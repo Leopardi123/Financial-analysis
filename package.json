@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@libsql/client": "^0.6.5",
+    "@libsql/client": "latest",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
