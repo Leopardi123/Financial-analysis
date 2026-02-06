@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Admin from "./Admin";
 
 function StockViewer() {
   const [ticker, setTicker] = useState("AAPL");
@@ -17,28 +18,6 @@ function StockViewer() {
 
       <div style={{ marginTop: 16, border: "1px dashed #ccc", padding: 12 }}>
         Chart will appear here
-      </div>
-    </div>
-  );
-}
-
-function Admin() {
-  const [secret, setSecret] = useState("");
-
-  return (
-    <div>
-      <h1>Admin</h1>
-
-      <input
-        type="password"
-        placeholder="CRON_SECRET"
-        value={secret}
-        onChange={(e) => setSecret(e.target.value)}
-      />
-
-      <div style={{ marginTop: 12 }}>
-        <button>Init DB</button>
-        <button>Refresh</button>
       </div>
     </div>
   );
