@@ -5,7 +5,8 @@ import {
   normalizeFinancialPoints,
   PeriodType,
   StatementType,
-} from "../_fmp";
+  requireFmpApiKey,
+} from "../_fmp.js";
 
 const STATEMENTS: StatementType[] = ["income", "balance", "cashflow"];
 
@@ -65,6 +66,10 @@ async function refreshTicker(ticker: string, period: PeriodType) {
 export default async function handler(req: any, res: any) {
   try {
     assertCronSecret(req);
+    if (!requireFmpApiKey()) {
+      res.status(500).json({ ok: false, error: "FMP_API_KEY missing" });
+      return;
+    }
 
     const ticker = typeof req.body?.ticker === "string" ? req.body.ticker.trim().toUpperCase() : "";
     if (!ticker) {

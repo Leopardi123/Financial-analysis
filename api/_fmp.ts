@@ -32,16 +32,19 @@ const STATEMENT_ENDPOINTS: Record<StatementType, string> = {
   cashflow: "cash-flow-statement",
 };
 
-function requireApiKey() {
+export function requireFmpApiKey() {
   const apiKey = process.env.FMP_API_KEY;
   if (!apiKey) {
-    throw new Error("FMP_API_KEY is not set");
+    return null;
   }
   return apiKey;
 }
 
 function buildUrl(ticker: string, statement: StatementType, period: PeriodType) {
-  const apiKey = requireApiKey();
+  const apiKey = requireFmpApiKey();
+  if (!apiKey) {
+    throw new Error("FMP_API_KEY missing");
+  }
   const endpoint = STATEMENT_ENDPOINTS[statement];
   const search = new URLSearchParams({ period, apikey: apiKey });
   return `${FMP_BASE_URL}/${endpoint}/${encodeURIComponent(ticker)}?${search.toString()}`;
