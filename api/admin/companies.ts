@@ -1,4 +1,4 @@
-import { assertCronSecret } from "../_auth";
+import { assertCronSecret } from "../_auth.js";
 import { execute } from "../_db";
 
 function normalizeTickers(tickers: unknown): string[] {

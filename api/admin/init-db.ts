@@ -1,4 +1,4 @@
-import { assertCronSecret } from "../_auth";
+import { assertCronSecret } from "../_auth.js";
 import { execute } from "../_db";
 
 export default async function handler(req: any, res: any) {

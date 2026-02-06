@@ -1,4 +1,4 @@
-import { assertCronSecret } from "../_auth";
+import { assertCronSecret } from "../_auth.js";
 import { execute, query } from "../_db";
 import {
   fetchStatement,
