@@ -1,5 +1,5 @@
 import { assertCronSecret } from "../_auth.js";
-import { execute } from "../_db";
+import { execute } from "../_db.js";
 
 export default async function handler(req: any, res: any) {
   try {

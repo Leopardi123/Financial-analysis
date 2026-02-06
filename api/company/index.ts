@@ -1,4 +1,4 @@
-import { query } from "../_db";
+import { query } from "../_db.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

@@ -1,5 +1,5 @@
 import { assertCronSecret } from "../_auth.js";
-import { execute } from "../_db";
+import { execute } from "../_db.js";
 
 function normalizeTickers(tickers: unknown): string[] {
   if (!Array.isArray(tickers)) {

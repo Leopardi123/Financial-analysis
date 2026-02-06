@@ -1,5 +1,5 @@
 import { assertCronSecret } from "../_auth.js";
-import { execute } from "../_db";
+import { execute } from "../_db.js";
 import {
   fetchStatement,
   normalizeFinancialPoints,

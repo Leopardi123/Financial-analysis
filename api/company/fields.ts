@@ -1,4 +1,4 @@
-import { query } from "../_db";
+import { query } from "../_db.js";
 
 export default async function handler(_req: any, res: any) {
   try {
