@@ -1,0 +1,24 @@
+name: Nightly Refresh
+
+on:
+  schedule:
+    - cron: "30 6 * * *" # 02:30 ET (adjust for DST as needed)
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger refresh endpoint
+        env:
+          CRON_URL: ${{ secrets.CRON_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_URL" ]; then
+            echo "CRON_URL secret is not set" >&2
+            exit 1
+          fi
+          curl -sS -X POST "$CRON_URL" \
+            -H "x-cron-secret: $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{}'
