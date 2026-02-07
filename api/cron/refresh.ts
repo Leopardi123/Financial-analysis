@@ -9,7 +9,7 @@ import {
 } from "../_fmp.js";
 import { ensureSchema, tables } from "../_migrate.js";
 
-const STATEMENTS: StatementType[] = ["income", "balance", "cashflow"];
+const STATEMENTS: StatementType[] = ["balance", "income", "cashflow"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_CALLS = 120;
 const MAX_POINTS_PER_RUN = 10000;

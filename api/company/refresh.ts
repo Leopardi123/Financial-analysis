@@ -9,7 +9,7 @@ import {
 } from "../_fmp.js";
 import { ensureSchema, tables } from "../_migrate.js";
 
-const STATEMENTS: StatementType[] = ["income", "balance", "cashflow"];
+const STATEMENTS: StatementType[] = ["balance", "income", "cashflow"];
 const PERIODS: PeriodType[] = ["fy", "q"];
 const MAX_POINTS_PER_RUN = 10000;
 const REPORT_BATCH_SIZE = 30;
