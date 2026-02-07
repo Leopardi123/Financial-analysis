@@ -2,6 +2,18 @@ import { query } from "../_db.js";
 import { ensureSchema, tables } from "../_migrate.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const META_KEYS = new Set([
+  "symbol",
+  "date",
+  "calendarYear",
+  "period",
+  "reportedCurrency",
+  "cik",
+  "fillingDate",
+  "acceptedDate",
+  "link",
+  "finalLink",
+]);
 
 function parseDate(value: unknown) {
   if (typeof value !== "string" || !value) {
@@ -93,6 +105,59 @@ export default async function handler(req: any, res: any) {
         statements[statement][field] = Array.from({ length: years.length }, () => null);
       }
       statements[statement][field][index] = Number(row.value ?? null);
+    }
+
+    if (Object.keys(statements.balance).length === 0) {
+      const reportRows = await query(
+        `SELECT fiscal_date, data_json
+         FROM ${tables.financialReports}
+         WHERE company_id = ? AND statement = 'balance' AND period = ?
+         ORDER BY fiscal_date ASC`,
+        [company.id, period]
+      );
+
+      const reportYears = new Set<number>();
+      for (const row of reportRows) {
+        const fiscalDate = String(row.fiscal_date ?? "");
+        if (!fiscalDate) {
+          continue;
+        }
+        const year = Number(fiscalDate.slice(0, 4));
+        if (!Number.isNaN(year)) {
+          reportYears.add(year);
+        }
+      }
+
+      if (reportYears.size > 0 && years.length === 0) {
+        const reportYearList = Array.from(reportYears).sort((a, b) => a - b);
+        years.splice(0, years.length, ...reportYearList);
+        yearIndex.clear();
+        years.forEach((year, index) => yearIndex.set(year, index));
+      }
+
+      for (const row of reportRows) {
+        const fiscalDate = String(row.fiscal_date ?? "");
+        if (!fiscalDate) {
+          continue;
+        }
+        const year = Number(fiscalDate.slice(0, 4));
+        const index = yearIndex.get(year);
+        if (index === undefined) {
+          continue;
+        }
+        const report = JSON.parse(String(row.data_json ?? "{}")) as Record<string, unknown>;
+        for (const [key, value] of Object.entries(report)) {
+          if (META_KEYS.has(key)) {
+            continue;
+          }
+          if (typeof value === "number" && Number.isFinite(value)) {
+            if (!statements.balance[key]) {
+              statements.balance[key] = Array.from({ length: years.length }, () => null);
+            }
+            statements.balance[key][index] = value;
+          }
+        }
+      }
     }
 
     res.status(200).json({
