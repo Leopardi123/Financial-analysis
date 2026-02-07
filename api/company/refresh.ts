@@ -195,15 +195,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    let started = cursor ? false : true;
     for (const target of targets) {
-      if (cursor && !started) {
-        if (cursor.statement === target.statement && cursor.period === target.period) {
-          started = true;
-        } else {
-          continue;
-        }
-      }
       const offset =
         cursor && cursor.statement === target.statement && cursor.period === target.period
           ? cursor.offset
