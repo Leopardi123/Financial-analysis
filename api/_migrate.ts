@@ -5,6 +5,13 @@ const TABLES = {
   financialReports: "financial_reports",
   financialPoints: "financial_points_v2",
   fetchLog: "fetch_log",
+  sectors: "sectors",
+  subsectors: "subsectors",
+  sectorMetrics: "sector_metrics",
+  sectorManualInputs: "sector_manual_inputs",
+  cycleScores: "cycle_scores",
+  assumptionsLog: "assumptions_log",
+  companySectorMap: "company_sector_map",
 };
 
 export async function ensureSchema() {
@@ -57,6 +64,85 @@ export async function ensureSchema() {
     )`
   );
 
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.sectors} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      created_at TEXT NOT NULL
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.subsectors} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sector_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(sector_id, name)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.sectorMetrics} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sector_id INTEGER NOT NULL,
+      subsector_id INTEGER,
+      metric TEXT NOT NULL,
+      period TEXT,
+      value REAL,
+      source TEXT,
+      as_of TEXT NOT NULL
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.sectorManualInputs} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sector_id INTEGER NOT NULL,
+      subsector_id INTEGER,
+      input_type TEXT NOT NULL,
+      value TEXT NOT NULL,
+      source TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.cycleScores} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sector_id INTEGER NOT NULL,
+      subsector_id INTEGER,
+      score REAL,
+      phase TEXT,
+      explanation_json TEXT,
+      computed_at TEXT NOT NULL
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.assumptionsLog} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sector_id INTEGER NOT NULL,
+      subsector_id INTEGER,
+      assumption TEXT NOT NULL,
+      rationale TEXT,
+      created_at TEXT NOT NULL
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.companySectorMap} (
+      company_id INTEGER NOT NULL,
+      sector_id INTEGER NOT NULL,
+      subsector_id INTEGER,
+      created_at TEXT NOT NULL,
+      UNIQUE(company_id, sector_id, subsector_id)
+    )`
+  );
+
   await batch([
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_reports_company
@@ -73,6 +159,30 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_fp_company_field
             ON ${TABLES.financialPoints} (company_id, field)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_subsectors_sector
+            ON ${TABLES.subsectors} (sector_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_sector_metrics_sector
+            ON ${TABLES.sectorMetrics} (sector_id, subsector_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_sector_manual_inputs_sector
+            ON ${TABLES.sectorManualInputs} (sector_id, subsector_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_cycle_scores_sector
+            ON ${TABLES.cycleScores} (sector_id, subsector_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_company_sector_map_sector
+            ON ${TABLES.companySectorMap} (sector_id, subsector_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_company_sector_map_company
+            ON ${TABLES.companySectorMap} (company_id)`,
     },
   ]);
 

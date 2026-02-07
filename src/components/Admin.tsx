@@ -62,6 +62,8 @@ export default function Admin() {
     setLoadingKey(title);
     updateLog(title, "loading", "LOADING...");
     try {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 45000);
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -69,7 +71,9 @@ export default function Admin() {
           "x-cron-secret": secret.trim(),
         },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
+      window.clearTimeout(timeoutId);
       const text = await response.text();
       let payload: unknown = text;
       try {
@@ -88,7 +92,11 @@ export default function Admin() {
       updateLog(title, "success", `SUCCESS\n${JSON.stringify(payload, null, 2)}`);
       return payload as RefreshPayload;
     } catch (error) {
-      updateLog(title, "error", `ERROR\n${(error as Error).message}`);
+      const message =
+        (error as Error).name === "AbortError"
+          ? "Request timed out. Try Continue materialization."
+          : (error as Error).message;
+      updateLog(title, "error", `ERROR\n${message}`);
     } finally {
       setLoadingKey(null);
     }

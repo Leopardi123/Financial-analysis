@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Admin from "./Admin";
 import Viewer from "./Viewer";
 import ChartCard from "./ChartCard";
@@ -32,6 +32,41 @@ export default function SingleStockDashboard() {
   const [formCategory, setFormCategory] = useState("");
   const [formSubcategory, setFormSubcategory] = useState("");
   const [formNote, setFormNote] = useState("");
+  const [priceData, setPriceData] = useState<{
+    long: { price: (string | number | null)[][]; volume: (string | number | null)[][] } | null;
+    short: { price: (string | number | null)[][]; volume: (string | number | null)[][] } | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadPrice() {
+      try {
+        const response = await fetch(`/api/company/price?ticker=${encodeURIComponent(ticker)}`);
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to load price data.");
+        }
+        if (isMounted) {
+          setPriceData({
+            long: payload.long ?? null,
+            short: payload.short ?? null,
+          });
+        }
+      } catch {
+        if (isMounted) {
+          setPriceData(null);
+        }
+      }
+    }
+
+    if (ticker) {
+      void loadPrice();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [ticker]);
 
   const revenueData = buildSeriesData(
     buildSeries(data, [{ label: "Revenue", statement: "income", field: "revenue" }]),
@@ -267,10 +302,30 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ChartCard chartType="AreaChart" title="Long Price History" data={null} height={260} />
-        <ChartCard chartType="AreaChart" title="Short Price History" data={null} height={260} />
-        <ChartCard chartType="ColumnChart" title="Long Volume" data={null} height={200} />
-        <ChartCard chartType="ColumnChart" title="Short Volume" data={null} height={200} />
+        <ChartCard
+          chartType="AreaChart"
+          title="Aktieprishistoria"
+          data={priceData?.long?.price ?? null}
+          height={260}
+        />
+        <ChartCard
+          chartType="AreaChart"
+          title="Aktieprishistoria (kort)"
+          data={priceData?.short?.price ?? null}
+          height={260}
+        />
+        <ChartCard
+          chartType="ColumnChart"
+          title="Volume"
+          data={priceData?.long?.volume ?? null}
+          height={200}
+        />
+        <ChartCard
+          chartType="ColumnChart"
+          title="Volume (kort)"
+          data={priceData?.short?.volume ?? null}
+          height={200}
+        />
       </div>
 
       <div className="breadcontainersinglecolumn">

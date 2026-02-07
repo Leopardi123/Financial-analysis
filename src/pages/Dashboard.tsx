@@ -1,6 +1,7 @@
 import Header from "../components/Header";
 import Section from "../components/Section";
 import SingleStockDashboard from "../components/SingleStockDashboard";
+import SectorDashboard from "../components/SectorDashboard";
 import "../styles/dashboard.css";
 
 export default function Dashboard() {
@@ -39,10 +40,7 @@ export default function Dashboard() {
           description="Eventuell text om sector dashboard. Här väljs en sektor att titta på."
           background="#d7cee9"
         >
-          <div className="breadcontainerdoublecolumn">
-            <div className="subrub">GOLD MINERS</div>
-            <p className="bread">Här visas sector dashboard.</p>
-          </div>
+          <SectorDashboard />
         </Section>
 
         <Section

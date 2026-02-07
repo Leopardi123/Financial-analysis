@@ -80,7 +80,7 @@
 }
 
 .visual {
-  max-height: 4000px;
+  max-height: 20000px;
   overflow: hidden;
   transition: max-height 0.3s ease;
 }
@@ -94,6 +94,138 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+.sector-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sector-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.sector-header label {
+  display: block;
+  font-family: "Josefin Sans", sans-serif;
+  font-size: 12px;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.sector-header select {
+  padding: 8px 12px;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+}
+
+.sector-link {
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 1px;
+  font-size: 12px;
+  text-decoration: none;
+  color: #1c2310;
+}
+
+.sector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.sector-card {
+  background: #f7f7ef;
+  border-radius: 6px;
+  padding: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.sector-card h3 {
+  margin-top: 0;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 2px;
+}
+
+.sector-card h4 {
+  margin-bottom: 6px;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 1px;
+}
+
+.todo-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.metric-list {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.metric-list ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.manual-inputs {
+  display: grid;
+  gap: 12px;
+}
+
+.manual-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.manual-input-row label {
+  display: block;
+  font-family: "Josefin Sans", sans-serif;
+  font-size: 12px;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.manual-input-row select,
+.manual-meta input {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  min-width: 200px;
+}
+
+.manual-meta {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.cycle-status {
+  font-family: "Merriweather", serif;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.input-log {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.input-meta {
+  font-size: 11px;
+  color: #555;
+}
+
+.input-note {
+  font-size: 11px;
+  color: #333;
 }
 
 .stock-selector {
