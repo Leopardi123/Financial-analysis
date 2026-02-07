@@ -12,7 +12,7 @@ These must be configured in Vercel (or your local environment):
 ## Setup Workflow
 
 1. **Init DB**
-   - In the Admin tab, enter `CRON_SECRET`.
+   - In the **Single Stock Dashboard** section, enter `CRON_SECRET` in the Admin block.
    - Click **Init DB** to create tables and indexes.
 
 2. **Upsert tickers**
