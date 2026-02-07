@@ -9,12 +9,20 @@ type LogEntry = {
 
 const DEFAULT_TICKERS = "AAPL, MSFT";
 
+type RefreshCursor = {
+  statement: "income" | "balance" | "cashflow";
+  period: "fy" | "q";
+  offset: number;
+};
+
 export default function Admin() {
   const [secret, setSecret] = useState("");
   const [tickers, setTickers] = useState(DEFAULT_TICKERS);
   const [refreshTicker, setRefreshTicker] = useState("AAPL");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
+  const [refreshCursor, setRefreshCursor] = useState<RefreshCursor | null>(null);
+  const [refreshDone, setRefreshDone] = useState(false);
 
   const secretReady = secret.trim().length > 0;
 
@@ -62,11 +70,13 @@ export default function Admin() {
           "error",
           `Error ${response.status}: ${response.statusText}\n${JSON.stringify(payload, null, 2)}`,
         );
-        return;
+        return { ok: false as const, payload };
       }
       updateLog(title, "success", JSON.stringify(payload, null, 2));
+      return { ok: true as const, payload };
     } catch (error) {
       updateLog(title, "error", `Network error: ${(error as Error).message}`);
+      return { ok: false as const, payload: { error: (error as Error).message } };
     } finally {
       setLoadingKey(null);
     }
@@ -84,13 +94,24 @@ export default function Admin() {
     void postJson("Upsert Tickers", "/api/admin/companies", { tickers: list });
   }
 
-  function handleRefreshTicker() {
+  async function handleRefreshTicker(skipFetch = false) {
     const value = refreshTicker.trim().toUpperCase();
     if (!value) {
       updateLog("Refresh Ticker", "error", "Please provide a ticker.");
       return;
     }
-    void postJson("Refresh Ticker", "/api/company/refresh", { ticker: value });
+    const response = await postJson("Refresh Ticker", "/api/company/refresh", {
+      ticker: value,
+      cursor: refreshCursor,
+      skipFetch,
+    });
+    if (response?.ok) {
+      const payload = response.payload as {
+        materialization?: { cursor?: RefreshCursor | null; done?: boolean };
+      };
+      setRefreshCursor(payload.materialization?.cursor ?? null);
+      setRefreshDone(Boolean(payload.materialization?.done));
+    }
   }
 
   function handleRunCron() {
@@ -103,7 +124,7 @@ export default function Admin() {
     <div>
       <h1>Admin</h1>
 
-      <label htmlFor="cron-secret">CRON_SECRET</label>
+      <label htmlFor="cron-secret">CRON_SECRET (required for admin actions)</label>
       <input
         id="cron-secret"
         type="password"
@@ -115,6 +136,9 @@ export default function Admin() {
 
       <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
         <div>
+          <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
+            Init DB creates or updates tables and indexes in Turso.
+          </div>
           <button onClick={handleInitDb} disabled={!secretReady || loadingKey !== null}>
             {loadingKey === "Init DB" ? "Initializing..." : "Init DB"}
           </button>
@@ -127,6 +151,9 @@ export default function Admin() {
 
         <div>
           <label htmlFor="upsert-tickers">Tickers (comma-separated)</label>
+          <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
+            Upsert tickers adds them to the database so refresh can find a company ID.
+          </div>
           <input
             id="upsert-tickers"
             value={tickers}
@@ -140,18 +167,37 @@ export default function Admin() {
 
         <div>
           <label htmlFor="refresh-ticker">Refresh ticker</label>
+          <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
+            Refresh fetches raw FMP reports and materializes them into points in small chunks.
+          </div>
           <input
             id="refresh-ticker"
             value={refreshTicker}
-            onChange={(e) => setRefreshTicker(e.target.value)}
+            onChange={(e) => {
+              setRefreshTicker(e.target.value);
+              setRefreshCursor(null);
+              setRefreshDone(false);
+            }}
             style={{ display: "block", marginTop: 6, marginBottom: 8, minWidth: 280 }}
           />
-          <button onClick={handleRefreshTicker} disabled={!secretReady || loadingKey !== null}>
+          <button onClick={() => void handleRefreshTicker()} disabled={!secretReady || loadingKey !== null}>
             {loadingKey === "Refresh Ticker" ? "Refreshing..." : "Refresh Ticker"}
           </button>
+          {!refreshDone && refreshCursor && (
+            <button
+              onClick={() => void handleRefreshTicker(true)}
+              disabled={!secretReady || loadingKey !== null}
+              style={{ marginLeft: 8 }}
+            >
+              {loadingKey === "Refresh Ticker" ? "Continuing..." : "Continue materialization"}
+            </button>
+          )}
         </div>
 
         <div>
+          <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
+            Run cron triggers nightly refresh logic for stale companies.
+          </div>
           <button onClick={handleRunCron} disabled={!secretReady || loadingKey !== null}>
             {loadingKey === "Run Cron" ? "Running..." : "Run Cron"}
           </button>

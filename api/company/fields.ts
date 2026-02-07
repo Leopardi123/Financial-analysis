@@ -1,9 +1,11 @@
 import { query } from "../_db.js";
+import { ensureSchema, tables } from "../_migrate.js";
 
 export default async function handler(_req: any, res: any) {
   try {
+    await ensureSchema();
     const rows = await query(
-      `SELECT DISTINCT statement, field FROM financial_points ORDER BY field ASC`
+      `SELECT DISTINCT statement, field FROM ${tables.financialPoints} ORDER BY field ASC`
     );
 
     const result = {

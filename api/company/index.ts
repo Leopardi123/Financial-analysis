@@ -1,4 +1,5 @@
 import { query } from "../_db.js";
+import { ensureSchema, tables } from "../_migrate.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -20,8 +21,9 @@ function isStale(value: string | null, days: number) {
 
 export default async function handler(req: any, res: any) {
   try {
+    await ensureSchema();
     const ticker = typeof req.query?.ticker === "string" ? req.query.ticker.trim().toUpperCase() : "";
-    const period = req.query?.period === "quarterly" ? "quarterly" : "annual";
+    const period = req.query?.period === "quarterly" || req.query?.period === "q" ? "q" : "fy";
 
     if (!ticker) {
       res.status(400).json({ ok: false, error: "Ticker is required" });
@@ -29,20 +31,24 @@ export default async function handler(req: any, res: any) {
     }
 
     const companyRows = await query(
-      `SELECT last_annual_fetch_at, last_quarterly_fetch_at
-       FROM companies WHERE ticker = ?`,
+      `SELECT id, last_fy_fetch_at, last_q_fetch_at
+       FROM ${tables.companiesV2} WHERE ticker = ?`,
       [ticker]
     );
     const company = companyRows[0] as
-      | { last_annual_fetch_at: string | null; last_quarterly_fetch_at: string | null }
+      | { id: number; last_fy_fetch_at: string | null; last_q_fetch_at: string | null }
       | undefined;
+    if (!company?.id) {
+      res.status(404).json({ ok: false, error: "Ticker not found" });
+      return;
+    }
 
     const rows = await query(
       `SELECT statement, fiscal_date, field, value
-       FROM financial_points
-       WHERE ticker = ? AND period = ?
+       FROM ${tables.financialPoints}
+       WHERE company_id = ? AND period = ?
        ORDER BY fiscal_date ASC`,
-      [ticker, period]
+      [company.id, period]
     );
 
     const yearSet = new Set<number>();
@@ -97,10 +103,10 @@ export default async function handler(req: any, res: any) {
       balance: statements.balance,
       cashflow: statements.cashflow,
       meta: {
-        lastAnnualFetchAt: company?.last_annual_fetch_at ?? null,
-        lastQuarterlyFetchAt: company?.last_quarterly_fetch_at ?? null,
-        staleAnnual: isStale(company?.last_annual_fetch_at ?? null, 365),
-        staleQuarterly: isStale(company?.last_quarterly_fetch_at ?? null, 90),
+        lastAnnualFetchAt: company?.last_fy_fetch_at ?? null,
+        lastQuarterlyFetchAt: company?.last_q_fetch_at ?? null,
+        staleAnnual: isStale(company?.last_fy_fetch_at ?? null, 365),
+        staleQuarterly: isStale(company?.last_q_fetch_at ?? null, 90),
       },
     });
   } catch (error) {

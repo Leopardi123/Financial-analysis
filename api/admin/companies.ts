@@ -1,5 +1,6 @@
 import { assertCronSecret } from "../_auth.js";
-import { execute } from "../_db.js";
+import { execute, query } from "../_db.js";
+import { ensureSchema, tables } from "../_migrate.js";
 
 function normalizeTickers(tickers: unknown): string[] {
   if (!Array.isArray(tickers)) {
@@ -14,6 +15,7 @@ export default async function handler(req: any, res: any) {
   try {
     assertCronSecret(req);
 
+    await ensureSchema();
     const tickers = normalizeTickers(req.body?.tickers);
     if (tickers.length === 0) {
       res.status(400).json({ ok: false, error: "No tickers provided" });
@@ -22,14 +24,21 @@ export default async function handler(req: any, res: any) {
 
     for (const ticker of tickers) {
       await execute(
-        `INSERT INTO companies (ticker, active)
+        `INSERT INTO ${tables.companiesV2} (ticker, active)
          VALUES (?, 1)
          ON CONFLICT(ticker) DO UPDATE SET active = 1`,
         [ticker]
       );
     }
 
-    res.status(200).json({ ok: true, count: tickers.length });
+    const rows = await query(
+      `SELECT COUNT(*) as count FROM ${tables.companiesV2} WHERE ticker IN (${tickers
+        .map(() => "?")
+        .join(", ")})`,
+      tickers
+    );
+
+    res.status(200).json({ ok: true, count: Number(rows[0]?.count ?? tickers.length) });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;
     res.status(status).json({ ok: false, error: (error as Error).message });

@@ -14,7 +14,7 @@ const META_KEYS = new Set([
 ]);
 
 export type StatementType = "income" | "balance" | "cashflow";
-export type PeriodType = "annual" | "quarterly";
+export type PeriodType = "fy" | "q";
 
 export type FinancialPoint = {
   ticker: string;
@@ -46,7 +46,8 @@ function buildUrl(ticker: string, statement: StatementType, period: PeriodType) 
     throw new Error("FMP_API_KEY missing");
   }
   const endpoint = STATEMENT_ENDPOINTS[statement];
-  const search = new URLSearchParams({ period, apikey: apiKey });
+  const fmpPeriod = period === "q" ? "quarter" : "annual";
+  const search = new URLSearchParams({ period: fmpPeriod, apikey: apiKey });
   return `${FMP_BASE_URL}/${endpoint}/${encodeURIComponent(ticker)}?${search.toString()}`;
 }
 
