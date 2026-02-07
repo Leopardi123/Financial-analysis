@@ -1,0 +1,2466 @@
+YOU ARE WORKING WITH A LEGACY FINANCIAL ANALYSIS FRONTEND.
+
+IMPORTANT:
+- The code below is REFERENCE ONLY.
+- Do NOT try to run it.
+- Do NOT simplify the analytical logic.
+- Your job is to understand the structure, intent, and mental model behind it.
+
+This frontend is NOT a generic stock dashboard.
+It is a long-term fundamental analysis instrument inspired by:
+- Buffet-style financial statement reading
+- Syding-style ratio intuition
+- Visual pattern recognition over time
+
+==============================
+HIGH-LEVEL INTENT
+==============================
+
+This frontend allows a user to:
+- Select a single stock
+- Load a deep analytical dashboard for that stock
+- Analyze it through:
+  - Price history with SMAs
+  - Financial statements (income, balance, cash flow)
+  - Ratio evolution
+  - “Buffetology” views that compare:
+    - Earnings vs costs
+    - Cash vs debt
+    - Capital intensity vs earnings
+    - Shareholder equity vs leverage
+- Think in terms of durability, capital efficiency, and financial resilience
+
+The UI is deliberately dense and analytical.
+This is not a trading UI.
+
+==============================
+LEGACY FRONTEND – JAVASCRIPT
+==============================
+
+
+
+[PASTE THE ENTIRE JAVASCRIPT CODE HERE — EXACTLY AS-IS]
+
+INDEX.HTML:
+<HTML>
+<HEAD>
+<!--  <link href='http://fonts.googleapis.com/css?family=Josefin+Sans' rel='stylesheet' type='text/css'>
+  <link href='http://fonts.googleapis.com/css?family=Merriweather' rel='stylesheet' type='text/css'>-->
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <?!= include('topside_style'); ?>
+  <?!= include('topside_script_DIV'); ?>
+  <?!= include('topside_script_charts'); ?>
+
+</HEAD>
+<BODY id="marginsandso">
+
+<DIV width="100%" style="background:#edeee0;position:fixed;width:100%;position:fixed;left:0px;top:0px;" align=center class="headrub" id="topheadrub">INSTRUMENTBRÄDA</DIV>
+
+
+
+<DIV width="100%" style="background:#bfcfc2" align=center><BR><BR>
+	<div id="rub2" class="rub">
+		ÖVERSIKT - Översikt - Didot
+	</div>	<BR>
+	<div id="bread2" class="bread">
+HÄR SKALL EVENTUELLT ALLT ÖVERSIKTLIGT VARA
+	</div><BR><BR>
+	
+	<div id="tahiti" class="clasp">
+		<a href="javascript:toggle('tahiti');">----<>----</a><BR> <BR> 
+	</div>
+	 <div id="launcher_tahiti" class="hidden" align=center>
+		 <table width="450" border=0 bgcolor="#FFFFFF">
+			 <tr>
+				 <td align=center><div id="stock_name" class="subrub">Översiktligheter</div><BR>
+				 HÄR VISAS DET ÖVERSIKTLIGA<BR><BR>Vad ska egentligen vara här?<BR><BR> en sak som skall finnas här:
+         <BR> Stäm av om aktier fallit en viss, större procent under en viss tid. Stäm av för samma företag hur mycket
+         deras revenue minskat, och om brutto-marginalen och ebitda-marginalen minskat och om de är över, låt säga, 40%. Om saker ser positiva ut. Visa upp dem i en lista. Detta görs förmodligen enklast genom att begära in högsta och lägsta under en längre period, samt sedvanligt, genom att titta på rapporterna.
+				 
+				 </td>
+			 </tr>
+		 </table><BR>
+	 </div>
+</DIV>
+<DIV width="100%" style="background:#e0e9ce" align=center><BR> <BR>
+	<div id="rub2" class="rub">
+		SINGLE STOCK DASHBOARD
+	</div>	<BR>
+	<div id="bread2" class="bread">
+		Här skall också finnas en linjegraf som visar upp det historiska aktievärdet som om det vore prissatt i guld.
+	</div><BR>
+  
+  <div style="display:flex; align-items: center; justify-content: center;" width="80%">
+    <div style="align-items: right; justify-content: right;">
+      <select name="singleStocksCategory" id="singleStocksCategory">
+        <option value="null">Välj En Kategori</option>
+      </select>
+      <select name="singleStocksSubCategory" id="singleStocksSubCategory">
+        <option value="null">Välj En Subkategori</option>
+      </select>
+      <select name="singleStocks" id="singleStocks">
+        <option value="null">Välj En Aktie</option>
+      </select>
+    </div>  
+    <div style="align-items: left; justify-content: left;">
+      <form id="tickerForm">
+          <div>
+              <label for="tickerSymbol">Ticker:</label>
+              <input type="text" id="tickerSymbol" name="tickerSymbol">
+          </div>
+          <div>
+              <label for="category">Kategori:</label>
+              <input type="text" id="category" name="category">
+          </div>
+          <div>
+              <label for="subcategory">Underkategori:</label>
+              <input type="text" id="subcategory" name="subcategory">
+          </div>
+          <div>
+              <label for="note">Anteckning:</label>
+              <input type="text" id="note" name="note">
+          </div>
+          <button type="button" id="addTickerButton">Lägg till ticker</button>
+      </form>
+      <script>
+      const addTickerButton = document.getElementById('addTickerButton');
+
+      addTickerButton.addEventListener('click', function(event) {
+          event.preventDefault(); // Förhindrar att formuläret skickas som standard
+          //alert("clickclick");
+          //console.log("CLICKCLICK");
+      
+
+          const tickerSymbol = document.getElementById('tickerSymbol').value;
+          const category = document.getElementById('category').value;
+          const subcategory = document.getElementById('subcategory').value;
+          const note = document.getElementById('note').value;
+
+          console.log('Ticker:', tickerSymbol);
+          console.log('Kategori:', category);
+          console.log('Underkategori:', subcategory);
+          console.log('Anteckning:', note);
+
+          // Din funktion för att hantera insamlade data
+          // Använd den insamlade datan (tickerSymbol, category, subcategory) här
+          // Exempel: skicka data till en server, lagra den i lokal lagring, etc.
+          handleTickerData(tickerSymbol, category, subcategory, note);
+      });
+
+      function handleTickerData(tickerSymbol, category, subcategory, note) {
+          console.log('Laddar ned data. Avvakta att den laddas.');
+
+          google.script.run.withSuccessHandler(SetStageAfterAddingNewCompany).getSingleStockFromAPI(tickerSymbol, category, subcategory, note)
+
+      }
+      </script>
+    </div>  
+  </div>  
+  <BR>
+	
+	<div id="SingleStock" class="clasp">
+		<a href="javascript:launcherboxOpen('SingleStock');"><img src="https://drive.google.com/uc?export=download&id=1k3x_zXMVsITXfzjrH7v0T2A4M3BXWEgP" border=0 id="SingleStockpil"></a><BR> <BR> 
+	</div>
+
+	<div id="launcher_SingleStock" class="hidden" align=center>
+    <div class="breadcontainerdoublecolumn">
+      <H1 id="SingleStock_Stock_Name" class="subrub"></H1>
+    </div>
+    <div class="breadcontainerdoublecolumn"> 
+      <p id="SingleStock_Header_Description" class="bread"></p> 
+    </div> 
+    <div class="breadcontainerdoublecolumn"> 
+      <H2 id="SingleStock_RightNowAtAGlance_Rub1">Anteckningar</H2> 
+      <H2 id="SingleStock_RightNowAtAGlance_Rub2"></H2> 
+      <p id="SingleStock_Header_Custom_Notes" class="bread"></p> 
+    </div> 
+    <div class="breadcontainerdoublecolumn"> 
+      <H2 id="SingleStock_BasicInformation_Rub">Grundinformation</H2> 
+    </div>
+    <div class="breadcontainerquadrupelcolumn"> 
+        <p id="SingleStock_BasicInformation_sector">Sektor:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_industry">Industri:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_minKategori">Kategori:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_subkategori">Subkategori:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_aktievaluta">Aktievaluta:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_rapportvaluta">Rapportvaluta:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde: </p> 
+        <p id="SingleStock_BasicInformation_MC">Börsvärde:</p> 
+    </div>
+    <div class="breadcontainerdoublecolumn"> 
+      <H2 id="SingleStock_RightNowAtAGlance_Rub">Vid en snabb anblick</H2> 
+    </div>
+    <div class="breadcontainerquadrupelcolumn"> 
+        <p id="SingleStock_RightNowAtAGlance_static_mktCap">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+        <p id="SingleStock_RightNowAtAGlance_static_MC">Börsvärde:</p> 
+    </div>
+    <div> 
+      <div class="breadcontainerdoublecolumn"> 
+        <p id="SingleStock_RightNowAtAGlance_Data" class="bread">Marknadsvärde: 188 mdr => P/B = 188/132 = 140%. En ROE på 20% brukar egentligen motivera ett P/B på cirka 200%, alltså 10 gånger ROE. Men Ericsson värderas bara till 7 gånger ROE. Det ser alltså ungefär lika billigt ut på P/B och ROE som på kassaflöde. När man köper på P/B = 10 gånger ROE så får man en totalavkastning på ungefär 10% plus tillväxten (t.ex. 5% som BNP).</p> 
+        <p>ROIC</p>
+        <p>Preferensaktier. De är kostsamma för ett företag. Det bästa är att inneha 0 sådana. Hur stor summa som utgör preferensaktier finns i balansSheet. Rött om fler än 0.</p>
+        <p></p>
+        <p>Capital expenditure (cashflow) vs netIncome över en tio år lång period. Slå samman totalen av capital expenditure under tio-årsperioden och slå samman netIncome under hela tioårsperioden. Om capital expenditure är under 50%: helt ok. Om det är under 20%: supergrönt. (sida 154, buffetboken.</p>
+      </div> 
+    </div>
+    <div class="chartcontainerdoublecolumn"> 
+      <div id="SingleStock_Header_longpricegraph" class="bread"></div>
+      <div id="SingleStock_Header_shortpricegraph" class="bread"></div>
+      <div id="SingleStock_Header_longvolumegraph" class="bread"></div>
+      <div id="SingleStock_Header_shortvolumegraph" class="bread"></div>
+    </div>
+    <div class="breadcontainersinglecolumn">
+      <H1b id="sydingAnalytik">Sydings Analytik</H1b>
+        <p>Här ligger en förklaring av hur denna information skall användas.</p>
+      <div class="breadcontainerdoublecolumn">
+        <p>Här skall det ligga en analys i text som genereras från datan under.</p>
+        <p>Här skall det ligga en analys i text som genereras från datan under.</p>
+      </div>
+    </div>
+    <div class="chartcontainerdoublecolumn"> 
+      <div id="columnchart_Revenue"></div>
+      <div id="columnchart_RevenueGrowth"></div>
+      <div id="columnchart_GrossProfitRatio"></div>
+      <div id="columnchart_ebitdaMargin"></div>
+      <div id="columnchart_NetIncomeMargin"></div>
+      <div id="columnchart_CashFromOperations"></div>
+      <div id="columnchart_CashFromInvesting"></div>
+      <div id="columnchart_FCF"></div>
+      <div id="columnchart_totalEquity"></div>
+      <div id="columnchart_ROE"></div>
+      <div id="columnchart_FCFPS"></div>
+    </div>
+    <div class="breadcontainersinglecolumn">
+      <H1b id="sydingAnalytik">Buffetologisk Analytik</H1b>
+      <p>Här ligger en förklaring av hur denna information skall användas.</p>
+      <H1brub id="sydingAnalytik">Income Statement</H1b>
+      <div class="breadcontainerdoublecolumn">
+        <p>Här skall det ligga en analys i text som genereras från datan under.</p>
+        <p>Här skall det ligga en analys i text som genereras från datan under.</p>
+      </div>
+    </div>
+    <div class="chartcontainerdoublecolumn"> 
+      <div id="combinationchart_Revenue"></div>
+      <div id="combinationchart_GrossProfit"></div>
+      <div id="combinationchart_GrossEBITDepriciation"></div>
+      <div id="combinationchart_GrossOperatingIncomeVSInterestExpenses"></div>
+      <div id="combinationchart_NetEarnings"></div>
+      <div id="combinationchart_NetEarningsPerShare"></div>
+    </div>
+    <div class="breadcontainersinglecolumn">
+      <H1brub id="sydingAnalytik">Balance Sheet</H1b>
+    </div>
+    <div class="chartcontainerdoublecolumn"> 
+      <div id="combinationchart_CashVSNetEarnings"></div>
+      <div id="combinationchart_CashVSShortTermDebt"></div>
+      <div id="combinationchart_InventoryVSNetEarnings"></div>
+      <div id="combinationchart_PPEVSDepriciationData"></div>
+      <div id="combinationchart_Goodwill"></div>
+      <div id="combinationchart_LongTermDebtVSShortTermDebt"></div>
+      <div id="combinationchart_EBITDAVSLongTerm"></div>
+      <div id="combinationchart_CurrentRatio"></div>
+      <div id="combinationchart_LongTermDebtToNetEarningsRatio"></div>
+      <div id="combinationchart_DebtToShareholdersEquityRatio"></div>
+      <div id="combinationchart_AdjustedDebtToShareholdersEquityRatio"></div>
+      <div id="combinationchart_RetainedEarningsVSNetIncome"></div>
+      <div id="combinationchart_ROE"></div>
+    </div>
+    <div class="breadcontainersinglecolumn">
+      <H1brub id="sydingAnalytik">Cashflow Statement</H1b>
+    </div>
+    <div class="chartcontainerdoublecolumn"> 
+      <div id="combinationchart_CapitalExpenditureVSNetEarnings"></div>
+      <div id="combinationchart_StockRepurchasesDividendsVSNetEarnings"></div>
+    </div>
+    <div class="breadcontainersinglecolumn">
+      <H1b id="sydingAnalytik">Buffetologisk Analytik</H1b>
+    </div>
+  </div>
+</DIV>
+<DIV width="100%" style="background:#d7cee9" align=center><BR> <BR>
+	<div id="rub2" class="rub">
+		SECTOR DASHBOARD
+	</div>	<BR>
+	<div id="bread2" class="bread">
+		Eventuell text om sector dashboard.<BR>Här väljs en sektor att titta på i fliken som öppnar sig.
+	</div><BR><BR>
+	<div id="lador" class="clasp">
+		<a href="javascript:launcherboxOpen('lador');">----<>----</a><BR> <BR> 
+	</div>
+	 <div id="launcher_lador" class="hidden" align=center>
+		 <table width="350" border=0 bgcolor="#FFFFFF">
+			 <tr>
+				 <td align=center>
+          <div id="stock_name" class="subrub">GOLD MINERS</div><BR>
+				 Här visas sector dashboard
+				 
+				 </td>
+			 </tr>
+		 </table><BR>
+	 </div>
+ </DIV>
+ <DIV width="100%" style="background:#d7eae8" align=center><BR> <BR>
+	<div id="rub2" class="rub">
+		PORTFOLIO DASHBOARD
+	</div>	<BR>
+	<div id="bread2" class="bread">
+		här visas alla portföljer sammanslaget, som en kursutvecklingskarta.<BR>
+    här väljer man om man ska titta på någon enskild portfölj.<BR>
+    klickar man sedan på någon enskild portföljs aktie, flyttas man upp till SINGLE STOCK DASHEN.
+	</div><BR><BR>
+	<div id="lager" class="clasp">
+		<a href="javascript:toggle('lager');">----<>----</a><BR> <BR> 
+	</div>
+	 <div id="launcher_lager" class="hidden" align=center>
+		 <table width="350" border=0 bgcolor="#FFFFFF">
+			 <tr>
+				 <td align=center>
+          <div id="stock_name" class="subrub">Vald Portfölj</div><BR>
+				 <img src="galleri.jpg">dashboard
+				 
+				 </td>
+			 </tr>
+		 </table><BR>
+	 </div>
+ </DIV>
+<DIV width="100%" style="background:#bfcfc2" align=center><BR><BR>
+	<div id="rub2" class="rub">
+		SCREENING DASHBOARD
+	</div>	<BR>
+	<div id="bread2" class="bread">
+		Text. Eventuellt.<BR> Här ordnar man rätt screener. väljer EV, etc.
+	</div><BR><BR>
+	
+	<div id="bestall" class="clasp">
+		<a href="javascript:toggle('bestall');">----<>----</a><BR> <BR> 
+	</div>
+	 <div id="launcher_bestall" class="hidden" align=center>
+		 <table width="350" border=0 bgcolor="#FFFFFF">
+			 <tr>
+				 <td align=center>
+          <div id="stock_name" class="subrub">Någon Screening Rubrik</div><BR>
+				 Här finns det som syns.
+				 
+				 </td>
+			 </tr>
+		 </table><BR>
+	 </div>
+</DIV>
+<DIV width="100%" style="background:#bfcdcf" align=center><BR><BR>
+	<div id="rub2" class="rub">
+		COMPARE STOCKS
+	</div>	<BR>
+	<div id="bread2" class="bread">
+		Text. Eventuellt.<BR> Här ordnar man rätt screener. väljer EV, etc.
+	</div><BR><BR>
+	
+	<div id="bestall" class="clasp">
+		<a href="javascript:toggle('compareStocks');">----<>----</a><BR> <BR> 
+	</div>
+	 <div id="launcher_compareStocks" class="hidden" align=center>
+		 <table width="350" border=0 bgcolor="#FFFFFF">
+			 <tr>
+				 <td align=center>
+          <div id="stock_name" class="subrub">jämför flera aktier</div><BR>
+				 Här finns det som syns.
+				 
+				 </td>
+			 </tr>
+		 </table><BR>
+	 </div>
+</DIV>
+
+ </BODY>
+</HTML>
+
+CODE:
+
+function calculateSMA(row,range) {
+  // Hämta värdena från kolumn D
+  const values = Sheet.getRange("D2:D" + (row + 19)).getValues();
+
+  // Summera värdena för de 20 senaste raderna
+  let sum = 0;
+  for (let i = 0; i < 20; i++) {
+    sum += values[i][0];
+  }
+
+  // Beräkna SMA-värdet
+  const SMA = sum / 20;
+
+  // Skriv in SMA-värdet i kolumn H
+  Sheet.getRange("H" + row).setValue(SMA);
+}
+
+<script type="text/javascript">
+<!--
+function launcherboxOpen(launcherID) {
+  toggle(launcherID);
+  var URL = "";
+
+  console.log("Den klickades: " +launcherID)
+
+  if (launcherID =="SingleStock") {
+    URL = "https://drive.google.com/uc?export=download&id=1k3x_zXMVsITXfzjrH7v0T2A4M3BXWEgP";
+    console.log("SingleStock clicked")
+  }
+
+  //document.getElementById('launcher_' + launcherID).style.display = "block";
+  document.getElementById(launcherID).innerHTML="<a href=\"javascript:launcherboxClose('" + launcherID + "');\"><IMG SRC=\"" + URL + "\" border=0></a><BR><BR>";
+}
+ 
+function launcherboxClose(launcherID) {
+  toggle(launcherID);
+
+  if (launcherID == "SingleStock") {
+    URL = "https://drive.google.com/uc?export=download&id=152a5pzFe4QusDG7H9HqTeAezY5GNorrk";
+    console.log("lador clicked")
+  }
+
+  document.getElementById(launcherID).innerHTML="<a href=\"javascript:launcherboxOpen('" + launcherID + "');\"><IMG SRC=\"" + URL + "\" border=0></a><BR><BR>";
+ } 
+
+function toggle(someId) {
+    var someElem = document.getElementById("launcher_" + someId);
+	var pilen;
+
+	pilen = someElem.className == 'hidden' ? 'pilupp' : 'pilned';
+    someElem.className = someElem.className == 'hidden' ? 'visual' : 'hidden';
+	
+	document.getElementById(someId + "pil").src = someId + pilen + ".jpg";
+}
+
+
+
+
+
+-->
+</script>
+
+
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <script type="text/javascript">
+
+    google.charts.load("current", {packages:['corechart']});
+    google.charts.setOnLoadCallback(setStage);
+
+    var storageForStoredStockList;
+
+    // ********************************************************************************************
+    // **************         Övergripande laddning av samtliga delområden       ******************
+    // ********************************************************************************************
+
+    function setStage(inData){
+
+      // google.script.run.withFailureHandler(filureHandlerConnectingWithSheets).getStoredStocksList();
+      google.script.run.withSuccessHandler(SetStageForSingleStock).getStoredStocksList();
+
+    }
+
+    // ********************************************************************************************
+    // ************          Övergripande laddning av SingleStock delområdet        ***************
+    // ********************************************************************************************
+
+
+function SetStageForSingleStock(inData){
+  var data = JSON.parse(inData);
+  console.log("****Set stage for single stock indata*****");
+  console.log(data);
+  console.log("*********");
+
+  const dropdown = document.getElementById('singleStocks');
+  const categoryDropdown = document.getElementById('singleStocksCategory');
+  const subCategoryDropdown = document.getElementById('singleStocksSubCategory');
+  storageForStoredStockList = data;
+
+  // Deklarera unika kategorier och initiera den med tom array
+  const uniqueCategories = [];
+
+  // Generera dropdown-alternativen
+  data.forEach((row, index) => {
+    if (index > 0) {
+      // Hämta kategori och symbol
+      const category = row[data[0].findIndex(col => col === 'Category')];
+      const subcategory = row[data[0].findIndex(col => col === 'Subcategory')];
+      const symbol = row[data[0].findIndex(col => col === 'Symbol')];
+      const companyName = row[data[0].findIndex(col => col === 'CompanyName')];
+
+      // Skapa kategori-dropdown-alternativ
+      if (!uniqueCategories.includes(category)) {
+        uniqueCategories.push(category);
+      }
+
+      // Skapa aktie-dropdown-alternativ
+      const stockOption = document.createElement('option');
+      stockOption.value = symbol;
+      stockOption.textContent = companyName;
+      dropdown.appendChild(stockOption);
+    }
+  });
+
+  // Sortera unika kategorier alfabetiskt
+  uniqueCategories.sort((a, b) => a.localeCompare(b));
+
+  // Skapa kategori-dropdown-alternativ baserat på sorterad ordning
+  uniqueCategories.forEach(category => {
+    const categoryOption = document.createElement('option');
+    categoryOption.value = category;
+    categoryOption.textContent = category;
+    categoryDropdown.appendChild(categoryOption);
+  });
+
+  // Skicka symbol till funktion vid val
+  dropdown.addEventListener('change', (event) => {
+    const selectedSymbol = event.target.value;
+    loadSingleStock(selectedSymbol); // Anropa din funktion med den valda symbolen
+  });
+
+  // Category dropdown event listener for filtering
+  categoryDropdown.addEventListener('change', (event) => {
+    const selectedCategory = event.target.value;
+    console.log("Vald kategori: "+selectedCategory)
+
+    // Hämta lagrad lista över aktier
+    const storedStocksList = storageForStoredStockList; // Assuming this variable exists
+    console.log("storedStocksList: "+storedStocksList);
+
+    // Filtrera aktier baserat på vald kategori
+    const filteredStocks = storedStocksList.filter(stock => stock[storedStocksList[0].findIndex(col => col === 'Category')] === selectedCategory);
+    console.log("filteredStocks: "+filteredStocks);
+    console.log("typeof filteredStocks: "+ typeof filteredStocks);
+    console.log("typeof storedStocksList: "+ typeof storedStocksList);
+    console.log("filteredStocks.length: "+ filteredStocks.length)
+    console.log("storedStocksList.length: "+ storedStocksList.length)
+
+    // Rensa befintliga aktie-dropdown-alternativ
+    dropdown.innerHTML = '';
+
+      console.log("*************HÄREMELLAN***************");
+
+      const emptyChild = document.createElement('option');
+      emptyChild.value = "null";
+      emptyChild.textContent = "Välj En Aktie"
+      dropdown.appendChild(emptyChild);
+
+
+
+      if (selectedCategory != "null") {
+        // Skapa aktie-dropdown-alternativ baserat på filtrerade aktier
+        filteredStocks.forEach(stock => {
+          const stockOption = document.createElement('option');
+          stockOption.value = stock[storedStocksList[0].findIndex(col => col === 'Symbol')];
+
+          stockOption.textContent = stock[storedStocksList[0].findIndex(col => col === 'CompanyName')];
+          dropdown.appendChild(stockOption);
+        });
+
+      } else {
+        storageForStoredStockList.forEach((row, index) => {
+          if (index > 0) {
+            // Hämta kategori och symbol
+            const symbol = row[storageForStoredStockList[0].findIndex(col => col === 'Symbol')];
+            const companyName = row[storageForStoredStockList[0].findIndex(col => col === 'CompanyName')];
+
+            // Skapa aktie-dropdown-alternativ
+            const stockOption = document.createElement('option');
+            stockOption.value = symbol;
+            stockOption.textContent = companyName;
+            dropdown.appendChild(stockOption);
+          }
+        });
+
+      }
+      console.log("*************DÄREMELLAN***************");
+
+  });
+}
+
+    // ********************************************************************************************
+    // ****          Övergripande laddning av specifika delar SingleStocks delområde        ******
+    // ********************************************************************************************
+
+    function SetStageAfterAddingNewCompany(ticker) {
+      const selectElement = document.getElementById('singleStocks'); // Replace 'mySelect' with your select element ID
+      const tickerSymbol = document.getElementById('tickerSymbol'); // Replace 'myInput' with your input element ID
+      const category = document.getElementById('category'); // Replace 'myInput' with your input element ID
+      const subcategory = document.getElementById('subcategory'); // Replace 'myInput' with your input element ID
+      const note = document.getElementById('note'); // Replace 'myInput' with your input element ID
+      selectElement.innerHTML = '';
+      tickerSymbol.value = '';
+      category.value = '';
+      subcategory.value = '';
+      note.value = '';
+      loadSingleStock(ticker);
+      setStage();
+    }
+
+    function loadSingleStock(ticker) {
+
+      // TMP DEFINITION AV TICKER. SKALL VARA DYNAMISK
+
+      var ticker = ticker;
+
+      console.log("***********************************");
+      console.log("*  LOADING SINGLE STOCK CONTENT   *");
+      console.log("*           FROM SERVER           *");
+      console.log("***********************************");
+
+      google.script.run.withSuccessHandler(SetPriceHistoryGraph).GetCurrentSingleStockData(ticker);
+      google.script.run.withSuccessHandler(parseSingleStock).GetSingleStockForWebApp(ticker);
+
+      console.log(document.getElementById('launcher_SingleStock').className)
+
+      if (document.getElementById('launcher_SingleStock').className == "hidden"){
+        toggle('SingleStock')
+      }    
+    }
+
+    function SetValueOfSingleDocumentElement(element,value) {
+
+      document.getElementById(element).innerHTML = value;
+
+    }
+
+    function SingleStock_LoadHeader(inData){
+      const data = inData;
+      const ticker = data[0];
+      const allCompanyData = data[1];
+
+      console.log(allCompanyData.companyProfileData);
+
+      console.log("*********************************");
+      console.log("* SETTING DESCRIPTION AND NOTES *");
+      console.log("*********************************");
+
+      console.log("HÄR KOMMER COMPANY PROFILE!!!!!")
+      console.log(allCompanyData.companyProfileData);
+      console.log("Här är indexet: "+allCompanyData.companyProfileData[1][allCompanyData.companyProfileData[0].findIndex(col => col === 'companyName')])
+
+      // Set company header
+      document.getElementById("SingleStock_Stock_Name").innerHTML=allCompanyData.companyProfileData[1][allCompanyData.companyProfileData[0].findIndex(col => col === 'companyName')]+" ("+ticker+")";
+
+      // Set company description
+      document.getElementById("SingleStock_Header_Description").innerHTML=allCompanyData.companyProfileData[1][allCompanyData.companyProfileData[0].findIndex(col => col === 'description')];
+
+      // Set company custom Notes
+      document.getElementById("SingleStock_Header_Custom_Notes").innerHTML=allCompanyData.customCompanyData[1][allCompanyData.customCompanyData[0].findIndex(col => col === 'Notes')];
+
+      console.log("**************************************");
+      console.log("* SETTING VALUES OF GRUNDINFORMATION *");
+      console.log("**************************************");
+
+      SetValueOfSingleDocumentElement("SingleStock_BasicInformation_sector","Sektor: " + 
+                allCompanyData.companyProfileData[1][allCompanyData.companyProfileData[0].findIndex(col => col === 'sector')]);
+      SetValueOfSingleDocumentElement("SingleStock_BasicInformation_industry","Industri: " + 
+                allCompanyData.companyProfileData[1][allCompanyData.companyProfileData[0].findIndex(col => col === 'industry')]);
+      SetValueOfSingleDocumentElement("SingleStock_BasicInformation_aktievaluta","Aktievaluta: " + 
+                allCompanyData.companyProfileData[1][allCompanyData.companyProfileData[0].findIndex(col => col === 'currency')]);
+      SetValueOfSingleDocumentElement("SingleStock_BasicInformation_rapportvaluta","Rapportvaluta: " + 
+                allCompanyData.incomeStatementDataYearly[1][allCompanyData.incomeStatementDataYearly[0].findIndex(col => col === 'reportedCurrency')]);
+      console.log("***************************")
+      console.log("*  FELHANTERING BÖRJAN  . *")
+      console.log("***************************")
+      console.log(allCompanyData.incomeStatementDataYearly[1]);
+      console.log("***************************")
+      console.log("*  FELHANTERING SLUT    . *")
+      console.log("***************************")
+      SetValueOfSingleDocumentElement("SingleStock_BasicInformation_minKategori","Kategori: " + 
+                storageForStoredStockList.find(row => row[1] === ticker)?.[storageForStoredStockList[0].findIndex(col => col === 'Category')]); // Optional Chaining (?.): Eftersom find kan returnera undefined om ingen matchning hittas, används optional chaining för att säkert komma åt värden i den hittade raden. Detta förhindrar fel om tickern inte finns.
+      SetValueOfSingleDocumentElement("SingleStock_BasicInformation_subkategori","Subkategori: " + 
+                storageForStoredStockList.find(row => row[1] === ticker)?.[storageForStoredStockList[0].findIndex(col => col === 'Subcategory')]);
+
+
+
+      console.log("***********************************");
+      console.log("* SETTING VALUES OF SNABB ANBLICK *");
+      console.log("***********************************");
+
+      SetValueOfSingleDocumentElement("SingleStock_RightNowAtAGlance_static_mktCap","Börsvärde: " + 
+                allCompanyData.companyProfileData[1][allCompanyData.companyProfileData[0].findIndex(col => col === 'mktCap')]
+                + " " + allCompanyData.companyProfileData[1][allCompanyData.companyProfileData[0].findIndex(col => col === 'currency')]);
+
+
+    }
+
+    function SetPriceHistoryGraph(ticker){
+      // Här skall linjegrafens data hämtas och linjegrafen skall befolkas med:
+      //  - prishistoria.
+      //  - SMA 20, 50, 200
+
+      console.log("*******************")
+      console.log("* Entered Set PHG *")
+      console.log("*******************")
+
+      google.script.run.withSuccessHandler(DividePriceData).getCurrentSingleStockFromSheets(ticker);
+      
+
+    }
+
+    function DividePriceData(inData){
+      const data = JSON.parse(inData).currentStockPriceHistory;
+
+      console.log("***************************")
+      console.log("* Entered Draw Line Chart *")
+      console.log("***************************")
+
+      const parsedData = ParseCurrentSingleStock(data);
+      
+      const parsedLongData = parsedData[0];
+      const parsedLongVolume = parsedData[1];
+      const parsedShortData = parsedData[2];
+      const parsedShortVolume = parsedData[3];
+
+      DrawLineChart(parsedLongData, 'SingleStock_Header_longpricegraph');
+      DrawLineChart(parsedShortData, 'SingleStock_Header_shortpricegraph');
+      DrawTradeVolumeChart(parsedLongVolume, 'SingleStock_Header_longvolumegraph');
+      DrawTradeVolumeChart(parsedShortVolume, 'SingleStock_Header_shortvolumegraph');
+
+    }
+
+    function DrawTradeVolumeChart(inData, inDivName) {
+
+      const parsedData = inData;
+      const divName = inDivName;
+
+      dataArray = google.visualization.arrayToDataTable(parsedData);
+
+      // Räkna ut högsta och lägsta värdet i arrayen för att begränsa storleken på grafen
+      let columnValues = [];
+      const columnIndex = parsedData[0].indexOf("volume")
+
+      if (columnIndex !== -1) { // Kontrollera om kolumnen finns
+        columnValues = parsedData.map(row => row[columnIndex]); // Mappa värden från den valda kolumnen
+      } else {
+        console.error(`Kolumnen hittades inte i arrayen.`);
+      }
+
+      columnValues.splice(0,1); // något skärs bort.
+      const maxValueOfChart = Math.max(...columnValues); // Hämta högsta värdet från allt utom rubrikerna.
+      const minValueOfChart = Math.min(...columnValues); // Hämta minsta värdet från allt utom rubrikerna.
+
+      console.log("MAX VALUE: "+maxValueOfChart);
+      console.log("MIN VALUE: "+minValueOfChart);
+
+      var options = {
+        title: 'Volume',
+        width: 500,
+        height: 130,
+        colors: ['#1c2310'],
+        backgroundColor: "#e0e9ce", //"#d2dfb9",
+        curveType: 'function',
+        hAxis: {
+          slantedText: true,
+          slantedTextAngle: 45,
+          format: 'YYYY MMM DD',
+          textStyle: {
+            bold: 'false', // Ta bort fet stil
+          },
+          maxTextLines: 5,
+          direction:-1,
+        },
+        vAxis: {
+          textStyle: {
+            bold: 'false' // Ta bort fet stil
+          },
+          minValue: minValueOfChart,
+          maxValue: maxValueOfChart,
+          direction:-1,
+        },
+        hAxis: {
+          textStyle: {
+            bold: 'false' // Ta bort fet stil
+          },
+        },/*
+        series: {
+          0: { // Index 0 represents the first series (likely your data series)
+            stroke: { // Apply stroke styling
+              color: "#1c2310",
+              opacity: 0.6,
+              width: 8,
+            },
+            fill: { // Apply fill styling
+              color: "#1c2310",
+              opacity: 0.2,
+            },
+          },
+        },*/
+        /*,
+        series: {
+          0: {
+            lineWidth: 1,
+            color: "#1c2310",
+          },
+          1: {
+            type: 'line',
+            lineWidth: 1,
+            //lineDashStyle: [5, 2],
+            color: "#b01212"
+          },
+          2: {
+            type: 'line',
+            lineWidth: 1,
+            //lineDashStyle: [10, 2],
+            color: "#124fb0"
+          },
+          3: {
+            type: 'line',
+            lineWidth: 1,
+            //lineDashStyle: [20, 2],
+            color: "#9612b0"
+          } 
+
+        }*/
+      };
+
+      var chart = new google.visualization.ColumnChart(document.getElementById(divName));
+      chart.draw(dataArray, options);
+    }
+
+    function DrawLineChart(inData, inDivName) {
+
+      const parsedData = inData;
+      const divName = inDivName;
+
+      dataArray = google.visualization.arrayToDataTable(parsedData);
+
+      var options = {
+        title: 'AKTIEPRISHISTORIA',
+        width: 500,
+        height: 300,
+        backgroundColor: "#e0e9ce", //"#d2dfb9",
+        curveType: 'function',
+        legend: { position: 'bottom' },
+        explorer: { actions: ['dragToZoom', 'rightClickToReset'] },
+        hAxis: {
+          slantedText: true,
+          slantedTextAngle: 45,
+          direction:-1,
+          format: 'YYYY MMM DD',
+          textStyle: {
+            bold: 'false', // Ta bort fet stil
+          },
+          maxTextLines: 5,
+        },
+        vAxis: {
+          textStyle: {
+            bold: 'false' // Ta bort fet stil
+          },
+        },
+        series: {
+          0: {
+            lineWidth: 1,
+            color: "#1c2310",
+          },
+          1: {
+            type: 'line',
+            lineWidth: 1,
+            //lineDashStyle: [5, 2],
+            color: "#b01212"
+          },
+          2: {
+            type: 'line',
+            lineWidth: 1,
+            //lineDashStyle: [10, 2],
+            color: "#124fb0"
+          },
+          3: {
+            type: 'line',
+            lineWidth: 1,
+            //lineDashStyle: [20, 2],
+            color: "#9612b0"
+          }
+
+        }
+      };
+
+      var chart = new google.visualization.AreaChart(document.getElementById(divName));
+
+      google.visualization.events.addListener(chart, 'select', function() {
+        var i = "";
+        var selected = chart.getSelection();
+        alert(selected[0]) // MAN SKA PÅ NÅGOT VIS KUNNA KOMMA ÅT KOLUMNEN ELLER ÄNDRA SÅ ATT RADEN ITNE SYNS PÅ DETTA VIS!!
+        alert(chart.getSelection());
+        for (var y in chart.getSelection()){
+            i += y+"\n";
+        }
+        console.log(i);
+      });
+
+
+      chart.draw(dataArray, options);
+    }
+/*
+function DrawAreaColumnCombinationChart(ticker, inData, inDivName, titel) {
+  const parsedData = inData;
+  const divName = inDivName;
+  console.log("innan.")
+  console.log("parsedData: " + parsedData)
+  dataArray = google.visualization.arrayToDataTable(parsedData);
+  console.log("innan.")
+
+  const chartTypes = ['area', 'column']; // Simple array for chart types
+
+  var options = {
+    series: [], // Initialize empty series array
+  };
+
+  // Define series configuration within the loop
+  for (let i = 0; i < dataArray.getNumberOfColumns(); i++) {
+    options.series.push({
+      lineWidth: 1, // Line width for all series
+      color: i === 0 ? '#1c2310' : i === 1 ? '#b01212' : `#${i * 100000}`, // Color scheme
+      type: chartTypes[i], // Assign chart types from the array
+    });
+      //console.log("Series "+ i + " type: " + chartTypes[i]); // Template literal
+        console.log(`Series ${i}`, options.series[i]);
+  }
+
+  // Create a ComboChart object
+  var chart = new google.visualization.ComboChart(document.getElementById(divName));
+
+  chart.draw(dataArray, options);
+}*/
+
+    function DrawAreaColumnCombinationChart(ticker, inData, inDivName, inTitle) {
+      let parsedData = [];
+      const divName = inDivName;
+      const title = inTitle;
+      console.log("innan.")
+      console.log("parsedData: " + parsedData)
+      console.log("innan.")
+
+      if (inData.length > 16) {
+        parsedData = inData.slice(0,16); // Korta ned datamängden så att den inte är längre än 12 poster.
+      } else {
+        parsedData = inData;
+      }
+
+      dataArray = google.visualization.arrayToDataTable(parsedData);
+
+      // Determine chart types based on data column count
+      const numColumns = dataArray.getNumberOfColumns();
+      const chartTypes = [];
+      const columnconfig = [];
+      // Assign chart types starting from the second column
+      for (let i = 1; i < numColumns; i++) {
+        if (i === 1) { // Second column is revenue (area chart)
+          chartTypes.push('area');
+        // columnconfig.push("linewidth:1,");
+        } else { // Subsequent columns are cost of revenue (column chart)
+          chartTypes.push('bars');
+        // columnconfig.push("stroke-color: #871B47, stroke-opacity: 0.6, stroke-width: 8, fill-color: #BC5679, fill-opacity: 0.2,");
+        }
+      }
+
+      var options = {
+        title: title,
+        width: 500,
+        height: 300,
+        backgroundColor: "#e0e9ce", //"#d2dfb9",
+        legend: { position: 'bottom' },
+        isStacked: true,
+        series: [], // Initialize empty series array
+        vAxis: {
+          format: 'short'
+        },
+        hAxis: {
+          format: ''
+        }
+          
+      };
+
+      // Define series configuration within the loop
+      for (let i = 0; i < numColumns-1; i++) {
+        options.series.push({
+          lineWidth: 1,
+          strokeOpacity: 0.1,
+          color: i === 0 ? '#1c2310' : i === 1 ? '#001233' : i === 2 ? '#210806' : `#332925`,
+          type: chartTypes[i],
+        });
+          //console.log("Series "+ i + " type: " + chartTypes[i]); // Template literal
+            console.log(`Series ${i}`, options.series[i]);
+      }
+
+      console.log("series för +" +[inData[0]])
+      console.log(options.series)
+
+      // Create an AreaChart object
+      var chart = new google.visualization.ComboChart(document.getElementById(divName));
+
+      chart.draw(dataArray, options);
+    }
+
+
+    function ParseCurrentSingleStock(inData){
+
+      var inData = inData;
+
+      //SingleStock_LoadHeader(inData);
+
+      var ticker = inData[0];
+      var allCompanyData = inData;
+      console.log("1. Är det här som det blir fel?")
+      console.log(allCompanyData);
+
+      var data = allCompanyData;
+
+      console.log("1b. Är det här som det blir fel?")
+      console.log(data);
+      console.log("data logged");
+
+
+      const dateIndex = data[0].findIndex(column => column === 'date');
+      const closeIndex = data[0].findIndex(column => column === 'close');
+      const sma20Index = data[0].findIndex(column => column === 'SMA20');
+      const sma50Index = data[0].findIndex(column => column === 'SMA50');
+      const sma200Index = data[0].findIndex(column => column === 'SMA200');
+      const volumeIndex = data[0].findIndex(column => column === 'volume');
+
+      console.log("The date indexes have been set.")
+
+
+      const filteredDataa = data.filter(row => row[dateIndex] !== null && row[closeIndex] !== null && row[sma20Index] !== null && row[sma50Index] !== null && row[sma200Index] !== null);
+
+      // Ändra så att datumet inte har timmar.
+      const filteredData = filteredDataa.map(([...row]) => {
+        const string = row[2]; // Hämta strängen från kolumn 3
+        const shortenedString = string.substring(0, 10); // Ta bort allt efter "T"
+        const newRow = row.slice(0, 2).concat(shortenedString, row.slice(3)); // Skapa en ny rad med den kortade strängen
+        return newRow;
+      });
+
+      console.log("filteredData med förändrat datum kommer här:");
+      console.log(filteredData);
+
+      const threeYearPriceData = filteredData.map(row => [row[dateIndex], row[closeIndex], row[sma200Index], row[sma50Index]]);
+      const threeMonthPriseData = filteredData.map(row => [row[dateIndex], row[closeIndex], row[sma200Index], row[sma50Index], row[sma20Index]]);
+      const volumeData = filteredData.map(row => [row[dateIndex], row[volumeIndex]]);
+
+      return [threeYearPriceData,volumeData,threeMonthPriseData.slice(0,61),volumeData.slice(0,61)];
+    }
+
+    function parseSingleStock(inData){
+
+
+
+      var inData = JSON.parse(inData);
+
+      SingleStock_LoadHeader(inData);
+
+      var ticker = inData[0];
+      var allCompanyData = inData[1];
+      console.log(allCompanyData);
+
+      var incomeStatement = allCompanyData.incomeStatementDataYearly;
+      var incomeStatementQuarterly = allCompanyData.incomeStatementDataQuarterly;
+      var balanceSheet = allCompanyData.balanceSheetDataYearly;
+      var balanceSheetQuarterly = allCompanyData.balanceSheetDataQuarterly;
+      var cashFlow = allCompanyData.cashFlowDataYearly;
+/*
+
+      data = incomeStatement
+      const calendarYearIndex = data[0].findIndex(column => column === 'calendarYear');
+      const netIncomeIndex = data[0].findIndex(column => column === 'netIncome');
+
+      const filteredData = data.filter(row => row[calendarYearIndex] !== null && row[netIncomeIndex] !== null);
+      const desiredData = filteredData.map(row => [row[calendarYearIndex], row[netIncomeIndex]]);
+
+      console.log("Data filtered for netIncome and year")
+      console.log(desiredData);
+
+      //drawChart(ticker,desiredData,"columnchart_values");
+*/
+      console.log("***************************")
+      console.log("*  LOADING COLUMN CHARTS. *")
+      console.log("***************************")
+
+      // create chart data for revenue      
+      const revenueChartData = filterDataForColumns([[incomeStatement,['calendarYear',['revenue']]]],ticker,"columnchart_Revenue");
+      console.log("revenue data loaded")
+      console.log(revenueChartData)
+      drawChart(ticker,revenueChartData,"columnchart_Revenue",['revenue'],['calendarYear'],"short");
+      console.log("revenue chart loaded")
+
+      // create chart data for revenue      
+      const revenueGrowthChartData = filterDataForColumns([[incomeStatement,['calendarYear',['revenueGrowth']]]],ticker,"columnchart_RevenueGrowth");
+      console.log("revenue data loaded")
+      console.log(revenueGrowthChartData)
+      drawChart(ticker,revenueGrowthChartData,"columnchart_RevenueGrowth",['revenueGrowth'],['calendarYear'],"percent");
+      console.log("revenueGrowth chart loaded")
+
+/*    ******************************
+      *.     SYDINGANALYTIK.       *
+      ******************************/
+
+      const grossProfitRatioChartData = filterDataForColumns([[incomeStatement,['calendarYear',['grossProfitRatio']]]],ticker,"columnchart_GrossProfitRatio");
+      drawChart(ticker,grossProfitRatioChartData,"columnchart_GrossProfitRatio",['grossProfitRatio'],['calendarYear'],"percent");
+      console.log("GrossProfitRatio loaded")
+
+      const ebitdamarginDescription = "Jag kollar EBITDA först för det utesluter avskrivningar som annars kan få marginalen att se för bra eller dålig ut beroende på exakt policy för avskrivningar just nu (om den korrekt speglar investeringsbehovet eller inte)";
+      const ebitdaMarginChartData = filterDataForColumns([[incomeStatement,['calendarYear',['ebitdaratio']]]],ticker,"columnchart_Revenue");
+      drawChart(ticker,ebitdaMarginChartData,"columnchart_ebitdaMargin",['ebitdaratio'],['calendarYear'],"percent");
+
+      // Normalized Net Income Margin.
+      // Data för denna saknar i FMP. Den har inte Non-Recurring expenses.
+
+      const netIncomeMarginDescription = "Det är vad företaget faktiskt tjänar efter skatt. Här kollar jag först på helårsbasis. Jag kan använda marginalen lite slarvigt för att räkna ut helårsvinsten som Sales x Net margin. ";
+      const netIncomeMarginChartData = filterDataForColumns([[incomeStatement,['calendarYear',['netIncomeRatio']]]],ticker,"columnchart_NetIncomeMargin");
+      drawChart(ticker,netIncomeMarginChartData,"columnchart_NetIncomeMargin",['netIncomeRatio'],['calendarYear'],"percent");
+
+      const cashFromOperationsDescription = "Det faktiska kassaflödet från själva rörelsen, dvs vad man får in för pengarflöde på att köpa och sälja. ";
+      const cashFromOperationsChartData = filterDataForColumns([[incomeStatement,['calendarYear',['operatingIncome']]]],ticker,"columnchart_CashFromOperations");
+      drawChart(ticker,cashFromOperationsChartData,"columnchart_CashFromOperations",['operatingIncome'],['calendarYear'],"short");
+
+      const cashFromInvestingDescription = "";
+      const cashFromInvestingChartData = filterDataForColumns([[cashFlow,['calendarYear',['netCashUsedForInvestingActivites']]]],ticker,"columnchart_CashFromOperations");
+      drawChart(ticker,cashFromInvestingChartData,"columnchart_CashFromInvesting",['netCashUsedForInvestingActivites'],['calendarYear'],"short");
+
+      const FCFDescription = "Detta är de pengar man har tillgång till om man äger hela företaget. Man kan då fortsätta att driva verksamheten precis som tidigare men dela ut dessa pengar till sig själv varje år. DETTA ÄR BASEN TILL OM det är värt att äga aktien eller inte: kassaflödet som finns över att ge till sig själv medan bolaget tuffar på.";
+      const FCFChartData = filterDataForColumns([[cashFlow,['calendarYear',['freeCashFlow']]]],ticker,"columnchart_FCF");
+      drawChart(ticker,FCFChartData,"columnchart_FCF",['freeCashFlow'],['calendarYear'],"short");
+
+      const totalEquityDescription = "Ericssons Equity = Book = tillgångar minus skulder = Net Asset Value";
+      const totalEquityChartData = filterDataForColumns([[balanceSheet,['calendarYear',['totalStockholdersEquity']]]],ticker,"columnchart_totalEquity");
+      drawChart(ticker,totalEquityChartData,"columnchart_totalEquity",['totalStockholdersEquity'],['calendarYear'],"short");
+
+      console.log("Data of Total Equity of Shareholders.")
+      console.log(totalEquityChartData)
+
+      const roeDescription = "";
+      const netIncomeChartData = filterDataForColumns([[incomeStatement,['calendarYear',['netIncome']]]],ticker,"columnchart_ROE");
+/*
+
+      console.log("Data of netIncome.")
+      console.log(netIncomeChartData)
+
+*/
+      const roeChartData = CalculateRoe(totalEquityChartData,netIncomeChartData);
+      console.log("DATA OF ROE CHART")
+      console.log(roeChartData)
+      drawChart(ticker,roeChartData,"columnchart_ROE",['roe'],['calendarYear'],"percent");
+
+/*
+      const FCFPSDescription = "Free Cash Flow Per Share. FCF/share gör det lite lättare att räkna på aktien. Ungefär 11-12 kr/aktie på sistone. Kom ihåg att FCF och min egen OpCF minus investeringar stämmer hyggligt överens så FCF/share enligt KoyFin blir";
+      const FCFPSChartData = filterDataForColumns([[cashFlow,['calendarYear',['freeCashFlow']]]],ticker,"columnchart_FCF");
+      drawChart(ticker,FCFPSChartData,"columnchart_FCF",['freeCashFlow'],['calendarYear']);
+*/
+
+/*    *************************************************
+      *.       BUFFETOLOGY - INCOME STATEMENT.        *
+      *************************************************/
+
+      const buffRevCostRevDescription = "asdf";
+      const buffRevCostRevChartData = filterDataForColumns([[incomeStatement,['calendarYear',['revenue','costOfRevenue']]]],ticker,"columnchart_totalEquity");
+      DrawAreaColumnCombinationChart(ticker,buffRevCostRevChartData,"combinationchart_Revenue","REVENUE VS. COST OF REVENUE");
+
+      const buffGrossExpDescription = "under 30% är fantastiskt. Hög research and development innebär förmodligen att man kommer behöva fortsätta ha en hög sådan kostnad. Tänk Intel, exempelvis.";
+      const buffGrossExpChartData = filterDataForColumns([[incomeStatement,['calendarYear',['grossProfit','sellingAndMarketingExpenses','generalAndAdministrativeExpenses','researchAndDevelopmentExpenses','otherExpenses']]]],ticker,"combinationchart_GrossProfit");
+      DrawAreaColumnCombinationChart(ticker,buffGrossExpChartData,"combinationchart_GrossProfit","GROSS PROFIT VS. EXPENSES");
+
+      const buffGrossEBITDepreciationDescription = "Depriciation är viktigt om man investerar långsiktigt. Investeringen kommer behöva återinvesteras, så kostnaden kommer finnas där varje år ändå.";
+      const buffGrossEBITDepreciationData = operatingIncomeAndDepriciation(filterDataForColumns([[incomeStatement,['calendarYear',['grossProfit','operatingExpenses','depreciationAndAmortization']]]],ticker,"combinationchart_GrossEBITDepriciation"));
+      DrawAreaColumnCombinationChart(ticker,buffGrossEBITDepreciationData,"combinationchart_GrossEBITDepriciation","OPERATING PROFIT VS. DEPRICIATION");
+
+      const buffOperatingIncomeVSInterestExpensesDescription = "Att betala mer än något tiotal procent av Operating Income i interestExpenses är för högt för att vara en långsikg Buffetinvestering.";
+      const buffOperatingIncomeVSInterestExpensesData = calculateBuffetOperatingIncome(filterDataForColumns([[incomeStatement,['calendarYear',['grossProfit','operatingExpenses','depreciationAndAmortization','interestExpense','interestIncome']]]],ticker,"combinationchart_GrossOperatingIncomeVSInterestExpenses"));
+      DrawAreaColumnCombinationChart(ticker,buffOperatingIncomeVSInterestExpensesData,"combinationchart_GrossOperatingIncomeVSInterestExpenses","EBIT VS. INTEREST");
+
+      const buffNetEarningsDescription = "Net Income / Net Earnings: när man drar av skatten från income before tax får man net earnings. I buffetska universat skall denna ha en uppåtgående trend. Det som skiljer denna från 'operating income vs interest expenses är att här är även incomeTax avdragen. Det gäller även nästa.";
+      const buffNetEarningsData = calculateBuffetNetEarnings(filterDataForColumns([[incomeStatement,['calendarYear',['grossProfit','operatingExpenses','depreciationAndAmortization','totalOtherIncomeExpensesNet','incomeTaxExpense']]]],ticker,"combinationchart_NetEarnings"));
+      DrawAreaColumnCombinationChart(ticker,buffNetEarningsData,"combinationchart_NetEarnings","NET EARNINGS (inkluderat skattekostnad)");
+
+      const buffNetEarningsPerShareDescription = "BuyBacks kan påverka NetEarnings så att det ser lägre ut än vad det är. Därför bra att titta per share. Över 20% netEarnings VS Revenue är bra och indikerar att man inte har mycket konkurrens. Under 10% indikerar motsatsen; att man förmodligen befinner sig i en mycket konkurrensorienterad bransch eller att man inte sköter ekonomin.";
+      const buffNetEarningsPerShareData = calculateBuffetNetEarningsPerShare(filterDataForColumns([[incomeStatement,['calendarYear',['grossProfit','operatingExpenses','depreciationAndAmortization','totalOtherIncomeExpensesNet','incomeTaxExpense','weightedAverageShsOut','revenue']]]],ticker,"combinationchart_NetEarnings"));
+      DrawAreaColumnCombinationChart(ticker,buffNetEarningsPerShareData,"combinationchart_NetEarningsPerShare","REVENUE PER SHARE VS.\n NET EARNINGS PER SHARE");
+
+/*    **********************************************
+      *.       BUFFETOLOGY - BALANCE SHEET.        *
+      **********************************************/
+
+      const buffCashVSNetEarningsDescription = "En hög kontantsiffra innebär att företaget antingen genererar mycket kontanter genom sin operativa verksamhet eller just har sålt aktier eller bonds. En låg andel kontanter innebär att företaget är dåligt skött eller mycket konkurrensutsatt.";
+      const buffCashVSNetEarningsData = calculateBuffetCashOrInventoryVSNetEarnings(filterDataForColumns([[incomeStatement,['calendarYear',['grossProfit','operatingExpenses','depreciationAndAmortization','totalOtherIncomeExpensesNet','incomeTaxExpense']]],[balanceSheet,['calendarYear',['cashAndShortTermInvestments']]]],ticker,"combinationchart_CashVSNetEarnings"),'cashAndShortTermInvestments');
+      DrawAreaColumnCombinationChart(ticker,buffCashVSNetEarningsData,"combinationchart_CashVSNetEarnings","CASH VS \n NET EARNINGS");
+
+      const buffCashVSShortTermDebtDescription = "Cash VS Short Term Debt visar om ett företag har den finansiella styrkan att genomleva svårare tider.";
+      const buffCashVSShortTermDebtData = filterDataForColumns([[balanceSheet,['calendarYear',['totalCurrentLiabilities','cashAndShortTermInvestments']]]],ticker,"combinationchart_CashVSShortTermDebt");
+      DrawAreaColumnCombinationChart(ticker,buffCashVSShortTermDebtData,"combinationchart_CashVSShortTermDebt","CASH VS \n TOTAL SHORT TERM DEBT"); // DET ÄR VÄRT ATT TA REDA PÅ OM DET VERKLIGEN SKA VARA TOTAL SHORT TERM DEBT, ELLER KANSKE ISTÄLLET "SHORT TERM DEBT".
+
+      const buffInventoryVSNetEarningsDescription = "I tillverkningsindustrin är Net Earnings som stiger i samma takt som inventory ett tecken på att företaget har en god ställning på marknaden. Det indikerar att företaget har funnit ett fördelaktigt sätt att sälja mer och att varorna därför ökat på ett likartat vis. Att det skulle vara en sanning att, om man skulle dela Total Debt / Current Assets och få en siffra under 1, att ett företag inte kan hantera sina närliggande skulder är fel. Är företaget välfungerande så kan det hantera detta endast genom sitt kassaflöde, som annars används till Share Buybacks eller utdelningar.";
+      const buffInventoryVSNetEarningsData = calculateBuffetCashOrInventoryVSNetEarnings(filterDataForColumns([[incomeStatement,['calendarYear',['grossProfit','operatingExpenses','depreciationAndAmortization','totalOtherIncomeExpensesNet','incomeTaxExpense']]],[balanceSheet,['calendarYear',['inventory']]]],ticker,"combinationchart_InventoryVSNetEarnings"),'inventory');
+      DrawAreaColumnCombinationChart(ticker,buffInventoryVSNetEarningsData,"combinationchart_InventoryVSNetEarnings","NET EARNINGS VS. \n INVENTORY");   // KANSKE SKALL DENNA VARA QUARTERLY FÖR ATT DEN SKA VARA ANVÄNDBAR?
+
+      const buffPPEVSDepriciationDescription = "Att inte ha mycket PPE kan vara en bra sak, speciellt om man får in mycket pengar med bra marginaler.";
+      const buffPPEVSDepriciationData = filterDataForColumns([[incomeStatement,['calendarYear',['depreciationAndAmortization']]],[balanceSheet,['calendarYear',['propertyPlantEquipmentNet']]]],ticker,"combinationchart_PPEVSDepriciationData");
+      DrawAreaColumnCombinationChart(ticker,buffPPEVSDepriciationData,"combinationchart_PPEVSDepriciationData","DEPRECIATION VS \n PROPERTY, PLANT & EQUIPMENT NET");
+
+      const buffGoodwillDescription = "Ökande goodwill över tid tyder på att andra verksamheter köps till ett pris som är över Book-value.";
+      const buffGoodwillData = filterDataForColumns([[balanceSheet,['calendarYear',['goodwill']]]],ticker,"combinationchart_Goodwill");
+      DrawAreaColumnCombinationChart(ticker,buffGoodwillData,"combinationchart_Goodwill","GOODWILL");
+
+      const buffLongTermDebtVSShortTermDebtDescription = "Att ha mer kortsiktig skuld än långsiktig skuld gör att man är mer utsatt för fluktuationer i räntan.";
+      const buffLongTermDebtVSShortTermDebtData = filterDataForColumns([[balanceSheet,['calendarYear',['shortTermDebt','longTermDebt']]]],ticker,"combinationchart_LongTermDebtVSShortTermDebt");
+      DrawAreaColumnCombinationChart(ticker,buffLongTermDebtVSShortTermDebtData,"combinationchart_LongTermDebtVSShortTermDebt","SHORT TERM DEBT VS. \n LONG TERM DEBT");
+
+      // Här skulle det finnas en graf över "LONG TERM DEBT DUE" mot en bakgrunda av netIncome. Men "LONG TERM DEBT DUE" finns inte hos FMP... FMP har "Company Notes", där denna iformation finns, men denna rör endast amerianska företag.
+
+      const buffEBITDAVSLongTermDebtDescription = "Long Term Debt VS EBITDA kan berätta hur en verksamhet kan betal igen långfristiga lån.";
+      const buffEBITDAVSLongTermDebtData = filterDataForColumns([[incomeStatement,['calendarYear',['ebitda']]],[balanceSheet,['calendarYear',['longTermDebt']]]],ticker,"combinationchart_EBITDAVSLongTerm");
+      DrawAreaColumnCombinationChart(ticker,buffEBITDAVSLongTermDebtData,"combinationchart_EBITDAVSLongTerm","EBITDA VS. \n LONG TERM DEBT");   // KANSKE SKALL DENNA VARA QUARTERLY FÖR ATT DEN SKA VARA ANVÄNDBAR?
+
+      const buffCurrentRatioDescription = "Genom att dela total current assets med total current liabilities får man reda på ett företags likviditet. Ju högre siffra, desto högre är förmågan att betala current liabilities";
+      const buffCurrentRatioData = calculateCurrentRatio(filterDataForColumns([[balanceSheet,['calendarYear',['totalCurrentAssets','totalCurrentLiabilities']]]],ticker,"combinationchart_CurrentRatio"));
+      DrawAreaColumnCombinationChart(ticker,buffCurrentRatioData,"combinationchart_CurrentRatio","CURRENT RATIO");
+
+      const buffLongTermDebtToNetEarningsRatioDescription = "Long term debt to netEarnings ratio ska vara under 4; det innebär att företaget med hjälp av sin NetEarnings kan betala av sina långsiktiga skulder på max 4 år.";
+      const buffLongTermDebtToNetEarningsRatioData = calculateLongTermDebtToNetEarningsRatio(filterDataForColumns([[balanceSheet,['calendarYear',['totalNonCurrentLiabilities']]],[buffInventoryVSNetEarningsData,['calendarYear',['netEarnings']]]],ticker,"combinationchart_LongTermDebtToNetEarningsRatio"));
+      DrawAreaColumnCombinationChart(ticker,buffLongTermDebtToNetEarningsRatioData,"combinationchart_LongTermDebtToNetEarningsRatio","LONG TERM DEBT TO \n NET EARNINGS RATIO");
+
+      const buffDebtToShareholdersEquityDescription = "Företag med en ihållande konkurrensförmån klarar av att finansiera sig med sina intäkter. Det innebär att de har en högre Shareholders Equity och en lägre skuldsättning. Problemet med debt to shareholders equity är att företag med välfungerande ekonomi använder sin equity/retained earnings till att köpa tillbaka aktier, vilket leder till att deras equity/retained earnings-bas minskar. Det ökar deras debt to shareholders equity ratio till den grad att det kan se ut som ett mediokert företag. Det är därför viktigt att manuellt lägga tillbaka värdet för de återköpta aktierna till shareholdersEquity så att det blir tydligt hur ratiot egentligen är.";
+      const buffDebtToShareholdersEquityData = calculateDebtToShareholdersEquityRatio(filterDataForColumns([[balanceSheet,['calendarYear',['totalLiabilities','totalStockholdersEquity']]]],ticker,"combinationchart_LongTermDebtToNetEarningsRatio"));
+      DrawAreaColumnCombinationChart(ticker,buffDebtToShareholdersEquityData,"combinationchart_DebtToShareholdersEquityRatio","DEBT TO SHAREHOLDERS EQUITY RATIO");
+
+      const cumulatedBuyBacks = cumulativeBuyBacks(filterDataForColumns([[cashFlow,['calendarYear',['commonStockRepurchased']]]]));
+      const buffAdjustedDebtToShareholdersEquityData = calculateAdjustedDebtToShareholdersEquityRatio(filterDataForColumns([[balanceSheet,['calendarYear',['totalLiabilities','totalStockholdersEquity']]],[cumulatedBuyBacks,['calendarYear',['commonStockRepurchased']]]],ticker,"combinationchart_LongTermDebtToNetEarningsRatio"));
+      DrawAreaColumnCombinationChart(ticker,buffAdjustedDebtToShareholdersEquityData,"combinationchart_AdjustedDebtToShareholdersEquityRatio","ADJUSTED DEBT TO  \n SHAREHOLDERS EQUITY RATIO");
+
+      // Preferred stock. Detta finns i balance sheet. Detta är dyrt för företaget. Kanske skall detta läggas in i översikten, som en markör över att det är ett företag med bra finanser. Det skall inte in i graferna dock. Se sida 130 i Buffetboken.
+
+      const buffRetainedEarningsVSNetIncomeDescription = "Net earnings som inte används till utdelning eller buybacks hamnar i retained earnings. Om ett företag går med förlus tas pengar från retained earnings. Retained earnings är kumulativ. 100% retained earnings är inte dåligt eftersom detta kan användas för tillväxt.";
+      const buffRetainedEarningsVSNetIncomeData = filterDataForColumns([[incomeStatement,['calendarYear',['netIncome']]],[balanceSheet,['calendarYear',['retainedEarnings']]]],ticker,"combinationchart_RetainedEarningsVSNetIncome");
+      DrawAreaColumnCombinationChart(ticker,buffRetainedEarningsVSNetIncomeData,"combinationchart_RetainedEarningsVSNetIncome","RETAINED EARNINGS VS \n NET EARNINGS");
+
+      // TREASURY STOCK är sådana aktier som återköpts men inte cancerlats. Dessa ska enligt Buffetboken finnas i balance sheet, men de finns inte hos FMP. Dessa finns i shareholders equity som en negativ post, vilket innebär att den minskar shareholders equity, vilket innebär att ROE blir högre. Eftersom en hög ROE är ett tecken på god ekonomi kan man lägga tillbaka TREASURY STOCK till ROE för att få en "TREASURY STOCK ADJUSTED ROE"
+
+      const buffROEDescription = "ROE. ETT ROE på 30% är bra. 15 är sådär. Om man delar ut pengar istället för att behålla dem i retained earnings kan shareholders equity vara på minus. Man behöver då jämföra med net earnings/income. Om han har en stabil, hög net income, så är det sannolikt att man delar ut. (Kan man lägga tillbaka utdelningen ovanpå shareholders equity för att få en klarare bild?)";
+      const buffROEData = calculateROE(filterDataForColumns([[incomeStatement,['calendarYear',['netIncome']]],[balanceSheet,['calendarYear',['totalStockholdersEquity']]]],ticker,"combinationchart_ROE"));
+      DrawAreaColumnCombinationChart(ticker,buffROEData,"combinationchart_ROE","ROE");
+
+      const buffCapitalExpenditureVSNetEarningsDescription = "Som en regel behöver en verksamhet med varaktigt god nisch inom en sektor inte använda mycket capital expenditure (dvs. property, plant, equipment, patent) i relation till sitt nettoresultat. Om capital expenditure är under 50%: helt ok. Om det är under 20%: supergrönt.";
+      const buffCapitalExpenditureVSNetEarningsData = mathAbsOfColumn(filterDataForColumns([[cashFlow,['calendarYear',['netIncome']]],[cashFlow,['calendarYear',['capitalExpenditure']]]],ticker,"combinationchart_CapitalExpenditureVSNetEarnings"),1);
+      DrawAreaColumnCombinationChart(ticker,buffCapitalExpenditureVSNetEarningsData,"combinationchart_CapitalExpenditureVSNetEarnings","CAPITAL EXPENDITURE VS.\n NET EARNINGS");
+
+
+      const buffStockRepurchasesDividendsVSNetEarningsDescription = "Hur stor del av net earnings används till återköp av aktier och till utdelningar, och är detta ett ihållande fenomen. (Borde detta kanske delas på antal aktier för att se om det är stabilt/ökande?)";
+      const buffStockRepurchasesDividendsVSNetEarningsData = mathAbsOfColumns(filterDataForColumns([[cashFlow,['calendarYear',['netIncome','commonStockRepurchased','dividendsPaid']]]]));
+      DrawAreaColumnCombinationChart(ticker,buffStockRepurchasesDividendsVSNetEarningsData,"combinationchart_StockRepurchasesDividendsVSNetEarnings","BUYBACKS & DIVIDENDS VS.\n NET EARNINGS");
+
+
+      /* 
+            EXEMPEL PÅ DATA FORMATERAD FÖR MULTIPLA STAPLAR:
+
+                  const revenueChartData = filterDataForColumns([[balanceSheet,['calendarYear',['revenue']]],[data,['calendarYear',['ebitda','ebitdaratio']]],[cashFlow,['calendarYear',['freeCashFlow','operatingCashFlow']]]],ticker,"columnchart_Revenue");  
+      */
+
+
+ //     console.log(filterDataForColumns([[balanceSheet,['calendarYear',['revenue']]],[data,['calendarYear',['ebitda','ebitdaratio']]]],ticker,"columnchart_Revenue"));
+    }
+
+  function mathAbsOfColumns(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    console.log("*******BINGBONG************")
+    console.log(data)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const secondColumn = row[1];
+      const thirdColumn = Math.abs(row[2]);
+      const fourthColumn = Math.abs(row[3]);
+
+      return [year, secondColumn, thirdColumn, fourthColumn];  
+    });
+
+    newHeaderRow = headerRow;
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+
+    console.log(newHeaderRow)
+    console.log(newData)
+    console.log("*******BINGBONG************")
+
+    return newData;
+  }
+
+  function mathAbsOfColumn(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    console.log("*******BINGBONG************")
+    console.log(data)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const secondColumn = row[1];
+      const thirdColumn = Math.abs(row[2]);
+
+      return [year, secondColumn, thirdColumn];  
+    });
+
+    newHeaderRow = headerRow;
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+
+    console.log(newHeaderRow)
+    console.log(newData)
+    console.log("*******BINGBONG************")
+
+    return newData;
+  }
+
+
+  function calculateROE(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    console.log("*******BINGBONG************")
+    console.log(data)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const roe = row[1]/row[2];
+
+      return [year, roe];  
+    });
+
+    newHeaderRow = ["calendarYear", 'roe'];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+
+    console.log(newHeaderRow)
+    console.log(newData)
+    console.log("*******BINGBONG************")
+
+    return newData;
+  }
+
+  function calculateAdjustedDebtToShareholdersEquityRatio(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    console.log("*******BINGBONG************")
+    console.log(data)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const totalLiabilites = row[1];
+      const shareholdersEquity = row[2]+row[3];
+
+      const debtToShareholdersEquity = totalLiabilites/shareholdersEquity;
+
+      return [year, debtToShareholdersEquity];  
+    });
+
+    newHeaderRow = ["calendarYear", 'adjustedDebtToShareholdersEquityRatio'];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+
+    console.log(newHeaderRow)
+    console.log(newData)
+    console.log("*******BINGBONG************")
+
+    return newData;
+  }
+
+
+  function cumulativeBuyBacks(inData) {
+    const data = inData;
+
+    // Initiera en tom array för att lagra de kumulativa värdena
+    const cumulativeData = [];
+
+    // Gå igenom datan baklänges
+    for (let i = data.length - 1; i >= 0; i--) {
+
+      if (i == data.length - 1) { // Gör den sista raden positiv.
+        data[i][1] = Math.abs(data[i][1])
+      } else if (i != data.length - 1 && i != 0) { // ackumulera alla rader utom den sista och den första som är en rubrik.
+        data[i][1] = Math.abs(data[i][1])+data[i+1][1]; 
+      } else if (i == 0) {
+        console.log("första raden helt orörd.") // Här skall inget göras. Denna rad kan tas bort.
+      }
+    }
+
+    // Vänd arrayen så att den är i ordning från 2020 till 2024
+    //cumulativeData.reverse();
+
+    // Returnera den kumulativa datan
+    return data;
+  }
+
+  function calculateDebtToShareholdersEquityRatio(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    console.log("*******BINGBONG************")
+    console.log(data)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const totalLiabilites = row[1];
+      const shareholdersEquity = row[2];
+
+      const debtToShareholdersEquity = totalLiabilites/shareholdersEquity;
+
+      return [year, debtToShareholdersEquity];  
+    });
+
+    newHeaderRow = ["calendarYear", 'debtToShareholdersEquityRatio'];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+
+    console.log(newHeaderRow)
+    console.log(newData)
+    console.log("*******BINGBONG************")
+
+    return newData;
+  }
+
+  function calculateLongTermDebtToNetEarningsRatio(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    console.log("*******BINGBONG************")
+    console.log(data)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const totalNonCurrentLiabilities = row[1];
+      const netEarnings = row[2];
+
+      const debtToNetEarningsRatio = totalNonCurrentLiabilities/netEarnings;
+
+      return [year, debtToNetEarningsRatio];  
+    });
+
+    newHeaderRow = ["calendarYear", 'debtToNetEarningsRatio'];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+
+    console.log(newHeaderRow)
+    console.log(newData)
+    console.log("*******BINGBONG************")
+
+    return newData;
+  }
+
+  function calculateCurrentRatio(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    console.log("*******BINGBONG************")
+    console.log(data)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const totalCurrentAssets = row[1];
+      const totalCurrentLiabilities = row[2];
+
+      const currentRatio = totalCurrentAssets/totalCurrentLiabilities;
+
+      return [year, currentRatio];  
+    });
+
+    newHeaderRow = ["calendarYear", 'currentRatio'];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+
+    console.log(newHeaderRow)
+    console.log(newData)
+    console.log("*******BINGBONG************")
+
+    return newData;
+  }
+
+  function calculateBuffetCashOrInventoryVSNetEarnings(data,secondType) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const grossProfit = row[1];
+      const operatingExpenses = row[2];
+      const depreciationAndAmortization = row[3];
+      const totalOtherIncomeExpensesNet = -row[4];
+      const incomeTaxExpense = row[5];
+      const cashAndShortTermInvestments = row[6];
+
+      const netEarnings = grossProfit - operatingExpenses - totalOtherIncomeExpensesNet -depreciationAndAmortization - incomeTaxExpense;
+
+      return [year, netEarnings, cashAndShortTermInvestments]; // HÄr borde också gain (loss) sale of asset finnas men jag kan inte hitta den i income statement.... 
+    });
+
+    newHeaderRow = ["calendarYear", 'netEarnings', secondType];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+    return newData;
+  }
+
+  function calculateBuffetNetEarningsPerShare(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const grossProfit = row[1];
+      const operatingExpenses = row[2];
+      const depreciationAndAmortization = row[3];
+      const totalOtherIncomeExpensesNet = -row[4];
+      const incomeTaxExpense = row[5];
+      const weightedAverageShsOut = row[6];
+      const revenue = row[7];
+
+      const netEarningsPerShare = (grossProfit - operatingExpenses - totalOtherIncomeExpensesNet -depreciationAndAmortization - incomeTaxExpense) / weightedAverageShsOut;
+
+      const revenuePerShare = revenue/weightedAverageShsOut
+
+      return [year, revenuePerShare, netEarningsPerShare]; // HÄr borde också gain (loss) sale of asset finnas men jag kan inte hitta den i income statement.... 
+    });
+    newHeaderRow = ["calendarYear", 'revenuePerShare', "netEarningsPerShare"];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+    return newData;
+  }
+
+  function calculateBuffetNetEarnings(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const grossProfit = row[1];
+      const operatingExpenses = row[2];
+      const depreciationAndAmortization = row[3];
+      const totalOtherIncomeExpensesNet = -row[4];
+      const incomeTaxExpense = row[5];
+
+      const netEarnings = grossProfit - operatingExpenses - totalOtherIncomeExpensesNet -depreciationAndAmortization - incomeTaxExpense;
+
+      return [year, netEarnings]; // HÄr borde också gain (loss) sale of asset finnas men jag kan inte hitta den i income statement.... 
+    });
+    newHeaderRow = ["calendarYear", "netEarnings"];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+    return newData;
+  }
+
+  function calculateBuffetOperatingIncome(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const grossProfit = row[1];
+      const operatingExpenses = row[2];
+      const depreciationAndAmortization = row[3];
+      const interestExpense = row[4];
+      const interestIncome = -row[5];
+
+      const operatingProfit = grossProfit - operatingExpenses - depreciationAndAmortization;
+
+      return [year, operatingProfit, interestExpense, interestIncome]; // HÄr borde också gain (loss) sale of asset finnas men jag kan inte hitta den i income statement.... 
+    });
+
+    newHeaderRow = ["calendarYear", "EBIT", "interestExpense", 'interestIncome'];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+    return newData;
+  }
+
+  function operatingIncomeAndDepriciation(data) {
+    // Extract the header row
+    const headerRow = data.shift(); // Remove and store the first row (header)
+
+    const newData = data.map((row) => {
+      const year = row[0];
+      const grossProfit = row[1];
+      const operatingExpenses = row[2];
+      const depreciationAndAmortization = row[3];
+
+      const operatingProfit = grossProfit - operatingExpenses;
+
+      return [year, operatingProfit, depreciationAndAmortization];
+    });
+
+    newHeaderRow = ["calendarYear", "operatingProfit", "depreciationAndAmortization"];
+    // Add the header back to the modified data
+    newData.unshift(newHeaderRow); // Prepend the header row to the beginning
+
+    return newData;
+  }
+
+    function CalculateRoe(totalEquityChartData,netIncomeChartData) {
+      const equityIndex = totalEquityChartData[0].findIndex(col => col === "totalStockholdersEquity");
+      const equityCalendarYearIndex = totalEquityChartData[0].findIndex(col => col === "calendarYear");
+      const netIncomeIndex = netIncomeChartData[0].findIndex(col => col === "netIncome")
+      const netIncomecalendarYearIndex = netIncomeChartData[0].findIndex(col => col === "calendarYear")
+      const roeArr = [];
+
+      console.log("****** HÄR KOMMER TESTEN MED ROE *******")
+      console.log("equityCalendarYearIndex " + equityCalendarYearIndex);
+      console.log("netIncomecalendarYearIndex " + netIncomecalendarYearIndex);
+      console.log("equityIndex " + equityIndex);
+      console.log("netIncomeIndex " + netIncomeIndex);
+      console.log("****** totalEquityChartData *******")
+      console.log(totalEquityChartData);
+      console.log("****** ******************** *******")
+      console.log("****** netIncomeChartData *******")
+      console.log(netIncomeChartData);
+      console.log("****** ******************** *******")
+      
+      for (arr of totalEquityChartData){
+        var rowArr = [];
+        var roeValue = 0;
+          for (netIncArr of netIncomeChartData) {
+            if (arr[equityCalendarYearIndex] === netIncArr[netIncomecalendarYearIndex]) {
+              roeValue = netIncArr[netIncomeIndex]/arr[equityIndex];
+              break;
+            }
+          }
+        rowArr = [arr[equityCalendarYearIndex],roeValue];
+        roeArr.push(rowArr);
+      }
+
+      roeArr[0][1] = "roe"
+
+      console.log(roeArr);
+      console.log("****** HÄR SLUTAR TESTEN MED ROE *******")
+
+      return roeArr;
+    }
+
+    function filterDataForColumns(dataSources, ticker) {
+
+      const filteredData = [];
+      const headerRow = []; // Initialize header row with column names
+      var realFirstRow = 0;
+
+      console.log("DATASOURCES:")
+      console.log(dataSources);
+
+      // Iterate through each data source
+      for (const dataSource of dataSources) {
+        const [dataObj, columnConfigs] = dataSource; // Destructure data source
+
+        if (dataSource == dataSources[dataSources.length-1]) {
+
+          console.log("Sista raden");
+          realFirstRow = filteredData.length
+
+        } else {
+          console.log("Inte första raden");
+        }
+
+        var currentHeaderRow = [];
+        headerRow.push(columnConfigs[0]);             // DET ÄR VID DESSA SOM EN IF-SATS SKALL IN FÖR ATT HANTERA
+        currentHeaderRow.push(columnConfigs[0]);      // Q1, Q2, etc, under period. dvs iF( PERIOD !== "FYs")
+
+        // Extract header row from any data source (assuming all have same columns)
+        for (const columnName of columnConfigs[1]) {
+          headerRow.push(columnName); // Add column names
+          currentHeaderRow.push(columnName);
+        }
+
+        // Process data from each data object
+        for (const obj of dataObj) { // Assuming dataObj is the financial Sheet object
+          const rowData = []; // Initialize row data for each data object
+
+          // Find desired columns based on configuration
+          for (const desiredColumn of currentHeaderRow) {
+            const columnIndex = dataObj[0].findIndex(row => row === desiredColumn);
+
+            // Add value to row data if column is found
+            if (columnIndex !== -1) {
+              rowData.push(obj[columnIndex]);
+
+              if (filteredData[dataObj.findIndex(row => row === obj)] != undefined) {
+                var oldRow = filteredData[dataObj.findIndex(row => row === obj)]
+                oldRow.push(obj[columnIndex])
+                filteredData[dataObj.findIndex(row => row === obj)] = oldRow;
+              } else {
+                filteredData[dataObj.findIndex(row => row === obj)] = [obj[columnIndex]];
+              }
+              // här kanske man kan lägga till datan direkt i slutet av varje rad av filteredData
+            }
+          }
+        }
+      }
+
+      const uniqueColumnNames = [];
+      const uniqueFilteredData = [];
+
+      for (const columnName of filteredData[0]) {
+        if (!uniqueColumnNames.includes(columnName)) {
+          uniqueColumnNames.push(columnName);
+        }
+      }
+
+      uniqueFilteredData.push(uniqueColumnNames)
+
+      for (const row of filteredData.slice(1)) {
+        const newRow = [];
+        for (const columnName of uniqueColumnNames) {
+          const columnIndex = filteredData[0].indexOf(columnName);
+          if (columnIndex !== -1) {
+            newRow.push(row[columnIndex]);
+          }
+        }
+        uniqueFilteredData.push(newRow);
+      }
+
+      console.log("******************");
+      console.log("**"+ ticker + " **");
+      console.log("******************");
+      console.log(uniqueFilteredData);
+
+      // Return filtered data with header row
+      return uniqueFilteredData;
+    }
+
+    function drawChart(ticker, inData, DIVname, vAxis, hAxis, vAxisTypeData) { // Här ska också axlarnas namn skickas med samt DIV-namnet och rubriken på diagrammet.
+      const symbol = ticker;
+
+      console.log("ticker: "+ticker)
+
+      var chartDataShorted;
+
+      let chartData = [];
+      if (inData.length > 11) {
+        chartDataShorted = inData.slice(0,11); // Korta ned datamängden så att den inte är längre än 12 poster.
+      } else {
+        chartDataShorted = inData;
+      }
+
+      const vertAxis = vAxis; // Kan innehålla flera värden
+      const horizAxis = hAxis; // ska förmodligen inte innehålla flera värden om det inte också finns en högersida.
+
+      const columnName = vertAxis[0]; // temporär tilldelning innan detta genereras från eventuellt multipla värden.
+
+      // Hämta nivån med kolumnnamn (justera indexet om nödvändigt)
+      const columnNames = chartDataShorted[0]; // Anta att kolumnnamnen finns i första nivån
+      const columnIndex = columnNames.indexOf(columnName); // Hitta indexet för den valda kolumnen
+
+      let columnValues = [];
+
+      if (columnIndex !== -1) { // Kontrollera om kolumnen finns
+        columnValues = chartDataShorted.map(row => row[columnIndex]); // Mappa värden från den valda kolumnen
+      } else {
+        console.error(`Kolumnen "${columnName}" hittades inte i arrayen.`);
+      }
+
+      columnValues.splice(0,1); // något skärs bort.
+      const maxValueOfChart = Math.max(...columnValues); // Hämta högsta värdet från allt utom rubrikerna.
+      const minValueOfChart = Math.min(...columnValues); // Hämta minsta värdet från allt utom rubrikerna.
+
+      console.log("minValue: "+minValueOfChart)
+      console.log("maxValue: "+maxValueOfChart)
+      console.log(chartDataShorted);
+
+      var data = google.visualization.arrayToDataTable(chartDataShorted);      
+      var view = new google.visualization.DataView(data);
+      view.setColumns([0, 1]);
+      var title = vertAxis[0].replace(/([A-Z])/g, ' $1').trim()
+      // s.replace(/([A-Z])/g, ' $1').trim()
+
+
+      var options = {
+        title: title.toUpperCase(),
+        subtitle: 'text om grafen',
+        titleTextStyle: { fontSize: 20,
+            bold: true
+          },
+        width: 500,
+        height: 300,
+        bar: {groupWidth: "95%"},
+        backgroundColor: "#e0e9ce", //"#d2dfb9",
+        legend: { position: "none" },
+        colors: ['#1c2310', '#FF0000'], // Svart för positiva värden, röd för negativa
+        trendlines: {
+          0: {
+            type: 'linear',
+            color: '#637a38',
+            lineWidth: 2,
+            opacity: 0.9,
+            showR2: true,
+            visibleInLegend: true,
+            showR2: true,
+            fontSize: 19
+          }
+        },
+        vAxis: {
+          baseline: 0, // Visa staplarna från 0
+          minValue: minValueOfChart,
+          maxValue: maxValueOfChart,
+          title: vertAxis[0],
+          format: vAxisTypeData
+        },
+        hAxis: {
+          title: horizAxis[0],
+          slantedText: true,
+          gridlines : {
+              count : chartDataShorted.length - 1
+            },
+        format:' ',
+        maxTextLines: chartDataShorted.length - 1,
+        slantedTextAngle: 45
+        }
+      };
+
+      var chart = new google.visualization.ColumnChart(document.getElementById(DIVname));
+      chart.draw(view, options);
+  }
+
+
+  /*
+UTSEENDE
+backgroundColor: Färgen på gradens bakgrund (standard: vit).
+chartArea: Anger området för grafen inom diagrammet (t.ex. {left: 50, top: 20, right: 20, bottom: 50}).
+legend: Konfigurerar hur legenden visas (t.ex. position, textStyle, maxLabels, alignment).
+hAxis: Konfigurerar den horisontella axeln (t.ex. title, textStyle, ticks, gridlines).
+series: Konfigurerar individuella serier i grafen (t.ex. color, lineWidth, pointSize, visibleInLegend).
+animation: Konfigurerar animationseffekter för grafen (t.ex. duration, easing).
+
+INTERAKTION
+selection: Konfigurerar hur användaren kan interagera med grafen genom att klicka och dra (t.ex. mode, enableSelection, selectionTextStyle).
+tooltip: Konfigurerar hur verktygstips visas när användaren hovrar över grafen (t.ex. isHtml, trigger, text, textStyle).
+
+DATA
+dataOpacity: Anger opaciteten för dataelementen i grafen (0-1).
+dataWindow: Anger ett delfönster av datan som ska visas i grafen (t.ex. startRow, numRows, startColumn, numColumns).
+Avancerade inställningar:
+
+ANNOTATIONS: Lägger till anteckningar och markeringar i grafen.
+seriesType: Anger typen av serie för varje datakolumn (t.ex. line, bar, area).
+isStacked: Staplar data i serier ovanpå varandra.
+vAxisType: Anger typen av den vertikala axeln (t.ex. linear, logarithmic).
+hAxisType: Anger typen av den horisontella axeln (t.ex. linear, category).
+*/
+</script>
+
+
+
+
+
+
+
+(The long <script> block you provided, including:
+- Google Charts loading
+- setStage / loadSingleStock
+- ParseCurrentSingleStock
+- All Buffetology calculations
+- All chart drawing logic
+- filterDataForColumns
+- toggle / launcher logic
+)
+
+==============================
+LEGACY STYLES – CSS
+==============================
+
+[PASTE THE ENTIRE CSS BLOCK HERE — EXACTLY AS-IS]
+
+<style>
+a:link {color:#000000;}      /* unvisited link */
+ a:visited {color:#000000;}  /* visited link */
+ a:hover {color:#000000;}  /* mouse over link */
+ a:active {color:#000000;}  /* selected link */ 
+ a:link {text-decoration:none;}
+ a:visited {text-decoration:none;}
+ a:hover {text-decoration:underline;}
+ a:active {text-decoration:underline;}
+ a:link {background-color:none;}
+ a:visited {background-color:none;}
+ a:hover {background-color:none;}
+ a:active {background-color:none;}
+ 
+#marginsandso{
+ margin-top:0px;
+ margin-bottom:100px;
+ margin-right:0px;
+ margin-left:0px; 
+}
+
+ .clasp {
+text-align:center;
+height: 72px;
+	}
+	
+ .launcherbox {
+display:none;
+ } 
+ 
+div.hidden {
+	text-align:center;
+	color:blue;
+    height: 0px;
+	overflow:hidden;
+	transition: height 0.3s;
+	margin-left: auto;
+    margin-right: auto;
+  //  width: 100%;
+
+}
+div.visual {
+	text-align:center;
+	color:red;
+	overflow:hidden;
+	display: block;
+    transition: height 0.3s;
+	margin-left: auto;
+    margin-right: auto;
+  //  width: 100%;
+} 
+ 
+ .headrub
+ {
+ /*text-align:justify;*/
+ text-align:center;
+ color:black;
+ font-family: 'Josefin Sans', sans-serif; 
+ letter-spacing:3px;
+ font-size:15px;
+ line-height:130%;
+ font-weight:900;
+ margin-bottom: 0px;
+ margin-top: 0px;
+ /* word-spacing:5px; */
+  }
+
+ .rub
+ {
+ /*text-align:justify;*/
+ text-align:center;
+ color:black;
+ font-family: 'Josefin Sans', sans-serif; 
+ letter-spacing:3px;
+ font-size:4vw;
+ line-height:130%;
+ font-weight:900;
+ margin-bottom: 0px;
+ margin-top: 0px;
+ /* word-spacing:5px; */
+  }
+ /*
+ .subrub
+ {
+ text-align:center;
+ color:black;
+ font-family: 'Josefin Sans', sans-serif; 
+ letter-spacing:3px;
+ font-size:3vw;
+ line-height:130%;
+ font-weight:900;
+ margin-bottom: 0px;
+ margin-top: 0px;
+  }
+ .bread
+ {
+ text-align:left;
+ color:black;
+ font-family: 'Garamond', serif; 
+ letter-spacing:0px;
+ font-size:2vw;
+ line-height:130%;
+ font-weight:400;
+ margin-bottom: 0px;
+ margin-top: 0px;
+ } */
+ .breadcontainersinglecolumn
+ {
+  display: grid;
+  grid-template-columns: auto;
+  align-content: center;
+ }
+  .breadcontainersinglecolumn > H1b {
+//  background-color: rgba(255, 255, 255, 0.8);
+  text-align: center;
+  padding: 0px 30px;
+  color:black;
+  font-family: 'Josefin Sans', sans-serif; 
+  letter-spacing:3px;
+  font-size:3vw;
+  line-height:130%;
+  font-weight:900;
+  margin-bottom: 0px;
+  margin-top: 100px;
+  }
+  .breadcontainersinglecolumn > H1brub {
+  text-align: center;
+  padding: 0px 30px;
+  color:black;
+  font-family: 'Josefin Sans', sans-serif; 
+  letter-spacing:3px;
+  font-size:2.5vw;
+  line-height:130%;
+  font-weight:900;
+  margin-bottom: 0px;
+  margin-top: 20px;
+  }
+   .breadcontainersinglecolumn > p {
+//  background-color: rgba(255, 255, 255, 0.8);
+  text-align: left;
+  padding: 30px 30px;
+  color:black;
+  font-family: 'Garamond', serif; 
+  letter-spacing:0px;
+  font-size:2vw;
+  line-height:130%;
+  font-weight:400;
+  margin-bottom: 0px;
+  margin-top: 0px;
+  }
+ .breadcontainerdoublecolumn
+ {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-content: center;
+ }
+ .breadcontainerdoublecolumn > H1 {
+//  background-color: rgba(255, 255, 255, 0.8);
+  text-align: left;
+  padding: 0px 30px;
+  color:black;
+  font-family: 'Josefin Sans', sans-serif; 
+  letter-spacing:3px;
+  font-size:3vw;
+  line-height:130%;
+  font-weight:900;
+  margin-bottom: 0px;
+  margin-top: 0px;
+  }
+ .breadcontainerdoublecolumn > H2 {
+//  background-color: rgba(255, 255, 255, 0.8);
+  text-align: left;
+  padding: 0px 30px;
+  color:black;
+  font-family: 'Josefin Sans', sans-serif; 
+  letter-spacing:3px;
+  font-size:2.3vw;
+  line-height:130%;
+  font-weight:900;
+  margin-bottom: 0px;
+  margin-top: 0px;
+  }
+ .breadcontainerdoublecolumn > p {
+//  background-color: rgba(255, 255, 255, 0.8);
+  text-align: left;
+  padding: 30px 30px;
+  color:black;
+  font-family: 'Garamond', serif; 
+  letter-spacing:0px;
+  font-size:2vw;
+  line-height:130%;
+  font-weight:400;
+  margin-bottom: 0px;
+  margin-top: 0px;
+  }
+ .breadcontainerdoublecolumn > p1 {
+//  background-color: rgba(255, 255, 255, 0.8);
+  text-align: left;
+  padding: 30px 30px;
+  color:black;
+  font-family: 'Garamond', serif; 
+  letter-spacing:0px;
+  font-size:2vw;
+  line-height:130%;
+  font-weight:400;
+  margin-bottom: 0px;
+  margin-top: 0px;
+  }
+  .chartcontainerdoublecolumn
+  {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: space-evenly;
+  gap: 10px;
+  }
+ .breadcontainerquadrupelcolumn
+ {
+  display: grid;
+  grid-template-columns: auto auto auto auto;
+  align-content: center;
+ }
+  .breadcontainerquadrupelcolumn > p {
+//  background-color: rgba(255, 255, 255, 0.8);
+  text-align: left;
+  padding: 5px 30px;
+  color:black;
+  font-family: 'Garamond', serif; 
+  letter-spacing:0px;
+  font-size:2vw;
+  line-height:100%;
+  font-weight:400;
+  margin-bottom: 0px;
+  margin-top: 0px;
+  }
+
+
+
+
+
+
+ 
+</style>
+
+==============================
+LEGACY FRONTEND – UI BEHAVIOR
+==============================
+
+- Uses Google Charts
+- Charts are drawn from array-based datasets
+- First row is always headers
+- Data is often sliced to last ~10–16 periods for readability
+- Visual language:
+  - muted green background
+  - minimal chrome
+  - focus on data, not decoration
+- Layout uses grid-based columns (single, double, quad)
+- Sections expand/collapse via launcher arrows
+
+==============================
+LEGACY BACKEND SHAPE (REFERENCE)
+==============================
+
+The legacy frontend was backed by Google Apps Script and Google Sheets.
+Examples of backend responsibilities:
+- Fetching data from Financial Modeling Prep
+- Parsing income statement, balance sheet, cash flow
+- Writing calculated fields into Sheets
+- Returning data arrays to frontend
+
+IMPORTANT:
+You are NOT to recreate Google Apps Script or Sheets.
+This is only to understand:
+- Data shape
+- Column naming
+- Calculation expectations
+
+[PASTE THE BACKEND / PARSE CODE HERE — EXACTLY AS-IS]
+
+/*
+  PARSE ALL DATA
+ */
+
+function parseCompanyProfile(data) {
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const formattedData = [
+    ['date', 'symbol', 'price', 'beta', 'volAvg', 'mktCap', 'lastDiv', 'range', 'changes', 'companyName',
+      'currency', 'cik', 'isin', 'cusip', 'exchange', 'exchangeShortName', 'industry', 'website', 'description',
+      'ceo', 'sector', 'country', 'fullTimeEmployees', 'phone', 'address', 'city', 'state', 'zip', 'dcfDiff',
+      'dcf', 'image', 'ipoDate', 'defaultImage', 'isEtf', 'isActivelyTrading', 'isAdr', 'isFund'],
+    [today, data[0]['symbol'], data[0]['price'], data[0]['beta'], data[0]['volAvg'], data[0]['mktCap'], data[0]['lastDiv'],
+      data[0]['range'], data[0]['changes'], data[0]['companyName'], data[0]['currency'], data[0]['cik'], data[0]['isin'],
+      data[0]['cusip'], data[0]['exchange'], data[0]['exchangeShortName'], data[0]['industry'], data[0]['website'],
+      data[0]['description'], data[0]['ceo'], data[0]['sector'], data[0]['country'], data[0]['fullTimeEmployees'],
+      data[0]['phone'], data[0]['address'], data[0]['city'], data[0]['state'], data[0]['zip'], data[0]['dcfDiff'],
+      data[0]['dcf'], data[0]['image'], data[0]['ipoDate'], data[0]['defaultImage'], data[0]['isEtf'],
+      data[0]['isActivelyTrading'], data[0]['isAdr'], data[0]['isFund']]
+  ];
+  
+  return formattedData;
+}
+
+function parseFinancialStatement(ticker){
+  var url = "https://financialmodelingprep.com/api/v3/income-statement/" + ticker + "?period=annual&apikey=b7a1ae9791277e869895a5ca7417cb81";
+
+  // Fetch income statement data from the API
+  const incomeStatementDataYearly = getData(url);
+
+  // Initialize an empty object to store formatted income statement data
+  const formattedData = {};
+
+  // Loop through each yearly income statement object
+  for (const item of incomeStatementDataYearly) {
+    const year = item.date.slice(0, 4); // Extract year from date string
+
+    // Create an object for the year if it doesn't exist yet
+    if (!formattedData[year]) {
+      formattedData[year] = {};
+    }
+
+    // Extract and store income statement items using object literals
+    formattedData[year] = {
+      date: item.date,
+      symbol: item.symbol,
+      reportedCurrency: item.reportedCurrency,
+      cik: item.cik,
+      fillingDate: item.fillingDate,
+      acceptedDate: item.acceptedDate,
+      calendarYear: item.calenderYear,
+      period: item.period,
+      revenue: item.revenue,
+      costOfRevenue: item.costOfRevenue,
+      grossProfit: item.grossProfit,
+      grossProfitRatio: item.grossProfitRatio,
+      researchAndDevelopmentExpenses: item.researchAndDevelopmentExpenses,
+      generalAndAdministrativeExpenses: item.generalAndAdministrativeExpenses,
+      sellingAndMarketingExpenses: item.sellingAndMarketingExpenses,
+      sellingGeneralAndAdministrativeExpenses: item.sellingGeneralAndAdministrativeExpenses,
+      otherExpenses: item.otherExpenses,
+      operatingExpenses: item.operatingExpenses,
+      costAndExpenses: item.costAndExpenses,
+      interestIncome: item.interestIncome,
+      interestExpense: item.interestExpense,
+      depreciationAndAmortization: item.depreciationAndAmortization,
+      ebitda: item.ebitda,
+      ebitdaratio: item.ebitdaratio,
+      operatingIncome: item.operatingIncome,
+      operatingIncomeRatio: item.operatingIncomeRatio,
+      totalOtherIncomeExpensesNet: item.totalOtherIncomeExpensesNet,
+      incomeBeforeTax: item.incomeBeforeTax,
+      incomeBeforeTaxRatio: item.incomeBeforeTaxRatio,
+      incomeTaxExpense: item.incomeTaxExpense,
+      netIncome: item.netIncome,
+      netIncomeRatio: item.netIncomeRatio,
+      eps: item.eps,
+      epsdiluted: item.epsdiluted,
+      weightedAverageShsOut: item.weightedAverageShsOut,
+      weightedAverageShsOutDil: item.weightedAverageShsOutDil,
+      link: item.link,
+      finalLink: item.finalLink
+    };
+  }
+  const resolvedFormattedData = formattedData;
+
+  const formattedChartData = [];
+
+  // Add header row with category names
+  const categoryNames = Object.keys(incomeStatementDataYearly[0]) /*.filter(
+    (key) => key !== 'date' && key !== 'symbol' && // Exclude unwanted properties
+          key !== 'reportedCurrency' && key !== 'cik' && ... // Add more exclusions if needed
+  );*/
+  formattedChartData.push(categoryNames);
+
+  // Loop through each income statement object
+  for (const item of incomeStatementDataYearly) {
+    const rowData = [];
+    for (const categoryName of categoryNames) {
+      rowData.push(item[categoryName]);
+    }
+    formattedChartData.push(rowData);
+  }
+
+  Logger.log("*******" + resolvedFormattedData[2021].netIncome);
+  Logger.log("*******" + resolvedFormattedData[2020].netIncome);
+  Logger.log("*******" + resolvedFormattedData[2019].netIncome);
+  Logger.log("*******" + resolvedFormattedData[2018].netIncome);
+
+  // Pack the formatted data och the raw data in i container.
+  const data = new Object();
+  data.yearly_incomestatement_raw = incomeStatementDataYearly;
+  data.yearly_incomestatement_formatted = resolvedFormattedData
+  data.yearly_incomestatement_chartformatted = formattedChartData;
+
+  // Return container
+  return data;
+}
+
+function parseFinancialDataForSheets(data){
+
+  const financialData = data;
+
+  const dataFormattedForSheets = [];
+
+  // Add header row with category names
+  const categoryNames = Object.keys(financialData[0]) /*.filter(
+    (key) => key !== 'date' && key !== 'symbol' && // Exclude unwanted properties
+          key !== 'reportedCurrency' && key !== 'cik' && ... // Add more exclusions if needed
+  );*/
+
+  dataFormattedForSheets.push(categoryNames);
+  counter = 1;
+  // Loop through each income statement object
+  for (const item of financialData) {
+    const rowData = [];
+    for (const categoryName of categoryNames) {
+      rowData.push(item[categoryName]);
+    }
+/*
+    console.log("REVENUE = TRUE? ")
+    console.log(categoryNames[8] == "revenue")
+    console.log("GROSSPROFIT = TRUE?")
+    console.log(categoryNames[10] == "grossProfit")
+    console.log("counter=arraylength = TRUE?")
+    console.log(financialData.length != counter). */
+
+    //HÄR SKALL IF IN FÖR ATT GENERERA NYA KOLUMNER SÅSOM revenueGrowth.
+    if (categoryNames[8] == "revenue" && categoryNames[10] == "grossProfit" && financialData.length != counter) {
+      rowData.push('=if(INDIRECT("I" & ROW()+1)=0,0,(INDIRECT("I" & ROW())/INDIRECT("I" & ROW()+1))-1)');
+    } else if (categoryNames[8] == "revenue" && categoryNames[10] == "grossProfit" && financialData.length == counter) {
+      rowData.push(parseFloat(0));
+      console.log("Den gick in i IF sista i raden.");
+    }
+
+    counter++;
+    dataFormattedForSheets.push(rowData);
+  }
+
+  // Här skall det läggas till nya kolumner vid behov
+  if (categoryNames[8] == "revenue" && categoryNames[10] == "grossProfit") {
+    // Lägg till en ny kolumn i IncomeStatement motsvarande datan som läggs ned nedan.
+    dataFormattedForSheets[0].push("revenueGrowth");
+  }
+
+
+  return dataFormattedForSheets;
+}
+
+function ParseTechnicals() {
+  // SMA; ETC.
+}
+
+function ParseCurrentPriceHistory(inData){
+
+  const data = inData;
+
+  // Hämta dagens datum
+  const todaysDate = new Date().toISOString().slice(0, 10);
+
+  // Formatera data till Sheets-format
+  const formattedData = [
+    // Kolumnnamn
+    ["dateSaved","symbol", "date", "open", "high", "low", "close", "adjClose", "volume", "unadjustedVolume", "change", "changePercent", "vwap", "label", "changeOverTime","SMA20","SMA50","SMA200"],
+    // Data
+    ...data.historical.map(day => {
+      
+      return [
+        todaysDate, // Dagens datum
+        data.symbol, // Symbolnamn
+        day.date, // Datum
+        day.open, // Öppningspris
+        day.high, // Högsta pris
+        day.low, // Lägsta pris
+        day.close, // Stängningspris
+        day.adjClose, // Justerat stängningspris
+        day.volume, // Volym
+        day.unadjustedVolume, // Ojusterad volym
+        day.change, // Förändring
+        day.changePercent, // Förändring i procent
+        day.vwap, // Viktad genomsnittlig pris
+        day.label, // Etikett
+        day.changeOverTime, // Förändring över tid
+        '=AVERAGE(INDIRECT("G" & ROW()):INDIRECT("G" & ROW()+9))',
+        '=AVERAGE(INDIRECT("G" & ROW()):INDIRECT("G" & ROW()+49))', 
+        '=AVERAGE(INDIRECT("G" & ROW()):INDIRECT("G" & ROW()+199))'
+      ];
+    })
+  ];
+
+  return formattedData;
+
+}
+
+
+
+
+==============================
+NEW SYSTEM TARGET
+==============================
+
+Rebuild this frontend using:
+
+- React
+- TypeScript
+- Modern component structure
+- react-google-charts (or equivalent)
+- Compatible with Vercel
+- Connected to a new backend API (Node / serverless)
+- NO google.script.run
+- NO Google Sheets
+- NO direct FMP calls from the frontend
+
+==============================
+ABSOLUTE RULES
+==============================
+
+1. Preserve analytical meaning.
+   - Buffetology charts must represent the same relationships.
+   - Ratios must be calculated the same way unless explicitly improved.
+
+2. Preserve mental model.
+   - This is an investor’s analysis desk, not a trading app.
+
+3. Preserve visual density.
+   - Do not “simplify” into KPI cards.
+   - Charts are the primary thinking tool.
+
+4. Replace:
+   - DOM manipulation → React state
+   - Global variables → hooks / context
+   - Inline chart drawing → reusable components
+
+5. Structure the new frontend so that:
+   - A “Single Stock Dashboard” is the core unit
+   - Viewer/Admin functionality can temporarily live inside this view
+
+==============================
+WORK PROCESS (MANDATORY)
+==============================
+
+STEP 1:
+Explain back to me, in your own words:
+- How this frontend works
+- How data flows
+- What each major analytical block represents conceptually
+
+DO NOT WRITE CODE YET.
+
+STEP 2:
+Propose a React component architecture:
+- Pages
+- Components
+- Hooks
+- Data services
+
+STEP 3:
+Only after approval, begin implementing.
+
+==============================
+GOAL
+==============================
+
+The goal is NOT just a rewrite.
+The goal is to preserve and modernize a personal financial thinking tool
+without losing its analytical soul.
+
