@@ -200,6 +200,15 @@
   min-width: 200px;
 }
 
+.sector-card select,
+.sector-card input {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  min-width: 200px;
+  margin-bottom: 8px;
+}
+
 .manual-meta {
   display: grid;
   gap: 12px;

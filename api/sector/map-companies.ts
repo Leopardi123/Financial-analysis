@@ -42,6 +42,7 @@ export default async function handler(req: any, res: any) {
     const sectorName = normalizeName(req.body?.sector);
     const subsectorName = normalizeName(req.body?.subsector);
     const tickers = Array.isArray(req.body?.tickers) ? req.body.tickers : [];
+    const category = normalizeName(req.body?.category);
 
     if (!sectorName || tickers.length === 0) {
       res.status(400).json({ ok: false, error: "Sector and tickers are required" });
@@ -70,9 +71,9 @@ export default async function handler(req: any, res: any) {
         continue;
       }
       await execute(
-        `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, created_at)
-         VALUES (?, ?, ?, ?)`,
-        [companyId, sector.id, subsector?.id ?? null, now]
+        `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, category, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [companyId, sector.id, subsector?.id ?? null, category || null, now]
       );
       results.push({ ticker, status: "mapped" });
     }

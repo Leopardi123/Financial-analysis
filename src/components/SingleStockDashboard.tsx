@@ -36,6 +36,7 @@ export default function SingleStockDashboard() {
     long: { price: (string | number | null)[][]; volume: (string | number | null)[][] } | null;
     short: { price: (string | number | null)[][]; volume: (string | number | null)[][] } | null;
   } | null>(null);
+  const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -61,6 +62,34 @@ export default function SingleStockDashboard() {
 
     if (ticker) {
       void loadPrice();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [ticker]);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadProfile() {
+      try {
+        const response = await fetch(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`);
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to load company profile.");
+        }
+        if (isMounted) {
+          setProfile(payload.profile ?? null);
+        }
+      } catch {
+        if (isMounted) {
+          setProfile(null);
+        }
+      }
+    }
+
+    if (ticker) {
+      void loadProfile();
     }
 
     return () => {
@@ -287,12 +316,25 @@ export default function SingleStockDashboard() {
       <Admin />
 
       <div className="breadcontainersinglecolumn">
-        <h1 id="SingleStock_Stock_Name" className="subrub">{data?.ticker ?? ""}</h1>
+        <h1 id="SingleStock_Stock_Name" className="subrub">
+          {profile?.companyName ? `${profile.companyName}` : data?.ticker ?? ""}
+          {data?.ticker ? ` (${data.ticker})` : ""}
+        </h1>
         <p className="bread">
-          Här visas en enstaka aktie och dess analytiska instrumentbräda. Välj ticker och kör
-          refresh i admin om data saknas.
+          {profile?.description
+            ? String(profile.description)
+            : "Här visas en enstaka aktie och dess analytiska instrumentbräda. Välj ticker och kör refresh i admin om data saknas."}
         </p>
       </div>
+
+      {profile && (
+        <div className="breadcontainerdoublecolumn">
+          <p className="bread">Sektor: {profile.sector ?? "-"}</p>
+          <p className="bread">Industri: {profile.industry ?? "-"}</p>
+          <p className="bread">Valuta: {profile.currency ?? "-"}</p>
+          <p className="bread">Börs: {profile.exchangeShortName ?? "-"}</p>
+        </div>
+      )}
 
       <div className="breadcontainersinglecolumn">
         <h2 className="subrub small">Price History</h2>

@@ -131,6 +131,14 @@ const OIL_QUESTIONS = [
   },
 ];
 
+const COMPANY_CATEGORIES = [
+  "Major",
+  "Producer",
+  "Junior developer",
+  "Junior explorer - fyndighet",
+  "Junior explorer - pre descovery",
+];
+
 export default function SectorDashboard() {
   const [sector, setSector] = useState(SECTORS[0].name);
   const [subsector, setSubsector] = useState(SECTORS[0].subsectors[0]);
@@ -141,6 +149,7 @@ export default function SectorDashboard() {
   const [inputNote, setInputNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [mappingTickers, setMappingTickers] = useState("");
+  const [mappingCategory, setMappingCategory] = useState(COMPANY_CATEGORIES[0]);
 
   const subsectors = useMemo(() => {
     return SECTORS.find((item) => item.name === sector)?.subsectors ?? [];
@@ -384,6 +393,18 @@ export default function SectorDashboard() {
           <p className="bread">
             Koppla tickers till vald sektor/undersektor för att beräkna automatiska sektormått.
           </p>
+          <label htmlFor="mapping-category">Kategori</label>
+          <select
+            id="mapping-category"
+            value={mappingCategory}
+            onChange={(event) => setMappingCategory(event.target.value)}
+          >
+            {COMPANY_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
           <input
             value={mappingTickers}
             onChange={(event) => setMappingTickers(event.target.value)}
@@ -403,6 +424,7 @@ export default function SectorDashboard() {
                 body: JSON.stringify({
                   sector,
                   subsector,
+                  category: mappingCategory,
                   tickers: mappingTickers
                     .split(",")
                     .map((ticker) => ticker.trim().toUpperCase())

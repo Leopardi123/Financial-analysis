@@ -138,6 +138,7 @@ export async function ensureSchema() {
       company_id INTEGER NOT NULL,
       sector_id INTEGER NOT NULL,
       subsector_id INTEGER,
+      category TEXT,
       created_at TEXT NOT NULL,
       UNIQUE(company_id, sector_id, subsector_id)
     )`
