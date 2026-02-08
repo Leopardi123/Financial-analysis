@@ -166,7 +166,6 @@ export default function SingleStockDashboard() {
     },
   };
 
-  const shortAxis = { vAxis: { format: "short" } };
   const lineBehindBars = {
     seriesType: "bars",
     series: {
@@ -383,10 +382,10 @@ export default function SingleStockDashboard() {
 
       {profile && (
         <div className="breadcontainerdoublecolumn">
-          <p className="bread">Sektor: {profile.sector ?? "-"}</p>
-          <p className="bread">Industri: {profile.industry ?? "-"}</p>
-          <p className="bread">Valuta: {profile.currency ?? "-"}</p>
-          <p className="bread">Börs: {profile.exchangeShortName ?? "-"}</p>
+          <p className="bread">Sektor: {String(profile.sector ?? "-")}</p>
+          <p className="bread">Industri: {String(profile.industry ?? "-")}</p>
+          <p className="bread">Valuta: {String(profile.currency ?? "-")}</p>
+          <p className="bread">Börs: {String(profile.exchangeShortName ?? "-")}</p>
         </div>
       )}
 
