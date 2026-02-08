@@ -28,9 +28,9 @@ const STOCKS = ["AAPL", "MSFT", "ERIC-B.ST"];
 
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
-  sma200: "#1f1f1f",
-  sma50: "#4b5b4b",
-  sma20: "#6b7f9d",
+  sma200: "#3a3a3a",
+  sma50: "#3e5f8a",
+  sma20: "#4b7f5a",
 };
 
 function normalizeDateSeries(data: (string | number | null)[][] | null) {
@@ -43,7 +43,7 @@ function normalizeDateSeries(data: (string | number | null)[][] | null) {
     const parsedDate = typeof rawDate === "string" || typeof rawDate === "number"
       ? new Date(rawDate)
       : null;
-    const dateValue = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : rawDate;
+    const dateValue = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
     return [dateValue, ...rest] as (string | number | Date | null)[];
   });
   return [headers, ...normalizedRows];
@@ -237,7 +237,7 @@ export default function SingleStockDashboard() {
       slantedTextAngle: 45,
     },
     series: {
-      0: { lineWidth: 2 },
+      0: { lineWidth: 3 },
       1: { lineWidth: 1 },
       2: { lineWidth: 1 },
       3: { lineWidth: 1 },
