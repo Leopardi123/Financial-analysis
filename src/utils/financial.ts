@@ -2,7 +2,7 @@ import type { CompanyResponse } from "../components/Viewer";
 
 type StatementKey = "income" | "balance" | "cashflow";
 
-type SeriesRow = (string | number | null)[];
+type SeriesRow = (string | number | Date | null)[];
 
 type SeriesResult = {
   headers: string[];
@@ -12,10 +12,21 @@ type SeriesResult = {
 const EMPTY_RESULT: SeriesResult = { headers: ["Year"], rows: [] };
 
 function toYearLabel(year: number) {
-  return String(year);
+  return year;
 }
 
-function safeNumber(value: number | null | undefined) {
+function safeNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === "n/a") {
+      return null;
+    }
+    const parsed = Number(trimmed);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
   if (typeof value !== "number" || Number.isNaN(value)) {
     return null;
   }
@@ -354,6 +365,9 @@ export function buildFreeCashFlowPerShareSeries(data: CompanyResponse | null) {
 }
 
 function parseRowDate(value: SeriesRow[0]) {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
   if (typeof value === "number") {
     return value;
   }

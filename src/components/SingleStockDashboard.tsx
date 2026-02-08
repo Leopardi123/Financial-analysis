@@ -26,6 +26,29 @@ const CATEGORIES = ["Välj En Kategori", "Tech", "Industrials", "Consumer"];
 const SUBCATEGORIES = ["Välj En Subkategori", "Software", "Hardware", "Services"];
 const STOCKS = ["AAPL", "MSFT", "ERIC-B.ST"];
 
+const PRICE_SERIES_COLORS = {
+  close: "#0b0b0b",
+  sma200: "#1f1f1f",
+  sma50: "#4b5b4b",
+  sma20: "#6b7f9d",
+};
+
+function normalizeDateSeries(data: (string | number | null)[][] | null) {
+  if (!data || data.length === 0) {
+    return data;
+  }
+  const [headers, ...rows] = data;
+  const normalizedRows = rows.map((row) => {
+    const [rawDate, ...rest] = row;
+    const parsedDate = typeof rawDate === "string" || typeof rawDate === "number"
+      ? new Date(rawDate)
+      : null;
+    const dateValue = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : rawDate;
+    return [dateValue, ...rest] as (string | number | Date | null)[];
+  });
+  return [headers, ...normalizedRows];
+}
+
 export default function SingleStockDashboard() {
   const { ticker, setTicker, loading, error, data, fetchCompany } = useCompanyData("AAPL");
   const [formTicker, setFormTicker] = useState("");
@@ -34,29 +57,62 @@ export default function SingleStockDashboard() {
   const [formNote, setFormNote] = useState("");
   const [availableTickers, setAvailableTickers] = useState<string[]>(STOCKS);
   const [priceData, setPriceData] = useState<{
-    long: { price: (string | number | null)[][]; volume: (string | number | null)[][] } | null;
-    short: { price: (string | number | null)[][]; volume: (string | number | null)[][] } | null;
+    long: {
+      price: (string | number | Date | null)[][] | null;
+      volume: (string | number | Date | null)[][] | null;
+    } | null;
+    short: {
+      price: (string | number | Date | null)[][] | null;
+      volume: (string | number | Date | null)[][] | null;
+    } | null;
   } | null>(null);
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [priceError, setPriceError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     async function loadPrice() {
       try {
+        setPriceLoading(true);
+        setPriceError(null);
         const response = await fetch(`/api/company/price?ticker=${encodeURIComponent(ticker)}`);
         const payload = await response.json();
         if (!response.ok) {
-          throw new Error(payload.error ?? "Failed to load price data.");
+          const message = String(payload.error ?? "Failed to load price data.");
+          const unsupported =
+            response.status === 404 || message.toLowerCase().includes("not found");
+          throw new Error(unsupported ? "Ticker not supported by data provider." : message);
         }
         if (isMounted) {
+          const longPayload = payload.long ?? null;
+          const shortPayload = payload.short ?? null;
           setPriceData({
-            long: payload.long ?? null,
-            short: payload.short ?? null,
+            long: longPayload
+              ? {
+                price: normalizeDateSeries(longPayload.price),
+                volume: normalizeDateSeries(longPayload.volume),
+              }
+              : null,
+            short: shortPayload
+              ? {
+                price: normalizeDateSeries(shortPayload.price),
+                volume: normalizeDateSeries(shortPayload.volume),
+              }
+              : null,
           });
+          if (!longPayload && !shortPayload) {
+            setPriceData(null);
+          }
         }
-      } catch {
+      } catch (error) {
         if (isMounted) {
           setPriceData(null);
+          setPriceError((error as Error).message);
+        }
+      } finally {
+        if (isMounted) {
+          setPriceLoading(false);
         }
       }
     }
@@ -164,6 +220,40 @@ export default function SingleStockDashboard() {
         opacity: 0.6,
       },
     },
+  };
+
+  const priceChartOptions = {
+    backgroundColor: "#e0e9ce",
+    colors: [
+      PRICE_SERIES_COLORS.close,
+      PRICE_SERIES_COLORS.sma200,
+      PRICE_SERIES_COLORS.sma50,
+      PRICE_SERIES_COLORS.sma20,
+    ],
+    legend: { position: "bottom" },
+    hAxis: {
+      format: "yyyy",
+      slantedText: true,
+      slantedTextAngle: 45,
+    },
+    series: {
+      0: { lineWidth: 2 },
+      1: { lineWidth: 1 },
+      2: { lineWidth: 1 },
+      3: { lineWidth: 1 },
+    },
+  };
+
+  const volumeChartOptions = {
+    backgroundColor: "#e0e9ce",
+    colors: [PRICE_SERIES_COLORS.close],
+    legend: { position: "bottom" },
+    hAxis: {
+      format: "yyyy",
+      slantedText: true,
+      slantedTextAngle: 45,
+    },
+    vAxis: { format: "short" },
   };
 
   const lineBehindBars = {
@@ -394,32 +484,41 @@ export default function SingleStockDashboard() {
         <p className="bread">
           Pris- och volymgrafer laddas från backend när historik finns tillgänglig.
         </p>
+        {priceLoading && <p className="status">Fetching data…</p>}
+        {!priceLoading && priceError && <p className="status error">{priceError}</p>}
+        {!priceLoading && !priceError && !priceData && (
+          <p className="status empty">No historical data available.</p>
+        )}
       </div>
 
       <div className="chartcontainerdoublecolumn">
         <ChartCard
-          chartType="AreaChart"
+          chartType="LineChart"
           title="Aktieprishistoria"
           data={priceData?.long?.price ?? null}
           height={260}
+          options={priceChartOptions}
         />
         <ChartCard
-          chartType="AreaChart"
+          chartType="LineChart"
           title="Aktieprishistoria (kort)"
           data={priceData?.short?.price ?? null}
           height={260}
+          options={priceChartOptions}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Volume"
           data={priceData?.long?.volume ?? null}
           height={200}
+          options={volumeChartOptions}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Volume (kort)"
           data={priceData?.short?.volume ?? null}
           height={200}
+          options={volumeChartOptions}
         />
       </div>
 

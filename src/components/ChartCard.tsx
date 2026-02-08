@@ -2,7 +2,7 @@ import { Chart } from "react-google-charts";
 
 type ChartCardProps = {
   title: string;
-  data: (string | number | null)[][] | null;
+  data: (string | number | Date | null)[][] | null;
   chartType: "ColumnChart" | "ComboChart" | "AreaChart" | "LineChart";
   height?: number;
   options?: Record<string, unknown>;

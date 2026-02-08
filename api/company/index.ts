@@ -23,6 +23,24 @@ function parseDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function parseNumericValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === "n/a") {
+      return null;
+    }
+    const parsed = Number(trimmed);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
 function isStale(value: string | null, days: number) {
   const date = parseDate(value);
   if (!date) {
@@ -104,7 +122,8 @@ export default async function handler(req: any, res: any) {
       if (!statements[statement][field]) {
         statements[statement][field] = Array.from({ length: years.length }, () => null);
       }
-      statements[statement][field][index] = Number(row.value ?? null);
+      const parsedValue = parseNumericValue(row.value);
+      statements[statement][field][index] = parsedValue;
     }
 
     if (Object.keys(statements.balance).length === 0) {
