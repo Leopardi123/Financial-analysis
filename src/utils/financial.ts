@@ -353,12 +353,43 @@ export function buildFreeCashFlowPerShareSeries(data: CompanyResponse | null) {
   return { headers, rows };
 }
 
+function parseRowDate(value: SeriesRow[0]) {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const numeric = Number(value);
+    if (!Number.isNaN(numeric)) {
+      return numeric;
+    }
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.getTime();
+    }
+  }
+  return null;
+}
+
+function selectRecentRows(rows: SeriesRow[], maxRows: number) {
+  if (rows.length <= maxRows) {
+    return rows;
+  }
+  const sorted = [...rows].sort((a, b) => {
+    const aDate = parseRowDate(a[0]);
+    const bDate = parseRowDate(b[0]);
+    if (aDate === null || bDate === null) {
+      return 0;
+    }
+    return aDate - bDate;
+  });
+  const slice = sorted.slice(sorted.length - maxRows);
+  return slice;
+}
+
 export function buildSeriesData(result: SeriesResult, maxRows = 12) {
   if (!result.rows.length) {
     return null;
   }
-  const rows = result.rows.length > maxRows
-    ? result.rows.slice(result.rows.length - maxRows)
-    : result.rows;
+  const rows = selectRecentRows(result.rows, maxRows);
   return [result.headers, ...rows];
 }

@@ -15,6 +15,7 @@ const DEFAULT_OPTIONS = {
     fontSize: 16,
     bold: true,
   },
+  colors: ["#0b0b0b"],
   hAxis: {
     slantedText: true,
     slantedTextAngle: 45,

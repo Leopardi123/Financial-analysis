@@ -24,7 +24,7 @@ import {
 
 const CATEGORIES = ["Välj En Kategori", "Tech", "Industrials", "Consumer"];
 const SUBCATEGORIES = ["Välj En Subkategori", "Software", "Hardware", "Services"];
-const STOCKS = ["Välj En Aktie", "AAPL", "MSFT", "ERIC-B.ST"];
+const STOCKS = ["AAPL", "MSFT", "ERIC-B.ST"];
 
 export default function SingleStockDashboard() {
   const { ticker, setTicker, loading, error, data, fetchCompany } = useCompanyData("AAPL");
@@ -32,6 +32,7 @@ export default function SingleStockDashboard() {
   const [formCategory, setFormCategory] = useState("");
   const [formSubcategory, setFormSubcategory] = useState("");
   const [formNote, setFormNote] = useState("");
+  const [availableTickers, setAvailableTickers] = useState<string[]>(STOCKS);
   const [priceData, setPriceData] = useState<{
     long: { price: (string | number | null)[][]; volume: (string | number | null)[][] } | null;
     short: { price: (string | number | null)[][]; volume: (string | number | null)[][] } | null;
@@ -69,6 +70,26 @@ export default function SingleStockDashboard() {
     };
   }, [ticker]);
 
+  const loadTickers = async () => {
+    try {
+      const response = await fetch("/api/company/list");
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load tickers.");
+      }
+      const list = Array.isArray(payload.tickers) ? payload.tickers : [];
+      if (list.length > 0) {
+        setAvailableTickers(list);
+      }
+    } catch (error) {
+      console.error("Failed to load tickers", error);
+    }
+  };
+
+  useEffect(() => {
+    void loadTickers();
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     async function loadProfile() {
@@ -99,39 +120,59 @@ export default function SingleStockDashboard() {
 
   const revenueData = buildSeriesData(
     buildSeries(data, [{ label: "Revenue", statement: "income", field: "revenue" }]),
+    10,
   );
-  const revenueGrowthData = buildSeriesData(buildRevenueGrowthSeries(data));
+  const revenueGrowthData = buildSeriesData(buildRevenueGrowthSeries(data), 10);
   const grossProfitRatioData = buildSeriesData(
     buildSeries(data, [{ label: "Gross Profit Ratio", statement: "income", field: "grossProfitRatio" }]),
+    10,
   );
   const ebitdaMarginData = buildSeriesData(
     buildSeries(data, [{ label: "EBITDA Margin", statement: "income", field: "ebitdaratio" }]),
+    10,
   );
   const netIncomeMarginData = buildSeriesData(
     buildSeries(data, [{ label: "Net Income Margin", statement: "income", field: "netIncomeRatio" }]),
+    10,
   );
   const cashFromOperationsData = buildSeriesData(
     buildSeries(data, [{ label: "Operating Cash Flow", statement: "cashflow", field: "operatingCashFlow" }]),
+    10,
   );
   const cashFromInvestingData = buildSeriesData(
     buildSeries(data, [{ label: "Cash From Investing", statement: "cashflow", field: "netCashUsedForInvestingActivites" }]),
+    10,
   );
   const freeCashFlowData = buildSeriesData(
     buildSeries(data, [{ label: "Free Cash Flow", statement: "cashflow", field: "freeCashFlow" }]),
+    10,
   );
-  const freeCashFlowPerShareData = buildSeriesData(buildFreeCashFlowPerShareSeries(data));
+  const freeCashFlowPerShareData = buildSeriesData(buildFreeCashFlowPerShareSeries(data), 10);
   const equityData = buildSeriesData(
     buildSeries(data, [{ label: "Total Equity", statement: "balance", field: "totalStockholdersEquity" }]),
+    10,
   );
-  const roeData = buildSeriesData(buildRoeSeries(data));
+  const roeData = buildSeriesData(buildRoeSeries(data), 10);
+
+  const sydingBaseOptions = {
+    colors: ["#0b0b0b"],
+    trendlines: {
+      0: {
+        type: "linear",
+        color: "#0b0b0b",
+        lineWidth: 1,
+        opacity: 0.6,
+      },
+    },
+  };
 
   const shortAxis = { vAxis: { format: "short" } };
   const lineBehindBars = {
     seriesType: "bars",
     series: {
-      0: { type: "line", lineWidth: 2 },
+      0: { type: "area", lineWidth: 2, color: "#0b0b0b", areaOpacity: 0.25 },
     },
-    colors: ["#6b7a5b", "#0f1d40", "#2b2b2b", "#4b2e2e", "#3b3f5c"],
+    colors: ["#0b0b0b", "#0b0b0b", "#0b0b0b", "#0b0b0b", "#0b0b0b"],
     isStacked: true,
     vAxis: { format: "short" },
   };
@@ -141,6 +182,7 @@ export default function SingleStockDashboard() {
       { label: "Revenue", statement: "income", field: "revenue" },
       { label: "Cost of Revenue", statement: "income", field: "costOfRevenue" },
     ]),
+    15,
   );
   const grossProfitVsExpensesData = buildSeriesData(
     buildSeries(data, [
@@ -150,61 +192,72 @@ export default function SingleStockDashboard() {
       { label: "R&D", statement: "income", field: "researchAndDevelopmentExpenses" },
       { label: "Other Expenses", statement: "income", field: "otherExpenses" },
     ]),
+    15,
   );
-  const operatingProfitVsDepData = buildSeriesData(buildOperatingProfitVsDepSeries(data));
-  const ebitVsInterestData = buildSeriesData(buildOperatingIncomeVsInterestSeries(data));
-  const netEarningsData = buildSeriesData(computeNetEarningsSeries(data));
-  const netEarningsPerShareData = buildSeriesData(buildNetEarningsPerShareSeries(data));
+  const operatingProfitVsDepData = buildSeriesData(buildOperatingProfitVsDepSeries(data), 15);
+  const ebitVsInterestData = buildSeriesData(buildOperatingIncomeVsInterestSeries(data), 15);
+  const netEarningsData = buildSeriesData(computeNetEarningsSeries(data), 15);
+  const netEarningsPerShareData = buildSeriesData(buildNetEarningsPerShareSeries(data), 15);
 
   const cashVsNetEarningsData = buildSeriesData(
     buildCashVsNetEarningsSeries(data, "cashAndShortTermInvestments"),
+    15,
   );
   const cashVsShortTermDebtData = buildSeriesData(
     buildSeries(data, [
       { label: "Total Current Liabilities", statement: "balance", field: "totalCurrentLiabilities" },
       { label: "Cash & Short Term Investments", statement: "balance", field: "cashAndShortTermInvestments" },
     ]),
+    15,
   );
   const inventoryVsNetEarningsData = buildSeriesData(
     buildCashVsNetEarningsSeries(data, "inventory"),
+    15,
   );
   const ppeVsDepData = buildSeriesData(
     buildSeries(data, [
       { label: "Property Plant Equipment", statement: "balance", field: "propertyPlantEquipmentNet" },
       { label: "Depreciation", statement: "income", field: "depreciationAndAmortization" },
     ]),
+    15,
   );
   const goodwillData = buildSeriesData(
     buildSeries(data, [{ label: "Goodwill", statement: "balance", field: "goodwill" }]),
+    15,
   );
   const debtMixData = buildSeriesData(
     buildSeries(data, [
       { label: "Short Term Debt", statement: "balance", field: "shortTermDebt" },
       { label: "Long Term Debt", statement: "balance", field: "longTermDebt" },
     ]),
+    15,
   );
   const ebitdaVsLongTermDebtData = buildSeriesData(
     buildSeries(data, [
       { label: "EBITDA", statement: "income", field: "ebitda" },
       { label: "Long Term Debt", statement: "balance", field: "longTermDebt" },
     ]),
+    15,
   );
-  const currentRatioData = buildSeriesData(buildCurrentRatioSeries(data));
-  const longTermDebtToNetEarningsData = buildSeriesData(buildLongTermDebtToNetEarningsSeries(data));
-  const debtToEquityData = buildSeriesData(buildDebtToEquitySeries(data));
-  const adjustedDebtToEquityData = buildSeriesData(buildAdjustedDebtToEquitySeries(data));
+  const currentRatioData = buildSeriesData(buildCurrentRatioSeries(data), 15);
+  const longTermDebtToNetEarningsData = buildSeriesData(buildLongTermDebtToNetEarningsSeries(data), 15);
+  const debtToEquityData = buildSeriesData(buildDebtToEquitySeries(data), 15);
+  const adjustedDebtToEquityData = buildSeriesData(buildAdjustedDebtToEquitySeries(data), 15);
   const retainedEarningsData = buildSeriesData(
     buildSeries(data, [
       { label: "Net Income", statement: "income", field: "netIncome" },
       { label: "Retained Earnings", statement: "balance", field: "retainedEarnings" },
     ]),
+    15,
   );
 
   const capexVsNetEarningsData = buildSeriesData(
     buildCapitalExpenditureVsNetEarningsSeries(data),
+    15,
   );
   const buybacksDividendsData = buildSeriesData(
     buildBuybacksDividendsSeries(data),
+    15,
   );
 
   return (
@@ -226,15 +279,16 @@ export default function SingleStockDashboard() {
             ))}
           </select>
           <select
-            defaultValue={STOCKS[0]}
+            defaultValue="Välj En Aktie"
             onChange={(event) => {
               const value = event.target.value;
-              if (value !== STOCKS[0]) {
+              if (value !== "Välj En Aktie") {
                 void fetchCompany(value);
               }
             }}
           >
-            {STOCKS.map((item) => (
+            <option value="Välj En Aktie">Välj En Aktie</option>
+            {availableTickers.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
@@ -313,7 +367,7 @@ export default function SingleStockDashboard() {
 
       <div className="divider" />
 
-      <Admin />
+      <Admin onTickersUpserted={loadTickers} />
 
       <div className="breadcontainersinglecolumn">
         <h1 id="SingleStock_Stock_Name" className="subrub">
@@ -382,67 +436,67 @@ export default function SingleStockDashboard() {
           chartType="ColumnChart"
           title="Revenue"
           data={revenueData}
-          options={shortAxis}
+          options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Revenue Growth"
           data={revenueGrowthData}
-          options={{ vAxis: { format: "percent" } }}
+          options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Gross Profit Ratio"
           data={grossProfitRatioData}
-          options={{ vAxis: { format: "percent" } }}
+          options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="EBITDA Margin"
           data={ebitdaMarginData}
-          options={{ vAxis: { format: "percent" } }}
+          options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Net Income Margin"
           data={netIncomeMarginData}
-          options={{ vAxis: { format: "percent" } }}
+          options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Operating Cash Flow"
           data={cashFromOperationsData}
-          options={shortAxis}
+          options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Cash From Investing"
           data={cashFromInvestingData}
-          options={shortAxis}
+          options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Free Cash Flow"
           data={freeCashFlowData}
-          options={shortAxis}
+          options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Free Cash Flow/Share"
           data={freeCashFlowPerShareData}
-          options={shortAxis}
+          options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="Total Equity"
           data={equityData}
-          options={shortAxis}
+          options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
           chartType="ColumnChart"
           title="ROE"
           data={roeData}
-          options={{ vAxis: { format: "percent" } }}
+          options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
       </div>
 

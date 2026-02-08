@@ -28,7 +28,11 @@ type RefreshPayload = {
   };
 };
 
-export default function Admin() {
+type AdminProps = {
+  onTickersUpserted?: () => void;
+};
+
+export default function Admin({ onTickersUpserted }: AdminProps) {
   const [secret, setSecret] = useState("");
   const [tickers, setTickers] = useState(DEFAULT_TICKERS);
   const [refreshTicker, setRefreshTicker] = useState("AAPL");
@@ -82,6 +86,12 @@ export default function Admin() {
         payload = text;
       }
       if (!response.ok) {
+        console.error("Admin request failed", {
+          title,
+          status: response.status,
+          statusText: response.statusText,
+          payload,
+        });
         updateLog(
           title,
           "error",
@@ -90,6 +100,9 @@ export default function Admin() {
         return;
       }
       updateLog(title, "success", `SUCCESS\n${JSON.stringify(payload, null, 2)}`);
+      if (title === "Upsert Tickers") {
+        onTickersUpserted?.();
+      }
       return payload as RefreshPayload;
     } catch (error) {
       const message =
