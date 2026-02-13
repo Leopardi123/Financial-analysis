@@ -178,7 +178,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             </button>
             <button
               type="button"
-              onClick={() => void postJson("Refresh Companies", "/api/admin/refresh-companies", {})}
+              onClick={() => void postJson("Refresh Companies", "/api/companies", {})}
               disabled={!secretReady || loadingKey !== null}
             >
               {loadingKey === "Refresh Companies" ? "Refreshing list..." : "Refresh Companies"}

@@ -45,7 +45,7 @@ export default function CompanyPicker({
       }
       setLoading(true);
       try {
-        const response = await fetch(`/api/companies/search?q=${encodeURIComponent(text)}`);
+        const response = await fetch(`/api/companies?q=${encodeURIComponent(text)}`);
         const payload = await response.json();
         const next = Array.isArray(payload.results) ? payload.results : [];
         setResults(next);
