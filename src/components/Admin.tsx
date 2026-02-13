@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import CompanyPicker from "./CompanyPicker";
 
 type LogEntry = {
   id: number;
@@ -73,6 +74,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         headers: {
           "Content-Type": "application/json",
           "x-cron-secret": secret.trim(),
+          "x-admin-secret": secret.trim(),
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -115,6 +117,26 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     }
   }
 
+
+
+  function appendTicker(symbol: string) {
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) {
+      return;
+    }
+    setTickers((prev) => {
+      const list = prev
+        .split(",")
+        .map((ticker) => ticker.trim().toUpperCase())
+        .filter(Boolean);
+      if (!list.includes(normalized)) {
+        list.push(normalized);
+      }
+      return list.join(", ");
+    });
+    setRefreshTicker(normalized);
+  }
+
   const initLog = logByKey["Init DB"];
 
   return (
@@ -154,6 +176,13 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             >
               {loadingKey === "Init DB" ? "Initializing..." : "Init DB"}
             </button>
+            <button
+              type="button"
+              onClick={() => void postJson("Refresh Companies", "/api/admin/refresh-companies", {})}
+              disabled={!secretReady || loadingKey !== null}
+            >
+              {loadingKey === "Refresh Companies" ? "Refreshing list..." : "Refresh Companies"}
+            </button>
             {initLog && (
               <span className={initLog.status === "error" ? "status error" : "status success"}>
                 {initLog.status.toUpperCase()}
@@ -162,6 +191,11 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
           </div>
 
           <div>
+            <CompanyPicker
+              label="Lägg till bolag via namn"
+              placeholder="T.ex. Microsoft"
+              onSelect={(company) => appendTicker(company.symbol)}
+            />
             <label htmlFor="tickers">Tickers (comma-separated)</label>
             <input
               id="tickers"

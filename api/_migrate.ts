@@ -1,6 +1,7 @@
 import { batch, execute } from "./_db.js";
 
 const TABLES = {
+  companies: "companies",
   companiesV2: "companies_v2",
   financialReports: "financial_reports",
   financialPoints: "financial_points_v2",
@@ -15,6 +16,17 @@ const TABLES = {
 };
 
 export async function ensureSchema() {
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.companies} (
+      symbol TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      exchange TEXT,
+      type TEXT,
+      normalized_name TEXT NOT NULL
+    )`
+  );
+
   await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companiesV2} (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,6 +157,14 @@ export async function ensureSchema() {
   );
 
   await batch([
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_companies_name
+            ON ${TABLES.companies} (name)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_companies_normalized
+            ON ${TABLES.companies} (normalized_name)`,
+    },
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_reports_company
             ON ${TABLES.financialReports} (company_id)`,

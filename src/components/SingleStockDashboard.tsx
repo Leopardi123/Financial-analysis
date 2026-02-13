@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Admin from "./Admin";
 import Viewer from "./Viewer";
 import ChartCard from "./ChartCard";
+import CompanyPicker from "./CompanyPicker";
 import useCompanyData from "../hooks/useCompanyData";
 import {
   buildSeries,
@@ -371,6 +372,13 @@ export default function SingleStockDashboard() {
     <div className="single-stock-dashboard">
       <div className="stock-selector">
         <div className="stock-selector-row">
+          <CompanyPicker
+            label="Sök bolagsnamn"
+            placeholder="T.ex. Apple"
+            onSelect={(company) => {
+              void fetchCompany(company.symbol);
+            }}
+          />
           <select defaultValue={CATEGORIES[0]}>
             {CATEGORIES.map((item) => (
               <option key={item} value={item}>
