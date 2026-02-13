@@ -56,6 +56,7 @@ export default function SingleStockDashboard() {
   const [formSubcategory, setFormSubcategory] = useState("");
   const [formNote, setFormNote] = useState("");
   const [availableTickers, setAvailableTickers] = useState<string[]>(STOCKS);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [priceData, setPriceData] = useState<{
     long: {
       price: (string | number | Date | null)[][] | null;
@@ -125,6 +126,22 @@ export default function SingleStockDashboard() {
       isMounted = false;
     };
   }, [ticker]);
+
+
+  useEffect(() => {
+    function onScreeningOpen(event: Event) {
+      const custom = event as CustomEvent<{ ticker?: string }>;
+      const nextTicker = custom.detail?.ticker?.trim().toUpperCase();
+      if (!nextTicker) {
+        return;
+      }
+      void fetchCompany(nextTicker);
+    }
+    window.addEventListener("screening:open-ticker", onScreeningOpen as EventListener);
+    return () => {
+      window.removeEventListener("screening:open-ticker", onScreeningOpen as EventListener);
+    };
+  }, [fetchCompany]);
 
   const loadTickers = async () => {
     try {
@@ -237,7 +254,7 @@ export default function SingleStockDashboard() {
       slantedTextAngle: 45,
     },
     series: {
-      0: { lineWidth: 3 },
+      0: { lineWidth: 2 },
       1: { lineWidth: 1 },
       2: { lineWidth: 1 },
       3: { lineWidth: 1 },
@@ -254,6 +271,7 @@ export default function SingleStockDashboard() {
       slantedTextAngle: 45,
     },
     vAxis: { format: "short" },
+    bar: { groupWidth: "45%" },
   };
 
   const lineBehindBars = {
@@ -294,7 +312,7 @@ export default function SingleStockDashboard() {
   );
   const cashVsShortTermDebtData = buildSeriesData(
     buildSeries(data, [
-      { label: "Total Current Liabilities", statement: "balance", field: "totalCurrentLiabilities" },
+      { label: "Short Term Debt", statement: "balance", field: "shortTermDebt" },
       { label: "Cash & Short Term Investments", statement: "balance", field: "cashAndShortTermInvestments" },
     ]),
     15,
@@ -456,7 +474,17 @@ export default function SingleStockDashboard() {
 
       <div className="divider" />
 
-      <Admin onTickersUpserted={loadTickers} />
+      <div className="breadcontainersinglecolumn">
+        <button
+          type="button"
+          className="admin-toggle"
+          onClick={() => setShowAdmin((prev) => !prev)}
+        >
+          {showAdmin ? "Dölj admin" : "Visa admin"}
+        </button>
+      </div>
+
+      {showAdmin && <Admin onTickersUpserted={loadTickers} />}
 
       <div className="breadcontainersinglecolumn">
         <h1 id="SingleStock_Stock_Name" className="subrub">
@@ -525,7 +553,8 @@ export default function SingleStockDashboard() {
       <div className="breadcontainersinglecolumn">
         <h1 className="subrub">Sydings Analytik</h1>
         <p className="bread">
-          Här visas marginaler och kassaflöden över tid för att se varaktig lönsamhet.
+          Sydings Analytik visar marginaler och kassaflöden över tid för att bedöma varaktig
+          lönsamhet. Data hämtas via backendens materialiserade årsdata efter “Refresh Ticker”.
         </p>
       </div>
 
@@ -601,7 +630,9 @@ export default function SingleStockDashboard() {
       <div className="breadcontainersinglecolumn">
         <h1 className="subrub">Buffetologisk Analytik</h1>
         <p className="bread">
-          Här jämförs intäkter, kostnader och kapitalstruktur för att förstå bolagets uthållighet.
+          Buffetologi jämför intäkter, kostnader och kapitalstruktur för att förstå bolagets
+          uthållighet. Graferna speglar samma legacy‑modell, men drivs nu av backendens
+          årsvisa datapunkter.
         </p>
       </div>
 

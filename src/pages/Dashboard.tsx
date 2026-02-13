@@ -2,6 +2,7 @@ import Header from "../components/Header";
 import Section from "../components/Section";
 import SingleStockDashboard from "../components/SingleStockDashboard";
 import SectorDashboard from "../components/SectorDashboard";
+import ScreeningDashboard from "../components/ScreeningDashboard";
 import "../styles/dashboard.css";
 
 export default function Dashboard() {
@@ -61,10 +62,7 @@ export default function Dashboard() {
           description="Här ordnar man rätt screener och väljer EV, etc."
           background="#bfcfc2"
         >
-          <div className="breadcontainerdoublecolumn">
-            <div className="subrub">Någon Screening Rubrik</div>
-            <p className="bread">Här finns det som syns.</p>
-          </div>
+          <ScreeningDashboard />
         </Section>
 
         <Section

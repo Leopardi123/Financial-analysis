@@ -120,10 +120,17 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   return (
     <div className="admin">
       <div className="admin-guidance">
+        <h3 className="subrub small">Admin — så fungerar flödet</h3>
+        <ul className="bread">
+          <li>1) Lägg till ticker: skriv in tickers och kör “Upsert Tickers”. Detta sparar listan.</li>
+          <li>2) Hämta data: kör “Refresh Ticker” för att ladda ned och materialisera data för en aktie.</li>
+          <li>3) Fortsätt materialisering: om refresh avbryts, kör “Continue materialization”.</li>
+          <li>4) “Fetch” i UI hämtar endast redan sparad data från DB — den laddar inte ner nya.</li>
+          <li>5) Att välja ticker i UI byter bara visning; du måste “Refresh Ticker” om data saknas.</li>
+        </ul>
         <p className="bread">
-          CRON_SECRET krävs för admin‑åtgärder. Init DB skapar tabeller och index, Upsert tickers
-          sparar aktielistan, Refresh ticker hämtar ny data och materialiserar i steg, och Run Cron
-          triggar den schemalagda uppdateringen.
+          CRON_SECRET krävs för admin‑åtgärder. Init DB skapar tabeller och index. Run Cron triggar
+          den schemalagda uppdateringen.
         </p>
       </div>
       <div className="admin-grid">

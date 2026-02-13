@@ -45,6 +45,35 @@ export function getFieldSeries(
   return source.map((value) => safeNumber(value));
 }
 
+
+
+function getEbitSeries(data: CompanyResponse | null) {
+  const directEbit = getFieldSeries(data, "income", "ebit");
+  const grossProfit = getFieldSeries(data, "income", "grossProfit");
+  const operatingExpenses = getFieldSeries(data, "income", "operatingExpenses");
+  const depreciation = getFieldSeries(data, "income", "depreciationAndAmortization");
+
+  return (data?.years ?? []).map((_, index) => {
+    const ebit = directEbit[index];
+    if (typeof ebit === "number") {
+      return ebit;
+    }
+
+    const gp = grossProfit[index];
+    const opEx = operatingExpenses[index];
+    if (typeof gp === "number" && typeof opEx === "number") {
+      const dep = depreciation[index];
+      // FMP can include D&A either in operatingExpenses or separately.
+      // We use GP - OpEx as baseline to avoid double counting D&A by default.
+      if (typeof dep === "number" && Math.abs(dep) > Math.abs(gp - opEx) * 2) {
+        return gp - opEx - dep;
+      }
+      return gp - opEx;
+    }
+    return null;
+  });
+}
+
 export function buildSeries(
   data: CompanyResponse | null,
   fields: Array<{ label: string; statement: StatementKey; field: string }>,
@@ -89,28 +118,32 @@ export function computeNetEarningsSeries(data: CompanyResponse | null) {
   if (!data) {
     return EMPTY_RESULT;
   }
-  const grossProfit = getFieldSeries(data, "income", "grossProfit");
-  const operatingExpenses = getFieldSeries(data, "income", "operatingExpenses");
-  const depreciation = getFieldSeries(data, "income", "depreciationAndAmortization");
+  const fallbackNetIncome = getFieldSeries(data, "income", "netIncome");
+  const ebitSeries = getEbitSeries(data);
+  const interestExpense = getFieldSeries(data, "income", "interestExpense");
+  const interestIncome = getFieldSeries(data, "income", "interestIncome");
   const otherIncome = getFieldSeries(data, "income", "totalOtherIncomeExpensesNet");
   const incomeTax = getFieldSeries(data, "income", "incomeTaxExpense");
-  const fallbackNetIncome = getFieldSeries(data, "income", "netIncome");
 
   const headers = ["Year", "Net Earnings"];
   const rows = data.years.map((year, index) => {
-    const values = [grossProfit, operatingExpenses, depreciation, otherIncome, incomeTax]
-      .map((series) => series[index]);
-
-    let netEarnings = null as number | null;
-    if (values.every((value) => typeof value === "number")) {
-      const [gp, opEx, dep, other, tax] = values as number[];
-      const otherAdjusted = -other;
-      netEarnings = gp - opEx - otherAdjusted - dep - tax;
-    } else {
-      netEarnings = fallbackNetIncome[index] ?? null;
+    const direct = fallbackNetIncome[index];
+    if (typeof direct === "number") {
+      return [toYearLabel(year), direct] as SeriesRow;
     }
 
-    return [toYearLabel(year), netEarnings] as SeriesRow;
+    const ebit = ebitSeries[index];
+    const tax = incomeTax[index];
+    const intExp = interestExpense[index] ?? 0;
+    const intInc = interestIncome[index] ?? 0;
+    const other = otherIncome[index] ?? 0;
+
+    const rebuilt =
+      typeof ebit === "number" && typeof tax === "number"
+        ? ebit - intExp + intInc + other - tax
+        : null;
+
+    return [toYearLabel(year), rebuilt] as SeriesRow;
   });
 
   return { headers, rows };
@@ -190,9 +223,11 @@ export function buildAdjustedDebtToEquitySeries(data: CompanyResponse | null) {
   if (!data) {
     return EMPTY_RESULT;
   }
+  // Equity-basis ratio: liabilities over common equity (not enterprise value debt stack).
   const liabilities = getFieldSeries(data, "balance", "totalLiabilities");
   const equity = getFieldSeries(data, "balance", "totalStockholdersEquity");
   const buybacks = getFieldSeries(data, "cashflow", "commonStockRepurchased");
+  const treasuryStock = getFieldSeries(data, "balance", "treasuryStock");
   let cumulative = 0;
 
   const headers = ["Year", "Adjusted Debt to Equity"];
@@ -203,7 +238,9 @@ export function buildAdjustedDebtToEquitySeries(data: CompanyResponse | null) {
     }
     const debt = liabilities[index];
     const eq = equity[index];
-    const adjustedEquity = typeof eq === "number" ? eq + cumulative : null;
+    const treasury = treasuryStock[index];
+    const treasuryAdj = typeof treasury === "number" ? Math.abs(treasury) : 0;
+    const adjustedEquity = typeof eq === "number" ? eq + cumulative + treasuryAdj : null;
     const value =
       typeof debt === "number" && typeof adjustedEquity === "number" && adjustedEquity !== 0
         ? debt / adjustedEquity
@@ -235,18 +272,14 @@ export function buildOperatingProfitVsDepSeries(data: CompanyResponse | null) {
   if (!data) {
     return EMPTY_RESULT;
   }
-  const grossProfit = getFieldSeries(data, "income", "grossProfit");
-  const operatingExpenses = getFieldSeries(data, "income", "operatingExpenses");
+  const ebitSeries = getEbitSeries(data);
   const depreciation = getFieldSeries(data, "income", "depreciationAndAmortization");
 
   const headers = ["Year", "Operating Profit", "Depreciation"];
   const rows = data.years.map((year, index) => {
-    const gp = grossProfit[index];
-    const op = operatingExpenses[index];
     const dep = depreciation[index];
-    const operatingProfit =
-      typeof gp === "number" && typeof op === "number" ? gp - op : null;
-    return [toYearLabel(year), operatingProfit, dep ?? null] as SeriesRow;
+    const operatingProfit = ebitSeries[index];
+    return [toYearLabel(year), operatingProfit ?? null, dep ?? null] as SeriesRow;
   });
   return { headers, rows };
 }
@@ -255,21 +288,13 @@ export function buildOperatingIncomeVsInterestSeries(data: CompanyResponse | nul
   if (!data) {
     return EMPTY_RESULT;
   }
-  const grossProfit = getFieldSeries(data, "income", "grossProfit");
-  const operatingExpenses = getFieldSeries(data, "income", "operatingExpenses");
-  const depreciation = getFieldSeries(data, "income", "depreciationAndAmortization");
+  const ebitSeries = getEbitSeries(data);
   const interestExpense = getFieldSeries(data, "income", "interestExpense");
   const interestIncome = getFieldSeries(data, "income", "interestIncome");
 
   const headers = ["Year", "EBIT", "Interest Expense", "Interest Income"];
   const rows = data.years.map((year, index) => {
-    const gp = grossProfit[index];
-    const op = operatingExpenses[index];
-    const dep = depreciation[index];
-    const ebit =
-      typeof gp === "number" && typeof op === "number" && typeof dep === "number"
-        ? gp - op - dep
-        : null;
+    const ebit = ebitSeries[index];
     const interestIncomeAdjusted = typeof interestIncome[index] === "number"
       ? -interestIncome[index]
       : null;
@@ -405,5 +430,9 @@ export function buildSeriesData(result: SeriesResult, maxRows = 12) {
     return null;
   }
   const rows = selectRecentRows(result.rows, maxRows);
+  const hasValues = rows.some((row) => row.slice(1).some((value) => value !== null));
+  if (!hasValues) {
+    return null;
+  }
   return [result.headers, ...rows];
 }

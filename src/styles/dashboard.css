@@ -388,6 +388,10 @@ td.sticky-col {
   margin-bottom: 12px;
 }
 
+.admin-toggle {
+  margin: 8px 0;
+}
+
 .admin-actions {
   display: grid;
   gap: 16px;
@@ -521,4 +525,14 @@ td.sticky-col {
   .breadcontainerquadrupelcolumn {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+.screening-dashboard .manual-json {
+  width: 100%;
+  min-height: 90px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
 }
