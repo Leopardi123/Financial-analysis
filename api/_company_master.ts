@@ -9,7 +9,7 @@ const SUFFIX_TOKENS = new Set([
 
 type RawCompany = Record<string, unknown>;
 
-export type CompanyMasterRow = {
+type CompanyMasterRow = {
   symbol: string;
   name: string;
   exchange: string | null;
@@ -20,19 +20,12 @@ export type CompanyMasterRow = {
 export function normalizeName(name: string): string {
   let normalized = name.toLowerCase().trim();
   normalized = normalized.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-  if (!normalized) {
-    return "";
-  }
+  if (!normalized) return "";
 
   let tokens = normalized.split(" ").filter(Boolean);
-  while (tokens.length > 0) {
-    const last = tokens[tokens.length - 1];
-    if (!SUFFIX_TOKENS.has(last)) {
-      break;
-    }
+  while (tokens.length > 0 && SUFFIX_TOKENS.has(tokens[tokens.length - 1])) {
     tokens = tokens.slice(0, -1);
   }
-
   return tokens.join(" ").trim();
 }
 
@@ -47,10 +40,7 @@ function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
         : null;
   const type = typeof row.type === "string" ? row.type.trim().toLowerCase() : null;
 
-  if (!symbol || !name) {
-    return null;
-  }
-
+  if (!symbol || !name) return null;
   if (type && ["etf", "fund", "index", "crypto", "forex"].some((token) => type.includes(token))) {
     return null;
   }
@@ -69,9 +59,7 @@ async function sleep(ms: number) {
 }
 
 async function fetchWithRetry(url: string) {
-  let attempt = 0;
-  while (attempt < 5) {
-    attempt += 1;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
       const response = await fetch(url);
       if (!response.ok && RETRYABLE_STATUSES.has(response.status)) {
@@ -80,9 +68,7 @@ async function fetchWithRetry(url: string) {
       }
       return response;
     } catch {
-      if (attempt >= 5) {
-        throw new Error("Network error while fetching company list");
-      }
+      if (attempt >= 5) throw new Error("Network error while fetching company list");
       await sleep(250 * attempt);
     }
   }
@@ -93,29 +79,19 @@ async function fetchCompanyRows(apiKey: string) {
   const stableResponse = await fetchWithRetry(`${STABLE_URL}?apikey=${encodeURIComponent(apiKey)}`);
   if (stableResponse.ok) {
     const payload = (await stableResponse.json()) as RawCompany[];
-    return {
-      endpointUsed: "stable" as const,
-      rows: Array.isArray(payload) ? payload : [],
-    };
+    return { endpointUsed: "stable" as const, rows: Array.isArray(payload) ? payload : [] };
   }
 
   const legacyResponse = await fetchWithRetry(`${LEGACY_URL}?apikey=${encodeURIComponent(apiKey)}`);
-  if (!legacyResponse.ok) {
-    throw new Error(`FMP company list failed (${legacyResponse.status})`);
-  }
+  if (!legacyResponse.ok) throw new Error(`FMP company list failed (${legacyResponse.status})`);
   const payload = (await legacyResponse.json()) as RawCompany[];
-  return {
-    endpointUsed: "legacy" as const,
-    rows: Array.isArray(payload) ? payload : [],
-  };
+  return { endpointUsed: "legacy" as const, rows: Array.isArray(payload) ? payload : [] };
 }
 
 export async function refreshCompaniesMaster() {
   const startedAt = Date.now();
   const apiKey = process.env.FMP_API_KEY;
-  if (!apiKey) {
-    throw new Error("FMP_API_KEY missing");
-  }
+  if (!apiKey) throw new Error("FMP_API_KEY missing");
 
   const { endpointUsed, rows } = await fetchCompanyRows(apiKey);
   const normalizedRows = rows.map(toCompanyRow).filter((row): row is CompanyMasterRow => row !== null);
@@ -156,9 +132,7 @@ export async function refreshCompaniesMaster() {
 
 export async function searchCompaniesByName(queryText: string) {
   const q = queryText.trim();
-  if (q.length < 2) {
-    return [];
-  }
+  if (q.length < 2) return [];
 
   const normalized = normalizeName(q);
   const namePrefix = `${q.toLowerCase()}%`;
