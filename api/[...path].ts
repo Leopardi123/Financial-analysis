@@ -29,6 +29,13 @@ function toRouteKey(pathParam: string | string[] | undefined): string {
 
 export default async function handler(req: any, res: any) {
   try {
+    const pathParam = req.query?.path;
+    if (req.method === "GET" && Array.isArray(pathParam) && pathParam.length === 1 && pathParam[0] === "health") {
+      const mod = await import("../src/server/routes/health.js");
+      await mod.default(req, res);
+      return;
+    }
+
     const routeKey = toRouteKey(req.query?.path);
     const load = ROUTE_MAP[routeKey];
     if (!load) {
