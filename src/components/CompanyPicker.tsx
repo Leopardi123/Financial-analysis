@@ -15,8 +15,8 @@ type CompanyPickerProps = {
 
 export default function CompanyPicker({
   onSelect,
-  placeholder = "Sök bolagsnamn",
-  label = "Bolag",
+  placeholder = "Search company name",
+  label = "Company",
 }: CompanyPickerProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CompanyOption[]>([]);
@@ -27,9 +27,7 @@ export default function CompanyPicker({
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
-      if (!wrapperRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
+      if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false);
     };
     window.addEventListener("mousedown", handleOutsideClick);
     return () => window.removeEventListener("mousedown", handleOutsideClick);
@@ -78,31 +76,23 @@ export default function CompanyPicker({
       }
       return;
     }
-
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setHighlightedIndex((prev) => Math.min(prev + 1, results.length - 1));
       return;
     }
-
     if (event.key === "ArrowUp") {
       event.preventDefault();
       setHighlightedIndex((prev) => Math.max(prev - 1, 0));
       return;
     }
-
     if (event.key === "Enter") {
       event.preventDefault();
       const choice = results[highlightedIndex] ?? topMatch;
-      if (choice) {
-        choose(choice);
-      }
+      if (choice) choose(choice);
       return;
     }
-
-    if (event.key === "Escape") {
-      setOpen(false);
-    }
+    if (event.key === "Escape") setOpen(false);
   }
 
   return (
@@ -115,7 +105,7 @@ export default function CompanyPicker({
         onFocus={() => setOpen(results.length > 0)}
         onKeyDown={onKeyDown}
       />
-      {loading && <div className="company-picker-loading">Söker…</div>}
+      {loading && <div className="company-picker-loading">Searching…</div>}
       {open && results.length > 0 && (
         <ul className="company-picker-results">
           {results.map((item, index) => (
