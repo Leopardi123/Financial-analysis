@@ -19,16 +19,13 @@ export default async function handler(req: any, res: any) {
     }
 
     const q = typeof req.query?.q === "string" ? req.query.q : "";
-    if (q.trim().length >= 2) {
-      const results = await searchCompaniesByName(q);
-      res.status(200).json({ ok: true, results });
+    if (q.trim().length < 2) {
+      res.status(200).json({ ok: true, results: [] });
       return;
     }
 
-    // Vercel Cron invokes GET requests. Allow authenticated refresh without q.
-    assertAdminSecret(req);
-    const summary = await refreshCompaniesMaster();
-    res.status(200).json({ ok: true, ...summary });
+    const results = await searchCompaniesByName(q);
+    res.status(200).json({ ok: true, results });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;
     res.status(status).json({ ok: false, error: (error as Error).message });

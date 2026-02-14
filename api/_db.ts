@@ -1,35 +1,47 @@
-import { createClient, type Client, type InStatement } from "@libsql/client";
+import {
+  createClient,
+  type InArgs,
+  type ResultSet,
+  type Row,
+} from "@libsql/client";
 
-let cachedClient: Client | null = null;
+const url = process.env.TURSO_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
+const authToken =
+  process.env.TURSO_AUTH_TOKEN ?? process.env.DATABASE_AUTH_TOKEN ?? "";
 
-export function getDb() {
-  if (cachedClient) {
-    return cachedClient;
-  }
-  const databaseUrl = process.env.TURSO_DATABASE_URL;
-  const authToken = process.env.TURSO_AUTH_TOKEN;
-
-  if (!databaseUrl) {
-    throw new Error("TURSO_DATABASE_URL is not set");
-  }
-
-  cachedClient = createClient({
-    url: databaseUrl,
-    authToken,
-  });
-
-  return cachedClient;
+if (!url) {
+  throw new Error("Missing database URL (TURSO_DATABASE_URL / DATABASE_URL)");
 }
 
-export async function execute(sql: string, params: Array<string | number | null> = []) {
-  return getDb().execute({ sql, args: params });
+export const db = createClient({
+  url,
+  authToken: authToken || undefined,
+});
+
+/** Low-level execute (kept for backwards compatibility) */
+export async function execute(sql: string, args?: InArgs): Promise<ResultSet> {
+  return db.execute(sql, args);
 }
 
-export async function query(sql: string, params: Array<string | number | null> = []) {
-  const result = await getDb().execute({ sql, args: params });
-  return result.rows;
+/** Used by many server routes: query -> rows[] */
+export async function query<T extends Row = Row>(
+  sql: string,
+  args?: InArgs
+): Promise<T[]> {
+  const res = await db.execute(sql, args);
+  return res.rows as T[];
 }
 
-export async function batch(statements: InStatement[]) {
-  return getDb().batch(statements);
+/** Used by some server routes: batch([{sql,args}...]) */
+export async function batch(
+  statements: Array<{ sql: string; args?: InArgs }>
+): Promise<void> {
+  await db.batch(statements.map((s) => [s.sql, s.args] as [string, InArgs?]));
+}
+
+/** Optional helper, if you want tuple-style batches */
+export async function executeMany(
+  statements: Array<[string, InArgs?]>
+): Promise<void> {
+  await db.batch(statements);
 }
