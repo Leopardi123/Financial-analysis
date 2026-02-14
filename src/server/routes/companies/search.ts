@@ -1,5 +1,5 @@
-import { searchCompaniesByName } from "../_company_master.js";
-import { ensureSchema } from "../_migrate.js";
+import { searchCompaniesByName } from "../../../../api/_company_master.js";
+import { ensureSchema } from "../../../../api/_migrate.js";
 
 export default async function handler(req: any, res: any) {
   try {

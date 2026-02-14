@@ -3,7 +3,9 @@ type Handler = (req: any, res: any) => Promise<void> | void;
 const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/companies": () => import("../src/server/routes/admin/companies.js"),
   "admin/init-db": () => import("../src/server/routes/admin/init-db.js"),
+  "admin/refresh-companies": () => import("../src/server/routes/admin/refresh-companies.js"),
   companies: () => import("../src/server/routes/companies.js"),
+  "companies/search": () => import("../src/server/routes/companies/search.js"),
   "company/fields": () => import("../src/server/routes/company/fields.js"),
   "company/index": () => import("../src/server/routes/company/index.js"),
   "company/list": () => import("../src/server/routes/company/list.js"),
@@ -11,6 +13,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "company/profile": () => import("../src/server/routes/company/profile.js"),
   "company/refresh": () => import("../src/server/routes/company/refresh.js"),
   "cron/refresh": () => import("../src/server/routes/cron/refresh.js"),
+  "cron/refresh-companies": () => import("../src/server/routes/cron/refresh-companies.js"),
   "sector/manual-input": () => import("../src/server/routes/sector/manual-input.js"),
   "sector/map-companies": () => import("../src/server/routes/sector/map-companies.js"),
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),
