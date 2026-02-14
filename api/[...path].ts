@@ -14,6 +14,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "company/refresh": () => import("../src/server/routes/company/refresh.js"),
   "cron/refresh": () => import("../src/server/routes/cron/refresh.js"),
   "cron/refresh-companies": () => import("../src/server/routes/cron/refresh-companies.js"),
+  health: () => import("../src/server/routes/health.js"),
   "sector/manual-input": () => import("../src/server/routes/sector/manual-input.js"),
   "sector/map-companies": () => import("../src/server/routes/sector/map-companies.js"),
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),
