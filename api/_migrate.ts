@@ -13,7 +13,12 @@ export const tables = {
   subsectors: "subsectors",
   financialPoints: "financial_points",
   sectorMetrics: "sector_metrics",
+
+  // MISSING keys referenced by server routes:
+  financialReports: "financial_reports",
+  sectorManualInputs: "sector_manual_inputs",
 } as const;
+
 
 export async function ensureSchema() {
   if (migrated) return;
