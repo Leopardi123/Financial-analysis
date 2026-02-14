@@ -1,23 +1,55 @@
 import { useState } from "react";
 import CompanyPicker, { type CompanyOption } from "./components/CompanyPicker";
 
-export default function App() {
+function StockViewer() {
   const [ticker, setTicker] = useState("AAPL");
-  const [secret, setSecret] = useState("");
-  const [adminTickers, setAdminTickers] = useState("AAPL, MSFT");
-  const [refreshLog, setRefreshLog] = useState<string>("");
 
   function onSelectCompany(company: CompanyOption) {
     setTicker(company.symbol);
   }
 
+  return (
+    <div>
+      <h1>Stock Viewer</h1>
+
+      <CompanyPicker
+        label="Company"
+        placeholder="Type company name"
+        onSelect={onSelectCompany}
+      />
+
+      <label>Ticker</label>
+      <input
+        value={ticker}
+        onChange={(e) => setTicker(e.target.value)}
+      />
+
+      <button>Fetch</button>
+
+      <div style={{ marginTop: 16, border: "1px dashed #ccc", padding: 12 }}>
+        Chart will appear here
+      </div>
+    </div>
+  );
+}
+
+function Admin() {
+  const [secret, setSecret] = useState("");
+  const [tickers, setTickers] = useState("AAPL, MSFT");
+  const [refreshLog, setRefreshLog] = useState("");
+
   function onAdminSelect(company: CompanyOption) {
     const next = company.symbol.trim().toUpperCase();
     if (!next) return;
-    setAdminTickers((prev) => {
-      const values = prev.split(",").map((v) => v.trim().toUpperCase()).filter(Boolean);
-      if (!values.includes(next)) values.push(next);
-      return values.join(", ");
+    setTickers((prev) => {
+      const list = prev
+        .split(",")
+        .map((ticker) => ticker.trim().toUpperCase())
+        .filter(Boolean);
+      if (!list.includes(next)) {
+        list.push(next);
+      }
+      return list.join(", ");
     });
   }
 
@@ -40,33 +72,46 @@ export default function App() {
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 16, fontFamily: "Arial, sans-serif" }}>
-      <h1>Financial Analysis</h1>
+    <div>
+      <h1>Admin</h1>
 
-      <section style={{ marginBottom: 24 }}>
-        <h2>Single stock selector</h2>
-        <CompanyPicker label="Find company" placeholder="Type company name" onSelect={onSelectCompany} />
-        <p>
-          Selected ticker: <strong>{ticker}</strong>
-        </p>
-      </section>
+      <input
+        type="password"
+        placeholder="CRON_SECRET"
+        value={secret}
+        onChange={(e) => setSecret(e.target.value)}
+      />
 
-      <section>
-        <h2>Admin</h2>
-        <label>
-          ADMIN/CRON secret
-          <input
-            type="password"
-            value={secret}
-            onChange={(event) => setSecret(event.target.value)}
-            style={{ display: "block", marginTop: 6, marginBottom: 12, width: "100%" }}
-          />
-        </label>
-        <button type="button" onClick={() => void refreshCompanies()}>Refresh companies from FMP</button>
-        <CompanyPicker label="Add ticker by company name" onSelect={onAdminSelect} />
-        <p>Tickers: {adminTickers}</p>
-        {refreshLog && <pre>{refreshLog}</pre>}
-      </section>
-    </main>
+      <div style={{ marginTop: 12 }}>
+        <button>Init DB</button>
+        <button type="button" onClick={() => void refreshCompanies()}>Refresh Companies</button>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <CompanyPicker
+          label="Add ticker by company"
+          placeholder="Type company name"
+          onSelect={onAdminSelect}
+        />
+        <p>Tickers: {tickers}</p>
+      </div>
+
+      {refreshLog && <pre>{refreshLog}</pre>}
+    </div>
+  );
+}
+
+export default function App() {
+  const [tab, setTab] = useState<"viewer" | "admin">("viewer");
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ marginBottom: 16 }}>
+        <button onClick={() => setTab("viewer")}>Viewer</button>
+        <button onClick={() => setTab("admin")}>Admin</button>
+      </div>
+
+      {tab === "viewer" ? <StockViewer /> : <Admin />}
+    </div>
   );
 }
