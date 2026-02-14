@@ -44,6 +44,36 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    if (req.method === "GET" && segments[0] === "company" && segments[1] === "list") {
+      const mod = await import("../src/server/routes/company/list.js");
+      await mod.default(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "company" && segments[1] === "price") {
+      const mod = await import("../src/server/routes/company/price.js");
+      await mod.default(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "company" && segments[1] === "profile") {
+      const mod = await import("../src/server/routes/company/profile.js");
+      await mod.default(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "sector" && segments[1] === "overview") {
+      const mod = await import("../src/server/routes/sector/overview.js");
+      await mod.default(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "sector" && segments[1] === "manual-input") {
+      const mod = await import("../src/server/routes/sector/manual-input.js");
+      await mod.default(req, res);
+      return;
+    }
+
     if (req.method === "GET" && segments.length === 1 && segments[0] === "health") {
       const mod = await import("../src/server/routes/health.js");
       await mod.default(req, res);
