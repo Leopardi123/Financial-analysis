@@ -1,10 +1,6 @@
 function extractBearer(authHeader: string | string[] | undefined) {
-  if (typeof authHeader !== "string") {
-    return null;
-  }
-  if (!authHeader.toLowerCase().startsWith("bearer ")) {
-    return null;
-  }
+  if (typeof authHeader !== "string") return null;
+  if (!authHeader.toLowerCase().startsWith("bearer ")) return null;
   return authHeader.slice(7).trim();
 }
 
@@ -19,18 +15,6 @@ export function assertAdminSecret(req: { headers: Record<string, string | string
   const normalizedHeaderSecret = Array.isArray(headerSecret) ? headerSecret[0] : headerSecret;
 
   if (!secret || (bearer !== secret && normalizedHeaderSecret !== secret)) {
-    const error = new Error("Unauthorized");
-    (error as Error & { status?: number }).status = 401;
-    throw error;
-  }
-}
-
-export function assertCronSecret(req: { headers: Record<string, string | string[] | undefined> }) {
-  const secret = process.env.CRON_SECRET;
-  const bearer = extractBearer(req.headers.authorization);
-  const provided = req.headers["x-cron-secret"];
-  const normalized = Array.isArray(provided) ? provided[0] : provided;
-  if (!secret || (normalized !== secret && bearer !== secret)) {
     const error = new Error("Unauthorized");
     (error as Error & { status?: number }).status = 401;
     throw error;
