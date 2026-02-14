@@ -28,6 +28,10 @@ export default async function handler(req: any, res: any) {
   res.setHeader("x-api-pathname", pathname);
   res.setHeader("x-api-segments", JSON.stringify(segments));
 
+  console.log("[api router] req.url", req.url ?? "");
+  console.log("[api router] pathname", pathname);
+  console.log("[api router] segments", JSON.stringify(segments));
+
   try {
     if (
       req.method === "GET" &&
