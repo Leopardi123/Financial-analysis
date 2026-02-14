@@ -20,23 +20,21 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),
 };
 
-function toRouteKey(pathParam: string | string[] | undefined): string {
-  if (Array.isArray(pathParam)) {
-    return pathParam.join("/");
-  }
-  return typeof pathParam === "string" ? pathParam : "";
-}
-
 export default async function handler(req: any, res: any) {
+  const { pathname } = new URL(req.url ?? "/", "http://localhost");
+  const p = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
+  const segments = p.split("/").filter(Boolean);
+
+  res.setHeader("x-api-pathname", pathname);
+  res.setHeader("x-api-segments", JSON.stringify(segments));
+
   try {
-    const pathParam = req.query?.path;
-    if (req.method === "GET" && Array.isArray(pathParam) && pathParam.length === 1 && pathParam[0] === "health") {
-      const mod = await import("../src/server/routes/health.js");
-      await mod.default(req, res);
+    if (req.method === "GET" && segments.length === 1 && segments[0] === "health") {
+      res.status(200).json({ ok: true, route: "health", segments, pathname });
       return;
     }
 
-    const routeKey = toRouteKey(req.query?.path);
+    const routeKey = segments.join("/");
     const load = ROUTE_MAP[routeKey];
     if (!load) {
       res.status(404).json({ ok: false, error: "Not found" });
