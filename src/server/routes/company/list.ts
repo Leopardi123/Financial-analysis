@@ -5,7 +5,7 @@ export default async function handler(_req: any, res: any) {
   try {
     await ensureSchema();
     const rows = await query(
-      `SELECT ticker FROM ${tables.companiesV2} WHERE active = 1 ORDER BY ticker ASC`
+      `SELECT ticker FROM ${tables.companiesV2} WHERE active = 1 ORDER BY ticker`
     );
     const tickers = rows.map((row: any) => String(row.ticker));
     res.status(200).json({ ok: true, tickers });
