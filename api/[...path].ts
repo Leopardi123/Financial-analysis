@@ -29,6 +29,22 @@ export default async function handler(req: any, res: any) {
   res.setHeader("x-api-segments", JSON.stringify(segments));
 
   try {
+    if (
+      req.method === "GET" &&
+      segments.length === 2 &&
+      segments[0] === "debug" &&
+      segments[1] === "routes"
+    ) {
+      const routes = [
+        { method: "GET", path: "/api/debug/routes" },
+        ...Object.keys(ROUTE_MAP)
+          .sort()
+          .map((routeKey) => ({ method: "ANY", path: `/api/${routeKey}` })),
+      ];
+      res.status(200).json({ ok: true, routes });
+      return;
+    }
+
     if (req.method === "GET" && segments.length === 1 && segments[0] === "health") {
       const mod = await import("../src/server/routes/health.js");
       await mod.default(req, res);
