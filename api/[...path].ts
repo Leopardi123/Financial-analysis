@@ -30,7 +30,8 @@ export default async function handler(req: any, res: any) {
 
   try {
     if (req.method === "GET" && segments.length === 1 && segments[0] === "health") {
-      res.status(200).json({ ok: true, route: "health", segments, pathname });
+      const mod = await import("../src/server/routes/health.js");
+      await mod.default(req, res);
       return;
     }
 
