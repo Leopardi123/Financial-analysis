@@ -31,7 +31,6 @@ export default async function handler(req: any, res: any) {
   try {
     if (
       req.method === "GET" &&
-      segments.length === 2 &&
       segments[0] === "debug" &&
       segments[1] === "routes"
     ) {
