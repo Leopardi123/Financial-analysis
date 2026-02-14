@@ -150,7 +150,7 @@ export async function searchCompaniesByName(queryText: string) {
     [namePrefix, normalizedPrefix, namePrefix, normalizedPrefix]
   );
 
-  return rows.map((row) => ({
+  return rows.map((row: any) => ({
     symbol: String(row.symbol),
     name: String(row.name),
     exchange: row.exchange ? String(row.exchange) : null,
