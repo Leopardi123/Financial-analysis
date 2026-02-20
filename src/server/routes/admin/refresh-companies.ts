@@ -1,6 +1,6 @@
-import { assertAdminSecret } from "../_auth.js";
-import { ensureSchema } from "../_migrate.js";
-import { refreshCompaniesMaster } from "../_company_master.js";
+import { assertAdminSecret } from "../../../../api/_auth.js";
+import { ensureSchema } from "../../../../api/_migrate.js";
+import { refreshCompaniesMaster } from "../../../../api/_company_master.js";
 
 export default async function handler(req: any, res: any) {
   try {
