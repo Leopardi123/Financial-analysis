@@ -25,7 +25,6 @@ import {
 
 const CATEGORIES = ["Välj En Kategori", "Tech", "Industrials", "Consumer"];
 const SUBCATEGORIES = ["Välj En Subkategori", "Software", "Hardware", "Services"];
-const STOCKS = ["AAPL", "MSFT", "ERIC-B.ST"];
 
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
@@ -56,7 +55,8 @@ export default function SingleStockDashboard() {
   const [formCategory, setFormCategory] = useState("");
   const [formSubcategory, setFormSubcategory] = useState("");
   const [formNote, setFormNote] = useState("");
-  const [availableTickers, setAvailableTickers] = useState<string[]>(STOCKS);
+  const [availableTickers, setAvailableTickers] = useState<string[]>([]);
+  const [tickersError, setTickersError] = useState<string | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [priceData, setPriceData] = useState<{
     long: {
@@ -79,7 +79,14 @@ export default function SingleStockDashboard() {
         setPriceLoading(true);
         setPriceError(null);
         const response = await fetch(`/api/company/price?ticker=${encodeURIComponent(ticker)}`);
-        const payload = await response.json();
+        const contentType = response.headers.get("content-type") ?? "";
+        const rawPayload = await response.text();
+        if (!contentType.toLowerCase().includes("application/json")) {
+          throw new Error(
+            `Expected JSON from /api/company/price (status=${response.status}, content-type=${contentType || "unknown"}, body=${rawPayload.slice(0, 120)})`
+          );
+        }
+        const payload = rawPayload ? JSON.parse(rawPayload) : {};
         if (!response.ok) {
           const message = String(payload.error ?? "Failed to load price data.");
           const unsupported =
@@ -146,16 +153,16 @@ export default function SingleStockDashboard() {
 
   const loadTickers = async () => {
     try {
+      setTickersError(null);
       const response = await fetch("/api/company/list");
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error ?? "Failed to load tickers.");
       }
       const list = Array.isArray(payload.tickers) ? payload.tickers : [];
-      if (list.length > 0) {
-        setAvailableTickers(list);
-      }
+      setAvailableTickers(list);
     } catch (error) {
+      setTickersError((error as Error).message);
       console.error("Failed to load tickers", error);
     }
   };
@@ -409,6 +416,7 @@ export default function SingleStockDashboard() {
               </option>
             ))}
           </select>
+          {tickersError && <p className="status error">{tickersError}</p>}
         </div>
 
         <div className="stock-selector-row form">

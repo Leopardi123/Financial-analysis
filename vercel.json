@@ -4,5 +4,11 @@
       "path": "/api/companies",
       "schedule": "0 3 1 * *"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api"
+    }
   ]
 }
