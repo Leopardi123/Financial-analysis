@@ -1,24 +1,9 @@
 type Handler = (req: any, res: any) => Promise<void> | void;
 
 function normalizePathSegments(req: any): string[] {
-  const queryPath = req?.query?.path;
-
-  if (Array.isArray(queryPath)) {
-    return queryPath
-      .flatMap((segment) => String(segment).split("/"))
-      .map((segment) => segment.trim())
-      .filter((segment) => segment.length > 0 && segment !== "api");
-  }
-
-  if (typeof queryPath === "string") {
-    return queryPath
-      .split("/")
-      .map((segment) => segment.trim())
-      .filter((segment) => segment.length > 0 && segment !== "api");
-  }
-
   const { pathname } = new URL(req?.url ?? "/", "http://localhost");
   const trimmed = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
+
   return trimmed
     .split("/")
     .map((segment) => segment.trim())
@@ -78,9 +63,6 @@ export default async function handler(req: any, res: any) {
   res.setHeader("x-debug-url", String(req.url ?? ""));
   res.setHeader("x-debug-query-path", JSON.stringify(queryPath));
 
-  const p = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
-  const pathFromUrl = p.split("/").filter(Boolean);
-
   let matched = "none";
   const setDebugHeaders = () => {
     res.setHeader("x-api-pathname", pathname);
@@ -90,10 +72,6 @@ export default async function handler(req: any, res: any) {
   };
 
   setDebugHeaders();
-
-  console.log("[api router] req.url", req.url ?? "");
-  console.log("[api router] pathname", pathname);
-  console.log("[api router] segments", JSON.stringify(segments));
 
   try {
     if (req.method === "GET" && segments[0] === "company" && segments[1] === "list") {
