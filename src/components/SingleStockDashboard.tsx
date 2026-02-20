@@ -25,7 +25,6 @@ import {
 
 const CATEGORIES = ["Välj En Kategori", "Tech", "Industrials", "Consumer"];
 const SUBCATEGORIES = ["Välj En Subkategori", "Software", "Hardware", "Services"];
-const STOCKS = ["AAPL", "MSFT", "ERIC-B.ST"];
 
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
@@ -56,7 +55,7 @@ export default function SingleStockDashboard() {
   const [formCategory, setFormCategory] = useState("");
   const [formSubcategory, setFormSubcategory] = useState("");
   const [formNote, setFormNote] = useState("");
-  const [availableTickers, setAvailableTickers] = useState<string[]>(STOCKS);
+  const [availableTickers, setAvailableTickers] = useState<string[]>([]);
   const [showAdmin, setShowAdmin] = useState(false);
   const [priceData, setPriceData] = useState<{
     long: {
@@ -152,9 +151,7 @@ export default function SingleStockDashboard() {
         throw new Error(payload.error ?? "Failed to load tickers.");
       }
       const list = Array.isArray(payload.tickers) ? payload.tickers : [];
-      if (list.length > 0) {
-        setAvailableTickers(list);
-      }
+      setAvailableTickers(list);
     } catch (error) {
       console.error("Failed to load tickers", error);
     }

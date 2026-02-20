@@ -94,21 +94,17 @@ export default async function handler(req: any, res: any) {
       [company.id, period]
     );
 
-    const yearSet = new Set<number>();
+    const fiscalDateSet = new Set<string>();
     for (const row of rows) {
       const fiscalDate = String(row.fiscal_date ?? "");
-      if (!fiscalDate) {
-        continue;
-      }
-      const year = Number(fiscalDate.slice(0, 4));
-      if (!Number.isNaN(year)) {
-        yearSet.add(year);
+      if (fiscalDate) {
+        fiscalDateSet.add(fiscalDate);
       }
     }
 
-    const years = Array.from(yearSet).sort((a, b) => a - b);
-    const yearIndex = new Map<number, number>();
-    years.forEach((year, index) => yearIndex.set(year, index));
+    const fiscalDates = Array.from(fiscalDateSet).sort((a, b) => a.localeCompare(b));
+    const fiscalDateIndex = new Map<string, number>();
+    fiscalDates.forEach((fiscalDate, index) => fiscalDateIndex.set(fiscalDate, index));
 
     const statements = {
       income: {} as Record<string, Array<number | null>>,
@@ -126,14 +122,13 @@ export default async function handler(req: any, res: any) {
         continue;
       }
       const fiscalDate = String(row.fiscal_date ?? "");
-      const year = Number(fiscalDate.slice(0, 4));
-      const index = yearIndex.get(year);
+      const index = fiscalDateIndex.get(fiscalDate);
       if (index === undefined) {
         continue;
       }
 
       if (!statements[statement][field]) {
-        statements[statement][field] = Array.from({ length: years.length }, () => null);
+        statements[statement][field] = Array.from({ length: fiscalDates.length }, () => null);
       }
       const parsedValue = parseNumericValue(row.value);
       statements[statement][field][index] = parsedValue;
@@ -148,23 +143,20 @@ export default async function handler(req: any, res: any) {
         [company.id, period]
       );
 
-      const reportYears = new Set<number>();
+      const reportFiscalDates = new Set<string>();
       for (const row of reportRows) {
         const fiscalDate = String(row.fiscal_date ?? "");
         if (!fiscalDate) {
           continue;
         }
-        const year = Number(fiscalDate.slice(0, 4));
-        if (!Number.isNaN(year)) {
-          reportYears.add(year);
-        }
+        reportFiscalDates.add(fiscalDate);
       }
 
-      if (reportYears.size > 0 && years.length === 0) {
-        const reportYearList = Array.from(reportYears).sort((a, b) => a - b);
-        years.splice(0, years.length, ...reportYearList);
-        yearIndex.clear();
-        years.forEach((year, index) => yearIndex.set(year, index));
+      if (reportFiscalDates.size > 0 && fiscalDates.length === 0) {
+        const reportDateList = Array.from(reportFiscalDates).sort((a, b) => a.localeCompare(b));
+        fiscalDates.push(...reportDateList);
+        fiscalDateIndex.clear();
+        fiscalDates.forEach((fiscalDate, index) => fiscalDateIndex.set(fiscalDate, index));
       }
 
       for (const row of reportRows) {
@@ -172,8 +164,7 @@ export default async function handler(req: any, res: any) {
         if (!fiscalDate) {
           continue;
         }
-        const year = Number(fiscalDate.slice(0, 4));
-        const index = yearIndex.get(year);
+        const index = fiscalDateIndex.get(fiscalDate);
         if (index === undefined) {
           continue;
         }
@@ -184,7 +175,7 @@ export default async function handler(req: any, res: any) {
           }
           if (typeof value === "number" && Number.isFinite(value)) {
             if (!statements.balance[key]) {
-              statements.balance[key] = Array.from({ length: years.length }, () => null);
+              statements.balance[key] = Array.from({ length: fiscalDates.length }, () => null);
             }
             statements.balance[key][index] = value;
           }
@@ -192,10 +183,15 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    const years = fiscalDates
+      .map((fiscalDate) => Number(fiscalDate.slice(0, 4)))
+      .filter((year) => !Number.isNaN(year));
+
     res.status(200).json({
       ticker,
       period,
       years,
+      fiscal_dates: fiscalDates,
       income: statements.income,
       balance: statements.balance,
       cashflow: statements.cashflow,

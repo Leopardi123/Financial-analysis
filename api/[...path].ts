@@ -6,6 +6,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/refresh-companies": () => import("../src/server/routes/admin/refresh-companies.js"),
   companies: () => import("../src/server/routes/companies.js"),
   "companies/search": () => import("../src/server/routes/companies/search.js"),
+  company: () => import("../src/server/routes/company/index.js"),
   "company/fields": () => import("../src/server/routes/company/fields.js"),
   "company/index": () => import("../src/server/routes/company/index.js"),
   "company/list": () => import("../src/server/routes/company/list.js"),

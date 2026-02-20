@@ -118,6 +118,10 @@ export default function Admin() {
     void postJson("Run Cron", "/api/cron/refresh", {});
   }
 
+  function handleRefreshCompanies() {
+    void postJson("Refresh Companies", "/api/cron/refresh-companies", {});
+  }
+
   const initLog = logByKey["Init DB"];
 
   return (
@@ -192,6 +196,15 @@ export default function Admin() {
               {loadingKey === "Refresh Ticker" ? "Continuing..." : "Continue materialization"}
             </button>
           )}
+        </div>
+
+        <div>
+          <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
+            Refresh Companies populates the master companies table from FMP.
+          </div>
+          <button onClick={handleRefreshCompanies} disabled={!secretReady || loadingKey !== null}>
+            {loadingKey === "Refresh Companies" ? "Refreshing..." : "Refresh Companies"}
+          </button>
         </div>
 
         <div>

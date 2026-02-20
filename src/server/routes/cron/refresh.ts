@@ -80,16 +80,27 @@ async function materializeReports(params: {
   limit: number;
   maxPoints: number;
 }) {
+  const latestRows = await query(
+    `SELECT fiscal_date
+     FROM ${tables.financialReports}
+     WHERE company_id = ? AND statement = ? AND period = ?
+     ORDER BY fiscal_date DESC
+     LIMIT 1`,
+    [params.companyId, params.statement, params.period]
+  );
+  const latestFiscalDate = String(latestRows[0]?.fiscal_date ?? "");
+
   const rows = await query(
     `SELECT fiscal_date, data_json, fetched_at
      FROM ${tables.financialReports}
      WHERE company_id = ? AND statement = ? AND period = ?
-     ORDER BY fiscal_date ASC
+     ORDER BY fiscal_date DESC
      LIMIT ? OFFSET ?`,
     [params.companyId, params.statement, params.period, params.limit, params.offset]
   );
 
   let inserted = 0;
+  let newestFiscalDateProcessed = false;
   let batchStatements: Array<{ sql: string; args: Array<string | number | null> }> = [];
 
   for (const row of rows) {
@@ -98,6 +109,9 @@ async function materializeReports(params: {
     const fetchedAt = String(row.fetched_at ?? new Date().toISOString());
     if (!fiscalDate) {
       continue;
+    }
+    if (latestFiscalDate && fiscalDate === latestFiscalDate) {
+      newestFiscalDateProcessed = true;
     }
 
     const points = normalizeFinancialPoints(
@@ -144,7 +158,7 @@ async function materializeReports(params: {
 
   const nextOffset = params.offset + rows.length;
   const done = rows.length < params.limit && inserted < params.maxPoints;
-  return { inserted, nextOffset, done };
+  return { inserted, nextOffset, done, newestFiscalDateProcessed };
 }
 
 export default async function handler(req: any, res: any) {
@@ -236,12 +250,15 @@ export default async function handler(req: any, res: any) {
         done: boolean;
         cursor: number;
       }> = [];
+      let periodComplete = true;
+      let newestFiscalDateProcessed = true;
       for (const statement of STATEMENTS) {
         if (remaining <= 0) {
+          periodComplete = false;
           materialization.push({ statement, inserted: 0, done: false, cursor: 0 });
           continue;
         }
-        const { inserted, nextOffset, done } = await materializeReports({
+        const { inserted, nextOffset, done, newestFiscalDateProcessed: statementNewestProcessed } = await materializeReports({
           companyId: item.companyId,
           statement,
           period: item.period,
@@ -250,17 +267,19 @@ export default async function handler(req: any, res: any) {
           maxPoints: remaining,
         });
         remaining -= inserted;
+        periodComplete = periodComplete && done;
+        newestFiscalDateProcessed = newestFiscalDateProcessed && statementNewestProcessed;
         materialization.push({ statement, inserted, done, cursor: nextOffset });
       }
 
       processed.push({ ticker: item.ticker, period: item.period, results, materialization });
 
-      if (item.period === "fy") {
+      if (item.period === "fy" && periodComplete && newestFiscalDateProcessed) {
         await execute(
           `UPDATE ${tables.companiesV2} SET last_fy_fetch_at = ? WHERE id = ?`,
           [new Date().toISOString(), item.companyId]
         );
-      } else {
+      } else if (item.period === "q" && periodComplete && newestFiscalDateProcessed) {
         await execute(
           `UPDATE ${tables.companiesV2} SET last_q_fetch_at = ? WHERE id = ?`,
           [new Date().toISOString(), item.companyId]
