@@ -119,7 +119,7 @@ export default function Admin() {
   }
 
   function handleRefreshCompanies() {
-    void postJson("Refresh Companies", "/api/cron/refresh-companies", {});
+    void postJson("Refresh Companies", "/api/companies", {});
   }
 
   const initLog = logByKey["Init DB"];
