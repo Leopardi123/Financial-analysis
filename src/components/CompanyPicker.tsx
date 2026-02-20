@@ -24,6 +24,8 @@ export default function CompanyPicker({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const cacheRef = useRef(new Map<string, { value: CompanyOption[]; expiresAt: number }>());
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -39,27 +41,62 @@ export default function CompanyPicker({
     const timeout = window.setTimeout(async () => {
       const text = query.trim();
       if (text.length < 2) {
+        abortRef.current?.abort();
         setResults([]);
         setOpen(false);
         return;
       }
+
+      const key = text.toLowerCase();
+      const cached = cacheRef.current.get(key);
+      if (cached && cached.expiresAt > Date.now()) {
+        setResults(cached.value);
+        setOpen(cached.value.length > 0);
+        setHighlightedIndex(0);
+        return;
+      }
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       setLoading(true);
       try {
-        const response = await fetch(`/api/companies?q=${encodeURIComponent(text)}`);
+        const response = await fetch(`/api/companies/search?q=${encodeURIComponent(text)}`, {
+          signal: controller.signal,
+        });
         const payload = await response.json();
         const next = Array.isArray(payload.results) ? payload.results : [];
+
+        cacheRef.current.set(key, { value: next, expiresAt: Date.now() + 60_000 });
+        if (cacheRef.current.size > 50) {
+          const oldestKey = cacheRef.current.keys().next().value;
+          if (oldestKey) {
+            cacheRef.current.delete(oldestKey);
+          }
+        }
+
         setResults(next);
         setOpen(true);
         setHighlightedIndex(0);
-      } catch {
+      } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          return;
+        }
         setResults([]);
         setOpen(false);
       } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
         setLoading(false);
       }
-    }, 250);
+    }, 350);
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      abortRef.current?.abort();
+    };
   }, [query]);
 
   const topMatch = useMemo(() => results[0] ?? null, [results]);

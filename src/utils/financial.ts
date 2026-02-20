@@ -429,7 +429,21 @@ export function buildSeriesData(result: SeriesResult, maxRows = 12) {
   if (!result.rows.length) {
     return null;
   }
-  const rows = selectRecentRows(result.rows, maxRows);
+  const normalizedRows = result.rows
+    .map((row) => {
+      const domain = parseRowDate(row[0]);
+      if (domain === null || Number.isNaN(domain)) {
+        return null;
+      }
+      return [domain, ...row.slice(1)] as SeriesRow;
+    })
+    .filter((row): row is SeriesRow => row !== null);
+
+  if (normalizedRows.length === 0) {
+    return null;
+  }
+
+  const rows = selectRecentRows(normalizedRows, maxRows);
   const hasValues = rows.some((row) => row.slice(1).some((value) => value !== null));
   if (!hasValues) {
     return null;
