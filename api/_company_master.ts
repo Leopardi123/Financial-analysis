@@ -17,6 +17,18 @@ export type CompanyMasterRow = {
   normalized_name: string;
 };
 
+export type RefreshCompaniesSummary = {
+  endpointUsed: "stable" | "legacy";
+  fetchedCount: number;
+  attemptedUpserts: number;
+  upsertedCount: number;
+  rowsAffectedTotal: number;
+  batchCount: number;
+  errorCount: number;
+  firstError: { message: string; code?: string; stackPreview?: string } | null;
+  durationMs: number;
+};
+
 export function normalizeName(name: string): string {
   let normalized = name.toLowerCase().trim();
   normalized = normalized.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
@@ -120,13 +132,34 @@ export async function refreshCompaniesMaster() {
   const { endpointUsed, rows } = await fetchCompanyRows(apiKey);
   const normalizedRows = rows.map(toCompanyRow).filter((row): row is CompanyMasterRow => row !== null);
 
-  let upsertedCount = 0;
+  const summary: RefreshCompaniesSummary = {
+    endpointUsed,
+    fetchedCount: rows.length,
+    attemptedUpserts: normalizedRows.length,
+    upsertedCount: 0,
+    rowsAffectedTotal: 0,
+    batchCount: 0,
+    errorCount: 0,
+    firstError: null,
+    durationMs: 0,
+  };
+
+  const readRowsAffected = (result: unknown) => {
+    if (!result || typeof result !== "object") {
+      return 0;
+    }
+    const candidate = result as { rowsAffected?: unknown };
+    const rowsAffected = Number(candidate.rowsAffected ?? 0);
+    return Number.isFinite(rowsAffected) ? rowsAffected : 0;
+  };
+
   const chunkSize = 1000;
   for (let index = 0; index < normalizedRows.length; index += chunkSize) {
     const chunk = normalizedRows.slice(index, index + chunkSize);
+    summary.batchCount += 1;
     await execute("BEGIN");
     try {
-      await batch(
+      const results = await batch(
         chunk.map((row) => ({
           sql: `INSERT INTO companies (symbol, name, exchange, type, normalized_name)
                 VALUES (?, ?, ?, ?, ?)
@@ -138,20 +171,29 @@ export async function refreshCompaniesMaster() {
           args: [row.symbol, row.name, row.exchange, row.type, row.normalized_name],
         }))
       );
+      summary.rowsAffectedTotal += results.reduce((acc, result) => acc + readRowsAffected(result), 0);
       await execute("COMMIT");
-      upsertedCount += chunk.length;
+      summary.upsertedCount += chunk.length;
     } catch (error) {
+      summary.errorCount += 1;
+      if (!summary.firstError) {
+        const typed = error as Error & { code?: string };
+        summary.firstError = {
+          message: typed.message,
+          code: typed.code,
+          stackPreview: typed.stack?.split("\n").slice(0, 3).join("\n"),
+        };
+      }
       await execute("ROLLBACK");
-      throw error;
+      const wrapped = new Error("companies master upsert failed");
+      (wrapped as Error & { cause?: unknown; diagnostics?: RefreshCompaniesSummary }).cause = error;
+      (wrapped as Error & { cause?: unknown; diagnostics?: RefreshCompaniesSummary }).diagnostics = summary;
+      throw wrapped;
     }
   }
 
-  return {
-    endpointUsed,
-    fetchedCount: rows.length,
-    upsertedCount,
-    durationMs: Date.now() - startedAt,
-  };
+  summary.durationMs = Date.now() - startedAt;
+  return summary;
 }
 
 export async function searchCompaniesByName(queryText: string) {
