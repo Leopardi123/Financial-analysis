@@ -15,6 +15,38 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "company/refresh": () => import("../src/server/routes/company/refresh.js"),
   "cron/refresh": () => import("../src/server/routes/cron/refresh.js"),
   "cron/refresh-companies": () => import("../src/server/routes/cron/refresh-companies.js"),
+  "debug/info": async () => ({
+    default: async (req: any, res: any) => {
+      const { pathname } = new URL(req.url ?? "/", "http://localhost");
+      const p = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
+      const segments = p.split("/").filter(Boolean);
+      const routeKey = segments.join("/");
+      res.status(200).json({
+        ok: true,
+        git: {
+          sha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+          ref: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+        },
+        vercel: {
+          env: process.env.VERCEL_ENV ?? null,
+          region: process.env.VERCEL_REGION ?? null,
+        },
+        router: {
+          pathname,
+          segments,
+          routeKey,
+        },
+      });
+    },
+  }),
+  "debug/routes": async () => ({
+    default: async (_req: any, res: any) => {
+      const routes = Object.keys(ROUTE_MAP)
+        .sort()
+        .map((key) => ({ method: "ANY", key, path: `/api/${key}` }));
+      res.status(200).json({ ok: true, routes });
+    },
+  }),
   health: () => import("../src/server/routes/health.js"),
   "sector/manual-input": () => import("../src/server/routes/sector/manual-input.js"),
   "sector/map-companies": () => import("../src/server/routes/sector/map-companies.js"),
@@ -23,8 +55,12 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
 
 export default async function handler(req: any, res: any) {
   const { pathname } = new URL(req.url ?? "/", "http://localhost");
+  const pathFromQuery = Array.isArray(req.query?.path)
+    ? req.query.path.filter((part: unknown) => typeof part === "string" && part.length > 0)
+    : [];
   const p = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
-  const segments = p.split("/").filter(Boolean);
+  const pathFromUrl = p.split("/").filter(Boolean);
+  const segments = pathFromQuery.length > 0 ? pathFromQuery : pathFromUrl;
   const routeKey = segments.join("/");
 
   let matched = "none";
@@ -42,38 +78,6 @@ export default async function handler(req: any, res: any) {
   console.log("[api router] segments", JSON.stringify(segments));
 
   try {
-    if (req.method === "GET" && segments[0] === "debug" && segments[1] === "routes") {
-      matched = "debug/routes";
-      setDebugHeaders();
-      const routes = Object.keys(ROUTE_MAP)
-        .sort()
-        .map((key) => ({ method: "ANY", key, path: `/api/${key}` }));
-      res.status(200).json({ ok: true, routes });
-      return;
-    }
-
-    if (req.method === "GET" && segments[0] === "debug" && segments[1] === "info") {
-      matched = "debug/info";
-      setDebugHeaders();
-      res.status(200).json({
-        ok: true,
-        git: {
-          sha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
-          ref: process.env.VERCEL_GIT_COMMIT_REF ?? null,
-        },
-        vercel: {
-          env: process.env.VERCEL_ENV ?? null,
-          region: process.env.VERCEL_REGION ?? null,
-        },
-        router: {
-          pathname,
-          segments,
-          routeKey,
-        },
-      });
-      return;
-    }
-
     if (req.method === "GET" && segments[0] === "company" && segments[1] === "list") {
       matched = "company/list";
       setDebugHeaders();
