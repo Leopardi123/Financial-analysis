@@ -1,4 +1,4 @@
-import { batch, execute, query } from "./_db.js";
+import { batch, query } from "./_db.js";
 
 const STABLE_URL = "https://financialmodelingprep.com/stable/stock-list";
 const LEGACY_URL = "https://financialmodelingprep.com/api/v3/stock/list";
@@ -24,6 +24,7 @@ export type RefreshCompaniesSummary = {
   rawSampleKeys: string[];
   rawSample: {
     symbol: string | null;
+    companyName: string | null;
     name: string | null;
     exchange: string | null;
     exchangeShortName: string | null;
@@ -45,7 +46,7 @@ export type RefreshCompaniesSummary = {
   batchCount: number;
   errorCount: number;
   firstError: { message: string; code?: string; stackPreview?: string } | null;
-  writePhaseReached: "FETCH_OK" | "MAP_OK" | "BEGIN_OK" | "UPSERT_OK" | "COMMIT_OK" | "ROLLBACK_SKIPPED" | "ROLLBACK_OK" | "ERROR";
+  writePhaseReached: "FETCH_OK" | "MAP_OK" | "WRITE_OK" | "UPSERT_OK" | "ERROR";
   inTxAtError: boolean;
   lastSqlOp: string;
   durationMs: number;
@@ -72,7 +73,10 @@ export function normalizeName(name: string): string {
 
 function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
   const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
-  const name = typeof row.name === "string" ? row.name.trim() : "";
+  const nameFromName = typeof row.name === "string" ? row.name.trim() : "";
+  const nameFromCompanyName = typeof row.companyName === "string" ? row.companyName.trim() : "";
+  const nameFromCompanySnake = typeof row.company_name === "string" ? row.company_name.trim() : "";
+  const name = nameFromName || nameFromCompanyName || nameFromCompanySnake;
   const exchangeCandidate =
     typeof row.exchangeShortName === "string"
       ? row.exchangeShortName
@@ -88,11 +92,12 @@ function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
   }
 
   const finalName = name || symbol;
+  const finalExchange = exchangeCandidate ? exchangeCandidate.trim() : "UNKNOWN";
 
   return {
     symbol,
     name: finalName,
-    exchange: exchangeCandidate ? exchangeCandidate.trim() : null,
+    exchange: finalExchange,
     type,
     normalized_name: normalizeName(finalName),
   };
@@ -157,6 +162,7 @@ export async function refreshCompaniesMaster() {
   const rawSample = rawSampleRow
     ? {
       symbol: typeof rawSampleRow.symbol === "string" ? rawSampleRow.symbol : null,
+      companyName: typeof rawSampleRow.companyName === "string" ? rawSampleRow.companyName : null,
       name: typeof rawSampleRow.name === "string" ? rawSampleRow.name : null,
       exchange: typeof rawSampleRow.exchange === "string" ? rawSampleRow.exchange : null,
       exchangeShortName: typeof rawSampleRow.exchangeShortName === "string" ? rawSampleRow.exchangeShortName : null,
@@ -192,18 +198,18 @@ export async function refreshCompaniesMaster() {
       continue;
     }
 
-    if (typeof row.name !== "string" || row.name.trim().length === 0) {
-      droppedCounts.droppedMissingName += 1;
-    }
+    const hasName = typeof row.name === "string" && row.name.trim().length > 0;
+    const hasCompanyName = typeof row.companyName === "string" && row.companyName.trim().length > 0;
+    const hasCompanyNameSnake = typeof row.company_name === "string" && row.company_name.trim().length > 0;
 
     const mapped = toCompanyRow(row);
     if (!mapped) {
-      droppedCounts.droppedOther += 1;
+      if (!hasName && !hasCompanyName && !hasCompanyNameSnake) {
+        droppedCounts.droppedMissingName += 1;
+      } else {
+        droppedCounts.droppedOther += 1;
+      }
       continue;
-    }
-
-    if (!mapped.exchange) {
-      droppedCounts.droppedMissingExchange += 1;
     }
 
     normalizedRows.push(mapped);
@@ -238,16 +244,11 @@ export async function refreshCompaniesMaster() {
     return Number.isFinite(rowsAffected) ? rowsAffected : 0;
   };
 
-  const chunkSize = 1000;
+  const chunkSize = 300;
   summary.writePhaseReached = "MAP_OK";
   for (let index = 0; index < normalizedRows.length; index += chunkSize) {
     const chunk = normalizedRows.slice(index, index + chunkSize);
     summary.batchCount += 1;
-    let inTx = false;
-    summary.lastSqlOp = "BEGIN";
-    await execute("BEGIN");
-    inTx = true;
-    summary.writePhaseReached = "BEGIN_OK";
     try {
       summary.lastSqlOp = "UPSERT batch";
       const results = await batch(
@@ -264,14 +265,12 @@ export async function refreshCompaniesMaster() {
       );
       summary.writePhaseReached = "UPSERT_OK";
       summary.rowsAffectedTotal += results.reduce((acc, result) => acc + readRowsAffected(result), 0);
-      summary.lastSqlOp = "COMMIT";
-      await execute("COMMIT");
-      inTx = false;
-      summary.writePhaseReached = "COMMIT_OK";
+      summary.lastSqlOp = "WRITE batch";
+      summary.writePhaseReached = "WRITE_OK";
       summary.upsertedCount += chunk.length;
     } catch (error) {
       summary.writePhaseReached = "ERROR";
-      summary.inTxAtError = inTx;
+      summary.inTxAtError = false;
       summary.errorCount += 1;
       if (!summary.firstError) {
         const typed = error as Error & { code?: string };
@@ -280,17 +279,6 @@ export async function refreshCompaniesMaster() {
           code: typed.code,
           stackPreview: typed.stack?.split("\n").slice(0, 3).join("\n"),
         };
-      }
-      if (inTx) {
-        summary.lastSqlOp = "ROLLBACK";
-        try {
-          await execute("ROLLBACK");
-          summary.writePhaseReached = "ROLLBACK_OK";
-        } catch {
-          summary.writePhaseReached = "ERROR";
-        }
-      } else {
-        summary.writePhaseReached = "ROLLBACK_SKIPPED";
       }
       const wrapped = new Error("companies master upsert failed");
       (wrapped as Error & { cause?: unknown; diagnostics?: RefreshCompaniesSummary }).cause = error;
