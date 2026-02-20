@@ -1,5 +1,30 @@
 type Handler = (req: any, res: any) => Promise<void> | void;
 
+function normalizePathSegments(req: any): string[] {
+  const queryPath = req?.query?.path;
+
+  if (Array.isArray(queryPath)) {
+    return queryPath
+      .flatMap((segment) => String(segment).split("/"))
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0 && segment !== "api");
+  }
+
+  if (typeof queryPath === "string") {
+    return queryPath
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0 && segment !== "api");
+  }
+
+  const { pathname } = new URL(req?.url ?? "/", "http://localhost");
+  const trimmed = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
+  return trimmed
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0 && segment !== "api");
+}
+
 const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/companies": () => import("../src/server/routes/admin/companies.js"),
   "admin/init-db": () => import("../src/server/routes/admin/init-db.js"),
@@ -17,25 +42,14 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "cron/refresh-companies": () => import("../src/server/routes/cron/refresh-companies.js"),
   "debug/info": async () => ({
     default: async (req: any, res: any) => {
-      const { pathname } = new URL(req.url ?? "/", "http://localhost");
-      const p = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
-      const segments = p.split("/").filter(Boolean);
+      const segments = normalizePathSegments(req);
       const routeKey = segments.join("/");
       res.status(200).json({
         ok: true,
-        git: {
-          sha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
-          ref: process.env.VERCEL_GIT_COMMIT_REF ?? null,
-        },
-        vercel: {
-          env: process.env.VERCEL_ENV ?? null,
-          region: process.env.VERCEL_REGION ?? null,
-        },
-        router: {
-          pathname,
-          segments,
-          routeKey,
-        },
+        routeKey,
+        segments,
+        url: String(req.url ?? ""),
+        queryPath: req.query?.path ?? null,
       });
     },
   }),
@@ -55,13 +69,17 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
 
 export default async function handler(req: any, res: any) {
   const { pathname } = new URL(req.url ?? "/", "http://localhost");
-  const pathFromQuery = Array.isArray(req.query?.path)
-    ? req.query.path.filter((part: unknown) => typeof part === "string" && part.length > 0)
-    : [];
+  const segments = normalizePathSegments(req);
+  const routeKey = segments.join("/");
+  const queryPath = req.query?.path ?? null;
+
+  res.setHeader("x-debug-segments", JSON.stringify(segments));
+  res.setHeader("x-debug-routekey", routeKey);
+  res.setHeader("x-debug-url", String(req.url ?? ""));
+  res.setHeader("x-debug-query-path", JSON.stringify(queryPath));
+
   const p = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
   const pathFromUrl = p.split("/").filter(Boolean);
-  const segments = pathFromQuery.length > 0 ? pathFromQuery : pathFromUrl;
-  const routeKey = segments.join("/");
 
   let matched = "none";
   const setDebugHeaders = () => {
