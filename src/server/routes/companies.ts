@@ -113,6 +113,9 @@ export default async function handler(req: any, res: any) {
           afterCount,
           errorCount: summary?.errorCount ?? 1,
           firstError: diagnosticsFromError(refreshError),
+          writePhaseReached: summary?.writePhaseReached ?? "ERROR",
+          inTxAtError: summary?.inTxAtError ?? false,
+          lastSqlOp: summary?.lastSqlOp ?? "unknown",
         });
         return;
       }
@@ -138,6 +141,9 @@ export default async function handler(req: any, res: any) {
           errorCount: summary?.errorCount ?? 0,
           firstError: summary?.firstError ?? null,
           batchCount: summary?.batchCount ?? 0,
+          writePhaseReached: summary?.writePhaseReached ?? "ERROR",
+          inTxAtError: summary?.inTxAtError ?? false,
+          lastSqlOp: summary?.lastSqlOp ?? "unknown",
         });
         return;
       }
@@ -160,6 +166,9 @@ export default async function handler(req: any, res: any) {
         errorCount: summary?.errorCount ?? 0,
         firstError: summary?.firstError ?? null,
         batchCount: summary?.batchCount ?? 0,
+        writePhaseReached: summary?.writePhaseReached ?? "ERROR",
+        inTxAtError: summary?.inTxAtError ?? false,
+        lastSqlOp: summary?.lastSqlOp ?? "unknown",
       });
       return;
     }

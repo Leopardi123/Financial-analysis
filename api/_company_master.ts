@@ -45,6 +45,9 @@ export type RefreshCompaniesSummary = {
   batchCount: number;
   errorCount: number;
   firstError: { message: string; code?: string; stackPreview?: string } | null;
+  writePhaseReached: "FETCH_OK" | "MAP_OK" | "BEGIN_OK" | "UPSERT_OK" | "COMMIT_OK" | "ROLLBACK_SKIPPED" | "ROLLBACK_OK" | "ERROR";
+  inTxAtError: boolean;
+  lastSqlOp: string;
   durationMs: number;
 };
 
@@ -220,6 +223,9 @@ export async function refreshCompaniesMaster() {
     batchCount: 0,
     errorCount: 0,
     firstError: null,
+    writePhaseReached: "FETCH_OK",
+    inTxAtError: false,
+    lastSqlOp: "none",
     durationMs: 0,
   };
 
@@ -233,11 +239,17 @@ export async function refreshCompaniesMaster() {
   };
 
   const chunkSize = 1000;
+  summary.writePhaseReached = "MAP_OK";
   for (let index = 0; index < normalizedRows.length; index += chunkSize) {
     const chunk = normalizedRows.slice(index, index + chunkSize);
     summary.batchCount += 1;
+    let inTx = false;
+    summary.lastSqlOp = "BEGIN";
     await execute("BEGIN");
+    inTx = true;
+    summary.writePhaseReached = "BEGIN_OK";
     try {
+      summary.lastSqlOp = "UPSERT batch";
       const results = await batch(
         chunk.map((row) => ({
           sql: `INSERT INTO companies (symbol, name, exchange, type, normalized_name)
@@ -250,10 +262,16 @@ export async function refreshCompaniesMaster() {
           args: [row.symbol, row.name, row.exchange, row.type, row.normalized_name],
         }))
       );
+      summary.writePhaseReached = "UPSERT_OK";
       summary.rowsAffectedTotal += results.reduce((acc, result) => acc + readRowsAffected(result), 0);
+      summary.lastSqlOp = "COMMIT";
       await execute("COMMIT");
+      inTx = false;
+      summary.writePhaseReached = "COMMIT_OK";
       summary.upsertedCount += chunk.length;
     } catch (error) {
+      summary.writePhaseReached = "ERROR";
+      summary.inTxAtError = inTx;
       summary.errorCount += 1;
       if (!summary.firstError) {
         const typed = error as Error & { code?: string };
@@ -263,7 +281,17 @@ export async function refreshCompaniesMaster() {
           stackPreview: typed.stack?.split("\n").slice(0, 3).join("\n"),
         };
       }
-      await execute("ROLLBACK");
+      if (inTx) {
+        summary.lastSqlOp = "ROLLBACK";
+        try {
+          await execute("ROLLBACK");
+          summary.writePhaseReached = "ROLLBACK_OK";
+        } catch {
+          summary.writePhaseReached = "ERROR";
+        }
+      } else {
+        summary.writePhaseReached = "ROLLBACK_SKIPPED";
+      }
       const wrapped = new Error("companies master upsert failed");
       (wrapped as Error & { cause?: unknown; diagnostics?: RefreshCompaniesSummary }).cause = error;
       (wrapped as Error & { cause?: unknown; diagnostics?: RefreshCompaniesSummary }).diagnostics = summary;
