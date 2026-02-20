@@ -20,6 +20,25 @@ export type CompanyMasterRow = {
 export type RefreshCompaniesSummary = {
   endpointUsed: "stable" | "legacy";
   fetchedCount: number;
+  rawCount: number;
+  rawSampleKeys: string[];
+  rawSample: {
+    symbol: string | null;
+    name: string | null;
+    exchange: string | null;
+    exchangeShortName: string | null;
+    type: string | null;
+    stockExchange: string | null;
+    isActivelyTrading: string | number | boolean | null;
+  } | null;
+  mappedCount: number;
+  droppedCounts: {
+    droppedMissingSymbol: number;
+    droppedMissingName: number;
+    droppedWrongType: number;
+    droppedMissingExchange: number;
+    droppedOther: number;
+  };
   attemptedUpserts: number;
   upsertedCount: number;
   rowsAffectedTotal: number;
@@ -52,27 +71,27 @@ function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
   const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
   const name = typeof row.name === "string" ? row.name.trim() : "";
   const exchangeCandidate =
-    typeof row.exchange === "string"
-      ? row.exchange
-      : typeof row.exchangeShortName === "string"
-        ? row.exchangeShortName
+    typeof row.exchangeShortName === "string"
+      ? row.exchangeShortName
+      : typeof row.stockExchange === "string"
+        ? row.stockExchange
+        : typeof row.exchange === "string"
+          ? row.exchange
         : null;
   const type = typeof row.type === "string" ? row.type.trim().toLowerCase() : null;
 
-  if (!symbol || !name) {
+  if (!symbol) {
     return null;
   }
 
-  if (type && ["etf", "fund", "index", "crypto", "forex"].some((token) => type.includes(token))) {
-    return null;
-  }
+  const finalName = name || symbol;
 
   return {
     symbol,
-    name,
+    name: finalName,
     exchange: exchangeCandidate ? exchangeCandidate.trim() : null,
     type,
-    normalized_name: normalizeName(name),
+    normalized_name: normalizeName(finalName),
   };
 }
 
@@ -130,11 +149,71 @@ export async function refreshCompaniesMaster() {
   }
 
   const { endpointUsed, rows } = await fetchCompanyRows(apiKey);
-  const normalizedRows = rows.map(toCompanyRow).filter((row): row is CompanyMasterRow => row !== null);
+  const rawSampleRow = rows[0] as RawCompany | undefined;
+  const rawSampleKeys = rawSampleRow ? Object.keys(rawSampleRow).slice(0, 30) : [];
+  const rawSample = rawSampleRow
+    ? {
+      symbol: typeof rawSampleRow.symbol === "string" ? rawSampleRow.symbol : null,
+      name: typeof rawSampleRow.name === "string" ? rawSampleRow.name : null,
+      exchange: typeof rawSampleRow.exchange === "string" ? rawSampleRow.exchange : null,
+      exchangeShortName: typeof rawSampleRow.exchangeShortName === "string" ? rawSampleRow.exchangeShortName : null,
+      type: typeof rawSampleRow.type === "string" ? rawSampleRow.type : null,
+      stockExchange: typeof rawSampleRow.stockExchange === "string" ? rawSampleRow.stockExchange : null,
+      isActivelyTrading:
+        typeof rawSampleRow.isActivelyTrading === "string" ||
+          typeof rawSampleRow.isActivelyTrading === "number" ||
+          typeof rawSampleRow.isActivelyTrading === "boolean"
+          ? rawSampleRow.isActivelyTrading
+          : null,
+    }
+    : null;
+
+  const droppedCounts = {
+    droppedMissingSymbol: 0,
+    droppedMissingName: 0,
+    droppedWrongType: 0,
+    droppedMissingExchange: 0,
+    droppedOther: 0,
+  };
+
+  const normalizedRows: CompanyMasterRow[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") {
+      droppedCounts.droppedOther += 1;
+      continue;
+    }
+
+    const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
+    if (!symbol) {
+      droppedCounts.droppedMissingSymbol += 1;
+      continue;
+    }
+
+    if (typeof row.name !== "string" || row.name.trim().length === 0) {
+      droppedCounts.droppedMissingName += 1;
+    }
+
+    const mapped = toCompanyRow(row);
+    if (!mapped) {
+      droppedCounts.droppedOther += 1;
+      continue;
+    }
+
+    if (!mapped.exchange) {
+      droppedCounts.droppedMissingExchange += 1;
+    }
+
+    normalizedRows.push(mapped);
+  }
 
   const summary: RefreshCompaniesSummary = {
     endpointUsed,
     fetchedCount: rows.length,
+    rawCount: rows.length,
+    rawSampleKeys,
+    rawSample,
+    mappedCount: normalizedRows.length,
+    droppedCounts,
     attemptedUpserts: normalizedRows.length,
     upsertedCount: 0,
     rowsAffectedTotal: 0,
