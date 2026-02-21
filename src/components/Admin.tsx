@@ -27,6 +27,7 @@ type MaterializationProgress = {
   done: boolean;
   inserted?: number;
   processedInRun?: number;
+  processedTotal?: number;
   totalToProcess?: number;
   remaining?: number;
   currentOffset?: number;
@@ -47,6 +48,7 @@ type RefreshPayload = {
     done: boolean;
     inserted?: number;
     processedInRun?: number;
+    processedTotal?: number;
     totalToProcess?: number;
     remaining?: number;
     currentOffset?: number;
@@ -224,12 +226,14 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     const total = Number(progress.totalToProcess ?? 0);
     const remaining = Number(progress.remaining ?? Math.max(0, total - (nextOffset ?? currentOffset)));
     const processedInRun = Number(progress.processedInRun ?? progress.inserted ?? 0);
-    const computedProcessed = total > 0 ? Math.max(0, total - remaining) : Math.max(0, nextOffset ?? currentOffset);
+    const processedTotal = Number(
+      progress.processedTotal ?? (total > 0 ? Math.max(0, total - remaining) : Math.max(0, nextOffset ?? currentOffset))
+    );
 
     setTickerCurrentOffset(currentOffset);
     setTickerNextOffset(progress.done ? null : nextOffset);
     setTickerTotalToProcess(total);
-    setTickerProcessedTotal(computedProcessed);
+    setTickerProcessedTotal(Math.max(0, processedTotal));
     setTickerLastBatchProcessed(processedInRun);
   }
 
@@ -345,9 +349,10 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     if (payload?.materialization) {
       applyMaterialization(payload.materialization);
       const done = Boolean(payload.materialization.done);
+      const processedTotal = Number(payload.materialization.processedTotal ?? payload.materialization.nextOffset ?? 0);
       const processed = Number(payload.materialization.totalToProcess ?? 0) > 0
-        ? `${tickerProcessedTotal} / ${payload.materialization.totalToProcess}`
-        : `${tickerProcessedTotal}`;
+        ? `${processedTotal} / ${payload.materialization.totalToProcess}`
+        : `${processedTotal}`;
       setTickerAutoMessage(done ? "Materialization complete." : `Materializing ${processed}`);
       return payload;
     }

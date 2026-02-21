@@ -14,6 +14,10 @@ const PERIODS: PeriodType[] = ["fy", "q"];
 const MAX_POINTS_PER_RUN = 10000;
 const REPORT_BATCH_SIZE = 30;
 
+function targetKey(statement: StatementType, period: PeriodType) {
+  return `${statement}:${period}`;
+}
+
 function toFiscalDateCutoffIso() {
   const now = new Date();
   const cutoff = new Date(now.getTime());
@@ -231,18 +235,23 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    const targetCounts = new Map<string, number>();
     for (const target of targets) {
-      const offset =
-        cursor && cursor.statement === target.statement && cursor.period === target.period
-          ? cursor.offset
-          : 0;
       const countRows = await query(
         `SELECT COUNT(*) as n
          FROM ${tables.financialReports}
          WHERE company_id = ? AND statement = ? AND period = ? AND fiscal_date >= ?`,
         [companyId, target.statement, target.period, cutoffDate]
       );
-      const totalReports = Number(countRows[0]?.n ?? 0);
+      targetCounts.set(targetKey(target.statement, target.period), Number(countRows[0]?.n ?? 0));
+    }
+
+    for (const target of targets) {
+      const offset =
+        cursor && cursor.statement === target.statement && cursor.period === target.period
+          ? cursor.offset
+          : 0;
+      const totalReports = targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
       const { inserted, nextOffset, done: targetDone, newestFiscalDateProcessed } = await materializeReports({
         companyId,
         statement: target.statement,
@@ -298,6 +307,32 @@ export default async function handler(req: any, res: any) {
       );
     }
 
+    const totalToProcess = targets.reduce(
+      (acc, target) => acc + (targetCounts.get(targetKey(target.statement, target.period)) ?? 0),
+      0
+    );
+    const cursorIndex = nextCursor
+      ? targets.findIndex(
+        (target) => target.statement === nextCursor.statement && target.period === nextCursor.period
+      )
+      : -1;
+    const processedTotal = done
+      ? totalToProcess
+      : targets.reduce((acc, target, index) => {
+        const count = targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
+        if (cursorIndex < 0) {
+          return acc;
+        }
+        if (index < cursorIndex) {
+          return acc + count;
+        }
+        if (index === cursorIndex && nextCursor) {
+          return acc + Math.max(0, Math.min(nextCursor.offset, count));
+        }
+        return acc;
+      }, 0);
+    const remaining = Math.max(0, totalToProcess - processedTotal);
+
     res.status(200).json({
       ok: true,
       ticker,
@@ -308,12 +343,13 @@ export default async function handler(req: any, res: any) {
         done,
         inserted: materialized,
         processedInRun: materialized,
+        processedTotal,
         statement: currentTargetProgress?.statement ?? null,
         period: currentTargetProgress?.period ?? null,
         currentOffset: currentTargetProgress?.currentOffset ?? (cursor?.offset ?? 0),
         nextOffset: currentTargetProgress?.nextOffset ?? nextCursor?.offset ?? null,
-        totalToProcess: currentTargetProgress?.totalReports ?? 0,
-        remaining: currentTargetProgress?.remainingReports ?? 0,
+        totalToProcess,
+        remaining,
       },
     });
   } catch (error) {
@@ -329,6 +365,7 @@ export default async function handler(req: any, res: any) {
         done: false,
         inserted: 0,
         processedInRun: 0,
+        processedTotal: requestCursor?.offset ?? 0,
         statement: requestCursor?.statement ?? null,
         period: requestCursor?.period ?? null,
         currentOffset: requestCursor?.offset ?? 0,
