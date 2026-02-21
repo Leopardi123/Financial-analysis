@@ -1,5 +1,5 @@
 import { assertCronSecret } from "../../../../api/_auth.js";
-import { batch, execute, query } from "../../../../api/_db.js";
+import { batch, execute, getDb, query } from "../../../../api/_db.js";
 import {
   fetchStatement,
   PeriodType,
