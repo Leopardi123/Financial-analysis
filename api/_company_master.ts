@@ -1,6 +1,5 @@
 import { batch, query } from "./_db.js";
 
-const STABLE_URL = "https://financialmodelingprep.com/stable/stock-list";
 const LEGACY_URL = "https://financialmodelingprep.com/api/v3/stock/list";
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const SUFFIX_TOKENS = new Set([
@@ -18,7 +17,7 @@ export type CompanyMasterRow = {
 };
 
 export type RefreshCompaniesSummary = {
-  endpointUsed: "stable" | "legacy";
+  endpointUsed: "legacy";
   endpointPath: string;
   fetchedCount: number;
   rawCount: number;
@@ -55,6 +54,18 @@ export type RefreshCompaniesSummary = {
   inTxAtError: boolean;
   lastSqlOp: string;
   durationMs: number;
+  cursor: {
+    nextOffset: number | null;
+    processedInRun: number;
+    totalToProcess: number;
+    done: boolean;
+  };
+};
+
+export type RefreshCompaniesOptions = {
+  cursorOffset?: number;
+  maxRowsPerRun?: number;
+  maxDurationMs?: number;
 };
 
 export function normalizeName(name: string): string {
@@ -85,16 +96,24 @@ function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
   const nameFromCompany = typeof row.company === "string" ? row.company.trim() : "";
   const nameFromCompanySnake = typeof row.company_name === "string" ? row.company_name.trim() : "";
   const name = nameFromName || nameFromCompanyName || nameFromCompany || nameFromCompanySnake;
-  const exchangeCandidate =
-    typeof row.exchangeShortName === "string"
-      ? row.exchangeShortName
-      : typeof row.exchangeName === "string"
-        ? row.exchangeName
-      : typeof row.stockExchange === "string"
-        ? row.stockExchange
-        : typeof row.exchange === "string"
-          ? row.exchange
-        : null;
+  const pickString = (...values: unknown[]) => {
+    for (const value of values) {
+      if (typeof value !== "string") {
+        continue;
+      }
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+    return null;
+  };
+  const exchangeCandidate = pickString(
+    row.exchangeShortName,
+    row.exchange,
+    row.exchangeName,
+    row.stockExchange
+  );
   const type = typeof row.type === "string" && row.type.trim().length > 0
     ? row.type.trim().toLowerCase()
     : "stock";
@@ -104,7 +123,7 @@ function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
   }
 
   const finalName = name || symbol;
-  const finalExchange = exchangeCandidate ? exchangeCandidate.trim() : "UNKNOWN";
+  const finalExchange = exchangeCandidate ?? "UNKNOWN";
 
   return {
     symbol,
@@ -141,22 +160,12 @@ async function fetchWithRetry(url: string) {
 }
 
 async function fetchCompanyRows(apiKey: string) {
-  const stableUrl = `${STABLE_URL}?apikey=${encodeURIComponent(apiKey)}`;
-  const stableResponse = await fetchWithRetry(stableUrl);
-  if (stableResponse.ok) {
-    const payload = (await stableResponse.json()) as RawCompany[];
-    return {
-      endpointUsed: "stable" as const,
-      endpointPath: STABLE_URL,
-      rows: Array.isArray(payload) ? payload : [],
-    };
-  }
-
   const legacyUrl = `${LEGACY_URL}?apikey=${encodeURIComponent(apiKey)}`;
   const legacyResponse = await fetchWithRetry(legacyUrl);
   if (!legacyResponse.ok) {
-    throw new Error(`FMP company list failed (${legacyResponse.status})`);
+    throw new Error(`FMP company list failed at /api/v3/stock/list (${legacyResponse.status})`);
   }
+
   const payload = (await legacyResponse.json()) as RawCompany[];
   return {
     endpointUsed: "legacy" as const,
@@ -165,14 +174,37 @@ async function fetchCompanyRows(apiKey: string) {
   };
 }
 
-export async function refreshCompaniesMaster() {
+export async function refreshCompaniesMaster(options: RefreshCompaniesOptions = {}) {
   const startedAt = Date.now();
+  const stageStartedAt = Date.now();
   const apiKey = process.env.FMP_API_KEY;
   if (!apiKey) {
     throw new Error("FMP_API_KEY missing");
   }
 
+  const cursorOffset = Number.isFinite(options.cursorOffset) ? Math.max(0, Number(options.cursorOffset)) : 0;
+  const maxRowsPerRun = Number.isFinite(options.maxRowsPerRun)
+    ? Math.max(1, Math.floor(Number(options.maxRowsPerRun)))
+    : Number.POSITIVE_INFINITY;
+  const maxDurationMs = Number.isFinite(options.maxDurationMs)
+    ? Math.max(1, Math.floor(Number(options.maxDurationMs)))
+    : Number.POSITIVE_INFINITY;
+
+  console.info("[companies-refresh]", {
+    stage: "start",
+    ts: new Date().toISOString(),
+    cursorOffset,
+    maxRowsPerRun,
+    maxDurationMs,
+  });
+
   const { endpointUsed, endpointPath, rows } = await fetchCompanyRows(apiKey);
+  console.info("[companies-refresh]", {
+    stage: "fetch_done",
+    elapsedMs: Date.now() - stageStartedAt,
+    fetchedCount: rows.length,
+    endpointUsed,
+  });
   const rawSampleRow = rows[0] as RawCompany | undefined;
   const rawSampleKeys = rawSampleRow ? Object.keys(rawSampleRow).slice(0, 30) : [];
   const rawSample = rawSampleRow
@@ -257,6 +289,12 @@ export async function refreshCompaniesMaster() {
     inTxAtError: false,
     lastSqlOp: "none",
     durationMs: 0,
+    cursor: {
+      nextOffset: null,
+      processedInRun: 0,
+      totalToProcess: 0,
+      done: true,
+    },
   };
 
   const readRowsAffected = (result: unknown) => {
@@ -269,9 +307,21 @@ export async function refreshCompaniesMaster() {
   };
 
   const chunkSize = 300;
+  let nextOffset = Math.min(cursorOffset, normalizedRows.length);
+  const runStartedAt = Date.now();
+  summary.cursor.totalToProcess = normalizedRows.length;
   summary.writePhaseReached = "MAP_OK";
-  for (let index = 0; index < normalizedRows.length; index += chunkSize) {
+  for (let index = nextOffset; index < normalizedRows.length; index += chunkSize) {
+    const elapsed = Date.now() - runStartedAt;
+    if (summary.cursor.processedInRun >= maxRowsPerRun || elapsed >= maxDurationMs) {
+      nextOffset = index;
+      break;
+    }
     const chunk = normalizedRows.slice(index, index + chunkSize);
+    if (chunk.length === 0) {
+      nextOffset = index;
+      break;
+    }
     summary.batchCount += 1;
     try {
       summary.lastSqlOp = "UPSERT batch";
@@ -292,6 +342,15 @@ export async function refreshCompaniesMaster() {
       summary.lastSqlOp = "WRITE batch";
       summary.writePhaseReached = "WRITE_OK";
       summary.upsertedCount += chunk.length;
+      summary.cursor.processedInRun += chunk.length;
+      nextOffset = index + chunk.length;
+      console.info("[companies-refresh]", {
+        stage: "upsert_batch_done",
+        batch: summary.batchCount,
+        chunkSize: chunk.length,
+        nextOffset,
+        elapsedRunMs: Date.now() - runStartedAt,
+      });
     } catch (error) {
       summary.writePhaseReached = "ERROR";
       summary.inTxAtError = false;
@@ -310,6 +369,18 @@ export async function refreshCompaniesMaster() {
       throw wrapped;
     }
   }
+
+  summary.cursor.nextOffset = nextOffset >= normalizedRows.length ? null : nextOffset;
+  summary.cursor.done = summary.cursor.nextOffset === null;
+
+  console.info("[companies-refresh]", {
+    stage: "complete",
+    done: summary.cursor.done,
+    processedInRun: summary.cursor.processedInRun,
+    totalToProcess: summary.cursor.totalToProcess,
+    nextOffset: summary.cursor.nextOffset,
+    durationMs: Date.now() - startedAt,
+  });
 
   summary.durationMs = Date.now() - startedAt;
   return summary;

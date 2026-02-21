@@ -2,12 +2,12 @@ import { assertCronSecret } from "../../../../api/_auth.js";
 import { batch, execute, query } from "../../../../api/_db.js";
 import {
   fetchStatement,
-  normalizeFinancialPoints,
   PeriodType,
   StatementType,
   requireFmpApiKey,
 } from "../../../../api/_fmp.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { getCoverageCounts, materializeReports, toFiscalDateCutoffIso } from "../../materialization/materializeReportsCore.js";
 
 const STATEMENTS: StatementType[] = ["balance", "income", "cashflow"];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -72,95 +72,6 @@ async function upsertReports(
   return statements.length;
 }
 
-async function materializeReports(params: {
-  companyId: number;
-  statement: StatementType;
-  period: PeriodType;
-  offset: number;
-  limit: number;
-  maxPoints: number;
-}) {
-  const latestRows = await query(
-    `SELECT fiscal_date
-     FROM ${tables.financialReports}
-     WHERE company_id = ? AND statement = ? AND period = ?
-     ORDER BY fiscal_date DESC
-     LIMIT 1`,
-    [params.companyId, params.statement, params.period]
-  );
-  const latestFiscalDate = String(latestRows[0]?.fiscal_date ?? "");
-
-  const rows = await query(
-    `SELECT fiscal_date, data_json, fetched_at
-     FROM ${tables.financialReports}
-     WHERE company_id = ? AND statement = ? AND period = ?
-     ORDER BY fiscal_date DESC
-     LIMIT ? OFFSET ?`,
-    [params.companyId, params.statement, params.period, params.limit, params.offset]
-  );
-
-  let inserted = 0;
-  let newestFiscalDateProcessed = false;
-  let batchStatements: Array<{ sql: string; args: Array<string | number | null> }> = [];
-
-  for (const row of rows) {
-    const report = JSON.parse(String(row.data_json ?? "{}")) as Record<string, unknown>;
-    const fiscalDate = String(row.fiscal_date ?? "");
-    const fetchedAt = String(row.fetched_at ?? new Date().toISOString());
-    if (!fiscalDate) {
-      continue;
-    }
-    if (latestFiscalDate && fiscalDate === latestFiscalDate) {
-      newestFiscalDateProcessed = true;
-    }
-
-    const points = normalizeFinancialPoints(
-      String(params.companyId),
-      params.statement,
-      params.period,
-      [report]
-    );
-
-    for (const point of points) {
-      batchStatements.push({
-        sql: `INSERT INTO ${tables.financialPoints}
-          (company_id, statement, period, fiscal_date, field, value, fetched_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(company_id, statement, period, fiscal_date, field)
-          DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
-        args: [
-          params.companyId,
-          point.statement,
-          point.period,
-          fiscalDate,
-          point.field,
-          point.value,
-          fetchedAt,
-        ],
-      });
-      inserted += 1;
-      if (batchStatements.length >= 400) {
-        await batch(batchStatements);
-        batchStatements = [];
-      }
-      if (inserted >= params.maxPoints) {
-        break;
-      }
-    }
-    if (inserted >= params.maxPoints) {
-      break;
-    }
-  }
-
-  if (batchStatements.length > 0) {
-    await batch(batchStatements);
-  }
-
-  const nextOffset = params.offset + rows.length;
-  const done = rows.length < params.limit && inserted < params.maxPoints;
-  return { inserted, nextOffset, done, newestFiscalDateProcessed };
-}
-
 export default async function handler(req: any, res: any) {
   try {
     assertCronSecret(req);
@@ -215,6 +126,8 @@ export default async function handler(req: any, res: any) {
       queue.push({ companyId: companyMap.get(ticker) ?? 0, ticker, period: "fy" });
     }
 
+    const cutoffDate = toFiscalDateCutoffIso();
+
     const processed: Array<{
       ticker: string;
       period: PeriodType;
@@ -243,6 +156,14 @@ export default async function handler(req: any, res: any) {
         }
       }
 
+      console.info("[company-refresh]", {
+        stage: "cron_materialization_path",
+        invokedFunction: "materializeReportsCore",
+        cutoffEnabled: true,
+        preflightEnabled: true,
+        pointsTable: tables.financialPoints,
+      });
+
       let remaining = MAX_POINTS_PER_RUN;
       const materialization: Array<{
         statement: StatementType;
@@ -258,6 +179,34 @@ export default async function handler(req: any, res: any) {
           materialization.push({ statement, inserted: 0, done: false, cursor: 0 });
           continue;
         }
+        const { reportsDatesCount, pointsDatesCount } = await getCoverageCounts({
+          companyId: item.companyId,
+          statement,
+          period: item.period,
+          cutoffDate,
+        });
+        console.info("[company-refresh]", {
+          stage: "materialization_target_preflight",
+          statement,
+          period: item.period,
+          reportsDatesCount,
+          pointsDatesCount,
+          cutoffDate,
+        });
+
+        if (reportsDatesCount === 0 || pointsDatesCount >= reportsDatesCount) {
+          console.info("[company-refresh]", {
+            stage: "materialization_target_skipped",
+            statement,
+            period: item.period,
+            reportsDatesCount,
+            pointsDatesCount,
+            reason: reportsDatesCount === 0 ? "no_reports" : "date_coverage_reached",
+          });
+          materialization.push({ statement, inserted: 0, done: true, cursor: 0 });
+          continue;
+        }
+
         const { inserted, nextOffset, done, newestFiscalDateProcessed: statementNewestProcessed } = await materializeReports({
           companyId: item.companyId,
           statement,
@@ -265,6 +214,7 @@ export default async function handler(req: any, res: any) {
           offset: 0,
           limit: REPORT_BATCH_SIZE,
           maxPoints: remaining,
+          cutoffDate,
         });
         remaining -= inserted;
         periodComplete = periodComplete && done;
