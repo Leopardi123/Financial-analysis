@@ -17,6 +17,7 @@ const LOCK_TICKER = "__cron_refresh_lock__";
 const LOCK_PERIOD = "lock";
 const LOCK_STATEMENT = "refresh";
 const PERIODS: PeriodType[] = ["q", "fy"];
+const BOOTSTRAP_REPORT_LIMIT = 12;
 
 function isCronAuthorized(req: { headers: Record<string, string | string[] | undefined> }) {
   const secret = process.env.CRON_SECRET;
@@ -85,6 +86,17 @@ async function logFetch(
      VALUES (?, ?, ?, ?, ?, ?)`,
     [new Date().toISOString(), ticker, period, statement, ok ? 1 : 0, error ?? null]
   );
+}
+
+async function hasAnyReports(companyId: number, period: PeriodType, statement: StatementType) {
+  const rows = await query(
+    `SELECT 1
+     FROM ${tables.financialReports}
+     WHERE company_id = ? AND period = ? AND statement = ?
+     LIMIT 1`,
+    [companyId, period, statement]
+  );
+  return rows.length > 0;
 }
 
 async function upsertReports(
@@ -224,9 +236,27 @@ export default async function handler(req: any, res: any) {
 
       for (const statement of STATEMENTS) {
         try {
-          const rows = await fetchStatement(item.ticker, statement, item.period);
-          const latestIncoming = String(rows[0]?.date ?? "");
+          const reportExists = await hasAnyReports(item.companyId, item.period, statement);
           const latestStored = latestByStatement.get(statement) ?? "";
+
+          if (!reportExists) {
+            const bootstrapRows = await fetchStatement(item.ticker, statement, item.period, {
+              limit: BOOTSTRAP_REPORT_LIMIT,
+            });
+            if (bootstrapRows.length === 0) {
+              latestChecks[statement] = "no_fmp_data";
+              results[statement] = 0;
+              continue;
+            }
+            const inserted = await upsertReports(item.companyId, item.ticker, statement, item.period, bootstrapRows);
+            latestChecks[statement] = "bootstrap_seeded";
+            changedStatements.add(statement);
+            results[statement] = inserted;
+            continue;
+          }
+
+          const latestOnly = await fetchStatement(item.ticker, statement, item.period, { limit: 1 });
+          const latestIncoming = String(latestOnly[0]?.date ?? "");
           if (!latestIncoming) {
             latestChecks[statement] = "no_fmp_data";
             results[statement] = 0;
@@ -238,6 +268,7 @@ export default async function handler(req: any, res: any) {
             continue;
           }
 
+          const rows = await fetchStatement(item.ticker, statement, item.period);
           const inserted = await upsertReports(item.companyId, item.ticker, statement, item.period, rows);
           latestChecks[statement] = "new_report_detected";
           changedStatements.add(statement);

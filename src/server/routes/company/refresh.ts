@@ -11,6 +11,7 @@ import { getCoverageCounts, materializeReports, toFiscalDateCutoffIso } from "..
 
 const STATEMENTS: StatementType[] = ["balance", "income", "cashflow"];
 const PERIODS: PeriodType[] = ["fy", "q"];
+const BOOTSTRAP_REPORT_LIMIT = 12;
 const MAX_POINTS_PER_RUN = 10000;
 const REPORT_BATCH_SIZE = 30;
 
@@ -53,6 +54,17 @@ async function logFetch(
      VALUES (?, ?, ?, ?, ?, ?)`,
     [new Date().toISOString(), ticker, period, statement, ok ? 1 : 0, error ?? null]
   );
+}
+
+async function hasAnyReports(companyId: number, period: PeriodType, statement: StatementType) {
+  const rows = await query(
+    `SELECT 1
+     FROM ${tables.financialReports}
+     WHERE company_id = ? AND period = ? AND statement = ?
+     LIMIT 1`,
+    [companyId, period, statement]
+  );
+  return rows.length > 0;
 }
 
 async function upsertReports(
@@ -126,7 +138,10 @@ export default async function handler(req: any, res: any) {
       for (const period of PERIODS) {
         for (const statement of STATEMENTS) {
           try {
-            const rows = await fetchStatement(ticker, statement, period);
+            const reportExists = await hasAnyReports(companyId, period, statement);
+            const rows = await fetchStatement(ticker, statement, period, {
+              limit: reportExists ? undefined : BOOTSTRAP_REPORT_LIMIT,
+            });
             const inserted = await upsertReports(companyId, ticker, statement, period, rows);
             rawSummary[`${statement}_${period}`] = inserted;
           } catch (error) {

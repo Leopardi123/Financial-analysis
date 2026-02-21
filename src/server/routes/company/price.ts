@@ -1,4 +1,4 @@
-import { requireFmpApiKey } from "../../../../api/_fmp.js";
+import { fetchApiV3Json, requireFmpApiKey } from "../../../../api/_fmp.js";
 
 type PricePoint = {
   date: string;
@@ -47,8 +47,7 @@ function calculateSma(values: number[], window: number) {
 
 export default async function handler(req: any, res: any) {
   try {
-    const apiKey = requireFmpApiKey();
-    if (!apiKey) {
+    if (!requireFmpApiKey()) {
       res.status(500).json({ ok: false, error: "FMP_API_KEY missing" });
       return;
     }
@@ -59,16 +58,10 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${encodeURIComponent(
-      ticker
-    )}?serietype=line&apikey=${apiKey}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      res.status(502).json({ ok: false, error: `FMP price request failed (${response.status})` });
-      return;
-    }
-
-    const payload = (await response.json()) as { historical?: Array<Record<string, unknown>> };
+    const payload = await fetchApiV3Json<{ historical?: Array<Record<string, unknown>> }>(
+      `historical-price-full/${encodeURIComponent(ticker)}`,
+      { serietype: "line" }
+    );
     const points: PricePoint[] = (payload.historical ?? [])
       .filter((row) => typeof row?.date === "string" && typeof row?.close === "number")
       .map((row) => ({

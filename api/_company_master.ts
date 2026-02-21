@@ -1,6 +1,6 @@
 import { batch, query } from "./_db.js";
+import { fetchApiV3Json } from "./_fmp.js";
 
-const LEGACY_URL = "https://financialmodelingprep.com/api/v3/stock/list";
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const SUFFIX_TOKENS = new Set([
   "inc", "corp", "corporation", "ltd", "limited", "plc", "sa", "ag", "ab", "asa", "nv", "oyj", "spa", "sarl", "llc", "co", "company",
@@ -138,18 +138,21 @@ async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchWithRetry(url: string) {
+async function fetchWithRetry(path: string) {
   let attempt = 0;
   while (attempt < 5) {
     attempt += 1;
     try {
-      const response = await fetch(url);
-      if (!response.ok && RETRYABLE_STATUSES.has(response.status)) {
+      const response = await fetchApiV3Json<RawCompany[]>(path);
+      return response;
+    } catch (error) {
+      const message = (error as Error).message;
+      const statusMatch = message.match(/:\s(\d{3})$/);
+      const status = statusMatch ? Number(statusMatch[1]) : null;
+      if (status && RETRYABLE_STATUSES.has(status) && attempt < 5) {
         await sleep(250 * attempt);
         continue;
       }
-      return response;
-    } catch {
       if (attempt >= 5) {
         throw new Error("Network error while fetching company list");
       }
@@ -159,17 +162,11 @@ async function fetchWithRetry(url: string) {
   throw new Error("Failed to fetch company list after retries");
 }
 
-async function fetchCompanyRows(apiKey: string) {
-  const legacyUrl = `${LEGACY_URL}?apikey=${encodeURIComponent(apiKey)}`;
-  const legacyResponse = await fetchWithRetry(legacyUrl);
-  if (!legacyResponse.ok) {
-    throw new Error(`FMP company list failed at /api/v3/stock/list (${legacyResponse.status})`);
-  }
-
-  const payload = (await legacyResponse.json()) as RawCompany[];
+async function fetchCompanyRows() {
+  const payload = await fetchWithRetry("stock/list");
   return {
     endpointUsed: "legacy" as const,
-    endpointPath: LEGACY_URL,
+    endpointPath: "https://financialmodelingprep.com/api/v3/stock/list",
     rows: Array.isArray(payload) ? payload : [],
   };
 }
@@ -198,7 +195,7 @@ export async function refreshCompaniesMaster(options: RefreshCompaniesOptions = 
     maxDurationMs,
   });
 
-  const { endpointUsed, endpointPath, rows } = await fetchCompanyRows(apiKey);
+  const { endpointUsed, endpointPath, rows } = await fetchCompanyRows();
   console.info("[companies-refresh]", {
     stage: "fetch_done",
     elapsedMs: Date.now() - stageStartedAt,
