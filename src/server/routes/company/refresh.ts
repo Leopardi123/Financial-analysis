@@ -328,12 +328,14 @@ async function materializeReports(params: {
     elapsedMs: Date.now() - runStartedAt,
   });
 
-  const nextOffset = params.offset + rows.length;
-  const done = rows.length < params.limit && inserted < params.maxPoints;
+  const sourceRowsLen = rows.length;
+  const nextOffset = params.offset + sourceRowsLen;
+  const done = sourceRowsLen === 0 || (sourceRowsLen < params.limit && inserted < params.maxPoints);
   return {
     inserted,
     rowsAttempted,
     rowsWritten,
+    sourceRowsLen,
     nextOffset,
     done,
     newestFiscalDateProcessed,
@@ -433,7 +435,15 @@ export default async function handler(req: any, res: any) {
           ? cursor.offset
           : 0;
       const totalReports = targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
-      const { inserted, rowsWritten, rowsAttempted, nextOffset, done: targetDone, newestFiscalDateProcessed } = await materializeReports({
+      const {
+        inserted,
+        rowsWritten,
+        rowsAttempted,
+        sourceRowsLen,
+        nextOffset,
+        done: targetDone,
+        newestFiscalDateProcessed,
+      } = await materializeReports({
         companyId,
         statement: target.statement,
         period: target.period,
@@ -442,13 +452,34 @@ export default async function handler(req: any, res: any) {
         maxPoints: MAX_POINTS_PER_RUN - materialized,
         cutoffDate,
       });
+
+      let resolvedNextOffset = nextOffset;
+      let resolvedTargetDone = targetDone;
+      if (!resolvedTargetDone && resolvedNextOffset <= offset) {
+        console.info("[company-refresh]", {
+          stage: "materialization_no_progress_risk",
+          statement: target.statement,
+          period: target.period,
+          localOffsetCurrent: offset,
+          computedNext: resolvedNextOffset,
+          sourceRowsLen,
+          rowsAttempted,
+          rowsWritten,
+        });
+        if (sourceRowsLen === 0) {
+          resolvedTargetDone = true;
+        } else {
+          resolvedNextOffset = offset + sourceRowsLen;
+        }
+      }
+
       currentTargetProgress = {
         statement: target.statement,
         period: target.period,
         currentOffset: offset,
-        nextOffset,
+        nextOffset: resolvedNextOffset,
         totalReports,
-        remainingReports: Math.max(0, totalReports - nextOffset),
+        remainingReports: Math.max(0, totalReports - resolvedNextOffset),
       };
       periodStatus[target.period].seen = true;
       periodStatus[target.period].newestProcessed =
@@ -457,17 +488,17 @@ export default async function handler(req: any, res: any) {
       materialized += inserted;
       rowsWrittenInRun += rowsWritten;
       rowsWrittenInRunAttempted += rowsAttempted;
-      if (!targetDone) {
+      if (!resolvedTargetDone) {
         periodStatus[target.period].complete = false;
         periodStatus[target.period].newestProcessed = false;
         done = false;
-        nextCursor = { statement: target.statement, period: target.period, offset: nextOffset };
+        nextCursor = { statement: target.statement, period: target.period, offset: resolvedNextOffset };
         break;
       }
       if (materialized >= MAX_POINTS_PER_RUN || Date.now() - startTime > 45000) {
         periodStatus[target.period].complete = false;
         done = false;
-        nextCursor = { statement: target.statement, period: target.period, offset: nextOffset };
+        nextCursor = { statement: target.statement, period: target.period, offset: resolvedNextOffset };
         break;
       }
     }
