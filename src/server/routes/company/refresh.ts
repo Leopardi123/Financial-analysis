@@ -342,6 +342,31 @@ async function materializeReports(params: {
   };
 }
 
+async function getCoverageCounts(params: {
+  companyId: number;
+  period: PeriodType;
+  statement: StatementType;
+  cutoffDate: string;
+}) {
+  const reportCountRows = await query(
+    `SELECT COUNT(DISTINCT fiscal_date) as n
+     FROM ${tables.financialReports}
+     WHERE company_id = ? AND period = ? AND statement = ? AND fiscal_date >= ?`,
+    [params.companyId, params.period, params.statement, params.cutoffDate]
+  );
+  const pointCountRows = await query(
+    `SELECT COUNT(DISTINCT fiscal_date) as n
+     FROM ${tables.financialPoints}
+     WHERE company_id = ? AND period = ? AND statement = ? AND fiscal_date >= ?`,
+    [params.companyId, params.period, params.statement, params.cutoffDate]
+  );
+
+  return {
+    reportsDatesCount: Number(reportCountRows[0]?.n ?? 0),
+    pointsDatesCount: Number(pointCountRows[0]?.n ?? 0),
+  };
+}
+
 export default async function handler(req: any, res: any) {
   try {
     assertCronSecret(req);
@@ -436,6 +461,43 @@ export default async function handler(req: any, res: any) {
           ? cursor.offset
           : 0;
       const totalReports = targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
+
+      const { reportsDatesCount, pointsDatesCount } = await getCoverageCounts({
+        companyId,
+        statement: target.statement,
+        period: target.period,
+        cutoffDate,
+      });
+      console.info("[company-refresh]", {
+        stage: "materialization_target_preflight",
+        statement: target.statement,
+        period: target.period,
+        reportsDatesCount,
+        pointsDatesCount,
+        cutoffDate,
+      });
+
+      if (reportsDatesCount === 0 || pointsDatesCount >= reportsDatesCount) {
+        currentTargetProgress = {
+          statement: target.statement,
+          period: target.period,
+          currentOffset: 0,
+          nextOffset: 0,
+          totalReports,
+          remainingReports: 0,
+        };
+        periodStatus[target.period].seen = true;
+        console.info("[company-refresh]", {
+          stage: "materialization_target_skipped",
+          statement: target.statement,
+          period: target.period,
+          reportsDatesCount,
+          pointsDatesCount,
+          reason: reportsDatesCount === 0 ? "no_reports" : "date_coverage_reached",
+        });
+        continue;
+      }
+
       const {
         inserted,
         rowsWritten,

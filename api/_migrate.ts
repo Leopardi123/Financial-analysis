@@ -179,8 +179,16 @@ export async function ensureSchema() {
             ON ${TABLES.financialReports} (company_id, statement, period, fiscal_date)`,
     },
     {
+      sql: `CREATE INDEX IF NOT EXISTS idx_reports_company_period_stmt_date
+            ON ${TABLES.financialReports} (company_id, period, statement, fiscal_date)`,
+    },
+    {
       sql: `CREATE INDEX IF NOT EXISTS idx_fp_company_stmt_period_date
             ON ${TABLES.financialPoints} (company_id, statement, period, fiscal_date)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_fp_company_period_stmt_date
+            ON ${TABLES.financialPoints} (company_id, period, statement, fiscal_date)`,
     },
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_fp_company_field
