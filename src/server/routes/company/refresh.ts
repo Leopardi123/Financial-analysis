@@ -335,7 +335,14 @@ async function materializeReports(params: {
 
   const nextOffset = params.offset + rows.length;
   const done = rows.length < params.limit && inserted < params.maxPoints;
-  return { inserted, nextOffset, done, newestFiscalDateProcessed };
+  return {
+    inserted,
+    rowsAttempted,
+    rowsWritten,
+    nextOffset,
+    done,
+    newestFiscalDateProcessed,
+  };
 }
 
 export default async function handler(req: any, res: any) {
@@ -390,6 +397,8 @@ export default async function handler(req: any, res: any) {
 
     const startTime = Date.now();
     let materialized = 0;
+    let rowsWrittenInRun = 0;
+    let rowsWrittenInRunAttempted = 0;
     let nextCursor: { statement: StatementType; period: PeriodType; offset: number } | null = null;
     let done = true;
     let currentTargetProgress: {
@@ -429,7 +438,7 @@ export default async function handler(req: any, res: any) {
           ? cursor.offset
           : 0;
       const totalReports = targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
-      const { inserted, nextOffset, done: targetDone, newestFiscalDateProcessed } = await materializeReports({
+      const { inserted, rowsWritten, rowsAttempted, nextOffset, done: targetDone, newestFiscalDateProcessed } = await materializeReports({
         companyId,
         statement: target.statement,
         period: target.period,
@@ -451,6 +460,8 @@ export default async function handler(req: any, res: any) {
         periodStatus[target.period].newestProcessed &&
         (offset > 0 || newestFiscalDateProcessed);
       materialized += inserted;
+      rowsWrittenInRun += rowsWritten;
+      rowsWrittenInRunAttempted += rowsAttempted;
       if (!targetDone) {
         periodStatus[target.period].complete = false;
         periodStatus[target.period].newestProcessed = false;
@@ -496,8 +507,8 @@ export default async function handler(req: any, res: any) {
     const processedTotal = done
       ? totalToProcess
       : computeProcessedTotalFromCursor({ targets, targetCounts, cursor: nextCursor });
-    const rowsProcessedInRun = Math.max(0, processedTotal - previousProcessedTotal);
-    const remaining = Math.max(0, totalToProcess - processedTotal);
+    const targetsProcessedInRun = Math.max(0, processedTotal - previousProcessedTotal);
+    const remainingTargets = Math.max(0, totalToProcess - processedTotal);
 
     res.status(200).json({
       ok: true,
@@ -509,17 +520,20 @@ export default async function handler(req: any, res: any) {
         done,
         inserted: materialized,
         processedInRun: materialized,
-        progressUnit: "rows",
-        rowsTotal: totalToProcess,
-        rowsProcessedTotal: processedTotal,
-        rowsProcessedInRun,
+        progressUnit: "targets",
+        targetsTotal: totalToProcess,
+        targetsProcessedTotal: processedTotal,
+        targetsProcessedInRun,
+        rowsWrittenInRun,
+        rowsWrittenInRunAttempted,
         processedTotal,
         statement: currentTargetProgress?.statement ?? null,
         period: currentTargetProgress?.period ?? null,
         currentOffset: previousProcessedTotal,
         nextOffset: done ? totalToProcess : processedTotal,
-        totalToProcess,
-        remaining,
+        totalToProcess: totalToProcess,
+        remainingTargets,
+        remaining: remainingTargets,
       },
     });
   } catch (error) {
@@ -535,16 +549,19 @@ export default async function handler(req: any, res: any) {
         done: false,
         inserted: 0,
         processedInRun: 0,
-        progressUnit: "rows",
-        rowsTotal: 0,
-        rowsProcessedTotal: requestCursor?.offset ?? 0,
-        rowsProcessedInRun: 0,
+        progressUnit: "targets",
+        targetsTotal: 0,
+        targetsProcessedTotal: requestCursor?.offset ?? 0,
+        targetsProcessedInRun: 0,
+        rowsWrittenInRun: 0,
+        rowsWrittenInRunAttempted: 0,
         processedTotal: requestCursor?.offset ?? 0,
         statement: requestCursor?.statement ?? null,
         period: requestCursor?.period ?? null,
         currentOffset: requestCursor?.offset ?? 0,
         nextOffset: requestCursor?.offset ?? null,
         totalToProcess: 0,
+        remainingTargets: 0,
         remaining: 0,
       },
     });

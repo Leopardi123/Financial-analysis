@@ -26,17 +26,17 @@ type MaterializationProgress = {
   cursor: MaterializationCursor | null;
   done: boolean;
   progressUnit?: "rows" | "targets";
-  rowsTotal?: number;
-  rowsProcessedTotal?: number;
-  rowsProcessedInRun?: number;
   targetsTotal?: number;
   targetsProcessedTotal?: number;
   targetsProcessedInRun?: number;
+  rowsWrittenInRun?: number;
+  rowsWrittenInRunAttempted?: number;
   inserted?: number;
   processedInRun?: number;
   processedTotal?: number;
   totalToProcess?: number;
   remaining?: number;
+  remainingTargets?: number;
   currentOffset?: number;
   nextOffset?: number | null;
   statement?: string | null;
@@ -54,12 +54,11 @@ type RefreshPayload = {
     cursor: MaterializationCursor | null;
     done: boolean;
     progressUnit?: "rows" | "targets";
-    rowsTotal?: number;
-    rowsProcessedTotal?: number;
-    rowsProcessedInRun?: number;
     targetsTotal?: number;
     targetsProcessedTotal?: number;
     targetsProcessedInRun?: number;
+    rowsWrittenInRun?: number;
+    rowsWrittenInRunAttempted?: number;
     inserted?: number;
     processedInRun?: number;
     processedTotal?: number;
@@ -105,9 +104,11 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [tickerProcessedTotal, setTickerProcessedTotal] = useState(0);
   const [tickerTotalToProcess, setTickerTotalToProcess] = useState(0);
   const [tickerLastBatchProcessed, setTickerLastBatchProcessed] = useState(0);
+  const [tickerLastBatchRowsWritten, setTickerLastBatchRowsWritten] = useState(0);
+  const [tickerRowsWrittenTotal, setTickerRowsWrittenTotal] = useState(0);
   const [tickerCurrentOffset, setTickerCurrentOffset] = useState(0);
   const [tickerNextOffset, setTickerNextOffset] = useState<number | null>(null);
-  const [tickerProgressUnit, setTickerProgressUnit] = useState<"rows" | "targets">("rows");
+  const [tickerProgressUnit, setTickerProgressUnit] = useState<"rows" | "targets">("targets");
   const [tickerProgressPercentShown, setTickerProgressPercentShown] = useState(0);
 
   const autoRefreshRunningRef = useRef(false);
@@ -237,9 +238,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     const unit = progress.progressUnit ?? tickerProgressUnit;
     setTickerProgressUnit(unit);
 
-    const unitTotal = unit === "rows" ? progress.rowsTotal : progress.targetsTotal;
-    const unitProcessedTotal = unit === "rows" ? progress.rowsProcessedTotal : progress.targetsProcessedTotal;
-    const unitProcessedInRun = unit === "rows" ? progress.rowsProcessedInRun : progress.targetsProcessedInRun;
+    const unitTotal = progress.targetsTotal;
+    const unitProcessedTotal = progress.targetsProcessedTotal;
+    const unitProcessedInRun = progress.targetsProcessedInRun;
 
     const incomingTotal = Number(
       unitTotal ?? progress.totalToProcess ?? tickerTotalToProcess
@@ -260,6 +261,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setTickerTotalToProcess((prev) => Math.max(prev, Math.max(0, incomingTotal)));
     setTickerProcessedTotal((prev) => Math.max(prev, Math.max(0, incomingProcessedTotal)));
     setTickerLastBatchProcessed(Math.max(0, incomingProcessedInRun));
+    const incomingRowsWritten = Number(progress.rowsWrittenInRun ?? progress.inserted ?? 0);
+    setTickerLastBatchRowsWritten(Math.max(0, incomingRowsWritten));
+    setTickerRowsWrittenTotal((prev) => prev + Math.max(0, incomingRowsWritten));
     setTickerCurrentOffset((prev) => Math.max(prev, Math.max(0, currentOffset)));
     setTickerNextOffset(progress.done ? null : nextOffset);
 
@@ -383,11 +387,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       const done = Boolean(payload.materialization.done);
       const processedTotal = Number(payload.materialization.processedTotal ?? payload.materialization.nextOffset ?? 0);
       const progressUnit = payload.materialization.progressUnit ?? tickerProgressUnit;
-      const total = Number(
-        (progressUnit === "rows" ? payload.materialization.rowsTotal : payload.materialization.targetsTotal)
-        ?? payload.materialization.totalToProcess
-        ?? 0
-      );
+      const total = Number(payload.materialization.targetsTotal ?? payload.materialization.totalToProcess ?? 0);
       const processed = total > 0
         ? `${processedTotal} / ${total}`
         : `${processedTotal}`;
@@ -433,6 +433,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       setTickerProcessedTotal(0);
       setTickerTotalToProcess(0);
       setTickerLastBatchProcessed(0);
+      setTickerLastBatchRowsWritten(0);
+      setTickerRowsWrittenTotal(0);
       setTickerCurrentOffset(0);
       setTickerNextOffset(null);
       setTickerProgressPercentShown(0);
@@ -734,6 +736,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             </p>
             <p className="bread">
               Last batch: +{tickerLastBatchProcessed} {tickerProgressUnit}
+            </p>
+            <p className="bread">
+              Rows written last batch: {tickerLastBatchRowsWritten} (cumulative {tickerRowsWrittenTotal})
             </p>
             <p className="bread">
               Cursor ({tickerProgressUnit}): current {tickerCurrentOffset} · next {tickerNextOffset ?? "done"}
