@@ -31,6 +31,12 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    if (req.query?.quick === "1") {
+      const ping = await query("SELECT 1 AS ok");
+      res.status(200).json({ ok: true, quick: true, ping: Number((ping[0] as { ok?: unknown } | undefined)?.ok ?? 0) });
+      return;
+    }
+
     const tableRows = (await query(
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC"
     )) as TableRow[];

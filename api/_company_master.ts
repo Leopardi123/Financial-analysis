@@ -19,19 +19,24 @@ export type CompanyMasterRow = {
 
 export type RefreshCompaniesSummary = {
   endpointUsed: "stable" | "legacy";
+  endpointPath: string;
   fetchedCount: number;
   rawCount: number;
   rawSampleKeys: string[];
   rawSample: {
     symbol: string | null;
+    ticker: string | null;
     companyName: string | null;
+    company: string | null;
     name: string | null;
     exchange: string | null;
     exchangeShortName: string | null;
+    exchangeName: string | null;
     type: string | null;
     stockExchange: string | null;
     isActivelyTrading: string | number | boolean | null;
   } | null;
+  mappedSample: CompanyMasterRow | null;
   mappedCount: number;
   droppedCounts: {
     droppedMissingSymbol: number;
@@ -72,20 +77,27 @@ export function normalizeName(name: string): string {
 }
 
 function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
-  const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
+  const symbolFromSymbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
+  const symbolFromTicker = typeof row.ticker === "string" ? row.ticker.trim().toUpperCase() : "";
+  const symbol = symbolFromSymbol || symbolFromTicker;
   const nameFromName = typeof row.name === "string" ? row.name.trim() : "";
   const nameFromCompanyName = typeof row.companyName === "string" ? row.companyName.trim() : "";
+  const nameFromCompany = typeof row.company === "string" ? row.company.trim() : "";
   const nameFromCompanySnake = typeof row.company_name === "string" ? row.company_name.trim() : "";
-  const name = nameFromName || nameFromCompanyName || nameFromCompanySnake;
+  const name = nameFromName || nameFromCompanyName || nameFromCompany || nameFromCompanySnake;
   const exchangeCandidate =
     typeof row.exchangeShortName === "string"
       ? row.exchangeShortName
+      : typeof row.exchangeName === "string"
+        ? row.exchangeName
       : typeof row.stockExchange === "string"
         ? row.stockExchange
         : typeof row.exchange === "string"
           ? row.exchange
         : null;
-  const type = typeof row.type === "string" ? row.type.trim().toLowerCase() : null;
+  const type = typeof row.type === "string" && row.type.trim().length > 0
+    ? row.type.trim().toLowerCase()
+    : "stock";
 
   if (!symbol) {
     return null;
@@ -129,22 +141,26 @@ async function fetchWithRetry(url: string) {
 }
 
 async function fetchCompanyRows(apiKey: string) {
-  const stableResponse = await fetchWithRetry(`${STABLE_URL}?apikey=${encodeURIComponent(apiKey)}`);
+  const stableUrl = `${STABLE_URL}?apikey=${encodeURIComponent(apiKey)}`;
+  const stableResponse = await fetchWithRetry(stableUrl);
   if (stableResponse.ok) {
     const payload = (await stableResponse.json()) as RawCompany[];
     return {
       endpointUsed: "stable" as const,
+      endpointPath: STABLE_URL,
       rows: Array.isArray(payload) ? payload : [],
     };
   }
 
-  const legacyResponse = await fetchWithRetry(`${LEGACY_URL}?apikey=${encodeURIComponent(apiKey)}`);
+  const legacyUrl = `${LEGACY_URL}?apikey=${encodeURIComponent(apiKey)}`;
+  const legacyResponse = await fetchWithRetry(legacyUrl);
   if (!legacyResponse.ok) {
     throw new Error(`FMP company list failed (${legacyResponse.status})`);
   }
   const payload = (await legacyResponse.json()) as RawCompany[];
   return {
     endpointUsed: "legacy" as const,
+    endpointPath: LEGACY_URL,
     rows: Array.isArray(payload) ? payload : [],
   };
 }
@@ -156,16 +172,19 @@ export async function refreshCompaniesMaster() {
     throw new Error("FMP_API_KEY missing");
   }
 
-  const { endpointUsed, rows } = await fetchCompanyRows(apiKey);
+  const { endpointUsed, endpointPath, rows } = await fetchCompanyRows(apiKey);
   const rawSampleRow = rows[0] as RawCompany | undefined;
   const rawSampleKeys = rawSampleRow ? Object.keys(rawSampleRow).slice(0, 30) : [];
   const rawSample = rawSampleRow
     ? {
       symbol: typeof rawSampleRow.symbol === "string" ? rawSampleRow.symbol : null,
+      ticker: typeof rawSampleRow.ticker === "string" ? rawSampleRow.ticker : null,
       companyName: typeof rawSampleRow.companyName === "string" ? rawSampleRow.companyName : null,
+      company: typeof rawSampleRow.company === "string" ? rawSampleRow.company : null,
       name: typeof rawSampleRow.name === "string" ? rawSampleRow.name : null,
       exchange: typeof rawSampleRow.exchange === "string" ? rawSampleRow.exchange : null,
       exchangeShortName: typeof rawSampleRow.exchangeShortName === "string" ? rawSampleRow.exchangeShortName : null,
+      exchangeName: typeof rawSampleRow.exchangeName === "string" ? rawSampleRow.exchangeName : null,
       type: typeof rawSampleRow.type === "string" ? rawSampleRow.type : null,
       stockExchange: typeof rawSampleRow.stockExchange === "string" ? rawSampleRow.stockExchange : null,
       isActivelyTrading:
@@ -192,7 +211,9 @@ export async function refreshCompaniesMaster() {
       continue;
     }
 
-    const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
+    const symbol =
+      (typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "") ||
+      (typeof row.ticker === "string" ? row.ticker.trim().toUpperCase() : "");
     if (!symbol) {
       droppedCounts.droppedMissingSymbol += 1;
       continue;
@@ -200,11 +221,12 @@ export async function refreshCompaniesMaster() {
 
     const hasName = typeof row.name === "string" && row.name.trim().length > 0;
     const hasCompanyName = typeof row.companyName === "string" && row.companyName.trim().length > 0;
+    const hasCompany = typeof row.company === "string" && row.company.trim().length > 0;
     const hasCompanyNameSnake = typeof row.company_name === "string" && row.company_name.trim().length > 0;
 
     const mapped = toCompanyRow(row);
     if (!mapped) {
-      if (!hasName && !hasCompanyName && !hasCompanyNameSnake) {
+      if (!hasName && !hasCompanyName && !hasCompany && !hasCompanyNameSnake) {
         droppedCounts.droppedMissingName += 1;
       } else {
         droppedCounts.droppedOther += 1;
@@ -217,10 +239,12 @@ export async function refreshCompaniesMaster() {
 
   const summary: RefreshCompaniesSummary = {
     endpointUsed,
+    endpointPath,
     fetchedCount: rows.length,
     rawCount: rows.length,
     rawSampleKeys,
     rawSample,
+    mappedSample: normalizedRows[0] ?? null,
     mappedCount: normalizedRows.length,
     droppedCounts,
     attemptedUpserts: normalizedRows.length,

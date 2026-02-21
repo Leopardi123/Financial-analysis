@@ -166,6 +166,10 @@ export async function ensureSchema() {
             ON ${TABLES.companies} (normalized_name)`,
     },
     {
+      sql: `CREATE INDEX IF NOT EXISTS idx_companies_normalized_name
+            ON ${TABLES.companies} (normalized_name)`,
+    },
+    {
       sql: `CREATE INDEX IF NOT EXISTS idx_reports_company
             ON ${TABLES.financialReports} (company_id)`,
     },
