@@ -2,6 +2,9 @@ import { query } from "../../../api/_db.js";
 import { refreshCompaniesMaster, searchCompaniesByName, type RefreshCompaniesSummary } from "../../../api/_company_master.js";
 import { ensureSchema } from "../../../api/_migrate.js";
 
+const COMPANIES_REFRESH_TIME_BUDGET_MS = 9000;
+const COMPANIES_REFRESH_MAX_ROWS_PER_RUN = 2400;
+
 function extractBearer(authHeader: string | string[] | undefined) {
   if (typeof authHeader !== "string") {
     return null;
@@ -79,6 +82,12 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === "POST") {
       assertCompaniesSyncSecret(req);
+      const body = typeof req.body === "object" && req.body ? req.body as { cursorOffset?: unknown; reset?: unknown } : {};
+      const reset = Boolean(body.reset);
+      const parsedCursorOffset = Number(body.cursorOffset ?? 0);
+      const cursorOffset = reset || !Number.isFinite(parsedCursorOffset) || parsedCursorOffset < 0
+        ? 0
+        : Math.floor(parsedCursorOffset);
       const { dbHost, dbName } = parseDbIdentity();
       const beforeCount = await readCompaniesCount();
 
@@ -86,7 +95,11 @@ export default async function handler(req: any, res: any) {
       let refreshError: unknown = null;
 
       try {
-        summary = await refreshCompaniesMaster();
+        summary = await refreshCompaniesMaster({
+          cursorOffset,
+          maxRowsPerRun: COMPANIES_REFRESH_MAX_ROWS_PER_RUN,
+          maxDurationMs: COMPANIES_REFRESH_TIME_BUDGET_MS,
+        });
       } catch (error) {
         refreshError = error;
         summary = (error as Error & { diagnostics?: RefreshCompaniesSummary }).diagnostics ?? null;
@@ -118,11 +131,15 @@ export default async function handler(req: any, res: any) {
           writePhaseReached: summary?.writePhaseReached ?? "ERROR",
           inTxAtError: summary?.inTxAtError ?? false,
           lastSqlOp: summary?.lastSqlOp ?? "unknown",
+          cursor: summary?.cursor ?? null,
         });
         return;
       }
 
-      const noRowsWritten = afterCount === beforeCount && (summary?.rowsAffectedTotal ?? 0) === 0;
+      const noRowsWritten =
+        afterCount === beforeCount &&
+        (summary?.rowsAffectedTotal ?? 0) === 0 &&
+        (summary?.upsertedCount ?? 0) === 0;
       if (noRowsWritten) {
         res.status(500).json({
           ok: false,
@@ -148,6 +165,7 @@ export default async function handler(req: any, res: any) {
           writePhaseReached: summary?.writePhaseReached ?? "ERROR",
           inTxAtError: summary?.inTxAtError ?? false,
           lastSqlOp: summary?.lastSqlOp ?? "unknown",
+          cursor: summary?.cursor ?? null,
         });
         return;
       }
@@ -175,6 +193,7 @@ export default async function handler(req: any, res: any) {
         writePhaseReached: summary?.writePhaseReached ?? "ERROR",
         inTxAtError: summary?.inTxAtError ?? false,
         lastSqlOp: summary?.lastSqlOp ?? "unknown",
+        cursor: summary?.cursor ?? null,
       });
       return;
     }
@@ -188,7 +207,11 @@ export default async function handler(req: any, res: any) {
 
     // Vercel Cron invokes GET requests. Allow authenticated refresh without q.
     assertCompaniesSyncSecret(req);
-    const summary = await refreshCompaniesMaster();
+    const summary = await refreshCompaniesMaster({
+      cursorOffset: 0,
+      maxRowsPerRun: COMPANIES_REFRESH_MAX_ROWS_PER_RUN,
+      maxDurationMs: COMPANIES_REFRESH_TIME_BUDGET_MS,
+    });
     res.status(200).json({ ok: true, ...summary });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;
