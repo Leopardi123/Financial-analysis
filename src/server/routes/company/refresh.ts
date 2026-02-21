@@ -397,6 +397,7 @@ export default async function handler(req: any, res: any) {
     let rowsWrittenInRun = 0;
     let rowsWrittenInRunAttempted = 0;
     let nextCursor: { statement: StatementType; period: PeriodType; offset: number } | null = null;
+    let responseCursor: { statement: StatementType; period: PeriodType; offset: number } | null = null;
     let done = true;
     let currentTargetProgress: {
       statement: StatementType;
@@ -492,12 +493,14 @@ export default async function handler(req: any, res: any) {
         periodStatus[target.period].complete = false;
         periodStatus[target.period].newestProcessed = false;
         done = false;
+        responseCursor = { statement: target.statement, period: target.period, offset };
         nextCursor = { statement: target.statement, period: target.period, offset: resolvedNextOffset };
         break;
       }
       if (materialized >= MAX_POINTS_PER_RUN || Date.now() - startTime > 45000) {
         periodStatus[target.period].complete = false;
         done = false;
+        responseCursor = { statement: target.statement, period: target.period, offset };
         nextCursor = { statement: target.statement, period: target.period, offset: resolvedNextOffset };
         break;
       }
@@ -534,8 +537,8 @@ export default async function handler(req: any, res: any) {
       : computeProcessedTotalFromCursor({ targets: activeTargets, cursor: nextCursor });
     const targetsProcessedInRun = Math.max(0, targetIndexGlobal - previousProcessedTotal);
     const remainingTargets = Math.max(0, totalToProcess - targetIndexGlobal);
-    const localOffsetCurrent = currentTargetProgress?.currentOffset ?? (cursor?.offset ?? 0);
-    const localOffsetNext = currentTargetProgress?.nextOffset ?? nextCursor?.offset ?? null;
+    const localOffsetCurrent = responseCursor?.offset ?? (cursor?.offset ?? 0);
+    const localOffsetNext = nextCursor?.offset ?? (done ? null : localOffsetCurrent);
     console.info("[company-refresh]", {
       stage: "materialization_payload_consistency",
       rowsAttempted: rowsWrittenInRunAttempted,
@@ -549,7 +552,8 @@ export default async function handler(req: any, res: any) {
       phase: done ? "materialized_done" : "materialized_partial",
       raw: rawSummary,
       materialization: {
-        cursor: nextCursor,
+        cursor: responseCursor,
+        nextCursor,
         done,
         inserted: rowsWrittenInRun,
         processedInRun: rowsWrittenInRun,
@@ -582,6 +586,7 @@ export default async function handler(req: any, res: any) {
       error: (error as Error).message,
       materialization: {
         cursor: requestCursor,
+        nextCursor: requestCursor,
         done: false,
         inserted: 0,
         processedInRun: 0,

@@ -24,6 +24,7 @@ type MaterializationCursor = {
 
 type MaterializationProgress = {
   cursor: MaterializationCursor | null;
+  nextCursor?: MaterializationCursor | null;
   done: boolean;
   progressUnit?: "rows" | "targets";
   targetIndexGlobal?: number;
@@ -55,6 +56,7 @@ type RefreshPayload = {
   };
   materialization?: {
     cursor: MaterializationCursor | null;
+    nextCursor?: MaterializationCursor | null;
     done: boolean;
     progressUnit?: "rows" | "targets";
     targetIndexGlobal?: number;
@@ -97,6 +99,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [materializationCursor, setMaterializationCursor] = useState<MaterializationCursor | null>(null);
+  const [materializationDisplayCursor, setMaterializationDisplayCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDone, setMaterializationDone] = useState(true);
   const [companiesCursorOffset, setCompaniesCursorOffset] = useState<number | null>(null);
   const [companiesRefreshDone, setCompaniesRefreshDone] = useState(true);
@@ -237,8 +240,10 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
 
   function applyMaterialization(progress: MaterializationProgress) {
     if ("cursor" in progress) {
-      setMaterializationCursor(progress.cursor ?? null);
-      materializationCursorRef.current = progress.cursor ?? null;
+      const nextCursor = progress.nextCursor ?? progress.cursor ?? null;
+      setMaterializationCursor(nextCursor);
+      materializationCursorRef.current = nextCursor;
+      setMaterializationDisplayCursor(progress.cursor ?? null);
     }
     setMaterializationDone(Boolean(progress.done));
 
@@ -448,6 +453,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     if (reset) {
       materializationCursorRef.current = null;
       setMaterializationCursor(null);
+      setMaterializationDisplayCursor(null);
       setMaterializationDone(false);
       setTickerProcessedTotal(0);
       setTickerTotalToProcess(0);
@@ -760,7 +766,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               Rows written last batch: {tickerLastBatchRowsWritten} (cumulative {tickerRowsWrittenTotal})
             </p>
             <p className="bread">
-              Cursor (local): {String(materializationCursor?.statement ?? "-")}/{String(materializationCursor?.period ?? "-")} offset {tickerCurrentOffset} → {tickerNextOffset ?? "done"}
+              Cursor (local): {String(materializationDisplayCursor?.statement ?? "-")}/{String(materializationDisplayCursor?.period ?? "-")} offset {tickerCurrentOffset} → {tickerNextOffset ?? "done"}
             </p>
             <div
               style={{
