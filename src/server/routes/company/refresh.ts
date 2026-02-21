@@ -14,6 +14,13 @@ const PERIODS: PeriodType[] = ["fy", "q"];
 const MAX_POINTS_PER_RUN = 10000;
 const REPORT_BATCH_SIZE = 30;
 
+function toFiscalDateCutoffIso() {
+  const now = new Date();
+  const cutoff = new Date(now.getTime());
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 20);
+  return cutoff.toISOString().slice(0, 10);
+}
+
 async function logFetch(
   ticker: string,
   period: PeriodType,
@@ -67,24 +74,25 @@ async function materializeReports(params: {
   offset: number;
   limit: number;
   maxPoints: number;
+  cutoffDate: string;
 }) {
   const latestRows = await query(
     `SELECT fiscal_date
      FROM ${tables.financialReports}
-     WHERE company_id = ? AND statement = ? AND period = ?
+     WHERE company_id = ? AND statement = ? AND period = ? AND fiscal_date >= ?
      ORDER BY fiscal_date DESC
      LIMIT 1`,
-    [params.companyId, params.statement, params.period]
+    [params.companyId, params.statement, params.period, params.cutoffDate]
   );
   const latestFiscalDate = String(latestRows[0]?.fiscal_date ?? "");
 
   const rows = await query(
     `SELECT fiscal_date, data_json, fetched_at
      FROM ${tables.financialReports}
-     WHERE company_id = ? AND statement = ? AND period = ?
+     WHERE company_id = ? AND statement = ? AND period = ? AND fiscal_date >= ?
      ORDER BY fiscal_date DESC
      LIMIT ? OFFSET ?`,
-    [params.companyId, params.statement, params.period, params.limit, params.offset]
+    [params.companyId, params.statement, params.period, params.cutoffDate, params.limit, params.offset]
   );
 
   let inserted = 0;
@@ -181,6 +189,8 @@ export default async function handler(req: any, res: any) {
       | null;
 
     const rawSummary: Record<string, number> = {};
+    const cutoffDate = toFiscalDateCutoffIso();
+    console.info("[company-refresh]", { stage: "materialization_cutoff", ticker, cutoffDate });
 
     if (!skipFetch) {
       for (const period of PERIODS) {
@@ -229,8 +239,8 @@ export default async function handler(req: any, res: any) {
       const countRows = await query(
         `SELECT COUNT(*) as n
          FROM ${tables.financialReports}
-         WHERE company_id = ? AND statement = ? AND period = ?`,
-        [companyId, target.statement, target.period]
+         WHERE company_id = ? AND statement = ? AND period = ? AND fiscal_date >= ?`,
+        [companyId, target.statement, target.period, cutoffDate]
       );
       const totalReports = Number(countRows[0]?.n ?? 0);
       const { inserted, nextOffset, done: targetDone, newestFiscalDateProcessed } = await materializeReports({
@@ -240,6 +250,7 @@ export default async function handler(req: any, res: any) {
         offset,
         limit: REPORT_BATCH_SIZE,
         maxPoints: MAX_POINTS_PER_RUN - materialized,
+        cutoffDate,
       });
       currentTargetProgress = {
         statement: target.statement,
