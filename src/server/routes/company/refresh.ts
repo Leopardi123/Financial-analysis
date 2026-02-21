@@ -131,8 +131,13 @@ async function materializeReports(params: {
   let rowsAttempted = 0;
   let rowsWritten = 0;
   let chunksWritten = 0;
+  let rowsExistingFetched = 0;
+  let rowsUnchangedSkipped = 0;
   let newestFiscalDateProcessed = false;
   const runStartedAt = Date.now();
+  let deltaReadMs = 0;
+  let writeMs = 0;
+  let transformMs = 0;
 
   const bufferedPoints: Array<{ fiscalDate: string; field: string; value: number; fetchedAt: string }> = [];
 
@@ -151,6 +156,7 @@ async function materializeReports(params: {
     const existingValueMap = new Map<string, number | null>();
 
     if (fiscalDates.length > 0 && fields.length > 0) {
+      const deltaReadStartedAt = Date.now();
       const fiscalDatePlaceholders = fiscalDates.map(() => "?").join(",");
       const fieldPlaceholders = fields.map(() => "?").join(",");
       const existingResult = await tx!.execute({
@@ -168,6 +174,8 @@ async function materializeReports(params: {
         ],
       });
       const existingRows = existingResult.rows;
+      rowsExistingFetched += existingRows.length;
+      deltaReadMs += Date.now() - deltaReadStartedAt;
 
       for (const row of existingRows) {
         const key = `${String(row.fiscal_date)}|${String(row.field)}`;
@@ -181,6 +189,7 @@ async function materializeReports(params: {
       const existing = existingValueMap.get(key);
       return existing == null || existing !== point.value;
     });
+    rowsUnchangedSkipped += bufferedPoints.length - changedRows.length;
 
     if (changedRows.length === 0) {
       bufferedPoints.length = 0;
@@ -189,6 +198,7 @@ async function materializeReports(params: {
 
     const SQL_CHUNK_ROWS = 120;
     for (let i = 0; i < changedRows.length; i += SQL_CHUNK_ROWS) {
+      const chunkWriteStartedAt = Date.now();
       const chunk = changedRows.slice(i, i + SQL_CHUNK_ROWS);
       const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(",");
       const args: Array<string | number> = [];
@@ -212,8 +222,18 @@ async function materializeReports(params: {
               DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
         args,
       });
+      writeMs += Date.now() - chunkWriteStartedAt;
       rowsWritten += chunk.length;
       chunksWritten += 1;
+      console.info("[company-refresh]", {
+        stage: "materialization_chunk_write",
+        statement: params.statement,
+        period: params.period,
+        chunkIndex: chunksWritten,
+        valuesCount: chunk.length,
+        txStage,
+        elapsedMs: Date.now() - runStartedAt,
+      });
     }
 
     bufferedPoints.length = 0;
@@ -237,12 +257,14 @@ async function materializeReports(params: {
         newestFiscalDateProcessed = true;
       }
 
+      const transformStartedAt = Date.now();
       const points = normalizeFinancialPoints(
         String(params.companyId),
         params.statement,
         params.period,
         [report]
       );
+      transformMs += Date.now() - transformStartedAt;
 
       for (const point of points) {
         bufferedPoints.push({
@@ -298,8 +320,16 @@ async function materializeReports(params: {
     period: params.period,
     offset: params.offset,
     rowsAttempted,
+    rowsExistingFetched,
+    rowsUnchangedSkipped,
     rowsWritten,
     chunksWritten,
+    phaseMs: {
+      transformMs,
+      deltaReadMs,
+      writeMs,
+      otherMs: Math.max(0, Date.now() - runStartedAt - transformMs - deltaReadMs - writeMs),
+    },
     elapsedMs: Date.now() - runStartedAt,
   });
 
