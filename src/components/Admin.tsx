@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import CompanyPicker from "./CompanyPicker";
 
 type LogEntry = {
@@ -23,6 +23,12 @@ type MaterializationCursor = {
 };
 
 type RefreshPayload = {
+  cursor?: {
+    nextOffset: number | null;
+    done: boolean;
+    processedInRun: number;
+    totalToProcess: number;
+  };
   materialization?: {
     cursor: MaterializationCursor | null;
     done: boolean;
@@ -33,6 +39,14 @@ type AdminProps = {
   onTickersUpserted?: () => void;
 };
 
+type AutoRefreshStatus = "idle" | "running" | "paused" | "done" | "error";
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export default function Admin({ onTickersUpserted }: AdminProps) {
   const [secret, setSecret] = useState("");
   const [tickers, setTickers] = useState(DEFAULT_TICKERS);
@@ -41,6 +55,18 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [materializationCursor, setMaterializationCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDone, setMaterializationDone] = useState(true);
+  const [companiesCursorOffset, setCompaniesCursorOffset] = useState<number | null>(null);
+  const [companiesRefreshDone, setCompaniesRefreshDone] = useState(true);
+  const [companiesProcessedTotal, setCompaniesProcessedTotal] = useState(0);
+  const [companiesTotalToProcess, setCompaniesTotalToProcess] = useState(0);
+  const [companiesLastBatchProcessed, setCompaniesLastBatchProcessed] = useState(0);
+  const [companiesNextOffset, setCompaniesNextOffset] = useState<number | null>(null);
+  const [autoRefreshStatus, setAutoRefreshStatus] = useState<AutoRefreshStatus>("idle");
+  const [autoRefreshMessage, setAutoRefreshMessage] = useState("Not started.");
+
+  const autoRefreshRunningRef = useRef(false);
+  const autoRefreshPausedRef = useRef(false);
+  const companiesCursorOffsetRef = useRef<number>(0);
 
   const secretReady = secret.trim().length > 0;
 
@@ -138,6 +164,115 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   }
 
   const initLog = logByKey["Init DB"];
+  const companiesProgressPercent = companiesTotalToProcess > 0
+    ? Math.min(100, Math.round((companiesProcessedTotal / companiesTotalToProcess) * 100))
+    : 0;
+
+  useEffect(() => {
+    return () => {
+      autoRefreshRunningRef.current = false;
+      autoRefreshPausedRef.current = true;
+    };
+  }, []);
+
+  function applyCursor(cursor: NonNullable<RefreshPayload["cursor"]>) {
+    const nextOffset = cursor.nextOffset;
+    const inferredProcessedTotal = nextOffset ?? cursor.totalToProcess;
+    setCompaniesCursorOffset(nextOffset);
+    companiesCursorOffsetRef.current = nextOffset ?? cursor.totalToProcess;
+    setCompaniesNextOffset(nextOffset);
+    setCompaniesRefreshDone(cursor.done);
+    setCompaniesLastBatchProcessed(cursor.processedInRun);
+    setCompaniesTotalToProcess(cursor.totalToProcess);
+    setCompaniesProcessedTotal(Math.max(0, inferredProcessedTotal));
+  }
+
+  async function requestCompaniesBatch(reset: boolean, retryAttempt = 0): Promise<RefreshPayload | null> {
+    const baseOffset = reset ? 0 : companiesCursorOffsetRef.current;
+    const title = reset ? "Refresh Companies" : "Continue Companies Refresh";
+    const payload = await postJson(title, "/api/companies", reset
+      ? { cursorOffset: 0, reset: true }
+      : { cursorOffset: baseOffset });
+
+    if (payload?.cursor) {
+      applyCursor(payload.cursor);
+      setAutoRefreshMessage(
+        `Processed ${payload.cursor.nextOffset ?? payload.cursor.totalToProcess} / ${payload.cursor.totalToProcess}`
+      );
+      return payload;
+    }
+
+    if (retryAttempt >= 3) {
+      setAutoRefreshStatus("error");
+      setAutoRefreshMessage("Auto refresh paused after repeated errors. Click Resume to retry.");
+      autoRefreshRunningRef.current = false;
+      autoRefreshPausedRef.current = true;
+      return null;
+    }
+
+    const backoffMs = 500 * (2 ** retryAttempt);
+    setAutoRefreshMessage(`Transient error, retrying in ${backoffMs}ms (attempt ${retryAttempt + 1}/3)...`);
+    await sleep(backoffMs);
+    return requestCompaniesBatch(reset, retryAttempt + 1);
+  }
+
+  async function runAutoRefresh(reset: boolean) {
+    if (autoRefreshRunningRef.current) {
+      return;
+    }
+
+    autoRefreshRunningRef.current = true;
+    autoRefreshPausedRef.current = false;
+    setAutoRefreshStatus("running");
+    setAutoRefreshMessage(reset ? "Starting from scratch..." : "Resuming from saved cursor...");
+
+    if (reset) {
+      setCompaniesProcessedTotal(0);
+      setCompaniesTotalToProcess(0);
+      setCompaniesLastBatchProcessed(0);
+      setCompaniesCursorOffset(0);
+      companiesCursorOffsetRef.current = 0;
+      setCompaniesNextOffset(0);
+      setCompaniesRefreshDone(false);
+    }
+
+    let nextReset = reset;
+
+    while (autoRefreshRunningRef.current) {
+      if (autoRefreshPausedRef.current) {
+        break;
+      }
+
+      const payload = await requestCompaniesBatch(nextReset);
+      nextReset = false;
+      if (!payload || !payload.cursor) {
+        break;
+      }
+
+      if (payload.cursor.done) {
+        setAutoRefreshStatus("done");
+        setAutoRefreshMessage("Completed successfully.");
+        autoRefreshRunningRef.current = false;
+        autoRefreshPausedRef.current = false;
+        return;
+      }
+
+      const jitterMs = 200 + Math.floor(Math.random() * 301);
+      await sleep(jitterMs);
+    }
+
+    if (autoRefreshPausedRef.current) {
+      setAutoRefreshStatus("paused");
+      setAutoRefreshMessage("Paused by user.");
+    }
+    autoRefreshRunningRef.current = false;
+  }
+
+  function handlePauseAutoRefresh() {
+    autoRefreshPausedRef.current = true;
+    setAutoRefreshStatus("paused");
+    setAutoRefreshMessage("Pausing after current batch...");
+  }
 
   return (
     <div className="admin">
@@ -178,16 +313,105 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             </button>
             <button
               type="button"
-              onClick={() => void postJson("Refresh Companies", "/api/companies", {})}
-              disabled={!secretReady || loadingKey !== null}
+              onClick={() =>
+                void postJson("Refresh Companies", "/api/companies", {
+                  cursorOffset: 0,
+                  reset: true,
+                }).then((payload) => {
+                  const cursor = payload?.cursor;
+                  if (cursor) {
+                    applyCursor(cursor);
+                  }
+                })
+              }
+              disabled={!secretReady || loadingKey !== null || autoRefreshStatus === "running"}
             >
               {loadingKey === "Refresh Companies" ? "Refreshing list..." : "Refresh Companies"}
+            </button>
+            {!companiesRefreshDone && companiesCursorOffset !== null && (
+              <button
+                type="button"
+                onClick={() =>
+                  void postJson("Continue Companies Refresh", "/api/companies", {
+                    cursorOffset: companiesCursorOffset,
+                  }).then((payload) => {
+                    const cursor = payload?.cursor;
+                    if (cursor) {
+                      applyCursor(cursor);
+                    }
+                  })
+                }
+                disabled={!secretReady || loadingKey !== null || autoRefreshStatus === "running"}
+              >
+                {loadingKey === "Continue Companies Refresh" ? "Continuing list refresh..." : "Continue companies refresh"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void runAutoRefresh(false)}
+              disabled={!secretReady || autoRefreshStatus === "running" || loadingKey !== null}
+            >
+              Start auto refresh
+            </button>
+            <button
+              type="button"
+              onClick={handlePauseAutoRefresh}
+              disabled={!secretReady || autoRefreshStatus !== "running"}
+            >
+              Pause
+            </button>
+            <button
+              type="button"
+              onClick={() => void runAutoRefresh(false)}
+              disabled={!secretReady || (autoRefreshStatus !== "paused" && autoRefreshStatus !== "error") || loadingKey !== null}
+            >
+              Resume
+            </button>
+            <button
+              type="button"
+              onClick={() => void runAutoRefresh(true)}
+              disabled={!secretReady || autoRefreshStatus === "running" || loadingKey !== null}
+            >
+              Reset
             </button>
             {initLog && (
               <span className={initLog.status === "error" ? "status error" : "status success"}>
                 {initLog.status.toUpperCase()}
               </span>
             )}
+          </div>
+
+          <div>
+            <p className="bread">
+              Auto refresh status: <strong>{autoRefreshStatus}</strong> — {autoRefreshMessage}
+            </p>
+            <p className="bread">
+              Processed {companiesProcessedTotal} of {companiesTotalToProcess || "?"} · Last batch {companiesLastBatchProcessed}
+            </p>
+            <p className="bread">
+              Current cursorOffset: {companiesCursorOffset ?? 0} · Next offset: {companiesNextOffset ?? "done"}
+            </p>
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 520,
+                height: 12,
+                borderRadius: 8,
+                background: "#e5e7eb",
+                overflow: "hidden",
+              }}
+              aria-label="Companies refresh progress"
+            >
+              <div
+                style={{
+                  width: `${companiesProgressPercent}%`,
+                  height: "100%",
+                  background: autoRefreshStatus === "error" ? "#b91c1c" : "#2563eb",
+                  transition: "width 180ms ease",
+                }}
+              />
+            </div>
+            <p className="bread">{companiesProgressPercent}%</p>
           </div>
 
           <div>
