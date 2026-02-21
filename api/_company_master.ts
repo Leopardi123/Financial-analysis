@@ -1,6 +1,5 @@
 import { batch, query } from "./_db.js";
 
-const STABLE_URL = "https://financialmodelingprep.com/stable/stock-list";
 const LEGACY_URL = "https://financialmodelingprep.com/api/v3/stock/list";
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const SUFFIX_TOKENS = new Set([
@@ -18,7 +17,7 @@ export type CompanyMasterRow = {
 };
 
 export type RefreshCompaniesSummary = {
-  endpointUsed: "stable" | "legacy";
+  endpointUsed: "legacy";
   endpointPath: string;
   fetchedCount: number;
   rawCount: number;
@@ -161,22 +160,12 @@ async function fetchWithRetry(url: string) {
 }
 
 async function fetchCompanyRows(apiKey: string) {
-  const stableUrl = `${STABLE_URL}?apikey=${encodeURIComponent(apiKey)}`;
-  const stableResponse = await fetchWithRetry(stableUrl);
-  if (stableResponse.ok) {
-    const payload = (await stableResponse.json()) as RawCompany[];
-    return {
-      endpointUsed: "stable" as const,
-      endpointPath: STABLE_URL,
-      rows: Array.isArray(payload) ? payload : [],
-    };
-  }
-
   const legacyUrl = `${LEGACY_URL}?apikey=${encodeURIComponent(apiKey)}`;
   const legacyResponse = await fetchWithRetry(legacyUrl);
   if (!legacyResponse.ok) {
-    throw new Error(`FMP company list failed (${legacyResponse.status})`);
+    throw new Error(`FMP company list failed at /api/v3/stock/list (${legacyResponse.status})`);
   }
+
   const payload = (await legacyResponse.json()) as RawCompany[];
   return {
     endpointUsed: "legacy" as const,
