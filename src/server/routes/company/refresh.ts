@@ -1,5 +1,5 @@
 import { assertCronSecret } from "../../../../api/_auth.js";
-import { batch, execute, query } from "../../../../api/_db.js";
+import { batch, execute, getDb, query } from "../../../../api/_db.js";
 import {
   fetchStatement,
   normalizeFinancialPoints,
@@ -136,6 +136,9 @@ async function materializeReports(params: {
 
   const bufferedPoints: Array<{ fiscalDate: string; field: string; value: number; fetchedAt: string }> = [];
 
+  const db = getDb();
+  let tx: Awaited<ReturnType<typeof db.transaction>> | null = null;
+
   async function flushBufferedPoints() {
     if (bufferedPoints.length === 0) {
       return;
@@ -150,20 +153,21 @@ async function materializeReports(params: {
     if (fiscalDates.length > 0 && fields.length > 0) {
       const fiscalDatePlaceholders = fiscalDates.map(() => "?").join(",");
       const fieldPlaceholders = fields.map(() => "?").join(",");
-      const existingRows = await query(
-        `SELECT fiscal_date, field, value
-         FROM ${tables.financialPoints}
-         WHERE company_id = ? AND statement = ? AND period = ?
-           AND fiscal_date IN (${fiscalDatePlaceholders})
-           AND field IN (${fieldPlaceholders})`,
-        [
+      const existingResult = await tx!.execute({
+        sql: `SELECT fiscal_date, field, value
+              FROM ${tables.financialPoints}
+              WHERE company_id = ? AND statement = ? AND period = ?
+                AND fiscal_date IN (${fiscalDatePlaceholders})
+                AND field IN (${fieldPlaceholders})`,
+        args: [
           params.companyId,
           params.statement,
           params.period,
           ...fiscalDates,
           ...fields,
-        ]
-      );
+        ],
+      });
+      const existingRows = existingResult.rows;
 
       for (const row of existingRows) {
         const key = `${String(row.fiscal_date)}|${String(row.field)}`;
@@ -200,14 +204,14 @@ async function materializeReports(params: {
         );
       }
 
-      await execute(
-        `INSERT INTO ${tables.financialPoints}
-         (company_id, statement, period, fiscal_date, field, value, fetched_at)
-         VALUES ${placeholders}
-         ON CONFLICT(company_id, statement, period, fiscal_date, field)
-         DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
+      await tx!.execute({
+        sql: `INSERT INTO ${tables.financialPoints}
+              (company_id, statement, period, fiscal_date, field, value, fetched_at)
+              VALUES ${placeholders}
+              ON CONFLICT(company_id, statement, period, fiscal_date, field)
+              DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
         args,
-      );
+      });
       rowsWritten += chunk.length;
       chunksWritten += 1;
     }
@@ -215,9 +219,13 @@ async function materializeReports(params: {
     bufferedPoints.length = 0;
   }
 
-  await execute("BEGIN");
-  let txOpen = true;
+  let txActive = false;
+  let txStage: "begin" | "write" | "commit" = "begin";
   try {
+    tx = await db.transaction("write");
+    txActive = true;
+    txStage = "write";
+
     for (const row of rows) {
       const report = JSON.parse(String(row.data_json ?? "{}")) as Record<string, unknown>;
       const fiscalDate = String(row.fiscal_date ?? "");
@@ -257,12 +265,28 @@ async function materializeReports(params: {
     }
 
     await flushBufferedPoints();
-    await execute("COMMIT");
-    txOpen = false;
+    txStage = "commit";
+    await tx.commit();
+    txActive = false;
+    tx = null;
   } catch (error) {
-    if (txOpen) {
-      await execute("ROLLBACK");
-      txOpen = false;
+    console.info("[company-refresh]", {
+      stage: "materialization_tx_error",
+      txActive,
+      txStage,
+      message: (error as Error).message,
+    });
+    if (txActive && tx) {
+      try {
+        await tx.rollback();
+      } catch (rollbackError) {
+        const rollbackMessage = (rollbackError as Error).message.toLowerCase();
+        if (!rollbackMessage.includes("no transaction is active")) {
+          throw rollbackError;
+        }
+      }
+      txActive = false;
+      tx = null;
     }
     throw error;
   }
