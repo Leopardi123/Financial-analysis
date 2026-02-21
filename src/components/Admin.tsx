@@ -26,6 +26,7 @@ type MaterializationProgress = {
   cursor: MaterializationCursor | null;
   done: boolean;
   progressUnit?: "rows" | "targets";
+  targetIndexGlobal?: number;
   targetsTotal?: number;
   targetsProcessedTotal?: number;
   targetsProcessedInRun?: number;
@@ -37,6 +38,8 @@ type MaterializationProgress = {
   totalToProcess?: number;
   remaining?: number;
   remainingTargets?: number;
+  localOffsetCurrent?: number;
+  localOffsetNext?: number | null;
   currentOffset?: number;
   nextOffset?: number | null;
   statement?: string | null;
@@ -54,6 +57,7 @@ type RefreshPayload = {
     cursor: MaterializationCursor | null;
     done: boolean;
     progressUnit?: "rows" | "targets";
+    targetIndexGlobal?: number;
     targetsTotal?: number;
     targetsProcessedTotal?: number;
     targetsProcessedInRun?: number;
@@ -64,6 +68,9 @@ type RefreshPayload = {
     processedTotal?: number;
     totalToProcess?: number;
     remaining?: number;
+    remainingTargets?: number;
+    localOffsetCurrent?: number;
+    localOffsetNext?: number | null;
     currentOffset?: number;
     nextOffset?: number | null;
     statement?: string | null;
@@ -239,7 +246,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setTickerProgressUnit(unit);
 
     const unitTotal = progress.targetsTotal;
-    const unitProcessedTotal = progress.targetsProcessedTotal;
+    const unitProcessedTotal = progress.targetIndexGlobal ?? progress.targetsProcessedTotal;
     const unitProcessedInRun = progress.targetsProcessedInRun;
 
     const incomingTotal = Number(
@@ -252,10 +259,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       unitProcessedInRun ?? progress.processedInRun ?? progress.inserted ?? tickerLastBatchProcessed
     );
 
-    const hasCurrentOffset = typeof progress.currentOffset === "number";
-    const hasNextOffset = typeof progress.nextOffset === "number" || progress.nextOffset === null;
-    const currentOffset = hasCurrentOffset ? Number(progress.currentOffset) : tickerCurrentOffset;
-    const nextOffset: number | null = hasNextOffset ? (progress.nextOffset ?? null) : (tickerNextOffset ?? null);
+    const localCurrentRaw = progress.localOffsetCurrent ?? progress.currentOffset;
+    const localNextRaw = progress.localOffsetNext ?? progress.nextOffset;
+    const hasCurrentOffset = typeof localCurrentRaw === "number";
+    const hasNextOffset = typeof localNextRaw === "number" || localNextRaw === null;
+    const currentOffset = hasCurrentOffset ? Number(localCurrentRaw) : tickerCurrentOffset;
+    const nextOffset: number | null = hasNextOffset ? (localNextRaw ?? null) : (tickerNextOffset ?? null);
 
     setTickerTotalToProcess((prev) => Math.max(prev, Math.max(0, incomingTotal)));
     setTickerProcessedTotal((prev) => Math.max(prev, Math.max(0, incomingProcessedTotal)));
@@ -390,7 +399,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     if (payload?.materialization) {
       applyMaterialization(payload.materialization);
       const done = Boolean(payload.materialization.done);
-      const processedTotal = Number(payload.materialization.processedTotal ?? payload.materialization.nextOffset ?? 0);
+      const processedTotal = Number(
+        payload.materialization.targetIndexGlobal
+        ?? payload.materialization.targetsProcessedTotal
+        ?? payload.materialization.processedTotal
+        ?? 0
+      );
       const progressUnit = payload.materialization.progressUnit ?? tickerProgressUnit;
       const total = Number(payload.materialization.targetsTotal ?? payload.materialization.totalToProcess ?? 0);
       const processed = total > 0
@@ -746,7 +760,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               Rows written last batch: {tickerLastBatchRowsWritten} (cumulative {tickerRowsWrittenTotal})
             </p>
             <p className="bread">
-              Cursor ({tickerProgressUnit}): current {tickerCurrentOffset} · next {tickerNextOffset ?? "done"}
+              Cursor (local): {String(materializationCursor?.statement ?? "-")}/{String(materializationCursor?.period ?? "-")} offset {tickerCurrentOffset} → {tickerNextOffset ?? "done"}
             </p>
             <div
               style={{

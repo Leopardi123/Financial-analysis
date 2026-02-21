@@ -20,7 +20,6 @@ function targetKey(statement: StatementType, period: PeriodType) {
 
 function computeProcessedTotalFromCursor(params: {
   targets: Array<{ statement: StatementType; period: PeriodType }>;
-  targetCounts: Map<string, number>;
   cursor: { statement: StatementType; period: PeriodType; offset: number } | null;
 }) {
   if (!params.cursor) {
@@ -34,13 +33,9 @@ function computeProcessedTotalFromCursor(params: {
     return 0;
   }
 
-  return params.targets.reduce((acc, target, index) => {
-    const count = params.targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
+  return params.targets.reduce((acc, _target, index) => {
     if (index < cursorIndex) {
-      return acc + count;
-    }
-    if (index === cursorIndex) {
-      return acc + Math.max(0, Math.min(params.cursor?.offset ?? 0, count));
+      return acc + 1;
     }
     return acc;
   }, 0);
@@ -495,20 +490,21 @@ export default async function handler(req: any, res: any) {
       );
     }
 
-    const totalToProcess = targets.reduce(
-      (acc, target) => acc + (targetCounts.get(targetKey(target.statement, target.period)) ?? 0),
-      0
+    const activeTargets = targets.filter(
+      (target) => (targetCounts.get(targetKey(target.statement, target.period)) ?? 0) > 0
     );
+    const totalToProcess = activeTargets.length;
     const previousProcessedTotal = computeProcessedTotalFromCursor({
-      targets,
-      targetCounts,
+      targets: activeTargets,
       cursor,
     });
-    const processedTotal = done
+    const targetIndexGlobal = done
       ? totalToProcess
-      : computeProcessedTotalFromCursor({ targets, targetCounts, cursor: nextCursor });
-    const targetsProcessedInRun = Math.max(0, processedTotal - previousProcessedTotal);
-    const remainingTargets = Math.max(0, totalToProcess - processedTotal);
+      : computeProcessedTotalFromCursor({ targets: activeTargets, cursor: nextCursor });
+    const targetsProcessedInRun = Math.max(0, targetIndexGlobal - previousProcessedTotal);
+    const remainingTargets = Math.max(0, totalToProcess - targetIndexGlobal);
+    const localOffsetCurrent = currentTargetProgress?.currentOffset ?? (cursor?.offset ?? 0);
+    const localOffsetNext = currentTargetProgress?.nextOffset ?? nextCursor?.offset ?? null;
     console.info("[company-refresh]", {
       stage: "materialization_payload_consistency",
       rowsAttempted: rowsWrittenInRunAttempted,
@@ -528,15 +524,18 @@ export default async function handler(req: any, res: any) {
         processedInRun: rowsWrittenInRun,
         progressUnit: "targets",
         targetsTotal: totalToProcess,
-        targetsProcessedTotal: processedTotal,
+        targetIndexGlobal,
+        targetsProcessedTotal: targetIndexGlobal,
         targetsProcessedInRun,
         rowsWrittenInRun,
         rowsWrittenInRunAttempted,
-        processedTotal,
+        processedTotal: targetIndexGlobal,
         statement: currentTargetProgress?.statement ?? null,
         period: currentTargetProgress?.period ?? null,
-        currentOffset: previousProcessedTotal,
-        nextOffset: done ? totalToProcess : processedTotal,
+        localOffsetCurrent,
+        localOffsetNext,
+        currentOffset: localOffsetCurrent,
+        nextOffset: localOffsetNext,
         totalToProcess: totalToProcess,
         remainingTargets,
         remaining: remainingTargets,
@@ -557,13 +556,16 @@ export default async function handler(req: any, res: any) {
         processedInRun: 0,
         progressUnit: "targets",
         targetsTotal: 0,
-        targetsProcessedTotal: requestCursor?.offset ?? 0,
+        targetIndexGlobal: 0,
+        targetsProcessedTotal: 0,
         targetsProcessedInRun: 0,
         rowsWrittenInRun: 0,
         rowsWrittenInRunAttempted: 0,
-        processedTotal: requestCursor?.offset ?? 0,
+        processedTotal: 0,
         statement: requestCursor?.statement ?? null,
         period: requestCursor?.period ?? null,
+        localOffsetCurrent: requestCursor?.offset ?? 0,
+        localOffsetNext: requestCursor?.offset ?? null,
         currentOffset: requestCursor?.offset ?? 0,
         nextOffset: requestCursor?.offset ?? null,
         totalToProcess: 0,
