@@ -239,11 +239,25 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   }, []);
 
   function applyMaterialization(progress: MaterializationProgress) {
-    if ("cursor" in progress) {
-      const nextCursor = progress.nextCursor ?? progress.cursor ?? null;
-      setMaterializationCursor(nextCursor);
-      materializationCursorRef.current = nextCursor;
-      setMaterializationDisplayCursor(progress.cursor ?? null);
+    const hasIncomingCursor = "cursor" in progress;
+    const hasIncomingNextCursor = "nextCursor" in progress;
+    const incomingCursor = hasIncomingCursor ? (progress.cursor ?? null) : null;
+    const incomingNextCursor = hasIncomingNextCursor ? (progress.nextCursor ?? null) : null;
+
+    if (hasIncomingCursor) {
+      setMaterializationDisplayCursor(incomingCursor);
+    }
+    if (hasIncomingNextCursor) {
+      setMaterializationCursor(incomingNextCursor);
+      materializationCursorRef.current = incomingNextCursor;
+    }
+
+    if (import.meta.env.DEV) {
+      console.debug("[admin] materialization cursor update", {
+        previousCursor: materializationDisplayCursor,
+        incomingCursor,
+        incomingNextCursor,
+      });
     }
     setMaterializationDone(Boolean(progress.done));
 
@@ -264,12 +278,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       unitProcessedInRun ?? progress.processedInRun ?? progress.inserted ?? tickerLastBatchProcessed
     );
 
-    const localCurrentRaw = progress.localOffsetCurrent ?? progress.currentOffset;
-    const localNextRaw = progress.localOffsetNext ?? progress.nextOffset;
+    const localCurrentRaw = progress.localOffsetCurrent ?? progress.currentOffset ?? incomingCursor?.offset;
+    const localNextRaw = progress.localOffsetNext ?? progress.nextOffset ?? incomingNextCursor?.offset;
     const hasCurrentOffset = typeof localCurrentRaw === "number";
     const hasNextOffset = typeof localNextRaw === "number" || localNextRaw === null;
     const currentOffset = hasCurrentOffset ? Number(localCurrentRaw) : tickerCurrentOffset;
-    const nextOffset: number | null = hasNextOffset ? (localNextRaw ?? null) : (tickerNextOffset ?? null);
+    const nextOffset: number | null = hasNextOffset ? (localNextRaw ?? null) : null;
 
     setTickerTotalToProcess((prev) => Math.max(prev, Math.max(0, incomingTotal)));
     setTickerProcessedTotal((prev) => Math.max(prev, Math.max(0, incomingProcessedTotal)));
@@ -278,12 +292,14 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setTickerLastBatchRowsWritten(Math.max(0, incomingRowsWritten));
     setTickerRowsWrittenTotal((prev) => prev + Math.max(0, incomingRowsWritten));
     if (hasCurrentOffset) {
-      setTickerCurrentOffset((prev) => Math.max(prev, Math.max(0, currentOffset)));
+      setTickerCurrentOffset(Math.max(0, currentOffset));
     }
     if (progress.done) {
       setTickerNextOffset(null);
     } else if (hasNextOffset) {
       setTickerNextOffset(nextOffset);
+    } else if (hasIncomingNextCursor) {
+      setTickerNextOffset(null);
     }
 
     const safeTotal = Math.max(0, incomingTotal);
@@ -766,7 +782,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               Rows written last batch: {tickerLastBatchRowsWritten} (cumulative {tickerRowsWrittenTotal})
             </p>
             <p className="bread">
-              Cursor (local): {String(materializationDisplayCursor?.statement ?? "-")}/{String(materializationDisplayCursor?.period ?? "-")} offset {tickerCurrentOffset} → {tickerNextOffset ?? "done"}
+              Cursor (local): {String(materializationDisplayCursor?.statement ?? "-")}/{String(materializationDisplayCursor?.period ?? "-")} offset {tickerCurrentOffset}
+              {tickerNextOffset === null ? "" : ` → ${tickerNextOffset}`}
             </p>
             <div
               style={{
