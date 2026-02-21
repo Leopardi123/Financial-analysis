@@ -18,6 +18,34 @@ function targetKey(statement: StatementType, period: PeriodType) {
   return `${statement}:${period}`;
 }
 
+function computeProcessedTotalFromCursor(params: {
+  targets: Array<{ statement: StatementType; period: PeriodType }>;
+  targetCounts: Map<string, number>;
+  cursor: { statement: StatementType; period: PeriodType; offset: number } | null;
+}) {
+  if (!params.cursor) {
+    return 0;
+  }
+
+  const cursorIndex = params.targets.findIndex(
+    (target) => target.statement === params.cursor?.statement && target.period === params.cursor?.period
+  );
+  if (cursorIndex < 0) {
+    return 0;
+  }
+
+  return params.targets.reduce((acc, target, index) => {
+    const count = params.targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
+    if (index < cursorIndex) {
+      return acc + count;
+    }
+    if (index === cursorIndex) {
+      return acc + Math.max(0, Math.min(params.cursor?.offset ?? 0, count));
+    }
+    return acc;
+  }, 0);
+}
+
 function toFiscalDateCutoffIso() {
   const now = new Date();
   const cutoff = new Date(now.getTime());
@@ -311,26 +339,15 @@ export default async function handler(req: any, res: any) {
       (acc, target) => acc + (targetCounts.get(targetKey(target.statement, target.period)) ?? 0),
       0
     );
-    const cursorIndex = nextCursor
-      ? targets.findIndex(
-        (target) => target.statement === nextCursor.statement && target.period === nextCursor.period
-      )
-      : -1;
+    const previousProcessedTotal = computeProcessedTotalFromCursor({
+      targets,
+      targetCounts,
+      cursor,
+    });
     const processedTotal = done
       ? totalToProcess
-      : targets.reduce((acc, target, index) => {
-        const count = targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
-        if (cursorIndex < 0) {
-          return acc;
-        }
-        if (index < cursorIndex) {
-          return acc + count;
-        }
-        if (index === cursorIndex && nextCursor) {
-          return acc + Math.max(0, Math.min(nextCursor.offset, count));
-        }
-        return acc;
-      }, 0);
+      : computeProcessedTotalFromCursor({ targets, targetCounts, cursor: nextCursor });
+    const rowsProcessedInRun = Math.max(0, processedTotal - previousProcessedTotal);
     const remaining = Math.max(0, totalToProcess - processedTotal);
 
     res.status(200).json({
@@ -343,11 +360,15 @@ export default async function handler(req: any, res: any) {
         done,
         inserted: materialized,
         processedInRun: materialized,
+        progressUnit: "rows",
+        rowsTotal: totalToProcess,
+        rowsProcessedTotal: processedTotal,
+        rowsProcessedInRun,
         processedTotal,
         statement: currentTargetProgress?.statement ?? null,
         period: currentTargetProgress?.period ?? null,
-        currentOffset: currentTargetProgress?.currentOffset ?? (cursor?.offset ?? 0),
-        nextOffset: currentTargetProgress?.nextOffset ?? nextCursor?.offset ?? null,
+        currentOffset: previousProcessedTotal,
+        nextOffset: done ? totalToProcess : processedTotal,
         totalToProcess,
         remaining,
       },
@@ -365,6 +386,10 @@ export default async function handler(req: any, res: any) {
         done: false,
         inserted: 0,
         processedInRun: 0,
+        progressUnit: "rows",
+        rowsTotal: 0,
+        rowsProcessedTotal: requestCursor?.offset ?? 0,
+        rowsProcessedInRun: 0,
         processedTotal: requestCursor?.offset ?? 0,
         statement: requestCursor?.statement ?? null,
         period: requestCursor?.period ?? null,
