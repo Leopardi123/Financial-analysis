@@ -509,6 +509,12 @@ export default async function handler(req: any, res: any) {
       : computeProcessedTotalFromCursor({ targets, targetCounts, cursor: nextCursor });
     const targetsProcessedInRun = Math.max(0, processedTotal - previousProcessedTotal);
     const remainingTargets = Math.max(0, totalToProcess - processedTotal);
+    console.info("[company-refresh]", {
+      stage: "materialization_payload_consistency",
+      rowsAttempted: rowsWrittenInRunAttempted,
+      rowsWritten: rowsWrittenInRun,
+      insertedLegacy: rowsWrittenInRun,
+    });
 
     res.status(200).json({
       ok: true,
@@ -518,8 +524,8 @@ export default async function handler(req: any, res: any) {
       materialization: {
         cursor: nextCursor,
         done,
-        inserted: materialized,
-        processedInRun: materialized,
+        inserted: rowsWrittenInRun,
+        processedInRun: rowsWrittenInRun,
         progressUnit: "targets",
         targetsTotal: totalToProcess,
         targetsProcessedTotal: processedTotal,

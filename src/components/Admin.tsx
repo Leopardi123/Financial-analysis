@@ -252,11 +252,10 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       unitProcessedInRun ?? progress.processedInRun ?? progress.inserted ?? tickerLastBatchProcessed
     );
 
-    const currentOffset = Number(progress.currentOffset ?? progress.cursor?.offset ?? tickerCurrentOffset);
-    const nextOffsetRaw = progress.nextOffset;
-    const nextOffset = typeof nextOffsetRaw === "number"
-      ? nextOffsetRaw
-      : (progress.cursor?.offset ?? tickerNextOffset);
+    const hasCurrentOffset = typeof progress.currentOffset === "number";
+    const hasNextOffset = typeof progress.nextOffset === "number" || progress.nextOffset === null;
+    const currentOffset = hasCurrentOffset ? Number(progress.currentOffset) : tickerCurrentOffset;
+    const nextOffset: number | null = hasNextOffset ? (progress.nextOffset ?? null) : (tickerNextOffset ?? null);
 
     setTickerTotalToProcess((prev) => Math.max(prev, Math.max(0, incomingTotal)));
     setTickerProcessedTotal((prev) => Math.max(prev, Math.max(0, incomingProcessedTotal)));
@@ -264,8 +263,14 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     const incomingRowsWritten = Number(progress.rowsWrittenInRun ?? progress.inserted ?? 0);
     setTickerLastBatchRowsWritten(Math.max(0, incomingRowsWritten));
     setTickerRowsWrittenTotal((prev) => prev + Math.max(0, incomingRowsWritten));
-    setTickerCurrentOffset((prev) => Math.max(prev, Math.max(0, currentOffset)));
-    setTickerNextOffset(progress.done ? null : nextOffset);
+    if (hasCurrentOffset) {
+      setTickerCurrentOffset((prev) => Math.max(prev, Math.max(0, currentOffset)));
+    }
+    if (progress.done) {
+      setTickerNextOffset(null);
+    } else if (hasNextOffset) {
+      setTickerNextOffset(nextOffset);
+    }
 
     const safeTotal = Math.max(0, incomingTotal);
     const safeProcessed = Math.max(0, incomingProcessedTotal);
