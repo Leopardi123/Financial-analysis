@@ -1,5 +1,5 @@
 import { query, execute } from "../../../../api/_db.js";
-import { requireFmpApiKey } from "../../../../api/_fmp.js";
+import { fetchStableJson, requireFmpApiKey } from "../../../../api/_fmp.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 
 function parseFiscalYearEnd(raw: unknown) {
@@ -29,8 +29,7 @@ function fiscalYearEndMonth(value: string | null) {
 export default async function handler(req: any, res: any) {
   try {
     await ensureSchema();
-    const apiKey = requireFmpApiKey();
-    if (!apiKey) {
+    if (!requireFmpApiKey()) {
       res.status(500).json({ ok: false, error: "FMP_API_KEY missing" });
       return;
     }
@@ -50,14 +49,9 @@ export default async function handler(req: any, res: any) {
       ? companyRows[0].fiscal_year_end
       : null;
 
-    const url = `https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(ticker)}&apikey=${apiKey}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      res.status(502).json({ ok: false, error: `FMP profile request failed (${response.status})` });
-      return;
-    }
-
-    const payload = (await response.json()) as Array<Record<string, unknown>>;
+    const payload = await fetchStableJson<Array<Record<string, unknown>>>("profile", {
+      symbol: ticker,
+    });
     const profile = payload?.[0] ?? null;
     const fromProfile = parseFiscalYearEnd(profile?.fiscalYearEnd);
     const fiscalYearEnd = fromProfile ?? storedFiscalYearEnd;
