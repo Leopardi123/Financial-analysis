@@ -1,5 +1,5 @@
 import { assertCronSecret } from "../../../../api/_auth.js";
-import { batch, execute, query } from "../../../../api/_db.js";
+import { batch, execute, getDb, query } from "../../../../api/_db.js";
 import {
   fetchStatement,
   normalizeFinancialPoints,
@@ -13,6 +13,40 @@ const STATEMENTS: StatementType[] = ["balance", "income", "cashflow"];
 const PERIODS: PeriodType[] = ["fy", "q"];
 const MAX_POINTS_PER_RUN = 10000;
 const REPORT_BATCH_SIZE = 30;
+
+function targetKey(statement: StatementType, period: PeriodType) {
+  return `${statement}:${period}`;
+}
+
+function computeProcessedTotalFromCursor(params: {
+  targets: Array<{ statement: StatementType; period: PeriodType }>;
+  cursor: { statement: StatementType; period: PeriodType; offset: number } | null;
+}) {
+  if (!params.cursor) {
+    return 0;
+  }
+
+  const cursorIndex = params.targets.findIndex(
+    (target) => target.statement === params.cursor?.statement && target.period === params.cursor?.period
+  );
+  if (cursorIndex < 0) {
+    return 0;
+  }
+
+  return params.targets.reduce((acc, _target, index) => {
+    if (index < cursorIndex) {
+      return acc + 1;
+    }
+    return acc;
+  }, 0);
+}
+
+function toFiscalDateCutoffIso() {
+  const now = new Date();
+  const cutoff = new Date(now.getTime());
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 20);
+  return cutoff.toISOString().slice(0, 10);
+}
 
 async function logFetch(
   ticker: string,
@@ -67,86 +101,270 @@ async function materializeReports(params: {
   offset: number;
   limit: number;
   maxPoints: number;
+  cutoffDate: string;
 }) {
   const latestRows = await query(
     `SELECT fiscal_date
      FROM ${tables.financialReports}
-     WHERE company_id = ? AND statement = ? AND period = ?
+     WHERE company_id = ? AND statement = ? AND period = ? AND fiscal_date >= ?
      ORDER BY fiscal_date DESC
      LIMIT 1`,
-    [params.companyId, params.statement, params.period]
+    [params.companyId, params.statement, params.period, params.cutoffDate]
   );
   const latestFiscalDate = String(latestRows[0]?.fiscal_date ?? "");
 
   const rows = await query(
     `SELECT fiscal_date, data_json, fetched_at
      FROM ${tables.financialReports}
-     WHERE company_id = ? AND statement = ? AND period = ?
+     WHERE company_id = ? AND statement = ? AND period = ? AND fiscal_date >= ?
      ORDER BY fiscal_date DESC
      LIMIT ? OFFSET ?`,
-    [params.companyId, params.statement, params.period, params.limit, params.offset]
+    [params.companyId, params.statement, params.period, params.cutoffDate, params.limit, params.offset]
   );
 
   let inserted = 0;
+  let rowsAttempted = 0;
+  let rowsWritten = 0;
+  let chunksWritten = 0;
+  let rowsExistingFetched = 0;
+  let rowsUnchangedSkipped = 0;
   let newestFiscalDateProcessed = false;
-  let batchStatements: Array<{ sql: string; args: Array<string | number | null> }> = [];
+  const runStartedAt = Date.now();
+  let deltaReadMs = 0;
+  let writeMs = 0;
+  let transformMs = 0;
 
-  for (const row of rows) {
-    const report = JSON.parse(String(row.data_json ?? "{}")) as Record<string, unknown>;
-    const fiscalDate = String(row.fiscal_date ?? "");
-    const fetchedAt = String(row.fetched_at ?? new Date().toISOString());
-    if (!fiscalDate) {
-      continue;
+  const bufferedPoints: Array<{ fiscalDate: string; field: string; value: number; fetchedAt: string }> = [];
+
+  const db = getDb();
+  let tx: Awaited<ReturnType<typeof db.transaction>> | null = null;
+
+  async function flushBufferedPoints() {
+    if (bufferedPoints.length === 0) {
+      return;
     }
-    if (latestFiscalDate && fiscalDate === latestFiscalDate) {
-      newestFiscalDateProcessed = true;
-    }
 
-    const points = normalizeFinancialPoints(
-      String(params.companyId),
-      params.statement,
-      params.period,
-      [report]
-    );
+    rowsAttempted += bufferedPoints.length;
 
-    for (const point of points) {
-      batchStatements.push({
-        sql: `INSERT INTO ${tables.financialPoints}
-          (company_id, statement, period, fiscal_date, field, value, fetched_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(company_id, statement, period, fiscal_date, field)
-          DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
+    const fiscalDates = Array.from(new Set(bufferedPoints.map((point) => point.fiscalDate)));
+    const fields = Array.from(new Set(bufferedPoints.map((point) => point.field)));
+    const existingValueMap = new Map<string, number | null>();
+
+    if (fiscalDates.length > 0 && fields.length > 0) {
+      const deltaReadStartedAt = Date.now();
+      const fiscalDatePlaceholders = fiscalDates.map(() => "?").join(",");
+      const fieldPlaceholders = fields.map(() => "?").join(",");
+      const existingResult = await tx!.execute({
+        sql: `SELECT fiscal_date, field, value
+              FROM ${tables.financialPoints}
+              WHERE company_id = ? AND statement = ? AND period = ?
+                AND fiscal_date IN (${fiscalDatePlaceholders})
+                AND field IN (${fieldPlaceholders})`,
         args: [
           params.companyId,
-          point.statement,
-          point.period,
-          fiscalDate,
-          point.field,
-          point.value,
-          fetchedAt,
+          params.statement,
+          params.period,
+          ...fiscalDates,
+          ...fields,
         ],
       });
-      inserted += 1;
-      if (batchStatements.length >= 400) {
-        await batch(batchStatements);
-        batchStatements = [];
+      const existingRows = existingResult.rows;
+      rowsExistingFetched += existingRows.length;
+      deltaReadMs += Date.now() - deltaReadStartedAt;
+
+      for (const row of existingRows) {
+        const key = `${String(row.fiscal_date)}|${String(row.field)}`;
+        const value = row.value == null ? null : Number(row.value);
+        existingValueMap.set(key, Number.isFinite(value as number) ? (value as number) : null);
+      }
+    }
+
+    const changedRows = bufferedPoints.filter((point) => {
+      const key = `${point.fiscalDate}|${point.field}`;
+      const existing = existingValueMap.get(key);
+      return existing == null || existing !== point.value;
+    });
+    rowsUnchangedSkipped += bufferedPoints.length - changedRows.length;
+
+    if (changedRows.length === 0) {
+      bufferedPoints.length = 0;
+      return;
+    }
+
+    const SQL_CHUNK_ROWS = 120;
+    for (let i = 0; i < changedRows.length; i += SQL_CHUNK_ROWS) {
+      const chunkWriteStartedAt = Date.now();
+      const chunk = changedRows.slice(i, i + SQL_CHUNK_ROWS);
+      const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(",");
+      const args: Array<string | number> = [];
+      for (const row of chunk) {
+        args.push(
+          params.companyId,
+          params.statement,
+          params.period,
+          row.fiscalDate,
+          row.field,
+          row.value,
+          row.fetchedAt,
+        );
+      }
+
+      await tx!.execute({
+        sql: `INSERT INTO ${tables.financialPoints}
+              (company_id, statement, period, fiscal_date, field, value, fetched_at)
+              VALUES ${placeholders}
+              ON CONFLICT(company_id, statement, period, fiscal_date, field)
+              DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
+        args,
+      });
+      writeMs += Date.now() - chunkWriteStartedAt;
+      rowsWritten += chunk.length;
+      chunksWritten += 1;
+      console.info("[company-refresh]", {
+        stage: "materialization_chunk_write",
+        statement: params.statement,
+        period: params.period,
+        chunkIndex: chunksWritten,
+        valuesCount: chunk.length,
+        txStage,
+        elapsedMs: Date.now() - runStartedAt,
+      });
+    }
+
+    bufferedPoints.length = 0;
+  }
+
+  let txActive = false;
+  let txStage: "begin" | "write" | "commit" = "begin";
+  try {
+    tx = await db.transaction("write");
+    txActive = true;
+    txStage = "write";
+
+    for (const row of rows) {
+      const report = JSON.parse(String(row.data_json ?? "{}")) as Record<string, unknown>;
+      const fiscalDate = String(row.fiscal_date ?? "");
+      const fetchedAt = String(row.fetched_at ?? new Date().toISOString());
+      if (!fiscalDate) {
+        continue;
+      }
+      if (latestFiscalDate && fiscalDate === latestFiscalDate) {
+        newestFiscalDateProcessed = true;
+      }
+
+      const transformStartedAt = Date.now();
+      const points = normalizeFinancialPoints(
+        String(params.companyId),
+        params.statement,
+        params.period,
+        [report]
+      );
+      transformMs += Date.now() - transformStartedAt;
+
+      for (const point of points) {
+        bufferedPoints.push({
+          fiscalDate,
+          field: point.field,
+          value: point.value,
+          fetchedAt,
+        });
+        inserted += 1;
+        if (bufferedPoints.length >= 800) {
+          await flushBufferedPoints();
+        }
+        if (inserted >= params.maxPoints) {
+          break;
+        }
       }
       if (inserted >= params.maxPoints) {
         break;
       }
     }
-    if (inserted >= params.maxPoints) {
-      break;
+
+    await flushBufferedPoints();
+    txStage = "commit";
+    await tx.commit();
+    txActive = false;
+    tx = null;
+  } catch (error) {
+    console.info("[company-refresh]", {
+      stage: "materialization_tx_error",
+      txActive,
+      txStage,
+      message: (error as Error).message,
+    });
+    if (txActive && tx) {
+      try {
+        await tx.rollback();
+      } catch (rollbackError) {
+        const rollbackMessage = (rollbackError as Error).message.toLowerCase();
+        if (!rollbackMessage.includes("no transaction is active")) {
+          throw rollbackError;
+        }
+      }
+      txActive = false;
+      tx = null;
     }
+    throw error;
   }
 
-  if (batchStatements.length > 0) {
-    await batch(batchStatements);
-  }
+  console.info("[company-refresh]", {
+    stage: "materialization_write_stats",
+    companyId: params.companyId,
+    statement: params.statement,
+    period: params.period,
+    offset: params.offset,
+    rowsAttempted,
+    rowsExistingFetched,
+    rowsUnchangedSkipped,
+    rowsWritten,
+    chunksWritten,
+    phaseMs: {
+      transformMs,
+      deltaReadMs,
+      writeMs,
+      otherMs: Math.max(0, Date.now() - runStartedAt - transformMs - deltaReadMs - writeMs),
+    },
+    elapsedMs: Date.now() - runStartedAt,
+  });
 
-  const nextOffset = params.offset + rows.length;
-  const done = rows.length < params.limit && inserted < params.maxPoints;
-  return { inserted, nextOffset, done, newestFiscalDateProcessed };
+  const sourceRowsLen = rows.length;
+  const nextOffset = params.offset + sourceRowsLen;
+  const done = sourceRowsLen === 0 || (sourceRowsLen < params.limit && inserted < params.maxPoints);
+  return {
+    inserted,
+    rowsAttempted,
+    rowsWritten,
+    sourceRowsLen,
+    nextOffset,
+    done,
+    newestFiscalDateProcessed,
+  };
+}
+
+async function getCoverageCounts(params: {
+  companyId: number;
+  period: PeriodType;
+  statement: StatementType;
+  cutoffDate: string;
+}) {
+  const reportCountRows = await query(
+    `SELECT COUNT(DISTINCT fiscal_date) as n
+     FROM ${tables.financialReports}
+     WHERE company_id = ? AND period = ? AND statement = ? AND fiscal_date >= ?`,
+    [params.companyId, params.period, params.statement, params.cutoffDate]
+  );
+  const pointCountRows = await query(
+    `SELECT COUNT(DISTINCT fiscal_date) as n
+     FROM ${tables.financialPoints}
+     WHERE company_id = ? AND period = ? AND statement = ? AND fiscal_date >= ?`,
+    [params.companyId, params.period, params.statement, params.cutoffDate]
+  );
+
+  return {
+    reportsDatesCount: Number(reportCountRows[0]?.n ?? 0),
+    pointsDatesCount: Number(pointCountRows[0]?.n ?? 0),
+  };
 }
 
 export default async function handler(req: any, res: any) {
@@ -181,6 +399,8 @@ export default async function handler(req: any, res: any) {
       | null;
 
     const rawSummary: Record<string, number> = {};
+    const cutoffDate = toFiscalDateCutoffIso();
+    console.info("[company-refresh]", { stage: "materialization_cutoff", ticker, cutoffDate });
 
     if (!skipFetch) {
       for (const period of PERIODS) {
@@ -199,8 +419,19 @@ export default async function handler(req: any, res: any) {
 
     const startTime = Date.now();
     let materialized = 0;
+    let rowsWrittenInRun = 0;
+    let rowsWrittenInRunAttempted = 0;
     let nextCursor: { statement: StatementType; period: PeriodType; offset: number } | null = null;
+    let responseCursor: { statement: StatementType; period: PeriodType; offset: number } | null = null;
     let done = true;
+    let currentTargetProgress: {
+      statement: StatementType;
+      period: PeriodType;
+      currentOffset: number;
+      nextOffset: number;
+      totalReports: number;
+      remainingReports: number;
+    } | null = null;
     const periodStatus: Record<PeriodType, { seen: boolean; complete: boolean; newestProcessed: boolean }> = {
       fy: { seen: false, complete: true, newestProcessed: true },
       q: { seen: false, complete: true, newestProcessed: true },
@@ -213,35 +444,126 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    const targetCounts = new Map<string, number>();
+    for (const target of targets) {
+      const countRows = await query(
+        `SELECT COUNT(*) as n
+         FROM ${tables.financialReports}
+         WHERE company_id = ? AND statement = ? AND period = ? AND fiscal_date >= ?`,
+        [companyId, target.statement, target.period, cutoffDate]
+      );
+      targetCounts.set(targetKey(target.statement, target.period), Number(countRows[0]?.n ?? 0));
+    }
+
     for (const target of targets) {
       const offset =
         cursor && cursor.statement === target.statement && cursor.period === target.period
           ? cursor.offset
           : 0;
-      const { inserted, nextOffset, done: targetDone, newestFiscalDateProcessed } = await materializeReports({
+      const totalReports = targetCounts.get(targetKey(target.statement, target.period)) ?? 0;
+
+      const { reportsDatesCount, pointsDatesCount } = await getCoverageCounts({
+        companyId,
+        statement: target.statement,
+        period: target.period,
+        cutoffDate,
+      });
+      console.info("[company-refresh]", {
+        stage: "materialization_target_preflight",
+        statement: target.statement,
+        period: target.period,
+        reportsDatesCount,
+        pointsDatesCount,
+        cutoffDate,
+      });
+
+      if (reportsDatesCount === 0 || pointsDatesCount >= reportsDatesCount) {
+        currentTargetProgress = {
+          statement: target.statement,
+          period: target.period,
+          currentOffset: 0,
+          nextOffset: 0,
+          totalReports,
+          remainingReports: 0,
+        };
+        periodStatus[target.period].seen = true;
+        console.info("[company-refresh]", {
+          stage: "materialization_target_skipped",
+          statement: target.statement,
+          period: target.period,
+          reportsDatesCount,
+          pointsDatesCount,
+          reason: reportsDatesCount === 0 ? "no_reports" : "date_coverage_reached",
+        });
+        continue;
+      }
+
+      const {
+        inserted,
+        rowsWritten,
+        rowsAttempted,
+        sourceRowsLen,
+        nextOffset,
+        done: targetDone,
+        newestFiscalDateProcessed,
+      } = await materializeReports({
         companyId,
         statement: target.statement,
         period: target.period,
         offset,
         limit: REPORT_BATCH_SIZE,
         maxPoints: MAX_POINTS_PER_RUN - materialized,
+        cutoffDate,
       });
+
+      let resolvedNextOffset = nextOffset;
+      let resolvedTargetDone = targetDone;
+      if (!resolvedTargetDone && resolvedNextOffset <= offset) {
+        console.info("[company-refresh]", {
+          stage: "materialization_no_progress_risk",
+          statement: target.statement,
+          period: target.period,
+          localOffsetCurrent: offset,
+          computedNext: resolvedNextOffset,
+          sourceRowsLen,
+          rowsAttempted,
+          rowsWritten,
+        });
+        if (sourceRowsLen === 0) {
+          resolvedTargetDone = true;
+        } else {
+          resolvedNextOffset = offset + sourceRowsLen;
+        }
+      }
+
+      currentTargetProgress = {
+        statement: target.statement,
+        period: target.period,
+        currentOffset: offset,
+        nextOffset: resolvedNextOffset,
+        totalReports,
+        remainingReports: Math.max(0, totalReports - resolvedNextOffset),
+      };
       periodStatus[target.period].seen = true;
       periodStatus[target.period].newestProcessed =
         periodStatus[target.period].newestProcessed &&
         (offset > 0 || newestFiscalDateProcessed);
       materialized += inserted;
-      if (!targetDone) {
+      rowsWrittenInRun += rowsWritten;
+      rowsWrittenInRunAttempted += rowsAttempted;
+      if (!resolvedTargetDone) {
         periodStatus[target.period].complete = false;
         periodStatus[target.period].newestProcessed = false;
         done = false;
-        nextCursor = { statement: target.statement, period: target.period, offset: nextOffset };
+        responseCursor = { statement: target.statement, period: target.period, offset };
+        nextCursor = { statement: target.statement, period: target.period, offset: resolvedNextOffset };
         break;
       }
       if (materialized >= MAX_POINTS_PER_RUN || Date.now() - startTime > 45000) {
         periodStatus[target.period].complete = false;
         done = false;
-        nextCursor = { statement: target.statement, period: target.period, offset: nextOffset };
+        responseCursor = { statement: target.statement, period: target.period, offset };
+        nextCursor = { statement: target.statement, period: target.period, offset: resolvedNextOffset };
         break;
       }
     }
@@ -264,15 +586,90 @@ export default async function handler(req: any, res: any) {
       );
     }
 
+    const activeTargets = targets.filter(
+      (target) => (targetCounts.get(targetKey(target.statement, target.period)) ?? 0) > 0
+    );
+    const totalToProcess = activeTargets.length;
+    const previousProcessedTotal = computeProcessedTotalFromCursor({
+      targets: activeTargets,
+      cursor,
+    });
+    const targetIndexGlobal = done
+      ? totalToProcess
+      : computeProcessedTotalFromCursor({ targets: activeTargets, cursor: nextCursor });
+    const targetsProcessedInRun = Math.max(0, targetIndexGlobal - previousProcessedTotal);
+    const remainingTargets = Math.max(0, totalToProcess - targetIndexGlobal);
+    const localOffsetCurrent = responseCursor?.offset ?? (cursor?.offset ?? 0);
+    const localOffsetNext = nextCursor?.offset ?? (done ? null : localOffsetCurrent);
+    console.info("[company-refresh]", {
+      stage: "materialization_payload_consistency",
+      rowsAttempted: rowsWrittenInRunAttempted,
+      rowsWritten: rowsWrittenInRun,
+      insertedLegacy: rowsWrittenInRun,
+    });
+
     res.status(200).json({
       ok: true,
       ticker,
       phase: done ? "materialized_done" : "materialized_partial",
       raw: rawSummary,
-      materialization: { cursor: nextCursor, done, inserted: materialized },
+      materialization: {
+        cursor: responseCursor,
+        nextCursor,
+        done,
+        inserted: rowsWrittenInRun,
+        processedInRun: rowsWrittenInRun,
+        progressUnit: "targets",
+        targetsTotal: totalToProcess,
+        targetIndexGlobal,
+        targetsProcessedTotal: targetIndexGlobal,
+        targetsProcessedInRun,
+        rowsWrittenInRun,
+        rowsWrittenInRunAttempted,
+        processedTotal: targetIndexGlobal,
+        statement: currentTargetProgress?.statement ?? null,
+        period: currentTargetProgress?.period ?? null,
+        localOffsetCurrent,
+        localOffsetNext,
+        currentOffset: localOffsetCurrent,
+        nextOffset: localOffsetNext,
+        totalToProcess: totalToProcess,
+        remainingTargets,
+        remaining: remainingTargets,
+      },
     });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;
-    res.status(status).json({ ok: false, error: (error as Error).message });
+    const requestCursor = (req.body?.cursor ?? null) as
+      | { statement: StatementType; period: PeriodType; offset: number }
+      | null;
+    res.status(status).json({
+      ok: false,
+      error: (error as Error).message,
+      materialization: {
+        cursor: requestCursor,
+        nextCursor: requestCursor,
+        done: false,
+        inserted: 0,
+        processedInRun: 0,
+        progressUnit: "targets",
+        targetsTotal: 0,
+        targetIndexGlobal: 0,
+        targetsProcessedTotal: 0,
+        targetsProcessedInRun: 0,
+        rowsWrittenInRun: 0,
+        rowsWrittenInRunAttempted: 0,
+        processedTotal: 0,
+        statement: requestCursor?.statement ?? null,
+        period: requestCursor?.period ?? null,
+        localOffsetCurrent: requestCursor?.offset ?? 0,
+        localOffsetNext: requestCursor?.offset ?? null,
+        currentOffset: requestCursor?.offset ?? 0,
+        nextOffset: requestCursor?.offset ?? null,
+        totalToProcess: 0,
+        remainingTargets: 0,
+        remaining: 0,
+      },
+    });
   }
 }
