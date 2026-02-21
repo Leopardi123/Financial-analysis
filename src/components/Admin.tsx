@@ -22,6 +22,19 @@ type MaterializationCursor = {
   offset: number;
 };
 
+type MaterializationProgress = {
+  cursor: MaterializationCursor | null;
+  done: boolean;
+  inserted?: number;
+  processedInRun?: number;
+  totalToProcess?: number;
+  remaining?: number;
+  currentOffset?: number;
+  nextOffset?: number | null;
+  statement?: string | null;
+  period?: string | null;
+};
+
 type RefreshPayload = {
   cursor?: {
     nextOffset: number | null;
@@ -32,6 +45,14 @@ type RefreshPayload = {
   materialization?: {
     cursor: MaterializationCursor | null;
     done: boolean;
+    inserted?: number;
+    processedInRun?: number;
+    totalToProcess?: number;
+    remaining?: number;
+    currentOffset?: number;
+    nextOffset?: number | null;
+    statement?: string | null;
+    period?: string | null;
   };
 };
 
@@ -63,10 +84,20 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [companiesNextOffset, setCompaniesNextOffset] = useState<number | null>(null);
   const [autoRefreshStatus, setAutoRefreshStatus] = useState<AutoRefreshStatus>("idle");
   const [autoRefreshMessage, setAutoRefreshMessage] = useState("Not started.");
+  const [tickerAutoStatus, setTickerAutoStatus] = useState<AutoRefreshStatus>("idle");
+  const [tickerAutoMessage, setTickerAutoMessage] = useState("Not started.");
+  const [tickerProcessedTotal, setTickerProcessedTotal] = useState(0);
+  const [tickerTotalToProcess, setTickerTotalToProcess] = useState(0);
+  const [tickerLastBatchProcessed, setTickerLastBatchProcessed] = useState(0);
+  const [tickerCurrentOffset, setTickerCurrentOffset] = useState(0);
+  const [tickerNextOffset, setTickerNextOffset] = useState<number | null>(null);
 
   const autoRefreshRunningRef = useRef(false);
   const autoRefreshPausedRef = useRef(false);
   const companiesCursorOffsetRef = useRef<number>(0);
+  const tickerAutoRunningRef = useRef(false);
+  const tickerAutoPausedRef = useRef(false);
+  const materializationCursorRef = useRef<MaterializationCursor | null>(null);
 
   const secretReady = secret.trim().length > 0;
 
@@ -167,13 +198,40 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const companiesProgressPercent = companiesTotalToProcess > 0
     ? Math.min(100, Math.round((companiesProcessedTotal / companiesTotalToProcess) * 100))
     : 0;
+  const tickerProgressPercent = tickerTotalToProcess > 0
+    ? Math.min(100, Math.round((tickerProcessedTotal / tickerTotalToProcess) * 100))
+    : 0;
 
   useEffect(() => {
     return () => {
       autoRefreshRunningRef.current = false;
       autoRefreshPausedRef.current = true;
+      tickerAutoRunningRef.current = false;
+      tickerAutoPausedRef.current = true;
     };
   }, []);
+
+  function applyMaterialization(progress: MaterializationProgress) {
+    setMaterializationCursor(progress.cursor ?? null);
+    materializationCursorRef.current = progress.cursor ?? null;
+    setMaterializationDone(progress.done);
+
+    const currentOffset = Number(progress.currentOffset ?? progress.cursor?.offset ?? 0);
+    const nextOffsetRaw = progress.nextOffset;
+    const nextOffset = typeof nextOffsetRaw === "number"
+      ? nextOffsetRaw
+      : progress.cursor?.offset ?? null;
+    const total = Number(progress.totalToProcess ?? 0);
+    const remaining = Number(progress.remaining ?? Math.max(0, total - (nextOffset ?? currentOffset)));
+    const processedInRun = Number(progress.processedInRun ?? progress.inserted ?? 0);
+    const computedProcessed = total > 0 ? Math.max(0, total - remaining) : Math.max(0, nextOffset ?? currentOffset);
+
+    setTickerCurrentOffset(currentOffset);
+    setTickerNextOffset(progress.done ? null : nextOffset);
+    setTickerTotalToProcess(total);
+    setTickerProcessedTotal(computedProcessed);
+    setTickerLastBatchProcessed(processedInRun);
+  }
 
   function applyCursor(cursor: NonNullable<RefreshPayload["cursor"]>) {
     const nextOffset = cursor.nextOffset;
@@ -272,6 +330,115 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     autoRefreshPausedRef.current = true;
     setAutoRefreshStatus("paused");
     setAutoRefreshMessage("Pausing after current batch...");
+  }
+
+  async function requestTickerRefreshBatch(skipFetch: boolean, retryAttempt = 0): Promise<RefreshPayload | null> {
+    const ticker = refreshTicker.trim().toUpperCase();
+    const title = skipFetch ? "Continue Materialization" : "Refresh Ticker";
+    const payload = await postJson(title, "/api/company/refresh", {
+      ticker,
+      ...(skipFetch
+        ? { skipFetch: true, cursor: materializationCursorRef.current }
+        : {}),
+    });
+
+    if (payload?.materialization) {
+      applyMaterialization(payload.materialization);
+      const done = Boolean(payload.materialization.done);
+      const processed = Number(payload.materialization.totalToProcess ?? 0) > 0
+        ? `${tickerProcessedTotal} / ${payload.materialization.totalToProcess}`
+        : `${tickerProcessedTotal}`;
+      setTickerAutoMessage(done ? "Materialization complete." : `Materializing ${processed}`);
+      return payload;
+    }
+
+    if (retryAttempt >= 3) {
+      setTickerAutoStatus("error");
+      setTickerAutoMessage("Auto ticker refresh paused after repeated errors. Click Resume to retry.");
+      tickerAutoRunningRef.current = false;
+      tickerAutoPausedRef.current = true;
+      return null;
+    }
+
+    const backoffMs = 500 * (2 ** retryAttempt);
+    setTickerAutoMessage(`Transient error, retrying in ${backoffMs}ms (attempt ${retryAttempt + 1}/3)...`);
+    await sleep(backoffMs);
+    return requestTickerRefreshBatch(skipFetch, retryAttempt + 1);
+  }
+
+  async function runTickerAutoFlow(reset: boolean) {
+    if (tickerAutoRunningRef.current) {
+      return;
+    }
+
+    const ticker = refreshTicker.trim().toUpperCase();
+    if (!ticker) {
+      setTickerAutoStatus("error");
+      setTickerAutoMessage("Ticker is required.");
+      return;
+    }
+
+    tickerAutoRunningRef.current = true;
+    tickerAutoPausedRef.current = false;
+    setTickerAutoStatus("running");
+    setTickerAutoMessage(reset ? "Starting ticker refresh from scratch..." : "Resuming ticker materialization...");
+
+    if (reset) {
+      materializationCursorRef.current = null;
+      setMaterializationCursor(null);
+      setMaterializationDone(false);
+      setTickerProcessedTotal(0);
+      setTickerTotalToProcess(0);
+      setTickerLastBatchProcessed(0);
+      setTickerCurrentOffset(0);
+      setTickerNextOffset(null);
+    }
+
+    const firstResponse = await requestTickerRefreshBatch(!reset);
+    if (!firstResponse?.materialization) {
+      tickerAutoRunningRef.current = false;
+      return;
+    }
+
+    if (firstResponse.materialization.done) {
+      setTickerAutoStatus("done");
+      setTickerAutoMessage("Ticker refresh + materialization complete.");
+      tickerAutoRunningRef.current = false;
+      tickerAutoPausedRef.current = false;
+      return;
+    }
+
+    while (tickerAutoRunningRef.current) {
+      if (tickerAutoPausedRef.current) {
+        break;
+      }
+
+      const jitterMs = 200 + Math.floor(Math.random() * 301);
+      await sleep(jitterMs);
+      const payload = await requestTickerRefreshBatch(true);
+      if (!payload?.materialization) {
+        break;
+      }
+      if (payload.materialization.done) {
+        setTickerAutoStatus("done");
+        setTickerAutoMessage("Ticker refresh + materialization complete.");
+        tickerAutoRunningRef.current = false;
+        tickerAutoPausedRef.current = false;
+        return;
+      }
+    }
+
+    if (tickerAutoPausedRef.current) {
+      setTickerAutoStatus("paused");
+      setTickerAutoMessage("Paused by user.");
+    }
+    tickerAutoRunningRef.current = false;
+  }
+
+  function handlePauseTickerAutoFlow() {
+    tickerAutoPausedRef.current = true;
+    setTickerAutoStatus("paused");
+    setTickerAutoMessage("Pausing after current ticker batch...");
   }
 
   return (
@@ -457,12 +624,11 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
                 }).then((payload) => {
                   const materialization = payload?.materialization;
                   if (materialization) {
-                    setMaterializationCursor(materialization.cursor ?? null);
-                    setMaterializationDone(materialization.done);
+                    applyMaterialization(materialization);
                   }
                 })
               }
-              disabled={!secretReady || loadingKey !== null}
+              disabled={!secretReady || loadingKey !== null || tickerAutoStatus === "running"}
             >
               {loadingKey === "Refresh Ticker" ? "Refreshing..." : "Refresh Ticker"}
             </button>
@@ -477,16 +643,75 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
                   }).then((payload) => {
                     const materialization = payload?.materialization;
                     if (materialization) {
-                      setMaterializationCursor(materialization.cursor ?? null);
-                      setMaterializationDone(materialization.done);
+                      applyMaterialization(materialization);
                     }
                   })
                 }
-                disabled={!secretReady || loadingKey !== null}
+                disabled={!secretReady || loadingKey !== null || tickerAutoStatus === "running"}
               >
                 {loadingKey === "Continue Materialization" ? "Continuing..." : "Continue materialization"}
               </button>
             )}
+            <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => void runTickerAutoFlow(true)}
+                disabled={!secretReady || tickerAutoStatus === "running" || loadingKey !== null}
+              >
+                Start auto refresh ticker
+              </button>
+              <button
+                type="button"
+                onClick={handlePauseTickerAutoFlow}
+                disabled={!secretReady || tickerAutoStatus !== "running"}
+              >
+                Pause
+              </button>
+              <button
+                type="button"
+                onClick={() => void runTickerAutoFlow(false)}
+                disabled={!secretReady || (tickerAutoStatus !== "paused" && tickerAutoStatus !== "error") || loadingKey !== null}
+              >
+                Resume
+              </button>
+              <button
+                type="button"
+                onClick={() => void runTickerAutoFlow(true)}
+                disabled={!secretReady || tickerAutoStatus === "running" || loadingKey !== null}
+              >
+                Reset
+              </button>
+            </div>
+            <p className="bread">
+              Ticker auto status: <strong>{tickerAutoStatus}</strong> — {tickerAutoMessage}
+            </p>
+            <p className="bread">
+              Processed {tickerProcessedTotal} of {tickerTotalToProcess || "?"} · Last batch {tickerLastBatchProcessed}
+            </p>
+            <p className="bread">
+              Current offset: {tickerCurrentOffset} · Next offset: {tickerNextOffset ?? "done"}
+            </p>
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 520,
+                height: 12,
+                borderRadius: 8,
+                background: "#e5e7eb",
+                overflow: "hidden",
+              }}
+              aria-label="Ticker materialization progress"
+            >
+              <div
+                style={{
+                  width: `${tickerProgressPercent}%`,
+                  height: "100%",
+                  background: tickerAutoStatus === "error" ? "#b91c1c" : "#059669",
+                  transition: "width 180ms ease",
+                }}
+              />
+            </div>
+            <p className="bread">{tickerProgressPercent}%</p>
           </div>
 
           <div>

@@ -201,6 +201,14 @@ export default async function handler(req: any, res: any) {
     let materialized = 0;
     let nextCursor: { statement: StatementType; period: PeriodType; offset: number } | null = null;
     let done = true;
+    let currentTargetProgress: {
+      statement: StatementType;
+      period: PeriodType;
+      currentOffset: number;
+      nextOffset: number;
+      totalReports: number;
+      remainingReports: number;
+    } | null = null;
     const periodStatus: Record<PeriodType, { seen: boolean; complete: boolean; newestProcessed: boolean }> = {
       fy: { seen: false, complete: true, newestProcessed: true },
       q: { seen: false, complete: true, newestProcessed: true },
@@ -218,6 +226,13 @@ export default async function handler(req: any, res: any) {
         cursor && cursor.statement === target.statement && cursor.period === target.period
           ? cursor.offset
           : 0;
+      const countRows = await query(
+        `SELECT COUNT(*) as n
+         FROM ${tables.financialReports}
+         WHERE company_id = ? AND statement = ? AND period = ?`,
+        [companyId, target.statement, target.period]
+      );
+      const totalReports = Number(countRows[0]?.n ?? 0);
       const { inserted, nextOffset, done: targetDone, newestFiscalDateProcessed } = await materializeReports({
         companyId,
         statement: target.statement,
@@ -226,6 +241,14 @@ export default async function handler(req: any, res: any) {
         limit: REPORT_BATCH_SIZE,
         maxPoints: MAX_POINTS_PER_RUN - materialized,
       });
+      currentTargetProgress = {
+        statement: target.statement,
+        period: target.period,
+        currentOffset: offset,
+        nextOffset,
+        totalReports,
+        remainingReports: Math.max(0, totalReports - nextOffset),
+      };
       periodStatus[target.period].seen = true;
       periodStatus[target.period].newestProcessed =
         periodStatus[target.period].newestProcessed &&
@@ -269,10 +292,39 @@ export default async function handler(req: any, res: any) {
       ticker,
       phase: done ? "materialized_done" : "materialized_partial",
       raw: rawSummary,
-      materialization: { cursor: nextCursor, done, inserted: materialized },
+      materialization: {
+        cursor: nextCursor,
+        done,
+        inserted: materialized,
+        processedInRun: materialized,
+        statement: currentTargetProgress?.statement ?? null,
+        period: currentTargetProgress?.period ?? null,
+        currentOffset: currentTargetProgress?.currentOffset ?? (cursor?.offset ?? 0),
+        nextOffset: currentTargetProgress?.nextOffset ?? nextCursor?.offset ?? null,
+        totalToProcess: currentTargetProgress?.totalReports ?? 0,
+        remaining: currentTargetProgress?.remainingReports ?? 0,
+      },
     });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;
-    res.status(status).json({ ok: false, error: (error as Error).message });
+    const requestCursor = (req.body?.cursor ?? null) as
+      | { statement: StatementType; period: PeriodType; offset: number }
+      | null;
+    res.status(status).json({
+      ok: false,
+      error: (error as Error).message,
+      materialization: {
+        cursor: requestCursor,
+        done: false,
+        inserted: 0,
+        processedInRun: 0,
+        statement: requestCursor?.statement ?? null,
+        period: requestCursor?.period ?? null,
+        currentOffset: requestCursor?.offset ?? 0,
+        nextOffset: requestCursor?.offset ?? null,
+        totalToProcess: 0,
+        remaining: 0,
+      },
+    });
   }
 }
