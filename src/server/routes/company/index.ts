@@ -3,10 +3,10 @@ import { ensureSchema, tables } from "../../../../api/_migrate.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-type CompanyRow = { id: number; last_fy_fetch_at: string | null; last_q_fetch_at: string | null };
+type CompanyRow = { id: number; last_fy_fetch_at: string | null; last_q_fetch_at: string | null; fiscal_year_end: string | null };
 
 function parseCompanyRow(row: unknown): CompanyRow | undefined {
-  const candidate = row as { id?: unknown; last_fy_fetch_at?: unknown; last_q_fetch_at?: unknown } | null | undefined;
+  const candidate = row as { id?: unknown; last_fy_fetch_at?: unknown; last_q_fetch_at?: unknown; fiscal_year_end?: unknown } | null | undefined;
   const id = Number(candidate?.id);
   if (!Number.isFinite(id) || id <= 0) {
     return undefined;
@@ -15,6 +15,7 @@ function parseCompanyRow(row: unknown): CompanyRow | undefined {
     id,
     last_fy_fetch_at: candidate?.last_fy_fetch_at == null ? null : String(candidate.last_fy_fetch_at),
     last_q_fetch_at: candidate?.last_q_fetch_at == null ? null : String(candidate.last_q_fetch_at),
+    fiscal_year_end: candidate?.fiscal_year_end == null ? null : String(candidate.fiscal_year_end),
   };
 }
 const META_KEYS = new Set([
@@ -56,6 +57,21 @@ function parseNumericValue(value: unknown) {
   return null;
 }
 
+function parseFiscalYearEndMonth(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  const digits = value.replace(/[^0-9]/g, "");
+  if (digits.length < 2) {
+    return null;
+  }
+  const month = Number(digits.slice(0, 2));
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+  return month;
+}
+
 function isStale(value: string | null, days: number) {
   const date = parseDate(value);
   if (!date) {
@@ -76,7 +92,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const companyRows = await query(
-      `SELECT id, last_fy_fetch_at, last_q_fetch_at
+      `SELECT id, last_fy_fetch_at, last_q_fetch_at, fiscal_year_end
        FROM ${tables.companiesV2} WHERE ticker = ?`,
       [ticker]
     );
@@ -192,6 +208,8 @@ export default async function handler(req: any, res: any) {
       period,
       years,
       fiscal_dates: fiscalDates,
+      fiscal_year_end: company?.fiscal_year_end ?? null,
+      fiscal_year_end_month: parseFiscalYearEndMonth(company?.fiscal_year_end ?? null),
       income: statements.income,
       balance: statements.balance,
       cashflow: statements.cashflow,

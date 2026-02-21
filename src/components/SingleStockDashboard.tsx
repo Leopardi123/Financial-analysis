@@ -33,6 +33,24 @@ const PRICE_SERIES_COLORS = {
   sma20: "#4b7f5a",
 };
 
+function parseFiscalYearEndMonth(value: unknown) {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 12) {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const digits = value.replace(/[^0-9]/g, "");
+  if (digits.length < 2) {
+    return null;
+  }
+  const month = Number(digits.slice(0, 2));
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+  return month;
+}
+
 function normalizeDateSeries(data: (string | number | null)[][] | null) {
   if (!data || data.length === 0) {
     return data;
@@ -375,6 +393,12 @@ export default function SingleStockDashboard() {
     15,
   );
 
+  const fiscalYearEndMonth =
+    parseFiscalYearEndMonth(data?.fiscal_year_end_month) ??
+    parseFiscalYearEndMonth(data?.fiscal_year_end) ??
+    parseFiscalYearEndMonth(profile?.fiscalYearEndMonth) ??
+    parseFiscalYearEndMonth(profile?.fiscalYearEnd);
+
   return (
     <div className="single-stock-dashboard">
       <div className="stock-selector">
@@ -537,6 +561,7 @@ export default function SingleStockDashboard() {
 
       <div className="chartcontainerdoublecolumn">
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="LineChart"
           title="Aktieprishistoria"
           data={priceData?.long?.price ?? null}
@@ -544,6 +569,7 @@ export default function SingleStockDashboard() {
           options={priceChartOptions}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="LineChart"
           title="Aktieprishistoria (kort)"
           data={priceData?.short?.price ?? null}
@@ -551,6 +577,7 @@ export default function SingleStockDashboard() {
           options={priceChartOptions}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Volume"
           data={priceData?.long?.volume ?? null}
@@ -558,6 +585,7 @@ export default function SingleStockDashboard() {
           options={volumeChartOptions}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Volume (kort)"
           data={priceData?.short?.volume ?? null}
@@ -576,66 +604,77 @@ export default function SingleStockDashboard() {
 
       <div className="chartcontainerdoublecolumn">
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Revenue"
           data={revenueData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Revenue Growth"
           data={revenueGrowthData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Gross Profit Ratio"
           data={grossProfitRatioData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="EBITDA Margin"
           data={ebitdaMarginData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Net Income Margin"
           data={netIncomeMarginData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Operating Cash Flow"
           data={cashFromOperationsData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Cash From Investing"
           data={cashFromInvestingData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Free Cash Flow"
           data={freeCashFlowData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Free Cash Flow/Share"
           data={freeCashFlowPerShareData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Total Equity"
           data={equityData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="ROE"
           data={roeData}
@@ -658,36 +697,42 @@ export default function SingleStockDashboard() {
 
       <div className="chartcontainerdoublecolumn">
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Revenue vs Cost of Revenue"
           data={revenueVsCostData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Gross Profit vs Expenses"
           data={grossProfitVsExpensesData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Operating Profit vs Depreciation"
           data={operatingProfitVsDepData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="EBIT vs Interest"
           data={ebitVsInterestData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Net Earnings"
           data={netEarningsData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Revenue vs Net Earnings per Share"
           data={netEarningsPerShareData}
@@ -701,67 +746,88 @@ export default function SingleStockDashboard() {
 
       <div className="chartcontainerdoublecolumn">
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Cash vs Net Earnings"
           data={cashVsNetEarningsData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Cash vs Short Term Debt"
           data={cashVsShortTermDebtData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Net Earnings vs Inventory"
           data={inventoryVsNetEarningsData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="PPE vs Depreciation"
           data={ppeVsDepData}
           options={lineBehindBars}
         />
-        <ChartCard chartType="ColumnChart" title="Goodwill" data={goodwillData} />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
+          chartType="ColumnChart"
+          title="Goodwill"
+          data={goodwillData}
+        />
+        <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Short Term vs Long Term Debt"
           data={debtMixData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="EBITDA vs Long Term Debt"
           data={ebitdaVsLongTermDebtData}
           options={lineBehindBars}
         />
-        <ChartCard chartType="ColumnChart" title="Current Ratio" data={currentRatioData} />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
+          chartType="ColumnChart"
+          title="Current Ratio"
+          data={currentRatioData}
+        />
+        <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Long Term Debt to Net Earnings"
           data={longTermDebtToNetEarningsData}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Debt to Equity"
           data={debtToEquityData}
           options={{ vAxis: { format: "percent" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Adjusted Debt to Equity"
           data={adjustedDebtToEquityData}
           options={{ vAxis: { format: "percent" } }}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Retained Earnings vs Net Income"
           data={retainedEarningsData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="ROE"
           data={roeData}
@@ -775,12 +841,14 @@ export default function SingleStockDashboard() {
 
       <div className="chartcontainerdoublecolumn">
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Capital Expenditure vs Net Earnings"
           data={capexVsNetEarningsData}
           options={lineBehindBars}
         />
         <ChartCard
+          fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Buybacks + Dividends vs Net Earnings"
           data={buybacksDividendsData}

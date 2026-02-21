@@ -4,6 +4,9 @@ export type CompanyResponse = {
   ticker: string;
   period: string;
   years: number[];
+  fiscal_dates?: string[];
+  fiscal_year_end?: string | null;
+  fiscal_year_end_month?: number | null;
   income: Record<string, Array<number | null>>;
   balance: Record<string, Array<number | null>>;
   cashflow: Record<string, Array<number | null>>;
