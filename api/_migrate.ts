@@ -33,7 +33,8 @@ export async function ensureSchema() {
       ticker TEXT NOT NULL UNIQUE,
       active INTEGER DEFAULT 1,
       last_fy_fetch_at TEXT,
-      last_q_fetch_at TEXT
+      last_q_fetch_at TEXT,
+      fiscal_year_end TEXT
     )`
   );
 
@@ -210,6 +211,12 @@ export async function ensureSchema() {
             ON ${TABLES.companySectorMap} (company_id)`,
     },
   ]);
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN fiscal_year_end TEXT`);
+  } catch {
+    // Column already exists.
+  }
 
   await migrateCompanies();
 }
