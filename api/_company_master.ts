@@ -85,16 +85,24 @@ function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
   const nameFromCompany = typeof row.company === "string" ? row.company.trim() : "";
   const nameFromCompanySnake = typeof row.company_name === "string" ? row.company_name.trim() : "";
   const name = nameFromName || nameFromCompanyName || nameFromCompany || nameFromCompanySnake;
-  const exchangeCandidate =
-    typeof row.exchangeShortName === "string"
-      ? row.exchangeShortName
-      : typeof row.exchangeName === "string"
-        ? row.exchangeName
-      : typeof row.stockExchange === "string"
-        ? row.stockExchange
-        : typeof row.exchange === "string"
-          ? row.exchange
-        : null;
+  const pickString = (...values: unknown[]) => {
+    for (const value of values) {
+      if (typeof value !== "string") {
+        continue;
+      }
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+    return null;
+  };
+  const exchangeCandidate = pickString(
+    row.exchangeShortName,
+    row.exchange,
+    row.exchangeName,
+    row.stockExchange
+  );
   const type = typeof row.type === "string" && row.type.trim().length > 0
     ? row.type.trim().toLowerCase()
     : "stock";
@@ -104,7 +112,7 @@ function toCompanyRow(row: RawCompany): CompanyMasterRow | null {
   }
 
   const finalName = name || symbol;
-  const finalExchange = exchangeCandidate ? exchangeCandidate.trim() : "UNKNOWN";
+  const finalExchange = exchangeCandidate ?? "UNKNOWN";
 
   return {
     symbol,
