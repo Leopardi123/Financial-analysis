@@ -128,61 +128,156 @@ async function materializeReports(params: {
   );
 
   let inserted = 0;
+  let rowsAttempted = 0;
+  let rowsWritten = 0;
+  let chunksWritten = 0;
   let newestFiscalDateProcessed = false;
-  let batchStatements: Array<{ sql: string; args: Array<string | number | null> }> = [];
+  const runStartedAt = Date.now();
 
-  for (const row of rows) {
-    const report = JSON.parse(String(row.data_json ?? "{}")) as Record<string, unknown>;
-    const fiscalDate = String(row.fiscal_date ?? "");
-    const fetchedAt = String(row.fetched_at ?? new Date().toISOString());
-    if (!fiscalDate) {
-      continue;
-    }
-    if (latestFiscalDate && fiscalDate === latestFiscalDate) {
-      newestFiscalDateProcessed = true;
+  const bufferedPoints: Array<{ fiscalDate: string; field: string; value: number; fetchedAt: string }> = [];
+
+  async function flushBufferedPoints() {
+    if (bufferedPoints.length === 0) {
+      return;
     }
 
-    const points = normalizeFinancialPoints(
-      String(params.companyId),
-      params.statement,
-      params.period,
-      [report]
-    );
+    rowsAttempted += bufferedPoints.length;
 
-    for (const point of points) {
-      batchStatements.push({
-        sql: `INSERT INTO ${tables.financialPoints}
-          (company_id, statement, period, fiscal_date, field, value, fetched_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(company_id, statement, period, fiscal_date, field)
-          DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
-        args: [
+    const fiscalDates = Array.from(new Set(bufferedPoints.map((point) => point.fiscalDate)));
+    const fields = Array.from(new Set(bufferedPoints.map((point) => point.field)));
+    const existingValueMap = new Map<string, number | null>();
+
+    if (fiscalDates.length > 0 && fields.length > 0) {
+      const fiscalDatePlaceholders = fiscalDates.map(() => "?").join(",");
+      const fieldPlaceholders = fields.map(() => "?").join(",");
+      const existingRows = await query(
+        `SELECT fiscal_date, field, value
+         FROM ${tables.financialPoints}
+         WHERE company_id = ? AND statement = ? AND period = ?
+           AND fiscal_date IN (${fiscalDatePlaceholders})
+           AND field IN (${fieldPlaceholders})`,
+        [
           params.companyId,
-          point.statement,
-          point.period,
+          params.statement,
+          params.period,
+          ...fiscalDates,
+          ...fields,
+        ]
+      );
+
+      for (const row of existingRows) {
+        const key = `${String(row.fiscal_date)}|${String(row.field)}`;
+        const value = row.value == null ? null : Number(row.value);
+        existingValueMap.set(key, Number.isFinite(value as number) ? (value as number) : null);
+      }
+    }
+
+    const changedRows = bufferedPoints.filter((point) => {
+      const key = `${point.fiscalDate}|${point.field}`;
+      const existing = existingValueMap.get(key);
+      return existing == null || existing !== point.value;
+    });
+
+    if (changedRows.length === 0) {
+      bufferedPoints.length = 0;
+      return;
+    }
+
+    const SQL_CHUNK_ROWS = 120;
+    for (let i = 0; i < changedRows.length; i += SQL_CHUNK_ROWS) {
+      const chunk = changedRows.slice(i, i + SQL_CHUNK_ROWS);
+      const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(",");
+      const args: Array<string | number> = [];
+      for (const row of chunk) {
+        args.push(
+          params.companyId,
+          params.statement,
+          params.period,
+          row.fiscalDate,
+          row.field,
+          row.value,
+          row.fetchedAt,
+        );
+      }
+
+      await execute(
+        `INSERT INTO ${tables.financialPoints}
+         (company_id, statement, period, fiscal_date, field, value, fetched_at)
+         VALUES ${placeholders}
+         ON CONFLICT(company_id, statement, period, fiscal_date, field)
+         DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
+        args,
+      );
+      rowsWritten += chunk.length;
+      chunksWritten += 1;
+    }
+
+    bufferedPoints.length = 0;
+  }
+
+  await execute("BEGIN");
+  let txOpen = true;
+  try {
+    for (const row of rows) {
+      const report = JSON.parse(String(row.data_json ?? "{}")) as Record<string, unknown>;
+      const fiscalDate = String(row.fiscal_date ?? "");
+      const fetchedAt = String(row.fetched_at ?? new Date().toISOString());
+      if (!fiscalDate) {
+        continue;
+      }
+      if (latestFiscalDate && fiscalDate === latestFiscalDate) {
+        newestFiscalDateProcessed = true;
+      }
+
+      const points = normalizeFinancialPoints(
+        String(params.companyId),
+        params.statement,
+        params.period,
+        [report]
+      );
+
+      for (const point of points) {
+        bufferedPoints.push({
           fiscalDate,
-          point.field,
-          point.value,
+          field: point.field,
+          value: point.value,
           fetchedAt,
-        ],
-      });
-      inserted += 1;
-      if (batchStatements.length >= 400) {
-        await batch(batchStatements);
-        batchStatements = [];
+        });
+        inserted += 1;
+        if (bufferedPoints.length >= 800) {
+          await flushBufferedPoints();
+        }
+        if (inserted >= params.maxPoints) {
+          break;
+        }
       }
       if (inserted >= params.maxPoints) {
         break;
       }
     }
-    if (inserted >= params.maxPoints) {
-      break;
+
+    await flushBufferedPoints();
+    await execute("COMMIT");
+    txOpen = false;
+  } catch (error) {
+    if (txOpen) {
+      await execute("ROLLBACK");
+      txOpen = false;
     }
+    throw error;
   }
 
-  if (batchStatements.length > 0) {
-    await batch(batchStatements);
-  }
+  console.info("[company-refresh]", {
+    stage: "materialization_write_stats",
+    companyId: params.companyId,
+    statement: params.statement,
+    period: params.period,
+    offset: params.offset,
+    rowsAttempted,
+    rowsWritten,
+    chunksWritten,
+    elapsedMs: Date.now() - runStartedAt,
+  });
 
   const nextOffset = params.offset + rows.length;
   const done = rows.length < params.limit && inserted < params.maxPoints;
