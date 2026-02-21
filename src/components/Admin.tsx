@@ -23,6 +23,12 @@ type MaterializationCursor = {
 };
 
 type RefreshPayload = {
+  cursor?: {
+    nextOffset: number | null;
+    done: boolean;
+    processedInRun: number;
+    totalToProcess: number;
+  };
   materialization?: {
     cursor: MaterializationCursor | null;
     done: boolean;
@@ -41,6 +47,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [materializationCursor, setMaterializationCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDone, setMaterializationDone] = useState(true);
+  const [companiesCursorOffset, setCompaniesCursorOffset] = useState<number | null>(null);
+  const [companiesRefreshDone, setCompaniesRefreshDone] = useState(true);
 
   const secretReady = secret.trim().length > 0;
 
@@ -178,11 +186,41 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             </button>
             <button
               type="button"
-              onClick={() => void postJson("Refresh Companies", "/api/companies", {})}
+              onClick={() =>
+                void postJson("Refresh Companies", "/api/companies", {
+                  cursorOffset: 0,
+                  reset: true,
+                }).then((payload) => {
+                  const cursor = payload?.cursor;
+                  if (cursor) {
+                    setCompaniesCursorOffset(cursor.nextOffset);
+                    setCompaniesRefreshDone(cursor.done);
+                  }
+                })
+              }
               disabled={!secretReady || loadingKey !== null}
             >
               {loadingKey === "Refresh Companies" ? "Refreshing list..." : "Refresh Companies"}
             </button>
+            {!companiesRefreshDone && companiesCursorOffset !== null && (
+              <button
+                type="button"
+                onClick={() =>
+                  void postJson("Continue Companies Refresh", "/api/companies", {
+                    cursorOffset: companiesCursorOffset,
+                  }).then((payload) => {
+                    const cursor = payload?.cursor;
+                    if (cursor) {
+                      setCompaniesCursorOffset(cursor.nextOffset);
+                      setCompaniesRefreshDone(cursor.done);
+                    }
+                  })
+                }
+                disabled={!secretReady || loadingKey !== null}
+              >
+                {loadingKey === "Continue Companies Refresh" ? "Continuing list refresh..." : "Continue companies refresh"}
+              </button>
+            )}
             {initLog && (
               <span className={initLog.status === "error" ? "status error" : "status success"}>
                 {initLog.status.toUpperCase()}
