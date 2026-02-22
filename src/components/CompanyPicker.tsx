@@ -145,14 +145,16 @@ export default function CompanyPicker({
   return (
     <div className="company-picker" ref={wrapperRef}>
       <label>{label}</label>
-      <input
-        value={query}
-        placeholder={placeholder}
-        onChange={(event) => setQuery(event.target.value)}
-        onFocus={() => setOpen(results.length > 0)}
-        onKeyDown={onKeyDown}
-      />
-      {loading && <div className="company-picker-loading">Söker…</div>}
+      <div className="company-picker-input-wrap">
+        <input
+          value={query}
+          placeholder={placeholder}
+          onChange={(event) => setQuery(event.target.value)}
+          onFocus={() => setOpen(results.length > 0)}
+          onKeyDown={onKeyDown}
+        />
+        {loading && <div className="company-picker-loading">Söker…</div>}
+      </div>
       {open && results.length > 0 && (
         <ul className="company-picker-results">
           {results.map((item, index) => (
