@@ -105,10 +105,40 @@ function buildTicks(dates: Date[], quarterly: boolean, fiscalYearEndMonth?: numb
 
 function normalizeChartData(
   data: (string | number | Date | null)[][],
+  chartType: ChartCardProps["chartType"],
   fiscalYearEndMonth?: number | null,
 ) {
   const [headers, ...rows] = data;
-  const normalizedRows = rows.filter((row) => row[0] instanceof Date) as (string | number | Date | null)[][];
+
+  if (chartType === "ScatterChart") {
+    const scatterRows = rows
+      .map((row) => {
+        const x = row[0];
+        const y = row[1];
+        if (typeof x !== "number" || !Number.isFinite(x) || typeof y !== "number" || !Number.isFinite(y)) {
+          return null;
+        }
+        return [x, y] as ChartDataCell[];
+      })
+      .filter((row): row is ChartDataCell[] => row !== null);
+
+    return {
+      data: [headers as ChartDataCell[], ...scatterRows],
+      ticks: undefined,
+    };
+  }
+
+  const normalizedRows = rows
+    .map((row) => {
+      const rawDate = row[0];
+      if (!(rawDate instanceof Date) || Number.isNaN(rawDate.getTime())) {
+        return null;
+      }
+      const values = row.slice(1).map((value) => (typeof value === "number" && Number.isFinite(value) ? value : null));
+      return [rawDate, ...values] as ChartDataCell[];
+    })
+    .filter((row): row is ChartDataCell[] => row !== null);
+
   const dates = normalizedRows.map((row) => row[0] as Date);
   const quarterly = isQuarterlySeries(dates);
 
@@ -162,7 +192,7 @@ export default function ChartCard({
     );
   }
 
-  const normalized = normalizeChartData(data, fiscalYearEndMonth);
+  const normalized = normalizeChartData(data, chartType, fiscalYearEndMonth);
   const optionHAxis = (options.hAxis as Record<string, unknown> | undefined) ?? {};
   const optionVAxes = (options.vAxes as Record<string, unknown> | undefined) ?? undefined;
 
@@ -203,7 +233,7 @@ export default function ChartCard({
           hAxis: {
             ...DEFAULT_OPTIONS.hAxis,
             ...optionHAxis,
-            ticks: normalized.ticks,
+            ...(normalized.ticks ? { ticks: normalized.ticks } : {}),
             format: undefined,
           },
         }}

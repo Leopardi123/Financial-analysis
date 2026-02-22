@@ -1088,15 +1088,39 @@ export default function SingleStockDashboard() {
     return [survival, dilutionComponent, discipline];
   }, 15);
 
-  const survivalScoreData = buildDerivedSeries(["Date", "Survival Score"], (index) => {
+  const survivalScoreData = buildDerivedSeries(["Date", "Survival Score", "Max Available"], (index) => {
     const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
     const dilution = dilutionRateData?.[index + 1]?.[1] as number | null | undefined;
     const burnAccel = burnChangeYoYData?.[index + 1]?.[1] as number | null | undefined;
-    if (typeof runway !== "number") return [null];
-    const runwayScore = Math.max(0, Math.min(10, runway / 2));
-    const dilutionPenalty = typeof dilution === "number" ? Math.max(0, dilution * 30) : 0;
-    const burnPenalty = typeof burnAccel === "number" ? Math.max(0, burnAccel > 0 ? 1.5 : 0) : 0;
-    return [Math.max(0, Math.min(10, runwayScore - dilutionPenalty - burnPenalty))];
+    const netCash = netCashDebtData?.[index + 1]?.[1] as number | null | undefined;
+    const overhead = overheadRatioData?.[index + 1]?.[1] as number | null | undefined;
+
+    let score = 0;
+    let maxAvailable = 0;
+
+    if (typeof runway === "number") {
+      maxAvailable += 4;
+      score += Math.max(0, Math.min(4, runway / 6));
+    }
+    if (typeof dilution === "number") {
+      maxAvailable += 2;
+      score += Math.max(0, Math.min(2, 2 - (dilution / 50)));
+    }
+    if (typeof burnAccel === "number") {
+      maxAvailable += 1;
+      score += burnAccel <= 0 ? 1 : 0;
+    }
+    if (typeof netCash === "number") {
+      maxAvailable += 2;
+      score += netCash >= 0 ? 2 : 0.5;
+    }
+    if (typeof overhead === "number") {
+      maxAvailable += 1;
+      score += overhead < 100 ? 1 : 0.25;
+    }
+
+    if (maxAvailable === 0) return [null, null];
+    return [Math.max(0, Math.min(10, (score / maxAvailable) * 10)), maxAvailable];
   }, 15);
 
   const revenueVsCostData = buildSeriesData(
@@ -1296,8 +1320,10 @@ export default function SingleStockDashboard() {
   const latestBurn = latestValueFromSeries(burnRateTtmData);
   const latestDilution = latestValueFromSeries(dilutionRateData);
   const latestGovernanceLeak = latestValueFromSeries(governanceLeakIndexData);
-  const latestSurvivalScore = latestValueFromSeries(survivalScoreData);
+  const latestSurvivalScore = latestValueFromSeries(survivalScoreData, 1);
+  const latestSurvivalMaxAvailable = latestValueFromSeries(survivalScoreData, 2);
   const runwayRiskLabel = latestRunway === null ? "n/a" : latestRunway < 12 ? "<12" : latestRunway <= 24 ? "12–24" : ">24";
+  const survivalPartial = typeof latestSurvivalMaxAvailable === "number" && latestSurvivalMaxAvailable < 10;
 
   const statementCurrencyRaw =
     (data as any)?.financials?.currency
@@ -1355,9 +1381,11 @@ export default function SingleStockDashboard() {
     "E2 Runway vs Risk Thresholds": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
     "E1 Burn Change YoY (abs)": { unitLabel: `${statementCurrency}/month`, unitKind: "money", yAxisTitle: `${statementCurrency}/month` },
     "E1b Burn Acceleration (Momentum) YoY %": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
-    "E3 Dilution vs Runway (Scatter)": { unitLabel: "months + %", unitKind: "unknown", yAxisTitle: "%" },
+    "E3 Dilution vs Runway (Scatter)": { unitLabel: "months", unitKind: "months", yAxisTitle: "%" },
     "D6 Raises in Last 5 Years": { unitLabel: "count", unitKind: "index", yAxisTitle: "count" },
-    "E5 Survival Score (0–10 composite)": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
+    "E5 Survival Score": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
+    "E5 Survival Score Breakdown": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
+    "E4 Governance Leak Index": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
   };
 
   const resolveUnitMeta = (title: string): ChartUnitMeta => unitMetaByTitle[title] ?? {
@@ -1989,7 +2017,7 @@ export default function SingleStockDashboard() {
             <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E2 Runway vs Risk Thresholds" id="E2 Runway vs Risk Thresholds" infoSections={PRE_REVENUE_CORE_INFO["E2 Runway vs Risk Thresholds"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayRiskBandsData} />
             <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ScatterChart" title="E3 Dilution vs Runway (Scatter)" id="E3 Dilution vs Runway (Scatter)" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway (Scatter)"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={{ hAxis: { title: "months" }, vAxis: { title: "%", format: "#,##0.##'%'" }, legend: { position: "none" } }} />
             <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E4 Governance Leak Index" id="E4 Governance Leak Index" infoSections={PRE_REVENUE_CORE_INFO["E4 Governance Leak Index"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={governanceLeakIndexData} />
-            <div className="chart-card"><div className="producer-core-title-row"><h3 className="subrub small">E5 Survival Score</h3><InfoPopover id="e5-kpi" openId={openInfoId} onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onClose={() => setOpenInfoId(null)} title="E5 Survival Score" sections={withUnitMetadata(PRE_REVENUE_CORE_INFO["E5 Survival Score"], "index", "unknown", mixedCurrencyNote)} /></div><p className="subrub">{latestSurvivalScore === null ? "—" : latestSurvivalScore.toLocaleString("en-US", { maximumFractionDigits: 2 })}</p><p className="bread">{latestSurvivalScore === null ? "n/a" : latestSurvivalScore >= 7 ? "Strong" : latestSurvivalScore >= 4 ? "Neutral" : "High risk"}</p></div>
+            <div className="chart-card"><div className="producer-core-title-row"><h3 className="subrub small">E5 Survival Score</h3><InfoPopover id="e5-kpi" openId={openInfoId} onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onClose={() => setOpenInfoId(null)} title="E5 Survival Score" sections={withUnitMetadata(PRE_REVENUE_CORE_INFO["E5 Survival Score"], "index", "unknown", mixedCurrencyNote ? `${mixedCurrencyNote} Survival score may be PARTIAL when components are missing.` : "Survival score may be PARTIAL when components are missing.")} /></div><p className="subrub">{latestSurvivalScore === null ? "—" : latestSurvivalScore.toLocaleString("en-US", { maximumFractionDigits: 2 })}</p><p className="bread">{latestSurvivalScore === null ? "n/a" : survivalPartial ? "PARTIAL" : latestSurvivalScore >= 7 ? "Strong" : latestSurvivalScore >= 4 ? "Neutral" : "High risk"}</p></div>
             <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E5 Survival Score Breakdown" id="E5 Survival Score Breakdown" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalComponentData} options={{ isStacked: true, vAxis: { viewWindow: { min: 0, max: 10 } } }} />
           </div>
         </>
