@@ -66,15 +66,36 @@ function formatPanelValue(value: unknown): string {
 
 
 
-type CompactMetric = { label: string; value: unknown };
+type CompactMetric = { label: string; value: unknown; info?: string[] };
 
-function renderCompactMetrics(metrics: CompactMetric[]) {
-  return metrics.map((metric) => (
-    <div key={metric.label} className="compact-metric-row">
-      <span className="compact-metric-label">{metric.label}</span>
-      <span className="compact-metric-value">{formatPanelValue(metric.value)}</span>
-    </div>
-  ));
+function renderCompactMetrics(
+  sectionKey: string,
+  metrics: CompactMetric[],
+  openInfoId: string | null,
+  setOpenInfoId: (next: string | null | ((prev: string | null) => string | null)) => void,
+) {
+  return metrics.map((metric) => {
+    const metricId = `${sectionKey}-${metric.label}`;
+    return (
+      <div key={metricId} className="compact-metric-row">
+        <span className="compact-metric-label-wrap">
+          <span className="compact-metric-label">{metric.label}</span>
+          {metric.info && metric.info.length > 0 ? (
+            <InfoPopover
+              id={metricId}
+              openId={openInfoId}
+              onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+              onClose={() => setOpenInfoId(null)}
+              title={metric.label}
+              content={metric.info}
+            />
+          ) : null}
+        </span>
+        <span className="compact-metric-dots" />
+        <span className="compact-metric-value">{formatPanelValue(metric.value)}</span>
+      </div>
+    );
+  });
 }
 
 type AnalysisMode = "revenue" | "prerevenue";
@@ -114,6 +135,38 @@ const RR_INFO = [
   "Cost quartile and reserve-life fields remain explicit MVP placeholders.",
   "Classification is a composite of scale, ROCE, fortress, and value context.",
 ];
+
+const METRIC_INFO: Record<string, string[]> = {
+  "Gross margin": ["Revenue minus direct production costs divided by revenue.", "Shows structural cost advantage and pricing power when stable."],
+  "Operating margin": ["Operating income divided by revenue.", "Shows operational discipline before financing effects."],
+  "Net margin": ["Net income divided by revenue.", "Shows full-cycle profitability including financing and tax impact."],
+  "OCF / NI": ["Operating cash flow divided by net income.", "Above 1.0 suggests strong earnings quality."],
+  "FCF / NI": ["Free cash flow relative to net income.", "Shows distributable earnings after sustaining investment."],
+  "Capex / Revenue": ["Capital expenditure divided by revenue.", "Shows capital intensity and reinvestment burden."],
+  "ROE": ["Net income divided by shareholder equity.", "Shows equity capital productivity."],
+  "ROIC pre-tax": ["EBIT divided by invested capital.", "Shows enterprise-level capital efficiency."],
+  "Shares trend 5Y": ["Compound change in shares outstanding over five years.", "Higher values can indicate dilution risk."],
+  "Retained vs NI": ["Retained earnings vs cumulative net income.", "Shows whether profit retention compounds productively."],
+  "Invalid capital employed": ["Sanity flag for ROCE denominator validity."],
+  "EV formula check": ["Internal EV consistency check using MarketCap + Debt - Cash."],
+  "Net debt / EBITDA": ["Debt relative to earnings capacity.", "Shows leverage sustainability."],
+  "Interest coverage": ["EBIT divided by interest expense.", "Shows debt servicing capacity."],
+  "Current ratio": ["Current assets divided by current liabilities.", "Shows short-term liquidity buffer."],
+  "Cash vs short debt": ["Cash divided by short-term debt.", "Shows immediate liquidity resilience."],
+  "FCF volatility 5Y": ["Std. dev. of FCF relative to mean FCF.", "Shows cyclical sensitivity."],
+  "P/E": ["Price divided by earnings per share.", "Shows how much market pays per unit of earnings."],
+  "Earnings yield": ["Net income divided by market cap.", "Shows implied return on current earnings."],
+  "EV/EBIT": ["Enterprise value divided by operating earnings.", "Shows capital-adjusted valuation multiple."],
+  "EV/FCF": ["Enterprise value divided by free cash flow.", "Shows full-capital-structure cash valuation."],
+  "Implied return": ["Approximation: earnings yield + growth estimate."],
+  "10Y recoverable value": ["Approx proxy: annual production * price * 10.", "Shows institutional scale suitability."],
+  "ROCE": ["EBIT divided by capital employed.", "RR heuristic: above 25% can signal elite capital quality."],
+  "Net debt / FCF": ["Debt relative to sustaining free cash flow.", "Lower values indicate stronger balance-sheet resilience."],
+  "Margin buffer": ["(Current price - AISC) / current price.", "Shows downside protection buffer."],
+  "Fair value 1": ["Owner earnings approximation using discounted operating cash proxy."],
+  "Fair value 2": ["Flat 10-year DCF using margin assumption and discount rate."],
+  "RR classification": ["Composite of scale, ROCE, and balance-sheet strength."],
+};
 
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
@@ -180,6 +233,8 @@ export default function SingleStockDashboard() {
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const [openInfoId, setOpenInfoId] = useState<string | null>(null);
+  const [rrAiscInput, setRrAiscInput] = useState<string>("");
+  const [rrDiscountRateInput, setRrDiscountRateInput] = useState<string>("");
 
   useEffect(() => {
     let isMounted = true;
@@ -500,6 +555,38 @@ export default function SingleStockDashboard() {
   const rrOverlay = useMemo(() => (data?.rr_overlay as RrOverlayPanel | undefined) ?? null, [data]);
   const producerCoreMissing = !producerCore || !producerCore.efficiency;
   const rrOverlayMissing = !rrOverlay || Object.keys(rrOverlay).length === 0;
+  const rrAisc = rrAiscInput.trim() ? Number(rrAiscInput) : null;
+  const rrDiscountRatePct = rrDiscountRateInput.trim() ? Number(rrDiscountRateInput) : null;
+  const rrDiscountRate = rrDiscountRatePct !== null && Number.isFinite(rrDiscountRatePct) && rrDiscountRatePct > 0
+    ? rrDiscountRatePct / 100
+    : null;
+  const rrOperatingCfAdjusted = typeof (rrOverlay as any)?.rr_operating_cf_adjusted === "number"
+    ? Number((rrOverlay as any).rr_operating_cf_adjusted)
+    : null;
+  const rrNetDebt = typeof (rrOverlay as any)?.rr_net_debt === "number" ? Number((rrOverlay as any).rr_net_debt) : null;
+  const rrProduction = typeof (rrOverlay as any)?.rr_production === "number" ? Number((rrOverlay as any).rr_production) : null;
+  const rrCurrentPrice = (() => {
+    const rows = priceData?.short?.price;
+    if (!rows || rows.length < 2) return null;
+    const last = rows[rows.length - 1];
+    const v = last?.[1];
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  })();
+  const rrFv1 = rrAisc !== null && rrDiscountRate !== null && rrOperatingCfAdjusted !== null && rrNetDebt !== null
+    ? rrOperatingCfAdjusted / rrDiscountRate - rrNetDebt
+    : null;
+  const rrFv2 = rrAisc !== null && rrDiscountRate !== null && rrCurrentPrice !== null && rrProduction !== null && rrNetDebt !== null
+    ? (() => {
+      const annualMargin = (rrCurrentPrice - rrAisc) * rrProduction;
+      let npv = 0;
+      for (let t = 1; t <= 10; t += 1) {
+        npv += annualMargin / ((1 + rrDiscountRate) ** t);
+      }
+      return npv - rrNetDebt;
+    })()
+    : null;
+  const rrInputsReady = rrAisc !== null && rrDiscountRate !== null && rrDiscountRate > 0;
+
   const fiscalYearEndMonth =
     parseFiscalYearEndMonth(data?.fiscal_year_end_month) ??
     parseFiscalYearEndMonth(data?.fiscal_year_end) ??
@@ -738,26 +825,26 @@ export default function SingleStockDashboard() {
                     />
                   </div>
                   <div className="compact-metrics-grid">
-                    {renderCompactMetrics([
-                      { label: "Gross margin", value: (producerCore as any)?.efficiency?.margin_structure?.gross_margin },
-                      { label: "Operating margin", value: (producerCore as any)?.efficiency?.margin_structure?.operating_margin },
-                      { label: "Net margin", value: (producerCore as any)?.efficiency?.margin_structure?.net_margin },
+                    {renderCompactMetrics("efficiency", [
+                      { label: "Gross margin", value: (producerCore as any)?.efficiency?.margin_structure?.gross_margin, info: METRIC_INFO["Gross margin"] },
+                      { label: "Operating margin", value: (producerCore as any)?.efficiency?.margin_structure?.operating_margin, info: METRIC_INFO["Operating margin"] },
+                      { label: "Net margin", value: (producerCore as any)?.efficiency?.margin_structure?.net_margin, info: METRIC_INFO["Net margin"] },
                       { label: "Margin trend", value: (producerCore as any)?.efficiency?.margin_structure?.margin_trend_label },
-                      { label: "OCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.ocf_to_ni },
-                      { label: "FCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.fcf_to_ni },
+                      { label: "OCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.ocf_to_ni, info: METRIC_INFO["OCF / NI"] },
+                      { label: "FCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.fcf_to_ni, info: METRIC_INFO["FCF / NI"] },
                       { label: "Accrual", value: (producerCore as any)?.efficiency?.cash_quality?.accrual_flag },
-                      { label: "Capex / Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_revenue },
+                      { label: "Capex / Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_revenue, info: METRIC_INFO["Capex / Revenue"] },
                       { label: "Capex / OCF", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_ocf },
                       { label: "PPE vs Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.ppe_vs_revenue_signal },
                       { label: "Net debt", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt },
                       { label: "Net debt / EBITDA", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt_to_ebitda },
                       { label: "Interest coverage", value: (producerCore as any)?.efficiency?.balance_sheet?.interest_coverage },
                       { label: "Debt trend", value: (producerCore as any)?.efficiency?.balance_sheet?.debt_trend_label },
-                      { label: "ROE", value: (producerCore as any)?.efficiency?.returns?.roe },
-                      { label: "ROIC pre-tax", value: (producerCore as any)?.efficiency?.returns?.roic_pre_tax },
+                      { label: "ROE", value: (producerCore as any)?.efficiency?.returns?.roe, info: METRIC_INFO["ROE"] },
+                      { label: "ROIC pre-tax", value: (producerCore as any)?.efficiency?.returns?.roic_pre_tax, info: METRIC_INFO["ROIC pre-tax"] },
                       { label: "ROE trend 5Y", value: (producerCore as any)?.efficiency?.returns?.roe_trend_5Y },
-                      { label: "Shares trend 5Y", value: (producerCore as any)?.efficiency?.allocation?.shares_trend_5Y },
-                      { label: "Retained vs NI", value: (producerCore as any)?.efficiency?.allocation?.retained_vs_ni_signal },
+                      { label: "Shares trend 5Y", value: (producerCore as any)?.efficiency?.allocation?.shares_trend_5Y, info: METRIC_INFO["Shares trend 5Y"] },
+                      { label: "Retained vs NI", value: (producerCore as any)?.efficiency?.allocation?.retained_vs_ni_signal, info: METRIC_INFO["Retained vs NI"] },
                       {
                         label: "Quality flags",
                         value: Array.isArray((producerCore as any)?.efficiency?.quality_flags) && (producerCore as any).efficiency.quality_flags.length
@@ -770,10 +857,10 @@ export default function SingleStockDashboard() {
                           ? (producerCore as any).efficiency.risk_flags.join(", ")
                           : "—",
                       },
-                      { label: "Invalid capital employed", value: (producerCore as any)?.efficiency?.diagnostics?.invalid_capital_employed },
-                      { label: "EV formula check", value: (producerCore as any)?.efficiency?.diagnostics?.ev_formula_check },
+                      { label: "Invalid capital employed", value: (producerCore as any)?.efficiency?.diagnostics?.invalid_capital_employed, info: METRIC_INFO["Invalid capital employed"] },
+                      { label: "EV formula check", value: (producerCore as any)?.efficiency?.diagnostics?.ev_formula_check, info: METRIC_INFO["EV formula check"] },
                       { label: "Accounting anomaly", value: (producerCore as any)?.efficiency?.diagnostics?.accounting_anomaly },
-                    ])}
+                    ], openInfoId, setOpenInfoId)}
                   </div>
                 </section>
 
@@ -790,15 +877,14 @@ export default function SingleStockDashboard() {
                     />
                   </div>
                   <div className="compact-metrics-grid">
-                    {renderCompactMetrics([
-                      { label: "Net debt", value: (producerCore as any)?.resilience?.leverage?.net_debt },
-                      { label: "Net debt / EBITDA", value: (producerCore as any)?.resilience?.leverage?.net_debt_to_ebitda },
-                      { label: "Interest coverage", value: (producerCore as any)?.resilience?.leverage?.interest_coverage },
-                      { label: "Current ratio", value: (producerCore as any)?.resilience?.liquidity?.current_ratio },
-                      { label: "Cash vs short debt", value: (producerCore as any)?.resilience?.liquidity?.cash_vs_short_term_debt },
-                      { label: "FCF volatility 5Y", value: (producerCore as any)?.resilience?.stability?.fcf_volatility_5Y },
-                    ])}
-                  </div>
+                    {renderCompactMetrics("resilience", [
+                      { label: "Net debt", value: (producerCore as any)?.resilience?.leverage?.net_debt, info: METRIC_INFO["Net debt / EBITDA"] },
+                      { label: "Net debt / EBITDA", value: (producerCore as any)?.resilience?.leverage?.net_debt_to_ebitda, info: METRIC_INFO["Net debt / EBITDA"] },
+                      { label: "Interest coverage", value: (producerCore as any)?.resilience?.leverage?.interest_coverage, info: METRIC_INFO["Interest coverage"] },
+                      { label: "Current ratio", value: (producerCore as any)?.resilience?.liquidity?.current_ratio, info: METRIC_INFO["Current ratio"] },
+                      { label: "Cash vs short debt", value: (producerCore as any)?.resilience?.liquidity?.cash_vs_short_term_debt, info: METRIC_INFO["Cash vs short debt"] },
+                      { label: "FCF volatility 5Y", value: (producerCore as any)?.resilience?.stability?.fcf_volatility_5Y, info: METRIC_INFO["FCF volatility 5Y"] },
+                    ], openInfoId, setOpenInfoId)}                  </div>
                 </section>
 
                 <section className="producer-core-section value">
@@ -814,22 +900,21 @@ export default function SingleStockDashboard() {
                     />
                   </div>
                   <div className="compact-metrics-grid">
-                    {renderCompactMetrics([
-                      { label: "P/E", value: (producerCore as any)?.value?.multiples?.pe },
-                      { label: "Earnings yield", value: (producerCore as any)?.value?.multiples?.earnings_yield },
+                    {renderCompactMetrics("value", [
+                      { label: "P/E", value: (producerCore as any)?.value?.multiples?.pe, info: METRIC_INFO["P/E"] },
+                      { label: "Earnings yield", value: (producerCore as any)?.value?.multiples?.earnings_yield, info: METRIC_INFO["Earnings yield"] },
                       { label: "P/FCF", value: (producerCore as any)?.value?.multiples?.p_fcf },
                       { label: "FCF yield", value: (producerCore as any)?.value?.multiples?.fcf_yield },
                       { label: "EV/EBITDA", value: (producerCore as any)?.value?.multiples?.ev_ebitda },
-                      { label: "EV/EBIT", value: (producerCore as any)?.value?.multiples?.ev_ebit },
-                      { label: "EV/FCF", value: (producerCore as any)?.value?.multiples?.ev_fcf },
+                      { label: "EV/EBIT", value: (producerCore as any)?.value?.multiples?.ev_ebit, info: METRIC_INFO["EV/EBIT"] },
+                      { label: "EV/FCF", value: (producerCore as any)?.value?.multiples?.ev_fcf, info: METRIC_INFO["EV/FCF"] },
                       { label: "Net debt / EV", value: (producerCore as any)?.value?.multiples?.net_debt_over_ev },
                       { label: "Median NI (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_ni },
                       { label: "Median EBIT margin (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_ebit_margin },
                       { label: "Median FCF (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_fcf },
-                      { label: "Implied return", value: (producerCore as any)?.value?.implied_return },
+                      { label: "Implied return", value: (producerCore as any)?.value?.implied_return, info: METRIC_INFO["Implied return"] },
                       { label: "Value band", value: (producerCore as any)?.value?.value_band },
-                    ])}
-                  </div>
+                    ], openInfoId, setOpenInfoId)}                  </div>
                 </section>
               </div>
 
@@ -848,27 +933,63 @@ export default function SingleStockDashboard() {
                   />
                 </div>
                 <p className="bread">MVP proxies. Missing benchmark/reserve inputs visas som null + flags.</p>
+                <div className="rr-input-row">
+                  <label>AISC (USD per unit)
+                    <input value={rrAiscInput} onChange={(e) => setRrAiscInput(e.target.value)} placeholder="e.g. 950" />
+                  </label>
+                  <label>Discount rate r (%)
+                    <input value={rrDiscountRateInput} onChange={(e) => setRrDiscountRateInput(e.target.value)} placeholder="e.g. 10" />
+                  </label>
+                </div>
+                {!rrInputsReady && <p className="status empty">Provide AISC and discount rate to activate</p>}
+                {rrInputsReady && rrProduction === null && <p className="status empty">Production data missing – FV2 disabled</p>}
                 {rrOverlayMissing ? (
                   <p className="status empty">Data missing for RR Snapshot panel.</p>
                 ) : (
-                  <div className="compact-metrics-grid">
-                    {renderCompactMetrics([
-                      { label: "10Y recoverable value", value: (rrOverlay as any)?.rr_scale_10y_recoverable_value_usd },
-                      { label: "Scale flag", value: rrOverlay?.rr_scale_flag ?? "Unknown" },
-                      { label: "ROCE", value: (rrOverlay as any)?.rr_roce },
-                      { label: "ROCE flag", value: rrOverlay?.rr_roce_flag ?? "Unknown" },
-                      { label: "Cost quartile", value: (rrOverlay as any)?.rr_cost_quartile },
-                      { label: "Reserve life", value: (rrOverlay as any)?.rr_reserve_life_years },
-                      { label: "Net debt / FCF", value: (rrOverlay as any)?.rr_net_debt_fcf },
-                      { label: "Interest coverage", value: rrOverlay?.rr_interest_coverage },
-                      { label: "Margin buffer", value: (rrOverlay as any)?.rr_margin_buffer_pct },
-                      { label: "Fair value 1", value: (rrOverlay as any)?.rr_fair_value_1 },
-                      { label: "Fair value 2", value: (rrOverlay as any)?.rr_fair_value_2 },
-                      { label: "Fair value 3", value: (rrOverlay as any)?.rr_fair_value_3 },
-                      { label: "RR classification", value: rrOverlay?.rr_classification },
-                      { label: "Missing benchmark", value: rrOverlay?.rr_cost_quartile_flags?.missing_benchmark ?? false },
-                      { label: "Missing reserves", value: rrOverlay?.rr_reserve_life_flags?.missing_reserves ?? false },
-                    ])}
+                  <div className="rr-grid">
+                    <div className="rr-group">
+                      <h4>Scale</h4>
+                      <div className="compact-metrics-grid">
+                        {renderCompactMetrics("rr-scale", [
+                          { label: "10Y recoverable value", value: (rrOverlay as any)?.rr_scale_10y_recoverable_value_usd, info: METRIC_INFO["10Y recoverable value"] },
+                          { label: "Scale flag", value: rrOverlay?.rr_scale_flag ?? "Unknown" },
+                        ], openInfoId, setOpenInfoId)}
+                      </div>
+                    </div>
+                    <div className="rr-group">
+                      <h4>Capital</h4>
+                      <div className="compact-metrics-grid">
+                        {renderCompactMetrics("rr-capital", [
+                          { label: "ROCE", value: (rrOverlay as any)?.rr_roce, info: METRIC_INFO["ROCE"] },
+                          { label: "ROCE flag", value: rrOverlay?.rr_roce_flag ?? "Unknown" },
+                          { label: "Margin buffer", value: rrCurrentPrice !== null && rrAisc !== null && rrCurrentPrice !== 0 ? (rrCurrentPrice - rrAisc) / rrCurrentPrice : (rrOverlay as any)?.rr_margin_buffer_pct, info: METRIC_INFO["Margin buffer"] },
+                          { label: "Cost quartile", value: (rrOverlay as any)?.rr_cost_quartile },
+                          { label: "Reserve life", value: (rrOverlay as any)?.rr_reserve_life_years },
+                        ], openInfoId, setOpenInfoId)}
+                      </div>
+                    </div>
+                    <div className="rr-group">
+                      <h4>Balance sheet</h4>
+                      <div className="compact-metrics-grid">
+                        {renderCompactMetrics("rr-balance", [
+                          { label: "Net debt / FCF", value: (rrOverlay as any)?.rr_net_debt_fcf, info: METRIC_INFO["Net debt / FCF"] },
+                          { label: "Interest coverage", value: rrOverlay?.rr_interest_coverage, info: METRIC_INFO["Interest coverage"] },
+                          { label: "Missing benchmark", value: rrOverlay?.rr_cost_quartile_flags?.missing_benchmark ?? false },
+                          { label: "Missing reserves", value: rrOverlay?.rr_reserve_life_flags?.missing_reserves ?? false },
+                        ], openInfoId, setOpenInfoId)}
+                      </div>
+                    </div>
+                    <div className="rr-group">
+                      <h4>Fair value</h4>
+                      <div className="compact-metrics-grid">
+                        {renderCompactMetrics("rr-fv", [
+                          { label: "Fair value 1", value: rrFv1, info: METRIC_INFO["Fair value 1"] },
+                          { label: "Fair value 2", value: rrProduction === null ? null : rrFv2, info: METRIC_INFO["Fair value 2"] },
+                          { label: "Fair value 3", value: "Disabled in revenue mode" },
+                          { label: "RR classification", value: rrOverlay?.rr_classification, info: METRIC_INFO["RR classification"] },
+                        ], openInfoId, setOpenInfoId)}
+                      </div>
+                    </div>
                   </div>
                 )}
               </section>
