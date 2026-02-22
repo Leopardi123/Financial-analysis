@@ -183,6 +183,23 @@ const metricInfoMap: Record<string, { title: string; body: string }> = {
   "missing_flags": { title: "Missing flags", body: "Vad består måttet av? Datagap-flaggor för saknade indata. Vad säger det? Beräkningens begränsning. Hur tolkas det? Hantera som osäkerhet i beslut. Ramverk: riskdisciplin." },
 };
 
+
+metricInfoMap["scale_flag"] = { title: "Scale flag", body: "Bygger på proxy för institutionsskala från RR-lagret. Högt/InstitutionalScale är positivt, Subscale är svagare. Tolkning: visar storlekskvalificering, inte lönsamhet. Källa: marknad + rapportdata (proxy). Ramverk: RR." };
+metricInfoMap["rr_roce"] = { title: "ROCE", body: "Delberäkning: EBIT senaste 12 månaderna delas med kapital använt i verksamheten (totala tillgångar minus kortfristiga skulder). Under 10% svagt, 10–20% okej, 20–40% starkt, över 40% exceptionellt. Tolkning: högre är bättre men kapitaldefinition påverkar jämförbarhet. Källa: resultaträkning + balansräkning. Ramverk: RR." };
+metricInfoMap["rr_roce_flag"] = { title: "ROCE flag", body: "Klassning av ROCE-nivå i RR-filtret. Hög klass indikerar bättre kapitalallokering. Tolkning: använd med skuldmått och skala, inte ensamt. Källa: härledd från ROCE." };
+metricInfoMap["margin_buffer"] = { title: "Margin buffer", body: "Proxy-marginal från operativ marginal i RR-lagret. Högre marginal betyder större skydd mot kostnadschocker. Tumregel för marginaler: <10% tunn, 10–25% okej, 25–40% stark, >40% exceptionell (branschberoende). Källa: resultaträkning (proxy)." };
+metricInfoMap["cost_quartile"] = { title: "Cost quartile", body: "Visar kostnadsposition relativt global kostnadskurva. Hög kvalitet kräver låg kostnadsquartil, men här saknas benchmark i MVP. Tolkning: null betyder datagap, inte neutral signal. Källa: extern benchmark (saknas)." };
+metricInfoMap["reserve_life"] = { title: "Reserve life", body: "Visar hur länge reservbasen kan stödja produktion. Lång reservlivslängd minskar reinvesteringspress. I revenue-mode saknas ofta projektdata, därför visas null. Källa: reserver/projektdata (saknas)." };
+metricInfoMap["rr_net_debt_fcf"] = { title: "Net debt / FCF", body: "Nettoskuld dividerat med sustaining FCF. >3x högt belånat, 1.5–3x måttligt, 0–1.5x konservativt, <0 nettokassa. Tolkning: lägre är robustare i stress. Källa: balansräkning + kassaflöde." };
+metricInfoMap["rr_interest_coverage"] = { title: "Interest coverage", body: "Operativ vinst delat med räntekostnad. <1.5x stressat, 1.5–3x skört, 3–8x okej, >8x starkt. Tolkning: hög täckning minskar kreditrisk. Källa: resultaträkning." };
+metricInfoMap["fv2_enterprise"] = { title: "FV2 Enterprise", body: "Delberäkning: median fritt kassaflöde över 5 år. Huvudformel: enterprisevärde = median FCF delat med diskonteringsräntan. Tolkning: förenklad perpetuitetsproxy; lägre ränta ger högre värde. Källa: kassaflöde + användarinput r." };
+metricInfoMap["fv2_equity"] = { title: "FV2 Equity", body: "Delberäkning: FV2 enterprisevärde. Huvudformel: equityvärde = enterprisevärde minus nettoskuld. Tolkning: visar värde till aktieägare efter finansiering. Källa: FV2 enterprise + nettoskuld från balansdata." };
+metricInfoMap["fv2_per_share"] = { title: "FV2 Per share", body: "Delberäkning: FV2 equityvärde. Huvudformel: equityvärde delat med utestående aktier. Tolkning: jämför mot aktiekurs; null om aktieantal saknas. Källa: FV2 equity + aktieantal från rapportdata." };
+metricInfoMap["ev_over_fv2"] = { title: "EV / FV2 Enterprise", body: "Formel: aktuellt EV dividerat med FV2 enterprisevärde. <0.8 kan vara billigt, 0.8–1.2 nära fair value, >1.2 kan vara dyrt. Tolkning: snabb signal, inte full DCF. Källa: EV-proxy + FV2 enterprise." };
+metricInfoMap["rr_classification"] = { title: "RR classification", body: "Samlad klassning av skala, kapitalavkastning och balansstyrka. Tolkning: hög klass kräver balans mellan kvalitet och robusthet, inte bara ett starkt enskilt mått. Källa: RR-overlay regler." };
+metricInfoMap["fv3_disabled"] = { title: "FV3", body: "FV3 kräver projekt-/LOM-modell och beräknas inte i revenue mode. Tolkning: frånvaro är avsiktlig, inte fel. Källa: designregel i UI." };
+metricInfoMap["quality_flags"] = { title: "Quality flags", body: "Samling positiva kvalitetssignaler (kassakonvertering, marginalstabilitet, skuldtrend, dilution). Tolkning: fler flaggor stärker kvalitetscase men ersätter inte värdering. Källa: härledda från rapportdata." };
+metricInfoMap["risk_flags"] = { title: "Risk flags", body: "Samling riskmönster (negativ FCF, utspädning, komprimerade marginaler, svag kassakonvertering). Tolkning: fler flaggor kräver högre säkerhetsmarginal. Källa: härledda från rapportdata." };
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
   sma200: "#3a3a3a",
@@ -570,11 +587,8 @@ export default function SingleStockDashboard() {
   const producerCoreMissing = !producerCore || !producerCore.efficiency;
   const rrOverlayMissing = !rrOverlay || Object.keys(rrOverlay).length === 0;
   const rrDiscountRatePct = rrDiscountRateInput.trim() ? Number(rrDiscountRateInput) : null;
-  const rrDiscountRate = rrDiscountRatePct !== null && Number.isFinite(rrDiscountRatePct) && rrDiscountRatePct > 0
+  const rrDiscountRate = rrDiscountRatePct !== null && Number.isFinite(rrDiscountRatePct) && rrDiscountRatePct > 0 && rrDiscountRatePct <= 25
     ? rrDiscountRatePct / 100
-    : null;
-  const rrOperatingCfAdjusted = typeof (rrOverlay as any)?.rr_operating_cf_adjusted === "number"
-    ? Number((rrOverlay as any).rr_operating_cf_adjusted)
     : null;
   const rrNetDebt = typeof (rrOverlay as any)?.rr_net_debt === "number"
     ? Number((rrOverlay as any).rr_net_debt)
@@ -602,9 +616,6 @@ export default function SingleStockDashboard() {
     }
     return null;
   })();
-  const rrFv1 = rrDiscountRate !== null && rrOperatingCfAdjusted !== null && rrNetDebt !== null
-    ? rrOperatingCfAdjusted / rrDiscountRate - rrNetDebt
-    : null;
   const fv2Ev = rrDiscountRate !== null && medianFcf5Y !== null && medianFcf5Y > 0
     ? medianFcf5Y / rrDiscountRate
     : null;
@@ -612,8 +623,18 @@ export default function SingleStockDashboard() {
   const fv2PerShare = fv2Equity !== null && sharesOutstanding !== null && sharesOutstanding > 0
     ? fv2Equity / sharesOutstanding
     : null;
-  const fv2EvSignal = fv2Ev !== null && typeof (rrOverlay as any)?.rr_ev_fcf === "number" && medianFcf5Y !== null && medianFcf5Y > 0
-    ? ((rrOverlay as any).rr_ev_fcf * medianFcf5Y) / fv2Ev
+  const evFromNetDebtRatio = (() => {
+    const netDebtOverEv = typeof (producerCore as any)?.value?.multiples?.net_debt_over_ev === "number"
+      ? Number((producerCore as any).value.multiples.net_debt_over_ev)
+      : null;
+    if (rrNetDebt === null || netDebtOverEv === null || netDebtOverEv === 0) {
+      return null;
+    }
+    const ev = rrNetDebt / netDebtOverEv;
+    return Number.isFinite(ev) && ev > 0 ? ev : null;
+  })();
+  const fv2EvSignal = fv2Ev !== null && fv2Ev > 0 && evFromNetDebtRatio !== null
+    ? evFromNetDebtRatio / fv2Ev
     : null;
   const fv2Flags = {
     missing_median_fcf: medianFcf5Y === null || medianFcf5Y <= 0,
@@ -883,12 +904,14 @@ export default function SingleStockDashboard() {
                       { label: "Retained vs NI", value: (producerCore as any)?.efficiency?.allocation?.retained_vs_ni_signal, infoKey: "retained_vs_ni_signal" },
                       {
                         label: "Quality flags",
+                        infoKey: "quality_flags",
                         value: Array.isArray((producerCore as any)?.efficiency?.quality_flags) && (producerCore as any).efficiency.quality_flags.length
                           ? (producerCore as any).efficiency.quality_flags.join(", ")
                           : "—",
                       },
                       {
                         label: "Risk flags",
+                        infoKey: "risk_flags",
                         value: Array.isArray((producerCore as any)?.efficiency?.risk_flags) && (producerCore as any).efficiency.risk_flags.length
                           ? (producerCore as any).efficiency.risk_flags.join(", ")
                           : "—",
@@ -914,9 +937,9 @@ export default function SingleStockDashboard() {
                   </div>
                   <div className="compact-metrics-grid">
                     {renderCompactMetrics("resilience", [
-                      { label: "Net debt", value: (producerCore as any)?.resilience?.leverage?.net_debt },
-                      { label: "Net debt / EBITDA", value: (producerCore as any)?.resilience?.leverage?.net_debt_to_ebitda },
-                      { label: "Interest coverage", value: (producerCore as any)?.resilience?.leverage?.interest_coverage },
+                      { label: "Net debt", value: (producerCore as any)?.resilience?.leverage?.net_debt, infoKey: "net_debt" },
+                      { label: "Net debt / EBITDA", value: (producerCore as any)?.resilience?.leverage?.net_debt_to_ebitda, infoKey: "net_debt_to_ebitda" },
+                      { label: "Interest coverage", value: (producerCore as any)?.resilience?.leverage?.interest_coverage, infoKey: "interest_coverage" },
                       { label: "Current ratio", value: (producerCore as any)?.resilience?.liquidity?.current_ratio, infoKey: "current_ratio" },
                       { label: "Cash vs short debt", value: (producerCore as any)?.resilience?.liquidity?.cash_vs_short_term_debt, infoKey: "cash_vs_short_term_debt" },
                       { label: "FCF volatility 5Y", value: (producerCore as any)?.resilience?.stability?.fcf_volatility_5Y, infoKey: "fcf_volatility_5Y" },
@@ -974,7 +997,7 @@ export default function SingleStockDashboard() {
                     <input value={rrDiscountRateInput} onChange={(e) => setRrDiscountRateInput(e.target.value)} placeholder="t.ex. 10" />
                   </label>
                 </div>
-                {!rrInputsReady && <p className="status empty">Ange diskonteringsränta för att aktivera FV2.</p>}
+                {!rrInputsReady && <p className="status empty">Ange giltig diskonteringsränta (0–25%) för att aktivera FV2.</p>}
                 {rrOverlayMissing ? (
                   <p className="status empty">Data missing for RR Snapshot panel.</p>
                 ) : (
@@ -983,8 +1006,8 @@ export default function SingleStockDashboard() {
                       <h4>Scale</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-scale", [
-                          { label: "10Y recoverable value", value: (rrOverlay as any)?.rr_scale_10y_recoverable_value_usd },
-                          { label: "Scale flag", value: rrOverlay?.rr_scale_flag ?? "Unknown" },
+                          { label: "10Y recoverable value", infoKey: "rr_scale_10y_recoverable_value_usd", value: (rrOverlay as any)?.rr_scale_10y_recoverable_value_usd },
+                          { label: "Scale flag", infoKey: "scale_flag", value: rrOverlay?.rr_scale_flag ?? "Unknown" },
                         ], openInfoId, setOpenInfoId)}
                       </div>
                     </div>
@@ -992,11 +1015,11 @@ export default function SingleStockDashboard() {
                       <h4>Capital</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-capital", [
-                          { label: "ROCE", value: (rrOverlay as any)?.rr_roce },
-                          { label: "ROCE flag", value: rrOverlay?.rr_roce_flag ?? "Unknown" },
-                          { label: "Margin buffer", value: (rrOverlay as any)?.rr_margin_buffer_pct },
-                          { label: "Cost quartile", value: (rrOverlay as any)?.rr_cost_quartile },
-                          { label: "Reserve life", value: (rrOverlay as any)?.rr_reserve_life_years },
+                          { label: "ROCE", infoKey: "rr_roce", value: (rrOverlay as any)?.rr_roce },
+                          { label: "ROCE flag", infoKey: "rr_roce_flag", value: rrOverlay?.rr_roce_flag ?? "Unknown" },
+                          { label: "Margin buffer", infoKey: "margin_buffer", value: (rrOverlay as any)?.rr_margin_buffer_pct },
+                          { label: "Cost quartile", infoKey: "cost_quartile", value: (rrOverlay as any)?.rr_cost_quartile },
+                          { label: "Reserve life", infoKey: "reserve_life", value: (rrOverlay as any)?.rr_reserve_life_years },
                         ], openInfoId, setOpenInfoId)}
                       </div>
                     </div>
@@ -1004,10 +1027,10 @@ export default function SingleStockDashboard() {
                       <h4>Balance sheet</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-balance", [
-                          { label: "Net debt / FCF", value: (rrOverlay as any)?.rr_net_debt_fcf },
-                          { label: "Interest coverage", value: rrOverlay?.rr_interest_coverage },
-                          { label: "Missing benchmark", value: rrOverlay?.rr_cost_quartile_flags?.missing_benchmark ?? false },
-                          { label: "Missing reserves", value: rrOverlay?.rr_reserve_life_flags?.missing_reserves ?? false },
+                          { label: "Net debt / FCF", infoKey: "rr_net_debt_fcf", value: (rrOverlay as any)?.rr_net_debt_fcf },
+                          { label: "Interest coverage", infoKey: "rr_interest_coverage", value: rrOverlay?.rr_interest_coverage },
+                          { label: "Missing benchmark", infoKey: "missing_flags", value: rrOverlay?.rr_cost_quartile_flags?.missing_benchmark ?? false },
+                          { label: "Missing reserves", infoKey: "missing_flags", value: rrOverlay?.rr_reserve_life_flags?.missing_reserves ?? false },
                         ], openInfoId, setOpenInfoId)}
                       </div>
                     </div>
@@ -1015,17 +1038,16 @@ export default function SingleStockDashboard() {
                       <h4>Fair value</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-fv", [
-                          { label: "Fair value 1", value: rrFv1, infoKey: "fv2" },
-                          { label: "FV2 (Enterprise, USD)", value: fv2Ev, infoKey: "fv2" },
-                          { label: "FV2 (Equity, USD)", value: fv2Equity, infoKey: "fv2" },
-                          { label: "FV2 (Per share, USD)", value: fv2PerShare, infoKey: "fv2" },
-                          { label: "EV / FV2_EV", value: fv2EvSignal, infoKey: "fv2" },
+                                                    { label: "FV2 (Enterprise, USD)", value: fv2Ev, infoKey: "fv2_enterprise" },
+                          { label: "FV2 (Equity, USD)", value: fv2Equity, infoKey: "fv2_equity" },
+                          { label: "FV2 (Per share, USD)", value: fv2PerShare, infoKey: "fv2_per_share" },
+                          { label: "EV / FV2_EV", value: fv2EvSignal, infoKey: "ev_over_fv2" },
                           { label: "missing_median_fcf", value: fv2Flags.missing_median_fcf, infoKey: "missing_flags" },
                           { label: "missing_net_debt", value: fv2Flags.missing_net_debt, infoKey: "missing_flags" },
                           { label: "missing_shares", value: fv2Flags.missing_shares, infoKey: "missing_flags" },
                           { label: "invalid_discount_rate", value: fv2Flags.invalid_discount_rate, infoKey: "missing_flags" },
-                          { label: "Fair value 3", value: "Ej aktiv i revenue mode" },
-                          { label: "RR classification", value: rrOverlay?.rr_classification },
+                          { label: "Fair value 3", infoKey: "fv3_disabled", value: "Ej aktiv i revenue mode" },
+                          { label: "RR classification", infoKey: "rr_classification", value: rrOverlay?.rr_classification },
                         ], openInfoId, setOpenInfoId)}
                       </div>
                     </div>
