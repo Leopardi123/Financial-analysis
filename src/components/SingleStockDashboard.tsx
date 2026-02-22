@@ -241,6 +241,187 @@ const defaultMetricInfo = (label: string): MetricInfo => buildMetricInfo(
   ["Producer Core / RR beroende på sektion."]
 );
 
+
+
+const BUFFETOLOGY_CHART_INFO_MAP: Record<string, MetricInfo> = {
+  "EBITDA Margin": {
+    title: "EBITDA Margin",
+    sections: [
+      { heading: "LEGACY", lines: [`Warren Buffett tittar inte på EBITDA som primärt mått, men han är mycket intresserad av rörelsens inneboende lönsamhet.  
+
+EBITDA visar hur stark affärsmodellen är innan kapitalintensitet och finansiering påverkar resultatet.  
+
+Ett bolag med stabil och hög EBITDA-marginal indikerar ofta:
+- Prissättningsmakt
+- Operativ hävstång
+- Strukturell kostnadsfördel  
+
+Om EBITDA är volatil eller cyklisk utan tydlig förbättring, tyder det på att bolaget saknar moat.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- EBITDA kan dölja reinvesteringsbehov. Tolka alltid tillsammans med Capex och Free Cash Flow för att se om lönsamheten är “kassareell”.", "- För kapitalintensiva bolag, var extra försiktig med att dra moat-slutsatser från EBITDA-marginal isolerat."] },
+    ],
+  },
+  "Net Income Margin": {
+    title: "Net Income Margin",
+    sections: [
+      { heading: "LEGACY", lines: [`Buffett föredrar företag som konsekvent kan behålla en hög andel av varje intäktskrona som vinst.  
+
+Net income margin visar affärens fulla ekonomiska kraft, efter alla kostnader, inklusive ränta och skatt.  
+
+Ett kvalitetsbolag kännetecknas av:
+- Stabil eller stigande nettomarginal över lång tid
+- Låg känslighet för konjunktursvängningar  
+
+Kraftiga svängningar kan indikera svag konkurrensposition.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Nettomarginal påverkas starkt av kapitalstruktur och skatt. Jämför därför också Operating Cash Flow och skuldsättningsgrafer för att skilja affärskvalitet från finansieringsval."] },
+    ],
+  },
+  "Cash vs Net Earnings": {
+    title: "Cash vs Net Earnings",
+    sections: [
+      { heading: "LEGACY", lines: [`Buffett är extremt skeptisk till bokföringsvinster som inte omvandlas till kassaflöde.  
+
+Ett av hans centrala filter:  
+
+“Earnings must convert to cash.”  
+
+Om Operating Cash Flow konsekvent är lika med eller större än Net Income är det ett styrketecken.  
+
+Om vinsterna över tid inte genererar kassaflöde är det ett varningstecken för aggressiv redovisning.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Enstaka avvikelser kan bero på rörelsekapital. Titta på flera år och kombinera med Inventory-grafen och kundfordringar om de finns i datat."] },
+    ],
+  },
+  "Free Cash Flow": {
+    title: "Free Cash Flow",
+    sections: [
+      { heading: "LEGACY", lines: [`Detta är det viktigaste måttet i Buffett-analys.  
+
+Free Cash Flow visar vad ägarna faktiskt kan ta ut utan att skada verksamheten.  
+
+Buffett kallar detta för “owner earnings”.  
+
+Ett bolag med:
+- Stabil FCF
+- Växande FCF
+- Låg Capex relativt kassaflöde  
+
+är ofta en kandidat för långsiktig kapitalallokering.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- “Owner earnings” handlar om kassaflöde efter nödvändiga investeringar för att bibehålla konkurrenskraft. Tolka därför FCF tillsammans med Depreciation vs PPE för att se om bolaget underinvesterar.", "- Återkommande “engångs-justeringar” som krävs för att få fram FCF är en varningsflagga."] },
+    ],
+  },
+  "Capital Expenditure vs Net Earnings": {
+    title: "Capital Expenditure vs Net Earnings",
+    sections: [
+      { heading: "LEGACY", lines: [`Buffett föredrar verksamheter som inte kräver ständigt reinvesterande av vinsten för att överleva.  
+
+Om Capex över lång tid ≈ Net Income betyder det att:
+- Hela vinsten måste återinvesteras
+- Det finns lite ägarvärde kvar  
+
+Låg kapitalintensitet är ett tecken på stark affärsmodell.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Skilj mellan underhållsinvesteringar och expansionsinvesteringar när det går. Stabil FCF trots hög Capex kan vara OK om Capex är värdeskapande expansion, men det ska synas i långsiktigt ökande FCF per aktie."] },
+    ],
+  },
+  "Retained Earnings vs Net Income": {
+    title: "Retained Earnings vs Net Income",
+    sections: [
+      { heading: "LEGACY", lines: [`Buffett analyserar hur väl bolag förvaltar kvarhållna vinster.  
+
+Han ställer frågan:  
+
+“För varje dollar som behålls i bolaget, hur mycket marknadsvärde skapas?”  
+
+Om retained earnings växer men:
+- ROE faller
+- Aktiekursen inte reflekterar värdeskapande  
+
+är kapitalallokeringen ineffektiv.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Nyckeln är att retained earnings ska leda till högre framtida “owner earnings”. Om retained earnings växer men FCF per aktie inte gör det, är det ett tydligt disciplinproblem."] },
+    ],
+  },
+  "ROE": {
+    title: "ROE",
+    sections: [
+      { heading: "LEGACY", lines: [`Buffett älskar bolag med hög och stabil ROE, utan överdriven skuldsättning.  
+
+En ROE över 15% under lång tid indikerar ofta:
+- Moat
+- Kapitaldisciplin
+- Effektiv ledning  
+
+Men hög ROE driven av hög skuld är inte attraktiv.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Tolka alltid ROE tillsammans med Debt to Equity och räntetäckning. Ett “bra” ROE som faller kraftigt när equity växer kan signalera avtagande avkastning på återinvesterat kapital."] },
+    ],
+  },
+  "Debt to Equity": {
+    title: "Debt to Equity",
+    sections: [
+      { heading: "LEGACY", lines: [`Buffett undviker bolag som är beroende av skuld för att generera avkastning.  
+
+Ett kvalitetsbolag ska kunna överleva svåra tider utan att vara beroende av kreditmarknaden.  
+
+Låg skuld:
+- Minskar risk
+- Ökar optionalitet
+- Förhindrar permanent kapitalförlust`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Hög skuld ökar risken för permanent kapitalförlust via refinansieringsstress och framtida utspädning. Det är ofta inte volatilitet som dödar ägaren, det är behovet av kapital vid fel tidpunkt."] },
+    ],
+  },
+  "EBIT vs Interest": {
+    title: "EBIT vs Interest",
+    sections: [
+      { heading: "LEGACY", lines: [`Buffett föredrar bolag som kan täcka sina räntekostnader flera gånger om utan stress.  
+
+Svag räntetäckning indikerar:
+- Operativ sårbarhet
+- Risk vid ränteuppgång
+- Potentiell equity-utspädning`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Om räntetäckningen ser OK ut bara i högkonjunktur, men kollapsar i sämre år, är bolaget cykliskt sårbart även om snittet ser bra ut."] },
+    ],
+  },
+  "Gross Profit Ratio": {
+    title: "Gross Profit Ratio",
+    sections: [
+      { heading: "LEGACY", lines: [`Buffett analyserar bruttomarginalens stabilitet för att identifiera moat.  
+
+Hög och stabil gross margin över tid är ett av de tydligaste tecknen på:
+- Prissättningsmakt
+- Varumärkesstyrka
+- Strukturell konkurrensfördel`] },
+      { heading: "CENTRAL ADDITION", lines: ["- En gross margin som hålls uppe via tillfälliga råvarufördelar eller konjunktur kan lura. Bekräfta med flera cykler och se om Operating margin och FCF följer med."] },
+    ],
+  },
+  "Buybacks + Dividends vs Net Earnings": {
+    title: "Buybacks + Dividends vs Net Earnings",
+    sections: [
+      { heading: "LEGACY", lines: [`Kapitalallokering är centralt i Buffett-filosofin.  
+
+Om ett bolag:
+- Genererar överskott
+- Återköper aktier under intrinsic value
+- Delar ut kapital disciplinerat  
+
+då arbetar ledningen för aktieägarna.  
+
+Men återköp över intrinsic value förstör värde.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Kombinera med Shares Outstanding-trenden. Återköp som inte minskar aktieantalet över tid är ofta kosmetik, särskilt om SBC är hög."] },
+    ],
+  },
+  "Total Equity": {
+    title: "Total Equity",
+    sections: [
+      { heading: "LEGACY", lines: [`Equity ska växa organiskt via retained earnings, inte genom emissioner.  
+
+Buffett föredrar bolag där:
+- Equity växer
+- ROE förblir hög
+- Ingen konstant utspädning sker  
+
+Detta är tecken på intern kapitalgenerering.`] },
+      { heading: "CENTRAL ADDITION", lines: ["- Var extra uppmärksam på perioden där equity växer men emissioner avtar. Det är ofta första visuella tecknet på att bolaget går från “finansierat” till “självfinansierande”."] },
+    ],
+  },
+};
+
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
   sma200: "#3a3a3a",
@@ -1233,6 +1414,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Gross Profit Ratio"
+          id="Gross Profit Ratio"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Gross Profit Ratio"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={grossProfitRatioData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
@@ -1240,6 +1426,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="EBITDA Margin"
+          id="EBITDA Margin"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["EBITDA Margin"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={ebitdaMarginData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
@@ -1247,6 +1438,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Net Income Margin"
+          id="Net Income Margin"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Net Income Margin"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={netIncomeMarginData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
@@ -1268,6 +1464,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Free Cash Flow"
+          id="Free Cash Flow"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Free Cash Flow"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={freeCashFlowData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
@@ -1282,6 +1483,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Total Equity"
+          id="Total Equity"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Total Equity"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={equityData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
@@ -1289,6 +1495,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="ROE"
+          id="ROE"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["ROE"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={roeData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
@@ -1343,6 +1554,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="EBIT vs Interest"
+          id="EBIT vs Interest"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["EBIT vs Interest"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={ebitVsInterestData}
           options={lineBehindBars}
         />
@@ -1371,6 +1587,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Cash vs Net Earnings"
+          id="Cash vs Net Earnings"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Cash vs Net Earnings"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={cashVsNetEarningsData}
           options={lineBehindBars}
         />
@@ -1431,6 +1652,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Debt to Equity"
+          id="Debt to Equity"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Debt to Equity"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={debtToEquityData}
           options={{ vAxis: { format: "percent" } }}
         />
@@ -1445,6 +1671,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Retained Earnings vs Net Income"
+          id="Retained Earnings vs Net Income"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Retained Earnings vs Net Income"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={retainedEarningsData}
           options={lineBehindBars}
         />
@@ -1466,6 +1697,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Capital Expenditure vs Net Earnings"
+          id="Capital Expenditure vs Net Earnings"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Capital Expenditure vs Net Earnings"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={capexVsNetEarningsData}
           options={lineBehindBars}
         />
@@ -1473,6 +1709,11 @@ export default function SingleStockDashboard() {
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Buybacks + Dividends vs Net Earnings"
+          id="Buybacks + Dividends vs Net Earnings"
+          infoSections={BUFFETOLOGY_CHART_INFO_MAP["Buybacks + Dividends vs Net Earnings"]?.sections}
+          openInfoId={openInfoId}
+          onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+          onCloseInfo={() => setOpenInfoId(null)}
           data={buybacksDividendsData}
           options={lineBehindBars}
         />
