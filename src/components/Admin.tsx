@@ -97,6 +97,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [tickers, setTickers] = useState(DEFAULT_TICKERS);
   const [refreshTicker, setRefreshTicker] = useState("AAPL");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [showLog, setShowLog] = useState(false);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [materializationCursor, setMaterializationCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDisplayCursor, setMaterializationDisplayCursor] = useState<MaterializationCursor | null>(null);
@@ -808,7 +809,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <p className="bread">{tickerProgressPercent}%</p>
           </div>
 
-          <div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
               type="button"
               onClick={() => void postJson("Run Cron", "/api/cron/refresh", {})}
@@ -816,28 +817,38 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             >
               {loadingKey === "Run Cron" ? "Running..." : "Run Cron"}
             </button>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={showLog}
+                onChange={(event) => setShowLog(event.target.checked)}
+              />
+              Visa logg
+            </label>
           </div>
         </div>
       </div>
 
-      <div className="log-panel">
-        <h3>Logg</h3>
-        {logEntries.length === 0 ? (
-          <div className="status empty">No requests yet.</div>
-        ) : (
-          logEntries.map((entry) => (
-            <div key={entry.id} className={`log-entry ${entry.status}`}>
-              <div className="log-entry-header">
-                <strong>{entry.title}</strong>
-                <span className={`log-status ${entry.status}`}>
-                  {STATUS_LABELS[entry.status]}
-                </span>
+      {showLog && (
+        <div className="log-panel">
+          <h3>Logg</h3>
+          {logEntries.length === 0 ? (
+            <div className="status empty">No requests yet.</div>
+          ) : (
+            logEntries.map((entry) => (
+              <div key={entry.id} className={`log-entry ${entry.status}`}>
+                <div className="log-entry-header">
+                  <strong>{entry.title}</strong>
+                  <span className={`log-status ${entry.status}`}>
+                    {STATUS_LABELS[entry.status]}
+                  </span>
+                </div>
+                <pre>{entry.message}</pre>
               </div>
-              <pre>{entry.message}</pre>
-            </div>
-          ))
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
