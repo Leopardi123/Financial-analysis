@@ -221,7 +221,7 @@ const metricInfoMap: Record<string, MetricInfo> = {
   fv2_enterprise: buildMetricInfo("FV2 (Enterprise, USD)", ["Förenklad enterprise valuation baserad på normaliserat fritt kassaflöde."], ["Steg 1: median FCF (5Y). Steg 2: FV2 enterprise = median FCF delat med discount rate."], ["Lägre diskonteringsränta ger högre värde och tvärtom.", "Jämför med aktuellt EV för att bedöma relativ över-/undervärdering."], ["Modellen antar perpetuitet och fångar inte cykel/regimskiften fullt ut.", "Små ändringar i r ger stor effekt på utfallet."], ["RR FV2."]),
   fv2_equity: buildMetricInfo("FV2 (Equity, USD)", ["Värde till aktieägare efter avdrag för nettoskuld."], ["Steg 1: FV2 enterprise. Steg 2: FV2 equity = FV2 enterprise minus Net debt."], ["Starkt equityvärde kräver både rimligt enterprisevärde och kontrollerad skuldsättning.", "Negativt equityvärde signalerar hög finansieringsrisk."], ["Fel i nettoskuld slår direkt på equityvärdet.", "Bör valideras mot alternativa värderingsmetoder."], ["RR FV2."]),
   fv2_per_share: buildMetricInfo("FV2 (Per share, USD)", ["Översätter FV2 equity till ett värde per aktie."], ["FV2 per share = FV2 equity delat med utestående aktier."], ["Jämför med marknadspris för snabb värderingssignal.", "Null eller extremt värde kräver kontroll av shares-data."], ["Felaktigt aktieantal ger direkt missvisande värde per aktie.", "Utspädning över tid bör beaktas i jämförelsen."], ["RR FV2."]),
-  ev_over_fv2: buildMetricInfo("EV / FV2_EV", ["Relativ multipel mellan aktuellt enterprise value och FV2 enterprise."], ["EV / FV2 = Aktuellt EV delat med FV2 enterprise."], ["<0.8 kan indikera rabatt, 0.8–1.2 nära fair value, >1.2 möjlig premie.", "Tolka zon tillsammans med kvalitet och balansrisk."], ["Förenklad FV2 kan avvika kraftigt från full DCF.", "Kortsiktiga marknadsrörelser kan flytta kvoten snabbt."], ["RR FV2."]),
+  ev_over_fv2: buildMetricInfo("EV / FV2_EV", ["Relativ multipel mellan aktuellt enterprise value och FV2 enterprise."], ["EV / FV2 = Aktuellt EV delat med FV2 enterprise."], ["<0.8 kan indikera rabatt, 0.8–1.2 nära fair value, >1.2 möjlig premie.", "Tolka zon tillsammans med kvalitet och balansrisk.", "Om aktuellt EV saknas eller är <= 0 visas värdet som — (missing EV)."], ["Förenklad FV2 kan avvika kraftigt från full DCF.", "Kortsiktiga marknadsrörelser kan flytta kvoten snabbt."], ["RR FV2."]),
   rr_classification: buildMetricInfo("RR classification", ["Samlad RR-klassning av skala, avkastning och balansrobusthet."], ["Härleds från RR-overlay-regler där flera delmått vägs samman."], ["Hög klass är starkast när delmåtten pekar åt samma håll över tid.", "Använd klassningen som startpunkt för vidare analys, inte slutbeslut."], ["Klassning nära gränser kan ändras snabbt av små dataskift.", "Datagap i underliggande mått kan ge underskattad kvalitet."], ["RR."]),
   fv3_disabled: buildMetricInfo("Fair value 3", ["Markerar att FV3-modellen inte används i revenue mode."], ["FV3 kräver projekt/LOM-antaganden och är därför avstängd i denna vy."], ["Statusen 'Ej aktiv' är förväntad och inte ett systemfel."], ["Att tolka avsaknad av FV3 som negativ signal är fel.", "Använd FV2 och övriga RR-mått tills FV3-data finns."], ["UI-designregel."]),
   missing_median_fcf: buildMetricInfo("missing_median_fcf", ["Flagga för att femårsmedian av FCF saknas."], ["Sätts när inputdata inte räcker för att beräkna median FCF (5Y)."], ["True innebär att FV2 blir osäkert eller ej beräkningsbart."], ["Tolka inte false som kvalitetsbevis, endast datatillgänglighet."], ["RR datakvalitet."]),
@@ -293,19 +293,64 @@ function formatMarketCapValue(value: number | null) {
   return value.toLocaleString("en-US", { maximumFractionDigits: 0, useGrouping: true });
 }
 
-function normalizeDateSeries(data: (string | number | null)[][] | null) {
+function parseChartDate(rawDate: unknown): Date | null {
+  if (rawDate instanceof Date) {
+    return Number.isNaN(rawDate.getTime()) ? null : rawDate;
+  }
+  if (typeof rawDate === "number" && Number.isFinite(rawDate)) {
+    const fromNumber = new Date(rawDate);
+    return Number.isNaN(fromNumber.getTime()) ? null : fromNumber;
+  }
+  if (typeof rawDate === "string") {
+    const trimmed = rawDate.trim();
+    if (!trimmed) return null;
+    const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    if (isoDateMatch) {
+      const year = Number(isoDateMatch[1]);
+      const month = Number(isoDateMatch[2]);
+      const day = Number(isoDateMatch[3]);
+      const utcDate = new Date(Date.UTC(year, month - 1, day));
+      return Number.isNaN(utcDate.getTime()) ? null : utcDate;
+    }
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+function normalizeDateSeries(data: (string | number | Date | null)[][] | null) {
   if (!data || data.length === 0) {
     return data;
   }
   const [headers, ...rows] = data;
-  const normalizedRows = rows.map((row) => {
-    const [rawDate, ...rest] = row;
-    const parsedDate = typeof rawDate === "string" || typeof rawDate === "number"
-      ? new Date(rawDate)
-      : null;
-    const dateValue = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
-    return [dateValue, ...rest] as (string | number | Date | null)[];
-  });
+  const normalizedRows = rows
+    .map((row) => {
+      const [rawDate, ...rest] = row;
+      const parsedDate = parseChartDate(rawDate);
+      if (!parsedDate) {
+        return null;
+      }
+      const normalizedValues = rest.map((value) => {
+        if (value === null) return null;
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        if (typeof value === "string") {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+      });
+      if (normalizedValues.length > 0 && normalizedValues.every((value) => value === null)) {
+        return null;
+      }
+      return [parsedDate, ...normalizedValues] as (string | number | Date | null)[];
+    })
+    .filter((row): row is (string | number | Date | null)[] => row !== null)
+    .sort((a, b) => (a[0] as Date).getTime() - (b[0] as Date).getTime());
+
+  if (normalizedRows.length === 0) {
+    return null;
+  }
+
   return [headers, ...normalizedRows];
 }
 
@@ -675,7 +720,7 @@ export default function SingleStockDashboard() {
   const medianFcf5Y = typeof (producerCore as any)?.value?.medians_5Y?.median_fcf === "number"
     ? Number((producerCore as any).value.medians_5Y.median_fcf)
     : null;
-  const sharesOutstanding = (() => {
+  const statementDerivedSharesOutstanding = (() => {
     const candidates = [
       (data?.balance as any)?.sharesOutstanding,
       (data?.balance as any)?.commonStockSharesOutstanding,
@@ -693,6 +738,37 @@ export default function SingleStockDashboard() {
     }
     return null;
   })();
+  const sharesOutstanding =
+    toFiniteNumber((profile as any)?.sharesOutstanding) ??
+    toFiniteNumber((data as any)?.quote?.sharesOutstanding) ??
+    statementDerivedSharesOutstanding;
+
+  const totalDebt = (() => {
+    const series = (data?.balance as any)?.totalDebt;
+    if (!Array.isArray(series)) return null;
+    for (let i = series.length - 1; i >= 0; i -= 1) {
+      const value = toFiniteNumber(series[i]);
+      if (value !== null) return value;
+    }
+    return null;
+  })();
+  const cashAndShortTermInvestments = (() => {
+    const series = (data?.balance as any)?.cashAndShortTermInvestments;
+    if (!Array.isArray(series)) return null;
+    for (let i = series.length - 1; i >= 0; i -= 1) {
+      const value = toFiniteNumber(series[i]);
+      if (value !== null) return value;
+    }
+    return null;
+  })();
+  const marketCapForEv =
+    toFiniteNumber((profile as any)?.mktCap) ??
+    toFiniteNumber((profile as any)?.marketCap) ??
+    toFiniteNumber((data as any)?.quote?.marketCap);
+  const currentEnterpriseValue = marketCapForEv !== null && totalDebt !== null && cashAndShortTermInvestments !== null
+    ? marketCapForEv + totalDebt - cashAndShortTermInvestments
+    : null;
+
   const fv2Ev = rrDiscountRate !== null && medianFcf5Y !== null && medianFcf5Y > 0
     ? medianFcf5Y / rrDiscountRate
     : null;
@@ -700,18 +776,8 @@ export default function SingleStockDashboard() {
   const fv2PerShare = fv2Equity !== null && sharesOutstanding !== null && sharesOutstanding > 0
     ? fv2Equity / sharesOutstanding
     : null;
-  const evFromNetDebtRatio = (() => {
-    const netDebtOverEv = typeof (producerCore as any)?.value?.multiples?.net_debt_over_ev === "number"
-      ? Number((producerCore as any).value.multiples.net_debt_over_ev)
-      : null;
-    if (rrNetDebt === null || netDebtOverEv === null || netDebtOverEv === 0) {
-      return null;
-    }
-    const ev = rrNetDebt / netDebtOverEv;
-    return Number.isFinite(ev) && ev > 0 ? ev : null;
-  })();
-  const fv2EvSignal = fv2Ev !== null && fv2Ev > 0 && evFromNetDebtRatio !== null
-    ? evFromNetDebtRatio / fv2Ev
+  const fv2EvSignal = fv2Ev !== null && fv2Ev > 0 && currentEnterpriseValue !== null && currentEnterpriseValue > 0
+    ? currentEnterpriseValue / fv2Ev
     : null;
   const fv2Flags = {
     missing_median_fcf: medianFcf5Y === null || medianFcf5Y <= 0,
@@ -719,6 +785,7 @@ export default function SingleStockDashboard() {
     missing_shares: sharesOutstanding === null || sharesOutstanding <= 0,
     invalid_discount_rate: rrDiscountRate === null || rrDiscountRate <= 0,
   };
+  const missingEvForFv2 = currentEnterpriseValue === null || currentEnterpriseValue <= 0;
   const rrInputsReady = rrDiscountRate !== null && rrDiscountRate > 0;
 
   const fiscalYearEndMonth =
@@ -1120,7 +1187,7 @@ export default function SingleStockDashboard() {
                       <h4>Fair value</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-fv", [
-                                                    { label: "FV2 (Enterprise, USD)", value: fv2Ev, infoKey: "fv2_enterprise" },
+                          { label: "FV2 (Enterprise, USD)", value: fv2Ev, infoKey: "fv2_enterprise" },
                           { label: "FV2 (Equity, USD)", value: fv2Equity, infoKey: "fv2_equity" },
                           { label: "FV2 (Per share, USD)", value: fv2PerShare, infoKey: "fv2_per_share" },
                           { label: "EV / FV2_EV", value: fv2EvSignal, infoKey: "ev_over_fv2" },
@@ -1129,8 +1196,8 @@ export default function SingleStockDashboard() {
                           { label: "missing_shares", value: fv2Flags.missing_shares, infoKey: "missing_shares" },
                           { label: "invalid_discount_rate", value: fv2Flags.invalid_discount_rate, infoKey: "invalid_discount_rate" },
                           { label: "Fair value 3", infoKey: "fv3_disabled", value: "Ej aktiv i revenue mode" },
-                          { label: "RR classification", infoKey: "rr_classification", value: rrOverlay?.rr_classification },
                         ], openInfoId, setOpenInfoId)}
+                        {missingEvForFv2 && <p className="status empty">missing EV (market cap + debt - cash)</p>}
                       </div>
                     </div>
                   </div>
