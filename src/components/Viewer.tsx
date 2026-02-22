@@ -10,6 +10,8 @@ export type CompanyResponse = {
   income: Record<string, Array<number | null>>;
   balance: Record<string, Array<number | null>>;
   cashflow: Record<string, Array<number | null>>;
+  producer_core?: Record<string, unknown>;
+  rr_overlay?: Record<string, unknown>;
   error?: string;
 };
 

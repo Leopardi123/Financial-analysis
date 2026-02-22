@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Admin from "./Admin";
 import Viewer from "./Viewer";
 import ChartCard from "./ChartCard";
@@ -25,6 +25,47 @@ import {
 
 const CATEGORIES = ["Välj En Kategori", "Tech", "Industrials", "Consumer"];
 const SUBCATEGORIES = ["Välj En Subkategori", "Software", "Hardware", "Services"];
+
+
+
+type ProducerCorePanel = {
+  efficiency?: {
+    margin_structure?: { operating_margin?: number | null };
+    returns?: { roe?: number | null };
+    balance_sheet?: { net_debt?: number | null; interest_coverage?: number | null };
+  };
+};
+
+type RrOverlayPanel = {
+  rr_scale_flag?: string | null;
+  rr_roce_flag?: string | null;
+  rr_fortress_flag?: boolean | null;
+  rr_classification?: string | null;
+  rr_cost_quartile_flags?: { missing_benchmark?: boolean };
+  rr_reserve_life_flags?: { missing_reserves?: boolean };
+};
+
+function formatPanelValue(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(3);
+  }
+  if (typeof value === "boolean") {
+    return String(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  return "-";
+}
+
+type AnalysisMode = "revenue" | "prerevenue";
+
+function readModeFromUrl(): AnalysisMode {
+  if (typeof window === "undefined") return "revenue";
+  const params = new URLSearchParams(window.location.search);
+  const mode = (params.get("mode") ?? "").toLowerCase();
+  return mode === "prerevenue" ? "prerevenue" : "revenue";
+}
 
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
@@ -89,6 +130,7 @@ export default function SingleStockDashboard() {
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceError, setPriceError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
 
   useEffect(() => {
     let isMounted = true;
@@ -189,6 +231,17 @@ export default function SingleStockDashboard() {
     void loadTickers();
   }, []);
 
+
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    params.set("mode", analysisMode);
+    const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+  }, [analysisMode]);
   useEffect(() => {
     let isMounted = true;
     async function loadProfile() {
@@ -393,6 +446,11 @@ export default function SingleStockDashboard() {
     15,
   );
 
+
+  const producerCore = useMemo(() => (data?.producer_core as ProducerCorePanel | undefined) ?? null, [data]);
+  const rrOverlay = useMemo(() => (data?.rr_overlay as RrOverlayPanel | undefined) ?? null, [data]);
+  const producerCoreMissing = !producerCore || !producerCore.efficiency;
+  const rrOverlayMissing = !rrOverlay || Object.keys(rrOverlay).length === 0;
   const fiscalYearEndMonth =
     parseFiscalYearEndMonth(data?.fiscal_year_end_month) ??
     parseFiscalYearEndMonth(data?.fiscal_year_end) ??
@@ -546,6 +604,17 @@ export default function SingleStockDashboard() {
           <p className="bread">Börs: {String(profile.exchangeShortName ?? "-")}</p>
         </div>
       )}
+      <div className="breadcontainersinglecolumn">
+        <h2 className="subrub small">Mode</h2>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button type="button" onClick={() => setAnalysisMode("revenue")} disabled={analysisMode === "revenue"}>
+            Revenue (Producer)
+          </button>
+          <button type="button" onClick={() => setAnalysisMode("prerevenue")} disabled={analysisMode === "prerevenue"}>
+            Pre-Revenue
+          </button>
+        </div>
+      </div>
 
       <div className="breadcontainersinglecolumn">
         <h2 className="subrub small">Price History</h2>
@@ -593,6 +662,44 @@ export default function SingleStockDashboard() {
           options={volumeChartOptions}
         />
       </div>
+
+      {analysisMode === "revenue" && (
+        <>
+          <div className="breadcontainersinglecolumn">
+            <h1 className="subrub">Producer Core (PVE v2)</h1>
+            <p className="bread">Efficiency, Resilience, Value och Context snapshots för MAJOR/revenue-mode.</p>
+          </div>
+          {producerCoreMissing ? (
+            <div className="breadcontainersinglecolumn">
+              <p className="status empty">Data missing for Producer Core panel.</p>
+            </div>
+          ) : (
+            <div className="breadcontainerdoublecolumn">
+              <p className="bread">Operating margin: {formatPanelValue(producerCore.efficiency?.margin_structure?.operating_margin)}</p>
+              <p className="bread">ROE: {formatPanelValue(producerCore.efficiency?.returns?.roe)}</p>
+              <p className="bread">Net debt: {formatPanelValue(producerCore.efficiency?.balance_sheet?.net_debt)}</p>
+              <p className="bread">Interest coverage: {formatPanelValue(producerCore.efficiency?.balance_sheet?.interest_coverage)}</p>
+            </div>
+          )}
+
+          <div className="breadcontainersinglecolumn">
+            <h1 className="subrub">RR Snapshot (Commodity Strength — MVP)</h1>
+            <p className="bread">MVP proxies. Missing benchmark/reserve inputs visas som null + flags.</p>
+          </div>
+          {rrOverlayMissing ? (
+            <div className="breadcontainersinglecolumn">
+              <p className="status empty">Data missing for RR Snapshot panel.</p>
+            </div>
+          ) : (
+            <div className="breadcontainerdoublecolumn">
+              <p className="bread">Scale flag: {formatPanelValue(rrOverlay?.rr_scale_flag ?? "Unknown")}</p>
+              <p className="bread">ROCE flag: {formatPanelValue(rrOverlay?.rr_roce_flag ?? "Unknown")}</p>
+              <p className="bread">Fortress: {formatPanelValue(rrOverlay?.rr_fortress_flag)}</p>
+              <p className="bread">Classification: {formatPanelValue(rrOverlay?.rr_classification)}</p>
+              <p className="bread">Missing benchmark: {formatPanelValue(rrOverlay?.rr_cost_quartile_flags?.missing_benchmark ?? false)}</p>
+              <p className="bread">Missing reserves: {formatPanelValue(rrOverlay?.rr_reserve_life_flags?.missing_reserves ?? false)}</p>
+            </div>
+          )}
 
       <div className="breadcontainersinglecolumn">
         <h1 className="subrub">Sydings Analytik</h1>
@@ -681,6 +788,16 @@ export default function SingleStockDashboard() {
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
       </div>
+
+      </>
+      )}
+
+      {analysisMode === "prerevenue" && (
+        <div className="breadcontainersinglecolumn">
+          <h1 className="subrub">Pre-Revenue</h1>
+          <p className="bread">Pre-revenue view uses existing project/dilution/runway logic unchanged.</p>
+        </div>
+      )}
 
       <div className="breadcontainersinglecolumn">
         <h1 className="subrub">Buffetologisk Analytik</h1>

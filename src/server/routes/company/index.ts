@@ -1,5 +1,7 @@
 import { query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { computeProducerCore } from "../../../../api/_producer_core.js";
+import { computeRrOverlay } from "../../../../api/_rr_overlay.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -203,6 +205,15 @@ export default async function handler(req: any, res: any) {
       .map((fiscalDate) => Number(fiscalDate.slice(0, 4)))
       .filter((year) => !Number.isNaN(year));
 
+    const producerCore = computeProducerCore({
+      income: statements.income,
+      balance: statements.balance,
+      cashflow: statements.cashflow,
+      fiscalDates,
+      years,
+    });
+    const rrOverlay = computeRrOverlay(producerCore);
+
     res.status(200).json({
       ticker,
       period,
@@ -213,6 +224,13 @@ export default async function handler(req: any, res: any) {
       income: statements.income,
       balance: statements.balance,
       cashflow: statements.cashflow,
+      producer_core: {
+        efficiency: producerCore.efficiency,
+        resilience: producerCore.resilience,
+        value: producerCore.value,
+        context: producerCore.context,
+      },
+      rr_overlay: rrOverlay,
       meta: {
         lastAnnualFetchAt: company?.last_fy_fetch_at ?? null,
         lastQuarterlyFetchAt: company?.last_q_fetch_at ?? null,
