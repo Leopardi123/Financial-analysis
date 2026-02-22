@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import Admin from "./Admin";
-import Viewer from "./Viewer";
 import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
@@ -267,6 +266,33 @@ function parseFiscalYearEndMonth(value: unknown) {
   return month;
 }
 
+function toFiniteNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function formatPriceValue(value: number | null) {
+  if (value === null) {
+    return "—";
+  }
+  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatMarketCapValue(value: number | null) {
+  if (value === null) {
+    return "—";
+  }
+  return value.toLocaleString("en-US", { maximumFractionDigits: 0, useGrouping: true });
+}
+
 function normalizeDateSeries(data: (string | number | null)[][] | null) {
   if (!data || data.length === 0) {
     return data;
@@ -284,7 +310,7 @@ function normalizeDateSeries(data: (string | number | null)[][] | null) {
 }
 
 export default function SingleStockDashboard() {
-  const { ticker, setTicker, loading, error, data, fetchCompany } = useCompanyData("AAPL");
+  const { ticker, data, fetchCompany } = useCompanyData("AAPL");
   const [formTicker, setFormTicker] = useState("");
   const [formCategory, setFormCategory] = useState("");
   const [formSubcategory, setFormSubcategory] = useState("");
@@ -701,6 +727,18 @@ export default function SingleStockDashboard() {
     parseFiscalYearEndMonth(profile?.fiscalYearEndMonth) ??
     parseFiscalYearEndMonth(profile?.fiscalYearEnd);
 
+  const exchangeDisplay = [
+    profile?.exchangeShortName,
+    profile?.exchange,
+    profile?.exchangeSymbol,
+    profile?.symbolExchange,
+  ].find((value) => typeof value === "string" && value.trim().length > 0);
+
+  const priceValue = toFiniteNumber(profile?.price);
+  const marketCapValue =
+    toFiniteNumber(profile?.mktCap) ??
+    toFiniteNumber(profile?.marketCap);
+
   return (
     <div className="single-stock-dashboard">
       <div className="stock-selector">
@@ -805,16 +843,6 @@ export default function SingleStockDashboard() {
         </div>
       </div>
 
-      <Viewer
-        ticker={ticker}
-        loading={loading}
-        error={error}
-        data={data}
-        onTickerChange={setTicker}
-        onFetch={fetchCompany}
-      />
-
-      <div className="divider" />
 
       <div className="breadcontainersinglecolumn">
         <button
@@ -842,10 +870,12 @@ export default function SingleStockDashboard() {
 
       {profile && (
         <div className="breadcontainerdoublecolumn">
-          <p className="bread">Sektor: {String(profile.sector ?? "-")}</p>
-          <p className="bread">Industri: {String(profile.industry ?? "-")}</p>
-          <p className="bread">Valuta: {String(profile.currency ?? "-")}</p>
-          <p className="bread">Börs: {String(profile.exchangeShortName ?? "-")}</p>
+          <p className="bread">Sektor: {String(profile.sector ?? "—")}</p>
+          <p className="bread">Industri: {String(profile.industry ?? "—")}</p>
+          <p className="bread">Valuta: {String(profile.currency ?? "—")}</p>
+          <p className="bread">Börs: {exchangeDisplay ? String(exchangeDisplay) : "—"}</p>
+          <p className="bread">Aktiepris: {formatPriceValue(priceValue)}</p>
+          <p className="bread">Börsvärde: {formatMarketCapValue(marketCapValue)}</p>
         </div>
       )}
       <div className="breadcontainersinglecolumn">
