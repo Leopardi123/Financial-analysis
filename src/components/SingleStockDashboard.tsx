@@ -66,7 +66,7 @@ function formatPanelValue(value: unknown): string {
 
 
 
-type CompactMetric = { label: string; value: unknown; info?: string[] };
+type CompactMetric = { label: string; value: unknown; infoKey?: string };
 
 function renderCompactMetrics(
   sectionKey: string,
@@ -76,20 +76,22 @@ function renderCompactMetrics(
 ) {
   return metrics.map((metric) => {
     const metricId = `${sectionKey}-${metric.label}`;
+    const info = metricInfoMap[metric.infoKey ?? metric.label] ?? {
+      title: metric.label,
+      body: "Vad består måttet av: rapporterade finansiella data. Vad säger det: en snabb signal om kvalitet/värdering/risk. Hur tolkas det: följ trend och nivå tillsammans. Ramverk: Buffetology/Syding/RR beroende på kontext.",
+    };
     return (
       <div key={metricId} className="compact-metric-row">
         <span className="compact-metric-label-wrap">
           <span className="compact-metric-label">{metric.label}</span>
-          {metric.info && metric.info.length > 0 ? (
-            <InfoPopover
-              id={metricId}
-              openId={openInfoId}
-              onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
-              onClose={() => setOpenInfoId(null)}
-              title={metric.label}
-              content={metric.info}
-            />
-          ) : null}
+          <InfoPopover
+            id={metricId}
+            openId={openInfoId}
+            onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+            onClose={() => setOpenInfoId(null)}
+            title={info.title}
+            content={[info.body]}
+          />
         </span>
         <span className="compact-metric-dots" />
         <span className="compact-metric-value">{formatPanelValue(metric.value)}</span>
@@ -108,64 +110,77 @@ function readModeFromUrl(): AnalysisMode {
 }
 
 const EFFICIENCY_INFO = [
-  "Operational quality and capital productivity; trend quality over 5Y matters.",
-  "Margins + cash conversion show structural strength vs temporary strength.",
-  "OCF consistently above NI suggests higher earnings quality.",
-  "If margins expand while debt rises, treat as caution.",
-  "Flags summarize positive structural markers vs risk markers.",
+  "Visar hur väl bolaget omvandlar intäkter till vinst och kassaflöde samt hur kapital används.",
+  "Bygger på rapporterade siffror och kombinerar Buffetology-kvalitet med Syding-trender.",
 ];
 
 const RESILIENCE_INFO = [
-  "Downcycle survivability lens: leverage, liquidity, and cash-flow stability.",
-  "Buffett lens: fortress balance sheet is preferred.",
-  "RR lens: NetDebt/FCF below 1.5 and strong interest coverage.",
-  "Metrics indicate stress survival probability, not just point-in-time strength.",
+  "Visar finansiell robusthet via skuld, likviditet och kassaflödesstabilitet.",
+  "RR-lins: lägre nettoskuld mot kassaflöde och god räntetäckning ökar överlevnadsförmåga.",
 ];
 
 const VALUE_INFO = [
-  "Valuation links current price to earnings power and cash generation.",
-  "Syding lens: implied return approximates earnings yield plus growth.",
-  "Equity-basis metrics use market cap; enterprise-basis metrics use EV.",
-  "5Y medians are cycle-smoothing references for valuation context.",
+  "Visar värdering med strikt separation mellan equity-basis och enterprise-basis.",
+  "Syding-lins: implied return används som enkel heuristik för framåtblickande avkastning.",
 ];
 
 const RR_INFO = [
-  "Institutional quality filter inspired by Rick Rule.",
-  "Tests scale, efficiency, and financial robustness in one panel.",
-  "Cost quartile and reserve-life fields remain explicit MVP placeholders.",
-  "Classification is a composite of scale, ROCE, fortress, and value context.",
+  "Corporate earning-power och kapitaldisciplin enligt RR-inspirerat filter.",
+  "Fokuserar på skala, avkastning på kapital och balansräkningens styrka.",
 ];
 
-const METRIC_INFO: Record<string, string[]> = {
-  "Gross margin": ["Revenue minus direct production costs divided by revenue.", "Shows structural cost advantage and pricing power when stable."],
-  "Operating margin": ["Operating income divided by revenue.", "Shows operational discipline before financing effects."],
-  "Net margin": ["Net income divided by revenue.", "Shows full-cycle profitability including financing and tax impact."],
-  "OCF / NI": ["Operating cash flow divided by net income.", "Above 1.0 suggests strong earnings quality."],
-  "FCF / NI": ["Free cash flow relative to net income.", "Shows distributable earnings after sustaining investment."],
-  "Capex / Revenue": ["Capital expenditure divided by revenue.", "Shows capital intensity and reinvestment burden."],
-  "ROE": ["Net income divided by shareholder equity.", "Shows equity capital productivity."],
-  "ROIC pre-tax": ["EBIT divided by invested capital.", "Shows enterprise-level capital efficiency."],
-  "Shares trend 5Y": ["Compound change in shares outstanding over five years.", "Higher values can indicate dilution risk."],
-  "Retained vs NI": ["Retained earnings vs cumulative net income.", "Shows whether profit retention compounds productively."],
-  "Invalid capital employed": ["Sanity flag for ROCE denominator validity."],
-  "EV formula check": ["Internal EV consistency check using MarketCap + Debt - Cash."],
-  "Net debt / EBITDA": ["Debt relative to earnings capacity.", "Shows leverage sustainability."],
-  "Interest coverage": ["EBIT divided by interest expense.", "Shows debt servicing capacity."],
-  "Current ratio": ["Current assets divided by current liabilities.", "Shows short-term liquidity buffer."],
-  "Cash vs short debt": ["Cash divided by short-term debt.", "Shows immediate liquidity resilience."],
-  "FCF volatility 5Y": ["Std. dev. of FCF relative to mean FCF.", "Shows cyclical sensitivity."],
-  "P/E": ["Price divided by earnings per share.", "Shows how much market pays per unit of earnings."],
-  "Earnings yield": ["Net income divided by market cap.", "Shows implied return on current earnings."],
-  "EV/EBIT": ["Enterprise value divided by operating earnings.", "Shows capital-adjusted valuation multiple."],
-  "EV/FCF": ["Enterprise value divided by free cash flow.", "Shows full-capital-structure cash valuation."],
-  "Implied return": ["Approximation: earnings yield + growth estimate."],
-  "10Y recoverable value": ["Approx proxy: annual production * price * 10.", "Shows institutional scale suitability."],
-  "ROCE": ["EBIT divided by capital employed.", "RR heuristic: above 25% can signal elite capital quality."],
-  "Net debt / FCF": ["Debt relative to sustaining free cash flow.", "Lower values indicate stronger balance-sheet resilience."],
-  "Margin buffer": ["(Current price - AISC) / current price.", "Shows downside protection buffer."],
-  "Fair value 1": ["Owner earnings approximation using discounted operating cash proxy."],
-  "Fair value 2": ["Flat 10-year DCF using margin assumption and discount rate."],
-  "RR classification": ["Composite of scale, ROCE, and balance-sheet strength."],
+const metricInfoMap: Record<string, { title: string; body: string }> = {
+  "Efficiency": { title: "Efficiency", body: "Vad består måttet av? Sektionen kombinerar marginaler, kassaflöden och kapitalanvändning från Income/Balance/Cash Flow. Vad säger det? Om affären är strukturellt stark eller cykliskt stark. Hur tolkas det? Läs trend över 5 år tillsammans med nivå. Ramverk: Buffetology + Syding." },
+  "gross_margin": { title: "Gross margin", body: "Vad består måttet av? grossProfit/revenue. Vad säger det? Strukturell kostnadsfördel och prissättningskraft. Hur tolkas det? Hög/stabil nivå är starkare än kort topp. Ramverk: Buffetology." },
+  "operating_margin": { title: "Operating margin", body: "Vad består måttet av? operatingIncome/revenue. Vad säger det? Kärnverksamhetens effektivitet före finansiering/skatt. Hur tolkas det? Stabil förbättring signalerar operativ kvalitet. Ramverk: Syding + Buffetology." },
+  "net_margin": { title: "Net margin", body: "Vad består måttet av? netIncome/revenue. Vad säger det? Slutlig lönsamhet efter alla poster. Hur tolkas det? Mer volatil än operating margin; följ trend. Ramverk: Syding." },
+  "margin_trend_label": { title: "Margin trend", body: "Vad består måttet av? 5-års trendetikett för marginalutveckling. Vad säger det? Expansion eller kompression i affärsmodell. Hur tolkas det? Trend väger ofta tyngre än enstaka års nivå. Ramverk: Syding." },
+  "ocf_to_ni": { title: "OCF / NI", body: "Vad består måttet av? OperatingCashFlow/NetIncome. Vad säger det? Earnings quality. Hur tolkas det? Över 1 över tid är kvalitativt starkt. Ramverk: Buffetology." },
+  "fcf_to_ni": { title: "FCF / NI", body: "Vad består måttet av? FreeCashFlow/NetIncome. Vad säger det? Hur mycket redovisad vinst blir verkligt fritt kassaflöde. Hur tolkas det? Högre/stabilare är bättre. Ramverk: Buffetology." },
+  "accrual_flag": { title: "Accrual", body: "Vad består måttet av? Flagga när OCF ofta understiger NI. Vad säger det? Risk för svag kassakonvertering. Hur tolkas det? True kräver extra försiktighet. Ramverk: Buffetology." },
+  "capex_to_revenue": { title: "Capex / Revenue", body: "Vad består måttet av? Abs(Capex)/Revenue. Vad säger det? Kapitalintensitet. Hur tolkas det? Hög nivå kräver stark avkastning för att vara hållbar. Ramverk: Buffetology." },
+  "capex_to_ocf": { title: "Capex / OCF", body: "Vad består måttet av? Abs(Capex)/OCF. Vad säger det? Reinvesteringsandel av operativt kassaflöde. Hur tolkas det? Hög andel minskar finansiell flexibilitet. Ramverk: Buffetology." },
+  "ppe_vs_revenue_signal": { title: "PPE vs Revenue", body: "Vad består måttet av? Jämförelse mellan PPE- och revenuetillväxt. Vad säger det? Över-/underinvesteringsrisk. Hur tolkas det? PPE långt över revenue kan vara varningssignal. Ramverk: Syding." },
+  "net_debt": { title: "Net debt", body: "Vad består måttet av? TotalDebt minus Cash. Vad säger det? Nettoskuldsättning. Hur tolkas det? Lägre/fallande nivå förbättrar tålighet. Ramverk: RR + Buffetology." },
+  "net_debt_to_ebitda": { title: "Net debt / EBITDA", body: "Vad består måttet av? NetDebt/EBITDA. Vad säger det? Skuldbärighet mot earnings-kapacitet. Hur tolkas det? Lägre är normalt starkare. Ramverk: RR." },
+  "interest_coverage": { title: "Interest coverage", body: "Vad består måttet av? EBIT/InterestExpense. Vad säger det? Räntetäckningsförmåga. Hur tolkas det? Högre värde ger större stressmarginal. Ramverk: RR + Buffetology." },
+  "debt_trend_label": { title: "Debt trend", body: "Vad består måttet av? Trend i nettoskuld. Vad säger det? Om balansräkningen stärks eller försvagas. Hur tolkas det? Skuld upp i högmarginalmiljö är risk. Ramverk: Syding." },
+  "roe": { title: "ROE", body: "Vad består måttet av? NetIncome/Equity. Vad säger det? Avkastning på eget kapital. Hur tolkas det? Stabilt hög ROE är kvalitetsmarkör. Ramverk: Buffetology." },
+  "roic_pre_tax": { title: "ROIC pre-tax", body: "Vad består måttet av? EBIT/Investerat kapital (proxy). Vad säger det? Operativ kapitaleffektivitet. Hur tolkas det? Högre och stabil nivå ger starkare värdeskapande. Ramverk: Buffetology + RR." },
+  "roe_trend_5Y": { title: "ROE trend 5Y", body: "Vad består måttet av? Trend i ROE över fem år. Vad säger det? Strukturell förbättring/försämring. Hur tolkas det? Positiv trend stärker kvalitetstes. Ramverk: Syding." },
+  "shares_trend_5Y": { title: "Shares trend 5Y", body: "Vad består måttet av? CAGR i aktieantal. Vad säger det? Utspädning/disciplinnivå. Hur tolkas det? Lägre/negativ trend är aktieägarvänlig. Ramverk: Buffetology." },
+  "retained_vs_ni_signal": { title: "Retained vs NI", body: "Vad består måttet av? Retained earnings vs kumulativ NI. Vad säger det? Kapitalallokeringens kvalitet. Hur tolkas det? Leakage kan signalera svag allokering. Ramverk: Buffetology." },
+  "quality_flags": { title: "Quality flags", body: "Vad består måttet av? Samlad uppsättning positiva kvalitetsmönster. Vad säger det? Strukturell styrka. Hur tolkas det? Fler flaggor stödjer kvalitetscase. Ramverk: Buffetology + Syding." },
+  "risk_flags": { title: "Risk flags", body: "Vad består måttet av? Samlad uppsättning risksignaler. Vad säger det? Sårbarhet i kassaflöde/balans/marginal. Hur tolkas det? Fler flaggor kräver högre säkerhetsmarginal. Ramverk: RR + Syding." },
+  "invalid_capital_employed": { title: "Invalid capital employed", body: "Vad består måttet av? Flagga för ogiltig nämnare i kapitalavkastningsmått. Vad säger det? Beräkningen är matematiskt osäker. Hur tolkas det? Tolka ROCE/ROIC med försiktighet. Ramverk: kvalitetssäkring." },
+  "ev_formula_check": { title: "EV formula check", body: "Vad består måttet av? EV enligt MarketCap + Debt − Cash. Vad säger det? Intern konsistens i EV-bas. Hur tolkas det? Avvikelse kan indikera datagap. Ramverk: värderingsdisciplin." },
+  "accounting_anomaly": { title: "Accounting anomaly", body: "Vad består måttet av? Kontroll av Revenue ≥ Gross ≥ EBIT ≥ Net. Vad säger det? Logisk redovisningskonsistens. Hur tolkas det? True innebär potentiell datakvalitetsvarning. Ramverk: kvalitetssäkring." },
+  "Resilience": { title: "Resilience", body: "Vad består måttet av? Leverage, likviditet och FCF-stabilitet. Vad säger det? Överlevnadsförmåga i svag cykel. Hur tolkas det? Stark balans + låg volatilitet ger robusthet. Ramverk: RR + Buffetology." },
+  "current_ratio": { title: "Current ratio", body: "Vad består måttet av? CurrentAssets/CurrentLiabilities. Vad säger det? Kortfristig likviditetsbuffert. Hur tolkas det? Högre nivå ger bättre motståndskraft. Ramverk: RR." },
+  "cash_vs_short_term_debt": { title: "Cash vs short debt", body: "Vad består måttet av? Cash/ShortTermDebt. Vad säger det? Omedelbar betalningsförmåga. Hur tolkas det? Högre är säkrare i stress. Ramverk: RR." },
+  "fcf_volatility_5Y": { title: "FCF volatility 5Y", body: "Vad består måttet av? Stddev FCF / mean FCF över 5 år. Vad säger det? Cyklisk känslighet i kassaflöde. Hur tolkas det? Lägre volatilitet är robustare. Ramverk: Syding + RR." },
+  "Value": { title: "Value", body: "Vad består måttet av? Multiplar och yields med strikt EV/Equity-separation. Vad säger det? Pris kontra earning power. Hur tolkas det? Kombinera nivå med kvalitet och trend. Ramverk: Syding + Buffetology." },
+  "pe": { title: "P/E", body: "Vad består måttet av? Price/EPS. Vad säger det? Hur många årsvinster marknaden betalar för. Hur tolkas det? Jämför mot kvalitet, tillväxt och historik. Ramverk: Buffetology." },
+  "earnings_yield": { title: "Earnings yield", body: "Vad består måttet av? NetIncome/MarketCap. Vad säger det? Implicit avkastning på nuvarande vinstbas. Hur tolkas det? Högre yield kan ge bättre säkerhetsmarginal. Ramverk: Syding." },
+  "p_fcf": { title: "P/FCF", body: "Vad består måttet av? MarketCap/FCF. Vad säger det? Pris relativt fritt kassaflöde. Hur tolkas det? Lägre kan vara attraktivt om kvaliteten håller. Ramverk: Buffetology." },
+  "fcf_yield": { title: "FCF yield", body: "Vad består måttet av? FCF/MarketCap. Vad säger det? Kassaflödesavkastning på equity-värde. Hur tolkas det? Hög och stabil nivå är positiv. Ramverk: Buffetology." },
+  "ev_ebitda": { title: "EV/EBITDA", body: "Vad består måttet av? EV/EBITDA. Vad säger det? Enterprise-multipel före capex. Hur tolkas det? Jämför inom sektor och över tid. Ramverk: Syding." },
+  "ev_ebit": { title: "EV/EBIT", body: "Vad består måttet av? EV/EBIT. Vad säger det? Kapitaljusterad operativ värdering. Hur tolkas det? Lägre kan indikera billigare enterprise-värde. Ramverk: Syding." },
+  "ev_fcf": { title: "EV/FCF", body: "Vad består måttet av? EV/FCF. Vad säger det? Full kapitalstrukturvärdering mot kassaflöde. Hur tolkas det? Lägre är ofta mer attraktivt vid samma kvalitet. Ramverk: Syding." },
+  "net_debt_over_ev": { title: "Net debt / EV", body: "Vad består måttet av? NetDebt/EV. Vad säger det? Skuldtyngd i enterprise-värdet. Hur tolkas det? Hög andel ökar finansiell risk. Ramverk: RR." },
+  "median_ni_5y": { title: "Median NI (5Y)", body: "Vad består måttet av? Median net income över 5 år. Vad säger det? Cykelutjämnad vinstnivå. Hur tolkas det? Minskar brus från enstaka år. Ramverk: Syding." },
+  "median_ebit_margin_5y": { title: "Median EBIT margin (5Y)", body: "Vad består måttet av? Median operativ marginal över 5 år. Vad säger det? Normaliserad marginalkvalitet. Hur tolkas det? Bas för uthållig lönsamhet. Ramverk: Syding." },
+  "median_fcf_5y": { title: "Median FCF (5Y)", body: "Vad består måttet av? Median free cash flow över 5 år. Vad säger det? Corporate earning-power genom cykeln. Hur tolkas det? Används i FV2. Ramverk: RR + Syding." },
+  "implied_return": { title: "Implied return", body: "Vad består måttet av? Earnings yield + growth-heuristik. Vad säger det? Förenklad framåtriktad avkastningsbild. Hur tolkas det? Heuristik, inte exakt prognos. Ramverk: Syding." },
+  "value_band": { title: "Value band", body: "Vad består måttet av? Relativ klassning av värderingsläge. Vad säger det? Under-/övervärderad zon om engine finns. Hur tolkas det? Använd med kvalitetsmått. Ramverk: Syding." },
+  "RR Snapshot": { title: "RR Snapshot", body: "Vad består måttet av? Corporate earning-power och kapitaldisciplin med rapportdata. Vad säger det? Institutionskvalitet via skala, avkastning och balans. Hur tolkas det? Sammanvägning av RR-filter. Ramverk: RR." },
+  "fv2": { title: "FV2", body: "Vad består måttet av? Median FCF (5Y) diskonterat med r: EV=FCF/r, Equity=EV−NetDebt. Vad säger det? Corporate earning-power värde. Hur tolkas det? Jämför EV mot FV2_EV och equity mot FV2_equity. Ramverk: RR + Syding." },
+  "rr_scale_10y_recoverable_value_usd": { title: "10Y recoverable value", body: "Vad består måttet av? 10 × senaste års revenue (proxy). Vad säger det? Institutionsskala. Hur tolkas det? Högre nivå kan öka investerbarhet för större kapital. Ramverk: RR." },
+  "rr_roce": { title: "ROCE", body: "Vad består måttet av? EBIT/capital employed. Vad säger det? Kapitalallokeringskvalitet. Hur tolkas det? RR-lins: mycket hög nivå är elit. Ramverk: RR." },
+  "rr_roce_flag": { title: "ROCE flag", body: "Vad består måttet av? Klassificering av ROCE-nivå. Vad säger det? Snabb kvalitetsetikett. Hur tolkas det? Använd ihop med balans och skala. Ramverk: RR." },
+  "rr_net_debt_fcf": { title: "Net debt / FCF", body: "Vad består måttet av? Nettoskuld relativt sustaining FCF. Vad säger det? Fortress eller fragile balansprofil. Hur tolkas det? Lägre är starkare. Ramverk: RR." },
+  "rr_interest_coverage": { title: "RR interest coverage", body: "Vad består måttet av? EBIT/interest expense i RR-lagret. Vad säger det? Kreditstress-tålighet. Hur tolkas det? Högre värde minskar refinansieringsrisk. Ramverk: RR." },
+  "missing_flags": { title: "Missing flags", body: "Vad består måttet av? Datagap-flaggor för saknade indata. Vad säger det? Beräkningens begränsning. Hur tolkas det? Hantera som osäkerhet i beslut. Ramverk: riskdisciplin." },
 };
 
 const PRICE_SERIES_COLORS = {
@@ -233,7 +248,6 @@ export default function SingleStockDashboard() {
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const [openInfoId, setOpenInfoId] = useState<string | null>(null);
-  const [rrAiscInput, setRrAiscInput] = useState<string>("");
   const [rrDiscountRateInput, setRrDiscountRateInput] = useState<string>("");
 
   useEffect(() => {
@@ -555,7 +569,6 @@ export default function SingleStockDashboard() {
   const rrOverlay = useMemo(() => (data?.rr_overlay as RrOverlayPanel | undefined) ?? null, [data]);
   const producerCoreMissing = !producerCore || !producerCore.efficiency;
   const rrOverlayMissing = !rrOverlay || Object.keys(rrOverlay).length === 0;
-  const rrAisc = rrAiscInput.trim() ? Number(rrAiscInput) : null;
   const rrDiscountRatePct = rrDiscountRateInput.trim() ? Number(rrDiscountRateInput) : null;
   const rrDiscountRate = rrDiscountRatePct !== null && Number.isFinite(rrDiscountRatePct) && rrDiscountRatePct > 0
     ? rrDiscountRatePct / 100
@@ -563,29 +576,52 @@ export default function SingleStockDashboard() {
   const rrOperatingCfAdjusted = typeof (rrOverlay as any)?.rr_operating_cf_adjusted === "number"
     ? Number((rrOverlay as any).rr_operating_cf_adjusted)
     : null;
-  const rrNetDebt = typeof (rrOverlay as any)?.rr_net_debt === "number" ? Number((rrOverlay as any).rr_net_debt) : null;
-  const rrProduction = typeof (rrOverlay as any)?.rr_production === "number" ? Number((rrOverlay as any).rr_production) : null;
-  const rrCurrentPrice = (() => {
-    const rows = priceData?.short?.price;
-    if (!rows || rows.length < 2) return null;
-    const last = rows[rows.length - 1];
-    const v = last?.[1];
-    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  const rrNetDebt = typeof (rrOverlay as any)?.rr_net_debt === "number"
+    ? Number((rrOverlay as any).rr_net_debt)
+    : typeof (producerCore as any)?.efficiency?.balance_sheet?.net_debt === "number"
+      ? Number((producerCore as any).efficiency.balance_sheet.net_debt)
+      : null;
+  const medianFcf5Y = typeof (producerCore as any)?.value?.medians_5Y?.median_fcf === "number"
+    ? Number((producerCore as any).value.medians_5Y.median_fcf)
+    : null;
+  const sharesOutstanding = (() => {
+    const candidates = [
+      (data?.balance as any)?.sharesOutstanding,
+      (data?.balance as any)?.commonStockSharesOutstanding,
+      (data?.income as any)?.weightedAverageShsOut,
+      (data?.income as any)?.weightedAverageShsOutDil,
+    ];
+    for (const series of candidates) {
+      if (!Array.isArray(series)) continue;
+      for (let i = series.length - 1; i >= 0; i -= 1) {
+        const v = series[i];
+        if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+          return v;
+        }
+      }
+    }
+    return null;
   })();
-  const rrFv1 = rrAisc !== null && rrDiscountRate !== null && rrOperatingCfAdjusted !== null && rrNetDebt !== null
+  const rrFv1 = rrDiscountRate !== null && rrOperatingCfAdjusted !== null && rrNetDebt !== null
     ? rrOperatingCfAdjusted / rrDiscountRate - rrNetDebt
     : null;
-  const rrFv2 = rrAisc !== null && rrDiscountRate !== null && rrCurrentPrice !== null && rrProduction !== null && rrNetDebt !== null
-    ? (() => {
-      const annualMargin = (rrCurrentPrice - rrAisc) * rrProduction;
-      let npv = 0;
-      for (let t = 1; t <= 10; t += 1) {
-        npv += annualMargin / ((1 + rrDiscountRate) ** t);
-      }
-      return npv - rrNetDebt;
-    })()
+  const fv2Ev = rrDiscountRate !== null && medianFcf5Y !== null && medianFcf5Y > 0
+    ? medianFcf5Y / rrDiscountRate
     : null;
-  const rrInputsReady = rrAisc !== null && rrDiscountRate !== null && rrDiscountRate > 0;
+  const fv2Equity = fv2Ev !== null && rrNetDebt !== null ? fv2Ev - rrNetDebt : null;
+  const fv2PerShare = fv2Equity !== null && sharesOutstanding !== null && sharesOutstanding > 0
+    ? fv2Equity / sharesOutstanding
+    : null;
+  const fv2EvSignal = fv2Ev !== null && typeof (rrOverlay as any)?.rr_ev_fcf === "number" && medianFcf5Y !== null && medianFcf5Y > 0
+    ? ((rrOverlay as any).rr_ev_fcf * medianFcf5Y) / fv2Ev
+    : null;
+  const fv2Flags = {
+    missing_median_fcf: medianFcf5Y === null || medianFcf5Y <= 0,
+    missing_net_debt: rrNetDebt === null,
+    missing_shares: sharesOutstanding === null || sharesOutstanding <= 0,
+    invalid_discount_rate: rrDiscountRate === null || rrDiscountRate <= 0,
+  };
+  const rrInputsReady = rrDiscountRate !== null && rrDiscountRate > 0;
 
   const fiscalYearEndMonth =
     parseFiscalYearEndMonth(data?.fiscal_year_end_month) ??
@@ -826,25 +862,25 @@ export default function SingleStockDashboard() {
                   </div>
                   <div className="compact-metrics-grid">
                     {renderCompactMetrics("efficiency", [
-                      { label: "Gross margin", value: (producerCore as any)?.efficiency?.margin_structure?.gross_margin, info: METRIC_INFO["Gross margin"] },
-                      { label: "Operating margin", value: (producerCore as any)?.efficiency?.margin_structure?.operating_margin, info: METRIC_INFO["Operating margin"] },
-                      { label: "Net margin", value: (producerCore as any)?.efficiency?.margin_structure?.net_margin, info: METRIC_INFO["Net margin"] },
-                      { label: "Margin trend", value: (producerCore as any)?.efficiency?.margin_structure?.margin_trend_label },
-                      { label: "OCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.ocf_to_ni, info: METRIC_INFO["OCF / NI"] },
-                      { label: "FCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.fcf_to_ni, info: METRIC_INFO["FCF / NI"] },
-                      { label: "Accrual", value: (producerCore as any)?.efficiency?.cash_quality?.accrual_flag },
-                      { label: "Capex / Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_revenue, info: METRIC_INFO["Capex / Revenue"] },
-                      { label: "Capex / OCF", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_ocf },
-                      { label: "PPE vs Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.ppe_vs_revenue_signal },
-                      { label: "Net debt", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt },
-                      { label: "Net debt / EBITDA", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt_to_ebitda },
-                      { label: "Interest coverage", value: (producerCore as any)?.efficiency?.balance_sheet?.interest_coverage },
-                      { label: "Debt trend", value: (producerCore as any)?.efficiency?.balance_sheet?.debt_trend_label },
-                      { label: "ROE", value: (producerCore as any)?.efficiency?.returns?.roe, info: METRIC_INFO["ROE"] },
-                      { label: "ROIC pre-tax", value: (producerCore as any)?.efficiency?.returns?.roic_pre_tax, info: METRIC_INFO["ROIC pre-tax"] },
-                      { label: "ROE trend 5Y", value: (producerCore as any)?.efficiency?.returns?.roe_trend_5Y },
-                      { label: "Shares trend 5Y", value: (producerCore as any)?.efficiency?.allocation?.shares_trend_5Y, info: METRIC_INFO["Shares trend 5Y"] },
-                      { label: "Retained vs NI", value: (producerCore as any)?.efficiency?.allocation?.retained_vs_ni_signal, info: METRIC_INFO["Retained vs NI"] },
+                      { label: "Gross margin", value: (producerCore as any)?.efficiency?.margin_structure?.gross_margin, infoKey: "gross_margin" },
+                      { label: "Operating margin", value: (producerCore as any)?.efficiency?.margin_structure?.operating_margin, infoKey: "operating_margin" },
+                      { label: "Net margin", value: (producerCore as any)?.efficiency?.margin_structure?.net_margin, infoKey: "net_margin" },
+                      { label: "Margin trend", value: (producerCore as any)?.efficiency?.margin_structure?.margin_trend_label, infoKey: "margin_trend_label" },
+                      { label: "OCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.ocf_to_ni, infoKey: "ocf_to_ni" },
+                      { label: "FCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.fcf_to_ni, infoKey: "fcf_to_ni" },
+                      { label: "Accrual", value: (producerCore as any)?.efficiency?.cash_quality?.accrual_flag, infoKey: "accrual_flag" },
+                      { label: "Capex / Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_revenue, infoKey: "capex_to_revenue" },
+                      { label: "Capex / OCF", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_ocf, infoKey: "capex_to_ocf" },
+                      { label: "PPE vs Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.ppe_vs_revenue_signal, infoKey: "ppe_vs_revenue_signal" },
+                      { label: "Net debt", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt, infoKey: "net_debt" },
+                      { label: "Net debt / EBITDA", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt_to_ebitda, infoKey: "net_debt_to_ebitda" },
+                      { label: "Interest coverage", value: (producerCore as any)?.efficiency?.balance_sheet?.interest_coverage, infoKey: "interest_coverage" },
+                      { label: "Debt trend", value: (producerCore as any)?.efficiency?.balance_sheet?.debt_trend_label, infoKey: "debt_trend_label" },
+                      { label: "ROE", value: (producerCore as any)?.efficiency?.returns?.roe, infoKey: "roe" },
+                      { label: "ROIC pre-tax", value: (producerCore as any)?.efficiency?.returns?.roic_pre_tax, infoKey: "roic_pre_tax" },
+                      { label: "ROE trend 5Y", value: (producerCore as any)?.efficiency?.returns?.roe_trend_5Y, infoKey: "roe_trend_5Y" },
+                      { label: "Shares trend 5Y", value: (producerCore as any)?.efficiency?.allocation?.shares_trend_5Y, infoKey: "shares_trend_5Y" },
+                      { label: "Retained vs NI", value: (producerCore as any)?.efficiency?.allocation?.retained_vs_ni_signal, infoKey: "retained_vs_ni_signal" },
                       {
                         label: "Quality flags",
                         value: Array.isArray((producerCore as any)?.efficiency?.quality_flags) && (producerCore as any).efficiency.quality_flags.length
@@ -857,9 +893,9 @@ export default function SingleStockDashboard() {
                           ? (producerCore as any).efficiency.risk_flags.join(", ")
                           : "—",
                       },
-                      { label: "Invalid capital employed", value: (producerCore as any)?.efficiency?.diagnostics?.invalid_capital_employed, info: METRIC_INFO["Invalid capital employed"] },
-                      { label: "EV formula check", value: (producerCore as any)?.efficiency?.diagnostics?.ev_formula_check, info: METRIC_INFO["EV formula check"] },
-                      { label: "Accounting anomaly", value: (producerCore as any)?.efficiency?.diagnostics?.accounting_anomaly },
+                      { label: "Invalid capital employed", value: (producerCore as any)?.efficiency?.diagnostics?.invalid_capital_employed, infoKey: "invalid_capital_employed" },
+                      { label: "EV formula check", value: (producerCore as any)?.efficiency?.diagnostics?.ev_formula_check, infoKey: "ev_formula_check" },
+                      { label: "Accounting anomaly", value: (producerCore as any)?.efficiency?.diagnostics?.accounting_anomaly, infoKey: "accounting_anomaly" },
                     ], openInfoId, setOpenInfoId)}
                   </div>
                 </section>
@@ -878,12 +914,12 @@ export default function SingleStockDashboard() {
                   </div>
                   <div className="compact-metrics-grid">
                     {renderCompactMetrics("resilience", [
-                      { label: "Net debt", value: (producerCore as any)?.resilience?.leverage?.net_debt, info: METRIC_INFO["Net debt / EBITDA"] },
-                      { label: "Net debt / EBITDA", value: (producerCore as any)?.resilience?.leverage?.net_debt_to_ebitda, info: METRIC_INFO["Net debt / EBITDA"] },
-                      { label: "Interest coverage", value: (producerCore as any)?.resilience?.leverage?.interest_coverage, info: METRIC_INFO["Interest coverage"] },
-                      { label: "Current ratio", value: (producerCore as any)?.resilience?.liquidity?.current_ratio, info: METRIC_INFO["Current ratio"] },
-                      { label: "Cash vs short debt", value: (producerCore as any)?.resilience?.liquidity?.cash_vs_short_term_debt, info: METRIC_INFO["Cash vs short debt"] },
-                      { label: "FCF volatility 5Y", value: (producerCore as any)?.resilience?.stability?.fcf_volatility_5Y, info: METRIC_INFO["FCF volatility 5Y"] },
+                      { label: "Net debt", value: (producerCore as any)?.resilience?.leverage?.net_debt },
+                      { label: "Net debt / EBITDA", value: (producerCore as any)?.resilience?.leverage?.net_debt_to_ebitda },
+                      { label: "Interest coverage", value: (producerCore as any)?.resilience?.leverage?.interest_coverage },
+                      { label: "Current ratio", value: (producerCore as any)?.resilience?.liquidity?.current_ratio, infoKey: "current_ratio" },
+                      { label: "Cash vs short debt", value: (producerCore as any)?.resilience?.liquidity?.cash_vs_short_term_debt, infoKey: "cash_vs_short_term_debt" },
+                      { label: "FCF volatility 5Y", value: (producerCore as any)?.resilience?.stability?.fcf_volatility_5Y, infoKey: "fcf_volatility_5Y" },
                     ], openInfoId, setOpenInfoId)}                  </div>
                 </section>
 
@@ -901,19 +937,19 @@ export default function SingleStockDashboard() {
                   </div>
                   <div className="compact-metrics-grid">
                     {renderCompactMetrics("value", [
-                      { label: "P/E", value: (producerCore as any)?.value?.multiples?.pe, info: METRIC_INFO["P/E"] },
-                      { label: "Earnings yield", value: (producerCore as any)?.value?.multiples?.earnings_yield, info: METRIC_INFO["Earnings yield"] },
-                      { label: "P/FCF", value: (producerCore as any)?.value?.multiples?.p_fcf },
-                      { label: "FCF yield", value: (producerCore as any)?.value?.multiples?.fcf_yield },
-                      { label: "EV/EBITDA", value: (producerCore as any)?.value?.multiples?.ev_ebitda },
-                      { label: "EV/EBIT", value: (producerCore as any)?.value?.multiples?.ev_ebit, info: METRIC_INFO["EV/EBIT"] },
-                      { label: "EV/FCF", value: (producerCore as any)?.value?.multiples?.ev_fcf, info: METRIC_INFO["EV/FCF"] },
-                      { label: "Net debt / EV", value: (producerCore as any)?.value?.multiples?.net_debt_over_ev },
-                      { label: "Median NI (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_ni },
-                      { label: "Median EBIT margin (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_ebit_margin },
-                      { label: "Median FCF (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_fcf },
-                      { label: "Implied return", value: (producerCore as any)?.value?.implied_return, info: METRIC_INFO["Implied return"] },
-                      { label: "Value band", value: (producerCore as any)?.value?.value_band },
+                      { label: "P/E", value: (producerCore as any)?.value?.multiples?.pe, infoKey: "pe" },
+                      { label: "Earnings yield", value: (producerCore as any)?.value?.multiples?.earnings_yield, infoKey: "earnings_yield" },
+                      { label: "P/FCF", value: (producerCore as any)?.value?.multiples?.p_fcf, infoKey: "p_fcf" },
+                      { label: "FCF yield", value: (producerCore as any)?.value?.multiples?.fcf_yield, infoKey: "fcf_yield" },
+                      { label: "EV/EBITDA", value: (producerCore as any)?.value?.multiples?.ev_ebitda, infoKey: "ev_ebitda" },
+                      { label: "EV/EBIT", value: (producerCore as any)?.value?.multiples?.ev_ebit, infoKey: "ev_ebit" },
+                      { label: "EV/FCF", value: (producerCore as any)?.value?.multiples?.ev_fcf, infoKey: "ev_fcf" },
+                      { label: "Net debt / EV", value: (producerCore as any)?.value?.multiples?.net_debt_over_ev, infoKey: "net_debt_over_ev" },
+                      { label: "Median NI (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_ni, infoKey: "median_ni_5y" },
+                      { label: "Median EBIT margin (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_ebit_margin, infoKey: "median_ebit_margin_5y" },
+                      { label: "Median FCF (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_fcf, infoKey: "median_fcf_5y" },
+                      { label: "Implied return", value: (producerCore as any)?.value?.implied_return, infoKey: "implied_return" },
+                      { label: "Value band", value: (producerCore as any)?.value?.value_band, infoKey: "value_band" },
                     ], openInfoId, setOpenInfoId)}                  </div>
                 </section>
               </div>
@@ -934,15 +970,11 @@ export default function SingleStockDashboard() {
                 </div>
                 <p className="bread">MVP proxies. Missing benchmark/reserve inputs visas som null + flags.</p>
                 <div className="rr-input-row">
-                  <label>AISC (USD per unit)
-                    <input value={rrAiscInput} onChange={(e) => setRrAiscInput(e.target.value)} placeholder="e.g. 950" />
-                  </label>
-                  <label>Discount rate r (%)
-                    <input value={rrDiscountRateInput} onChange={(e) => setRrDiscountRateInput(e.target.value)} placeholder="e.g. 10" />
+                  <label>Diskonteringsränta r (%)
+                    <input value={rrDiscountRateInput} onChange={(e) => setRrDiscountRateInput(e.target.value)} placeholder="t.ex. 10" />
                   </label>
                 </div>
-                {!rrInputsReady && <p className="status empty">Provide AISC and discount rate to activate</p>}
-                {rrInputsReady && rrProduction === null && <p className="status empty">Production data missing – FV2 disabled</p>}
+                {!rrInputsReady && <p className="status empty">Ange diskonteringsränta för att aktivera FV2.</p>}
                 {rrOverlayMissing ? (
                   <p className="status empty">Data missing for RR Snapshot panel.</p>
                 ) : (
@@ -951,7 +983,7 @@ export default function SingleStockDashboard() {
                       <h4>Scale</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-scale", [
-                          { label: "10Y recoverable value", value: (rrOverlay as any)?.rr_scale_10y_recoverable_value_usd, info: METRIC_INFO["10Y recoverable value"] },
+                          { label: "10Y recoverable value", value: (rrOverlay as any)?.rr_scale_10y_recoverable_value_usd },
                           { label: "Scale flag", value: rrOverlay?.rr_scale_flag ?? "Unknown" },
                         ], openInfoId, setOpenInfoId)}
                       </div>
@@ -960,9 +992,9 @@ export default function SingleStockDashboard() {
                       <h4>Capital</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-capital", [
-                          { label: "ROCE", value: (rrOverlay as any)?.rr_roce, info: METRIC_INFO["ROCE"] },
+                          { label: "ROCE", value: (rrOverlay as any)?.rr_roce },
                           { label: "ROCE flag", value: rrOverlay?.rr_roce_flag ?? "Unknown" },
-                          { label: "Margin buffer", value: rrCurrentPrice !== null && rrAisc !== null && rrCurrentPrice !== 0 ? (rrCurrentPrice - rrAisc) / rrCurrentPrice : (rrOverlay as any)?.rr_margin_buffer_pct, info: METRIC_INFO["Margin buffer"] },
+                          { label: "Margin buffer", value: (rrOverlay as any)?.rr_margin_buffer_pct },
                           { label: "Cost quartile", value: (rrOverlay as any)?.rr_cost_quartile },
                           { label: "Reserve life", value: (rrOverlay as any)?.rr_reserve_life_years },
                         ], openInfoId, setOpenInfoId)}
@@ -972,8 +1004,8 @@ export default function SingleStockDashboard() {
                       <h4>Balance sheet</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-balance", [
-                          { label: "Net debt / FCF", value: (rrOverlay as any)?.rr_net_debt_fcf, info: METRIC_INFO["Net debt / FCF"] },
-                          { label: "Interest coverage", value: rrOverlay?.rr_interest_coverage, info: METRIC_INFO["Interest coverage"] },
+                          { label: "Net debt / FCF", value: (rrOverlay as any)?.rr_net_debt_fcf },
+                          { label: "Interest coverage", value: rrOverlay?.rr_interest_coverage },
                           { label: "Missing benchmark", value: rrOverlay?.rr_cost_quartile_flags?.missing_benchmark ?? false },
                           { label: "Missing reserves", value: rrOverlay?.rr_reserve_life_flags?.missing_reserves ?? false },
                         ], openInfoId, setOpenInfoId)}
@@ -983,10 +1015,17 @@ export default function SingleStockDashboard() {
                       <h4>Fair value</h4>
                       <div className="compact-metrics-grid">
                         {renderCompactMetrics("rr-fv", [
-                          { label: "Fair value 1", value: rrFv1, info: METRIC_INFO["Fair value 1"] },
-                          { label: "Fair value 2", value: rrProduction === null ? null : rrFv2, info: METRIC_INFO["Fair value 2"] },
-                          { label: "Fair value 3", value: "Disabled in revenue mode" },
-                          { label: "RR classification", value: rrOverlay?.rr_classification, info: METRIC_INFO["RR classification"] },
+                          { label: "Fair value 1", value: rrFv1, infoKey: "fv2" },
+                          { label: "FV2 (Enterprise, USD)", value: fv2Ev, infoKey: "fv2" },
+                          { label: "FV2 (Equity, USD)", value: fv2Equity, infoKey: "fv2" },
+                          { label: "FV2 (Per share, USD)", value: fv2PerShare, infoKey: "fv2" },
+                          { label: "EV / FV2_EV", value: fv2EvSignal, infoKey: "fv2" },
+                          { label: "missing_median_fcf", value: fv2Flags.missing_median_fcf, infoKey: "missing_flags" },
+                          { label: "missing_net_debt", value: fv2Flags.missing_net_debt, infoKey: "missing_flags" },
+                          { label: "missing_shares", value: fv2Flags.missing_shares, infoKey: "missing_flags" },
+                          { label: "invalid_discount_rate", value: fv2Flags.invalid_discount_rate, infoKey: "missing_flags" },
+                          { label: "Fair value 3", value: "Ej aktiv i revenue mode" },
+                          { label: "RR classification", value: rrOverlay?.rr_classification },
                         ], openInfoId, setOpenInfoId)}
                       </div>
                     </div>
