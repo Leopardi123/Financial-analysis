@@ -1,5 +1,8 @@
 import { query } from "../../../../api/_db.js";
+import { fetchApiV3Json, requireFmpApiKey } from "../../../../api/_fmp.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { computeProducerCore } from "../../../../api/_producer_core.js";
+import { computeRrOverlay } from "../../../../api/_rr_overlay.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -203,6 +206,36 @@ export default async function handler(req: any, res: any) {
       .map((fiscalDate) => Number(fiscalDate.slice(0, 4)))
       .filter((year) => !Number.isNaN(year));
 
+    let marketPrice: number | null = null;
+    let marketCap: number | null = null;
+    let sharesOutstanding: number | null = null;
+
+    if (requireFmpApiKey()) {
+      try {
+        const quote = await fetchApiV3Json<Array<Record<string, unknown>>>(`quote/${encodeURIComponent(ticker)}`);
+        const first = Array.isArray(quote) ? quote[0] : null;
+        marketPrice = typeof first?.price === "number" && Number.isFinite(first.price) ? first.price : null;
+        marketCap = typeof first?.marketCap === "number" && Number.isFinite(first.marketCap) ? first.marketCap : null;
+        sharesOutstanding = typeof first?.sharesOutstanding === "number" && Number.isFinite(first.sharesOutstanding)
+          ? first.sharesOutstanding
+          : null;
+      } catch {
+        // Optional market plumbing for valuation multiples.
+      }
+    }
+
+    const producerCore = computeProducerCore({
+      income: statements.income,
+      balance: statements.balance,
+      cashflow: statements.cashflow,
+      fiscalDates,
+      years,
+      price: marketPrice,
+      marketCap,
+      sharesOutstanding,
+    });
+    const rrOverlay = computeRrOverlay(producerCore);
+
     res.status(200).json({
       ticker,
       period,
@@ -213,6 +246,13 @@ export default async function handler(req: any, res: any) {
       income: statements.income,
       balance: statements.balance,
       cashflow: statements.cashflow,
+      producer_core: {
+        efficiency: producerCore.efficiency,
+        resilience: producerCore.resilience,
+        value: producerCore.value,
+        context: producerCore.context,
+      },
+      rr_overlay: rrOverlay,
       meta: {
         lastAnnualFetchAt: company?.last_fy_fetch_at ?? null,
         lastQuarterlyFetchAt: company?.last_q_fetch_at ?? null,
