@@ -1,19 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 
+type InfoSection = {
+  heading: string;
+  lines: string[];
+};
+
 type InfoPopoverProps = {
   id: string;
   openId: string | null;
   onToggle: (id: string) => void;
   onClose: () => void;
   title: string;
-  content: string[];
+  sections?: InfoSection[];
+  content?: string[];
 };
 
-export default function InfoPopover({ id, openId, onToggle, onClose, title, content }: InfoPopoverProps) {
+export default function InfoPopover({ id, openId, onToggle, onClose, title, sections, content }: InfoPopoverProps) {
   const isOpen = openId === id;
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [panelStyle, setPanelStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const normalizedSections: InfoSection[] = sections && sections.length
+    ? sections
+    : (content ?? []).length
+      ? [{ heading: "Info", lines: content ?? [] }]
+      : [];
 
   useEffect(() => {
     if (!isOpen || !triggerRef.current) {
@@ -85,11 +97,16 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, cont
       {isOpen && (
         <div className="info-popover-panel" style={panelStyle ?? undefined}>
           <h4>{title}</h4>
-          <ul>
-            {content.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+          {normalizedSections.map((section) => (
+            <div key={`${section.heading}-${section.lines.join("|")}`} className="info-popover-section">
+              <p className="info-popover-heading">{section.heading}</p>
+              <ul>
+                {section.lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       )}
     </div>
