@@ -3,6 +3,7 @@ import Admin from "./Admin";
 import Viewer from "./Viewer";
 import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
+import InfoPopover from "./InfoPopover";
 import useCompanyData from "../hooks/useCompanyData";
 import {
   buildSeries,
@@ -41,21 +42,26 @@ type RrOverlayPanel = {
   rr_roce_flag?: string | null;
   rr_fortress_flag?: boolean | null;
   rr_classification?: string | null;
+  rr_interest_coverage?: number | null;
   rr_cost_quartile_flags?: { missing_benchmark?: boolean };
   rr_reserve_life_flags?: { missing_reserves?: boolean };
+  [key: string]: unknown;
 };
 
 function formatPanelValue(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) {
-    return Number.isInteger(value) ? String(value) : value.toFixed(3);
+    return value.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
+    });
   }
   if (typeof value === "boolean") {
-    return String(value);
+    return value ? "Yes" : "No";
   }
   if (typeof value === "string" && value.trim()) {
     return value;
   }
-  return "-";
+  return "—";
 }
 
 
@@ -79,6 +85,35 @@ function readModeFromUrl(): AnalysisMode {
   const mode = (params.get("mode") ?? "").toLowerCase();
   return mode === "prerevenue" ? "prerevenue" : "revenue";
 }
+
+const EFFICIENCY_INFO = [
+  "Operational quality and capital productivity; trend quality over 5Y matters.",
+  "Margins + cash conversion show structural strength vs temporary strength.",
+  "OCF consistently above NI suggests higher earnings quality.",
+  "If margins expand while debt rises, treat as caution.",
+  "Flags summarize positive structural markers vs risk markers.",
+];
+
+const RESILIENCE_INFO = [
+  "Downcycle survivability lens: leverage, liquidity, and cash-flow stability.",
+  "Buffett lens: fortress balance sheet is preferred.",
+  "RR lens: NetDebt/FCF below 1.5 and strong interest coverage.",
+  "Metrics indicate stress survival probability, not just point-in-time strength.",
+];
+
+const VALUE_INFO = [
+  "Valuation links current price to earnings power and cash generation.",
+  "Syding lens: implied return approximates earnings yield plus growth.",
+  "Equity-basis metrics use market cap; enterprise-basis metrics use EV.",
+  "5Y medians are cycle-smoothing references for valuation context.",
+];
+
+const RR_INFO = [
+  "Institutional quality filter inspired by Rick Rule.",
+  "Tests scale, efficiency, and financial robustness in one panel.",
+  "Cost quartile and reserve-life fields remain explicit MVP placeholders.",
+  "Classification is a composite of scale, ROCE, fortress, and value context.",
+];
 
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
@@ -144,6 +179,7 @@ export default function SingleStockDashboard() {
   const [priceError, setPriceError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
+  const [openInfoId, setOpenInfoId] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -690,21 +726,31 @@ export default function SingleStockDashboard() {
             <div className="producer-core-compact-card">
               <div className="producer-core-compact-grid">
                 <section className="producer-core-section efficiency">
-                  <h2 className="subrub small">Efficiency</h2>
+                  <div className="producer-core-title-row">
+                    <h2 className="subrub small">Efficiency</h2>
+                    <InfoPopover
+                      id="efficiency"
+                      openId={openInfoId}
+                      onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                      onClose={() => setOpenInfoId(null)}
+                      title="Efficiency"
+                      content={EFFICIENCY_INFO}
+                    />
+                  </div>
                   <div className="compact-metrics-grid">
                     {renderCompactMetrics([
                       { label: "Gross margin", value: (producerCore as any)?.efficiency?.margin_structure?.gross_margin },
                       { label: "Operating margin", value: (producerCore as any)?.efficiency?.margin_structure?.operating_margin },
                       { label: "Net margin", value: (producerCore as any)?.efficiency?.margin_structure?.net_margin },
                       { label: "Margin trend", value: (producerCore as any)?.efficiency?.margin_structure?.margin_trend_label },
-                      { label: "OCF/NI", value: (producerCore as any)?.efficiency?.cash_quality?.ocf_to_ni },
-                      { label: "FCF/NI", value: (producerCore as any)?.efficiency?.cash_quality?.fcf_to_ni },
+                      { label: "OCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.ocf_to_ni },
+                      { label: "FCF / NI", value: (producerCore as any)?.efficiency?.cash_quality?.fcf_to_ni },
                       { label: "Accrual", value: (producerCore as any)?.efficiency?.cash_quality?.accrual_flag },
-                      { label: "Capex/Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_revenue },
-                      { label: "Capex/OCF", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_ocf },
+                      { label: "Capex / Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_revenue },
+                      { label: "Capex / OCF", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_ocf },
                       { label: "PPE vs Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.ppe_vs_revenue_signal },
                       { label: "Net debt", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt },
-                      { label: "Net debt/EBITDA", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt_to_ebitda },
+                      { label: "Net debt / EBITDA", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt_to_ebitda },
                       { label: "Interest coverage", value: (producerCore as any)?.efficiency?.balance_sheet?.interest_coverage },
                       { label: "Debt trend", value: (producerCore as any)?.efficiency?.balance_sheet?.debt_trend_label },
                       { label: "ROE", value: (producerCore as any)?.efficiency?.returns?.roe },
@@ -724,52 +770,108 @@ export default function SingleStockDashboard() {
                           ? (producerCore as any).efficiency.risk_flags.join(", ")
                           : "—",
                       },
-                      { label: "Diagnostics", value: JSON.stringify((producerCore as any)?.efficiency?.diagnostics ?? null) },
+                      { label: "Invalid capital employed", value: (producerCore as any)?.efficiency?.diagnostics?.invalid_capital_employed },
+                      { label: "EV formula check", value: (producerCore as any)?.efficiency?.diagnostics?.ev_formula_check },
+                      { label: "Accounting anomaly", value: (producerCore as any)?.efficiency?.diagnostics?.accounting_anomaly },
                     ])}
                   </div>
                 </section>
 
                 <section className="producer-core-section resilience">
-                  <h2 className="subrub small">Resilience</h2>
+                  <div className="producer-core-title-row">
+                    <h2 className="subrub small">Resilience</h2>
+                    <InfoPopover
+                      id="resilience"
+                      openId={openInfoId}
+                      onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                      onClose={() => setOpenInfoId(null)}
+                      title="Resilience"
+                      content={RESILIENCE_INFO}
+                    />
+                  </div>
                   <div className="compact-metrics-grid">
                     {renderCompactMetrics([
-                      { label: "Leverage", value: JSON.stringify((producerCore as any)?.resilience?.leverage ?? null) },
-                      { label: "Liquidity", value: JSON.stringify((producerCore as any)?.resilience?.liquidity ?? null) },
-                      { label: "Stability", value: JSON.stringify((producerCore as any)?.resilience?.stability ?? null) },
+                      { label: "Net debt", value: (producerCore as any)?.resilience?.leverage?.net_debt },
+                      { label: "Net debt / EBITDA", value: (producerCore as any)?.resilience?.leverage?.net_debt_to_ebitda },
+                      { label: "Interest coverage", value: (producerCore as any)?.resilience?.leverage?.interest_coverage },
+                      { label: "Current ratio", value: (producerCore as any)?.resilience?.liquidity?.current_ratio },
+                      { label: "Cash vs short debt", value: (producerCore as any)?.resilience?.liquidity?.cash_vs_short_term_debt },
+                      { label: "FCF volatility 5Y", value: (producerCore as any)?.resilience?.stability?.fcf_volatility_5Y },
                     ])}
                   </div>
                 </section>
 
                 <section className="producer-core-section value">
-                  <h2 className="subrub small">Value</h2>
+                  <div className="producer-core-title-row">
+                    <h2 className="subrub small">Value</h2>
+                    <InfoPopover
+                      id="value"
+                      openId={openInfoId}
+                      onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                      onClose={() => setOpenInfoId(null)}
+                      title="Value"
+                      content={VALUE_INFO}
+                    />
+                  </div>
                   <div className="compact-metrics-grid">
                     {renderCompactMetrics([
-                      { label: "Multiples", value: JSON.stringify((producerCore as any)?.value?.multiples ?? null) },
-                      { label: "Medians 5Y", value: JSON.stringify((producerCore as any)?.value?.medians_5Y ?? null) },
+                      { label: "P/E", value: (producerCore as any)?.value?.multiples?.pe },
+                      { label: "Earnings yield", value: (producerCore as any)?.value?.multiples?.earnings_yield },
+                      { label: "P/FCF", value: (producerCore as any)?.value?.multiples?.p_fcf },
+                      { label: "FCF yield", value: (producerCore as any)?.value?.multiples?.fcf_yield },
+                      { label: "EV/EBITDA", value: (producerCore as any)?.value?.multiples?.ev_ebitda },
+                      { label: "EV/EBIT", value: (producerCore as any)?.value?.multiples?.ev_ebit },
+                      { label: "EV/FCF", value: (producerCore as any)?.value?.multiples?.ev_fcf },
+                      { label: "Net debt / EV", value: (producerCore as any)?.value?.multiples?.net_debt_over_ev },
+                      { label: "Median NI (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_ni },
+                      { label: "Median EBIT margin (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_ebit_margin },
+                      { label: "Median FCF (5Y)", value: (producerCore as any)?.value?.medians_5Y?.median_fcf },
                       { label: "Implied return", value: (producerCore as any)?.value?.implied_return },
                       { label: "Value band", value: (producerCore as any)?.value?.value_band },
                     ])}
                   </div>
                 </section>
               </div>
-            </div>
-          )}
-          <div className="breadcontainersinglecolumn">
-            <h1 className="subrub">RR Snapshot (Commodity Strength — MVP)</h1>
-            <p className="bread">MVP proxies. Missing benchmark/reserve inputs visas som null + flags.</p>
-          </div>
-          {rrOverlayMissing ? (
-            <div className="breadcontainersinglecolumn">
-              <p className="status empty">Data missing for RR Snapshot panel.</p>
-            </div>
-          ) : (
-            <div className="breadcontainerdoublecolumn">
-              <p className="bread">Scale flag: {formatPanelValue(rrOverlay?.rr_scale_flag ?? "Unknown")}</p>
-              <p className="bread">ROCE flag: {formatPanelValue(rrOverlay?.rr_roce_flag ?? "Unknown")}</p>
-              <p className="bread">Fortress: {formatPanelValue(rrOverlay?.rr_fortress_flag)}</p>
-              <p className="bread">Classification: {formatPanelValue(rrOverlay?.rr_classification)}</p>
-              <p className="bread">Missing benchmark: {formatPanelValue(rrOverlay?.rr_cost_quartile_flags?.missing_benchmark ?? false)}</p>
-              <p className="bread">Missing reserves: {formatPanelValue(rrOverlay?.rr_reserve_life_flags?.missing_reserves ?? false)}</p>
+
+              <div className="producer-core-divider" />
+
+              <section className="producer-core-section rr-snapshot">
+                <div className="producer-core-title-row">
+                  <h2 className="subrub small">RR Snapshot (Commodity Strength — MVP)</h2>
+                  <InfoPopover
+                    id="rr"
+                    openId={openInfoId}
+                    onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                    onClose={() => setOpenInfoId(null)}
+                    title="RR Snapshot"
+                    content={RR_INFO}
+                  />
+                </div>
+                <p className="bread">MVP proxies. Missing benchmark/reserve inputs visas som null + flags.</p>
+                {rrOverlayMissing ? (
+                  <p className="status empty">Data missing for RR Snapshot panel.</p>
+                ) : (
+                  <div className="compact-metrics-grid">
+                    {renderCompactMetrics([
+                      { label: "10Y recoverable value", value: (rrOverlay as any)?.rr_scale_10y_recoverable_value_usd },
+                      { label: "Scale flag", value: rrOverlay?.rr_scale_flag ?? "Unknown" },
+                      { label: "ROCE", value: (rrOverlay as any)?.rr_roce },
+                      { label: "ROCE flag", value: rrOverlay?.rr_roce_flag ?? "Unknown" },
+                      { label: "Cost quartile", value: (rrOverlay as any)?.rr_cost_quartile },
+                      { label: "Reserve life", value: (rrOverlay as any)?.rr_reserve_life_years },
+                      { label: "Net debt / FCF", value: (rrOverlay as any)?.rr_net_debt_fcf },
+                      { label: "Interest coverage", value: rrOverlay?.rr_interest_coverage },
+                      { label: "Margin buffer", value: (rrOverlay as any)?.rr_margin_buffer_pct },
+                      { label: "Fair value 1", value: (rrOverlay as any)?.rr_fair_value_1 },
+                      { label: "Fair value 2", value: (rrOverlay as any)?.rr_fair_value_2 },
+                      { label: "Fair value 3", value: (rrOverlay as any)?.rr_fair_value_3 },
+                      { label: "RR classification", value: rrOverlay?.rr_classification },
+                      { label: "Missing benchmark", value: rrOverlay?.rr_cost_quartile_flags?.missing_benchmark ?? false },
+                      { label: "Missing reserves", value: rrOverlay?.rr_reserve_life_flags?.missing_reserves ?? false },
+                    ])}
+                  </div>
+                )}
+              </section>
             </div>
           )}
 

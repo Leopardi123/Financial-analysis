@@ -645,3 +645,70 @@ td.sticky-col {
     gap: 8px;
   }
 }
+
+.producer-core-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.producer-core-divider {
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  margin: 10px 0;
+}
+
+.producer-core-section.rr-snapshot {
+  background: #fff;
+}
+
+.compact-metrics-grid {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.info-popover {
+  position: relative;
+}
+
+.info-popover-trigger {
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.info-popover-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: min(420px, 80vw);
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  padding: 10px;
+}
+
+.info-popover-panel h4 {
+  margin: 0 0 6px;
+  font-family: "Josefin Sans", sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.8px;
+}
+
+.info-popover-panel ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.info-popover-panel li {
+  margin: 0 0 4px;
+  font-size: 11px;
+  line-height: 1.3;
+}
