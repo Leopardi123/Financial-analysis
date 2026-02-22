@@ -579,3 +579,69 @@ td.sticky-col {
 .company-picker-results li:hover {
   background: #eef4dc;
 }
+
+.producer-core-compact-card {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  padding: 10px;
+  background: #fafaf7;
+}
+
+.producer-core-compact-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.producer-core-section {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  padding: 10px;
+  box-shadow: none;
+}
+
+.producer-core-section.efficiency,
+.producer-core-section.value {
+  background: #f5f5f1;
+}
+
+.producer-core-section.resilience {
+  background: #fff;
+}
+
+.producer-core-section .subrub.small {
+  font-size: 17px;
+  margin-bottom: 8px;
+}
+
+.compact-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+
+.compact-metric-row {
+  display: contents;
+}
+
+.compact-metric-label {
+  font-size: 11px;
+  line-height: 1.2;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.6px;
+}
+
+.compact-metric-value {
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: right;
+  font-family: "Merriweather", serif;
+  word-break: break-word;
+}
+
+@media (min-width: 900px) {
+  .producer-core-compact-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+}

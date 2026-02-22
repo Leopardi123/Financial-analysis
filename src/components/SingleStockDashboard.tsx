@@ -58,6 +58,19 @@ function formatPanelValue(value: unknown): string {
   return "-";
 }
 
+
+
+type CompactMetric = { label: string; value: unknown };
+
+function renderCompactMetrics(metrics: CompactMetric[]) {
+  return metrics.map((metric) => (
+    <div key={metric.label} className="compact-metric-row">
+      <span className="compact-metric-label">{metric.label}</span>
+      <span className="compact-metric-value">{formatPanelValue(metric.value)}</span>
+    </div>
+  ));
+}
+
 type AnalysisMode = "revenue" | "prerevenue";
 
 function readModeFromUrl(): AnalysisMode {
@@ -674,50 +687,73 @@ export default function SingleStockDashboard() {
               <p className="status empty">Data missing for Producer Core panel.</p>
             </div>
           ) : (
-            <>
-              <div className="breadcontainersinglecolumn"><h2 className="subrub small">Efficiency</h2></div>
-              <div className="breadcontainerdoublecolumn">
-                <p className="bread">Gross margin: {formatPanelValue((producerCore as any)?.efficiency?.margin_structure?.gross_margin)}</p>
-                <p className="bread">Operating margin: {formatPanelValue((producerCore as any)?.efficiency?.margin_structure?.operating_margin)}</p>
-                <p className="bread">Net margin: {formatPanelValue((producerCore as any)?.efficiency?.margin_structure?.net_margin)}</p>
-                <p className="bread">Margin trend: {formatPanelValue((producerCore as any)?.efficiency?.margin_structure?.margin_trend_label)}</p>
-                <p className="bread">OCF/NI: {formatPanelValue((producerCore as any)?.efficiency?.cash_quality?.ocf_to_ni)}</p>
-                <p className="bread">FCF/NI: {formatPanelValue((producerCore as any)?.efficiency?.cash_quality?.fcf_to_ni)}</p>
-                <p className="bread">Accrual flag: {formatPanelValue((producerCore as any)?.efficiency?.cash_quality?.accrual_flag)}</p>
-                <p className="bread">Capex/Revenue: {formatPanelValue((producerCore as any)?.efficiency?.capital_intensity?.capex_to_revenue)}</p>
-                <p className="bread">Capex/OCF: {formatPanelValue((producerCore as any)?.efficiency?.capital_intensity?.capex_to_ocf)}</p>
-                <p className="bread">PPE vs Revenue: {formatPanelValue((producerCore as any)?.efficiency?.capital_intensity?.ppe_vs_revenue_signal)}</p>
-                <p className="bread">Net debt: {formatPanelValue((producerCore as any)?.efficiency?.balance_sheet?.net_debt)}</p>
-                <p className="bread">Net debt/EBITDA: {formatPanelValue((producerCore as any)?.efficiency?.balance_sheet?.net_debt_to_ebitda)}</p>
-                <p className="bread">Interest coverage: {formatPanelValue((producerCore as any)?.efficiency?.balance_sheet?.interest_coverage)}</p>
-                <p className="bread">Debt trend: {formatPanelValue((producerCore as any)?.efficiency?.balance_sheet?.debt_trend_label)}</p>
-                <p className="bread">ROE: {formatPanelValue((producerCore as any)?.efficiency?.returns?.roe)}</p>
-                <p className="bread">ROIC pre-tax: {formatPanelValue((producerCore as any)?.efficiency?.returns?.roic_pre_tax)}</p>
-                <p className="bread">ROE trend 5Y: {formatPanelValue((producerCore as any)?.efficiency?.returns?.roe_trend_5Y)}</p>
-                <p className="bread">Shares trend 5Y: {formatPanelValue((producerCore as any)?.efficiency?.allocation?.shares_trend_5Y)}</p>
-                <p className="bread">Retained vs NI: {formatPanelValue((producerCore as any)?.efficiency?.allocation?.retained_vs_ni_signal)}</p>
-                <p className="bread">Quality flags: {Array.isArray((producerCore as any)?.efficiency?.quality_flags) && (producerCore as any).efficiency.quality_flags.length ? (producerCore as any).efficiency.quality_flags.join(', ') : '—'}</p>
-                <p className="bread">Risk flags: {Array.isArray((producerCore as any)?.efficiency?.risk_flags) && (producerCore as any).efficiency.risk_flags.length ? (producerCore as any).efficiency.risk_flags.join(', ') : '—'}</p>
-                <p className="bread">Diagnostics: {formatPanelValue(JSON.stringify((producerCore as any)?.efficiency?.diagnostics ?? null))}</p>
-              </div>
+            <div className="producer-core-compact-card">
+              <div className="producer-core-compact-grid">
+                <section className="producer-core-section efficiency">
+                  <h2 className="subrub small">Efficiency</h2>
+                  <div className="compact-metrics-grid">
+                    {renderCompactMetrics([
+                      { label: "Gross margin", value: (producerCore as any)?.efficiency?.margin_structure?.gross_margin },
+                      { label: "Operating margin", value: (producerCore as any)?.efficiency?.margin_structure?.operating_margin },
+                      { label: "Net margin", value: (producerCore as any)?.efficiency?.margin_structure?.net_margin },
+                      { label: "Margin trend", value: (producerCore as any)?.efficiency?.margin_structure?.margin_trend_label },
+                      { label: "OCF/NI", value: (producerCore as any)?.efficiency?.cash_quality?.ocf_to_ni },
+                      { label: "FCF/NI", value: (producerCore as any)?.efficiency?.cash_quality?.fcf_to_ni },
+                      { label: "Accrual", value: (producerCore as any)?.efficiency?.cash_quality?.accrual_flag },
+                      { label: "Capex/Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_revenue },
+                      { label: "Capex/OCF", value: (producerCore as any)?.efficiency?.capital_intensity?.capex_to_ocf },
+                      { label: "PPE vs Revenue", value: (producerCore as any)?.efficiency?.capital_intensity?.ppe_vs_revenue_signal },
+                      { label: "Net debt", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt },
+                      { label: "Net debt/EBITDA", value: (producerCore as any)?.efficiency?.balance_sheet?.net_debt_to_ebitda },
+                      { label: "Interest coverage", value: (producerCore as any)?.efficiency?.balance_sheet?.interest_coverage },
+                      { label: "Debt trend", value: (producerCore as any)?.efficiency?.balance_sheet?.debt_trend_label },
+                      { label: "ROE", value: (producerCore as any)?.efficiency?.returns?.roe },
+                      { label: "ROIC pre-tax", value: (producerCore as any)?.efficiency?.returns?.roic_pre_tax },
+                      { label: "ROE trend 5Y", value: (producerCore as any)?.efficiency?.returns?.roe_trend_5Y },
+                      { label: "Shares trend 5Y", value: (producerCore as any)?.efficiency?.allocation?.shares_trend_5Y },
+                      { label: "Retained vs NI", value: (producerCore as any)?.efficiency?.allocation?.retained_vs_ni_signal },
+                      {
+                        label: "Quality flags",
+                        value: Array.isArray((producerCore as any)?.efficiency?.quality_flags) && (producerCore as any).efficiency.quality_flags.length
+                          ? (producerCore as any).efficiency.quality_flags.join(", ")
+                          : "—",
+                      },
+                      {
+                        label: "Risk flags",
+                        value: Array.isArray((producerCore as any)?.efficiency?.risk_flags) && (producerCore as any).efficiency.risk_flags.length
+                          ? (producerCore as any).efficiency.risk_flags.join(", ")
+                          : "—",
+                      },
+                      { label: "Diagnostics", value: JSON.stringify((producerCore as any)?.efficiency?.diagnostics ?? null) },
+                    ])}
+                  </div>
+                </section>
 
-              <div className="breadcontainersinglecolumn"><h2 className="subrub small">Resilience</h2></div>
-              <div className="breadcontainerdoublecolumn">
-                <p className="bread">Leverage: {formatPanelValue(JSON.stringify((producerCore as any)?.resilience?.leverage ?? null))}</p>
-                <p className="bread">Liquidity: {formatPanelValue(JSON.stringify((producerCore as any)?.resilience?.liquidity ?? null))}</p>
-                <p className="bread">Stability: {formatPanelValue(JSON.stringify((producerCore as any)?.resilience?.stability ?? null))}</p>
-              </div>
+                <section className="producer-core-section resilience">
+                  <h2 className="subrub small">Resilience</h2>
+                  <div className="compact-metrics-grid">
+                    {renderCompactMetrics([
+                      { label: "Leverage", value: JSON.stringify((producerCore as any)?.resilience?.leverage ?? null) },
+                      { label: "Liquidity", value: JSON.stringify((producerCore as any)?.resilience?.liquidity ?? null) },
+                      { label: "Stability", value: JSON.stringify((producerCore as any)?.resilience?.stability ?? null) },
+                    ])}
+                  </div>
+                </section>
 
-              <div className="breadcontainersinglecolumn"><h2 className="subrub small">Value</h2></div>
-              <div className="breadcontainerdoublecolumn">
-                <p className="bread">Multiples: {formatPanelValue(JSON.stringify((producerCore as any)?.value?.multiples ?? null))}</p>
-                <p className="bread">Medians 5Y: {formatPanelValue(JSON.stringify((producerCore as any)?.value?.medians_5Y ?? null))}</p>
-                <p className="bread">Implied return: {formatPanelValue((producerCore as any)?.value?.implied_return)}</p>
-                <p className="bread">Value band: {formatPanelValue((producerCore as any)?.value?.value_band)}</p>
+                <section className="producer-core-section value">
+                  <h2 className="subrub small">Value</h2>
+                  <div className="compact-metrics-grid">
+                    {renderCompactMetrics([
+                      { label: "Multiples", value: JSON.stringify((producerCore as any)?.value?.multiples ?? null) },
+                      { label: "Medians 5Y", value: JSON.stringify((producerCore as any)?.value?.medians_5Y ?? null) },
+                      { label: "Implied return", value: (producerCore as any)?.value?.implied_return },
+                      { label: "Value band", value: (producerCore as any)?.value?.value_band },
+                    ])}
+                  </div>
+                </section>
               </div>
-            </>
+            </div>
           )}
-
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">RR Snapshot (Commodity Strength — MVP)</h1>
             <p className="bread">MVP proxies. Missing benchmark/reserve inputs visas som null + flags.</p>
