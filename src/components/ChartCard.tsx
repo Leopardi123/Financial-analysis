@@ -1,14 +1,20 @@
 import { Chart } from "react-google-charts";
+import InfoPopover from "./InfoPopover";
 
 type ChartDataCell = string | number | Date | null | { type: string; role: string };
 
 type ChartCardProps = {
+  id?: string;
   title: string;
   data: (string | number | Date | null)[][] | null;
   chartType: "ColumnChart" | "ComboChart" | "AreaChart" | "LineChart";
   height?: number;
   options?: Record<string, unknown>;
   fiscalYearEndMonth?: number | null;
+  infoSections?: { heading: string; lines: string[] }[];
+  openInfoId?: string | null;
+  onToggleInfo?: (id: string) => void;
+  onCloseInfo?: () => void;
 };
 
 const DEFAULT_OPTIONS = {
@@ -120,13 +126,21 @@ function normalizeChartData(
 }
 
 export default function ChartCard({
+  id,
   title,
   data,
   chartType,
   height = 300,
   options = {},
   fiscalYearEndMonth,
+  infoSections,
+  openInfoId,
+  onToggleInfo,
+  onCloseInfo,
 }: ChartCardProps) {
+  const chartId = id ?? title;
+  const hasInfo = Boolean(infoSections?.length && onToggleInfo && onCloseInfo);
+
   if (!data) {
     return (
       <div className="chart-card chart-empty">
@@ -141,6 +155,19 @@ export default function ChartCard({
 
   return (
     <div className="chart-card">
+      {hasInfo && (
+        <div className="producer-core-title-row" style={{ marginBottom: "4px" }}>
+          <div className="chart-title" style={{ marginBottom: 0 }}>{title}</div>
+          <InfoPopover
+            id={chartId}
+            openId={openInfoId ?? null}
+            onToggle={onToggleInfo!}
+            onClose={onCloseInfo!}
+            title={title}
+            sections={infoSections}
+          />
+        </div>
+      )}
       <Chart
         chartType={chartType}
         data={normalized.data}
@@ -149,7 +176,7 @@ export default function ChartCard({
         options={{
           ...DEFAULT_OPTIONS,
           ...options,
-          title,
+          title: hasInfo ? undefined : title,
           tooltip: { trigger: "focus" },
           hAxis: {
             ...DEFAULT_OPTIONS.hAxis,
