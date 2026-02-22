@@ -53,6 +53,31 @@ function formatIsoDate(value: Date) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+
+
+function parseStrictIsoDate(value: string): Date | null {
+  const trimmed = value.trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function normalizeNumberCell(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === "n/a" || trimmed === "—") return null;
+    const parsed = Number(trimmed.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function isQuarterlySeries(dates: Date[]) {
   if (dates.length < 2) {
     return false;
@@ -113,9 +138,9 @@ function normalizeChartData(
   if (chartType === "ScatterChart") {
     const scatterRows = rows
       .map((row) => {
-        const x = row[0];
-        const y = row[1];
-        if (typeof x !== "number" || !Number.isFinite(x) || typeof y !== "number" || !Number.isFinite(y)) {
+        const x = normalizeNumberCell(row[0]);
+        const y = normalizeNumberCell(row[1]);
+        if (x === null || y === null) {
           return null;
         }
         return [x, y] as ChartDataCell[];
@@ -131,11 +156,16 @@ function normalizeChartData(
   const normalizedRows = rows
     .map((row) => {
       const rawDate = row[0];
-      if (!(rawDate instanceof Date) || Number.isNaN(rawDate.getTime())) {
+      const parsedDate = rawDate instanceof Date
+        ? (Number.isNaN(rawDate.getTime()) ? null : rawDate)
+        : typeof rawDate === "string"
+          ? parseStrictIsoDate(rawDate)
+          : null;
+      if (!parsedDate) {
         return null;
       }
-      const values = row.slice(1).map((value) => (typeof value === "number" && Number.isFinite(value) ? value : null));
-      return [rawDate, ...values] as ChartDataCell[];
+      const values = row.slice(1).map((value) => normalizeNumberCell(value));
+      return [parsedDate, ...values] as ChartDataCell[];
     })
     .filter((row): row is ChartDataCell[] => row !== null);
 
@@ -193,6 +223,9 @@ export default function ChartCard({
   }
 
   const normalized = normalizeChartData(data, chartType, fiscalYearEndMonth);
+  const rowsBefore = data.length > 0 ? data.length - 1 : 0;
+  const rowsAfter = normalized.data.length > 0 ? normalized.data.length - 1 : 0;
+  const allScatterPointsDropped = chartType === "ScatterChart" && rowsBefore > 0 && rowsAfter === 0;
   const optionHAxis = (options.hAxis as Record<string, unknown> | undefined) ?? {};
   const optionVAxes = (options.vAxes as Record<string, unknown> | undefined) ?? undefined;
 
@@ -215,6 +248,9 @@ export default function ChartCard({
           />
         )}
       </div>
+      {allScatterPointsDropped && (
+        <p className="status empty" style={{ margin: "4px 0 8px" }}>No valid points (runwayMonths or dilutionYoY missing/invalid). Before: {rowsBefore}, after sanitization: {rowsAfter}.</p>
+      )}
       <Chart
         chartType={chartType}
         data={normalized.data}
