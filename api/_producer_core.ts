@@ -8,6 +8,7 @@ export type ProducerInput = {
   years: number[];
   price?: number | null;
   marketCap?: number | null;
+  sharesOutstanding?: number | null;
   macro_flags?: string[];
   sector_flags?: string[];
   cycle_flags?: string[];
@@ -102,7 +103,7 @@ function latestMarketCap(input: ProducerInput, sharesSeries: Array<number | null
   const direct = latest(marketCapSeries);
   if (direct !== null) return direct;
   const price = input.price ?? null;
-  const shares = latest(sharesSeries);
+  const shares = latest(sharesSeries) ?? input.sharesOutstanding ?? null;
   if (price === null || shares === null) return null;
   return price * shares;
 }
@@ -127,7 +128,9 @@ export function computeProducerCore(input: ProducerInput) {
   const longTermDebt = pickSeries(input.balance, ["longTermDebt"]);
   const equity = pickSeries(input.balance, ["totalStockholdersEquity"]);
   const currentAssets = pickSeries(input.balance, ["totalCurrentAssets"]);
-  const shares = pickSeries(input.balance, ["weightedAverageShsOut", "commonStockSharesOutstanding", "sharesOutstanding"]);
+  const sharesFromIncome = pickSeries(input.income, ["weightedAverageShsOut", "weightedAverageShsOutDil"]);
+  const sharesFromBalance = pickSeries(input.balance, ["commonStockSharesOutstanding", "sharesOutstanding", "weightedAverageShsOut"]);
+  const shares = sharesFromIncome.length > 0 ? sharesFromIncome : sharesFromBalance;
   const retainedEarnings = pickSeries(input.balance, ["retainedEarnings"]);
   const ppe = pickSeries(input.balance, ["propertyPlantEquipmentNet"]);
 
@@ -211,6 +214,19 @@ export function computeProducerCore(input: ProducerInput) {
   const fcfLast = windows ? freeCashFlow.slice(-5) : [];
   const fcfNegCount = fcfLast.reduce<number>((acc, value) => (value !== null && value < 0 ? acc + 1 : acc), 0);
 
+  const latestShares = latest(shares) ?? input.sharesOutstanding ?? null;
+  const latestFcf = latest(freeCashFlow);
+  const latestPrice = input.price ?? null;
+  const eps = latestNetIncome !== null && latestShares !== null && latestShares > 0 ? latestNetIncome / latestShares : null;
+  const pe = latestPrice !== null && eps !== null && latestNetIncome !== null && latestNetIncome > 0 ? latestPrice / eps : null;
+  const earningsYield = marketCap !== null && marketCap > 0 ? safeDiv(latestNetIncome, marketCap) : null;
+  const pFcf = marketCap !== null && marketCap > 0 && latestFcf !== null && latestFcf > 0 ? marketCap / latestFcf : null;
+  const fcfYield = marketCap !== null && marketCap > 0 ? safeDiv(latestFcf, marketCap) : null;
+  const evEbitda = ev !== null && latestEbitda !== null && latestEbitda > 0 ? ev / latestEbitda : null;
+  const evEbit = ev !== null && ebitTtm !== null && ebitTtm > 0 ? ev / ebitTtm : null;
+  const evFcf = ev !== null && latestFcf !== null && latestFcf > 0 ? ev / latestFcf : null;
+  const netDebtOverEv = ev !== null && ev > 0 ? safeDiv(netDebt, ev) : null;
+
   const quality_flags: string[] = [];
   const risk_flags: string[] = [];
   if (windows && accrualCount <= 2) quality_flags.push("ocf_ge_ni_3y");
@@ -287,14 +303,14 @@ export function computeProducerCore(input: ProducerInput) {
     },
     value: {
       multiples: {
-        pe: safeDiv(input.price ?? null, safeDiv(latestNetIncome, latest(shares))),
-        earnings_yield: safeDiv(latestNetIncome, marketCap),
-        p_fcf: safeDiv(marketCap, latest(freeCashFlow)),
-        fcf_yield: safeDiv(latest(freeCashFlow), marketCap),
-        ev_ebitda: safeDiv(ev, latestEbitda),
-        ev_ebit: safeDiv(ev, ebitTtm),
-        ev_fcf: safeDiv(ev, latest(freeCashFlow)),
-        net_debt_over_ev: safeDiv(netDebt, ev),
+        pe,
+        earnings_yield: earningsYield,
+        p_fcf: pFcf,
+        fcf_yield: fcfYield,
+        ev_ebitda: evEbitda,
+        ev_ebit: evEbit,
+        ev_fcf: evFcf,
+        net_debt_over_ev: netDebtOverEv,
       },
       medians_5Y: {
         median_ni: annualCount >= needed5Y ? median(netIncome.slice(-5).filter((v): v is number => v !== null)) : null,
@@ -304,7 +320,7 @@ export function computeProducerCore(input: ProducerInput) {
         median_fcf: annualCount >= needed5Y ? median(freeCashFlow.slice(-5).filter((v): v is number => v !== null)) : null,
       },
       implied_return: (() => {
-        const ey = safeDiv(latestNetIncome, marketCap);
+        const ey = earningsYield;
         if (ey === null || revenueGrowth === null) return null;
         return ey + revenueGrowth;
       })(),
