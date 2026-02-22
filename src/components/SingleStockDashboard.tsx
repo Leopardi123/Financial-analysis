@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import Admin from "./Admin";
 import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
@@ -127,6 +127,16 @@ const INFO_SECTION_HEADINGS = {
 type MetricInfoSection = { heading: string; lines: string[] };
 type MetricInfo = { title: string; sections: MetricInfoSection[] };
 
+
+
+type CurrencySource = "statements" | "market" | "unknown";
+
+type ChartUnitMeta = {
+  unitLabel: string;
+  unitKind: "money" | "percent" | "months" | "ratio" | "shares" | "index" | "unknown";
+  yAxisTitle?: string;
+  y2AxisTitle?: string;
+};
 function buildMetricInfo(
   title: string,
   measure: string[],
@@ -449,13 +459,13 @@ const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
   "A1 Cash Balance": buildCoreInfo("Cash and cash equivalents trend.", "Cash runway is the primary survival constraint.", "Falling trend with no financing support increases risk.", "Rapid cash drawdown and no offsetting inflows.", "Uses balance.cashAndCashEquivalents; missing points are shown as missing data."),
   "A2 Operating Cash Flow": buildCoreInfo("Operating cash flow by period.", "Shows core corporate burn before financing.", "Persistent negative values imply structural burn.", "Burn deepens YoY without milestone progress.", "Uses cashflow.operatingCashFlow; sparse series render partial chart."),
   "A3 Free Cash Flow": buildCoreInfo("Free cash flow after capex.", "Approximates all-in corporate cash consumption.", "Negative and worsening FCF reduces optionality.", "FCF deterioration despite capital raises.", "Uses cashflow.freeCashFlow (fallback partial if missing)."),
-  "A4 Burn Rate TTM": buildCoreInfo("Trailing 4-period burn proxy from OCF.", "Smooths one-off period noise.", "Higher burn line means faster cash depletion.", "Acceleration in burn with flat liquidity.", "Requires >=4 OCF points; otherwise missing data."),
-  "A5 Runway Months": buildCoreInfo("Cash divided by annualized burn, converted to months.", "Direct survival-to-milestone lens.", "Below ~12 months indicates financing pressure.", "Runway collapsing while dilution rises.", "Needs cash + negative OCF; if unavailable, chart shows missing data."),
+  "A4 Burn Rate TTM": buildCoreInfo("Trailing 4-period burn proxy from OCF.", "Smooths one-off period noise.", "Higher burn line means faster cash depletion.", "Acceleration in burn with flat liquidity.", "Basis: TTM (if built from quarterly points). Not enough history for TTM returns missing data."),
+  "A5 Runway Months": buildCoreInfo("Cash divided by annualized burn, converted to months.", "Direct survival-to-milestone lens.", "Below ~12 months indicates financing pressure.", "Runway collapsing while dilution rises.", "Basis: TTM (if built from quarterly points). Requires cash and burn rate history; otherwise missing data."),
   "A6 Burn Decomposition": buildCoreInfo("Burn components: OCF, capex, SBC, R&D proxy.", "Explains what drives cash consumption.", "Look for component concentration and trend.", "SBC/overhead growth without operating traction.", "Uses available statement fields; missing components remain null."),
   "A7 Cash Bridge / Waterfall": buildCoreInfo("Cash bridge using OCF, investing, financing cash flows.", "Shows how ending cash is funded.", "Positive financing with negative operations signals dependency.", "Repeated financing dependence without burn improvement.", "Uses net cash flow lines where available."),
   "A8 Next-12M Survival Gauge": buildCoreInfo("Runway vs 12-month threshold.", "Simple survival checkpoint.", "Runway above 12m improves flexibility.", "Runway consistently below threshold.", "Derived from runway series; threshold always shown."),
   "B1 Shares Outstanding": buildCoreInfo("Outstanding shares trend.", "Captures dilution burden on owners.", "Rising shares with weak cash metrics is negative.", "Step-ups after raises with no runway extension.", "Uses balance/income share fields depending on availability."),
-  "B2 Dilution Rate YoY": buildCoreInfo("Year-over-year share growth.", "Quantifies annual dilution cost.", "Sustained high positive bars indicate dilution pressure.", "Double-digit dilution repeated across years.", "Requires consecutive share observations."),
+  "B2 Dilution Rate YoY": buildCoreInfo("Year-over-year share growth.", "Quantifies annual dilution cost.", "Sustained high positive bars indicate dilution pressure.", "Double-digit dilution repeated across years.", "Requires consecutive share observations. Extreme dilution values are hidden (>300%) to avoid unreliable artifacts from missing/incorrect share baselines."),
   "B3 Cash per Share": buildCoreInfo("Cash divided by shares outstanding.", "Per-share liquidity view.", "Falling cash/share implies weaker ownership backing.", "Cash/share down despite financing rounds.", "Needs both cash and shares."),
   "B4 Market Cap vs Shares": buildCoreInfo("Market cap and share count shown together.", "Relates valuation to dilution trajectory.", "If shares rise faster than market cap, value transfer may be weak.", "Persistent share growth with flat market cap.", "Market cap can be missing in statement-only mode; chart degrades gracefully."),
   "B5 SBC": buildCoreInfo("Stock-based compensation trend.", "SBC is non-cash now but dilution later.", "Rising SBC with weak progress is a warning.", "SBC growth without milestone delivery.", "Uses cashflow.stockBasedCompensation."),
@@ -479,6 +489,29 @@ const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
   "E4 Governance Leak Index": buildCoreInfo("Leak proxy combining SBC intensity and dilution.", "Flags hidden shareholder leakage.", "Higher index = higher governance leak risk.", "Sustained high index with no progress.", "Proxy from SBC + share growth; missing components allowed."),
   "E5 Survival Score": buildCoreInfo("Composite 0–10 survival score proxy.", "Single scoreboard summary for decision hygiene.", "Higher score reflects stronger runway + lower dilution/burn stress.", "Score drifting lower into financing windows.", "Proxy only; based on available runway/burn/dilution inputs."),
 };
+
+
+function withUnitMetadata(
+  sections: MetricInfoSection[] | undefined,
+  unitLabel: string,
+  source: CurrencySource,
+  mixedCurrencyNote?: string,
+) {
+  if (!sections) return sections;
+  const dataLine = `Unit: ${unitLabel}`;
+  const sourceLine = `Currency source: ${source}`;
+  const mixedLine = mixedCurrencyNote ? `Note: ${mixedCurrencyNote}` : null;
+  const nextSections = [...sections];
+  const idx = nextSections.findIndex((section) => section.heading.toUpperCase() === "DATA AVAILABILITY");
+  if (idx >= 0) {
+    const lines = [...nextSections[idx].lines, dataLine, sourceLine, ...(mixedLine ? [mixedLine] : [])];
+    nextSections[idx] = { ...nextSections[idx], lines: Array.from(new Set(lines)) };
+  } else {
+    nextSections.push({ heading: "DATA AVAILABILITY", lines: [dataLine, sourceLine, ...(mixedLine ? [mixedLine] : [])] });
+  }
+  return nextSections;
+}
+
 const PRICE_SERIES_COLORS = {
   close: "#0b0b0b",
   sma200: "#3a3a3a",
@@ -902,17 +935,17 @@ export default function SingleStockDashboard() {
 
   const burnRateTtmData = buildDerivedSeries(["Date", "Burn Rate TTM"], (index) => {
     if (index < 3) return [null];
-    const window = operatingCashFlowSeries.slice(index - 3, index + 1);
+    const window = freeCashFlowSeries.slice(index - 3, index + 1);
     if (window.some((v) => typeof v !== "number")) return [null];
     const total = (window as number[]).reduce((acc, value) => acc + Math.abs(value), 0);
-    return [total / 4];
+    return [total / 12];
   }, 15);
 
   const runwayMonthsData = buildDerivedSeries(["Date", "Runway Months"], (index) => {
     const cash = cashSeries[index];
-    const ocf = operatingCashFlowSeries[index];
-    if (typeof cash !== "number" || typeof ocf !== "number" || ocf >= 0) return [null];
-    return [cash / Math.abs(ocf) * 12];
+    const burnPerMonth = burnRateTtmData?.[index + 1]?.[1] as number | null | undefined;
+    if (typeof cash !== "number" || typeof burnPerMonth !== "number" || burnPerMonth <= 0) return [null];
+    return [cash / burnPerMonth];
   }, 15);
 
   const burnDecompositionData = buildDerivedSeries(["Date", "Burn (abs OCF)", "Capex (abs)", "SBC", "R&D"], (index) => [
@@ -938,8 +971,10 @@ export default function SingleStockDashboard() {
     if (index === 0) return [null];
     const current = statementShares[index];
     const previous = statementShares[index - 1];
-    if (typeof current !== "number" || typeof previous !== "number" || previous === 0) return [null];
-    return [current / previous - 1];
+    if (typeof current !== "number" || typeof previous !== "number" || previous <= 0) return [null];
+    const dilution = current / previous - 1;
+    if (Math.abs(dilution) > 3) return [null];
+    return [dilution * 100];
   }, 15);
 
   const cashPerShareData = buildDerivedSeries(["Date", "Cash per Share"], (index) => {
@@ -959,7 +994,7 @@ export default function SingleStockDashboard() {
   const sbcIntensityData = buildDerivedSeries(["Date", "SBC / abs(OCF)", "SBC"], (index) => {
     const sbc = sbcSeries[index];
     const ocf = operatingCashFlowSeries[index];
-    const ratio = typeof sbc === "number" && typeof ocf === "number" && ocf !== 0 ? sbc / Math.abs(ocf) : null;
+    const ratio = typeof sbc === "number" && typeof ocf === "number" && ocf !== 0 ? (sbc / Math.abs(ocf)) * 100 : null;
     return [ratio, sbc ?? null];
   }, 15);
   const allInDilutionData = buildDerivedSeries(["Date", "Common Stock Issued", "SBC"], (index) => [
@@ -976,9 +1011,9 @@ export default function SingleStockDashboard() {
   ], 15);
   const overheadRatioData = buildDerivedSeries(["Date", "Overhead Ratio"], (index) => {
     const overhead = overheadSeries[index];
-    const ocf = operatingCashFlowSeries[index];
-    if (typeof overhead !== "number" || typeof ocf !== "number" || ocf === 0) return [null];
-    return [overhead / Math.abs(ocf)];
+    const fcf = freeCashFlowSeries[index];
+    if (typeof overhead !== "number" || typeof fcf !== "number" || fcf === 0) return [null];
+    return [(overhead / Math.abs(fcf)) * 100];
   }, 15);
   const vceProxyData = buildDerivedSeries(["Date", "VCE Proxy"], (index) => {
     const fcf = freeCashFlowSeries[index];
@@ -1031,7 +1066,7 @@ export default function SingleStockDashboard() {
     const dilution = dilutionRateData?.[index + 1]?.[1] as number | null | undefined;
     const sbcIntensity = sbcIntensityData?.[index + 1]?.[1] as number | null | undefined;
     if (typeof dilution !== "number" && typeof sbcIntensity !== "number") return [null];
-    return [(dilution ?? 0) + (sbcIntensity ?? 0)];
+    return [((dilution ?? 0) / 100) + ((sbcIntensity ?? 0) / 100)];
   }, 15);
   const survivalScoreData = buildDerivedSeries(["Date", "Survival Score"], (index) => {
     const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
@@ -1230,6 +1265,89 @@ export default function SingleStockDashboard() {
     toFiniteNumber(profile?.mktCap) ??
     toFiniteNumber(profile?.marketCap);
 
+  const statementCurrencyRaw =
+    (data as any)?.financials?.currency
+    ?? (data as any)?.reportedCurrency
+    ?? (data as any)?.statementCurrency
+    ?? profile?.currency
+    ?? null;
+  const statementCurrency = typeof statementCurrencyRaw === "string" && statementCurrencyRaw.trim()
+    ? statementCurrencyRaw.trim().toUpperCase()
+    : "USD";
+  const marketCurrencyRaw = profile?.currency ?? statementCurrency;
+  const marketCurrency = typeof marketCurrencyRaw === "string" && marketCurrencyRaw.trim()
+    ? marketCurrencyRaw.trim().toUpperCase()
+    : statementCurrency;
+  const mixedCurrency = statementCurrency !== marketCurrency;
+  const mixedCurrencyNote = mixedCurrency
+    ? `Market data uses ${marketCurrency} while statements use ${statementCurrency}.`
+    : undefined;
+
+  const unitMetaByTitle: Record<string, ChartUnitMeta> = {
+    "Aktieprishistoria": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
+    "Aktieprishistoria (kort)": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
+    "Volume": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
+    "Volume (kort)": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
+    "Revenue": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "Revenue Growth": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
+    "Gross Profit Ratio": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
+    "EBITDA Margin": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
+    "Net Income Margin": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
+    "Operating Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "Cash From Investing": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "Free Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "Free Cash Flow/Share": { unitLabel: `${statementCurrency}/share`, unitKind: "money", yAxisTitle: `${statementCurrency}/share` },
+    "Total Equity": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "ROE": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
+    "A1 Cash Balance": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "A2 Operating Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "A3 Free Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "A4 Burn Rate TTM": { unitLabel: `${statementCurrency}/month`, unitKind: "money", yAxisTitle: `${statementCurrency}/month` },
+    "A5 Runway Months": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
+    "A8 Next-12M Survival Gauge": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
+    "B1 Shares Outstanding": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
+    "B2 Dilution Rate YoY": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
+    "B3 Cash per Share": { unitLabel: `${statementCurrency}/share`, unitKind: "money", yAxisTitle: `${statementCurrency}/share` },
+    "B4 Market Cap vs Shares": { unitLabel: `${marketCurrency} + shares`, unitKind: "unknown", yAxisTitle: marketCurrency, y2AxisTitle: "shares" },
+    "B5 SBC": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "B6 SBC Intensity": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
+    "B7 All-in Dilution": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "C1 Corporate Overhead": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "C2 R&D / Exploration Proxy": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "C4 Overhead Ratio": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
+    "C5 VCE Proxy": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
+    "D1 Net Cash / Net Debt": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "D4 Current Ratio": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
+    "E2 Runway Risk Bands": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
+    "E5 Survival Score (0–10 composite)": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
+  };
+
+  const resolveUnitMeta = (title: string): ChartUnitMeta => unitMetaByTitle[title] ?? {
+    unitLabel: statementCurrency,
+    unitKind: "money",
+    yAxisTitle: statementCurrency,
+  };
+
+  const ReportedChart = (props: ComponentProps<typeof ChartCard>) => {
+    const meta = resolveUnitMeta(props.title);
+    const source: CurrencySource = meta.unitLabel.includes("shares") || meta.unitLabel === "%" || meta.unitLabel === "months" || meta.unitLabel === "x" || meta.unitLabel === "index"
+      ? "unknown"
+      : meta.unitLabel.includes(marketCurrency) && !meta.unitLabel.includes(statementCurrency)
+        ? "market"
+        : "statements";
+    const infoSections = withUnitMetadata(props.infoSections, meta.unitLabel, source, mixedCurrencyNote);
+    return (
+      <ChartCard
+        {...props}
+        infoSections={infoSections}
+        unitLabel={props.unitLabel ?? meta.unitLabel}
+        unitKind={props.unitKind ?? meta.unitKind}
+        yAxisTitle={props.yAxisTitle ?? meta.yAxisTitle}
+        y2AxisTitle={props.y2AxisTitle ?? meta.y2AxisTitle}
+      />
+    );
+  };
+
   return (
     <div className="single-stock-dashboard">
       <div className="stock-selector">
@@ -1382,7 +1500,7 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="LineChart"
           title="Aktieprishistoria"
@@ -1390,7 +1508,7 @@ export default function SingleStockDashboard() {
           height={260}
           options={priceChartOptions}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="LineChart"
           title="Aktieprishistoria (kort)"
@@ -1398,7 +1516,7 @@ export default function SingleStockDashboard() {
           height={260}
           options={priceChartOptions}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Volume"
@@ -1406,7 +1524,7 @@ export default function SingleStockDashboard() {
           height={200}
           options={volumeChartOptions}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Volume (kort)"
@@ -1437,6 +1555,12 @@ export default function SingleStockDashboard() {
           <button type="button" onClick={() => setPrimaryView("projects")} disabled={primaryView === "projects"}>Projects</button>
         </div>
       </div>
+
+      {primaryView === "reported" && mixedCurrency && (
+        <div className="breadcontainersinglecolumn">
+          <p className="status" style={{ color: "#7a4f01" }}>⚠ Mixed currencies: Statements in {statementCurrency}, Market data in {marketCurrency}. No FX normalization applied yet.</p>
+        </div>
+      )}
 
       {analysisMode === "revenue" && primaryView === "reported" && (
         <>
@@ -1649,21 +1773,21 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Revenue"
           data={revenueData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Revenue Growth"
           data={revenueGrowthData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Gross Profit Ratio"
@@ -1675,7 +1799,7 @@ export default function SingleStockDashboard() {
           data={grossProfitRatioData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="EBITDA Margin"
@@ -1687,7 +1811,7 @@ export default function SingleStockDashboard() {
           data={ebitdaMarginData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Net Income Margin"
@@ -1699,21 +1823,21 @@ export default function SingleStockDashboard() {
           data={netIncomeMarginData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Operating Cash Flow"
           data={cashFromOperationsData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Cash From Investing"
           data={cashFromInvestingData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Free Cash Flow"
@@ -1725,14 +1849,14 @@ export default function SingleStockDashboard() {
           data={freeCashFlowData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Free Cash Flow/Share"
           data={freeCashFlowPerShareData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Total Equity"
@@ -1744,7 +1868,7 @@ export default function SingleStockDashboard() {
           data={equityData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="ROE"
@@ -1770,54 +1894,54 @@ export default function SingleStockDashboard() {
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">A) Survival Engine</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={buildSeriesData(buildSeries(data, [{ label: "Cash Balance", statement: "balance", field: "cashAndCashEquivalents" }]), 15)} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A2 Operating Cash Flow" id="A2 Operating Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A2 Operating Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashFromOperationsData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A3 Free Cash Flow" id="A3 Free Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A3 Free Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={freeCashFlowData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A4 Burn Rate TTM" id="A4 Burn Rate TTM" infoSections={PRE_REVENUE_CORE_INFO["A4 Burn Rate TTM"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnRateTtmData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A5 Runway Months" id="A5 Runway Months" infoSections={PRE_REVENUE_CORE_INFO["A5 Runway Months"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayMonthsData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={lineBehindBars} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A7 Cash Bridge / Waterfall" id="A7 Cash Bridge / Waterfall" infoSections={PRE_REVENUE_CORE_INFO["A7 Cash Bridge / Waterfall"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBridgeData} options={lineBehindBars} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A8 Next-12M Survival Gauge" id="A8 Next-12M Survival Gauge" infoSections={PRE_REVENUE_CORE_INFO["A8 Next-12M Survival Gauge"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={next12mSurvivalData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={buildSeriesData(buildSeries(data, [{ label: "Cash Balance", statement: "balance", field: "cashAndCashEquivalents" }]), 15)} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A2 Operating Cash Flow" id="A2 Operating Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A2 Operating Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashFromOperationsData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A3 Free Cash Flow" id="A3 Free Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A3 Free Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={freeCashFlowData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A4 Burn Rate TTM" id="A4 Burn Rate TTM" infoSections={PRE_REVENUE_CORE_INFO["A4 Burn Rate TTM"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnRateTtmData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A5 Runway Months" id="A5 Runway Months" infoSections={PRE_REVENUE_CORE_INFO["A5 Runway Months"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayMonthsData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={lineBehindBars} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A7 Cash Bridge / Waterfall" id="A7 Cash Bridge / Waterfall" infoSections={PRE_REVENUE_CORE_INFO["A7 Cash Bridge / Waterfall"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBridgeData} options={lineBehindBars} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A8 Next-12M Survival Gauge" id="A8 Next-12M Survival Gauge" infoSections={PRE_REVENUE_CORE_INFO["A8 Next-12M Survival Gauge"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={next12mSurvivalData} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">B) Dilution & Shareholder Cost</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B1 Shares Outstanding" id="B1 Shares Outstanding" infoSections={PRE_REVENUE_CORE_INFO["B1 Shares Outstanding"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sharesOutstandingData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B2 Dilution Rate YoY" id="B2 Dilution Rate YoY" infoSections={PRE_REVENUE_CORE_INFO["B2 Dilution Rate YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionRateData} options={{ vAxis: { format: "percent" } }} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B3 Cash per Share" id="B3 Cash per Share" infoSections={PRE_REVENUE_CORE_INFO["B3 Cash per Share"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashPerShareData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B4 Market Cap vs Shares" id="B4 Market Cap vs Shares" infoSections={PRE_REVENUE_CORE_INFO["B4 Market Cap vs Shares"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={marketCapVsSharesData} options={lineBehindBars} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B5 SBC" id="B5 SBC" infoSections={PRE_REVENUE_CORE_INFO["B5 SBC"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B6 SBC Intensity" id="B6 SBC Intensity" infoSections={PRE_REVENUE_CORE_INFO["B6 SBC Intensity"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcIntensityData} options={lineBehindBars} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B7 All-in Dilution" id="B7 All-in Dilution" infoSections={PRE_REVENUE_CORE_INFO["B7 All-in Dilution"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={allInDilutionData} options={lineBehindBars} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B1 Shares Outstanding" id="B1 Shares Outstanding" infoSections={PRE_REVENUE_CORE_INFO["B1 Shares Outstanding"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sharesOutstandingData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B2 Dilution Rate YoY" id="B2 Dilution Rate YoY" infoSections={PRE_REVENUE_CORE_INFO["B2 Dilution Rate YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionRateData} options={{ vAxis: { format: "#,##0.##'%'" } }} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B3 Cash per Share" id="B3 Cash per Share" infoSections={PRE_REVENUE_CORE_INFO["B3 Cash per Share"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashPerShareData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B4 Market Cap vs Shares" id="B4 Market Cap vs Shares" infoSections={PRE_REVENUE_CORE_INFO["B4 Market Cap vs Shares"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={marketCapVsSharesData} options={{ seriesType: "bars", series: { 0: { type: "bars", targetAxisIndex: 0 }, 1: { type: "line", targetAxisIndex: 1, lineWidth: 2 } }, vAxes: { 0: { title: marketCurrency, format: "#,##0" }, 1: { title: "shares", format: "#,##0" } } }} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B5 SBC" id="B5 SBC" infoSections={PRE_REVENUE_CORE_INFO["B5 SBC"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B6 SBC Intensity" id="B6 SBC Intensity" infoSections={PRE_REVENUE_CORE_INFO["B6 SBC Intensity"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcIntensityData} options={{ ...lineBehindBars, vAxis: { format: "#,##0.##'%'" } }} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B7 All-in Dilution" id="B7 All-in Dilution" infoSections={PRE_REVENUE_CORE_INFO["B7 All-in Dilution"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={allInDilutionData} options={lineBehindBars} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">C) Corporate Discipline</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C1 Corporate Overhead" id="C1 Corporate Overhead" infoSections={PRE_REVENUE_CORE_INFO["C1 Corporate Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={corporateOverheadData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C2 R&D / Exploration Proxy" id="C2 R&D / Exploration Proxy" infoSections={PRE_REVENUE_CORE_INFO["C2 R&D / Exploration Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={rndProxyData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C3 Spend Mix" id="C3 Spend Mix" infoSections={PRE_REVENUE_CORE_INFO["C3 Spend Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={spendMixData} options={lineBehindBars} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C4 Overhead Ratio" id="C4 Overhead Ratio" infoSections={PRE_REVENUE_CORE_INFO["C4 Overhead Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={overheadRatioData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C5 VCE Proxy" id="C5 VCE Proxy" infoSections={PRE_REVENUE_CORE_INFO["C5 VCE Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceProxyData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C6 VCE vs Overhead" id="C6 VCE vs Overhead" infoSections={PRE_REVENUE_CORE_INFO["C6 VCE vs Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceVsOverheadData} options={lineBehindBars} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C1 Corporate Overhead" id="C1 Corporate Overhead" infoSections={PRE_REVENUE_CORE_INFO["C1 Corporate Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={corporateOverheadData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C2 R&D / Exploration Proxy" id="C2 R&D / Exploration Proxy" infoSections={PRE_REVENUE_CORE_INFO["C2 R&D / Exploration Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={rndProxyData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C3 Spend Mix" id="C3 Spend Mix" infoSections={PRE_REVENUE_CORE_INFO["C3 Spend Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={spendMixData} options={lineBehindBars} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C4 Overhead Ratio" id="C4 Overhead Ratio" infoSections={PRE_REVENUE_CORE_INFO["C4 Overhead Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={overheadRatioData} options={{ vAxis: { format: "#,##0.##'%'" } }} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C5 VCE Proxy" id="C5 VCE Proxy" infoSections={PRE_REVENUE_CORE_INFO["C5 VCE Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceProxyData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C6 VCE vs Overhead" id="C6 VCE vs Overhead" infoSections={PRE_REVENUE_CORE_INFO["C6 VCE vs Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceVsOverheadData} options={lineBehindBars} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">D) Financing Structure & Stress</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="D1 Net Cash / Net Debt" id="D1 Net Cash / Net Debt" infoSections={PRE_REVENUE_CORE_INFO["D1 Net Cash / Net Debt"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={netCashDebtData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D2 Debt Maturity Mix" id="D2 Debt Maturity Mix" infoSections={PRE_REVENUE_CORE_INFO["D2 Debt Maturity Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={debtMaturityMixData} options={lineBehindBars} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D3 Cash vs Short-Term Obligations" id="D3 Cash vs Short-Term Obligations" infoSections={PRE_REVENUE_CORE_INFO["D3 Cash vs Short-Term Obligations"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashVsObligationsData} options={lineBehindBars} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D4 Current Ratio" id="D4 Current Ratio" infoSections={PRE_REVENUE_CORE_INFO["D4 Current Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={currentRatioData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D5 Financing Inflows" id="D5 Financing Inflows" infoSections={PRE_REVENUE_CORE_INFO["D5 Financing Inflows"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingInflowsData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D6 Financing Frequency" id="D6 Financing Frequency" infoSections={PRE_REVENUE_CORE_INFO["D6 Financing Frequency"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingFrequencyData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="D1 Net Cash / Net Debt" id="D1 Net Cash / Net Debt" infoSections={PRE_REVENUE_CORE_INFO["D1 Net Cash / Net Debt"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={netCashDebtData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D2 Debt Maturity Mix" id="D2 Debt Maturity Mix" infoSections={PRE_REVENUE_CORE_INFO["D2 Debt Maturity Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={debtMaturityMixData} options={lineBehindBars} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D3 Cash vs Short-Term Obligations" id="D3 Cash vs Short-Term Obligations" infoSections={PRE_REVENUE_CORE_INFO["D3 Cash vs Short-Term Obligations"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashVsObligationsData} options={lineBehindBars} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D4 Current Ratio" id="D4 Current Ratio" infoSections={PRE_REVENUE_CORE_INFO["D4 Current Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={currentRatioData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D5 Financing Inflows" id="D5 Financing Inflows" infoSections={PRE_REVENUE_CORE_INFO["D5 Financing Inflows"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingInflowsData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D6 Financing Frequency" id="D6 Financing Frequency" infoSections={PRE_REVENUE_CORE_INFO["D6 Financing Frequency"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingFrequencyData} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">E) Risk Signals & Scoreboard</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E1 Burn Acceleration YoY" id="E1 Burn Acceleration YoY" infoSections={PRE_REVENUE_CORE_INFO["E1 Burn Acceleration YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnAccelerationData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E2 Runway Risk Bands" id="E2 Runway Risk Bands" infoSections={PRE_REVENUE_CORE_INFO["E2 Runway Risk Bands"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayRiskBandsData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="E3 Dilution vs Runway" id="E3 Dilution vs Runway" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={lineBehindBars} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E4 Governance Leak Index" id="E4 Governance Leak Index" infoSections={PRE_REVENUE_CORE_INFO["E4 Governance Leak Index"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={governanceLeakIndexData} />
-            <ChartCard fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalScoreData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E1 Burn Acceleration YoY" id="E1 Burn Acceleration YoY" infoSections={PRE_REVENUE_CORE_INFO["E1 Burn Acceleration YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnAccelerationData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E2 Runway Risk Bands" id="E2 Runway Risk Bands" infoSections={PRE_REVENUE_CORE_INFO["E2 Runway Risk Bands"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayRiskBandsData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="E3 Dilution vs Runway" id="E3 Dilution vs Runway" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={lineBehindBars} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E4 Governance Leak Index" id="E4 Governance Leak Index" infoSections={PRE_REVENUE_CORE_INFO["E4 Governance Leak Index"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={governanceLeakIndexData} />
+            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalScoreData} />
           </div>
         </>
       )}
@@ -1838,28 +1962,28 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Revenue vs Cost of Revenue"
           data={revenueVsCostData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Gross Profit vs Expenses"
           data={grossProfitVsExpensesData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Operating Profit vs Depreciation"
           data={operatingProfitVsDepData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="EBIT vs Interest"
@@ -1871,14 +1995,14 @@ export default function SingleStockDashboard() {
           data={ebitVsInterestData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Net Earnings"
           data={netEarningsData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Revenue vs Net Earnings per Share"
@@ -1892,7 +2016,7 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Cash vs Net Earnings"
@@ -1904,60 +2028,60 @@ export default function SingleStockDashboard() {
           data={cashVsNetEarningsData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Cash vs Short Term Debt"
           data={cashVsShortTermDebtData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Net Earnings vs Inventory"
           data={inventoryVsNetEarningsData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="PPE vs Depreciation"
           data={ppeVsDepData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Goodwill"
           data={goodwillData}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Short Term vs Long Term Debt"
           data={debtMixData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="EBITDA vs Long Term Debt"
           data={ebitdaVsLongTermDebtData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Current Ratio"
           data={currentRatioData}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Long Term Debt to Net Earnings"
           data={longTermDebtToNetEarningsData}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Debt to Equity"
@@ -1969,14 +2093,14 @@ export default function SingleStockDashboard() {
           data={debtToEquityData}
           options={{ vAxis: { format: "percent" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Adjusted Debt to Equity"
           data={adjustedDebtToEquityData}
           options={{ vAxis: { format: "percent" } }}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Retained Earnings vs Net Income"
@@ -1988,7 +2112,7 @@ export default function SingleStockDashboard() {
           data={retainedEarningsData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="ROE"
@@ -2002,7 +2126,7 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Capital Expenditure vs Net Earnings"
@@ -2014,7 +2138,7 @@ export default function SingleStockDashboard() {
           data={capexVsNetEarningsData}
           options={lineBehindBars}
         />
-        <ChartCard
+        <ReportedChart
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Buybacks + Dividends vs Net Earnings"

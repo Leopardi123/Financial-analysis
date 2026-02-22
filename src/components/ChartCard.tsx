@@ -15,6 +15,10 @@ type ChartCardProps = {
   openInfoId?: string | null;
   onToggleInfo?: (id: string) => void;
   onCloseInfo?: () => void;
+  unitLabel?: string;
+  unitKind?: "money" | "percent" | "months" | "ratio" | "shares" | "index" | "unknown";
+  yAxisTitle?: string;
+  y2AxisTitle?: string;
 };
 
 const DEFAULT_OPTIONS = {
@@ -137,14 +141,22 @@ export default function ChartCard({
   openInfoId,
   onToggleInfo,
   onCloseInfo,
+  unitLabel,
+  unitKind,
+  yAxisTitle,
+  y2AxisTitle,
 }: ChartCardProps) {
   const chartId = id ?? title;
   const hasInfo = Boolean(infoSections?.length && onToggleInfo && onCloseInfo);
 
+  const optionVAxis = (options.vAxis as Record<string, unknown> | undefined) ?? {};
+  const resolvedUnitLabel = unitLabel ?? (typeof optionVAxis.title === "string" && optionVAxis.title.trim() ? optionVAxis.title : "unknown");
+  const hasUnknownUnit = resolvedUnitLabel === "unknown" || unitKind === "unknown";
+
   if (!data) {
     return (
       <div className="chart-card chart-empty">
-        <div className="chart-title">{title}</div>
+        <div className="chart-title">{title} <span style={{ fontSize: "10px" }}>({resolvedUnitLabel})</span></div>
         <div className="chart-placeholder">No data yet.</div>
       </div>
     );
@@ -152,12 +164,17 @@ export default function ChartCard({
 
   const normalized = normalizeChartData(data, fiscalYearEndMonth);
   const optionHAxis = (options.hAxis as Record<string, unknown> | undefined) ?? {};
+  const optionVAxes = (options.vAxes as Record<string, unknown> | undefined) ?? undefined;
 
   return (
     <div className="chart-card">
-      {hasInfo && (
-        <div className="producer-core-title-row" style={{ marginBottom: "4px" }}>
+      <div className="producer-core-title-row" style={{ marginBottom: "4px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
           <div className="chart-title" style={{ marginBottom: 0 }}>{title}</div>
+          <span style={{ fontSize: "10px", padding: "2px 6px", border: "1px solid rgba(0,0,0,0.35)", borderRadius: "10px", background: "#f3f6e9" }}>{resolvedUnitLabel}</span>
+          {hasUnknownUnit && <span style={{ fontSize: "10px", color: "#7a4f01" }}>⚠</span>}
+        </div>
+        {hasInfo && (
           <InfoPopover
             id={chartId}
             openId={openInfoId ?? null}
@@ -166,8 +183,8 @@ export default function ChartCard({
             title={title}
             sections={infoSections}
           />
-        </div>
-      )}
+        )}
+      </div>
       <Chart
         chartType={chartType}
         data={normalized.data}
@@ -176,8 +193,13 @@ export default function ChartCard({
         options={{
           ...DEFAULT_OPTIONS,
           ...options,
-          title: hasInfo ? undefined : title,
+          title: undefined,
           tooltip: { trigger: "focus" },
+          vAxis: {
+            ...optionVAxis,
+            title: (optionVAxis.title as string | undefined) ?? yAxisTitle ?? resolvedUnitLabel,
+          },
+          ...(optionVAxes ? { vAxes: optionVAxes } : y2AxisTitle ? { vAxes: { 0: { title: yAxisTitle ?? resolvedUnitLabel }, 1: { title: y2AxisTitle } } } : {}),
           hAxis: {
             ...DEFAULT_OPTIONS.hAxis,
             ...optionHAxis,
