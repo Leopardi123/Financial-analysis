@@ -656,6 +656,7 @@ export default function SingleStockDashboard() {
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const previousModeRef = useRef<AnalysisMode>(analysisMode);
+  const latestModeRef = useRef<AnalysisMode>(analysisMode);
   const [primaryView, setPrimaryView] = useState<PrimaryView>(() => readPrimaryViewFromUrl());
   const keepChartsAlive = keepChartsAliveFromUrl();
   const companyType = analysisMode === "prerevenue" ? "Pre-Revenue" : "Revenue";
@@ -670,6 +671,20 @@ export default function SingleStockDashboard() {
     || "unknown";
   const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const [rrDiscountRateInput, setRrDiscountRateInput] = useState<string>("");
+
+  useEffect(() => {
+    latestModeRef.current = analysisMode;
+  }, [analysisMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const debugCharts = new URLSearchParams(window.location.search).get("debugCharts") === "1";
+    if (!debugCharts) return;
+    console.log(`[PARENT_MOUNT] id=SingleStockDashboard mode=${analysisMode}`);
+    return () => {
+      console.log(`[PARENT_UNMOUNT] id=SingleStockDashboard mode=${latestModeRef.current}`);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
