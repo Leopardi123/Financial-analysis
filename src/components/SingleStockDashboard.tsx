@@ -1340,9 +1340,16 @@ export default function SingleStockDashboard() {
       () => withUnitMetadata(props.infoSections, meta.unitLabel, source, mixedCurrencyNote),
       [props.infoSections, meta.unitLabel, source, mixedCurrencyNote],
     );
+    const dataSignature = useMemo(() => JSON.stringify(props.data), [props.data]);
+    const optionsSignature = useMemo(() => JSON.stringify(props.options ?? {}), [props.options]);
+    const stableData = useMemo(() => props.data, [dataSignature]);
+    const stableOptions = useMemo(() => props.options, [optionsSignature]);
+
     return (
       <ChartCard
         {...props}
+        data={stableData}
+        options={stableOptions}
         infoIsOpen={openInfoId === (props.id ?? props.title)}
         onToggleInfo={handleToggleInfo}
         onCloseInfo={handleCloseInfo}
