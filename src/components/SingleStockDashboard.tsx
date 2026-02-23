@@ -780,15 +780,6 @@ export default function SingleStockDashboard() {
   }, [analysisMode, primaryView]);
 
   useEffect(() => {
-    if (primaryView !== "reported" || typeof window === "undefined") {
-      return;
-    }
-    const handle = window.setTimeout(() => {
-      window.dispatchEvent(new Event("resize"));
-    }, 0);
-    return () => window.clearTimeout(handle);
-  }, [analysisMode, primaryView]);
-  useEffect(() => {
     let isMounted = true;
     async function loadProfile() {
       try {
@@ -1380,6 +1371,9 @@ export default function SingleStockDashboard() {
     setOpenInfoId(null);
   }, []);
 
+  const activeModeSectionStyle = { visibility: "visible", position: "static", pointerEvents: "auto", width: "100%" } as const;
+  const inactiveModeSectionStyle = { visibility: "hidden", position: "absolute", left: 0, top: 0, pointerEvents: "none", width: "100%" } as const;
+
   return (
     <div className="single-stock-dashboard">
       <div className="stock-selector">
@@ -1595,7 +1589,7 @@ export default function SingleStockDashboard() {
       )}
 
       {primaryView === "reported" && (
-        <div hidden={analysisMode !== "revenue"}>
+        <div style={analysisMode === "revenue" ? activeModeSectionStyle : inactiveModeSectionStyle}>
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">Producer Core (PVE v2)</h1>
             <p className="bread">Efficiency, Resilience, Value och Context snapshots för MAJOR/revenue-mode.</p>
@@ -1900,7 +1894,7 @@ export default function SingleStockDashboard() {
       )}
 
       {primaryView === "reported" && (
-        <div hidden={analysisMode !== "prerevenue"}>
+        <div style={analysisMode === "prerevenue" ? activeModeSectionStyle : inactiveModeSectionStyle}>
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">Corporate Pre-Revenue Core Engine</h1>
             <p className="bread">Graph-first corporate survival, dilution and discipline dashboard. Buffet charts are intentionally hidden for Pre-Revenue.</p>
@@ -1961,7 +1955,7 @@ export default function SingleStockDashboard() {
       )}
 
 {primaryView === "reported" && (
-      <div hidden={analysisMode !== "revenue"}>
+      <div style={analysisMode === "revenue" ? activeModeSectionStyle : inactiveModeSectionStyle}>
       <div className="breadcontainersinglecolumn">
         <h1 className="subrub">Buffetologisk Analytik</h1>
         <p className="bread">
