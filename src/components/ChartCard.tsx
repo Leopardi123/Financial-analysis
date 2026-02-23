@@ -22,9 +22,12 @@ type ChartCardProps = {
   y2AxisTitle?: string;
 };
 
-const DEBUG_INFO_CLICK = false;
-const DEBUG_DRAW = false;
 const EMPTY_OPTIONS: Record<string, unknown> = {};
+
+function debugChartsOn(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("debugCharts") === "1";
+}
 
 const DEFAULT_OPTIONS = {
   backgroundColor: "#e0e9ce",
@@ -71,40 +74,28 @@ function buildOptionSignature(chartType: ChartCardProps["chartType"], options: R
 
 const ChartBody = memo(function ChartBody({ id, chartType, data, height, options }: ChartBodyProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const prevDataRef = useRef<ChartDataCell[][] | null>(null);
-  const prevOptionsRef = useRef<Record<string, unknown> | null>(null);
+  const previousSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const DEBUG = debugChartsOn();
   const dataSig = useMemo(() => buildDataSignature(data), [data]);
   const optSig = useMemo(() => buildOptionSignature(chartType, options), [chartType, options]);
 
-  if (DEBUG_DRAW) {
-    const width = wrapperRef.current?.clientWidth ?? 0;
-    console.log(`[ChartRender] id=${id} dataRefChanged=${prevDataRef.current === data ? "n" : "y"} optionsRefChanged=${prevOptionsRef.current === options ? "n" : "y"} width=${width} height=${height}`);
-  }
-
   useEffect(() => {
-    if (!DEBUG_DRAW || !wrapperRef.current || typeof ResizeObserver === "undefined") {
+    if (!DEBUG || !wrapperRef.current || typeof ResizeObserver === "undefined") {
       return;
     }
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      console.log(`[ChartDraw] id=${id} reason=resize-observer dataSig=${dataSig} optSig=${optSig} size=${Math.round(entry.contentRect.width)}x${Math.round(entry.contentRect.height)}`);
+      const width = Math.round(entry.contentRect.width);
+      const heightSize = Math.round(entry.contentRect.height);
+      const previousSize = previousSizeRef.current;
+      const changed = previousSize ? previousSize.width !== width || previousSize.height !== heightSize : true;
+      previousSizeRef.current = { width, height: heightSize };
+      console.log(`[ChartRO] id=${id} w=${width} h=${heightSize} changed=${changed}`);
     });
     observer.observe(wrapperRef.current);
     return () => observer.disconnect();
-  }, [id, dataSig, optSig]);
-
-  useEffect(() => {
-    if (!DEBUG_DRAW) return;
-    const onResize = () => {
-      console.log(`[ChartDraw] id=${id} reason=window-resize dataSig=${dataSig} optSig=${optSig}`);
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [id, dataSig, optSig]);
-
-  prevDataRef.current = data;
-  prevOptionsRef.current = options;
+  }, [DEBUG, id]);
 
   return (
     <div ref={wrapperRef}>
@@ -114,10 +105,10 @@ const ChartBody = memo(function ChartBody({ id, chartType, data, height, options
         width="100%"
         height={`${height}px`}
         options={options}
-        chartEvents={DEBUG_DRAW ? [{
+        chartEvents={DEBUG ? [{
           eventName: "ready",
           callback: () => {
-            console.log(`[ChartDraw] id=${id} reason=chart-ready dataSig=${dataSig} optSig=${optSig}`);
+            console.log(`[ChartDraw] id=${id} dataSig=${dataSig} optSig=${optSig}`);
           },
         }] : undefined}
       />
@@ -231,20 +222,11 @@ function ChartCard({
   yAxisTitle,
   y2AxisTitle,
 }: ChartCardProps) {
+  const DEBUG = debugChartsOn();
   const chartId = id ?? title;
   const options = optionsProp ?? EMPTY_OPTIONS;
   const previousDataRef = useRef<(string | number | Date | null)[][] | null | undefined>(undefined);
   const previousOptionsRef = useRef<Record<string, unknown> | undefined>(undefined);
-  const chartKey = "none";
-
-  if (DEBUG_INFO_CLICK && infoSections?.length) {
-    console.log(
-      `[CC] id=${chartId} infoIsOpen=${String(infoIsOpen)} dataRefChanged=${previousDataRef.current === data ? "no" : "yes"} optionsRefChanged=${previousOptionsRef.current === options ? "no" : "yes"} chartKey=${chartKey}`,
-    );
-  }
-
-  previousDataRef.current = data;
-  previousOptionsRef.current = options;
 
   const hasInfo = Boolean(infoSections?.length && onToggleInfo && onCloseInfo);
 
@@ -264,6 +246,20 @@ function ChartCard({
   const normalized = useMemo(() => normalizeChartData(data, fiscalYearEndMonth), [data, fiscalYearEndMonth]);
   const optionHAxis = (options.hAxis as Record<string, unknown> | undefined) ?? EMPTY_OPTIONS;
   const optionVAxes = (options.vAxes as Record<string, unknown> | undefined) ?? undefined;
+
+  if (DEBUG) {
+    const headerTypes = normalized.data[0]?.map((item) => (typeof item === "object" ? "obj" : typeof item)).join(",") ?? "none";
+    const rowCount = Math.max(0, normalized.data.length - 1);
+    const lastX = rowCount > 0 ? normalized.data[normalized.data.length - 1]?.[0] : "none";
+    const vAxisTitle = typeof optionVAxis.title === "string" ? optionVAxis.title : "";
+    const seriesCount = Object.keys(((options.series as Record<string, unknown> | undefined) ?? EMPTY_OPTIONS)).length;
+    const dataSig = `${headerTypes}|rows:${rowCount}|xlast:${String(lastX)}`;
+    const optSig = `${chartType}|vAxis:${vAxisTitle}|series:${seriesCount}`;
+    console.log(`[ChartRender] id=${chartId} dataRef=${previousDataRef.current !== data ? "NEW" : "SAME"} optRef=${previousOptionsRef.current !== options ? "NEW" : "SAME"} dataSig=${dataSig} optSig=${optSig}`);
+  }
+  previousDataRef.current = data;
+  previousOptionsRef.current = options;
+
   const chartOptions = useMemo(
     () => ({
       ...DEFAULT_OPTIONS,
