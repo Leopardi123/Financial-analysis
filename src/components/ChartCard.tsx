@@ -1,4 +1,4 @@
-import { memo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import { Chart } from "react-google-charts";
 import InfoPopover from "./InfoPopover";
 
@@ -23,6 +23,7 @@ type ChartCardProps = {
 };
 
 const DEBUG_INFO_CLICK = false;
+const DEBUG_CHARTBODY_RENDER = false;
 
 const DEFAULT_OPTIONS = {
   backgroundColor: "#e0e9ce",
@@ -42,6 +43,28 @@ const DEFAULT_OPTIONS = {
 };
 
 type Tick = { v: Date; f: string };
+
+type ChartBodyProps = {
+  chartType: ChartCardProps["chartType"];
+  data: ChartDataCell[][];
+  height: number;
+  options: Record<string, unknown>;
+};
+
+const ChartBody = memo(function ChartBody({ chartType, data, height, options }: ChartBodyProps) {
+  if (DEBUG_CHARTBODY_RENDER) {
+    console.log(`[ChartBody] render type=${chartType} height=${height}`);
+  }
+  return (
+    <Chart
+      chartType={chartType}
+      data={data}
+      width="100%"
+      height={`${height}px`}
+      options={options}
+    />
+  );
+});
 
 function toUtcDateParts(value: Date) {
   return {
@@ -181,6 +204,26 @@ function ChartCard({
   const normalized = normalizeChartData(data, fiscalYearEndMonth);
   const optionHAxis = (options.hAxis as Record<string, unknown> | undefined) ?? {};
   const optionVAxes = (options.vAxes as Record<string, unknown> | undefined) ?? undefined;
+  const chartOptions = useMemo(
+    () => ({
+      ...DEFAULT_OPTIONS,
+      ...options,
+      title: undefined,
+      tooltip: { trigger: "focus" },
+      vAxis: {
+        ...optionVAxis,
+        title: (optionVAxis.title as string | undefined) ?? yAxisTitle ?? resolvedUnitLabel,
+      },
+      ...(optionVAxes ? { vAxes: optionVAxes } : y2AxisTitle ? { vAxes: { 0: { title: yAxisTitle ?? resolvedUnitLabel }, 1: { title: y2AxisTitle } } } : {}),
+      hAxis: {
+        ...DEFAULT_OPTIONS.hAxis,
+        ...optionHAxis,
+        ticks: normalized.ticks,
+        format: undefined,
+      },
+    }),
+    [normalized.ticks, optionHAxis, optionVAxes, optionVAxis, options, resolvedUnitLabel, y2AxisTitle, yAxisTitle],
+  );
 
   return (
     <div className="chart-card">
@@ -201,35 +244,7 @@ function ChartCard({
           />
         )}
       </div>
-      <Chart
-        chartType={chartType}
-        data={normalized.data}
-        width="100%"
-        height={`${height}px`}
-        options={{
-          ...DEFAULT_OPTIONS,
-          ...options,
-          title: undefined,
-          tooltip: { trigger: "focus" },
-          vAxis: {
-            ...optionVAxis,
-            title: (optionVAxis.title as string | undefined) ?? yAxisTitle ?? resolvedUnitLabel,
-          },
-          ...(optionVAxes ? { vAxes: optionVAxes } : y2AxisTitle ? { vAxes: { 0: { title: yAxisTitle ?? resolvedUnitLabel }, 1: { title: y2AxisTitle } } } : {}),
-          hAxis: {
-            ...DEFAULT_OPTIONS.hAxis,
-            ...optionHAxis,
-            ticks: normalized.ticks,
-            format: undefined,
-          },
-        }}
-        chartEvents={DEBUG_INFO_CLICK ? [{
-          eventName: "ready",
-          callback: () => {
-            console.log(`[CC] draw id=${chartId} chartKey=${chartKey}`);
-          },
-        }] : undefined}
-      />
+      <ChartBody chartType={chartType} data={normalized.data as ChartDataCell[][]} height={height} options={chartOptions} />
     </div>
   );
 }
