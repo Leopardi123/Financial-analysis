@@ -75,11 +75,19 @@ function buildOptionSignature(chartType: ChartCardProps["chartType"], options: R
 const ChartBody = memo(function ChartBody({ id, chartType, data, height, options }: ChartBodyProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const previousSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const lastNonZeroSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const zeroHeightFramesRef = useRef(0);
   const mountedRef = useRef(true);
   const rafRef = useRef<number | null>(null);
+  const renderCountRef = useRef(0);
   const DEBUG = debugChartsOn();
   const dataSig = useMemo(() => buildDataSignature(data), [data]);
   const optSig = useMemo(() => buildOptionSignature(chartType, options), [chartType, options]);
+
+  renderCountRef.current += 1;
+  if (DEBUG) {
+    console.log(`[ChartBodyRender] id=${id} count=${renderCountRef.current} dataSig=${dataSig} optSig=${optSig}`);
+  }
 
   useEffect(() => {
     mountedRef.current = true;
@@ -108,10 +116,21 @@ const ChartBody = memo(function ChartBody({ id, chartType, data, height, options
         }
         const width = Math.round(entry.contentRect.width);
         const heightSize = Math.round(entry.contentRect.height);
+        if (heightSize === 0) {
+          zeroHeightFramesRef.current += 1;
+          if (zeroHeightFramesRef.current <= 1) {
+            return;
+          }
+        } else {
+          zeroHeightFramesRef.current = 0;
+        }
         const previousSize = previousSizeRef.current;
         const changed = previousSize ? previousSize.width !== width || previousSize.height !== heightSize : true;
         if (changed) {
           previousSizeRef.current = { width, height: heightSize };
+          if (heightSize > 0) {
+            lastNonZeroSizeRef.current = { width, height: heightSize };
+          }
           console.log(`[ChartRO] id=${id} w=${width} h=${heightSize} changed=true`);
         }
       });
@@ -127,7 +146,7 @@ const ChartBody = memo(function ChartBody({ id, chartType, data, height, options
   }, [DEBUG, id]);
 
   return (
-    <div ref={wrapperRef}>
+    <div ref={wrapperRef} style={{ minHeight: `${height}px`, flex: "0 0 auto" }}>
       <Chart
         chartType={chartType}
         data={data}
@@ -310,6 +329,22 @@ function ChartCard({
     [normalized.ticks, optionHAxis, optionVAxes, optionVAxis, options, resolvedUnitLabel, y2AxisTitle, yAxisTitle],
   );
 
+  const stableDataSigRef = useRef<string | null>(null);
+  const stableOptionsSigRef = useRef<string | null>(null);
+  const stableChartDataRef = useRef<ChartDataCell[][] | null>(null);
+  const stableChartOptionsRef = useRef<Record<string, unknown> | null>(null);
+  const chartDataSig = `${normalized.data[0]?.length ?? 0}|${normalized.data.length}|${String(normalized.data[normalized.data.length - 1]?.[0] ?? "none")}`;
+  const chartOptionsSig = `${chartType}|${String((chartOptions.vAxis as Record<string, unknown> | undefined)?.title ?? "")}|${Object.keys((((chartOptions as Record<string, unknown>).series as Record<string, unknown> | undefined) ?? EMPTY_OPTIONS)).length}`;
+
+  if (stableDataSigRef.current !== chartDataSig) {
+    stableDataSigRef.current = chartDataSig;
+    stableChartDataRef.current = normalized.data as ChartDataCell[][];
+  }
+  if (stableOptionsSigRef.current !== chartOptionsSig) {
+    stableOptionsSigRef.current = chartOptionsSig;
+    stableChartOptionsRef.current = chartOptions;
+  }
+
   return (
     <div className="chart-card">
       <div className="producer-core-title-row" style={{ marginBottom: "4px" }}>
@@ -329,7 +364,7 @@ function ChartCard({
           />
         )}
       </div>
-      <ChartBody id={chartId} chartType={chartType} data={normalized.data as ChartDataCell[][]} height={height} options={chartOptions} />
+      <ChartBody id={chartId} chartType={chartType} data={(stableChartDataRef.current ?? (normalized.data as ChartDataCell[][]))} height={height} options={(stableChartOptionsRef.current ?? chartOptions)} />
     </div>
   );
 }
