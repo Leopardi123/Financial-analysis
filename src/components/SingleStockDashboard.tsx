@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import Admin from "./Admin";
 import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
@@ -116,6 +116,12 @@ function readPrimaryViewFromUrl(): PrimaryView {
   if (view === "modeled") return "modeled";
   if (view === "projects") return "projects";
   return "reported";
+}
+
+function keepChartsAliveFromUrl(): boolean {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get("keepChartsAlive") === "1";
 }
 const INFO_SECTION_HEADINGS = {
   measure: "Vad det mäter",
@@ -649,7 +655,9 @@ export default function SingleStockDashboard() {
   const [priceError, setPriceError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
+  const previousModeRef = useRef<AnalysisMode>(analysisMode);
   const [primaryView, setPrimaryView] = useState<PrimaryView>(() => readPrimaryViewFromUrl());
+  const keepChartsAlive = keepChartsAliveFromUrl();
   const companyType = analysisMode === "prerevenue" ? "Pre-Revenue" : "Revenue";
   const buildCommitSha =
     (import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA as string | undefined)
@@ -778,6 +786,16 @@ export default function SingleStockDashboard() {
     const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
     window.history.replaceState(null, "", nextUrl);
   }, [analysisMode, primaryView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const debugCharts = new URLSearchParams(window.location.search).get("debugCharts") === "1";
+    if (!debugCharts) return;
+    if (previousModeRef.current !== analysisMode) {
+      console.log(`[ModeToggle] from=${previousModeRef.current} to=${analysisMode}`);
+      previousModeRef.current = analysisMode;
+    }
+  }, [analysisMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1379,6 +1397,7 @@ export default function SingleStockDashboard() {
     return (
       <ChartCard
         {...props}
+        mode={analysisMode}
         data={stableData}
         options={stableOptions}
         infoIsOpen={openInfoId === (props.id ?? props.title)}
@@ -1923,7 +1942,7 @@ export default function SingleStockDashboard() {
         </div>
       )}
 
-      {primaryView === "reported" && (
+      {(primaryView === "reported" && (keepChartsAlive || analysisMode === "prerevenue")) && (
         <div style={analysisMode === "prerevenue" ? activeModeSectionStyle : inactiveModeSectionStyle}>
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">Corporate Pre-Revenue Core Engine</h1>
@@ -1984,7 +2003,7 @@ export default function SingleStockDashboard() {
         </div>
       )}
 
-{primaryView === "reported" && (
+{(primaryView === "reported" && (keepChartsAlive || analysisMode === "revenue")) && (
       <div style={analysisMode === "revenue" ? activeModeSectionStyle : inactiveModeSectionStyle}>
       <div className="breadcontainersinglecolumn">
         <h1 className="subrub">Buffetologisk Analytik</h1>

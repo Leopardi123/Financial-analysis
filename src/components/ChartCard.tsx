@@ -6,6 +6,7 @@ type ChartDataCell = string | number | Date | null | { type: string; role: strin
 
 type ChartCardProps = {
   id?: string;
+  mode?: string;
   title: string;
   data: (string | number | Date | null)[][] | null;
   chartType: "ColumnChart" | "ComboChart" | "AreaChart" | "LineChart";
@@ -50,6 +51,7 @@ type Tick = { v: Date; f: string };
 
 type ChartBodyProps = {
   id: string;
+  mode?: string;
   chartType: ChartCardProps["chartType"];
   data: ChartDataCell[][];
   height: number;
@@ -72,7 +74,7 @@ function buildOptionSignature(chartType: ChartCardProps["chartType"], options: R
   return `t=${chartType}|va=${String(vAxis.title ?? "")}|vas=${Object.keys(vAxes).length}|s=${Object.keys(series).length}`;
 }
 
-const ChartBody = memo(function ChartBody({ id, chartType, data, height, options }: ChartBodyProps) {
+const ChartBody = memo(function ChartBody({ id, mode, chartType, data, height, options }: ChartBodyProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const previousSizeRef = useRef<{ width: number; height: number } | null>(null);
   const lastNonZeroSizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -80,6 +82,7 @@ const ChartBody = memo(function ChartBody({ id, chartType, data, height, options
   const mountedRef = useRef(true);
   const rafRef = useRef<number | null>(null);
   const renderCountRef = useRef(0);
+  const instanceRef = useRef(Math.random().toString(16).slice(2, 8));
   const DEBUG = debugChartsOn();
   const dataSig = useMemo(() => buildDataSignature(data), [data]);
   const optSig = useMemo(() => buildOptionSignature(chartType, options), [chartType, options]);
@@ -91,14 +94,20 @@ const ChartBody = memo(function ChartBody({ id, chartType, data, height, options
 
   useEffect(() => {
     mountedRef.current = true;
+    if (DEBUG) {
+      console.log(`[ChartMount] id=${id} inst=${instanceRef.current} key=none mode=${mode ?? "unknown"}`);
+    }
     return () => {
+      if (DEBUG) {
+        console.log(`[ChartUnmount] id=${id} inst=${instanceRef.current}`);
+      }
       mountedRef.current = false;
       if (rafRef.current !== null && typeof window !== "undefined") {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
     };
-  }, []);
+  }, [DEBUG, id, mode]);
 
   useEffect(() => {
     if (!DEBUG || !wrapperRef.current || typeof ResizeObserver === "undefined") {
@@ -255,6 +264,7 @@ function normalizeChartData(
 
 function ChartCard({
   id,
+  mode,
   title,
   data,
   chartType,
@@ -364,7 +374,7 @@ function ChartCard({
           />
         )}
       </div>
-      <ChartBody id={chartId} chartType={chartType} data={(stableChartDataRef.current ?? (normalized.data as ChartDataCell[][]))} height={height} options={(stableChartOptionsRef.current ?? chartOptions)} />
+      <ChartBody id={chartId} mode={mode} chartType={chartType} data={(stableChartDataRef.current ?? (normalized.data as ChartDataCell[][]))} height={height} options={(stableChartOptionsRef.current ?? chartOptions)} />
     </div>
   );
 }
