@@ -1397,7 +1397,6 @@ export default function SingleStockDashboard() {
     return (
       <ChartCard
         {...props}
-        mode={analysisMode}
         data={stableData}
         options={stableOptions}
         infoIsOpen={openInfoId === (props.id ?? props.title)}
