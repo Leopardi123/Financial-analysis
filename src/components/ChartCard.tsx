@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { Chart } from "react-google-charts";
 import InfoPopover from "./InfoPopover";
 
@@ -23,7 +23,8 @@ type ChartCardProps = {
 };
 
 const DEBUG_INFO_CLICK = false;
-const DEBUG_CHARTBODY_RENDER = false;
+const DEBUG_DRAW = false;
+const EMPTY_OPTIONS: Record<string, unknown> = {};
 
 const DEFAULT_OPTIONS = {
   backgroundColor: "#e0e9ce",
@@ -45,24 +46,82 @@ const DEFAULT_OPTIONS = {
 type Tick = { v: Date; f: string };
 
 type ChartBodyProps = {
+  id: string;
   chartType: ChartCardProps["chartType"];
   data: ChartDataCell[][];
   height: number;
   options: Record<string, unknown>;
 };
 
-const ChartBody = memo(function ChartBody({ chartType, data, height, options }: ChartBodyProps) {
-  if (DEBUG_CHARTBODY_RENDER) {
-    console.log(`[ChartBody] render type=${chartType} height=${height}`);
+function buildDataSignature(data: ChartDataCell[][]) {
+  const header = Array.isArray(data[0]) ? data[0] : [];
+  const rows = data.length > 1 ? data.slice(1) : [];
+  const lastX = rows.length ? rows[rows.length - 1]?.[0] : null;
+  const sample = rows.length ? rows[Math.floor(rows.length / 2)] : [];
+  const sampleNumber = sample.find((value) => typeof value === "number") ?? null;
+  return `h=${header.length}|r=${rows.length}|x=${String(lastX)}|n=${String(sampleNumber)}`;
+}
+
+function buildOptionSignature(chartType: ChartCardProps["chartType"], options: Record<string, unknown>) {
+  const vAxis = (options.vAxis as Record<string, unknown> | undefined) ?? {};
+  const vAxes = (options.vAxes as Record<string, unknown> | undefined) ?? {};
+  const series = (options.series as Record<string, unknown> | undefined) ?? {};
+  return `t=${chartType}|va=${String(vAxis.title ?? "")}|vas=${Object.keys(vAxes).length}|s=${Object.keys(series).length}`;
+}
+
+const ChartBody = memo(function ChartBody({ id, chartType, data, height, options }: ChartBodyProps) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const prevDataRef = useRef<ChartDataCell[][] | null>(null);
+  const prevOptionsRef = useRef<Record<string, unknown> | null>(null);
+  const dataSig = useMemo(() => buildDataSignature(data), [data]);
+  const optSig = useMemo(() => buildOptionSignature(chartType, options), [chartType, options]);
+
+  if (DEBUG_DRAW) {
+    const width = wrapperRef.current?.clientWidth ?? 0;
+    console.log(`[ChartRender] id=${id} dataRefChanged=${prevDataRef.current === data ? "n" : "y"} optionsRefChanged=${prevOptionsRef.current === options ? "n" : "y"} width=${width} height=${height}`);
   }
+
+  useEffect(() => {
+    if (!DEBUG_DRAW || !wrapperRef.current || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      console.log(`[ChartDraw] id=${id} reason=resize-observer dataSig=${dataSig} optSig=${optSig} size=${Math.round(entry.contentRect.width)}x${Math.round(entry.contentRect.height)}`);
+    });
+    observer.observe(wrapperRef.current);
+    return () => observer.disconnect();
+  }, [id, dataSig, optSig]);
+
+  useEffect(() => {
+    if (!DEBUG_DRAW) return;
+    const onResize = () => {
+      console.log(`[ChartDraw] id=${id} reason=window-resize dataSig=${dataSig} optSig=${optSig}`);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [id, dataSig, optSig]);
+
+  prevDataRef.current = data;
+  prevOptionsRef.current = options;
+
   return (
-    <Chart
-      chartType={chartType}
-      data={data}
-      width="100%"
-      height={`${height}px`}
-      options={options}
-    />
+    <div ref={wrapperRef}>
+      <Chart
+        chartType={chartType}
+        data={data}
+        width="100%"
+        height={`${height}px`}
+        options={options}
+        chartEvents={DEBUG_DRAW ? [{
+          eventName: "ready",
+          callback: () => {
+            console.log(`[ChartDraw] id=${id} reason=chart-ready dataSig=${dataSig} optSig=${optSig}`);
+          },
+        }] : undefined}
+      />
+    </div>
   );
 });
 
@@ -161,7 +220,7 @@ function ChartCard({
   data,
   chartType,
   height = 300,
-  options = {},
+  options: optionsProp,
   fiscalYearEndMonth,
   infoSections,
   infoIsOpen = false,
@@ -173,6 +232,7 @@ function ChartCard({
   y2AxisTitle,
 }: ChartCardProps) {
   const chartId = id ?? title;
+  const options = optionsProp ?? EMPTY_OPTIONS;
   const previousDataRef = useRef<(string | number | Date | null)[][] | null | undefined>(undefined);
   const previousOptionsRef = useRef<Record<string, unknown> | undefined>(undefined);
   const chartKey = "none";
@@ -188,7 +248,7 @@ function ChartCard({
 
   const hasInfo = Boolean(infoSections?.length && onToggleInfo && onCloseInfo);
 
-  const optionVAxis = (options.vAxis as Record<string, unknown> | undefined) ?? {};
+  const optionVAxis = (options.vAxis as Record<string, unknown> | undefined) ?? EMPTY_OPTIONS;
   const resolvedUnitLabel = unitLabel ?? (typeof optionVAxis.title === "string" && optionVAxis.title.trim() ? optionVAxis.title : "unknown");
   const hasUnknownUnit = resolvedUnitLabel === "unknown" || unitKind === "unknown";
 
@@ -201,8 +261,8 @@ function ChartCard({
     );
   }
 
-  const normalized = normalizeChartData(data, fiscalYearEndMonth);
-  const optionHAxis = (options.hAxis as Record<string, unknown> | undefined) ?? {};
+  const normalized = useMemo(() => normalizeChartData(data, fiscalYearEndMonth), [data, fiscalYearEndMonth]);
+  const optionHAxis = (options.hAxis as Record<string, unknown> | undefined) ?? EMPTY_OPTIONS;
   const optionVAxes = (options.vAxes as Record<string, unknown> | undefined) ?? undefined;
   const chartOptions = useMemo(
     () => ({
@@ -244,7 +304,7 @@ function ChartCard({
           />
         )}
       </div>
-      <ChartBody chartType={chartType} data={normalized.data as ChartDataCell[][]} height={height} options={chartOptions} />
+      <ChartBody id={chartId} chartType={chartType} data={normalized.data as ChartDataCell[][]} height={height} options={chartOptions} />
     </div>
   );
 }
