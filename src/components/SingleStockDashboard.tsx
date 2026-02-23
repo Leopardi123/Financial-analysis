@@ -657,8 +657,12 @@ function ReportedChart({ reportedChartContext, ...props }: ReportedChartProps) {
   );
 }
 
-export default function SingleStockDashboard() {
-  const { ticker, data, fetchCompany } = useCompanyData("AAPL");
+type SingleStockDashboardProps = {
+  onTickerChange?: (ticker: string) => void;
+};
+
+export default function SingleStockDashboard({ onTickerChange }: SingleStockDashboardProps = {}) {
+  const { ticker, data, error, fetchCompany } = useCompanyData("AAPL");
   const [formTicker, setFormTicker] = useState("");
   const [formCategory, setFormCategory] = useState("");
   const [formSubcategory, setFormSubcategory] = useState("");
@@ -1119,7 +1123,7 @@ export default function SingleStockDashboard() {
     const netCashMM = (cash - debt) / 1_000_000;
     const cashMM = cash / 1_000_000;
     const debtMM = debt / 1_000_000;
-    return [{ v: netCashMM, f: `${netCashMM.toFixed(2)} ${statementCurrency} million\nCash: ${cashMM.toFixed(2)}\nTotal debt: ${debtMM.toFixed(2)}` } as unknown as number];
+    return [{ v: netCashMM, f: `${netCashMM.toFixed(2)} ${a1StatementCurrency} million\nCash: ${cashMM.toFixed(2)}\nTotal debt: ${debtMM.toFixed(2)}` } as unknown as number];
   }, 15);
   const debtMaturityMixData = buildDerivedSeries(["Date", "Short-Term Debt", "Long-Term Debt"], (index) => {
     const shortTerm = shortTermDebtSeries[index];
@@ -1128,8 +1132,8 @@ export default function SingleStockDashboard() {
     const longMM = typeof longTerm === "number" ? longTerm / 1_000_000 : null;
     const totalMM = (shortMM ?? 0) + (longMM ?? 0);
     return [
-      shortMM === null ? null : ({ v: shortMM, f: `${shortMM.toFixed(2)} ${statementCurrency} million\nTotal: ${totalMM.toFixed(2)}` } as unknown as number),
-      longMM === null ? null : ({ v: longMM, f: `${longMM.toFixed(2)} ${statementCurrency} million\nTotal: ${totalMM.toFixed(2)}` } as unknown as number),
+      shortMM === null ? null : ({ v: shortMM, f: `${shortMM.toFixed(2)} ${a1StatementCurrency} million\nTotal: ${totalMM.toFixed(2)}` } as unknown as number),
+      longMM === null ? null : ({ v: longMM, f: `${longMM.toFixed(2)} ${a1StatementCurrency} million\nTotal: ${totalMM.toFixed(2)}` } as unknown as number),
     ];
   }, 15);
   const cashVsObligationsData = buildDerivedSeries(["Date", "Cash", "Current Liabilities"], (index) => [
@@ -1140,7 +1144,7 @@ export default function SingleStockDashboard() {
     const inflow = commonStockIssuedSeries[index];
     if (typeof inflow !== "number") return [null];
     const inflowMM = inflow / 1_000_000;
-    return [{ v: inflowMM, f: `${inflowMM.toFixed(2)} ${statementCurrency} million` } as unknown as number];
+    return [{ v: inflowMM, f: `${inflowMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number];
   }, 15);
   const financingFrequencyData = buildDerivedSeries(["Date", "Financing Frequency (8p)"], (index) => {
     if (index < 2) return [null];
@@ -1489,6 +1493,7 @@ export default function SingleStockDashboard() {
             label="Sök bolagsnamn"
             placeholder="T.ex. Apple"
             onSelect={(company) => {
+              onTickerChange?.(company.symbol);
               void fetchCompany(company.symbol);
             }}
           />
@@ -1511,6 +1516,7 @@ export default function SingleStockDashboard() {
             onChange={(event) => {
               const value = event.target.value;
               if (value !== "Välj En Aktie") {
+                onTickerChange?.(value);
                 void fetchCompany(value);
               }
             }}
@@ -1523,6 +1529,7 @@ export default function SingleStockDashboard() {
             ))}
           </select>
           {tickersError && <p className="status error">{tickersError}</p>}
+          {error && <p className="status error">{error}</p>}
         </div>
 
         <div className="stock-selector-row form">

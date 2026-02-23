@@ -1,11 +1,15 @@
+import { useState } from "react";
 import Header from "../components/Header";
 import Section from "../components/Section";
 import SingleStockDashboard from "../components/SingleStockDashboard";
 import SectorDashboard from "../components/SectorDashboard";
 import ScreeningDashboard from "../components/ScreeningDashboard";
+import ErrorBoundary from "../components/ErrorBoundary";
 import "../styles/dashboard.css";
 
 export default function Dashboard() {
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+
   return (
     <div className="dashboard">
       <Header />
@@ -32,7 +36,9 @@ export default function Dashboard() {
           background="#e0e9ce"
           defaultOpen
         >
-          <SingleStockDashboard />
+          <ErrorBoundary sectionTitle="Single Stock Dashboard" selectedTicker={selectedTicker}>
+          <SingleStockDashboard onTickerChange={(nextTicker) => setSelectedTicker(nextTicker)} />
+          </ErrorBoundary>
         </Section>
 
         <Section
