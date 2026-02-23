@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
 import { Chart } from "react-google-charts";
 import InfoPopover from "./InfoPopover";
 
@@ -21,6 +21,62 @@ type ChartCardProps = {
   yAxisTitle?: string;
   y2AxisTitle?: string;
 };
+
+const DEBUG_CHART_RERENDERS = false;
+
+function isDate(value: unknown): value is Date {
+  return value instanceof Date;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !isDate(value);
+}
+
+function areValuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) {
+    return true;
+  }
+  if (isDate(a) && isDate(b)) {
+    return a.getTime() === b.getTime();
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) {
+      if (!areValuesEqual(a[index], b[index])) return false;
+    }
+    return true;
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    for (const key of aKeys) {
+      if (!(key in b) || !areValuesEqual(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function areChartCardPropsEqual(prev: ChartCardProps, next: ChartCardProps) {
+  return (
+    prev.id === next.id
+    && prev.title === next.title
+    && prev.chartType === next.chartType
+    && prev.height === next.height
+    && prev.fiscalYearEndMonth === next.fiscalYearEndMonth
+    && prev.infoIsOpen === next.infoIsOpen
+    && prev.onToggleInfo === next.onToggleInfo
+    && prev.onCloseInfo === next.onCloseInfo
+    && prev.unitLabel === next.unitLabel
+    && prev.unitKind === next.unitKind
+    && prev.yAxisTitle === next.yAxisTitle
+    && prev.y2AxisTitle === next.y2AxisTitle
+    && areValuesEqual(prev.infoSections, next.infoSections)
+    && areValuesEqual(prev.data, next.data)
+    && areValuesEqual(prev.options ?? {}, next.options ?? {})
+  );
+}
 
 const DEFAULT_OPTIONS = {
   backgroundColor: "#e0e9ce",
@@ -148,6 +204,28 @@ function ChartCard({
   y2AxisTitle,
 }: ChartCardProps) {
   const chartId = id ?? title;
+  const chartCardRef = useRef<HTMLDivElement | null>(null);
+  const previousDataRef = useRef<(string | number | Date | null)[][] | null | undefined>(undefined);
+  const previousOptionsRef = useRef<Record<string, unknown> | undefined>(undefined);
+
+  if (DEBUG_CHART_RERENDERS) {
+    const dataRefToken = previousDataRef.current === data ? "same" : "new";
+    const optionsRefToken = previousOptionsRef.current === options ? "same" : "new";
+    console.log(`[ChartCardRender] id=${chartId} infoIsOpen=${String(infoIsOpen)} dataRef=${dataRefToken} optionsRef=${optionsRefToken}`);
+  }
+
+  useLayoutEffect(() => {
+    if (!DEBUG_CHART_RERENDERS || !chartCardRef.current) {
+      return;
+    }
+    console.log(
+      `[ChartCardSize] id=${chartId} w=${chartCardRef.current.clientWidth} h=${chartCardRef.current.clientHeight}`,
+    );
+  });
+
+  previousDataRef.current = data;
+  previousOptionsRef.current = options;
+
   const hasInfo = Boolean(infoSections?.length && onToggleInfo && onCloseInfo);
 
   const optionVAxis = (options.vAxis as Record<string, unknown> | undefined) ?? {};
@@ -168,8 +246,8 @@ function ChartCard({
   const optionVAxes = (options.vAxes as Record<string, unknown> | undefined) ?? undefined;
 
   return (
-    <div className="chart-card">
-      <div className="producer-core-title-row" style={{ marginBottom: "4px" }}>
+    <div className="chart-card" ref={chartCardRef}>
+      <div className="producer-core-title-row" style={{ marginBottom: "4px", minHeight: "24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
           <div className="chart-title" style={{ marginBottom: 0 }}>{title}</div>
           <span style={{ fontSize: "10px", padding: "2px 6px", border: "1px solid rgba(0,0,0,0.35)", borderRadius: "10px", background: "#f3f6e9" }}>{resolvedUnitLabel}</span>
@@ -213,4 +291,4 @@ function ChartCard({
   );
 }
 
-export default memo(ChartCard);
+export default memo(ChartCard, areChartCardPropsEqual);
