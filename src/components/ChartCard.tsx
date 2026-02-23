@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import { Chart } from "react-google-charts";
 import InfoPopover from "./InfoPopover";
 
@@ -22,7 +22,7 @@ type ChartCardProps = {
   y2AxisTitle?: string;
 };
 
-const DEBUG_CHART_RERENDERS = false;
+const DEBUG_CHART_BLINK = false;
 
 function isDate(value: unknown): value is Date {
   return value instanceof Date;
@@ -56,26 +56,6 @@ function areValuesEqual(a: unknown, b: unknown): boolean {
     return true;
   }
   return false;
-}
-
-function areChartCardPropsEqual(prev: ChartCardProps, next: ChartCardProps) {
-  return (
-    prev.id === next.id
-    && prev.title === next.title
-    && prev.chartType === next.chartType
-    && prev.height === next.height
-    && prev.fiscalYearEndMonth === next.fiscalYearEndMonth
-    && prev.infoIsOpen === next.infoIsOpen
-    && prev.onToggleInfo === next.onToggleInfo
-    && prev.onCloseInfo === next.onCloseInfo
-    && prev.unitLabel === next.unitLabel
-    && prev.unitKind === next.unitKind
-    && prev.yAxisTitle === next.yAxisTitle
-    && prev.y2AxisTitle === next.y2AxisTitle
-    && areValuesEqual(prev.infoSections, next.infoSections)
-    && areValuesEqual(prev.data, next.data)
-    && areValuesEqual(prev.options ?? {}, next.options ?? {})
-  );
 }
 
 const DEFAULT_OPTIONS = {
@@ -204,24 +184,15 @@ function ChartCard({
   y2AxisTitle,
 }: ChartCardProps) {
   const chartId = id ?? title;
-  const chartCardRef = useRef<HTMLDivElement | null>(null);
   const previousDataRef = useRef<(string | number | Date | null)[][] | null | undefined>(undefined);
   const previousOptionsRef = useRef<Record<string, unknown> | undefined>(undefined);
+  const chartKey = "none";
 
-  if (DEBUG_CHART_RERENDERS) {
-    const dataRefToken = previousDataRef.current === data ? "same" : "new";
-    const optionsRefToken = previousOptionsRef.current === options ? "same" : "new";
-    console.log(`[ChartCardRender] id=${chartId} infoIsOpen=${String(infoIsOpen)} dataRef=${dataRefToken} optionsRef=${optionsRefToken}`);
-  }
-
-  useLayoutEffect(() => {
-    if (!DEBUG_CHART_RERENDERS || !chartCardRef.current) {
-      return;
-    }
+  if (DEBUG_CHART_BLINK) {
     console.log(
-      `[ChartCardSize] id=${chartId} w=${chartCardRef.current.clientWidth} h=${chartCardRef.current.clientHeight}`,
+      `[CC] id=${chartId} infoIsOpen=${String(infoIsOpen)} dataRefChanged=${previousDataRef.current === data ? "no" : "yes"} optionsRefChanged=${previousOptionsRef.current === options ? "no" : "yes"} chartKey=${chartKey}`,
     );
-  });
+  }
 
   previousDataRef.current = data;
   previousOptionsRef.current = options;
@@ -241,13 +212,56 @@ function ChartCard({
     );
   }
 
-  const normalized = normalizeChartData(data, fiscalYearEndMonth);
+  const normalized = useMemo(() => normalizeChartData(data, fiscalYearEndMonth), [data, fiscalYearEndMonth]);
   const optionHAxis = (options.hAxis as Record<string, unknown> | undefined) ?? {};
   const optionVAxes = (options.vAxes as Record<string, unknown> | undefined) ?? undefined;
+  const chartOptions = useMemo(() => ({
+    ...DEFAULT_OPTIONS,
+    ...options,
+    title: undefined,
+    tooltip: { trigger: "focus" },
+    vAxis: {
+      ...optionVAxis,
+      title: (optionVAxis.title as string | undefined) ?? yAxisTitle ?? resolvedUnitLabel,
+    },
+    ...(optionVAxes ? { vAxes: optionVAxes } : y2AxisTitle ? { vAxes: { 0: { title: yAxisTitle ?? resolvedUnitLabel }, 1: { title: y2AxisTitle } } } : {}),
+    hAxis: {
+      ...DEFAULT_OPTIONS.hAxis,
+      ...optionHAxis,
+      ticks: normalized.ticks,
+      format: undefined,
+    },
+  }), [normalized.ticks, optionHAxis, optionVAxes, optionVAxis, options, resolvedUnitLabel, y2AxisTitle, yAxisTitle]);
+  const chartData = normalized.data;
+  const stableChartDataRef = useRef(chartData);
+  const stableChartOptionsRef = useRef(chartOptions);
+
+  if (!areValuesEqual(stableChartDataRef.current, chartData)) {
+    stableChartDataRef.current = chartData;
+  }
+  if (!areValuesEqual(stableChartOptionsRef.current, chartOptions)) {
+    stableChartOptionsRef.current = chartOptions;
+  }
+
+  const chartElement = useMemo(() => (
+    <Chart
+      chartType={chartType}
+      data={stableChartDataRef.current}
+      width="100%"
+      height={`${height}px`}
+      options={stableChartOptionsRef.current}
+      chartEvents={DEBUG_CHART_BLINK ? [{
+        eventName: "ready",
+        callback: () => {
+          console.log(`[CC] draw id=${chartId} chartKey=${chartKey}`);
+        },
+      }] : undefined}
+    />
+  ), [chartType, chartId, chartKey, height]);
 
   return (
-    <div className="chart-card" ref={chartCardRef}>
-      <div className="producer-core-title-row" style={{ marginBottom: "4px", minHeight: "24px" }}>
+    <div className="chart-card">
+      <div className="producer-core-title-row" style={{ marginBottom: "4px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
           <div className="chart-title" style={{ marginBottom: 0 }}>{title}</div>
           <span style={{ fontSize: "10px", padding: "2px 6px", border: "1px solid rgba(0,0,0,0.35)", borderRadius: "10px", background: "#f3f6e9" }}>{resolvedUnitLabel}</span>
@@ -264,31 +278,9 @@ function ChartCard({
           />
         )}
       </div>
-      <Chart
-        chartType={chartType}
-        data={normalized.data}
-        width="100%"
-        height={`${height}px`}
-        options={{
-          ...DEFAULT_OPTIONS,
-          ...options,
-          title: undefined,
-          tooltip: { trigger: "focus" },
-          vAxis: {
-            ...optionVAxis,
-            title: (optionVAxis.title as string | undefined) ?? yAxisTitle ?? resolvedUnitLabel,
-          },
-          ...(optionVAxes ? { vAxes: optionVAxes } : y2AxisTitle ? { vAxes: { 0: { title: yAxisTitle ?? resolvedUnitLabel }, 1: { title: y2AxisTitle } } } : {}),
-          hAxis: {
-            ...DEFAULT_OPTIONS.hAxis,
-            ...optionHAxis,
-            ticks: normalized.ticks,
-            format: undefined,
-          },
-        }}
-      />
+      {chartElement}
     </div>
   );
 }
 
-export default memo(ChartCard, areChartCardPropsEqual);
+export default memo(ChartCard);
