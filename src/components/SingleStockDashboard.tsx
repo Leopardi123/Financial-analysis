@@ -778,6 +778,16 @@ export default function SingleStockDashboard() {
     const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
     window.history.replaceState(null, "", nextUrl);
   }, [analysisMode, primaryView]);
+
+  useEffect(() => {
+    if (primaryView !== "reported" || typeof window === "undefined") {
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      window.dispatchEvent(new Event("resize"));
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [analysisMode, primaryView]);
   useEffect(() => {
     let isMounted = true;
     async function loadProfile() {
@@ -1584,8 +1594,8 @@ export default function SingleStockDashboard() {
         </div>
       )}
 
-      {analysisMode === "revenue" && primaryView === "reported" && (
-        <>
+      {primaryView === "reported" && (
+        <div hidden={analysisMode !== "revenue"}>
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">Producer Core (PVE v2)</h1>
             <p className="bread">Efficiency, Resilience, Value och Context snapshots för MAJOR/revenue-mode.</p>
@@ -1886,11 +1896,11 @@ export default function SingleStockDashboard() {
         />
       </div>
 
-      </>
+        </div>
       )}
 
-      {analysisMode === "prerevenue" && primaryView === "reported" && (
-        <>
+      {primaryView === "reported" && (
+        <div hidden={analysisMode !== "prerevenue"}>
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">Corporate Pre-Revenue Core Engine</h1>
             <p className="bread">Graph-first corporate survival, dilution and discipline dashboard. Buffet charts are intentionally hidden for Pre-Revenue.</p>
@@ -1947,11 +1957,11 @@ export default function SingleStockDashboard() {
             <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E4 Governance Leak Index" id="E4 Governance Leak Index" infoSections={PRE_REVENUE_CORE_INFO["E4 Governance Leak Index"]} data={governanceLeakIndexData} />
             <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} data={survivalScoreData} />
           </div>
-        </>
+        </div>
       )}
 
-{analysisMode === "revenue" && primaryView === "reported" && (
-      <>
+{primaryView === "reported" && (
+      <div hidden={analysisMode !== "revenue"}>
       <div className="breadcontainersinglecolumn">
         <h1 className="subrub">Buffetologisk Analytik</h1>
         <p className="bread">
@@ -2137,8 +2147,8 @@ export default function SingleStockDashboard() {
           options={lineBehindBars}
         />
       </div>
-      </>
-      )}
+      </div>
+)}
 
       {primaryView === "modeled" && (
         <div className="breadcontainersinglecolumn">
