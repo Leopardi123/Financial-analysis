@@ -792,6 +792,21 @@ export default function SingleStockDashboard() {
     console.log(
       `[LayoutWidth] mode=${analysisMode} view=${primaryView} docClientWidth=${doc.clientWidth} bodyClientWidth=${document.body.clientWidth} verticalScrollbar=${hasVerticalScrollbar}`,
     );
+
+    const firstVisibleGrid = Array.from(document.querySelectorAll<HTMLElement>(".chartcontainerdoublecolumn"))
+      .find((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+    if (firstVisibleGrid) {
+      const gridRect = firstVisibleGrid.getBoundingClientRect();
+      const gridStyle = window.getComputedStyle(firstVisibleGrid);
+      const firstChart = firstVisibleGrid.querySelector<HTMLElement>(".chart-card");
+      const firstChartWidth = firstChart ? Math.round(firstChart.getBoundingClientRect().width) : 0;
+      console.log(
+        `[GridWidth] mode=${analysisMode} gridW=${Math.round(gridRect.width)} padL=${gridStyle.paddingLeft} padR=${gridStyle.paddingRight} firstCardW=${firstChartWidth}`,
+      );
+    }
   }, [analysisMode, primaryView]);
 
   useEffect(() => {
