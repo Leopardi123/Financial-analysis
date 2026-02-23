@@ -477,17 +477,17 @@ const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
   "C4 Overhead Ratio": buildCoreInfo("Overhead relative to total operating outflow proxy.", "Measures efficiency of corporate shell.", "Lower ratio generally indicates better discipline.", "Rising ratio despite financing pressure.", "Requires overhead plus OCF/opex proxy."),
   "C5 VCE Proxy": buildCoreInfo("Value creation efficiency proxy from FCF and spend.", "High-level discipline signal in pre-revenue phase.", "Less negative values imply improving efficiency.", "Efficiency worsening over several periods.", "Proxy only; shown when component data exists."),
   "C6 VCE vs Overhead": buildCoreInfo("VCE proxy compared with overhead.", "Checks if overhead is justified by efficiency trend.", "Divergence (worse VCE + higher overhead) is negative.", "Persistent negative divergence.", "Derived series, missing if inputs missing."),
-  "D1 Net Cash / Net Debt": buildCoreInfo("Cash minus total debt.", "Core balance sheet resilience measure.", "Positive net cash gives optionality.", "Net debt rising while burn remains high.", "Uses cash and debt fields from balance sheet."),
-  "D2 Debt Maturity Mix": buildCoreInfo("Short-term vs long-term debt mix.", "Near-term maturities increase refinancing risk.", "Higher short-term share = tighter risk profile.", "Short-term debt spikes with low cash.", "Uses shortTermDebt and longTermDebt."),
-  "D3 Cash vs Short-Term Obligations": buildCoreInfo("Cash compared to current liabilities.", "Tests near-term liquidity stress.", "Cash below obligations indicates fragility.", "Gap widening over time.", "Uses cash and totalCurrentLiabilities."),
-  "D4 Current Ratio": buildCoreInfo("Current assets / current liabilities.", "Classic short-term solvency gauge.", "Below 1 can indicate funding pressure.", "Sustained sub-1 trend.", "Uses totalCurrentAssets and totalCurrentLiabilities."),
-  "D5 Financing Inflows": buildCoreInfo("Equity/debt financing inflow proxy.", "Shows external funding dependence.", "Frequent inflows may be necessary but costly.", "Reliance increases while runway still drops.", "Uses commonStockIssued when available."),
-  "D6 Financing Frequency": buildCoreInfo("Binary signal for periods with financing inflow.", "Indicates cadence of capital dependence.", "Frequent positive periods imply repeated market access need.", "Consecutive financing periods without burn improvement.", "Derived from financing inflow proxy."),
-  "E1 Burn Acceleration YoY": buildCoreInfo("YoY change in burn intensity.", "Early warning of worsening cash dynamics.", "Positive acceleration means burn is worsening.", "Multiple positive acceleration years.", "Derived from burn proxy."),
-  "E2 Runway Risk Bands": buildCoreInfo("Runway with 6m/12m reference bands.", "Visual risk banding for financing urgency.", "Crossing below 12m and 6m increases urgency.", "Staying below thresholds for extended periods.", "Derived from runway series."),
-  "E3 Dilution vs Runway": buildCoreInfo("Dilution rate plotted with runway trend.", "Checks if dilution buys sufficient time.", "Good outcome: dilution stabilizes and runway improves.", "Dilution rises while runway still shrinks.", "Needs shares + runway inputs."),
-  "E4 Governance Leak Index": buildCoreInfo("Leak proxy combining SBC intensity and dilution.", "Flags hidden shareholder leakage.", "Higher index = higher governance leak risk.", "Sustained high index with no progress.", "Proxy from SBC + share growth; missing components allowed."),
-  "E5 Survival Score": buildCoreInfo("Composite 0–10 survival score proxy.", "Single scoreboard summary for decision hygiene.", "Higher score reflects stronger runway + lower dilution/burn stress.", "Score drifting lower into financing windows.", "Proxy only; based on available runway/burn/dilution inputs."),
+  "D1 Net Cash / Net Debt": buildCoreInfo("Net cash stock measure = cash minus total debt, shown as period bars in statement currency millions.", "Tracks balance-sheet resilience and whether the company is in net cash or net debt territory.", "Bars above zero indicate net cash; below zero indicate net debt. Tooltip includes net cash, cash, and total debt (all in millions).", "Sustained moves deeper below zero can signal rising refinancing risk.", "Uses balance.cashAndCashEquivalents and balance.totalDebt on statement dates."),
+  "D2 Debt Maturity Mix": buildCoreInfo("Stacked short-term and long-term debt bars by period, shown in statement currency millions.", "Separates near-term maturities from longer-dated debt to assess refinancing pressure.", "Total stack height is total debt; a larger short-term share indicates tighter near-term obligations.", "Rising short-term component without liquidity improvement increases rollover risk.", "Uses balance.shortTermDebt and balance.longTermDebt."),
+  "D3 Cash vs Short-Term Obligations": buildCoreInfo("Cash and current liabilities plotted together by period in statement currency millions.", "Conservative liquidity check for near-term obligations coverage.", "In this chart, short-term obligations means total current liabilities (not only short-term debt). Cash below current liabilities can indicate near-term stress.", "A widening liabilities-over-cash gap raises financing pressure risk.", "Uses balance.cashAndCashEquivalents and balance.totalCurrentLiabilities."),
+  "D4 Current Ratio": buildCoreInfo("Current assets divided by current liabilities (x multiple).", "Standard short-term solvency indicator.", "Values below 1 can imply tighter liquidity coverage. Very high spikes can occur when current liabilities are unusually small.", "Do not over-interpret temporary spikes without checking balance-sheet composition.", "Uses balance.totalCurrentAssets and balance.totalCurrentLiabilities."),
+  "D5 Financing Inflows": buildCoreInfo("Cash proceeds from equity issuance per period, shown as bars in statement currency millions.", "Highlights survival funding events and dependence on external equity markets.", "Larger positive bars indicate larger issuance cash inflows in that period.", "Frequent large inflows without runway improvement can signal structural dependence.", "Uses cashflow.commonStockIssued as the inflow proxy."),
+  "D6 Financing Frequency": buildCoreInfo("Trailing 8-period financing frequency rate (0–1) from equity-inflow observations.", "Summarizes how often the company relies on equity issuance over recent periods.", "Higher values mean more frequent periods with positive financing inflow.", "Persistently high frequency alongside weak burn trends can indicate fragile self-funding capacity.", "Derived from cashflow.commonStockIssued > 0 within a trailing window."),
+  "E1 Burn Acceleration (Δ vs prior period)": buildCoreInfo("Change in burn magnitude versus the prior period, shown as bars in statement currency millions.", "Provides an early signal of whether operating burn is worsening or improving period-to-period.", "Positive values mean burn worsened; negative values mean burn improved.", "Can be noisy from working-capital timing effects in operating cash flow.", "Derived from cashflow.operatingCashFlow as Δ|OCF| between consecutive periods."),
+  "E2 Runway Risk Bands": buildCoreInfo("Estimated runway months with 12m and 6m reference lines.", "Shows approximate time-to-cash pressure using operating burn pace.", "Runway is computed as cash divided by approximate monthly burn from operating cash flow; crossings below 12m and 6m raise urgency.", "OCF volatility can move runway sharply between periods.", "Derived from balance.cashAndCashEquivalents and cashflow.operatingCashFlow; months-per-period is inferred from statement cadence."),
+  "E3 Dilution vs Runway": buildCoreInfo("Dilution rate and runway months plotted together by period.", "Shows the tradeoff between shareholder dilution and survival time gained.", "High dilution with low runway is a distress signal; healthier patterns combine stabilizing dilution with improving runway.", "Single-period swings can be noisy; assess trends across multiple periods.", "Uses share-count dilution and derived runway months from cash and operating cash flow."),
+  "E4 Governance Leak Index": buildCoreInfo("Composite index proxy combining dilution rate and SBC intensity.", "Flags owner-value leakage via issuance and equity compensation pressure.", "Higher index values indicate greater potential shareholder leakage.", "Persistently elevated readings without operating progress are a governance warning.", "Derived from dilution rate and SBC intensity inputs; index scale."),
+  "E5 Survival Score": buildCoreInfo("Heuristic 0–10 composite survival score.", "Compresses runway and funding-friction signals into one monitoring gauge.", "Higher values generally indicate longer runway with lower dilution/burn penalties.", "This is not valuation; treat as a directional risk heuristic.", "Derived from runway months with dilution and burn-acceleration penalties; returns null when inputs are insufficient."),
 };
 
 
@@ -1116,52 +1116,105 @@ export default function SingleStockDashboard() {
     const cash = cashSeries[index];
     const debt = totalDebtSeries[index];
     if (typeof cash !== "number" || typeof debt !== "number") return [null];
-    return [cash - debt];
+    const netCashMM = (cash - debt) / 1_000_000;
+    const cashMM = cash / 1_000_000;
+    const debtMM = debt / 1_000_000;
+    return [{ v: netCashMM, f: `${netCashMM.toFixed(2)} ${statementCurrency} million\nCash: ${cashMM.toFixed(2)}\nTotal debt: ${debtMM.toFixed(2)}` } as unknown as number];
   }, 15);
-  const debtMaturityMixData = buildDerivedSeries(["Date", "Short-Term Debt", "Long-Term Debt"], (index) => [
-    shortTermDebtSeries[index] ?? null,
-    longTermDebtSeries[index] ?? null,
-  ], 15);
+  const debtMaturityMixData = buildDerivedSeries(["Date", "Short-Term Debt", "Long-Term Debt"], (index) => {
+    const shortTerm = shortTermDebtSeries[index];
+    const longTerm = longTermDebtSeries[index];
+    const shortMM = typeof shortTerm === "number" ? shortTerm / 1_000_000 : null;
+    const longMM = typeof longTerm === "number" ? longTerm / 1_000_000 : null;
+    const totalMM = (shortMM ?? 0) + (longMM ?? 0);
+    return [
+      shortMM === null ? null : ({ v: shortMM, f: `${shortMM.toFixed(2)} ${statementCurrency} million\nTotal: ${totalMM.toFixed(2)}` } as unknown as number),
+      longMM === null ? null : ({ v: longMM, f: `${longMM.toFixed(2)} ${statementCurrency} million\nTotal: ${totalMM.toFixed(2)}` } as unknown as number),
+    ];
+  }, 15);
   const cashVsObligationsData = buildDerivedSeries(["Date", "Cash", "Current Liabilities"], (index) => [
-    cashSeries[index] ?? null,
-    currentLiabilitySeries[index] ?? null,
+    typeof cashSeries[index] === "number" ? (cashSeries[index] as number) / 1_000_000 : null,
+    typeof currentLiabilitySeries[index] === "number" ? (currentLiabilitySeries[index] as number) / 1_000_000 : null,
   ], 15);
-  const financingInflowsData = buildDerivedSeries(["Date", "Financing Inflows"], (index) => [commonStockIssuedSeries[index] ?? null], 15);
-  const financingFrequencyData = buildDerivedSeries(["Date", "Financing Frequency"], (index) => {
+  const financingInflowsData = buildDerivedSeries(["Date", "Financing Inflows"], (index) => {
     const inflow = commonStockIssuedSeries[index];
-    return [typeof inflow === "number" && inflow > 0 ? 1 : 0];
+    if (typeof inflow !== "number") return [null];
+    const inflowMM = inflow / 1_000_000;
+    return [{ v: inflowMM, f: `${inflowMM.toFixed(2)} ${statementCurrency} million` } as unknown as number];
+  }, 15);
+  const financingFrequencyData = buildDerivedSeries(["Date", "Financing Frequency (8p)"], (index) => {
+    if (index < 2) return [null];
+    const windowStart = Math.max(0, index - 7);
+    const window = commonStockIssuedSeries.slice(windowStart, index + 1).filter((value): value is number => typeof value === "number");
+    if (window.length < 3) return [null];
+    const positives = window.filter((value) => value > 0).length;
+    return [positives / window.length];
   }, 15);
 
-  const burnAccelerationData = buildDerivedSeries(["Date", "Burn Acceleration YoY"], (index) => {
-    if (index === 0) return [null];
+  const burnAccelerationRawSeries = fiscalDates.map((_, index) => {
+    if (index === 0) return null;
     const current = operatingCashFlowSeries[index];
     const previous = operatingCashFlowSeries[index - 1];
-    if (typeof current !== "number" || typeof previous !== "number") return [null];
-    return [Math.abs(current) - Math.abs(previous)];
-  }, 15);
-  const runwayRiskBandsData = buildDerivedSeries(["Date", "Runway", "12M", "6M"], (index) => {
-    const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
-    return [typeof runway === "number" ? runway : null, 12, 6];
-  }, 15);
-  const dilutionVsRunwayData = buildDerivedSeries(["Date", "Dilution Rate", "Runway Months"], (index) => {
-    const dilution = dilutionRateData?.[index + 1]?.[1] as number | null | undefined;
-    const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
-    return [typeof dilution === "number" ? dilution : null, typeof runway === "number" ? runway : null];
-  }, 15);
+    if (typeof current !== "number" || typeof previous !== "number") return null;
+    return (Math.abs(current) - Math.abs(previous)) / 1_000_000;
+  });
+  const hasQuarterlyPeriods = (() => {
+    const countsByYear = new Map<number, number>();
+    fiscalDates.forEach((date) => {
+      const year = date.getUTCFullYear();
+      countsByYear.set(year, (countsByYear.get(year) ?? 0) + 1);
+    });
+    return Array.from(countsByYear.values()).some((count) => count > 1);
+  })();
+  const monthsInPeriod = hasQuarterlyPeriods ? 3 : 12;
+  const runwayMonthsRawSeries = fiscalDates.map((_, index) => {
+    const cash = cashSeries[index];
+    const operatingCashFlow = operatingCashFlowSeries[index];
+    if (typeof cash !== "number" || typeof operatingCashFlow !== "number") return null;
+    const burnPerMonth = Math.max(0, -operatingCashFlow / monthsInPeriod);
+    if (burnPerMonth <= 0) return null;
+    return cash / burnPerMonth;
+  });
+  const dilutionRateRawSeries = fiscalDates.map((_, index) => {
+    if (index === 0) return null;
+    const current = statementShares[index];
+    const previous = statementShares[index - 1];
+    if (typeof current !== "number" || typeof previous !== "number" || previous <= 0) return null;
+    const dilution = current / previous - 1;
+    if (Math.abs(dilution) > 3) return null;
+    return dilution * 100;
+  });
+  const sbcIntensityRawSeries = fiscalDates.map((_, index) => {
+    const sbc = sbcSeries[index];
+    const ocf = operatingCashFlowSeries[index];
+    if (typeof sbc !== "number" || typeof ocf !== "number" || ocf === 0) return null;
+    return (sbc / Math.abs(ocf)) * 100;
+  });
+
+  const burnAccelerationData = buildDerivedSeries(["Date", "Burn Acceleration"], (index) => [burnAccelerationRawSeries[index]], 15);
+  const runwayRiskBandsData = buildDerivedSeries(["Date", "Runway", "12M", "6M"], (index) => [
+    runwayMonthsRawSeries[index],
+    12,
+    6,
+  ], 15);
+  const dilutionVsRunwayData = buildDerivedSeries(["Date", "Dilution Rate", "Runway Months"], (index) => [
+    dilutionRateRawSeries[index],
+    runwayMonthsRawSeries[index],
+  ], 15);
   const governanceLeakIndexData = buildDerivedSeries(["Date", "Governance Leak Index"], (index) => {
-    const dilution = dilutionRateData?.[index + 1]?.[1] as number | null | undefined;
-    const sbcIntensity = sbcIntensityData?.[index + 1]?.[1] as number | null | undefined;
+    const dilution = dilutionRateRawSeries[index];
+    const sbcIntensity = sbcIntensityRawSeries[index];
     if (typeof dilution !== "number" && typeof sbcIntensity !== "number") return [null];
-    return [((dilution ?? 0) / 100) + ((sbcIntensity ?? 0) / 100)];
+    return [((dilution ?? 0) + (sbcIntensity ?? 0)) / 100];
   }, 15);
   const survivalScoreData = buildDerivedSeries(["Date", "Survival Score"], (index) => {
-    const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
-    const dilution = dilutionRateData?.[index + 1]?.[1] as number | null | undefined;
-    const burnAccel = burnAccelerationData?.[index + 1]?.[1] as number | null | undefined;
-    if (typeof runway !== "number") return [null];
+    const runway = runwayMonthsRawSeries[index];
+    const dilutionPercent = dilutionRateRawSeries[index];
+    const burnAccel = burnAccelerationRawSeries[index];
+    if (typeof runway !== "number" || typeof dilutionPercent !== "number") return [null];
     const runwayScore = Math.max(0, Math.min(10, runway / 2));
-    const dilutionPenalty = typeof dilution === "number" ? Math.max(0, dilution * 30) : 0;
-    const burnPenalty = typeof burnAccel === "number" ? Math.max(0, burnAccel > 0 ? 1.5 : 0) : 0;
+    const dilutionPenalty = Math.max(0, Math.min(10, dilutionPercent * 0.5));
+    const burnPenalty = typeof burnAccel === "number" && burnAccel > 0 ? Math.min(2, burnAccel / 50) : 0;
     return [Math.max(0, Math.min(10, runwayScore - dilutionPenalty - burnPenalty))];
   }, 15);
 
@@ -1402,9 +1455,16 @@ export default function SingleStockDashboard() {
     "C2 R&D / Exploration Proxy": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "C4 Overhead Ratio": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
     "C5 VCE Proxy": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
-    "D1 Net Cash / Net Debt": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "D1 Net Cash / Net Debt": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
+    "D2 Debt Maturity Mix": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
+    "D3 Cash vs Short-Term Obligations": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "D4 Current Ratio": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
+    "D5 Financing Inflows": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
+    "D6 Financing Frequency": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
+    "E1 Burn Acceleration (Δ vs prior period)": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "E2 Runway Risk Bands": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
+    "E3 Dilution vs Runway": { unitLabel: "index", unitKind: "index", yAxisTitle: "index", y2AxisTitle: "months" },
+    "E4 Governance Leak Index": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
     "E5 Survival Score (0–10 composite)": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
   };
 
@@ -2000,21 +2060,21 @@ export default function SingleStockDashboard() {
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">D) Financing Structure & Stress</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="D1 Net Cash / Net Debt" id="D1 Net Cash / Net Debt" infoSections={PRE_REVENUE_CORE_INFO["D1 Net Cash / Net Debt"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={netCashDebtData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D2 Debt Maturity Mix" id="D2 Debt Maturity Mix" infoSections={PRE_REVENUE_CORE_INFO["D2 Debt Maturity Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={debtMaturityMixData} options={lineBehindBars} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D3 Cash vs Short-Term Obligations" id="D3 Cash vs Short-Term Obligations" infoSections={PRE_REVENUE_CORE_INFO["D3 Cash vs Short-Term Obligations"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashVsObligationsData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D1 Net Cash / Net Debt" id="D1 Net Cash / Net Debt" infoSections={PRE_REVENUE_CORE_INFO["D1 Net Cash / Net Debt"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={netCashDebtData} options={{ vAxis: { baseline: 0 } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D2 Debt Maturity Mix" id="D2 Debt Maturity Mix" infoSections={PRE_REVENUE_CORE_INFO["D2 Debt Maturity Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={debtMaturityMixData} options={{ isStacked: true, bar: { groupWidth: "65%" } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D3 Cash vs Short-Term Obligations" id="D3 Cash vs Short-Term Obligations" infoSections={PRE_REVENUE_CORE_INFO["D3 Cash vs Short-Term Obligations"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashVsObligationsData} options={{ seriesType: "line", series: { 0: { type: "area", areaOpacity: 0.2, lineWidth: 2 }, 1: { type: "line", lineWidth: 2 } } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D4 Current Ratio" id="D4 Current Ratio" infoSections={PRE_REVENUE_CORE_INFO["D4 Current Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={currentRatioData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D5 Financing Inflows" id="D5 Financing Inflows" infoSections={PRE_REVENUE_CORE_INFO["D5 Financing Inflows"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingInflowsData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D6 Financing Frequency" id="D6 Financing Frequency" infoSections={PRE_REVENUE_CORE_INFO["D6 Financing Frequency"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingFrequencyData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D5 Financing Inflows" id="D5 Financing Inflows" infoSections={PRE_REVENUE_CORE_INFO["D5 Financing Inflows"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingInflowsData} options={{ vAxis: { baseline: 0 } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="D6 Financing Frequency" id="D6 Financing Frequency" infoSections={PRE_REVENUE_CORE_INFO["D6 Financing Frequency"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingFrequencyData} options={{ vAxis: { viewWindow: { min: 0, max: 1 } } }} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">E) Risk Signals & Scoreboard</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E1 Burn Acceleration YoY" id="E1 Burn Acceleration YoY" infoSections={PRE_REVENUE_CORE_INFO["E1 Burn Acceleration YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnAccelerationData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E1 Burn Acceleration (Δ vs prior period)" id="E1 Burn Acceleration (Δ vs prior period)" infoSections={PRE_REVENUE_CORE_INFO["E1 Burn Acceleration (Δ vs prior period)"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnAccelerationData} options={{ vAxis: { baseline: 0 } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E2 Runway Risk Bands" id="E2 Runway Risk Bands" infoSections={PRE_REVENUE_CORE_INFO["E2 Runway Risk Bands"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayRiskBandsData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="E3 Dilution vs Runway" id="E3 Dilution vs Runway" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="E3 Dilution vs Runway" id="E3 Dilution vs Runway" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={{ seriesType: "bars", series: { 0: { type: "bars", targetAxisIndex: 0 }, 1: { type: "line", targetAxisIndex: 1, lineWidth: 2 } }, vAxes: { 0: { title: "index" }, 1: { title: "months" } } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E4 Governance Leak Index" id="E4 Governance Leak Index" infoSections={PRE_REVENUE_CORE_INFO["E4 Governance Leak Index"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={governanceLeakIndexData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalScoreData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalScoreData} options={{ vAxis: { viewWindow: { min: 0, max: 10 } } }} />
           </div>
         </>
       )}
