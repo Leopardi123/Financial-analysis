@@ -456,7 +456,7 @@ function buildCoreInfo(what: string, why: string, how: string, redFlags: string,
 }
 
 const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
-  "A1 Cash Balance": buildCoreInfo("Cash and cash equivalents trend.", "Cash runway is the primary survival constraint.", "Falling trend with no financing support increases risk.", "Rapid cash drawdown and no offsetting inflows.", "Uses balance.cashAndCashEquivalents; missing points are shown as missing data."),
+  "A1 Cash Balance": buildCoreInfo("Stock measure of cash on hand at each reporting date, shown as bars.", "Cash balance is the near-term survival anchor in pre-revenue companies.", "Each bar is cash balance (in statement currency, millions). Hover shows ΔCash versus prior statement as a financing/burn proxy.", "Large repeated negative ΔCash and no offsetting inflow periods can signal rising financing pressure.", "Uses balance.cashAndCashEquivalents on statement dates. ΔCash = current cash minus prior cash and is not operating cash flow."),
   "A2 Operating Cash Flow": buildCoreInfo("Operating cash flow by period.", "Shows core corporate burn before financing.", "Persistent negative values imply structural burn.", "Burn deepens YoY without milestone progress.", "Uses cashflow.operatingCashFlow; sparse series render partial chart."),
   "A3 Free Cash Flow": buildCoreInfo("Free cash flow after capex.", "Approximates all-in corporate cash consumption.", "Negative and worsening FCF reduces optionality.", "FCF deterioration despite capital raises.", "Uses cashflow.freeCashFlow (fallback partial if missing)."),
   "A4 Burn Rate TTM": buildCoreInfo("Trailing 4-period burn proxy from OCF.", "Smooths one-off period noise.", "Higher burn line means faster cash depletion.", "Acceleration in burn with flat liquidity.", "Basis: TTM (if built from quarterly points). Not enough history for TTM returns missing data."),
@@ -965,6 +965,60 @@ export default function SingleStockDashboard() {
     maxRows = 12,
   ) => buildSeriesData({ headers, rows: fiscalDates.map((date, index) => [date, ...mapper(index)]) }, maxRows);
 
+  const a1StatementCurrencyRaw =
+    (data as any)?.financials?.currency
+    ?? (data as any)?.reportedCurrency
+    ?? (data as any)?.statementCurrency
+    ?? profile?.currency
+    ?? null;
+  const a1StatementCurrency = typeof a1StatementCurrencyRaw === "string" && a1StatementCurrencyRaw.trim()
+    ? a1StatementCurrencyRaw.trim().toUpperCase()
+    : "USD";
+
+  const cashBalanceBarsData = useMemo(() => {
+    const rows = fiscalDates
+      .map((date, index) => {
+        const cash = cashSeries[index];
+        if (typeof cash !== "number") return null;
+        const previousCash = index > 0 ? cashSeries[index - 1] : null;
+        const cashMM = cash / 1_000_000;
+        const deltaMM = typeof previousCash === "number" ? (cash - previousCash) / 1_000_000 : null;
+        return {
+          date,
+          cashMM,
+          tooltipDate: date.getUTCFullYear(),
+          hasDelta: typeof deltaMM === "number",
+          deltaMM,
+        };
+      })
+      .filter((row): row is { date: Date; cashMM: number; tooltipDate: number; hasDelta: boolean; deltaMM: number | null } => Boolean(row));
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const trimmedRows = rows.slice(-15);
+    const isQuarterly = (() => {
+      const countsByYear = new Map<number, number>();
+      trimmedRows.forEach((row) => {
+        const year = row.date.getUTCFullYear();
+        countsByYear.set(year, (countsByYear.get(year) ?? 0) + 1);
+      });
+      return Array.from(countsByYear.values()).some((count) => count > 1);
+    })();
+
+    return [
+      ["Date", "Cash Balance (MM)"],
+      ...trimmedRows.map((row) => {
+        const quarter = Math.floor(row.date.getUTCMonth() / 3) + 1;
+        const dateLabel = isQuarterly ? `${row.tooltipDate} Q${quarter}` : `${row.tooltipDate}`;
+        const deltaLabel = row.hasDelta ? `${(row.deltaMM as number) >= 0 ? "+" : ""}${(row.deltaMM as number).toFixed(2)}` : "—";
+        const formattedValue = `Date: ${dateLabel}\nCash: ${row.cashMM.toFixed(2)} ${a1StatementCurrency} million\nΔCash: ${deltaLabel} ${a1StatementCurrency} million`;
+        return [row.date, { v: row.cashMM, f: formattedValue }];
+      }),
+    ] as unknown as (string | number | Date | null)[][];
+  }, [cashSeries, fiscalDates, a1StatementCurrency]);
+
   const burnRateTtmData = buildDerivedSeries(["Date", "Burn Rate TTM"], (index) => {
     if (index < 3) return [null];
     const window = freeCashFlowSeries.slice(index - 3, index + 1);
@@ -1331,7 +1385,7 @@ export default function SingleStockDashboard() {
     "Free Cash Flow/Share": { unitLabel: `${statementCurrency}/share`, unitKind: "money", yAxisTitle: `${statementCurrency}/share` },
     "Total Equity": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "ROE": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
-    "A1 Cash Balance": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "A1 Cash Balance": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "A2 Operating Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "A3 Free Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "A4 Burn Rate TTM": { unitLabel: `${statementCurrency}/month`, unitKind: "money", yAxisTitle: `${statementCurrency}/month` },
@@ -1913,7 +1967,7 @@ export default function SingleStockDashboard() {
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">A) Survival Engine</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={buildSeriesData(buildSeries(data, [{ label: "Cash Balance", statement: "balance", field: "cashAndCashEquivalents" }]), 15)} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBalanceBarsData} options={{ bar: { groupWidth: "65%" } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A2 Operating Cash Flow" id="A2 Operating Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A2 Operating Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashFromOperationsData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A3 Free Cash Flow" id="A3 Free Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A3 Free Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={freeCashFlowData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A4 Burn Rate TTM" id="A4 Burn Rate TTM" infoSections={PRE_REVENUE_CORE_INFO["A4 Burn Rate TTM"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnRateTtmData} />
