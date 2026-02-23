@@ -780,6 +780,21 @@ export default function SingleStockDashboard() {
   }, [analysisMode, primaryView]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const debugCharts = new URLSearchParams(window.location.search).get("debugCharts") === "1";
+    if (!debugCharts) {
+      return;
+    }
+    const doc = document.documentElement;
+    const hasVerticalScrollbar = doc.scrollHeight > window.innerHeight;
+    console.log(
+      `[LayoutWidth] mode=${analysisMode} view=${primaryView} docClientWidth=${doc.clientWidth} bodyClientWidth=${document.body.clientWidth} verticalScrollbar=${hasVerticalScrollbar}`,
+    );
+  }, [analysisMode, primaryView]);
+
+  useEffect(() => {
     let isMounted = true;
     async function loadProfile() {
       try {

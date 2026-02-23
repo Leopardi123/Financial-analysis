@@ -595,6 +595,12 @@ td.sticky-col {
   background: #fafaf7;
 }
 
+html,
+body {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
 .producer-core-compact-grid {
   display: grid;
   grid-template-columns: 1fr;
