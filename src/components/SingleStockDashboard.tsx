@@ -625,6 +625,38 @@ function normalizeDateSeries(data: (string | number | Date | null)[][] | null) {
   return [headers, ...normalizedRows];
 }
 
+type ReportedChartContext = {
+  resolveUnitMeta: (title: string) => ChartUnitMeta;
+  marketCurrency: string;
+  statementCurrency: string;
+  mixedCurrencyNote?: string;
+};
+
+type ReportedChartProps = ComponentProps<typeof ChartCard> & {
+  reportedChartContext: ReportedChartContext;
+};
+
+function ReportedChart({ reportedChartContext, ...props }: ReportedChartProps) {
+  const { resolveUnitMeta, marketCurrency, statementCurrency, mixedCurrencyNote } = reportedChartContext;
+  const meta = resolveUnitMeta(props.title);
+  const source: CurrencySource = meta.unitLabel.includes("shares") || meta.unitLabel === "%" || meta.unitLabel === "months" || meta.unitLabel === "x" || meta.unitLabel === "index"
+    ? "unknown"
+    : meta.unitLabel.includes(marketCurrency) && !meta.unitLabel.includes(statementCurrency)
+      ? "market"
+      : "statements";
+  const infoSections = withUnitMetadata(props.infoSections, meta.unitLabel, source, mixedCurrencyNote);
+  return (
+    <ChartCard
+      {...props}
+      infoSections={infoSections}
+      unitLabel={props.unitLabel ?? meta.unitLabel}
+      unitKind={props.unitKind ?? meta.unitKind}
+      yAxisTitle={props.yAxisTitle ?? meta.yAxisTitle}
+      y2AxisTitle={props.y2AxisTitle ?? meta.y2AxisTitle}
+    />
+  );
+}
+
 export default function SingleStockDashboard() {
   const { ticker, data, fetchCompany } = useCompanyData("AAPL");
   const [formTicker, setFormTicker] = useState("");
@@ -1328,24 +1360,11 @@ export default function SingleStockDashboard() {
     yAxisTitle: statementCurrency,
   };
 
-  const ReportedChart = (props: ComponentProps<typeof ChartCard>) => {
-    const meta = resolveUnitMeta(props.title);
-    const source: CurrencySource = meta.unitLabel.includes("shares") || meta.unitLabel === "%" || meta.unitLabel === "months" || meta.unitLabel === "x" || meta.unitLabel === "index"
-      ? "unknown"
-      : meta.unitLabel.includes(marketCurrency) && !meta.unitLabel.includes(statementCurrency)
-        ? "market"
-        : "statements";
-    const infoSections = withUnitMetadata(props.infoSections, meta.unitLabel, source, mixedCurrencyNote);
-    return (
-      <ChartCard
-        {...props}
-        infoSections={infoSections}
-        unitLabel={props.unitLabel ?? meta.unitLabel}
-        unitKind={props.unitKind ?? meta.unitKind}
-        yAxisTitle={props.yAxisTitle ?? meta.yAxisTitle}
-        y2AxisTitle={props.y2AxisTitle ?? meta.y2AxisTitle}
-      />
-    );
+  const reportedChartContext: ReportedChartContext = {
+    resolveUnitMeta,
+    marketCurrency,
+    statementCurrency,
+    mixedCurrencyNote,
   };
 
   return (
@@ -1500,7 +1519,7 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="LineChart"
           title="Aktieprishistoria"
@@ -1508,7 +1527,7 @@ export default function SingleStockDashboard() {
           height={260}
           options={priceChartOptions}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="LineChart"
           title="Aktieprishistoria (kort)"
@@ -1516,7 +1535,7 @@ export default function SingleStockDashboard() {
           height={260}
           options={priceChartOptions}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Volume"
@@ -1524,7 +1543,7 @@ export default function SingleStockDashboard() {
           height={200}
           options={volumeChartOptions}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Volume (kort)"
@@ -1773,21 +1792,21 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Revenue"
           data={revenueData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Revenue Growth"
           data={revenueGrowthData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Gross Profit Ratio"
@@ -1799,7 +1818,7 @@ export default function SingleStockDashboard() {
           data={grossProfitRatioData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="EBITDA Margin"
@@ -1811,7 +1830,7 @@ export default function SingleStockDashboard() {
           data={ebitdaMarginData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Net Income Margin"
@@ -1823,21 +1842,21 @@ export default function SingleStockDashboard() {
           data={netIncomeMarginData}
           options={{ ...sydingBaseOptions, vAxis: { format: "percent" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Operating Cash Flow"
           data={cashFromOperationsData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Cash From Investing"
           data={cashFromInvestingData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Free Cash Flow"
@@ -1849,14 +1868,14 @@ export default function SingleStockDashboard() {
           data={freeCashFlowData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Free Cash Flow/Share"
           data={freeCashFlowPerShareData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Total Equity"
@@ -1868,7 +1887,7 @@ export default function SingleStockDashboard() {
           data={equityData}
           options={{ ...sydingBaseOptions, vAxis: { format: "short" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="ROE"
@@ -1894,54 +1913,54 @@ export default function SingleStockDashboard() {
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">A) Survival Engine</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={buildSeriesData(buildSeries(data, [{ label: "Cash Balance", statement: "balance", field: "cashAndCashEquivalents" }]), 15)} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A2 Operating Cash Flow" id="A2 Operating Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A2 Operating Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashFromOperationsData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A3 Free Cash Flow" id="A3 Free Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A3 Free Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={freeCashFlowData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A4 Burn Rate TTM" id="A4 Burn Rate TTM" infoSections={PRE_REVENUE_CORE_INFO["A4 Burn Rate TTM"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnRateTtmData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A5 Runway Months" id="A5 Runway Months" infoSections={PRE_REVENUE_CORE_INFO["A5 Runway Months"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayMonthsData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={lineBehindBars} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A7 Cash Bridge / Waterfall" id="A7 Cash Bridge / Waterfall" infoSections={PRE_REVENUE_CORE_INFO["A7 Cash Bridge / Waterfall"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBridgeData} options={lineBehindBars} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A8 Next-12M Survival Gauge" id="A8 Next-12M Survival Gauge" infoSections={PRE_REVENUE_CORE_INFO["A8 Next-12M Survival Gauge"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={next12mSurvivalData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={buildSeriesData(buildSeries(data, [{ label: "Cash Balance", statement: "balance", field: "cashAndCashEquivalents" }]), 15)} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A2 Operating Cash Flow" id="A2 Operating Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A2 Operating Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashFromOperationsData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A3 Free Cash Flow" id="A3 Free Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A3 Free Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={freeCashFlowData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A4 Burn Rate TTM" id="A4 Burn Rate TTM" infoSections={PRE_REVENUE_CORE_INFO["A4 Burn Rate TTM"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnRateTtmData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A5 Runway Months" id="A5 Runway Months" infoSections={PRE_REVENUE_CORE_INFO["A5 Runway Months"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayMonthsData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A7 Cash Bridge / Waterfall" id="A7 Cash Bridge / Waterfall" infoSections={PRE_REVENUE_CORE_INFO["A7 Cash Bridge / Waterfall"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBridgeData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A8 Next-12M Survival Gauge" id="A8 Next-12M Survival Gauge" infoSections={PRE_REVENUE_CORE_INFO["A8 Next-12M Survival Gauge"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={next12mSurvivalData} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">B) Dilution & Shareholder Cost</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B1 Shares Outstanding" id="B1 Shares Outstanding" infoSections={PRE_REVENUE_CORE_INFO["B1 Shares Outstanding"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sharesOutstandingData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B2 Dilution Rate YoY" id="B2 Dilution Rate YoY" infoSections={PRE_REVENUE_CORE_INFO["B2 Dilution Rate YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionRateData} options={{ vAxis: { format: "#,##0.##'%'" } }} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B3 Cash per Share" id="B3 Cash per Share" infoSections={PRE_REVENUE_CORE_INFO["B3 Cash per Share"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashPerShareData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B4 Market Cap vs Shares" id="B4 Market Cap vs Shares" infoSections={PRE_REVENUE_CORE_INFO["B4 Market Cap vs Shares"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={marketCapVsSharesData} options={{ seriesType: "bars", series: { 0: { type: "bars", targetAxisIndex: 0 }, 1: { type: "line", targetAxisIndex: 1, lineWidth: 2 } }, vAxes: { 0: { title: marketCurrency, format: "#,##0" }, 1: { title: "shares", format: "#,##0" } } }} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B5 SBC" id="B5 SBC" infoSections={PRE_REVENUE_CORE_INFO["B5 SBC"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B6 SBC Intensity" id="B6 SBC Intensity" infoSections={PRE_REVENUE_CORE_INFO["B6 SBC Intensity"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcIntensityData} options={{ ...lineBehindBars, vAxis: { format: "#,##0.##'%'" } }} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B7 All-in Dilution" id="B7 All-in Dilution" infoSections={PRE_REVENUE_CORE_INFO["B7 All-in Dilution"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={allInDilutionData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B1 Shares Outstanding" id="B1 Shares Outstanding" infoSections={PRE_REVENUE_CORE_INFO["B1 Shares Outstanding"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sharesOutstandingData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B2 Dilution Rate YoY" id="B2 Dilution Rate YoY" infoSections={PRE_REVENUE_CORE_INFO["B2 Dilution Rate YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionRateData} options={{ vAxis: { format: "#,##0.##'%'" } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B3 Cash per Share" id="B3 Cash per Share" infoSections={PRE_REVENUE_CORE_INFO["B3 Cash per Share"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashPerShareData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B4 Market Cap vs Shares" id="B4 Market Cap vs Shares" infoSections={PRE_REVENUE_CORE_INFO["B4 Market Cap vs Shares"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={marketCapVsSharesData} options={{ seriesType: "bars", series: { 0: { type: "bars", targetAxisIndex: 0 }, 1: { type: "line", targetAxisIndex: 1, lineWidth: 2 } }, vAxes: { 0: { title: marketCurrency, format: "#,##0" }, 1: { title: "shares", format: "#,##0" } } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B5 SBC" id="B5 SBC" infoSections={PRE_REVENUE_CORE_INFO["B5 SBC"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B6 SBC Intensity" id="B6 SBC Intensity" infoSections={PRE_REVENUE_CORE_INFO["B6 SBC Intensity"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcIntensityData} options={{ ...lineBehindBars, vAxis: { format: "#,##0.##'%'" } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B7 All-in Dilution" id="B7 All-in Dilution" infoSections={PRE_REVENUE_CORE_INFO["B7 All-in Dilution"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={allInDilutionData} options={lineBehindBars} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">C) Corporate Discipline</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C1 Corporate Overhead" id="C1 Corporate Overhead" infoSections={PRE_REVENUE_CORE_INFO["C1 Corporate Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={corporateOverheadData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C2 R&D / Exploration Proxy" id="C2 R&D / Exploration Proxy" infoSections={PRE_REVENUE_CORE_INFO["C2 R&D / Exploration Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={rndProxyData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C3 Spend Mix" id="C3 Spend Mix" infoSections={PRE_REVENUE_CORE_INFO["C3 Spend Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={spendMixData} options={lineBehindBars} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C4 Overhead Ratio" id="C4 Overhead Ratio" infoSections={PRE_REVENUE_CORE_INFO["C4 Overhead Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={overheadRatioData} options={{ vAxis: { format: "#,##0.##'%'" } }} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C5 VCE Proxy" id="C5 VCE Proxy" infoSections={PRE_REVENUE_CORE_INFO["C5 VCE Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceProxyData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C6 VCE vs Overhead" id="C6 VCE vs Overhead" infoSections={PRE_REVENUE_CORE_INFO["C6 VCE vs Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceVsOverheadData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C1 Corporate Overhead" id="C1 Corporate Overhead" infoSections={PRE_REVENUE_CORE_INFO["C1 Corporate Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={corporateOverheadData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C2 R&D / Exploration Proxy" id="C2 R&D / Exploration Proxy" infoSections={PRE_REVENUE_CORE_INFO["C2 R&D / Exploration Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={rndProxyData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C3 Spend Mix" id="C3 Spend Mix" infoSections={PRE_REVENUE_CORE_INFO["C3 Spend Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={spendMixData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C4 Overhead Ratio" id="C4 Overhead Ratio" infoSections={PRE_REVENUE_CORE_INFO["C4 Overhead Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={overheadRatioData} options={{ vAxis: { format: "#,##0.##'%'" } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C5 VCE Proxy" id="C5 VCE Proxy" infoSections={PRE_REVENUE_CORE_INFO["C5 VCE Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceProxyData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C6 VCE vs Overhead" id="C6 VCE vs Overhead" infoSections={PRE_REVENUE_CORE_INFO["C6 VCE vs Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceVsOverheadData} options={lineBehindBars} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">D) Financing Structure & Stress</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="D1 Net Cash / Net Debt" id="D1 Net Cash / Net Debt" infoSections={PRE_REVENUE_CORE_INFO["D1 Net Cash / Net Debt"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={netCashDebtData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D2 Debt Maturity Mix" id="D2 Debt Maturity Mix" infoSections={PRE_REVENUE_CORE_INFO["D2 Debt Maturity Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={debtMaturityMixData} options={lineBehindBars} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D3 Cash vs Short-Term Obligations" id="D3 Cash vs Short-Term Obligations" infoSections={PRE_REVENUE_CORE_INFO["D3 Cash vs Short-Term Obligations"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashVsObligationsData} options={lineBehindBars} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D4 Current Ratio" id="D4 Current Ratio" infoSections={PRE_REVENUE_CORE_INFO["D4 Current Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={currentRatioData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D5 Financing Inflows" id="D5 Financing Inflows" infoSections={PRE_REVENUE_CORE_INFO["D5 Financing Inflows"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingInflowsData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D6 Financing Frequency" id="D6 Financing Frequency" infoSections={PRE_REVENUE_CORE_INFO["D6 Financing Frequency"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingFrequencyData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="D1 Net Cash / Net Debt" id="D1 Net Cash / Net Debt" infoSections={PRE_REVENUE_CORE_INFO["D1 Net Cash / Net Debt"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={netCashDebtData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D2 Debt Maturity Mix" id="D2 Debt Maturity Mix" infoSections={PRE_REVENUE_CORE_INFO["D2 Debt Maturity Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={debtMaturityMixData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D3 Cash vs Short-Term Obligations" id="D3 Cash vs Short-Term Obligations" infoSections={PRE_REVENUE_CORE_INFO["D3 Cash vs Short-Term Obligations"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashVsObligationsData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D4 Current Ratio" id="D4 Current Ratio" infoSections={PRE_REVENUE_CORE_INFO["D4 Current Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={currentRatioData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D5 Financing Inflows" id="D5 Financing Inflows" infoSections={PRE_REVENUE_CORE_INFO["D5 Financing Inflows"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingInflowsData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D6 Financing Frequency" id="D6 Financing Frequency" infoSections={PRE_REVENUE_CORE_INFO["D6 Financing Frequency"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingFrequencyData} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">E) Risk Signals & Scoreboard</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E1 Burn Acceleration YoY" id="E1 Burn Acceleration YoY" infoSections={PRE_REVENUE_CORE_INFO["E1 Burn Acceleration YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnAccelerationData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E2 Runway Risk Bands" id="E2 Runway Risk Bands" infoSections={PRE_REVENUE_CORE_INFO["E2 Runway Risk Bands"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayRiskBandsData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="E3 Dilution vs Runway" id="E3 Dilution vs Runway" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={lineBehindBars} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E4 Governance Leak Index" id="E4 Governance Leak Index" infoSections={PRE_REVENUE_CORE_INFO["E4 Governance Leak Index"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={governanceLeakIndexData} />
-            <ReportedChart fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalScoreData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E1 Burn Acceleration YoY" id="E1 Burn Acceleration YoY" infoSections={PRE_REVENUE_CORE_INFO["E1 Burn Acceleration YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnAccelerationData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E2 Runway Risk Bands" id="E2 Runway Risk Bands" infoSections={PRE_REVENUE_CORE_INFO["E2 Runway Risk Bands"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayRiskBandsData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="E3 Dilution vs Runway" id="E3 Dilution vs Runway" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E4 Governance Leak Index" id="E4 Governance Leak Index" infoSections={PRE_REVENUE_CORE_INFO["E4 Governance Leak Index"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={governanceLeakIndexData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalScoreData} />
           </div>
         </>
       )}
@@ -1962,28 +1981,28 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Revenue vs Cost of Revenue"
           data={revenueVsCostData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Gross Profit vs Expenses"
           data={grossProfitVsExpensesData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Operating Profit vs Depreciation"
           data={operatingProfitVsDepData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="EBIT vs Interest"
@@ -1995,14 +2014,14 @@ export default function SingleStockDashboard() {
           data={ebitVsInterestData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Net Earnings"
           data={netEarningsData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Revenue vs Net Earnings per Share"
@@ -2016,7 +2035,7 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Cash vs Net Earnings"
@@ -2028,60 +2047,60 @@ export default function SingleStockDashboard() {
           data={cashVsNetEarningsData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Cash vs Short Term Debt"
           data={cashVsShortTermDebtData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Net Earnings vs Inventory"
           data={inventoryVsNetEarningsData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="PPE vs Depreciation"
           data={ppeVsDepData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Goodwill"
           data={goodwillData}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Short Term vs Long Term Debt"
           data={debtMixData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="EBITDA vs Long Term Debt"
           data={ebitdaVsLongTermDebtData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Current Ratio"
           data={currentRatioData}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Long Term Debt to Net Earnings"
           data={longTermDebtToNetEarningsData}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Debt to Equity"
@@ -2093,14 +2112,14 @@ export default function SingleStockDashboard() {
           data={debtToEquityData}
           options={{ vAxis: { format: "percent" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="Adjusted Debt to Equity"
           data={adjustedDebtToEquityData}
           options={{ vAxis: { format: "percent" } }}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Retained Earnings vs Net Income"
@@ -2112,7 +2131,7 @@ export default function SingleStockDashboard() {
           data={retainedEarningsData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ColumnChart"
           title="ROE"
@@ -2126,7 +2145,7 @@ export default function SingleStockDashboard() {
       </div>
 
       <div className="chartcontainerdoublecolumn">
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Capital Expenditure vs Net Earnings"
@@ -2138,7 +2157,7 @@ export default function SingleStockDashboard() {
           data={capexVsNetEarningsData}
           options={lineBehindBars}
         />
-        <ReportedChart
+        <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
           chartType="ComboChart"
           title="Buybacks + Dividends vs Net Earnings"
