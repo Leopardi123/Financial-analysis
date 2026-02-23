@@ -1348,7 +1348,7 @@ export default function SingleStockDashboard() {
     ? `Market data uses ${marketCurrency} while statements use ${statementCurrency}.`
     : undefined;
 
-  const unitMetaByTitle: Record<string, ChartUnitMeta> = {
+  const unitMetaByTitle: Record<string, ChartUnitMeta> = useMemo(() => ({
     "Aktieprishistoria": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
     "Aktieprishistoria (kort)": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
     "Volume": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
@@ -1385,15 +1385,23 @@ export default function SingleStockDashboard() {
     "D4 Current Ratio": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
     "E2 Runway Risk Bands": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
     "E5 Survival Score (0–10 composite)": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
-  };
+  }), [marketCurrency, statementCurrency]);
 
-  const resolveUnitMeta = (title: string): ChartUnitMeta => unitMetaByTitle[title] ?? {
+  const resolveUnitMeta = useCallback((title: string): ChartUnitMeta => unitMetaByTitle[title] ?? {
     unitLabel: statementCurrency,
     unitKind: "money",
     yAxisTitle: statementCurrency,
-  };
+  }, [statementCurrency, unitMetaByTitle]);
 
-  const ReportedChart = (props: ComponentProps<typeof ChartCard>) => {
+  const handleToggleInfo = useCallback((id: string) => {
+    setOpenInfoId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const handleCloseInfo = useCallback(() => {
+    setOpenInfoId(null);
+  }, []);
+
+  const ReportedChart = useCallback((props: ComponentProps<typeof ChartCard>) => {
     const meta = resolveUnitMeta(props.title);
     const source: CurrencySource = meta.unitLabel.includes("shares") || meta.unitLabel === "%" || meta.unitLabel === "months" || meta.unitLabel === "x" || meta.unitLabel === "index"
       ? "unknown"
@@ -1424,15 +1432,7 @@ export default function SingleStockDashboard() {
         y2AxisTitle={props.y2AxisTitle ?? meta.y2AxisTitle}
       />
     );
-  };
-
-  const handleToggleInfo = useCallback((id: string) => {
-    setOpenInfoId((prev) => (prev === id ? null : id));
-  }, []);
-
-  const handleCloseInfo = useCallback(() => {
-    setOpenInfoId(null);
-  }, []);
+  }, [handleCloseInfo, handleToggleInfo, marketCurrency, mixedCurrencyNote, openInfoId, resolveUnitMeta, statementCurrency]);
 
   const activeModeSectionStyle = { visibility: "visible", position: "static", pointerEvents: "auto", width: "100%" } as const;
   const inactiveModeSectionStyle = { visibility: "hidden", position: "absolute", left: 0, top: 0, pointerEvents: "none", width: "100%" } as const;
