@@ -22,7 +22,8 @@ function getFiscalDates(data: CompanyResponse | null) {
   return data.years.map((year) => `${year}-12-31`);
 }
 
-function toDomainDate(fiscalDate: string) {
+export function toDomainDate(fiscalDate: string | Date) {
+  if (fiscalDate instanceof Date) return fiscalDate;
   const parsed = new Date(`${fiscalDate}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) {
     return new Date(fiscalDate);

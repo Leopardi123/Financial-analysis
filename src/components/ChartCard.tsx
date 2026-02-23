@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Chart } from "react-google-charts";
 import InfoPopover from "./InfoPopover";
 
@@ -12,7 +13,7 @@ type ChartCardProps = {
   options?: Record<string, unknown>;
   fiscalYearEndMonth?: number | null;
   infoSections?: { heading: string; lines: string[] }[];
-  openInfoId?: string | null;
+  infoIsOpen?: boolean;
   onToggleInfo?: (id: string) => void;
   onCloseInfo?: () => void;
   unitLabel?: string;
@@ -129,7 +130,7 @@ function normalizeChartData(
   };
 }
 
-export default function ChartCard({
+function ChartCard({
   id,
   title,
   data,
@@ -138,7 +139,7 @@ export default function ChartCard({
   options = {},
   fiscalYearEndMonth,
   infoSections,
-  openInfoId,
+  infoIsOpen = false,
   onToggleInfo,
   onCloseInfo,
   unitLabel,
@@ -177,7 +178,7 @@ export default function ChartCard({
         {hasInfo && (
           <InfoPopover
             id={chartId}
-            openId={openInfoId ?? null}
+            openId={infoIsOpen ? chartId : null}
             onToggle={onToggleInfo!}
             onClose={onCloseInfo!}
             title={title}
@@ -211,3 +212,5 @@ export default function ChartCard({
     </div>
   );
 }
+
+export default memo(ChartCard);

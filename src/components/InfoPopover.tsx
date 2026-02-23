@@ -95,7 +95,7 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
         (i)
       </button>
       {isOpen && (
-        <div className="info-popover-panel" style={panelStyle ?? undefined}>
+        <div className="info-popover-panel" style={panelStyle ? { ...panelStyle, right: "auto" } : undefined}>
           <h4>{title}</h4>
           {normalizedSections.map((section) => (
             <div key={`${section.heading}-${section.lines.join("|")}`} className="info-popover-section">
