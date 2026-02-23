@@ -456,38 +456,38 @@ function buildCoreInfo(what: string, why: string, how: string, redFlags: string,
 }
 
 const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
-  "A1 Cash Balance": buildCoreInfo("Cash and cash equivalents trend.", "Cash runway is the primary survival constraint.", "Falling trend with no financing support increases risk.", "Rapid cash drawdown and no offsetting inflows.", "Uses balance.cashAndCashEquivalents; missing points are shown as missing data."),
-  "A2 Operating Cash Flow": buildCoreInfo("Operating cash flow by period.", "Shows core corporate burn before financing.", "Persistent negative values imply structural burn.", "Burn deepens YoY without milestone progress.", "Uses cashflow.operatingCashFlow; sparse series render partial chart."),
-  "A3 Free Cash Flow": buildCoreInfo("Free cash flow after capex.", "Approximates all-in corporate cash consumption.", "Negative and worsening FCF reduces optionality.", "FCF deterioration despite capital raises.", "Uses cashflow.freeCashFlow (fallback partial if missing)."),
+  "A1 Cash Balance": buildCoreInfo("Stock measure of cash on hand at each reporting date, shown as bars.", "Cash balance is the near-term survival anchor in pre-revenue companies.", "Each bar is cash balance (in statement currency, millions). Hover shows ΔCash versus prior statement as a financing/burn proxy.", "Large repeated negative ΔCash and no offsetting inflow periods can signal rising financing pressure.", "Uses balance.cashAndCashEquivalents on statement dates. ΔCash = current cash minus prior cash and is not operating cash flow."),
+  "A2 Operating Cash Flow": buildCoreInfo("Period measure from the cash flow statement: operating cash flow for each reporting period, shown as bars.", "Separates operating burn generation from financing and balance-sheet cash levels in pre-revenue survival analysis.", "Negative bars represent operating burn for that period; positive bars show operating inflow. Working-capital timing can create volatility, so a less negative period is not always structural improvement.", "Repeated deep negative bars without milestone progress or financing flexibility increase survival risk.", "Uses cashflow.operatingCashFlow by statement date. This is not ΔCash (change in cash balance); it is operating cash flow."),
+  "A3 Free Cash Flow": buildCoreInfo("Burn proxy bars per period in statement currency millions.", "Gives a practical spend-intensity input for runway analysis in pre-revenue mode.", "Definition: burn = -min(0, FCF). If FCF is missing, fallback uses burn = max(0, -(Operating Cash Flow - Capex)); if Capex is missing, fallback is max(0, -Operating Cash Flow).", "Rising burn bars without financing flexibility can tighten survival windows quickly.", "Uses cashflow.freeCashFlow first, then cashflow.operatingCashFlow and cashflow.capitalExpenditure fallback hierarchy."),
   "A4 Burn Rate TTM": buildCoreInfo("Trailing 4-period burn proxy from OCF.", "Smooths one-off period noise.", "Higher burn line means faster cash depletion.", "Acceleration in burn with flat liquidity.", "Basis: TTM (if built from quarterly points). Not enough history for TTM returns missing data."),
   "A5 Runway Months": buildCoreInfo("Cash divided by annualized burn, converted to months.", "Direct survival-to-milestone lens.", "Below ~12 months indicates financing pressure.", "Runway collapsing while dilution rises.", "Basis: TTM (if built from quarterly points). Requires cash and burn rate history; otherwise missing data."),
-  "A6 Burn Decomposition": buildCoreInfo("Burn components: OCF, capex, SBC, R&D proxy.", "Explains what drives cash consumption.", "Look for component concentration and trend.", "SBC/overhead growth without operating traction.", "Uses available statement fields; missing components remain null."),
+  "A6 Burn Decomposition": buildCoreInfo("Period burn decomposition in statement currency millions using abs(Operating Cash Flow) as burn proxy and key spend components.", "Shows what is driving cash consumption in each period.", "Burn proxy is abs(OCF): higher bars mean higher burn. Capex (abs), SBC and R&D are shown as separate components when available.", "OCF can be noisy from working-capital timing; treat single-period spikes cautiously.", "Uses cashflow.operatingCashFlow (abs), cashflow.capitalExpenditure (abs), cashflow.stockBasedCompensation, and income.researchAndDevelopmentExpenses."),
   "A7 Cash Bridge / Waterfall": buildCoreInfo("Cash bridge using OCF, investing, financing cash flows.", "Shows how ending cash is funded.", "Positive financing with negative operations signals dependency.", "Repeated financing dependence without burn improvement.", "Uses net cash flow lines where available."),
   "A8 Next-12M Survival Gauge": buildCoreInfo("Runway vs 12-month threshold.", "Simple survival checkpoint.", "Runway above 12m improves flexibility.", "Runway consistently below threshold.", "Derived from runway series; threshold always shown."),
   "B1 Shares Outstanding": buildCoreInfo("Outstanding shares trend.", "Captures dilution burden on owners.", "Rising shares with weak cash metrics is negative.", "Step-ups after raises with no runway extension.", "Uses balance/income share fields depending on availability."),
   "B2 Dilution Rate YoY": buildCoreInfo("Year-over-year share growth.", "Quantifies annual dilution cost.", "Sustained high positive bars indicate dilution pressure.", "Double-digit dilution repeated across years.", "Requires consecutive share observations. Extreme dilution values are hidden (>300%) to avoid unreliable artifacts from missing/incorrect share baselines."),
   "B3 Cash per Share": buildCoreInfo("Cash divided by shares outstanding.", "Per-share liquidity view.", "Falling cash/share implies weaker ownership backing.", "Cash/share down despite financing rounds.", "Needs both cash and shares."),
-  "B4 Market Cap vs Shares": buildCoreInfo("Market cap and share count shown together.", "Relates valuation to dilution trajectory.", "If shares rise faster than market cap, value transfer may be weak.", "Persistent share growth with flat market cap.", "Market cap can be missing in statement-only mode; chart degrades gracefully."),
+  "B4 Market Cap vs Shares": buildCoreInfo("Historical implied market cap series derived as Close Price × Shares Outstanding on statement anchor dates.", "Shows how market valuation moved through time relative to dilution/events.", "Each point uses fiscal statement dates; price alignment uses exact-date close when available, otherwise nearest prior trading-day close.", "Sparse or stale price history near statement dates can create gaps.", "Shares source prefers balance.commonStockSharesOutstanding with fallback to income.weightedAverageShsOut when necessary."),
   "B5 SBC": buildCoreInfo("Stock-based compensation trend.", "SBC is non-cash now but dilution later.", "Rising SBC with weak progress is a warning.", "SBC growth without milestone delivery.", "Uses cashflow.stockBasedCompensation."),
   "B6 SBC Intensity": buildCoreInfo("SBC relative to burn/OCF.", "Shows compensation leakage intensity.", "Higher ratio means more dilution risk per burn unit.", "SBC intensity trending up.", "Requires SBC and OCF."),
-  "B7 All-in Dilution": buildCoreInfo("Combined proxy: issuance + SBC.", "Summarizes total dilution pressure.", "Higher values indicate shareholder cost of survival.", "Both issuance and SBC elevated simultaneously.", "Uses commonStockIssued + SBC when available."),
+  "B7 All-in Dilution": buildCoreInfo("Grouped period bars of equity-financing inflow and SBC expense in statement currency millions.", "Shows equity reliance (financing cash-in) and equity leakage (compensation cost proxy) side by side.", "Common Stock Issued reflects financing cash proceeds, while SBC is a non-cash accounting expense tied to equity compensation.", "Interpret as equity reliance/leakage proxy, not a pure percent dilution metric.", "Uses cashflow.commonStockIssued and cashflow.stockBasedCompensation."),
   "C1 Corporate Overhead": buildCoreInfo("SG&A proxy for overhead.", "Tracks fixed corporate cost discipline.", "Flat/declining overhead at same output is positive.", "Overhead growth disconnected from progress.", "Uses SG&A; falls back to operatingExpenses proxy if needed."),
   "C2 R&D / Exploration Proxy": buildCoreInfo("R&D expense trend.", "Proxy for technical advancement spend.", "Stable investment with controlled overhead is preferred.", "R&D cuts that coincide with stalled milestones.", "Uses researchAndDevelopmentExpenses."),
   "C3 Spend Mix": buildCoreInfo("Stack of overhead, R&D, capex.", "Visualizes allocation priorities.", "Balanced mix should align with company stage.", "Administrative spend crowding out core progress spend.", "Uses available fields only."),
   "C4 Overhead Ratio": buildCoreInfo("Overhead relative to total operating outflow proxy.", "Measures efficiency of corporate shell.", "Lower ratio generally indicates better discipline.", "Rising ratio despite financing pressure.", "Requires overhead plus OCF/opex proxy."),
   "C5 VCE Proxy": buildCoreInfo("Value creation efficiency proxy from FCF and spend.", "High-level discipline signal in pre-revenue phase.", "Less negative values imply improving efficiency.", "Efficiency worsening over several periods.", "Proxy only; shown when component data exists."),
   "C6 VCE vs Overhead": buildCoreInfo("VCE proxy compared with overhead.", "Checks if overhead is justified by efficiency trend.", "Divergence (worse VCE + higher overhead) is negative.", "Persistent negative divergence.", "Derived series, missing if inputs missing."),
-  "D1 Net Cash / Net Debt": buildCoreInfo("Cash minus total debt.", "Core balance sheet resilience measure.", "Positive net cash gives optionality.", "Net debt rising while burn remains high.", "Uses cash and debt fields from balance sheet."),
-  "D2 Debt Maturity Mix": buildCoreInfo("Short-term vs long-term debt mix.", "Near-term maturities increase refinancing risk.", "Higher short-term share = tighter risk profile.", "Short-term debt spikes with low cash.", "Uses shortTermDebt and longTermDebt."),
-  "D3 Cash vs Short-Term Obligations": buildCoreInfo("Cash compared to current liabilities.", "Tests near-term liquidity stress.", "Cash below obligations indicates fragility.", "Gap widening over time.", "Uses cash and totalCurrentLiabilities."),
-  "D4 Current Ratio": buildCoreInfo("Current assets / current liabilities.", "Classic short-term solvency gauge.", "Below 1 can indicate funding pressure.", "Sustained sub-1 trend.", "Uses totalCurrentAssets and totalCurrentLiabilities."),
-  "D5 Financing Inflows": buildCoreInfo("Equity/debt financing inflow proxy.", "Shows external funding dependence.", "Frequent inflows may be necessary but costly.", "Reliance increases while runway still drops.", "Uses commonStockIssued when available."),
-  "D6 Financing Frequency": buildCoreInfo("Binary signal for periods with financing inflow.", "Indicates cadence of capital dependence.", "Frequent positive periods imply repeated market access need.", "Consecutive financing periods without burn improvement.", "Derived from financing inflow proxy."),
-  "E1 Burn Acceleration YoY": buildCoreInfo("YoY change in burn intensity.", "Early warning of worsening cash dynamics.", "Positive acceleration means burn is worsening.", "Multiple positive acceleration years.", "Derived from burn proxy."),
-  "E2 Runway Risk Bands": buildCoreInfo("Runway with 6m/12m reference bands.", "Visual risk banding for financing urgency.", "Crossing below 12m and 6m increases urgency.", "Staying below thresholds for extended periods.", "Derived from runway series."),
-  "E3 Dilution vs Runway": buildCoreInfo("Dilution rate plotted with runway trend.", "Checks if dilution buys sufficient time.", "Good outcome: dilution stabilizes and runway improves.", "Dilution rises while runway still shrinks.", "Needs shares + runway inputs."),
-  "E4 Governance Leak Index": buildCoreInfo("Leak proxy combining SBC intensity and dilution.", "Flags hidden shareholder leakage.", "Higher index = higher governance leak risk.", "Sustained high index with no progress.", "Proxy from SBC + share growth; missing components allowed."),
-  "E5 Survival Score": buildCoreInfo("Composite 0–10 survival score proxy.", "Single scoreboard summary for decision hygiene.", "Higher score reflects stronger runway + lower dilution/burn stress.", "Score drifting lower into financing windows.", "Proxy only; based on available runway/burn/dilution inputs."),
+  "D1 Net Cash / Net Debt": buildCoreInfo("Net cash stock measure = cash minus total debt, shown as period bars in statement currency millions.", "Tracks balance-sheet resilience and whether the company is in net cash or net debt territory.", "Bars above zero indicate net cash; below zero indicate net debt. Tooltip includes net cash, cash, and total debt (all in millions).", "Sustained moves deeper below zero can signal rising refinancing risk.", "Uses balance.cashAndCashEquivalents and balance.totalDebt on statement dates."),
+  "D2 Debt Maturity Mix": buildCoreInfo("Stacked short-term and long-term debt bars by period, shown in statement currency millions.", "Separates near-term maturities from longer-dated debt to assess refinancing pressure.", "Total stack height is total debt; a larger short-term share indicates tighter near-term obligations.", "Rising short-term component without liquidity improvement increases rollover risk.", "Uses balance.shortTermDebt and balance.longTermDebt."),
+  "D3 Cash vs Short-Term Obligations": buildCoreInfo("Cash and current liabilities plotted together by period in statement currency millions.", "Conservative liquidity check for near-term obligations coverage.", "In this chart, short-term obligations means total current liabilities (not only short-term debt). Cash below current liabilities can indicate near-term stress.", "A widening liabilities-over-cash gap raises financing pressure risk.", "Uses balance.cashAndCashEquivalents and balance.totalCurrentLiabilities."),
+  "D4 Current Ratio": buildCoreInfo("Current assets divided by current liabilities (x multiple).", "Standard short-term solvency indicator.", "Values below 1 can imply tighter liquidity coverage. Very high spikes can occur when current liabilities are unusually small.", "Do not over-interpret temporary spikes without checking balance-sheet composition.", "Uses balance.totalCurrentAssets and balance.totalCurrentLiabilities."),
+  "D5 Financing Inflows": buildCoreInfo("Cash proceeds from equity issuance per period, shown as bars in statement currency millions.", "Highlights survival funding events and dependence on external equity markets.", "Larger positive bars indicate larger issuance cash inflows in that period.", "Frequent large inflows without runway improvement can signal structural dependence.", "Uses cashflow.commonStockIssued as the inflow proxy."),
+  "D6 Financing Frequency": buildCoreInfo("Trailing 8-period financing frequency rate (0–1) from equity-inflow observations.", "Summarizes how often the company relies on equity issuance over recent periods.", "Higher values mean more frequent periods with positive financing inflow.", "Persistently high frequency alongside weak burn trends can indicate fragile self-funding capacity.", "Derived from cashflow.commonStockIssued > 0 within a trailing window."),
+  "E1 Burn Acceleration (Δ vs prior period)": buildCoreInfo("Change in burn magnitude versus the prior period, shown as bars in statement currency millions.", "Provides an early signal of whether operating burn is worsening or improving period-to-period.", "Positive values mean burn worsened; negative values mean burn improved.", "Can be noisy from working-capital timing effects in operating cash flow.", "Derived from cashflow.operatingCashFlow as Δ|OCF| between consecutive periods."),
+  "E2 Runway Risk Bands": buildCoreInfo("Estimated runway months with 12m and 6m risk reference lines.", "Shows approximate survival time at the current burn pace.", "Runway = cash divided by approximate monthly burn derived from the corrected burn proxy and inferred period length (3m quarterly, 12m annual).", "Runway is approximate and can move sharply from working-capital timing and one-off cash movements.", "Derived from balance.cashAndCashEquivalents plus the A3 burn proxy series; values are clamped visually for readability while tooltip keeps actual when higher."),
+  "E3 Dilution vs Runway": buildCoreInfo("Dilution rate (%) and runway months shown together with dual axes.", "Highlights whether shareholder dilution is buying meaningful survival time.", "Higher dilution with low runway indicates stress; improving runway with moderating dilution is healthier.", "Single-point jumps can come from sparse share updates; focus on trend direction.", "Uses share-count dilution percent and derived runway months."),
+  "E4 Governance Leak Index": buildCoreInfo("Heuristic index combining dilution and SBC intensity components.", "Flags potential owner-value leakage through equity issuance and compensation.", "Higher readings indicate larger cumulative leakage pressure.", "Use as directional signal, not an accounting metric.", "Derived from dilution percent and SBC-intensity percent on aligned periods (scaled to index)."),
+  "E5 Survival Score": buildCoreInfo("Heuristic 0–10 survival score with explainable components.", "Provides a compact risk gauge driven mainly by runway and penalized by dilution/leak/worsening burn signals.", "Tooltip shows runway score and penalties so score moves are explainable period-to-period.", "Not valuation and not a point forecast; use only as a directional monitoring aid.", "Requires aligned runway and dilution inputs; returns null when insufficient data."),
 };
 
 
@@ -657,8 +657,12 @@ function ReportedChart({ reportedChartContext, ...props }: ReportedChartProps) {
   );
 }
 
-export default function SingleStockDashboard() {
-  const { ticker, data, fetchCompany } = useCompanyData("AAPL");
+type SingleStockDashboardProps = {
+  onTickerChange?: (ticker: string) => void;
+};
+
+export default function SingleStockDashboard({ onTickerChange }: SingleStockDashboardProps = {}) {
+  const { ticker, data, error, fetchCompany } = useCompanyData("AAPL");
   const [formTicker, setFormTicker] = useState("");
   const [formCategory, setFormCategory] = useState("");
   const [formSubcategory, setFormSubcategory] = useState("");
@@ -965,27 +969,123 @@ export default function SingleStockDashboard() {
     maxRows = 12,
   ) => buildSeriesData({ headers, rows: fiscalDates.map((date, index) => [date, ...mapper(index)]) }, maxRows);
 
+  const a1StatementCurrencyRaw =
+    (data as any)?.financials?.currency
+    ?? (data as any)?.reportedCurrency
+    ?? (data as any)?.statementCurrency
+    ?? profile?.currency
+    ?? null;
+  const a1StatementCurrency = typeof a1StatementCurrencyRaw === "string" && a1StatementCurrencyRaw.trim()
+    ? a1StatementCurrencyRaw.trim().toUpperCase()
+    : "USD";
+
+  const cashBalanceBarsData = useMemo(() => {
+    const rows = fiscalDates
+      .map((date, index) => {
+        const cash = cashSeries[index];
+        if (typeof cash !== "number") return null;
+        const previousCash = index > 0 ? cashSeries[index - 1] : null;
+        const cashMM = cash / 1_000_000;
+        const deltaMM = typeof previousCash === "number" ? (cash - previousCash) / 1_000_000 : null;
+        return {
+          date,
+          cashMM,
+          tooltipDate: date.getUTCFullYear(),
+          hasDelta: typeof deltaMM === "number",
+          deltaMM,
+        };
+      })
+      .filter((row): row is { date: Date; cashMM: number; tooltipDate: number; hasDelta: boolean; deltaMM: number | null } => Boolean(row));
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const trimmedRows = rows.slice(-15);
+    const isQuarterly = (() => {
+      const countsByYear = new Map<number, number>();
+      trimmedRows.forEach((row) => {
+        const year = row.date.getUTCFullYear();
+        countsByYear.set(year, (countsByYear.get(year) ?? 0) + 1);
+      });
+      return Array.from(countsByYear.values()).some((count) => count > 1);
+    })();
+
+    return [
+      ["Date", "Cash Balance (MM)"],
+      ...trimmedRows.map((row) => {
+        const quarter = Math.floor(row.date.getUTCMonth() / 3) + 1;
+        const dateLabel = isQuarterly ? `${row.tooltipDate} Q${quarter}` : `${row.tooltipDate}`;
+        const deltaLabel = row.hasDelta ? `${(row.deltaMM as number) >= 0 ? "+" : ""}${(row.deltaMM as number).toFixed(2)}` : "—";
+        const formattedValue = `Date: ${dateLabel}\nCash: ${row.cashMM.toFixed(2)} ${a1StatementCurrency} million\nΔCash: ${deltaLabel} ${a1StatementCurrency} million`;
+        return [row.date, { v: row.cashMM, f: formattedValue }];
+      }),
+    ] as unknown as (string | number | Date | null)[][];
+  }, [cashSeries, fiscalDates, a1StatementCurrency]);
+
+  const burnProxyRawSeries = fiscalDates.map((_, index) => {
+    const fcf = freeCashFlowSeries[index];
+    if (typeof fcf === "number") {
+      return Math.max(0, -fcf);
+    }
+    const ocf = operatingCashFlowSeries[index];
+    const capex = capexSeries[index];
+    if (typeof ocf === "number" && typeof capex === "number") {
+      return Math.max(0, -(ocf - capex));
+    }
+    if (typeof ocf === "number") {
+      return Math.max(0, -ocf);
+    }
+    return null;
+  });
+
+  const a3BurnProxyData = buildDerivedSeries(["Date", "Burn Proxy"], (index) => {
+    const burn = burnProxyRawSeries[index];
+    if (typeof burn !== "number") return [null];
+    const burnMM = burn / 1_000_000;
+    return [{ v: burnMM, f: `${burnMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number];
+  }, 10);
+
   const burnRateTtmData = buildDerivedSeries(["Date", "Burn Rate TTM"], (index) => {
     if (index < 3) return [null];
-    const window = freeCashFlowSeries.slice(index - 3, index + 1);
+    const window = burnProxyRawSeries.slice(index - 3, index + 1);
     if (window.some((v) => typeof v !== "number")) return [null];
-    const total = (window as number[]).reduce((acc, value) => acc + Math.abs(value), 0);
+    const total = (window as number[]).reduce((acc, value) => acc + value, 0);
     return [total / 12];
   }, 15);
 
-  const runwayMonthsData = buildDerivedSeries(["Date", "Runway Months"], (index) => {
+  const hasQuarterlyPeriods = (() => {
+    const countsByYear = new Map<number, number>();
+    fiscalDates.forEach((date) => {
+      const year = date.getUTCFullYear();
+      countsByYear.set(year, (countsByYear.get(year) ?? 0) + 1);
+    });
+    return Array.from(countsByYear.values()).some((count) => count > 1);
+  })();
+  const monthsInPeriod = hasQuarterlyPeriods ? 3 : 12;
+
+  const runwayMonthsRawSeries = fiscalDates.map((_, index) => {
     const cash = cashSeries[index];
-    const burnPerMonth = burnRateTtmData?.[index + 1]?.[1] as number | null | undefined;
-    if (typeof cash !== "number" || typeof burnPerMonth !== "number" || burnPerMonth <= 0) return [null];
-    return [cash / burnPerMonth];
+    const burnPeriod = burnProxyRawSeries[index];
+    if (typeof cash !== "number" || typeof burnPeriod !== "number") return null;
+    const burnPerMonth = burnPeriod / monthsInPeriod;
+    if (!Number.isFinite(burnPerMonth) || burnPerMonth <= 0) return null;
+    const runway = cash / burnPerMonth;
+    return Number.isFinite(runway) ? runway : null;
+  });
+
+  const runwayMonthsData = buildDerivedSeries(["Date", "Runway Months"], (index) => {
+    const runway = runwayMonthsRawSeries[index];
+    return [typeof runway === "number" ? runway : null];
   }, 15);
 
-  const burnDecompositionData = buildDerivedSeries(["Date", "Burn (abs OCF)", "Capex (abs)", "SBC", "R&D"], (index) => [
-    typeof operatingCashFlowSeries[index] === "number" ? Math.abs(operatingCashFlowSeries[index] as number) : null,
-    typeof capexSeries[index] === "number" ? Math.abs(capexSeries[index] as number) : null,
-    sbcSeries[index] ?? null,
-    rdSeries[index] ?? null,
-  ], 15);
+  const burnDecompositionData = buildDerivedSeries(["Date", "Burn (abs OCF)", "Capex (abs)", "SBC", "R&D"], (index) => {
+    const burn = typeof operatingCashFlowSeries[index] === "number" ? Math.abs(operatingCashFlowSeries[index] as number) / 1_000_000 : null;
+    const capex = typeof capexSeries[index] === "number" ? Math.abs(capexSeries[index] as number) / 1_000_000 : null;
+    const sbc = typeof sbcSeries[index] === "number" ? (sbcSeries[index] as number) / 1_000_000 : null;
+    const rd = typeof rdSeries[index] === "number" ? (rdSeries[index] as number) / 1_000_000 : null;
+    return [burn, capex, sbc, rd];
+  }, 15);
 
   const cashBridgeData = buildDerivedSeries(["Date", "Operating", "Investing", "Financing"], (index) => [
     operatingCashFlowSeries[index] ?? null,
@@ -994,20 +1094,21 @@ export default function SingleStockDashboard() {
   ], 15);
 
   const next12mSurvivalData = buildDerivedSeries(["Date", "Runway Months", "12M Threshold"], (index) => {
-    const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
+    const runway = runwayMonthsRawSeries[index];
     return [typeof runway === "number" ? runway : null, 12];
   }, 15);
 
   const sharesOutstandingData = buildDerivedSeries(["Date", "Shares Outstanding"], (index) => [statementShares[index] ?? null], 15);
-  const dilutionRateData = buildDerivedSeries(["Date", "Dilution Rate YoY"], (index) => {
-    if (index === 0) return [null];
+  const dilutionRateRawSeries = fiscalDates.map((_, index) => {
+    if (index === 0) return null;
     const current = statementShares[index];
     const previous = statementShares[index - 1];
-    if (typeof current !== "number" || typeof previous !== "number" || previous <= 0) return [null];
+    if (typeof current !== "number" || typeof previous !== "number" || previous <= 0) return null;
     const dilution = current / previous - 1;
-    if (Math.abs(dilution) > 3) return [null];
-    return [dilution * 100];
-  }, 15);
+    if (Math.abs(dilution) > 3) return null;
+    return dilution * 100;
+  });
+  const dilutionRateData = buildDerivedSeries(["Date", "Dilution Rate YoY"], (index) => [dilutionRateRawSeries[index]], 15);
 
   const cashPerShareData = buildDerivedSeries(["Date", "Cash per Share"], (index) => {
     const cash = cashSeries[index];
@@ -1016,23 +1117,65 @@ export default function SingleStockDashboard() {
     return [cash / shares];
   }, 15);
 
-  const marketCapVsSharesData = buildDerivedSeries(["Date", "Market Cap", "Shares Outstanding"], (index) => {
+  const historicalClosePoints = useMemo(() => {
+    const source = priceData?.long?.price;
+    if (!source || source.length < 2) return [] as { date: Date; close: number }[];
+    return source.slice(1)
+      .map((row) => {
+        const [rawDate, ...rest] = row;
+        const date = parseChartDate(rawDate);
+        const close = rest.find((value) => typeof value === "number" && Number.isFinite(value));
+        if (!date || Number.isNaN(date.getTime()) || typeof close !== "number" || !Number.isFinite(close)) return null;
+        return { date, close };
+      })
+      .filter((point): point is { date: Date; close: number } => Boolean(point))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [priceData]);
+
+  const marketCapVsSharesData = buildDerivedSeries(["Date", "Implied Market Cap"], (index) => {
+    const anchorDate = fiscalDates[index];
+    if (!(anchorDate instanceof Date) || Number.isNaN(anchorDate.getTime())) return [null];
     const shares = statementShares[index];
-    const marketCap = typeof ((data as any)?.quote)?.marketCap === "number" ? ((data as any).quote as any).marketCap : null;
-    return [marketCap, shares ?? null];
+    if (typeof shares !== "number" || !Number.isFinite(shares) || shares <= 0) return [null];
+    let chosen: { date: Date; close: number } | null = null;
+    for (const point of historicalClosePoints) {
+      if (point.date.getTime() <= anchorDate.getTime()) {
+        chosen = point;
+      } else {
+        break;
+      }
+    }
+    if (!chosen) return [null];
+    const impliedMarketCap = chosen.close * shares;
+    if (!Number.isFinite(impliedMarketCap)) return [null];
+    const marketCapMM = impliedMarketCap / 1_000_000;
+    const sharesMM = shares / 1_000_000;
+    const tooltip = `Close price: ${chosen.close.toFixed(2)}\nShares: ${shares.toLocaleString("en-US", { maximumFractionDigits: 0 })}\nShares (millions): ${sharesMM.toFixed(2)}\nImplied market cap: ${marketCapMM.toFixed(2)} ${a1StatementCurrency} million`;
+    return [{ v: marketCapMM, f: tooltip } as unknown as number];
   }, 15);
 
   const sbcData = buildDerivedSeries(["Date", "SBC"], (index) => [sbcSeries[index] ?? null], 15);
-  const sbcIntensityData = buildDerivedSeries(["Date", "SBC / abs(OCF)", "SBC"], (index) => {
+  const sbcIntensityRawSeries = fiscalDates.map((_, index) => {
     const sbc = sbcSeries[index];
-    const ocf = operatingCashFlowSeries[index];
-    const ratio = typeof sbc === "number" && typeof ocf === "number" && ocf !== 0 ? (sbc / Math.abs(ocf)) * 100 : null;
-    return [ratio, sbc ?? null];
-  }, 15);
-  const allInDilutionData = buildDerivedSeries(["Date", "Common Stock Issued", "SBC"], (index) => [
-    commonStockIssuedSeries[index] ?? null,
+    const burn = burnProxyRawSeries[index];
+    if (typeof sbc !== "number" || typeof burn !== "number" || burn === 0) return null;
+    const ratio = (sbc / burn) * 100;
+    return Number.isFinite(ratio) ? ratio : null;
+  });
+  const sbcIntensityData = buildDerivedSeries(["Date", "SBC / Burn", "SBC"], (index) => [
+    sbcIntensityRawSeries[index],
     sbcSeries[index] ?? null,
   ], 15);
+  const allInDilutionData = buildDerivedSeries(["Date", "Equity financing inflow", "SBC expense"], (index) => {
+    const issued = commonStockIssuedSeries[index];
+    const sbc = sbcSeries[index];
+    const issuedMM = typeof issued === "number" && Number.isFinite(issued) ? issued / 1_000_000 : null;
+    const sbcMM = typeof sbc === "number" && Number.isFinite(sbc) ? sbc / 1_000_000 : null;
+    return [
+      issuedMM === null ? null : ({ v: issuedMM, f: `Equity financing inflow (Common Stock Issued): ${issuedMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number),
+      sbcMM === null ? null : ({ v: sbcMM, f: `SBC expense (non-cash): ${sbcMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number),
+    ];
+  }, 15);
 
   const corporateOverheadData = buildDerivedSeries(["Date", "Corporate Overhead"], (index) => [overheadSeries[index] ?? null], 15);
   const rndProxyData = buildDerivedSeries(["Date", "R&D / Exploration Proxy"], (index) => [rdSeries[index] ?? null], 15);
@@ -1062,53 +1205,91 @@ export default function SingleStockDashboard() {
     const cash = cashSeries[index];
     const debt = totalDebtSeries[index];
     if (typeof cash !== "number" || typeof debt !== "number") return [null];
-    return [cash - debt];
+    const netCashMM = (cash - debt) / 1_000_000;
+    const cashMM = cash / 1_000_000;
+    const debtMM = debt / 1_000_000;
+    const tooltip = `Net cash: ${netCashMM.toFixed(2)} ${a1StatementCurrency} million\nCash: ${cashMM.toFixed(2)} ${a1StatementCurrency} million\nTotal debt: ${debtMM.toFixed(2)} ${a1StatementCurrency} million`;
+    return [{ v: netCashMM, f: tooltip } as unknown as number];
   }, 15);
-  const debtMaturityMixData = buildDerivedSeries(["Date", "Short-Term Debt", "Long-Term Debt"], (index) => [
-    shortTermDebtSeries[index] ?? null,
-    longTermDebtSeries[index] ?? null,
-  ], 15);
-  const cashVsObligationsData = buildDerivedSeries(["Date", "Cash", "Current Liabilities"], (index) => [
-    cashSeries[index] ?? null,
-    currentLiabilitySeries[index] ?? null,
-  ], 15);
-  const financingInflowsData = buildDerivedSeries(["Date", "Financing Inflows"], (index) => [commonStockIssuedSeries[index] ?? null], 15);
-  const financingFrequencyData = buildDerivedSeries(["Date", "Financing Frequency"], (index) => {
+  const debtMaturityMixData = buildDerivedSeries(["Date", "Short-Term Debt", "Long-Term Debt"], (index) => {
+    const shortTerm = shortTermDebtSeries[index];
+    const longTerm = longTermDebtSeries[index];
+    const shortMM = typeof shortTerm === "number" ? shortTerm / 1_000_000 : null;
+    const longMM = typeof longTerm === "number" ? longTerm / 1_000_000 : null;
+    if (shortMM === null && longMM === null) return [null, null];
+    const totalMM = (shortMM ?? 0) + (longMM ?? 0);
+    return [
+      shortMM === null ? null : ({ v: shortMM, f: `ST debt: ${shortMM.toFixed(2)} ${a1StatementCurrency} million\nLT debt: ${(longMM ?? 0).toFixed(2)} ${a1StatementCurrency} million\nTotal: ${totalMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number),
+      longMM === null ? null : ({ v: longMM, f: `ST debt: ${(shortMM ?? 0).toFixed(2)} ${a1StatementCurrency} million\nLT debt: ${longMM.toFixed(2)} ${a1StatementCurrency} million\nTotal: ${totalMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number),
+    ];
+  }, 15);
+  const cashVsObligationsData = buildDerivedSeries(["Date", "Cash", "Current Liabilities"], (index) => {
+    const cash = cashSeries[index];
+    const liabilities = currentLiabilitySeries[index];
+    const cashMM = typeof cash === "number" ? cash / 1_000_000 : null;
+    const liabilitiesMM = typeof liabilities === "number" ? liabilities / 1_000_000 : null;
+    return [
+      cashMM === null ? null : ({ v: cashMM, f: `Cash: ${cashMM.toFixed(2)} ${a1StatementCurrency} million\nCurrent liabilities: ${(liabilitiesMM ?? 0).toFixed(2)} ${a1StatementCurrency} million` } as unknown as number),
+      liabilitiesMM === null ? null : ({ v: liabilitiesMM, f: `Cash: ${(cashMM ?? 0).toFixed(2)} ${a1StatementCurrency} million\nCurrent liabilities: ${liabilitiesMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number),
+    ];
+  }, 15);
+  const financingInflowsData = buildDerivedSeries(["Date", "Financing Inflows"], (index) => {
     const inflow = commonStockIssuedSeries[index];
-    return [typeof inflow === "number" && inflow > 0 ? 1 : 0];
+    if (typeof inflow !== "number") return [null];
+    const inflowMM = inflow / 1_000_000;
+    return [{ v: inflowMM, f: `${inflowMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number];
+  }, 15);
+  const financingFrequencyData = buildDerivedSeries(["Date", "Financing Frequency (8p)"], (index) => {
+    if (index < 2) return [null];
+    const windowStart = Math.max(0, index - 7);
+    const windowValues = commonStockIssuedSeries.slice(windowStart, index + 1).filter((value): value is number => typeof value === "number");
+    if (windowValues.length < 3) return [null];
+    const positives = windowValues.filter((value) => value > 0).length;
+    const freq = positives / windowValues.length;
+    const tooltip = `${freq.toFixed(2)} index\n${positives}/${windowValues.length} periods with inflow > 0`;
+    return [{ v: freq, f: tooltip } as unknown as number];
   }, 15);
 
-  const burnAccelerationData = buildDerivedSeries(["Date", "Burn Acceleration YoY"], (index) => {
-    if (index === 0) return [null];
-    const current = operatingCashFlowSeries[index];
-    const previous = operatingCashFlowSeries[index - 1];
-    if (typeof current !== "number" || typeof previous !== "number") return [null];
-    return [Math.abs(current) - Math.abs(previous)];
-  }, 15);
+  const burnAccelerationRawSeries = fiscalDates.map((_, index) => {
+    if (index === 0) return null;
+    const current = burnProxyRawSeries[index];
+    const previous = burnProxyRawSeries[index - 1];
+    if (typeof current !== "number" || typeof previous !== "number") return null;
+    return (current - previous) / 1_000_000;
+  });
+
   const runwayRiskBandsData = buildDerivedSeries(["Date", "Runway", "12M", "6M"], (index) => {
-    const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
-    return [typeof runway === "number" ? runway : null, 12, 6];
+    const runway = runwayMonthsRawSeries[index];
+    if (typeof runway !== "number") return [null, 12, 6];
+    const capped = Math.min(runway, 36);
+    const tooltip = runway > 36 ? `>36 months (actual: ${runway.toFixed(1)})` : `${runway.toFixed(1)} months`;
+    return [{ v: capped, f: tooltip } as unknown as number, 12, 6];
   }, 15);
-  const dilutionVsRunwayData = buildDerivedSeries(["Date", "Dilution Rate", "Runway Months"], (index) => {
-    const dilution = dilutionRateData?.[index + 1]?.[1] as number | null | undefined;
-    const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
-    return [typeof dilution === "number" ? dilution : null, typeof runway === "number" ? runway : null];
-  }, 15);
-  const governanceLeakIndexData = buildDerivedSeries(["Date", "Governance Leak Index"], (index) => {
-    const dilution = dilutionRateData?.[index + 1]?.[1] as number | null | undefined;
-    const sbcIntensity = sbcIntensityData?.[index + 1]?.[1] as number | null | undefined;
-    if (typeof dilution !== "number" && typeof sbcIntensity !== "number") return [null];
-    return [((dilution ?? 0) / 100) + ((sbcIntensity ?? 0) / 100)];
-  }, 15);
+  const burnAccelerationData = buildDerivedSeries(["Date", "Burn Acceleration"], (index) => [burnAccelerationRawSeries[index]], 15);
+  const dilutionVsRunwayData = buildDerivedSeries(["Date", "Dilution Rate", "Runway Months"], (index) => [
+    dilutionRateRawSeries[index],
+    runwayMonthsRawSeries[index],
+  ], 15);
+  const governanceLeakRawSeries = fiscalDates.map((_, index) => {
+    const dilution = dilutionRateRawSeries[index];
+    const sbcIntensity = sbcIntensityRawSeries[index];
+    if (typeof dilution !== "number" && typeof sbcIntensity !== "number") return null;
+    return ((dilution ?? 0) + (sbcIntensity ?? 0)) / 100;
+  });
+  const governanceLeakIndexData = buildDerivedSeries(["Date", "Governance Leak Index"], (index) => [governanceLeakRawSeries[index]], 15);
   const survivalScoreData = buildDerivedSeries(["Date", "Survival Score"], (index) => {
-    const runway = runwayMonthsData?.[index + 1]?.[1] as number | null | undefined;
-    const dilution = dilutionRateData?.[index + 1]?.[1] as number | null | undefined;
-    const burnAccel = burnAccelerationData?.[index + 1]?.[1] as number | null | undefined;
-    if (typeof runway !== "number") return [null];
+    const runway = runwayMonthsRawSeries[index];
+    const dilutionPercent = dilutionRateRawSeries[index];
+    const burnAccel = burnAccelerationRawSeries[index];
+    const governanceLeak = governanceLeakRawSeries[index];
+    if (typeof runway !== "number" || typeof dilutionPercent !== "number") return [null];
     const runwayScore = Math.max(0, Math.min(10, runway / 2));
-    const dilutionPenalty = typeof dilution === "number" ? Math.max(0, dilution * 30) : 0;
-    const burnPenalty = typeof burnAccel === "number" ? Math.max(0, burnAccel > 0 ? 1.5 : 0) : 0;
-    return [Math.max(0, Math.min(10, runwayScore - dilutionPenalty - burnPenalty))];
+    const dilutionPenalty = Math.max(0, Math.min(10, dilutionPercent * 0.5));
+    const leakPenalty = typeof governanceLeak === "number" ? Math.max(0, Math.min(3, governanceLeak * 1.5)) : 0;
+    const burnPenalty = typeof burnAccel === "number" && burnAccel > 0 ? Math.min(2, burnAccel / 50) : 0;
+    const score = Math.max(0, Math.min(10, runwayScore - dilutionPenalty - leakPenalty - burnPenalty));
+    const tooltip = `Score: ${score.toFixed(2)}\nRunway score: ${runwayScore.toFixed(2)}\nDilution penalty: -${dilutionPenalty.toFixed(2)}\nLeak penalty: -${leakPenalty.toFixed(2)}\nBurn penalty: -${burnPenalty.toFixed(2)}`;
+    return [{ v: score, f: tooltip } as unknown as number];
   }, 15);
 
   const revenueVsCostData = buildSeriesData(
@@ -1331,26 +1512,33 @@ export default function SingleStockDashboard() {
     "Free Cash Flow/Share": { unitLabel: `${statementCurrency}/share`, unitKind: "money", yAxisTitle: `${statementCurrency}/share` },
     "Total Equity": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "ROE": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
-    "A1 Cash Balance": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "A1 Cash Balance": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "A2 Operating Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
-    "A3 Free Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "A3 Free Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "A4 Burn Rate TTM": { unitLabel: `${statementCurrency}/month`, unitKind: "money", yAxisTitle: `${statementCurrency}/month` },
     "A5 Runway Months": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
     "A8 Next-12M Survival Gauge": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
     "B1 Shares Outstanding": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
     "B2 Dilution Rate YoY": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
     "B3 Cash per Share": { unitLabel: `${statementCurrency}/share`, unitKind: "money", yAxisTitle: `${statementCurrency}/share` },
-    "B4 Market Cap vs Shares": { unitLabel: `${marketCurrency} + shares`, unitKind: "unknown", yAxisTitle: marketCurrency, y2AxisTitle: "shares" },
+    "B4 Market Cap vs Shares": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "B5 SBC": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "B6 SBC Intensity": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
-    "B7 All-in Dilution": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "B7 All-in Dilution": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "C1 Corporate Overhead": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "C2 R&D / Exploration Proxy": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "C4 Overhead Ratio": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
     "C5 VCE Proxy": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
-    "D1 Net Cash / Net Debt": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "D1 Net Cash / Net Debt": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
+    "D2 Debt Maturity Mix": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
+    "D3 Cash vs Short-Term Obligations": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "D4 Current Ratio": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
+    "D5 Financing Inflows": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
+    "D6 Financing Frequency": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
+    "E1 Burn Acceleration (Δ vs prior period)": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "E2 Runway Risk Bands": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
+    "E3 Dilution vs Runway": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%", y2AxisTitle: "months" },
+    "E4 Governance Leak Index": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
     "E5 Survival Score (0–10 composite)": { unitLabel: "index", unitKind: "index", yAxisTitle: "index" },
   };
 
@@ -1375,6 +1563,7 @@ export default function SingleStockDashboard() {
             label="Sök bolagsnamn"
             placeholder="T.ex. Apple"
             onSelect={(company) => {
+              onTickerChange?.(company.symbol);
               void fetchCompany(company.symbol);
             }}
           />
@@ -1397,6 +1586,7 @@ export default function SingleStockDashboard() {
             onChange={(event) => {
               const value = event.target.value;
               if (value !== "Välj En Aktie") {
+                onTickerChange?.(value);
                 void fetchCompany(value);
               }
             }}
@@ -1409,6 +1599,7 @@ export default function SingleStockDashboard() {
             ))}
           </select>
           {tickersError && <p className="status error">{tickersError}</p>}
+          {error && <p className="status error">{error}</p>}
         </div>
 
         <div className="stock-selector-row form">
@@ -1913,12 +2104,12 @@ export default function SingleStockDashboard() {
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">A) Survival Engine</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={buildSeriesData(buildSeries(data, [{ label: "Cash Balance", statement: "balance", field: "cashAndCashEquivalents" }]), 15)} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A2 Operating Cash Flow" id="A2 Operating Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A2 Operating Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashFromOperationsData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A3 Free Cash Flow" id="A3 Free Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A3 Free Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={freeCashFlowData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBalanceBarsData} options={{ bar: { groupWidth: "65%" } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A2 Operating Cash Flow" id="A2 Operating Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A2 Operating Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashFromOperationsData} options={{ vAxis: { baseline: 0 } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A3 Free Cash Flow" id="A3 Free Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A3 Free Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={a3BurnProxyData} options={{ vAxis: { baseline: 0 } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A4 Burn Rate TTM" id="A4 Burn Rate TTM" infoSections={PRE_REVENUE_CORE_INFO["A4 Burn Rate TTM"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnRateTtmData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A5 Runway Months" id="A5 Runway Months" infoSections={PRE_REVENUE_CORE_INFO["A5 Runway Months"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayMonthsData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={{ bar: { groupWidth: "65%" } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A7 Cash Bridge / Waterfall" id="A7 Cash Bridge / Waterfall" infoSections={PRE_REVENUE_CORE_INFO["A7 Cash Bridge / Waterfall"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBridgeData} options={lineBehindBars} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A8 Next-12M Survival Gauge" id="A8 Next-12M Survival Gauge" infoSections={PRE_REVENUE_CORE_INFO["A8 Next-12M Survival Gauge"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={next12mSurvivalData} />
           </div>
@@ -1928,10 +2119,10 @@ export default function SingleStockDashboard() {
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B1 Shares Outstanding" id="B1 Shares Outstanding" infoSections={PRE_REVENUE_CORE_INFO["B1 Shares Outstanding"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sharesOutstandingData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B2 Dilution Rate YoY" id="B2 Dilution Rate YoY" infoSections={PRE_REVENUE_CORE_INFO["B2 Dilution Rate YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionRateData} options={{ vAxis: { format: "#,##0.##'%'" } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B3 Cash per Share" id="B3 Cash per Share" infoSections={PRE_REVENUE_CORE_INFO["B3 Cash per Share"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashPerShareData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B4 Market Cap vs Shares" id="B4 Market Cap vs Shares" infoSections={PRE_REVENUE_CORE_INFO["B4 Market Cap vs Shares"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={marketCapVsSharesData} options={{ seriesType: "bars", series: { 0: { type: "bars", targetAxisIndex: 0 }, 1: { type: "line", targetAxisIndex: 1, lineWidth: 2 } }, vAxes: { 0: { title: marketCurrency, format: "#,##0" }, 1: { title: "shares", format: "#,##0" } } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="B4 Market Cap vs Shares" id="B4 Market Cap vs Shares" infoSections={PRE_REVENUE_CORE_INFO["B4 Market Cap vs Shares"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={marketCapVsSharesData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B5 SBC" id="B5 SBC" infoSections={PRE_REVENUE_CORE_INFO["B5 SBC"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B6 SBC Intensity" id="B6 SBC Intensity" infoSections={PRE_REVENUE_CORE_INFO["B6 SBC Intensity"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={sbcIntensityData} options={{ ...lineBehindBars, vAxis: { format: "#,##0.##'%'" } }} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="B7 All-in Dilution" id="B7 All-in Dilution" infoSections={PRE_REVENUE_CORE_INFO["B7 All-in Dilution"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={allInDilutionData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="B7 All-in Dilution" id="B7 All-in Dilution" infoSections={PRE_REVENUE_CORE_INFO["B7 All-in Dilution"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={allInDilutionData} options={{ bar: { groupWidth: "65%" } }} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">C) Corporate Discipline</h2></div>
@@ -1946,21 +2137,21 @@ export default function SingleStockDashboard() {
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">D) Financing Structure & Stress</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="D1 Net Cash / Net Debt" id="D1 Net Cash / Net Debt" infoSections={PRE_REVENUE_CORE_INFO["D1 Net Cash / Net Debt"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={netCashDebtData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D2 Debt Maturity Mix" id="D2 Debt Maturity Mix" infoSections={PRE_REVENUE_CORE_INFO["D2 Debt Maturity Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={debtMaturityMixData} options={lineBehindBars} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D3 Cash vs Short-Term Obligations" id="D3 Cash vs Short-Term Obligations" infoSections={PRE_REVENUE_CORE_INFO["D3 Cash vs Short-Term Obligations"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashVsObligationsData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D1 Net Cash / Net Debt" id="D1 Net Cash / Net Debt" infoSections={PRE_REVENUE_CORE_INFO["D1 Net Cash / Net Debt"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={netCashDebtData} options={{ vAxis: { baseline: 0 } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D2 Debt Maturity Mix" id="D2 Debt Maturity Mix" infoSections={PRE_REVENUE_CORE_INFO["D2 Debt Maturity Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={debtMaturityMixData} options={{ isStacked: true, bar: { groupWidth: "65%" } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="D3 Cash vs Short-Term Obligations" id="D3 Cash vs Short-Term Obligations" infoSections={PRE_REVENUE_CORE_INFO["D3 Cash vs Short-Term Obligations"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashVsObligationsData} options={{ seriesType: "line", series: { 0: { type: "area", areaOpacity: 0.2, lineWidth: 2 }, 1: { type: "line", lineWidth: 2 } } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D4 Current Ratio" id="D4 Current Ratio" infoSections={PRE_REVENUE_CORE_INFO["D4 Current Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={currentRatioData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D5 Financing Inflows" id="D5 Financing Inflows" infoSections={PRE_REVENUE_CORE_INFO["D5 Financing Inflows"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingInflowsData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D6 Financing Frequency" id="D6 Financing Frequency" infoSections={PRE_REVENUE_CORE_INFO["D6 Financing Frequency"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingFrequencyData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="D5 Financing Inflows" id="D5 Financing Inflows" infoSections={PRE_REVENUE_CORE_INFO["D5 Financing Inflows"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingInflowsData} options={{ vAxis: { baseline: 0 } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="D6 Financing Frequency" id="D6 Financing Frequency" infoSections={PRE_REVENUE_CORE_INFO["D6 Financing Frequency"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={financingFrequencyData} options={{ vAxis: { viewWindow: { min: 0, max: 1 } } }} />
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">E) Risk Signals & Scoreboard</h2></div>
           <div className="chartcontainerdoublecolumn">
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E1 Burn Acceleration YoY" id="E1 Burn Acceleration YoY" infoSections={PRE_REVENUE_CORE_INFO["E1 Burn Acceleration YoY"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnAccelerationData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E2 Runway Risk Bands" id="E2 Runway Risk Bands" infoSections={PRE_REVENUE_CORE_INFO["E2 Runway Risk Bands"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayRiskBandsData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="E3 Dilution vs Runway" id="E3 Dilution vs Runway" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={lineBehindBars} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="E1 Burn Acceleration (Δ vs prior period)" id="E1 Burn Acceleration (Δ vs prior period)" infoSections={PRE_REVENUE_CORE_INFO["E1 Burn Acceleration (Δ vs prior period)"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnAccelerationData} options={{ vAxis: { baseline: 0 } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E2 Runway Risk Bands" id="E2 Runway Risk Bands" infoSections={PRE_REVENUE_CORE_INFO["E2 Runway Risk Bands"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayRiskBandsData} options={{ vAxis: { viewWindow: { min: 0, max: 36 } } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="E3 Dilution vs Runway" id="E3 Dilution vs Runway" infoSections={PRE_REVENUE_CORE_INFO["E3 Dilution vs Runway"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={dilutionVsRunwayData} options={{ seriesType: "bars", series: { 0: { type: "bars", targetAxisIndex: 0 }, 1: { type: "line", targetAxisIndex: 1, lineWidth: 2 } }, vAxes: { 0: { title: "%" }, 1: { title: "months" } } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E4 Governance Leak Index" id="E4 Governance Leak Index" infoSections={PRE_REVENUE_CORE_INFO["E4 Governance Leak Index"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={governanceLeakIndexData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalScoreData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="E5 Survival Score (0–10 composite)" id="E5 Survival Score" infoSections={PRE_REVENUE_CORE_INFO["E5 Survival Score"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={survivalScoreData} options={{ vAxis: { viewWindow: { min: 0, max: 10 } } }} />
           </div>
         </>
       )}

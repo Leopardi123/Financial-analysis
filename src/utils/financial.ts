@@ -56,7 +56,10 @@ export function getFieldSeries(
   if (!data) {
     return [];
   }
-  const source = data[statement]?.[field] ?? [];
+  const source = data[statement]?.[field];
+  if (!Array.isArray(source)) {
+    return [];
+  }
   return source.map((value) => safeNumber(value));
 }
 
@@ -101,8 +104,9 @@ export function buildSeries(
   const rows = fiscalDates.map((fiscalDate, index) => {
     const row: SeriesRow = [toDomainDate(fiscalDate)];
     fields.forEach((item) => {
-      const values = data[item.statement]?.[item.field] ?? [];
-      row.push(safeNumber(values[index]));
+      const values = data[item.statement]?.[item.field];
+      const series = Array.isArray(values) ? values : [];
+      row.push(safeNumber(series[index]));
     });
     return row;
   });
