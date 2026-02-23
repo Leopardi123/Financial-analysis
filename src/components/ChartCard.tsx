@@ -75,9 +75,22 @@ function buildOptionSignature(chartType: ChartCardProps["chartType"], options: R
 const ChartBody = memo(function ChartBody({ id, chartType, data, height, options }: ChartBodyProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const previousSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const mountedRef = useRef(true);
+  const rafRef = useRef<number | null>(null);
   const DEBUG = debugChartsOn();
   const dataSig = useMemo(() => buildDataSignature(data), [data]);
   const optSig = useMemo(() => buildOptionSignature(chartType, options), [chartType, options]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (rafRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!DEBUG || !wrapperRef.current || typeof ResizeObserver === "undefined") {
@@ -86,15 +99,31 @@ const ChartBody = memo(function ChartBody({ id, chartType, data, height, options
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      const width = Math.round(entry.contentRect.width);
-      const heightSize = Math.round(entry.contentRect.height);
-      const previousSize = previousSizeRef.current;
-      const changed = previousSize ? previousSize.width !== width || previousSize.height !== heightSize : true;
-      previousSizeRef.current = { width, height: heightSize };
-      console.log(`[ChartRO] id=${id} w=${width} h=${heightSize} changed=${changed}`);
+      if (rafRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(rafRef.current);
+      }
+      rafRef.current = window.requestAnimationFrame(() => {
+        if (!mountedRef.current) {
+          return;
+        }
+        const width = Math.round(entry.contentRect.width);
+        const heightSize = Math.round(entry.contentRect.height);
+        const previousSize = previousSizeRef.current;
+        const changed = previousSize ? previousSize.width !== width || previousSize.height !== heightSize : true;
+        if (changed) {
+          previousSizeRef.current = { width, height: heightSize };
+          console.log(`[ChartRO] id=${id} w=${width} h=${heightSize} changed=true`);
+        }
+      });
     });
     observer.observe(wrapperRef.current);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (rafRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
   }, [DEBUG, id]);
 
   return (
