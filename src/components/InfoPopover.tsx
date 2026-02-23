@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type InfoSection = {
   heading: string;
@@ -19,7 +20,10 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
   const isOpen = openId === id;
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const [panelStyle, setPanelStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debugCharts") === "1";
 
   const normalizedSections: InfoSection[] = sections && sections.length
     ? sections
@@ -37,7 +41,7 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
         return;
       }
       const rect = triggerRef.current.getBoundingClientRect();
-      const viewportPadding = 8;
+      const viewportPadding = 10;
       const panelWidth = Math.min(420, window.innerWidth - viewportPadding * 2);
 
       let left = rect.left + rect.width / 2 - panelWidth / 2;
@@ -45,23 +49,28 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
       left = Math.min(left, window.innerWidth - panelWidth - viewportPadding);
 
       const preferredTop = rect.bottom + 8;
-      const estimatedHeight = 240;
+      const measuredHeight = panelRef.current?.getBoundingClientRect().height ?? 240;
       let top = preferredTop;
-      if (preferredTop + estimatedHeight > window.innerHeight - viewportPadding) {
-        top = Math.max(viewportPadding, rect.top - estimatedHeight - 8);
+      if (preferredTop + measuredHeight > window.innerHeight - viewportPadding) {
+        top = Math.max(viewportPadding, rect.top - measuredHeight - 8);
       }
 
+      if (DEBUG) {
+        console.log(`[InfoPopover] id=${id} trigger=${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)}x${Math.round(rect.height)} panel=${Math.round(left)},${Math.round(top)},${Math.round(panelWidth)}x${Math.round(measuredHeight)}`);
+      }
       setPanelStyle({ top, left, width: panelWidth });
     };
 
     updatePosition();
+    const frame = window.requestAnimationFrame(updatePosition);
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     return () => {
+      window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [isOpen]);
+  }, [DEBUG, id, isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -69,19 +78,47 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
     }
 
     const onPointerDown = (event: MouseEvent) => {
-      if (!popoverRef.current) {
+      if (!panelRef.current && !triggerRef.current) {
         return;
       }
-      if (!popoverRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const clickedTrigger = Boolean(triggerRef.current?.contains(target));
+      const clickedPanel = Boolean(panelRef.current?.contains(target));
+      if (!clickedTrigger && !clickedPanel) {
+        onClose();
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
         onClose();
       }
     };
 
     document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
     };
   }, [isOpen, onClose]);
+
+  const panel = isOpen ? createPortal(
+    <div className="info-popover-panel" ref={panelRef} style={panelStyle ? { ...panelStyle, right: "auto" } : undefined}>
+      <h4>{title}</h4>
+      {normalizedSections.map((section) => (
+        <div key={`${section.heading}-${section.lines.join("|")}`} className="info-popover-section">
+          <p className="info-popover-heading">{section.heading}</p>
+          <ul>
+            {section.lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>,
+    document.body,
+  ) : null;
 
   return (
     <div className="info-popover" ref={popoverRef}>
@@ -94,21 +131,7 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
       >
         (i)
       </button>
-      {isOpen && (
-        <div className="info-popover-panel" style={panelStyle ? { ...panelStyle, right: "auto" } : undefined}>
-          <h4>{title}</h4>
-          {normalizedSections.map((section) => (
-            <div key={`${section.heading}-${section.lines.join("|")}`} className="info-popover-section">
-              <p className="info-popover-heading">{section.heading}</p>
-              <ul>
-                {section.lines.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
+      {panel}
     </div>
   );
 }
