@@ -461,7 +461,7 @@ const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
   "A3 Burn vs Capital Available": buildCoreInfo("Bars show period Burn Proxy (positive, statement currency millions) and overlay shows Capital Available in the same period.", "Survival-coverage view: compares burn intensity against available capital buffer (starting cash + financing inflows).", "Burn Proxy is derived from cash flow for the period using FCF first (burn = max(0, -FCF)); fallback uses max(0, -(Operating Cash Flow - Capex)); if Capex is missing fallback is max(0, -Operating Cash Flow). Capital Available = Starting Cash (prior period cash balance) + Financing Inflows (equity and debt proceeds when fields are available).", "Higher burn bars than available-capital overlay can indicate tighter survival coverage and dependence on fresh raises versus internal buffer.", "Not a pure FCF chart. Working-capital timing can add volatility, financing fields may be incomplete, and debt inflow coverage depends on dataset availability."),
   "A4 Burn Rate TTM": buildCoreInfo("Trailing 4-period burn proxy from OCF.", "Smooths one-off period noise.", "Higher burn line means faster cash depletion.", "Acceleration in burn with flat liquidity.", "Basis: TTM (if built from quarterly points). Not enough history for TTM returns missing data."),
   "A5 Runway Months": buildCoreInfo("Cash divided by annualized burn, converted to months.", "Direct survival-to-milestone lens.", "Below ~12 months indicates financing pressure.", "Runway collapsing while dilution rises.", "Basis: TTM (if built from quarterly points). Requires cash and burn rate history; otherwise missing data."),
-  "A6 Burn Decomposition": buildCoreInfo("Period burn decomposition in statement currency millions using abs(Operating Cash Flow) as burn proxy and key spend components.", "Shows what is driving cash consumption in each period.", "Burn proxy is abs(OCF): higher bars mean higher burn. Capex (abs), SBC and R&D are shown as separate components when available.", "OCF can be noisy from working-capital timing; treat single-period spikes cautiously.", "Uses cashflow.operatingCashFlow (abs), cashflow.capitalExpenditure (abs), cashflow.stockBasedCompensation, and income.researchAndDevelopmentExpenses."),
+  "A6 Burn Decomposition": buildCoreInfo("Period burn decomposition in statement currency millions using the same Burn Proxy hierarchy as A3.", "Shows composition of burn proxy each period, instead of abs(Operating Cash Flow).", "Burn Proxy = max(0, -FCF); fallback max(0, -(Operating Cash Flow - Capex)); fallback max(0, -Operating Cash Flow). Stack components are Capex (abs), SBC proxy, R&D proxy, and residual Other within burn.", "SBC and R&D are accounting proxies (not clean cash lines), and working-capital timing can still affect burn proxy levels.", "Uses cashflow.freeCashFlow first, then cashflow.operatingCashFlow with cashflow.capitalExpenditure fallback logic. Component proxies use cashflow.capitalExpenditure (abs), cashflow.stockBasedCompensation, and income.researchAndDevelopmentExpenses."),
   "A7 Cash Bridge / Waterfall": buildCoreInfo("Cash bridge using OCF, investing, financing cash flows.", "Shows how ending cash is funded.", "Positive financing with negative operations signals dependency.", "Repeated financing dependence without burn improvement.", "Uses net cash flow lines where available."),
   "A8 Next-12M Survival Gauge": buildCoreInfo("Runway vs 12-month threshold.", "Simple survival checkpoint.", "Runway above 12m improves flexibility.", "Runway consistently below threshold.", "Derived from runway series; threshold always shown."),
   "B1 Shares Outstanding": buildCoreInfo("Outstanding shares trend.", "Captures dilution burden on owners.", "Rising shares with weak cash metrics is negative.", "Step-ups after raises with no runway extension.", "Uses balance/income share fields depending on availability."),
@@ -1120,13 +1120,23 @@ Capital Available: ${availableLabel}`,
     return [typeof runway === "number" ? runway : null];
   }, 15);
 
-  const burnDecompositionData = buildDerivedSeries(["Date", "Burn (abs OCF)", "Capex (abs)", "SBC", "R&D"], (index) => {
-    const burn = typeof operatingCashFlowSeries[index] === "number" ? Math.abs(operatingCashFlowSeries[index] as number) / 1_000_000 : null;
-    const capex = typeof capexSeries[index] === "number" ? Math.abs(capexSeries[index] as number) / 1_000_000 : null;
-    const sbc = typeof sbcSeries[index] === "number" ? (sbcSeries[index] as number) / 1_000_000 : null;
-    const rd = typeof rdSeries[index] === "number" ? (rdSeries[index] as number) / 1_000_000 : null;
-    return [burn, capex, sbc, rd];
-  }, 15);
+  const burnDecompositionMaxRows = hasQuarterlyPeriods ? 40 : 10;
+  const burnDecompositionData = buildDerivedSeries(["Date", "Capex (abs)", "SBC (proxy)", "R&D (proxy)", "Other within burn"], (index) => {
+    const burnRaw = burnProxyRawSeries[index];
+    const burn = typeof burnRaw === "number" ? safeFiniteOrNull(Math.max(0, burnRaw) / 1_000_000) : null;
+    if (burn === null) return [null, null, null, null];
+
+    const capexRaw = typeof capexSeries[index] === "number" ? Math.abs(capexSeries[index] as number) / 1_000_000 : 0;
+    const sbcRaw = typeof sbcSeries[index] === "number" ? Math.max(0, (sbcSeries[index] as number) / 1_000_000) : 0;
+    const rdRaw = typeof rdSeries[index] === "number" ? Math.max(0, (rdSeries[index] as number) / 1_000_000) : 0;
+
+    const capex = Math.min(burn, safeFiniteOrNull(capexRaw) ?? 0);
+    const sbc = Math.min(Math.max(0, burn - capex), safeFiniteOrNull(sbcRaw) ?? 0);
+    const rd = Math.min(Math.max(0, burn - capex - sbc), safeFiniteOrNull(rdRaw) ?? 0);
+    const other = safeFiniteOrNull(Math.max(0, burn - capex - sbc - rd));
+
+    return [capex, sbc, rd, other];
+  }, burnDecompositionMaxRows);
 
   const cashBridgeData = buildDerivedSeries(["Date", "Operating", "Investing", "Financing"], (index) => [
     operatingCashFlowSeries[index] ?? null,
@@ -2150,7 +2160,7 @@ Capital Available: ${availableLabel}`,
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A3 Burn vs Capital Available" id="A3 Burn vs Capital Available" infoSections={PRE_REVENUE_CORE_INFO["A3 Burn vs Capital Available"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={a3BurnVsCapitalAvailableData} options={{ seriesType: "bars", series: { 0: { type: "bars", targetAxisIndex: 0, color: "#0b0b0b" }, 1: { type: "area", targetAxisIndex: 0, areaOpacity: 0.15, lineWidth: 1, color: "#7a7a7a" } }, colors: ["#0b0b0b", "#7a7a7a"], vAxis: { baseline: 0, title: `${statementCurrency} (millions)` }, tooltip: { isHtml: false } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A4 Burn Rate TTM" id="A4 Burn Rate TTM" infoSections={PRE_REVENUE_CORE_INFO["A4 Burn Rate TTM"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnRateTtmData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A5 Runway Months" id="A5 Runway Months" infoSections={PRE_REVENUE_CORE_INFO["A5 Runway Months"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayMonthsData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={{ bar: { groupWidth: "65%" } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={{ isStacked: true, bar: { groupWidth: "65%" }, vAxis: { baseline: 0 } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A7 Cash Bridge / Waterfall" id="A7 Cash Bridge / Waterfall" infoSections={PRE_REVENUE_CORE_INFO["A7 Cash Bridge / Waterfall"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBridgeData} options={lineBehindBars} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A8 Next-12M Survival Gauge" id="A8 Next-12M Survival Gauge" infoSections={PRE_REVENUE_CORE_INFO["A8 Next-12M Survival Gauge"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={next12mSurvivalData} />
           </div>
