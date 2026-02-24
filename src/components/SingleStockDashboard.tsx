@@ -4,6 +4,7 @@ import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import useCompanyData from "../hooks/useCompanyData";
+import type { CompanyResponse } from "./Viewer";
 import {
   buildSeries,
   buildSeriesData,
@@ -663,6 +664,7 @@ type SingleStockDashboardProps = {
 
 export default function SingleStockDashboard({ onTickerChange }: SingleStockDashboardProps = {}) {
   const { ticker, data, error, fetchCompany } = useCompanyData("AAPL");
+  const [quarterlyData, setQuarterlyData] = useState<CompanyResponse | null>(null);
   const [formTicker, setFormTicker] = useState("");
   const [formCategory, setFormCategory] = useState("");
   const [formSubcategory, setFormSubcategory] = useState("");
@@ -754,6 +756,38 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
 
     if (ticker) {
       void loadPrice();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [ticker]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadQuarterly() {
+      try {
+        const response = await fetch(`/api/company?ticker=${encodeURIComponent(ticker)}&period=quarterly`);
+        const payload = (await response.json()) as CompanyResponse;
+        if (!response.ok || payload.error) {
+          if (isMounted) {
+            setQuarterlyData(null);
+          }
+          return;
+        }
+        if (isMounted) {
+          setQuarterlyData(payload);
+        }
+      } catch {
+        if (isMounted) {
+          setQuarterlyData(null);
+        }
+      }
+    }
+
+    if (ticker) {
+      void loadQuarterly();
     }
 
     return () => {
@@ -946,6 +980,28 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     ];
     return candidates.find((candidate) => candidate.some((value) => typeof value === "number")) ?? [];
   })();
+
+  const quarterlySharesPoints = useMemo(() => {
+    const quarterlyFiscalDates = (quarterlyData?.fiscal_dates ?? [])
+      .map((fiscalDate) => new Date(`${fiscalDate}T00:00:00Z`));
+    const quarterlyShareCandidates = [
+      getFieldSeries(quarterlyData, "balance", "commonStockSharesOutstanding"),
+      getFieldSeries(quarterlyData, "balance", "sharesOutstanding"),
+      getFieldSeries(quarterlyData, "income", "weightedAverageShsOut"),
+    ];
+    const quarterlySharesSeries = quarterlyShareCandidates
+      .find((candidate) => candidate.some((value) => typeof value === "number" && Number.isFinite(value))) ?? [];
+
+    return quarterlyFiscalDates
+      .map((date, index) => {
+        const shares = quarterlySharesSeries[index];
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+        if (typeof shares !== "number" || !Number.isFinite(shares) || shares <= 0) return null;
+        return { date, shares };
+      })
+      .filter((point): point is { date: Date; shares: number } => Boolean(point))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [quarterlyData]);
 
   const cashSeries = getFieldSeries(data, "balance", "cashAndCashEquivalents");
   const operatingCashFlowSeries = getFieldSeries(data, "cashflow", "operatingCashFlow");
@@ -1184,9 +1240,27 @@ Capital Available: ${availableLabel}`,
   }, [priceData]);
 
   const marketCapVsSharesData = buildDerivedSeries(["Date", "Implied Market Cap"], (index) => {
+    const QUARTERLY_SHARES_RECENCY_MS = 18 * 30 * 24 * 60 * 60 * 1000;
     const anchorDate = fiscalDates[index];
     if (!(anchorDate instanceof Date) || Number.isNaN(anchorDate.getTime())) return [null];
-    const shares = statementShares[index];
+    const annualShares = statementShares[index];
+    const getSharesForAnchor = () => {
+      if (typeof annualShares === "number" && Number.isFinite(annualShares) && annualShares > 0) {
+        return annualShares;
+      }
+      let fallbackQuarterlyPoint: { date: Date; shares: number } | null = null;
+      for (const point of quarterlySharesPoints) {
+        if (point.date.getTime() <= anchorDate.getTime()) {
+          fallbackQuarterlyPoint = point;
+        } else {
+          break;
+        }
+      }
+      if (!fallbackQuarterlyPoint) return null;
+      if (anchorDate.getTime() - fallbackQuarterlyPoint.date.getTime() > QUARTERLY_SHARES_RECENCY_MS) return null;
+      return fallbackQuarterlyPoint.shares;
+    };
+    const shares = getSharesForAnchor();
     if (typeof shares !== "number" || !Number.isFinite(shares) || shares <= 0) return [null];
     let chosen: { date: Date; close: number } | null = null;
     for (const point of historicalClosePoints) {
