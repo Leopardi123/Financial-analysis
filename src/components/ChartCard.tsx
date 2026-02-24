@@ -108,6 +108,9 @@ function normalizeChartData(
   fiscalYearEndMonth?: number | null,
 ) {
   const [headers, ...rows] = data;
+  const hasTooltipColumn = headers.some(
+    (header) => typeof header === "object" && header !== null && "role" in header && (header as { role?: string }).role === "tooltip",
+  );
   const normalizedRows = rows.filter((row) => row[0] instanceof Date) as (string | number | Date | null)[][];
   const dates = normalizedRows.map((row) => row[0] as Date);
   const quarterly = isQuarterlySeries(dates);
@@ -118,10 +121,14 @@ function normalizeChartData(
     const tooltipLabel = quarterly
       ? `${exactDate} (${formatQuarterLabel(date, fiscalYearEndMonth)})`
       : exactDate;
-    return [row[0], ...row.slice(1), tooltipLabel] as ChartDataCell[];
+    return hasTooltipColumn
+      ? [row[0], ...row.slice(1)] as ChartDataCell[]
+      : [row[0], ...row.slice(1), tooltipLabel] as ChartDataCell[];
   });
 
-  const withTooltipHeaders: ChartDataCell[] = [...headers, { type: "string", role: "tooltip" }];
+  const withTooltipHeaders: ChartDataCell[] = hasTooltipColumn
+    ? [...headers]
+    : [...headers, { type: "string", role: "tooltip" }];
 
   return {
     data: [withTooltipHeaders, ...rowsWithTooltips],

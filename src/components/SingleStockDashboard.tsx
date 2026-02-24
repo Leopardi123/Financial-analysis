@@ -458,7 +458,7 @@ function buildCoreInfo(what: string, why: string, how: string, redFlags: string,
 const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
   "A1 Cash Balance": buildCoreInfo("Stock measure of cash on hand at each reporting date, shown as bars.", "Cash balance is the near-term survival anchor in pre-revenue companies.", "Each bar is cash balance (in statement currency, millions). Hover shows ΔCash versus prior statement as a financing/burn proxy.", "Large repeated negative ΔCash and no offsetting inflow periods can signal rising financing pressure.", "Uses balance.cashAndCashEquivalents on statement dates. ΔCash = current cash minus prior cash and is not operating cash flow."),
   "A2 Operating Cash Flow": buildCoreInfo("Period measure from the cash flow statement: operating cash flow for each reporting period, shown as bars.", "Separates operating burn generation from financing and balance-sheet cash levels in pre-revenue survival analysis.", "Negative bars represent operating burn for that period; positive bars show operating inflow. Working-capital timing can create volatility, so a less negative period is not always structural improvement.", "Repeated deep negative bars without milestone progress or financing flexibility increase survival risk.", "Uses cashflow.operatingCashFlow by statement date. This is not ΔCash (change in cash balance); it is operating cash flow."),
-  "A3 Free Cash Flow": buildCoreInfo("Burn proxy bars per period in statement currency millions.", "Gives a practical spend-intensity input for runway analysis in pre-revenue mode.", "Definition: burn = -min(0, FCF). If FCF is missing, fallback uses burn = max(0, -(Operating Cash Flow - Capex)); if Capex is missing, fallback is max(0, -Operating Cash Flow).", "Rising burn bars without financing flexibility can tighten survival windows quickly.", "Uses cashflow.freeCashFlow first, then cashflow.operatingCashFlow and cashflow.capitalExpenditure fallback hierarchy."),
+  "A3 Burn vs Capital Available": buildCoreInfo("Bars show period Burn Proxy (positive, statement currency millions) and overlay shows Capital Available in the same period.", "Survival-coverage view: compares burn intensity against available capital buffer (starting cash + financing inflows).", "Burn Proxy is derived from cash flow for the period using FCF first (burn = max(0, -FCF)); fallback uses max(0, -(Operating Cash Flow - Capex)); if Capex is missing fallback is max(0, -Operating Cash Flow). Capital Available = Starting Cash (prior period cash balance) + Financing Inflows (equity and debt proceeds when fields are available).", "Higher burn bars than available-capital overlay can indicate tighter survival coverage and dependence on fresh raises versus internal buffer.", "Not a pure FCF chart. Working-capital timing can add volatility, financing fields may be incomplete, and debt inflow coverage depends on dataset availability."),
   "A4 Burn Rate TTM": buildCoreInfo("Trailing 4-period burn proxy from OCF.", "Smooths one-off period noise.", "Higher burn line means faster cash depletion.", "Acceleration in burn with flat liquidity.", "Basis: TTM (if built from quarterly points). Not enough history for TTM returns missing data."),
   "A5 Runway Months": buildCoreInfo("Cash divided by annualized burn, converted to months.", "Direct survival-to-milestone lens.", "Below ~12 months indicates financing pressure.", "Runway collapsing while dilution rises.", "Basis: TTM (if built from quarterly points). Requires cash and burn rate history; otherwise missing data."),
   "A6 Burn Decomposition": buildCoreInfo("Period burn decomposition in statement currency millions using abs(Operating Cash Flow) as burn proxy and key spend components.", "Shows what is driving cash consumption in each period.", "Burn proxy is abs(OCF): higher bars mean higher burn. Capex (abs), SBC and R&D are shown as separate components when available.", "OCF can be noisy from working-capital timing; treat single-period spikes cautiously.", "Uses cashflow.operatingCashFlow (abs), cashflow.capitalExpenditure (abs), cashflow.stockBasedCompensation, and income.researchAndDevelopmentExpenses."),
@@ -953,6 +953,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const capexSeries = getFieldSeries(data, "cashflow", "capitalExpenditure");
   const sbcSeries = getFieldSeries(data, "cashflow", "stockBasedCompensation");
   const commonStockIssuedSeries = getFieldSeries(data, "cashflow", "commonStockIssued");
+  const netBorrowingsSeries = getFieldSeries(data, "cashflow", "netBorrowings");
   const sgnaSeriesRaw = getFieldSeries(data, "income", "sellingGeneralAndAdministrativeExpenses");
   const operatingExpensesSeries = getFieldSeries(data, "income", "operatingExpenses");
   const overheadSeries = sgnaSeriesRaw.some((value) => typeof value === "number") ? sgnaSeriesRaw : operatingExpensesSeries;
@@ -1039,12 +1040,52 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return null;
   });
 
-  const a3BurnProxyData = buildDerivedSeries(["Date", "Burn Proxy"], (index) => {
-    const burn = burnProxyRawSeries[index];
-    if (typeof burn !== "number") return [null];
-    const burnMM = burn / 1_000_000;
-    return [{ v: burnMM, f: `${burnMM.toFixed(2)} ${a1StatementCurrency} million` } as unknown as number];
-  }, 10);
+  const safeFiniteOrNull = (value: number | null | undefined) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+
+  const a3BurnVsCapitalAvailableData = useMemo(() => {
+    const rows = fiscalDates
+      .map((date, index) => {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+
+        const burnRaw = burnProxyRawSeries[index];
+        const burnMM = typeof burnRaw === "number" ? safeFiniteOrNull(burnRaw / 1_000_000) : null;
+
+        const previousCash = index > 0 ? cashSeries[index - 1] : null;
+        const startingCashMM = typeof previousCash === "number" ? safeFiniteOrNull(previousCash / 1_000_000) : null;
+
+        const equityRaw = commonStockIssuedSeries[index];
+        const debtRaw = netBorrowingsSeries[index];
+        const equityMM = typeof equityRaw === "number" ? safeFiniteOrNull(equityRaw / 1_000_000) : null;
+        const debtMM = typeof debtRaw === "number" ? safeFiniteOrNull(debtRaw / 1_000_000) : null;
+        const financingInflowsMM = safeFiniteOrNull((equityMM ?? 0) + (debtMM ?? 0));
+        const availableMM = startingCashMM === null ? null : safeFiniteOrNull(startingCashMM + (financingInflowsMM ?? 0));
+
+        const dateLabel = date.toISOString().slice(0, 10);
+        const formatMM = (value: number | null) => value === null ? "—" : `${value.toFixed(2)} ${a1StatementCurrency} million`;
+        const burnLabel = formatMM(burnMM);
+        const startingCashLabel = formatMM(startingCashMM);
+        const financingLabel = formatMM(financingInflowsMM);
+        const equityLabel = formatMM(equityMM);
+        const debtLabel = formatMM(debtMM);
+        const availableLabel = formatMM(availableMM);
+
+        return [
+          date,
+          burnMM,
+          availableMM,
+          `Date: ${dateLabel}
+Burn Proxy: ${burnLabel}
+Starting Cash (t-1): ${startingCashLabel}
+Financing Inflows: ${financingLabel} (Equity: ${equityLabel}; Debt: ${debtLabel})
+Capital Available: ${availableLabel}`,
+        ] as (string | number | Date | null)[];
+      })
+      .filter((row): row is (string | number | Date | null)[] => row !== null)
+      .slice(-10);
+
+    if (rows.length === 0) return null;
+    return [["Date", "Burn Proxy", "Capital Available", { role: "tooltip", type: "string" }], ...rows] as (string | number | Date | null)[][];
+  }, [a1StatementCurrency, burnProxyRawSeries, cashSeries, commonStockIssuedSeries, fiscalDates, netBorrowingsSeries]);
 
   const burnRateTtmData = buildDerivedSeries(["Date", "Burn Rate TTM"], (index) => {
     if (index < 3) return [null];
@@ -1514,7 +1555,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     "ROE": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
     "A1 Cash Balance": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "A2 Operating Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
-    "A3 Free Cash Flow": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
+    "A3 Burn vs Capital Available": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "A4 Burn Rate TTM": { unitLabel: `${statementCurrency}/month`, unitKind: "money", yAxisTitle: `${statementCurrency}/month` },
     "A5 Runway Months": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
     "A8 Next-12M Survival Gauge": { unitLabel: "months", unitKind: "months", yAxisTitle: "months" },
@@ -2106,7 +2147,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
           <div className="chartcontainerdoublecolumn">
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A1 Cash Balance" id="A1 Cash Balance" infoSections={PRE_REVENUE_CORE_INFO["A1 Cash Balance"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashBalanceBarsData} options={{ bar: { groupWidth: "65%" } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A2 Operating Cash Flow" id="A2 Operating Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A2 Operating Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={cashFromOperationsData} options={{ vAxis: { baseline: 0 } }} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A3 Free Cash Flow" id="A3 Free Cash Flow" infoSections={PRE_REVENUE_CORE_INFO["A3 Free Cash Flow"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={a3BurnProxyData} options={{ vAxis: { baseline: 0 } }} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="A3 Burn vs Capital Available" id="A3 Burn vs Capital Available" infoSections={PRE_REVENUE_CORE_INFO["A3 Burn vs Capital Available"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={a3BurnVsCapitalAvailableData} options={{ seriesType: "bars", series: { 0: { type: "bars", targetAxisIndex: 0, color: "#0b0b0b" }, 1: { type: "area", targetAxisIndex: 0, areaOpacity: 0.15, lineWidth: 1, color: "#7a7a7a" } }, colors: ["#0b0b0b", "#7a7a7a"], vAxis: { baseline: 0, title: `${statementCurrency} (millions)` }, tooltip: { isHtml: false } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A4 Burn Rate TTM" id="A4 Burn Rate TTM" infoSections={PRE_REVENUE_CORE_INFO["A4 Burn Rate TTM"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnRateTtmData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="A5 Runway Months" id="A5 Runway Months" infoSections={PRE_REVENUE_CORE_INFO["A5 Runway Months"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={runwayMonthsData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="A6 Burn Decomposition" id="A6 Burn Decomposition" infoSections={PRE_REVENUE_CORE_INFO["A6 Burn Decomposition"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={burnDecompositionData} options={{ bar: { groupWidth: "65%" } }} />
