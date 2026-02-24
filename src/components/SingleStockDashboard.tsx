@@ -473,7 +473,12 @@ const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
   "B6 SBC Intensity": buildCoreInfo("SBC as a share of burn (percent).", "Shows compensation leakage intensity.", "This chart shows SBC as a share of burn (percent). It does not plot SBC amounts here; see B5 for SBC in currency.", "SBC intensity trending up.", "Requires SBC and burn proxy data."),
   "B7 All-in Dilution": buildCoreInfo("Grouped period bars of equity-financing inflow and SBC expense in statement currency millions.", "Shows equity reliance (financing cash-in) and equity leakage (compensation cost proxy) side by side.", "Common Stock Issued reflects financing cash proceeds, while SBC is a non-cash accounting expense tied to equity compensation.", "Interpret as equity reliance/leakage proxy, not a pure percent dilution metric.", "Uses cashflow.commonStockIssued and cashflow.stockBasedCompensation."),
   "C1 Corporate Overhead": buildCoreInfo("SG&A proxy for overhead.", "Tracks fixed corporate cost discipline.", "Flat/declining overhead at same output is positive.", "Overhead growth disconnected from progress.", "Uses SG&A; falls back to operatingExpenses proxy if needed."),
-  "C2 R&D / Exploration Proxy": buildCoreInfo("R&D expense trend.", "Proxy for technical advancement spend.", "Stable investment with controlled overhead is preferred.", "R&D cuts that coincide with stalled milestones.", "Uses researchAndDevelopmentExpenses."),
+  "C2 Exploration / Evaluation Cash Proxy (OCF Adjusted)": [
+    { heading: "WHAT", lines: ["Exploration and evaluation cash proxy derived from operating cash flow."] },
+    { heading: "HOW", lines: ["Defined as:", "max(0, -Operating Cash Flow − SBC − G&A)", "Values are shown in statement currency millions."] },
+    { heading: "INTERPRETATION", lines: ["Estimates project-related cash spend by removing corporate overhead and equity compensation from operational cash burn."] },
+    { heading: "LIMITATIONS", lines: ["Includes working capital effects.", "Not a reported exploration line item.", "Proxy only."] },
+  ],
   "C3 Spend Mix": buildCoreInfo("Stack of overhead, R&D, capex.", "Visualizes allocation priorities.", "Balanced mix should align with company stage.", "Administrative spend crowding out core progress spend.", "Uses available fields only."),
   "C4 Overhead Ratio": buildCoreInfo("Overhead relative to total operating outflow proxy.", "Measures efficiency of corporate shell.", "Lower ratio generally indicates better discipline.", "Rising ratio despite financing pressure.", "Requires overhead plus OCF/opex proxy."),
   "C5 VCE Proxy": buildCoreInfo("Value creation efficiency proxy from FCF and spend.", "High-level discipline signal in pre-revenue phase.", "Less negative values imply improving efficiency.", "Efficiency worsening over several periods.", "Proxy only; shown when component data exists."),
@@ -1008,6 +1013,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const freeCashFlowSeries = getFieldSeries(data, "cashflow", "freeCashFlow");
   const capexSeries = getFieldSeries(data, "cashflow", "capitalExpenditure");
   const sbcSeries = getFieldSeries(data, "cashflow", "stockBasedCompensation");
+  const generalAndAdministrativeSeries = getFieldSeries(data, "income", "generalAndAdministrativeExpenses");
   const commonStockIssuedSeries = getFieldSeries(data, "cashflow", "commonStockIssued");
   const netBorrowingsSeries = getFieldSeries(data, "cashflow", "netBorrowings");
   const sgnaSeriesRaw = getFieldSeries(data, "income", "sellingGeneralAndAdministrativeExpenses");
@@ -1307,7 +1313,26 @@ Capital Available: ${availableLabel}`,
   }, 15);
 
   const corporateOverheadData = buildDerivedSeries(["Date", "Corporate Overhead"], (index) => [overheadSeries[index] ?? null], 15);
-  const rndProxyData = buildDerivedSeries(["Date", "R&D / Exploration Proxy"], (index) => [rdSeries[index] ?? null], 15);
+  const explorationProxyData = buildDerivedSeries(["Date", "Exploration Proxy"], (index) => {
+    const operatingCashFlow = operatingCashFlowSeries[index];
+    if (typeof operatingCashFlow !== "number" || !Number.isFinite(operatingCashFlow)) return [null];
+
+    const burnFromOcf = Math.max(0, -operatingCashFlow);
+    if (!Number.isFinite(burnFromOcf) || burnFromOcf === 0) return [0];
+
+    const sbcCash = typeof sbcSeries[index] === "number" && Number.isFinite(sbcSeries[index] as number)
+      ? (sbcSeries[index] as number)
+      : 0;
+    const gaCashProxy = typeof generalAndAdministrativeSeries[index] === "number" && Number.isFinite(generalAndAdministrativeSeries[index] as number)
+      ? (generalAndAdministrativeSeries[index] as number)
+      : 0;
+
+    const explorationProxyRaw = burnFromOcf - sbcCash - gaCashProxy;
+    if (!Number.isFinite(explorationProxyRaw)) return [null];
+
+    const explorationProxy = Math.max(0, explorationProxyRaw);
+    return [Number.isFinite(explorationProxy) ? explorationProxy / 1_000_000 : null];
+  }, 15);
   const spendMixData = buildDerivedSeries(["Date", "Overhead", "R&D", "Capex (abs)"], (index) => [
     overheadSeries[index] ?? null,
     rdSeries[index] ?? null,
@@ -1655,7 +1680,7 @@ Capital Available: ${availableLabel}`,
     "B6 SBC Intensity": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
     "B7 All-in Dilution": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "C1 Corporate Overhead": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
-    "C2 R&D / Exploration Proxy": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "C2 Exploration / Evaluation Cash Proxy (OCF Adjusted)": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "C4 Overhead Ratio": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
     "C5 VCE Proxy": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
     "D1 Net Cash / Net Debt": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
@@ -2257,7 +2282,7 @@ Capital Available: ${availableLabel}`,
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">C) Corporate Discipline</h2></div>
           <div className="chartcontainerdoublecolumn">
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C1 Corporate Overhead" id="C1 Corporate Overhead" infoSections={PRE_REVENUE_CORE_INFO["C1 Corporate Overhead"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={corporateOverheadData} />
-            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C2 R&D / Exploration Proxy" id="C2 R&D / Exploration Proxy" infoSections={PRE_REVENUE_CORE_INFO["C2 R&D / Exploration Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={rndProxyData} />
+            <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ColumnChart" title="C2 Exploration / Evaluation Cash Proxy (OCF Adjusted)" id="C2 Exploration / Evaluation Cash Proxy (OCF Adjusted)" infoSections={PRE_REVENUE_CORE_INFO["C2 Exploration / Evaluation Cash Proxy (OCF Adjusted)"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={explorationProxyData} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="ComboChart" title="C3 Spend Mix" id="C3 Spend Mix" infoSections={PRE_REVENUE_CORE_INFO["C3 Spend Mix"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={spendMixData} options={lineBehindBars} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C4 Overhead Ratio" id="C4 Overhead Ratio" infoSections={PRE_REVENUE_CORE_INFO["C4 Overhead Ratio"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={overheadRatioData} options={{ vAxis: { format: "#,##0.##'%'" } }} />
             <ReportedChart reportedChartContext={reportedChartContext} fiscalYearEndMonth={fiscalYearEndMonth} chartType="LineChart" title="C5 VCE Proxy" id="C5 VCE Proxy" infoSections={PRE_REVENUE_CORE_INFO["C5 VCE Proxy"]} openInfoId={openInfoId} onToggleInfo={(id) => setOpenInfoId((prev) => (prev === id ? null : id))} onCloseInfo={() => setOpenInfoId(null)} data={vceProxyData} />
