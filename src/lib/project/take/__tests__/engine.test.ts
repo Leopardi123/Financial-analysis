@@ -46,6 +46,29 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertDeepEqual(happyPath.totalTakeUSD, [0, 7, 7, 1], 'happy path total take');
   assertDeepEqual(happyPath.netRevenueAfterTakeUSD, [0, 93, 93, 49], 'happy path net revenue');
 
+  const tieredHappyPath = computeProjectTakeMVI({
+    masterN: 3,
+    grossRevenueUSD: [0, 50, 150, 250],
+    items: [
+      {
+        id: 'tiered',
+        base: { baseType: 'REVENUE' },
+        rate: {
+          rateType: 'TIERED',
+          thresholdType: 'revenue',
+          tiers: [
+            { thresholdValue: 0, rate: 0.01 },
+            { thresholdValue: 100, rate: 0.02 },
+            { thresholdValue: 200, rate: 0.03 },
+          ],
+        },
+      },
+    ],
+  });
+
+  assertDeepEqual(tieredHappyPath.takeByItemUSD.tiered, [0, 0.5, 3, 7.5], 'tiered happy path item take');
+  assertDeepEqual(tieredHappyPath.totalTakeUSD, [0, 0.5, 3, 7.5], 'tiered happy path total take');
+
   const metalSpecific = computeProjectTakeMVI({
     masterN: 3,
     grossRevenueUSD: [100, 100, 100, 100],
@@ -63,6 +86,31 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
 
   assertDeepEqual(metalSpecific.totalTakeUSD, [1, 2, 3, 4], 'metal specific total take');
   assertDeepEqual(metalSpecific.netRevenueAfterTakeUSD, [99, 98, 97, 96], 'metal specific net revenue');
+
+  const metalSpecificTiered = computeProjectTakeMVI({
+    masterN: 3,
+    grossRevenueUSD: [100, 100, 100, 100],
+    byMetalRevenueUSD: {
+      Ag: [0, 10, 110, 210],
+    },
+    items: [
+      {
+        id: 'ag-tiered',
+        base: { baseType: 'REVENUE', metal: 'Ag' },
+        rate: {
+          rateType: 'TIERED',
+          thresholdType: 'revenue',
+          tiers: [
+            { thresholdValue: 0, rate: 0.01 },
+            { thresholdValue: 100, rate: 0.02 },
+            { thresholdValue: 200, rate: 0.03 },
+          ],
+        },
+      },
+    ],
+  });
+
+  assertDeepEqual(metalSpecificTiered.takeByItemUSD['ag-tiered'], [0, 0.1, 2.2, 6.3], 'metal tiered should use metal revenue');
 
   const missingMetalFallsBack = computeProjectTakeMVI({
     masterN: 3,
@@ -124,6 +172,55 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
       }),
     /rate.value must be finite and >= 0/,
     'negative rate should throw',
+  );
+
+  assertThrows(
+    () =>
+      computeProjectTakeMVI({
+        masterN: 1,
+        grossRevenueUSD: [100, 100],
+        items: [
+          {
+            id: 'bad-tier-first-threshold',
+            base: { baseType: 'REVENUE' },
+            rate: {
+              rateType: 'TIERED',
+              thresholdType: 'revenue',
+              tiers: [
+                { thresholdValue: 50, rate: 0.02 },
+                { thresholdValue: 100, rate: 0.03 },
+              ],
+            },
+          },
+        ],
+      }),
+    /first tier thresholdValue must be 0/,
+    'first tier threshold should be zero',
+  );
+
+  assertThrows(
+    () =>
+      computeProjectTakeMVI({
+        masterN: 1,
+        grossRevenueUSD: [100, 100],
+        items: [
+          {
+            id: 'bad-tier-order',
+            base: { baseType: 'REVENUE' },
+            rate: {
+              rateType: 'TIERED',
+              thresholdType: 'revenue',
+              tiers: [
+                { thresholdValue: 0, rate: 0.01 },
+                { thresholdValue: 200, rate: 0.03 },
+                { thresholdValue: 100, rate: 0.02 },
+              ],
+            },
+          },
+        ],
+      }),
+    /tiers must be sorted ascending by thresholdValue/,
+    'unsorted tiers should throw',
   );
 
   assertThrows(

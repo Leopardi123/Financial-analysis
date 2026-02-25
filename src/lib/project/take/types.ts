@@ -1,3 +1,17 @@
+export type TakeRateFixed = {
+  rateType: 'FIXED';
+  value: number;
+};
+
+export type TakeRateTiered = {
+  rateType: 'TIERED';
+  thresholdType: 'revenue';
+  tiers: Array<{
+    thresholdValue: number;
+    rate: number;
+  }>;
+};
+
 export type TakeItemMVI = {
   id: string;
   appliesTo?: {
@@ -9,10 +23,7 @@ export type TakeItemMVI = {
     baseType: 'REVENUE';
     metal?: string | null;
   };
-  rate: {
-    rateType: 'FIXED';
-    value: number;
-  };
+  rate: TakeRateFixed | TakeRateTiered;
 };
 
 export type ProjectTakeMVIInput = {
