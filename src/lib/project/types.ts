@@ -165,4 +165,5 @@ export type ProjectEngineFullProductionV1Output = {
   phase1: ProjectPhase1Output;
   phase2: ProjectPhase2Output;
   aisc: ProjectAiscOutput;
+  capexUSD_used: (number | null)[];
 };

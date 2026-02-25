@@ -97,6 +97,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertAlmostEqual(happyPath.nationalTake.totalTakeUSD[0], 90.5, 'total take should be revenue+profit takes');
   assertAlmostEqual(happyPath.nationalTake.totalRoyaltiesUSD[0], 170.5, 'total royalties should include stream take');
   assertAlmostEqual(happyPath.phase1.ebitUSD[0], 284.5, 'final EBIT should include total royalties with stream take');
+  assertDeepEqual(happyPath.capexUSD_used, [0], 'engine should expose capex series used by phase1');
 
   const noStreams = computeProjectEngineFullProductionV1({
     masterN: 0,
