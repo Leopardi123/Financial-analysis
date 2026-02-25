@@ -15,6 +15,9 @@ export type NationalTakeInput = {
   phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & {
     royaltiesUSD?: never;
   };
+
+  // Additional royalties to include in final Phase1 only (e.g., stream take)
+  extraRoyaltiesUSD?: (number | null)[];
 };
 
 export type NationalTakeOutput = {
@@ -22,6 +25,7 @@ export type NationalTakeOutput = {
   revenueTakeUSD: (number | null)[];
   profitTakeUSD: (number | null)[];
   totalTakeUSD: (number | null)[];
+  totalRoyaltiesUSD: (number | null)[];
 
   // Net revenue after revenue-take (NOT after profit-take)
   netRevenueAfterRevenueTakeUSD: (number | null)[];
