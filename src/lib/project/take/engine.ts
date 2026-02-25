@@ -1,4 +1,4 @@
-import type { ProjectTakeMVIInput, ProjectTakeMVIOutput, TakeItemMVI } from './types.ts';
+import type { ProjectTakeMVIInput, ProjectTakeMVIOutput, TakeItemMVI, TakeRateTiered } from './types.ts';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -20,6 +20,52 @@ function toValidPeriodIndex(value: number | null | undefined, name: string, mast
   return value;
 }
 
+function validateTieredRate(rate: TakeRateTiered, itemId: string): void {
+  if (rate.thresholdType !== 'revenue') {
+    throw new Error(`thresholdType must be revenue for item ${itemId}`);
+  }
+
+  if (rate.tiers.length < 1) {
+    throw new Error(`tiers must contain at least one tier for item ${itemId}`);
+  }
+
+  const [firstTier] = rate.tiers;
+  if (firstTier.thresholdValue !== 0) {
+    throw new Error(`first tier thresholdValue must be 0 for item ${itemId}`);
+  }
+
+  let previousThreshold = -1;
+  for (const tier of rate.tiers) {
+    if (!isFiniteNumber(tier.thresholdValue) || tier.thresholdValue < 0) {
+      throw new Error(`tier thresholdValue must be finite and >= 0 for item ${itemId}`);
+    }
+
+    if (tier.thresholdValue < previousThreshold) {
+      throw new Error(`tiers must be sorted ascending by thresholdValue for item ${itemId}`);
+    }
+
+    if (!isFiniteNumber(tier.rate) || tier.rate < 0) {
+      throw new Error(`tier rate must be finite and >= 0 for item ${itemId}`);
+    }
+
+    previousThreshold = tier.thresholdValue;
+  }
+}
+
+function selectTieredRate(rate: TakeRateTiered, baseValue: number): number {
+  let selectedRate = rate.tiers[0].rate;
+  for (const tier of rate.tiers) {
+    if (baseValue >= tier.thresholdValue) {
+      selectedRate = tier.rate;
+      continue;
+    }
+
+    break;
+  }
+
+  return selectedRate;
+}
+
 function validateItem(item: TakeItemMVI, masterN: number, seenIds: Set<string>): void {
   if (!item.id) {
     throw new Error('item id is required');
@@ -30,8 +76,12 @@ function validateItem(item: TakeItemMVI, masterN: number, seenIds: Set<string>):
   }
   seenIds.add(item.id);
 
-  if (!isFiniteNumber(item.rate.value) || item.rate.value < 0) {
-    throw new Error(`rate.value must be finite and >= 0 for item ${item.id}`);
+  if (item.rate.rateType === 'FIXED') {
+    if (!isFiniteNumber(item.rate.value) || item.rate.value < 0) {
+      throw new Error(`rate.value must be finite and >= 0 for item ${item.id}`);
+    }
+  } else {
+    validateTieredRate(item.rate, item.id);
   }
 
   const start = toValidPeriodIndex(item.appliesTo?.start_t, 'start_t', masterN);
@@ -89,7 +139,8 @@ export function computeProjectTakeMVI(input: ProjectTakeMVIInput): ProjectTakeMV
         continue;
       }
 
-      const itemTake = Math.max(0, baseAtT) * item.rate.value;
+      const selectedRate = item.rate.rateType === 'FIXED' ? item.rate.value : selectTieredRate(item.rate, baseAtT);
+      const itemTake = Math.max(0, baseAtT) * selectedRate;
       takeByItemUSD[item.id][t] = itemTake;
       total += itemTake;
     }
