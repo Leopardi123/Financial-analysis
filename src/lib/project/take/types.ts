@@ -19,6 +19,9 @@ export type TakeBase =
     }
   | {
       baseType: 'OPERATING_PROFIT';
+    }
+  | {
+      baseType: 'EBITDA';
     };
 
 export type TakeItemMVI = {
@@ -37,6 +40,7 @@ export type ProjectTakeMVIInput = {
   grossRevenueUSD: (number | null)[];
   byMetalRevenueUSD?: Record<string, (number | null)[]> | null;
   operatingProfitUSD?: (number | null)[] | null;
+  ebitdaUSD?: (number | null)[] | null;
   items: TakeItemMVI[];
 };
 
