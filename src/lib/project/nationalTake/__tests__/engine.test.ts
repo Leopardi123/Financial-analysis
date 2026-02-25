@@ -115,4 +115,31 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
 
   assert(missingOperatingProfitPath.profitTakeUSD[0] === null, 'missing operating profit should produce null profit take');
   assert(missingOperatingProfitPath.totalTakeUSD[0] === null, 'null profit take should produce null total take in strict aggregation');
+
+  const withExtraRoyalties = computeNationalTake({
+    masterN: 0,
+    grossRevenueUSD: [1000],
+    items: [
+      {
+        id: 'nsr-5pct',
+        base: { baseType: 'REVENUE' },
+        rate: { rateType: 'FIXED', value: 0.05 },
+      },
+    ],
+    phase1: {
+      masterN: 0,
+      productionStartPeriod: 0,
+      taxRate: 0,
+      capexUSD: [0],
+      operatingCostsUSD: [0],
+      sustainingCapexUSD: [0],
+      siteGandA_USD: [0],
+      reclamationUSD: [0],
+    },
+    extraRoyaltiesUSD: [80],
+  });
+
+  assertDeepEqual(withExtraRoyalties.totalTakeUSD, [50], 'extra royalties should not change take totals');
+  assertDeepEqual(withExtraRoyalties.totalRoyaltiesUSD, [130], 'extra royalties should be included in final royalties');
+
 })();

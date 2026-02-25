@@ -41,6 +41,9 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
     assertSeriesLength(input.phase1.byproductCreditsUSD, expectedLength, 'phase1.byproductCreditsUSD');
   }
 
+  const extraRoyaltiesUSD = input.extraRoyaltiesUSD ?? zeroSeries(expectedLength);
+  assertSeriesLength(extraRoyaltiesUSD, expectedLength, 'extraRoyaltiesUSD');
+
   const revenueItems = input.items.filter((item) => item.base.baseType === 'REVENUE');
   const profitItems = input.items.filter((item) => item.base.baseType === 'OPERATING_PROFIT');
 
@@ -72,17 +75,23 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
     totalTakeUSD[t] = strictAdd(revenueTakeOut.totalTakeUSD[t], profitTakeOut.totalTakeUSD[t]);
   }
 
+  const totalRoyaltiesUSD = new Array<number | null>(expectedLength).fill(0);
+  for (let t = 0; t < expectedLength; t += 1) {
+    totalRoyaltiesUSD[t] = strictAdd(totalTakeUSD[t], extraRoyaltiesUSD[t]);
+  }
+
   const finalPhase1 = computeProjectPhase1({
     ...input.phase1,
     masterN: input.masterN,
     revenueUSD: revenueTakeOut.netRevenueAfterTakeUSD,
-    royaltiesUSD: totalTakeUSD,
+    royaltiesUSD: totalRoyaltiesUSD,
   });
 
   return {
     revenueTakeUSD: revenueTakeOut.totalTakeUSD,
     profitTakeUSD: profitTakeOut.totalTakeUSD,
     totalTakeUSD,
+    totalRoyaltiesUSD,
     netRevenueAfterRevenueTakeUSD: revenueTakeOut.netRevenueAfterTakeUSD,
     phase1: finalPhase1,
     revenueTakeByItemUSD: revenueTakeOut.takeByItemUSD,
