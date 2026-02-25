@@ -37,3 +37,15 @@ export type ProjectPhase2Output = {
   npv_over_etlv: number | null;
   dcf_present_over_etlv: number | null;
 };
+
+export type ProjectEngineInput = {
+  phase1: ProjectPhase1Input;
+  phase2: {
+    discountRate: number;
+  };
+};
+
+export type ProjectEngineOutput = {
+  phase1: ProjectPhase1Output;
+  phase2: ProjectPhase2Output;
+};
