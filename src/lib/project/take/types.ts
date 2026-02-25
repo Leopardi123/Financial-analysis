@@ -12,6 +12,15 @@ export type TakeRateTiered = {
   }>;
 };
 
+export type TakeBase =
+  | {
+      baseType: 'REVENUE';
+      metal?: string | null;
+    }
+  | {
+      baseType: 'OPERATING_PROFIT';
+    };
+
 export type TakeItemMVI = {
   id: string;
   appliesTo?: {
@@ -19,10 +28,7 @@ export type TakeItemMVI = {
     start_t?: number | null;
     end_t?: number | null;
   };
-  base: {
-    baseType: 'REVENUE';
-    metal?: string | null;
-  };
+  base: TakeBase;
   rate: TakeRateFixed | TakeRateTiered;
 };
 
@@ -30,6 +36,7 @@ export type ProjectTakeMVIInput = {
   masterN: number;
   grossRevenueUSD: (number | null)[];
   byMetalRevenueUSD?: Record<string, (number | null)[]> | null;
+  operatingProfitUSD?: (number | null)[] | null;
   items: TakeItemMVI[];
 };
 

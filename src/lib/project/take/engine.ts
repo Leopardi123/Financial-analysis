@@ -76,6 +76,10 @@ function validateItem(item: TakeItemMVI, masterN: number, seenIds: Set<string>):
   }
   seenIds.add(item.id);
 
+  if (item.base.baseType === 'OPERATING_PROFIT' && item.rate.rateType === 'TIERED') {
+    throw new Error(`rateType TIERED is not supported for baseType OPERATING_PROFIT on item ${item.id}`);
+  }
+
   if (item.rate.rateType === 'FIXED') {
     if (!isFiniteNumber(item.rate.value) || item.rate.value < 0) {
       throw new Error(`rate.value must be finite and >= 0 for item ${item.id}`);
@@ -98,9 +102,18 @@ export function computeProjectTakeMVI(input: ProjectTakeMVIInput): ProjectTakeMV
     throw new Error('grossRevenueUSD length must equal masterN+1');
   }
 
+  const needsOperatingProfit = input.items.some((item) => item.base.baseType === 'OPERATING_PROFIT');
+  if (needsOperatingProfit && input.operatingProfitUSD?.length !== expectedLength) {
+    throw new Error('operatingProfitUSD length must equal masterN+1 when OPERATING_PROFIT items are configured');
+  }
+
   const seenIds = new Set<string>();
   for (const item of input.items) {
     validateItem(item, input.masterN, seenIds);
+    if (item.base.baseType !== 'REVENUE') {
+      continue;
+    }
+
     const metal = item.base.metal;
     if (metal && input.byMetalRevenueUSD?.[metal] && input.byMetalRevenueUSD[metal].length !== expectedLength) {
       throw new Error(`byMetalRevenueUSD[${metal}] length must equal masterN+1`);
@@ -129,9 +142,14 @@ export function computeProjectTakeMVI(input: ProjectTakeMVIInput): ProjectTakeMV
         continue;
       }
 
-      const metal = item.base.metal;
-      const baseSeries = metal && input.byMetalRevenueUSD?.[metal] ? input.byMetalRevenueUSD[metal] : input.grossRevenueUSD;
-      const baseAtT = baseSeries[t];
+      let baseAtT: number | null | undefined;
+      if (item.base.baseType === 'OPERATING_PROFIT') {
+        baseAtT = input.operatingProfitUSD?.[t];
+      } else {
+        const metal = item.base.metal;
+        const baseSeries = metal && input.byMetalRevenueUSD?.[metal] ? input.byMetalRevenueUSD[metal] : input.grossRevenueUSD;
+        baseAtT = baseSeries[t];
+      }
 
       if (!isFiniteNumber(baseAtT)) {
         takeByItemUSD[item.id][t] = null;

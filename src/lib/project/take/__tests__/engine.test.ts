@@ -146,6 +146,23 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertDeepEqual(missingBaseAtPeriod.totalTakeUSD, [2, 2, null, 2], 'missing base should null total in strict aggregation');
   assertDeepEqual(missingBaseAtPeriod.netRevenueAfterTakeUSD, [98, 98, null, 98], 'missing base should null net revenue in strict aggregation');
 
+
+  const operatingProfitHappyPath = computeProjectTakeMVI({
+    masterN: 2,
+    grossRevenueUSD: [100, 100, 100],
+    operatingProfitUSD: [-10, 50, 200],
+    items: [
+      {
+        id: 'profit-duty',
+        base: { baseType: 'OPERATING_PROFIT' },
+        rate: { rateType: 'FIXED', value: 0.1 },
+      },
+    ],
+  });
+
+  assertDeepEqual(operatingProfitHappyPath.takeByItemUSD['profit-duty'], [0, 5, 20], 'operating profit duty should apply fixed rate to non-negative profit');
+  assertDeepEqual(operatingProfitHappyPath.totalTakeUSD, [0, 5, 20], 'operating profit duty should aggregate into total take');
+
   assertThrows(
     () =>
       computeProjectTakeMVI({
@@ -155,6 +172,64 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
       }),
     /grossRevenueUSD length must equal masterN\+1/,
     'length mismatch should throw',
+  );
+
+  assertThrows(
+    () =>
+      computeProjectTakeMVI({
+        masterN: 2,
+        grossRevenueUSD: [100, 100, 100],
+        items: [
+          {
+            id: 'profit-duty',
+            base: { baseType: 'OPERATING_PROFIT' },
+            rate: { rateType: 'FIXED', value: 0.1 },
+          },
+        ],
+      }),
+    /operatingProfitUSD length must equal masterN\+1 when OPERATING_PROFIT items are configured/,
+    'missing operating profit series should throw when required',
+  );
+
+  const operatingProfitNullSlot = computeProjectTakeMVI({
+    masterN: 2,
+    grossRevenueUSD: [100, 100, 100],
+    operatingProfitUSD: [50, null, 200],
+    items: [
+      {
+        id: 'profit-null-slot',
+        base: { baseType: 'OPERATING_PROFIT' },
+        rate: { rateType: 'FIXED', value: 0.1 },
+      },
+    ],
+  });
+
+  assertDeepEqual(operatingProfitNullSlot.takeByItemUSD['profit-null-slot'], [5, null, 20], 'operating profit null slot should produce null item take');
+  assertDeepEqual(operatingProfitNullSlot.totalTakeUSD, [5, null, 20], 'operating profit null slot should produce strict null total');
+
+  assertThrows(
+    () =>
+      computeProjectTakeMVI({
+        masterN: 2,
+        grossRevenueUSD: [100, 100, 100],
+        operatingProfitUSD: [50, 100, 200],
+        items: [
+          {
+            id: 'profit-tiered',
+            base: { baseType: 'OPERATING_PROFIT' },
+            rate: {
+              rateType: 'TIERED',
+              thresholdType: 'revenue',
+              tiers: [
+                { thresholdValue: 0, rate: 0.01 },
+                { thresholdValue: 100, rate: 0.02 },
+              ],
+            },
+          },
+        ],
+      }),
+    /rateType TIERED is not supported for baseType OPERATING_PROFIT/,
+    'operating profit with tiered rate should throw',
   );
 
   assertThrows(
