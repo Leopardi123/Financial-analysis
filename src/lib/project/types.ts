@@ -1,3 +1,4 @@
+import type { ProjectRevenueInput, ProjectRevenueOutput } from './revenue/types.ts';
 import type { ProjectTakeMVIInput, ProjectTakeMVIOutput } from './take/types.ts';
 import type { ProjectAiscOutput } from './aisc/types.ts';
 
@@ -90,5 +91,25 @@ export type ProjectEngineWithTakeAndAiscInput = {
 };
 
 export type ProjectEngineWithTakeAndAiscOutput = ProjectEngineWithTakeOutput & {
+  aisc: ProjectAiscOutput;
+};
+
+export type ProjectEngineFromProductionInput = {
+  revenue: ProjectRevenueInput;
+  take: Omit<ProjectTakeMVIInput, 'grossRevenueUSD'> & {
+    items: ProjectTakeMVIInput['items'];
+  };
+  phase1: Omit<ProjectPhase1Input, 'revenueUSD'>;
+  phase2: { discountRate: number };
+  aisc: {
+    auPriceUSDPerOz: (number | null)[];
+  };
+};
+
+export type ProjectEngineFromProductionOutput = {
+  revenue: ProjectRevenueOutput;
+  take: ProjectTakeMVIOutput;
+  phase1: ProjectPhase1Output;
+  phase2: ProjectPhase2Output;
   aisc: ProjectAiscOutput;
 };
