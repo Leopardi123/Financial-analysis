@@ -1,11 +1,5 @@
 import { computeProjectAisc } from '../engine.ts';
 
-function assert(condition: unknown, message: string): void {
-  if (!condition) {
-    throw new Error(message);
-  }
-}
-
 function assertEqual(actual: unknown, expected: unknown, message: string): void {
   if (actual !== expected) {
     throw new Error(`${message}. Expected ${String(expected)}, received ${String(actual)}`);
