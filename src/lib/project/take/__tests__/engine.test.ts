@@ -163,6 +163,22 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertDeepEqual(operatingProfitHappyPath.takeByItemUSD['profit-duty'], [0, 5, 20], 'operating profit duty should apply fixed rate to non-negative profit');
   assertDeepEqual(operatingProfitHappyPath.totalTakeUSD, [0, 5, 20], 'operating profit duty should aggregate into total take');
 
+  const ebitdaHappyPath = computeProjectTakeMVI({
+    masterN: 2,
+    grossRevenueUSD: [100, 100, 100],
+    ebitdaUSD: [-10, 50, 200],
+    items: [
+      {
+        id: 'ebitda-duty',
+        base: { baseType: 'EBITDA' },
+        rate: { rateType: 'FIXED', value: 0.1 },
+      },
+    ],
+  });
+
+  assertDeepEqual(ebitdaHappyPath.takeByItemUSD['ebitda-duty'], [0, 5, 20], 'ebitda duty should apply fixed rate to non-negative ebitda');
+  assertDeepEqual(ebitdaHappyPath.totalTakeUSD, [0, 5, 20], 'ebitda duty should aggregate into total take');
+
   assertThrows(
     () =>
       computeProjectTakeMVI({
@@ -190,6 +206,39 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
     /operatingProfitUSD length must equal masterN\+1 when OPERATING_PROFIT items are configured/,
     'missing operating profit series should throw when required',
   );
+
+  assertThrows(
+    () =>
+      computeProjectTakeMVI({
+        masterN: 2,
+        grossRevenueUSD: [100, 100, 100],
+        items: [
+          {
+            id: 'ebitda-duty',
+            base: { baseType: 'EBITDA' },
+            rate: { rateType: 'FIXED', value: 0.1 },
+          },
+        ],
+      }),
+    /ebitdaUSD length must equal masterN\+1 when EBITDA items are configured/,
+    'missing ebitda series should throw when required',
+  );
+
+  const ebitdaNullSlot = computeProjectTakeMVI({
+    masterN: 2,
+    grossRevenueUSD: [100, 100, 100],
+    ebitdaUSD: [50, null, 200],
+    items: [
+      {
+        id: 'ebitda-null-slot',
+        base: { baseType: 'EBITDA' },
+        rate: { rateType: 'FIXED', value: 0.1 },
+      },
+    ],
+  });
+
+  assertDeepEqual(ebitdaNullSlot.takeByItemUSD['ebitda-null-slot'], [5, null, 20], 'ebitda null slot should produce null item take');
+  assertDeepEqual(ebitdaNullSlot.totalTakeUSD, [5, null, 20], 'ebitda null slot should produce strict null total');
 
   const operatingProfitNullSlot = computeProjectTakeMVI({
     masterN: 2,
@@ -230,6 +279,31 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
       }),
     /rateType TIERED is not supported for baseType OPERATING_PROFIT/,
     'operating profit with tiered rate should throw',
+  );
+
+  assertThrows(
+    () =>
+      computeProjectTakeMVI({
+        masterN: 2,
+        grossRevenueUSD: [100, 100, 100],
+        ebitdaUSD: [50, 100, 200],
+        items: [
+          {
+            id: 'ebitda-tiered',
+            base: { baseType: 'EBITDA' },
+            rate: {
+              rateType: 'TIERED',
+              thresholdType: 'revenue',
+              tiers: [
+                { thresholdValue: 0, rate: 0.01 },
+                { thresholdValue: 100, rate: 0.02 },
+              ],
+            },
+          },
+        ],
+      }),
+    /rateType TIERED is not supported for baseType EBITDA/,
+    'ebitda with tiered rate should throw',
   );
 
   assertThrows(

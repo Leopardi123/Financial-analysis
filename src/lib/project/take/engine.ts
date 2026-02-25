@@ -76,8 +76,11 @@ function validateItem(item: TakeItemMVI, masterN: number, seenIds: Set<string>):
   }
   seenIds.add(item.id);
 
-  if (item.base.baseType === 'OPERATING_PROFIT' && item.rate.rateType === 'TIERED') {
-    throw new Error(`rateType TIERED is not supported for baseType OPERATING_PROFIT on item ${item.id}`);
+  if (
+    (item.base.baseType === 'OPERATING_PROFIT' || item.base.baseType === 'EBITDA')
+    && item.rate.rateType === 'TIERED'
+  ) {
+    throw new Error(`rateType TIERED is not supported for baseType ${item.base.baseType} on item ${item.id}`);
   }
 
   if (item.rate.rateType === 'FIXED') {
@@ -105,6 +108,11 @@ export function computeProjectTakeMVI(input: ProjectTakeMVIInput): ProjectTakeMV
   const needsOperatingProfit = input.items.some((item) => item.base.baseType === 'OPERATING_PROFIT');
   if (needsOperatingProfit && input.operatingProfitUSD?.length !== expectedLength) {
     throw new Error('operatingProfitUSD length must equal masterN+1 when OPERATING_PROFIT items are configured');
+  }
+
+  const needsEbitda = input.items.some((item) => item.base.baseType === 'EBITDA');
+  if (needsEbitda && input.ebitdaUSD?.length !== expectedLength) {
+    throw new Error('ebitdaUSD length must equal masterN+1 when EBITDA items are configured');
   }
 
   const seenIds = new Set<string>();
@@ -145,6 +153,8 @@ export function computeProjectTakeMVI(input: ProjectTakeMVIInput): ProjectTakeMV
       let baseAtT: number | null | undefined;
       if (item.base.baseType === 'OPERATING_PROFIT') {
         baseAtT = input.operatingProfitUSD?.[t];
+      } else if (item.base.baseType === 'EBITDA') {
+        baseAtT = input.ebitdaUSD?.[t];
       } else {
         const metal = item.base.metal;
         const baseSeries = metal && input.byMetalRevenueUSD?.[metal] ? input.byMetalRevenueUSD[metal] : input.grossRevenueUSD;
