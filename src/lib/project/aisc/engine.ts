@@ -25,11 +25,11 @@ export function computeProjectAisc(input: ProjectAiscInput): ProjectAiscOutput {
   const payableAuEqOz: (number | null)[] = new Array(expectedLength).fill(null);
 
   for (let t = 0; t <= input.masterN; t += 1) {
-    const revenueAtT = grossRevenueUSD[t];
+    const grossRevenueAtT = grossRevenueUSD[t];
     const auPriceAtT = auPriceUSDPerOz[t];
 
-    if (revenueAtT != null && auPriceAtT != null && auPriceAtT > 0) {
-      payableAuEqOz[t] = revenueAtT / auPriceAtT;
+    if (grossRevenueAtT != null && auPriceAtT != null && auPriceAtT > 0) {
+      payableAuEqOz[t] = grossRevenueAtT / auPriceAtT;
     }
   }
 
@@ -41,9 +41,27 @@ export function computeProjectAisc(input: ProjectAiscInput): ProjectAiscOutput {
     };
   }
 
-  let numerator = 0;
-  let denominator = 0;
   let lomPeriods = 0;
+  let denominator = 0;
+
+  for (let t = input.productionStartPeriod; t <= input.masterN; t += 1) {
+    const payableAtT = payableAuEqOz[t];
+
+    if (payableAtT != null && payableAtT > 0) {
+      lomPeriods += 1;
+      denominator += payableAtT;
+    }
+  }
+
+  if (lomPeriods === 0 || denominator <= 0) {
+    return {
+      payableAuEqOz,
+      lomPeriods,
+      aiscAuEqUSDPerOz_LOM: null,
+    };
+  }
+
+  let numerator = 0;
 
   for (let t = input.productionStartPeriod; t <= input.masterN; t += 1) {
     const payableAtT = payableAuEqOz[t];
@@ -51,9 +69,6 @@ export function computeProjectAisc(input: ProjectAiscInput): ProjectAiscOutput {
     if (payableAtT == null || payableAtT <= 0) {
       continue;
     }
-
-    lomPeriods += 1;
-    denominator += payableAtT;
 
     const sustainingAtT = sustainingCostUSD[t];
     if (sustainingAtT == null) {
@@ -65,14 +80,6 @@ export function computeProjectAisc(input: ProjectAiscInput): ProjectAiscOutput {
     }
 
     numerator += sustainingAtT;
-  }
-
-  if (denominator <= 0) {
-    return {
-      payableAuEqOz,
-      lomPeriods,
-      aiscAuEqUSDPerOz_LOM: null,
-    };
   }
 
   return {
