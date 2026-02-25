@@ -74,5 +74,6 @@ export function computeProjectEngineFullProductionV1(
     phase1: nationalTakeOut.phase1,
     phase2: phase2Out,
     aisc: aiscOut,
+    capexUSD_used: input.phase1.capexUSD,
   };
 }
