@@ -1,4 +1,5 @@
 import type { ProjectTakeMVIInput, ProjectTakeMVIOutput } from './take/types.ts';
+import type { ProjectAiscOutput } from './aisc/types.ts';
 
 export type ProjectPhase1Input = {
   masterN: number;
@@ -66,4 +67,28 @@ export type ProjectEngineWithTakeOutput = {
   take: ProjectTakeMVIOutput;
   phase1: ProjectPhase1Output;
   phase2: ProjectPhase2Output;
+};
+
+export type ProjectEngineWithAiscInput = {
+  engine: ProjectEngineInput;
+  aisc: {
+    grossRevenueUSD: (number | null)[];
+    auPriceUSDPerOz: (number | null)[];
+  };
+};
+
+export type ProjectEngineWithAiscOutput = ProjectEngineOutput & {
+  aisc: ProjectAiscOutput;
+};
+
+export type ProjectEngineWithTakeAndAiscInput = {
+  engineWithTake: ProjectEngineWithTakeInput;
+  aisc: {
+    grossRevenueUSD: (number | null)[];
+    auPriceUSDPerOz: (number | null)[];
+  };
+};
+
+export type ProjectEngineWithTakeAndAiscOutput = ProjectEngineWithTakeOutput & {
+  aisc: ProjectAiscOutput;
 };
