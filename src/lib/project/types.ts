@@ -1,3 +1,5 @@
+import type { ProjectTakeMVIInput, ProjectTakeMVIOutput } from './take/types.ts';
+
 export type ProjectPhase1Input = {
   masterN: number;
   productionStartPeriod: number;
@@ -46,6 +48,22 @@ export type ProjectEngineInput = {
 };
 
 export type ProjectEngineOutput = {
+  phase1: ProjectPhase1Output;
+  phase2: ProjectPhase2Output;
+};
+
+export type ProjectEngineWithTakeInput = {
+  take: ProjectTakeMVIInput;
+  phase1: Omit<ProjectPhase1Input, 'revenueUSD'> & {
+    grossRevenueUSD: (number | null)[];
+  };
+  phase2: {
+    discountRate: number;
+  };
+};
+
+export type ProjectEngineWithTakeOutput = {
+  take: ProjectTakeMVIOutput;
   phase1: ProjectPhase1Output;
   phase2: ProjectPhase2Output;
 };
