@@ -472,7 +472,7 @@ const PRE_REVENUE_CORE_INFO: Record<string, MetricInfoSection[]> = {
   "B5 SBC": buildCoreInfo("Stock-based compensation trend in statement currency millions.", "SBC is non-cash now but dilution later.", "Rising SBC with weak progress is a warning. Values are scaled to statement currency millions for comparability.", "SBC growth without milestone delivery.", "Uses cashflow.stockBasedCompensation, scaled by 1,000,000."),
   "B6 SBC Intensity": buildCoreInfo("SBC as a share of burn (percent).", "Shows compensation leakage intensity.", "This chart shows SBC as a share of burn (percent). It does not plot SBC amounts here; see B5 for SBC in currency.", "SBC intensity trending up.", "Requires SBC and burn proxy data."),
   "B7 All-in Dilution": buildCoreInfo("Grouped period bars of equity-financing inflow and SBC expense in statement currency millions.", "Shows equity reliance (financing cash-in) and equity leakage (compensation cost proxy) side by side.", "Common Stock Issued reflects financing cash proceeds, while SBC is a non-cash accounting expense tied to equity compensation.", "Interpret as equity reliance/leakage proxy, not a pure percent dilution metric.", "Uses cashflow.commonStockIssued and cashflow.stockBasedCompensation."),
-  "C1 Corporate Overhead": buildCoreInfo("SG&A proxy for overhead.", "Tracks fixed corporate cost discipline.", "Flat/declining overhead at same output is positive.", "Overhead growth disconnected from progress.", "Uses SG&A; falls back to operatingExpenses proxy if needed."),
+  "C1 Corporate Overhead": buildCoreInfo("G&A expense (generalAndAdministrativeExpenses) proxy for overhead.", "Tracks fixed corporate cost discipline.", "Flat/declining overhead at same output is positive.", "Overhead growth disconnected from progress.", "Income statement: generalAndAdministrativeExpenses; fallback to SG&A then operatingExpenses only if GA is unavailable."),
   "C2 Exploration / Evaluation Cash Proxy (OCF Adjusted)": [
     { heading: "WHAT", lines: ["Exploration and evaluation cash proxy derived from operating cash flow."] },
     { heading: "HOW", lines: ["Defined as:", "max(0, -Operating Cash Flow − SBC − G&A)", "Values are shown in statement currency millions."] },
@@ -1016,9 +1016,15 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const generalAndAdministrativeSeries = getFieldSeries(data, "income", "generalAndAdministrativeExpenses");
   const commonStockIssuedSeries = getFieldSeries(data, "cashflow", "commonStockIssued");
   const netBorrowingsSeries = getFieldSeries(data, "cashflow", "netBorrowings");
+  const hasAnyFiniteNonZero = (series: Array<number | null | undefined>) => series.some((value) => typeof value === "number" && Number.isFinite(value) && value !== 0);
+  const gaSeriesRaw = generalAndAdministrativeSeries;
   const sgnaSeriesRaw = getFieldSeries(data, "income", "sellingGeneralAndAdministrativeExpenses");
   const operatingExpensesSeries = getFieldSeries(data, "income", "operatingExpenses");
-  const overheadSeries = sgnaSeriesRaw.some((value) => typeof value === "number") ? sgnaSeriesRaw : operatingExpensesSeries;
+  const overheadSeriesRaw = hasAnyFiniteNonZero(gaSeriesRaw)
+    ? gaSeriesRaw
+    : hasAnyFiniteNonZero(sgnaSeriesRaw)
+      ? sgnaSeriesRaw
+      : operatingExpensesSeries;
   const rdSeries = getFieldSeries(data, "income", "researchAndDevelopmentExpenses");
   const totalDebtSeries = getFieldSeries(data, "balance", "totalDebt");
   const shortTermDebtSeries = getFieldSeries(data, "balance", "shortTermDebt");
@@ -1312,7 +1318,11 @@ Capital Available: ${availableLabel}`,
     ];
   }, 15);
 
-  const corporateOverheadData = buildDerivedSeries(["Date", "Corporate Overhead"], (index) => [overheadSeries[index] ?? null], 15);
+  const corporateOverheadData = buildDerivedSeries(["Date", "Corporate Overhead"], (index) => {
+    const overheadRaw = overheadSeriesRaw[index];
+    if (typeof overheadRaw !== "number" || !Number.isFinite(overheadRaw)) return [null];
+    return [Math.abs(overheadRaw) / 1_000_000];
+  }, 15);
   const explorationProxyData = buildDerivedSeries(["Date", "Exploration Proxy"], (index) => {
     const operatingCashFlow = operatingCashFlowSeries[index];
     if (typeof operatingCashFlow !== "number" || !Number.isFinite(operatingCashFlow)) return [null];
@@ -1334,25 +1344,25 @@ Capital Available: ${availableLabel}`,
     return [Number.isFinite(explorationProxy) ? explorationProxy / 1_000_000 : null];
   }, 15);
   const spendMixData = buildDerivedSeries(["Date", "Overhead", "R&D", "Capex (abs)"], (index) => [
-    overheadSeries[index] ?? null,
+    overheadSeriesRaw[index] ?? null,
     rdSeries[index] ?? null,
     typeof capexSeries[index] === "number" ? Math.abs(capexSeries[index] as number) : null,
   ], 15);
   const overheadRatioData = buildDerivedSeries(["Date", "Overhead Ratio"], (index) => {
-    const overhead = overheadSeries[index];
+    const overhead = overheadSeriesRaw[index];
     const fcf = freeCashFlowSeries[index];
     if (typeof overhead !== "number" || typeof fcf !== "number" || fcf === 0) return [null];
     return [(overhead / Math.abs(fcf)) * 100];
   }, 15);
   const vceProxyData = buildDerivedSeries(["Date", "VCE Proxy"], (index) => {
     const fcf = freeCashFlowSeries[index];
-    const overhead = overheadSeries[index];
+    const overhead = overheadSeriesRaw[index];
     if (typeof fcf !== "number" || typeof overhead !== "number" || overhead === 0) return [null];
     return [fcf / Math.abs(overhead)];
   }, 15);
   const vceVsOverheadData = buildDerivedSeries(["Date", "VCE Proxy", "Overhead"], (index) => {
     const vce = vceProxyData?.[index + 1]?.[1] as number | null | undefined;
-    return [typeof vce === "number" ? vce : null, overheadSeries[index] ?? null];
+    return [typeof vce === "number" ? vce : null, overheadSeriesRaw[index] ?? null];
   }, 15);
 
   const netCashDebtData = buildDerivedSeries(["Date", "Net Cash / Net Debt"], (index) => {
@@ -1679,7 +1689,7 @@ Capital Available: ${availableLabel}`,
     "B5 SBC": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "B6 SBC Intensity": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
     "B7 All-in Dilution": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
-    "C1 Corporate Overhead": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
+    "C1 Corporate Overhead": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: `${statementCurrency} (millions)` },
     "C2 Exploration / Evaluation Cash Proxy (OCF Adjusted)": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
     "C4 Overhead Ratio": { unitLabel: "%", unitKind: "percent", yAxisTitle: "%" },
     "C5 VCE Proxy": { unitLabel: "x", unitKind: "ratio", yAxisTitle: "x" },
