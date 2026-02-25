@@ -19,3 +19,21 @@ export type ProjectPhase1Output = {
   nopatUSD: (number | null)[];
   fcffUSD: (number | null)[];
 };
+
+export type ProjectPhase2Input = {
+  masterN: number;
+  productionStartPeriod: number;
+  discountRate: number;
+  fcffUSD: (number | null)[];
+};
+
+export type ProjectPhase2Output = {
+  dfToToday: (number | null)[];
+  cfLOM_USD: number | null;
+  npvToday_USD: number | null;
+  dcfProdStart_exCapex_USD: number | null;
+  dcfProdStart_present_USD: number | null;
+  irr: number | null;
+  npv_over_etlv: number | null;
+  dcf_present_over_etlv: number | null;
+};
