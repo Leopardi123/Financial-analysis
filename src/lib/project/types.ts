@@ -1,6 +1,7 @@
-import type { ProjectRevenueInput, ProjectRevenueOutput } from './revenue/types.ts';
-import type { ProjectTakeMVIInput, ProjectTakeMVIOutput } from './take/types.ts';
 import type { ProjectAiscOutput } from './aisc/types.ts';
+import type { ProjectRevenueInput, ProjectRevenueOutput } from './revenue/types.ts';
+import type { StreamsApplyByMetalInput, StreamsApplyByMetalOutput } from './streams/applyByMetal.ts';
+import type { ProjectTakeMVIInput, ProjectTakeMVIOutput, TakeItemMVI } from './take/types.ts';
 
 export type ProjectPhase1Input = {
   masterN: number;
@@ -107,6 +108,28 @@ export type ProjectEngineFromProductionInput = {
 };
 
 export type ProjectEngineFromProductionOutput = {
+  revenue: ProjectRevenueOutput;
+  take: ProjectTakeMVIOutput;
+  phase1: ProjectPhase1Output;
+  phase2: ProjectPhase2Output;
+  aisc: ProjectAiscOutput;
+};
+
+export type ProjectEngineFromProductionWithStreamsInput = {
+  streams: StreamsApplyByMetalInput;
+  revenue: Omit<ProjectRevenueInput, 'payableQtyByMetal'>;
+  take: Omit<ProjectTakeMVIInput, 'grossRevenueUSD' | 'byMetalRevenueUSD'> & {
+    items: TakeItemMVI[];
+  };
+  phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & {
+    royaltiesUSD?: never;
+  };
+  phase2: { discountRate: number };
+  aisc: { auPriceUSDPerOz: (number | null)[] };
+};
+
+export type ProjectEngineFromProductionWithStreamsOutput = {
+  streams: StreamsApplyByMetalOutput;
   revenue: ProjectRevenueOutput;
   take: ProjectTakeMVIOutput;
   phase1: ProjectPhase1Output;
