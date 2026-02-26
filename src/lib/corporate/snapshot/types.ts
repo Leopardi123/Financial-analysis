@@ -29,6 +29,13 @@ export type CorporateSnapshot = {
 
   marketValue: MarketValueOutput;
 
+  MarketCap_TargetCurrency: number | null;
+  EV_TargetCurrency: number | null;
+  EV_perShare_TargetCurrency: number | null;
+  EV_over_NPV: number | null;
+  EV_over_NAV: number | null;
+  P_over_NAV: number | null;
+
   // Convenience
   NPV_today_TargetCurrency: number | null;
   NAV_today_TargetCurrency: number | null;

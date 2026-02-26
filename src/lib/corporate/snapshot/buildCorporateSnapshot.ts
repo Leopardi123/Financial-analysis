@@ -57,18 +57,18 @@ export function computeMarketValue(args: {
   const NAV_T = toFiniteOrNull(args.financing.NAV_today_TargetCurrency);
 
   const EV_over_NPV =
-    EV_TargetCurrency !== null && NPV_T !== null && NPV_T !== 0 ? EV_TargetCurrency / NPV_T : null;
+    EV_TargetCurrency !== null && NPV_T !== null && NPV_T > 0 ? EV_TargetCurrency / NPV_T : null;
 
   const EV_over_NAV =
-    EV_TargetCurrency !== null && NAV_T !== null && NAV_T !== 0 ? EV_TargetCurrency / NAV_T : null;
+    EV_TargetCurrency !== null && NAV_T !== null && NAV_T > 0 ? EV_TargetCurrency / NAV_T : null;
 
   const P_over_NAV =
-    MarketCap_TargetCurrency !== null && NAV_T !== null && NAV_T !== 0
+    MarketCap_TargetCurrency !== null && NAV_T !== null && NAV_T > 0
       ? MarketCap_TargetCurrency / NAV_T
       : null;
 
   const EV_perShare_TargetCurrency =
-    EV_TargetCurrency !== null && shares_current !== null && shares_current > 0
+    EV_TargetCurrency !== null && shares_current !== null && shares_current !== 0
       ? EV_TargetCurrency / shares_current
       : null;
 
@@ -99,6 +99,12 @@ export function buildCorporateSnapshot(args: {
     aggregation: args.aggregation,
     financing: args.financing,
     marketValue,
+    MarketCap_TargetCurrency: marketValue.MarketCap_TargetCurrency,
+    EV_TargetCurrency: marketValue.EV_TargetCurrency,
+    EV_perShare_TargetCurrency: marketValue.EV_perShare_TargetCurrency,
+    EV_over_NPV: marketValue.EV_over_NPV,
+    EV_over_NAV: marketValue.EV_over_NAV,
+    P_over_NAV: marketValue.P_over_NAV,
     NPV_today_TargetCurrency: toFiniteOrNull(args.financing.NPV_today_TargetCurrency),
     NAV_today_TargetCurrency: toFiniteOrNull(args.financing.NAV_today_TargetCurrency),
   };
