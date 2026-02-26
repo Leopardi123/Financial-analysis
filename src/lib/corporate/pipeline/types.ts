@@ -9,14 +9,10 @@ import type { CorporatePerShareOutput } from '../perShare/types.ts';
 
 export type CorporatePipelineInput = {
   discountRate: number;
-
-  // Layer 2 projects
   projects: CorporateProjectsInput;
 
-  // Financing (cash-first)
-  financing: Omit<CorporateFinancingInput, 'npvToday_USD_total'>;
+  financing: Omit<CorporateFinancingInput, 'NPV_today_USD' | 'shares_current' | 'price_current_TargetCurrency'>;
 
-  // Market (t=0)
   market: Omit<
     CorporateMarketValueInput,
     | 'cash_AfterCashFirst_TargetCurrency_t0'
@@ -26,11 +22,7 @@ export type CorporatePipelineInput = {
     | 'navToday_TargetCurrency'
   >;
 
-  // Equity raise -> shares_post_financing
   equityFinancing: Omit<CorporateEquityFinancingInput, 'shares_current'>;
-
-  // Optional internal series scalars for per-share:
-  // We will use financing + projects to compute cfLOM_target if available.
 };
 
 export type CorporatePipelineOutput = {

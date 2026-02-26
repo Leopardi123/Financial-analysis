@@ -1,35 +1,49 @@
 export type CorporateFinancingInput = {
-  // From corporate project aggregation (Layer 2):
-  npvToday_USD_total: number | null;
+  // Preferred Lista 5 naming
+  NPV_today_USD: number | null;
+  targetCurrency?: 'USD' | 'SEK' | 'CAD' | 'EUR' | string;
+  fx_USD_to_TargetCurrency: number;
+  cash_t0_TargetCurrency?: number | null;
+  debt_t0_TargetCurrency?: number | null;
+  shares_current: number | null;
+  price_current_TargetCurrency: number | null;
+  financingPlan?: {
+    debt_fraction?: number | null;
+    equity_fraction?: number | null;
+    use_cash_first?: boolean | null;
+    cash_use_cap_TargetCurrency?: number | null;
+    equity_raise_price_TargetCurrency?: number | null;
+  } | null;
+  buildFundingNeed_USD?: number | null;
 
-  // FX:
-  fx_USD_to_TargetCurrency: number | null;
-
-  // Balance sheet at t=0 in TargetCurrency:
-  cash_TargetCurrency_t0: number | null;
-  debt_TargetCurrency_t0: number | null;
-
-  // Optional enterprise adjustments (default 0):
-  preferredEquity_TargetCurrency_t0?: number | null;
-  minorityInterest_TargetCurrency_t0?: number | null;
-
-  // Cash-first allocation:
-  cashUsedForProjectFinancing_TargetCurrency_t0?: number | null; // default 0
+  // Legacy aliases kept for compatibility with existing pipeline/tests.
+  npvToday_USD_total?: number | null;
+  cash_TargetCurrency_t0?: number | null;
+  debt_TargetCurrency_t0?: number | null;
+  cashUsedForProjectFinancing_TargetCurrency_t0?: number | null;
 };
 
 export type CorporateFinancingOutput = {
-  npvToday_TargetCurrency: number | null;
+  cash_used_for_build_TargetCurrency: number | null;
+  cash_t0_post_TargetCurrency: number | null;
 
+  new_debt_TargetCurrency: number | null;
+  debt_t0_post_TargetCurrency: number | null;
+
+  equity_raised_TargetCurrency: number | null;
+  new_shares: number | null;
+  shares_post_financing: number | null;
+
+  NPV_today_TargetCurrency: number | null;
+  NAV_today_TargetCurrency: number | null;
+  Debt_to_Equity_ratio: number | null;
+
+  // Legacy aliases kept for compatibility.
+  npvToday_TargetCurrency: number | null;
+  navToday_TargetCurrency: number | null;
   cash_AfterCashFirst_TargetCurrency_t0: number | null;
   debt_TargetCurrency_t0: number | null;
-
-  netCash_TargetCurrency_t0: number | null; // cash_after - debt
-
-  navToday_TargetCurrency: number | null; // NPV_target + netCash
-
-  enterpriseAdjustments_TargetCurrency_t0: number | null; // preferred + minority
-  // EV components (without market cap):
-  // EV = MarketCap + debt - cash + enterpriseAdjustments. MarketCap is not in scope.
-  // We still expose the additive component (debt - cash_after + adjustments) to be used later.
-  evAdditive_Component_TargetCurrency_t0: number | null; // debt - cash_after + enterpriseAdjustments
+  netCash_TargetCurrency_t0: number | null;
+  enterpriseAdjustments_TargetCurrency_t0: number | null;
+  evAdditive_Component_TargetCurrency_t0: number | null;
 };
