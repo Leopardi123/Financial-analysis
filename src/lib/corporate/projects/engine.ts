@@ -53,6 +53,32 @@ function sumSeriesStrict(projects: ValidatedProject[], field: SeriesField, maste
   return output;
 }
 
+
+function computeProjectDcfProdStartPresent(
+  project: ValidatedProject,
+  masterN: number,
+  discountRate: number,
+): number | null {
+  if (project.productionStartPeriod > masterN) {
+    return 0;
+  }
+
+  let dcfProdStart_exCapex_USD = 0;
+
+  for (let t = project.productionStartPeriod; t <= masterN; t += 1) {
+    const fcff = project.fcffUSD[t];
+    if (fcff === null || !Number.isFinite(fcff)) {
+      return null;
+    }
+
+    const discountFactorFromProdStart = 1 / (1 + discountRate) ** (t - project.productionStartPeriod);
+    dcfProdStart_exCapex_USD += fcff * discountFactorFromProdStart;
+  }
+
+  const discountToPresent = 1 / (1 + discountRate) ** project.productionStartPeriod;
+  return dcfProdStart_exCapex_USD * discountToPresent;
+}
+
 function sumStrict(values: (number | null)[]): number | null {
   let sum = 0;
   for (const value of values) {
@@ -88,6 +114,17 @@ export function computeCorporateProjects(
 
     const discountFactor = 1 / (1 + input.discountRate) ** t;
     npvToday_USD_total += fcff * discountFactor;
+  }
+
+  let dcfProdStart_present_USD_total: number | null = 0;
+  for (const project of projects) {
+    const projectDcfPresent = computeProjectDcfProdStartPresent(project, input.masterN, input.discountRate);
+    if (projectDcfPresent === null) {
+      dcfProdStart_present_USD_total = null;
+      break;
+    }
+
+    dcfProdStart_present_USD_total += projectDcfPresent;
   }
 
   let denominator = 0;
@@ -128,6 +165,7 @@ export function computeCorporateProjects(
     sustainingCostUSD_total,
     cfLOM_USD_total,
     npvToday_USD_total,
+    dcfProdStart_present_USD_total,
     payableAuEqOz_total_included,
     sustainingCostUSD_total_included,
     aiscAuEqUSDPerOz_LOM_corp,

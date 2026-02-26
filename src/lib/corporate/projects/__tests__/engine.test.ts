@@ -65,6 +65,16 @@ function makeBaseInput(): CorporateProjectsInput & { discountRate: number } {
   assertEqual(happy.npvToday_USD_total === null, false, 'happy path npv should not be null');
   assertApproxEqual(happy.npvToday_USD_total as number, expectedNpv, 1e-9, 'npv should match discounted aggregated fcff');
 
+  const expectedProjectAProdStartPresent = (50 + 50 / 1.1) / 1.1;
+  const expectedProjectBProdStartPresent = -50 + 30 / 1.1 + 30 / 1.1 ** 2;
+  const expectedProdStartPresentTotal = expectedProjectAProdStartPresent + expectedProjectBProdStartPresent;
+  assertApproxEqual(
+    happy.dcfProdStart_present_USD_total as number,
+    expectedProdStartPresentTotal,
+    1e-9,
+    'DCF prod-start present total should equal sum of project-level discounted values',
+  );
+
   assertApproxEqual(happy.payableAuEqOz_total_included as number, 1.75, 1e-12, 'AISC denominator should match included payable ounces');
   assertApproxEqual(happy.sustainingCostUSD_total_included as number, 2100, 1e-12, 'AISC numerator should match included sustaining costs');
   assertApproxEqual(happy.aiscAuEqUSDPerOz_LOM_corp as number, 1200, 1e-12, 'AISC should use aggregated numerator/denominator');
@@ -76,6 +86,15 @@ function makeBaseInput(): CorporateProjectsInput & { discountRate: number } {
   assertEqual(strictNull.fcffUSD_total[1], null, 'strict totals should null out a period if any project has null');
   assertEqual(strictNull.cfLOM_USD_total, null, 'cf LOM should be null when aggregated fcff contains null');
   assertEqual(strictNull.npvToday_USD_total, null, 'npv should be null when aggregated fcff contains null');
+
+  const strictNullProdStartInput = makeBaseInput();
+  strictNullProdStartInput.projects[0].fcffUSD[2] = null;
+  const strictNullProdStart = computeCorporateProjects(strictNullProdStartInput);
+  assertEqual(
+    strictNullProdStart.dcfProdStart_present_USD_total,
+    null,
+    'DCF prod-start present total should be null when any project has null FCFF at/after production start',
+  );
 
   const aiscStrictNullInput = makeBaseInput();
   aiscStrictNullInput.projects[0].sustainingCostUSD[1] = null;

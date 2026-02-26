@@ -31,10 +31,18 @@ export function computeCorporatePipeline(input: CorporatePipelineInput): Corpora
   });
 
   const cfLOM_USD_total = projects.cfLOM_USD_total;
+  const dcfProdStart_present_USD_total = projects.dcfProdStart_present_USD_total;
   const fx = input.financing.fx_USD_to_TargetCurrency;
   const cfLOM_TargetCurrency =
     cfLOM_USD_total !== null && Number.isFinite(cfLOM_USD_total) && fx !== null && Number.isFinite(fx)
       ? cfLOM_USD_total * fx
+      : null;
+  const dcfProdStart_present_TargetCurrency =
+    dcfProdStart_present_USD_total !== null &&
+    Number.isFinite(dcfProdStart_present_USD_total) &&
+    fx !== null &&
+    Number.isFinite(fx)
+      ? dcfProdStart_present_USD_total * fx
       : null;
 
   const perShare = computeCorporatePerShare({
@@ -42,6 +50,7 @@ export function computeCorporatePipeline(input: CorporatePipelineInput): Corpora
     npvToday_TargetCurrency: financing.npvToday_TargetCurrency,
     navToday_TargetCurrency: financing.navToday_TargetCurrency,
     cfLOM_TargetCurrency,
+    dcfProdStart_present_TargetCurrency,
   });
 
   return {
