@@ -50,6 +50,11 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
     }
 
     const input = validation.value;
+    const resolverScenario = input.scenario.mode === 'percentile'
+      ? { mode: 'percentile' as const, lookbackYears: input.scenario.lookbackYears, percentile: input.scenario.percentile }
+      : input.scenario.mode === 'fixed'
+        ? { mode: 'fixed' as const, fixedPriceByKey: input.scenario.fixedPriceByKey }
+        : { mode: 'spot' as const };
     diagnostics.meta.projectCount = input.projects.length;
 
     const requestedPriceKeys = new Set<string>();
@@ -123,9 +128,11 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
           };
 
           const resolved = await resolveProjectPricesToEngineInput(
-            { parsed, from, to },
+            { parsed, from, to, scenario: resolverScenario },
             { readHistoryRows },
           );
+
+          diagnostics.warnings.push(...(resolved.diagnostics?.warnings ?? []));
 
           for (const [metal, series] of Object.entries(resolved.spotPriceUSDByMetal)) {
             const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
