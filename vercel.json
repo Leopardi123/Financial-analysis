@@ -18,5 +18,10 @@
       "source": "/:path*",
       "destination": "/"
     }
-  ]
+  ],
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "src/**/*.ts"
+    }
+  }
 }
