@@ -903,6 +903,14 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   }, [analysisMode]);
 
   useEffect(() => {
+    if (analysisMode !== "prerevenue" || primaryView !== "projects") {
+      return;
+    }
+    window.location.href = `/projects?symbol=${encodeURIComponent(ticker)}`;
+  }, [analysisMode, primaryView, ticker]);
+
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -2121,7 +2129,11 @@ Capital Available: ${availableLabel}`,
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button type="button" onClick={() => setPrimaryView("reported")} disabled={primaryView === "reported"}>Reported (Corporate)</button>
           <button type="button" onClick={() => setPrimaryView("modeled")} disabled={primaryView === "modeled"}>Modeled (NAV / DCF)</button>
-          <button type="button" onClick={() => setPrimaryView("projects")} disabled={primaryView === "projects"}>Projects</button>
+          {analysisMode === "prerevenue" && (
+            <a href={`/projects?symbol=${encodeURIComponent(ticker)}`} className="button-link" style={{ alignSelf: "center" }}>
+              Projects
+            </a>
+          )}
           {analysisMode === "prerevenue" && (
             <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
               Edit projects
