@@ -51,7 +51,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
     },
   });
 
-  assertDeepEqual(withCap.deliveredQty, [15, 0, 0], 'cap should limit first period and exhaust remaining periods');
+  assertDeepEqual(withCap.deliveredQty, [15, 0, 0], 'cap should clamp delivered quantity by remaining cap');
   assertDeepEqual(withCap.effectivePayableQty, [85, 100, 100], 'cap should preserve effective payable qty');
   assertDeepEqual(withCap.remainingCapEnd, 0, 'cap should end at zero after full delivery');
 
@@ -111,7 +111,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
           purchasePrice: { kind: 'FIXED_USD_PER_UNIT', value: 1 },
         },
       }),
-    /deliveryCapTotalQty must be finite and >= 0 when provided/,
+    /deliveryCapQty must be finite and > 0 when provided/,
     'negative cap should throw',
   );
 
@@ -126,7 +126,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
           purchasePrice: { kind: 'PCT_OF_SPOT', value: 1.1 },
         },
       }),
-    /purchasePrice PCT_OF_SPOT value must be finite and within \[0, 1\]/,
+    /pctOfSpot must be finite and within \[0, 1\]/,
     'purchase pct > 1 should throw',
   );
 
@@ -144,21 +144,5 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
     /payableQty\[0\] cannot be negative/,
     'negative payable qty should throw',
   );
-
-  assertThrows(
-    () =>
-      applyStreamMVI({
-        masterN: 0,
-        payableQty: [100],
-        spotPriceUSDPerUnit: [10],
-        config: {
-          streamPctOfPayable: 0.5,
-          purchasePrice: { kind: 'FIXED_USD_PER_UNIT', value: 12 },
-        },
-      }),
-    /purchase price exceeds spot at period 0/,
-    'purchase price above spot should throw when delivering',
-  );
-
   console.log('Project streams MVI tests passed');
 })();

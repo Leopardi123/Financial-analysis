@@ -6,8 +6,19 @@ export type StreamMVIConfig = {
   streamPctOfPayable: number;
   start_t?: number | null;
   end_t?: number | null;
+
+  // Legacy and JSON-v1-compatible cap field
   deliveryCapTotalQty?: number | null;
-  purchasePrice: StreamPurchasePriceRule;
+  // MVI hardened name
+  deliveryCapQty?: number | null;
+
+  // Legacy purchase shape
+  purchasePrice?: StreamPurchasePriceRule;
+
+  // MVI hardened purchase shape
+  purchasePriceRule?: 'FIXED_USD_PER_UNIT' | 'PCT_OF_SPOT';
+  fixedPriceUSDPerUnit?: number;
+  pctOfSpot?: number;
 };
 
 export type StreamMVIInput = {

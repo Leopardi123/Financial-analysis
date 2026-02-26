@@ -86,6 +86,65 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertDeepEqual(output.aisc.payableAuEqOz, [90, 90], 'AISC payable AuEq ounces should derive from stream-adjusted gross revenue');
   assertEqual(output.aisc.aiscAuEqUSDPerOz_LOM, 2, 'AISC should reflect sustaining cost including stream take');
 
+
+  const revenueAndTakeBaseOutput = computeProjectEngineFromProductionWithStreams({
+    streams: {
+      masterN: 2,
+      payableQtyByMetal: {
+        Au: [100, 100, 100],
+      },
+      spotPriceUSDByMetal: {
+        Au: [10, 10, 10],
+      },
+      streamsByMetal: {
+        Au: {
+          streamPctOfPayable: 0.1,
+          purchasePriceRule: 'FIXED_USD_PER_UNIT',
+          fixedPriceUSDPerUnit: 2,
+        },
+      },
+    },
+    revenue: {
+      masterN: 2,
+      priceUSDByMetal: {
+        Au: [10, 10, 10],
+      },
+    },
+    take: {
+      masterN: 2,
+      items: [
+        {
+          id: 'rev-royalty',
+          jurisdictionLevel: 'national',
+          metals: ['Au'],
+          baseType: 'REVENUE',
+          rateType: 'FIXED',
+          rateFixed: 0.1,
+        },
+      ],
+    },
+    phase1: {
+      masterN: 2,
+      productionStartPeriod: 0,
+      operatingCostsUSD: [0, 0, 0],
+      sustainingCapexUSD: [0, 0, 0],
+      siteGandA_USD: [0, 0, 0],
+      reclamationUSD: [0, 0, 0],
+      capexUSD: [0, 0, 0],
+      taxRate: 0,
+    },
+    phase2: {
+      discountRate: 0.1,
+    },
+    aisc: {
+      auPriceUSDPerOz: [10, 10, 10],
+    },
+  });
+
+  assertDeepEqual(revenueAndTakeBaseOutput.revenue.byMetalRevenueUSD.Au, [900, 900, 900], 'revenue should be based on effective payable quantity after streams');
+  assertDeepEqual(revenueAndTakeBaseOutput.revenue.grossRevenueUSD, [900, 900, 900], 'gross revenue should use post-stream payable quantity');
+  assertDeepEqual(revenueAndTakeBaseOutput.take.takeByItemUSD['rev-royalty'], [90, 90, 90], 'revenue-based take should use post-stream revenue base');
+
   const strictNullOutput = computeProjectEngineFromProductionWithStreams({
     streams: {
       masterN: 1,
