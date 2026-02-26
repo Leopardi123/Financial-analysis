@@ -7,6 +7,174 @@ import { PRICE_KEY_SET, type PriceKey } from "../src/lib/prices/keys.js";
 
 type Handler = (req: any, res: any) => Promise<void> | void;
 
+const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
+
+function parseRequestBody(req: any): unknown {
+  if (typeof req.body === "string") {
+    return JSON.parse(req.body);
+  }
+  return req.body;
+}
+
+async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
+  const refresh = String(req.query?.refresh ?? "") === "1";
+  const diagnostics = {
+    warnings: [] as string[],
+    errors: [] as string[],
+    meta: {
+      refresh,
+      projectCount: 0,
+    },
+  };
+
+  try {
+    const [{ validateSnapshotRequest }, { parseProjectJsonV1 }, { computeProjectEngineFullProductionV1 }, { resolveProjectPricesToEngineInput }, { aggregateProjectsCorporateV1 }, { computeCorporateFinancing }, { buildCorporateSnapshot }] = await Promise.all([
+      import("../src/lib/api/validateSnapshotRequest.js"),
+      import("../src/lib/project/jsonv1/parse.js"),
+      import("../src/lib/project/engineFullProductionV1.js"),
+      import("../src/lib/project/jsonv1/resolvePrices.js"),
+      import("../src/lib/corporate/aggregateProjects.js"),
+      import("../src/lib/corporate/financing/compute.js"),
+      import("../src/lib/corporate/snapshot/buildCorporateSnapshot.js"),
+    ]);
+
+    const body = parseRequestBody(req);
+    const validation = validateSnapshotRequest(body);
+    diagnostics.warnings.push(...validation.warnings);
+
+    if (!validation.ok) {
+      diagnostics.errors.push(...validation.errors);
+      res.status(400).json({ ok: false, diagnostics });
+      return;
+    }
+
+    const input = validation.value;
+    diagnostics.meta.projectCount = input.projects.length;
+
+    const requestedPriceKeys = new Set<string>();
+    for (const project of input.projects) {
+      const rawJson = project.rawJson as Record<string, unknown>;
+      const metals = rawJson.metals;
+      if (typeof metals === "object" && metals !== null) {
+        const priceKeyByMetal = (metals as Record<string, unknown>).priceKeyByMetal;
+        if (typeof priceKeyByMetal === "object" && priceKeyByMetal !== null) {
+          for (const value of Object.values(priceKeyByMetal)) {
+            if (typeof value === "string") {
+              requestedPriceKeys.add(value);
+            }
+          }
+        }
+
+        const auPriceKey = (metals as Record<string, unknown>).auPriceKey;
+        if (typeof auPriceKey === "string") {
+          requestedPriceKeys.add(auPriceKey);
+        }
+      }
+    }
+
+    if (refresh && requestedPriceKeys.size > CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS) {
+      diagnostics.errors.push(
+        `refresh=1 exceeds max unique price keys (${CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS}); received ${requestedPriceKeys.size}`,
+      );
+      res.status(400).json({ ok: false, diagnostics });
+      return;
+    }
+
+    const aggregation = await aggregateProjectsCorporateV1(
+      {
+        discountRate: input.discountRate,
+        projects: input.projects,
+      },
+      {
+        projectToSeries: async ({ projectId, rawJson }) => {
+          const parsed = parseProjectJsonV1(rawJson);
+          const periodEndDatesUtc = parsed.engineInputWithoutPrices.periodEndDatesUtc;
+          if (!periodEndDatesUtc || periodEndDatesUtc.length === 0) {
+            throw new Error(`Project ${projectId} is missing time.periodEndDatesUtc; required for corporate aggregation v1.`);
+          }
+
+          const from = periodEndDatesUtc[0];
+          const to = periodEndDatesUtc[periodEndDatesUtc.length - 1];
+
+          const readHistoryRows = async ({ priceKey, from: rangeFrom, to: rangeTo }: { priceKey: PriceKey; from: string; to: string }) => {
+            let history = await readHistoryRowsInRange({ priceKey, from: rangeFrom, to: rangeTo });
+            if (refresh && history.missing) {
+              await refreshHistoryRangeToMonthlyBlobs({ priceKey, from: rangeFrom, to: rangeTo });
+              history = await readHistoryRowsInRange({ priceKey, from: rangeFrom, to: rangeTo });
+            }
+            return history;
+          };
+
+          const resolved = await resolveProjectPricesToEngineInput(
+            { parsed, from, to },
+            { readHistoryRows },
+          );
+
+          for (const [metal, series] of Object.entries(resolved.spotPriceUSDByMetal)) {
+            const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
+            series.forEach((value, index) => {
+              if (value === null) {
+                diagnostics.warnings.push(
+                  `Missing price coverage for project=${projectId} metal=${metal} priceKey=${priceKey} targetDate=${periodEndDatesUtc[index]}`,
+                );
+              }
+            });
+          }
+
+          resolved.aisc.auPriceUSDPerOz.forEach((value, index) => {
+            if (value === null) {
+              diagnostics.warnings.push(
+                `Missing price coverage for project=${projectId} metal=Au priceKey=${parsed.engineInputWithoutPrices.auPriceKey} targetDate=${periodEndDatesUtc[index]}`,
+              );
+            }
+          });
+
+          const out = computeProjectEngineFullProductionV1(resolved);
+
+          return {
+            periodEndDatesUtc,
+            capexUSD: out.capexUSD_used,
+            fcffUSD: out.phase1.fcffUSD,
+            sustainingCostUSD: out.phase1.sustainingCostUSD,
+            payableAuEqOz: out.aisc.payableAuEqOz,
+          };
+        },
+      },
+    );
+
+    diagnostics.warnings.push(...aggregation.diagnostics.notes);
+
+    const financing = computeCorporateFinancing({
+      NPV_today_USD: aggregation.NPV_today_USD,
+      targetCurrency: input.targetCurrency,
+      fx_USD_to_TargetCurrency: input.fx_USD_to_TargetCurrency,
+      cash_t0_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? null,
+      debt_t0_TargetCurrency: input.balanceSheet?.debt_t0_TargetCurrency ?? null,
+      shares_current: input.market.shares_current,
+      price_current_TargetCurrency: input.market.price_current_TargetCurrency,
+      financingPlan: input.financingPlan,
+      buildFundingNeed_USD: input.buildFundingNeed_USD,
+    });
+
+    const snapshot = buildCorporateSnapshot({
+      targetCurrency: input.targetCurrency,
+      aggregation,
+      financing,
+      market: {
+        shares_current: input.market.shares_current,
+        price_current_TargetCurrency: input.market.price_current_TargetCurrency,
+        preferredEquity_TargetCurrency: input.market.preferredEquity_TargetCurrency,
+        minorityInterest_TargetCurrency: input.market.minorityInterest_TargetCurrency,
+      },
+    });
+
+    res.status(200).json({ ok: true, snapshot, diagnostics });
+  } catch (error) {
+    diagnostics.errors.push((error as Error).message);
+    res.status(400).json({ ok: false, diagnostics });
+  }
+}
+
 function normalizePathSegments(req: any): string[] {
   const { pathname } = new URL(req?.url ?? "/", "http://localhost");
   const trimmed = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
@@ -203,6 +371,13 @@ export default async function handler(req: any, res: any) {
         source_symbol: sourceSymbol,
         meta: { missing: history.missing },
       });
+      return;
+    }
+
+    if (req.method === "POST" && segments[0] === "snapshot" && segments[1] === "corporate") {
+      matched = "snapshot/corporate";
+      setDebugHeaders();
+      await handleCorporateSnapshot(req, res);
       return;
     }
 
