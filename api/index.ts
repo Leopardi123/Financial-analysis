@@ -43,13 +43,15 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
     errors: [] as string[],
     meta: {
       refresh,
+      mode: "inline" as "inline" | "symbol",
       projectCount: 0,
     },
   };
 
   try {
-    const [{ validateSnapshotRequest }, { parseProjectJsonV1 }, { computeProjectEngineFullProductionV1 }, { resolveProjectPricesToEngineInput }, { aggregateProjectsCorporateV1 }, { computeCorporateFinancing }, { deriveBuildFundingNeedUSD }, { buildCorporateSnapshot }, { resolveFxUSDToTarget }, { getTodayUtcDateString }, { fxKeyUSDTo }] = await Promise.all([
+    const [{ validateSnapshotRequest }, { loadProjectsForSymbol }, { parseProjectJsonV1 }, { computeProjectEngineFullProductionV1 }, { resolveProjectPricesToEngineInput }, { aggregateProjectsCorporateV1 }, { computeCorporateFinancing }, { deriveBuildFundingNeedUSD }, { buildCorporateSnapshot }, { resolveFxUSDToTarget }, { getTodayUtcDateString }, { fxKeyUSDTo }] = await Promise.all([
       import("../src/lib/api/validateSnapshotRequest.js"),
+      import("../src/lib/api/loadProjectsForSymbol.js"),
       import("../src/lib/project/jsonv1/parse.js"),
       import("../src/lib/project/engineFullProductionV1.js"),
       import("../src/lib/project/jsonv1/resolvePrices.js"),
@@ -73,16 +75,31 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
     }
 
     const input = validation.value;
+
+    const projects = "symbol" in input
+      ? await loadProjectsForSymbol(input.symbol)
+      : input.projects;
+
+    if ("symbol" in input) {
+      diagnostics.meta.mode = "symbol";
+      diagnostics.meta.symbol = input.symbol;
+      if (projects.length === 0) {
+        diagnostics.errors.push(`No stored projects found for symbol=${input.symbol}`);
+        res.status(400).json({ ok: false, diagnostics });
+        return;
+      }
+    }
+
     const resolverScenario = input.scenario.mode === 'percentile'
       ? { mode: 'percentile' as const, lookbackYears: input.scenario.lookbackYears, percentile: input.scenario.percentile }
       : input.scenario.mode === 'fixed'
         ? { mode: 'fixed' as const, fixedPriceByKey: input.scenario.fixedPriceByKey }
         : { mode: 'spot' as const };
-    diagnostics.meta.projectCount = input.projects.length;
+    diagnostics.meta.projectCount = projects.length;
     diagnostics.meta.fxSource = input.fx.source;
 
     const requestedPriceKeys = new Set<string>();
-    for (const project of input.projects) {
+    for (const project of projects) {
       const rawJson = project.rawJson as Record<string, unknown>;
       const metals = rawJson.metals;
       if (typeof metals === "object" && metals !== null) {
@@ -119,7 +136,7 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
     const aggregation = await aggregateProjectsCorporateV1(
       {
         discountRate: input.discountRate,
-        projects: input.projects,
+        projects,
       },
       {
         projectToSeries: async ({ projectId, rawJson }) => {
@@ -192,8 +209,8 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
 
     diagnostics.warnings.push(...aggregation.diagnostics.notes);
 
-    const firstProjectPeriodEnd = typeof input.projects[0]?.rawJson?.time === 'object' && input.projects[0]?.rawJson?.time !== null
-      ? (input.projects[0].rawJson.time as Record<string, unknown>).periodEndDatesUtc
+    const firstProjectPeriodEnd = typeof projects[0]?.rawJson?.time === 'object' && projects[0]?.rawJson?.time !== null
+      ? (projects[0].rawJson.time as Record<string, unknown>).periodEndDatesUtc
       : undefined;
     const t0AnchorDate = Array.isArray(firstProjectPeriodEnd) && typeof firstProjectPeriodEnd[0] === 'string'
       ? firstProjectPeriodEnd[0]
