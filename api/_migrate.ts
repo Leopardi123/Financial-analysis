@@ -1,4 +1,6 @@
 import { batch, execute } from "./_db.js";
+import { ensurePriceSchema } from "../src/lib/prices/db/schema.js";
+import { seedPriceRegistry } from "../src/lib/prices/db/seed.js";
 
 const TABLES = {
   companies: "companies",
@@ -227,6 +229,8 @@ export async function ensureSchema() {
   }
 
   await migrateCompanies();
+  await ensurePriceSchema();
+  await seedPriceRegistry();
 }
 
 async function migrateCompanies() {
