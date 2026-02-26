@@ -59,4 +59,25 @@ export type CorporateSnapshot = {
   NPV_over_ETLV: number | null;
   DCF_present_over_ETLV: number | null;
   DCF_prodStart_over_ETLV: number | null;
+
+  Revenue_10Y_USD: number | null;
+  FCFF_10Y_USD: number | null;
+  AuEq_Oz_10Y: number | null;
+  InSituValue_10Y_USD: number | null;
+  InSituValue_perShare_10Y_USD: number | null;
+
+  Revenue_10Y_TargetCurrency: number | null;
+  FCFF_10Y_TargetCurrency: number | null;
+  InSituValue_10Y_TargetCurrency: number | null;
+  InSituValue_perShare_10Y_TargetCurrency: number | null;
+  in_situ_value_TargetCurrency: number | null;
+  in_situ_value_per_share_TargetCurrency: number | null;
+  Revenue_10Y_perShare_TargetCurrency: number | null;
+  FCFF_10Y_perShare_TargetCurrency: number | null;
+  EV_over_Revenue_10Y: number | null;
+
+  BookValue_USD: number | null;
+  BookValue_perShare_USD_shares_current: number | null;
+  BookValue_perShare_USD_shares_post_financing: number | null;
+
 };

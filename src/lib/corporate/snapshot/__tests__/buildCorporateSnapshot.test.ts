@@ -42,6 +42,8 @@ function baseAggregation(): CorporateAggregationOutput {
     corporateMasterN: 0,
     capexUSD_total: [],
     fcffUSD_total: [],
+    grossRevenueUSD_total: [],
+    auPriceUSDPerOz: [],
     sustainingCostUSD_total: [],
     payableAuEqOz_total: [],
     aiscAuEqUSDPerOz_LOM: null,
