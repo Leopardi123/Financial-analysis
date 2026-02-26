@@ -1,51 +1,42 @@
-export type TakeRateFixed = {
-  rateType: 'FIXED';
-  value: number;
-};
+export type TakeJurisdictionLevel =
+  | 'contractual'
+  | 'national'
+  | 'provincial_state'
+  | 'municipal'
+  | 'other';
 
-export type TakeRateTiered = {
-  rateType: 'TIERED';
-  thresholdType: 'revenue';
-  tiers: Array<{
-    thresholdValue: number;
-    rate: number;
-  }>;
-};
+export type TakeBaseType = 'REVENUE' | 'BY_METAL_REVENUE' | 'PAYABLE_QTY';
 
-export type TakeBase =
-  | {
-      baseType: 'REVENUE';
-      metal?: string | null;
-    }
-  | {
-      baseType: 'OPERATING_PROFIT';
-    }
-  | {
-      baseType: 'EBITDA';
-    };
+export type TakeRateType = 'FIXED' | 'TIERED_REVENUE';
 
 export type TakeItemMVI = {
   id: string;
-  appliesTo?: {
-    metals?: string[];
-    start_t?: number | null;
-    end_t?: number | null;
-  };
-  base: TakeBase;
-  rate: TakeRateFixed | TakeRateTiered;
+  jurisdictionLevel: TakeJurisdictionLevel;
+  metals: string[];
+  start_t?: number | null;
+  end_t?: number | null;
+  baseType: TakeBaseType;
+  rateType: TakeRateType;
+  rateFixed?: number | null;
+  tiers?: Array<{ thresholdUSD: number; rate: number }> | null;
+  cap?: {
+    capType: 'none' | 'revenue' | 'payableQty';
+    capAmountUSD?: number | null;
+    capAmountQty?: number | null;
+  } | null;
+  enabled?: boolean | null;
 };
 
 export type ProjectTakeMVIInput = {
   masterN: number;
-  grossRevenueUSD: (number | null)[];
-  byMetalRevenueUSD?: Record<string, (number | null)[]> | null;
-  operatingProfitUSD?: (number | null)[] | null;
-  ebitdaUSD?: (number | null)[] | null;
+  grossRevenueUSD: Array<number | null>;
+  byMetalRevenueUSD?: Record<string, Array<number | null>> | null;
+  payableQtyByMetal?: Record<string, Array<number | null>> | null;
   items: TakeItemMVI[];
 };
 
 export type ProjectTakeMVIOutput = {
-  totalTakeUSD: (number | null)[];
-  netRevenueAfterTakeUSD: (number | null)[];
-  takeByItemUSD: Record<string, (number | null)[]>;
+  totalTakeUSD: Array<number | null>;
+  netRevenueAfterTakeUSD: Array<number | null>;
+  takeByItemUSD: Record<string, Array<number | null>>;
 };

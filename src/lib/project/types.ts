@@ -102,7 +102,9 @@ export type ProjectEngineFromProductionInput = {
   take: Omit<ProjectTakeMVIInput, 'grossRevenueUSD'> & {
     items: ProjectTakeMVIInput['items'];
   };
-  phase1: Omit<ProjectPhase1Input, 'revenueUSD'>;
+  phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & {
+    royaltiesUSD?: (number | null)[];
+  };
   phase2: { discountRate: number };
   aisc: {
     auPriceUSDPerOz: (number | null)[];
@@ -150,7 +152,7 @@ export type ProjectEngineFullProductionV1Input = {
   takeItems: TakeItemMVI[];
 
   phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & {
-    royaltiesUSD?: never;
+    royaltiesUSD?: (number | null)[];
   };
 
   phase2: { discountRate: number };
@@ -166,6 +168,8 @@ export type ProjectEngineFullProductionV1Output = {
   streams: StreamsApplyByMetalOutput | null;
   revenue: ProjectRevenueOutput;
   nationalTake: NationalTakeOutput;
+  totalTakeUSD: (number | null)[];
+  itemTakeUSDById: Record<string, (number | null)[]>;
   phase1: ProjectPhase1Output;
   phase2: ProjectPhase2Output;
   aisc: ProjectAiscOutput;
