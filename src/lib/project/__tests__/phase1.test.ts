@@ -50,6 +50,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertDeepEqual(happyPath.taxUSD, [0, 0, 14.7, 14.7], 'happy path taxUSD');
   assertDeepEqual(happyPath.nopatUSD, [-12, -12, 34.3, 34.3], 'happy path nopatUSD');
   assertDeepEqual(happyPath.fcffUSD, [-62, -32, 34.3, 34.3], 'happy path fcffUSD');
+  assertDeepEqual(happyPath.workingCapitalDeltaUSD_effective, [0, 0, 0, 0], 'happy path defaults working capital delta to zero');
   assert((happyPath.ebitUSD[0] as number) < 0, 'pre-production ebit at t=0 should be negative');
   assert((happyPath.ebitUSD[1] as number) < 0, 'pre-production ebit at t=1 should be negative');
   assertEqual(happyPath.taxUSD[0], 0, 'tax at t=0 should be zero for negative EBIT');
@@ -110,6 +111,40 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertEqual(nullCapex.ebitUSD[1], 81, 'ebit should still compute when capex is null');
   assertEqual(nullCapex.nopatUSD[1], 56.7, 'nopat should still compute when capex is null');
   assertEqual(nullCapex.fcffUSD[1], null, 'fcff should be null when capex is null');
+
+
+
+  const positiveWorkingCapital = computeProjectPhase1({
+    masterN: 0,
+    productionStartPeriod: 0,
+    taxRate: 0,
+    revenueUSD: [100],
+    operatingCostsUSD: [0],
+    sustainingCapexUSD: [0],
+    siteGandA_USD: [0],
+    royaltiesUSD: [0],
+    reclamationUSD: [0],
+    byproductCreditsUSD: [0],
+    capexUSD: [0],
+    workingCapitalDeltaUSD: [30],
+  });
+  assertEqual(positiveWorkingCapital.fcffUSD[0], 70, 'positive working capital delta should reduce fcff');
+
+  const negativeWorkingCapital = computeProjectPhase1({
+    masterN: 0,
+    productionStartPeriod: 0,
+    taxRate: 0,
+    revenueUSD: [100],
+    operatingCostsUSD: [0],
+    sustainingCapexUSD: [0],
+    siteGandA_USD: [0],
+    royaltiesUSD: [0],
+    reclamationUSD: [0],
+    byproductCreditsUSD: [0],
+    capexUSD: [0],
+    workingCapitalDeltaUSD: [-30],
+  });
+  assertEqual(negativeWorkingCapital.fcffUSD[0], 130, 'negative working capital delta should increase fcff');
 
   assertThrows(
     () =>

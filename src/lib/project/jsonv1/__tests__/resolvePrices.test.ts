@@ -27,6 +27,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   base.series.siteGandA_USD = [0, 0, 0];
   base.series.reclamationUSD = [0, 0, 0];
   base.series.byproductCreditsUSD = [0, 0, 0];
+  base.series.workingCapitalDeltaUSD = [0, 0, 0];
 
   if (base.operations) {
     base.operations.oreMilledTonnes = [null, null, null];
@@ -102,6 +103,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   missingEarlierData.series.siteGandA_USD = [0];
   missingEarlierData.series.reclamationUSD = [0];
   missingEarlierData.series.byproductCreditsUSD = [0];
+  missingEarlierData.series.workingCapitalDeltaUSD = [0];
   missingEarlierData.metals.payableQtyByMetal = { Au: [1] };
   missingEarlierData.metals.payableQtyUnitByMetal = { Au: 'toz' };
   missingEarlierData.metals.priceKeyByMetal = { Au: 'XAU_USD_TOZ' };
@@ -133,6 +135,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   fallbackBase.series.siteGandA_USD = [0];
   fallbackBase.series.reclamationUSD = [0];
   fallbackBase.series.byproductCreditsUSD = [0];
+  fallbackBase.series.workingCapitalDeltaUSD = [0];
   fallbackBase.metals.payableQtyByMetal = { Au: [1] };
   fallbackBase.metals.payableQtyUnitByMetal = { Au: 'toz' };
   fallbackBase.metals.priceKeyByMetal = { Au: 'XAU_USD_TOZ' };

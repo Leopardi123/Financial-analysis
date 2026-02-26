@@ -52,6 +52,22 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertThrows(() => parseProjectJsonV1(badSeriesLength), /series\.capexUSD/, 'throws on required series length mismatch');
 
 
+  const workingCapitalSeries = getProjectJsonV1Template();
+  workingCapitalSeries.series.workingCapitalDeltaUSD = new Array(workingCapitalSeries.time.masterN + 1).fill(10);
+  workingCapitalSeries.series.workingCapitalDeltaUSD[2] = Number.NaN;
+  const parsedWorkingCapital = parseProjectJsonV1(workingCapitalSeries);
+  assertEqual(parsedWorkingCapital.engineInputWithoutPrices.phase1.workingCapitalDeltaUSD?.[0], 10, 'working capital series is carried to engine input');
+  assertEqual(parsedWorkingCapital.engineInputWithoutPrices.phase1.workingCapitalDeltaUSD?.[2], null, 'working capital non-finite values sanitize to null');
+
+  const badWorkingCapitalLength = getProjectJsonV1Template();
+  badWorkingCapitalLength.series.workingCapitalDeltaUSD = [1, 2, 3];
+  assertThrows(
+    () => parseProjectJsonV1(badWorkingCapitalLength),
+    /series\.workingCapitalDeltaUSD/,
+    'throws on optional working capital length mismatch',
+  );
+
+
   const badPeriodEndDatesLength = getProjectJsonV1Template();
   badPeriodEndDatesLength.time.periodEndDatesUtc = ['2026-12-31'];
   assertThrows(

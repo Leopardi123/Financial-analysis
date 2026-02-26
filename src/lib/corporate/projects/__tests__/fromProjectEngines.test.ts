@@ -60,6 +60,7 @@ function makeOutputStub(input: {
         taxUSD: [],
         nopatUSD: [],
         fcffUSD: input.fcffUSD,
+        workingCapitalDeltaUSD_effective: new Array(input.fcffUSD.length).fill(0),
         ...(input.phase1ProductionStartPeriod !== undefined
           ? { productionStartPeriod: input.phase1ProductionStartPeriod }
           : {}),
@@ -74,6 +75,7 @@ function makeOutputStub(input: {
       taxUSD: [],
       nopatUSD: [],
       fcffUSD: input.fcffUSD,
+      workingCapitalDeltaUSD_effective: new Array(input.fcffUSD.length).fill(0),
       ...(input.phase1ProductionStartPeriod !== undefined
         ? { productionStartPeriod: input.phase1ProductionStartPeriod }
         : {}),

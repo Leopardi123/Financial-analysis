@@ -53,12 +53,14 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const reclamationUSD = normalizeSeriesLength(input.reclamationUSD, length, 'reclamationUSD');
   const capexUSD = normalizeSeriesLength(input.capexUSD, length, 'capexUSD');
   const byproductCreditsUSD = normalizeSeriesLength(input.byproductCreditsUSD, length, 'byproductCreditsUSD');
+  const workingCapitalDeltaUSD = normalizeSeriesLength(input.workingCapitalDeltaUSD, length, 'workingCapitalDeltaUSD');
 
   const sustainingCostUSD: (number | null)[] = new Array(length).fill(null);
   const ebitUSD: (number | null)[] = new Array(length).fill(null);
   const taxUSD: (number | null)[] = new Array(length).fill(null);
   const nopatUSD: (number | null)[] = new Array(length).fill(null);
   const fcffUSD: (number | null)[] = new Array(length).fill(null);
+  const workingCapitalDeltaUSD_effective: (number | null)[] = new Array(length).fill(0);
 
   for (let t = 0; t < length; t += 1) {
     const r = safeValue(revenueUSD, t);
@@ -68,6 +70,8 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     const roy = safeValue(royaltiesUSD, t);
     const rec = safeValue(reclamationUSD, t);
     const bp = safeValue(byproductCreditsUSD, t);
+    const dWC = safeValue(workingCapitalDeltaUSD, t);
+    workingCapitalDeltaUSD_effective[t] = dWC;
 
     const sustainingValue = op + sc + ga + roy + rec - bp;
     const ebitValue = r - op - sc - ga - roy - rec + bp;
@@ -112,7 +116,7 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     }
 
     const nopatAtT = nopatUSD[t] as number;
-    const fcffValue = nopatAtT - cx;
+    const fcffValue = nopatAtT - cx - dWC;
     fcffUSD[t] = Number.isFinite(fcffValue) ? fcffValue : null;
   }
 
@@ -122,6 +126,7 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     taxUSD,
     nopatUSD,
     fcffUSD,
+    workingCapitalDeltaUSD_effective,
   };
 }
 

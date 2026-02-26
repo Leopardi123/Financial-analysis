@@ -30,6 +30,7 @@ export type ProjectJsonV1 = {
     operatingCostsUSD: Array<number | null>;
     sustainingCapexUSD: Array<number | null>;
     siteGandA_USD: Array<number | null>;
+    workingCapitalDeltaUSD?: Array<number | null>;
     royaltiesUSD?: Array<number | null>;
     reclamationUSD: Array<number | null>;
     byproductCreditsUSD?: Array<number | null>;
