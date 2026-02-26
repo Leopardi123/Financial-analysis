@@ -2,6 +2,10 @@ import type { CorporateFinancingOutput } from '../financing/types.ts';
 import type { CorporateAggregationOutput } from '../types.ts';
 import type { CorporateSnapshot, MarketValueInput, MarketValueOutput } from './types.ts';
 import { makeNullLista2CfDcfMetrics, type Lista2CfDcfMetrics } from '../../snapshot/lista2CfDcf.ts';
+import {
+  makeNullLista3aProjectEfficiencyMetrics,
+  type Lista3aProjectEfficiencyMetrics,
+} from '../../snapshot/lista3aProjectEfficiency.ts';
 import { makeNullLista4TenYearMetrics, type Lista4TenYearMetrics } from '../../snapshot/lista4TenYear.ts';
 
 function toFiniteOrNull(value: number | null | undefined): number | null {
@@ -91,6 +95,7 @@ export function buildCorporateSnapshot(args: {
   financing: CorporateFinancingOutput;
   market: MarketValueInput;
   lista2CfDcf?: Lista2CfDcfMetrics;
+  lista3aProjectEfficiency?: Lista3aProjectEfficiencyMetrics;
   lista4TenYear?: Lista4TenYearMetrics;
 }): CorporateSnapshot {
   const marketValue = computeMarketValue({
@@ -99,6 +104,7 @@ export function buildCorporateSnapshot(args: {
   });
 
   const lista2 = args.lista2CfDcf ?? makeNullLista2CfDcfMetrics();
+  const lista3a = args.lista3aProjectEfficiency ?? makeNullLista3aProjectEfficiencyMetrics();
   const lista4Base = args.lista4TenYear ?? makeNullLista4TenYearMetrics();
   const lista4: Lista4TenYearMetrics = {
     ...lista4Base,
@@ -124,6 +130,7 @@ export function buildCorporateSnapshot(args: {
     NPV_today_TargetCurrency: toFiniteOrNull(args.financing.NPV_today_TargetCurrency),
     NAV_today_TargetCurrency: toFiniteOrNull(args.financing.NAV_today_TargetCurrency),
     ...lista2,
+    ...lista3a,
     ...lista4,
   };
 }

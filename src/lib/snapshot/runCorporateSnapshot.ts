@@ -11,6 +11,7 @@ import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
 import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics } from './lista2CfDcf.ts';
+import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
 
@@ -568,7 +569,6 @@ export async function runCorporateSnapshotPipeline(args: {
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
 
-
     const rawBody = args.body as Record<string, unknown>;
     const rawBalance = rawBody.balanceSheet;
     const totalStockholdersEquity_USD =
@@ -596,6 +596,16 @@ export async function runCorporateSnapshotPipeline(args: {
       projectSeriesContexts,
     });
 
+    const lista3a = computeLista3aProjectEfficiencyMetrics({
+      masterN: aggregation.corporateMasterN,
+      productionStartPeriod: corporateProductionStartPeriod,
+      discountRate: input.discountRate,
+      fcffUSD_total: aggregation.fcffUSD_total,
+      ebitUSD_total: snapshotSeries.ebitUSD,
+      capexUSD_total: aggregation.capexUSD_total,
+    });
+    diagnostics.warnings.push(...lista3a.warnings);
+
     const snapshot = buildCorporateSnapshot({
       targetCurrency: input.targetCurrency,
       aggregation,
@@ -607,6 +617,7 @@ export async function runCorporateSnapshotPipeline(args: {
         minorityInterest_TargetCurrency: input.market.minorityInterest_TargetCurrency,
       },
       lista2CfDcf: lista2.metrics,
+      lista3aProjectEfficiency: lista3a.metrics,
       lista4TenYear: lista4,
     });
 

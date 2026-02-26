@@ -82,6 +82,12 @@ export type CorporateSnapshot = {
   DCF_prodStart_present_TargetCurrency: number | null;
   DCF_prodStart_present_perShare_TargetCurrency: number | null;
 
+  Payback_approx_years: number | null;
+  Payback_real_years: number | null;
+  ROI_10Y_pct: number | null;
+  LOM_average_EBIT_ROCE_pct: number | null;
+  LOM_discounted_EBIT_ROCE_pct: number | null;
+
   NPV_over_ETLV: number | null;
   DCF_present_over_ETLV: number | null;
   DCF_prodStart_over_ETLV: number | null;
