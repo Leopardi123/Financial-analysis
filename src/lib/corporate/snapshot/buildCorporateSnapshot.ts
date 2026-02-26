@@ -1,0 +1,105 @@
+import type { CorporateFinancingOutput } from '../financing/types.ts';
+import type { CorporateAggregationOutput } from '../types.ts';
+import type { CorporateSnapshot, MarketValueInput, MarketValueOutput } from './types.ts';
+
+function toFiniteOrNull(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+function toStrictAdjustment(value: number | null | undefined, label: string): number {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+
+  if (!Number.isFinite(value)) {
+    throw new Error(`${label} must be finite when provided`);
+  }
+
+  return value;
+}
+
+export function computeMarketValue(args: {
+  market: MarketValueInput;
+  financing: CorporateFinancingOutput;
+}): MarketValueOutput {
+  const shares_current = toFiniteOrNull(args.market.shares_current);
+  const price_current_TargetCurrency = toFiniteOrNull(args.market.price_current_TargetCurrency);
+
+  const preferredEquity = toStrictAdjustment(
+    args.market.preferredEquity_TargetCurrency,
+    'preferredEquity_TargetCurrency',
+  );
+  const minorityInterest = toStrictAdjustment(
+    args.market.minorityInterest_TargetCurrency,
+    'minorityInterest_TargetCurrency',
+  );
+
+  const EnterpriseAdjustments_TargetCurrency = preferredEquity + minorityInterest;
+
+  const MarketCap_TargetCurrency =
+    shares_current !== null && price_current_TargetCurrency !== null
+      ? shares_current * price_current_TargetCurrency
+      : null;
+
+  const cashPost = toFiniteOrNull(args.financing.cash_t0_post_TargetCurrency);
+  const debtPost = toFiniteOrNull(args.financing.debt_t0_post_TargetCurrency);
+
+  const EV_TargetCurrency =
+    MarketCap_TargetCurrency !== null && cashPost !== null && debtPost !== null
+      ? MarketCap_TargetCurrency + debtPost - cashPost + EnterpriseAdjustments_TargetCurrency
+      : null;
+
+  const NPV_T = toFiniteOrNull(args.financing.NPV_today_TargetCurrency);
+  const NAV_T = toFiniteOrNull(args.financing.NAV_today_TargetCurrency);
+
+  const EV_over_NPV =
+    EV_TargetCurrency !== null && NPV_T !== null && NPV_T !== 0 ? EV_TargetCurrency / NPV_T : null;
+
+  const EV_over_NAV =
+    EV_TargetCurrency !== null && NAV_T !== null && NAV_T !== 0 ? EV_TargetCurrency / NAV_T : null;
+
+  const P_over_NAV =
+    MarketCap_TargetCurrency !== null && NAV_T !== null && NAV_T !== 0
+      ? MarketCap_TargetCurrency / NAV_T
+      : null;
+
+  const EV_perShare_TargetCurrency =
+    EV_TargetCurrency !== null && shares_current !== null && shares_current > 0
+      ? EV_TargetCurrency / shares_current
+      : null;
+
+  return {
+    MarketCap_TargetCurrency,
+    EnterpriseAdjustments_TargetCurrency,
+    EV_TargetCurrency,
+    EV_over_NPV,
+    EV_over_NAV,
+    P_over_NAV,
+    EV_perShare_TargetCurrency,
+  };
+}
+
+export function buildCorporateSnapshot(args: {
+  targetCurrency: string;
+  aggregation: CorporateAggregationOutput;
+  financing: CorporateFinancingOutput;
+  market: MarketValueInput;
+}): CorporateSnapshot {
+  const marketValue = computeMarketValue({
+    market: args.market,
+    financing: args.financing,
+  });
+
+  return {
+    targetCurrency: args.targetCurrency,
+    aggregation: args.aggregation,
+    financing: args.financing,
+    marketValue,
+    NPV_today_TargetCurrency: toFiniteOrNull(args.financing.NPV_today_TargetCurrency),
+    NAV_today_TargetCurrency: toFiniteOrNull(args.financing.NAV_today_TargetCurrency),
+  };
+}
