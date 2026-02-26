@@ -28,13 +28,14 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
   };
 
   try {
-    const [{ validateSnapshotRequest }, { parseProjectJsonV1 }, { computeProjectEngineFullProductionV1 }, { resolveProjectPricesToEngineInput }, { aggregateProjectsCorporateV1 }, { computeCorporateFinancing }, { buildCorporateSnapshot }] = await Promise.all([
+    const [{ validateSnapshotRequest }, { parseProjectJsonV1 }, { computeProjectEngineFullProductionV1 }, { resolveProjectPricesToEngineInput }, { aggregateProjectsCorporateV1 }, { computeCorporateFinancing }, { deriveBuildFundingNeedUSD }, { buildCorporateSnapshot }] = await Promise.all([
       import("../src/lib/api/validateSnapshotRequest.js"),
       import("../src/lib/project/jsonv1/parse.js"),
       import("../src/lib/project/engineFullProductionV1.js"),
       import("../src/lib/project/jsonv1/resolvePrices.js"),
       import("../src/lib/corporate/aggregateProjects.js"),
       import("../src/lib/corporate/financing/compute.js"),
+      import("../src/lib/corporate/financing/deriveBuildFundingNeed.js"),
       import("../src/lib/corporate/snapshot/buildCorporateSnapshot.js"),
     ]);
 
@@ -80,6 +81,12 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
       return;
     }
 
+    const projectsForBuildFunding = [] as Array<{
+      projectId: string;
+      productionStartPeriod: number;
+      periodEndDatesUtc: string[];
+    }>;
+
     const aggregation = await aggregateProjectsCorporateV1(
       {
         discountRate: input.discountRate,
@@ -89,9 +96,19 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
         projectToSeries: async ({ projectId, rawJson }) => {
           const parsed = parseProjectJsonV1(rawJson);
           const periodEndDatesUtc = parsed.engineInputWithoutPrices.periodEndDatesUtc;
+          const productionStartPeriod = parsed.engineInputWithoutPrices.productionStartPeriod;
           if (!periodEndDatesUtc || periodEndDatesUtc.length === 0) {
             throw new Error(`Project ${projectId} is missing time.periodEndDatesUtc; required for corporate aggregation v1.`);
           }
+          if (!Number.isInteger(productionStartPeriod)) {
+            throw new Error(`Project ${projectId} is missing integer productionStartPeriod`);
+          }
+
+          projectsForBuildFunding.push({
+            projectId,
+            productionStartPeriod,
+            periodEndDatesUtc,
+          });
 
           const from = periodEndDatesUtc[0];
           const to = periodEndDatesUtc[periodEndDatesUtc.length - 1];
@@ -144,6 +161,24 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
 
     diagnostics.warnings.push(...aggregation.diagnostics.notes);
 
+    let buildFundingNeedUSD = input.buildFundingNeed_USD;
+    if (buildFundingNeedUSD === undefined) {
+      diagnostics.warnings.push(
+        'buildFundingNeed_USD derived from capex schedule using first production date window',
+      );
+      buildFundingNeedUSD = deriveBuildFundingNeedUSD({
+        corporatePeriodEndDatesUtc: aggregation.corporatePeriodEndDatesUtc,
+        capexUSD_total: aggregation.capexUSD_total,
+        projects: projectsForBuildFunding,
+      });
+
+      if (buildFundingNeedUSD === null) {
+        diagnostics.warnings.push(
+          'buildFundingNeed_USD derivation returned null because capexUSD_total contains null in the build window',
+        );
+      }
+    }
+
     const financing = computeCorporateFinancing({
       NPV_today_USD: aggregation.NPV_today_USD,
       targetCurrency: input.targetCurrency,
@@ -153,7 +188,7 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
       shares_current: input.market.shares_current,
       price_current_TargetCurrency: input.market.price_current_TargetCurrency,
       financingPlan: input.financingPlan,
-      buildFundingNeed_USD: input.buildFundingNeed_USD,
+      buildFundingNeed_USD: buildFundingNeedUSD,
     });
 
     const snapshot = buildCorporateSnapshot({

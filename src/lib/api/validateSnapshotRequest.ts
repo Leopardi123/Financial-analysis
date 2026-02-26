@@ -145,8 +145,12 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
   }
 
   const buildFundingNeed = readNullableFiniteNumber(body.buildFundingNeed_USD);
-  if (body.buildFundingNeed_USD !== undefined && buildFundingNeed === null && body.buildFundingNeed_USD !== null) {
-    errors.push('buildFundingNeed_USD must be finite when provided');
+  if (body.buildFundingNeed_USD !== undefined) {
+    if (buildFundingNeed === undefined || buildFundingNeed === null) {
+      errors.push('buildFundingNeed_USD must be finite and >= 0 when provided');
+    } else if (buildFundingNeed < 0) {
+      errors.push('buildFundingNeed_USD must be >= 0 when provided');
+    }
   }
 
   const projectsRaw = body.projects;
