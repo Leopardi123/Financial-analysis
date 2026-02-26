@@ -12,7 +12,7 @@ test('introspectSnapshot handles scalar, array, and object keys', () => {
     eNull: null,
   });
 
-  assert.deepEqual(shape.scalarKeys, ['aNumber', 'dBool', 'eNull', 'zString']);
+  assert.deepEqual(shape.scalarKeys, ['aNumber', 'bObject.nested', 'dBool', 'eNull', 'zString']);
   assert.deepEqual(shape.objectKeys, ['bObject']);
   assert.deepEqual(shape.arrayKeys, ['cArray']);
   assert.equal(shape.arrayValueTypes.cArray, 'number|null');
@@ -37,7 +37,7 @@ test('introspectSnapshot output is stable and sorted alphabetically', () => {
     middle: 'value',
   });
 
-  assert.deepEqual(shape.scalarKeys, ['middle']);
+  assert.deepEqual(shape.scalarKeys, ['alpha.ok', 'middle']);
   assert.deepEqual(shape.objectKeys, ['alpha']);
   assert.deepEqual(shape.arrayKeys, ['zebra']);
 });

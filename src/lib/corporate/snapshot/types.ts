@@ -20,6 +20,32 @@ export type MarketValueOutput = {
   EV_perShare_TargetCurrency: number | null; // EVPS = EV / shares_current
 };
 
+export type CorporateSnapshotSeries = {
+  periodIndex: number[];
+  periodEndDatesUtc: Array<string | null>;
+  oreMinedTonnes: Array<number | null>;
+  oreMilledTonnes: Array<number | null>;
+  throughputUnit: 'tpd' | 'tpa' | null;
+  nameplateThroughput: number | null;
+  utilizationPct: number | null;
+  payableQtyByMetal: Record<string, Array<number | null>>;
+  payableQtyUnitByMetal: Record<string, string>;
+  priceUsedByMetal_USD: Record<string, Array<number | null>>;
+  revenueByMetal_USD: Record<string, Array<number | null>>;
+  totalRevenue_USD: Array<number | null>;
+  operatingCostsUSD: Array<number | null>;
+  sustainingCapexUSD: Array<number | null>;
+  siteGandA_USD: Array<number | null>;
+  royaltiesUSD: Array<number | null>;
+  reclamationUSD: Array<number | null>;
+  byproductCreditsUSD: Array<number | null>;
+  sustainingCostUSD: Array<number | null>;
+  ebitUSD: Array<number | null>;
+  taxUSD: Array<number | null>;
+  fcffUSD: Array<number | null>;
+  capexUSD: Array<number | null>;
+};
+
 export type CorporateSnapshot = {
   targetCurrency: string;
 
@@ -79,5 +105,7 @@ export type CorporateSnapshot = {
   BookValue_USD: number | null;
   BookValue_perShare_USD_shares_current: number | null;
   BookValue_perShare_USD_shares_post_financing: number | null;
+
+  series?: CorporateSnapshotSeries;
 
 };
