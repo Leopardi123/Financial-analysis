@@ -1,5 +1,5 @@
 import { computeProjectPhase1 } from '../phase1.ts';
-import { computeProjectTakeMVI } from '../take/engine.ts';
+import { computeTakeEngine } from '../take/compute.ts';
 import type { NationalTakeInput, NationalTakeOutput } from './types.ts';
 
 function assertSeriesLength(series: unknown[], expectedLength: number, fieldName: string): void {
@@ -12,22 +12,23 @@ function zeroSeries(length: number): number[] {
   return new Array(length).fill(0);
 }
 
-function strictAdd(left: number | null, right: number | null): number | null {
-  if (left == null || right == null) {
-    return null;
-  }
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
 
-  return left + right;
+function anyNonNull(series: Array<number | null> | undefined): boolean {
+  if (!series) {
+    return false;
+  }
+  return series.some((value) => value !== null);
 }
 
 export function computeNationalTake(input: NationalTakeInput): NationalTakeOutput {
   const expectedLength = input.masterN + 1;
 
   assertSeriesLength(input.grossRevenueUSD, expectedLength, 'grossRevenueUSD');
-
-  const byMetalRevenue = input.byMetalRevenueUSD ?? null;
-  if (byMetalRevenue) {
-    for (const [metal, series] of Object.entries(byMetalRevenue)) {
+  if (input.byMetalRevenueUSD) {
+    for (const [metal, series] of Object.entries(input.byMetalRevenueUSD)) {
       assertSeriesLength(series, expectedLength, `byMetalRevenueUSD[${metal}]`);
     }
   }
@@ -40,61 +41,42 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
   if (input.phase1.byproductCreditsUSD) {
     assertSeriesLength(input.phase1.byproductCreditsUSD, expectedLength, 'phase1.byproductCreditsUSD');
   }
+  if (input.phase1.royaltiesUSD) {
+    assertSeriesLength(input.phase1.royaltiesUSD, expectedLength, 'phase1.royaltiesUSD');
+  }
 
   const extraRoyaltiesUSD = input.extraRoyaltiesUSD ?? zeroSeries(expectedLength);
   assertSeriesLength(extraRoyaltiesUSD, expectedLength, 'extraRoyaltiesUSD');
 
-  const revenueItems = input.items.filter((item) => item.base.baseType === 'REVENUE');
-  const profitItems = input.items.filter((item) => item.base.baseType === 'OPERATING_PROFIT');
-
-  const revenueTakeOut = computeProjectTakeMVI({
+  const takeOut = computeTakeEngine({
     masterN: input.masterN,
     grossRevenueUSD: input.grossRevenueUSD,
-    byMetalRevenueUSD: byMetalRevenue,
-    items: revenueItems,
+    revenueByMetalUSD: input.byMetalRevenueUSD ?? undefined,
+    takeItems: input.items,
   });
 
-  const zeros = zeroSeries(expectedLength);
-  const phase1Pre = computeProjectPhase1({
-    ...input.phase1,
-    masterN: input.masterN,
-    revenueUSD: revenueTakeOut.netRevenueAfterTakeUSD,
-    royaltiesUSD: zeros,
-  });
-
-  const profitTakeOut = computeProjectTakeMVI({
-    masterN: input.masterN,
-    grossRevenueUSD: input.grossRevenueUSD,
-    byMetalRevenueUSD: byMetalRevenue,
-    operatingProfitUSD: phase1Pre.ebitUSD,
-    items: profitItems,
-  });
-
-  const totalTakeUSD = new Array<number | null>(expectedLength).fill(0);
-  for (let t = 0; t < expectedLength; t += 1) {
-    totalTakeUSD[t] = strictAdd(revenueTakeOut.totalTakeUSD[t], profitTakeOut.totalTakeUSD[t]);
-  }
+  const royaltiesEffective = anyNonNull(input.phase1.royaltiesUSD)
+    ? (input.phase1.royaltiesUSD as Array<number | null>)
+    : takeOut.totalTakeUSD;
 
   const totalRoyaltiesUSD = new Array<number | null>(expectedLength).fill(0);
   for (let t = 0; t < expectedLength; t += 1) {
-    totalRoyaltiesUSD[t] = strictAdd(totalTakeUSD[t], extraRoyaltiesUSD[t]);
+    const left = royaltiesEffective[t];
+    const right = extraRoyaltiesUSD[t];
+    totalRoyaltiesUSD[t] = isFiniteNumber(left) && isFiniteNumber(right) ? left + right : null;
   }
 
-  const finalPhase1 = computeProjectPhase1({
+  const phase1Out = computeProjectPhase1({
     ...input.phase1,
     masterN: input.masterN,
-    revenueUSD: revenueTakeOut.netRevenueAfterTakeUSD,
+    revenueUSD: input.grossRevenueUSD,
     royaltiesUSD: totalRoyaltiesUSD,
   });
 
   return {
-    revenueTakeUSD: revenueTakeOut.totalTakeUSD,
-    profitTakeUSD: profitTakeOut.totalTakeUSD,
-    totalTakeUSD,
+    totalTakeUSD: takeOut.totalTakeUSD,
     totalRoyaltiesUSD,
-    netRevenueAfterRevenueTakeUSD: revenueTakeOut.netRevenueAfterTakeUSD,
-    phase1: finalPhase1,
-    revenueTakeByItemUSD: revenueTakeOut.takeByItemUSD,
-    profitTakeByItemUSD: profitTakeOut.takeByItemUSD,
+    phase1: phase1Out,
+    itemTakeUSDById: takeOut.itemTakeUSDById,
   };
 }

@@ -71,6 +71,8 @@ export function computeProjectEngineFullProductionV1(
     streams: streamsOut,
     revenue: revenueOut,
     nationalTake: nationalTakeOut,
+    totalTakeUSD: nationalTakeOut.totalTakeUSD,
+    itemTakeUSDById: nationalTakeOut.itemTakeUSDById,
     phase1: nationalTakeOut.phase1,
     phase2: phase2Out,
     aisc: aiscOut,

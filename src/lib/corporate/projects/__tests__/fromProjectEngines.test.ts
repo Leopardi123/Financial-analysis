@@ -52,11 +52,8 @@ function makeOutputStub(input: {
       byMetalRevenueUSD: {},
     },
     nationalTake: {
-      revenueTakeUSD: [],
-      profitTakeUSD: [],
       totalTakeUSD: [],
       totalRoyaltiesUSD: [],
-      netRevenueAfterRevenueTakeUSD: [],
       phase1: {
         sustainingCostUSD: input.sustainingCostUSD,
         ebitUSD: [],
@@ -67,9 +64,10 @@ function makeOutputStub(input: {
           ? { productionStartPeriod: input.phase1ProductionStartPeriod }
           : {}),
       },
-      revenueTakeByItemUSD: {},
-      profitTakeByItemUSD: {},
+      itemTakeUSDById: {},
     },
+    totalTakeUSD: [],
+    itemTakeUSDById: {},
     phase1: {
       sustainingCostUSD: input.sustainingCostUSD,
       ebitUSD: [],
