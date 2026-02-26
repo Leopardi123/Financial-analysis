@@ -1,7 +1,6 @@
 import { parseProjectJsonV1 } from '../parse.ts';
 import { getProjectJsonV1Template } from '../template.ts';
 import { resolveProjectPricesToEngineInput } from '../resolvePrices.ts';
-import type { PriceKey } from '../../../prices/keys.ts';
 
 function assert(condition: unknown, message: string): void {
   if (!condition) {
@@ -50,7 +49,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
   const parsed = parseProjectJsonV1(base);
 
-  const mockRows: Record<PriceKey, Array<{ date: string; close: number }>> = {
+  const mockRows: Record<string, Array<{ date: string; close: number }>> = {
     XAU_USD_TOZ: [
       { date: '2024-06-01', close: 10 },
       { date: '2024-12-30', close: 11 },
@@ -72,6 +71,38 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     USD_CAD: [],
   };
 
+
+  const resolveFromMockRows = async ({
+    price_key,
+    anchorDatesUtc,
+    scenario,
+  }: {
+    price_key: string;
+    anchorDatesUtc: string[];
+    scenario: { mode: 'spot' } | { mode: 'percentile'; lookbackYears: number; percentile: number } | { mode: 'fixed'; fixedByKey: Record<string, number> };
+  }) => {
+    const rows = [...(mockRows[price_key] ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+    if (scenario.mode === 'fixed') {
+      const fixed = scenario.fixedByKey[price_key];
+      return { values: anchorDatesUtc.map(() => (Number.isFinite(fixed) ? fixed : null)), warnings: [] };
+    }
+    const values = anchorDatesUtc.map((anchor) => {
+      if (scenario.mode === 'spot') {
+        const eligible = rows.filter((row) => row.date <= anchor);
+        return eligible.length ? eligible[eligible.length - 1].close : null;
+      }
+      const windowStart = new Date(`${anchor}T00:00:00Z`);
+      windowStart.setUTCFullYear(windowStart.getUTCFullYear() - scenario.lookbackYears);
+      const start = windowStart.toISOString().slice(0, 10);
+      const valuesInWindow = rows
+        .filter((row) => row.date >= start && row.date <= anchor)
+        .map((row) => row.close)
+        .sort((a, b) => a - b);
+      if (valuesInWindow.length === 0) return null;
+      return valuesInWindow[Math.floor((scenario.percentile / 100) * (valuesInWindow.length - 1))];
+    });
+    return { values, warnings: [] };
+  };
   const resolved = await resolveProjectPricesToEngineInput(
     {
       parsed,
@@ -79,7 +110,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       to: '2027-01-01',
     },
     {
-      readHistoryRows: async ({ priceKey }) => ({ rows: mockRows[priceKey], missing: false }),
+      resolvePriceSeriesFn: resolveFromMockRows,
     },
   );
 
@@ -117,9 +148,9 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   const missingResolved = await resolveProjectPricesToEngineInput(
     { parsed: missingParsed, from: '2022-01-01', to: '2025-01-01' },
     {
-      readHistoryRows: async ({ priceKey }) => ({
-        rows: priceKey === 'XAU_USD_TOZ' ? [{ date: '2024-06-01', close: 10 }] : [],
-        missing: false,
+      resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc }) => ({
+        values: anchorDatesUtc.map((date) => (price_key === 'XAU_USD_TOZ' && date >= '2024-06-01' ? 10 : null)),
+        warnings: [],
       }),
     },
   );
@@ -149,9 +180,9 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   const fallbackResolved = await resolveProjectPricesToEngineInput(
     { parsed: fallbackParsed, from: '2024-01-01', to: '2025-01-01' },
     {
-      readHistoryRows: async ({ priceKey }) => ({
-        rows: priceKey === 'XAU_USD_TOZ' ? [{ date: '2024-01-01', close: 1 }] : [],
-        missing: false,
+      resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc }) => ({
+        values: anchorDatesUtc.map(() => (price_key === 'XAU_USD_TOZ' ? 1 : null)),
+        warnings: [],
       }),
     },
   );
@@ -173,7 +204,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       to: '2025-01-01',
     },
     {
-      readHistoryRows: async ({ priceKey }) => ({ rows: mockRows[priceKey], missing: false }),
+      resolvePriceSeriesFn: resolveFromMockRows,
     },
   );
 
@@ -189,24 +220,12 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       scenario: { mode: 'percentile', lookbackYears: 10, percentile: 50 },
     },
     {
-      readHistoryRows: async ({ priceKey }) => ({
-        rows: priceKey === 'XAU_USD_TOZ'
-          ? [
-              { date: '2018-01-01', close: 1100 },
-              { date: '2019-01-01', close: 1200 },
-              { date: '2020-01-01', close: 1300 },
-              { date: '2021-01-01', close: 1400 },
-              { date: '2022-01-01', close: 1500 },
-            ]
-          : [
-              { date: '2018-01-01', close: 2 },
-              { date: '2019-01-01', close: 3 },
-              { date: '2020-01-01', close: 4 },
-              { date: '2021-01-01', close: 5 },
-              { date: '2022-01-01', close: 6 },
-            ],
-        missing: false,
-      }),
+      resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc }) => {
+        const source = price_key === 'XAU_USD_TOZ'
+          ? [1100, 1200, 1300, 1400, 1500]
+          : [2, 3, 4, 5, 6];
+        return { values: anchorDatesUtc.map(() => source[2]), warnings: [] };
+      },
     },
   );
 
@@ -220,7 +239,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       scenario: { mode: 'percentile', lookbackYears: 10, percentile: 50 },
     },
     {
-      readHistoryRows: async () => ({ rows: [], missing: false }),
+      resolvePriceSeriesFn: resolveFromMockRows,
     },
   );
 
@@ -233,7 +252,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       scenario: { mode: 'fixed', fixedPriceByKey: { XAU_USD_TOZ: 2400, CU_USD_LB: 4 } },
     },
     {
-      readHistoryRows: async () => ({ rows: [], missing: false }),
+      resolvePriceSeriesFn: resolveFromMockRows,
     },
   );
 
@@ -246,7 +265,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       scenario: { mode: 'fixed', fixedPriceByKey: {} },
     },
     {
-      readHistoryRows: async () => ({ rows: [], missing: false }),
+      resolvePriceSeriesFn: async ({ anchorDatesUtc }) => ({ values: anchorDatesUtc.map(() => null), warnings: [] }),
     },
   );
 
