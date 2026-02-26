@@ -4,13 +4,6 @@ import { readHistoryRowsInRange } from "../src/lib/prices/db/readHistory.js";
 import { refreshHistoryRangeToMonthlyBlobs } from "../src/lib/prices/refreshHistory.js";
 import { PRICE_TABLES } from "../src/lib/prices/db/schema.js";
 import { PRICE_KEY_SET, type PriceKey } from "../src/lib/prices/keys.js";
-import { validateSnapshotRequest } from "../src/lib/api/validateSnapshotRequest.js";
-import { parseProjectJsonV1 } from "../src/lib/project/jsonv1/parse.js";
-import { computeProjectEngineFullProductionV1 } from "../src/lib/project/engineFullProductionV1.js";
-import { resolveProjectPricesToEngineInput } from "../src/lib/project/jsonv1/resolvePrices.js";
-import { aggregateProjectsCorporateV1 } from "../src/lib/corporate/aggregateProjects.js";
-import { computeCorporateFinancing } from "../src/lib/corporate/financing/compute.js";
-import { buildCorporateSnapshot } from "../src/lib/corporate/snapshot/buildCorporateSnapshot.js";
 
 type Handler = (req: any, res: any) => Promise<void> | void;
 
@@ -35,6 +28,16 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
   };
 
   try {
+    const [{ validateSnapshotRequest }, { parseProjectJsonV1 }, { computeProjectEngineFullProductionV1 }, { resolveProjectPricesToEngineInput }, { aggregateProjectsCorporateV1 }, { computeCorporateFinancing }, { buildCorporateSnapshot }] = await Promise.all([
+      import("../src/lib/api/validateSnapshotRequest.js"),
+      import("../src/lib/project/jsonv1/parse.js"),
+      import("../src/lib/project/engineFullProductionV1.js"),
+      import("../src/lib/project/jsonv1/resolvePrices.js"),
+      import("../src/lib/corporate/aggregateProjects.js"),
+      import("../src/lib/corporate/financing/compute.js"),
+      import("../src/lib/corporate/snapshot/buildCorporateSnapshot.js"),
+    ]);
+
     const body = parseRequestBody(req);
     const validation = validateSnapshotRequest(body);
     diagnostics.warnings.push(...validation.warnings);
