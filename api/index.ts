@@ -4,6 +4,13 @@ import { readHistoryRowsInRange } from "../src/lib/prices/db/readHistory.js";
 import { refreshHistoryRangeToMonthlyBlobs } from "../src/lib/prices/refreshHistory.js";
 import { PRICE_TABLES } from "../src/lib/prices/db/schema.js";
 import { PRICE_KEY_SET, type PriceKey } from "../src/lib/prices/keys.js";
+import { validateSnapshotRequest } from "../src/lib/api/validateSnapshotRequest.js";
+import { aggregateProjectsCorporateV1 } from "../src/lib/corporate/aggregateProjects.js";
+import { computeCorporateFinancing } from "../src/lib/corporate/financing/compute.js";
+import { buildCorporateSnapshot } from "../src/lib/corporate/snapshot/buildCorporateSnapshot.js";
+import { parseProjectJsonV1 } from "../src/lib/project/jsonv1/parse.js";
+import { resolveProjectPricesToEngineInput } from "../src/lib/project/jsonv1/resolvePrices.js";
+import { computeProjectEngineFullProductionV1 } from "../src/lib/project/engineFullProductionV1.js";
 
 type Handler = (req: any, res: any) => Promise<void> | void;
 
@@ -161,6 +168,146 @@ export default async function handler(req: any, res: any) {
 
       res.status(200).json({ asof_utc: new Date().toISOString(), data });
       return;
+    }
+
+    if (req.method === "POST" && segments[0] === "snapshot" && segments[1] === "corporate") {
+      matched = "snapshot/corporate";
+      setDebugHeaders();
+
+      const refresh = String(req.query?.refresh ?? "") === "1";
+      const warnings: string[] = [];
+      const errors: string[] = [];
+
+      const validation = validateSnapshotRequest(req.body);
+      if (!validation.ok) {
+        res.status(400).json({
+          ok: false,
+          diagnostics: {
+            warnings: validation.warnings,
+            errors: validation.errors,
+            meta: {
+              refresh,
+              projectCount: Array.isArray(req.body?.projects) ? req.body.projects.length : 0,
+            },
+          },
+        });
+        return;
+      }
+
+      warnings.push(...validation.warnings);
+
+      const input = validation.value;
+
+      try {
+        const keys = new Set<string>();
+        for (const project of input.projects) {
+          const parsed = parseProjectJsonV1(project.rawJson);
+          keys.add(parsed.engineInputWithoutPrices.auPriceKey);
+          for (const key of Object.values(parsed.engineInputWithoutPrices.priceKeyByMetal)) {
+            keys.add(key);
+          }
+        }
+
+        const maxRefreshKeys = 10;
+        if (refresh && keys.size > maxRefreshKeys) {
+          res.status(400).json({
+            ok: false,
+            diagnostics: {
+              warnings,
+              errors: [`refresh=1 exceeded max price keys per request (${maxRefreshKeys})`],
+              meta: {
+                refresh,
+                projectCount: input.projects.length,
+              },
+            },
+          });
+          return;
+        }
+        const aggregation = await aggregateProjectsCorporateV1(
+          {
+            discountRate: input.discountRate,
+            projects: input.projects,
+          },
+          {
+            projectToSeries: async ({ projectId, rawJson }) => {
+              const parsed = parseProjectJsonV1(rawJson);
+              const periodEndDatesUtc = parsed.engineInputWithoutPrices.periodEndDatesUtc;
+              if (!periodEndDatesUtc) {
+                throw new Error(`Project ${projectId} is missing time.periodEndDatesUtc; required for corporate aggregation v1.`);
+              }
+
+              const resolved = await resolveProjectPricesToEngineInput(
+                {
+                  parsed,
+                  from: periodEndDatesUtc[0],
+                  to: periodEndDatesUtc[periodEndDatesUtc.length - 1],
+                },
+                {
+                  allowRefresh: refresh,
+                  projectId,
+                  onWarning: (warning) => warnings.push(warning),
+                },
+              );
+
+              const out = computeProjectEngineFullProductionV1(resolved);
+              return {
+                periodEndDatesUtc,
+                capexUSD: out.capexUSD_used,
+                fcffUSD: out.phase1.fcffUSD,
+                sustainingCostUSD: out.phase1.sustainingCostUSD,
+                payableAuEqOz: out.aisc.payableAuEqOz,
+              };
+            },
+          },
+        );
+
+        warnings.push(...aggregation.diagnostics.notes);
+
+        const financing = computeCorporateFinancing({
+          NPV_today_USD: aggregation.NPV_today_USD,
+          fx_USD_to_TargetCurrency: input.fx_USD_to_TargetCurrency,
+          cash_t0_TargetCurrency: input.balanceSheet.cash_t0_TargetCurrency ?? null,
+          debt_t0_TargetCurrency: input.balanceSheet.debt_t0_TargetCurrency ?? null,
+          shares_current: input.market.shares_current,
+          price_current_TargetCurrency: input.market.price_current_TargetCurrency,
+          financingPlan: input.financingPlan,
+          buildFundingNeed_USD: input.buildFundingNeed_USD ?? null,
+        });
+
+        const snapshot = buildCorporateSnapshot({
+          targetCurrency: input.targetCurrency,
+          aggregation,
+          financing,
+          market: input.market,
+        });
+
+        res.status(200).json({
+          ok: true,
+          snapshot,
+          diagnostics: {
+            warnings,
+            errors,
+            meta: {
+              refresh,
+              projectCount: input.projects.length,
+            },
+          },
+        });
+        return;
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          diagnostics: {
+            warnings,
+            errors: [...errors, (error as Error).message],
+            meta: {
+              refresh,
+              projectCount: input.projects.length,
+            },
+          },
+        });
+        return;
+      }
     }
 
     if (req.method === "GET" && segments[0] === "prices" && segments[1] === "history") {

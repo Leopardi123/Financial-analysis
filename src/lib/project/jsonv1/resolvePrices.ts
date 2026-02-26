@@ -1,4 +1,5 @@
 import { readHistoryRowsInRange, type HistoryRow } from '../../prices/db/readHistory.ts';
+import { refreshHistoryRangeToMonthlyBlobs } from '../../prices/refreshHistory.ts';
 import { convertMass, convertPreciousQuantity } from '../../prices/units.ts';
 import { getPriceKeyDefinition, type PriceKey } from '../../prices/keys.ts';
 import type { ProjectEngineFullProductionV1Input } from '../types.ts';
@@ -79,10 +80,68 @@ export async function resolveProjectPricesToEngineInput(
   },
   deps: {
     readHistoryRows?: (params: { priceKey: PriceKey; from: string; to: string }) => Promise<{ rows: HistoryRow[]; missing: boolean }>;
+    refreshHistoryRows?: (params: { priceKey: PriceKey; from: string; to: string }) => Promise<{ monthsTouched: number }>;
+    allowRefresh?: boolean;
+    onWarning?: (warning: string) => void;
+    projectId?: string;
   } = {},
 ): Promise<ProjectEngineFullProductionV1Input> {
   const { parsed, from, to } = args;
   const readHistoryRows = deps.readHistoryRows ?? ((params) => readHistoryRowsInRange(params));
+  const refreshHistoryRows = deps.refreshHistoryRows ?? ((params) => refreshHistoryRangeToMonthlyBlobs(params));
+  const allowRefresh = deps.allowRefresh === true;
+
+  const emitWarning = (warning: string) => {
+    if (deps.onWarning) {
+      deps.onWarning(warning);
+    }
+  };
+
+  const emitMissingTargetWarnings = (args: {
+    projectId: string;
+    metal: string;
+    priceKey: string;
+    targets: string[];
+    series: Array<number | null>;
+  }) => {
+    for (let i = 0; i < args.targets.length; i += 1) {
+      if (args.series[i] !== null) {
+        continue;
+      }
+      emitWarning(
+        `No price coverage for project ${args.projectId}, metal ${args.metal}, priceKey ${args.priceKey}, targetDate ${args.targets[i]} (no close <= target date).`,
+      );
+    }
+  };
+
+  const readHistoryWithOptionalRefresh = async (params: { priceKey: PriceKey; metal: string }): Promise<HistoryRow[]> => {
+    let history = await readHistoryRows({
+      priceKey: params.priceKey,
+      from,
+      to,
+    });
+
+    if (history.missing && allowRefresh) {
+      await refreshHistoryRows({
+        priceKey: params.priceKey,
+        from,
+        to,
+      });
+      history = await readHistoryRows({
+        priceKey: params.priceKey,
+        from,
+        to,
+      });
+    }
+
+    if (history.missing && !allowRefresh) {
+      emitWarning(
+        `Missing price history months for project ${deps.projectId ?? 'unknown'}, metal ${params.metal}, priceKey ${params.priceKey} in range ${from}..${to}.`,
+      );
+    }
+
+    return history.rows;
+  };
 
   const masterN = parsed.engineInputWithoutPrices.masterN;
   const len = masterN + 1;
@@ -112,20 +171,31 @@ export async function resolveProjectPricesToEngineInput(
       metal,
     });
 
-    const history = await readHistoryRows({
-      priceKey: priceKey as PriceKey,
-      from,
-      to,
+    const historyRows = await readHistoryWithOptionalRefresh({ priceKey: priceKey as PriceKey, metal });
+    const spotSeries = resolveSeriesAtTargets(historyRows, targets);
+    spotPriceUSDByMetal[metal] = spotSeries;
+    emitMissingTargetWarnings({
+      projectId: deps.projectId ?? 'unknown',
+      metal,
+      priceKey,
+      targets,
+      series: spotSeries,
     });
-    spotPriceUSDByMetal[metal] = resolveSeriesAtTargets(history.rows, targets);
   }
 
-  const auHistory = await readHistoryRows({
-    priceKey: parsed.engineInputWithoutPrices.auPriceKey as PriceKey,
-    from,
-    to,
+  const auPriceKey = parsed.engineInputWithoutPrices.auPriceKey;
+  const auHistoryRows = await readHistoryWithOptionalRefresh({
+    priceKey: auPriceKey as PriceKey,
+    metal: 'AuEq',
   });
-  let auPriceUSDPerOz = resolveSeriesAtTargets(auHistory.rows, targets);
+  let auPriceUSDPerOz = resolveSeriesAtTargets(auHistoryRows, targets);
+  emitMissingTargetWarnings({
+    projectId: deps.projectId ?? 'unknown',
+    metal: 'AuEq',
+    priceKey: auPriceKey,
+    targets,
+    series: auPriceUSDPerOz,
+  });
 
   if (parsed.priceOverrides.spotPriceUSDByMetal) {
     for (const [metal, series] of Object.entries(parsed.priceOverrides.spotPriceUSDByMetal)) {
