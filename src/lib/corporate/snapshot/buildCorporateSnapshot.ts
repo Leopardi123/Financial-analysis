@@ -1,6 +1,7 @@
 import type { CorporateFinancingOutput } from '../financing/types.ts';
 import type { CorporateAggregationOutput } from '../types.ts';
 import type { CorporateSnapshot, MarketValueInput, MarketValueOutput } from './types.ts';
+import { makeNullLista2CfDcfMetrics, type Lista2CfDcfMetrics } from '../../snapshot/lista2CfDcf.ts';
 
 function toFiniteOrNull(value: number | null | undefined): number | null {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -88,11 +89,14 @@ export function buildCorporateSnapshot(args: {
   aggregation: CorporateAggregationOutput;
   financing: CorporateFinancingOutput;
   market: MarketValueInput;
+  lista2CfDcf?: Lista2CfDcfMetrics;
 }): CorporateSnapshot {
   const marketValue = computeMarketValue({
     market: args.market,
     financing: args.financing,
   });
+
+  const lista2 = args.lista2CfDcf ?? makeNullLista2CfDcfMetrics();
 
   return {
     targetCurrency: args.targetCurrency,
@@ -107,5 +111,6 @@ export function buildCorporateSnapshot(args: {
     P_over_NAV: marketValue.P_over_NAV,
     NPV_today_TargetCurrency: toFiniteOrNull(args.financing.NPV_today_TargetCurrency),
     NAV_today_TargetCurrency: toFiniteOrNull(args.financing.NAV_today_TargetCurrency),
+    ...lista2,
   };
 }
