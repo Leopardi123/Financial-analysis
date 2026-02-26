@@ -1,6 +1,6 @@
-import { readHistoryRowsInRange, type HistoryRow } from '../db/readHistory.ts';
-import { refreshHistoryRangeToMonthlyBlobs } from '../refreshHistory.ts';
-import { fxKeyUSDTo } from './keys.ts';
+import { readHistoryRowsInRange, type HistoryRow } from '../db/readHistory.js';
+import { refreshHistoryRangeToMonthlyBlobs } from '../refreshHistory.js';
+import { fxKeyUSDTo } from './keys.js';
 
 export type FxScenario =
   | { mode: 'spot' }
