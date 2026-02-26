@@ -21,6 +21,7 @@ export type CorporateProjectsOutput = {
 
   cfLOM_USD_total: number | null;
   npvToday_USD_total: number | null;
+  dcfProdStart_present_USD_total: number | null;
 
   payableAuEqOz_total_included: number | null;
   sustainingCostUSD_total_included: number | null;

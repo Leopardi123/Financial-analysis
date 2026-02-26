@@ -77,6 +77,21 @@ function makeBaseInput(): CorporatePipelineInput {
     'happy path NAV/share should use financing NAV and post-financing shares',
   );
 
+  const expectedDcfProdStartPresentUsd = (10 + 20 / 1.1) + (1 + 2 / 1.1);
+  const expectedDcfProdStartPresentTarget = expectedDcfProdStartPresentUsd * 10;
+  assertApproxEqual(
+    happy.projects.dcfProdStart_present_USD_total as number,
+    expectedDcfProdStartPresentUsd,
+    1e-12,
+    'happy path should compute DCF prod-start present total at projects layer',
+  );
+  assertApproxEqual(
+    happy.perShare.dcfProdStart_present_perShare_TargetCurrency as number,
+    expectedDcfProdStartPresentTarget / (happy.equityFinancing.shares_post_financing as number),
+    1e-12,
+    'happy path should compute DCF prod-start present/share from target-currency aggregate and post-financing shares',
+  );
+
   const nullPropagationInput = makeBaseInput();
   nullPropagationInput.projects.projects[1].fcffUSD[1] = null;
 
@@ -116,6 +131,11 @@ function makeBaseInput(): CorporatePipelineInput {
     nullPropagation.perShare.cfLOM_perShare_TargetCurrency,
     null,
     'per-share should propagate null CF LOM/share when projects cfLOM is null',
+  );
+  assertEqual(
+    nullPropagation.perShare.dcfProdStart_present_perShare_TargetCurrency,
+    null,
+    'per-share should propagate null DCF prod-start present/share when project DCF aggregate is null',
   );
 
   console.log('Corporate pipeline engine tests passed');
