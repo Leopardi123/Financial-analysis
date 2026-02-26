@@ -15,6 +15,7 @@ const TABLES = {
   cycleScores: "cycle_scores",
   assumptionsLog: "assumptions_log",
   companySectorMap: "company_sector_map",
+  companyProjects: "company_projects",
 };
 
 export async function ensureSchema() {
@@ -159,6 +160,20 @@ export async function ensureSchema() {
     )`
   );
 
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.companyProjects} (
+      id TEXT PRIMARY KEY,
+      symbol TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      project_name TEXT,
+      json_version TEXT NOT NULL,
+      raw_json TEXT NOT NULL,
+      created_at_utc TEXT NOT NULL,
+      updated_at_utc TEXT NOT NULL,
+      UNIQUE(symbol, project_id)
+    )`
+  );
+
   await batch([
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_companies_name
@@ -219,6 +234,15 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_company_sector_map_company
             ON ${TABLES.companySectorMap} (company_id)`,
+    },
+
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_company_projects_symbol
+            ON ${TABLES.companyProjects} (symbol)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_company_projects_symbol_project
+            ON ${TABLES.companyProjects} (symbol, project_id)`,
     },
   ]);
 
