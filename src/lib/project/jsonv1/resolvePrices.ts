@@ -1,9 +1,9 @@
-import { convertMass, convertPreciousQuantity } from '../../prices/units.ts';
-import { getPriceKeyDefinition } from '../../prices/keys.ts';
-import type { ProjectEngineFullProductionV1Input } from '../types.ts';
-import type { QtyUnit } from './schema.ts';
-import type { ParsedProjectJsonV1 } from './parse.ts';
-import { resolvePriceSeries, type PriceScenario as CorePriceScenario } from '../../prices/resolve.ts';
+import { convertMass, convertPreciousQuantity } from '../../prices/units.js';
+import { getPriceKeyDefinition } from '../../prices/keys.js';
+import type { ProjectEngineFullProductionV1Input } from '../types.js';
+import type { QtyUnit } from './schema.js';
+import type { ParsedProjectJsonV1 } from './parse.js';
+import { resolvePriceSeries, type PriceScenario as CorePriceScenario } from '../../prices/resolve.js';
 
 export type PriceScenario =
   | { mode: 'spot' }

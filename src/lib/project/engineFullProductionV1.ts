@@ -1,12 +1,12 @@
-import { computeProjectAisc } from './aisc/engine.ts';
-import { computeNationalTake } from './nationalTake/engine.ts';
-import { computeProjectPhase2 } from './phase2.ts';
-import { computeProjectRevenue } from './revenue/engine.ts';
-import { applyStreamsByMetal } from './streams/applyByMetal.ts';
+import { computeProjectAisc } from './aisc/engine.js';
+import { computeNationalTake } from './nationalTake/engine.js';
+import { computeProjectPhase2 } from './phase2.js';
+import { computeProjectRevenue } from './revenue/engine.js';
+import { applyStreamsByMetal } from './streams/applyByMetal.js';
 import type {
   ProjectEngineFullProductionV1Input,
   ProjectEngineFullProductionV1Output,
-} from './types.ts';
+} from './types.js';
 
 function zeroSeries(length: number): number[] {
   return new Array(length).fill(0);

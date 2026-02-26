@@ -1,5 +1,5 @@
-import { computeStreamsByMetal } from './compute.ts';
-import type { StreamMVIConfig } from './types.ts';
+import { computeStreamsByMetal } from './compute.js';
+import type { StreamMVIConfig } from './types.js';
 
 export type StreamsApplyByMetalInput = {
   masterN: number;

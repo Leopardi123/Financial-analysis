@@ -1,12 +1,12 @@
-import { computeProjectEngineFullProductionV1 } from '../project/engineFullProductionV1.ts';
-import { parseProjectJsonV1 } from '../project/jsonv1/parse.ts';
-import { resolveProjectPricesToEngineInput } from '../project/jsonv1/resolvePrices.ts';
+import { computeProjectEngineFullProductionV1 } from '../project/engineFullProductionV1.js';
+import { parseProjectJsonV1 } from '../project/jsonv1/parse.js';
+import { resolveProjectPricesToEngineInput } from '../project/jsonv1/resolvePrices.js';
 import type {
   CorporateAggregationDeps,
   CorporateAggregationInput,
   CorporateAggregationOutput,
   CorporateProjectEngineSnapshot,
-} from './types.ts';
+} from './types.js';
 
 function validateBaseInput(input: CorporateAggregationInput): void {
   if (!(input.discountRate > 0 && input.discountRate <= 0.25)) {

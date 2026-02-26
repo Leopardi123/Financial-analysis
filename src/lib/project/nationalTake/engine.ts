@@ -1,6 +1,6 @@
-import { computeProjectPhase1 } from '../phase1.ts';
-import { computeTakeEngine } from '../take/compute.ts';
-import type { NationalTakeInput, NationalTakeOutput } from './types.ts';
+import { computeProjectPhase1 } from '../phase1.js';
+import { computeTakeEngine } from '../take/compute.js';
+import type { NationalTakeInput, NationalTakeOutput } from './types.js';
 
 function assertSeriesLength(series: unknown[], expectedLength: number, fieldName: string): void {
   if (series.length !== expectedLength) {

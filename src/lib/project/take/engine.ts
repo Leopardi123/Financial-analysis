@@ -1,5 +1,5 @@
-import { computeTakeEngine } from './compute.ts';
-import type { ProjectTakeMVIInput, ProjectTakeMVIOutput } from './types.ts';
+import { computeTakeEngine } from './compute.js';
+import type { ProjectTakeMVIInput, ProjectTakeMVIOutput } from './types.js';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);

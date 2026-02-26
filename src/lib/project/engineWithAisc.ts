@@ -1,6 +1,6 @@
-import { computeProjectAisc } from './aisc/engine.ts';
-import { computeProjectEngine } from './engine.ts';
-import type { ProjectEngineWithAiscInput, ProjectEngineWithAiscOutput } from './types.ts';
+import { computeProjectAisc } from './aisc/engine.js';
+import { computeProjectEngine } from './engine.js';
+import type { ProjectEngineWithAiscInput, ProjectEngineWithAiscOutput } from './types.js';
 
 function assertSeriesLength(series: (number | null)[], masterN: number, name: string): void {
   if (series.length !== masterN + 1) {

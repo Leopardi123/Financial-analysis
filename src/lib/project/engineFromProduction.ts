@@ -1,13 +1,13 @@
-import { computeProjectAisc } from './aisc/engine.ts';
-import { computeProjectPhase1 } from './phase1.ts';
-import { computeProjectPhase2 } from './phase2.ts';
-import { computeProjectRevenue } from './revenue/engine.ts';
-import { computeProjectTakeMVI } from './take/engine.ts';
+import { computeProjectAisc } from './aisc/engine.js';
+import { computeProjectPhase1 } from './phase1.js';
+import { computeProjectPhase2 } from './phase2.js';
+import { computeProjectRevenue } from './revenue/engine.js';
+import { computeProjectTakeMVI } from './take/engine.js';
 import type {
   ProjectEngineFromProductionInput,
   ProjectEngineFromProductionOutput,
   ProjectPhase1Input,
-} from './types.ts';
+} from './types.js';
 
 export function computeProjectEngineFromProduction(
   input: ProjectEngineFromProductionInput,

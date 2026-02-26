@@ -1,5 +1,5 @@
-import type { StreamMVIConfig } from './types.ts';
-import { applyStreamMVI } from './engine.ts';
+import type { StreamMVIConfig } from './types.js';
+import { applyStreamMVI } from './engine.js';
 
 export type StreamComputeInputs = {
   masterN: number;
