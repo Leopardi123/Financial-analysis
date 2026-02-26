@@ -9,6 +9,60 @@ import { formatNumber, isDevAccessEnabled, makeHarnessProjectJson } from './shar
 
 const defaultRawJson = JSON.stringify(makeHarnessProjectJson(), null, 2);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeNullableSeriesLength(value: unknown, len: number): Array<unknown> | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  if (value.length === len) {
+    return value;
+  }
+
+  if (value.length > len) {
+    return value.slice(0, len);
+  }
+
+  return [...value, ...new Array(len - value.length).fill(null)];
+}
+
+function normalizeOperationsSeriesForSandbox(raw: unknown): unknown {
+  if (!isRecord(raw)) {
+    return raw;
+  }
+
+  const time = raw.time;
+  if (!isRecord(time) || !Number.isInteger(time.masterN) || (time.masterN as number) < 0) {
+    return raw;
+  }
+
+  const len = (time.masterN as number) + 1;
+  const operations = raw.operations;
+  if (!isRecord(operations)) {
+    return raw;
+  }
+
+  const nextOperations: Record<string, unknown> = { ...operations };
+
+  const oreMilled = normalizeNullableSeriesLength(operations.oreMilledTonnes, len);
+  if (oreMilled !== null) {
+    nextOperations.oreMilledTonnes = oreMilled;
+  }
+
+  const oreMined = normalizeNullableSeriesLength(operations.oreMinedTonnes, len);
+  if (oreMined !== null) {
+    nextOperations.oreMinedTonnes = oreMined;
+  }
+
+  return {
+    ...raw,
+    operations: nextOperations,
+  };
+}
+
 export default function EngineSandboxPage() {
   const [rawJson, setRawJson] = useState(defaultRawJson);
   const [validate, setValidate] = useState(true);
@@ -43,7 +97,8 @@ export default function EngineSandboxPage() {
 
     try {
       const decoded = JSON.parse(rawJson) as unknown;
-      const parsed = parseProjectJsonV1WithContext(decoded);
+      const normalized = normalizeOperationsSeriesForSandbox(decoded);
+      const parsed = parseProjectJsonV1WithContext(normalized);
       setParseMessage('ok');
 
       const pricesByScenario = buildPriceScenarioSetFromSpot(parsed.engineInput.spotPriceUSDByMetal, {

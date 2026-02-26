@@ -3,6 +3,8 @@ import type { ProjectJsonV1 } from '../../lib/project/jsonv1/schema.ts';
 
 export function makeHarnessProjectJson(): ProjectJsonV1 {
   const template = getProjectJsonV1Template();
+  const masterN = 2;
+  const len = masterN + 1;
 
   return {
     ...template,
@@ -13,7 +15,7 @@ export function makeHarnessProjectJson(): ProjectJsonV1 {
       notes: 'Deterministic sample for dev harness',
     },
     time: {
-      masterN: 2,
+      masterN,
       productionStartPeriod: 1,
     },
     series: {
@@ -34,6 +36,15 @@ export function makeHarnessProjectJson(): ProjectJsonV1 {
         Au: [2000, 2000, 2000],
       },
       auPriceUSDPerOz: [2000, 2000, 2000],
+    },
+    operations: {
+      capacity: {
+        throughputUnit: 'tpd',
+        nameplateThroughput: 10000,
+        utilizationPct: null,
+      },
+      oreMilledTonnes: new Array(len).fill(null),
+      oreMinedTonnes: new Array(len).fill(null),
     },
     streamsByMetal: null,
     takeItems: [],
