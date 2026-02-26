@@ -1,5 +1,5 @@
-import type { PriceKey } from "./keys.ts";
-import { fetchQuote } from "./providers/fmp.ts";
+import type { PriceKey } from "./keys.js";
+import { fetchQuote } from "./providers/fmp.js";
 
 export interface LatestCacheEntry {
   price: number;

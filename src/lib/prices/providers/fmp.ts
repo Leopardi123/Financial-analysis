@@ -1,4 +1,4 @@
-import { fetchStableJson } from "../../../../api/_fmp.ts";
+import { fetchStableJson } from "../../../../api/_fmp.js";
 
 export interface FmpQuoteResult {
   price: number;

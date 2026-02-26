@@ -1,6 +1,6 @@
-import { mergeMonthlyPayload, encodeMonthlyPayload, decodeMonthlyPayload, type MonthlyPricePayload } from "./historyBlob.ts";
-import { fetchHistoricalEodFull } from "./providers/fmp.ts";
-import type { PriceKey } from "./keys.ts";
+import { mergeMonthlyPayload, encodeMonthlyPayload, decodeMonthlyPayload, type MonthlyPricePayload } from "./historyBlob.js";
+import { fetchHistoricalEodFull } from "./providers/fmp.js";
+import type { PriceKey } from "./keys.js";
 
 const PRICE_PROVIDER_MAP_TABLE = "price_provider_map";
 const PRICE_EOD_MONTHLY_TABLE = "price_eod_monthly";
@@ -29,12 +29,12 @@ function toPayload(rows: Array<{ date: string; close: number; open?: number; hig
 }
 
 async function defaultQuery(sql: string, params: Array<string | number | null> = []): Promise<any[]> {
-  const db = await import("../../../api/_db.ts");
+  const db = await import("../../../api/_db.js");
   return db.query(sql, params);
 }
 
 async function defaultExecute(sql: string, params: Array<string | number | null> = []): Promise<unknown> {
-  const db = await import("../../../api/_db.ts");
+  const db = await import("../../../api/_db.js");
   return db.execute(sql, params);
 }
 

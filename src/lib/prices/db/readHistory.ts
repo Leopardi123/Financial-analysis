@@ -1,5 +1,5 @@
-import { decodeMonthlyPayload } from "../historyBlob.ts";
-import type { PriceKey } from "../keys.ts";
+import { decodeMonthlyPayload } from "../historyBlob.js";
+import type { PriceKey } from "../keys.js";
 
 const PRICE_EOD_MONTHLY_TABLE = "price_eod_monthly";
 
@@ -30,7 +30,7 @@ function enumerateMonths(from: string, to: string): string[] {
 }
 
 async function defaultQuery(sql: string, params: Array<string | number | null> = []): Promise<any[]> {
-  const db = await import("../../../../api/_db.ts");
+  const db = await import("../../../../api/_db.js");
   return db.query(sql, params);
 }
 
