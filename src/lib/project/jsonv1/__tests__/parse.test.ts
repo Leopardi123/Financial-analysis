@@ -1,4 +1,4 @@
-import { parseProjectJsonV1, parseProjectJsonV1WithContext } from '../parse.ts';
+import { parseProjectJsonV1 } from '../parse.ts';
 import { getProjectJsonV1Template } from '../template.ts';
 
 function assert(condition: unknown, message: string): void {
@@ -28,19 +28,16 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
 (function runParseProjectJsonV1Tests() {
   const happy = getProjectJsonV1Template();
   happy.metals.payableQtyByMetal.Au[2] = 100;
-  happy.metals.spotPriceUSDByMetal.Au[2] = 10;
-  happy.metals.auPriceUSDPerOz[2] = 10;
   happy.series.operatingCostsUSD[2] = 400;
   happy.series.capexUSD[0] = -1000;
 
-  const engineInput = parseProjectJsonV1(happy);
-  assertEqual(engineInput.payableQtyByMetal.Au[2], 100, 'happy path payable qty');
-  assertEqual(engineInput.spotPriceUSDByMetal.Au[2], 10, 'happy path spot price');
-  assertEqual(engineInput.phase1.capexUSD[0], -1000, 'happy path capex passthrough');
-
-  const withContext = parseProjectJsonV1WithContext(happy);
-  assert(withContext.context.operations != null, 'happy path context operations should be present');
-  assertEqual(withContext.context.operations?.capacity.throughputUnit, 'tpd', 'happy path throughput unit');
+  const parsed = parseProjectJsonV1(happy);
+  assertEqual(parsed.engineInputWithoutPrices.payableQtyByMetal.Au[2], 100, 'happy path payable qty');
+  assertEqual(parsed.engineInputWithoutPrices.phase1.capexUSD[0], -1000, 'happy path capex passthrough');
+  assertEqual(parsed.engineInputWithoutPrices.priceKeyByMetal.Au, 'XAU_USD_TOZ', 'price key parsed');
+  assertEqual(parsed.engineInputWithoutPrices.payableQtyUnitByMetal.Au, 'toz', 'qty unit parsed');
+  assertEqual(parsed.engineInputWithoutPrices.auPriceKey, 'XAU_USD_TOZ', 'au price key parsed');
+  assert(parsed.context.operations != null, 'happy path context operations should be present');
 
   const wrongVersion = getProjectJsonV1Template();
   (wrongVersion as { version: string }).version = 'wrong';
@@ -54,17 +51,24 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   badSeriesLength.series.capexUSD = [1, 2, 3];
   assertThrows(() => parseProjectJsonV1(badSeriesLength), /series\.capexUSD/, 'throws on required series length mismatch');
 
-  const metalMismatch = getProjectJsonV1Template();
-  metalMismatch.metals.spotPriceUSDByMetal = {};
-  assertThrows(() => parseProjectJsonV1(metalMismatch), /spotPriceUSDByMetal\.Au/, 'throws on payable/spot metal mismatch');
+  const metalMismatchUnits = getProjectJsonV1Template();
+  metalMismatchUnits.metals.payableQtyUnitByMetal = { Au: 'toz' };
+  assertThrows(() => parseProjectJsonV1(metalMismatchUnits), /payableQtyUnitByMetal/, 'throws on payable/unit metal mismatch');
+
+  const metalMismatchPrices = getProjectJsonV1Template();
+  metalMismatchPrices.metals.priceKeyByMetal = { Au: 'XAU_USD_TOZ' };
+  assertThrows(() => parseProjectJsonV1(metalMismatchPrices), /priceKeyByMetal/, 'throws on payable/price-key mismatch');
 
   const negativeQty = getProjectJsonV1Template();
   negativeQty.metals.payableQtyByMetal.Au[1] = -1;
   assertThrows(() => parseProjectJsonV1(negativeQty), /payableQtyByMetal\.Au\[1\]/, 'throws on negative payable qty');
 
-  const negativePrice = getProjectJsonV1Template();
-  negativePrice.metals.spotPriceUSDByMetal.Au[1] = -1;
-  assertThrows(() => parseProjectJsonV1(negativePrice), /spotPriceUSDByMetal\.Au\[1\]/, 'throws on negative spot price');
+  const legacy = getProjectJsonV1Template();
+  legacy.metals.spotPriceUSDByMetal = { Au: new Array(legacy.time.masterN + 1).fill(10), Cu: new Array(legacy.time.masterN + 1).fill(4) };
+  legacy.metals.auPriceUSDPerOz = new Array(legacy.time.masterN + 1).fill(1999);
+  const parsedLegacy = parseProjectJsonV1(legacy);
+  assertEqual(parsedLegacy.priceOverrides.spotPriceUSDByMetal?.Au[0], 10, 'legacy spot price carried as override');
+  assertEqual(parsedLegacy.priceOverrides.auPriceUSDPerOz?.[0], 1999, 'legacy au price carried as override');
 
   const invalidOperations = getProjectJsonV1Template();
   if (invalidOperations.operations == null) {
@@ -72,7 +76,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   }
   invalidOperations.operations.capacity.nameplateThroughput = 0;
   assertThrows(
-    () => parseProjectJsonV1WithContext(invalidOperations),
+    () => parseProjectJsonV1(invalidOperations),
     /operations\.capacity\.nameplateThroughput/,
     'throws on invalid operations capacity',
   );

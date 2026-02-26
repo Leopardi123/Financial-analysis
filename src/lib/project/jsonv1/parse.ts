@@ -1,5 +1,5 @@
 import type { ProjectEngineFullProductionV1Input } from '../types.ts';
-import type { ProjectJsonV1 } from './schema.ts';
+import type { ProjectJsonV1, QtyUnit } from './schema.ts';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -53,6 +53,8 @@ function asRecordOfSeries(value: unknown, path: string, expectedLength: number):
   return mapped;
 }
 
+const QTY_UNIT_SET = new Set<QtyUnit>(['toz', 'g', 'kg', 'lb', 'tonne', 'short_ton', 'long_ton']);
+
 function parseOperations(raw: unknown, expectedLength: number): ProjectJsonV1['operations'] {
   if (raw == null) {
     return raw as null;
@@ -104,6 +106,14 @@ function parseOperations(raw: unknown, expectedLength: number): ProjectJsonV1['o
     operations.oreMinedTonnes = oreMinedTonnes;
   }
 
+  if ('oreTonnageUnit' in raw && raw.oreTonnageUnit !== undefined) {
+    const oreTonnageUnit = raw.oreTonnageUnit;
+    if (oreTonnageUnit !== null && oreTonnageUnit !== 'tonne' && oreTonnageUnit !== 'short_ton' && oreTonnageUnit !== 'long_ton') {
+      fail('operations.oreTonnageUnit', '"tonne" | "short_ton" | "long_ton" | null', oreTonnageUnit);
+    }
+    operations.oreTonnageUnit = oreTonnageUnit;
+  }
+
   return operations;
 }
 
@@ -112,15 +122,23 @@ export type ProjectJsonV1Context = {
 };
 
 export type ParsedProjectJsonV1 = {
-  engineInput: ProjectEngineFullProductionV1Input;
+  engineInputWithoutPrices: Omit<ProjectEngineFullProductionV1Input, 'spotPriceUSDByMetal' | 'aisc'> & {
+    payableQtyByMetal: Record<string, Array<number | null>>;
+    streamsByMetal: Record<string, import('../streams/types').StreamMVIConfig> | null;
+    takeItems: Array<import('../take/types').TakeItemMVI>;
+    masterN: number;
+    productionStartPeriod: number;
+    taxRate: number;
+    priceKeyByMetal: Record<string, string>;
+    auPriceKey: string;
+    payableQtyUnitByMetal: Record<string, QtyUnit>;
+  };
   context: ProjectJsonV1Context;
+  priceOverrides: NonNullable<ProjectJsonV1['priceOverrides']>;
+  engineInput: ProjectEngineFullProductionV1Input;
 };
 
-export function parseProjectJsonV1(raw: unknown): ProjectEngineFullProductionV1Input {
-  return parseProjectJsonV1WithContext(raw).engineInput;
-}
-
-export function parseProjectJsonV1WithContext(raw: unknown): ParsedProjectJsonV1 {
+export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   if (!isPlainObject(raw)) {
     fail('root', 'object', raw);
   }
@@ -166,24 +184,52 @@ export function parseProjectJsonV1WithContext(raw: unknown): ParsedProjectJsonV1
   }
 
   const payableQtyByMetal = asRecordOfSeries(raw.metals.payableQtyByMetal, 'metals.payableQtyByMetal', expectedLength);
-  const spotPriceUSDByMetal = asRecordOfSeries(raw.metals.spotPriceUSDByMetal, 'metals.spotPriceUSDByMetal', expectedLength);
-  const auPriceUSDPerOz = asSeries(raw.metals.auPriceUSDPerOz, 'metals.auPriceUSDPerOz', expectedLength);
-
   const payableMetals = Object.keys(payableQtyByMetal);
   if (payableMetals.length === 0) {
     fail('metals.payableQtyByMetal', 'at least one metal key', payableMetals);
   }
 
-  for (const metal of payableMetals) {
-    if (!(metal in spotPriceUSDByMetal)) {
-      fail(`metals.spotPriceUSDByMetal.${metal}`, 'series for every payable metal', undefined);
-    }
-
-    validateNonNegativeFiniteSeries(payableQtyByMetal[metal], `metals.payableQtyByMetal.${metal}`);
-    validateNonNegativeFiniteSeries(spotPriceUSDByMetal[metal], `metals.spotPriceUSDByMetal.${metal}`);
+  if (!isPlainObject(raw.metals.payableQtyUnitByMetal)) {
+    fail('metals.payableQtyUnitByMetal', 'object map of units', raw.metals.payableQtyUnitByMetal);
   }
 
-  validateNonNegativeFiniteSeries(auPriceUSDPerOz, 'metals.auPriceUSDPerOz');
+  if (!isPlainObject(raw.metals.priceKeyByMetal)) {
+    fail('metals.priceKeyByMetal', 'object map of price keys', raw.metals.priceKeyByMetal);
+  }
+
+  const payableQtyUnitByMetal: Record<string, QtyUnit> = {};
+  const priceKeyByMetal: Record<string, string> = {};
+
+  for (const metal of payableMetals) {
+    validateNonNegativeFiniteSeries(payableQtyByMetal[metal], `metals.payableQtyByMetal.${metal}`);
+
+    const qtyUnit = raw.metals.payableQtyUnitByMetal[metal];
+    if (typeof qtyUnit !== 'string' || !QTY_UNIT_SET.has(qtyUnit as QtyUnit)) {
+      fail(`metals.payableQtyUnitByMetal.${metal}`, 'known QtyUnit', qtyUnit);
+    }
+    payableQtyUnitByMetal[metal] = qtyUnit as QtyUnit;
+
+    const priceKey = raw.metals.priceKeyByMetal[metal];
+    if (typeof priceKey !== 'string' || priceKey.trim().length === 0) {
+      fail(`metals.priceKeyByMetal.${metal}`, 'non-empty string', priceKey);
+    }
+    priceKeyByMetal[metal] = priceKey;
+  }
+
+  const extraUnitKeys = Object.keys(raw.metals.payableQtyUnitByMetal).filter((key) => !(key in payableQtyByMetal));
+  if (extraUnitKeys.length > 0) {
+    fail('metals.payableQtyUnitByMetal', 'same keys as payableQtyByMetal', extraUnitKeys);
+  }
+
+  const extraPriceKeys = Object.keys(raw.metals.priceKeyByMetal).filter((key) => !(key in payableQtyByMetal));
+  if (extraPriceKeys.length > 0) {
+    fail('metals.priceKeyByMetal', 'same keys as payableQtyByMetal', extraPriceKeys);
+  }
+
+  const auPriceKey = raw.metals.auPriceKey;
+  if (typeof auPriceKey !== 'string' || auPriceKey.trim().length === 0) {
+    fail('metals.auPriceKey', 'non-empty string', auPriceKey);
+  }
 
   const streamsByMetal = raw.streamsByMetal;
   if (streamsByMetal !== undefined && streamsByMetal !== null && !isPlainObject(streamsByMetal)) {
@@ -197,11 +243,57 @@ export function parseProjectJsonV1WithContext(raw: unknown): ParsedProjectJsonV1
 
   const operations = raw.operations === undefined ? undefined : parseOperations(raw.operations, expectedLength);
 
+  const explicitOverrides = raw.priceOverrides;
+  if (explicitOverrides !== undefined && explicitOverrides !== null && !isPlainObject(explicitOverrides)) {
+    fail('priceOverrides', 'object or null', explicitOverrides);
+  }
+
+  const legacySpot =
+    raw.metals.spotPriceUSDByMetal === undefined
+      ? undefined
+      : asRecordOfSeries(raw.metals.spotPriceUSDByMetal, 'metals.spotPriceUSDByMetal', expectedLength);
+  const legacyAu =
+    raw.metals.auPriceUSDPerOz === undefined
+      ? undefined
+      : asSeries(raw.metals.auPriceUSDPerOz, 'metals.auPriceUSDPerOz', expectedLength);
+
+  if (legacySpot) {
+    for (const [metal, series] of Object.entries(legacySpot)) {
+      validateNonNegativeFiniteSeries(series, `metals.spotPriceUSDByMetal.${metal}`);
+    }
+  }
+  if (legacyAu) {
+    validateNonNegativeFiniteSeries(legacyAu, 'metals.auPriceUSDPerOz');
+  }
+
+  const overrideSpot = explicitOverrides?.spotPriceUSDByMetal
+    ? asRecordOfSeries(explicitOverrides.spotPriceUSDByMetal, 'priceOverrides.spotPriceUSDByMetal', expectedLength)
+    : legacySpot;
+
+  const overrideAu = explicitOverrides?.auPriceUSDPerOz
+    ? asSeries(explicitOverrides.auPriceUSDPerOz, 'priceOverrides.auPriceUSDPerOz', expectedLength)
+    : legacyAu;
+
+  if (overrideSpot) {
+    for (const [metal, series] of Object.entries(overrideSpot)) {
+      validateNonNegativeFiniteSeries(series, `priceOverrides.spotPriceUSDByMetal.${metal}`);
+    }
+  }
+  if (overrideAu) {
+    validateNonNegativeFiniteSeries(overrideAu, 'priceOverrides.auPriceUSDPerOz');
+  }
+
+  const nulls = new Array(expectedLength).fill(null) as Array<number | null>;
+  const fallbackSpot: Record<string, Array<number | null>> = {};
+  for (const metal of payableMetals) {
+    fallbackSpot[metal] = overrideSpot?.[metal] ? [...overrideSpot[metal]] : [...nulls];
+  }
+
   const engineInput: ProjectEngineFullProductionV1Input = {
     masterN,
     streamsByMetal: (streamsByMetal as ProjectEngineFullProductionV1Input['streamsByMetal']) ?? null,
     payableQtyByMetal,
-    spotPriceUSDByMetal,
+    spotPriceUSDByMetal: fallbackSpot,
     takeItems: (takeItems as ProjectEngineFullProductionV1Input['takeItems']) ?? [],
     phase1: {
       masterN,
@@ -215,18 +307,50 @@ export function parseProjectJsonV1WithContext(raw: unknown): ParsedProjectJsonV1
       byproductCreditsUSD,
     },
     phase2: {
-      // Corporate pipeline should overwrite discountRate at runtime.
       discountRate: 0.1,
     },
     aisc: {
-      auPriceUSDPerOz,
+      auPriceUSDPerOz: overrideAu ? [...overrideAu] : [...nulls],
     },
   };
 
   return {
-    engineInput,
+    engineInputWithoutPrices: {
+      masterN,
+      streamsByMetal: (streamsByMetal as ProjectEngineFullProductionV1Input['streamsByMetal']) ?? null,
+      payableQtyByMetal,
+      takeItems: (takeItems as ProjectEngineFullProductionV1Input['takeItems']) ?? [],
+      phase1: {
+        masterN,
+        productionStartPeriod,
+        taxRate,
+        capexUSD,
+        operatingCostsUSD,
+        sustainingCapexUSD,
+        siteGandA_USD,
+        reclamationUSD,
+        byproductCreditsUSD,
+      },
+      phase2: {
+        discountRate: 0.1,
+      },
+      productionStartPeriod,
+      taxRate,
+      priceKeyByMetal,
+      auPriceKey,
+      payableQtyUnitByMetal,
+    },
     context: {
       operations: operations ?? null,
     },
+    priceOverrides: {
+      spotPriceUSDByMetal: overrideSpot,
+      auPriceUSDPerOz: overrideAu,
+    },
+    engineInput,
   };
+}
+
+export function parseProjectJsonV1WithContext(raw: unknown): ParsedProjectJsonV1 {
+  return parseProjectJsonV1(raw);
 }

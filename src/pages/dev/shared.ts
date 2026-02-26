@@ -32,6 +32,15 @@ export function makeHarnessProjectJson(): ProjectJsonV1 {
       payableQtyByMetal: {
         Au: [0, 100, 100],
       },
+      payableQtyUnitByMetal: {
+        Au: 'toz',
+      },
+      priceKeyByMetal: {
+        Au: 'XAU_USD_TOZ',
+      },
+      auPriceKey: 'XAU_USD_TOZ',
+    },
+    priceOverrides: {
       spotPriceUSDByMetal: {
         Au: [2000, 2000, 2000],
       },
@@ -45,6 +54,7 @@ export function makeHarnessProjectJson(): ProjectJsonV1 {
       },
       oreMilledTonnes: new Array(len).fill(null),
       oreMinedTonnes: new Array(len).fill(null),
+      oreTonnageUnit: 'tonne',
     },
     streamsByMetal: null,
     takeItems: [],

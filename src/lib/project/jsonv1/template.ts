@@ -28,9 +28,19 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     },
 
     metals: {
-      payableQtyByMetal: { Au: [...nulls] },
-      spotPriceUSDByMetal: { Au: [...nulls] },
-      auPriceUSDPerOz: [...nulls],
+      payableQtyByMetal: {
+        Au: [...nulls],
+        Cu: [...nulls],
+      },
+      payableQtyUnitByMetal: {
+        Au: 'toz',
+        Cu: 'lb',
+      },
+      priceKeyByMetal: {
+        Au: 'XAU_USD_TOZ',
+        Cu: 'CU_USD_LB',
+      },
+      auPriceKey: 'XAU_USD_TOZ',
     },
 
     streamsByMetal: null,
@@ -40,6 +50,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       capacity: { throughputUnit: 'tpd', nameplateThroughput: 10000, utilizationPct: null },
       oreMilledTonnes: [...nulls],
       oreMinedTonnes: [...nulls],
+      oreTonnageUnit: 'tonne',
     },
   };
 }

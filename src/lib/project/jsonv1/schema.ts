@@ -1,6 +1,10 @@
 import type { StreamMVIConfig } from '../streams/types.ts';
 import type { TakeItemMVI } from '../take/types.ts';
 
+export type QtyUnit = 'toz' | 'g' | 'kg' | 'lb' | 'tonne' | 'short_ton' | 'long_ton';
+
+export type PriceUnit = 'USD_per_toz' | 'USD_per_lb' | 'USD_per_tonne';
+
 export type ProjectJsonV1 = {
   version: 'project_json_v1';
 
@@ -32,8 +36,12 @@ export type ProjectJsonV1 = {
 
   metals: {
     payableQtyByMetal: Record<string, Array<number | null>>;
-    spotPriceUSDByMetal: Record<string, Array<number | null>>;
-    auPriceUSDPerOz: Array<number | null>;
+    payableQtyUnitByMetal: Record<string, QtyUnit>;
+    priceKeyByMetal: Record<string, string>;
+    auPriceKey: string;
+    spotPriceUSDByMetal?: Record<string, Array<number | null>>;
+    spotPriceUnitByMetal?: Record<string, PriceUnit>;
+    auPriceUSDPerOz?: Array<number | null>;
   };
 
   streamsByMetal?: Record<string, StreamMVIConfig> | null;
@@ -49,5 +57,11 @@ export type ProjectJsonV1 = {
 
     oreMilledTonnes?: Array<number | null>;
     oreMinedTonnes?: Array<number | null>;
+    oreTonnageUnit?: 'tonne' | 'short_ton' | 'long_ton' | null;
+  } | null;
+
+  priceOverrides?: {
+    spotPriceUSDByMetal?: Record<string, Array<number | null>>;
+    auPriceUSDPerOz?: Array<number | null>;
   } | null;
 };
