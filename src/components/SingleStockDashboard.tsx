@@ -731,14 +731,14 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
 
   const [targetCurrency, setTargetCurrency] = useState("USD");
   const [snapshotDiscountRateInput] = useState("0.10");
-  const [sharesCurrentInput] = useState("");
-  const [priceCurrentInput] = useState("");
-  const [cashT0Input] = useState("");
-  const [debtT0Input] = useState("");
+  const [sharesCurrentInput] = useState("100000000");
+  const [priceCurrentInput] = useState("1.50");
+  const [cashT0Input] = useState("0");
+  const [debtT0Input] = useState("0");
   const [useCashFirst] = useState(true);
   const [cashUseCapInput] = useState("");
-  const [debtFractionInput] = useState("");
-  const [equityFractionInput] = useState("");
+  const [debtFractionInput] = useState("0.5");
+  const [equityFractionInput] = useState("0.5");
   const [equityRaisePriceInput] = useState("");
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
@@ -997,6 +997,9 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
 
     try {
       const project = await getCompanyProject(ticker, projectId);
+      setSelectedProjectId(project.project_id);
+      setSelectedProjectName(project.project_name ?? null);
+      setProjectSelectorOpen(false);
       const result = await postCorporateSnapshot({
         symbol: ticker,
         targetCurrency,
@@ -1032,8 +1035,6 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         setProjectSnapshotError((result.diagnostics?.errors ?? ["Snapshot request failed."]).join("\n"));
         return;
       }
-      setSelectedProjectId(project.project_id);
-      setSelectedProjectName(project.project_name ?? null);
       setProjectSnapshotData(result.snapshot as unknown as Record<string, unknown>);
     } catch (error) {
       setProjectSnapshotData(null);
