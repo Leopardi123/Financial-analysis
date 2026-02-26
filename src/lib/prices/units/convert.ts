@@ -1,4 +1,4 @@
-import { CANONICAL_UNITS, UNIT_CONSTANTS } from './types.js';
+import { CANONICAL_UNITS, UNIT_CONSTANTS } from './types.ts';
 
 function normalizeUnit(unit: string): string {
   return unit.trim().toUpperCase();

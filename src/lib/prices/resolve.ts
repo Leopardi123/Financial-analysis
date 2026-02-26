@@ -1,7 +1,7 @@
-import { convertPriceToCanonical } from './units/convert.js';
-import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.js';
-import { fetchHistorical, type ProviderPriceRow } from './providers/fmp.js';
-import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.js';
+import { convertPriceToCanonical } from './units/convert.ts';
+import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.ts';
+import { fetchHistorical, type ProviderPriceRow } from './providers/fmp.ts';
+import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.ts';
 
 export type PriceScenario =
   | { mode: 'spot' }
