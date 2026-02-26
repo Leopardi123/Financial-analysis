@@ -14,8 +14,25 @@ import { computeProjectEngineFullProductionV1 } from "../src/lib/project/engineF
 
 type Handler = (req: any, res: any) => Promise<void> | void;
 
+function parseRequestUrl(req: any): URL {
+  const raw = req?.url;
+  if (typeof raw === "string") {
+    try {
+      return new URL(raw, "http://localhost");
+    } catch {
+      try {
+        return new URL(raw);
+      } catch {
+        return new URL("/", "http://localhost");
+      }
+    }
+  }
+
+  return new URL("/", "http://localhost");
+}
+
 function normalizePathSegments(req: any): string[] {
-  const { pathname } = new URL(req?.url ?? "/", "http://localhost");
+  const { pathname } = parseRequestUrl(req);
   const trimmed = pathname.startsWith("/api") ? pathname.slice(4) : pathname;
 
   return trimmed
@@ -67,7 +84,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
 };
 
 export default async function handler(req: any, res: any) {
-  const { pathname } = new URL(req.url ?? "/", "http://localhost");
+  const { pathname } = parseRequestUrl(req);
   const segments = normalizePathSegments(req);
   const routeKey = segments.join("/");
   const queryPath = req.query?.path ?? null;
