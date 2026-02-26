@@ -26,6 +26,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       operatingCostsUSD: [...nulls],
       sustainingCapexUSD: [...nulls],
       siteGandA_USD: [...nulls],
+      workingCapitalDeltaUSD: [...nulls],
       royaltiesUSD: [...nulls],
       reclamationUSD: [...nulls],
       byproductCreditsUSD: [...nulls],

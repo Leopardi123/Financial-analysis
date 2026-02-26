@@ -17,6 +17,7 @@ export type ProjectPhase1Input = {
   siteGandA_USD: (number | null)[];
   reclamationUSD: (number | null)[];
   byproductCreditsUSD?: (number | null)[] | null;
+  workingCapitalDeltaUSD?: (number | null)[] | null;
 };
 
 export type ProjectPhase1Output = {
@@ -25,6 +26,7 @@ export type ProjectPhase1Output = {
   taxUSD: (number | null)[];
   nopatUSD: (number | null)[];
   fcffUSD: (number | null)[];
+  workingCapitalDeltaUSD_effective: (number | null)[];
 };
 
 export type ProjectPhase2Input = {

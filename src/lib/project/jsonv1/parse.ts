@@ -30,6 +30,10 @@ function asSeries(value: unknown, path: string, expectedLength: number): Array<n
   return value as Array<number | null>;
 }
 
+function sanitizeSeries(series: Array<number | null>): Array<number | null> {
+  return series.map((value) => (isFiniteNumber(value) ? value : null));
+}
+
 function validateNonNegativeFiniteSeries(series: Array<number | null>, path: string): void {
   for (let i = 0; i < series.length; i += 1) {
     const value = series[i];
@@ -215,6 +219,11 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
       ? undefined
       : asSeries(raw.series.byproductCreditsUSD, 'series.byproductCreditsUSD', expectedLength);
 
+  const workingCapitalDeltaUSD =
+    raw.series.workingCapitalDeltaUSD === undefined
+      ? undefined
+      : sanitizeSeries(asSeries(raw.series.workingCapitalDeltaUSD, 'series.workingCapitalDeltaUSD', expectedLength));
+
   if (!isPlainObject(raw.metals)) {
     fail('metals', 'object', raw.metals);
   }
@@ -341,6 +350,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
       siteGandA_USD,
       reclamationUSD,
       byproductCreditsUSD,
+      workingCapitalDeltaUSD,
     },
     phase2: {
       discountRate: 0.1,
@@ -366,6 +376,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
         siteGandA_USD,
         reclamationUSD,
         byproductCreditsUSD,
+        workingCapitalDeltaUSD,
       },
       phase2: {
         discountRate: 0.1,
