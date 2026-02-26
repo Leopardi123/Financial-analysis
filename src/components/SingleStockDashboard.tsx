@@ -6,7 +6,7 @@ import InfoPopover from "./InfoPopover";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
 import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
-import { getCompanyProjectsBySymbol, type CompanyProjectSummary } from "../lib/client/companyProjectsClient.ts";
+import { getCompanyProject, getCompanyProjectsBySymbol, type CompanyProjectSummary } from "../lib/client/companyProjectsClient.ts";
 import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import {
@@ -108,22 +108,6 @@ function toInputNumber(value: string): number | undefined {
   if (!trimmed) return undefined;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : Number.NaN;
-}
-
-function formatRunTimestamp(iso: string | null): string {
-  if (!iso) return "Never";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "Never";
-  return date.toLocaleString();
-}
-
-function maxUpdatedAtUtc(projects: CompanyProjectSummary[]): string | null {
-  if (projects.length === 0) return null;
-  let max = projects[0].updated_at_utc;
-  for (const project of projects) {
-    if (project.updated_at_utc > max) max = project.updated_at_utc;
-  }
-  return max;
 }
 
 type AnalysisMode = "revenue" | "prerevenue";
@@ -739,31 +723,31 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectSnapshotLoading, setProjectSnapshotLoading] = useState(false);
   const [projectSnapshotError, setProjectSnapshotError] = useState<string | null>(null);
   const [projectSnapshotWarnings, setProjectSnapshotWarnings] = useState<string[]>([]);
+  const [projectSnapshotErrors, setProjectSnapshotErrors] = useState<string[]>([]);
   const [projectSnapshotData, setProjectSnapshotData] = useState<Record<string, unknown> | null>(null);
-  const [projectSnapshotJsonOpen, setProjectSnapshotJsonOpen] = useState(false);
-  const [projectInputOpen, setProjectInputOpen] = useState(true);
-  const [financingPlanOpen, setFinancingPlanOpen] = useState(false);
-  const [lastProjectSnapshotRunAt, setLastProjectSnapshotRunAt] = useState<string | null>(null);
+  const [projectSelectorOpen, setProjectSelectorOpen] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
 
   const [targetCurrency, setTargetCurrency] = useState("USD");
-  const [snapshotDiscountRateInput, setSnapshotDiscountRateInput] = useState("0.10");
-  const [sharesCurrentInput, setSharesCurrentInput] = useState("");
-  const [priceCurrentInput, setPriceCurrentInput] = useState("");
-  const [cashT0Input, setCashT0Input] = useState("");
-  const [debtT0Input, setDebtT0Input] = useState("");
-  const [useCashFirst, setUseCashFirst] = useState(true);
-  const [cashUseCapInput, setCashUseCapInput] = useState("");
-  const [debtFractionInput, setDebtFractionInput] = useState("");
-  const [equityFractionInput, setEquityFractionInput] = useState("");
-  const [equityRaisePriceInput, setEquityRaisePriceInput] = useState("");
-  const [scenarioMode, setScenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
-  const [scenarioLookbackYearsInput, setScenarioLookbackYearsInput] = useState("10");
-  const [scenarioPercentileInput, setScenarioPercentileInput] = useState("50");
-  const [fixedPriceMapJson, setFixedPriceMapJson] = useState("{\n  \"XAU_USD_TOZ\": 2400\n}");
-  const [fxSource, setFxSource] = useState<"auto" | "manual">("auto");
-  const [manualFxInput, setManualFxInput] = useState("");
-  const [fxAnchor, setFxAnchor] = useState<"today" | "t0_period_end">("today");
-  const [fxScenarioSameAsPriceScenario, setFxScenarioSameAsPriceScenario] = useState(true);
+  const [snapshotDiscountRateInput] = useState("0.10");
+  const [sharesCurrentInput] = useState("");
+  const [priceCurrentInput] = useState("");
+  const [cashT0Input] = useState("");
+  const [debtT0Input] = useState("");
+  const [useCashFirst] = useState(true);
+  const [cashUseCapInput] = useState("");
+  const [debtFractionInput] = useState("");
+  const [equityFractionInput] = useState("");
+  const [equityRaisePriceInput] = useState("");
+  const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
+  const [scenarioLookbackYearsInput] = useState("10");
+  const [scenarioPercentileInput] = useState("50");
+  const [fixedPriceMapJson] = useState("{\n  \"XAU_USD_TOZ\": 2400\n}");
+  const [fxSource] = useState<"auto" | "manual">("auto");
+  const [manualFxInput] = useState("");
+  const [fxAnchor] = useState<"today" | "t0_period_end">("today");
+  const [fxScenarioSameAsPriceScenario] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
@@ -902,6 +886,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     setPrimaryView("reported");
   }, [analysisMode]);
 
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -979,7 +964,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     };
   }, [ticker]);
 
-  const runProjectSnapshot = async () => {
+  const runProjectSnapshotForProject = async (projectId: string) => {
     const discountRate = toInputNumber(snapshotDiscountRateInput);
     const sharesCurrent = toInputNumber(sharesCurrentInput);
     const priceCurrent = toInputNumber(priceCurrentInput);
@@ -1005,49 +990,51 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       return { mode: "spot" };
     })();
 
-    const payload: SnapshotRequest = {
-      symbol: ticker,
-      targetCurrency,
-      discountRate: discountRate ?? Number.NaN,
-      market: {
-        shares_current: sharesCurrent ?? Number.NaN,
-        price_current_TargetCurrency: priceCurrent ?? Number.NaN,
-      },
-      balanceSheet: {
-        cash_t0_TargetCurrency: toInputNumber(cashT0Input),
-        debt_t0_TargetCurrency: toInputNumber(debtT0Input),
-      },
-      financingPlan: {
-        use_cash_first: useCashFirst,
-        cash_use_cap_TargetCurrency: toInputNumber(cashUseCapInput),
-        debt_fraction: toInputNumber(debtFractionInput),
-        equity_fraction: toInputNumber(equityFractionInput),
-        equity_raise_price_TargetCurrency: toInputNumber(equityRaisePriceInput),
-      },
-      scenario,
-      fx: {
-        source: fxSource,
-        anchor: fxAnchor,
-        scenario: fxScenarioSameAsPriceScenario ? scenario : { mode: "spot" },
-        manual_fx_USD_to_TargetCurrency: toInputNumber(manualFxInput),
-      },
-      projects: [],
-    };
-
     setProjectSnapshotLoading(true);
     setProjectSnapshotError(null);
     setProjectSnapshotWarnings([]);
+    setProjectSnapshotErrors([]);
 
     try {
-      const result = await postCorporateSnapshot(payload);
+      const project = await getCompanyProject(ticker, projectId);
+      const result = await postCorporateSnapshot({
+        symbol: ticker,
+        targetCurrency,
+        discountRate: discountRate ?? Number.NaN,
+        market: {
+          shares_current: sharesCurrent ?? Number.NaN,
+          price_current_TargetCurrency: priceCurrent ?? Number.NaN,
+        },
+        balanceSheet: {
+          cash_t0_TargetCurrency: toInputNumber(cashT0Input),
+          debt_t0_TargetCurrency: toInputNumber(debtT0Input),
+        },
+        financingPlan: {
+          use_cash_first: useCashFirst,
+          cash_use_cap_TargetCurrency: toInputNumber(cashUseCapInput),
+          debt_fraction: toInputNumber(debtFractionInput),
+          equity_fraction: toInputNumber(equityFractionInput),
+          equity_raise_price_TargetCurrency: toInputNumber(equityRaisePriceInput),
+        },
+        scenario,
+        fx: {
+          source: fxSource,
+          anchor: fxAnchor,
+          scenario: fxScenarioSameAsPriceScenario ? scenario : { mode: "spot" },
+          manual_fx_USD_to_TargetCurrency: toInputNumber(manualFxInput),
+        },
+        projects: [{ projectId: project.project_id, rawJson: project.raw_json }],
+      });
       setProjectSnapshotWarnings(result.diagnostics?.warnings ?? []);
+      setProjectSnapshotErrors(result.diagnostics?.errors ?? []);
       if (!result.ok || !result.snapshot) {
         setProjectSnapshotData(null);
         setProjectSnapshotError((result.diagnostics?.errors ?? ["Snapshot request failed."]).join("\n"));
         return;
       }
+      setSelectedProjectId(project.project_id);
+      setSelectedProjectName(project.project_name ?? null);
       setProjectSnapshotData(result.snapshot as unknown as Record<string, unknown>);
-      setLastProjectSnapshotRunAt(new Date().toISOString());
     } catch (error) {
       setProjectSnapshotData(null);
       setProjectSnapshotError((error as Error).message);
@@ -1888,8 +1875,6 @@ Capital Available: ${availableLabel}`,
     yAxisTitle: statementCurrency,
   };
 
-  const projectCount = companyProjects.length;
-  const projectLastUpdatedAtUtc = maxUpdatedAtUtc(companyProjects);
   const projectSnapshotMetrics = (() => {
     if (!projectSnapshotData) return [] as Array<{ label: string; value: unknown }>;
     const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
@@ -2121,7 +2106,9 @@ Capital Available: ${availableLabel}`,
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button type="button" onClick={() => setPrimaryView("reported")} disabled={primaryView === "reported"}>Reported (Corporate)</button>
           <button type="button" onClick={() => setPrimaryView("modeled")} disabled={primaryView === "modeled"}>Modeled (NAV / DCF)</button>
-          <button type="button" onClick={() => setPrimaryView("projects")} disabled={primaryView === "projects"}>Projects</button>
+          {analysisMode === "prerevenue" && (
+            <button type="button" onClick={() => setPrimaryView("projects")} disabled={primaryView === "projects"}>Projects</button>
+          )}
           {analysisMode === "prerevenue" && (
             <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
               Edit projects
@@ -2744,107 +2731,74 @@ Capital Available: ${availableLabel}`,
 
       {primaryView === "projects" && (
         <div className="breadcontainersinglecolumn">
-          <h1 className="subrub">Pre-Revenue Projects Snapshot</h1>
-          <p className="bread">Run corporate project snapshot directly from symbol-stored projects.</p>
-          <p className="bread">Stored projects: <strong>{projectCount}</strong></p>
-          <p className="bread">Last updated (UTC): <strong>{projectLastUpdatedAtUtc ?? "—"}</strong></p>
-          <p className="bread">Last snapshot run: <strong>{formatRunTimestamp(lastProjectSnapshotRunAt)}</strong></p>
+          {!selectedProjectId && (
+            <>
+              <h1 className="subrub">Project</h1>
+              <p className="bread">Choose a project to view its metrics, operations, and economics.</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                <button type="button" onClick={() => setProjectSelectorOpen((prev) => !prev)}>
+                  Select project
+                </button>
+                <a href={`/company/${encodeURIComponent(ticker)}/projects?action=new`} className="button-link" style={{ alignSelf: "center" }}>
+                  Add project
+                </a>
+              </div>
+              <p className="bread">To add a new project, use “New from template” in the editor.</p>
 
-          {companyProjectsLoading && <p className="bread">Loading stored projects…</p>}
-          {companyProjectsError && <p className="status error">{companyProjectsError}</p>}
+              {companyProjectsLoading && <p className="bread">Loading stored projects…</p>}
+              {companyProjectsError && <p className="status error">{companyProjectsError}</p>}
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-            <button type="button" onClick={() => void runProjectSnapshot()} disabled={projectSnapshotLoading || companyProjectsLoading || projectCount === 0}>
-              {projectSnapshotLoading ? "Running…" : "Run Project Snapshot"}
-            </button>
-            <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
-              Edit projects
-            </a>
-            <button type="button" onClick={() => setProjectInputOpen((prev) => !prev)}>{projectInputOpen ? "Hide inputs" : "Show inputs"}</button>
-          </div>
-
-          {projectCount === 0 && <p className="status empty">No stored projects for this symbol.</p>}
-
-          {projectInputOpen && (
-            <div style={{ display: "grid", gap: 10, maxWidth: 760 }}>
-              <label><span>targetCurrency</span><input value={targetCurrency} onChange={(e) => setTargetCurrency(e.target.value.toUpperCase())} /></label>
-              <label><span>discountRate</span><input value={snapshotDiscountRateInput} onChange={(e) => setSnapshotDiscountRateInput(e.target.value)} /></label>
-
-              <h3 className="subrub small">Market Inputs</h3>
-              <label><span>shares_current</span><input value={sharesCurrentInput} onChange={(e) => setSharesCurrentInput(e.target.value)} /></label>
-              <label><span>price_current_TargetCurrency</span><input value={priceCurrentInput} onChange={(e) => setPriceCurrentInput(e.target.value)} /></label>
-
-              <h3 className="subrub small">Balance Sheet</h3>
-              <label><span>cash_t0_TargetCurrency</span><input value={cashT0Input} onChange={(e) => setCashT0Input(e.target.value)} /></label>
-              <label><span>debt_t0_TargetCurrency</span><input value={debtT0Input} onChange={(e) => setDebtT0Input(e.target.value)} /></label>
-
-              <button type="button" onClick={() => setFinancingPlanOpen((prev) => !prev)}>{financingPlanOpen ? "Hide Financing Plan" : "Show Financing Plan"}</button>
-              {financingPlanOpen && (
-                <>
-                  <label><input type="checkbox" checked={useCashFirst} onChange={(e) => setUseCashFirst(e.target.checked)} />use_cash_first</label>
-                  <label><span>cash_use_cap_TargetCurrency</span><input value={cashUseCapInput} onChange={(e) => setCashUseCapInput(e.target.value)} /></label>
-                  <label><span>debt_fraction</span><input value={debtFractionInput} onChange={(e) => setDebtFractionInput(e.target.value)} /></label>
-                  <label><span>equity_fraction</span><input value={equityFractionInput} onChange={(e) => setEquityFractionInput(e.target.value)} /></label>
-                  <label><span>equity_raise_price_TargetCurrency</span><input value={equityRaisePriceInput} onChange={(e) => setEquityRaisePriceInput(e.target.value)} /></label>
-                </>
-              )}
-
-              <h3 className="subrub small">Scenario</h3>
-              <label><span>mode</span><select value={scenarioMode} onChange={(e) => setScenarioMode(e.target.value as "spot" | "percentile" | "fixed")}><option value="spot">spot</option><option value="percentile">percentile</option><option value="fixed">fixed</option></select></label>
-              {scenarioMode === "percentile" && (
-                <>
-                  <label><span>lookbackYears</span><input value={scenarioLookbackYearsInput} onChange={(e) => setScenarioLookbackYearsInput(e.target.value)} /></label>
-                  <label><span>percentile</span><input value={scenarioPercentileInput} onChange={(e) => setScenarioPercentileInput(e.target.value)} /></label>
-                </>
-              )}
-              {scenarioMode === "fixed" && (
-                <label><span>fixed prices JSON</span><textarea rows={6} value={fixedPriceMapJson} onChange={(e) => setFixedPriceMapJson(e.target.value)} /></label>
-              )}
-
-              <h3 className="subrub small">FX</h3>
-              <label><span>source</span><select value={fxSource} onChange={(e) => setFxSource(e.target.value as "auto" | "manual")}><option value="auto">auto</option><option value="manual">manual</option></select></label>
-              {fxSource === "manual" && <label><span>manual_fx_USD_to_TargetCurrency</span><input value={manualFxInput} onChange={(e) => setManualFxInput(e.target.value)} /></label>}
-              <label><span>anchor</span><select value={fxAnchor} onChange={(e) => setFxAnchor(e.target.value as "today" | "t0_period_end")}><option value="today">today</option><option value="t0_period_end">t0_period_end</option></select></label>
-              <label><input type="checkbox" checked={fxScenarioSameAsPriceScenario} onChange={(e) => setFxScenarioSameAsPriceScenario(e.target.checked)} />FX same as price scenario</label>
-            </div>
-          )}
-
-          {(projectSnapshotError || projectSnapshotWarnings.length > 0) && (
-            <div style={{ marginTop: 16 }}>
-              {projectSnapshotError && <pre style={{ color: "#b00020", whiteSpace: "pre-wrap" }}>{projectSnapshotError}</pre>}
-              {projectSnapshotWarnings.length > 0 && (
-                <ul style={{ color: "#8a6d3b" }}>
-                  {projectSnapshotWarnings.map((warning) => <li key={warning}>{warning}</li>)}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {projectSnapshotMetrics.length > 0 && (
-            <div style={{ marginTop: 16, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-              {projectSnapshotMetrics.map((metric) => (
-                <div key={metric.label} className="producer-card">
-                  <h3>{metric.label}</h3>
-                  <p>{formatPanelValue(metric.value)}</p>
+              {projectSelectorOpen && (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {companyProjects.length === 0 && <p className="status empty">No stored projects for this symbol.</p>}
+                  {companyProjects.map((project) => (
+                    <button key={project.project_id} type="button" onClick={() => void runProjectSnapshotForProject(project.project_id)} disabled={projectSnapshotLoading}>
+                      {project.project_id} — {project.project_name ?? "Unnamed project"}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
 
-          {projectSnapshotData && (
-            <div style={{ marginTop: 16 }}>
-              <button type="button" onClick={() => setProjectSnapshotJsonOpen((prev) => !prev)}>{projectSnapshotJsonOpen ? "Hide JSON" : "Show JSON"}</button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(JSON.stringify(projectSnapshotData, null, 2));
-                }}
-                style={{ marginLeft: 8 }}
-              >
-                Copy JSON
-              </button>
-              {projectSnapshotJsonOpen && <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectSnapshotData, null, 2)}</pre>}
-            </div>
+          {selectedProjectId && (
+            <>
+              <h1 className="subrub">{selectedProjectName?.trim() || selectedProjectId}</h1>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); }}>
+                  Back to projects
+                </button>
+                <a href={`/company/${encodeURIComponent(ticker)}/projects?projectId=${encodeURIComponent(selectedProjectId)}`} className="button-link" style={{ alignSelf: "center" }}>
+                  Edit project
+                </a>
+              </div>
+
+              {projectSnapshotLoading && <p className="bread">Running snapshot…</p>}
+              {projectSnapshotError && <p className="status error">{projectSnapshotError}</p>}
+
+              {projectSnapshotMetrics.length > 0 && (
+                <div style={{ marginTop: 16, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                  {projectSnapshotMetrics.map((metric) => (
+                    <div key={metric.label} className="producer-card">
+                      <h3>{metric.label}</h3>
+                      <p>{formatPanelValue(metric.value)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <details style={{ marginTop: 12 }}>
+                <summary>Diagnostics</summary>
+                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && <p>No diagnostics.</p>}
+                {projectSnapshotErrors.length > 0 && <ul>{projectSnapshotErrors.map((item) => <li key={`e-${item}`}>{item}</li>)}</ul>}
+                {projectSnapshotWarnings.length > 0 && <ul>{projectSnapshotWarnings.map((item) => <li key={`w-${item}`}>{item}</li>)}</ul>}
+              </details>
+
+              <details style={{ marginTop: 12 }}>
+                <summary>Snapshot JSON</summary>
+                <pre style={{ whiteSpace: "pre-wrap" }}>{projectSnapshotData ? JSON.stringify(projectSnapshotData, null, 2) : "No snapshot loaded."}</pre>
+              </details>
+            </>
           )}
         </div>
       )}
