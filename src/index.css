@@ -19,3 +19,90 @@ button,
 input {
   font-family: inherit;
 }
+
+.playground-shell {
+  padding: 16px;
+}
+
+.playground-subtitle {
+  opacity: 0.8;
+}
+
+.playground-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.playground-card {
+  background: #f7f8ef;
+  border: 1px solid #d8dbc8;
+  border-radius: 10px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.playground-field {
+  display: grid;
+  gap: 4px;
+}
+
+.playground-field input,
+.playground-field select,
+.playground-textarea,
+.playground-card button {
+  padding: 8px;
+  border: 1px solid #b8bca8;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.playground-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.playground-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.playground-error {
+  color: #a11a1a;
+}
+
+.playground-warning {
+  color: #7a6200;
+}
+
+.playground-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.playground-metric-card {
+  background: #fff;
+  border: 1px solid #d8dbc8;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.playground-pre {
+  overflow: auto;
+  max-height: 320px;
+  background: #121212;
+  color: #efefef;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+@media (min-width: 960px) {
+  .playground-grid {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
