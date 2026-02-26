@@ -1,0 +1,76 @@
+{
+  "targetCurrency": "CAD",
+  "discountRate": 0.1,
+  "market": {
+    "shares_current": 100000000,
+    "price_current_TargetCurrency": 1.25,
+    "preferredEquity_TargetCurrency": 0,
+    "minorityInterest_TargetCurrency": 0
+  },
+  "balanceSheet": {
+    "cash_t0_TargetCurrency": 5000000,
+    "debt_t0_TargetCurrency": 10000000
+  },
+  "scenario": {
+    "mode": "fixed",
+    "fixedPriceByKey": {
+      "XAU_USD_TOZ": 2100,
+      "CU_USD_LB": 4.1
+    }
+  },
+  "fx": {
+    "source": "manual",
+    "anchor": "today",
+    "manual_fx_USD_to_TargetCurrency": 1.35,
+    "scenario": {
+      "mode": "spot"
+    }
+  },
+  "projects": [
+    {
+      "projectId": "ABRA_MINIMAL",
+      "rawJson": {
+        "version": "project_json_v1",
+        "meta": {
+          "projectId": "ABRA_MINIMAL",
+          "projectName": "Abra Minimal",
+          "currency": "USD",
+          "notes": "Fixture"
+        },
+        "time": {
+          "masterN": 5,
+          "productionStartPeriod": 2,
+          "periodEndDatesUtc": ["2026-12-31", "2027-12-31", "2028-12-31", "2029-12-31", "2030-12-31", "2031-12-31"]
+        },
+        "economics": { "taxRate": 0.27 },
+        "series": {
+          "capexUSD": [200000000, 120000000, 0, 0, 0, 0],
+          "operatingCostsUSD": [0, 0, 180000000, 180000000, 180000000, 180000000],
+          "sustainingCapexUSD": [0, 0, 15000000, 15000000, 15000000, 15000000],
+          "siteGandA_USD": [0, 0, 9000000, 9000000, 9000000, 9000000],
+          "workingCapitalDeltaUSD": [0, 0, 2000000, 0, 0, 0],
+          "royaltiesUSD": [0, 0, 5000000, 5000000, 5000000, 5000000],
+          "reclamationUSD": [0, 0, 1000000, 1000000, 1000000, 1000000],
+          "byproductCreditsUSD": [0, 0, 10000000, 10000000, 10000000, 10000000]
+        },
+        "metals": {
+          "payableQtyByMetal": {
+            "Au": [0, 0, 120000, 120000, 120000, 120000],
+            "Cu": [0, 0, 25000000, 25000000, 25000000, 25000000]
+          },
+          "payableQtyUnitByMetal": { "Au": "toz", "Cu": "lb" },
+          "priceKeyByMetal": { "Au": "XAU_USD_TOZ", "Cu": "CU_USD_LB" },
+          "auPriceKey": "XAU_USD_TOZ"
+        },
+        "streamsByMetal": null,
+        "takeItems": [],
+        "operations": {
+          "capacity": { "throughputUnit": "tpd", "nameplateThroughput": 10000, "utilizationPct": null },
+          "oreMilledTonnes": [0, 0, 3200000, 3200000, 3200000, 3200000],
+          "oreMinedTonnes": [0, 0, 3400000, 3400000, 3400000, 3400000],
+          "oreTonnageUnit": "tonne"
+        }
+      }
+    }
+  ]
+}
