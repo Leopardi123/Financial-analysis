@@ -4,6 +4,18 @@ import { readHistoryRowsInRange } from "../src/lib/prices/db/readHistory.js";
 import { refreshHistoryRangeToMonthlyBlobs } from "../src/lib/prices/refreshHistory.js";
 import { PRICE_TABLES } from "../src/lib/prices/db/schema.js";
 import { PRICE_KEY_SET, type PriceKey } from "../src/lib/prices/keys.js";
+import {
+  deleteCompanyProject,
+  getCompanyProject,
+  listCompanyProjects,
+  upsertCompanyProject,
+} from "../src/lib/db/companyProjects.js";
+import {
+  validateCompanyProjectGetQuery,
+  validateCompanyProjectKey,
+  validateCompanyProjectListQuery,
+  validateCompanyProjectUpsert,
+} from "../src/lib/api/validateCompanyProjects.js";
 
 type Handler = (req: any, res: any) => Promise<void> | void;
 
@@ -14,6 +26,14 @@ function parseRequestBody(req: any): unknown {
     return JSON.parse(req.body);
   }
   return req.body;
+}
+
+function sendValidationError(res: any, error: string, details?: unknown): void {
+  if (details === undefined) {
+    res.status(400).json({ ok: false, error });
+    return;
+  }
+  res.status(400).json({ ok: false, error, details });
 }
 
 async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
@@ -466,6 +486,101 @@ export default async function handler(req: any, res: any) {
       matched = "snapshot/corporate";
       setDebugHeaders();
       await handleCorporateSnapshot(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "company-projects" && segments.length === 1) {
+      matched = "company-projects";
+      setDebugHeaders();
+
+      const validation = validateCompanyProjectListQuery(req.query);
+      if (!validation.ok) {
+        sendValidationError(res, validation.error, validation.details);
+        return;
+      }
+
+      const projects = await listCompanyProjects(validation.value.symbol);
+      res.status(200).json({ ok: true, symbol: validation.value.symbol, projects });
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "company-projects" && segments[1] === "get") {
+      matched = "company-projects/get";
+      setDebugHeaders();
+
+      const validation = validateCompanyProjectGetQuery(req.query);
+      if (!validation.ok) {
+        sendValidationError(res, validation.error, validation.details);
+        return;
+      }
+
+      const project = await getCompanyProject(validation.value.symbol, validation.value.project_id);
+      if (!project) {
+        res.status(404).json({ ok: false, error: "Project not found" });
+        return;
+      }
+
+      res.status(200).json({
+        ok: true,
+        project: {
+          symbol: project.symbol,
+          project_id: project.project_id,
+          project_name: project.project_name,
+          json_version: project.json_version,
+          raw_json: JSON.parse(project.raw_json),
+          updated_at_utc: project.updated_at_utc,
+        },
+      });
+      return;
+    }
+
+    if (req.method === "POST" && segments[0] === "company-projects" && segments[1] === "upsert") {
+      matched = "company-projects/upsert";
+      setDebugHeaders();
+
+      const body = parseRequestBody(req);
+      const validation = validateCompanyProjectUpsert(body);
+      if (!validation.ok) {
+        sendValidationError(res, validation.error, validation.details);
+        return;
+      }
+
+      const project = await upsertCompanyProject({
+        symbol: validation.value.symbol,
+        project_id: validation.value.project_id,
+        project_name: validation.value.project_name,
+        json_version: validation.value.json_version,
+        raw_json: JSON.stringify(validation.value.raw_json),
+      });
+
+      res.status(200).json({
+        ok: true,
+        project_id: project.project_id,
+        symbol: project.symbol,
+        updated_at_utc: project.updated_at_utc,
+      });
+      return;
+    }
+
+    if (req.method === "POST" && segments[0] === "company-projects" && segments[1] === "delete") {
+      matched = "company-projects/delete";
+      setDebugHeaders();
+
+      const body = parseRequestBody(req);
+      const validation = validateCompanyProjectKey(body);
+      if (!validation.ok) {
+        sendValidationError(res, validation.error, validation.details);
+        return;
+      }
+
+      const project = await getCompanyProject(validation.value.symbol, validation.value.project_id);
+      if (!project) {
+        res.status(404).json({ ok: false, error: "Project not found" });
+        return;
+      }
+
+      await deleteCompanyProject(validation.value.symbol, validation.value.project_id);
+      res.status(200).json({ ok: true });
       return;
     }
 
