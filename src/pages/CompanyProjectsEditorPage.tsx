@@ -53,6 +53,10 @@ function validateProjectJson(rawJson: string): ValidationState {
 
 export default function CompanyProjectsEditorPage() {
   const symbol = useMemo(() => parseSymbolFromPath(window.location.pathname), []);
+  const startWithNewDraft = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('action') === 'new';
+  }, []);
   const [projects, setProjects] = useState<CompanyProjectSummary[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -97,6 +101,13 @@ export default function CompanyProjectsEditorPage() {
   useEffect(() => {
     void refreshList();
   }, [symbol]);
+
+  useEffect(() => {
+    if (!startWithNewDraft || loadingList || projects.length > 0 || isNewDraft) {
+      return;
+    }
+    startNewFromTemplate();
+  }, [startWithNewDraft, loadingList, projects.length, isNewDraft]);
 
   const hasProjects = projects.length > 0;
 
