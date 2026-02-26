@@ -64,12 +64,13 @@ export default function CompanyProjectsEditorPage() {
   const [rawJsonInput, setRawJsonInput] = useState('');
   const [savedRawJson, setSavedRawJson] = useState<string | null>(null);
 
-  const [validation, setValidation] = useState<ValidationState>({ ok: false, error: null, parsed: null });
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorInfo, setEditorInfo] = useState<string | null>(null);
   const [lastSavedAtUtc, setLastSavedAtUtc] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadingProject, setLoadingProject] = useState(false);
+
+  const parsedValidation = useMemo(() => validateProjectJson(rawJsonInput), [rawJsonInput]);
 
   async function refreshList(nextSelectedProjectId?: string): Promise<CompanyProjectSummary[]> {
     if (!symbol) {
@@ -115,7 +116,6 @@ export default function CompanyProjectsEditorPage() {
       setRawJsonInput(rawJson);
       setSavedRawJson(rawJson);
       setLastSavedAtUtc(project.updated_at_utc);
-      setValidation(validateProjectJson(rawJson));
     } catch (error) {
       setEditorError((error as Error).message);
       await refreshList();
@@ -142,29 +142,26 @@ export default function CompanyProjectsEditorPage() {
     setLastSavedAtUtc(null);
     setEditorError(null);
     setEditorInfo('Created a new draft from template.');
-    setValidation(validateProjectJson(rawJson));
   }
 
   function handleValidate(): void {
-    const next = validateProjectJson(rawJsonInput);
-    setValidation(next);
-    setEditorError(next.error);
-    if (next.ok) {
-      setEditorInfo('JSON is valid locally. Save to run full server validation.');
-    }
-  }
-
-  function handlePrettify(): void {
-    const next = validateProjectJson(rawJsonInput);
-    if (!next.ok || !next.parsed) {
-      setValidation(next);
-      setEditorError(next.error);
+    if (!parsedValidation.ok) {
+      setEditorError(parsedValidation.error);
       return;
     }
 
-    const pretty = JSON.stringify(next.parsed, null, 2);
+    setEditorError(null);
+    setEditorInfo('JSON is valid locally. Save to run full server validation.');
+  }
+
+  function handlePrettify(): void {
+    if (!parsedValidation.ok || !parsedValidation.parsed) {
+      setEditorError(parsedValidation.error);
+      return;
+    }
+
+    const pretty = JSON.stringify(parsedValidation.parsed, null, 2);
     setRawJsonInput(pretty);
-    setValidation(validateProjectJson(pretty));
     setEditorError(null);
     setEditorInfo('JSON prettified.');
   }
@@ -185,10 +182,8 @@ export default function CompanyProjectsEditorPage() {
       return;
     }
 
-    const nextValidation = validateProjectJson(rawJsonInput);
-    setValidation(nextValidation);
-    if (!nextValidation.ok || !nextValidation.parsed) {
-      setEditorError(nextValidation.error);
+    if (!parsedValidation.ok || !parsedValidation.parsed) {
+      setEditorError(parsedValidation.error);
       return;
     }
 
@@ -206,7 +201,7 @@ export default function CompanyProjectsEditorPage() {
         symbol,
         project_id: projectIdInput.trim(),
         project_name: projectNameInput.trim() || null,
-        raw_json: nextValidation.parsed,
+        raw_json: parsedValidation.parsed,
       });
 
       setIsNewDraft(false);
@@ -239,7 +234,6 @@ export default function CompanyProjectsEditorPage() {
         setRawJsonInput('');
         setSavedRawJson(null);
         setLastSavedAtUtc(null);
-        setValidation({ ok: false, error: null, parsed: null });
       }
 
       await refreshList();
@@ -251,12 +245,11 @@ export default function CompanyProjectsEditorPage() {
   function handleResetToSaved(): void {
     if (savedRawJson == null) return;
     setRawJsonInput(savedRawJson);
-    setValidation(validateProjectJson(savedRawJson));
     setEditorError(null);
     setEditorInfo('Reset to last saved JSON.');
   }
 
-  const canSave = Boolean(symbol) && validation.ok && !saving;
+  const canSave = Boolean(symbol) && parsedValidation.ok && !saving;
 
   return (
     <div className="project-editor-page">
@@ -327,7 +320,7 @@ export default function CompanyProjectsEditorPage() {
               value={rawJsonInput}
               onChange={(event) => {
                 setRawJsonInput(event.target.value);
-                setValidation({ ok: false, error: null, parsed: null });
+                setEditorError(null);
               }}
             />
           </label>
