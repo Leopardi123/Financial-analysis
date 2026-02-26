@@ -13,16 +13,18 @@ export function computeCorporatePipeline(input: CorporatePipelineInput): Corpora
 
   const financing = computeCorporateFinancing({
     ...input.financing,
-    npvToday_USD_total: projects.npvToday_USD_total,
+    NPV_today_USD: projects.npvToday_USD_total,
+    shares_current: input.market.shares_current,
+    price_current_TargetCurrency: input.market.price_current_TargetCurrency,
   });
 
   const marketValue = computeCorporateMarketValue({
     ...input.market,
-    cash_AfterCashFirst_TargetCurrency_t0: financing.cash_AfterCashFirst_TargetCurrency_t0,
-    debt_TargetCurrency_t0: financing.debt_TargetCurrency_t0,
-    enterpriseAdjustments_TargetCurrency_t0: financing.enterpriseAdjustments_TargetCurrency_t0,
-    npvToday_TargetCurrency: financing.npvToday_TargetCurrency,
-    navToday_TargetCurrency: financing.navToday_TargetCurrency,
+    cash_AfterCashFirst_TargetCurrency_t0: financing.cash_t0_post_TargetCurrency,
+    debt_TargetCurrency_t0: financing.debt_t0_post_TargetCurrency,
+    enterpriseAdjustments_TargetCurrency_t0: 0,
+    npvToday_TargetCurrency: financing.NPV_today_TargetCurrency,
+    navToday_TargetCurrency: financing.NAV_today_TargetCurrency,
   });
 
   const equityFinancing = computeCorporateEquityFinancing({
@@ -34,21 +36,18 @@ export function computeCorporatePipeline(input: CorporatePipelineInput): Corpora
   const dcfProdStart_present_USD_total = projects.dcfProdStart_present_USD_total;
   const fx = input.financing.fx_USD_to_TargetCurrency;
   const cfLOM_TargetCurrency =
-    cfLOM_USD_total !== null && Number.isFinite(cfLOM_USD_total) && fx !== null && Number.isFinite(fx)
+    cfLOM_USD_total !== null && Number.isFinite(cfLOM_USD_total) && Number.isFinite(fx)
       ? cfLOM_USD_total * fx
       : null;
   const dcfProdStart_present_TargetCurrency =
-    dcfProdStart_present_USD_total !== null &&
-    Number.isFinite(dcfProdStart_present_USD_total) &&
-    fx !== null &&
-    Number.isFinite(fx)
+    dcfProdStart_present_USD_total !== null && Number.isFinite(dcfProdStart_present_USD_total) && Number.isFinite(fx)
       ? dcfProdStart_present_USD_total * fx
       : null;
 
   const perShare = computeCorporatePerShare({
-    shares_post_financing: equityFinancing.shares_post_financing,
-    npvToday_TargetCurrency: financing.npvToday_TargetCurrency,
-    navToday_TargetCurrency: financing.navToday_TargetCurrency,
+    shares_post_financing: financing.shares_post_financing ?? equityFinancing.shares_post_financing,
+    npvToday_TargetCurrency: financing.NPV_today_TargetCurrency,
+    navToday_TargetCurrency: financing.NAV_today_TargetCurrency,
     cfLOM_TargetCurrency,
     dcfProdStart_present_TargetCurrency,
   });
