@@ -78,6 +78,8 @@ export const PRICE_KEY_DEFINITIONS: readonly PriceKeyDefinition[] = [
 
 export const PRICE_KEY_SET = new Set(PRICE_KEY_DEFINITIONS.map((definition) => definition.priceKey));
 
+export type PriceKey = (typeof PRICE_KEY_DEFINITIONS)[number]["priceKey"];
+
 export function getPriceKeyDefinition(priceKey: string): PriceKeyDefinition {
   const definition = PRICE_KEY_DEFINITIONS.find((item) => item.priceKey === priceKey);
   if (!definition) {

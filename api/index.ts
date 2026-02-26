@@ -1,3 +1,10 @@
+import { query } from "./_db.js";
+import { getLatestPriceCached } from "../src/lib/prices/latestCache.js";
+import { readHistoryRowsInRange } from "../src/lib/prices/db/readHistory.js";
+import { refreshHistoryRangeToMonthlyBlobs } from "../src/lib/prices/refreshHistory.js";
+import { PRICE_TABLES } from "../src/lib/prices/db/schema.js";
+import { PRICE_KEY_SET, type PriceKey } from "../src/lib/prices/keys.js";
+
 type Handler = (req: any, res: any) => Promise<void> | void;
 
 function normalizePathSegments(req: any): string[] {
@@ -111,6 +118,91 @@ export default async function handler(req: any, res: any) {
       setDebugHeaders();
       const mod = await import("../src/server/routes/sector/manual-input.js");
       await mod.default(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "prices" && segments[1] === "latest") {
+      matched = "prices/latest";
+      setDebugHeaders();
+      const keysParam = String(req.query?.keys ?? "").trim();
+      const keys = keysParam.split(",").map((key) => key.trim()).filter((key) => key.length > 0);
+      if (keys.length === 0) {
+        res.status(400).json({ ok: false, error: "keys query parameter is required" });
+        return;
+      }
+
+      const mapRows = await query(
+        `SELECT price_key, provider_symbol
+         FROM ${PRICE_TABLES.providerMap}
+         WHERE provider = 'FMP' AND price_key IN (${keys.map(() => "?").join(", ")})`,
+        keys,
+      ) as Array<{ price_key: string; provider_symbol: string }>;
+      const symbolByKey = new Map(mapRows.map((row) => [String(row.price_key), String(row.provider_symbol)]));
+
+      const data: Record<string, { price: number | null; asof_utc: string | null; provider: "FMP"; source_symbol: string | null }> = {};
+      for (const key of keys) {
+        if (!PRICE_KEY_SET.has(key)) {
+          data[key] = { price: null, asof_utc: null, provider: "FMP", source_symbol: null };
+          continue;
+        }
+        const symbol = symbolByKey.get(key);
+        if (!symbol) {
+          data[key] = { price: null, asof_utc: null, provider: "FMP", source_symbol: null };
+          continue;
+        }
+
+        try {
+          const latest = await getLatestPriceCached(key as PriceKey, symbol);
+          data[key] = { price: latest.price, asof_utc: latest.asof_utc, provider: "FMP", source_symbol: symbol };
+        } catch {
+          data[key] = { price: null, asof_utc: null, provider: "FMP", source_symbol: symbol };
+        }
+      }
+
+      res.status(200).json({ asof_utc: new Date().toISOString(), data });
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "prices" && segments[1] === "history") {
+      matched = "prices/history";
+      setDebugHeaders();
+      const key = String(req.query?.key ?? "").trim();
+      const from = String(req.query?.from ?? "").trim();
+      const to = String(req.query?.to ?? "").trim();
+      const refresh = String(req.query?.refresh ?? "") === "1";
+
+      if (!PRICE_KEY_SET.has(key)) {
+        res.status(400).json({ ok: false, error: "invalid key" });
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+        res.status(400).json({ ok: false, error: "invalid from/to" });
+        return;
+      }
+
+      const mapRows = await query(
+        `SELECT provider_symbol
+         FROM ${PRICE_TABLES.providerMap}
+         WHERE provider = 'FMP' AND price_key = ?
+         LIMIT 1`,
+        [key],
+      ) as Array<{ provider_symbol: string }>;
+      const sourceSymbol = mapRows[0]?.provider_symbol ? String(mapRows[0].provider_symbol) : null;
+
+      if (refresh) {
+        await refreshHistoryRangeToMonthlyBlobs({ priceKey: key as PriceKey, from, to });
+      }
+
+      const history = await readHistoryRowsInRange({ priceKey: key as PriceKey, from, to });
+      res.status(200).json({
+        key,
+        from,
+        to,
+        rows: history.rows,
+        provider: "FMP",
+        source_symbol: sourceSymbol,
+        meta: { missing: history.missing },
+      });
       return;
     }
 
