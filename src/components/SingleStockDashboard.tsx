@@ -2122,6 +2122,11 @@ Capital Available: ${availableLabel}`,
           <button type="button" onClick={() => setPrimaryView("reported")} disabled={primaryView === "reported"}>Reported (Corporate)</button>
           <button type="button" onClick={() => setPrimaryView("modeled")} disabled={primaryView === "modeled"}>Modeled (NAV / DCF)</button>
           <button type="button" onClick={() => setPrimaryView("projects")} disabled={primaryView === "projects"}>Projects</button>
+          {analysisMode === "prerevenue" && (
+            <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
+              Edit projects
+            </a>
+          )}
         </div>
       </div>
 
@@ -2459,6 +2464,7 @@ Capital Available: ${availableLabel}`,
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">Corporate Pre-Revenue Core Engine</h1>
             <p className="bread">Graph-first corporate survival, dilution and discipline dashboard. Buffet charts are intentionally hidden for Pre-Revenue.</p>
+            <p className="bread">Need to update project JSON? <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link">Open Project Editor</a></p>
           </div>
 
           <div className="breadcontainersinglecolumn"><h2 className="subrub small">A) Survival Engine</h2></div>
@@ -2751,9 +2757,9 @@ Capital Available: ${availableLabel}`,
             <button type="button" onClick={() => void runProjectSnapshot()} disabled={projectSnapshotLoading || companyProjectsLoading || projectCount === 0}>
               {projectSnapshotLoading ? "Running…" : "Run Project Snapshot"}
             </button>
-            {projectCount === 0 && (
-              <a href="#" className="button-link" style={{ alignSelf: "center" }}>Go to Project Editor</a>
-            )}
+            <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
+              Edit projects
+            </a>
             <button type="button" onClick={() => setProjectInputOpen((prev) => !prev)}>{projectInputOpen ? "Hide inputs" : "Show inputs"}</button>
           </div>
 
