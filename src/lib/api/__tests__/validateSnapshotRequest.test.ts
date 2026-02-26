@@ -37,6 +37,19 @@ function assert(condition: boolean, message: string): void {
 
   assert(happy.ok, 'happy path should validate');
 
+  const withoutBuildFundingNeed = validateSnapshotRequest({
+    targetCurrency: 'SEK',
+    discountRate: 0.1,
+    fx_USD_to_TargetCurrency: 10,
+    market: {
+      shares_current: 100000000,
+      price_current_TargetCurrency: 12.5,
+    },
+    projects: [{ projectId: 'p1', rawJson }],
+  });
+
+  assert(withoutBuildFundingNeed.ok, 'request without buildFundingNeed_USD should validate');
+
   const badDiscount = validateSnapshotRequest({
     targetCurrency: 'SEK',
     discountRate: 0.5,
