@@ -4,7 +4,7 @@ import SelfTestPage from './pages/dev/SelfTestPage';
 import PlaygroundSnapshot from './pages/PlaygroundSnapshot';
 
 export default function App() {
-  const pathname = window.location.pathname;
+  const pathname = window.location.pathname.replace(/\/$/, '') || '/';
 
   if (pathname === '/dev/engine-sandbox') {
     return <EngineSandboxPage />;
@@ -14,7 +14,7 @@ export default function App() {
     return <SelfTestPage />;
   }
 
-  if (pathname === '/playground/snapshot') {
+  if (pathname === '/playground' || pathname === '/playground/snapshot') {
     return <PlaygroundSnapshot />;
   }
 
