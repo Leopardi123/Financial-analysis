@@ -5,12 +5,6 @@ import type { ProjectEngineFullProductionV1Input } from '../types.ts';
 import type { QtyUnit } from './schema.ts';
 import type { ParsedProjectJsonV1 } from './parse.ts';
 
-function addDays(baseDate: string, days: number): string {
-  const date = new Date(`${baseDate}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 function resolveSeriesAtTargets(rows: HistoryRow[], targets: string[]): Array<number | null> {
   const sortedRows = [...rows].sort((a, b) => a.date.localeCompare(b.date));
   const series: Array<number | null> = [];
@@ -92,7 +86,13 @@ export async function resolveProjectPricesToEngineInput(
 
   const masterN = parsed.engineInputWithoutPrices.masterN;
   const len = masterN + 1;
-  const targets = Array.from({ length: len }, (_item, t) => addDays(from, t * 365));
+  const targets = parsed.engineInputWithoutPrices.periodEndDatesUtc
+    ? [...parsed.engineInputWithoutPrices.periodEndDatesUtc]
+    : Array.from({ length: len }, (_item, t) => {
+        const date = new Date(`${from}T00:00:00Z`);
+        date.setUTCDate(date.getUTCDate() + t * 365);
+        return date.toISOString().slice(0, 10);
+      });
 
   const spotPriceUSDByMetal: Record<string, Array<number | null>> = {};
   const payableQtyByMetalCanonical: Record<string, Array<number | null>> = {};
@@ -137,6 +137,8 @@ export async function resolveProjectPricesToEngineInput(
     auPriceUSDPerOz = [...parsed.priceOverrides.auPriceUSDPerOz];
   }
 
+  const usedFallbackDateMapping = parsed.engineInputWithoutPrices.periodEndDatesUtc === undefined;
+
   return {
     masterN,
     streamsByMetal: parsed.engineInputWithoutPrices.streamsByMetal,
@@ -148,5 +150,6 @@ export async function resolveProjectPricesToEngineInput(
     aisc: {
       auPriceUSDPerOz,
     },
+    ...(usedFallbackDateMapping ? { meta: { usedFallbackDateMapping: true } } : {}),
   };
 }

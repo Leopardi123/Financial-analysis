@@ -156,6 +156,10 @@ export type ProjectEngineFullProductionV1Input = {
   phase2: { discountRate: number };
 
   aisc: { auPriceUSDPerOz: (number | null)[] };
+
+  meta?: {
+    usedFallbackDateMapping?: boolean;
+  };
 };
 
 export type ProjectEngineFullProductionV1Output = {

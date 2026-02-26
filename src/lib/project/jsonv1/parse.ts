@@ -55,6 +55,40 @@ function asRecordOfSeries(value: unknown, path: string, expectedLength: number):
 
 const QTY_UNIT_SET = new Set<QtyUnit>(['toz', 'g', 'kg', 'lb', 'tonne', 'short_ton', 'long_ton']);
 
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function parsePeriodEndDates(raw: unknown, expectedLength: number): Array<string> | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(raw)) {
+    fail('time.periodEndDatesUtc', `array length ${expectedLength}`, raw);
+  }
+
+  if (raw.length !== expectedLength) {
+    fail('time.periodEndDatesUtc', `array length ${expectedLength}`, raw.length);
+  }
+
+  const periodEndDatesUtc: string[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const value = raw[i];
+    if (typeof value !== 'string' || !isIsoDate(value)) {
+      fail(`time.periodEndDatesUtc[${i}]`, 'YYYY-MM-DD string', value);
+    }
+
+    if (i > 0 && raw[i - 1] >= value) {
+      fail(`time.periodEndDatesUtc[${i}]`, `strictly increasing date after ${raw[i - 1]}`, value);
+    }
+
+    periodEndDatesUtc.push(value);
+  }
+
+  return periodEndDatesUtc;
+}
+
 function parseOperations(raw: unknown, expectedLength: number): ProjectJsonV1['operations'] {
   if (raw == null) {
     return raw as null;
@@ -132,6 +166,7 @@ export type ParsedProjectJsonV1 = {
     priceKeyByMetal: Record<string, string>;
     auPriceKey: string;
     payableQtyUnitByMetal: Record<string, QtyUnit>;
+    periodEndDatesUtc?: Array<string>;
   };
   context: ProjectJsonV1Context;
   priceOverrides: NonNullable<ProjectJsonV1['priceOverrides']>;
@@ -154,6 +189,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   const masterN = asInteger(raw.time.masterN, 'time.masterN', 0);
   const productionStartPeriod = asInteger(raw.time.productionStartPeriod, 'time.productionStartPeriod', 0);
   const expectedLength = masterN + 1;
+  const periodEndDatesUtc = parsePeriodEndDates(raw.time.periodEndDatesUtc, expectedLength);
 
   if (!isPlainObject(raw.economics)) {
     fail('economics', 'object', raw.economics);
@@ -339,6 +375,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
       priceKeyByMetal,
       auPriceKey,
       payableQtyUnitByMetal,
+      periodEndDatesUtc,
     },
     context: {
       operations: operations ?? null,
