@@ -142,6 +142,8 @@ async function defaultProjectToSeries(args: {
     periodEndDatesUtc,
     capexUSD: out.capexUSD_used,
     fcffUSD: out.phase1.fcffUSD,
+    grossRevenueUSD: out.revenue.grossRevenueUSD,
+    auPriceUSDPerOz: resolved.aisc.auPriceUSDPerOz,
     sustainingCostUSD: out.phase1.sustainingCostUSD,
     payableAuEqOz: out.aisc.payableAuEqOz,
   };
@@ -178,6 +180,8 @@ async function projectToSeriesViaDeps(
     periodEndDatesUtc,
     capexUSD: out.capexUSD_used,
     fcffUSD: out.phase1.fcffUSD,
+    grossRevenueUSD: out.revenue.grossRevenueUSD,
+    auPriceUSDPerOz: resolvedInput.aisc.auPriceUSDPerOz,
     sustainingCostUSD: out.phase1.sustainingCostUSD,
     payableAuEqOz: out.aisc.payableAuEqOz,
   };
@@ -199,6 +203,8 @@ export async function aggregateProjectsCorporateV1(
 
     assertSeriesLength(projects[index].capexUSD, periodLength, projectId, 'capexUSD');
     assertSeriesLength(projects[index].fcffUSD, periodLength, projectId, 'fcffUSD');
+    assertSeriesLength(projects[index].grossRevenueUSD, periodLength, projectId, 'grossRevenueUSD');
+    assertSeriesLength(projects[index].auPriceUSDPerOz, periodLength, projectId, 'auPriceUSDPerOz');
     assertSeriesLength(projects[index].sustainingCostUSD, periodLength, projectId, 'sustainingCostUSD');
     assertSeriesLength(projects[index].payableAuEqOz, periodLength, projectId, 'payableAuEqOz');
   }
@@ -208,6 +214,8 @@ export async function aggregateProjectsCorporateV1(
 
   const capexUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.capexUSD);
   const fcffUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.fcffUSD);
+  const grossRevenueUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.grossRevenueUSD);
+  const auPriceUSDPerOz = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.auPriceUSDPerOz);
   const sustainingCostUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.sustainingCostUSD);
   const payableAuEqOz_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.payableAuEqOz);
 
@@ -224,6 +232,8 @@ export async function aggregateProjectsCorporateV1(
     corporateMasterN,
     capexUSD_total,
     fcffUSD_total,
+    grossRevenueUSD_total,
+    auPriceUSDPerOz,
     sustainingCostUSD_total,
     payableAuEqOz_total,
     aiscAuEqUSDPerOz_LOM,

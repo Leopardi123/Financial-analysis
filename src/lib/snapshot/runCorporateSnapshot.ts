@@ -11,6 +11,7 @@ import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
 import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics } from './lista2CfDcf.ts';
+import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -169,6 +170,8 @@ export async function runCorporateSnapshotPipeline(args: {
             periodEndDatesUtc,
             capexUSD: out.capexUSD_used,
             fcffUSD: out.phase1.fcffUSD,
+            grossRevenueUSD: out.revenue.grossRevenueUSD,
+            auPriceUSDPerOz: resolved.aisc.auPriceUSDPerOz,
             sustainingCostUSD: out.phase1.sustainingCostUSD,
             payableAuEqOz: out.aisc.payableAuEqOz,
           };
@@ -278,6 +281,28 @@ export async function runCorporateSnapshotPipeline(args: {
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
 
+
+    const rawBody = args.body as Record<string, unknown>;
+    const rawBalance = rawBody.balanceSheet;
+    const totalStockholdersEquity_USD =
+      typeof rawBalance === 'object' && rawBalance !== null && Number.isFinite((rawBalance as Record<string, unknown>).totalStockholdersEquity_t0_USD)
+        ? ((rawBalance as Record<string, unknown>).totalStockholdersEquity_t0_USD as number)
+        : typeof rawBalance === 'object' && rawBalance !== null && Number.isFinite((rawBalance as Record<string, unknown>).totalStockholdersEquity_USD)
+          ? ((rawBalance as Record<string, unknown>).totalStockholdersEquity_USD as number)
+          : null;
+
+    const lista4 = computeLista4TenYearMetrics({
+      masterN: aggregation.corporateMasterN,
+      revenueUSD_total: aggregation.grossRevenueUSD_total,
+      fcffUSD_total: aggregation.fcffUSD_total,
+      auPriceUSDPerOz: aggregation.auPriceUSDPerOz,
+      fx_USD_to_TargetCurrency: fxRate,
+      shares_current: input.market.shares_current,
+      shares_post_financing: financing.shares_post_financing,
+      ev_TargetCurrency: null,
+      totalStockholdersEquity_USD,
+    });
+
     const snapshot = buildCorporateSnapshot({
       targetCurrency: input.targetCurrency,
       aggregation,
@@ -289,6 +314,7 @@ export async function runCorporateSnapshotPipeline(args: {
         minorityInterest_TargetCurrency: input.market.minorityInterest_TargetCurrency,
       },
       lista2CfDcf: lista2.metrics,
+      lista4TenYear: lista4,
     });
 
     return { ok: true, snapshot, diagnostics };
