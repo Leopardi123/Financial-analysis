@@ -103,6 +103,22 @@ function baseAggregation(): CorporateAggregationOutput {
   assertEqual(nullPrice.EV_over_NAV, null, 'null EV gives null EV_over_NAV');
   assertEqual(nullPrice.P_over_NAV, null, 'null market cap gives null P_over_NAV');
 
+
+  const negativeDenominators = computeMarketValue({
+    market: {
+      shares_current: 100,
+      price_current_TargetCurrency: 10,
+    },
+    financing: {
+      ...financing,
+      NPV_today_TargetCurrency: -500,
+      NAV_today_TargetCurrency: -400,
+    },
+  });
+  assertEqual(negativeDenominators.EV_over_NPV, null, 'non-positive NPV gives null EV_over_NPV');
+  assertEqual(negativeDenominators.EV_over_NAV, null, 'non-positive NAV gives null EV_over_NAV');
+  assertEqual(negativeDenominators.P_over_NAV, null, 'non-positive NAV gives null P_over_NAV');
+
   const withAdjustments = computeMarketValue({
     market: {
       shares_current: 100,
@@ -132,6 +148,12 @@ function baseAggregation(): CorporateAggregationOutput {
   assertEqual(snapshot.targetCurrency, 'SEK', 'snapshot keeps target currency');
   assertEqual(snapshot.NPV_today_TargetCurrency, 500, 'snapshot keeps convenience NPV');
   assertEqual(snapshot.NAV_today_TargetCurrency, 400, 'snapshot keeps convenience NAV');
+  assertEqual(snapshot.MarketCap_TargetCurrency, 1000, 'snapshot exposes root-level market cap');
+  assertEqual(snapshot.EV_TargetCurrency, 1100, 'snapshot exposes root-level EV');
+  assertAlmostEqual(snapshot.EV_perShare_TargetCurrency, 11, 'snapshot exposes root-level EV per share');
+  assertAlmostEqual(snapshot.EV_over_NPV, 2.2, 'snapshot exposes root-level EV over NPV');
+  assertAlmostEqual(snapshot.EV_over_NAV, 2.75, 'snapshot exposes root-level EV over NAV');
+  assertAlmostEqual(snapshot.P_over_NAV, 2.5, 'snapshot exposes root-level P over NAV');
 
   console.log('Corporate snapshot market value tests passed');
 })();

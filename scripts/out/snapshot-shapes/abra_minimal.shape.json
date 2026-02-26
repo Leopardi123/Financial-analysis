@@ -1,7 +1,13 @@
 {
   "scalarKeys": [
+    "EV_over_NAV",
+    "EV_over_NPV",
+    "EV_perShare_TargetCurrency",
+    "EV_TargetCurrency",
+    "MarketCap_TargetCurrency",
     "NAV_today_TargetCurrency",
     "NPV_today_TargetCurrency",
+    "P_over_NAV",
     "targetCurrency"
   ],
   "objectKeys": [
@@ -20,11 +26,7 @@
     "EBITDA_10Y_TargetCurrency",
     "EBITDA_TargetCurrency",
     "EnterpriseAdjustments_TargetCurrency",
-    "EV_over_NAV",
-    "EV_over_NPV",
     "EV_over_Revenue_10Y",
-    "EV_perShare_TargetCurrency",
-    "EV_TargetCurrency",
     "FCFF_10Y_TargetCurrency",
     "FCFF_TargetCurrency",
     "GA_per_revenue",
@@ -33,12 +35,10 @@
     "in_situ_value_per_share_TargetCurrency",
     "in_situ_value_TargetCurrency",
     "IRR",
-    "MarketCap_TargetCurrency",
     "median_EV_NPV_multiple",
     "median_P_NAV_multiple",
     "millingCost_TargetCurrency",
     "miningCost_TargetCurrency",
-    "P_over_NAV",
     "payableQtyByMetal",
     "payback_real_years",
     "payback_year",
