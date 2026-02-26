@@ -1,6 +1,6 @@
 import { batch } from "../../../../api/_db.js";
-import { PRICE_KEY_DEFINITIONS, type PriceKind } from "../keys.ts";
-import { PRICE_TABLES } from "./schema.ts";
+import { PRICE_KEY_DEFINITIONS, type PriceKind } from "../keys.js";
+import { PRICE_TABLES } from "./schema.js";
 
 interface ProviderMapping {
   priceKey: string;
