@@ -7,6 +7,8 @@ import type {
 } from '../financingEquity/types.ts';
 import { computeCorporateMarketValue } from '../marketValue/engine.ts';
 import type { CorporateMarketValueOutput } from '../marketValue/types.ts';
+import { computeCorporateOverheadOverlay } from '../overhead/engine.ts';
+import type { CorporateOverheadOverlayOutput } from '../overhead/types.ts';
 import { computeCorporatePerShare } from '../perShare/engine.ts';
 import type { CorporatePerShareOutput } from '../perShare/types.ts';
 import { computeCorporateFromProjectInputs } from '../projects/fromProjectInputs.ts';
@@ -24,6 +26,11 @@ export type CorporateFullPipelineFromProjectInputsInput = {
     shares_current: number | null;
   };
   equityFinancing: Omit<CorporateEquityFinancingInput, 'shares_current'>;
+  overhead?: {
+    enabled: boolean;
+    corpGA_cash_USD: (number | null)[];
+    corpSBC_USD: (number | null)[];
+  } | null;
   diagnose?: boolean | null;
   validate?: boolean | null;
 };
@@ -31,6 +38,7 @@ export type CorporateFullPipelineFromProjectInputsInput = {
 export type CorporateFullPipelineFromProjectInputsOutput = {
   projectStage: CorporateFromProjectInputsOutput;
   corporateProjects: CorporateProjectsOutput;
+  overheadOverlay: CorporateOverheadOverlayOutput | null;
   financing: CorporateFinancingOutput;
   marketValue: CorporateMarketValueOutput;
   equityFinancing: CorporateEquityFinancingOutput;
@@ -48,9 +56,24 @@ export function computeCorporateFullPipelineFromProjectInputs(
 
   const corporateProjects = projectStage.corporateProjects;
 
+  let overheadOverlay: CorporateOverheadOverlayOutput | null = null;
+  let npvUSD_for_financing = corporateProjects.npvToday_USD_total;
+
+  if (input.overhead?.enabled) {
+    overheadOverlay = computeCorporateOverheadOverlay({
+      masterN: input.projects.masterN,
+      discountRate: input.projects.discountRate,
+      fcffUSD_total: corporateProjects.fcffUSD_total,
+      corpGA_cash_USD: input.overhead.corpGA_cash_USD,
+      corpSBC_USD: input.overhead.corpSBC_USD,
+    });
+
+    npvUSD_for_financing = overheadOverlay.npvToday_USD_after_overhead;
+  }
+
   const financing = computeCorporateFinancing({
     ...input.financing,
-    npvToday_USD_total: corporateProjects.npvToday_USD_total,
+    npvToday_USD_total: npvUSD_for_financing,
   });
 
   const marketValue = computeCorporateMarketValue({
@@ -86,6 +109,7 @@ export function computeCorporateFullPipelineFromProjectInputs(
   return {
     projectStage,
     corporateProjects,
+    overheadOverlay,
     financing,
     marketValue,
     equityFinancing,
