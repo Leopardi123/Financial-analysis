@@ -3,10 +3,18 @@ export type SnapshotScenario =
   | { mode: 'percentile'; lookbackYears: number; percentile: number; window: 'trailing'; sampling: 'eod_close'; anchor: 'period_end' }
   | { mode: 'fixed'; fixedPriceByKey: Record<string, number> };
 
+export type SnapshotFxConfig = {
+  source: 'auto' | 'manual';
+  anchor: 'today' | 't0_period_end';
+  scenario: SnapshotScenario;
+  manual_fx_USD_to_TargetCurrency?: number;
+};
+
 export type SnapshotRequest = {
   targetCurrency: string;
   discountRate: number;
-  fx_USD_to_TargetCurrency: number;
+  // legacy/manual fallback; callers may still send top-level FX directly
+  fx_USD_to_TargetCurrency?: number;
   market: {
     shares_current: number;
     price_current_TargetCurrency: number;
@@ -25,6 +33,7 @@ export type SnapshotRequest = {
     equity_raise_price_TargetCurrency?: number | null;
   };
   buildFundingNeed_USD?: number | null;
+  fx: SnapshotFxConfig;
   scenario: SnapshotScenario;
   projects: Array<{
     projectId: string;
@@ -72,9 +81,9 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     errors.push('discountRate must satisfy 0 < r <= 0.25');
   }
 
-  const fx = readFiniteNumber(body.fx_USD_to_TargetCurrency);
-  if (fx === null || !(fx > 0)) {
-    errors.push('fx_USD_to_TargetCurrency must be finite and > 0');
+  const legacyFx = readFiniteNumber(body.fx_USD_to_TargetCurrency);
+  if (body.fx_USD_to_TargetCurrency !== undefined && (legacyFx === null || !(legacyFx > 0))) {
+    errors.push('fx_USD_to_TargetCurrency must be finite and > 0 when provided');
   }
 
   const market = body.market;
@@ -225,6 +234,92 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     }
   }
 
+
+  const fxRaw = body.fx;
+  let fxSource: 'auto' | 'manual' = 'auto';
+  let fxAnchor: 'today' | 't0_period_end' = 'today';
+  let fxScenario: SnapshotScenario = { mode: 'spot' };
+  let manualFx: number | undefined;
+
+  if (fxRaw !== undefined) {
+    if (!isObject(fxRaw)) {
+      errors.push('fx must be an object when provided');
+    } else {
+      const source = fxRaw.source ?? 'auto';
+      if (source !== 'auto' && source !== 'manual') {
+        errors.push('fx.source must be one of: auto, manual');
+      } else {
+        fxSource = source;
+      }
+
+      const anchor = fxRaw.anchor ?? 'today';
+      if (anchor !== 'today' && anchor !== 't0_period_end') {
+        errors.push('fx.anchor must be one of: today, t0_period_end');
+      } else {
+        fxAnchor = anchor;
+      }
+
+      const fxScenarioRaw = fxRaw.scenario;
+      if (fxScenarioRaw !== undefined) {
+        if (!isObject(fxScenarioRaw)) {
+          errors.push('fx.scenario must be an object when provided');
+        } else {
+          const mode = fxScenarioRaw.mode;
+          if (mode === 'spot') {
+            fxScenario = { mode: 'spot' };
+          } else if (mode === 'percentile') {
+            const lookbackYears = readFiniteNumber(fxScenarioRaw.lookbackYears) ?? 10;
+            const percentile = readFiniteNumber(fxScenarioRaw.percentile) ?? 50;
+            if (!Number.isInteger(lookbackYears) || lookbackYears < 1 || lookbackYears > 30) {
+              errors.push('fx.scenario.lookbackYears must be an integer in [1, 30] when mode=percentile');
+            }
+            if (!Number.isInteger(percentile) || percentile < 1 || percentile > 99) {
+              errors.push('fx.scenario.percentile must be an integer in [1, 99] when mode=percentile');
+            }
+            fxScenario = {
+              mode: 'percentile',
+              lookbackYears: Number.isInteger(lookbackYears) ? lookbackYears : 10,
+              percentile: Number.isInteger(percentile) ? percentile : 50,
+              window: 'trailing',
+              sampling: 'eod_close',
+              anchor: 'period_end',
+            };
+          } else if (mode === 'fixed') {
+            const fixed = readFiniteNumber(fxScenarioRaw.fixedFx);
+            if (fixed !== null && fixed > 0) {
+              fxScenario = { mode: 'fixed', fixedPriceByKey: {} };
+              manualFx = fixed;
+            } else {
+              fxScenario = { mode: 'fixed', fixedPriceByKey: {} };
+            }
+          } else {
+            errors.push('fx.scenario.mode must be one of: spot, percentile, fixed');
+          }
+        }
+      } else {
+        fxScenario = scenario.mode === 'fixed' ? { mode: 'spot' } : scenario;
+      }
+
+      const manual = readFiniteNumber(fxRaw.manual_fx_USD_to_TargetCurrency);
+      if (fxRaw.manual_fx_USD_to_TargetCurrency !== undefined) {
+        if (manual === null || !(manual > 0)) {
+          errors.push('fx.manual_fx_USD_to_TargetCurrency must be finite and > 0 when provided');
+        } else {
+          manualFx = manual;
+        }
+      }
+    }
+  } else {
+    fxScenario = scenario.mode === 'fixed' ? { mode: 'spot' } : scenario;
+  }
+
+  if (legacyFx !== null && legacyFx !== undefined) {
+    fxSource = 'manual';
+    manualFx = legacyFx;
+  } else if (fxSource === 'manual' && !(Number.isFinite(manualFx) && (manualFx as number) > 0)) {
+    errors.push('fx.manual_fx_USD_to_TargetCurrency must be finite and > 0 when fx.source=manual');
+  }
+
   const projectsRaw = body.projects;
   if (!Array.isArray(projectsRaw) || projectsRaw.length === 0) {
     errors.push('projects must be a non-empty array');
@@ -277,7 +372,13 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     value: {
       targetCurrency,
       discountRate: discountRate as number,
-      fx_USD_to_TargetCurrency: fx as number,
+      fx_USD_to_TargetCurrency: legacyFx ?? manualFx,
+      fx: {
+        source: fxSource,
+        anchor: fxAnchor,
+        scenario: fxScenario,
+        manual_fx_USD_to_TargetCurrency: manualFx,
+      },
       market: {
         shares_current: shares as number,
         price_current_TargetCurrency: currentPrice as number,
