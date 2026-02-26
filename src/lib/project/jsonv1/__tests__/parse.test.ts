@@ -51,6 +51,30 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   badSeriesLength.series.capexUSD = [1, 2, 3];
   assertThrows(() => parseProjectJsonV1(badSeriesLength), /series\.capexUSD/, 'throws on required series length mismatch');
 
+
+  const badPeriodEndDatesLength = getProjectJsonV1Template();
+  badPeriodEndDatesLength.time.periodEndDatesUtc = ['2026-12-31'];
+  assertThrows(
+    () => parseProjectJsonV1(badPeriodEndDatesLength),
+    /time\.periodEndDatesUtc/,
+    'throws on periodEndDatesUtc length mismatch',
+  );
+
+  const badPeriodEndDatesOrder = getProjectJsonV1Template();
+  badPeriodEndDatesOrder.time.periodEndDatesUtc = [
+    '2026-12-31',
+    '2027-12-31',
+    '2027-12-31',
+    '2029-12-31',
+    '2030-12-31',
+    '2031-12-31',
+  ];
+  assertThrows(
+    () => parseProjectJsonV1(badPeriodEndDatesOrder),
+    /time\.periodEndDatesUtc/,
+    'throws on non-increasing periodEndDatesUtc',
+  );
+
   const metalMismatchUnits = getProjectJsonV1Template();
   metalMismatchUnits.metals.payableQtyUnitByMetal = { Au: 'toz' };
   assertThrows(() => parseProjectJsonV1(metalMismatchUnits), /payableQtyUnitByMetal/, 'throws on payable/unit metal mismatch');

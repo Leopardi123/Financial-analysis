@@ -14,7 +14,11 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       currency: 'USD',
       notes: '',
     },
-    time: { masterN, productionStartPeriod: tp },
+    time: {
+      masterN,
+      productionStartPeriod: tp,
+      periodEndDatesUtc: ['2026-12-31', '2027-12-31', '2028-12-31', '2029-12-31', '2030-12-31', '2031-12-31'],
+    },
     economics: { taxRate: 0 },
 
     series: {

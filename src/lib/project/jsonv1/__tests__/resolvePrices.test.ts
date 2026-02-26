@@ -19,6 +19,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   const base = getProjectJsonV1Template();
   base.time.masterN = 2;
   base.time.productionStartPeriod = 1;
+  base.time.periodEndDatesUtc = ['2024-12-31', '2025-12-31', '2026-12-31'];
 
   base.series.capexUSD = [100, 20, 10];
   base.series.operatingCostsUSD = [0, 1, 2];
@@ -26,7 +27,6 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   base.series.siteGandA_USD = [0, 0, 0];
   base.series.reclamationUSD = [0, 0, 0];
   base.series.byproductCreditsUSD = [0, 0, 0];
-
 
   if (base.operations) {
     base.operations.oreMilledTonnes = [null, null, null];
@@ -51,9 +51,11 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
   const mockRows: Record<PriceKey, Array<{ date: string; close: number }>> = {
     XAU_USD_TOZ: [
-      { date: '2022-01-01', close: 1800 },
-      { date: '2023-01-15', close: 1900 },
-      { date: '2024-06-01', close: 2000 },
+      { date: '2024-06-01', close: 10 },
+      { date: '2024-12-30', close: 11 },
+      { date: '2025-01-02', close: 12 },
+      { date: '2025-12-31', close: 20 },
+      { date: '2026-06-30', close: 25 },
     ],
     XAG_USD_TOZ: [],
     CU_USD_LB: [
@@ -73,7 +75,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     {
       parsed,
       from: '2022-01-01',
-      to: '2025-01-01',
+      to: '2027-01-01',
     },
     {
       readHistoryRows: async ({ priceKey }) => ({ rows: mockRows[priceKey], missing: false }),
@@ -81,14 +83,77 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   );
 
   assertEqual(resolved.spotPriceUSDByMetal.Au.length, 3, 'resolved Au series length');
-  assertEqual(resolved.spotPriceUSDByMetal.Au[0], 1800, 'carry-forward at t0');
-  assertEqual(resolved.spotPriceUSDByMetal.Au[1], 1800, 'carry-forward at t1');
-  assertEqual(resolved.spotPriceUSDByMetal.Au[2], 1900, 'carry-forward at t2');
+  assertEqual(resolved.spotPriceUSDByMetal.Au[0], 11, 'explicit date mapping at t0');
+  assertEqual(resolved.spotPriceUSDByMetal.Au[1], 20, 'explicit date mapping at t1');
+  assertEqual(resolved.spotPriceUSDByMetal.Au[2], 25, 'explicit date mapping at t2');
 
   const expectedLb = 2204.6226218487757;
   const gotLb = resolved.payableQtyByMetal.Cu[0];
   assert(gotLb !== null, 'converted qty should not be null');
   assert(Math.abs((gotLb as number) - expectedLb) < 1e-9, 'tonne to lb conversion should apply');
+
+  const missingEarlierData = getProjectJsonV1Template();
+  missingEarlierData.time.masterN = 0;
+  missingEarlierData.time.productionStartPeriod = 0;
+  missingEarlierData.time.periodEndDatesUtc = ['2024-01-01'];
+  missingEarlierData.series.capexUSD = [0];
+  missingEarlierData.series.operatingCostsUSD = [0];
+  missingEarlierData.series.sustainingCapexUSD = [0];
+  missingEarlierData.series.siteGandA_USD = [0];
+  missingEarlierData.series.reclamationUSD = [0];
+  missingEarlierData.series.byproductCreditsUSD = [0];
+  missingEarlierData.metals.payableQtyByMetal = { Au: [1] };
+  missingEarlierData.metals.payableQtyUnitByMetal = { Au: 'toz' };
+  missingEarlierData.metals.priceKeyByMetal = { Au: 'XAU_USD_TOZ' };
+
+  if (missingEarlierData.operations) {
+    missingEarlierData.operations.oreMilledTonnes = [null];
+    missingEarlierData.operations.oreMinedTonnes = [null];
+  }
+
+  const missingParsed = parseProjectJsonV1(missingEarlierData);
+  const missingResolved = await resolveProjectPricesToEngineInput(
+    { parsed: missingParsed, from: '2022-01-01', to: '2025-01-01' },
+    {
+      readHistoryRows: async ({ priceKey }) => ({
+        rows: priceKey === 'XAU_USD_TOZ' ? [{ date: '2024-06-01', close: 10 }] : [],
+        missing: false,
+      }),
+    },
+  );
+  assertEqual(missingResolved.spotPriceUSDByMetal.Au[0], null, 'missing earlier data resolves to null');
+
+  const fallbackBase = getProjectJsonV1Template();
+  fallbackBase.time.masterN = 0;
+  fallbackBase.time.productionStartPeriod = 0;
+  fallbackBase.time.periodEndDatesUtc = undefined;
+  fallbackBase.series.capexUSD = [0];
+  fallbackBase.series.operatingCostsUSD = [0];
+  fallbackBase.series.sustainingCapexUSD = [0];
+  fallbackBase.series.siteGandA_USD = [0];
+  fallbackBase.series.reclamationUSD = [0];
+  fallbackBase.series.byproductCreditsUSD = [0];
+  fallbackBase.metals.payableQtyByMetal = { Au: [1] };
+  fallbackBase.metals.payableQtyUnitByMetal = { Au: 'toz' };
+  fallbackBase.metals.priceKeyByMetal = { Au: 'XAU_USD_TOZ' };
+
+  if (fallbackBase.operations) {
+    fallbackBase.operations.oreMilledTonnes = [null];
+    fallbackBase.operations.oreMinedTonnes = [null];
+  }
+
+  const fallbackParsed = parseProjectJsonV1(fallbackBase);
+  const fallbackResolved = await resolveProjectPricesToEngineInput(
+    { parsed: fallbackParsed, from: '2024-01-01', to: '2025-01-01' },
+    {
+      readHistoryRows: async ({ priceKey }) => ({
+        rows: priceKey === 'XAU_USD_TOZ' ? [{ date: '2024-01-01', close: 1 }] : [],
+        missing: false,
+      }),
+    },
+  );
+
+  assertEqual(fallbackResolved.meta?.usedFallbackDateMapping, true, 'fallback date mapping is flagged');
 
   const withOverrides = {
     ...parsed,

@@ -18,6 +18,7 @@ export type ProjectJsonV1 = {
   time: {
     masterN: number;
     productionStartPeriod: number;
+    periodEndDatesUtc?: Array<string>;
   };
 
   economics: {
