@@ -10,6 +10,7 @@ import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnap
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
 import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
+import { computeLista2CfDcfMetrics } from './lista2CfDcf.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -248,6 +249,35 @@ export async function runCorporateSnapshotPipeline(args: {
       buildFundingNeed_USD: buildFundingNeedUSD,
     });
 
+    const productionStartIndices = projectsForBuildFunding
+      .map((project) => {
+        const productionDate = project.periodEndDatesUtc[project.productionStartPeriod];
+        const corporateIndex = aggregation.corporatePeriodEndDatesUtc.indexOf(productionDate);
+        return corporateIndex >= 0 ? corporateIndex : null;
+      })
+      .filter((value): value is number => value !== null);
+
+    const corporateProductionStartPeriod =
+      productionStartIndices.length > 0 ? Math.min(...productionStartIndices) : null;
+
+    if (projectsForBuildFunding.length > 0 && corporateProductionStartPeriod === null) {
+      diagnostics.warnings.push(
+        'Lista2 CF+DCF productionStartPeriod unavailable after corporate date-grid alignment; outputs set to null',
+      );
+    }
+
+    const lista2 = computeLista2CfDcfMetrics({
+      fcfUSD_total: aggregation.fcffUSD_total,
+      masterN: aggregation.corporateMasterN,
+      productionStartPeriod: corporateProductionStartPeriod,
+      discountRate: input.discountRate,
+      shares_post_financing: financing.shares_post_financing,
+      fx_USD_to_TargetCurrency: fxRate,
+      npvToday_USD: aggregation.NPV_today_USD,
+    });
+    diagnostics.warnings.push(...lista2.warnings);
+    diagnostics.errors.push(...lista2.errors);
+
     const snapshot = buildCorporateSnapshot({
       targetCurrency: input.targetCurrency,
       aggregation,
@@ -258,6 +288,7 @@ export async function runCorporateSnapshotPipeline(args: {
         preferredEquity_TargetCurrency: input.market.preferredEquity_TargetCurrency,
         minorityInterest_TargetCurrency: input.market.minorityInterest_TargetCurrency,
       },
+      lista2CfDcf: lista2.metrics,
     });
 
     return { ok: true, snapshot, diagnostics };
