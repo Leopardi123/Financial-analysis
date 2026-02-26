@@ -10,7 +10,7 @@ function assert(condition: boolean, message: string): void {
 (function runTests() {
   const rawJson = getProjectJsonV1Template();
 
-  const legacyAccepted = validateSnapshotRequest({
+  const inlineProjectsValid = validateSnapshotRequest({
     targetCurrency: 'SEK',
     discountRate: 0.1,
     fx_USD_to_TargetCurrency: 10,
@@ -20,9 +20,9 @@ function assert(condition: boolean, message: string): void {
     },
     projects: [{ projectId: 'p1', rawJson }],
   });
-  assert(legacyAccepted.ok, 'legacy top-level fx should validate');
+  assert(inlineProjectsValid.ok, 'inline projects mode should validate');
 
-  const autoWithoutLegacy = validateSnapshotRequest({
+  const symbolOnlyValid = validateSnapshotRequest({
     targetCurrency: 'SEK',
     discountRate: 0.1,
     market: {
@@ -34,11 +34,11 @@ function assert(condition: boolean, message: string): void {
       anchor: 'today',
       scenario: { mode: 'spot' },
     },
-    projects: [{ projectId: 'p1', rawJson }],
+    symbol: 'ABRA.V',
   });
-  assert(autoWithoutLegacy.ok, 'auto fx request without manual fallback should validate');
+  assert(symbolOnlyValid.ok, 'symbol-only mode should validate');
 
-  const manualInvalid = validateSnapshotRequest({
+  const symbolAndProjectsInvalid = validateSnapshotRequest({
     targetCurrency: 'SEK',
     discountRate: 0.1,
     market: {
@@ -46,34 +46,51 @@ function assert(condition: boolean, message: string): void {
       price_current_TargetCurrency: 12.5,
     },
     fx: {
-      source: 'manual',
-      manual_fx_USD_to_TargetCurrency: 0,
+      source: 'auto',
+      anchor: 'today',
+      scenario: { mode: 'spot' },
     },
+    symbol: 'ABRA.V',
     projects: [{ projectId: 'p1', rawJson }],
   });
-  assert(!manualInvalid.ok, 'manual fx with invalid value should fail');
-  if (!manualInvalid.ok) {
+  assert(!symbolAndProjectsInvalid.ok, 'symbol + projects must fail validation');
+  if (!symbolAndProjectsInvalid.ok) {
     assert(
-      manualInvalid.errors.some((error) => error.includes('fx.manual_fx_USD_to_TargetCurrency')),
-      'manual fx invalid should produce manual fx validation error',
+      symbolAndProjectsInvalid.errors.some((error) => error.includes('Exactly one of symbol or projects')),
+      'symbol + projects should emit XOR error',
     );
   }
 
-  const scenarioOmitted = validateSnapshotRequest({
+  const emptySymbolInvalid = validateSnapshotRequest({
     targetCurrency: 'SEK',
     discountRate: 0.1,
-    fx_USD_to_TargetCurrency: 10,
     market: {
-      shares_current: 100,
-      price_current_TargetCurrency: 10,
+      shares_current: 100000000,
+      price_current_TargetCurrency: 12.5,
     },
-    projects: [{ projectId: 'p1', rawJson }],
+    fx: {
+      source: 'auto',
+      anchor: 'today',
+      scenario: { mode: 'spot' },
+    },
+    symbol: '   ',
   });
+  assert(!emptySymbolInvalid.ok, 'empty symbol should fail validation');
 
-  assert(scenarioOmitted.ok, 'scenario omitted should validate');
-  if (scenarioOmitted.ok) {
-    assert(scenarioOmitted.value.scenario.mode === 'spot', 'scenario omitted defaults to spot mode');
-  }
+  const missingSymbolInvalid = validateSnapshotRequest({
+    targetCurrency: 'SEK',
+    discountRate: 0.1,
+    market: {
+      shares_current: 100000000,
+      price_current_TargetCurrency: 12.5,
+    },
+    fx: {
+      source: 'auto',
+      anchor: 'today',
+      scenario: { mode: 'spot' },
+    },
+  });
+  assert(!missingSymbolInvalid.ok, 'missing symbol/projects should fail validation');
 
   console.log('validateSnapshotRequest tests passed');
 })();

@@ -39,6 +39,7 @@ export type SnapshotRequest = {
     projectId: string;
     rawJson: Record<string, unknown>;
   }>;
+  symbol?: string;
 };
 
 type ValidationResult =
@@ -320,9 +321,26 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     errors.push('fx.manual_fx_USD_to_TargetCurrency must be finite and > 0 when fx.source=manual');
   }
 
+  const symbolRaw = body.symbol;
+  const symbol = typeof symbolRaw === 'string' ? symbolRaw.trim() : '';
+  const hasSymbol = symbolRaw !== undefined;
+  if (hasSymbol && !symbol) {
+    errors.push('symbol must be a non-empty string when provided');
+  }
+
   const projectsRaw = body.projects;
-  if (!Array.isArray(projectsRaw) || projectsRaw.length === 0) {
-    errors.push('projects must be a non-empty array');
+  const hasProjects = projectsRaw !== undefined;
+
+  if (hasSymbol === hasProjects) {
+    errors.push('Exactly one of symbol or projects must be provided');
+  }
+
+  if (hasSymbol && hasProjects) {
+    errors.push('projects must be omitted when symbol is provided');
+  }
+
+  if (hasProjects && (!Array.isArray(projectsRaw) || projectsRaw.length === 0)) {
+    errors.push('projects must be a non-empty array when provided');
   }
 
   const projects: SnapshotRequest['projects'] = [];
@@ -366,38 +384,48 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     return { ok: false, errors, warnings };
   }
 
+  const valueBase = {
+    targetCurrency,
+    discountRate: discountRate as number,
+    fx_USD_to_TargetCurrency: legacyFx ?? manualFx,
+    fx: {
+      source: fxSource,
+      anchor: fxAnchor,
+      scenario: fxScenario,
+      manual_fx_USD_to_TargetCurrency: manualFx,
+    },
+    market: {
+      shares_current: shares as number,
+      price_current_TargetCurrency: currentPrice as number,
+      preferredEquity_TargetCurrency: preferredEquity,
+      minorityInterest_TargetCurrency: minorityInterest,
+    },
+    balanceSheet: isObject(balanceSheetRaw)
+      ? {
+          cash_t0_TargetCurrency: cash,
+          debt_t0_TargetCurrency: debt,
+        }
+      : undefined,
+    financingPlan:
+      isObject(financingPlanRaw) || financingPlanRaw === null
+        ? (financingPlanRaw as SnapshotRequest['financingPlan'])
+        : undefined,
+    buildFundingNeed_USD: buildFundingNeed,
+    scenario,
+  };
+
   return {
     ok: true,
     warnings,
-    value: {
-      targetCurrency,
-      discountRate: discountRate as number,
-      fx_USD_to_TargetCurrency: legacyFx ?? manualFx,
-      fx: {
-        source: fxSource,
-        anchor: fxAnchor,
-        scenario: fxScenario,
-        manual_fx_USD_to_TargetCurrency: manualFx,
-      },
-      market: {
-        shares_current: shares as number,
-        price_current_TargetCurrency: currentPrice as number,
-        preferredEquity_TargetCurrency: preferredEquity,
-        minorityInterest_TargetCurrency: minorityInterest,
-      },
-      balanceSheet: isObject(balanceSheetRaw)
-        ? {
-            cash_t0_TargetCurrency: cash,
-            debt_t0_TargetCurrency: debt,
-          }
-        : undefined,
-      financingPlan:
-        isObject(financingPlanRaw) || financingPlanRaw === null
-          ? (financingPlanRaw as SnapshotRequest['financingPlan'])
-          : undefined,
-      buildFundingNeed_USD: buildFundingNeed,
-      scenario,
-      projects,
-    },
+    value: hasSymbol
+      ? {
+          ...valueBase,
+          symbol,
+          projects: [],
+        }
+      : {
+          ...valueBase,
+          projects,
+        },
   };
 }
