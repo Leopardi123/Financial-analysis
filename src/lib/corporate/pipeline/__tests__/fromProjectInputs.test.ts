@@ -101,6 +101,46 @@ function makeBaseInput(): CorporateFullPipelineFromProjectInputsInput {
     'happy path per-share NAV should use shares_post_financing=1020',
   );
 
+
+
+  const withOverhead = computeCorporateFullPipelineFromProjectInputs({
+    ...makeBaseInput(),
+    overhead: {
+      enabled: true,
+      corpGA_cash_USD: [10],
+      corpSBC_USD: [0],
+    },
+  });
+
+  assert(withOverhead.overheadOverlay !== null, 'enabled overhead should compute overlay output');
+
+  const expectedNpvWithOverhead =
+    withOverhead.overheadOverlay?.npvToday_USD_after_overhead !== null &&
+    withOverhead.overheadOverlay?.npvToday_USD_after_overhead !== undefined
+      ? withOverhead.overheadOverlay.npvToday_USD_after_overhead * (makeBaseInput().financing.fx_USD_to_TargetCurrency as number)
+      : null;
+
+  assert(
+    expectedNpvWithOverhead !== null && withOverhead.financing.npvToday_TargetCurrency === expectedNpvWithOverhead,
+    'financing should use after-overhead NPV when overlay is enabled',
+  );
+
+  const withoutOverhead = computeCorporateFullPipelineFromProjectInputs({
+    ...makeBaseInput(),
+    overhead: {
+      enabled: false,
+      corpGA_cash_USD: [10],
+      corpSBC_USD: [0],
+    },
+  });
+
+  assert(withoutOverhead.overheadOverlay === null, 'disabled overhead should not compute overlay output');
+  assert(
+    withoutOverhead.financing.npvToday_TargetCurrency ===
+      withoutOverhead.corporateProjects.npvToday_USD_total! * (makeBaseInput().financing.fx_USD_to_TargetCurrency as number),
+    'financing should use corporate projects NPV when overlay is disabled',
+  );
+
   const diagnosed = computeCorporateFullPipelineFromProjectInputs({
     ...makeBaseInput(),
     diagnose: true,
