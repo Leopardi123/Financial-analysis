@@ -28,7 +28,7 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
   };
 
   try {
-    const [{ validateSnapshotRequest }, { parseProjectJsonV1 }, { computeProjectEngineFullProductionV1 }, { resolveProjectPricesToEngineInput }, { aggregateProjectsCorporateV1 }, { computeCorporateFinancing }, { deriveBuildFundingNeedUSD }, { buildCorporateSnapshot }] = await Promise.all([
+    const [{ validateSnapshotRequest }, { parseProjectJsonV1 }, { computeProjectEngineFullProductionV1 }, { resolveProjectPricesToEngineInput }, { aggregateProjectsCorporateV1 }, { computeCorporateFinancing }, { deriveBuildFundingNeedUSD }, { buildCorporateSnapshot }, { resolveFxUSDToTarget }, { getTodayUtcDateString }, { fxKeyUSDTo }] = await Promise.all([
       import("../src/lib/api/validateSnapshotRequest.js"),
       import("../src/lib/project/jsonv1/parse.js"),
       import("../src/lib/project/engineFullProductionV1.js"),
@@ -37,6 +37,9 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
       import("../src/lib/corporate/financing/compute.js"),
       import("../src/lib/corporate/financing/deriveBuildFundingNeed.js"),
       import("../src/lib/corporate/snapshot/buildCorporateSnapshot.js"),
+      import("../src/lib/prices/fx/resolveFx.js"),
+      import("../src/lib/prices/fx/date.js"),
+      import("../src/lib/prices/fx/keys.js"),
     ]);
 
     const body = parseRequestBody(req);
@@ -56,6 +59,7 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
         ? { mode: 'fixed' as const, fixedPriceByKey: input.scenario.fixedPriceByKey }
         : { mode: 'spot' as const };
     diagnostics.meta.projectCount = input.projects.length;
+    diagnostics.meta.fxSource = input.fx.source;
 
     const requestedPriceKeys = new Set<string>();
     for (const project of input.projects) {
@@ -168,6 +172,16 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
 
     diagnostics.warnings.push(...aggregation.diagnostics.notes);
 
+    const firstProjectPeriodEnd = typeof input.projects[0]?.rawJson?.time === 'object' && input.projects[0]?.rawJson?.time !== null
+      ? (input.projects[0].rawJson.time as Record<string, unknown>).periodEndDatesUtc
+      : undefined;
+    const t0AnchorDate = Array.isArray(firstProjectPeriodEnd) && typeof firstProjectPeriodEnd[0] === 'string'
+      ? firstProjectPeriodEnd[0]
+      : null;
+    const anchorDateUtc = input.fx.anchor === 't0_period_end'
+      ? (t0AnchorDate ?? getTodayUtcDateString())
+      : getTodayUtcDateString();
+
     let buildFundingNeedUSD = input.buildFundingNeed_USD;
     if (buildFundingNeedUSD === undefined) {
       diagnostics.warnings.push(
@@ -186,10 +200,42 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
       }
     }
 
+    let fxRate = input.fx_USD_to_TargetCurrency ?? null;
+    if (input.fx.source === 'manual') {
+      fxRate = input.fx.manual_fx_USD_to_TargetCurrency ?? input.fx_USD_to_TargetCurrency ?? null;
+    } else {
+      const fxScenario = input.fx.scenario.mode === 'percentile'
+        ? { mode: 'percentile' as const, lookbackYears: input.fx.scenario.lookbackYears, percentile: input.fx.scenario.percentile }
+        : input.fx.scenario.mode === 'fixed'
+          ? {
+              mode: 'fixed' as const,
+              fixedFx: input.fx.scenario.fixedPriceByKey[fxKeyUSDTo(input.targetCurrency)],
+            }
+          : { mode: 'spot' as const };
+      const resolvedFx = await resolveFxUSDToTarget({
+        targetCurrency: input.targetCurrency,
+        anchorDateUtc,
+        scenario: fxScenario,
+        allowRefresh: refresh,
+      });
+      diagnostics.warnings.push(...resolvedFx.warnings);
+      fxRate = resolvedFx.fx;
+
+      if (fxRate === null && input.fx_USD_to_TargetCurrency !== undefined) {
+        fxRate = input.fx_USD_to_TargetCurrency;
+        diagnostics.warnings.push('FX auto-resolve failed; using legacy fx_USD_to_TargetCurrency fallback');
+      }
+      if (fxRate === null) {
+        diagnostics.errors.push('FX missing and auto-resolve failed.');
+        res.status(400).json({ ok: false, diagnostics });
+        return;
+      }
+    }
+
     const financing = computeCorporateFinancing({
       NPV_today_USD: aggregation.NPV_today_USD,
       targetCurrency: input.targetCurrency,
-      fx_USD_to_TargetCurrency: input.fx_USD_to_TargetCurrency,
+      fx_USD_to_TargetCurrency: fxRate as number,
       cash_t0_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? null,
       debt_t0_TargetCurrency: input.balanceSheet?.debt_t0_TargetCurrency ?? null,
       shares_current: input.market.shares_current,

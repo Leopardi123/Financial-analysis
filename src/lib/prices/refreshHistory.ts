@@ -13,6 +13,14 @@ type ProviderMapRow = {
 type QueryFn = (sql: string, params?: Array<string | number | null>) => Promise<any[]>;
 type ExecuteFn = (sql: string, params?: Array<string | number | null>) => Promise<unknown>;
 
+function fxProviderSymbolFromKey(priceKey: string): string | null {
+  const match = /^FX_USD_([A-Z]+)$/.exec(priceKey);
+  if (!match) {
+    return null;
+  }
+  return `USD${match[1]}`;
+}
+
 function monthFromDate(date: string): string {
   return date.slice(0, 7).replace("-", "");
 }
@@ -69,11 +77,12 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
     ) as ProviderMapRow[];
 
     const mapping = mappingRows[0];
-    if (!mapping?.provider_symbol) {
+    const providerSymbol = mapping?.provider_symbol ?? fxProviderSymbolFromKey(args.priceKey);
+    if (!providerSymbol) {
       throw new Error(`No FMP mapping found for price key: ${args.priceKey}`);
     }
 
-    const allRows = await fetchHistoricalFn(mapping.provider_symbol);
+    const allRows = await fetchHistoricalFn(providerSymbol);
     const filtered = allRows.filter((row) => row.date >= args.from && row.date <= args.to);
 
     const byMonth = new Map<string, typeof filtered>();
@@ -108,7 +117,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
           provider = excluded.provider,
           source_symbol = excluded.source_symbol,
           updated_at_utc = excluded.updated_at_utc`,
-        [args.priceKey, yyyymm, encodeMonthlyPayload(merged), mapping.provider_symbol, new Date().toISOString()],
+        [args.priceKey, yyyymm, encodeMonthlyPayload(merged), providerSymbol, new Date().toISOString()],
       );
       monthsTouched += 1;
     }
