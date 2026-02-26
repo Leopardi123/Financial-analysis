@@ -80,30 +80,36 @@ export function introspectSnapshot(obj: unknown): SnapshotShape {
     };
   }
 
-  const entries = Object.entries(obj).sort(([a], [b]) => a.localeCompare(b));
   const scalarKeys: string[] = [];
   const objectKeys: string[] = [];
   const arrayKeys: string[] = [];
   const arrayValueTypes: Record<string, string> = {};
 
-  for (const [key, value] of entries) {
-    if (Array.isArray(value)) {
-      arrayKeys.push(key);
-      arrayValueTypes[key] = summarizeArrayTypes(value);
-      continue;
-    }
+  const visit = (node: Record<string, unknown>, prefix: string): void => {
+    const entries = Object.entries(node).sort(([a], [b]) => a.localeCompare(b));
+    for (const [key, value] of entries) {
+      const path = prefix.length > 0 ? `${prefix}.${key}` : key;
+      if (Array.isArray(value)) {
+        arrayKeys.push(path);
+        arrayValueTypes[path] = summarizeArrayTypes(value);
+        continue;
+      }
 
-    if (isPlainObject(value)) {
-      objectKeys.push(key);
-      continue;
-    }
+      if (isPlainObject(value)) {
+        objectKeys.push(path);
+        visit(value, path);
+        continue;
+      }
 
-    scalarKeys.push(key);
-    const type = classifyScalar(value);
-    if (type === 'null' && typeof value === 'number' && !Number.isFinite(value)) {
-      empty.notes.push(`Top-level key ${key} had non-finite number and was classified as null.`);
+      scalarKeys.push(path);
+      const type = classifyScalar(value);
+      if (type === 'null' && typeof value === 'number' && !Number.isFinite(value)) {
+        empty.notes.push(`Top-level key ${path} had non-finite number and was classified as null.`);
+      }
     }
-  }
+  };
+
+  visit(obj, '');
 
   const shape: SnapshotShape = {
     scalarKeys,

@@ -12,8 +12,254 @@ import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics } from './lista2CfDcf.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
+import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
+
+function toFiniteOrNull(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+function sanitizeSeries(series: Array<number | null>): Array<number | null> {
+  return series.map((value) => toFiniteOrNull(value));
+}
+
+function assertSeriesLength(
+  series: Array<number | null>,
+  expectedLength: number,
+  label: string,
+): void {
+  if (series.length !== expectedLength) {
+    throw new Error(`${label} length must equal masterN+1 (${expectedLength})`);
+  }
+}
+
+function sumStrictAlignedSeries(args: {
+  corporateDates: string[];
+  projectDateSeries: Array<{ projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> }>;
+  label: string;
+}): Array<number | null> {
+  const sums = new Array<number>(args.corporateDates.length).fill(0);
+  const hasContributor = new Array<boolean>(args.corporateDates.length).fill(false);
+  const nullAtDate = new Array<boolean>(args.corporateDates.length).fill(false);
+
+  for (const projectSeries of args.projectDateSeries) {
+    assertSeriesLength(
+      projectSeries.series,
+      projectSeries.periodEndDatesUtc.length,
+      `${args.label} project=${projectSeries.projectId}`,
+    );
+
+    const dateToIndex = new Map<string, number>(
+      projectSeries.periodEndDatesUtc.map((date, idx) => [date, idx]),
+    );
+
+    for (let t = 0; t < args.corporateDates.length; t += 1) {
+      if (nullAtDate[t]) {
+        continue;
+      }
+      const projectIndex = dateToIndex.get(args.corporateDates[t]);
+      if (projectIndex === undefined) {
+        continue;
+      }
+
+      hasContributor[t] = true;
+      const value = toFiniteOrNull(projectSeries.series[projectIndex]);
+      if (value === null) {
+        nullAtDate[t] = true;
+        continue;
+      }
+      sums[t] += value;
+    }
+  }
+
+  return sums.map((value, t) => (nullAtDate[t] || !hasContributor[t] ? null : value));
+}
+
+type ProjectSeriesContext = {
+  projectId: string;
+  periodEndDatesUtc: string[];
+  payableQtyByMetal: Record<string, Array<number | null>>;
+  payableQtyUnitByMetal: Record<string, string>;
+  revenueByMetal_USD: Record<string, Array<number | null>>;
+  operations: {
+    oreMinedTonnes?: Array<number | null>;
+    oreMilledTonnes?: Array<number | null>;
+    throughputUnit: 'tpd' | 'tpa' | null;
+    nameplateThroughput: number | null;
+    utilizationPct: number | null;
+  };
+  economics: {
+    operatingCostsUSD: Array<number | null>;
+    sustainingCapexUSD: Array<number | null>;
+    siteGandA_USD: Array<number | null>;
+    royaltiesUSD: Array<number | null>;
+    reclamationUSD: Array<number | null>;
+    byproductCreditsUSD: Array<number | null>;
+    sustainingCostUSD: Array<number | null>;
+    ebitUSD: Array<number | null>;
+    taxUSD: Array<number | null>;
+    fcffUSD: Array<number | null>;
+    capexUSD: Array<number | null>;
+  };
+};
+
+function buildSnapshotSeries(args: {
+  masterN: number;
+  corporateDates: string[];
+  projectSeriesContexts: ProjectSeriesContext[];
+}): CorporateSnapshotSeries {
+  const expectedLength = args.masterN + 1;
+  if (args.corporateDates.length !== expectedLength) {
+    throw new Error(`series.periodEndDatesUtc length must equal masterN+1 (${expectedLength})`);
+  }
+
+  const periodIndex = Array.from({ length: expectedLength }, (_, i) => i);
+  const periodEndDatesUtc = args.corporateDates.map((date) => (typeof date === 'string' ? date : null));
+
+  const throughputUnits = new Set(args.projectSeriesContexts.map((entry) => entry.operations.throughputUnit).filter((v) => v !== null));
+  const throughputUnit = throughputUnits.size === 1 ? [...throughputUnits][0] as 'tpd' | 'tpa' : null;
+
+  const nameplateVals = args.projectSeriesContexts.map((entry) => entry.operations.nameplateThroughput).filter((v): v is number => v !== null);
+  const utilizationVals = args.projectSeriesContexts.map((entry) => entry.operations.utilizationPct).filter((v): v is number => v !== null);
+
+  const oreMinedTonnes = sumStrictAlignedSeries({
+    corporateDates: args.corporateDates,
+    projectDateSeries: args.projectSeriesContexts
+      .filter((entry) => Array.isArray(entry.operations.oreMinedTonnes))
+      .map((entry) => ({
+        projectId: entry.projectId,
+        periodEndDatesUtc: entry.periodEndDatesUtc,
+        series: sanitizeSeries(entry.operations.oreMinedTonnes ?? []),
+      })),
+    label: 'series.oreMinedTonnes',
+  });
+
+  const oreMilledTonnes = sumStrictAlignedSeries({
+    corporateDates: args.corporateDates,
+    projectDateSeries: args.projectSeriesContexts
+      .filter((entry) => Array.isArray(entry.operations.oreMilledTonnes))
+      .map((entry) => ({
+        projectId: entry.projectId,
+        periodEndDatesUtc: entry.periodEndDatesUtc,
+        series: sanitizeSeries(entry.operations.oreMilledTonnes ?? []),
+      })),
+    label: 'series.oreMilledTonnes',
+  });
+
+  const payableQtyByMetal: Record<string, Array<number | null>> = {};
+  const payableQtyUnitByMetal: Record<string, string> = {};
+  const priceUsedByMetal_USD: Record<string, Array<number | null>> = {};
+  const revenueByMetal_USD: Record<string, Array<number | null>> = {};
+
+  const metalKeys = [...new Set(args.projectSeriesContexts.flatMap((entry) => Object.keys(entry.payableQtyByMetal)))].sort((a, b) => a.localeCompare(b));
+
+  for (const metal of metalKeys) {
+    const qtyProjects = args.projectSeriesContexts
+      .filter((entry) => Array.isArray(entry.payableQtyByMetal[metal]))
+      .map((entry) => ({
+        projectId: entry.projectId,
+        periodEndDatesUtc: entry.periodEndDatesUtc,
+        series: sanitizeSeries(entry.payableQtyByMetal[metal]),
+      }));
+
+    const revenueProjects = args.projectSeriesContexts
+      .filter((entry) => Array.isArray(entry.revenueByMetal_USD[metal]))
+      .map((entry) => ({
+        projectId: entry.projectId,
+        periodEndDatesUtc: entry.periodEndDatesUtc,
+        series: sanitizeSeries(entry.revenueByMetal_USD[metal]),
+      }));
+
+    payableQtyByMetal[metal] = sumStrictAlignedSeries({ corporateDates: args.corporateDates, projectDateSeries: qtyProjects, label: `series.payableQtyByMetal.${metal}` });
+    revenueByMetal_USD[metal] = sumStrictAlignedSeries({ corporateDates: args.corporateDates, projectDateSeries: revenueProjects, label: `series.revenueByMetal_USD.${metal}` });
+
+    priceUsedByMetal_USD[metal] = new Array<number | null>(expectedLength).fill(null);
+    for (let t = 0; t < expectedLength; t += 1) {
+      const qty = payableQtyByMetal[metal][t];
+      const revenue = revenueByMetal_USD[metal][t];
+      priceUsedByMetal_USD[metal][t] = qty !== null && qty > 0 && revenue !== null ? revenue / qty : null;
+    }
+
+    const unitSet = new Set(args.projectSeriesContexts.map((entry) => entry.payableQtyUnitByMetal[metal]).filter((v): v is string => typeof v === 'string'));
+    if (unitSet.size > 1) {
+      throw new Error(`series.payableQtyUnitByMetal.${metal} has inconsistent units across projects`);
+    }
+    if (unitSet.size === 0) {
+      throw new Error(`series.payableQtyUnitByMetal.${metal} missing for all projects`);
+    }
+    payableQtyUnitByMetal[metal] = [...unitSet][0];
+  }
+
+  const totalRevenue_USD = new Array<number | null>(expectedLength).fill(null);
+  for (let t = 0; t < expectedLength; t += 1) {
+    let sum = 0;
+    let hasAny = false;
+    let hasNull = false;
+    for (const metal of metalKeys) {
+      const revenue = revenueByMetal_USD[metal][t];
+      if (revenue === null) {
+        hasNull = true;
+        continue;
+      }
+      hasAny = true;
+      sum += revenue;
+    }
+    totalRevenue_USD[t] = hasAny && !hasNull ? sum : null;
+  }
+
+  const aggregateEconomic = (label: keyof ProjectSeriesContext['economics']): Array<number | null> => sumStrictAlignedSeries({
+    corporateDates: args.corporateDates,
+    projectDateSeries: args.projectSeriesContexts.map((entry) => ({
+      projectId: entry.projectId,
+      periodEndDatesUtc: entry.periodEndDatesUtc,
+      series: sanitizeSeries(entry.economics[label]),
+    })),
+    label: `series.${label}`,
+  });
+
+  const operatingCostsUSD = aggregateEconomic('operatingCostsUSD');
+  const sustainingCapexUSD = aggregateEconomic('sustainingCapexUSD');
+  const siteGandA_USD = aggregateEconomic('siteGandA_USD');
+  const royaltiesUSD = aggregateEconomic('royaltiesUSD');
+  const reclamationUSD = aggregateEconomic('reclamationUSD');
+  const byproductCreditsUSD = aggregateEconomic('byproductCreditsUSD');
+  const sustainingCostUSD = aggregateEconomic('sustainingCostUSD');
+  const ebitUSD = aggregateEconomic('ebitUSD');
+  const taxUSD = aggregateEconomic('taxUSD');
+  const fcffUSD = aggregateEconomic('fcffUSD');
+  const capexUSD = aggregateEconomic('capexUSD');
+
+  return {
+    periodIndex,
+    periodEndDatesUtc,
+    oreMinedTonnes,
+    oreMilledTonnes,
+    throughputUnit,
+    nameplateThroughput: nameplateVals.length > 0 ? nameplateVals.reduce((a, b) => a + b, 0) : null,
+    utilizationPct: utilizationVals.length > 0 ? utilizationVals.reduce((a, b) => a + b, 0) / utilizationVals.length : null,
+    payableQtyByMetal,
+    payableQtyUnitByMetal,
+    priceUsedByMetal_USD,
+    revenueByMetal_USD,
+    totalRevenue_USD,
+    operatingCostsUSD,
+    sustainingCapexUSD,
+    siteGandA_USD,
+    royaltiesUSD,
+    reclamationUSD,
+    byproductCreditsUSD,
+    sustainingCostUSD,
+    ebitUSD,
+    taxUSD,
+    fcffUSD,
+    capexUSD,
+  };
+}
 
 type SnapshotDiagnostics = {
   warnings: string[];
@@ -112,6 +358,8 @@ export async function runCorporateSnapshotPipeline(args: {
       periodEndDatesUtc: string[];
     }>;
 
+    const projectSeriesContexts: ProjectSeriesContext[] = [];
+
     const aggregation = await aggregateProjectsCorporateV1(
       {
         discountRate: input.discountRate,
@@ -165,6 +413,45 @@ export async function runCorporateSnapshotPipeline(args: {
           });
 
           const out = computeProjectEngineFullProductionV1(resolved);
+          const projectLength = periodEndDatesUtc.length;
+          const nullSeries = new Array<number | null>(projectLength).fill(null);
+          const taxRate = parsed.engineInputWithoutPrices.taxRate;
+          const taxByRule = out.phase1.ebitUSD.map((ebit) => {
+            const finiteEbit = toFiniteOrNull(ebit);
+            return finiteEbit === null ? null : Math.max(0, finiteEbit) * taxRate;
+          });
+
+          projectSeriesContexts.push({
+            projectId,
+            periodEndDatesUtc,
+            payableQtyByMetal: Object.fromEntries(
+              Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
+            ),
+            payableQtyUnitByMetal: { ...parsed.engineInputWithoutPrices.payableQtyUnitByMetal },
+            revenueByMetal_USD: Object.fromEntries(
+              Object.entries(out.revenue.byMetalRevenueUSD).map(([metal, series]) => [metal, sanitizeSeries(series)]),
+            ),
+            operations: {
+              oreMinedTonnes: parsed.context.operations?.oreMinedTonnes ? sanitizeSeries(parsed.context.operations.oreMinedTonnes) : undefined,
+              oreMilledTonnes: parsed.context.operations?.oreMilledTonnes ? sanitizeSeries(parsed.context.operations.oreMilledTonnes) : undefined,
+              throughputUnit: parsed.context.operations?.capacity.throughputUnit ?? null,
+              nameplateThroughput: toFiniteOrNull(parsed.context.operations?.capacity.nameplateThroughput),
+              utilizationPct: toFiniteOrNull(parsed.context.operations?.capacity.utilizationPct),
+            },
+            economics: {
+              operatingCostsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD),
+              sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
+              siteGandA_USD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.siteGandA_USD),
+              royaltiesUSD: sanitizeSeries(out.nationalTake.totalRoyaltiesUSD),
+              reclamationUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD),
+              byproductCreditsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.byproductCreditsUSD ?? nullSeries),
+              sustainingCostUSD: sanitizeSeries(out.phase1.sustainingCostUSD),
+              ebitUSD: sanitizeSeries(out.phase1.ebitUSD),
+              taxUSD: sanitizeSeries(taxByRule),
+              fcffUSD: sanitizeSeries(out.phase1.fcffUSD),
+              capexUSD: sanitizeSeries(out.capexUSD_used),
+            },
+          });
 
           return {
             periodEndDatesUtc,
@@ -303,6 +590,12 @@ export async function runCorporateSnapshotPipeline(args: {
       totalStockholdersEquity_USD,
     });
 
+    const snapshotSeries = buildSnapshotSeries({
+      masterN: aggregation.corporateMasterN,
+      corporateDates: aggregation.corporatePeriodEndDatesUtc,
+      projectSeriesContexts,
+    });
+
     const snapshot = buildCorporateSnapshot({
       targetCurrency: input.targetCurrency,
       aggregation,
@@ -316,6 +609,8 @@ export async function runCorporateSnapshotPipeline(args: {
       lista2CfDcf: lista2.metrics,
       lista4TenYear: lista4,
     });
+
+    snapshot.series = snapshotSeries;
 
     return { ok: true, snapshot, diagnostics };
   } catch (error) {

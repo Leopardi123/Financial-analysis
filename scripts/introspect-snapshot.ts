@@ -30,6 +30,18 @@ async function run(): Promise<void> {
     const shape = introspectSnapshot(result.snapshot);
     const compare = compareSnapshotKeys(shape, EXPECTED_SNAPSHOT_KEYS);
 
+    if (!shape.arrayKeys.includes('series.periodIndex')) {
+      throw new Error(`Fixture ${fixtureFile} missing required array key series.periodIndex`);
+    }
+
+    const hasNumericSeriesArray = shape.arrayKeys.some((key) =>
+      key.startsWith('series.') && shape.arrayValueTypes[key] === 'number|null',
+    );
+
+    if (!hasNumericSeriesArray) {
+      throw new Error(`Fixture ${fixtureFile} missing numeric series arrays under snapshot.series`);
+    }
+
     await writeFile(
       path.join(outDir, `${fixtureName}.shape.json`),
       `${JSON.stringify(shape, null, 2)}\n`,

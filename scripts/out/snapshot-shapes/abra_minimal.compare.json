@@ -78,6 +78,7 @@
     "Revenue_10Y_perShare_TargetCurrency",
     "Revenue_10Y_TargetCurrency",
     "Revenue_10Y_USD",
+    "series",
     "targetCurrency"
   ],
   "presentButNullish": [],

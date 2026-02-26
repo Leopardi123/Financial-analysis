@@ -76,4 +76,5 @@ export const EXPECTED_SNAPSHOT_KEYS: string[] = [
   'financing',
   'marketValue',
   'targetCurrency',
+  'series',
 ];
