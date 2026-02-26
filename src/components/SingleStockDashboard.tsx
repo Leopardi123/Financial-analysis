@@ -2751,9 +2751,9 @@ Capital Available: ${availableLabel}`,
             <button type="button" onClick={() => void runProjectSnapshot()} disabled={projectSnapshotLoading || companyProjectsLoading || projectCount === 0}>
               {projectSnapshotLoading ? "Running…" : "Run Project Snapshot"}
             </button>
-            {projectCount === 0 && (
-              <a href="#" className="button-link" style={{ alignSelf: "center" }}>Go to Project Editor</a>
-            )}
+            <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
+              Edit projects
+            </a>
             <button type="button" onClick={() => setProjectInputOpen((prev) => !prev)}>{projectInputOpen ? "Hide inputs" : "Show inputs"}</button>
           </div>
 

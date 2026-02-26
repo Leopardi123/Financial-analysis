@@ -1,0 +1,95 @@
+.project-editor-page {
+  padding: 16px;
+}
+
+.project-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.project-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  gap: 16px;
+}
+
+.project-list-panel,
+.project-editor-panel {
+  border: 1px solid #d5d5d5;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.project-list-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.project-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.project-list li {
+  border: 1px solid #e6e6e6;
+  border-radius: 6px;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.project-list li.selected {
+  border-color: #7f9cf5;
+  background: #f4f7ff;
+}
+
+.project-row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.danger {
+  color: #b00020;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.field-grid label,
+.json-label {
+  display: grid;
+  gap: 6px;
+}
+
+.json-label textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.editor-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.save-meta {
+  margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .project-editor-layout {
+    grid-template-columns: 1fr;
+  }
+}
