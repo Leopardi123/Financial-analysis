@@ -5,6 +5,11 @@ import type { ProjectEngineFullProductionV1Input } from '../types.ts';
 import type { QtyUnit } from './schema.ts';
 import type { ParsedProjectJsonV1 } from './parse.ts';
 
+export type PriceScenario =
+  | { mode: 'spot' }
+  | { mode: 'percentile'; lookbackYears: number; percentile: number }
+  | { mode: 'fixed'; fixedPriceByKey: Record<string, number> };
+
 function resolveSeriesAtTargets(rows: HistoryRow[], targets: string[]): Array<number | null> {
   const sortedRows = [...rows].sort((a, b) => a.date.localeCompare(b.date));
   const series: Array<number | null> = [];
@@ -20,6 +25,37 @@ function resolveSeriesAtTargets(rows: HistoryRow[], targets: string[]): Array<nu
   }
 
   return series;
+}
+
+function subtractUtcYears(dateStr: string, years: number): string {
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  date.setUTCFullYear(date.getUTCFullYear() - years);
+  return date.toISOString().slice(0, 10);
+}
+
+function resolvePercentileSeriesAtTargets(args: {
+  rows: HistoryRow[];
+  targets: string[];
+  lookbackYears: number;
+  percentile: number;
+}): Array<number | null> {
+  const sortedRows = [...args.rows].sort((a, b) => a.date.localeCompare(b.date));
+  const p = args.percentile / 100;
+
+  return args.targets.map((target) => {
+    const windowStart = subtractUtcYears(target, args.lookbackYears);
+    const closes = sortedRows
+      .filter((row) => row.date >= windowStart && row.date <= target)
+      .map((row) => row.close)
+      .sort((a, b) => a - b);
+
+    if (closes.length === 0) {
+      return null;
+    }
+
+    const index = Math.floor(p * (closes.length - 1));
+    return closes[index];
+  });
 }
 
 function canonicalQtyUnitFromPriceKey(priceKey: string): 'toz' | 'lb' | 'tonne' {
@@ -74,15 +110,19 @@ function mapQtySeriesToCanonical(args: {
 export async function resolveProjectPricesToEngineInput(
   args: {
     parsed: ParsedProjectJsonV1;
-    from: string;
-    to: string;
+    scenario?: PriceScenario;
+    from?: string;
+    to?: string;
+    allowRefresh?: boolean;
   },
   deps: {
     readHistoryRows?: (params: { priceKey: PriceKey; from: string; to: string }) => Promise<{ rows: HistoryRow[]; missing: boolean }>;
   } = {},
-): Promise<ProjectEngineFullProductionV1Input> {
+): Promise<ProjectEngineFullProductionV1Input & { diagnostics?: { warnings: string[] } }> {
   const { parsed, from, to } = args;
   const readHistoryRows = deps.readHistoryRows ?? ((params) => readHistoryRowsInRange(params));
+  const scenario = args.scenario ?? { mode: 'spot' };
+  const warnings: string[] = [];
 
   const masterN = parsed.engineInputWithoutPrices.masterN;
   const len = masterN + 1;
@@ -96,6 +136,9 @@ export async function resolveProjectPricesToEngineInput(
 
   const spotPriceUSDByMetal: Record<string, Array<number | null>> = {};
   const payableQtyByMetalCanonical: Record<string, Array<number | null>> = {};
+
+  const fallbackFrom = targets.length > 0 ? targets[0] : '1970-01-01';
+  const fallbackTo = targets.length > 0 ? targets[targets.length - 1] : fallbackFrom;
 
   for (const [metal, qtySeries] of Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal)) {
     const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
@@ -112,20 +155,80 @@ export async function resolveProjectPricesToEngineInput(
       metal,
     });
 
+    const historyFrom = scenario.mode === 'percentile'
+      ? subtractUtcYears(from ?? fallbackFrom, scenario.lookbackYears)
+      : (from ?? fallbackFrom);
     const history = await readHistoryRows({
       priceKey: priceKey as PriceKey,
-      from,
-      to,
+      from: historyFrom,
+      to: to ?? fallbackTo,
     });
-    spotPriceUSDByMetal[metal] = resolveSeriesAtTargets(history.rows, targets);
+    if (scenario.mode === 'spot') {
+      spotPriceUSDByMetal[metal] = resolveSeriesAtTargets(history.rows, targets);
+    } else if (scenario.mode === 'percentile') {
+      spotPriceUSDByMetal[metal] = resolvePercentileSeriesAtTargets({
+        rows: history.rows,
+        targets,
+        lookbackYears: scenario.lookbackYears,
+        percentile: scenario.percentile,
+      });
+    } else {
+      const fixed = scenario.fixedPriceByKey[priceKey];
+      spotPriceUSDByMetal[metal] = targets.map(() => (Number.isFinite(fixed) && fixed > 0 ? fixed : null));
+    }
+
+    spotPriceUSDByMetal[metal].forEach((value, index) => {
+      if (value !== null) {
+        return;
+      }
+
+      const periodEndDate = targets[index] ?? 'unknown-date';
+      const reason = scenario.mode === 'fixed'
+        ? `Missing fixed price for key ${priceKey}`
+        : scenario.mode === 'percentile'
+          ? `No closes in trailing ${scenario.lookbackYears}y window`
+          : 'No close on or before period end';
+
+      warnings.push(`projectId=unknown metal=${metal} key=${priceKey} periodEndDate=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
+    });
   }
 
-  const auHistory = await readHistoryRows({
-    priceKey: parsed.engineInputWithoutPrices.auPriceKey as PriceKey,
-    from,
-    to,
+  let auPriceUSDPerOz: Array<number | null>;
+
+  if (scenario.mode === 'fixed') {
+    const fixed = scenario.fixedPriceByKey[parsed.engineInputWithoutPrices.auPriceKey];
+    auPriceUSDPerOz = targets.map(() => (Number.isFinite(fixed) && fixed > 0 ? fixed : null));
+  } else {
+    const auHistoryFrom = scenario.mode === 'percentile'
+      ? subtractUtcYears(from ?? fallbackFrom, scenario.lookbackYears)
+      : (from ?? fallbackFrom);
+    const auHistory = await readHistoryRows({
+      priceKey: parsed.engineInputWithoutPrices.auPriceKey as PriceKey,
+      from: auHistoryFrom,
+      to: to ?? fallbackTo,
+    });
+    auPriceUSDPerOz = scenario.mode === 'percentile'
+      ? resolvePercentileSeriesAtTargets({
+          rows: auHistory.rows,
+          targets,
+          lookbackYears: scenario.lookbackYears,
+          percentile: scenario.percentile,
+        })
+      : resolveSeriesAtTargets(auHistory.rows, targets);
+  }
+
+  auPriceUSDPerOz.forEach((value, index) => {
+    if (value !== null) {
+      return;
+    }
+    const periodEndDate = targets[index] ?? 'unknown-date';
+    const reason = scenario.mode === 'fixed'
+      ? `Missing fixed price for key ${parsed.engineInputWithoutPrices.auPriceKey}`
+      : scenario.mode === 'percentile'
+        ? `No closes in trailing ${scenario.lookbackYears}y window`
+        : 'No close on or before period end';
+    warnings.push(`projectId=unknown metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} periodEndDate=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
   });
-  let auPriceUSDPerOz = resolveSeriesAtTargets(auHistory.rows, targets);
 
   if (parsed.priceOverrides.spotPriceUSDByMetal) {
     for (const [metal, series] of Object.entries(parsed.priceOverrides.spotPriceUSDByMetal)) {
@@ -150,6 +253,7 @@ export async function resolveProjectPricesToEngineInput(
     aisc: {
       auPriceUSDPerOz,
     },
+    ...(warnings.length > 0 ? { diagnostics: { warnings } } : {}),
     ...(usedFallbackDateMapping ? { meta: { usedFallbackDateMapping: true } } : {}),
   };
 }

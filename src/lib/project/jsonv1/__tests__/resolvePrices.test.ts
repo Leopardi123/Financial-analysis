@@ -179,5 +179,78 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
   assertEqual(overridden.spotPriceUSDByMetal.Au[0], 1, 'override spot prices should win');
   assertEqual(overridden.aisc.auPriceUSDPerOz[2], 9, 'override au prices should win');
+
+
+  const percentileResolved = await resolveProjectPricesToEngineInput(
+    {
+      parsed,
+      from: '2015-01-01',
+      to: '2026-12-31',
+      scenario: { mode: 'percentile', lookbackYears: 10, percentile: 50 },
+    },
+    {
+      readHistoryRows: async ({ priceKey }) => ({
+        rows: priceKey === 'XAU_USD_TOZ'
+          ? [
+              { date: '2018-01-01', close: 1100 },
+              { date: '2019-01-01', close: 1200 },
+              { date: '2020-01-01', close: 1300 },
+              { date: '2021-01-01', close: 1400 },
+              { date: '2022-01-01', close: 1500 },
+            ]
+          : [
+              { date: '2018-01-01', close: 2 },
+              { date: '2019-01-01', close: 3 },
+              { date: '2020-01-01', close: 4 },
+              { date: '2021-01-01', close: 5 },
+              { date: '2022-01-01', close: 6 },
+            ],
+        missing: false,
+      }),
+    },
+  );
+
+  assertEqual(percentileResolved.spotPriceUSDByMetal.Au[2], 1300, 'percentile mode uses deterministic floor index for median');
+
+  const percentileMissingWindow = await resolveProjectPricesToEngineInput(
+    {
+      parsed: missingParsed,
+      from: '2024-01-01',
+      to: '2024-12-31',
+      scenario: { mode: 'percentile', lookbackYears: 10, percentile: 50 },
+    },
+    {
+      readHistoryRows: async () => ({ rows: [], missing: false }),
+    },
+  );
+
+  assertEqual(percentileMissingWindow.spotPriceUSDByMetal.Au[0], null, 'percentile with no rows resolves null');
+  assert((percentileMissingWindow.diagnostics?.warnings.length ?? 0) > 0, 'percentile with no rows emits warnings');
+
+  const fixedResolved = await resolveProjectPricesToEngineInput(
+    {
+      parsed,
+      scenario: { mode: 'fixed', fixedPriceByKey: { XAU_USD_TOZ: 2400, CU_USD_LB: 4 } },
+    },
+    {
+      readHistoryRows: async () => ({ rows: [], missing: false }),
+    },
+  );
+
+  assertEqual(fixedResolved.spotPriceUSDByMetal.Au[0], 2400, 'fixed mode applies mapped key');
+  assertEqual(fixedResolved.spotPriceUSDByMetal.Cu[2], 4, 'fixed mode series is constant by key');
+
+  const fixedMissing = await resolveProjectPricesToEngineInput(
+    {
+      parsed: missingParsed,
+      scenario: { mode: 'fixed', fixedPriceByKey: {} },
+    },
+    {
+      readHistoryRows: async () => ({ rows: [], missing: false }),
+    },
+  );
+
+  assertEqual(fixedMissing.spotPriceUSDByMetal.Au[0], null, 'fixed mode missing key resolves null');
+  assert((fixedMissing.diagnostics?.warnings.some((w) => w.includes('Missing fixed price for key XAU_USD_TOZ')) ?? false), 'fixed mode missing key warning contains key');
   console.log('Project JSON v1 resolve prices tests passed');
 })();

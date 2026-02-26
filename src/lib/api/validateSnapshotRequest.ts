@@ -1,3 +1,8 @@
+export type SnapshotScenario =
+  | { mode: 'spot' }
+  | { mode: 'percentile'; lookbackYears: number; percentile: number; window: 'trailing'; sampling: 'eod_close'; anchor: 'period_end' }
+  | { mode: 'fixed'; fixedPriceByKey: Record<string, number> };
+
 export type SnapshotRequest = {
   targetCurrency: string;
   discountRate: number;
@@ -20,6 +25,7 @@ export type SnapshotRequest = {
     equity_raise_price_TargetCurrency?: number | null;
   };
   buildFundingNeed_USD?: number | null;
+  scenario: SnapshotScenario;
   projects: Array<{
     projectId: string;
     rawJson: Record<string, unknown>;
@@ -153,6 +159,72 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     }
   }
 
+
+  const scenarioRaw = body.scenario;
+  let scenario: SnapshotScenario = { mode: 'spot' };
+  if (scenarioRaw !== undefined) {
+    if (!isObject(scenarioRaw)) {
+      errors.push('scenario must be an object when provided');
+    } else {
+      const mode = scenarioRaw.mode;
+      if (mode === 'spot') {
+        scenario = { mode: 'spot' };
+      } else if (mode === 'percentile') {
+        const lookbackYears = readFiniteNumber(scenarioRaw.lookbackYears) ?? 10;
+        const percentile = readFiniteNumber(scenarioRaw.percentile) ?? 50;
+        const window = scenarioRaw.window ?? 'trailing';
+        const sampling = scenarioRaw.sampling ?? 'eod_close';
+        const anchor = scenarioRaw.anchor ?? 'period_end';
+
+        if (!Number.isInteger(lookbackYears) || lookbackYears < 1 || lookbackYears > 30) {
+          errors.push('scenario.lookbackYears must be an integer in [1, 30] when mode=percentile');
+        }
+        if (!Number.isInteger(percentile) || percentile < 1 || percentile > 99) {
+          errors.push('scenario.percentile must be an integer in [1, 99] when mode=percentile');
+        }
+        if (window !== 'trailing') {
+          errors.push('scenario.window must be "trailing" when mode=percentile');
+        }
+        if (sampling !== 'eod_close') {
+          errors.push('scenario.sampling must be "eod_close" when mode=percentile');
+        }
+        if (anchor !== 'period_end') {
+          errors.push('scenario.anchor must be "period_end" when mode=percentile');
+        }
+
+        scenario = {
+          mode: 'percentile',
+          lookbackYears: Number.isInteger(lookbackYears) ? lookbackYears : 10,
+          percentile: Number.isInteger(percentile) ? percentile : 50,
+          window: 'trailing',
+          sampling: 'eod_close',
+          anchor: 'period_end',
+        };
+      } else if (mode === 'fixed') {
+        const fixedPriceByKey = scenarioRaw.fixedPriceByKey;
+        if (!isObject(fixedPriceByKey) || Object.keys(fixedPriceByKey).length === 0) {
+          errors.push('scenario.fixedPriceByKey must be a non-empty object when mode=fixed');
+        }
+
+        const normalizedFixed: Record<string, number> = {};
+        if (isObject(fixedPriceByKey)) {
+          for (const [key, value] of Object.entries(fixedPriceByKey)) {
+            const n = readFiniteNumber(value);
+            if (n === null || n <= 0) {
+              errors.push(`scenario.fixedPriceByKey.${key} must be finite and > 0`);
+            } else {
+              normalizedFixed[key] = n;
+            }
+          }
+        }
+
+        scenario = { mode: 'fixed', fixedPriceByKey: normalizedFixed };
+      } else {
+        errors.push('scenario.mode must be one of: spot, percentile, fixed');
+      }
+    }
+  }
+
   const projectsRaw = body.projects;
   if (!Array.isArray(projectsRaw) || projectsRaw.length === 0) {
     errors.push('projects must be a non-empty array');
@@ -223,6 +295,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
           ? (financingPlanRaw as SnapshotRequest['financingPlan'])
           : undefined,
       buildFundingNeed_USD: buildFundingNeed,
+      scenario,
       projects,
     },
   };

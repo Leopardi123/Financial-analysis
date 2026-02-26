@@ -79,6 +79,51 @@ function assert(condition: boolean, message: string): void {
     },
   });
 
+
+
+  const scenarioOmitted = validateSnapshotRequest({
+    targetCurrency: 'SEK',
+    discountRate: 0.1,
+    fx_USD_to_TargetCurrency: 10,
+    market: {
+      shares_current: 100,
+      price_current_TargetCurrency: 10,
+    },
+    projects: [{ projectId: 'p1', rawJson }],
+  });
+
+  assert(scenarioOmitted.ok, 'scenario omitted should validate');
+  if (scenarioOmitted.ok) {
+    assert(scenarioOmitted.value.scenario.mode === 'spot', 'scenario omitted defaults to spot mode');
+  }
+
+  const badPercentile = validateSnapshotRequest({
+    targetCurrency: 'SEK',
+    discountRate: 0.1,
+    fx_USD_to_TargetCurrency: 10,
+    market: {
+      shares_current: 100,
+      price_current_TargetCurrency: 10,
+    },
+    scenario: {
+      mode: 'percentile',
+      lookbackYears: 10,
+      percentile: 0,
+      window: 'trailing',
+      sampling: 'eod_close',
+      anchor: 'period_end',
+    },
+    projects: [{ projectId: 'p1', rawJson }],
+  });
+
+  assert(!badPercentile.ok, 'percentile out of range should fail');
+  if (!badPercentile.ok) {
+    assert(
+      badPercentile.errors.some((error) => error.includes('scenario.percentile')),
+      'percentile out of range should produce percentile error',
+    );
+  }
+
   assert(!missingProjects.ok, 'missing projects should fail');
   if (!missingProjects.ok) {
     assert(
