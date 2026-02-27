@@ -32,8 +32,9 @@ export function computeProjectEngineFromProductionWithStreams(
 
   const revenueOut = computeProjectRevenue({
     masterN: input.streams.masterN,
-    payableQtyByMetal: streamsOut.effectivePayableQtyByMetal,
+    payableQtyByMetal: input.streams.payableQtyByMetal,
     priceUSDByMetal: input.streams.spotPriceUSDByMetal,
+    streamsByMetal: input.streams.streamsByMetal,
   });
 
   const takeOut = computeProjectTakeMVI({
@@ -46,7 +47,7 @@ export function computeProjectEngineFromProductionWithStreams(
   const phase1Out = computeProjectPhase1({
     ...input.phase1,
     revenueUSD: takeOut.netRevenueAfterTakeUSD,
-    royaltiesUSD: streamsOut.streamTakeUSD_total,
+    royaltiesUSD: new Array(input.streams.masterN + 1).fill(0),
   });
 
   const phase2Out = computeProjectPhase2({

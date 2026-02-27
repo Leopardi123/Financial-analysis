@@ -3,6 +3,7 @@ export type StreamPurchasePriceRule =
   | { kind: 'PCT_OF_SPOT'; value: number };
 
 export type StreamMVIConfig = {
+  streamMetal?: string;
   streamPctOfPayable: number;
   start_t?: number | null;
   end_t?: number | null;

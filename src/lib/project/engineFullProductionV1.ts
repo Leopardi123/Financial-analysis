@@ -34,13 +34,11 @@ export function computeProjectEngineFullProductionV1(
       })
     : null;
 
-  const effectivePayableQtyByMetal = streamsOut?.effectivePayableQtyByMetal ?? input.payableQtyByMetal;
-  const streamTakeUSD_total = streamsOut?.streamTakeUSD_total ?? zeroSeries(input.masterN + 1);
-
   const revenueOut = computeProjectRevenue({
     masterN: input.masterN,
-    payableQtyByMetal: effectivePayableQtyByMetal,
+    payableQtyByMetal: input.payableQtyByMetal,
     priceUSDByMetal: input.spotPriceUSDByMetal,
+    streamsByMetal: input.streamsByMetal,
   });
 
   const nationalTakeOut = computeNationalTake({
@@ -50,7 +48,7 @@ export function computeProjectEngineFullProductionV1(
     items: input.takeItems,
     royaltiesDetail: input.royaltiesDetail,
     phase1: input.phase1,
-    extraRoyaltiesUSD: streamTakeUSD_total,
+    extraRoyaltiesUSD: zeroSeries(input.masterN + 1),
   });
 
   const phase2Out = computeProjectPhase2({
