@@ -385,7 +385,29 @@ export type ParsedProjectJsonV1 = {
   context: ProjectJsonV1Context;
   priceOverrides: NonNullable<ProjectJsonV1['priceOverrides']>;
   engineInput: ProjectEngineFullProductionV1Input;
+  warnings: string[];
 };
+
+function normalizeSpendSeriesAbs(
+  series: Array<number | null>,
+  warningMessage: string,
+  warnings: string[],
+): Array<number | null> {
+  let hadNegative = false;
+  const normalized = series.map((value) => {
+    if (isFiniteNumber(value) && value < 0) {
+      hadNegative = true;
+      return Math.abs(value);
+    }
+    return value;
+  });
+
+  if (hadNegative) {
+    warnings.push(warningMessage);
+  }
+
+  return normalized;
+}
 
 export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   if (!isPlainObject(raw)) {
@@ -419,9 +441,19 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     fail('series', 'object', raw.series);
   }
 
-  const capexUSD = asSeries(raw.series.capexUSD, 'series.capexUSD', expectedLength);
+  const warnings: string[] = [];
+
+  const capexUSD = normalizeSpendSeriesAbs(
+    asSeries(raw.series.capexUSD, 'series.capexUSD', expectedLength),
+    'capexUSD: detected negative values; normalized to spend (abs).',
+    warnings,
+  );
   const operatingCostsUSD = asSeries(raw.series.operatingCostsUSD, 'series.operatingCostsUSD', expectedLength);
-  const sustainingCapexUSD = asSeries(raw.series.sustainingCapexUSD, 'series.sustainingCapexUSD', expectedLength);
+  const sustainingCapexUSD = normalizeSpendSeriesAbs(
+    asSeries(raw.series.sustainingCapexUSD, 'series.sustainingCapexUSD', expectedLength),
+    'sustainingCapexUSD: detected negative values; normalized to spend (abs).',
+    warnings,
+  );
   const siteGandA_USD = asSeries(raw.series.siteGandA_USD, 'series.siteGandA_USD', expectedLength);
   const reclamationUSD = asSeries(raw.series.reclamationUSD, 'series.reclamationUSD', expectedLength);
   const byproductCreditsUSD =
@@ -609,6 +641,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
       auPriceUSDPerOz: overrideAu,
     },
     engineInput,
+    warnings,
   };
 }
 
