@@ -856,3 +856,56 @@ td.sticky-col {
 .project-excel-grid .section-row .section-fill {
   background: #f4f8f0;
 }
+
+.project-key-metrics-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.project-key-metrics-column {
+  display: grid;
+  gap: 6px;
+}
+
+.project-key-metrics-column h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.project-key-metrics-table-wrap {
+  border: 1px solid #d8e0d2;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.project-key-metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.project-key-metrics-table th,
+.project-key-metrics-table td {
+  padding: 4px 6px;
+  border-top: 1px solid #e5ebdf;
+  text-align: right;
+}
+
+.project-key-metrics-table tr:first-child th,
+.project-key-metrics-table tr:first-child td {
+  border-top: 0;
+}
+
+.project-key-metrics-table th {
+  text-align: left;
+  background: #fbfdf8;
+}
+
+@media (max-width: 1100px) {
+  .project-key-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}

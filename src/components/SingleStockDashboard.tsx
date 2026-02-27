@@ -1915,23 +1915,44 @@ Capital Available: ${availableLabel}`,
     yAxisTitle: statementCurrency,
   };
 
-  const projectSnapshotMetrics = (() => {
-    if (!projectSnapshotData) return [] as Array<{ label: string; value: unknown }>;
-    const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
-    const financing = (projectSnapshotData.financing ?? {}) as Record<string, unknown>;
-    const aggregation = (projectSnapshotData.aggregation ?? {}) as Record<string, unknown>;
-
-    return [
-      { label: "NPV_today_TargetCurrency", value: projectSnapshotData.NPV_today_TargetCurrency },
-      { label: "NAV_today_TargetCurrency", value: projectSnapshotData.NAV_today_TargetCurrency },
-      { label: "EV_TargetCurrency", value: marketValue.EV_TargetCurrency },
-      { label: "EV_over_NPV", value: marketValue.EV_over_NPV },
-      { label: "P_over_NAV", value: marketValue.P_over_NAV },
-      { label: "AISC_AuEq_USD_per_Oz_LOM", value: aggregation.aiscAuEqUSDPerOz_LOM },
-      { label: "shares_post_financing", value: financing.shares_post_financing },
-    ];
-  })();
-
+  const projectListaTables = useMemo(() => ({
+    lista1: [
+      { label: "NPV_today_TargetCurrency", value: projectSnapshotData?.NPV_today_TargetCurrency ?? null },
+      { label: "NPV_today_perShare_TargetCurrency", value: projectSnapshotData?.NPV_today_perShare_TargetCurrency ?? null },
+      { label: "NAV_today_TargetCurrency", value: projectSnapshotData?.NAV_today_TargetCurrency ?? null },
+      { label: "NAV_today_perShare_TargetCurrency", value: projectSnapshotData?.NAV_today_perShare_TargetCurrency ?? null },
+      { label: "DCF_prodStart_exCapex_TargetCurrency", value: projectSnapshotData?.DCF_prodStart_exCapex_TargetCurrency ?? null },
+      { label: "DCF_prodStart_exCapex_perShare_TargetCurrency", value: projectSnapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null },
+      { label: "DCF_prodStart_present_TargetCurrency", value: projectSnapshotData?.DCF_prodStart_present_TargetCurrency ?? null },
+      { label: "DCF_prodStart_present_perShare_TargetCurrency", value: projectSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency ?? null },
+      { label: "CF_LOM_TargetCurrency", value: projectSnapshotData?.CF_LOM_TargetCurrency ?? null },
+      { label: "CF_LOM_perShare_TargetCurrency", value: projectSnapshotData?.CF_LOM_perShare_TargetCurrency ?? null },
+      { label: "EV_TargetCurrency", value: projectSnapshotData?.EV_TargetCurrency ?? null },
+      { label: "EVPS_TargetCurrency", value: projectSnapshotData?.EVPS_TargetCurrency ?? null },
+      { label: "EV_over_NPV", value: projectSnapshotData?.EV_over_NPV ?? null },
+      { label: "EV_over_NAV", value: projectSnapshotData?.EV_over_NAV ?? null },
+      { label: "P_over_NAV", value: projectSnapshotData?.P_over_NAV ?? null },
+      { label: "NPV_over_ETLV", value: projectSnapshotData?.NPV_over_ETLV ?? null },
+      { label: "DCF_present_over_ETLV", value: projectSnapshotData?.DCF_present_over_ETLV ?? null },
+    ],
+    lista2: [
+      { label: "Time_to_production (tp)", value: projectSnapshotData?.Time_to_production ?? null },
+      { label: "LOM (period count)", value: projectSnapshotData?.LOM_periods ?? null },
+      { label: "LOM_production_AuEq_Oz", value: projectSnapshotData?.LOM_production_AuEq_Oz ?? null },
+      { label: "Annual_production_AuEq_Oz", value: projectSnapshotData?.Annual_production_AuEq_Oz ?? null },
+      { label: "AISC_AuEq_USD_per_Oz_LOM", value: projectSnapshotData?.AISC_AuEq_USD_per_Oz_LOM ?? null },
+      { label: "CAPEX_per_annual_AuEq_Oz", value: projectSnapshotData?.CAPEX_per_annual_AuEq_Oz ?? null },
+    ],
+    lista3: [
+      { label: "Payback_approx_years", value: projectSnapshotData?.Payback_approx_years ?? null },
+      { label: "Payback_real_years", value: projectSnapshotData?.Payback_real_years ?? null },
+      { label: "LOM_average_EBIT_ROCE_pct", value: projectSnapshotData?.LOM_average_EBIT_ROCE_pct ?? null },
+      { label: "LOM_discounted_EBIT_ROCE_pct", value: projectSnapshotData?.LOM_discounted_EBIT_ROCE_pct ?? null },
+      { label: "ROI_10Y_pct", value: projectSnapshotData?.ROI_10Y_pct ?? null },
+      { label: "Kapitalavkastning_LOM", value: projectSnapshotData?.Kapitalavkastning_LOM ?? null },
+      { label: "Kapitalavkastning_per_Ar_LOM", value: projectSnapshotData?.Kapitalavkastning_per_Ar_LOM ?? null },
+    ],
+  }), [projectSnapshotData]);
 
   const parsedSelectedProject = useMemo(() => {
     if (!selectedProjectRawJson) return null;
@@ -3008,16 +3029,29 @@ Capital Available: ${availableLabel}`,
               {projectSnapshotLoading && <p className="bread">Running snapshot…</p>}
               {projectSnapshotError && <p className="status error">{projectSnapshotError}</p>}
 
-              {projectSnapshotMetrics.length > 0 && (
-                <div style={{ marginTop: 16, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-                  {projectSnapshotMetrics.map((metric) => (
-                    <div key={metric.label} className="producer-card">
-                      <h3>{metric.label}</h3>
-                      <p>{formatPanelValue(metric.value)}</p>
+              <section className="project-key-metrics-grid" aria-label="Project key metrics lists">
+                {[
+                  { title: "Lista 1 — Finansiella nyckeltal och värdering", rows: projectListaTables.lista1 },
+                  { title: "Lista 2 — Produktion och operativt", rows: projectListaTables.lista2 },
+                  { title: "Lista 3 — Effektivitet och lönsamhet", rows: projectListaTables.lista3 },
+                ].map((table) => (
+                  <article key={table.title} className="project-key-metrics-column">
+                    <h3>{table.title}</h3>
+                    <div className="project-key-metrics-table-wrap">
+                      <table className="project-key-metrics-table">
+                        <tbody>
+                          {table.rows.map((metric) => (
+                            <tr key={metric.label}>
+                              <th>{metric.label}</th>
+                              <td>{formatPanelValue(metric.value)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </article>
+                ))}
+              </section>
 
               {projectExcelGrid && (
                 <section style={{ marginTop: 12, display: "grid", gap: 8 }}>
