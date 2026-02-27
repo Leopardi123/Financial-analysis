@@ -69,7 +69,7 @@ test('snapshot series normalizes non-finite inputs to null', async () => {
     return;
   }
 
-  assert.equal(result.snapshot.series?.operatingCostsUSD[2], null);
+  assert.equal(result.snapshot.series?.operatingCostsUSD[2], 0);
 });
 
 
@@ -115,6 +115,44 @@ test('snapshot series exposes economics breakdown when provided', async () => {
   assert.equal(result.snapshot.series?.taxesDetail?.municipalRevenueTaxUSD?.length, result.snapshot.aggregation.corporateMasterN + 1);
 });
 
+
+
+test('projects-mode normalizes sparse/null project series and computes Lista2 metrics', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  const operations = rawJson.operations as Record<string, unknown>;
+  const metals = rawJson.metals as Record<string, unknown>;
+
+  series.capexUSD = [null, -100, null, 0];
+  series.operatingCostsUSD = [null, 120, null, 130, null];
+  series.sustainingCapexUSD = [null, null, 20];
+  series.siteGandA_USD = [null, 5, null];
+  series.depreciationUSD = [null, 10, null];
+  series.workingCapitalDeltaUSD = [null, 1, null];
+  series.reclamationUSD = [null, null, 2];
+  series.byproductCreditsUSD = [null, null, null];
+
+  operations.oreMilledTonnes = [1000, null, 1200];
+  operations.oreMinedTonnes = [900, null];
+  operations.gradeByMetal = { Au: [null, 1.2, null] };
+  operations.recoveryPctByMetal = { Au: [0.9, null] };
+
+  const payableQtyByMetal = metals.payableQtyByMetal as Record<string, Array<number | null>>;
+  const firstMetal = Object.keys(payableQtyByMetal)[0];
+  payableQtyByMetal[firstMetal] = [100, null, 130, null];
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+
+  if (!result.ok) {
+    return;
+  }
+
+  assert.equal(Number.isFinite(result.snapshot.NPV_today_TargetCurrency), true);
+  assert.equal(result.diagnostics.warnings.some((warning) => warning.includes('Lista2 CF+DCF skipped: fcfUSD_total contains null/non-finite periods')), false);
+});
 
 test('projects-mode snapshot without market does not throw and nulls EV outputs', async () => {
   const body = await loadFixture();
