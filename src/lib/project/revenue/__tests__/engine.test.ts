@@ -56,35 +56,17 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertDeepEqual(missingAgPrice.byMetalRevenueUSD.Ag, [250, null, 250], 'missing Ag price should produce null Ag revenue');
   assertDeepEqual(missingAgPrice.grossRevenueUSD, [2250, null, 2250], 'strict gross should be null when any metal is missing');
 
-  assertThrows(
-    () =>
-      computeProjectRevenue({
-        masterN: 2,
-        payableQtyByMetal: {
-          Au: [1, -1, 1],
-        },
-        priceUSDByMetal: {
-          Au: [2000, 2000, 2000],
-        },
-      }),
-    /cannot be negative/,
-    'negative qty should throw',
-  );
-
-  assertThrows(
-    () =>
-      computeProjectRevenue({
-        masterN: 2,
-        payableQtyByMetal: {
-          Au: [1, 1, 1],
-        },
-        priceUSDByMetal: {
-          Au: [2000, -2000, 2000],
-        },
-      }),
-    /cannot be negative/,
-    'negative price should throw',
-  );
+  const negativeInput = computeProjectRevenue({
+    masterN: 2,
+    payableQtyByMetal: {
+      Au: [1, -1, 1],
+    },
+    priceUSDByMetal: {
+      Au: [2000, 2000, -2000],
+    },
+  });
+  assertDeepEqual(negativeInput.byMetalRevenueUSD.Au, [2000, null, null], 'negative qty/price produce null revenues');
+  assertDeepEqual(negativeInput.grossRevenueUSD, [2000, null, null], 'negative qty/price null-propagate gross revenue');
 
   assertThrows(
     () =>

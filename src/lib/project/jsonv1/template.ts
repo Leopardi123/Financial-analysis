@@ -295,6 +295,20 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
         baseDefinition: { baseType: 'REVENUE' },
         rateDefinition: { rateType: 'FIXED', rate: 0.00 },
       },
+      {
+        id: 'example_metal_nsr',
+        type: 'NSR',
+        jurisdictionLevel: 'provincial_state',
+        appliesTo: {
+          scope: 'metalSpecific',
+          metals: ['Ag'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: { rateType: 'FIXED', rate: 0.00 },
+      },
     ],
     operations: {
       capacity: { throughputUnit: 'tpd', nameplateThroughput: 10000, utilizationPct: null },

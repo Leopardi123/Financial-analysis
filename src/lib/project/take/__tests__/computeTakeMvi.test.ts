@@ -17,6 +17,10 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
     masterN: 2,
     productionStartPeriod: 0,
     grossRevenueUSD: [100, 200, 300],
+    revenueByMetalUSD: {
+      Au: [70, 150, 210],
+      Ag: [30, 50, 90],
+    },
     takeItems: [
       {
         id: 't1',
@@ -54,6 +58,9 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
     masterN: 2,
     productionStartPeriod: 0,
     grossRevenueUSD: [100, 200, 300],
+    revenueByMetalUSD: {
+      Au: [100, 200, 300],
+    },
     takeItems: [
       {
         id: 't1',
@@ -77,6 +84,9 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
     masterN: 2,
     productionStartPeriod: 0,
     grossRevenueUSD: [100, null, 300],
+    revenueByMetalUSD: {
+      Au: [100, null, 300],
+    },
     takeItems: [
       {
         id: 't1',
@@ -100,6 +110,9 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
     masterN: 0,
     productionStartPeriod: 0,
     grossRevenueUSD: [100],
+    revenueByMetalUSD: {
+      Au: [100],
+    },
     takeItems: [
       {
         id: 'bad',
@@ -121,6 +134,63 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
   assert(
     invalidRate.diagnostics.some((line) => line.includes('rate must be finite in [0,1]')),
     'invalid rate emits diagnostic',
+  );
+
+  const metalSpecificAuOnly = computeTotalTakeUSD_MVI({
+    masterN: 2,
+    productionStartPeriod: 0,
+    grossRevenueUSD: [600, 900, 1200],
+    revenueByMetalUSD: {
+      Au: [500, 700, 1000],
+      Ag: [100, 200, 200],
+    },
+    takeItems: [
+      {
+        id: 'au_take',
+        type: 'NSR',
+        jurisdictionLevel: 'provincial_state',
+        appliesTo: {
+          scope: 'metalSpecific',
+          metals: ['Au'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: { rateType: 'FIXED', rate: 0.1 },
+      },
+    ],
+  });
+  assertDeepEqual(metalSpecificAuOnly.totalTakeUSD, [50, 70, 100], 'metal specific item taxes only selected metal base');
+
+  const missingMetalIgnored = computeTotalTakeUSD_MVI({
+    masterN: 1,
+    productionStartPeriod: 0,
+    grossRevenueUSD: [100, 100],
+    revenueByMetalUSD: {
+      Au: [90, 90],
+    },
+    takeItems: [
+      {
+        id: 'bad_metal',
+        type: 'NSR',
+        jurisdictionLevel: 'provincial_state',
+        appliesTo: {
+          scope: 'metalSpecific',
+          metals: ['Ag'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: { rateType: 'FIXED', rate: 0.1 },
+      },
+    ],
+  });
+  assertDeepEqual(missingMetalIgnored.totalTakeUSD, [0, 0], 'item with missing metal key is ignored');
+  assert(
+    missingMetalIgnored.diagnostics.some((line) => line.includes('metal missing from revenueByMetalUSD')),
+    'missing metal diagnostic emitted',
   );
 
   console.log('Take MVI compute tests passed');

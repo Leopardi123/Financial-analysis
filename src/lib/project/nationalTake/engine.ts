@@ -72,6 +72,7 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
     masterN: input.masterN,
     productionStartPeriod: input.phase1.productionStartPeriod,
     grossRevenueUSD: input.grossRevenueUSD,
+    revenueByMetalUSD: input.byMetalRevenueUSD ?? undefined,
     takeItems: input.items,
   });
 
