@@ -2,6 +2,7 @@ import { convertPriceToCanonical } from './units/convert.ts';
 import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.ts';
 import { fetchHistorical, type ProviderPriceRow } from './providers/fmp.ts';
 import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.ts';
+import { getLegacySymbolForPriceKey } from './providers/legacyCommoditySymbolMap.ts';
 
 export type PriceScenario =
   | { mode: 'spot' }
@@ -54,7 +55,7 @@ async function maybeRefreshHistory(price_key: string, fromUtc: string, toUtc: st
     throw new Error(`Unsupported provider: ${mapping.provider}`);
   }
 
-  const dailyRows: ProviderPriceRow[] = await deps.fetchHistoricalFn(mapping.provider_symbol, mapping.provider_kind, fetchFrom, toUtc);
+  const dailyRows: ProviderPriceRow[] = await deps.fetchHistoricalFn(mapping.provider_symbol, mapping.provider_kind, fetchFrom, toUtc, price_key);
   const monthlyCanonicalRows = downsampleDailyToMonthlyEom(
     dailyRows.map((row) => ({
       dateUtc: row.dateUtc,
@@ -95,6 +96,12 @@ export async function resolvePriceSeries(
     return { values: args.anchorDatesUtc.map(() => fixedValue), warnings: [] };
   }
 
+  const warnings: string[] = [];
+  const legacySymbol = getLegacySymbolForPriceKey(args.price_key);
+  if (!legacySymbol) {
+    warnings.push(`Unknown legacy priceKey mapping: ${args.price_key}`);
+  }
+
   const maxDate = sortedAnchors[sortedAnchors.length - 1];
   const minDate = sortedAnchors[0];
   const fromUtc = args.scenario.mode === 'percentile'
@@ -106,7 +113,9 @@ export async function resolvePriceSeries(
   }
 
   const rows = await resolvedDeps.getMonthlySeriesFn(args.price_key, fromUtc, maxDate);
-  const warnings: string[] = [];
+  if (rows.length === 0 && legacySymbol) {
+    warnings.push(`No price data returned from FMP legacy v3 for symbol ${legacySymbol}`);
+  }
 
   if (args.scenario.mode === 'spot') {
     const values = args.anchorDatesUtc.map((anchorDateUtc) => {

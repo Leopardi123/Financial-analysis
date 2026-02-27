@@ -126,6 +126,10 @@ export async function resolveProjectPricesToEngineInput(
       scenario: coreScenario,
       allowRefresh: args.allowRefresh === true,
     });
+    if (resolved.warnings.length > 0) {
+      warnings.push(...resolved.warnings);
+    }
+
     const resolvedValues = scenario.mode === 'spot'
       ? new Array(len).fill(resolved.values[0] ?? null)
       : resolved.values;
@@ -164,6 +168,9 @@ export async function resolveProjectPricesToEngineInput(
       scenario: coreScenario,
       allowRefresh: args.allowRefresh === true,
     });
+    if (resolvedAu.warnings.length > 0) {
+      warnings.push(...resolvedAu.warnings);
+    }
     auPriceUSDPerOz = scenario.mode === 'spot'
       ? new Array(len).fill(resolvedAu.values[0] ?? null)
       : resolvedAu.values;

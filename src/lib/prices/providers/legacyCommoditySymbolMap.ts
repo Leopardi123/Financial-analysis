@@ -1,0 +1,31 @@
+const LEGACY_PRICE_KEY_TO_SYMBOL: Record<string, string> = {
+  XAU_USD_TOZ: 'XAUUSD',
+  XAG_USD_TOZ: 'XAGUSD',
+  XPT_USD_TOZ: 'XPTUSD',
+  XPD_USD_TOZ: 'XPDUSD',
+  CU_USD_LB: 'HGUSD',
+  NI_USD_LB: 'NIUSD',
+  ZN_USD_LB: 'ZNUSD',
+  PB_USD_LB: 'PBUSD',
+  AL_USD_LB: 'ALUSD',
+  SN_USD_LB: 'SNUSD',
+  CO_USD_LB: 'COBALT',
+  LI_USD_TONNE: 'LITHIUM',
+  MN_USD_TONNE: 'MANGANESE',
+  GRAPHITE_USD_TONNE: 'GRAPHITE',
+  IRON_ORE_USD_TONNE: 'IRON',
+  MET_COAL_USD_TONNE: 'METCOAL',
+  THERMAL_COAL_USD_TONNE: 'COAL',
+  URANIUM_USD_LB: 'URANIUM',
+  USD_CAD: 'USD/CAD',
+  CAD_USD: 'CAD/USD',
+  USD_SEK: 'USD/SEK',
+  SEK_USD: 'SEK/USD',
+  USD_EUR: 'USD/EUR',
+  EUR_USD: 'EUR/USD',
+};
+
+export function getLegacySymbolForPriceKey(priceKey: string): string | null {
+  return LEGACY_PRICE_KEY_TO_SYMBOL[priceKey] ?? null;
+}
+

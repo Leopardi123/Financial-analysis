@@ -1,4 +1,5 @@
-import { fetchStableJson } from '../../../../api/_fmp.js';
+import { fetchApiV3Json, fetchStableJson } from '../../../../api/_fmp.js';
+import { getLegacySymbolForPriceKey } from './legacyCommoditySymbolMap.ts';
 
 export interface FmpQuoteResult {
   price: number;
@@ -102,8 +103,19 @@ export async function fetchHistorical(
   _provider_kind: string,
   fromUtc: string,
   toUtc: string,
+  priceKey?: string,
 ): Promise<ProviderPriceRow[]> {
-  const rows = await fetchHistoricalEodFull(provider_symbol);
+  const legacySymbol = priceKey ? getLegacySymbolForPriceKey(priceKey) : null;
+  const symbol = legacySymbol ?? provider_symbol;
+  const response = legacySymbol
+    ? await fetchApiV3Json<FmpHistoricalResponse>(`historical-price-full/${encodeURIComponent(symbol)}`)
+    : await fetchStableJson<FmpHistoricalResponse>('historical-price-eod/full', { symbol });
+  const sourceRows = Array.isArray(response) ? response : Array.isArray(response?.historical) ? response.historical : [];
+  const rows = sourceRows
+    .map((row) => normalizeHistoricalRow(row))
+    .filter((row): row is FmpHistoricalRow => row !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   return rows
     .filter((row) => row.date >= fromUtc && row.date <= toUtc)
     .map((row) => ({ dateUtc: row.date, close: row.close }));

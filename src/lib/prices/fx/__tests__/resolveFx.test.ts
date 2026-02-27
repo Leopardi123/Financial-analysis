@@ -23,13 +23,10 @@ function assert(condition: boolean, message: string): void {
       allowRefresh: false,
     },
     {
-      readHistoryRows: async () => ({
-        rows: [
-          { date: '2024-01-01', close: 10.1 },
-          { date: '2024-01-15', close: 10.2 },
-        ],
-        missing: false,
-      }),
+      fetchHistorical: async () => ({ historical: [
+        { date: '2024-01-01', close: 10.1 },
+        { date: '2024-01-15', close: 10.2 },
+      ] }),
     },
   );
   assert(spot.fx === 10.2, 'spot should resolve last close <= anchor');
@@ -42,35 +39,15 @@ function assert(condition: boolean, message: string): void {
       allowRefresh: false,
     },
     {
-      readHistoryRows: async () => ({
-        rows: [
-          { date: '2024-01-10', close: 1.2 },
-          { date: '2024-03-10', close: 1.3 },
-          { date: '2024-04-10', close: 1.4 },
-          { date: '2024-05-10', close: 1.5 },
-        ],
-        missing: false,
-      }),
+      fetchHistorical: async (symbol) => ({ historical: symbol === 'USD/CAD' ? [
+        { date: '2024-01-10', close: 1.2 },
+        { date: '2024-03-10', close: 1.3 },
+        { date: '2024-04-10', close: 1.4 },
+        { date: '2024-05-10', close: 1.5 },
+      ] : [] }),
     },
   );
   assert(percentile.fx === 1.3, 'percentile should use floor(p*(n-1)) index rule');
-
-
-  const directCad = await resolveFxUSDToTarget(
-    {
-      targetCurrency: 'CAD',
-      anchorDateUtc: '2024-12-31',
-      scenario: { mode: 'spot' },
-      allowRefresh: false,
-    },
-    {
-      readHistoryRows: async ({ priceKey }) => ({
-        rows: priceKey === 'USD_CAD' ? [{ date: '2024-12-30', close: 1.36 }] : [],
-        missing: false,
-      }),
-    },
-  );
-  assert(directCad.fx === 1.36, 'spot should resolve USD_CAD directly when available');
 
   const invertedCad = await resolveFxUSDToTarget(
     {
@@ -80,10 +57,7 @@ function assert(condition: boolean, message: string): void {
       allowRefresh: false,
     },
     {
-      readHistoryRows: async ({ priceKey }) => ({
-        rows: priceKey === 'CAD_USD' ? [{ date: '2024-12-30', close: 0.75 }] : [],
-        missing: false,
-      }),
+      fetchHistorical: async (symbol) => ({ historical: symbol === 'CAD/USD' ? [{ date: '2024-12-30', close: 0.75 }] : [] }),
     },
   );
   assert(Math.abs((invertedCad.fx ?? 0) - (1 / 0.75)) < 1e-9, 'spot should invert CAD_USD when USD_CAD is unavailable');
@@ -96,11 +70,11 @@ function assert(condition: boolean, message: string): void {
       allowRefresh: false,
     },
     {
-      readHistoryRows: async () => ({ rows: [], missing: true }),
+      fetchHistorical: async () => ({ historical: [] }),
     },
   );
-  assert(missing.fx === null, 'missing history with allowRefresh=false should return null fx');
-  assert(missing.warnings.length > 0, 'missing history should produce warnings');
+  assert(missing.fx === null, 'missing history should return null fx');
+  assert(missing.warnings.some((w) => w.includes('No price data returned from FMP legacy v3 for symbol')), 'missing history should produce legacy no data warning');
 
   console.log('resolveFx tests passed');
 })();

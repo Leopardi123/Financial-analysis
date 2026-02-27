@@ -672,26 +672,28 @@ export async function runCorporateSnapshotPipeline(args: {
 
           diagnostics.warnings.push(...(resolved.diagnostics?.warnings ?? []));
 
-          for (const [metal, series] of Object.entries(resolved.spotPriceUSDByMetal)) {
-            const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
-            const missingDates = series
+          if (resolverScenario.mode !== 'spot') {
+            for (const [metal, series] of Object.entries(resolved.spotPriceUSDByMetal)) {
+              const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
+              const missingDates = series
+                .map((value, index) => (value === null ? periodEndDatesUtc[index] : null))
+                .filter((value): value is string => typeof value === 'string');
+
+              if (missingDates.length > 0) {
+                diagnostics.warnings.push(
+                  `Missing price coverage for project=${projectId} metal=${metal} priceKey=${priceKey} missingPeriods=${missingDates.length} firstMissingDate=${missingDates[0]}`,
+                );
+              }
+            }
+
+            const missingAuDates = resolved.aisc.auPriceUSDPerOz
               .map((value, index) => (value === null ? periodEndDatesUtc[index] : null))
               .filter((value): value is string => typeof value === 'string');
-
-            if (missingDates.length > 0) {
+            if (missingAuDates.length > 0) {
               diagnostics.warnings.push(
-                `Missing price coverage for project=${projectId} metal=${metal} priceKey=${priceKey} missingPeriods=${missingDates.length} firstMissingDate=${missingDates[0]}`,
+                `Missing price coverage for project=${projectId} metal=Au priceKey=${parsed.engineInputWithoutPrices.auPriceKey} missingPeriods=${missingAuDates.length} firstMissingDate=${missingAuDates[0]}`,
               );
             }
-          }
-
-          const missingAuDates = resolved.aisc.auPriceUSDPerOz
-            .map((value, index) => (value === null ? periodEndDatesUtc[index] : null))
-            .filter((value): value is string => typeof value === 'string');
-          if (missingAuDates.length > 0) {
-            diagnostics.warnings.push(
-              `Missing price coverage for project=${projectId} metal=Au priceKey=${parsed.engineInputWithoutPrices.auPriceKey} missingPeriods=${missingAuDates.length} firstMissingDate=${missingAuDates[0]}`,
-            );
           }
 
           const out = computeProjectEngineFullProductionV1(resolved);
