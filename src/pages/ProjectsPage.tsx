@@ -3,6 +3,7 @@ import { postCorporateSnapshot } from '../lib/client/snapshotClient.ts';
 import { getCompanyProject, listCompanyProjects, type CompanyProjectRecord, type CompanyProjectSummary } from '../lib/client/companyProjectsClient.ts';
 import type { SnapshotRequest } from '../lib/api/validateSnapshotRequest.ts';
 import { buildTransposedTable } from '../lib/ui/tables/buildTransposedTable.ts';
+import { resolveCommonSharesCurrent } from '../lib/market/resolveSharesCurrent.ts';
 import '../styles/projects-view.css';
 
 const DEFAULT_SYMBOL = 'AAPL';
@@ -137,6 +138,7 @@ export default function ProjectsPage() {
   const [snapshotDiagnosticsErrors, setSnapshotDiagnosticsErrors] = useState<string[]>([]);
   const [snapshotData, setSnapshotData] = useState<Record<string, unknown> | null>(null);
   const [profileDefaults, setProfileDefaults] = useState<Record<string, unknown> | null>(null);
+  const [companyStatements, setCompanyStatements] = useState<{ balance?: Record<string, Array<number | null>>; income?: Record<string, Array<number | null>> } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -162,6 +164,34 @@ export default function ProjectsPage() {
     }
 
     void loadProjects();
+    return () => {
+      isMounted = false;
+    };
+  }, [symbol]);
+
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCompanyStatements() {
+      try {
+        const response = await fetch(`/api/company?ticker=${encodeURIComponent(symbol)}`);
+        const payload = (await response.json()) as {
+          balance?: Record<string, Array<number | null>>;
+          income?: Record<string, Array<number | null>>;
+        };
+        if (!isMounted) return;
+        setCompanyStatements({
+          balance: payload?.balance,
+          income: payload?.income,
+        });
+      } catch {
+        if (!isMounted) return;
+        setCompanyStatements(null);
+      }
+    }
+
+    void loadCompanyStatements();
     return () => {
       isMounted = false;
     };
@@ -208,7 +238,10 @@ export default function ProjectsPage() {
         if (!isMounted) return;
         setSelectedProject(project);
 
-        const sharesCurrent = readFiniteNumber(profileDefaults?.sharesOutstanding);
+        const sharesCurrent = resolveCommonSharesCurrent({
+          balance: companyStatements?.balance,
+          income: companyStatements?.income,
+        });
         const priceCurrent = readFiniteNumber(profileDefaults?.price);
         const marketWarnings: string[] = [];
         const market =
@@ -220,7 +253,7 @@ export default function ProjectsPage() {
             : undefined;
         if (!market) {
           if (!(sharesCurrent !== null && sharesCurrent > 0)) {
-            marketWarnings.push('market.shares_current missing from profile.sharesOutstanding; EV/multiples may be null.');
+            marketWarnings.push('market.shares_current missing (resolved from statements); EV/multiples will be null.');
           }
           if (!(priceCurrent !== null && priceCurrent > 0)) {
             marketWarnings.push('market.price_current_TargetCurrency missing from profile.price; EV/multiples may be null.');
@@ -279,7 +312,7 @@ export default function ProjectsPage() {
     return () => {
       isMounted = false;
     };
-  }, [lockedTargetCurrency, profileDefaults, projectId, symbol]);
+  }, [lockedTargetCurrency, companyStatements, profileDefaults, projectId, symbol]);
 
   const metrics = useMemo(() => {
     if (!snapshotData) return [] as Array<{ label: string; value: unknown }>;

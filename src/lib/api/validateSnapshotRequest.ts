@@ -127,13 +127,13 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
 
   if (isProjectsMode) {
     if (!isObject(market)) {
-      warnings.push('market: missing market block; EV/multiple outputs will be null');
+      warnings.push('market missing; EV/multiples will be null.');
     } else {
       if (shares === null || !(shares > 0)) {
-        warnings.push('market: missing or invalid shares_current; EV/multiple outputs will be null');
+        warnings.push('market.shares_current missing (resolved from statements); EV/multiples will be null.');
       }
       if (currentPrice === null || !(currentPrice > 0)) {
-        warnings.push('market: missing or invalid price_current_TargetCurrency; EV/multiple outputs will be null');
+        warnings.push('market.price_current_TargetCurrency missing or invalid; EV/multiples will be null.');
       }
     }
   }

@@ -34,7 +34,7 @@ function assert(condition: boolean, message: string): void {
     assert(projectsWithoutMarketValid.value.market?.shares_current === null, 'missing market shares should normalize to null');
     assert(projectsWithoutMarketValid.value.market?.price_current_TargetCurrency === null, 'missing market price should normalize to null');
     assert(
-      projectsWithoutMarketValid.warnings.some((warning) => warning.includes('market: missing market block')),
+      projectsWithoutMarketValid.warnings.some((warning) => warning.includes('market missing; EV/multiples will be null.')),
       'projects mode without market should emit warning',
     );
   }
