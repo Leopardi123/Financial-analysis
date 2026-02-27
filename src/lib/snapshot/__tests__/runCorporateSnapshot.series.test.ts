@@ -201,7 +201,7 @@ test('projects-mode per-share metrics default to post-financing FD shares while 
   assert.equal(fdResult.snapshot.EV_perShare_TargetCurrency, baseResult.snapshot.EV_perShare_TargetCurrency);
 });
 
-test('royaltiesDetail derives royaltyUSD from revenue NSR_pct and only backfills series royalties when missing', async () => {
+test('royaltiesDetail computes royalties from revenue rules and overrides series royalties when rules are computable', async () => {
   const baseBody = await loadFixture();
   const projects = baseBody.projects as Array<Record<string, unknown>>;
   const rawJson = projects[0].rawJson as Record<string, unknown>;
@@ -252,7 +252,7 @@ test('royaltiesDetail derives royaltyUSD from revenue NSR_pct and only backfills
   }
 
   assert.ok(
-    resultA.diagnostics.warnings.includes('royaltiesDetail: derived royaltyUSD from base=revenue using NSR_pct rate(s); summed into series.royaltiesUSD'),
+    resultA.diagnostics.warnings.some((line) => line.includes('royalties: computed from royaltiesDetail (base=revenue')),
   );
 
   const bodyB = JSON.parse(JSON.stringify(baseBody)) as Record<string, unknown>;
@@ -266,7 +266,11 @@ test('royaltiesDetail derives royaltyUSD from revenue NSR_pct and only backfills
   assert.equal(resultB.ok, true);
   if (!resultB.ok) return;
 
-  assert.deepEqual(resultB.snapshot.series?.royaltiesUSD, existingRoyalties);
+  assert.notDeepEqual(resultB.snapshot.series?.royaltiesUSD, existingRoyalties);
+
+  assert.ok(
+    resultB.diagnostics.warnings.includes('royalties: computed royalties used; series.royaltiesUSD ignored due to royaltiesDetail precedence'),
+  );
   const detail = resultB.snapshot.series?.royaltiesDetail ?? [];
   assert.equal(detail.length, 2);
   const derivedTotal = (detail[0].royaltyUSD ?? []).map((_, t) => {
