@@ -70,3 +70,46 @@ test('snapshot series normalizes non-finite inputs to null', async () => {
 
   assert.equal(result.snapshot.series?.operatingCostsUSD[2], null);
 });
+
+
+test('snapshot series exposes economics breakdown when provided', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  series.siteGandA_USD = (series.siteGandA_USD as Array<number | null>).map(() => null);
+  rawJson.economicsBreakdown = {
+    cogs: {
+      miningUSD: (series.operatingCostsUSD as Array<number | null>).map(() => 10),
+      millingUSD: (series.operatingCostsUSD as Array<number | null>).map(() => 5),
+      siteGandA_USD: (series.operatingCostsUSD as Array<number | null>).map(() => 2),
+    },
+    selling: {
+      tcRcUSD: (series.operatingCostsUSD as Array<number | null>).map(() => 1),
+      transportUSD: (series.operatingCostsUSD as Array<number | null>).map(() => 1),
+    },
+    royaltiesDetail: [
+      {
+        id: 'nsr',
+        label: 'NSR',
+        base: 'revenue',
+        rate: 0.01,
+      },
+    ],
+    taxesDetail: {
+      municipalRevenueTaxUSD: (series.operatingCostsUSD as Array<number | null>).map(() => 3),
+    },
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+
+  if (!result.ok) {
+    return;
+  }
+
+  assert.ok(result.snapshot.series?.economicsBreakdown);
+  assert.equal(result.snapshot.series?.economicsBreakdown?.cogs?.miningUSD?.length, result.snapshot.aggregation.corporateMasterN + 1);
+  assert.equal(result.snapshot.series?.royaltiesDetail?.[0]?.id, 'nsr');
+  assert.equal(result.snapshot.series?.taxesDetail?.municipalRevenueTaxUSD?.length, result.snapshot.aggregation.corporateMasterN + 1);
+});

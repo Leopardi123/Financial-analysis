@@ -16,6 +16,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
 (async function runResolveProjectPricesToEngineInputTests() {
   const base = getProjectJsonV1Template();
+  base.economicsBreakdown = null;
   base.time.masterN = 2;
   base.time.productionStartPeriod = 1;
   base.time.periodEndDatesUtc = ['2024-12-31', '2025-12-31', '2026-12-31'];
@@ -125,6 +126,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   assert(Math.abs((gotLb as number) - expectedLb) < 1e-9, 'tonne to lb conversion should apply');
 
   const missingEarlierData = getProjectJsonV1Template();
+  missingEarlierData.economicsBreakdown = null;
   missingEarlierData.time.masterN = 0;
   missingEarlierData.time.productionStartPeriod = 0;
   missingEarlierData.time.periodEndDatesUtc = ['2024-01-01'];
@@ -157,6 +159,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   assertEqual(missingResolved.spotPriceUSDByMetal.Au[0], null, 'missing earlier data resolves to null');
 
   const fallbackBase = getProjectJsonV1Template();
+  fallbackBase.economicsBreakdown = null;
   fallbackBase.time.masterN = 0;
   fallbackBase.time.productionStartPeriod = 0;
   fallbackBase.time.periodEndDatesUtc = undefined;

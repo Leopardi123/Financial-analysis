@@ -110,6 +110,50 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertEqual(parsedLegacy.priceOverrides.spotPriceUSDByMetal?.Au[0], 10, 'legacy spot price carried as override');
   assertEqual(parsedLegacy.priceOverrides.auPriceUSDPerOz?.[0], 1999, 'legacy au price carried as override');
 
+
+  const withBreakdown = getProjectJsonV1Template();
+  withBreakdown.series.siteGandA_USD = new Array(withBreakdown.time.masterN + 1).fill(null);
+  withBreakdown.economicsBreakdown = {
+    cogs: {
+      miningUSD: new Array(withBreakdown.time.masterN + 1).fill(10),
+      siteGandA_USD: new Array(withBreakdown.time.masterN + 1).fill(5),
+    },
+    selling: {
+      tcRcUSD: new Array(withBreakdown.time.masterN + 1).fill(3),
+      transportUSD: new Array(withBreakdown.time.masterN + 1).fill(2),
+    },
+    royaltiesDetail: [
+      {
+        id: 'roy1',
+        label: 'NSR',
+        base: 'revenue',
+        rate: 0.01,
+      },
+    ],
+    taxesDetail: {
+      federalIncomeTaxUSD: new Array(withBreakdown.time.masterN + 1).fill(1),
+    },
+  };
+  const parsedBreakdown = parseProjectJsonV1(withBreakdown);
+  assertEqual(parsedBreakdown.context.economicsBreakdown?.cogs?.miningUSD?.[0], 10, 'economics breakdown mining parsed');
+
+  const badBreakdownLength = getProjectJsonV1Template();
+  badBreakdownLength.economicsBreakdown = {
+    cogs: {
+      miningUSD: [1, 2],
+    },
+  };
+  assertThrows(() => parseProjectJsonV1(badBreakdownLength), /economicsBreakdown\.cogs\.miningUSD/, 'throws on economics breakdown length mismatch');
+
+  const duplicateSiteGanda = getProjectJsonV1Template();
+  duplicateSiteGanda.series.siteGandA_USD[1] = 9;
+  duplicateSiteGanda.economicsBreakdown = {
+    cogs: {
+      siteGandA_USD: new Array(duplicateSiteGanda.time.masterN + 1).fill(1),
+    },
+  };
+  assertThrows(() => parseProjectJsonV1(duplicateSiteGanda), /economicsBreakdown\.cogs\.siteGandA_USD/, 'throws on siteGandA duplication');
+
   const invalidOperations = getProjectJsonV1Template();
   if (invalidOperations.operations == null) {
     throw new Error('template.operations must be present');
