@@ -169,8 +169,13 @@ type ProjectSeriesContext = {
     reclamationUSD: Array<number | null>;
     byproductCreditsUSD: Array<number | null>;
     sustainingCostUSD: Array<number | null>;
+    ebitdaUSD: Array<number | null>;
+    depreciationUSD: Array<number | null>;
     ebitUSD: Array<number | null>;
+    taxableIncomeUSD: Array<number | null>;
+    effectiveTaxRate: Array<number | null>;
     taxUSD: Array<number | null>;
+    workingCapitalDeltaUSD: Array<number | null>;
     fcffUSD: Array<number | null>;
     capexUSD: Array<number | null>;
   };
@@ -366,8 +371,13 @@ function buildSnapshotSeries(args: {
   const reclamationUSD = aggregateEconomic('reclamationUSD');
   const byproductCreditsUSD = aggregateEconomic('byproductCreditsUSD');
   const sustainingCostUSD = aggregateEconomic('sustainingCostUSD');
+  const ebitdaUSD = aggregateEconomic('ebitdaUSD');
+  const depreciationUSD = aggregateEconomic('depreciationUSD');
   const ebitUSD = aggregateEconomic('ebitUSD');
+  const taxableIncomeUSD = aggregateEconomic('taxableIncomeUSD');
+  const effectiveTaxRate = aggregateEconomic('effectiveTaxRate');
   const taxUSD = aggregateEconomic('taxUSD');
+  const workingCapitalDeltaUSD = aggregateEconomic('workingCapitalDeltaUSD');
   const fcffUSD = aggregateEconomic('fcffUSD');
   const capexUSD = aggregateEconomic('capexUSD');
 
@@ -517,8 +527,13 @@ function buildSnapshotSeries(args: {
     reclamationUSD,
     byproductCreditsUSD,
     sustainingCostUSD,
+    ebitdaUSD,
+    depreciationUSD,
     ebitUSD,
+    taxableIncomeUSD,
+    effectiveTaxRate,
     taxUSD,
+    workingCapitalDeltaUSD,
     fcffUSD,
     capexUSD,
     economicsBreakdown: hasAnyEconomicsBreakdown ? economicsBreakdown : undefined,
@@ -526,6 +541,43 @@ function buildSnapshotSeries(args: {
     taxesDetail: taxesDetail.federalIncomeTaxUSD || taxesDetail.municipalRevenueTaxUSD ? taxesDetail : undefined,
     unitAudit,
   };
+}
+
+
+function firstInvalidSeriesIndex(series: Array<number | null>): number | null {
+  for (let i = 0; i < series.length; i += 1) {
+    const value = series[i];
+    if (value === null || !Number.isFinite(value)) return i;
+  }
+  return null;
+}
+
+function firstFcffIssue(args: {
+  revenue: Array<number | null>;
+  operatingCosts: Array<number | null>;
+  royalties: Array<number | null>;
+  tax: Array<number | null>;
+  capex: Array<number | null>;
+  workingCapitalDelta: Array<number | null>;
+  fcff: Array<number | null>;
+}): { t: number; component: string } | null {
+  const firstFcff = firstInvalidSeriesIndex(args.fcff);
+  if (firstFcff === null) return null;
+  const checks: Array<[string, Array<number | null>]> = [
+    ['revenue', args.revenue],
+    ['opex', args.operatingCosts],
+    ['royalties', args.royalties],
+    ['tax', args.tax],
+    ['capex', args.capex],
+    ['wc', args.workingCapitalDelta],
+  ];
+  for (const [name, series] of checks) {
+    const value = series[firstFcff];
+    if (value === null || !Number.isFinite(value)) {
+      return { t: firstFcff, component: name };
+    }
+  }
+  return { t: firstFcff, component: 'fcff' };
 }
 
 function isAllNullOrNonFinite(series: Array<number | null> | null | undefined): boolean {
@@ -704,15 +756,34 @@ export async function runCorporateSnapshotPipeline(args: {
             }
           }
 
-          const out = computeProjectEngineFullProductionV1(resolved);
+          const rawSeriesRoyalties = (rawJsonRecord.series as { royaltiesUSD?: Array<number | null> } | undefined)?.royaltiesUSD;
+          const explicitRoyaltiesUSD = Array.from({ length: periodEndDatesUtc.length }, (_, t) => toFiniteOrNull(rawSeriesRoyalties?.[t] ?? null));
+          const resolvedWithRoyalties = isAllNullOrNonFinite(explicitRoyaltiesUSD)
+            ? resolved
+            : {
+                ...resolved,
+                phase1: {
+                  ...resolved.phase1,
+                  royaltiesUSD: explicitRoyaltiesUSD,
+                },
+              };
+
+          const out = computeProjectEngineFullProductionV1(resolvedWithRoyalties);
           diagnostics.warnings.push(...out.nationalTake.diagnostics);
           const projectLength = periodEndDatesUtc.length;
           const nullSeries = new Array<number | null>(projectLength).fill(null);
           const taxRate = parsed.engineInputWithoutPrices.taxRate;
-          const taxByRule = out.phase1.ebitUSD.map((ebit) => {
-            const finiteEbit = toFiniteOrNull(ebit);
-            return finiteEbit === null ? null : Math.max(0, finiteEbit) * taxRate;
+          const depreciationUSD = sanitizeSeries(parsed.context.series?.depreciationUSD ?? nullSeries);
+          const ebitdaUSD = sanitizeSeries(out.phase1.ebitdaUSD);
+          const ebitUSD = ebitdaUSD.map((ebitda, t) => {
+            const dep = depreciationUSD[t];
+            if (ebitda === null || dep === null) return null;
+            return ebitda - dep;
           });
+          const taxableIncomeUSD = ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
+          const taxByRule = taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
+          const effectiveTaxRate = ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
+          diagnostics.warnings.push(`Tax base: TaxableIncome = max(0, EBIT); EBIT = EBITDA - Depreciation; taxRate=${taxRate === null ? 'null' : String(taxRate)}`);
 
           const projectEconomicsBreakdown = parsed.context.economicsBreakdown;
           let anyItemDerivedFromRevenueRates = false;
@@ -747,35 +818,9 @@ export async function runCorporateSnapshotPipeline(args: {
             };
           });
 
-          let derivedRoyaltiesUSDFromDetail: Array<number | null> | null = null;
-          if (royaltiesDetail.length > 0) {
-            derivedRoyaltiesUSDFromDetail = Array.from({ length: projectLength }, (_, t) => {
-              let sum = 0;
-              let hasFinite = false;
-              for (const item of royaltiesDetail) {
-                const value = item.royaltyUSD[t];
-                const finite = toFiniteOrNull(value);
-                if (finite === null) continue;
-                hasFinite = true;
-                sum += finite;
-              }
-              return hasFinite ? sum : null;
-            });
-            if (anyItemDerivedFromRevenueRates) {
-              diagnostics.warnings.push('royaltiesDetail: derived royaltyUSD from base=revenue using NSR_pct rate(s); summed into series.royaltiesUSD');
-            }
+          if (anyItemDerivedFromRevenueRates) {
+            diagnostics.warnings.push('royaltiesDetail: derived royaltyUSD from base=revenue using NSR_pct rate(s); summed into series.royaltiesUSD');
           }
-
-          const rawSeriesRoyalties = (rawJsonRecord.series as { royaltiesUSD?: Array<number | null> } | undefined)?.royaltiesUSD;
-          const existingSeriesRoyaltiesUSD = Array.from({ length: projectLength }, (_, t) => {
-            const value = rawSeriesRoyalties?.[t] ?? null;
-            return toFiniteOrNull(value);
-          });
-          const shouldFillSeriesRoyaltiesFromDetail =
-            derivedRoyaltiesUSDFromDetail !== null && isAllNullOrNonFinite(existingSeriesRoyaltiesUSD);
-          const royaltiesUSDForSeries = shouldFillSeriesRoyaltiesFromDetail && derivedRoyaltiesUSDFromDetail
-            ? derivedRoyaltiesUSDFromDetail
-            : existingSeriesRoyaltiesUSD;
 
           const taxesDetail = projectEconomicsBreakdown?.taxesDetail
             ? {
@@ -835,12 +880,17 @@ export async function runCorporateSnapshotPipeline(args: {
               operatingCostsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD),
               sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
               siteGandA_USD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.siteGandA_USD),
-              royaltiesUSD: sanitizeSeries(royaltiesUSDForSeries),
+              royaltiesUSD: sanitizeSeries(out.nationalTake.totalRoyaltiesUSD),
               reclamationUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD),
               byproductCreditsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.byproductCreditsUSD ?? nullSeries),
               sustainingCostUSD: sanitizeSeries(out.phase1.sustainingCostUSD),
-              ebitUSD: sanitizeSeries(out.phase1.ebitUSD),
+              ebitdaUSD,
+              depreciationUSD,
+              ebitUSD: sanitizeSeries(ebitUSD),
+              taxableIncomeUSD: sanitizeSeries(taxableIncomeUSD),
+              effectiveTaxRate: sanitizeSeries(effectiveTaxRate),
               taxUSD: sanitizeSeries(taxByRule),
+              workingCapitalDeltaUSD: sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective),
               fcffUSD: sanitizeSeries(out.phase1.fcffUSD),
               capexUSD: sanitizeSeries(out.capexUSD_used),
             },
@@ -976,6 +1026,25 @@ export async function runCorporateSnapshotPipeline(args: {
       );
     }
 
+    const snapshotSeries = buildSnapshotSeries({
+      masterN: aggregation.corporateMasterN,
+      corporateDates: aggregation.corporatePeriodEndDatesUtc,
+      projectSeriesContexts,
+    });
+
+    const fcffIssue = firstFcffIssue({
+      revenue: snapshotSeries.totalRevenue_USD,
+      operatingCosts: snapshotSeries.operatingCostsUSD,
+      royalties: snapshotSeries.royaltiesUSD,
+      tax: snapshotSeries.taxUSD,
+      capex: snapshotSeries.capexUSD,
+      workingCapitalDelta: snapshotSeries.workingCapitalDeltaUSD ?? new Array(snapshotSeries.fcffUSD.length).fill(0),
+      fcff: snapshotSeries.fcffUSD,
+    });
+    if (fcffIssue) {
+      diagnostics.warnings.push(`Lista2 CF+DCF skipped candidate: first invalid FCFF at t=${fcffIssue.t}; component=${fcffIssue.component}`);
+    }
+
     const lista2 = computeLista2CfDcfMetrics({
       fcfUSD_total: aggregation.fcffUSD_total,
       masterN: aggregation.corporateMasterN,
@@ -1008,13 +1077,6 @@ export async function runCorporateSnapshotPipeline(args: {
       ev_TargetCurrency: null,
       totalStockholdersEquity_USD,
     });
-
-    const snapshotSeries = buildSnapshotSeries({
-      masterN: aggregation.corporateMasterN,
-      corporateDates: aggregation.corporatePeriodEndDatesUtc,
-      projectSeriesContexts,
-    });
-
     const lista3a = computeLista3aProjectEfficiencyMetrics({
       masterN: aggregation.corporateMasterN,
       productionStartPeriod: corporateProductionStartPeriod,

@@ -502,7 +502,7 @@ export type ParsedProjectJsonV1 = {
     takeItems: Array<import('../take/types').TakeItemMVI>;
     masterN: number;
     productionStartPeriod: number;
-    taxRate: number;
+    taxRate: number | null;
     priceKeyByMetal: Record<string, string>;
     auPriceKey: string;
     payableQtyUnitByMetal: Record<string, QtyUnit>;
@@ -558,10 +558,10 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   }
 
   const rawTaxRate = raw.economics.taxRate;
-  if (rawTaxRate !== undefined && (!isFiniteNumber(rawTaxRate) || rawTaxRate < 0 || rawTaxRate > 0.6)) {
+  if (rawTaxRate !== undefined && rawTaxRate !== null && (!isFiniteNumber(rawTaxRate) || rawTaxRate < 0 || rawTaxRate > 0.6)) {
     fail('economics.taxRate', 'finite number in [0, 0.6]', rawTaxRate);
   }
-  const taxRate = rawTaxRate ?? 0;
+  const taxRate = rawTaxRate ?? null;
 
   let fdExtraShares = 0;
   let fdNotes: string | undefined;
@@ -829,6 +829,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
       siteGandA_USD,
       reclamationUSD,
       byproductCreditsUSD,
+      depreciationUSD,
       workingCapitalDeltaUSD,
     },
     phase2: {
@@ -856,6 +857,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
         siteGandA_USD,
         reclamationUSD,
         byproductCreditsUSD,
+        depreciationUSD,
         workingCapitalDeltaUSD,
       },
       phase2: {

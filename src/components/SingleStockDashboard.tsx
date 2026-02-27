@@ -1990,8 +1990,13 @@ Capital Available: ${availableLabel}`,
       economics: {
         priceUSDByMetal: (projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {},
         operatingCostsUSD: getSeries(projectSeriesRecord.operatingCostsUSD) ?? undefined,
+        royaltiesUSD: getSeries(projectSeriesRecord.royaltiesUSD) ?? undefined,
+        ebitdaUSD: getSeries(projectSeriesRecord.ebitdaUSD) ?? undefined,
         ebitUSD: getSeries(projectSeriesRecord.ebitUSD) ?? undefined,
-        depreciationUSD: getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD) ?? undefined,
+        depreciationUSD: getSeries(projectSeriesRecord.depreciationUSD) ?? getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD) ?? undefined,
+        taxableIncomeUSD: getSeries(projectSeriesRecord.taxableIncomeUSD) ?? undefined,
+        taxUSD: getSeries(projectSeriesRecord.taxUSD) ?? undefined,
+        effectiveTaxRate: getSeries(projectSeriesRecord.effectiveTaxRate) ?? undefined,
       },
     });
 
@@ -2059,12 +2064,19 @@ Capital Available: ${availableLabel}`,
       ...revenueRows,
       { label: 'Gross revenue (USD)', values: seriesByLabel.get('Gross revenue (USD)') ?? null },
       { label: 'Gross profit (USD)', values: seriesByLabel.get('Gross profit (USD)') ?? null },
-      { label: 'EBITDA (USD)', values: seriesByLabel.get('EBITDA (USD)') ?? null },
+      { label: 'EBITDA (USD, includes royalties)', values: seriesByLabel.get('EBITDA (USD, includes royalties)') ?? null },
       { label: 'EBIT (USD)', values: getSeries(projectSeriesRecord.ebitUSD) },
-      { label: 'Tax (USD)', values: getSeries(projectSeriesRecord.taxUSD) },
       { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) },
       { label: 'Royalties (USD)', values: royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD) },
     ]
+      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+
+    const taxRows = [
+      ['Taxable income (USD)', projectSeriesRecord.taxableIncomeUSD],
+      ['Tax (USD)', projectSeriesRecord.taxUSD],
+      ['Effective tax rate', projectSeriesRecord.effectiveTaxRate],
+    ]
+      .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
 
     const capitalRows = [
@@ -2092,6 +2104,7 @@ Capital Available: ${availableLabel}`,
 
     addSection('PRODUCTION', productionRows);
     addSection('P&L CORE', pAndLCoreRows);
+    addSection('TAX', taxRows);
     addSection('CAPITAL', capitalRows);
     addSection('INVESTMENT & CASH FLOW', investmentRows);
 

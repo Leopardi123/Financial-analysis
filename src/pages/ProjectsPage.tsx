@@ -34,8 +34,13 @@ type SeriesShape = {
   reclamationUSD?: Array<number | null>;
   byproductCreditsUSD?: Array<number | null>;
   sustainingCostUSD?: Array<number | null>;
+  ebitdaUSD?: Array<number | null>;
+  depreciationUSD?: Array<number | null>;
   ebitUSD?: Array<number | null>;
+  taxableIncomeUSD?: Array<number | null>;
+  effectiveTaxRate?: Array<number | null>;
   taxUSD?: Array<number | null>;
+  workingCapitalDeltaUSD?: Array<number | null>;
   fcffUSD?: Array<number | null>;
   capexUSD?: Array<number | null>;
   unitAudit?: {
@@ -427,7 +432,9 @@ export default function ProjectsPage() {
       { label: 'Byproduct credits', values: series.byproductCreditsUSD },
       { label: 'Sustaining cost', values: series.sustainingCostUSD },
       { label: 'EBIT', values: series.ebitUSD },
+      { label: 'Taxable income', values: series.taxableIncomeUSD },
       { label: 'Tax', values: series.taxUSD },
+      { label: 'Effective tax rate', values: series.effectiveTaxRate },
       { label: 'FCFF', values: series.fcffUSD },
       { label: 'Capex', values: series.capexUSD },
     ];

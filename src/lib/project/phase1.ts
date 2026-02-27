@@ -37,11 +37,11 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     throw new Error('productionStartPeriod must be an integer');
   }
 
-  const taxRate = input.taxRate ?? 0;
-  if (!isFiniteNumber(taxRate)) {
+  const taxRate = input.taxRate ?? null;
+  if (taxRate !== null && !isFiniteNumber(taxRate)) {
     throw new Error('taxRate must be finite');
   }
-  if (taxRate < 0 || taxRate > 0.6) {
+  if (taxRate !== null && (taxRate < 0 || taxRate > 0.6)) {
     throw new Error('taxRate must be between 0 and 0.6');
   }
 
@@ -53,10 +53,14 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const reclamationUSD = normalizeSeriesLength(input.reclamationUSD, length, 'reclamationUSD');
   const capexUSD = normalizeSeriesLength(input.capexUSD, length, 'capexUSD');
   const byproductCreditsUSD = normalizeSeriesLength(input.byproductCreditsUSD, length, 'byproductCreditsUSD');
+  const depreciationUSD = normalizeSeriesLength(input.depreciationUSD, length, 'depreciationUSD');
   const workingCapitalDeltaUSD = normalizeSeriesLength(input.workingCapitalDeltaUSD, length, 'workingCapitalDeltaUSD');
 
   const sustainingCostUSD: (number | null)[] = new Array(length).fill(null);
+  const ebitdaUSD: (number | null)[] = new Array(length).fill(null);
   const ebitUSD: (number | null)[] = new Array(length).fill(null);
+  const taxableIncomeUSD: (number | null)[] = new Array(length).fill(null);
+  const effectiveTaxRate: (number | null)[] = new Array(length).fill(null);
   const taxUSD: (number | null)[] = new Array(length).fill(null);
   const nopatUSD: (number | null)[] = new Array(length).fill(null);
   const fcffUSD: (number | null)[] = new Array(length).fill(null);
@@ -70,16 +74,26 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     const roy = safeValue(royaltiesUSD, t);
     const rec = safeValue(reclamationUSD, t);
     const bp = safeValue(byproductCreditsUSD, t);
+    const dep = safeValue(depreciationUSD, t);
     const dWC = safeValue(workingCapitalDeltaUSD, t);
+    const cx = capexUSD[t];
+    if (cx !== null && cx < 0) {
+      throw new Error(CAPEX_NEGATIVE_ERROR);
+    }
     workingCapitalDeltaUSD_effective[t] = dWC;
 
     const sustainingValue = op + sc + ga + roy + rec - bp;
-    const ebitValue = r - op - sc - ga - roy - rec + bp;
+    // EBITDA convention in this model: gross revenue less operating, sustaining, G&A, royalties, reclamation, plus byproduct credits.
+    const ebitdaValue = r - op - sc - ga - roy - rec + bp;
+    const ebitValue = ebitdaValue - dep;
 
     sustainingCostUSD[t] = Number.isFinite(sustainingValue) ? sustainingValue : null;
+    ebitdaUSD[t] = Number.isFinite(ebitdaValue) ? ebitdaValue : null;
     ebitUSD[t] = Number.isFinite(ebitValue) ? ebitValue : null;
 
     if (ebitUSD[t] == null) {
+      taxableIncomeUSD[t] = null;
+      effectiveTaxRate[t] = null;
       taxUSD[t] = null;
       nopatUSD[t] = null;
       fcffUSD[t] = null;
@@ -87,8 +101,20 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     }
 
     const ebitAtT = ebitUSD[t] as number;
-    const taxValue = Math.max(0, ebitAtT) * taxRate;
+    const taxableIncomeAtT = Math.max(0, ebitAtT);
+    taxableIncomeUSD[t] = Number.isFinite(taxableIncomeAtT) ? taxableIncomeAtT : null;
+
+    if (taxRate === null || taxableIncomeUSD[t] === null) {
+      effectiveTaxRate[t] = null;
+      taxUSD[t] = null;
+      nopatUSD[t] = null;
+      fcffUSD[t] = null;
+      continue;
+    }
+
+    const taxValue = (taxableIncomeUSD[t] as number) * taxRate;
     taxUSD[t] = Number.isFinite(taxValue) ? taxValue : null;
+    effectiveTaxRate[t] = ebitAtT > 0 && taxUSD[t] !== null ? (taxUSD[t] as number) / ebitAtT : null;
 
     if (taxUSD[t] == null) {
       nopatUSD[t] = null;
@@ -105,24 +131,23 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
       continue;
     }
 
-    const cx = capexUSD[t];
     if (cx == null) {
       fcffUSD[t] = null;
       continue;
     }
 
-    if (cx < 0) {
-      throw new Error(CAPEX_NEGATIVE_ERROR);
-    }
-
     const nopatAtT = nopatUSD[t] as number;
-    const fcffValue = nopatAtT - cx - dWC;
+    const fcffValue = nopatAtT + dep - cx - dWC;
     fcffUSD[t] = Number.isFinite(fcffValue) ? fcffValue : null;
   }
 
   return {
     sustainingCostUSD,
+    ebitdaUSD,
+    depreciationUSD,
     ebitUSD,
+    taxableIncomeUSD,
+    effectiveTaxRate,
     taxUSD,
     nopatUSD,
     fcffUSD,
