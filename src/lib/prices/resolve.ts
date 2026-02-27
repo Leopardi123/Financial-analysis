@@ -1,6 +1,6 @@
 import { convertPriceToCanonical } from './units/convert.ts';
 import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.ts';
-import { buildHistoricalWindowUtc, fetchHistorical, getLegacyQuote, type ProviderPriceRow } from './providers/fmp.ts';
+import { buildHistoricalWindowUtc, fetchHistorical, getLegacyQuote, resolveLegacyCommodityCloseOnOrBefore, type ProviderPriceRow } from './providers/fmp.ts';
 import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.ts';
 import { getLegacySymbolForPriceKey } from './providers/legacyCommoditySymbolMap.ts';
 
@@ -18,6 +18,7 @@ type ResolveDeps = {
   upsertMonthlySeriesFn: typeof upsertMonthlySeries;
   getMonthlySeriesFn: typeof getMonthlySeries;
   getLegacyQuoteFn: typeof getLegacyQuote;
+  resolveLegacyCommodityCloseOnOrBeforeFn: typeof resolveLegacyCommodityCloseOnOrBefore;
 };
 
 function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
@@ -29,6 +30,7 @@ function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
     upsertMonthlySeriesFn: deps.upsertMonthlySeriesFn ?? upsertMonthlySeries,
     getMonthlySeriesFn: deps.getMonthlySeriesFn ?? getMonthlySeries,
     getLegacyQuoteFn: deps.getLegacyQuoteFn ?? getLegacyQuote,
+    resolveLegacyCommodityCloseOnOrBeforeFn: deps.resolveLegacyCommodityCloseOnOrBeforeFn ?? resolveLegacyCommodityCloseOnOrBefore,
   };
 }
 
@@ -126,25 +128,31 @@ export async function resolvePriceSeries(
       ? spotWindow?.fromUtc ?? minDate
       : minDate;
 
+  if (args.scenario.mode === 'spot' && legacySymbol) {
+    const resolvedCommodity = await resolvedDeps.resolveLegacyCommodityCloseOnOrBeforeFn(legacySymbol, maxDate);
+    resolvedCommodity.warnings.forEach((warning) => pushWarning(warning));
+
+    if (resolvedCommodity.close !== null) {
+      return { values: args.anchorDatesUtc.map(() => resolvedCommodity.close), warnings };
+    }
+
+    const quote = await resolvedDeps.getLegacyQuoteFn(legacySymbol);
+    if (quote) {
+      pushWarning(`commodity history missing; fell back to quotes/commodity spot: ${legacySymbol}`);
+      return { values: args.anchorDatesUtc.map(() => quote.price), warnings };
+    }
+
+    pushWarning(`commodity price missing: ${legacySymbol} (history+spot empty)`);
+    return { values: args.anchorDatesUtc.map(() => null), warnings };
+  }
+
   if (args.allowRefresh) {
     await maybeRefreshHistory(args.price_key, fromUtc, maxDate, resolvedDeps);
   }
 
   const rows = await resolvedDeps.getMonthlySeriesFn(args.price_key, fromUtc, maxDate);
-  let quoteFallbackClose: number | null = null;
   if (rows.length === 0 && legacySymbol) {
     pushWarning(`No price data returned from FMP legacy v3 for symbol ${legacySymbol}`);
-    pushWarning(`legacyFetch: GET /api/v3/historical-chart/1day/${legacySymbol}?from=${fromUtc}&to=${maxDate}`);
-    if (args.scenario.mode === 'spot') {
-      const quote = await resolvedDeps.getLegacyQuoteFn(legacySymbol);
-      if (quote) {
-        quoteFallbackClose = quote.price;
-        pushWarning(`historical missing for ${legacySymbol}; fell back to quotes/commodity spot price`);
-      } else {
-        pushWarning(`No legacy quote for commodity symbol ${legacySymbol} via /api/v3/quotes/commodity`);
-        pushWarning('legacyFetch: GET /api/v3/quotes/commodity');
-      }
-    }
   }
 
   if (args.scenario.mode === 'spot') {
@@ -152,9 +160,6 @@ export async function resolvePriceSeries(
       const eligible = rows.filter((row) => row.dateUtc <= anchorDateUtc);
       const latest = eligible[eligible.length - 1];
       if (!latest) {
-        if (quoteFallbackClose !== null) {
-          return quoteFallbackClose;
-        }
         pushWarning(`No close on or before ${anchorDateUtc} for ${args.price_key}`);
         return null;
       }

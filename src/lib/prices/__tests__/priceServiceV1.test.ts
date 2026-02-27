@@ -51,13 +51,16 @@ function assertApprox(actual: number, expected: number, tolerance: number, label
       allowRefresh: false,
     },
     {
-      getMonthlySeriesFn: async () => [
-        { dateUtc: '2024-12-31', value: 3.95 },
-        { dateUtc: '2025-01-31', value: 4.1 },
-      ],
+      resolveLegacyCommodityCloseOnOrBeforeFn: async () => ({
+        close: 3.95,
+        dateUtc: '2025-01-14',
+        warnings: [],
+      }),
+      getLegacyQuoteFn: async () => ({ symbol: 'HGUSD', price: 4.1 }),
+      getMonthlySeriesFn: async () => [],
     },
   );
-  assert(spot.values[0] === 3.95, `Expected carry-forward 3.95, got ${String(spot.values[0])}`);
+  assert(spot.values[0] === 3.95, `Expected close-on-or-before 3.95, got ${String(spot.values[0])}`);
 
   const percentile = await resolvePriceSeries(
     {
@@ -94,6 +97,53 @@ function assertApprox(actual: number, expected: number, tolerance: number, label
   });
   assert(legacyGc?.symbol === 'GCUSD', 'getLegacyQuote should match exact legacy symbol');
 
+
+
+  const commoditySpotFromHistory = await resolvePriceSeries(
+    {
+      price_key: 'XAU_USD_TOZ',
+      anchorDatesUtc: ['2026-02-27'],
+      scenario: { mode: 'spot' },
+      allowRefresh: false,
+    },
+    {
+      resolveLegacyCommodityCloseOnOrBeforeFn: async () => ({
+        close: 5190,
+        dateUtc: '2026-02-27',
+        warnings: ['commodity history resolved via historical-price-full: GCUSD close=5190 date=2026-02-27'],
+      }),
+      getLegacyQuoteFn: async () => ({ symbol: 'GCUSD', price: 5000 }),
+      getMonthlySeriesFn: async () => [],
+    },
+  );
+  assert(commoditySpotFromHistory.values[0] === 5190, `Expected commodity history close 5190, got ${String(commoditySpotFromHistory.values[0])}`);
+  assert(
+    !(commoditySpotFromHistory.warnings.some((w) => w.includes('fell back to quotes/commodity spot'))),
+    'should not fall back to quotes when historical-price-full has valid close',
+  );
+
+  const commoditySpotFallbackQuote = await resolvePriceSeries(
+    {
+      price_key: 'XAU_USD_TOZ',
+      anchorDatesUtc: ['2026-02-27'],
+      scenario: { mode: 'spot' },
+      allowRefresh: false,
+    },
+    {
+      resolveLegacyCommodityCloseOnOrBeforeFn: async () => ({
+        close: null,
+        dateUtc: null,
+        warnings: ['legacyFetch: GET /api/v3/historical-price-full/GCUSD?from=2026-01-28&to=2026-02-27'],
+      }),
+      getLegacyQuoteFn: async () => ({ symbol: 'GCUSD', price: 5222 }),
+      getMonthlySeriesFn: async () => [],
+    },
+  );
+  assert(commoditySpotFallbackQuote.values[0] === 5222, `Expected quotes fallback close 5222, got ${String(commoditySpotFallbackQuote.values[0])}`);
+  assert(
+    commoditySpotFallbackQuote.warnings.some((w) => w.includes('commodity history missing; fell back to quotes/commodity spot: GCUSD')),
+    'should emit quotes fallback diagnostic when commodity history is empty',
+  );
 
   const window = buildHistoricalWindowUtc({ toUtc: '2026-02-27', lookbackDays: 30, maxLookbackDays: 60 });
   assert(window.toUtc === '2026-02-27', `window to should remain exact UTC date, got ${window.toUtc}`);

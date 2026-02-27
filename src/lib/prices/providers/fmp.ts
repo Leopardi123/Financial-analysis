@@ -36,6 +36,11 @@ type FmpHistoricalResponse = {
   historical?: Array<Record<string, unknown>>;
 } | Array<Record<string, unknown>>;
 
+type FmpHistoricalFullResponse = {
+  symbol?: string;
+  historical?: Array<Record<string, unknown>>;
+};
+
 let legacyCommodityQuotesCache: Promise<LegacyCommodityQuoteRow[]> | null = null;
 
 export function formatDateUtc(date: Date): string {
@@ -111,24 +116,40 @@ function normalizeHistoricalRow(row: Record<string, unknown>): FmpHistoricalRow 
   };
 }
 
-function normalizeLegacyHistoricalChartRows(rows: unknown): FmpHistoricalRow[] {
-  if (!Array.isArray(rows)) {
+function normalizeHistoricalFullRows(response: unknown): FmpHistoricalRow[] {
+  if (typeof response !== 'object' || response === null) {
     return [];
   }
-  return rows
-    .map((row) => (typeof row === 'object' && row !== null ? normalizeHistoricalRow(row as Record<string, unknown>) : null))
+
+  const historicalRaw = (response as FmpHistoricalFullResponse).historical;
+  const historical = Array.isArray(historicalRaw) ? historicalRaw : [];
+
+  return historical
+    .map((row) => normalizeHistoricalRow(row))
     .filter((row): row is FmpHistoricalRow => row !== null)
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export async function resolveLegacyCloseOnOrBefore(
+export async function fetchLegacyCommodityHistoricalFull(
+  symbol: string,
+  args: { fromUtc: string; toUtc: string },
+  deps: {
+    fetchApiV3JsonFn?: typeof fetchApiV3Json;
+  } = {},
+): Promise<FmpHistoricalRow[]> {
+  const fetchApiV3JsonFn = deps.fetchApiV3JsonFn ?? fetchApiV3Json;
+  const path = `historical-price-full/${encodeURIComponent(symbol)}`;
+  const response = await fetchApiV3JsonFn<unknown>(path, { from: args.fromUtc, to: args.toUtc });
+  return normalizeHistoricalFullRows(response);
+}
+
+export async function resolveLegacyCommodityCloseOnOrBefore(
   symbol: string,
   targetDateUtc: string,
   deps: {
     fetchApiV3JsonFn?: typeof fetchApiV3Json;
   } = {},
-): Promise<{ close: number | null; warnings: string[] }> {
-  const fetchApiV3JsonFn = deps.fetchApiV3JsonFn ?? fetchApiV3Json;
+): Promise<{ close: number | null; dateUtc: string | null; warnings: string[] }> {
   const warnings: string[] = [];
   const todayUtc = todayUtcDateString();
   const clampedTo = targetDateUtc > todayUtc ? todayUtc : targetDateUtc;
@@ -141,18 +162,32 @@ export async function resolveLegacyCloseOnOrBefore(
     warnings.push(`historicalWindow: from clamped to ${window.fromUtc} (maxLookbackDays=${window.maxLookbackDays})`);
   }
 
-  const path = `historical-chart/1day/${encodeURIComponent(symbol)}`;
-  const response = await fetchApiV3JsonFn<unknown>(path, { from: window.fromUtc, to: window.toUtc });
-  const rows = normalizeLegacyHistoricalChartRows(response);
+  const rows = await fetchLegacyCommodityHistoricalFull(symbol, { fromUtc: window.fromUtc, toUtc: window.toUtc }, deps);
   const eligible = rows.filter((row) => row.date <= window.toUtc);
   const latest = eligible[eligible.length - 1];
   if (!latest) {
-    warnings.push(`No close on or before ${window.toUtc} for ${symbol}`);
-    warnings.push(`legacyFetch: GET /api/v3/${path}?from=${window.fromUtc}&to=${window.toUtc}`);
-    return { close: null, warnings };
+    warnings.push(`legacyFetch: GET /api/v3/historical-price-full/${symbol}?from=${window.fromUtc}&to=${window.toUtc}`);
+    return { close: null, dateUtc: null, warnings };
   }
 
-  return { close: latest.close, warnings };
+  warnings.push(`commodity history resolved via historical-price-full: ${symbol} close=${latest.close} date=${latest.date}`);
+  return { close: latest.close, dateUtc: latest.date, warnings };
+}
+
+export async function resolveLegacyCloseOnOrBefore(
+  symbol: string,
+  targetDateUtc: string,
+  deps: {
+    fetchApiV3JsonFn?: typeof fetchApiV3Json;
+  } = {},
+): Promise<{ close: number | null; warnings: string[] }> {
+  const resolved = await resolveLegacyCommodityCloseOnOrBefore(symbol, targetDateUtc, deps);
+  if (resolved.close === null) {
+    const window = buildHistoricalWindowUtc({ toUtc: targetDateUtc > todayUtcDateString() ? todayUtcDateString() : targetDateUtc, lookbackDays: 30, maxLookbackDays: 60 });
+    const warnings = [...resolved.warnings, `No close on or before ${window.toUtc} for ${symbol}`];
+    return { close: null, warnings };
+  }
+  return { close: resolved.close, warnings: resolved.warnings };
 }
 
 export async function fetchQuote(symbol: string): Promise<FmpQuoteResult> {
@@ -258,8 +293,10 @@ export async function fetchHistorical(
 
   const symbol = legacySymbol ?? provider_symbol;
   if (legacySymbol) {
-    const response = await fetchApiV3Json<unknown>(`historical-chart/1day/${encodeURIComponent(symbol)}`, { from: formatDateUtc(parseUtcDate(fromUtc)), to: formatDateUtc(parseUtcDate(toUtc)) });
-    const rows = normalizeLegacyHistoricalChartRows(response);
+    const rows = await fetchLegacyCommodityHistoricalFull(symbol, {
+      fromUtc: formatDateUtc(parseUtcDate(fromUtc)),
+      toUtc: formatDateUtc(parseUtcDate(toUtc)),
+    });
     return rows
       .filter((row) => row.date >= fromUtc && row.date <= toUtc)
       .map((row) => ({ dateUtc: row.date, close: row.close }));
