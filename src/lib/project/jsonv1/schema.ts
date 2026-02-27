@@ -63,6 +63,10 @@ export type ProjectJsonV1 = {
   } | null;
 
   economicsBreakdown?: {
+    meta?: {
+      defaultSource?: 'PEA' | 'PFS' | 'FS' | 'Other' | null;
+      notes?: string | null;
+    } | null;
     cogs?: {
       miningUSD?: Array<number | null>;
       millingUSD?: Array<number | null>;
@@ -83,6 +87,8 @@ export type ProjectJsonV1 = {
       base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
       rate?: number | null;
       royaltyUSD?: Array<number | null>;
+      source?: 'PEA' | 'PFS' | 'FS' | 'Other' | null;
+      notes?: string | null;
     }> | null;
     taxesDetail?: {
       federalIncomeTaxUSD?: Array<number | null>;

@@ -137,13 +137,56 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   const parsedBreakdown = parseProjectJsonV1(withBreakdown);
   assertEqual(parsedBreakdown.context.economicsBreakdown?.cogs?.miningUSD?.[0], 10, 'economics breakdown mining parsed');
 
-  const badBreakdownLength = getProjectJsonV1Template();
-  badBreakdownLength.economicsBreakdown = {
+  const sparseOperations = getProjectJsonV1Template();
+  if (sparseOperations.operations == null) {
+    throw new Error('template.operations must be present');
+  }
+  sparseOperations.operations.oreMilledTonnes = [10, 20];
+  const parsedSparseOperations = parseProjectJsonV1(sparseOperations);
+  assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.length, 6, 'sparse operations series padded to masterN+1');
+  assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.[0], 10, 'sparse operations first value preserved');
+  assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.[5], null, 'sparse operations trailing values padded with null');
+
+  const sparseBreakdown = getProjectJsonV1Template();
+  sparseBreakdown.series.siteGandA_USD = new Array(sparseBreakdown.time.masterN + 1).fill(null);
+  sparseBreakdown.economicsBreakdown = {
     cogs: {
-      miningUSD: [1, 2],
+      miningUSD: [1, 2, 3],
     },
   };
-  assertThrows(() => parseProjectJsonV1(badBreakdownLength), /economicsBreakdown\.cogs\.miningUSD/, 'throws on economics breakdown length mismatch');
+  const parsedSparseBreakdown = parseProjectJsonV1(sparseBreakdown);
+  assertEqual(parsedSparseBreakdown.context.economicsBreakdown?.cogs?.miningUSD?.length, 6, 'sparse economics breakdown series padded to masterN+1');
+  assertEqual(parsedSparseBreakdown.context.economicsBreakdown?.cogs?.miningUSD?.[2], 3, 'sparse economics breakdown value preserved');
+  assertEqual(parsedSparseBreakdown.context.economicsBreakdown?.cogs?.miningUSD?.[5], null, 'sparse economics breakdown trailing values padded');
+
+  const tooLongSparseBreakdown = getProjectJsonV1Template();
+  tooLongSparseBreakdown.economicsBreakdown = {
+    cogs: {
+      miningUSD: [1, 2, 3, 4, 5, 6, 7],
+    },
+  };
+  assertThrows(
+    () => parseProjectJsonV1(tooLongSparseBreakdown),
+    /economicsBreakdown\.cogs\.miningUSD length 7 exceeds expected max length 6/,
+    'throws on sparse series longer than masterN+1 with path and expected max length',
+  );
+
+  const breakdownMetadata = getProjectJsonV1Template();
+  breakdownMetadata.economicsBreakdown = {
+    royaltiesDetail: [
+      {
+        id: 'roy-meta',
+        label: 'Audited FS Royalty',
+        base: 'revenue',
+        rate: 0.02,
+        source: 'FS',
+        notes: 'from audited FS',
+      },
+    ],
+  };
+  const parsedBreakdownMetadata = parseProjectJsonV1(breakdownMetadata);
+  assertEqual(parsedBreakdownMetadata.context.economicsBreakdown?.royaltiesDetail?.[0]?.source, 'FS', 'royalties metadata source accepted');
+  assertEqual(parsedBreakdownMetadata.context.economicsBreakdown?.royaltiesDetail?.[0]?.notes, 'from audited FS', 'royalties metadata notes accepted');
 
   const duplicateSiteGanda = getProjectJsonV1Template();
   duplicateSiteGanda.series.siteGandA_USD[1] = 9;

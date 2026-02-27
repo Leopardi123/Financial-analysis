@@ -30,6 +30,25 @@ function asSeries(value: unknown, path: string, expectedLength: number): Array<n
   return value as Array<number | null>;
 }
 
+function normalizeSparseSeries(path: string, arr: unknown, masterN: number): Array<number | null> | undefined {
+  if (arr === undefined || arr === null) {
+    return undefined;
+  }
+  if (!Array.isArray(arr)) {
+    fail(path, `array length <= ${masterN + 1}`, arr);
+  }
+  if (arr.length > masterN + 1) {
+    throw new Error(`${path} length ${arr.length} exceeds expected max length ${masterN + 1}`);
+  }
+
+  const normalized = new Array<number | null>(masterN + 1).fill(null);
+  for (let i = 0; i < arr.length; i += 1) {
+    const value = arr[i];
+    normalized[i] = isFiniteNumber(value) ? value : null;
+  }
+  return normalized;
+}
+
 function sanitizeSeries(series: Array<number | null>): Array<number | null> {
   return series.map((value) => (isFiniteNumber(value) ? value : null));
 }
@@ -54,14 +73,11 @@ function toFiniteOrNull(value: number | null | undefined): number | null {
   return value;
 }
 
-function asOptionalSeries(value: unknown, path: string, expectedLength: number): Array<number | null> | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  return sanitizeSeries(asSeries(value, path, expectedLength));
+function asOptionalSparseSeries(value: unknown, path: string, masterN: number): Array<number | null> | undefined {
+  return normalizeSparseSeries(path, value, masterN);
 }
 
-function parseEconomicsBreakdown(raw: unknown, expectedLength: number, siteGandA_USD: Array<number | null>): ProjectJsonV1['economicsBreakdown'] {
+function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: Array<number | null>): ProjectJsonV1['economicsBreakdown'] {
   if (raw === undefined) {
     return undefined;
   }
@@ -74,6 +90,28 @@ function parseEconomicsBreakdown(raw: unknown, expectedLength: number, siteGandA
 
   const out: NonNullable<ProjectJsonV1['economicsBreakdown']> = {};
 
+  if ('meta' in raw && raw.meta !== undefined) {
+    if (raw.meta === null) {
+      out.meta = null;
+    } else {
+      if (!isPlainObject(raw.meta)) {
+        fail('economicsBreakdown.meta', 'object or null', raw.meta);
+      }
+      const defaultSource = raw.meta.defaultSource;
+      if (defaultSource !== undefined && defaultSource !== null && defaultSource !== 'PEA' && defaultSource !== 'PFS' && defaultSource !== 'FS' && defaultSource !== 'Other') {
+        fail('economicsBreakdown.meta.defaultSource', '"PEA" | "PFS" | "FS" | "Other" | null', defaultSource);
+      }
+      const notes = raw.meta.notes;
+      if (notes !== undefined && notes !== null && typeof notes !== 'string') {
+        fail('economicsBreakdown.meta.notes', 'string | null', notes);
+      }
+      out.meta = {
+        defaultSource: defaultSource ?? null,
+        notes: notes ?? null,
+      };
+    }
+  }
+
   if ('cogs' in raw && raw.cogs !== undefined) {
     if (raw.cogs === null) {
       fail('economicsBreakdown.cogs', 'object', raw.cogs);
@@ -83,12 +121,12 @@ function parseEconomicsBreakdown(raw: unknown, expectedLength: number, siteGandA
     }
 
     const cogs: NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['cogs']> = {};
-    cogs.miningUSD = asOptionalSeries(raw.cogs.miningUSD, 'economicsBreakdown.cogs.miningUSD', expectedLength);
-    cogs.millingUSD = asOptionalSeries(raw.cogs.millingUSD, 'economicsBreakdown.cogs.millingUSD', expectedLength);
-    cogs.utilitiesUSD = asOptionalSeries(raw.cogs.utilitiesUSD, 'economicsBreakdown.cogs.utilitiesUSD', expectedLength);
-    cogs.maintenanceUSD = asOptionalSeries(raw.cogs.maintenanceUSD, 'economicsBreakdown.cogs.maintenanceUSD', expectedLength);
-    cogs.campUSD = asOptionalSeries(raw.cogs.campUSD, 'economicsBreakdown.cogs.campUSD', expectedLength);
-    cogs.siteGandA_USD = asOptionalSeries(raw.cogs.siteGandA_USD, 'economicsBreakdown.cogs.siteGandA_USD', expectedLength);
+    cogs.miningUSD = asOptionalSparseSeries(raw.cogs.miningUSD, 'economicsBreakdown.cogs.miningUSD', masterN);
+    cogs.millingUSD = asOptionalSparseSeries(raw.cogs.millingUSD, 'economicsBreakdown.cogs.millingUSD', masterN);
+    cogs.utilitiesUSD = asOptionalSparseSeries(raw.cogs.utilitiesUSD, 'economicsBreakdown.cogs.utilitiesUSD', masterN);
+    cogs.maintenanceUSD = asOptionalSparseSeries(raw.cogs.maintenanceUSD, 'economicsBreakdown.cogs.maintenanceUSD', masterN);
+    cogs.campUSD = asOptionalSparseSeries(raw.cogs.campUSD, 'economicsBreakdown.cogs.campUSD', masterN);
+    cogs.siteGandA_USD = asOptionalSparseSeries(raw.cogs.siteGandA_USD, 'economicsBreakdown.cogs.siteGandA_USD', masterN);
 
     for (const key of ['miningUSD','millingUSD','utilitiesUSD','maintenanceUSD','campUSD','siteGandA_USD'] as const) {
       const series = cogs[key];
@@ -113,10 +151,10 @@ function parseEconomicsBreakdown(raw: unknown, expectedLength: number, siteGandA
     }
 
     const selling: NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['selling']> = {};
-    selling.treatmentChargesUSD = asOptionalSeries(raw.selling.treatmentChargesUSD, 'economicsBreakdown.selling.treatmentChargesUSD', expectedLength);
-    selling.refiningChargesUSD = asOptionalSeries(raw.selling.refiningChargesUSD, 'economicsBreakdown.selling.refiningChargesUSD', expectedLength);
-    selling.tcRcUSD = asOptionalSeries(raw.selling.tcRcUSD, 'economicsBreakdown.selling.tcRcUSD', expectedLength);
-    selling.transportUSD = asOptionalSeries(raw.selling.transportUSD, 'economicsBreakdown.selling.transportUSD', expectedLength);
+    selling.treatmentChargesUSD = asOptionalSparseSeries(raw.selling.treatmentChargesUSD, 'economicsBreakdown.selling.treatmentChargesUSD', masterN);
+    selling.refiningChargesUSD = asOptionalSparseSeries(raw.selling.refiningChargesUSD, 'economicsBreakdown.selling.refiningChargesUSD', masterN);
+    selling.tcRcUSD = asOptionalSparseSeries(raw.selling.tcRcUSD, 'economicsBreakdown.selling.tcRcUSD', masterN);
+    selling.transportUSD = asOptionalSparseSeries(raw.selling.transportUSD, 'economicsBreakdown.selling.transportUSD', masterN);
 
     for (const key of ['treatmentChargesUSD','refiningChargesUSD','tcRcUSD','transportUSD'] as const) {
       const series = selling[key];
@@ -160,9 +198,17 @@ function parseEconomicsBreakdown(raw: unknown, expectedLength: number, siteGandA
         if (item.rate !== undefined && item.rate !== null && (!isFiniteNumber(item.rate) || item.rate < 0)) {
           fail(`economicsBreakdown.royaltiesDetail[${idx}].rate`, 'null or finite number >= 0', item.rate);
         }
-        const royaltyUSD = asOptionalSeries(item.royaltyUSD, `economicsBreakdown.royaltiesDetail[${idx}].royaltyUSD`, expectedLength);
+        const royaltyUSD = asOptionalSparseSeries(item.royaltyUSD, `economicsBreakdown.royaltiesDetail[${idx}].royaltyUSD`, masterN);
         if (royaltyUSD) {
           validateNonNegativeFiniteSeries(royaltyUSD, `economicsBreakdown.royaltiesDetail[${idx}].royaltyUSD`);
+        }
+        const source = item.source;
+        if (source !== undefined && source !== null && source !== 'PEA' && source !== 'PFS' && source !== 'FS' && source !== 'Other') {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}].source`, '"PEA" | "PFS" | "FS" | "Other" | null', source);
+        }
+        const notes = item.notes;
+        if (notes !== undefined && notes !== null && typeof notes !== 'string') {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}].notes`, 'string | null', notes);
         }
         return {
           id: item.id,
@@ -170,6 +216,8 @@ function parseEconomicsBreakdown(raw: unknown, expectedLength: number, siteGandA
           base: item.base,
           rate: item.rate ?? null,
           royaltyUSD,
+          source: source ?? null,
+          notes: notes ?? null,
         };
       });
     }
@@ -183,8 +231,8 @@ function parseEconomicsBreakdown(raw: unknown, expectedLength: number, siteGandA
         fail('economicsBreakdown.taxesDetail', 'object or null', raw.taxesDetail);
       }
       const taxesDetail: NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['taxesDetail']> = {};
-      taxesDetail.federalIncomeTaxUSD = asOptionalSeries(raw.taxesDetail.federalIncomeTaxUSD, 'economicsBreakdown.taxesDetail.federalIncomeTaxUSD', expectedLength);
-      taxesDetail.municipalRevenueTaxUSD = asOptionalSeries(raw.taxesDetail.municipalRevenueTaxUSD, 'economicsBreakdown.taxesDetail.municipalRevenueTaxUSD', expectedLength);
+      taxesDetail.federalIncomeTaxUSD = asOptionalSparseSeries(raw.taxesDetail.federalIncomeTaxUSD, 'economicsBreakdown.taxesDetail.federalIncomeTaxUSD', masterN);
+      taxesDetail.municipalRevenueTaxUSD = asOptionalSparseSeries(raw.taxesDetail.municipalRevenueTaxUSD, 'economicsBreakdown.taxesDetail.municipalRevenueTaxUSD', masterN);
       if (taxesDetail.federalIncomeTaxUSD) {
         validateNonNegativeFiniteSeries(taxesDetail.federalIncomeTaxUSD, 'economicsBreakdown.taxesDetail.federalIncomeTaxUSD');
       }
@@ -248,7 +296,7 @@ function parsePeriodEndDates(raw: unknown, expectedLength: number): Array<string
   return periodEndDatesUtc;
 }
 
-function parseOperations(raw: unknown, expectedLength: number): ProjectJsonV1['operations'] {
+function parseOperations(raw: unknown, masterN: number): ProjectJsonV1['operations'] {
   if (raw == null) {
     return raw as null;
   }
@@ -288,13 +336,19 @@ function parseOperations(raw: unknown, expectedLength: number): ProjectJsonV1['o
   };
 
   if ('oreMilledTonnes' in raw && raw.oreMilledTonnes !== undefined) {
-    const oreMilledTonnes = asSeries(raw.oreMilledTonnes, 'operations.oreMilledTonnes', expectedLength);
+    const oreMilledTonnes = normalizeSparseSeries('operations.oreMilledTonnes', raw.oreMilledTonnes, masterN);
+    if (!oreMilledTonnes) {
+      fail('operations.oreMilledTonnes', `array length <= ${masterN + 1}`, raw.oreMilledTonnes);
+    }
     validateNonNegativeFiniteSeries(oreMilledTonnes, 'operations.oreMilledTonnes');
     operations.oreMilledTonnes = oreMilledTonnes;
   }
 
   if ('oreMinedTonnes' in raw && raw.oreMinedTonnes !== undefined) {
-    const oreMinedTonnes = asSeries(raw.oreMinedTonnes, 'operations.oreMinedTonnes', expectedLength);
+    const oreMinedTonnes = normalizeSparseSeries('operations.oreMinedTonnes', raw.oreMinedTonnes, masterN);
+    if (!oreMinedTonnes) {
+      fail('operations.oreMinedTonnes', `array length <= ${masterN + 1}`, raw.oreMinedTonnes);
+    }
     validateNonNegativeFiniteSeries(oreMinedTonnes, 'operations.oreMinedTonnes');
     operations.oreMinedTonnes = oreMinedTonnes;
   }
@@ -380,7 +434,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
       ? undefined
       : sanitizeSeries(asSeries(raw.series.workingCapitalDeltaUSD, 'series.workingCapitalDeltaUSD', expectedLength));
 
-  const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, expectedLength, siteGandA_USD);
+  const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, masterN, siteGandA_USD);
 
   if (!isPlainObject(raw.metals)) {
     fail('metals', 'object', raw.metals);
@@ -444,7 +498,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     fail('takeItems', 'array or null', takeItems);
   }
 
-  const operations = raw.operations === undefined ? undefined : parseOperations(raw.operations, expectedLength);
+  const operations = raw.operations === undefined ? undefined : parseOperations(raw.operations, masterN);
 
   const explicitOverrides = raw.priceOverrides;
   if (explicitOverrides !== undefined && explicitOverrides !== null && !isPlainObject(explicitOverrides)) {
