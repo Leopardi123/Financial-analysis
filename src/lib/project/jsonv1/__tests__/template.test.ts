@@ -1,4 +1,4 @@
-import { buildProjectJsonV1Template } from '../template.ts';
+import { buildProjectJsonV1Template, getProjectJsonV1Template } from '../template.ts';
 
 function assert(condition: unknown, message: string): void {
   if (!condition) {
@@ -27,8 +27,32 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
   assert((template.economicsBreakdown?.royaltiesDetail?.length ?? 0) >= 1, 'royaltiesDetail has at least one row');
 
   const item = template.economicsBreakdown?.royaltiesDetail?.[0] as Record<string, unknown>;
-  const expectedRoyaltyKeys = ['id', 'label', 'name', 'base', 'rateType', 'rate', 'royaltyUSD', 'source', 'notes'].sort();
+  const expectedRoyaltyKeys = [
+    'id',
+    'label',
+    'name',
+    'base',
+    'rateType',
+    'rate',
+    'royaltyUSD',
+    'source',
+    'notes',
+    '_choices_base',
+    '_choices_rateType',
+    '_choices_source',
+  ].sort();
   assertDeepEqual(Object.keys(item).sort(), expectedRoyaltyKeys, 'royaltiesDetail[0] has exact schema key set');
+  assertDeepEqual(item._choices_base, ['ebit', 'ebitda', 'quantity', 'revenue'], 'royalty base choices present and sorted');
+  assertDeepEqual(item._choices_rateType, ['NSR_pct', 'ad_valorem_pct'], 'royalty rateType choices present and sorted');
+
+  const defaultTemplate = getProjectJsonV1Template();
+  const takeItem = (defaultTemplate.takeItems?.[0] ?? null) as Record<string, unknown> | null;
+  assert(takeItem != null, 'takeItems[0] exists');
+  assertDeepEqual(takeItem?._choices_type, ['AD_VALOREM', 'NSR'], 'take type choices present and sorted');
+  assertDeepEqual(takeItem?._choices_jurisdictionLevel, ['contractual', 'municipal', 'national', 'other', 'provincial_state'], 'take jurisdiction choices present and sorted');
+
+  const capacity = defaultTemplate.operations?.capacity as Record<string, unknown>;
+  assertDeepEqual(capacity._choices_throughputUnit, ['tpa', 'tpd'], 'throughput choices present and sorted');
 
   for (const key of [
     'capexUSD',

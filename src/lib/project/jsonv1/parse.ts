@@ -9,6 +9,24 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function stripChoiceKeysDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripChoiceKeysDeep(item)) as T;
+  }
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value)) {
+    if (key.startsWith('_choices_')) {
+      continue;
+    }
+    out[key] = stripChoiceKeysDeep(nested);
+  }
+  return out as T;
+}
+
 function fail(path: string, expected: string, actual: unknown): never {
   throw new Error(`${path} expected ${expected}, received ${JSON.stringify(actual)}`);
 }
@@ -572,6 +590,7 @@ function normalizeSpendSeriesAbs(
 }
 
 export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
+  raw = stripChoiceKeysDeep(raw);
   if (!isPlainObject(raw)) {
     fail('root', 'object', raw);
   }
