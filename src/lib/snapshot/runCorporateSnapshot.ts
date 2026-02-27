@@ -857,14 +857,21 @@ export async function runCorporateSnapshotPipeline(args: {
       }
     }
 
+    const marketInput = {
+      shares_current: input.market?.shares_current ?? null,
+      price_current_TargetCurrency: input.market?.price_current_TargetCurrency ?? null,
+      preferredEquity_TargetCurrency: input.market?.preferredEquity_TargetCurrency ?? null,
+      minorityInterest_TargetCurrency: input.market?.minorityInterest_TargetCurrency ?? null,
+    };
+
     const financing = computeCorporateFinancing({
       NPV_today_USD: aggregation.NPV_today_USD,
       targetCurrency: input.targetCurrency,
       fx_USD_to_TargetCurrency: fxRate as number,
       cash_t0_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? null,
       debt_t0_TargetCurrency: input.balanceSheet?.debt_t0_TargetCurrency ?? null,
-      shares_current: input.market.shares_current,
-      price_current_TargetCurrency: input.market.price_current_TargetCurrency,
+      shares_current: marketInput.shares_current,
+      price_current_TargetCurrency: marketInput.price_current_TargetCurrency,
       financingPlan: input.financingPlan,
       buildFundingNeed_USD: buildFundingNeedUSD,
     });
@@ -913,7 +920,7 @@ export async function runCorporateSnapshotPipeline(args: {
       fcffUSD_total: aggregation.fcffUSD_total,
       auPriceUSDPerOz: aggregation.auPriceUSDPerOz,
       fx_USD_to_TargetCurrency: fxRate,
-      shares_current: input.market.shares_current,
+      shares_current: marketInput.shares_current,
       shares_post_financing: financing.shares_post_financing,
       ev_TargetCurrency: null,
       totalStockholdersEquity_USD,
@@ -939,12 +946,7 @@ export async function runCorporateSnapshotPipeline(args: {
       targetCurrency: input.targetCurrency,
       aggregation,
       financing,
-      market: {
-        shares_current: input.market.shares_current,
-        price_current_TargetCurrency: input.market.price_current_TargetCurrency,
-        preferredEquity_TargetCurrency: input.market.preferredEquity_TargetCurrency,
-        minorityInterest_TargetCurrency: input.market.minorityInterest_TargetCurrency,
-      },
+      market: marketInput,
       lista2CfDcf: lista2.metrics,
       lista3aProjectEfficiency: lista3a.metrics,
       lista4TenYear: lista4,

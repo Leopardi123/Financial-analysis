@@ -22,6 +22,23 @@ function assert(condition: boolean, message: string): void {
   });
   assert(inlineProjectsValid.ok, 'inline projects mode should validate');
 
+
+  const projectsWithoutMarketValid = validateSnapshotRequest({
+    targetCurrency: 'SEK',
+    discountRate: 0.1,
+    fx_USD_to_TargetCurrency: 10,
+    projects: [{ projectId: 'p1', rawJson }],
+  });
+  assert(projectsWithoutMarketValid.ok, 'projects mode without market should validate');
+  if (projectsWithoutMarketValid.ok) {
+    assert(projectsWithoutMarketValid.value.market?.shares_current === null, 'missing market shares should normalize to null');
+    assert(projectsWithoutMarketValid.value.market?.price_current_TargetCurrency === null, 'missing market price should normalize to null');
+    assert(
+      projectsWithoutMarketValid.warnings.some((warning) => warning.includes('market: missing market block')),
+      'projects mode without market should emit warning',
+    );
+  }
+
   const symbolOnlyValid = validateSnapshotRequest({
     targetCurrency: 'SEK',
     discountRate: 0.1,
