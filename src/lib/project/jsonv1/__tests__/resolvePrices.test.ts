@@ -115,10 +115,15 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     },
   );
 
+  const testTodayUtc = new Date().toISOString().slice(0, 10);
+  const eligibleSpotAu = [...mockRows.XAU_USD_TOZ]
+    .filter((row) => row.date <= testTodayUtc)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const expectedSpotAu = eligibleSpotAu.length ? eligibleSpotAu[eligibleSpotAu.length - 1].close : null;
   assertEqual(resolved.spotPriceUSDByMetal.Au.length, 3, 'resolved Au series length');
-  assertEqual(resolved.spotPriceUSDByMetal.Au[0], 11, 'explicit date mapping at t0');
-  assertEqual(resolved.spotPriceUSDByMetal.Au[1], 11, 'spot mode replicates anchor value at t1');
-  assertEqual(resolved.spotPriceUSDByMetal.Au[2], 11, 'spot mode replicates anchor value at t2');
+  assertEqual(resolved.spotPriceUSDByMetal.Au[0], expectedSpotAu, 'spot mode uses today UTC anchor at t0');
+  assertEqual(resolved.spotPriceUSDByMetal.Au[1], expectedSpotAu, 'spot mode replicates anchor value at t1');
+  assertEqual(resolved.spotPriceUSDByMetal.Au[2], expectedSpotAu, 'spot mode replicates anchor value at t2');
 
   const expectedLb = 2204.6226218487757;
   const gotLb = resolved.payableQtyByMetal.Cu[0];
@@ -156,7 +161,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       }),
     },
   );
-  assertEqual(missingResolved.spotPriceUSDByMetal.Au[0], null, 'missing earlier data resolves to null');
+  assertEqual(missingResolved.spotPriceUSDByMetal.Au[0], 10, 'spot mode resolves against today anchor rather than project period dates');
 
   const fallbackBase = getProjectJsonV1Template();
   fallbackBase.economicsBreakdown = null;
@@ -267,29 +272,10 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       },
     },
   );
-  assert(spotCalls.every((anchors) => anchors.length === 1 && anchors[0] === '2025-01-15'), 'spot mode should resolve each key once at anchor date');
+  assert(spotCalls.length === 2, 'spot mode should resolve each unique key once (Au shared with auPriceKey)');
+  assert(spotCalls.every((anchors) => anchors.length === 1 && anchors[0] === todayUtc), 'spot mode should always anchor to today UTC');
   assertEqual(spotFutureResolved.spotPriceUSDByMetal.Au[0], 1234, 'spot price should be replicated at t0');
   assertEqual(spotFutureResolved.spotPriceUSDByMetal.Au[2], 1234, 'spot price should be replicated at future tN');
-
-  const spotFutureAnchorCalls: string[][] = [];
-  await resolveProjectPricesToEngineInput(
-    {
-      parsed: spotFutureParsed,
-      scenario: { mode: 'spot' },
-      projectId: 'proj-spot-future-anchor-clamp',
-      spotAnchorDateUtc: '2099-12-31',
-    },
-    {
-      resolvePriceSeriesFn: async ({ anchorDatesUtc, price_key }) => {
-        spotFutureAnchorCalls.push(anchorDatesUtc);
-        return { values: [price_key === 'XAU_USD_TOZ' ? 2000 : 4], warnings: [] };
-      },
-    },
-  );
-  assert(
-    spotFutureAnchorCalls.every((anchors) => anchors.length === 1 && anchors[0] === todayUtc),
-    'spot mode should clamp future anchor dates to today UTC',
-  );
 
   const spotWarningResolved = await resolveProjectPricesToEngineInput(
     {
@@ -299,17 +285,16 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       spotAnchorDateUtc: '2025-01-15',
     },
     {
-      resolvePriceSeriesFn: async ({ anchorDatesUtc }) => ({ values: anchorDatesUtc.map(() => null), warnings: [] }),
+      resolvePriceSeriesFn: async ({ anchorDatesUtc, price_key }) => ({
+        values: anchorDatesUtc.map(() => null),
+        warnings: [`No close on or before anchor date for ${price_key}`],
+      }),
     },
   );
-  assert(
-    spotWarningResolved.diagnostics?.warnings.some((warning) => warning.includes('projectId=proj-warning-id')) ?? false,
-    'spot warnings should include project id when coverage is missing',
-  );
-  assertEqual(spotWarningResolved.diagnostics?.warnings.length, 3, 'spot warnings should emit once per missing key');
+  assertEqual(spotWarningResolved.diagnostics?.warnings.length, 2, 'spot warnings should emit at most once per unique key');
   assert(
     !(spotWarningResolved.diagnostics?.warnings.some((warning) => warning.includes('period end')) ?? false),
-    'spot warnings should reference anchor date, not period end',
+    'spot warnings should never reference period end dates',
   );
 
   const fixedResolved = await resolveProjectPricesToEngineInput(

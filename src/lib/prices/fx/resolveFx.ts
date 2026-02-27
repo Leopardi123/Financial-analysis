@@ -1,5 +1,6 @@
-import { readHistoryRowsInRange, type HistoryRow } from '../db/readHistory.ts';
-import { refreshHistoryRangeToMonthlyBlobs } from '../refreshHistory.ts';
+import { fetchApiV3Json } from '../../../../api/_fmp.js';
+import { buildHistoricalWindowUtc } from '../providers/fmp.ts';
+import { getLegacySymbolForPriceKey } from '../providers/legacyCommoditySymbolMap.ts';
 import { fxLookupCandidatesUSDTo } from './keys.ts';
 
 export type FxScenario =
@@ -7,13 +8,21 @@ export type FxScenario =
   | { mode: 'percentile'; lookbackYears: number; percentile: number }
   | { mode: 'fixed'; fixedFx?: number };
 
+type LegacyHistoricalResponse = Array<Record<string, unknown>>;
+
+type FxHistoryRow = { date: string; close: number };
+
 function subtractUtcYears(dateStr: string, years: number): string {
   const date = new Date(`${dateStr}T00:00:00Z`);
   date.setUTCFullYear(date.getUTCFullYear() - years);
   return date.toISOString().slice(0, 10);
 }
 
-function resolveSpot(rows: HistoryRow[], anchorDateUtc: string): number | null {
+function todayUtcDateString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function resolveSpot(rows: FxHistoryRow[], anchorDateUtc: string): number | null {
   const sortedRows = [...rows].sort((a, b) => a.date.localeCompare(b.date));
   let latest: number | null = null;
   for (const row of sortedRows) {
@@ -26,7 +35,7 @@ function resolveSpot(rows: HistoryRow[], anchorDateUtc: string): number | null {
 }
 
 function resolvePercentile(args: {
-  rows: HistoryRow[];
+  rows: FxHistoryRow[];
   anchorDateUtc: string;
   lookbackYears: number;
   percentile: number;
@@ -52,6 +61,20 @@ function invertFx(value: number | null): number | null {
   return 1 / value;
 }
 
+function normalizeLegacyRows(response: LegacyHistoricalResponse): FxHistoryRow[] {
+  return response
+    .map((row) => {
+      const date = typeof row.date === 'string' ? row.date.slice(0, 10) : null;
+      const close = typeof row.close === 'number' && Number.isFinite(row.close) ? row.close : null;
+      if (!date || close === null) {
+        return null;
+      }
+      return { date, close };
+    })
+    .filter((row): row is FxHistoryRow => row !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
 export async function resolveFxUSDToTarget(
   args: {
     targetCurrency: string;
@@ -60,10 +83,10 @@ export async function resolveFxUSDToTarget(
     allowRefresh: boolean;
   },
   deps: {
-    readHistoryRows?: typeof readHistoryRowsInRange;
-    refreshHistory?: typeof refreshHistoryRangeToMonthlyBlobs;
+    fetchHistorical?: (params: { symbol: string; from: string; to: string; path: string }) => Promise<LegacyHistoricalResponse>;
   } = {},
 ): Promise<{ fx: number | null; warnings: string[] }> {
+  void args.allowRefresh;
   const normalizedCurrency = args.targetCurrency.toUpperCase();
   if (normalizedCurrency === 'USD') {
     return { fx: 1, warnings: [] };
@@ -76,40 +99,58 @@ export async function resolveFxUSDToTarget(
     return { fx: null, warnings: ['FX fixed scenario missing fixedFx > 0'] };
   }
 
-  const readHistoryRows = deps.readHistoryRows ?? ((params) => readHistoryRowsInRange(params));
-  const refreshHistory = deps.refreshHistory ?? ((params) => refreshHistoryRangeToMonthlyBlobs(params));
-  const from = args.scenario.mode === 'percentile'
-    ? subtractUtcYears(args.anchorDateUtc, args.scenario.lookbackYears)
-    : args.anchorDateUtc;
-
   const warnings: string[] = [];
+  const seenWarnings = new Set<string>();
+  const pushWarning = (message: string) => {
+    if (!seenWarnings.has(message)) {
+      seenWarnings.add(message);
+      warnings.push(message);
+    }
+  };
+
+  const todayUtc = todayUtcDateString();
+  const clampedAnchorDateUtc = args.anchorDateUtc > todayUtc ? todayUtc : args.anchorDateUtc;
+  if (args.anchorDateUtc > todayUtc) {
+    pushWarning(`targetDate ${args.anchorDateUtc} is in the future; clamped to ${todayUtc}`);
+  }
+
+  const spotWindow = args.scenario.mode === 'spot'
+    ? buildHistoricalWindowUtc({ toUtc: clampedAnchorDateUtc, lookbackDays: 30, maxLookbackDays: 60 })
+    : null;
+  if (spotWindow?.wasClamped) {
+    pushWarning(`historicalWindow: from clamped to ${spotWindow.fromUtc} (maxLookbackDays=${spotWindow.maxLookbackDays})`);
+  }
+
+  const fromUtc = args.scenario.mode === 'percentile'
+    ? subtractUtcYears(clampedAnchorDateUtc, args.scenario.lookbackYears)
+    : spotWindow?.fromUtc ?? clampedAnchorDateUtc;
+
   const candidates = fxLookupCandidatesUSDTo(normalizedCurrency);
 
   for (const candidate of candidates) {
-    let history = await readHistoryRows({
-      priceKey: candidate.priceKey,
-      from,
-      to: args.anchorDateUtc,
-    });
+    const symbol = getLegacySymbolForPriceKey(candidate.priceKey);
+    if (!symbol) {
+      pushWarning(`Unknown legacy priceKey mapping: ${candidate.priceKey}`);
+      continue;
+    }
 
-    if (history.missing && args.allowRefresh) {
-      await refreshHistory({
-        priceKey: candidate.priceKey,
-        from,
-        to: args.anchorDateUtc,
-      });
-      history = await readHistoryRows({
-        priceKey: candidate.priceKey,
-        from,
-        to: args.anchorDateUtc,
-      });
+    const path = `historical-chart/1day/${encodeURIComponent(symbol)}`;
+    const fetchHistorical = deps.fetchHistorical ?? ((params: { symbol: string; from: string; to: string; path: string }) =>
+      fetchApiV3Json<LegacyHistoricalResponse>(params.path, { from: params.from, to: params.to }));
+
+    const response = await fetchHistorical({ symbol, from: fromUtc, to: clampedAnchorDateUtc, path });
+    const rows = normalizeLegacyRows(response);
+    if (rows.length === 0) {
+      pushWarning(`No price data returned from FMP legacy v3 for symbol ${symbol}`);
+      pushWarning(`legacyFetch: GET /api/v3/${path}?from=${fromUtc}&to=${clampedAnchorDateUtc}`);
+      continue;
     }
 
     const rawFx = args.scenario.mode === 'spot'
-      ? resolveSpot(history.rows, args.anchorDateUtc)
+      ? resolveSpot(rows, clampedAnchorDateUtc)
       : resolvePercentile({
-          rows: history.rows,
-          anchorDateUtc: args.anchorDateUtc,
+          rows,
+          anchorDateUtc: clampedAnchorDateUtc,
           lookbackYears: args.scenario.lookbackYears,
           percentile: args.scenario.percentile,
         });
@@ -120,10 +161,10 @@ export async function resolveFxUSDToTarget(
     }
 
     const modeReason = args.scenario.mode === 'percentile'
-      ? `No closes in trailing ${args.scenario.lookbackYears}y window for ${candidate.priceKey} <= ${args.anchorDateUtc}`
-      : `No close on or before ${args.anchorDateUtc} for ${candidate.priceKey}`;
+      ? `No closes in trailing ${args.scenario.lookbackYears}y window for ${candidate.priceKey} <= ${clampedAnchorDateUtc}`
+      : `No close on or before ${clampedAnchorDateUtc} for ${candidate.priceKey}`;
 
-    warnings.push(args.allowRefresh ? modeReason : `${modeReason}; refresh=0 so auto-resolve cannot backfill`);
+    pushWarning(modeReason);
   }
 
   return { fx: null, warnings };

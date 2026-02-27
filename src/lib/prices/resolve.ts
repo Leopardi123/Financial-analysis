@@ -1,7 +1,8 @@
 import { convertPriceToCanonical } from './units/convert.ts';
 import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.ts';
-import { fetchHistorical, type ProviderPriceRow } from './providers/fmp.ts';
+import { buildHistoricalWindowUtc, fetchHistorical, getLegacyQuote, resolveLegacyCommodityCloseOnOrBefore, type ProviderPriceRow } from './providers/fmp.ts';
 import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.ts';
+import { getLegacySymbolForPriceKey } from './providers/legacyCommoditySymbolMap.ts';
 
 export type PriceScenario =
   | { mode: 'spot' }
@@ -16,6 +17,8 @@ type ResolveDeps = {
   fetchHistoricalFn: typeof fetchHistorical;
   upsertMonthlySeriesFn: typeof upsertMonthlySeries;
   getMonthlySeriesFn: typeof getMonthlySeries;
+  getLegacyQuoteFn: typeof getLegacyQuote;
+  resolveLegacyCommodityCloseOnOrBeforeFn: typeof resolveLegacyCommodityCloseOnOrBefore;
 };
 
 function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
@@ -26,6 +29,8 @@ function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
     fetchHistoricalFn: deps.fetchHistoricalFn ?? fetchHistorical,
     upsertMonthlySeriesFn: deps.upsertMonthlySeriesFn ?? upsertMonthlySeries,
     getMonthlySeriesFn: deps.getMonthlySeriesFn ?? getMonthlySeries,
+    getLegacyQuoteFn: deps.getLegacyQuoteFn ?? getLegacyQuote,
+    resolveLegacyCommodityCloseOnOrBeforeFn: deps.resolveLegacyCommodityCloseOnOrBeforeFn ?? resolveLegacyCommodityCloseOnOrBefore,
   };
 }
 
@@ -54,7 +59,7 @@ async function maybeRefreshHistory(price_key: string, fromUtc: string, toUtc: st
     throw new Error(`Unsupported provider: ${mapping.provider}`);
   }
 
-  const dailyRows: ProviderPriceRow[] = await deps.fetchHistoricalFn(mapping.provider_symbol, mapping.provider_kind, fetchFrom, toUtc);
+  const dailyRows: ProviderPriceRow[] = await deps.fetchHistoricalFn(mapping.provider_symbol, mapping.provider_kind, fetchFrom, toUtc, price_key);
   const monthlyCanonicalRows = downsampleDailyToMonthlyEom(
     dailyRows.map((row) => ({
       dateUtc: row.dateUtc,
@@ -95,25 +100,67 @@ export async function resolvePriceSeries(
     return { values: args.anchorDatesUtc.map(() => fixedValue), warnings: [] };
   }
 
+  const warnings: string[] = [];
+  const seenWarnings = new Set<string>();
+  const pushWarning = (message: string) => {
+    if (!seenWarnings.has(message)) {
+      seenWarnings.add(message);
+      warnings.push(message);
+    }
+  };
+  const legacySymbol = getLegacySymbolForPriceKey(args.price_key);
+  if (!legacySymbol) {
+    pushWarning(`Unknown commodity priceKey ${args.price_key}; provide legacy symbol`);
+  }
+
   const maxDate = sortedAnchors[sortedAnchors.length - 1];
   const minDate = sortedAnchors[0];
+  const spotWindow = args.scenario.mode === 'spot'
+    ? buildHistoricalWindowUtc({ toUtc: maxDate, lookbackDays: 30, maxLookbackDays: 60 })
+    : null;
+  if (spotWindow?.wasClamped) {
+    pushWarning(`historicalWindow: from clamped to ${spotWindow.fromUtc} (maxLookbackDays=${spotWindow.maxLookbackDays})`);
+  }
+
   const fromUtc = args.scenario.mode === 'percentile'
     ? subtractUtcYears(minDate, args.scenario.lookbackYears)
-    : minDate;
+    : args.scenario.mode === 'spot'
+      ? spotWindow?.fromUtc ?? minDate
+      : minDate;
+
+  if (args.scenario.mode === 'spot' && legacySymbol) {
+    const resolvedCommodity = await resolvedDeps.resolveLegacyCommodityCloseOnOrBeforeFn(legacySymbol, maxDate);
+    resolvedCommodity.warnings.forEach((warning) => pushWarning(warning));
+
+    if (resolvedCommodity.close !== null) {
+      return { values: args.anchorDatesUtc.map(() => resolvedCommodity.close), warnings };
+    }
+
+    const quote = await resolvedDeps.getLegacyQuoteFn(legacySymbol);
+    if (quote) {
+      pushWarning(`commodity history missing; fell back to quotes/commodity spot: ${legacySymbol}`);
+      return { values: args.anchorDatesUtc.map(() => quote.price), warnings };
+    }
+
+    pushWarning(`commodity price missing: ${legacySymbol} (history+spot empty)`);
+    return { values: args.anchorDatesUtc.map(() => null), warnings };
+  }
 
   if (args.allowRefresh) {
     await maybeRefreshHistory(args.price_key, fromUtc, maxDate, resolvedDeps);
   }
 
   const rows = await resolvedDeps.getMonthlySeriesFn(args.price_key, fromUtc, maxDate);
-  const warnings: string[] = [];
+  if (rows.length === 0 && legacySymbol) {
+    pushWarning(`No price data returned from FMP legacy v3 for symbol ${legacySymbol}`);
+  }
 
   if (args.scenario.mode === 'spot') {
     const values = args.anchorDatesUtc.map((anchorDateUtc) => {
       const eligible = rows.filter((row) => row.dateUtc <= anchorDateUtc);
       const latest = eligible[eligible.length - 1];
       if (!latest) {
-        warnings.push(`No close on or before ${anchorDateUtc} for ${args.price_key}`);
+        pushWarning(`No close on or before ${anchorDateUtc} for ${args.price_key}`);
         return null;
       }
       return latest.value;
@@ -130,7 +177,7 @@ export async function resolvePriceSeries(
       .sort((a, b) => a - b);
 
     if (windowValues.length === 0) {
-      warnings.push(`No closes in trailing ${percentileScenario.lookbackYears}y window for ${args.price_key} <= ${anchorDateUtc}`);
+      pushWarning(`No closes in trailing ${percentileScenario.lookbackYears}y window for ${args.price_key} <= ${anchorDateUtc}`);
       return null;
     }
 
