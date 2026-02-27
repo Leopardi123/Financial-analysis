@@ -59,6 +59,7 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const sustainingCostUSD: (number | null)[] = new Array(length).fill(null);
   const ebitdaUSD: (number | null)[] = new Array(length).fill(null);
   const ebitUSD: (number | null)[] = new Array(length).fill(null);
+  const totalCapexUSD: (number | null)[] = new Array(length).fill(null);
   const taxableIncomeUSD: (number | null)[] = new Array(length).fill(null);
   const effectiveTaxRate: (number | null)[] = new Array(length).fill(null);
   const taxUSD: (number | null)[] = new Array(length).fill(null);
@@ -127,17 +128,26 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     nopatUSD[t] = Number.isFinite(nopatValue) ? nopatValue : null;
 
     if (nopatUSD[t] == null) {
+      totalCapexUSD[t] = null;
       fcffUSD[t] = null;
       continue;
     }
 
     if (cx == null) {
+      totalCapexUSD[t] = null;
+      fcffUSD[t] = null;
+      continue;
+    }
+
+    const totalCapexValue = cx + sc;
+    totalCapexUSD[t] = Number.isFinite(totalCapexValue) ? totalCapexValue : null;
+    if (totalCapexUSD[t] == null) {
       fcffUSD[t] = null;
       continue;
     }
 
     const nopatAtT = nopatUSD[t] as number;
-    const fcffValue = nopatAtT + dep - cx - dWC;
+    const fcffValue = nopatAtT + dep - (totalCapexUSD[t] as number) - dWC - rec;
     fcffUSD[t] = Number.isFinite(fcffValue) ? fcffValue : null;
   }
 
@@ -145,6 +155,7 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     sustainingCostUSD,
     ebitdaUSD,
     depreciationUSD,
+    totalCapexUSD,
     ebitUSD,
     taxableIncomeUSD,
     effectiveTaxRate,

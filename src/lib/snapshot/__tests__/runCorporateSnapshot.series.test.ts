@@ -350,6 +350,45 @@ test('tax chain uses EBIT=EBITDA-depreciation and taxRate null yields null tax',
   assert.ok((nullTaxResult.snapshot.series?.taxUSD ?? []).every((value) => value === null));
 });
 
+
+test('project FCFF identity uses total capex plus reclamation cash outflow', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  const operating = series.operatingCostsUSD as Array<number | null>;
+  const length = operating.length;
+  rawJson.economicsBreakdown = undefined;
+
+  series.sustainingCapexUSD = operating.map((_, t) => (t >= 2 ? 7 : 0));
+  series.reclamationUSD = operating.map((_, t) => (t === length - 1 ? 11 : 0));
+  series.siteGandA_USD = operating.map(() => 0);
+  series.byproductCreditsUSD = operating.map(() => 0);
+  series.depreciationUSD = operating.map(() => 0);
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const warnings = result.diagnostics.warnings ?? [];
+  assert.equal(warnings.some((warning) => warning.includes('FCFF identity')), false);
+
+  const outSeries = result.snapshot.series;
+  assert.ok(outSeries);
+  const t = 2;
+  const priorStyleFcff = (outSeries?.ebitUSD[t] as number) - (outSeries?.taxUSD[t] as number) + (outSeries?.depreciationUSD?.[t] as number) - (outSeries?.capexUSD[t] as number) - (outSeries?.workingCapitalDeltaUSD?.[t] as number);
+  const fcffAtT = outSeries?.fcffUSD[t] as number;
+  const sustainingAtT = outSeries?.sustainingCapexUSD[t] as number;
+  assert.equal(fcffAtT - priorStyleFcff, -sustainingAtT);
+
+  const last = (outSeries?.fcffUSD.length ?? 1) - 1;
+  const priorAtLast = (outSeries?.ebitUSD[last] as number) - (outSeries?.taxUSD[last] as number) + (outSeries?.depreciationUSD?.[last] as number) - (outSeries?.capexUSD[last] as number) - (outSeries?.workingCapitalDeltaUSD?.[last] as number) - (outSeries?.sustainingCapexUSD[last] as number);
+  const reclamationAtLast = outSeries?.reclamationUSD[last] as number;
+  assert.equal((outSeries?.fcffUSD[last] as number) - priorAtLast, -reclamationAtLast);
+
+  assert.equal(outSeries?.totalCapexUSD[t], (outSeries?.capexUSD[t] as number) + (outSeries?.sustainingCapexUSD[t] as number));
+});
+
 test('project identity checks report no failures on valid periods and cannot evaluate on null FCFF inputs', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;
@@ -390,6 +429,6 @@ test('project identity checks report no failures on valid periods and cannot eva
   if (!nullResult.ok) return;
 
   const nullWarnings = nullResult.diagnostics.warnings ?? [];
-  assert.ok(nullWarnings.some((warning) => warning.includes('cannot evaluate FCFF identity at t=2')));
-  assert.equal(nullWarnings.some((warning) => warning.includes('IDENTITY FAIL t=')), false);
+  assert.equal(nullWarnings.some((warning) => warning.includes('cannot evaluate FCFF identity')), false);
+  assert.equal(nullWarnings.some((warning) => warning.includes('FCFF identity')), false);
 });
