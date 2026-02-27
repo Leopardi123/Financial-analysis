@@ -80,11 +80,11 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   });
 
   assertDeepEqual(output.streams.streamTakeUSD_total, [80, 80], 'stream take should be computed from spot and purchase price');
-  assertDeepEqual(output.revenue.grossRevenueUSD, [900, 900], 'gross revenue should use effective payable quantity');
-  assertEqual(output.phase1.ebitUSD[0], 720, 'phase1 EBIT should include stream take through royalties');
-  assertEqual(output.phase1.ebitUSD[1], 720, 'phase1 EBIT should include stream take through royalties');
-  assertDeepEqual(output.aisc.payableAuEqOz, [90, 90], 'AISC payable AuEq ounces should derive from stream-adjusted gross revenue');
-  assertEqual(output.aisc.aiscAuEqUSDPerOz_LOM, 2, 'AISC should reflect sustaining cost including stream take');
+  assertDeepEqual(output.revenue.grossRevenueUSD, [920, 920], 'gross revenue should include spot revenue plus stream purchase cash');
+  assertEqual(output.phase1.ebitUSD[0], 820, 'phase1 EBIT should use net streamed revenue without extra royalty deduction');
+  assertEqual(output.phase1.ebitUSD[1], 820, 'phase1 EBIT should use net streamed revenue without extra royalty deduction');
+  assertDeepEqual(output.aisc.payableAuEqOz, [92, 92], 'AISC payable AuEq ounces should derive from streamed net gross revenue');
+  assertEqual(output.aisc.aiscAuEqUSDPerOz_LOM, 1.0869565217391304, 'AISC should reflect streamed net revenue base');
 
 
   const revenueAndTakeBaseOutput = computeProjectEngineFromProductionWithStreams({
@@ -141,9 +141,9 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
     },
   });
 
-  assertDeepEqual(revenueAndTakeBaseOutput.revenue.byMetalRevenueUSD.Au, [900, 900, 900], 'revenue should be based on effective payable quantity after streams');
-  assertDeepEqual(revenueAndTakeBaseOutput.revenue.grossRevenueUSD, [900, 900, 900], 'gross revenue should use post-stream payable quantity');
-  assertDeepEqual(revenueAndTakeBaseOutput.take.takeByItemUSD['rev-royalty'], [90, 90, 90], 'revenue-based take should use post-stream revenue base');
+  assertDeepEqual(revenueAndTakeBaseOutput.revenue.byMetalRevenueUSD.Au, [920, 920, 920], 'revenue should use streamed net formula before take');
+  assertDeepEqual(revenueAndTakeBaseOutput.revenue.grossRevenueUSD, [920, 920, 920], 'gross revenue should use streamed net formula');
+  assertDeepEqual(revenueAndTakeBaseOutput.take.takeByItemUSD['rev-royalty'], [92, 92, 92], 'revenue-based take should use streamed net revenue base');
 
   const strictNullOutput = computeProjectEngineFromProductionWithStreams({
     streams: {

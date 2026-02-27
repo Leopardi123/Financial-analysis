@@ -44,10 +44,13 @@ export function computeProjectRevenue(input: ProjectRevenueInput): ProjectRevenu
     masterN: input.masterN,
     payableQtyByMetal: input.payableQtyByMetal,
     priceUSDByMetal: input.priceUSDByMetal,
+    streamsByMetal: input.streamsByMetal,
   });
 
   return {
     byMetalRevenueUSD: computed.revenueByMetalUSD,
     grossRevenueUSD: computed.grossRevenueUSD,
+    deliveredQtyByMetal: computed.deliveredQtyByMetal,
+    streamCostToProjectUSDByMetal: computed.streamCostToProjectUSDByMetal,
   };
 }

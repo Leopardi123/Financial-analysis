@@ -40,6 +40,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertDeepEqual(happyPath.byMetalRevenueUSD.Au, [2000, 2000, 2000], 'happy path Au revenue');
   assertDeepEqual(happyPath.byMetalRevenueUSD.Ag, [250, 250, 250], 'happy path Ag revenue');
   assertDeepEqual(happyPath.grossRevenueUSD, [2250, 2250, 2250], 'happy path gross revenue');
+  assertDeepEqual(happyPath.deliveredQtyByMetal.Au, [0, 0, 0], 'happy path default delivered qty should be zero');
 
   const missingAgPrice = computeProjectRevenue({
     masterN: 2,
@@ -67,6 +68,29 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   });
   assertDeepEqual(negativeInput.byMetalRevenueUSD.Au, [2000, null, null], 'negative qty/price produce null revenues');
   assertDeepEqual(negativeInput.grossRevenueUSD, [2000, null, null], 'negative qty/price null-propagate gross revenue');
+
+  const streamed = computeProjectRevenue({
+    masterN: 0,
+    payableQtyByMetal: {
+      Au: [100],
+    },
+    priceUSDByMetal: {
+      Au: [10],
+    },
+    streamsByMetal: {
+      Au: {
+        streamPctOfPayable: 0.2,
+        purchasePrice: {
+          kind: 'FIXED_USD_PER_UNIT',
+          value: 3,
+        },
+      },
+    },
+  });
+
+  assertDeepEqual(streamed.byMetalRevenueUSD.Au, [860], 'streamed revenue should apply MVI net formula before take');
+  assertDeepEqual(streamed.deliveredQtyByMetal.Au, [20], 'streamed delivered quantity should be exposed');
+  assertDeepEqual(streamed.streamCostToProjectUSDByMetal.Au, [140], 'streamed cost to project should be exposed');
 
   assertThrows(
     () =>

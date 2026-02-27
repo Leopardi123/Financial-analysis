@@ -1,12 +1,18 @@
+import { applyStreamsMVI } from '../streams/applyStreamsMvi.ts';
+import type { StreamMVIConfig } from '../streams/types.ts';
+
 export type ComputeRevenueByMetalUSDArgs = {
   masterN: number;
   payableQtyByMetal: Record<string, (number | null)[]>;
   priceUSDByMetal: Record<string, (number | null)[]>;
+  streamsByMetal?: Record<string, StreamMVIConfig> | null;
 };
 
 export type ComputeRevenueByMetalUSDResult = {
   revenueByMetalUSD: Record<string, (number | null)[]>;
   grossRevenueUSD: (number | null)[];
+  deliveredQtyByMetal: Record<string, (number | null)[]>;
+  streamCostToProjectUSDByMetal: Record<string, (number | null)[]>;
   diagnostics: string[];
 };
 
@@ -26,6 +32,8 @@ export function computeRevenueByMetalUSD(args: ComputeRevenueByMetalUSDArgs): Co
   const expectedLength = args.masterN + 1;
   const diagnostics: string[] = [];
   const revenueByMetalUSD: Record<string, (number | null)[]> = {};
+  const deliveredQtyByMetal: Record<string, (number | null)[]> = {};
+  const streamCostToProjectUSDByMetal: Record<string, (number | null)[]> = {};
 
   const qtyMetals = Object.keys(args.payableQtyByMetal);
   const priceMetals = new Set(Object.keys(args.priceUSDByMetal));
@@ -51,13 +59,29 @@ export function computeRevenueByMetalUSD(args: ComputeRevenueByMetalUSDArgs): Co
     return {
       revenueByMetalUSD,
       grossRevenueUSD: new Array<number | null>(expectedLength).fill(null),
+      deliveredQtyByMetal,
+      streamCostToProjectUSDByMetal,
       diagnostics,
     };
   }
 
+  const streamsApplied = applyStreamsMVI({
+    masterN: args.masterN,
+    payableQtyByMetal: args.payableQtyByMetal,
+    spotPriceUSDByMetal: args.priceUSDByMetal,
+    streamsByMetal: args.streamsByMetal,
+  });
+  diagnostics.push(...streamsApplied.diagnostics);
+
   for (const metal of metals) {
     const qtySeries = args.payableQtyByMetal[metal];
+    const effectiveQtySeries = streamsApplied.effectivePayableQtyByMetal[metal] ?? [];
+    const deliveredQtySeries = streamsApplied.deliveredQtyByMetal[metal] ?? [];
+    const purchasePriceSeries = streamsApplied.streamPurchasePriceUSDByMetal[metal] ?? [];
     const priceSeries = args.priceUSDByMetal[metal];
+
+    deliveredQtyByMetal[metal] = [...deliveredQtySeries];
+    streamCostToProjectUSDByMetal[metal] = [...(streamsApplied.streamCostToProjectUSDByMetal[metal] ?? [])];
 
     if (qtySeries.length !== expectedLength) {
       diagnostics.push(`revenueByMetal: payableQtyByMetal[${metal}] length=${qtySeries.length} expected=${expectedLength}`);
@@ -68,7 +92,9 @@ export function computeRevenueByMetalUSD(args: ComputeRevenueByMetalUSDArgs): Co
 
     const nullPeriods: number[] = [];
     for (let t = 0; t < expectedLength; t += 1) {
-      const qty = qtySeries[t];
+      const qty = effectiveQtySeries[t];
+      const deliveredQty = deliveredQtySeries[t];
+      const purchasePrice = purchasePriceSeries[t];
       const price = priceSeries[t];
 
       if (!isFiniteNumber(qty) || !isFiniteNumber(price)) {
@@ -84,7 +110,11 @@ export function computeRevenueByMetalUSD(args: ComputeRevenueByMetalUSDArgs): Co
         continue;
       }
 
-      revenueByMetalUSD[metal][t] = qty * price;
+      const streamCash = isFiniteNumber(deliveredQty) && isFiniteNumber(purchasePrice)
+        ? deliveredQty * purchasePrice
+        : 0;
+
+      revenueByMetalUSD[metal][t] = (qty * price) + streamCash;
     }
 
     if (nullPeriods.length > 0) {
@@ -110,6 +140,8 @@ export function computeRevenueByMetalUSD(args: ComputeRevenueByMetalUSDArgs): Co
   return {
     revenueByMetalUSD,
     grossRevenueUSD,
+    deliveredQtyByMetal,
+    streamCostToProjectUSDByMetal,
     diagnostics,
   };
 }

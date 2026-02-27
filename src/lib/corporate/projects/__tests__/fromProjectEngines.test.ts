@@ -50,6 +50,8 @@ function makeOutputStub(input: {
     revenue: {
       grossRevenueUSD: input.grossRevenueUSD,
       byMetalRevenueUSD: {},
+      deliveredQtyByMetal: {},
+      streamCostToProjectUSDByMetal: {},
     },
     nationalTake: {
       totalTakeUSD: [],
