@@ -697,6 +697,7 @@ export async function runCorporateSnapshotPipeline(args: {
           }
 
           const out = computeProjectEngineFullProductionV1(resolved);
+          diagnostics.warnings.push(...out.nationalTake.diagnostics);
           const projectLength = periodEndDatesUtc.length;
           const nullSeries = new Array<number | null>(projectLength).fill(null);
           const taxRate = parsed.engineInputWithoutPrices.taxRate;

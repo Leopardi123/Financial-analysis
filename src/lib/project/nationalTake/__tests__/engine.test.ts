@@ -18,6 +18,7 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
       rateType: 'FIXED',
       rateFixed: 0.05,
     }],
+    royaltiesDetail: [{ id: 'nsr-detail', base: 'revenue', rateType: 'NSR_pct', rate: 5 }],
     phase1: {
       masterN: 1,
       productionStartPeriod: 0,
@@ -31,7 +32,7 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
   });
 
   assertDeepEqual(out.totalTakeUSD, [50, 50], 'total take');
-  assertDeepEqual(out.totalRoyaltiesUSD, [50, 50], 'royalties derived from take');
+  assertDeepEqual(out.totalRoyaltiesUSD, [50, 50], 'royalties derived from royaltiesDetail');
   assertDeepEqual(out.phase1.ebitUSD, [550, 550], 'phase1 uses derived royalties');
 
   const override = computeNationalTake({
@@ -45,6 +46,7 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
       rateType: 'FIXED',
       rateFixed: 0.05,
     }],
+    royaltiesDetail: [{ id: 'nsr-detail', base: 'revenue', rateType: 'NSR_pct', rate: 5 }],
     phase1: {
       masterN: 1,
       productionStartPeriod: 0,
@@ -60,6 +62,9 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
 
   assertDeepEqual(override.totalTakeUSD, [50, 50], 'take output unaffected by override');
   assertDeepEqual(override.totalRoyaltiesUSD, [0, 999], 'override royalties takes precedence');
+  if (!override.diagnostics.includes('royaltiesUSD: manual override detected; ignoring royaltiesDetail for calculation')) {
+    throw new Error('expected manual override diagnostic');
+  }
 
   console.log('National take tests passed');
 })();

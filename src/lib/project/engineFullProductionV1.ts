@@ -48,6 +48,7 @@ export function computeProjectEngineFullProductionV1(
     grossRevenueUSD: revenueOut.grossRevenueUSD,
     byMetalRevenueUSD: revenueOut.byMetalRevenueUSD,
     items: input.takeItems,
+    royaltiesDetail: input.royaltiesDetail,
     phase1: input.phase1,
     extraRoyaltiesUSD: streamTakeUSD_total,
   });
