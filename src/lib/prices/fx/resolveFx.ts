@@ -84,7 +84,6 @@ export async function resolveFxUSDToTarget(
     fetchHistorical?: (symbol: string) => Promise<LegacyHistoricalResponse>;
   } = {},
 ): Promise<{ fx: number | null; warnings: string[] }> {
-  void args.allowRefresh;
   const normalizedCurrency = args.targetCurrency.toUpperCase();
   if (normalizedCurrency === 'USD') {
     return { fx: 1, warnings: [] };
@@ -97,6 +96,11 @@ export async function resolveFxUSDToTarget(
     return { fx: null, warnings: ['FX fixed scenario missing fixedFx > 0'] };
   }
 
+
+  const fromUtc = args.scenario.mode === 'percentile'
+    ? subtractUtcYears(args.anchorDateUtc, args.scenario.lookbackYears)
+    : subtractUtcYears(args.anchorDateUtc, 20);
+
   const warnings: string[] = [];
   const candidates = fxLookupCandidatesUSDTo(normalizedCurrency);
 
@@ -107,7 +111,7 @@ export async function resolveFxUSDToTarget(
       continue;
     }
 
-    const fetchHistorical = deps.fetchHistorical ?? ((legacySymbol: string) => fetchApiV3Json<LegacyHistoricalResponse>(`historical-price-full/${encodeURIComponent(legacySymbol)}`));
+    const fetchHistorical = deps.fetchHistorical ?? ((legacySymbol: string) => fetchApiV3Json<LegacyHistoricalResponse>(`historical-price-full/${encodeURIComponent(legacySymbol)}`, { from: fromUtc, to: args.anchorDateUtc }));
     const response = await fetchHistorical(symbol);
     const rows = normalizeLegacyRows(response);
     if (rows.length === 0) {

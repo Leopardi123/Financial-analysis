@@ -1,8 +1,8 @@
 const LEGACY_PRICE_KEY_TO_SYMBOL: Record<string, string> = {
-  XAU_USD_TOZ: 'XAUUSD',
-  XAG_USD_TOZ: 'XAGUSD',
-  XPT_USD_TOZ: 'XPTUSD',
-  XPD_USD_TOZ: 'XPDUSD',
+  XAU_USD_TOZ: 'GCUSD',
+  XAG_USD_TOZ: 'SIUSD',
+  XPT_USD_TOZ: 'PLUSD',
+  XPD_USD_TOZ: 'PAUSD',
   CU_USD_LB: 'HGUSD',
   NI_USD_LB: 'NIUSD',
   ZN_USD_LB: 'ZNUSD',
@@ -25,7 +25,29 @@ const LEGACY_PRICE_KEY_TO_SYMBOL: Record<string, string> = {
   EUR_USD: 'EUR/USD',
 };
 
+const LEGACY_SYMBOL_PATTERN = /^[A-Z]+(?:\/[A-Z]+)?$/;
+
 export function getLegacySymbolForPriceKey(priceKey: string): string | null {
-  return LEGACY_PRICE_KEY_TO_SYMBOL[priceKey] ?? null;
+  const mapped = LEGACY_PRICE_KEY_TO_SYMBOL[priceKey];
+  if (mapped) {
+    return mapped;
+  }
+
+  const normalized = priceKey.trim().toUpperCase();
+  if (LEGACY_SYMBOL_PATTERN.test(normalized)) {
+    return normalized;
+  }
+
+  return null;
 }
 
+
+export function getCommodityPriceKeyForLegacySymbol(symbol: string): string | null {
+  const normalized = symbol.trim().toUpperCase();
+  for (const [priceKey, mappedSymbol] of Object.entries(LEGACY_PRICE_KEY_TO_SYMBOL)) {
+    if (mappedSymbol === normalized && (priceKey.includes('_USD_TOZ') || priceKey.endsWith('_USD_LB') || priceKey.endsWith('_USD_TONNE'))) {
+      return priceKey;
+    }
+  }
+  return null;
+}

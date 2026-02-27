@@ -106,9 +106,13 @@ export async function fetchHistorical(
   priceKey?: string,
 ): Promise<ProviderPriceRow[]> {
   const legacySymbol = priceKey ? getLegacySymbolForPriceKey(priceKey) : null;
+  if (priceKey && !legacySymbol) {
+    return [];
+  }
+
   const symbol = legacySymbol ?? provider_symbol;
   const response = legacySymbol
-    ? await fetchApiV3Json<FmpHistoricalResponse>(`historical-price-full/${encodeURIComponent(symbol)}`)
+    ? await fetchApiV3Json<FmpHistoricalResponse>(`historical-price-full/${encodeURIComponent(symbol)}`, { from: fromUtc, to: toUtc })
     : await fetchStableJson<FmpHistoricalResponse>('historical-price-eod/full', { symbol });
   const sourceRows = Array.isArray(response) ? response : Array.isArray(response?.historical) ? response.historical : [];
   const rows = sourceRows

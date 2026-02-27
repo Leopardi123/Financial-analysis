@@ -99,14 +99,16 @@ export async function resolvePriceSeries(
   const warnings: string[] = [];
   const legacySymbol = getLegacySymbolForPriceKey(args.price_key);
   if (!legacySymbol) {
-    warnings.push(`Unknown legacy priceKey mapping: ${args.price_key}`);
+    warnings.push(`Unknown commodity priceKey ${args.price_key}; provide legacy symbol`);
   }
 
   const maxDate = sortedAnchors[sortedAnchors.length - 1];
   const minDate = sortedAnchors[0];
   const fromUtc = args.scenario.mode === 'percentile'
     ? subtractUtcYears(minDate, args.scenario.lookbackYears)
-    : minDate;
+    : args.scenario.mode === 'spot'
+      ? subtractUtcYears(minDate, 20)
+      : minDate;
 
   if (args.allowRefresh) {
     await maybeRefreshHistory(args.price_key, fromUtc, maxDate, resolvedDeps);

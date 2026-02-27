@@ -4,6 +4,7 @@ import type { ProjectEngineFullProductionV1Input } from '../types.ts';
 import type { QtyUnit } from './schema.ts';
 import type { ParsedProjectJsonV1 } from './parse.ts';
 import { resolvePriceSeries, type PriceScenario as CorePriceScenario } from '../../prices/resolve.ts';
+import { getCommodityPriceKeyForLegacySymbol } from '../../prices/providers/legacyCommoditySymbolMap.ts';
 
 export type PriceScenario =
   | { mode: 'spot' }
@@ -12,7 +13,17 @@ export type PriceScenario =
 
 
 function canonicalQtyUnitFromPriceKey(priceKey: string): 'toz' | 'lb' | 'tonne' {
-  const unit = getPriceKeyDefinition(priceKey).canonicalUnit;
+  let resolvedPriceKey = priceKey;
+  try {
+    getPriceKeyDefinition(resolvedPriceKey);
+  } catch {
+    const mappedPriceKey = getCommodityPriceKeyForLegacySymbol(priceKey);
+    if (mappedPriceKey) {
+      resolvedPriceKey = mappedPriceKey;
+    }
+  }
+
+  const unit = getPriceKeyDefinition(resolvedPriceKey).canonicalUnit;
   if (unit === 'USD_per_toz') {
     return 'toz';
   }
@@ -91,16 +102,50 @@ export async function resolveProjectPricesToEngineInput(
         date.setUTCDate(date.getUTCDate() + t * 365);
         return date.toISOString().slice(0, 10);
       });
-  const fallbackAnchorDateUtc = targets[0] ?? from;
   const todayUtc = todayUtcDateString();
-  const spotAnchorDateUtc = scenario.mode === 'spot'
-    ? ((args.spotAnchorDateUtc ?? fallbackAnchorDateUtc ?? todayUtc) > todayUtc
-        ? todayUtc
-        : (args.spotAnchorDateUtc ?? fallbackAnchorDateUtc ?? todayUtc))
-    : '';
+  const spotAnchorDateUtc = scenario.mode === 'spot' ? todayUtc : '';
 
   const spotPriceUSDByMetal: Record<string, Array<number | null>> = {};
   const payableQtyByMetalCanonical: Record<string, Array<number | null>> = {};
+
+  const coreScenario: CorePriceScenario = scenario.mode === 'fixed'
+    ? { mode: 'fixed', fixedByKey: scenario.fixedPriceByKey }
+    : scenario;
+
+  const spotValueByPriceKey = new Map<string, number | null>();
+
+  async function resolveSeriesForPriceKey(priceKey: string): Promise<Array<number | null>> {
+    if (scenario.mode === 'spot') {
+      if (spotValueByPriceKey.has(priceKey)) {
+        return new Array(len).fill(spotValueByPriceKey.get(priceKey) ?? null);
+      }
+
+      const resolvedSpot = await resolvePriceSeriesFn({
+        price_key: priceKey,
+        anchorDatesUtc: [spotAnchorDateUtc],
+        scenario: coreScenario,
+        allowRefresh: args.allowRefresh === true,
+      });
+      if (resolvedSpot.warnings.length > 0) {
+        warnings.push(...resolvedSpot.warnings);
+      }
+
+      const scalar = resolvedSpot.values[0] ?? null;
+      spotValueByPriceKey.set(priceKey, scalar);
+      return new Array(len).fill(scalar);
+    }
+
+    const resolved = await resolvePriceSeriesFn({
+      price_key: priceKey,
+      anchorDatesUtc: targets,
+      scenario: coreScenario,
+      allowRefresh: args.allowRefresh === true,
+    });
+    if (resolved.warnings.length > 0) {
+      warnings.push(...resolved.warnings);
+    }
+    return resolved.values;
+  }
 
   for (const [metal, qtySeries] of Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal)) {
     const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
@@ -117,28 +162,9 @@ export async function resolveProjectPricesToEngineInput(
       metal,
     });
 
-    const coreScenario: CorePriceScenario = scenario.mode === 'fixed'
-      ? { mode: 'fixed', fixedByKey: scenario.fixedPriceByKey }
-      : scenario;
-    const resolved = await resolvePriceSeriesFn({
-      price_key: priceKey,
-      anchorDatesUtc: scenario.mode === 'spot' ? [spotAnchorDateUtc] : targets,
-      scenario: coreScenario,
-      allowRefresh: args.allowRefresh === true,
-    });
-    if (resolved.warnings.length > 0) {
-      warnings.push(...resolved.warnings);
-    }
-
-    const resolvedValues = scenario.mode === 'spot'
-      ? new Array(len).fill(resolved.values[0] ?? null)
-      : resolved.values;
-    spotPriceUSDByMetal[metal] = resolvedValues;
+    spotPriceUSDByMetal[metal] = await resolveSeriesForPriceKey(priceKey);
 
     if (scenario.mode === 'spot') {
-      if (spotPriceUSDByMetal[metal].some((value) => value === null)) {
-        warnings.push(`projectId=${projectId} metal=${metal} key=${priceKey} date=${spotAnchorDateUtc} mode=spot reason=No close on or before anchor date`);
-      }
       continue;
     }
 
@@ -156,31 +182,9 @@ export async function resolveProjectPricesToEngineInput(
     });
   }
 
-  let auPriceUSDPerOz: Array<number | null>;
+  let auPriceUSDPerOz: Array<number | null> = await resolveSeriesForPriceKey(parsed.engineInputWithoutPrices.auPriceKey);
 
-  {
-    const coreScenario: CorePriceScenario = scenario.mode === 'fixed'
-      ? { mode: 'fixed', fixedByKey: scenario.fixedPriceByKey }
-      : scenario;
-    const resolvedAu = await resolvePriceSeriesFn({
-      price_key: parsed.engineInputWithoutPrices.auPriceKey,
-      anchorDatesUtc: scenario.mode === 'spot' ? [spotAnchorDateUtc] : targets,
-      scenario: coreScenario,
-      allowRefresh: args.allowRefresh === true,
-    });
-    if (resolvedAu.warnings.length > 0) {
-      warnings.push(...resolvedAu.warnings);
-    }
-    auPriceUSDPerOz = scenario.mode === 'spot'
-      ? new Array(len).fill(resolvedAu.values[0] ?? null)
-      : resolvedAu.values;
-  }
-
-  if (scenario.mode === 'spot') {
-    if (auPriceUSDPerOz.some((value) => value === null)) {
-      warnings.push(`projectId=${projectId} metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} date=${spotAnchorDateUtc} mode=spot reason=No close on or before anchor date`);
-    }
-  } else {
+  if (scenario.mode !== 'spot') {
     auPriceUSDPerOz.forEach((value, index) => {
       if (value !== null) {
         return;
