@@ -75,17 +75,50 @@ function resolveProfileTargetCurrency(profile: Record<string, unknown> | null): 
   return profileCurrency || 'USD';
 }
 
-function formatMetricValue(value: unknown): string {
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return '—';
-    const abs = Math.abs(value);
-    const decimals = abs >= 100 ? 0 : abs >= 1 ? 2 : 4;
-    return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
+type MetricFormat = 'currency' | 'ratio' | 'percent' | 'number';
+
+type KeyMetricRow = {
+  label: string;
+  value: unknown;
+  format: MetricFormat;
+};
+
+type MetricList = {
+  title: string;
+  rows: KeyMetricRow[];
+};
+
+function formatWithSpaces(value: number, maxFractionDigits: number): string {
+  const rounded = Number(value.toFixed(maxFractionDigits));
+  const [whole, fraction] = Math.abs(rounded).toString().split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const sign = rounded < 0 ? '-' : '';
+  return `${sign}${fraction ? `${grouped}.${fraction}` : grouped}`;
+}
+
+function resolveCurrencySymbol(currency: string): string {
+  const code = currency.trim().toUpperCase();
+  if (code === 'SEK' || code === 'NOK' || code === 'DKK') return 'kr';
+  if (code === 'EUR') return '€';
+  if (code === 'GBP') return '£';
+  if (code === 'JPY' || code === 'CNY') return '¥';
+  if (code === 'CHF') return 'CHF';
+  if (code === 'CAD' || code === 'AUD' || code === 'USD') return '$';
+  return code;
+}
+
+function formatMetricValue(value: unknown, format: MetricFormat, currencySymbol: string): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  if (format === 'currency') {
+    return `${currencySymbol} ${formatWithSpaces(value, 2)}`;
   }
-  if (typeof value === 'string' && value.trim()) {
-    return value;
+  if (format === 'ratio') {
+    return value.toFixed(2);
   }
-  return '—';
+  if (format === 'percent') {
+    return `${value.toFixed(1)}%`;
+  }
+  return formatWithSpaces(value, 2);
 }
 
 function formatTableValue(value: number | null): string {
@@ -321,37 +354,71 @@ export default function ProjectsPage() {
     };
   }, [lockedTargetCurrency, companyStatements, profileDefaults, projectId, symbol]);
 
-  const metrics = useMemo(() => {
-    if (!snapshotData) return [] as Array<{ label: string; value: unknown }>;
+  const metricLists = useMemo(() => {
+    if (!snapshotData) return [] as MetricList[];
     const aggregation = (snapshotData.aggregation ?? {}) as Record<string, unknown>;
+    const financing = (snapshotData.financing ?? {}) as Record<string, unknown>;
+    const getFirst = (...values: unknown[]): unknown => values.find((value) => value !== undefined) ?? null;
 
-    return [
-      { label: 'price_current_TargetCurrency', value: readFiniteNumber(profileDefaults?.price) },
-      { label: 'targetCurrency (locked from profile)', value: lockedTargetCurrency },
-      { label: 'MarketCap_TargetCurrency', value: snapshotData.MarketCap_TargetCurrency },
-      { label: 'EV_TargetCurrency', value: snapshotData.EV_TargetCurrency },
-      { label: 'NPV_today_TargetCurrency', value: snapshotData.NPV_today_TargetCurrency },
-      { label: 'NAV_today_TargetCurrency', value: snapshotData.NAV_today_TargetCurrency },
-      { label: 'EV_over_NPV', value: snapshotData.EV_over_NPV },
-      { label: 'EV_over_NAV', value: snapshotData.EV_over_NAV },
-      { label: 'P_over_NAV', value: snapshotData.P_over_NAV },
-      { label: 'CF_LOM_TargetCurrency', value: snapshotData.CF_LOM_TargetCurrency },
-      { label: 'DCF_prodStart_present_TargetCurrency', value: snapshotData.DCF_prodStart_present_TargetCurrency },
-      { label: 'NPV_over_ETLV', value: snapshotData.NPV_over_ETLV },
-      { label: 'DCF_present_over_ETLV', value: snapshotData.DCF_present_over_ETLV },
-      { label: 'Payback_approx_years', value: snapshotData.Payback_approx_years },
-      { label: 'Payback_real_years', value: snapshotData.Payback_real_years },
-      { label: 'ROI_10Y_pct', value: snapshotData.ROI_10Y_pct },
-      { label: 'LOM_average_EBIT_ROCE_pct', value: snapshotData.LOM_average_EBIT_ROCE_pct },
-      { label: 'LOM_discounted_EBIT_ROCE_pct', value: snapshotData.LOM_discounted_EBIT_ROCE_pct },
-      { label: 'Revenue_10Y_TargetCurrency', value: snapshotData.Revenue_10Y_TargetCurrency },
-      { label: 'FCFF_10Y_TargetCurrency', value: snapshotData.FCFF_10Y_TargetCurrency },
-      { label: 'InSituValue_10Y_TargetCurrency', value: snapshotData.InSituValue_10Y_TargetCurrency },
-      { label: 'EV_over_Revenue_10Y', value: snapshotData.EV_over_Revenue_10Y },
-      { label: 'AuEq_Oz_10Y', value: snapshotData.AuEq_Oz_10Y },
-      { label: 'AISC (corp)', value: aggregation.aiscAuEqUSDPerOz_LOM ?? null },
+    const lists: MetricList[] = [
+      {
+        title: 'Lista 1 – Finansiella nyckeltal och värdering',
+        rows: [
+          { label: 'NPV today', value: snapshotData.NPV_today_TargetCurrency, format: 'currency' },
+          { label: 'NPV per share', value: financing.NPV_perShare_TargetCurrency ?? financing.npvPerShare_TargetCurrency, format: 'currency' },
+          { label: 'NAV today', value: snapshotData.NAV_today_TargetCurrency, format: 'currency' },
+          { label: 'NAV per share', value: financing.NAV_perShare_TargetCurrency ?? financing.navPerShare_TargetCurrency, format: 'currency' },
+          { label: 'DCF prod start (present)', value: snapshotData.DCF_prodStart_present_TargetCurrency, format: 'currency' },
+          { label: 'CF LOM', value: snapshotData.CF_LOM_TargetCurrency, format: 'currency' },
+          { label: 'EV', value: snapshotData.EV_TargetCurrency, format: 'currency' },
+          { label: 'EV / NPV', value: snapshotData.EV_over_NPV, format: 'ratio' },
+          { label: 'EV / NAV', value: snapshotData.EV_over_NAV, format: 'ratio' },
+          { label: 'P / NAV', value: snapshotData.P_over_NAV, format: 'ratio' },
+          { label: 'NPV / ETLV', value: snapshotData.NPV_over_ETLV, format: 'ratio' },
+          { label: 'DCF present / ETLV', value: snapshotData.DCF_present_over_ETLV, format: 'ratio' },
+          { label: 'Revenue 10Y', value: snapshotData.Revenue_10Y_TargetCurrency, format: 'currency' },
+          { label: 'FCFF 10Y', value: snapshotData.FCFF_10Y_TargetCurrency, format: 'currency' },
+          { label: 'In-situ value 10Y', value: snapshotData.InSituValue_10Y_TargetCurrency, format: 'currency' },
+          { label: 'EV / Revenue 10Y', value: snapshotData.EV_over_Revenue_10Y, format: 'ratio' },
+        ],
+      },
+      {
+        title: 'Lista 2 – Produktion / Operativt',
+        rows: [
+          { label: 'LOM', value: getFirst(snapshotData.LOM, snapshotData.LOM_years, aggregation.LOM_years), format: 'number' },
+          { label: 'Annual production AuEq (oz)', value: getFirst(snapshotData.Annual_production_AuEq_Oz, aggregation.Annual_production_AuEq_Oz), format: 'number' },
+          { label: 'AISC AuEq', value: aggregation.aiscAuEqUSDPerOz_LOM ?? null, format: 'currency' },
+          { label: 'CAPEX total', value: getFirst(snapshotData.CAPEX_total, snapshotData.Total_CAPEX_TargetCurrency, snapshotData.totalCapex_TargetCurrency), format: 'currency' },
+          { label: 'Initial CAPEX', value: getFirst(snapshotData.Initial_CAPEX, snapshotData.Initial_CAPEX_TargetCurrency, snapshotData.initialCapex_TargetCurrency), format: 'currency' },
+          { label: 'Sustaining CAPEX', value: getFirst(snapshotData.Sustaining_CAPEX, snapshotData.Sustaining_CAPEX_TargetCurrency, snapshotData.sustainingCapex_TargetCurrency), format: 'currency' },
+          { label: 'Payback real (years)', value: snapshotData.Payback_real_years, format: 'number' },
+          { label: 'IRR', value: getFirst(snapshotData.IRR_pct, snapshotData.IRR), format: 'percent' },
+        ],
+      },
+      {
+        title: 'Lista 3 – Effektivitet / Avkastning',
+        rows: [
+          { label: 'ROI 10Y', value: snapshotData.ROI_10Y_pct, format: 'percent' },
+          { label: 'LOM avg EBIT ROCE', value: snapshotData.LOM_average_EBIT_ROCE_pct, format: 'percent' },
+          { label: 'LOM discounted EBIT ROCE', value: snapshotData.LOM_discounted_EBIT_ROCE_pct, format: 'percent' },
+          { label: 'Kapitalavkastning LOM', value: getFirst(snapshotData.capital_return_on_build, snapshotData.Kapitalavkastning_LOM), format: 'ratio' },
+          { label: 'Kapitalavkastning per år LOM', value: getFirst(snapshotData.capital_return_10Y, snapshotData.Kapitalavkastning_per_År_LOM), format: 'ratio' },
+          {
+            label: 'True VCE / GA',
+            value: (() => {
+              const vce = readFiniteNumber(snapshotData.VCE_total_TargetCurrency);
+              const ga = readFiniteNumber(snapshotData.GA_total_TargetCurrency);
+              if (vce === null || ga === null || ga === 0) return null;
+              return vce / ga;
+            })(),
+            format: 'ratio',
+          },
+        ],
+      },
     ];
-  }, [lockedTargetCurrency, snapshotData, profileDefaults]);
+    return lists;
+  }, [snapshotData]);
+  const currencySymbol = useMemo(() => resolveCurrencySymbol(lockedTargetCurrency), [lockedTargetCurrency]);
 
   const series = (snapshotData?.series ?? null) as SeriesShape | null;
   const parsedProject = useMemo(() => {
@@ -540,10 +607,19 @@ export default function ProjectsPage() {
         {snapshotError && <p className="status error">{snapshotError}</p>}
 
         <section className="projects-metrics" aria-label="Key metrics">
-          {metrics.map((metric) => (
-            <article key={metric.label} className="producer-card">
-              <h3>{metric.label}</h3>
-              <p>{formatMetricValue(metric.value)}</p>
+          {metricLists.map((list) => (
+            <article key={list.title} className="projects-metrics-list">
+              <h3>{list.title}</h3>
+              <table className="projects-metrics-table">
+                <tbody>
+                  {list.rows.map((row) => (
+                    <tr key={`${list.title}-${row.label}`}>
+                      <th>{row.label}</th>
+                      <td>{formatMetricValue(row.value, row.format, currencySymbol)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </article>
           ))}
         </section>

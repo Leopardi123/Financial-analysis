@@ -43,8 +43,57 @@
 
 .projects-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.projects-metrics-list {
+  border: 1px solid #d8e0d2;
+  background: #fff;
+}
+
+.projects-metrics-list h3 {
+  margin: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid #d8e0d2;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.projects-metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.projects-metrics-table th,
+.projects-metrics-table td {
+  border-bottom: 1px solid #eef2ea;
+  padding: 4px 8px;
+}
+
+.projects-metrics-table tr:last-child th,
+.projects-metrics-table tr:last-child td {
+  border-bottom: none;
+}
+
+.projects-metrics-table th {
+  text-align: left;
+  font-weight: 500;
+}
+
+.projects-metrics-table td {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1023px) {
+  .projects-metrics {
+    grid-template-columns: 1fr;
+  }
 }
 
 .projects-card pre {
