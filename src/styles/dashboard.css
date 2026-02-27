@@ -807,3 +807,52 @@ td.sticky-col {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+.project-excel-grid-wrap {
+  overflow-x: auto;
+  border: 1px solid #d8e0d2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.project-excel-grid {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.project-excel-grid th,
+.project-excel-grid td {
+  text-align: right;
+  padding: 4px 6px;
+  border-top: 1px solid #e5ebdf;
+  background: #fff;
+}
+
+.project-excel-grid thead th {
+  background: #f4f8f0;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.project-excel-grid .first-col {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: #fbfdf8;
+}
+
+.project-excel-grid .section-row .section-first-col {
+  z-index: 4;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: #f4f8f0;
+}
+
+.project-excel-grid .section-row .section-fill {
+  background: #f4f8f0;
+}

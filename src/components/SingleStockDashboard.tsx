@@ -1946,6 +1946,26 @@ Capital Available: ${availableLabel}`,
 
   const projectExcelGrid = useMemo(() => {
     if (!parsedSelectedProject) return null;
+
+    const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
+    const getSeries = (raw: unknown): Array<number | null> | null => (Array.isArray(raw) ? raw as Array<number | null> : null);
+    const hasAnySeriesValue = (series: Array<number | null> | null | undefined): boolean => (
+      Array.isArray(series) && series.some((value) => value !== null && Number.isFinite(value))
+    );
+
+    const payableUnits = parsedSelectedProject.engineInputWithoutPrices.payableQtyUnitByMetal ?? {};
+    const payableSeriesByMetal = parsedSelectedProject.engineInputWithoutPrices.payableQtyByMetal ?? {};
+    const gradeByMetal = parsedSelectedProject.context.operations?.gradeByMetal ?? {};
+    const gradeUnitByMetal = parsedSelectedProject.context.operations?.gradeUnitByMetal ?? {};
+    const recoveryPctByMetal = parsedSelectedProject.context.operations?.recoveryPctByMetal ?? {};
+
+    const priorityMetals = ['Au', 'Ag', 'Cu', 'Zn', 'Pb', 'Ni', 'Co', 'Pt', 'Pd'];
+    const presentMetals = Array.from(new Set(Object.keys(payableSeriesByMetal)));
+    const orderedPayableMetals = [
+      ...priorityMetals.filter((metal) => presentMetals.includes(metal)),
+      ...presentMetals.filter((metal) => !priorityMetals.includes(metal)).sort((a, b) => a.localeCompare(b)),
+    ];
+
     const base = buildOperationsGridModel({
       masterN: parsedSelectedProject.engineInputWithoutPrices.masterN,
       productionStartPeriod: parsedSelectedProject.engineInputWithoutPrices.productionStartPeriod,
@@ -1954,6 +1974,9 @@ Capital Available: ${availableLabel}`,
         oreMilledTonnes: parsedSelectedProject.context.operations?.oreMilledTonnes,
         oreMinedTonnes: parsedSelectedProject.context.operations?.oreMinedTonnes,
         oreTonnageUnit: parsedSelectedProject.context.operations?.oreTonnageUnit,
+        gradeByMetal,
+        gradeUnitByMetal,
+        recoveryPctByMetal,
         capacity: {
           throughputUnit: parsedSelectedProject.context.operations?.capacity?.throughputUnit,
           nameplateThroughput: parsedSelectedProject.context.operations?.capacity?.nameplateThroughput,
@@ -1961,27 +1984,42 @@ Capital Available: ${availableLabel}`,
         },
       },
       metals: {
-        payableQtyByMetal: parsedSelectedProject.engineInputWithoutPrices.payableQtyByMetal,
-        payableQtyUnitByMetal: parsedSelectedProject.engineInputWithoutPrices.payableQtyUnitByMetal,
+        payableQtyByMetal: payableSeriesByMetal,
+        payableQtyUnitByMetal: payableUnits,
+      },
+      economics: {
+        priceUSDByMetal: (projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {},
+        operatingCostsUSD: getSeries(projectSeriesRecord.operatingCostsUSD) ?? undefined,
+        ebitUSD: getSeries(projectSeriesRecord.ebitUSD) ?? undefined,
+        depreciationUSD: getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD) ?? undefined,
       },
     });
 
     const seriesByLabel = new Map(base.rows.map((row) => [row.label, row.values]));
     const oreUnit = parsedSelectedProject.context.operations?.oreTonnageUnit ?? 'tonne';
-    const payableUnits = parsedSelectedProject.engineInputWithoutPrices.payableQtyUnitByMetal ?? {};
-    const payableSeriesByMetal = parsedSelectedProject.engineInputWithoutPrices.payableQtyByMetal ?? {};
-    const orderedPayableMetals = ['Au', 'Ag', 'Cu', 'Zn', 'Pb', 'Ni', 'Co', 'Pt', 'Pd'];
-    const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
 
-    const hasAnySeriesValue = (series: Array<number | null> | null | undefined): boolean => (
-      Array.isArray(series) && series.some((value) => value !== null && value !== 0)
-    );
-
-    const getSeries = (raw: unknown): Array<number | null> | null => (Array.isArray(raw) ? raw as Array<number | null> : null);
+    const recoverySeriesFor = (metal: string): Array<number | null> | null => {
+      const values = getSeries(recoveryPctByMetal[metal]);
+      if (!values || !hasAnySeriesValue(values)) return null;
+      const finite = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+      const isFraction = finite.length > 0 && finite.every((value) => value >= 0 && value <= 1);
+      return values.map((value) => (typeof value === 'number' && Number.isFinite(value) ? (isFraction ? value * 100 : value) : null));
+    };
 
     const productionRows = [
       { label: `Ore mined (${oreUnit})`, values: seriesByLabel.get(`Ore mined (${oreUnit})`) ?? null },
       { label: `Ore milled (${oreUnit})`, values: seriesByLabel.get(`Ore milled (${oreUnit})`) ?? null },
+      ...orderedPayableMetals.map((metal) => {
+        const values = getSeries(gradeByMetal[metal]);
+        const unit = gradeUnitByMetal[metal] ?? '—';
+        if (!values || !hasAnySeriesValue(values)) return null;
+        return { label: `Grade ${metal} (${unit})`, values };
+      }),
+      ...orderedPayableMetals.map((metal) => {
+        const values = recoverySeriesFor(metal);
+        if (!values) return null;
+        return { label: `Recovery ${metal} (%)`, values };
+      }),
       ...orderedPayableMetals.map((metal) => {
         const values = getSeries(payableSeriesByMetal[metal]);
         const unit = payableUnits[metal];
@@ -1991,15 +2029,22 @@ Capital Available: ${availableLabel}`,
           values: include ? values : null,
         };
       }),
-    ].filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+    ].filter((row) => row && row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+
+    const revenueRows = orderedPayableMetals
+      .map((metal) => ({ label: `Revenue ${metal} (USD)`, values: seriesByLabel.get(`Revenue ${metal} (USD)`) ?? null }))
+      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
 
     const pAndLCoreRows = [
-      ['Operating costs (USD)', projectSeriesRecord.operatingCostsUSD],
-      ['Royalties (USD)', projectSeriesRecord.royaltiesUSD],
-      ['EBIT (USD)', projectSeriesRecord.ebitUSD],
-      ['Tax (USD)', projectSeriesRecord.taxUSD],
+      ...revenueRows,
+      { label: 'Gross revenue (USD)', values: seriesByLabel.get('Gross revenue (USD)') ?? null },
+      { label: 'Gross profit (USD)', values: seriesByLabel.get('Gross profit (USD)') ?? null },
+      { label: 'EBITDA (USD)', values: seriesByLabel.get('EBITDA (USD)') ?? null },
+      { label: 'EBIT (USD)', values: getSeries(projectSeriesRecord.ebitUSD) },
+      { label: 'Tax (USD)', values: getSeries(projectSeriesRecord.taxUSD) },
+      { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) },
+      { label: 'Royalties (USD)', values: getSeries(projectSeriesRecord.royaltiesUSD) },
     ]
-      .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
 
     const capitalRows = [
@@ -2030,13 +2075,17 @@ Capital Available: ${availableLabel}`,
     addSection('CAPITAL', capitalRows);
     addSection('INVESTMENT & CASH FLOW', investmentRows);
 
+    const depreciationSeries = getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD);
+    const hasDepreciationSeries = Array.isArray(depreciationSeries);
+
     return {
       ...base,
       tMinusTp: base.tMinusTp.map((value) => {
         const num = Number(value);
         if (!Number.isFinite(num)) return value;
-        return num < 0 ? "" : value;
+        return num < 0 ? '' : value;
       }),
+      notes: hasDepreciationSeries ? base.notes : [...base.notes, 'EBITDA requires D&A series; missing => null'],
       rows: groupedRows,
     };
   }, [parsedSelectedProject, projectSeries]);
@@ -2947,45 +2996,35 @@ Capital Available: ${availableLabel}`,
                     <div><strong>Utilization:</strong> {projectExcelGrid.capacity.utilizationPct === null ? "—" : `${formatPanelValue(projectExcelGrid.capacity.utilizationPct * 100)}%`}</div>
                     <div><strong>Effective throughput:</strong> {formatPanelValue(projectExcelGrid.capacity.effectiveThroughput)} {projectExcelGrid.capacity.throughputUnit ?? ""}</div>
                   </div>
-                  <div style={{ overflowX: "auto", border: "1px solid #d8e0d2", borderRadius: 8, background: "#fff" }}>
-                    <table style={{ width: "100%", minWidth: 760, borderCollapse: "collapse", fontSize: 12 }}>
+                  <div className="project-excel-grid-wrap">
+                    <table className="project-excel-grid">
                       <thead>
                         <tr>
-                          <th style={{ textAlign: "left", padding: "4px 6px", background: "#f4f8f0" }}>Year</th>
-                          {projectExcelGrid.years.map((value, idx) => <th key={`year-${idx}`} style={{ textAlign: "right", padding: "4px 6px", background: "#f4f8f0" }}>{value}</th>)}
+                          <th className="first-col">Year</th>
+                          {projectExcelGrid.years.map((value, idx) => <th key={`year-${idx}`}>{value}</th>)}
                         </tr>
                         <tr>
-                          <th style={{ textAlign: "left", padding: "4px 6px", background: "#f4f8f0" }}>t</th>
-                          {projectExcelGrid.tIndex.map((value, idx) => <th key={`t-${idx}`} style={{ textAlign: "right", padding: "4px 6px", background: "#f4f8f0" }}>{value}</th>)}
+                          <th className="first-col">t</th>
+                          {projectExcelGrid.tIndex.map((value, idx) => <th key={`t-${idx}`}>{value}</th>)}
                         </tr>
                         <tr>
-                          <th style={{ textAlign: "left", padding: "4px 6px", background: "#f4f8f0" }}>t - tp</th>
-                          {projectExcelGrid.tMinusTp.map((value, idx) => <th key={`tp-${idx}`} style={{ textAlign: "right", padding: "4px 6px", background: "#f4f8f0" }}>{value}</th>)}
+                          <th className="first-col">t - tp</th>
+                          {projectExcelGrid.tMinusTp.map((value, idx) => <th key={`tp-${idx}`}>{value}</th>)}
                         </tr>
                       </thead>
                       <tbody>
                         {projectExcelGrid.rows.map((row) => (
                           row.type === 'divider'
                             ? (
-                              <tr key={`divider-${row.label}`}>
-                                <th
-                                  colSpan={projectExcelGrid.columnCount + 1}
-                                  style={{
-                                    textAlign: 'left',
-                                    padding: '5px 6px',
-                                    borderTop: '1px solid #d8e0d2',
-                                    background: '#f4f8f0',
-                                    letterSpacing: 0.3,
-                                  }}
-                                >
-                                  {row.label}
-                                </th>
+                              <tr key={`divider-${row.label}`} className="section-row">
+                                <th className="first-col section-first-col">{row.label}</th>
+                                {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`divider-${row.label}-${t}`} className="section-fill" />)}
                               </tr>
                             )
                             : (
                               <tr key={row.label}>
-                                <th style={{ textAlign: "left", padding: "4px 6px", borderTop: "1px solid #e5ebdf", position: "sticky", left: 0, background: "#fbfdf8" }}>{row.label}</th>
-                                {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`} style={{ textAlign: "right", padding: "4px 6px", borderTop: "1px solid #e5ebdf" }}>{formatPanelValue(row.values[t] ?? null)}</td>)}
+                                <th className="first-col">{row.label}</th>
+                                {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`}>{formatPanelValue(row.values[t] ?? null)}</td>)}
                               </tr>
                             )
                         ))}

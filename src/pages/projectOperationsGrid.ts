@@ -6,6 +6,9 @@ export type OperationsGridInput = {
     oreMilledTonnes?: Array<number | null>;
     oreMinedTonnes?: Array<number | null>;
     oreTonnageUnit?: string | null;
+    gradeByMetal?: Record<string, Array<number | null>>;
+    gradeUnitByMetal?: Record<string, string>;
+    recoveryPctByMetal?: Record<string, Array<number | null>>;
     capacity?: {
       throughputUnit?: string | null;
       nameplateThroughput?: number | null;
@@ -15,6 +18,12 @@ export type OperationsGridInput = {
   metals: {
     payableQtyByMetal?: Record<string, Array<number | null>>;
     payableQtyUnitByMetal?: Record<string, string>;
+  };
+  economics?: {
+    priceUSDByMetal?: Record<string, Array<number | null>>;
+    operatingCostsUSD?: Array<number | null>;
+    ebitUSD?: Array<number | null>;
+    depreciationUSD?: Array<number | null>;
   };
 };
 
@@ -54,6 +63,22 @@ function strictTotal(values: Array<number | null>, startIndex: number): number |
   return sum;
 }
 
+function hasAnyValue(values: Array<number | null> | undefined): values is Array<number | null> {
+  return Array.isArray(values) && values.some((value) => typeof value === 'number' && Number.isFinite(value));
+}
+
+function normalizeRecoverySeries(values: Array<number | null> | undefined, columnCount: number): Array<number | null> | null {
+  if (!Array.isArray(values)) return null;
+  const finite = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (finite.length === 0) return null;
+  const isFraction = finite.every((value) => value >= 0 && value <= 1);
+  return Array.from({ length: columnCount }, (_, i) => {
+    const value = values[i];
+    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    return isFraction ? value * 100 : value;
+  });
+}
+
 export function buildOperationsGridModel(input: OperationsGridInput): OperationsGridModel {
   const columnCount = Math.max(0, input.masterN + 1);
   const warnings: string[] = [];
@@ -77,19 +102,82 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   const rows: OperationsGridRow[] = [];
   const oreUnit = input.operations?.oreTonnageUnit ?? 'tonne';
 
-  if (Array.isArray(input.operations?.oreMilledTonnes)) {
-    rows.push({ label: `Ore milled (${oreUnit})`, values: input.operations?.oreMilledTonnes ?? [] });
-  }
   if (Array.isArray(input.operations?.oreMinedTonnes)) {
     rows.push({ label: `Ore mined (${oreUnit})`, values: input.operations?.oreMinedTonnes ?? [] });
   }
+  if (Array.isArray(input.operations?.oreMilledTonnes)) {
+    rows.push({ label: `Ore milled (${oreUnit})`, values: input.operations?.oreMilledTonnes ?? [] });
+  }
 
   const metals = Object.keys(input.metals.payableQtyByMetal ?? {}).sort((a, b) => a.localeCompare(b));
+
+  for (const metal of metals) {
+    const gradeValues = input.operations?.gradeByMetal?.[metal];
+    if (!hasAnyValue(gradeValues)) continue;
+    const gradeUnit = input.operations?.gradeUnitByMetal?.[metal] ?? '—';
+    rows.push({ label: `Grade ${metal} (${gradeUnit})`, values: gradeValues });
+  }
+
+  for (const metal of metals) {
+    const recoveryValues = normalizeRecoverySeries(input.operations?.recoveryPctByMetal?.[metal], columnCount);
+    if (!recoveryValues) continue;
+    rows.push({ label: `Recovery ${metal} (%)`, values: recoveryValues });
+  }
+
   for (const metal of metals) {
     const values = input.metals.payableQtyByMetal?.[metal];
     if (!Array.isArray(values)) continue;
     const unit = input.metals.payableQtyUnitByMetal?.[metal];
     rows.push({ label: `Payable ${metal} (${unit ?? '—'})`, values });
+  }
+
+  const priceUSDByMetal = input.economics?.priceUSDByMetal ?? {};
+  const revenueByMetal: Record<string, Array<number | null>> = {};
+  for (const metal of metals) {
+    const qty = input.metals.payableQtyByMetal?.[metal];
+    const price = priceUSDByMetal[metal];
+    if (!Array.isArray(qty)) continue;
+    const revenue = Array.from({ length: columnCount }, (_, t) => {
+      const q = qty[t];
+      const p = price?.[t];
+      if (q === null || p === null || !Number.isFinite(q) || !Number.isFinite(p)) return null;
+      return q * p;
+    });
+    revenueByMetal[metal] = revenue;
+    rows.push({ label: `Revenue ${metal} (USD)`, values: revenue });
+  }
+
+  const grossRevenue = Array.from({ length: columnCount }, (_, t) => {
+    if (metals.length === 0) return null;
+    let sum = 0;
+    for (const metal of metals) {
+      const value = revenueByMetal[metal]?.[t] ?? null;
+      if (value === null || !Number.isFinite(value)) return null;
+      sum += value;
+    }
+    return sum;
+  });
+  if (metals.length > 0) rows.push({ label: 'Gross revenue (USD)', values: grossRevenue });
+
+  const grossProfit = Array.from({ length: columnCount }, (_, t) => {
+    const revenue = grossRevenue[t];
+    const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
+    if (revenue === null || operatingCost === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost)) return null;
+    return revenue - operatingCost;
+  });
+  if (metals.length > 0) rows.push({ label: 'Gross profit (USD)', values: grossProfit });
+
+  const hasDepreciation = Array.isArray(input.economics?.depreciationUSD);
+  const ebitda = Array.from({ length: columnCount }, (_, t) => {
+    if (!hasDepreciation) return null;
+    const ebit = input.economics?.ebitUSD?.[t] ?? null;
+    const depreciation = input.economics?.depreciationUSD?.[t] ?? null;
+    if (ebit === null || depreciation === null || !Number.isFinite(ebit) || !Number.isFinite(depreciation)) return null;
+    return ebit + depreciation;
+  });
+  if (Array.isArray(input.economics?.ebitUSD)) {
+    rows.push({ label: 'EBITDA (USD)', values: ebitda });
+    rows.push({ label: 'EBIT (USD)', values: input.economics?.ebitUSD ?? [] });
   }
 
   const totals: Array<{ label: string; value: number | null }> = [];
