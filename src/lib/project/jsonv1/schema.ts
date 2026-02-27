@@ -22,12 +22,12 @@ export type ProjectJsonV1 = {
   };
 
   economics: {
-    taxRate?: number;
+    taxRate?: number | null;
   };
 
   equity?: {
-    fdExtraShares?: number;
-    fdNotes?: string;
+    fdExtraShares?: number | null;
+    fdNotes?: string | null;
   };
 
   series: {
@@ -47,7 +47,7 @@ export type ProjectJsonV1 = {
     payableQtyByMetal: Record<string, Array<number | null>>;
     payableQtyUnitByMetal: Record<string, QtyUnit>;
     priceKeyByMetal: Record<string, string>;
-    auPriceKey: string;
+    auPriceKey: string | null;
     spotPriceUSDByMetal?: Record<string, Array<number | null>>;
     spotPriceUnitByMetal?: Record<string, PriceUnit>;
     auPriceUSDPerOz?: Array<number | null>;
@@ -59,8 +59,8 @@ export type ProjectJsonV1 = {
 
   operations?: {
     capacity: {
-      throughputUnit: 'tpd' | 'tpa';
-      nameplateThroughput: number;
+      throughputUnit: 'tpd' | 'tpa' | null;
+      nameplateThroughput: number | null;
       utilizationPct?: number | null;
     };
 
@@ -96,7 +96,9 @@ export type ProjectJsonV1 = {
     royaltiesDetail?: Array<{
       id: string;
       label: string;
+      name?: string | null;
       base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
+      rateType?: string | null;
       rate?: number | null;
       royaltyUSD?: Array<number | null>;
       source?: 'PEA' | 'PFS' | 'FS' | 'Other' | null;

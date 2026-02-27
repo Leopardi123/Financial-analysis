@@ -7,7 +7,7 @@ import {
   type CompanyProjectSummary,
 } from '../lib/client/companyProjectsClient.ts';
 import { copyText } from '../lib/client/clipboard.ts';
-import { getProjectJsonV1Template } from '../lib/project/jsonv1/template.ts';
+import { buildProjectJsonV1Template } from '../lib/project/jsonv1/template.ts';
 import '../styles/company-project-editor.css';
 
 type ValidationState = {
@@ -23,7 +23,7 @@ function parseSymbolFromPath(pathname: string): string {
 }
 
 function formatTemplate(projectId: string, projectName: string): string {
-  const template = getProjectJsonV1Template() as Record<string, unknown>;
+  const template = buildProjectJsonV1Template() as Record<string, unknown>;
   const meta = (template.meta as Record<string, unknown> | undefined) ?? {};
   meta.projectId = projectId;
   meta.projectName = projectName;
@@ -136,7 +136,7 @@ export default function CompanyProjectsEditorPage() {
     setLoadingProject(true);
     try {
       const project = await getCompanyProject(symbol, projectId);
-      const rawJson = JSON.stringify(project.raw_json, null, 2);
+      const rawJson = JSON.stringify(buildProjectJsonV1Template(project.raw_json as never), null, 2);
       setIsNewDraft(false);
       setSelectedProjectId(project.project_id);
       setProjectIdInput(project.project_id);
