@@ -1966,21 +1966,69 @@ Capital Available: ${availableLabel}`,
       },
     });
 
-    const econDefs = [
-      ["Capex (USD)", projectSeries?.capexUSD],
-      ["FCFF (USD)", projectSeries?.fcffUSD],
-      ["EBIT (USD)", projectSeries?.ebitUSD],
-      ["Tax (USD)", projectSeries?.taxUSD],
-      ["Operating costs (USD)", projectSeries?.operatingCostsUSD],
-      ["Sustaining capex (USD)", projectSeries?.sustainingCapexUSD],
-      ["Royalties (USD)", projectSeries?.royaltiesUSD],
-      ["Reclamation (USD)", projectSeries?.reclamationUSD],
-    ] as const;
+    const seriesByLabel = new Map(base.rows.map((row) => [row.label, row.values]));
+    const oreUnit = parsedSelectedProject.context.operations?.oreTonnageUnit ?? 'tonne';
+    const payableUnits = parsedSelectedProject.engineInputWithoutPrices.payableQtyUnitByMetal ?? {};
+    const payableSeriesByMetal = parsedSelectedProject.engineInputWithoutPrices.payableQtyByMetal ?? {};
+    const orderedPayableMetals = ['Au', 'Ag', 'Cu', 'Zn', 'Pb', 'Ni', 'Co', 'Pt', 'Pd'];
+    const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
 
-    const economicsRows = econDefs
-      .map(([label, value]) => ({ label, values: Array.isArray(value) ? value as Array<number | null> : null }))
-      .filter((row) => row.values !== null)
-      .map((row) => ({ label: row.label, values: row.values as Array<number | null> }));
+    const hasAnySeriesValue = (series: Array<number | null> | null | undefined): boolean => (
+      Array.isArray(series) && series.some((value) => value !== null && value !== 0)
+    );
+
+    const getSeries = (raw: unknown): Array<number | null> | null => (Array.isArray(raw) ? raw as Array<number | null> : null);
+
+    const productionRows = [
+      { label: `Ore mined (${oreUnit})`, values: seriesByLabel.get(`Ore mined (${oreUnit})`) ?? null },
+      { label: `Ore milled (${oreUnit})`, values: seriesByLabel.get(`Ore milled (${oreUnit})`) ?? null },
+      ...orderedPayableMetals.map((metal) => {
+        const values = getSeries(payableSeriesByMetal[metal]);
+        const unit = payableUnits[metal];
+        const include = values !== null && (hasAnySeriesValue(values) || payableSeriesByMetal[metal] !== undefined);
+        return {
+          label: `Payable ${metal} (${unit ?? '—'})`,
+          values: include ? values : null,
+        };
+      }),
+    ].filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+
+    const pAndLCoreRows = [
+      ['Operating costs (USD)', projectSeriesRecord.operatingCostsUSD],
+      ['Royalties (USD)', projectSeriesRecord.royaltiesUSD],
+      ['EBIT (USD)', projectSeriesRecord.ebitUSD],
+      ['Tax (USD)', projectSeriesRecord.taxUSD],
+    ]
+      .map(([label, values]) => ({ label, values: getSeries(values) }))
+      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+
+    const capitalRows = [
+      ['Sustaining capex (USD)', projectSeriesRecord.sustainingCapexUSD],
+      ['Reclamation (USD)', projectSeriesRecord.reclamationUSD],
+      ['Working capital delta (USD)', projectSeriesRecord.workingCapitalDeltaUSD],
+      ['Byproduct credits (USD)', projectSeriesRecord.byproductCreditsUSD],
+    ]
+      .map(([label, values]) => ({ label, values: getSeries(values) }))
+      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+
+    const investmentRows = [
+      ['Capex (USD)', projectSeriesRecord.capexUSD],
+      ['FCFF (USD)', projectSeriesRecord.fcffUSD],
+    ]
+      .map(([label, values]) => ({ label, values: getSeries(values) }))
+      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+
+    const groupedRows: Array<{ type: 'divider'; label: string } | { type: 'data'; label: string; values: Array<number | null> }> = [];
+    const addSection = (label: string, rows: Array<{ label: string; values: Array<number | null> }>) => {
+      if (rows.length === 0) return;
+      groupedRows.push({ type: 'divider', label });
+      rows.forEach((row) => groupedRows.push({ type: 'data', ...row }));
+    };
+
+    addSection('PRODUCTION', productionRows);
+    addSection('P&L CORE', pAndLCoreRows);
+    addSection('CAPITAL', capitalRows);
+    addSection('INVESTMENT & CASH FLOW', investmentRows);
 
     return {
       ...base,
@@ -1989,7 +2037,7 @@ Capital Available: ${availableLabel}`,
         if (!Number.isFinite(num)) return value;
         return num < 0 ? "" : value;
       }),
-      rows: [...base.rows, ...economicsRows],
+      rows: groupedRows,
     };
   }, [parsedSelectedProject, projectSeries]);
 
@@ -2917,10 +2965,29 @@ Capital Available: ${availableLabel}`,
                       </thead>
                       <tbody>
                         {projectExcelGrid.rows.map((row) => (
-                          <tr key={row.label}>
-                            <th style={{ textAlign: "left", padding: "4px 6px", borderTop: "1px solid #e5ebdf", position: "sticky", left: 0, background: "#fbfdf8" }}>{row.label}</th>
-                            {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`} style={{ textAlign: "right", padding: "4px 6px", borderTop: "1px solid #e5ebdf" }}>{formatPanelValue(row.values[t] ?? null)}</td>)}
-                          </tr>
+                          row.type === 'divider'
+                            ? (
+                              <tr key={`divider-${row.label}`}>
+                                <th
+                                  colSpan={projectExcelGrid.columnCount + 1}
+                                  style={{
+                                    textAlign: 'left',
+                                    padding: '5px 6px',
+                                    borderTop: '1px solid #d8e0d2',
+                                    background: '#f4f8f0',
+                                    letterSpacing: 0.3,
+                                  }}
+                                >
+                                  {row.label}
+                                </th>
+                              </tr>
+                            )
+                            : (
+                              <tr key={row.label}>
+                                <th style={{ textAlign: "left", padding: "4px 6px", borderTop: "1px solid #e5ebdf", position: "sticky", left: 0, background: "#fbfdf8" }}>{row.label}</th>
+                                {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`} style={{ textAlign: "right", padding: "4px 6px", borderTop: "1px solid #e5ebdf" }}>{formatPanelValue(row.values[t] ?? null)}</td>)}
+                              </tr>
+                            )
                         ))}
                       </tbody>
                     </table>
