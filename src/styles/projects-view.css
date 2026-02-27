@@ -52,3 +52,46 @@
   word-break: break-word;
   font-size: 12px;
 }
+
+.projects-series-section {
+  display: grid;
+  gap: 8px;
+}
+
+.projects-series-section h2 {
+  margin: 0;
+}
+
+.projects-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #d8e0d2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.projects-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 680px;
+}
+
+.projects-table th,
+.projects-table td {
+  border-bottom: 1px solid #e5ebdf;
+  padding: 8px 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.projects-table th {
+  background: #f4f8f0;
+  font-weight: 600;
+}
+
+.projects-table th:first-child,
+.projects-table td:first-child {
+  position: sticky;
+  left: 0;
+  text-align: left;
+  background: #fbfdf8;
+}

@@ -2,9 +2,35 @@ import { useEffect, useMemo, useState } from 'react';
 import { postCorporateSnapshot } from '../lib/client/snapshotClient.ts';
 import { getCompanyProject, listCompanyProjects, type CompanyProjectRecord, type CompanyProjectSummary } from '../lib/client/companyProjectsClient.ts';
 import type { SnapshotRequest } from '../lib/api/validateSnapshotRequest.ts';
+import { buildTransposedTable } from '../lib/ui/tables/buildTransposedTable.ts';
 import '../styles/projects-view.css';
 
 const DEFAULT_SYMBOL = 'AAPL';
+
+type SeriesShape = {
+  periodIndex?: number[];
+  periodEndDatesUtc?: Array<string | null>;
+  oreMinedTonnes?: Array<number | null>;
+  oreMilledTonnes?: Array<number | null>;
+  nameplateThroughput?: number | null;
+  throughputUnit?: string | null;
+  utilizationPct?: number | null;
+  payableQtyByMetal?: Record<string, Array<number | null>>;
+  payableQtyUnitByMetal?: Record<string, string>;
+  revenueByMetal_USD?: Record<string, Array<number | null>>;
+  totalRevenue_USD?: Array<number | null>;
+  operatingCostsUSD?: Array<number | null>;
+  sustainingCapexUSD?: Array<number | null>;
+  siteGandA_USD?: Array<number | null>;
+  royaltiesUSD?: Array<number | null>;
+  reclamationUSD?: Array<number | null>;
+  byproductCreditsUSD?: Array<number | null>;
+  sustainingCostUSD?: Array<number | null>;
+  ebitUSD?: Array<number | null>;
+  taxUSD?: Array<number | null>;
+  fcffUSD?: Array<number | null>;
+  capexUSD?: Array<number | null>;
+};
 
 function getRouteProjectId(pathname: string): string | null {
   const match = pathname.match(/^\/projects\/([^/]+)\/?$/i);
@@ -17,14 +43,69 @@ function getSymbolFromQuery(search: string): string {
   return symbol || DEFAULT_SYMBOL;
 }
 
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 function formatMetricValue(value: unknown): string {
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
+    if (!Number.isFinite(value)) return '—';
+    const abs = Math.abs(value);
+    const decimals = abs >= 100 ? 0 : abs >= 1 ? 2 : 4;
+    return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
   }
   if (typeof value === 'string' && value.trim()) {
     return value;
   }
   return '—';
+}
+
+function formatTableValue(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '—';
+  const abs = Math.abs(value);
+  const decimals = abs >= 100 ? 0 : abs >= 1 ? 2 : 4;
+  return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
+}
+
+function extractYearLabel(value: string | null, index: number): string {
+  if (typeof value !== 'string') return `t${index}`;
+  const yearMatch = value.match(/^(\d{4})/);
+  return yearMatch?.[1] ?? `t${index}`;
+}
+
+function RenderSeriesTable(props: { title: string; columns: string[]; rows: Array<{ label: string; unit?: string; values: Array<number | null> }> }) {
+  const table = useMemo(() => buildTransposedTable({ columns: props.columns, rows: props.rows }), [props.columns, props.rows]);
+
+  return (
+    <section className="projects-series-section">
+      <h2>{props.title}</h2>
+      {table.rows.length === 0 ? (
+        <p className="projects-muted">No series data available yet for this project.</p>
+      ) : (
+        <div className="projects-table-wrap">
+          <table className="projects-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                {table.columns.map((column) => <th key={column}>{column}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {table.rows.map((row) => {
+                const label = row.unit ? `${row.label} (${row.unit})` : row.label;
+                return (
+                  <tr key={label}>
+                    <th>{label}</th>
+                    {row.cells.map((cell, idx) => <td key={`${label}-${idx}`}>{formatTableValue(cell)}</td>)}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export default function ProjectsPage() {
@@ -41,6 +122,7 @@ export default function ProjectsPage() {
   const [snapshotWarnings, setSnapshotWarnings] = useState<string[]>([]);
   const [snapshotDiagnosticsErrors, setSnapshotDiagnosticsErrors] = useState<string[]>([]);
   const [snapshotData, setSnapshotData] = useState<Record<string, unknown> | null>(null);
+  const [marketDefaults, setMarketDefaults] = useState<{ sharesCurrent: number; currentPrice: number } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -72,9 +154,41 @@ export default function ProjectsPage() {
   }, [symbol]);
 
   useEffect(() => {
-    if (!projectId) {
+    let isMounted = true;
+
+    async function loadProfileDefaults() {
+      try {
+        const response = await fetch(`/api/company/profile?ticker=${encodeURIComponent(symbol)}`);
+        const payload = (await response.json()) as { profile?: Record<string, unknown> };
+        const profile = payload?.profile ?? {};
+        const currentPrice = readFiniteNumber(profile.price);
+        const sharesOutstanding = readFiniteNumber(profile.sharesOutstanding);
+        const marketCap = readFiniteNumber(profile.mktCap);
+        const derivedShares = currentPrice && marketCap ? marketCap / currentPrice : null;
+
+        if (!isMounted) return;
+        if (currentPrice && (sharesOutstanding || derivedShares)) {
+          setMarketDefaults({
+            currentPrice,
+            sharesCurrent: sharesOutstanding ?? (derivedShares as number),
+          });
+        }
+      } catch {
+        if (!isMounted) return;
+      }
+    }
+
+    void loadProfileDefaults();
+    return () => {
+      isMounted = false;
+    };
+  }, [symbol]);
+
+  useEffect(() => {
+    if (!projectId || !marketDefaults) {
       return;
     }
+    const defaults = marketDefaults;
 
     let isMounted = true;
 
@@ -95,8 +209,8 @@ export default function ProjectsPage() {
           targetCurrency: 'USD',
           discountRate: 0.1,
           market: {
-            shares_current: 100000000,
-            price_current_TargetCurrency: 1.5,
+            shares_current: defaults.sharesCurrent,
+            price_current_TargetCurrency: defaults.currentPrice,
           },
           balanceSheet: {
             cash_t0_TargetCurrency: 0,
@@ -144,25 +258,103 @@ export default function ProjectsPage() {
     return () => {
       isMounted = false;
     };
-  }, [projectId, symbol]);
+  }, [projectId, symbol, marketDefaults]);
 
   const metrics = useMemo(() => {
     if (!snapshotData) return [] as Array<{ label: string; value: unknown }>;
-
-    const marketValue = (snapshotData.marketValue ?? {}) as Record<string, unknown>;
-    const financing = (snapshotData.financing ?? {}) as Record<string, unknown>;
     const aggregation = (snapshotData.aggregation ?? {}) as Record<string, unknown>;
 
     return [
+      { label: 'price_current_TargetCurrency', value: marketDefaults?.currentPrice ?? null },
+      { label: 'MarketCap_TargetCurrency', value: snapshotData.MarketCap_TargetCurrency },
+      { label: 'EV_TargetCurrency', value: snapshotData.EV_TargetCurrency },
       { label: 'NPV_today_TargetCurrency', value: snapshotData.NPV_today_TargetCurrency },
       { label: 'NAV_today_TargetCurrency', value: snapshotData.NAV_today_TargetCurrency },
-      { label: 'EV_TargetCurrency', value: marketValue.EV_TargetCurrency },
-      { label: 'EV_over_NPV', value: marketValue.EV_over_NPV },
-      { label: 'P_over_NAV', value: marketValue.P_over_NAV },
-      { label: 'AISC_corp (aggregation)', value: aggregation.aiscAuEqUSDPerOz_LOM },
-      { label: 'shares_post_financing', value: financing.shares_post_financing },
+      { label: 'EV_over_NPV', value: snapshotData.EV_over_NPV },
+      { label: 'EV_over_NAV', value: snapshotData.EV_over_NAV },
+      { label: 'P_over_NAV', value: snapshotData.P_over_NAV },
+      { label: 'CF_LOM_TargetCurrency', value: snapshotData.CF_LOM_TargetCurrency },
+      { label: 'DCF_prodStart_present_TargetCurrency', value: snapshotData.DCF_prodStart_present_TargetCurrency },
+      { label: 'NPV_over_ETLV', value: snapshotData.NPV_over_ETLV },
+      { label: 'DCF_present_over_ETLV', value: snapshotData.DCF_present_over_ETLV },
+      { label: 'Payback_approx_years', value: snapshotData.Payback_approx_years },
+      { label: 'Payback_real_years', value: snapshotData.Payback_real_years },
+      { label: 'ROI_10Y_pct', value: snapshotData.ROI_10Y_pct },
+      { label: 'LOM_average_EBIT_ROCE_pct', value: snapshotData.LOM_average_EBIT_ROCE_pct },
+      { label: 'LOM_discounted_EBIT_ROCE_pct', value: snapshotData.LOM_discounted_EBIT_ROCE_pct },
+      { label: 'Revenue_10Y_TargetCurrency', value: snapshotData.Revenue_10Y_TargetCurrency },
+      { label: 'FCFF_10Y_TargetCurrency', value: snapshotData.FCFF_10Y_TargetCurrency },
+      { label: 'InSituValue_10Y_TargetCurrency', value: snapshotData.InSituValue_10Y_TargetCurrency },
+      { label: 'EV_over_Revenue_10Y', value: snapshotData.EV_over_Revenue_10Y },
+      { label: 'AuEq_Oz_10Y', value: snapshotData.AuEq_Oz_10Y },
+      { label: 'AISC (corp)', value: aggregation.aiscAuEqUSDPerOz_LOM ?? null },
     ];
-  }, [snapshotData]);
+  }, [snapshotData, marketDefaults]);
+
+  const series = (snapshotData?.series ?? null) as SeriesShape | null;
+  const seriesColumns = useMemo(() => {
+    if (!series) return [] as string[];
+    const dates = Array.isArray(series.periodEndDatesUtc) ? series.periodEndDatesUtc : [];
+    if (dates.length > 0) return dates.map((date, idx) => extractYearLabel(date ?? null, idx));
+    const idx = Array.isArray(series.periodIndex) ? series.periodIndex : [];
+    return idx.map((value) => `t${value}`);
+  }, [series]);
+
+  const operationsRows = useMemo(() => {
+    if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
+    const rows: Array<{ label: string; unit?: string; values: Array<number | null> }> = [];
+
+    if (Array.isArray(series.oreMinedTonnes)) rows.push({ label: 'Ore mined', unit: 'tonne', values: series.oreMinedTonnes });
+    if (Array.isArray(series.oreMilledTonnes)) rows.push({ label: 'Ore milled', unit: 'tonne', values: series.oreMilledTonnes });
+    if (typeof series.nameplateThroughput === 'number') {
+      rows.push({ label: 'Nameplate throughput', unit: series.throughputUnit ?? undefined, values: new Array(seriesColumns.length).fill(series.nameplateThroughput) });
+    }
+    if (typeof series.utilizationPct === 'number') {
+      rows.push({ label: 'Utilization', unit: '%', values: new Array(seriesColumns.length).fill(series.utilizationPct) });
+    }
+
+    for (const metal of Object.keys(series.payableQtyByMetal ?? {}).sort((a, b) => a.localeCompare(b))) {
+      const values = series.payableQtyByMetal?.[metal];
+      if (Array.isArray(values)) {
+        rows.push({ label: `Payable ${metal}`, unit: series.payableQtyUnitByMetal?.[metal], values });
+      }
+    }
+
+    return rows;
+  }, [series, seriesColumns.length]);
+
+  const economicsRows = useMemo(() => {
+    if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
+    const rows: Array<{ label: string; unit?: string; values: Array<number | null> }> = [];
+
+    if (Array.isArray(series.totalRevenue_USD)) rows.push({ label: 'Revenue total', unit: 'USD', values: series.totalRevenue_USD });
+    for (const metal of Object.keys(series.revenueByMetal_USD ?? {}).sort((a, b) => a.localeCompare(b))) {
+      const values = series.revenueByMetal_USD?.[metal];
+      if (Array.isArray(values)) {
+        rows.push({ label: `Revenue ${metal}`, unit: 'USD', values });
+      }
+    }
+
+    const definitions: Array<{ label: string; values: Array<number | null> | undefined }> = [
+      { label: 'Operating costs', values: series.operatingCostsUSD },
+      { label: 'Sustaining capex', values: series.sustainingCapexUSD },
+      { label: 'Site G&A', values: series.siteGandA_USD },
+      { label: 'Royalties', values: series.royaltiesUSD },
+      { label: 'Reclamation', values: series.reclamationUSD },
+      { label: 'Byproduct credits', values: series.byproductCreditsUSD },
+      { label: 'Sustaining cost', values: series.sustainingCostUSD },
+      { label: 'EBIT', values: series.ebitUSD },
+      { label: 'Tax', values: series.taxUSD },
+      { label: 'FCFF', values: series.fcffUSD },
+      { label: 'Capex', values: series.capexUSD },
+    ];
+
+    for (const definition of definitions) {
+      if (Array.isArray(definition.values)) rows.push({ label: definition.label, unit: 'USD', values: definition.values });
+    }
+
+    return rows;
+  }, [series, seriesColumns.length]);
 
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;
@@ -238,6 +430,9 @@ export default function ProjectsPage() {
             </article>
           ))}
         </section>
+
+        <RenderSeriesTable title="Operations" columns={seriesColumns} rows={operationsRows} />
+        <RenderSeriesTable title="Economics" columns={seriesColumns} rows={economicsRows} />
 
         <details>
           <summary>Diagnostics</summary>
