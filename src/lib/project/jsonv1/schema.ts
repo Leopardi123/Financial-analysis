@@ -35,6 +35,7 @@ export type ProjectJsonV1 = {
     operatingCostsUSD: Array<number | null>;
     sustainingCapexUSD: Array<number | null>;
     siteGandA_USD: Array<number | null>;
+    // Optional depreciation & amortization series for EBITDA display.
     depreciationUSD?: Array<number | null>;
     workingCapitalDeltaUSD?: Array<number | null>;
     royaltiesUSD?: Array<number | null>;
@@ -66,8 +67,10 @@ export type ProjectJsonV1 = {
     oreMilledTonnes?: Array<number | null>;
     oreMinedTonnes?: Array<number | null>;
     oreTonnageUnit?: 'tonne' | 'short_ton' | 'long_ton' | null;
+    // Per-period head grade by metal (unit declared in gradeUnitByMetal).
     gradeByMetal?: Record<string, Array<number | null>>;
     gradeUnitByMetal?: Record<string, 'gpt' | 'pct' | 'ozpt' | string>;
+    // Per-period metallurgical recovery by metal (0..1 or 0..100 accepted).
     recoveryPctByMetal?: Record<string, Array<number | null>>;
   } | null;
 

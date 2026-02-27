@@ -28,10 +28,13 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   base.series.reclamationUSD = [0, 0, 0];
   base.series.byproductCreditsUSD = [0, 0, 0];
   base.series.workingCapitalDeltaUSD = [0, 0, 0];
+  base.series.depreciationUSD = [0, 0, 0];
 
   if (base.operations) {
     base.operations.oreMilledTonnes = [null, null, null];
     base.operations.oreMinedTonnes = [null, null, null];
+    base.operations.gradeByMetal = { Au: [null, null, null], Cu: [null, null, null] };
+    base.operations.recoveryPctByMetal = { Au: [null, null, null], Cu: [null, null, null] };
   }
 
   base.metals.payableQtyByMetal = {
@@ -141,6 +144,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   missingEarlierData.series.siteGandA_USD = [0];
   missingEarlierData.series.reclamationUSD = [0];
   missingEarlierData.series.byproductCreditsUSD = [0];
+  missingEarlierData.series.depreciationUSD = [0];
   missingEarlierData.series.workingCapitalDeltaUSD = [0];
   missingEarlierData.metals.payableQtyByMetal = { Au: [1] };
   missingEarlierData.metals.payableQtyUnitByMetal = { Au: 'toz' };
@@ -149,6 +153,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   if (missingEarlierData.operations) {
     missingEarlierData.operations.oreMilledTonnes = [null];
     missingEarlierData.operations.oreMinedTonnes = [null];
+    missingEarlierData.operations.gradeByMetal = { Au: [null], Cu: [null] };
+    missingEarlierData.operations.recoveryPctByMetal = { Au: [null], Cu: [null] };
   }
 
   const missingParsed = parseProjectJsonV1(missingEarlierData);
@@ -174,6 +180,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   fallbackBase.series.siteGandA_USD = [0];
   fallbackBase.series.reclamationUSD = [0];
   fallbackBase.series.byproductCreditsUSD = [0];
+  fallbackBase.series.depreciationUSD = [0];
   fallbackBase.series.workingCapitalDeltaUSD = [0];
   fallbackBase.metals.payableQtyByMetal = { Au: [1] };
   fallbackBase.metals.payableQtyUnitByMetal = { Au: 'toz' };
@@ -182,6 +189,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   if (fallbackBase.operations) {
     fallbackBase.operations.oreMilledTonnes = [null];
     fallbackBase.operations.oreMinedTonnes = [null];
+    fallbackBase.operations.gradeByMetal = { Au: [null], Cu: [null] };
+    fallbackBase.operations.recoveryPctByMetal = { Au: [null], Cu: [null] };
   }
 
   const fallbackParsed = parseProjectJsonV1(fallbackBase);

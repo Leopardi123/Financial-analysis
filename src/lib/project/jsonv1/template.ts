@@ -30,6 +30,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       operatingCostsUSD: [...nulls],
       sustainingCapexUSD: [...nulls],
       siteGandA_USD: [...nulls],
+      depreciationUSD: [...nulls],
       workingCapitalDeltaUSD: [...nulls],
       royaltiesUSD: [...nulls],
       reclamationUSD: [...nulls],
@@ -60,6 +61,18 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       oreMilledTonnes: [...nulls],
       oreMinedTonnes: [...nulls],
       oreTonnageUnit: 'tonne',
+      gradeByMetal: {
+        Au: [...nulls],
+        Cu: [...nulls],
+      },
+      gradeUnitByMetal: {
+        Au: 'gpt',
+        Cu: 'pct',
+      },
+      recoveryPctByMetal: {
+        Au: [...nulls],
+        Cu: [...nulls],
+      },
     },
 
     economicsBreakdown: {
