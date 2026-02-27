@@ -108,9 +108,14 @@ function isPositiveFinite(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+function resolveProfileTargetCurrency(profile: Record<string, unknown> | null): string {
+  const profileCurrency = typeof profile?.currency === "string" ? profile.currency.trim().toUpperCase() : "";
+  return profileCurrency || "USD";
+}
+
 function buildProjectsSnapshotRequest(args: {
   projects: Array<{ projectId: string; rawJson: Record<string, unknown> }>;
-  targetCurrency: string;
+  profile: Record<string, unknown> | null;
   discountRate: number;
   scenario: SnapshotRequest["scenario"];
   fx: SnapshotRequest["fx"];
@@ -119,8 +124,9 @@ function buildProjectsSnapshotRequest(args: {
     price_current_TargetCurrency: number;
   };
 }): SnapshotRequest {
+  const lockedTargetCurrency = resolveProfileTargetCurrency(args.profile);
   return {
-    targetCurrency: args.targetCurrency,
+    targetCurrency: lockedTargetCurrency,
     discountRate: args.discountRate,
     scenario: args.scenario,
     fx: args.fx,
@@ -755,18 +761,13 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
 
-  const [targetCurrency, setTargetCurrency] = useState("USD");
   const [snapshotDiscountRateInput] = useState("0.10");
-  const [sharesCurrentInput] = useState("");
-  const [priceCurrentInput] = useState("");
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
   const [scenarioPercentileInput] = useState("50");
   const [fixedPriceMapJson] = useState("{\n  \"XAU_USD_TOZ\": 2400\n}");
   const [fxSource] = useState<"auto" | "manual">("auto");
   const [manualFxInput] = useState("");
-  const [fxAnchor] = useState<"today" | "t0_period_end">("today");
-  const [fxScenarioSameAsPriceScenario] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
@@ -944,12 +945,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     };
   }, [ticker]);
 
-  useEffect(() => {
-    const profileCurrency = typeof profile?.currency === "string" && profile.currency.trim()
-      ? profile.currency.trim().toUpperCase()
-      : "USD";
-    setTargetCurrency(profileCurrency);
-  }, [profile?.currency, ticker]);
+  const lockedTargetCurrency = useMemo(() => resolveProfileTargetCurrency(profile), [profile]);
 
   useEffect(() => {
     let isMounted = true;
@@ -985,8 +981,25 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
 
   const runProjectSnapshotForProject = async (projectId: string, projectName?: string | null) => {
     const discountRate = toInputNumber(snapshotDiscountRateInput);
-    const sharesCurrent = toInputNumber(sharesCurrentInput);
-    const priceCurrent = toInputNumber(priceCurrentInput);
+    const profileSharesCurrent = typeof profile?.sharesOutstanding === "number" ? profile.sharesOutstanding : undefined;
+    const profilePriceCurrent = typeof profile?.price === "number" ? profile.price : undefined;
+    const marketWarnings: string[] = [];
+    const marketFromProfile =
+      isPositiveFinite(profileSharesCurrent) && isPositiveFinite(profilePriceCurrent)
+        ? {
+            shares_current: profileSharesCurrent,
+            price_current_TargetCurrency: profilePriceCurrent,
+          }
+        : undefined;
+
+    if (!marketFromProfile) {
+      if (!isPositiveFinite(profileSharesCurrent)) {
+        marketWarnings.push("market.shares_current missing from profile.sharesOutstanding; EV/multiples may be null.");
+      }
+      if (!isPositiveFinite(profilePriceCurrent)) {
+        marketWarnings.push("market.price_current_TargetCurrency missing from profile.price; EV/multiples may be null.");
+      }
+    }
 
     const scenario: SnapshotRequest["scenario"] = (() => {
       if (scenarioMode === "percentile") {
@@ -1028,27 +1041,21 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       }
 
       const request = buildProjectsSnapshotRequest({
-        targetCurrency,
+        profile,
         discountRate: discountRate ?? Number.NaN,
         scenario,
         fx: {
-          source: fxSource,
-          anchor: fxAnchor,
-          scenario: fxScenarioSameAsPriceScenario ? scenario : { mode: "spot" },
-          manual_fx_USD_to_TargetCurrency: toInputNumber(manualFxInput),
+          source: lockedTargetCurrency === "USD" ? "manual" : fxSource,
+          anchor: "today",
+          scenario: { mode: "spot" },
+          manual_fx_USD_to_TargetCurrency: lockedTargetCurrency === "USD" ? 1 : toInputNumber(manualFxInput),
         },
         projects: projectsPayload,
-        market:
-          isPositiveFinite(sharesCurrent) && isPositiveFinite(priceCurrent)
-            ? {
-                shares_current: sharesCurrent,
-                price_current_TargetCurrency: priceCurrent,
-              }
-            : undefined,
+        market: marketFromProfile,
       });
 
-      const result = await postCorporateSnapshot(request);
-      setProjectSnapshotWarnings(result.diagnostics?.warnings ?? []);
+      const result = await postCorporateSnapshot(request, { refresh: lockedTargetCurrency !== "USD" });
+      setProjectSnapshotWarnings([...marketWarnings, ...(result.diagnostics?.warnings ?? [])]);
       setProjectSnapshotErrors(result.diagnostics?.errors ?? []);
       if (!result.ok || !result.snapshot) {
         setProjectSnapshotData(null);
@@ -2126,6 +2133,7 @@ Capital Available: ${availableLabel}`,
       <div className="breadcontainersinglecolumn">
         <h2 className="subrub small">View</h2>
         <p className="bread">Company type preset: <strong>{companyType}</strong></p>
+        <p className="bread">Target currency: {lockedTargetCurrency} (from profile)</p>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button type="button" onClick={() => setPrimaryView("reported")} disabled={primaryView === "reported"}>Reported (Corporate)</button>
           <button type="button" onClick={() => setPrimaryView("modeled")} disabled={primaryView === "modeled"}>Modeled (NAV / DCF)</button>
