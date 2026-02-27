@@ -56,6 +56,11 @@ function readFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function resolveProfileTargetCurrency(profile: Record<string, unknown> | null): string {
+  const profileCurrency = typeof profile?.currency === 'string' ? profile.currency.trim().toUpperCase() : '';
+  return profileCurrency || 'USD';
+}
+
 function formatMetricValue(value: unknown): string {
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) return '—';
@@ -131,7 +136,7 @@ export default function ProjectsPage() {
   const [snapshotWarnings, setSnapshotWarnings] = useState<string[]>([]);
   const [snapshotDiagnosticsErrors, setSnapshotDiagnosticsErrors] = useState<string[]>([]);
   const [snapshotData, setSnapshotData] = useState<Record<string, unknown> | null>(null);
-  const [marketDefaults, setMarketDefaults] = useState<{ sharesCurrent: number; currentPrice: number } | null>(null);
+  const [profileDefaults, setProfileDefaults] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -169,19 +174,8 @@ export default function ProjectsPage() {
       try {
         const response = await fetch(`/api/company/profile?ticker=${encodeURIComponent(symbol)}`);
         const payload = (await response.json()) as { profile?: Record<string, unknown> };
-        const profile = payload?.profile ?? {};
-        const currentPrice = readFiniteNumber(profile.price);
-        const sharesOutstanding = readFiniteNumber(profile.sharesOutstanding);
-        const marketCap = readFiniteNumber(profile.mktCap);
-        const derivedShares = currentPrice && marketCap ? marketCap / currentPrice : null;
-
         if (!isMounted) return;
-        if (currentPrice && (sharesOutstanding || derivedShares)) {
-          setMarketDefaults({
-            currentPrice,
-            sharesCurrent: sharesOutstanding ?? (derivedShares as number),
-          });
-        }
+        setProfileDefaults(payload?.profile ?? null);
       } catch {
         if (!isMounted) return;
       }
@@ -193,11 +187,12 @@ export default function ProjectsPage() {
     };
   }, [symbol]);
 
+  const lockedTargetCurrency = useMemo(() => resolveProfileTargetCurrency(profileDefaults), [profileDefaults]);
+
   useEffect(() => {
-    if (!projectId || !marketDefaults) {
+    if (!projectId) {
       return;
     }
-    const defaults = marketDefaults;
 
     let isMounted = true;
 
@@ -213,23 +208,40 @@ export default function ProjectsPage() {
         if (!isMounted) return;
         setSelectedProject(project);
 
+        const sharesCurrent = readFiniteNumber(profileDefaults?.sharesOutstanding);
+        const priceCurrent = readFiniteNumber(profileDefaults?.price);
+        const marketWarnings: string[] = [];
+        const market =
+          sharesCurrent !== null && sharesCurrent > 0 && priceCurrent !== null && priceCurrent > 0
+            ? {
+                shares_current: sharesCurrent,
+                price_current_TargetCurrency: priceCurrent,
+              }
+            : undefined;
+        if (!market) {
+          if (!(sharesCurrent !== null && sharesCurrent > 0)) {
+            marketWarnings.push('market.shares_current missing from profile.sharesOutstanding; EV/multiples may be null.');
+          }
+          if (!(priceCurrent !== null && priceCurrent > 0)) {
+            marketWarnings.push('market.price_current_TargetCurrency missing from profile.price; EV/multiples may be null.');
+          }
+        }
+
         const payload: SnapshotRequest = {
           symbol,
-          targetCurrency: 'USD',
+          targetCurrency: lockedTargetCurrency,
           discountRate: 0.1,
-          market: {
-            shares_current: defaults.sharesCurrent,
-            price_current_TargetCurrency: defaults.currentPrice,
-          },
+          market,
           balanceSheet: {
             cash_t0_TargetCurrency: 0,
             debt_t0_TargetCurrency: 0,
           },
           scenario: { mode: 'spot' },
           fx: {
-            source: 'auto',
+            source: lockedTargetCurrency === 'USD' ? 'manual' : 'auto',
             anchor: 'today',
             scenario: { mode: 'spot' },
+            manual_fx_USD_to_TargetCurrency: lockedTargetCurrency === 'USD' ? 1 : undefined,
           },
           projects: [
             {
@@ -239,10 +251,10 @@ export default function ProjectsPage() {
           ],
         };
 
-        const result = await postCorporateSnapshot(payload);
+        const result = await postCorporateSnapshot(payload, { refresh: lockedTargetCurrency !== 'USD' });
         if (!isMounted) return;
 
-        setSnapshotWarnings(result.diagnostics?.warnings ?? []);
+        setSnapshotWarnings([...marketWarnings, ...(result.diagnostics?.warnings ?? [])]);
         setSnapshotDiagnosticsErrors(result.diagnostics?.errors ?? []);
         if (!result.ok || !result.snapshot) {
           setSnapshotData(null);
@@ -267,14 +279,15 @@ export default function ProjectsPage() {
     return () => {
       isMounted = false;
     };
-  }, [projectId, symbol, marketDefaults]);
+  }, [lockedTargetCurrency, profileDefaults, projectId, symbol]);
 
   const metrics = useMemo(() => {
     if (!snapshotData) return [] as Array<{ label: string; value: unknown }>;
     const aggregation = (snapshotData.aggregation ?? {}) as Record<string, unknown>;
 
     return [
-      { label: 'price_current_TargetCurrency', value: marketDefaults?.currentPrice ?? null },
+      { label: 'price_current_TargetCurrency', value: readFiniteNumber(profileDefaults?.price) },
+      { label: 'targetCurrency (locked from profile)', value: lockedTargetCurrency },
       { label: 'MarketCap_TargetCurrency', value: snapshotData.MarketCap_TargetCurrency },
       { label: 'EV_TargetCurrency', value: snapshotData.EV_TargetCurrency },
       { label: 'NPV_today_TargetCurrency', value: snapshotData.NPV_today_TargetCurrency },
@@ -298,7 +311,7 @@ export default function ProjectsPage() {
       { label: 'AuEq_Oz_10Y', value: snapshotData.AuEq_Oz_10Y },
       { label: 'AISC (corp)', value: aggregation.aiscAuEqUSDPerOz_LOM ?? null },
     ];
-  }, [snapshotData, marketDefaults]);
+  }, [lockedTargetCurrency, snapshotData, profileDefaults]);
 
   const series = (snapshotData?.series ?? null) as SeriesShape | null;
   const seriesColumns = useMemo(() => {
@@ -421,6 +434,7 @@ export default function ProjectsPage() {
           <div>
             <h1>{projectTitle}</h1>
             <p className="projects-muted">{selectedProject?.project_id ?? projectId} • {symbol}</p>
+            <p className="projects-muted">Target currency: {lockedTargetCurrency} (from profile)</p>
           </div>
           <div className="projects-actions">
             <a className="button-link" href={`/company/${encodeURIComponent(symbol)}/projects?projectId=${encodeURIComponent(projectId)}`}>Edit project</a>
