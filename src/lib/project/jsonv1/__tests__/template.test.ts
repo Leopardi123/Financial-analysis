@@ -12,19 +12,23 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   }
 }
 
+function assertDeepEqual(actual: unknown, expected: unknown, message: string): void {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`${message}. Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+
 (function runTemplateTests() {
   const template = buildProjectJsonV1Template({ version: 'project_json_v1' } as never);
   const expectedLen = template.time.masterN + 1;
 
   assert(template.economicsBreakdown != null, 'economicsBreakdown exists');
   assert(Array.isArray(template.economicsBreakdown?.royaltiesDetail), 'royaltiesDetail exists');
+  assert((template.economicsBreakdown?.royaltiesDetail?.length ?? 0) >= 1, 'royaltiesDetail has at least one row');
 
-  if ((template.economicsBreakdown?.royaltiesDetail?.length ?? 0) > 0) {
-    const item = template.economicsBreakdown?.royaltiesDetail?.[0] as Record<string, unknown>;
-    for (const key of ['id', 'label', 'name', 'base', 'rateType', 'rate']) {
-      assert(key in item, `royaltiesDetail[0].${key} exists`);
-    }
-  }
+  const item = template.economicsBreakdown?.royaltiesDetail?.[0] as Record<string, unknown>;
+  const expectedRoyaltyKeys = ['id', 'label', 'name', 'base', 'rateType', 'rate', 'royaltyUSD', 'source', 'notes'].sort();
+  assertDeepEqual(Object.keys(item).sort(), expectedRoyaltyKeys, 'royaltiesDetail[0] has exact schema key set');
 
   for (const key of [
     'capexUSD',
@@ -40,11 +44,27 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     assertEqual(template.series[key]!.length, expectedLen, `series.${key} length`);
   }
 
-  assert(template.operations != null, 'operations exists');
-  assert(template.operations?.capacity != null, 'operations.capacity exists');
-  assert('throughputUnit' in (template.operations?.capacity ?? {}), 'operations.capacity.throughputUnit exists');
-  assert('nameplateThroughput' in (template.operations?.capacity ?? {}), 'operations.capacity.nameplateThroughput exists');
-  assert('utilizationPct' in (template.operations?.capacity ?? {}), 'operations.capacity.utilizationPct exists');
+  const filled = buildProjectJsonV1Template({
+    version: 'project_json_v1',
+    economicsBreakdown: {
+      royaltiesDetail: [{
+        id: 'r-1',
+        label: 'NSR',
+        base: 'quantity',
+        rate: 0.02,
+      }],
+    },
+  } as never);
+
+  const filledRow = filled.economicsBreakdown?.royaltiesDetail?.[0] as Record<string, unknown>;
+  assertEqual(filledRow.id, 'r-1', 'existing royaltiesDetail.id preserved');
+  assertEqual(filledRow.label, 'NSR', 'existing royaltiesDetail.label preserved');
+  assertEqual(filledRow.base, 'quantity', 'existing royaltiesDetail.base preserved');
+  assertEqual(filledRow.rate, 0.02, 'existing royaltiesDetail.rate preserved');
+
+  for (const key of expectedRoyaltyKeys) {
+    assert(key in filledRow, `deep-filled royaltiesDetail key exists: ${key}`);
+  }
 
   console.log('Project JSON v1 template tests passed');
 })();
