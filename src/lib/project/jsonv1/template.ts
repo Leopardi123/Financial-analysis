@@ -4,6 +4,28 @@ type NullableNumberSeries = Array<number | null>;
 
 const DEFAULT_MASTER_N = 10;
 
+const ECONOMICS_BREAKDOWN_SOURCE_CHOICES = ['FS', 'Other', 'PEA', 'PFS'] as const;
+const ORE_TONNAGE_UNIT_CHOICES = ['long_ton', 'short_ton', 'tonne'] as const;
+const ROYALTY_BASE_CHOICES = ['ebit', 'ebitda', 'quantity', 'revenue'] as const;
+const ROYALTY_RATE_TYPE_CHOICES = ['NSR_pct', 'ad_valorem_pct'] as const;
+const TAKE_BASE_TYPE_CHOICES = ['BY_METAL_REVENUE', 'PAYABLE_QTY', 'REVENUE'] as const;
+const TAKE_CAP_TYPE_CHOICES = ['none', 'payableQty', 'revenue'] as const;
+const TAKE_JURISDICTION_LEVEL_CHOICES = ['contractual', 'municipal', 'national', 'other', 'provincial_state'] as const;
+const TAKE_RATE_TYPE_CHOICES = ['FIXED', 'TIERED', 'TIERED_REVENUE'] as const;
+const TAKE_SCOPE_CHOICES = ['metalSpecific', 'project'] as const;
+const TAKE_THRESHOLD_TYPE_CHOICES = ['price', 'revenue'] as const;
+const TAKE_TYPE_CHOICES = ['AD_VALOREM', 'NSR'] as const;
+const THROUGHPUT_UNIT_CHOICES = ['tpa', 'tpd'] as const;
+const VERSION_CHOICES = ['project_json_v1'] as const;
+const CURRENCY_CHOICES = ['USD'] as const;
+const QTY_UNIT_CHOICES = ['g', 'kg', 'lb', 'long_ton', 'short_ton', 'tonne', 'toz'] as const;
+
+type ProjectJsonV1Template = ProjectJsonV1 & Record<string, unknown>;
+
+function isChoiceKey(key: string): boolean {
+  return key.startsWith('_choices_');
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return {};
@@ -34,6 +56,9 @@ function normalizeSeriesMap(value: unknown, length: number): Record<string, Null
   const raw = asRecord(value);
   const out: Record<string, NullableNumberSeries> = {};
   for (const [metal, series] of Object.entries(raw)) {
+    if (isChoiceKey(metal)) {
+      continue;
+    }
     out[metal] = normalizeSeries(series, length);
   }
   return out;
@@ -43,6 +68,9 @@ function normalizeStringMap(value: unknown): Record<string, string> {
   const raw = asRecord(value);
   const out: Record<string, string> = {};
   for (const [key, mapValue] of Object.entries(raw)) {
+    if (isChoiceKey(key)) {
+      continue;
+    }
     if (typeof mapValue === 'string') {
       out[key] = mapValue;
     }
@@ -55,6 +83,9 @@ function normalizeQtyUnitMap(value: unknown): Record<string, QtyUnit> {
   const raw = asRecord(value);
   const out: Record<string, QtyUnit> = {};
   for (const [key, mapValue] of Object.entries(raw)) {
+    if (isChoiceKey(key)) {
+      continue;
+    }
     if (mapValue === 'toz' || mapValue === 'g' || mapValue === 'kg' || mapValue === 'lb' || mapValue === 'tonne' || mapValue === 'short_ton' || mapValue === 'long_ton') {
       out[key] = mapValue;
     }
@@ -64,7 +95,7 @@ function normalizeQtyUnitMap(value: unknown): Record<string, QtyUnit> {
 
 type RoyaltyDetailRow = NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['royaltiesDetail']>[number];
 
-function buildTemplateRoyaltyRow(length: number): RoyaltyDetailRow {
+function buildTemplateRoyaltyRow(length: number): RoyaltyDetailRow & Record<string, unknown> {
   return {
     id: 'royalty_1',
     label: 'Royalty 1',
@@ -75,6 +106,9 @@ function buildTemplateRoyaltyRow(length: number): RoyaltyDetailRow {
     royaltyUSD: Array<number | null>(length).fill(null),
     source: null,
     notes: null,
+    _choices_base: [...ROYALTY_BASE_CHOICES],
+    _choices_rateType: [...ROYALTY_RATE_TYPE_CHOICES],
+    _choices_source: [...ECONOMICS_BREAKDOWN_SOURCE_CHOICES],
   };
 }
 
@@ -105,7 +139,7 @@ function normalizeRoyaltiesDetail(value: unknown, length: number): NonNullable<N
   return rows.length > 0 ? rows : [templateRow];
 }
 
-export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJsonV1 {
+export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJsonV1Template {
   const root = asRecord(existing);
   const rootTime = asRecord(root.time);
   const requestedMasterN = rootTime.masterN;
@@ -135,12 +169,14 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     ? null
     : asRecord(economicsBreakdown.taxesDetail);
 
-  const output: ProjectJsonV1 = {
+  const output = {
     version: 'project_json_v1',
+    _choices_version: [...VERSION_CHOICES],
     meta: {
       projectId: typeof meta.projectId === 'string' ? meta.projectId : '',
       projectName: typeof meta.projectName === 'string' ? meta.projectName : '',
       currency: 'USD',
+      _choices_currency: [...CURRENCY_CHOICES],
       notes: typeof meta.notes === 'string' ? meta.notes : '',
     },
     time: {
@@ -179,6 +215,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     operations: {
       capacity: {
         throughputUnit: operationsCapacity.throughputUnit === 'tpa' ? 'tpa' : 'tpd',
+        _choices_throughputUnit: [...THROUGHPUT_UNIT_CHOICES],
         nameplateThroughput: typeof operationsCapacity.nameplateThroughput === 'number' && Number.isFinite(operationsCapacity.nameplateThroughput)
           ? operationsCapacity.nameplateThroughput
           : null,
@@ -189,6 +226,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
       oreMilledTonnes: normalizeSeries(operations.oreMilledTonnes, seriesLength),
       oreMinedTonnes: normalizeSeries(operations.oreMinedTonnes, seriesLength),
       oreTonnageUnit: operations.oreTonnageUnit === 'tonne' || operations.oreTonnageUnit === 'short_ton' || operations.oreTonnageUnit === 'long_ton' ? operations.oreTonnageUnit : null,
+      _choices_oreTonnageUnit: [...ORE_TONNAGE_UNIT_CHOICES],
       gradeByMetal: normalizeSeriesMap(operations.gradeByMetal, seriesLength),
       gradeUnitByMetal: normalizeStringMap(operations.gradeUnitByMetal),
       recoveryPctByMetal: normalizeSeriesMap(operations.recoveryPctByMetal, seriesLength),
@@ -201,6 +239,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
           || economicsBreakdownMeta.defaultSource === 'Other'
           ? economicsBreakdownMeta.defaultSource
           : null,
+        _choices_defaultSource: [...ECONOMICS_BREAKDOWN_SOURCE_CHOICES],
         notes: typeof economicsBreakdownMeta.notes === 'string' ? economicsBreakdownMeta.notes : null,
       },
       cogs: {
@@ -225,7 +264,42 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
         }
         : null,
     },
-  };
+  } as unknown as ProjectJsonV1Template;
+
+  for (const metal of Object.keys(output.metals.payableQtyUnitByMetal ?? {})) {
+    (output.metals.payableQtyUnitByMetal as Record<string, unknown>)[`_choices_${metal}`] = [...QTY_UNIT_CHOICES];
+  }
+
+  for (const item of Array.isArray(output.takeItems) ? output.takeItems : []) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      continue;
+    }
+    const mutableItem = item as Record<string, unknown>;
+    mutableItem._choices_type = [...TAKE_TYPE_CHOICES];
+    mutableItem._choices_jurisdictionLevel = [...TAKE_JURISDICTION_LEVEL_CHOICES];
+
+    const appliesTo = asRecord(mutableItem.appliesTo);
+    appliesTo._choices_scope = [...TAKE_SCOPE_CHOICES];
+    const volumeCap = asRecord(appliesTo.volumeCap);
+    volumeCap._choices_capType = [...TAKE_CAP_TYPE_CHOICES];
+    appliesTo.volumeCap = volumeCap;
+    mutableItem.appliesTo = appliesTo;
+
+    const baseDefinition = asRecord(mutableItem.baseDefinition);
+    baseDefinition._choices_baseType = [...TAKE_BASE_TYPE_CHOICES];
+    mutableItem.baseDefinition = baseDefinition;
+
+    const rateDefinition = asRecord(mutableItem.rateDefinition);
+    rateDefinition._choices_rateType = [...TAKE_RATE_TYPE_CHOICES];
+    if (Array.isArray(rateDefinition.tiers)) {
+      rateDefinition.tiers = rateDefinition.tiers.map((tier) => {
+        const tierRecord = asRecord(tier);
+        tierRecord._choices_thresholdType = [...TAKE_THRESHOLD_TYPE_CHOICES];
+        return tierRecord;
+      });
+    }
+    mutableItem.rateDefinition = rateDefinition;
+  }
 
   return output;
 }

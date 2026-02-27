@@ -41,6 +41,22 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assert(parsed.context.operations != null, 'happy path context operations should be present');
   assertEqual(parsed.context.equity?.fdExtraShares, 0, 'fd extra shares defaults to 0 when omitted');
 
+  (happy as Record<string, unknown>)._choices_version = ['project_json_v1'];
+  (happy.meta as Record<string, unknown>)._choices_currency = ['USD'];
+  ((happy.operations?.capacity ?? {}) as Record<string, unknown>)._choices_throughputUnit = ['tpa', 'tpd'];
+  (happy.economicsBreakdown?.meta as Record<string, unknown>)._choices_defaultSource = ['FS', 'Other', 'PEA', 'PFS'];
+  const firstTakeItem = (happy.takeItems?.[0] ?? null) as Record<string, unknown> | null;
+  if (firstTakeItem) {
+    firstTakeItem._choices_type = ['AD_VALOREM', 'NSR'];
+    (firstTakeItem.appliesTo as Record<string, unknown>)._choices_scope = ['metalSpecific', 'project'];
+    const tiers = (firstTakeItem.rateDefinition as Record<string, unknown>).tiers;
+    if (Array.isArray(tiers) && tiers[0] && typeof tiers[0] === 'object') {
+      (tiers[0] as Record<string, unknown>)._choices_thresholdType = ['price', 'revenue'];
+    }
+  }
+  const withChoicesParsed = parseProjectJsonV1(happy);
+  assertEqual(withChoicesParsed.engineInputWithoutPrices.auPriceKey, 'XAU_USD_TOZ', 'parse ignores _choices_ keys at root and nested levels');
+
   const withFdEquity = getProjectJsonV1Template();
   withFdEquity.equity = { fdExtraShares: 125, fdNotes: 'options + warrants' };
   const parsedWithFdEquity = parseProjectJsonV1(withFdEquity);
