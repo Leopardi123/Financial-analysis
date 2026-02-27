@@ -280,7 +280,22 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       auPriceKey: 'XAU_USD_TOZ',
     },
     streamsByMetal: null,
-    takeItems: [],
+    takeItems: [
+      {
+        id: 'example_nsr',
+        type: 'NSR',
+        jurisdictionLevel: 'national',
+        appliesTo: {
+          scope: 'project',
+          metals: ['ALL'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: { rateType: 'FIXED', rate: 0.00 },
+      },
+    ],
     operations: {
       capacity: { throughputUnit: 'tpd', nameplateThroughput: 10000, utilizationPct: null },
       oreMilledTonnes: [...nulls],

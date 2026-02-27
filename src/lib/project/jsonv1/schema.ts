@@ -1,5 +1,4 @@
 import type { StreamMVIConfig } from '../streams/types.ts';
-import type { TakeItemMVI } from '../take/types.ts';
 
 export type QtyUnit = 'toz' | 'g' | 'kg' | 'lb' | 'tonne' | 'short_ton' | 'long_ton';
 
@@ -55,7 +54,7 @@ export type ProjectJsonV1 = {
 
   streamsByMetal?: Record<string, StreamMVIConfig> | null;
 
-  takeItems?: Array<TakeItemMVI> | null;
+  takeItems?: Array<unknown> | null;
 
   operations?: {
     capacity: {

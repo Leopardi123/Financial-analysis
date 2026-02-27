@@ -1,6 +1,8 @@
 import { computeProjectPhase1 } from '../phase1.ts';
 import { computeRoyaltiesFromDetail } from '../royalties/mvi.ts';
 import { computeTakeEngine } from '../take/compute.ts';
+import { computeTotalTakeUSD_MVI } from '../take/computeTakeMvi.ts';
+import type { TakeItemMVI } from '../take/types.ts';
 import type { NationalTakeInput, NationalTakeOutput } from './types.ts';
 
 function assertSeriesLength(series: unknown[], expectedLength: number, fieldName: string): void {
@@ -22,6 +24,15 @@ function anyFinite(series: Array<number | null> | undefined): boolean {
     return false;
   }
   return series.some((value) => isFiniteNumber(value));
+}
+
+function isLegacyTakeItem(item: unknown): item is TakeItemMVI {
+  return typeof item === 'object'
+    && item !== null
+    && typeof (item as { id?: unknown }).id === 'string'
+    && Array.isArray((item as { metals?: unknown }).metals)
+    && typeof (item as { baseType?: unknown }).baseType === 'string'
+    && typeof (item as { rateType?: unknown }).rateType === 'string';
 }
 
 export function computeNationalTake(input: NationalTakeInput): NationalTakeOutput {
@@ -49,10 +60,18 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
   const extraRoyaltiesUSD = input.extraRoyaltiesUSD ?? zeroSeries(expectedLength);
   assertSeriesLength(extraRoyaltiesUSD, expectedLength, 'extraRoyaltiesUSD');
 
+  const legacyTakeItems = input.items.filter(isLegacyTakeItem);
   const takeOut = computeTakeEngine({
     masterN: input.masterN,
     grossRevenueUSD: input.grossRevenueUSD,
     revenueByMetalUSD: input.byMetalRevenueUSD ?? undefined,
+    takeItems: legacyTakeItems,
+  });
+
+  const takeMviOut = computeTotalTakeUSD_MVI({
+    masterN: input.masterN,
+    productionStartPeriod: input.phase1.productionStartPeriod,
+    grossRevenueUSD: input.grossRevenueUSD,
     takeItems: input.items,
   });
 
@@ -61,13 +80,20 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
     royaltiesDetail: input.royaltiesDetail,
   });
 
-  const diagnostics = [...royaltiesFromDetail.diagnostics];
-  const royaltiesEffective = anyFinite(input.phase1.royaltiesUSD)
-    ? (input.phase1.royaltiesUSD as Array<number | null>)
-    : royaltiesFromDetail.royaltiesUSD_calc;
+  const diagnostics = [...takeMviOut.diagnostics, ...royaltiesFromDetail.diagnostics];
+  let royaltiesEffective: Array<number | null>;
 
-  if (anyFinite(input.phase1.royaltiesUSD)) {
+  if (takeMviOut.includedCount >= 1) {
+    royaltiesEffective = takeMviOut.totalTakeUSD;
+    diagnostics.push(
+      `takeItems: using TotalTake_USD computed from takeItems (count=${takeMviOut.includedCount}, base=REVENUE, rateType=FIXED)`,
+    );
+    diagnostics.push(`takeItems: included ${takeMviOut.includedSummaries.join(', ')}`);
+  } else if (anyFinite(input.phase1.royaltiesUSD)) {
+    royaltiesEffective = input.phase1.royaltiesUSD as Array<number | null>;
     diagnostics.push('royaltiesUSD: manual override detected; ignoring royaltiesDetail for calculation');
+  } else {
+    royaltiesEffective = royaltiesFromDetail.royaltiesUSD_calc;
   }
 
   const totalRoyaltiesUSD = new Array<number | null>(expectedLength).fill(0);
