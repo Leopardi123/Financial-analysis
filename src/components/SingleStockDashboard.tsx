@@ -12,6 +12,7 @@ import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { buildOperationsGridModel } from "../pages/projectOperationsGrid.ts";
+import { buildProjectKeyMetricsSections, formatProjectMetricValue } from "../pages/projectKeyMetricsLists.ts";
 import {
   buildSeries,
   buildSeriesData,
@@ -1915,44 +1916,10 @@ Capital Available: ${availableLabel}`,
     yAxisTitle: statementCurrency,
   };
 
-  const projectListaTables = useMemo(() => ({
-    lista1: [
-      { label: "NPV_today_TargetCurrency", value: projectSnapshotData?.NPV_today_TargetCurrency ?? null },
-      { label: "NPV_today_perShare_TargetCurrency", value: projectSnapshotData?.NPV_today_perShare_TargetCurrency ?? null },
-      { label: "NAV_today_TargetCurrency", value: projectSnapshotData?.NAV_today_TargetCurrency ?? null },
-      { label: "NAV_today_perShare_TargetCurrency", value: projectSnapshotData?.NAV_today_perShare_TargetCurrency ?? null },
-      { label: "DCF_prodStart_exCapex_TargetCurrency", value: projectSnapshotData?.DCF_prodStart_exCapex_TargetCurrency ?? null },
-      { label: "DCF_prodStart_exCapex_perShare_TargetCurrency", value: projectSnapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null },
-      { label: "DCF_prodStart_present_TargetCurrency", value: projectSnapshotData?.DCF_prodStart_present_TargetCurrency ?? null },
-      { label: "DCF_prodStart_present_perShare_TargetCurrency", value: projectSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency ?? null },
-      { label: "CF_LOM_TargetCurrency", value: projectSnapshotData?.CF_LOM_TargetCurrency ?? null },
-      { label: "CF_LOM_perShare_TargetCurrency", value: projectSnapshotData?.CF_LOM_perShare_TargetCurrency ?? null },
-      { label: "EV_TargetCurrency", value: projectSnapshotData?.EV_TargetCurrency ?? null },
-      { label: "EVPS_TargetCurrency", value: projectSnapshotData?.EVPS_TargetCurrency ?? null },
-      { label: "EV_over_NPV", value: projectSnapshotData?.EV_over_NPV ?? null },
-      { label: "EV_over_NAV", value: projectSnapshotData?.EV_over_NAV ?? null },
-      { label: "P_over_NAV", value: projectSnapshotData?.P_over_NAV ?? null },
-      { label: "NPV_over_ETLV", value: projectSnapshotData?.NPV_over_ETLV ?? null },
-      { label: "DCF_present_over_ETLV", value: projectSnapshotData?.DCF_present_over_ETLV ?? null },
-    ],
-    lista2: [
-      { label: "Time_to_production (tp)", value: projectSnapshotData?.Time_to_production ?? null },
-      { label: "LOM (period count)", value: projectSnapshotData?.LOM_periods ?? null },
-      { label: "LOM_production_AuEq_Oz", value: projectSnapshotData?.LOM_production_AuEq_Oz ?? null },
-      { label: "Annual_production_AuEq_Oz", value: projectSnapshotData?.Annual_production_AuEq_Oz ?? null },
-      { label: "AISC_AuEq_USD_per_Oz_LOM", value: projectSnapshotData?.AISC_AuEq_USD_per_Oz_LOM ?? null },
-      { label: "CAPEX_per_annual_AuEq_Oz", value: projectSnapshotData?.CAPEX_per_annual_AuEq_Oz ?? null },
-    ],
-    lista3: [
-      { label: "Payback_approx_years", value: projectSnapshotData?.Payback_approx_years ?? null },
-      { label: "Payback_real_years", value: projectSnapshotData?.Payback_real_years ?? null },
-      { label: "LOM_average_EBIT_ROCE_pct", value: projectSnapshotData?.LOM_average_EBIT_ROCE_pct ?? null },
-      { label: "LOM_discounted_EBIT_ROCE_pct", value: projectSnapshotData?.LOM_discounted_EBIT_ROCE_pct ?? null },
-      { label: "ROI_10Y_pct", value: projectSnapshotData?.ROI_10Y_pct ?? null },
-      { label: "Kapitalavkastning_LOM", value: projectSnapshotData?.Kapitalavkastning_LOM ?? null },
-      { label: "Kapitalavkastning_per_Ar_LOM", value: projectSnapshotData?.Kapitalavkastning_per_Ar_LOM ?? null },
-    ],
-  }), [projectSnapshotData]);
+  const projectKeyMetricLists = useMemo(() => buildProjectKeyMetricsSections({
+    snapshot: projectSnapshotData,
+    discountRate: Number.isFinite(Number.parseFloat(snapshotDiscountRateInput)) ? Number.parseFloat(snapshotDiscountRateInput) : null,
+  }), [projectSnapshotData, snapshotDiscountRateInput]);
 
   const parsedSelectedProject = useMemo(() => {
     if (!selectedProjectRawJson) return null;
@@ -3029,21 +2996,29 @@ Capital Available: ${availableLabel}`,
               {projectSnapshotLoading && <p className="bread">Running snapshot…</p>}
               {projectSnapshotError && <p className="status error">{projectSnapshotError}</p>}
 
+              <section className="project-market-box" aria-label="Project market">
+                <h3>Market</h3>
+                <div className="project-market-grid">
+                  {projectKeyMetricLists.market.map((metric) => (
+                    <div key={metric.key} className="project-market-item">
+                      <span>{metric.label}</span>
+                      <strong>{formatProjectMetricValue(metric.key, metric.value)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
               <section className="project-key-metrics-grid" aria-label="Project key metrics lists">
-                {[
-                  { title: "Lista 1 — Finansiella nyckeltal och värdering", rows: projectListaTables.lista1 },
-                  { title: "Lista 2 — Produktion och operativt", rows: projectListaTables.lista2 },
-                  { title: "Lista 3 — Effektivitet och lönsamhet", rows: projectListaTables.lista3 },
-                ].map((table) => (
-                  <article key={table.title} className="project-key-metrics-column">
+                {projectKeyMetricLists.sections.map((table) => (
+                  <article key={table.id} className="project-key-metrics-column">
                     <h3>{table.title}</h3>
                     <div className="project-key-metrics-table-wrap">
                       <table className="project-key-metrics-table">
                         <tbody>
                           {table.rows.map((metric) => (
-                            <tr key={metric.label}>
+                            <tr key={metric.key}>
                               <th>{metric.label}</th>
-                              <td>{formatPanelValue(metric.value)}</td>
+                              <td>{formatProjectMetricValue(metric.key, metric.value)}</td>
                             </tr>
                           ))}
                         </tbody>
