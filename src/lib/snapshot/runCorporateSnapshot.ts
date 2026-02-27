@@ -19,6 +19,16 @@ import { convertPriceToCanonical, convertQuantityToCanonical } from '../units/co
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
+function dedupeMessages(messages: string[]): string[] {
+  return [...new Set(messages)];
+}
+
+function finalizeDiagnostics(diagnostics: SnapshotDiagnostics): SnapshotDiagnostics {
+  diagnostics.warnings = dedupeMessages(diagnostics.warnings);
+  diagnostics.errors = dedupeMessages(diagnostics.errors);
+  return diagnostics;
+}
+
 function toFiniteOrNull(value: number | null | undefined): number | null {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return null;
@@ -552,8 +562,8 @@ export async function runCorporateSnapshotPipeline(args: {
     diagnostics.warnings.push(...validation.warnings);
 
     if (!validation.ok) {
-      diagnostics.errors.push(...validation.errors);
-      return { ok: false, diagnostics };
+        diagnostics.errors.push(...validation.errors);
+        return { ok: false, diagnostics: finalizeDiagnostics(diagnostics) };
     }
 
     const input = validation.value;
@@ -567,7 +577,7 @@ export async function runCorporateSnapshotPipeline(args: {
       diagnostics.meta.symbol = input.symbol;
       if (projects.length === 0) {
         diagnostics.errors.push(`No stored projects found for symbol=${input.symbol}`);
-        return { ok: false, diagnostics };
+        return { ok: false, diagnostics: finalizeDiagnostics(diagnostics) };
       }
     }
 
@@ -615,7 +625,7 @@ export async function runCorporateSnapshotPipeline(args: {
       diagnostics.errors.push(
         `refresh=1 exceeds max unique price keys (${CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS}); received ${requestedPriceKeys.size}`,
       );
-      return { ok: false, diagnostics };
+      return { ok: false, diagnostics: finalizeDiagnostics(diagnostics) };
     }
 
     const projectsForBuildFunding = [] as Array<{
@@ -664,22 +674,25 @@ export async function runCorporateSnapshotPipeline(args: {
 
           for (const [metal, series] of Object.entries(resolved.spotPriceUSDByMetal)) {
             const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
-            series.forEach((value, index) => {
-              if (value === null) {
-                diagnostics.warnings.push(
-                  `Missing price coverage for project=${projectId} metal=${metal} priceKey=${priceKey} targetDate=${periodEndDatesUtc[index]}`,
-                );
-              }
-            });
-          }
+            const missingDates = series
+              .map((value, index) => (value === null ? periodEndDatesUtc[index] : null))
+              .filter((value): value is string => typeof value === 'string');
 
-          resolved.aisc.auPriceUSDPerOz.forEach((value, index) => {
-            if (value === null) {
+            if (missingDates.length > 0) {
               diagnostics.warnings.push(
-                `Missing price coverage for project=${projectId} metal=Au priceKey=${parsed.engineInputWithoutPrices.auPriceKey} targetDate=${periodEndDatesUtc[index]}`,
+                `Missing price coverage for project=${projectId} metal=${metal} priceKey=${priceKey} missingPeriods=${missingDates.length} firstMissingDate=${missingDates[0]}`,
               );
             }
-          });
+          }
+
+          const missingAuDates = resolved.aisc.auPriceUSDPerOz
+            .map((value, index) => (value === null ? periodEndDatesUtc[index] : null))
+            .filter((value): value is string => typeof value === 'string');
+          if (missingAuDates.length > 0) {
+            diagnostics.warnings.push(
+              `Missing price coverage for project=${projectId} metal=Au priceKey=${parsed.engineInputWithoutPrices.auPriceKey} missingPeriods=${missingAuDates.length} firstMissingDate=${missingAuDates[0]}`,
+            );
+          }
 
           const out = computeProjectEngineFullProductionV1(resolved);
           const projectLength = periodEndDatesUtc.length;
@@ -845,7 +858,9 @@ export async function runCorporateSnapshotPipeline(args: {
           : { mode: 'spot' as const };
       const resolvedFx = await resolveFxUSDToTarget({
         targetCurrency: input.targetCurrency,
-        anchorDateUtc: spotAnchorDateUtc,
+        anchorDateUtc: input.fx.scenario.mode === 'spot' && spotAnchorDateUtc > getTodayUtcDateString()
+          ? getTodayUtcDateString()
+          : spotAnchorDateUtc,
         scenario: fxScenario,
         allowRefresh: refresh,
       });
@@ -986,9 +1001,9 @@ export async function runCorporateSnapshotPipeline(args: {
 
     snapshot.series = snapshotSeries;
 
-    return { ok: true, snapshot, diagnostics };
+    return { ok: true, snapshot, diagnostics: finalizeDiagnostics(diagnostics) };
   } catch (error) {
     diagnostics.errors.push((error as Error).message);
-    return { ok: false, diagnostics };
+    return { ok: false, diagnostics: finalizeDiagnostics(diagnostics) };
   }
 }
