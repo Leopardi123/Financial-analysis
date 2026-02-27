@@ -30,6 +30,44 @@ function asSeries(value: unknown, path: string, expectedLength: number): Array<n
   return value as Array<number | null>;
 }
 
+function normalizeSeriesToMasterLength(args: {
+  value: unknown;
+  path: string;
+  expectedLength: number;
+  safeToZero: boolean;
+}): { series: Array<number | null>; normalized: boolean } {
+  const { value, path, expectedLength, safeToZero } = args;
+  if (!Array.isArray(value)) {
+    fail(path, 'array', value);
+  }
+
+  const normalized = new Array<number | null>(expectedLength).fill(null);
+  const copyLength = Math.min(value.length, expectedLength);
+
+  let normalizedFlag = value.length !== expectedLength;
+  for (let i = 0; i < copyLength; i += 1) {
+    const item = value[i];
+    const finite = isFiniteNumber(item) ? item : null;
+    if (finite === null && safeToZero) {
+      normalized[i] = 0;
+      if (item === null || item === undefined || !Number.isFinite(item as number)) {
+        normalizedFlag = true;
+      }
+      continue;
+    }
+    normalized[i] = finite;
+  }
+
+  if (safeToZero) {
+    for (let i = copyLength; i < expectedLength; i += 1) {
+      normalized[i] = 0;
+      normalizedFlag = true;
+    }
+  }
+
+  return { series: normalized, normalized: normalizedFlag };
+}
+
 function normalizeSparseSeries(path: string, arr: unknown, masterN: number): Array<number | null> | undefined {
   if (arr === undefined || arr === null) {
     return undefined;
@@ -49,9 +87,6 @@ function normalizeSparseSeries(path: string, arr: unknown, masterN: number): Arr
   return normalized;
 }
 
-function sanitizeSeries(series: Array<number | null>): Array<number | null> {
-  return series.map((value) => (isFiniteNumber(value) ? value : null));
-}
 
 function validateNonNegativeFiniteSeries(series: Array<number | null>, path: string): void {
   for (let i = 0; i < series.length; i += 1) {
@@ -64,6 +99,13 @@ function validateNonNegativeFiniteSeries(series: Array<number | null>, path: str
 
 function hasAnyNonNull(series: Array<number | null>): boolean {
   return series.some((value) => toFiniteOrNull(value) !== null);
+}
+
+function hasAnyNonZero(series: Array<number | null>): boolean {
+  return series.some((value) => {
+    const finite = toFiniteOrNull(value);
+    return finite !== null && finite !== 0;
+  });
 }
 
 function toFiniteOrNull(value: number | null | undefined): number | null {
@@ -135,7 +177,7 @@ function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: A
       }
     }
 
-    if (cogs.siteGandA_USD && hasAnyNonNull(cogs.siteGandA_USD) && hasAnyNonNull(siteGandA_USD)) {
+    if (cogs.siteGandA_USD && hasAnyNonNull(cogs.siteGandA_USD) && hasAnyNonZero(siteGandA_USD)) {
       fail('economicsBreakdown.cogs.siteGandA_USD', 'must not be provided when series.siteGandA_USD has any non-null values', cogs.siteGandA_USD);
     }
 
@@ -246,6 +288,24 @@ function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: A
   return out;
 }
 
+
+function asRecordOfRawSeries(value: unknown, path: string): Record<string, unknown[]> {
+  if (!isPlainObject(value)) {
+    fail(path, 'object map of series', value);
+  }
+
+  const entries = Object.entries(value);
+  const mapped: Record<string, unknown[]> = {};
+  for (const [key, rawSeries] of entries) {
+    if (!Array.isArray(rawSeries)) {
+      fail(`${path}.${key}`, 'array', rawSeries);
+    }
+    mapped[key] = rawSeries;
+  }
+
+  return mapped;
+}
+
 function asRecordOfSeries(value: unknown, path: string, expectedLength: number): Record<string, Array<number | null>> {
   if (!isPlainObject(value)) {
     fail(path, 'object map of series', value);
@@ -296,9 +356,9 @@ function parsePeriodEndDates(raw: unknown, expectedLength: number): Array<string
   return periodEndDatesUtc;
 }
 
-function parseOperations(raw: unknown, masterN: number): ProjectJsonV1['operations'] {
+function parseOperations(raw: unknown, masterN: number): { operations: ProjectJsonV1['operations']; normalized: boolean } {
   if (raw == null) {
-    return raw as null;
+    return { operations: raw as null, normalized: false };
   }
 
   if (!isPlainObject(raw)) {
@@ -334,23 +394,30 @@ function parseOperations(raw: unknown, masterN: number): ProjectJsonV1['operatio
       utilizationPct: utilizationPct ?? null,
     },
   };
+  let normalized = false;
 
   if ('oreMilledTonnes' in raw && raw.oreMilledTonnes !== undefined) {
-    const oreMilledTonnes = normalizeSparseSeries('operations.oreMilledTonnes', raw.oreMilledTonnes, masterN);
-    if (!oreMilledTonnes) {
-      fail('operations.oreMilledTonnes', `array length <= ${masterN + 1}`, raw.oreMilledTonnes);
-    }
-    validateNonNegativeFiniteSeries(oreMilledTonnes, 'operations.oreMilledTonnes');
-    operations.oreMilledTonnes = oreMilledTonnes;
+    const oreMilledTonnes = normalizeSeriesToMasterLength({
+      value: raw.oreMilledTonnes,
+      path: 'operations.oreMilledTonnes',
+      expectedLength: masterN + 1,
+      safeToZero: true,
+    });
+    normalized = normalized || oreMilledTonnes.normalized;
+    validateNonNegativeFiniteSeries(oreMilledTonnes.series, 'operations.oreMilledTonnes');
+    operations.oreMilledTonnes = oreMilledTonnes.series;
   }
 
   if ('oreMinedTonnes' in raw && raw.oreMinedTonnes !== undefined) {
-    const oreMinedTonnes = normalizeSparseSeries('operations.oreMinedTonnes', raw.oreMinedTonnes, masterN);
-    if (!oreMinedTonnes) {
-      fail('operations.oreMinedTonnes', `array length <= ${masterN + 1}`, raw.oreMinedTonnes);
-    }
-    validateNonNegativeFiniteSeries(oreMinedTonnes, 'operations.oreMinedTonnes');
-    operations.oreMinedTonnes = oreMinedTonnes;
+    const oreMinedTonnes = normalizeSeriesToMasterLength({
+      value: raw.oreMinedTonnes,
+      path: 'operations.oreMinedTonnes',
+      expectedLength: masterN + 1,
+      safeToZero: true,
+    });
+    normalized = normalized || oreMinedTonnes.normalized;
+    validateNonNegativeFiniteSeries(oreMinedTonnes.series, 'operations.oreMinedTonnes');
+    operations.oreMinedTonnes = oreMinedTonnes.series;
   }
 
   if ('oreTonnageUnit' in raw && raw.oreTonnageUnit !== undefined) {
@@ -368,12 +435,15 @@ function parseOperations(raw: unknown, masterN: number): ProjectJsonV1['operatio
     }
     const mapped: Record<string, Array<number | null>> = {};
     for (const [key, rawSeries] of Object.entries(value)) {
-      const series = normalizeSparseSeries(`${path}.${key}`, rawSeries, masterN);
-      if (!series) {
-        fail(`${path}.${key}`, `array length <= ${masterN + 1}`, rawSeries);
-      }
-      validateNonNegativeFiniteSeries(series, `${path}.${key}`);
-      mapped[key] = series;
+      const series = normalizeSeriesToMasterLength({
+        value: rawSeries,
+        path: `${path}.${key}`,
+        expectedLength: masterN + 1,
+        safeToZero: true,
+      });
+      normalized = normalized || series.normalized;
+      validateNonNegativeFiniteSeries(series.series, `${path}.${key}`);
+      mapped[key] = series.series;
     }
     return mapped;
   };
@@ -400,7 +470,7 @@ function parseOperations(raw: unknown, masterN: number): ProjectJsonV1['operatio
     operations.recoveryPctByMetal = parseOptionalSeriesMap(raw.recoveryPctByMetal, 'operations.recoveryPctByMetal');
   }
 
-  return operations;
+  return { operations, normalized };
 }
 
 export type ProjectJsonV1Context = {
@@ -511,34 +581,97 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   }
 
   const warnings: string[] = [];
+  let projectSeriesNormalized = false;
 
+  const capexNormalized = normalizeSeriesToMasterLength({
+    value: raw.series.capexUSD,
+    path: 'series.capexUSD',
+    expectedLength,
+    safeToZero: true,
+  });
+  projectSeriesNormalized = projectSeriesNormalized || capexNormalized.normalized;
   const capexUSD = normalizeSpendSeriesAbs(
-    asSeries(raw.series.capexUSD, 'series.capexUSD', expectedLength),
+    capexNormalized.series,
     'capexUSD: detected negative values; normalized to spend (abs).',
     warnings,
   );
-  const operatingCostsUSD = asSeries(raw.series.operatingCostsUSD, 'series.operatingCostsUSD', expectedLength);
+  const operatingCostsNormalized = normalizeSeriesToMasterLength({
+    value: raw.series.operatingCostsUSD,
+    path: 'series.operatingCostsUSD',
+    expectedLength,
+    safeToZero: true,
+  });
+  projectSeriesNormalized = projectSeriesNormalized || operatingCostsNormalized.normalized;
+  const operatingCostsUSD = operatingCostsNormalized.series;
+  const sustainingCapexNormalized = normalizeSeriesToMasterLength({
+    value: raw.series.sustainingCapexUSD,
+    path: 'series.sustainingCapexUSD',
+    expectedLength,
+    safeToZero: true,
+  });
+  projectSeriesNormalized = projectSeriesNormalized || sustainingCapexNormalized.normalized;
   const sustainingCapexUSD = normalizeSpendSeriesAbs(
-    asSeries(raw.series.sustainingCapexUSD, 'series.sustainingCapexUSD', expectedLength),
+    sustainingCapexNormalized.series,
     'sustainingCapexUSD: detected negative values; normalized to spend (abs).',
     warnings,
   );
-  const siteGandA_USD = asSeries(raw.series.siteGandA_USD, 'series.siteGandA_USD', expectedLength);
-  const reclamationUSD = asSeries(raw.series.reclamationUSD, 'series.reclamationUSD', expectedLength);
-  const byproductCreditsUSD =
+  const siteGandaNormalized = normalizeSeriesToMasterLength({
+    value: raw.series.siteGandA_USD,
+    path: 'series.siteGandA_USD',
+    expectedLength,
+    safeToZero: true,
+  });
+  projectSeriesNormalized = projectSeriesNormalized || siteGandaNormalized.normalized;
+  const siteGandA_USD = siteGandaNormalized.series;
+  const reclamationNormalized = normalizeSeriesToMasterLength({
+    value: raw.series.reclamationUSD,
+    path: 'series.reclamationUSD',
+    expectedLength,
+    safeToZero: true,
+  });
+  projectSeriesNormalized = projectSeriesNormalized || reclamationNormalized.normalized;
+  const reclamationUSD = reclamationNormalized.series;
+  const byproductCreditsNormalized =
     raw.series.byproductCreditsUSD === undefined
       ? undefined
-      : asSeries(raw.series.byproductCreditsUSD, 'series.byproductCreditsUSD', expectedLength);
+      : normalizeSeriesToMasterLength({
+          value: raw.series.byproductCreditsUSD,
+          path: 'series.byproductCreditsUSD',
+          expectedLength,
+          safeToZero: true,
+        });
+  if (byproductCreditsNormalized) {
+    projectSeriesNormalized = projectSeriesNormalized || byproductCreditsNormalized.normalized;
+  }
+  const byproductCreditsUSD = byproductCreditsNormalized?.series;
 
-  const workingCapitalDeltaUSD =
+  const workingCapitalNormalized =
     raw.series.workingCapitalDeltaUSD === undefined
       ? undefined
-      : sanitizeSeries(asSeries(raw.series.workingCapitalDeltaUSD, 'series.workingCapitalDeltaUSD', expectedLength));
+      : normalizeSeriesToMasterLength({
+          value: raw.series.workingCapitalDeltaUSD,
+          path: 'series.workingCapitalDeltaUSD',
+          expectedLength,
+          safeToZero: true,
+        });
+  if (workingCapitalNormalized) {
+    projectSeriesNormalized = projectSeriesNormalized || workingCapitalNormalized.normalized;
+  }
+  const workingCapitalDeltaUSD = workingCapitalNormalized?.series;
 
-  const depreciationUSD =
+  const depreciationNormalized =
     raw.series.depreciationUSD === undefined
       ? undefined
-      : sanitizeSeries(asSeries(raw.series.depreciationUSD, 'series.depreciationUSD', expectedLength));
+      : normalizeSeriesToMasterLength({
+          value: raw.series.depreciationUSD,
+          path: 'series.depreciationUSD',
+          expectedLength,
+          safeToZero: true,
+        });
+  if (depreciationNormalized) {
+    projectSeriesNormalized = projectSeriesNormalized || depreciationNormalized.normalized;
+  }
+  const depreciationUSD = depreciationNormalized?.series;
 
   const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, masterN, siteGandA_USD);
 
@@ -546,7 +679,18 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     fail('metals', 'object', raw.metals);
   }
 
-  const payableQtyByMetal = asRecordOfSeries(raw.metals.payableQtyByMetal, 'metals.payableQtyByMetal', expectedLength);
+  const payableQtyByMetalRaw = asRecordOfRawSeries(raw.metals.payableQtyByMetal, 'metals.payableQtyByMetal');
+  const payableQtyByMetal: Record<string, Array<number | null>> = {};
+  for (const [metal, series] of Object.entries(payableQtyByMetalRaw)) {
+    const normalizedSeries = normalizeSeriesToMasterLength({
+      value: series,
+      path: `metals.payableQtyByMetal.${metal}`,
+      expectedLength,
+      safeToZero: true,
+    });
+    projectSeriesNormalized = projectSeriesNormalized || normalizedSeries.normalized;
+    payableQtyByMetal[metal] = normalizedSeries.series;
+  }
   const payableMetals = Object.keys(payableQtyByMetal);
   if (payableMetals.length === 0) {
     fail('metals.payableQtyByMetal', 'at least one metal key', payableMetals);
@@ -604,7 +748,9 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     fail('takeItems', 'array or null', takeItems);
   }
 
-  const operations = raw.operations === undefined ? undefined : parseOperations(raw.operations, masterN);
+  const parsedOperations = raw.operations === undefined ? undefined : parseOperations(raw.operations, masterN);
+  const operations = parsedOperations?.operations;
+  projectSeriesNormalized = projectSeriesNormalized || (parsedOperations?.normalized ?? false);
 
   const explicitOverrides = raw.priceOverrides;
   if (explicitOverrides !== undefined && explicitOverrides !== null && !isPlainObject(explicitOverrides)) {
@@ -644,6 +790,10 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   }
   if (overrideAu) {
     validateNonNegativeFiniteSeries(overrideAu, 'priceOverrides.auPriceUSDPerOz');
+  }
+
+  if (projectSeriesNormalized) {
+    warnings.push('Normalized series length to masterN+1; padded/truncated as needed; null→0 for safe-to-zero series.');
   }
 
   const nulls = new Array(expectedLength).fill(null) as Array<number | null>;

@@ -76,15 +76,29 @@ export function computeLista2CfDcfMetrics(input: Input): {
   const nullMetrics = makeNullLista2CfDcfMetrics();
 
   const expectedLength = input.masterN + 1;
+  const normalizedFcf = new Array<number | null>(expectedLength).fill(null);
   if (input.fcfUSD_total.length !== expectedLength) {
     warnings.push(
-      `Lista2 CF+DCF skipped: fcfUSD_total length ${input.fcfUSD_total.length} does not match masterN+1 (${expectedLength})`,
+      `Lista2 CF+DCF input normalized: fcfUSD_total length ${input.fcfUSD_total.length} adjusted to masterN+1 (${expectedLength})`,
     );
-    return { metrics: nullMetrics, warnings, errors };
   }
 
-  if (input.fcfUSD_total.some((value) => value === null || !Number.isFinite(value))) {
-    warnings.push('Lista2 CF+DCF skipped: fcfUSD_total contains null/non-finite periods');
+  for (let t = 0; t < expectedLength; t += 1) {
+    const rawValue = input.fcfUSD_total[t] ?? null;
+    if (rawValue === null) {
+      normalizedFcf[t] = null;
+      continue;
+    }
+    if (!Number.isFinite(rawValue)) {
+      normalizedFcf[t] = null;
+      warnings.push(`fcfUSD_total: non-finite at t=${t}; set to null (value=${String(rawValue)})`);
+      continue;
+    }
+    normalizedFcf[t] = rawValue;
+  }
+
+  if (normalizedFcf.every((value) => value === null)) {
+    warnings.push('Lista2 CF+DCF skipped: fcfUSD_total has no finite periods after normalization');
     return { metrics: nullMetrics, warnings, errors };
   }
 
@@ -110,12 +124,13 @@ export function computeLista2CfDcfMetrics(input: Input): {
   const dfToToday_tp = 1 / (1 + input.discountRate) ** tp;
 
   for (let t = 0; t <= input.masterN; t += 1) {
-    const fcf = input.fcfUSD_total[t] as number;
-    cfLom += fcf;
+    const fcf = normalizedFcf[t];
+    const finiteFcf = fcf !== null && Number.isFinite(fcf) ? fcf : 0;
+    cfLom += finiteFcf;
 
     if (t >= tp) {
       const dfToProdStart = (1 / (1 + input.discountRate) ** t) / dfToToday_tp;
-      dcfProdStart_exCapex += fcf * dfToProdStart;
+      dcfProdStart_exCapex += finiteFcf * dfToProdStart;
     }
   }
 

@@ -55,9 +55,11 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   (badMasterN.time as { masterN: number | string }).masterN = 1.2;
   assertThrows(() => parseProjectJsonV1(badMasterN), /time\.masterN/, 'throws on non-integer masterN');
 
-  const badSeriesLength = getProjectJsonV1Template();
-  badSeriesLength.series.capexUSD = [1, 2, 3];
-  assertThrows(() => parseProjectJsonV1(badSeriesLength), /series\.capexUSD/, 'throws on required series length mismatch');
+  const shortCapexSeries = getProjectJsonV1Template();
+  shortCapexSeries.series.capexUSD = [1, 2, 3];
+  const parsedShortCapexSeries = parseProjectJsonV1(shortCapexSeries);
+  assertEqual(parsedShortCapexSeries.engineInputWithoutPrices.phase1.capexUSD.length, 6, 'required capex series normalized to masterN+1');
+  assertEqual(parsedShortCapexSeries.engineInputWithoutPrices.phase1.capexUSD[5], 0, 'required capex series padded with zero');
 
 
   const workingCapitalSeries = getProjectJsonV1Template();
@@ -65,15 +67,13 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   workingCapitalSeries.series.workingCapitalDeltaUSD[2] = Number.NaN;
   const parsedWorkingCapital = parseProjectJsonV1(workingCapitalSeries);
   assertEqual(parsedWorkingCapital.engineInputWithoutPrices.phase1.workingCapitalDeltaUSD?.[0], 10, 'working capital series is carried to engine input');
-  assertEqual(parsedWorkingCapital.engineInputWithoutPrices.phase1.workingCapitalDeltaUSD?.[2], null, 'working capital non-finite values sanitize to null');
+  assertEqual(parsedWorkingCapital.engineInputWithoutPrices.phase1.workingCapitalDeltaUSD?.[2], 0, 'working capital non-finite values normalize to zero');
 
-  const badWorkingCapitalLength = getProjectJsonV1Template();
-  badWorkingCapitalLength.series.workingCapitalDeltaUSD = [1, 2, 3];
-  assertThrows(
-    () => parseProjectJsonV1(badWorkingCapitalLength),
-    /series\.workingCapitalDeltaUSD/,
-    'throws on optional working capital length mismatch',
-  );
+  const shortWorkingCapitalLength = getProjectJsonV1Template();
+  shortWorkingCapitalLength.series.workingCapitalDeltaUSD = [1, 2, 3];
+  const parsedShortWorkingCapital = parseProjectJsonV1(shortWorkingCapitalLength);
+  assertEqual(parsedShortWorkingCapital.engineInputWithoutPrices.phase1.workingCapitalDeltaUSD?.length, 6, 'optional working capital series normalized to masterN+1');
+  assertEqual(parsedShortWorkingCapital.engineInputWithoutPrices.phase1.workingCapitalDeltaUSD?.[5], 0, 'optional working capital tail padded with 0');
 
 
   const badPeriodEndDatesLength = getProjectJsonV1Template();
@@ -122,20 +122,21 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   positiveCapex.series.capexUSD = [100, 0, 0, 5, 8, 10];
   const parsedPositiveCapex = parseProjectJsonV1(positiveCapex);
   assertEqual(parsedPositiveCapex.engineInputWithoutPrices.phase1.capexUSD[0], 100, 'positive capex remains unchanged');
-  assertEqual(parsedPositiveCapex.warnings.length, 0, 'positive capex has no normalization warning');
+  assert(parsedPositiveCapex.warnings.includes('Normalized series length to masterN+1; padded/truncated as needed; null→0 for safe-to-zero series.'), 'normalization warning emitted when safe-to-zero nulls are present');
 
   const mixedNullCapex = getProjectJsonV1Template();
   mixedNullCapex.series.capexUSD = [null, -25, null, 0, -5, null];
   mixedNullCapex.series.sustainingCapexUSD = [null, -1, 2, null, -3, null];
   const parsedMixedNullCapex = parseProjectJsonV1(mixedNullCapex);
-  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.capexUSD[0], null, 'capex null preserved at index 0');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.capexUSD[0], 0, 'capex null normalized to zero at index 0');
   assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.capexUSD[1], 25, 'capex negative normalized with nulls preserved');
-  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.capexUSD[5], null, 'capex trailing null preserved');
-  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.sustainingCapexUSD[0], null, 'sustaining capex null preserved at index 0');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.capexUSD[5], 0, 'capex trailing null normalized to zero');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.sustainingCapexUSD[0], 0, 'sustaining capex null normalized to zero at index 0');
   assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.sustainingCapexUSD[1], 1, 'sustaining capex negative normalized with nulls preserved');
-  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.sustainingCapexUSD[5], null, 'sustaining capex trailing null preserved');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.sustainingCapexUSD[5], 0, 'sustaining capex trailing null normalized to zero');
   assert(parsedMixedNullCapex.warnings.includes('capexUSD: detected negative values; normalized to spend (abs).'), 'mixed null capex warning emitted');
   assert(parsedMixedNullCapex.warnings.includes('sustainingCapexUSD: detected negative values; normalized to spend (abs).'), 'mixed null sustaining capex warning emitted');
+  assert(parsedMixedNullCapex.warnings.includes('Normalized series length to masterN+1; padded/truncated as needed; null→0 for safe-to-zero series.'), 'normalization warning emitted');
 
 
   const withBreakdown = getProjectJsonV1Template();
@@ -172,7 +173,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   const parsedSparseOperations = parseProjectJsonV1(sparseOperations);
   assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.length, 6, 'sparse operations series padded to masterN+1');
   assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.[0], 10, 'sparse operations first value preserved');
-  assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.[5], null, 'sparse operations trailing values padded with null');
+  assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.[5], 0, 'sparse operations trailing values padded with zero');
 
   const sparseBreakdown = getProjectJsonV1Template();
   sparseBreakdown.series.siteGandA_USD = new Array(sparseBreakdown.time.masterN + 1).fill(null);
