@@ -15,9 +15,9 @@ export type SnapshotRequest = {
   discountRate: number;
   // legacy/manual fallback; callers may still send top-level FX directly
   fx_USD_to_TargetCurrency?: number;
-  market: {
-    shares_current: number;
-    price_current_TargetCurrency: number;
+  market?: {
+    shares_current: number | null;
+    price_current_TargetCurrency: number | null;
     preferredEquity_TargetCurrency?: number | null;
     minorityInterest_TargetCurrency?: number | null;
   };
@@ -87,19 +87,55 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     errors.push('fx_USD_to_TargetCurrency must be finite and > 0 when provided');
   }
 
+  const symbolRaw = body.symbol;
+  const symbol = typeof symbolRaw === 'string' ? symbolRaw.trim() : '';
+  const hasSymbol = symbolRaw !== undefined;
+  if (hasSymbol && !symbol) {
+    errors.push('symbol must be a non-empty string when provided');
+  }
+
+  const projectsRaw = body.projects;
+  const hasProjects = projectsRaw !== undefined;
+
+  if (hasSymbol === hasProjects) {
+    errors.push('Exactly one of symbol or projects must be provided');
+  }
+
+  if (hasSymbol && hasProjects) {
+    errors.push('projects must be omitted when symbol is provided');
+  }
+
+  if (hasProjects && (!Array.isArray(projectsRaw) || projectsRaw.length === 0)) {
+    errors.push('projects must be a non-empty array when provided');
+  }
+
   const market = body.market;
-  if (!isObject(market)) {
+  const isProjectsMode = hasProjects && !hasSymbol;
+  if (!isProjectsMode && !isObject(market)) {
     errors.push('market is required and must be an object');
   }
 
   const shares = isObject(market) ? readFiniteNumber(market.shares_current) : null;
-  if (shares === null || !(shares > 0)) {
+  if (!isProjectsMode && (shares === null || !(shares > 0))) {
     errors.push('market.shares_current must be finite and > 0');
   }
 
   const currentPrice = isObject(market) ? readFiniteNumber(market.price_current_TargetCurrency) : null;
-  if (currentPrice === null || !(currentPrice > 0)) {
+  if (!isProjectsMode && (currentPrice === null || !(currentPrice > 0))) {
     errors.push('market.price_current_TargetCurrency must be finite and > 0');
+  }
+
+  if (isProjectsMode) {
+    if (!isObject(market)) {
+      warnings.push('market: missing market block; EV/multiple outputs will be null');
+    } else {
+      if (shares === null || !(shares > 0)) {
+        warnings.push('market: missing or invalid shares_current; EV/multiple outputs will be null');
+      }
+      if (currentPrice === null || !(currentPrice > 0)) {
+        warnings.push('market: missing or invalid price_current_TargetCurrency; EV/multiple outputs will be null');
+      }
+    }
   }
 
   const preferredEquity = isObject(market)
@@ -321,28 +357,6 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     errors.push('fx.manual_fx_USD_to_TargetCurrency must be finite and > 0 when fx.source=manual');
   }
 
-  const symbolRaw = body.symbol;
-  const symbol = typeof symbolRaw === 'string' ? symbolRaw.trim() : '';
-  const hasSymbol = symbolRaw !== undefined;
-  if (hasSymbol && !symbol) {
-    errors.push('symbol must be a non-empty string when provided');
-  }
-
-  const projectsRaw = body.projects;
-  const hasProjects = projectsRaw !== undefined;
-
-  if (hasSymbol === hasProjects) {
-    errors.push('Exactly one of symbol or projects must be provided');
-  }
-
-  if (hasSymbol && hasProjects) {
-    errors.push('projects must be omitted when symbol is provided');
-  }
-
-  if (hasProjects && (!Array.isArray(projectsRaw) || projectsRaw.length === 0)) {
-    errors.push('projects must be a non-empty array when provided');
-  }
-
   const projects: SnapshotRequest['projects'] = [];
   if (Array.isArray(projectsRaw)) {
     for (let i = 0; i < projectsRaw.length; i += 1) {
@@ -395,8 +409,8 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
       manual_fx_USD_to_TargetCurrency: manualFx,
     },
     market: {
-      shares_current: shares as number,
-      price_current_TargetCurrency: currentPrice as number,
+      shares_current: shares !== null && shares > 0 ? shares : null,
+      price_current_TargetCurrency: currentPrice !== null && currentPrice > 0 ? currentPrice : null,
       preferredEquity_TargetCurrency: preferredEquity,
       minorityInterest_TargetCurrency: minorityInterest,
     },

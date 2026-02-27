@@ -114,3 +114,24 @@ test('snapshot series exposes economics breakdown when provided', async () => {
   assert.equal(result.snapshot.series?.royaltiesDetail?.[0]?.id, 'nsr');
   assert.equal(result.snapshot.series?.taxesDetail?.municipalRevenueTaxUSD?.length, result.snapshot.aggregation.corporateMasterN + 1);
 });
+
+
+test('projects-mode snapshot without market does not throw and nulls EV outputs', async () => {
+  const body = await loadFixture();
+  delete (body as { market?: unknown }).market;
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+
+  if (!result.ok) {
+    return;
+  }
+
+  assert.equal(result.snapshot.MarketCap_TargetCurrency, null);
+  assert.equal(result.snapshot.EV_TargetCurrency, null);
+  assert.equal(result.snapshot.EV_perShare_TargetCurrency, null);
+  assert.equal(result.snapshot.EV_over_NPV, null);
+  assert.equal(result.snapshot.EV_over_NAV, null);
+  assert.equal(result.snapshot.P_over_NAV, null);
+  assert.ok(result.diagnostics.warnings.some((warning) => warning.includes('market: missing market block')));
+});

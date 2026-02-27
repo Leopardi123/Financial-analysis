@@ -103,6 +103,32 @@ function renderCompactMetrics(
 }
 
 
+
+function isPositiveFinite(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function buildProjectsSnapshotRequest(args: {
+  projects: Array<{ projectId: string; rawJson: Record<string, unknown> }>;
+  targetCurrency: string;
+  discountRate: number;
+  scenario: SnapshotRequest["scenario"];
+  fx: SnapshotRequest["fx"];
+  market?: {
+    shares_current: number;
+    price_current_TargetCurrency: number;
+  };
+}): SnapshotRequest {
+  return {
+    targetCurrency: args.targetCurrency,
+    discountRate: args.discountRate,
+    scenario: args.scenario,
+    fx: args.fx,
+    market: args.market,
+    projects: args.projects,
+  };
+}
+
 function toInputNumber(value: string): number | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
@@ -733,13 +759,6 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [snapshotDiscountRateInput] = useState("0.10");
   const [sharesCurrentInput] = useState("");
   const [priceCurrentInput] = useState("");
-  const [cashT0Input] = useState("");
-  const [debtT0Input] = useState("");
-  const [useCashFirst] = useState(true);
-  const [cashUseCapInput] = useState("");
-  const [debtFractionInput] = useState("");
-  const [equityFractionInput] = useState("");
-  const [equityRaisePriceInput] = useState("");
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
   const [scenarioPercentileInput] = useState("50");
@@ -1001,25 +1020,16 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
 
     try {
       const project = await getCompanyProject(ticker, projectId);
-      const result = await postCorporateSnapshot({
-        symbol: ticker,
+      const projectsPayload = [{ projectId: project.project_id, rawJson: project.raw_json }];
+      if (projectsPayload.length === 0) {
+        setProjectSnapshotData(null);
+        setProjectSnapshotError("No project selected.");
+        return;
+      }
+
+      const request = buildProjectsSnapshotRequest({
         targetCurrency,
         discountRate: discountRate ?? Number.NaN,
-        market: {
-          shares_current: sharesCurrent ?? Number.NaN,
-          price_current_TargetCurrency: priceCurrent ?? Number.NaN,
-        },
-        balanceSheet: {
-          cash_t0_TargetCurrency: toInputNumber(cashT0Input),
-          debt_t0_TargetCurrency: toInputNumber(debtT0Input),
-        },
-        financingPlan: {
-          use_cash_first: useCashFirst,
-          cash_use_cap_TargetCurrency: toInputNumber(cashUseCapInput),
-          debt_fraction: toInputNumber(debtFractionInput),
-          equity_fraction: toInputNumber(equityFractionInput),
-          equity_raise_price_TargetCurrency: toInputNumber(equityRaisePriceInput),
-        },
         scenario,
         fx: {
           source: fxSource,
@@ -1027,8 +1037,17 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
           scenario: fxScenarioSameAsPriceScenario ? scenario : { mode: "spot" },
           manual_fx_USD_to_TargetCurrency: toInputNumber(manualFxInput),
         },
-        projects: [{ projectId: project.project_id, rawJson: project.raw_json }],
+        projects: projectsPayload,
+        market:
+          isPositiveFinite(sharesCurrent) && isPositiveFinite(priceCurrent)
+            ? {
+                shares_current: sharesCurrent,
+                price_current_TargetCurrency: priceCurrent,
+              }
+            : undefined,
       });
+
+      const result = await postCorporateSnapshot(request);
       setProjectSnapshotWarnings(result.diagnostics?.warnings ?? []);
       setProjectSnapshotErrors(result.diagnostics?.errors ?? []);
       if (!result.ok || !result.snapshot) {
