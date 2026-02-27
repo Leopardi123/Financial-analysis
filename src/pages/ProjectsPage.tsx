@@ -4,6 +4,8 @@ import { getCompanyProject, listCompanyProjects, type CompanyProjectRecord, type
 import type { SnapshotRequest } from '../lib/api/validateSnapshotRequest.ts';
 import { buildTransposedTable } from '../lib/ui/tables/buildTransposedTable.ts';
 import { resolveCommonSharesCurrent } from '../lib/market/resolveSharesCurrent.ts';
+import { parseProjectJsonV1WithContext } from '../lib/project/jsonv1/parse.ts';
+import { buildOperationsGridModel } from './projectOperationsGrid.ts';
 import '../styles/projects-view.css';
 
 const DEFAULT_SYMBOL = 'AAPL';
@@ -80,12 +82,6 @@ function formatTableValue(value: number | null): string {
   const abs = Math.abs(value);
   const decimals = abs >= 100 ? 0 : abs >= 1 ? 2 : 4;
   return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
-}
-
-function extractYearLabel(value: string | null, index: number): string {
-  if (typeof value !== 'string') return `t${index}`;
-  const yearMatch = value.match(/^(\d{4})/);
-  return yearMatch?.[1] ?? `t${index}`;
 }
 
 function RenderSeriesTable(props: { title: string; columns: string[]; rows: Array<{ label: string; unit?: string; values: Array<number | null> }> }) {
@@ -347,36 +343,45 @@ export default function ProjectsPage() {
   }, [lockedTargetCurrency, snapshotData, profileDefaults]);
 
   const series = (snapshotData?.series ?? null) as SeriesShape | null;
+  const parsedProject = useMemo(() => {
+    if (!selectedProject?.raw_json) return null;
+    try {
+      return parseProjectJsonV1WithContext(selectedProject.raw_json);
+    } catch {
+      return null;
+    }
+  }, [selectedProject]);
+
   const seriesColumns = useMemo(() => {
     if (!series) return [] as string[];
-    const dates = Array.isArray(series.periodEndDatesUtc) ? series.periodEndDatesUtc : [];
-    if (dates.length > 0) return dates.map((date, idx) => extractYearLabel(date ?? null, idx));
     const idx = Array.isArray(series.periodIndex) ? series.periodIndex : [];
     return idx.map((value) => `t${value}`);
   }, [series]);
 
-  const operationsRows = useMemo(() => {
-    if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
-    const rows: Array<{ label: string; unit?: string; values: Array<number | null> }> = [];
-
-    if (Array.isArray(series.oreMinedTonnes)) rows.push({ label: 'Ore mined', unit: 'tonne', values: series.oreMinedTonnes });
-    if (Array.isArray(series.oreMilledTonnes)) rows.push({ label: 'Ore milled', unit: 'tonne', values: series.oreMilledTonnes });
-    if (typeof series.nameplateThroughput === 'number') {
-      rows.push({ label: 'Nameplate throughput', unit: series.throughputUnit ?? undefined, values: new Array(seriesColumns.length).fill(series.nameplateThroughput) });
-    }
-    if (typeof series.utilizationPct === 'number') {
-      rows.push({ label: 'Utilization', unit: '%', values: new Array(seriesColumns.length).fill(series.utilizationPct) });
-    }
-
-    for (const metal of Object.keys(series.payableQtyByMetal ?? {}).sort((a, b) => a.localeCompare(b))) {
-      const values = series.payableQtyByMetal?.[metal];
-      if (Array.isArray(values)) {
-        rows.push({ label: `Payable ${metal}`, unit: series.payableQtyUnitByMetal?.[metal], values });
-      }
-    }
-
-    return rows;
-  }, [series, seriesColumns.length]);
+  const operationsGrid = useMemo(() => {
+    const raw = parsedProject;
+    if (!raw) return null;
+    const masterN = raw.engineInputWithoutPrices.masterN;
+    return buildOperationsGridModel({
+      masterN,
+      productionStartPeriod: raw.engineInputWithoutPrices.productionStartPeriod,
+      periodEndDatesUtc: raw.engineInputWithoutPrices.periodEndDatesUtc,
+      operations: {
+        oreMilledTonnes: raw.context.operations?.oreMilledTonnes,
+        oreMinedTonnes: raw.context.operations?.oreMinedTonnes,
+        oreTonnageUnit: raw.context.operations?.oreTonnageUnit,
+        capacity: {
+          throughputUnit: raw.context.operations?.capacity?.throughputUnit,
+          nameplateThroughput: raw.context.operations?.capacity?.nameplateThroughput,
+          utilizationPct: raw.context.operations?.capacity?.utilizationPct,
+        },
+      },
+      metals: {
+        payableQtyByMetal: raw.engineInputWithoutPrices.payableQtyByMetal,
+        payableQtyUnitByMetal: raw.engineInputWithoutPrices.payableQtyUnitByMetal,
+      },
+    });
+  }, [parsedProject]);
 
   const economicsRows = useMemo(() => {
     if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
@@ -487,7 +492,62 @@ export default function ProjectsPage() {
           ))}
         </section>
 
-        <RenderSeriesTable title="Operations" columns={seriesColumns} rows={operationsRows} />
+        <section className="projects-series-section">
+          <h2>Operations</h2>
+          {!operationsGrid ? (
+            <p className="projects-muted">No series data available yet for this project.</p>
+          ) : (
+            <>
+              {operationsGrid.notes.map((note) => <p key={note} className="projects-warning-note">{note}</p>)}
+              {operationsGrid.warnings.map((warning) => <p key={warning} className="projects-warning-note">{warning}</p>)}
+
+              <div className="projects-capacity-block">
+                <div><strong>Nameplate throughput:</strong> {formatTableValue(operationsGrid.capacity.nameplateThroughput)} {operationsGrid.capacity.throughputUnit ?? ''}</div>
+                <div><strong>Utilization:</strong> {operationsGrid.capacity.utilizationPct === null ? '—' : `${formatTableValue(operationsGrid.capacity.utilizationPct * 100)}%`}</div>
+                <div><strong>Effective throughput:</strong> {formatTableValue(operationsGrid.capacity.effectiveThroughput)} {operationsGrid.capacity.throughputUnit ?? ''}</div>
+              </div>
+
+              <div className="projects-table-wrap">
+                <table className="projects-table projects-table-tight">
+                  <thead>
+                    <tr>
+                      <th>Year</th>
+                      {operationsGrid.years.map((value, idx) => <th key={`year-${idx}`}>{value}</th>)}
+                    </tr>
+                    <tr>
+                      <th>t</th>
+                      {operationsGrid.tIndex.map((value, idx) => <th key={`t-${idx}`}>{value}</th>)}
+                    </tr>
+                    <tr>
+                      <th>t - tp</th>
+                      {operationsGrid.tMinusTp.map((value, idx) => <th key={`dt-${idx}`}>{value}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {operationsGrid.rows.map((row) => (
+                      <tr key={row.label}>
+                        <th>{row.label}</th>
+                        {Array.from({ length: operationsGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`}>{formatTableValue(row.values[t] ?? null)}</td>)}
+                      </tr>
+                    ))}
+
+                    {operationsGrid.totals.length > 0 && (
+                      <tr>
+                        <th colSpan={operationsGrid.columnCount + 1} className="projects-subheader-cell">Totals (t &gt;= tp)</th>
+                      </tr>
+                    )}
+                    {operationsGrid.totals.map((total) => (
+                      <tr key={total.label}>
+                        <th>{total.label}</th>
+                        <td colSpan={operationsGrid.columnCount}>{formatTableValue(total.value)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
         <RenderSeriesTable title="Economics" columns={seriesColumns} rows={economicsRows} />
 
         <details>
