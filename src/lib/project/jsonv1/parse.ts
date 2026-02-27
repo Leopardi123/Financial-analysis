@@ -299,6 +299,42 @@ function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: A
 }
 
 
+
+function validateTakeItemsBasicShape(takeItems: unknown[], path: string): void {
+  for (let idx = 0; idx < takeItems.length; idx += 1) {
+    const item = takeItems[idx];
+    if (!isPlainObject(item)) {
+      continue;
+    }
+    if (!isPlainObject(item.rateDefinition)) {
+      continue;
+    }
+    const rateType = item.rateDefinition.rateType;
+    if (rateType !== undefined && rateType !== 'FIXED' && rateType !== 'TIERED') {
+      fail(`${path}[${idx}].rateDefinition.rateType`, '"FIXED" | "TIERED"', rateType);
+    }
+    if (item.priceKey !== undefined && item.priceKey !== null && typeof item.priceKey !== 'string') {
+      fail(`${path}[${idx}].priceKey`, 'string | null', item.priceKey);
+    }
+    const tiers = item.rateDefinition.tiers;
+    if (tiers !== undefined && tiers !== null) {
+      if (!Array.isArray(tiers)) {
+        fail(`${path}[${idx}].rateDefinition.tiers`, 'array', tiers);
+      }
+      for (let tierIdx = 0; tierIdx < tiers.length; tierIdx += 1) {
+        const tier = tiers[tierIdx];
+        if (!isPlainObject(tier)) {
+          fail(`${path}[${idx}].rateDefinition.tiers[${tierIdx}]`, 'object', tier);
+        }
+        const thresholdType = tier.thresholdType;
+        if (thresholdType !== undefined && thresholdType !== 'price' && thresholdType !== 'revenue') {
+          fail(`${path}[${idx}].rateDefinition.tiers[${tierIdx}].thresholdType`, '"price" | "revenue"', thresholdType);
+        }
+      }
+    }
+  }
+}
+
 function asRecordOfRawSeries(value: unknown, path: string): Record<string, unknown[]> {
   if (!isPlainObject(value)) {
     fail(path, 'object map of series', value);
@@ -757,6 +793,9 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   if (takeItems !== undefined && takeItems !== null && !Array.isArray(takeItems)) {
     fail('takeItems', 'array or null', takeItems);
   }
+  if (Array.isArray(takeItems)) {
+    validateTakeItemsBasicShape(takeItems, 'takeItems');
+  }
 
   const parsedOperations = raw.operations === undefined ? undefined : parseOperations(raw.operations, masterN);
   const operations = parsedOperations?.operations;
@@ -817,6 +856,8 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     streamsByMetal: (streamsByMetal as ProjectEngineFullProductionV1Input['streamsByMetal']) ?? null,
     payableQtyByMetal,
     spotPriceUSDByMetal: fallbackSpot,
+    priceKeyByMetal,
+    auPriceKey,
     takeItems: (takeItems as ProjectEngineFullProductionV1Input['takeItems']) ?? [],
     royaltiesDetail: economicsBreakdown?.royaltiesDetail ?? null,
     phase1: {
