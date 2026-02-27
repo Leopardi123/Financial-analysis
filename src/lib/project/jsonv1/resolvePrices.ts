@@ -60,6 +60,10 @@ function mapQtySeriesToCanonical(args: {
   });
 }
 
+function todayUtcDateString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export async function resolveProjectPricesToEngineInput(
   args: {
     parsed: ParsedProjectJsonV1;
@@ -88,8 +92,11 @@ export async function resolveProjectPricesToEngineInput(
         return date.toISOString().slice(0, 10);
       });
   const fallbackAnchorDateUtc = targets[0] ?? from;
+  const todayUtc = todayUtcDateString();
   const spotAnchorDateUtc = scenario.mode === 'spot'
-    ? (args.spotAnchorDateUtc ?? fallbackAnchorDateUtc ?? new Date().toISOString().slice(0, 10))
+    ? ((args.spotAnchorDateUtc ?? fallbackAnchorDateUtc ?? todayUtc) > todayUtc
+        ? todayUtc
+        : (args.spotAnchorDateUtc ?? fallbackAnchorDateUtc ?? todayUtc))
     : '';
 
   const spotPriceUSDByMetal: Record<string, Array<number | null>> = {};
@@ -124,6 +131,13 @@ export async function resolveProjectPricesToEngineInput(
       : resolved.values;
     spotPriceUSDByMetal[metal] = resolvedValues;
 
+    if (scenario.mode === 'spot') {
+      if (spotPriceUSDByMetal[metal].some((value) => value === null)) {
+        warnings.push(`projectId=${projectId} metal=${metal} key=${priceKey} date=${spotAnchorDateUtc} mode=spot reason=No close on or before anchor date`);
+      }
+      continue;
+    }
+
     spotPriceUSDByMetal[metal].forEach((value, index) => {
       if (value !== null) {
         return;
@@ -132,9 +146,7 @@ export async function resolveProjectPricesToEngineInput(
       const periodEndDate = targets[index] ?? 'unknown-date';
       const reason = scenario.mode === 'fixed'
         ? `Missing fixed price for key ${priceKey}`
-        : scenario.mode === 'percentile'
-          ? `No closes in trailing ${scenario.lookbackYears}y window`
-          : 'No close on or before period end';
+        : `No closes in trailing ${scenario.lookbackYears}y window`;
 
       warnings.push(`projectId=${projectId} metal=${metal} key=${priceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
     });
@@ -157,18 +169,22 @@ export async function resolveProjectPricesToEngineInput(
       : resolvedAu.values;
   }
 
-  auPriceUSDPerOz.forEach((value, index) => {
-    if (value !== null) {
-      return;
+  if (scenario.mode === 'spot') {
+    if (auPriceUSDPerOz.some((value) => value === null)) {
+      warnings.push(`projectId=${projectId} metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} date=${spotAnchorDateUtc} mode=spot reason=No close on or before anchor date`);
     }
-    const periodEndDate = targets[index] ?? 'unknown-date';
-    const reason = scenario.mode === 'fixed'
-      ? `Missing fixed price for key ${parsed.engineInputWithoutPrices.auPriceKey}`
-      : scenario.mode === 'percentile'
-        ? `No closes in trailing ${scenario.lookbackYears}y window`
-        : 'No close on or before period end';
-    warnings.push(`projectId=${projectId} metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
-  });
+  } else {
+    auPriceUSDPerOz.forEach((value, index) => {
+      if (value !== null) {
+        return;
+      }
+      const periodEndDate = targets[index] ?? 'unknown-date';
+      const reason = scenario.mode === 'fixed'
+        ? `Missing fixed price for key ${parsed.engineInputWithoutPrices.auPriceKey}`
+        : `No closes in trailing ${scenario.lookbackYears}y window`;
+      warnings.push(`projectId=${projectId} metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
+    });
+  }
 
   if (parsed.priceOverrides.spotPriceUSDByMetal) {
     for (const [metal, series] of Object.entries(parsed.priceOverrides.spotPriceUSDByMetal)) {

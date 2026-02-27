@@ -252,6 +252,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
   const spotFutureParsed = parseProjectJsonV1(base);
   const spotCalls: string[][] = [];
+  const todayUtc = new Date().toISOString().slice(0, 10);
   const spotFutureResolved = await resolveProjectPricesToEngineInput(
     {
       parsed: spotFutureParsed,
@@ -270,6 +271,26 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   assertEqual(spotFutureResolved.spotPriceUSDByMetal.Au[0], 1234, 'spot price should be replicated at t0');
   assertEqual(spotFutureResolved.spotPriceUSDByMetal.Au[2], 1234, 'spot price should be replicated at future tN');
 
+  const spotFutureAnchorCalls: string[][] = [];
+  await resolveProjectPricesToEngineInput(
+    {
+      parsed: spotFutureParsed,
+      scenario: { mode: 'spot' },
+      projectId: 'proj-spot-future-anchor-clamp',
+      spotAnchorDateUtc: '2099-12-31',
+    },
+    {
+      resolvePriceSeriesFn: async ({ anchorDatesUtc, price_key }) => {
+        spotFutureAnchorCalls.push(anchorDatesUtc);
+        return { values: [price_key === 'XAU_USD_TOZ' ? 2000 : 4], warnings: [] };
+      },
+    },
+  );
+  assert(
+    spotFutureAnchorCalls.every((anchors) => anchors.length === 1 && anchors[0] === todayUtc),
+    'spot mode should clamp future anchor dates to today UTC',
+  );
+
   const spotWarningResolved = await resolveProjectPricesToEngineInput(
     {
       parsed: spotFutureParsed,
@@ -284,6 +305,11 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   assert(
     spotWarningResolved.diagnostics?.warnings.some((warning) => warning.includes('projectId=proj-warning-id')) ?? false,
     'spot warnings should include project id when coverage is missing',
+  );
+  assertEqual(spotWarningResolved.diagnostics?.warnings.length, 3, 'spot warnings should emit once per missing key');
+  assert(
+    !(spotWarningResolved.diagnostics?.warnings.some((warning) => warning.includes('period end')) ?? false),
+    'spot warnings should reference anchor date, not period end',
   );
 
   const fixedResolved = await resolveProjectPricesToEngineInput(
