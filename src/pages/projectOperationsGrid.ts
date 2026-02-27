@@ -179,22 +179,28 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   if (metals.length > 0) rows.push({ label: 'Gross profit (USD)', values: grossProfit });
 
   const royaltiesDetail = input.economics?.royaltiesDetail ?? null;
-  const hasRoyaltiesDetail = Array.isArray(royaltiesDetail) && royaltiesDetail.length > 0;
+  const computableRules = (royaltiesDetail ?? []).filter((detail) => {
+    const rate = detail.rate;
+    return detail.base === 'revenue'
+      && (detail.rateType === 'NSR_pct' || detail.rateType === 'ad_valorem_pct')
+      && typeof rate === 'number'
+      && Number.isFinite(rate);
+  });
+  const hasComputedRoyalties = computableRules.length > 0;
+  if (hasComputedRoyalties) {
+    notes.push('Royalties (computed)');
+  }
+
   const effectiveRoyaltiesUSD = Array.from({ length: columnCount }, (_, t) => {
-    if (!hasRoyaltiesDetail) {
+    if (!hasComputedRoyalties) {
       const fallback = input.economics?.royaltiesUSD?.[t] ?? 0;
       return Number.isFinite(fallback) ? fallback : null;
     }
+    const revenue = grossRevenue[t];
+    if (revenue === null || !Number.isFinite(revenue)) return null;
     let sum = 0;
-    for (const detail of royaltiesDetail ?? []) {
-      const base = detail.base ?? null;
-      const rateType = detail.rateType ?? null;
-      const ratePct = detail.rate;
-      const rateFraction = typeof ratePct === 'number' && Number.isFinite(ratePct) ? ratePct / 100 : null;
-      if (rateFraction === null || base !== 'revenue' || rateType !== 'NSR_pct') return null;
-      const revenue = grossRevenue[t];
-      if (revenue === null || !Number.isFinite(revenue)) return null;
-      sum += revenue * rateFraction;
+    for (const detail of computableRules) {
+      sum += revenue * ((detail.rate as number) / 100);
     }
     return sum;
   });

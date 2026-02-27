@@ -41,6 +41,22 @@ function sanitizeSeries(series: Array<number | null>): Array<number | null> {
   return series.map((value) => toFiniteOrNull(value));
 }
 
+function materiallyDifferentSeries(
+  left: Array<number | null>,
+  right: Array<number | null>,
+  epsilon = 0.01,
+): boolean {
+  const len = Math.max(left.length, right.length);
+  for (let i = 0; i < len; i += 1) {
+    const l = toFiniteOrNull(left[i] ?? null);
+    const r = toFiniteOrNull(right[i] ?? null);
+    if (l === null && r === null) continue;
+    if (l === null || r === null) return true;
+    if (Math.abs(l - r) > epsilon) return true;
+  }
+  return false;
+}
+
 function assertSeriesLength(
   series: Array<number | null>,
   expectedLength: number,
@@ -962,33 +978,15 @@ export async function runCorporateSnapshotPipeline(args: {
 
           const rawSeriesRoyalties = (rawJsonRecord.series as { royaltiesUSD?: Array<number | null> } | undefined)?.royaltiesUSD;
           const explicitRoyaltiesUSD = Array.from({ length: periodEndDatesUtc.length }, (_, t) => toFiniteOrNull(rawSeriesRoyalties?.[t] ?? null));
-          const resolvedWithRoyalties = isAllNullOrNonFinite(explicitRoyaltiesUSD)
-            ? resolved
-            : {
-                ...resolved,
-                phase1: {
-                  ...resolved.phase1,
-                  royaltiesUSD: explicitRoyaltiesUSD,
-                },
-              };
 
-          const out = computeProjectEngineFullProductionV1(resolvedWithRoyalties);
-          diagnostics.warnings.push(...out.nationalTake.diagnostics);
+          const outPreRoyalties = computeProjectEngineFullProductionV1(resolved);
+          diagnostics.warnings.push(...outPreRoyalties.nationalTake.diagnostics);
           const projectLength = periodEndDatesUtc.length;
           const nullSeries = new Array<number | null>(projectLength).fill(null);
           const taxRate = parsed.engineInputWithoutPrices.taxRate;
           const depreciationUSD = sanitizeSeries(parsed.context.series?.depreciationUSD ?? nullSeries);
-          const ebitdaUSD = sanitizeSeries(out.phase1.ebitdaUSD);
-          const ebitUSD = ebitdaUSD.map((ebitda, t) => {
-            const dep = depreciationUSD[t];
-            if (ebitda === null || dep === null) return null;
-            return ebitda - dep;
-          });
-          const taxableIncomeUSD = ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
-          const taxByRule = taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
-          const effectiveTaxRate = ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
           diagnostics.warnings.push(`Tax base: TaxableIncome = max(0, EBIT); EBIT = EBITDA - Depreciation; taxRate=${taxRate === null ? 'null' : String(taxRate)}`);
-          const grossRevenueUSD = sanitizeSeries(out.revenue.grossRevenueUSD);
+          const grossRevenueUSD = sanitizeSeries(outPreRoyalties.revenue.grossRevenueUSD);
           const operatingCostsUSD = sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD);
           const grossProfitUSD = grossRevenueUSD.map((gross, t) => {
             const op = operatingCostsUSD[t];
@@ -997,26 +995,34 @@ export async function runCorporateSnapshotPipeline(args: {
           });
 
           const projectEconomicsBreakdown = parsed.context.economicsBreakdown;
-          let anyItemDerivedFromRevenueRates = false;
-          const royaltiesDetail = (projectEconomicsBreakdown?.royaltiesDetail ?? []).map((detail) => {
-            const explicitRoyaltyUSD = detail.royaltyUSD ? sanitizeSeries(detail.royaltyUSD) : null;
-            const shouldDeriveItemSeries = isAllNullOrNonFinite(explicitRoyaltyUSD);
-            const rate = toFiniteOrNull(detail.rate);
+          const sanitizedGrossRevenueUSD = sanitizeSeries(outPreRoyalties.revenue.grossRevenueUSD);
+          const grossRevenueHasNulls = sanitizedGrossRevenueUSD.some((value) => value === null);
+          if (grossRevenueHasNulls) {
+            diagnostics.warnings.push('royalties: grossRevenueUSD contains nulls; royalties set to null for those periods');
+          }
 
-            if (detail.base !== 'revenue' && shouldDeriveItemSeries) {
-              diagnostics.warnings.push(`royaltiesDetail: unknown base=${String(detail.base)}; royaltyUSD left null`);
+          const royaltiesDetailRaw = projectEconomicsBreakdown?.royaltiesDetail ?? null;
+          const computableRateTypes = new Set<string>();
+          let computableRuleCount = 0;
+          const royaltiesDetail = (royaltiesDetailRaw ?? []).map((detail) => {
+            const rate = toFiniteOrNull(detail.rate);
+            const isComputable =
+              detail.base === 'revenue'
+              && (detail.rateType === 'NSR_pct' || detail.rateType === 'ad_valorem_pct')
+              && rate !== null;
+
+            if (isComputable) {
+              computableRuleCount += 1;
+              computableRateTypes.add(String(detail.rateType));
+              diagnostics.warnings.push(`royaltiesDetail used: ${detail.id} rate=${String(rate)}%`);
+            } else {
+              diagnostics.warnings.push(`royaltiesDetail ignored: ${detail.id} base=${String(detail.base)} rateType=${String(detail.rateType)} rate=${String(detail.rate)}`);
             }
 
-            const royaltyUSD = shouldDeriveItemSeries
-              ? out.revenue.grossRevenueUSD.map((value) => {
-                  const finiteBase = toFiniteOrNull(value);
-                  if (detail.base !== 'revenue' || detail.rateType !== 'NSR_pct' || finiteBase === null || rate === null) {
-                    return null;
-                  }
-                  anyItemDerivedFromRevenueRates = true;
-                  return Math.max(0, finiteBase) * (rate / 100);
-                })
-              : (explicitRoyaltyUSD as Array<number | null>);
+            const royaltyUSD = sanitizedGrossRevenueUSD.map((gross) => {
+              if (!isComputable || gross === null) return null;
+              return gross * ((rate as number) / 100);
+            });
 
             return {
               id: detail.id,
@@ -1029,9 +1035,57 @@ export async function runCorporateSnapshotPipeline(args: {
             };
           });
 
-          if (anyItemDerivedFromRevenueRates) {
-            diagnostics.warnings.push('royaltiesDetail: derived royaltyUSD from base=revenue using NSR_pct rate(s); summed into series.royaltiesUSD');
+          const computedRoyaltiesUSD = sanitizedGrossRevenueUSD.map((gross, t) => {
+            if (gross === null) return null;
+            let sum = 0;
+            let hasAny = false;
+            for (const detail of royaltiesDetail) {
+              const value = detail.royaltyUSD[t] ?? null;
+              if (value === null) continue;
+              sum += value;
+              hasAny = true;
+            }
+            return hasAny ? sum : 0;
+          });
+
+          const hasRoyaltiesDetailArray = Array.isArray(royaltiesDetailRaw);
+          const hasComputableRoyaltyRules = computableRuleCount > 0;
+          const fallbackRoyaltiesUSD = isAllNullOrNonFinite(explicitRoyaltiesUSD)
+            ? sanitizeSeries(outPreRoyalties.nationalTake.totalRoyaltiesUSD)
+            : explicitRoyaltiesUSD;
+          const royaltiesUSD = hasComputableRoyaltyRules
+            ? sanitizeSeries(computedRoyaltiesUSD)
+            : fallbackRoyaltiesUSD;
+
+          if (hasComputableRoyaltyRules) {
+            const rateTypes = Array.from(computableRateTypes).sort((a, b) => a.localeCompare(b)).join('|');
+            diagnostics.warnings.push(`royalties: computed from royaltiesDetail (base=revenue, rateType=${rateTypes}, count=${String(computableRuleCount)})`);
+            diagnostics.warnings.push('Royalties (computed)');
+            if (!isAllNullOrNonFinite(explicitRoyaltiesUSD) && materiallyDifferentSeries(royaltiesUSD, explicitRoyaltiesUSD)) {
+              diagnostics.warnings.push('royalties: computed royalties used; series.royaltiesUSD ignored due to royaltiesDetail precedence');
+            }
+          } else if (hasRoyaltiesDetailArray) {
+            diagnostics.warnings.push('royaltiesDetail present but no computable rules; falling back to series.royaltiesUSD');
+          } else {
+            diagnostics.warnings.push('royaltiesDetail missing; using series.royaltiesUSD');
           }
+
+          const out = computeProjectEngineFullProductionV1({
+            ...resolved,
+            phase1: {
+              ...resolved.phase1,
+              royaltiesUSD,
+            },
+          });
+          const ebitdaUSD = sanitizeSeries(out.phase1.ebitdaUSD);
+          const ebitUSD = ebitdaUSD.map((ebitda, t) => {
+            const dep = depreciationUSD[t];
+            if (ebitda === null || dep === null) return null;
+            return ebitda - dep;
+          });
+          const taxableIncomeUSD = ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
+          const taxByRule = taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
+          const effectiveTaxRate = ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
 
           const taxesDetail = projectEconomicsBreakdown?.taxesDetail
             ? {
@@ -1050,7 +1104,7 @@ export async function runCorporateSnapshotPipeline(args: {
             taxRate,
             grossRevenueUSD,
             operatingCostsUSD,
-            royaltiesUSD: sanitizeSeries(out.nationalTake.totalRoyaltiesUSD),
+            royaltiesUSD,
             depreciationUSD,
             taxUSD: sanitizeSeries(taxByRule),
             capexUSD: sanitizeSeries(out.capexUSD_used),
@@ -1131,7 +1185,7 @@ export async function runCorporateSnapshotPipeline(args: {
               operatingCostsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD),
               sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
               siteGandA_USD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.siteGandA_USD),
-              royaltiesUSD: sanitizeSeries(out.nationalTake.totalRoyaltiesUSD),
+              royaltiesUSD,
               reclamationUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD),
               byproductCreditsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.byproductCreditsUSD ?? nullSeries),
               sustainingCostUSD: sanitizeSeries(out.phase1.sustainingCostUSD),
