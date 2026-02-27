@@ -1,6 +1,6 @@
 import { convertPriceToCanonical } from './units/convert.ts';
 import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.ts';
-import { fetchHistorical, getLegacyQuote, type ProviderPriceRow } from './providers/fmp.ts';
+import { buildHistoricalWindowUtc, fetchHistorical, getLegacyQuote, type ProviderPriceRow } from './providers/fmp.ts';
 import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.ts';
 import { getLegacySymbolForPriceKey } from './providers/legacyCommoditySymbolMap.ts';
 
@@ -113,10 +113,17 @@ export async function resolvePriceSeries(
 
   const maxDate = sortedAnchors[sortedAnchors.length - 1];
   const minDate = sortedAnchors[0];
+  const spotWindow = args.scenario.mode === 'spot'
+    ? buildHistoricalWindowUtc({ toUtc: maxDate, lookbackDays: 30, maxLookbackDays: 60 })
+    : null;
+  if (spotWindow?.wasClamped) {
+    pushWarning(`historicalWindow: from clamped to ${spotWindow.fromUtc} (maxLookbackDays=${spotWindow.maxLookbackDays})`);
+  }
+
   const fromUtc = args.scenario.mode === 'percentile'
     ? subtractUtcYears(minDate, args.scenario.lookbackYears)
     : args.scenario.mode === 'spot'
-      ? subtractUtcYears(minDate, 20)
+      ? spotWindow?.fromUtc ?? minDate
       : minDate;
 
   if (args.allowRefresh) {
@@ -132,6 +139,7 @@ export async function resolvePriceSeries(
       const quote = await resolvedDeps.getLegacyQuoteFn(legacySymbol);
       if (quote) {
         quoteFallbackClose = quote.price;
+        pushWarning(`historical missing for ${legacySymbol}; fell back to quotes/commodity spot price`);
       } else {
         pushWarning(`No legacy quote for commodity symbol ${legacySymbol} via /api/v3/quotes/commodity`);
         pushWarning('legacyFetch: GET /api/v3/quotes/commodity');

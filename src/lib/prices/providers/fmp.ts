@@ -36,6 +36,44 @@ type FmpHistoricalResponse = {
   historical?: Array<Record<string, unknown>>;
 } | Array<Record<string, unknown>>;
 
+let legacyCommodityQuotesCache: Promise<LegacyCommodityQuoteRow[]> | null = null;
+
+export function formatDateUtc(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function parseUtcDate(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00Z`);
+}
+
+function addUtcDays(dateStr: string, days: number): string {
+  const d = parseUtcDate(dateStr);
+  const next = new Date(d.getTime() + (days * 24 * 60 * 60 * 1000));
+  return formatDateUtc(next);
+}
+
+function todayUtcDateString(): string {
+  return formatDateUtc(new Date());
+}
+
+export function buildHistoricalWindowUtc(args: {
+  toUtc: string;
+  lookbackDays?: number;
+  maxLookbackDays?: number;
+}): { fromUtc: string; toUtc: string; wasClamped: boolean; maxLookbackDays: number } {
+  const toUtc = formatDateUtc(parseUtcDate(args.toUtc));
+  const lookbackDays = Number.isFinite(args.lookbackDays) ? Math.max(1, Math.floor(args.lookbackDays as number)) : 30;
+  const maxLookbackDays = Number.isFinite(args.maxLookbackDays) ? Math.max(1, Math.floor(args.maxLookbackDays as number)) : 60;
+
+  const fromCandidate = addUtcDays(toUtc, -lookbackDays);
+  const earliestAllowed = addUtcDays(toUtc, -maxLookbackDays);
+  if (fromCandidate < earliestAllowed) {
+    return { fromUtc: earliestAllowed, toUtc, wasClamped: true, maxLookbackDays };
+  }
+
+  return { fromUtc: fromCandidate, toUtc, wasClamped: false, maxLookbackDays };
+}
+
 function toIsoUtc(value: number | string | undefined): string | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return new Date(value * 1000).toISOString();
@@ -83,17 +121,6 @@ function normalizeLegacyHistoricalChartRows(rows: unknown): FmpHistoricalRow[] {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-
-function subtractUtcDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
-}
-
-function todayUtcDateString(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export async function resolveLegacyCloseOnOrBefore(
   symbol: string,
   targetDateUtc: string,
@@ -109,21 +136,24 @@ export async function resolveLegacyCloseOnOrBefore(
     warnings.push(`targetDate ${targetDateUtc} is in the future; clamped to ${todayUtc}`);
   }
 
-  const from = subtractUtcDays(clampedTo, 14);
+  const window = buildHistoricalWindowUtc({ toUtc: clampedTo, lookbackDays: 30, maxLookbackDays: 60 });
+  if (window.wasClamped) {
+    warnings.push(`historicalWindow: from clamped to ${window.fromUtc} (maxLookbackDays=${window.maxLookbackDays})`);
+  }
+
   const path = `historical-chart/1day/${encodeURIComponent(symbol)}`;
-  const response = await fetchApiV3JsonFn<unknown>(path, { from, to: clampedTo });
+  const response = await fetchApiV3JsonFn<unknown>(path, { from: window.fromUtc, to: window.toUtc });
   const rows = normalizeLegacyHistoricalChartRows(response);
-  const eligible = rows.filter((row) => row.date <= clampedTo);
+  const eligible = rows.filter((row) => row.date <= window.toUtc);
   const latest = eligible[eligible.length - 1];
   if (!latest) {
-    warnings.push(`No close on or before ${clampedTo} for ${symbol}`);
-    warnings.push(`legacyFetch: GET /api/v3/${path}?from=${from}&to=${clampedTo}`);
+    warnings.push(`No close on or before ${window.toUtc} for ${symbol}`);
+    warnings.push(`legacyFetch: GET /api/v3/${path}?from=${window.fromUtc}&to=${window.toUtc}`);
     return { close: null, warnings };
   }
 
   return { close: latest.close, warnings };
 }
-
 
 export async function fetchQuote(symbol: string): Promise<FmpQuoteResult> {
   const rows = await fetchStableJson<FmpQuoteRow[]>('quote', { symbol });
@@ -141,9 +171,32 @@ export async function fetchQuote(symbol: string): Promise<FmpQuoteResult> {
 export async function fetchLegacyCommodityQuotes(
   deps: {
     fetchApiV3JsonFn?: typeof fetchApiV3Json;
+    disableCache?: boolean;
   } = {},
 ): Promise<LegacyCommodityQuoteRow[]> {
   const fetchApiV3JsonFn = deps.fetchApiV3JsonFn ?? fetchApiV3Json;
+  if (!deps.disableCache && deps.fetchApiV3JsonFn === undefined) {
+    if (!legacyCommodityQuotesCache) {
+      legacyCommodityQuotesCache = fetchApiV3JsonFn<Array<Record<string, unknown>>>('quotes/commodity').then((rows) =>
+        rows
+          .map((row) => {
+            const symbol = typeof row.symbol === 'string' ? row.symbol.trim().toUpperCase() : null;
+            const price = typeof row.price === 'number' && Number.isFinite(row.price) ? row.price : null;
+            if (!symbol || price === null) {
+              return null;
+            }
+            return {
+              symbol,
+              price,
+              ...(typeof row.name === 'string' ? { name: row.name } : {}),
+            };
+          })
+          .filter((row): row is LegacyCommodityQuoteRow => row !== null),
+      );
+    }
+    return legacyCommodityQuotesCache;
+  }
+
   const rows = await fetchApiV3JsonFn<Array<Record<string, unknown>>>('quotes/commodity');
   return rows
     .map((row) => {
@@ -205,7 +258,7 @@ export async function fetchHistorical(
 
   const symbol = legacySymbol ?? provider_symbol;
   if (legacySymbol) {
-    const response = await fetchApiV3Json<unknown>(`historical-chart/1day/${encodeURIComponent(symbol)}`, { from: fromUtc, to: toUtc });
+    const response = await fetchApiV3Json<unknown>(`historical-chart/1day/${encodeURIComponent(symbol)}`, { from: formatDateUtc(parseUtcDate(fromUtc)), to: formatDateUtc(parseUtcDate(toUtc)) });
     const rows = normalizeLegacyHistoricalChartRows(response);
     return rows
       .filter((row) => row.date >= fromUtc && row.date <= toUtc)

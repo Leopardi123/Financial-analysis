@@ -1,4 +1,5 @@
 import { fetchApiV3Json } from '../../../../api/_fmp.js';
+import { buildHistoricalWindowUtc } from '../providers/fmp.ts';
 import { getLegacySymbolForPriceKey } from '../providers/legacyCommoditySymbolMap.ts';
 import { fxLookupCandidatesUSDTo } from './keys.ts';
 
@@ -14,12 +15,6 @@ type FxHistoryRow = { date: string; close: number };
 function subtractUtcYears(dateStr: string, years: number): string {
   const date = new Date(`${dateStr}T00:00:00Z`);
   date.setUTCFullYear(date.getUTCFullYear() - years);
-  return date.toISOString().slice(0, 10);
-}
-
-function subtractUtcDays(dateStr: string, days: number): string {
-  const date = new Date(`${dateStr}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString().slice(0, 10);
 }
 
@@ -119,9 +114,16 @@ export async function resolveFxUSDToTarget(
     pushWarning(`targetDate ${args.anchorDateUtc} is in the future; clamped to ${todayUtc}`);
   }
 
+  const spotWindow = args.scenario.mode === 'spot'
+    ? buildHistoricalWindowUtc({ toUtc: clampedAnchorDateUtc, lookbackDays: 30, maxLookbackDays: 60 })
+    : null;
+  if (spotWindow?.wasClamped) {
+    pushWarning(`historicalWindow: from clamped to ${spotWindow.fromUtc} (maxLookbackDays=${spotWindow.maxLookbackDays})`);
+  }
+
   const fromUtc = args.scenario.mode === 'percentile'
     ? subtractUtcYears(clampedAnchorDateUtc, args.scenario.lookbackYears)
-    : subtractUtcDays(clampedAnchorDateUtc, 14);
+    : spotWindow?.fromUtc ?? clampedAnchorDateUtc;
 
   const candidates = fxLookupCandidatesUSDTo(normalizedCurrency);
 

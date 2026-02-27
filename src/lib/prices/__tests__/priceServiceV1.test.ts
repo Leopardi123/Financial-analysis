@@ -2,7 +2,7 @@ import { convertPriceToCanonical } from '../units/convert.ts';
 import { UNIT_CONSTANTS } from '../units/types.ts';
 import { downsampleDailyToMonthlyEom } from '../store/monthly.ts';
 import { resolvePriceSeries } from '../resolve.ts';
-import { fetchLegacyCommodityQuotes, getLegacyQuote } from '../providers/fmp.ts';
+import { buildHistoricalWindowUtc, fetchLegacyCommodityQuotes, getLegacyQuote } from '../providers/fmp.ts';
 import { getProviderMapping } from '../registry/getPriceKeyMeta.ts';
 
 function assert(condition: unknown, message: string): void {
@@ -93,6 +93,12 @@ function assertApprox(actual: number, expected: number, tolerance: number, label
     fetchLegacyCommodityQuotesFn: async () => legacyCommodityQuotes,
   });
   assert(legacyGc?.symbol === 'GCUSD', 'getLegacyQuote should match exact legacy symbol');
+
+
+  const window = buildHistoricalWindowUtc({ toUtc: '2026-02-27', lookbackDays: 30, maxLookbackDays: 60 });
+  assert(window.toUtc === '2026-02-27', `window to should remain exact UTC date, got ${window.toUtc}`);
+  assert(window.fromUtc === '2026-01-28', `window from should be 30 days lookback, got ${window.fromUtc}`);
+  assert(window.fromUtc !== '2006-02-27', 'window from must never drift 20 years back in spot mode');
 
   let threw = false;
   try {
