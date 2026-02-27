@@ -35,6 +35,7 @@ export type ProjectJsonV1 = {
     operatingCostsUSD: Array<number | null>;
     sustainingCapexUSD: Array<number | null>;
     siteGandA_USD: Array<number | null>;
+    depreciationUSD?: Array<number | null>;
     workingCapitalDeltaUSD?: Array<number | null>;
     royaltiesUSD?: Array<number | null>;
     reclamationUSD: Array<number | null>;
@@ -65,6 +66,9 @@ export type ProjectJsonV1 = {
     oreMilledTonnes?: Array<number | null>;
     oreMinedTonnes?: Array<number | null>;
     oreTonnageUnit?: 'tonne' | 'short_ton' | 'long_ton' | null;
+    gradeByMetal?: Record<string, Array<number | null>>;
+    gradeUnitByMetal?: Record<string, 'gpt' | 'pct' | 'ozpt' | string>;
+    recoveryPctByMetal?: Record<string, Array<number | null>>;
   } | null;
 
   economicsBreakdown?: {

@@ -361,12 +361,54 @@ function parseOperations(raw: unknown, masterN: number): ProjectJsonV1['operatio
     operations.oreTonnageUnit = oreTonnageUnit;
   }
 
+  const parseOptionalSeriesMap = (value: unknown, path: string): Record<string, Array<number | null>> | undefined => {
+    if (value === undefined) return undefined;
+    if (!isPlainObject(value)) {
+      fail(path, 'object map of series', value);
+    }
+    const mapped: Record<string, Array<number | null>> = {};
+    for (const [key, rawSeries] of Object.entries(value)) {
+      const series = normalizeSparseSeries(`${path}.${key}`, rawSeries, masterN);
+      if (!series) {
+        fail(`${path}.${key}`, `array length <= ${masterN + 1}`, rawSeries);
+      }
+      validateNonNegativeFiniteSeries(series, `${path}.${key}`);
+      mapped[key] = series;
+    }
+    return mapped;
+  };
+
+  if ('gradeByMetal' in raw) {
+    operations.gradeByMetal = parseOptionalSeriesMap(raw.gradeByMetal, 'operations.gradeByMetal');
+  }
+
+  if ('gradeUnitByMetal' in raw && raw.gradeUnitByMetal !== undefined) {
+    if (!isPlainObject(raw.gradeUnitByMetal)) {
+      fail('operations.gradeUnitByMetal', 'object map of string units', raw.gradeUnitByMetal);
+    }
+    const gradeUnitByMetal: Record<string, string> = {};
+    for (const [metal, unit] of Object.entries(raw.gradeUnitByMetal)) {
+      if (typeof unit !== 'string' || unit.trim().length === 0) {
+        fail(`operations.gradeUnitByMetal.${metal}`, 'non-empty string', unit);
+      }
+      gradeUnitByMetal[metal] = unit;
+    }
+    operations.gradeUnitByMetal = gradeUnitByMetal;
+  }
+
+  if ('recoveryPctByMetal' in raw) {
+    operations.recoveryPctByMetal = parseOptionalSeriesMap(raw.recoveryPctByMetal, 'operations.recoveryPctByMetal');
+  }
+
   return operations;
 }
 
 export type ProjectJsonV1Context = {
   operations?: ProjectJsonV1['operations'] | null;
   economicsBreakdown?: ProjectJsonV1['economicsBreakdown'];
+  series?: {
+    depreciationUSD?: Array<number | null>;
+  };
   equity?: {
     fdExtraShares: number;
     fdNotes?: string;
@@ -492,6 +534,11 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     raw.series.workingCapitalDeltaUSD === undefined
       ? undefined
       : sanitizeSeries(asSeries(raw.series.workingCapitalDeltaUSD, 'series.workingCapitalDeltaUSD', expectedLength));
+
+  const depreciationUSD =
+    raw.series.depreciationUSD === undefined
+      ? undefined
+      : sanitizeSeries(asSeries(raw.series.depreciationUSD, 'series.depreciationUSD', expectedLength));
 
   const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, masterN, siteGandA_USD);
 
@@ -662,6 +709,9 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     context: {
       operations: operations ?? null,
       economicsBreakdown: economicsBreakdown ?? null,
+      series: {
+        depreciationUSD,
+      },
       equity: {
         fdExtraShares,
         ...(fdNotes !== undefined ? { fdNotes } : {}),
