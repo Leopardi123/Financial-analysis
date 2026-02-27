@@ -1,6 +1,7 @@
 import type { ProjectAiscOutput } from './aisc/types.ts';
 import type { NationalTakeOutput } from './nationalTake/types.ts';
 import type { ProjectRevenueInput, ProjectRevenueOutput } from './revenue/types.ts';
+import type { RoyaltyDetailMVI } from './royalties/mvi.ts';
 import type { StreamsApplyByMetalInput, StreamsApplyByMetalOutput } from './streams/applyByMetal.ts';
 import type { StreamMVIConfig } from './streams/types.ts';
 import type { ProjectTakeMVIInput, ProjectTakeMVIOutput, TakeItemMVI } from './take/types.ts';
@@ -152,6 +153,8 @@ export type ProjectEngineFullProductionV1Input = {
   spotPriceUSDByMetal: Record<string, (number | null)[]>;
 
   takeItems: TakeItemMVI[];
+
+  royaltiesDetail?: Array<RoyaltyDetailMVI> | null;
 
   phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & {
     royaltiesUSD?: (number | null)[];

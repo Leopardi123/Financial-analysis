@@ -1,4 +1,5 @@
 import { computeProjectPhase1 } from '../phase1.ts';
+import { computeRoyaltiesFromDetail } from '../royalties/mvi.ts';
 import { computeTakeEngine } from '../take/compute.ts';
 import type { NationalTakeInput, NationalTakeOutput } from './types.ts';
 
@@ -16,11 +17,11 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function anyNonNull(series: Array<number | null> | undefined): boolean {
+function anyFinite(series: Array<number | null> | undefined): boolean {
   if (!series) {
     return false;
   }
-  return series.some((value) => value !== null);
+  return series.some((value) => isFiniteNumber(value));
 }
 
 export function computeNationalTake(input: NationalTakeInput): NationalTakeOutput {
@@ -55,9 +56,19 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
     takeItems: input.items,
   });
 
-  const royaltiesEffective = anyNonNull(input.phase1.royaltiesUSD)
+  const royaltiesFromDetail = computeRoyaltiesFromDetail({
+    grossRevenueUSD: input.grossRevenueUSD,
+    royaltiesDetail: input.royaltiesDetail,
+  });
+
+  const diagnostics = [...royaltiesFromDetail.diagnostics];
+  const royaltiesEffective = anyFinite(input.phase1.royaltiesUSD)
     ? (input.phase1.royaltiesUSD as Array<number | null>)
-    : takeOut.totalTakeUSD;
+    : royaltiesFromDetail.royaltiesUSD_calc;
+
+  if (anyFinite(input.phase1.royaltiesUSD)) {
+    diagnostics.push('royaltiesUSD: manual override detected; ignoring royaltiesDetail for calculation');
+  }
 
   const totalRoyaltiesUSD = new Array<number | null>(expectedLength).fill(0);
   for (let t = 0; t < expectedLength; t += 1) {
@@ -78,5 +89,6 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
     totalRoyaltiesUSD,
     phase1: phase1Out,
     itemTakeUSDById: takeOut.itemTakeUSDById,
+    diagnostics,
   };
 }

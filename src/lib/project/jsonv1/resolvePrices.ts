@@ -226,6 +226,7 @@ export async function resolveProjectPricesToEngineInput(
     payableQtyByMetal: payableQtyByMetalCanonical,
     spotPriceUSDByMetal,
     takeItems: parsed.engineInputWithoutPrices.takeItems,
+    royaltiesDetail: parsed.engineInputWithoutPrices.royaltiesDetail ?? null,
     phase1: parsed.engineInputWithoutPrices.phase1,
     phase2: parsed.engineInputWithoutPrices.phase2,
     aisc: {

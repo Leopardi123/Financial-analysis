@@ -66,6 +66,7 @@ function makeOutputStub(input: {
           : {}),
       },
       itemTakeUSDById: {},
+      diagnostics: [],
     },
     totalTakeUSD: [],
     itemTakeUSDById: {},

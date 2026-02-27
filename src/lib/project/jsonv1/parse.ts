@@ -808,6 +808,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     payableQtyByMetal,
     spotPriceUSDByMetal: fallbackSpot,
     takeItems: (takeItems as ProjectEngineFullProductionV1Input['takeItems']) ?? [],
+    royaltiesDetail: economicsBreakdown?.royaltiesDetail ?? null,
     phase1: {
       masterN,
       productionStartPeriod,
@@ -834,6 +835,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
       streamsByMetal: (streamsByMetal as ProjectEngineFullProductionV1Input['streamsByMetal']) ?? null,
       payableQtyByMetal,
       takeItems: (takeItems as ProjectEngineFullProductionV1Input['takeItems']) ?? [],
+      royaltiesDetail: economicsBreakdown?.royaltiesDetail ?? null,
       phase1: {
         masterN,
         productionStartPeriod,
