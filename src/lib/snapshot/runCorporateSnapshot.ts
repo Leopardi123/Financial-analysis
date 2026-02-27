@@ -181,6 +181,210 @@ type ProjectSeriesContext = {
   };
 };
 
+type ProjectIdentityValidationResult = {
+  diagnostics: string[];
+  flags: {
+    identityHasFailure: boolean;
+    fcffIdentityFailInProductionWindow: boolean;
+  };
+  perPeriod: Array<{
+    t: number;
+    yearOrPeriodEndDate: string;
+    checks: {
+      grossProfit: 'pass' | 'fail' | 'cannot_evaluate';
+      ebitda: 'pass' | 'fail' | 'cannot_evaluate';
+      ebit: 'pass' | 'fail' | 'cannot_evaluate';
+      tax: 'pass' | 'fail' | 'cannot_evaluate';
+      fcff: 'pass' | 'fail' | 'cannot_evaluate';
+    };
+  }>;
+};
+
+function validateProjectIdentities(input: {
+  periodEndDatesUtc: string[];
+  productionStartPeriod: number;
+  taxRate: number | null;
+  grossRevenueUSD: Array<number | null>;
+  operatingCostsUSD: Array<number | null>;
+  royaltiesUSD: Array<number | null>;
+  depreciationUSD: Array<number | null>;
+  taxUSD: Array<number | null>;
+  capexUSD: Array<number | null>;
+  workingCapitalDeltaUSD: Array<number | null>;
+  sustainingCapexUSD: Array<number | null>;
+  reclamationUSD: Array<number | null>;
+  byproductCreditsUSD: Array<number | null>;
+  grossProfitUSD: Array<number | null>;
+  ebitdaUSD: Array<number | null>;
+  ebitUSD: Array<number | null>;
+  taxableIncomeUSD: Array<number | null>;
+  fcffUSD: Array<number | null>;
+  selling?: {
+    treatmentChargesUSD?: Array<number | null>;
+    refiningChargesUSD?: Array<number | null>;
+    tcRcUSD?: Array<number | null>;
+    transportUSD?: Array<number | null>;
+  };
+}): ProjectIdentityValidationResult {
+  const EPS_USD = 0.01;
+  const diagnostics: string[] = [];
+  const perPeriod: ProjectIdentityValidationResult['perPeriod'] = [];
+  let identityHasFailure = false;
+  let fcffIdentityFailInProductionWindow = false;
+  let loggedSellingAssumption = false;
+
+  const allSellingSeries = [
+    input.selling?.treatmentChargesUSD,
+    input.selling?.refiningChargesUSD,
+    input.selling?.tcRcUSD,
+    input.selling?.transportUSD,
+  ];
+  const allSellingAbsent = allSellingSeries.every((series) => !Array.isArray(series));
+  if (allSellingAbsent) {
+    diagnostics.push('Identity checks: selling costs absent => assumed 0 in identity check');
+    loggedSellingAssumption = true;
+  }
+
+  const formatFail = (t: number, label: string, expected: number, actual: number): string => {
+    const date = input.periodEndDatesUtc[t] ?? String(t);
+    const diff = expected - actual;
+    return `IDENTITY FAIL t=${t} year=${date} ${label}: expected=${String(expected)} actual=${String(actual)} diff=${String(diff)}`;
+  };
+
+  for (let t = 0; t < input.periodEndDatesUtc.length; t += 1) {
+    const checks: ProjectIdentityValidationResult['perPeriod'][number]['checks'] = {
+      grossProfit: 'cannot_evaluate',
+      ebitda: 'cannot_evaluate',
+      ebit: 'cannot_evaluate',
+      tax: 'cannot_evaluate',
+      fcff: 'cannot_evaluate',
+    };
+
+    const gr = toFiniteOrNull(input.grossRevenueUSD[t]);
+    const oc = toFiniteOrNull(input.operatingCostsUSD[t]);
+    const gpActual = toFiniteOrNull(input.grossProfitUSD[t]);
+    if (gr !== null && oc !== null && gpActual !== null) {
+      const expected = gr - oc;
+      if (Math.abs(expected - gpActual) > EPS_USD) {
+        diagnostics.push(formatFail(t, 'Gross profit identity', expected, gpActual));
+        checks.grossProfit = 'fail';
+        identityHasFailure = true;
+      } else {
+        checks.grossProfit = 'pass';
+      }
+    }
+
+    const roy = toFiniteOrNull(input.royaltiesUSD[t]);
+    const ebitdaActual = toFiniteOrNull(input.ebitdaUSD[t]);
+    let sellingSum = 0;
+    let hasFiniteSelling = false;
+    let sellingCannotEvaluate = false;
+    for (const series of allSellingSeries) {
+      if (!Array.isArray(series)) continue;
+      const value = toFiniteOrNull(series[t]);
+      if (value === null) {
+        sellingCannotEvaluate = true;
+        continue;
+      }
+      sellingSum += value;
+      hasFiniteSelling = true;
+    }
+    if (!hasFiniteSelling && !loggedSellingAssumption) {
+      diagnostics.push('Identity checks: selling costs absent => assumed 0 in identity check');
+      loggedSellingAssumption = true;
+    }
+    if (gr !== null && oc !== null && roy !== null && ebitdaActual !== null && !sellingCannotEvaluate) {
+      const expected = gr - oc - roy - sellingSum;
+      if (Math.abs(expected - ebitdaActual) > EPS_USD) {
+        diagnostics.push(formatFail(t, 'EBITDA identity', expected, ebitdaActual));
+        checks.ebitda = 'fail';
+        identityHasFailure = true;
+      } else {
+        checks.ebitda = 'pass';
+      }
+    }
+
+    const dep = toFiniteOrNull(input.depreciationUSD[t]);
+    const ebitda = toFiniteOrNull(input.ebitdaUSD[t]);
+    const ebitActual = toFiniteOrNull(input.ebitUSD[t]);
+    if (ebitda !== null && dep !== null && ebitActual !== null) {
+      const expected = ebitda - dep;
+      if (Math.abs(expected - ebitActual) > EPS_USD) {
+        diagnostics.push(formatFail(t, 'EBIT identity', expected, ebitActual));
+        checks.ebit = 'fail';
+        identityHasFailure = true;
+      } else {
+        checks.ebit = 'pass';
+      }
+    }
+
+    const taxableIncome = toFiniteOrNull(input.taxableIncomeUSD[t]);
+    const taxActual = toFiniteOrNull(input.taxUSD[t]);
+    if (taxableIncome !== null && taxActual !== null && input.taxRate !== null && Number.isFinite(input.taxRate)) {
+      const expected = Math.max(0, taxableIncome) * input.taxRate;
+      if (Math.abs(expected - taxActual) > EPS_USD) {
+        diagnostics.push(formatFail(t, 'Tax identity', expected, taxActual));
+        checks.tax = 'fail';
+        identityHasFailure = true;
+      } else {
+        checks.tax = 'pass';
+      }
+    }
+
+    const fcffActual = toFiniteOrNull(input.fcffUSD[t]);
+    const capex = toFiniteOrNull(input.capexUSD[t]);
+    const wc = toFiniteOrNull(input.workingCapitalDeltaUSD[t]);
+    const sust = toFiniteOrNull(input.sustainingCapexUSD[t]);
+    const recl = toFiniteOrNull(input.reclamationUSD[t]);
+    const byp = toFiniteOrNull(input.byproductCreditsUSD[t]);
+    const tax = toFiniteOrNull(input.taxUSD[t]);
+    if (
+      ebitActual !== null
+      && tax !== null
+      && dep !== null
+      && capex !== null
+      && wc !== null
+      && sust !== null
+      && recl !== null
+      && byp !== null
+      && fcffActual !== null
+    ) {
+      const expected = ebitActual - tax + dep - capex - wc - sust - recl + byp;
+      if (Math.abs(expected - fcffActual) > EPS_USD) {
+        diagnostics.push(formatFail(t, 'FCFF identity', expected, fcffActual));
+        checks.fcff = 'fail';
+        identityHasFailure = true;
+        if (t >= input.productionStartPeriod) {
+          fcffIdentityFailInProductionWindow = true;
+        }
+      } else {
+        checks.fcff = 'pass';
+      }
+    } else if (t >= input.productionStartPeriod) {
+      diagnostics.push(`Identity checks: cannot evaluate FCFF identity at t=${t} year=${input.periodEndDatesUtc[t] ?? String(t)} because one or more required inputs are null/non-finite`);
+    }
+
+    perPeriod.push({
+      t,
+      yearOrPeriodEndDate: input.periodEndDatesUtc[t] ?? String(t),
+      checks,
+    });
+  }
+
+  if (fcffIdentityFailInProductionWindow) {
+    diagnostics.unshift('IDENTITY FAIL: FCFF mismatch in production window; DCF/NPV outputs may be invalid.');
+  }
+
+  return {
+    diagnostics,
+    flags: {
+      identityHasFailure,
+      fcffIdentityFailInProductionWindow,
+    },
+    perPeriod,
+  };
+}
+
 function buildSnapshotSeries(args: {
   masterN: number;
   corporateDates: string[];
@@ -784,6 +988,13 @@ export async function runCorporateSnapshotPipeline(args: {
           const taxByRule = taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
           const effectiveTaxRate = ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
           diagnostics.warnings.push(`Tax base: TaxableIncome = max(0, EBIT); EBIT = EBITDA - Depreciation; taxRate=${taxRate === null ? 'null' : String(taxRate)}`);
+          const grossRevenueUSD = sanitizeSeries(out.revenue.grossRevenueUSD);
+          const operatingCostsUSD = sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD);
+          const grossProfitUSD = grossRevenueUSD.map((gross, t) => {
+            const op = operatingCostsUSD[t];
+            if (gross === null || op === null) return null;
+            return gross - op;
+          });
 
           const projectEconomicsBreakdown = parsed.context.economicsBreakdown;
           let anyItemDerivedFromRevenueRates = false;
@@ -832,6 +1043,46 @@ export async function runCorporateSnapshotPipeline(args: {
                   : undefined,
               }
             : null;
+
+          const identityValidation = validateProjectIdentities({
+            periodEndDatesUtc,
+            productionStartPeriod,
+            taxRate,
+            grossRevenueUSD,
+            operatingCostsUSD,
+            royaltiesUSD: sanitizeSeries(out.nationalTake.totalRoyaltiesUSD),
+            depreciationUSD,
+            taxUSD: sanitizeSeries(taxByRule),
+            capexUSD: sanitizeSeries(out.capexUSD_used),
+            workingCapitalDeltaUSD: sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective),
+            sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
+            reclamationUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD),
+            byproductCreditsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.byproductCreditsUSD ?? nullSeries),
+            grossProfitUSD,
+            ebitdaUSD,
+            ebitUSD: sanitizeSeries(ebitUSD),
+            taxableIncomeUSD: sanitizeSeries(taxableIncomeUSD),
+            fcffUSD: sanitizeSeries(out.phase1.fcffUSD),
+            selling: {
+              treatmentChargesUSD: projectEconomicsBreakdown?.selling?.treatmentChargesUSD
+                ? sanitizeSeries(projectEconomicsBreakdown.selling.treatmentChargesUSD)
+                : undefined,
+              refiningChargesUSD: projectEconomicsBreakdown?.selling?.refiningChargesUSD
+                ? sanitizeSeries(projectEconomicsBreakdown.selling.refiningChargesUSD)
+                : undefined,
+              tcRcUSD: projectEconomicsBreakdown?.selling?.tcRcUSD
+                ? sanitizeSeries(projectEconomicsBreakdown.selling.tcRcUSD)
+                : undefined,
+              transportUSD: projectEconomicsBreakdown?.selling?.transportUSD
+                ? sanitizeSeries(projectEconomicsBreakdown.selling.transportUSD)
+                : undefined,
+            },
+          });
+
+          if (identityValidation.diagnostics.length > 0) {
+            diagnostics.warnings.push(`Identity checks (${projectId}):`);
+            diagnostics.warnings.push(...identityValidation.diagnostics.map((line) => `[${projectId}] ${line}`));
+          }
 
           projectSeriesContexts.push({
             projectId,
