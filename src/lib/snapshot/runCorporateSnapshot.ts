@@ -622,6 +622,7 @@ export async function runCorporateSnapshotPipeline(args: {
       projectId: string;
       productionStartPeriod: number;
       periodEndDatesUtc: string[];
+      fdExtraShares: number;
     }>;
 
     const projectSeriesContexts: ProjectSeriesContext[] = [];
@@ -648,6 +649,7 @@ export async function runCorporateSnapshotPipeline(args: {
             projectId,
             productionStartPeriod,
             periodEndDatesUtc,
+            fdExtraShares: parsed.context.equity?.fdExtraShares ?? 0,
           });
 
           const from = periodEndDatesUtc[0];
@@ -909,6 +911,14 @@ export async function runCorporateSnapshotPipeline(args: {
     const corporateProductionStartPeriod =
       productionStartIndices.length > 0 ? Math.min(...productionStartIndices) : null;
 
+    const totalFdExtraShares = projectsForBuildFunding.reduce((sum, project) => sum + project.fdExtraShares, 0);
+    const shares_post_financing_fd =
+      typeof financing.shares_post_financing === 'number'
+      && Number.isFinite(financing.shares_post_financing)
+      && financing.shares_post_financing > 0
+        ? financing.shares_post_financing + totalFdExtraShares
+        : null;
+
     if (projectsForBuildFunding.length > 0 && corporateProductionStartPeriod === null) {
       diagnostics.warnings.push(
         'Lista2 CF+DCF productionStartPeriod unavailable after corporate date-grid alignment; outputs set to null',
@@ -920,7 +930,7 @@ export async function runCorporateSnapshotPipeline(args: {
       masterN: aggregation.corporateMasterN,
       productionStartPeriod: corporateProductionStartPeriod,
       discountRate: input.discountRate,
-      shares_post_financing: financing.shares_post_financing,
+      shares_post_financing: shares_post_financing_fd,
       fx_USD_to_TargetCurrency: fxRate,
       npvToday_USD: aggregation.NPV_today_USD,
     });
@@ -943,7 +953,7 @@ export async function runCorporateSnapshotPipeline(args: {
       auPriceUSDPerOz: aggregation.auPriceUSDPerOz,
       fx_USD_to_TargetCurrency: fxRate,
       shares_current: marketInput.shares_current,
-      shares_post_financing: financing.shares_post_financing,
+      shares_post_financing: shares_post_financing_fd,
       ev_TargetCurrency: null,
       totalStockholdersEquity_USD,
     });

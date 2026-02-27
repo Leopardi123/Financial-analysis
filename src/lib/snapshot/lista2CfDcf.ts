@@ -126,7 +126,7 @@ export function computeLista2CfDcfMetrics(input: Input): {
       ? input.shares_post_financing
       : null;
   if (shares === null) {
-    warnings.push('Lista2 CF+DCF per-share metrics set to null: shares_post_financing <= 0 or missing');
+    warnings.push('Lista2 CF+DCF per-share metrics set to null: shares_post_financing_fd <= 0 or missing');
   }
 
   const fx =

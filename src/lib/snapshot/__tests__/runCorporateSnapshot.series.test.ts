@@ -133,5 +133,32 @@ test('projects-mode snapshot without market does not throw and nulls EV outputs'
   assert.equal(result.snapshot.EV_over_NPV, null);
   assert.equal(result.snapshot.EV_over_NAV, null);
   assert.equal(result.snapshot.P_over_NAV, null);
-  assert.ok(result.diagnostics.warnings.some((warning) => warning.includes('market: missing market block')));
+  assert.ok(result.diagnostics.warnings.some((warning) => warning.includes('market missing; EV/multiples will be null.')));
+});
+
+
+test('projects-mode per-share metrics default to post-financing FD shares while EV per share stays on common shares_current', async () => {
+  const body = await loadFixture();
+  const baseResult = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(baseResult.ok, true);
+  if (!baseResult.ok) {
+    return;
+  }
+
+  const fdBody = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
+  const fdProjects = fdBody.projects as Array<Record<string, unknown>>;
+  const fdRawJson = fdProjects[0].rawJson as Record<string, unknown>;
+  fdRawJson.equity = { fdExtraShares: 500 };
+
+  const fdResult = await runCorporateSnapshotPipeline({ body: fdBody, refresh: false });
+  assert.equal(fdResult.ok, true);
+  if (!fdResult.ok) {
+    return;
+  }
+
+  assert.notEqual(baseResult.snapshot.CF_LOM_perShare_TargetCurrency, null);
+  assert.notEqual(fdResult.snapshot.CF_LOM_perShare_TargetCurrency, null);
+  assert.ok((fdResult.snapshot.CF_LOM_perShare_TargetCurrency as number) < (baseResult.snapshot.CF_LOM_perShare_TargetCurrency as number));
+
+  assert.equal(fdResult.snapshot.EV_perShare_TargetCurrency, baseResult.snapshot.EV_perShare_TargetCurrency);
 });

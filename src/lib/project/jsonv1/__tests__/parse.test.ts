@@ -39,6 +39,13 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertEqual(parsed.engineInputWithoutPrices.payableQtyUnitByMetal.Au, 'toz', 'qty unit parsed');
   assertEqual(parsed.engineInputWithoutPrices.auPriceKey, 'XAU_USD_TOZ', 'au price key parsed');
   assert(parsed.context.operations != null, 'happy path context operations should be present');
+  assertEqual(parsed.context.equity?.fdExtraShares, 0, 'fd extra shares defaults to 0 when omitted');
+
+  const withFdEquity = getProjectJsonV1Template();
+  withFdEquity.equity = { fdExtraShares: 125, fdNotes: 'options + warrants' };
+  const parsedWithFdEquity = parseProjectJsonV1(withFdEquity);
+  assertEqual(parsedWithFdEquity.context.equity?.fdExtraShares, 125, 'fd extra shares parsed when provided');
+  assertEqual(parsedWithFdEquity.context.equity?.fdNotes, 'options + warrants', 'fd notes parsed when provided');
 
   const wrongVersion = getProjectJsonV1Template();
   (wrongVersion as { version: string }).version = 'wrong';

@@ -367,6 +367,10 @@ function parseOperations(raw: unknown, masterN: number): ProjectJsonV1['operatio
 export type ProjectJsonV1Context = {
   operations?: ProjectJsonV1['operations'] | null;
   economicsBreakdown?: ProjectJsonV1['economicsBreakdown'];
+  equity?: {
+    fdExtraShares: number;
+    fdNotes?: string;
+  };
 };
 
 export type ParsedProjectJsonV1 = {
@@ -436,6 +440,29 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     fail('economics.taxRate', 'finite number in [0, 0.6]', rawTaxRate);
   }
   const taxRate = rawTaxRate ?? 0;
+
+  let fdExtraShares = 0;
+  let fdNotes: string | undefined;
+  if (raw.equity !== undefined) {
+    if (!isPlainObject(raw.equity)) {
+      fail('equity', 'object', raw.equity);
+    }
+    const rawFdExtraShares = raw.equity.fdExtraShares;
+    if (rawFdExtraShares !== undefined) {
+      if (!isFiniteNumber(rawFdExtraShares) || rawFdExtraShares < 0) {
+        fail('equity.fdExtraShares', 'finite number >= 0', rawFdExtraShares);
+      }
+      fdExtraShares = rawFdExtraShares;
+    }
+
+    const rawFdNotes = raw.equity.fdNotes;
+    if (rawFdNotes !== undefined) {
+      if (typeof rawFdNotes !== 'string') {
+        fail('equity.fdNotes', 'string', rawFdNotes);
+      }
+      fdNotes = rawFdNotes;
+    }
+  }
 
   if (!isPlainObject(raw.series)) {
     fail('series', 'object', raw.series);
@@ -635,6 +662,10 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     context: {
       operations: operations ?? null,
       economicsBreakdown: economicsBreakdown ?? null,
+      equity: {
+        fdExtraShares,
+        ...(fdNotes !== undefined ? { fdNotes } : {}),
+      },
     },
     priceOverrides: {
       spotPriceUSDByMetal: overrideSpot,

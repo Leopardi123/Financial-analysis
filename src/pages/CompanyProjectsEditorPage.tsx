@@ -13,6 +13,7 @@ import '../styles/company-project-editor.css';
 type ValidationState = {
   ok: boolean;
   error: string | null;
+  warning: string | null;
   parsed: Record<string, unknown> | null;
 };
 
@@ -36,19 +37,35 @@ function validateProjectJson(rawJson: string): ValidationState {
     parsed = JSON.parse(rawJson);
   } catch (error) {
     const message = (error as Error).message || 'Invalid JSON';
-    return { ok: false, error: `Invalid JSON: ${message}`, parsed: null };
+    return { ok: false, error: `Invalid JSON: ${message}`, warning: null, parsed: null };
   }
 
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { ok: false, error: 'JSON root must be an object.', parsed: null };
+  let root: unknown = parsed;
+  let warning: string | null = null;
+
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) {
+      return { ok: false, error: 'JSON array wrapper is empty.', warning: null, parsed: null };
+    }
+    const first = parsed[0];
+    if (typeof first !== 'object' || first === null || Array.isArray(first)) {
+      return { ok: false, error: 'Array wrapper first element must be an object.', warning: null, parsed: null };
+    }
+    const firstRecord = first as Record<string, unknown>;
+    root = firstRecord.rawJson ?? firstRecord;
+    warning = parsed.length > 1 ? 'Array wrapper contains multiple entries; loaded first element only.' : null;
   }
 
-  const version = (parsed as Record<string, unknown>).version;
+  if (typeof root !== 'object' || root === null || Array.isArray(root)) {
+    return { ok: false, error: 'JSON root must be an object.', warning: null, parsed: null };
+  }
+
+  const version = (root as Record<string, unknown>).version;
   if (version !== 'project_json_v1') {
-    return { ok: false, error: 'raw.version must be "project_json_v1".', parsed: null };
+    return { ok: false, error: 'raw.version must be "project_json_v1".', warning: null, parsed: null };
   }
 
-  return { ok: true, error: null, parsed: parsed as Record<string, unknown> };
+  return { ok: true, error: null, warning, parsed: root as Record<string, unknown> };
 }
 
 export default function CompanyProjectsEditorPage() {
@@ -162,7 +179,7 @@ export default function CompanyProjectsEditorPage() {
     }
 
     setEditorError(null);
-    setEditorInfo('JSON is valid locally. Save to run full server validation.');
+    setEditorInfo(parsedValidation.warning ?? 'JSON is valid locally. Save to run full server validation.');
   }
 
   function handlePrettify(): void {
@@ -174,7 +191,7 @@ export default function CompanyProjectsEditorPage() {
     const pretty = JSON.stringify(parsedValidation.parsed, null, 2);
     setRawJsonInput(pretty);
     setEditorError(null);
-    setEditorInfo('JSON prettified.');
+    setEditorInfo(parsedValidation.warning ?? 'JSON prettified.');
   }
 
   async function handleCopyTemplate(): Promise<void> {

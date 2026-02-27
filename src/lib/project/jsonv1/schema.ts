@@ -25,6 +25,11 @@ export type ProjectJsonV1 = {
     taxRate?: number;
   };
 
+  equity?: {
+    fdExtraShares?: number;
+    fdNotes?: string;
+  };
+
   series: {
     capexUSD: Array<number | null>;
     operatingCostsUSD: Array<number | null>;

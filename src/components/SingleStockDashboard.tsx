@@ -9,6 +9,7 @@ import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
 import { getCompanyProject, getCompanyProjectsBySymbol, type CompanyProjectSummary } from "../lib/client/companyProjectsClient.ts";
 import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
+import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import {
   buildSeries,
   buildSeriesData,
@@ -981,20 +982,23 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
 
   const runProjectSnapshotForProject = async (projectId: string, projectName?: string | null) => {
     const discountRate = toInputNumber(snapshotDiscountRateInput);
-    const profileSharesCurrent = typeof profile?.sharesOutstanding === "number" ? profile.sharesOutstanding : undefined;
+    const profileSharesCurrent = resolveCommonSharesCurrent({
+      balance: data?.balance as Record<string, Array<number | null>> | undefined,
+      income: data?.income as Record<string, Array<number | null>> | undefined,
+    });
     const profilePriceCurrent = typeof profile?.price === "number" ? profile.price : undefined;
     const marketWarnings: string[] = [];
     const marketFromProfile =
-      isPositiveFinite(profileSharesCurrent) && isPositiveFinite(profilePriceCurrent)
+      isPositiveFinite(profileSharesCurrent ?? undefined) && isPositiveFinite(profilePriceCurrent)
         ? {
-            shares_current: profileSharesCurrent,
+            shares_current: profileSharesCurrent as number,
             price_current_TargetCurrency: profilePriceCurrent,
           }
         : undefined;
 
     if (!marketFromProfile) {
-      if (!isPositiveFinite(profileSharesCurrent)) {
-        marketWarnings.push("market.shares_current missing from profile.sharesOutstanding; EV/multiples may be null.");
+      if (!isPositiveFinite(profileSharesCurrent ?? undefined)) {
+        marketWarnings.push("market.shares_current missing (resolved from statements); EV/multiples will be null.");
       }
       if (!isPositiveFinite(profilePriceCurrent)) {
         marketWarnings.push("market.price_current_TargetCurrency missing from profile.price; EV/multiples may be null.");
