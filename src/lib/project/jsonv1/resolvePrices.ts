@@ -67,6 +67,8 @@ export async function resolveProjectPricesToEngineInput(
     from?: string;
     to?: string;
     allowRefresh?: boolean;
+    projectId?: string;
+    spotAnchorDateUtc?: string;
   },
   deps: { resolvePriceSeriesFn?: typeof resolvePriceSeries } = {},
 ): Promise<ProjectEngineFullProductionV1Input & { diagnostics?: { warnings: string[] } }> {
@@ -74,6 +76,7 @@ export async function resolveProjectPricesToEngineInput(
   const resolvePriceSeriesFn = deps.resolvePriceSeriesFn ?? resolvePriceSeries;
   const scenario = args.scenario ?? { mode: 'spot' };
   const warnings: string[] = [];
+  const projectId = args.projectId ?? 'unknown';
 
   const masterN = parsed.engineInputWithoutPrices.masterN;
   const len = masterN + 1;
@@ -84,6 +87,10 @@ export async function resolveProjectPricesToEngineInput(
         date.setUTCDate(date.getUTCDate() + t * 365);
         return date.toISOString().slice(0, 10);
       });
+  const fallbackAnchorDateUtc = targets[0] ?? from;
+  const spotAnchorDateUtc = scenario.mode === 'spot'
+    ? (args.spotAnchorDateUtc ?? fallbackAnchorDateUtc ?? new Date().toISOString().slice(0, 10))
+    : '';
 
   const spotPriceUSDByMetal: Record<string, Array<number | null>> = {};
   const payableQtyByMetalCanonical: Record<string, Array<number | null>> = {};
@@ -108,11 +115,14 @@ export async function resolveProjectPricesToEngineInput(
       : scenario;
     const resolved = await resolvePriceSeriesFn({
       price_key: priceKey,
-      anchorDatesUtc: targets,
+      anchorDatesUtc: scenario.mode === 'spot' ? [spotAnchorDateUtc] : targets,
       scenario: coreScenario,
       allowRefresh: args.allowRefresh === true,
     });
-    spotPriceUSDByMetal[metal] = resolved.values;
+    const resolvedValues = scenario.mode === 'spot'
+      ? new Array(len).fill(resolved.values[0] ?? null)
+      : resolved.values;
+    spotPriceUSDByMetal[metal] = resolvedValues;
 
     spotPriceUSDByMetal[metal].forEach((value, index) => {
       if (value !== null) {
@@ -126,7 +136,7 @@ export async function resolveProjectPricesToEngineInput(
           ? `No closes in trailing ${scenario.lookbackYears}y window`
           : 'No close on or before period end';
 
-      warnings.push(`projectId=unknown metal=${metal} key=${priceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
+      warnings.push(`projectId=${projectId} metal=${metal} key=${priceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
     });
   }
 
@@ -138,11 +148,13 @@ export async function resolveProjectPricesToEngineInput(
       : scenario;
     const resolvedAu = await resolvePriceSeriesFn({
       price_key: parsed.engineInputWithoutPrices.auPriceKey,
-      anchorDatesUtc: targets,
+      anchorDatesUtc: scenario.mode === 'spot' ? [spotAnchorDateUtc] : targets,
       scenario: coreScenario,
       allowRefresh: args.allowRefresh === true,
     });
-    auPriceUSDPerOz = resolvedAu.values;
+    auPriceUSDPerOz = scenario.mode === 'spot'
+      ? new Array(len).fill(resolvedAu.values[0] ?? null)
+      : resolvedAu.values;
   }
 
   auPriceUSDPerOz.forEach((value, index) => {
@@ -155,7 +167,7 @@ export async function resolveProjectPricesToEngineInput(
       : scenario.mode === 'percentile'
         ? `No closes in trailing ${scenario.lookbackYears}y window`
         : 'No close on or before period end';
-    warnings.push(`projectId=unknown metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
+    warnings.push(`projectId=${projectId} metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
   });
 
   if (parsed.priceOverrides.spotPriceUSDByMetal) {
