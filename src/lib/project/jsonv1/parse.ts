@@ -240,6 +240,14 @@ function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: A
         if (item.rate !== undefined && item.rate !== null && (!isFiniteNumber(item.rate) || item.rate < 0)) {
           fail(`economicsBreakdown.royaltiesDetail[${idx}].rate`, 'null or finite number >= 0', item.rate);
         }
+        const name = item.name;
+        if (name !== undefined && name !== null && typeof name !== 'string') {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}].name`, 'string | null', name);
+        }
+        const rateType = item.rateType;
+        if (rateType !== undefined && rateType !== null && typeof rateType !== 'string') {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}].rateType`, 'string | null', rateType);
+        }
         const royaltyUSD = asOptionalSparseSeries(item.royaltyUSD, `economicsBreakdown.royaltiesDetail[${idx}].royaltyUSD`, masterN);
         if (royaltyUSD) {
           validateNonNegativeFiniteSeries(royaltyUSD, `economicsBreakdown.royaltiesDetail[${idx}].royaltyUSD`);
@@ -255,7 +263,9 @@ function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: A
         return {
           id: item.id,
           label: item.label,
+          name: name ?? null,
           base: item.base,
+          rateType: rateType ?? null,
           rate: item.rate ?? null,
           royaltyUSD,
           source: source ?? null,

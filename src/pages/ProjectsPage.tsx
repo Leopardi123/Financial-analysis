@@ -26,6 +26,11 @@ type SeriesShape = {
   sustainingCapexUSD?: Array<number | null>;
   siteGandA_USD?: Array<number | null>;
   royaltiesUSD?: Array<number | null>;
+  royaltiesDetail?: Array<{
+    id: string;
+    label: string;
+    royaltyUSD?: Array<number | null>;
+  }>;
   reclamationUSD?: Array<number | null>;
   byproductCreditsUSD?: Array<number | null>;
   sustainingCostUSD?: Array<number | null>;
@@ -395,11 +400,29 @@ export default function ProjectsPage() {
       }
     }
 
+    const royaltiesFromDetail = (() => {
+      const detail = (series.royaltiesDetail ?? []) as Array<{ royaltyUSD?: Array<number | null> }>;
+      if (detail.length === 0 || !Array.isArray(detail[0]?.royaltyUSD)) return undefined;
+      const length = detail[0].royaltyUSD?.length ?? 0;
+      return Array.from({ length }, (_, t) => {
+        let sum = 0;
+        let hasFinite = false;
+        for (const item of detail) {
+          const value = item.royaltyUSD?.[t];
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            sum += value;
+            hasFinite = true;
+          }
+        }
+        return hasFinite ? sum : null;
+      });
+    })();
+
     const definitions: Array<{ label: string; values: Array<number | null> | undefined }> = [
       { label: 'Operating costs', values: series.operatingCostsUSD },
       { label: 'Sustaining capex', values: series.sustainingCapexUSD },
       { label: 'Site G&A', values: series.siteGandA_USD },
-      { label: 'Royalties', values: series.royaltiesUSD },
+      { label: 'Royalties', values: royaltiesFromDetail ?? series.royaltiesUSD },
       { label: 'Reclamation', values: series.reclamationUSD },
       { label: 'Byproduct credits', values: series.byproductCreditsUSD },
       { label: 'Sustaining cost', values: series.sustainingCostUSD },
