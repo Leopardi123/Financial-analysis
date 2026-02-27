@@ -33,7 +33,8 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
 
   const parsed = parseProjectJsonV1(happy);
   assertEqual(parsed.engineInputWithoutPrices.payableQtyByMetal.Au[2], 100, 'happy path payable qty');
-  assertEqual(parsed.engineInputWithoutPrices.phase1.capexUSD[0], -1000, 'happy path capex passthrough');
+  assertEqual(parsed.engineInputWithoutPrices.phase1.capexUSD[0], 1000, 'negative capex normalized to spend');
+  assert(parsed.warnings.includes('capexUSD: detected negative values; normalized to spend (abs).'), 'negative capex warning emitted');
   assertEqual(parsed.engineInputWithoutPrices.priceKeyByMetal.Au, 'XAU_USD_TOZ', 'price key parsed');
   assertEqual(parsed.engineInputWithoutPrices.payableQtyUnitByMetal.Au, 'toz', 'qty unit parsed');
   assertEqual(parsed.engineInputWithoutPrices.auPriceKey, 'XAU_USD_TOZ', 'au price key parsed');
@@ -109,6 +110,25 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   const parsedLegacy = parseProjectJsonV1(legacy);
   assertEqual(parsedLegacy.priceOverrides.spotPriceUSDByMetal?.Au[0], 10, 'legacy spot price carried as override');
   assertEqual(parsedLegacy.priceOverrides.auPriceUSDPerOz?.[0], 1999, 'legacy au price carried as override');
+
+  const positiveCapex = getProjectJsonV1Template();
+  positiveCapex.series.capexUSD = [100, 0, 0, 5, 8, 10];
+  const parsedPositiveCapex = parseProjectJsonV1(positiveCapex);
+  assertEqual(parsedPositiveCapex.engineInputWithoutPrices.phase1.capexUSD[0], 100, 'positive capex remains unchanged');
+  assertEqual(parsedPositiveCapex.warnings.length, 0, 'positive capex has no normalization warning');
+
+  const mixedNullCapex = getProjectJsonV1Template();
+  mixedNullCapex.series.capexUSD = [null, -25, null, 0, -5, null];
+  mixedNullCapex.series.sustainingCapexUSD = [null, -1, 2, null, -3, null];
+  const parsedMixedNullCapex = parseProjectJsonV1(mixedNullCapex);
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.capexUSD[0], null, 'capex null preserved at index 0');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.capexUSD[1], 25, 'capex negative normalized with nulls preserved');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.capexUSD[5], null, 'capex trailing null preserved');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.sustainingCapexUSD[0], null, 'sustaining capex null preserved at index 0');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.sustainingCapexUSD[1], 1, 'sustaining capex negative normalized with nulls preserved');
+  assertEqual(parsedMixedNullCapex.engineInputWithoutPrices.phase1.sustainingCapexUSD[5], null, 'sustaining capex trailing null preserved');
+  assert(parsedMixedNullCapex.warnings.includes('capexUSD: detected negative values; normalized to spend (abs).'), 'mixed null capex warning emitted');
+  assert(parsedMixedNullCapex.warnings.includes('sustainingCapexUSD: detected negative values; normalized to spend (abs).'), 'mixed null sustaining capex warning emitted');
 
 
   const withBreakdown = getProjectJsonV1Template();

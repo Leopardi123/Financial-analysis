@@ -634,6 +634,7 @@ export async function runCorporateSnapshotPipeline(args: {
       {
         projectToSeries: async ({ projectId, rawJson }) => {
           const parsed = parseProjectJsonV1(rawJson);
+          diagnostics.warnings.push(...parsed.warnings);
           const periodEndDatesUtc = parsed.engineInputWithoutPrices.periodEndDatesUtc;
           const productionStartPeriod = parsed.engineInputWithoutPrices.productionStartPeriod;
           if (!periodEndDatesUtc || periodEndDatesUtc.length === 0) {
