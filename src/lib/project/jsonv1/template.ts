@@ -59,6 +59,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     },
 
     economicsBreakdown: {
+      // Optional blocks may be deleted or provided as shorter arrays; parser will pad with nulls.
       cogs: {
         miningUSD: [...nulls],
         millingUSD: [...nulls],
