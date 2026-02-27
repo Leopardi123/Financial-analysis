@@ -62,25 +62,47 @@ function normalizeQtyUnitMap(value: unknown): Record<string, QtyUnit> {
   return out;
 }
 
+type RoyaltyDetailRow = NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['royaltiesDetail']>[number];
+
+function buildTemplateRoyaltyRow(length: number): RoyaltyDetailRow {
+  return {
+    id: 'royalty_1',
+    label: 'Royalty 1',
+    name: null,
+    base: 'revenue',
+    rateType: null,
+    rate: null,
+    royaltyUSD: Array<number | null>(length).fill(null),
+    source: null,
+    notes: null,
+  };
+}
+
 function normalizeRoyaltiesDetail(value: unknown, length: number): NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['royaltiesDetail']> {
-  if (!Array.isArray(value)) {
-    return [];
+  const templateRow = buildTemplateRoyaltyRow(length);
+
+  if (!Array.isArray(value) || value.length === 0) {
+    return [templateRow];
   }
 
-  return value
+  const rows = value
     .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
-    .filter((item) => typeof item.id === 'string' && typeof item.label === 'string' && (item.base === 'revenue' || item.base === 'ebit' || item.base === 'ebitda' || item.base === 'quantity'))
     .map((item) => ({
-      id: item.id as string,
-      label: item.label as string,
-      name: typeof item.name === 'string' ? item.name : null,
-      base: item.base as 'revenue' | 'ebit' | 'ebitda' | 'quantity',
-      rateType: typeof item.rateType === 'string' ? item.rateType : null,
+      ...templateRow,
+      id: typeof item.id === 'string' ? item.id : templateRow.id,
+      label: typeof item.label === 'string' ? item.label : templateRow.label,
+      name: typeof item.name === 'string' ? item.name : templateRow.name,
+      base: item.base === 'revenue' || item.base === 'ebit' || item.base === 'ebitda' || item.base === 'quantity'
+        ? item.base
+        : templateRow.base,
+      rateType: typeof item.rateType === 'string' ? item.rateType : templateRow.rateType,
       rate: typeof item.rate === 'number' && Number.isFinite(item.rate) ? item.rate : null,
-      royaltyUSD: Array.isArray(item.royaltyUSD) ? normalizeSeries(item.royaltyUSD, length) : undefined,
-      source: item.source === 'PEA' || item.source === 'PFS' || item.source === 'FS' || item.source === 'Other' ? item.source : null,
-      notes: typeof item.notes === 'string' ? item.notes : null,
+      royaltyUSD: Array.isArray(item.royaltyUSD) ? normalizeSeries(item.royaltyUSD, length) : templateRow.royaltyUSD,
+      source: item.source === 'PEA' || item.source === 'PFS' || item.source === 'FS' || item.source === 'Other' ? item.source : templateRow.source,
+      notes: typeof item.notes === 'string' ? item.notes : templateRow.notes,
     }));
+
+  return rows.length > 0 ? rows : [templateRow];
 }
 
 export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJsonV1 {
