@@ -43,6 +43,161 @@ function validateNonNegativeFiniteSeries(series: Array<number | null>, path: str
   }
 }
 
+function hasAnyNonNull(series: Array<number | null>): boolean {
+  return series.some((value) => toFiniteOrNull(value) !== null);
+}
+
+function toFiniteOrNull(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  return value;
+}
+
+function asOptionalSeries(value: unknown, path: string, expectedLength: number): Array<number | null> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return sanitizeSeries(asSeries(value, path, expectedLength));
+}
+
+function parseEconomicsBreakdown(raw: unknown, expectedLength: number, siteGandA_USD: Array<number | null>): ProjectJsonV1['economicsBreakdown'] {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (raw === null) {
+    return null;
+  }
+  if (!isPlainObject(raw)) {
+    fail('economicsBreakdown', 'object or null', raw);
+  }
+
+  const out: NonNullable<ProjectJsonV1['economicsBreakdown']> = {};
+
+  if ('cogs' in raw && raw.cogs !== undefined) {
+    if (raw.cogs === null) {
+      fail('economicsBreakdown.cogs', 'object', raw.cogs);
+    }
+    if (!isPlainObject(raw.cogs)) {
+      fail('economicsBreakdown.cogs', 'object', raw.cogs);
+    }
+
+    const cogs: NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['cogs']> = {};
+    cogs.miningUSD = asOptionalSeries(raw.cogs.miningUSD, 'economicsBreakdown.cogs.miningUSD', expectedLength);
+    cogs.millingUSD = asOptionalSeries(raw.cogs.millingUSD, 'economicsBreakdown.cogs.millingUSD', expectedLength);
+    cogs.utilitiesUSD = asOptionalSeries(raw.cogs.utilitiesUSD, 'economicsBreakdown.cogs.utilitiesUSD', expectedLength);
+    cogs.maintenanceUSD = asOptionalSeries(raw.cogs.maintenanceUSD, 'economicsBreakdown.cogs.maintenanceUSD', expectedLength);
+    cogs.campUSD = asOptionalSeries(raw.cogs.campUSD, 'economicsBreakdown.cogs.campUSD', expectedLength);
+    cogs.siteGandA_USD = asOptionalSeries(raw.cogs.siteGandA_USD, 'economicsBreakdown.cogs.siteGandA_USD', expectedLength);
+
+    for (const key of ['miningUSD','millingUSD','utilitiesUSD','maintenanceUSD','campUSD','siteGandA_USD'] as const) {
+      const series = cogs[key];
+      if (series) {
+        validateNonNegativeFiniteSeries(series, `economicsBreakdown.cogs.${key}`);
+      }
+    }
+
+    if (cogs.siteGandA_USD && hasAnyNonNull(cogs.siteGandA_USD) && hasAnyNonNull(siteGandA_USD)) {
+      fail('economicsBreakdown.cogs.siteGandA_USD', 'must not be provided when series.siteGandA_USD has any non-null values', cogs.siteGandA_USD);
+    }
+
+    out.cogs = cogs;
+  }
+
+  if ('selling' in raw && raw.selling !== undefined) {
+    if (raw.selling === null) {
+      fail('economicsBreakdown.selling', 'object', raw.selling);
+    }
+    if (!isPlainObject(raw.selling)) {
+      fail('economicsBreakdown.selling', 'object', raw.selling);
+    }
+
+    const selling: NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['selling']> = {};
+    selling.treatmentChargesUSD = asOptionalSeries(raw.selling.treatmentChargesUSD, 'economicsBreakdown.selling.treatmentChargesUSD', expectedLength);
+    selling.refiningChargesUSD = asOptionalSeries(raw.selling.refiningChargesUSD, 'economicsBreakdown.selling.refiningChargesUSD', expectedLength);
+    selling.tcRcUSD = asOptionalSeries(raw.selling.tcRcUSD, 'economicsBreakdown.selling.tcRcUSD', expectedLength);
+    selling.transportUSD = asOptionalSeries(raw.selling.transportUSD, 'economicsBreakdown.selling.transportUSD', expectedLength);
+
+    for (const key of ['treatmentChargesUSD','refiningChargesUSD','tcRcUSD','transportUSD'] as const) {
+      const series = selling[key];
+      if (series) {
+        validateNonNegativeFiniteSeries(series, `economicsBreakdown.selling.${key}`);
+      }
+    }
+
+    if (
+      selling.tcRcUSD
+      && hasAnyNonNull(selling.tcRcUSD)
+      && ((selling.treatmentChargesUSD && hasAnyNonNull(selling.treatmentChargesUSD))
+        || (selling.refiningChargesUSD && hasAnyNonNull(selling.refiningChargesUSD)))
+    ) {
+      fail('economicsBreakdown.selling', 'tcRcUSD cannot be provided together with treatmentChargesUSD or refiningChargesUSD', raw.selling);
+    }
+
+    out.selling = selling;
+  }
+
+  if ('royaltiesDetail' in raw && raw.royaltiesDetail !== undefined) {
+    if (raw.royaltiesDetail === null) {
+      out.royaltiesDetail = null;
+    } else {
+      if (!Array.isArray(raw.royaltiesDetail)) {
+        fail('economicsBreakdown.royaltiesDetail', 'array or null', raw.royaltiesDetail);
+      }
+      out.royaltiesDetail = raw.royaltiesDetail.map((item, idx) => {
+        if (!isPlainObject(item)) {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}]`, 'object', item);
+        }
+        if (typeof item.id !== 'string' || item.id.trim().length === 0) {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}].id`, 'non-empty string', item.id);
+        }
+        if (typeof item.label !== 'string' || item.label.trim().length === 0) {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}].label`, 'non-empty string', item.label);
+        }
+        if (item.base !== 'revenue' && item.base !== 'ebit' && item.base !== 'ebitda' && item.base !== 'quantity') {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}].base`, '"revenue"|"ebit"|"ebitda"|"quantity"', item.base);
+        }
+        if (item.rate !== undefined && item.rate !== null && (!isFiniteNumber(item.rate) || item.rate < 0)) {
+          fail(`economicsBreakdown.royaltiesDetail[${idx}].rate`, 'null or finite number >= 0', item.rate);
+        }
+        const royaltyUSD = asOptionalSeries(item.royaltyUSD, `economicsBreakdown.royaltiesDetail[${idx}].royaltyUSD`, expectedLength);
+        if (royaltyUSD) {
+          validateNonNegativeFiniteSeries(royaltyUSD, `economicsBreakdown.royaltiesDetail[${idx}].royaltyUSD`);
+        }
+        return {
+          id: item.id,
+          label: item.label,
+          base: item.base,
+          rate: item.rate ?? null,
+          royaltyUSD,
+        };
+      });
+    }
+  }
+
+  if ('taxesDetail' in raw && raw.taxesDetail !== undefined) {
+    if (raw.taxesDetail === null) {
+      out.taxesDetail = null;
+    } else {
+      if (!isPlainObject(raw.taxesDetail)) {
+        fail('economicsBreakdown.taxesDetail', 'object or null', raw.taxesDetail);
+      }
+      const taxesDetail: NonNullable<NonNullable<ProjectJsonV1['economicsBreakdown']>['taxesDetail']> = {};
+      taxesDetail.federalIncomeTaxUSD = asOptionalSeries(raw.taxesDetail.federalIncomeTaxUSD, 'economicsBreakdown.taxesDetail.federalIncomeTaxUSD', expectedLength);
+      taxesDetail.municipalRevenueTaxUSD = asOptionalSeries(raw.taxesDetail.municipalRevenueTaxUSD, 'economicsBreakdown.taxesDetail.municipalRevenueTaxUSD', expectedLength);
+      if (taxesDetail.federalIncomeTaxUSD) {
+        validateNonNegativeFiniteSeries(taxesDetail.federalIncomeTaxUSD, 'economicsBreakdown.taxesDetail.federalIncomeTaxUSD');
+      }
+      if (taxesDetail.municipalRevenueTaxUSD) {
+        validateNonNegativeFiniteSeries(taxesDetail.municipalRevenueTaxUSD, 'economicsBreakdown.taxesDetail.municipalRevenueTaxUSD');
+      }
+      out.taxesDetail = taxesDetail;
+    }
+  }
+
+  return out;
+}
+
 function asRecordOfSeries(value: unknown, path: string, expectedLength: number): Record<string, Array<number | null>> {
   if (!isPlainObject(value)) {
     fail(path, 'object map of series', value);
@@ -157,6 +312,7 @@ function parseOperations(raw: unknown, expectedLength: number): ProjectJsonV1['o
 
 export type ProjectJsonV1Context = {
   operations?: ProjectJsonV1['operations'] | null;
+  economicsBreakdown?: ProjectJsonV1['economicsBreakdown'];
 };
 
 export type ParsedProjectJsonV1 = {
@@ -223,6 +379,8 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     raw.series.workingCapitalDeltaUSD === undefined
       ? undefined
       : sanitizeSeries(asSeries(raw.series.workingCapitalDeltaUSD, 'series.workingCapitalDeltaUSD', expectedLength));
+
+  const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, expectedLength, siteGandA_USD);
 
   if (!isPlainObject(raw.metals)) {
     fail('metals', 'object', raw.metals);
@@ -390,6 +548,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     },
     context: {
       operations: operations ?? null,
+      economicsBreakdown: economicsBreakdown ?? null,
     },
     priceOverrides: {
       spotPriceUSDByMetal: overrideSpot,

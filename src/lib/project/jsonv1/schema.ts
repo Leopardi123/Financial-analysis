@@ -62,6 +62,34 @@ export type ProjectJsonV1 = {
     oreTonnageUnit?: 'tonne' | 'short_ton' | 'long_ton' | null;
   } | null;
 
+  economicsBreakdown?: {
+    cogs?: {
+      miningUSD?: Array<number | null>;
+      millingUSD?: Array<number | null>;
+      utilitiesUSD?: Array<number | null>;
+      maintenanceUSD?: Array<number | null>;
+      campUSD?: Array<number | null>;
+      siteGandA_USD?: Array<number | null>;
+    };
+    selling?: {
+      treatmentChargesUSD?: Array<number | null>;
+      refiningChargesUSD?: Array<number | null>;
+      tcRcUSD?: Array<number | null>;
+      transportUSD?: Array<number | null>;
+    };
+    royaltiesDetail?: Array<{
+      id: string;
+      label: string;
+      base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
+      rate?: number | null;
+      royaltyUSD?: Array<number | null>;
+    }> | null;
+    taxesDetail?: {
+      federalIncomeTaxUSD?: Array<number | null>;
+      municipalRevenueTaxUSD?: Array<number | null>;
+    } | null;
+  } | null;
+
   priceOverrides?: {
     spotPriceUSDByMetal?: Record<string, Array<number | null>>;
     auPriceUSDPerOz?: Array<number | null>;

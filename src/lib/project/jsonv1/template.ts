@@ -57,5 +57,24 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       oreMinedTonnes: [...nulls],
       oreTonnageUnit: 'tonne',
     },
+
+    economicsBreakdown: {
+      cogs: {
+        miningUSD: [...nulls],
+        millingUSD: [...nulls],
+        utilitiesUSD: [...nulls],
+        maintenanceUSD: [...nulls],
+        campUSD: [...nulls],
+        siteGandA_USD: [...nulls],
+      },
+      selling: {
+        treatmentChargesUSD: [...nulls],
+        refiningChargesUSD: [...nulls],
+        tcRcUSD: [...nulls],
+        transportUSD: [...nulls],
+      },
+      royaltiesDetail: [],
+      taxesDetail: null,
+    },
   };
 }

@@ -20,6 +20,27 @@ export type MarketValueOutput = {
   EV_perShare_TargetCurrency: number | null; // EVPS = EV / shares_current
 };
 
+
+export type CorporateSnapshotEconomicsBreakdownSeries = {
+  cogs?: {
+    miningUSD?: Array<number | null>;
+    millingUSD?: Array<number | null>;
+    utilitiesUSD?: Array<number | null>;
+    maintenanceUSD?: Array<number | null>;
+    campUSD?: Array<number | null>;
+    siteGandA_USD?: Array<number | null>;
+  };
+  selling?: {
+    treatmentChargesUSD?: Array<number | null>;
+    refiningChargesUSD?: Array<number | null>;
+    tcRcUSD?: Array<number | null>;
+    transportUSD?: Array<number | null>;
+  };
+  totalCogsUSD?: Array<number | null>;
+  totalSellingUSD?: Array<number | null>;
+  totalOperatingCostsUSD?: Array<number | null>;
+};
+
 export type CorporateSnapshotSeries = {
   periodIndex: number[];
   periodEndDatesUtc: Array<string | null>;
@@ -44,6 +65,16 @@ export type CorporateSnapshotSeries = {
   taxUSD: Array<number | null>;
   fcffUSD: Array<number | null>;
   capexUSD: Array<number | null>;
+  economicsBreakdown?: CorporateSnapshotEconomicsBreakdownSeries;
+  royaltiesDetail?: Array<{
+    id: string;
+    label: string;
+    royaltyUSD: Array<number | null>;
+  }>;
+  taxesDetail?: {
+    federalIncomeTaxUSD?: Array<number | null>;
+    municipalRevenueTaxUSD?: Array<number | null>;
+  };
 };
 
 export type CorporateSnapshot = {

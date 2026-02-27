@@ -39,6 +39,20 @@ function assertSeriesLength(
   }
 }
 
+
+function sumComponentsAtIndex(components: Array<number | null>): number | null {
+  let sum = 0;
+  let hasAny = false;
+  for (const value of components) {
+    const finite = toFiniteOrNull(value);
+    if (finite !== null) {
+      sum += finite;
+      hasAny = true;
+    }
+  }
+  return hasAny ? sum : null;
+}
+
 function sumStrictAlignedSeries(args: {
   corporateDates: string[];
   projectDateSeries: Array<{ projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> }>;
@@ -81,6 +95,40 @@ function sumStrictAlignedSeries(args: {
   return sums.map((value, t) => (nullAtDate[t] || !hasContributor[t] ? null : value));
 }
 
+
+type EconomicsBreakdownSeries = {
+  cogs?: {
+    miningUSD?: Array<number | null>;
+    millingUSD?: Array<number | null>;
+    utilitiesUSD?: Array<number | null>;
+    maintenanceUSD?: Array<number | null>;
+    campUSD?: Array<number | null>;
+    siteGandA_USD?: Array<number | null>;
+  };
+  selling?: {
+    treatmentChargesUSD?: Array<number | null>;
+    refiningChargesUSD?: Array<number | null>;
+    tcRcUSD?: Array<number | null>;
+    transportUSD?: Array<number | null>;
+  };
+  totalCogsUSD?: Array<number | null>;
+  totalSellingUSD?: Array<number | null>;
+  totalOperatingCostsUSD?: Array<number | null>;
+};
+
+type RoyaltyDetailSeries = {
+  id: string;
+  label: string;
+  base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
+  rate: number | null;
+  royaltyUSD: Array<number | null>;
+};
+
+type TaxesDetailSeries = {
+  federalIncomeTaxUSD?: Array<number | null>;
+  municipalRevenueTaxUSD?: Array<number | null>;
+};
+
 type ProjectSeriesContext = {
   projectId: string;
   periodEndDatesUtc: string[];
@@ -94,6 +142,9 @@ type ProjectSeriesContext = {
     nameplateThroughput: number | null;
     utilizationPct: number | null;
   };
+  economicsBreakdown: EconomicsBreakdownSeries | null;
+  royaltiesDetail: RoyaltyDetailSeries[];
+  taxesDetail: TaxesDetailSeries | null;
   economics: {
     operatingCostsUSD: Array<number | null>;
     sustainingCapexUSD: Array<number | null>;
@@ -235,6 +286,132 @@ function buildSnapshotSeries(args: {
   const fcffUSD = aggregateEconomic('fcffUSD');
   const capexUSD = aggregateEconomic('capexUSD');
 
+  const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> }>, label: string): Array<number | null> =>
+    sumStrictAlignedSeries({
+      corporateDates: args.corporateDates,
+      projectDateSeries: seriesByProject,
+      label,
+    });
+
+  const aggregateOptionalBreakdownSeries = (
+    selector: (entry: ProjectSeriesContext) => Array<number | null> | undefined,
+    label: string,
+  ): Array<number | null> | undefined => {
+    const contributing = args.projectSeriesContexts
+      .map((entry) => {
+        const series = selector(entry);
+        if (!series) {
+          return null;
+        }
+        return {
+          projectId: entry.projectId,
+          periodEndDatesUtc: entry.periodEndDatesUtc,
+          series: sanitizeSeries(series),
+        };
+      })
+      .filter((value): value is { projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> } => value !== null);
+
+    if (contributing.length === 0) {
+      return undefined;
+    }
+
+    return aggregateBreakdownSeries(contributing, label);
+  };
+
+  const hasAnyEconomicsBreakdown = args.projectSeriesContexts.some((entry) => entry.economicsBreakdown !== null);
+  const economicsBreakdown: EconomicsBreakdownSeries = {};
+  economicsBreakdown.cogs = {
+    miningUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.cogs?.miningUSD, 'series.economicsBreakdown.cogs.miningUSD'),
+    millingUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.cogs?.millingUSD, 'series.economicsBreakdown.cogs.millingUSD'),
+    utilitiesUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.cogs?.utilitiesUSD, 'series.economicsBreakdown.cogs.utilitiesUSD'),
+    maintenanceUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.cogs?.maintenanceUSD, 'series.economicsBreakdown.cogs.maintenanceUSD'),
+    campUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.cogs?.campUSD, 'series.economicsBreakdown.cogs.campUSD'),
+    siteGandA_USD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.cogs?.siteGandA_USD, 'series.economicsBreakdown.cogs.siteGandA_USD'),
+  };
+
+  economicsBreakdown.selling = {
+    treatmentChargesUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.selling?.treatmentChargesUSD, 'series.economicsBreakdown.selling.treatmentChargesUSD'),
+    refiningChargesUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.selling?.refiningChargesUSD, 'series.economicsBreakdown.selling.refiningChargesUSD'),
+    tcRcUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.selling?.tcRcUSD, 'series.economicsBreakdown.selling.tcRcUSD'),
+    transportUSD: aggregateOptionalBreakdownSeries((entry) => entry.economicsBreakdown?.selling?.transportUSD, 'series.economicsBreakdown.selling.transportUSD'),
+  };
+
+  const totalCogsUSD = new Array<number | null>(expectedLength).fill(null);
+  const totalSellingUSD = new Array<number | null>(expectedLength).fill(null);
+  const totalOperatingCostsUSD = new Array<number | null>(expectedLength).fill(null);
+  const cogs = economicsBreakdown.cogs ?? {};
+  const selling = economicsBreakdown.selling ?? {};
+  for (let t = 0; t < expectedLength; t += 1) {
+    totalCogsUSD[t] = sumComponentsAtIndex([
+      cogs.miningUSD?.[t] ?? null,
+      cogs.millingUSD?.[t] ?? null,
+      cogs.utilitiesUSD?.[t] ?? null,
+      cogs.maintenanceUSD?.[t] ?? null,
+      cogs.campUSD?.[t] ?? null,
+      cogs.siteGandA_USD?.[t] ?? null,
+    ]);
+
+    const tcRcCombined = selling.tcRcUSD?.[t] ?? sumComponentsAtIndex([
+      selling.treatmentChargesUSD?.[t] ?? null,
+      selling.refiningChargesUSD?.[t] ?? null,
+    ]);
+
+    totalSellingUSD[t] = sumComponentsAtIndex([
+      tcRcCombined,
+      selling.transportUSD?.[t] ?? null,
+    ]);
+
+    totalOperatingCostsUSD[t] = sumComponentsAtIndex([
+      totalCogsUSD[t],
+      totalSellingUSD[t],
+      operatingCostsUSD[t],
+    ]);
+  }
+
+  economicsBreakdown.totalCogsUSD = totalCogsUSD.some((v) => v !== null) ? totalCogsUSD : undefined;
+  economicsBreakdown.totalSellingUSD = totalSellingUSD.some((v) => v !== null) ? totalSellingUSD : undefined;
+  economicsBreakdown.totalOperatingCostsUSD = totalOperatingCostsUSD.some((v) => v !== null) ? totalOperatingCostsUSD : undefined;
+
+  const royaltiesById = new Map<string, {
+    id: string;
+    label: string;
+    base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
+    rate: number | null;
+    projectSeries: Array<{ projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> }>;
+  }>();
+
+  for (const entry of args.projectSeriesContexts) {
+    for (const detail of entry.royaltiesDetail) {
+      if (!royaltiesById.has(detail.id)) {
+        royaltiesById.set(detail.id, {
+          id: detail.id,
+          label: detail.label,
+          base: detail.base,
+          rate: detail.rate,
+          projectSeries: [],
+        });
+      }
+      royaltiesById.get(detail.id)?.projectSeries.push({
+        projectId: entry.projectId,
+        periodEndDatesUtc: entry.periodEndDatesUtc,
+        series: sanitizeSeries(detail.royaltyUSD),
+      });
+    }
+  }
+
+  const royaltiesDetail = [...royaltiesById.values()]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((detail) => ({
+      id: detail.id,
+      label: detail.label,
+      royaltyUSD: aggregateBreakdownSeries(detail.projectSeries, `series.royaltiesDetail.${detail.id}.royaltyUSD`),
+    }));
+
+  const taxesDetail: TaxesDetailSeries = {
+    federalIncomeTaxUSD: aggregateOptionalBreakdownSeries((entry) => entry.taxesDetail?.federalIncomeTaxUSD, 'series.taxesDetail.federalIncomeTaxUSD'),
+    municipalRevenueTaxUSD: aggregateOptionalBreakdownSeries((entry) => entry.taxesDetail?.municipalRevenueTaxUSD, 'series.taxesDetail.municipalRevenueTaxUSD'),
+  };
+
   return {
     periodIndex,
     periodEndDatesUtc,
@@ -259,6 +436,9 @@ function buildSnapshotSeries(args: {
     taxUSD,
     fcffUSD,
     capexUSD,
+    economicsBreakdown: hasAnyEconomicsBreakdown ? economicsBreakdown : undefined,
+    royaltiesDetail: royaltiesDetail.length > 0 ? royaltiesDetail : undefined,
+    taxesDetail: taxesDetail.federalIncomeTaxUSD || taxesDetail.municipalRevenueTaxUSD ? taxesDetail : undefined,
   };
 }
 
@@ -422,6 +602,55 @@ export async function runCorporateSnapshotPipeline(args: {
             return finiteEbit === null ? null : Math.max(0, finiteEbit) * taxRate;
           });
 
+          const projectEconomicsBreakdown = parsed.context.economicsBreakdown;
+          const ebitdaSeries = out.phase1.ebitUSD.map((ebit, idx) => {
+            const finiteEbit = toFiniteOrNull(ebit);
+            const finiteTax = toFiniteOrNull(taxByRule[idx]);
+            if (finiteEbit === null) {
+              return null;
+            }
+            return finiteTax === null ? finiteEbit : finiteEbit + finiteTax;
+          });
+
+          const royaltiesDetail = (projectEconomicsBreakdown?.royaltiesDetail ?? []).map((detail) => {
+            const explicitRoyaltyUSD = detail.royaltyUSD ? sanitizeSeries(detail.royaltyUSD) : null;
+            const rate = toFiniteOrNull(detail.rate);
+            const baseSeries = detail.base === 'revenue'
+              ? out.revenue.grossRevenueUSD
+              : detail.base === 'ebit'
+                ? out.phase1.ebitUSD
+                : detail.base === 'ebitda'
+                  ? ebitdaSeries
+                  : nullSeries;
+
+            const royaltyUSD = explicitRoyaltyUSD ?? baseSeries.map((value) => {
+              const finiteBase = toFiniteOrNull(value);
+              if (finiteBase === null || rate === null) {
+                return null;
+              }
+              return Math.max(0, finiteBase) * rate;
+            });
+
+            return {
+              id: detail.id,
+              label: detail.label,
+              base: detail.base,
+              rate,
+              royaltyUSD: sanitizeSeries(royaltyUSD),
+            };
+          });
+
+          const taxesDetail = projectEconomicsBreakdown?.taxesDetail
+            ? {
+                federalIncomeTaxUSD: projectEconomicsBreakdown.taxesDetail.federalIncomeTaxUSD
+                  ? sanitizeSeries(projectEconomicsBreakdown.taxesDetail.federalIncomeTaxUSD)
+                  : undefined,
+                municipalRevenueTaxUSD: projectEconomicsBreakdown.taxesDetail.municipalRevenueTaxUSD
+                  ? sanitizeSeries(projectEconomicsBreakdown.taxesDetail.municipalRevenueTaxUSD)
+                  : undefined,
+              }
+            : null;
+
           projectSeriesContexts.push({
             projectId,
             periodEndDatesUtc,
@@ -439,6 +668,26 @@ export async function runCorporateSnapshotPipeline(args: {
               nameplateThroughput: toFiniteOrNull(parsed.context.operations?.capacity.nameplateThroughput),
               utilizationPct: toFiniteOrNull(parsed.context.operations?.capacity.utilizationPct),
             },
+            economicsBreakdown: projectEconomicsBreakdown
+              ? {
+                  cogs: {
+                    miningUSD: projectEconomicsBreakdown.cogs?.miningUSD ? sanitizeSeries(projectEconomicsBreakdown.cogs.miningUSD) : undefined,
+                    millingUSD: projectEconomicsBreakdown.cogs?.millingUSD ? sanitizeSeries(projectEconomicsBreakdown.cogs.millingUSD) : undefined,
+                    utilitiesUSD: projectEconomicsBreakdown.cogs?.utilitiesUSD ? sanitizeSeries(projectEconomicsBreakdown.cogs.utilitiesUSD) : undefined,
+                    maintenanceUSD: projectEconomicsBreakdown.cogs?.maintenanceUSD ? sanitizeSeries(projectEconomicsBreakdown.cogs.maintenanceUSD) : undefined,
+                    campUSD: projectEconomicsBreakdown.cogs?.campUSD ? sanitizeSeries(projectEconomicsBreakdown.cogs.campUSD) : undefined,
+                    siteGandA_USD: projectEconomicsBreakdown.cogs?.siteGandA_USD ? sanitizeSeries(projectEconomicsBreakdown.cogs.siteGandA_USD) : undefined,
+                  },
+                  selling: {
+                    treatmentChargesUSD: projectEconomicsBreakdown.selling?.treatmentChargesUSD ? sanitizeSeries(projectEconomicsBreakdown.selling.treatmentChargesUSD) : undefined,
+                    refiningChargesUSD: projectEconomicsBreakdown.selling?.refiningChargesUSD ? sanitizeSeries(projectEconomicsBreakdown.selling.refiningChargesUSD) : undefined,
+                    tcRcUSD: projectEconomicsBreakdown.selling?.tcRcUSD ? sanitizeSeries(projectEconomicsBreakdown.selling.tcRcUSD) : undefined,
+                    transportUSD: projectEconomicsBreakdown.selling?.transportUSD ? sanitizeSeries(projectEconomicsBreakdown.selling.transportUSD) : undefined,
+                  },
+                }
+              : null,
+            royaltiesDetail,
+            taxesDetail,
             economics: {
               operatingCostsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD),
               sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
