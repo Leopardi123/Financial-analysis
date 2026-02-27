@@ -1,6 +1,6 @@
 import { readHistoryRowsInRange, type HistoryRow } from '../db/readHistory.ts';
 import { refreshHistoryRangeToMonthlyBlobs } from '../refreshHistory.ts';
-import { fxKeyUSDTo } from './keys.ts';
+import { fxLookupCandidatesUSDTo } from './keys.ts';
 
 export type FxScenario =
   | { mode: 'spot' }
@@ -45,6 +45,13 @@ function resolvePercentile(args: {
   return closes[index];
 }
 
+function invertFx(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value) || value === 0) {
+    return null;
+  }
+  return 1 / value;
+}
+
 export async function resolveFxUSDToTarget(
   args: {
     targetCurrency: string;
@@ -69,55 +76,55 @@ export async function resolveFxUSDToTarget(
     return { fx: null, warnings: ['FX fixed scenario missing fixedFx > 0'] };
   }
 
-  const key = fxKeyUSDTo(normalizedCurrency);
   const readHistoryRows = deps.readHistoryRows ?? ((params) => readHistoryRowsInRange(params));
   const refreshHistory = deps.refreshHistory ?? ((params) => refreshHistoryRangeToMonthlyBlobs(params));
   const from = args.scenario.mode === 'percentile'
     ? subtractUtcYears(args.anchorDateUtc, args.scenario.lookbackYears)
     : args.anchorDateUtc;
 
-  let history = await readHistoryRows({
-    priceKey: key,
-    from,
-    to: args.anchorDateUtc,
-  });
+  const warnings: string[] = [];
+  const candidates = fxLookupCandidatesUSDTo(normalizedCurrency);
 
-  if (history.missing && args.allowRefresh) {
-    await refreshHistory({
-      priceKey: key,
+  for (const candidate of candidates) {
+    let history = await readHistoryRows({
+      priceKey: candidate.priceKey,
       from,
       to: args.anchorDateUtc,
     });
-    history = await readHistoryRows({
-      priceKey: key,
-      from,
-      to: args.anchorDateUtc,
-    });
+
+    if (history.missing && args.allowRefresh) {
+      await refreshHistory({
+        priceKey: candidate.priceKey,
+        from,
+        to: args.anchorDateUtc,
+      });
+      history = await readHistoryRows({
+        priceKey: candidate.priceKey,
+        from,
+        to: args.anchorDateUtc,
+      });
+    }
+
+    const rawFx = args.scenario.mode === 'spot'
+      ? resolveSpot(history.rows, args.anchorDateUtc)
+      : resolvePercentile({
+          rows: history.rows,
+          anchorDateUtc: args.anchorDateUtc,
+          lookbackYears: args.scenario.lookbackYears,
+          percentile: args.scenario.percentile,
+        });
+    const resolvedFx = candidate.invert ? invertFx(rawFx) : rawFx;
+
+    if (resolvedFx !== null) {
+      return { fx: resolvedFx, warnings };
+    }
+
+    const modeReason = args.scenario.mode === 'percentile'
+      ? `No closes in trailing ${args.scenario.lookbackYears}y window for ${candidate.priceKey} <= ${args.anchorDateUtc}`
+      : `No close on or before ${args.anchorDateUtc} for ${candidate.priceKey}`;
+
+    warnings.push(args.allowRefresh ? modeReason : `${modeReason}; refresh=0 so auto-resolve cannot backfill`);
   }
 
-  let fx: number | null;
-  if (args.scenario.mode === 'spot') {
-    fx = resolveSpot(history.rows, args.anchorDateUtc);
-  } else {
-    fx = resolvePercentile({
-      rows: history.rows,
-      anchorDateUtc: args.anchorDateUtc,
-      lookbackYears: args.scenario.lookbackYears,
-      percentile: args.scenario.percentile,
-    });
-  }
-
-  if (fx !== null) {
-    return { fx, warnings: [] };
-  }
-
-  const modeReason = args.scenario.mode === 'percentile'
-    ? `No closes in trailing ${args.scenario.lookbackYears}y window for ${key} <= ${args.anchorDateUtc}`
-    : `No close on or before ${args.anchorDateUtc} for ${key}`;
-
-  if (!args.allowRefresh) {
-    return { fx: null, warnings: [`${modeReason}; refresh=0 so auto-resolve cannot backfill`] };
-  }
-
-  return { fx: null, warnings: [modeReason] };
+  return { fx: null, warnings };
 }

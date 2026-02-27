@@ -55,6 +55,39 @@ function assert(condition: boolean, message: string): void {
   );
   assert(percentile.fx === 1.3, 'percentile should use floor(p*(n-1)) index rule');
 
+
+  const directCad = await resolveFxUSDToTarget(
+    {
+      targetCurrency: 'CAD',
+      anchorDateUtc: '2024-12-31',
+      scenario: { mode: 'spot' },
+      allowRefresh: false,
+    },
+    {
+      readHistoryRows: async ({ priceKey }) => ({
+        rows: priceKey === 'USD_CAD' ? [{ date: '2024-12-30', close: 1.36 }] : [],
+        missing: false,
+      }),
+    },
+  );
+  assert(directCad.fx === 1.36, 'spot should resolve USD_CAD directly when available');
+
+  const invertedCad = await resolveFxUSDToTarget(
+    {
+      targetCurrency: 'CAD',
+      anchorDateUtc: '2024-12-31',
+      scenario: { mode: 'spot' },
+      allowRefresh: false,
+    },
+    {
+      readHistoryRows: async ({ priceKey }) => ({
+        rows: priceKey === 'CAD_USD' ? [{ date: '2024-12-30', close: 0.75 }] : [],
+        missing: false,
+      }),
+    },
+  );
+  assert(Math.abs((invertedCad.fx ?? 0) - (1 / 0.75)) < 1e-9, 'spot should invert CAD_USD when USD_CAD is unavailable');
+
   const missing = await resolveFxUSDToTarget(
     {
       targetCurrency: 'EUR',

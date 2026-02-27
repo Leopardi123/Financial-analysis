@@ -576,6 +576,17 @@ export async function runCorporateSnapshotPipeline(args: {
       : input.scenario.mode === 'fixed'
         ? { mode: 'fixed' as const, fixedPriceByKey: input.scenario.fixedPriceByKey }
         : { mode: 'spot' as const };
+
+    const firstProjectPeriodEnd = typeof projects[0]?.rawJson?.time === 'object' && projects[0]?.rawJson?.time !== null
+      ? (projects[0].rawJson.time as Record<string, unknown>).periodEndDatesUtc
+      : undefined;
+    const t0AnchorDate = Array.isArray(firstProjectPeriodEnd) && typeof firstProjectPeriodEnd[0] === 'string'
+      ? firstProjectPeriodEnd[0]
+      : null;
+    const spotAnchorDateUtc = input.fx.anchor === 't0_period_end'
+      ? (t0AnchorDate ?? getTodayUtcDateString())
+      : getTodayUtcDateString();
+
     diagnostics.meta.projectCount = projects.length;
     diagnostics.meta.fxSource = input.fx.source;
 
@@ -642,7 +653,7 @@ export async function runCorporateSnapshotPipeline(args: {
           const to = periodEndDatesUtc[periodEndDatesUtc.length - 1];
 
           const resolved = await resolveProjectPricesToEngineInput(
-            { parsed, from, to, scenario: resolverScenario },
+            { parsed, from, to, scenario: resolverScenario, projectId, spotAnchorDateUtc },
             {},
           );
 
@@ -798,15 +809,6 @@ export async function runCorporateSnapshotPipeline(args: {
 
     diagnostics.warnings.push(...aggregation.diagnostics.notes);
 
-    const firstProjectPeriodEnd = typeof projects[0]?.rawJson?.time === 'object' && projects[0]?.rawJson?.time !== null
-      ? (projects[0].rawJson.time as Record<string, unknown>).periodEndDatesUtc
-      : undefined;
-    const t0AnchorDate = Array.isArray(firstProjectPeriodEnd) && typeof firstProjectPeriodEnd[0] === 'string'
-      ? firstProjectPeriodEnd[0]
-      : null;
-    const anchorDateUtc = input.fx.anchor === 't0_period_end'
-      ? (t0AnchorDate ?? getTodayUtcDateString())
-      : getTodayUtcDateString();
 
     let buildFundingNeedUSD = input.buildFundingNeed_USD;
     if (buildFundingNeedUSD === undefined) {
@@ -840,7 +842,7 @@ export async function runCorporateSnapshotPipeline(args: {
           : { mode: 'spot' as const };
       const resolvedFx = await resolveFxUSDToTarget({
         targetCurrency: input.targetCurrency,
-        anchorDateUtc,
+        anchorDateUtc: spotAnchorDateUtc,
         scenario: fxScenario,
         allowRefresh: refresh,
       });
@@ -852,8 +854,7 @@ export async function runCorporateSnapshotPipeline(args: {
         diagnostics.warnings.push('FX auto-resolve failed; using legacy fx_USD_to_TargetCurrency fallback');
       }
       if (fxRate === null) {
-        diagnostics.errors.push('FX missing and auto-resolve failed.');
-        return { ok: false, diagnostics };
+        diagnostics.warnings.push('FX missing and auto-resolve failed; target-currency outputs will be null.');
       }
     }
 
@@ -864,17 +865,37 @@ export async function runCorporateSnapshotPipeline(args: {
       minorityInterest_TargetCurrency: input.market?.minorityInterest_TargetCurrency ?? null,
     };
 
-    const financing = computeCorporateFinancing({
-      NPV_today_USD: aggregation.NPV_today_USD,
-      targetCurrency: input.targetCurrency,
-      fx_USD_to_TargetCurrency: fxRate as number,
-      cash_t0_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? null,
-      debt_t0_TargetCurrency: input.balanceSheet?.debt_t0_TargetCurrency ?? null,
-      shares_current: marketInput.shares_current,
-      price_current_TargetCurrency: marketInput.price_current_TargetCurrency,
-      financingPlan: input.financingPlan,
-      buildFundingNeed_USD: buildFundingNeedUSD,
-    });
+    const financing = fxRate === null
+      ? {
+          cash_used_for_build_TargetCurrency: null,
+          cash_t0_post_TargetCurrency: null,
+          new_debt_TargetCurrency: null,
+          debt_t0_post_TargetCurrency: null,
+          equity_raised_TargetCurrency: null,
+          new_shares: null,
+          shares_post_financing: marketInput.shares_current,
+          NPV_today_TargetCurrency: null,
+          NAV_today_TargetCurrency: null,
+          Debt_to_Equity_ratio: null,
+          npvToday_TargetCurrency: null,
+          navToday_TargetCurrency: null,
+          cash_AfterCashFirst_TargetCurrency_t0: null,
+          debt_TargetCurrency_t0: null,
+          netCash_TargetCurrency_t0: null,
+          enterpriseAdjustments_TargetCurrency_t0: 0,
+          evAdditive_Component_TargetCurrency_t0: null,
+        }
+      : computeCorporateFinancing({
+          NPV_today_USD: aggregation.NPV_today_USD,
+          targetCurrency: input.targetCurrency,
+          fx_USD_to_TargetCurrency: fxRate,
+          cash_t0_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? null,
+          debt_t0_TargetCurrency: input.balanceSheet?.debt_t0_TargetCurrency ?? null,
+          shares_current: marketInput.shares_current,
+          price_current_TargetCurrency: marketInput.price_current_TargetCurrency,
+          financingPlan: input.financingPlan,
+          buildFundingNeed_USD: buildFundingNeedUSD,
+        });
 
     const productionStartIndices = projectsForBuildFunding
       .map((project) => {

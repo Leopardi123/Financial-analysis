@@ -117,8 +117,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
   assertEqual(resolved.spotPriceUSDByMetal.Au.length, 3, 'resolved Au series length');
   assertEqual(resolved.spotPriceUSDByMetal.Au[0], 11, 'explicit date mapping at t0');
-  assertEqual(resolved.spotPriceUSDByMetal.Au[1], 20, 'explicit date mapping at t1');
-  assertEqual(resolved.spotPriceUSDByMetal.Au[2], 25, 'explicit date mapping at t2');
+  assertEqual(resolved.spotPriceUSDByMetal.Au[1], 11, 'spot mode replicates anchor value at t1');
+  assertEqual(resolved.spotPriceUSDByMetal.Au[2], 11, 'spot mode replicates anchor value at t2');
 
   const expectedLb = 2204.6226218487757;
   const gotLb = resolved.payableQtyByMetal.Cu[0];
@@ -248,6 +248,43 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
   assertEqual(percentileMissingWindow.spotPriceUSDByMetal.Au[0], null, 'percentile with no rows resolves null');
   assert((percentileMissingWindow.diagnostics?.warnings.length ?? 0) > 0, 'percentile with no rows emits warnings');
+
+
+  const spotFutureParsed = parseProjectJsonV1(base);
+  const spotCalls: string[][] = [];
+  const spotFutureResolved = await resolveProjectPricesToEngineInput(
+    {
+      parsed: spotFutureParsed,
+      scenario: { mode: 'spot' },
+      projectId: 'proj-spot-future',
+      spotAnchorDateUtc: '2025-01-15',
+    },
+    {
+      resolvePriceSeriesFn: async ({ anchorDatesUtc, price_key }) => {
+        spotCalls.push(anchorDatesUtc);
+        return { values: [price_key === 'XAU_USD_TOZ' ? 1234 : 3.21], warnings: [] };
+      },
+    },
+  );
+  assert(spotCalls.every((anchors) => anchors.length === 1 && anchors[0] === '2025-01-15'), 'spot mode should resolve each key once at anchor date');
+  assertEqual(spotFutureResolved.spotPriceUSDByMetal.Au[0], 1234, 'spot price should be replicated at t0');
+  assertEqual(spotFutureResolved.spotPriceUSDByMetal.Au[2], 1234, 'spot price should be replicated at future tN');
+
+  const spotWarningResolved = await resolveProjectPricesToEngineInput(
+    {
+      parsed: spotFutureParsed,
+      scenario: { mode: 'spot' },
+      projectId: 'proj-warning-id',
+      spotAnchorDateUtc: '2025-01-15',
+    },
+    {
+      resolvePriceSeriesFn: async ({ anchorDatesUtc }) => ({ values: anchorDatesUtc.map(() => null), warnings: [] }),
+    },
+  );
+  assert(
+    spotWarningResolved.diagnostics?.warnings.some((warning) => warning.includes('projectId=proj-warning-id')) ?? false,
+    'spot warnings should include project id when coverage is missing',
+  );
 
   const fixedResolved = await resolveProjectPricesToEngineInput(
     {
