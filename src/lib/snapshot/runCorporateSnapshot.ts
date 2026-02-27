@@ -14,6 +14,8 @@ import { computeLista2CfDcfMetrics } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
+import { canonicalUnitForMetal } from '../units/metalUnits.ts';
+import { convertPriceToCanonical, convertQuantityToCanonical } from '../units/conversion.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -134,6 +136,8 @@ type ProjectSeriesContext = {
   periodEndDatesUtc: string[];
   payableQtyByMetal: Record<string, Array<number | null>>;
   payableQtyUnitByMetal: Record<string, string>;
+  priceUSDUnitByMetal: Record<string, string>;
+  spotPriceUSDByMetal: Record<string, Array<number | null>>;
   revenueByMetal_USD: Record<string, Array<number | null>>;
   operations: {
     oreMinedTonnes?: Array<number | null>;
@@ -207,6 +211,7 @@ function buildSnapshotSeries(args: {
   const payableQtyUnitByMetal: Record<string, string> = {};
   const priceUsedByMetal_USD: Record<string, Array<number | null>> = {};
   const revenueByMetal_USD: Record<string, Array<number | null>> = {};
+  const unitAudit: NonNullable<CorporateSnapshotSeries['unitAudit']> = { metals: {} };
 
   const metalKeys = [...new Set(args.projectSeriesContexts.flatMap((entry) => Object.keys(entry.payableQtyByMetal)))].sort((a, b) => a.localeCompare(b));
 
@@ -227,15 +232,16 @@ function buildSnapshotSeries(args: {
         series: sanitizeSeries(entry.revenueByMetal_USD[metal]),
       }));
 
-    payableQtyByMetal[metal] = sumStrictAlignedSeries({ corporateDates: args.corporateDates, projectDateSeries: qtyProjects, label: `series.payableQtyByMetal.${metal}` });
-    revenueByMetal_USD[metal] = sumStrictAlignedSeries({ corporateDates: args.corporateDates, projectDateSeries: revenueProjects, label: `series.revenueByMetal_USD.${metal}` });
+    const spotPriceProjects = args.projectSeriesContexts
+      .filter((entry) => Array.isArray(entry.spotPriceUSDByMetal[metal]))
+      .map((entry) => ({
+        projectId: entry.projectId,
+        periodEndDatesUtc: entry.periodEndDatesUtc,
+        series: sanitizeSeries(entry.spotPriceUSDByMetal[metal]),
+      }));
 
-    priceUsedByMetal_USD[metal] = new Array<number | null>(expectedLength).fill(null);
-    for (let t = 0; t < expectedLength; t += 1) {
-      const qty = payableQtyByMetal[metal][t];
-      const revenue = revenueByMetal_USD[metal][t];
-      priceUsedByMetal_USD[metal][t] = qty !== null && qty > 0 && revenue !== null ? revenue / qty : null;
-    }
+    payableQtyByMetal[metal] = sumStrictAlignedSeries({ corporateDates: args.corporateDates, projectDateSeries: qtyProjects, label: `series.payableQtyByMetal.${metal}` });
+    const fallbackRevenue = sumStrictAlignedSeries({ corporateDates: args.corporateDates, projectDateSeries: revenueProjects, label: `series.revenueByMetal_USD.${metal}` });
 
     const unitSet = new Set(args.projectSeriesContexts.map((entry) => entry.payableQtyUnitByMetal[metal]).filter((v): v is string => typeof v === 'string'));
     if (unitSet.size > 1) {
@@ -244,7 +250,74 @@ function buildSnapshotSeries(args: {
     if (unitSet.size === 0) {
       throw new Error(`series.payableQtyUnitByMetal.${metal} missing for all projects`);
     }
-    payableQtyUnitByMetal[metal] = [...unitSet][0];
+    const qtyUnit = [...unitSet][0];
+    payableQtyUnitByMetal[metal] = qtyUnit;
+
+    const canonicalUnit = canonicalUnitForMetal(metal);
+    const priceUnitSet = new Set(args.projectSeriesContexts.map((entry) => entry.priceUSDUnitByMetal[metal]).filter((v): v is string => typeof v === 'string'));
+    const warnings: string[] = [];
+    const priceUnit = priceUnitSet.size > 0 ? [...priceUnitSet][0] : `USD_${canonicalUnit}`;
+    if (priceUnitSet.size > 1) {
+      warnings.push(`price unit mismatch across projects for ${metal}`);
+    }
+
+    priceUsedByMetal_USD[metal] = new Array<number | null>(expectedLength).fill(null);
+    revenueByMetal_USD[metal] = new Array<number | null>(expectedLength).fill(null);
+
+    for (let t = 0; t < expectedLength; t += 1) {
+      const spotValues = spotPriceProjects
+        .map((project) => {
+          const idx = project.periodEndDatesUtc.indexOf(args.corporateDates[t]);
+          return idx >= 0 ? project.series[idx] : null;
+        })
+        .filter((value): value is number => value !== null);
+      if (spotValues.length > 0) {
+        const first = spotValues[0];
+        if (spotValues.some((value) => value !== first)) {
+          warnings.push(`spot price mismatch across projects: metal ${metal} period ${t}`);
+        }
+        priceUsedByMetal_USD[metal][t] = first;
+      }
+
+      const qty = payableQtyByMetal[metal][t];
+      const price = priceUsedByMetal_USD[metal][t];
+
+      if (qty === null || price === null) {
+        revenueByMetal_USD[metal][t] = fallbackRevenue[t];
+        continue;
+      }
+
+      const qtyCanonical = convertQuantityToCanonical(metal, qty, qtyUnit);
+      const priceCanonical = convertPriceToCanonical(metal, price, priceUnit);
+
+      if (qtyCanonical === null || priceCanonical === null) {
+        revenueByMetal_USD[metal][t] = null;
+        warnings.push(`unit mismatch: metal ${metal} period ${t}`);
+      } else {
+        revenueByMetal_USD[metal][t] = qtyCanonical * priceCanonical;
+      }
+    }
+
+    const firstFiniteIndex = payableQtyByMetal[metal].findIndex((value): value is number => value !== null && Number.isFinite(value));
+    const conversionFactorExample = firstFiniteIndex >= 0
+      ? (() => {
+          const raw = payableQtyByMetal[metal][firstFiniteIndex] as number;
+          const canonical = convertQuantityToCanonical(metal, raw, qtyUnit);
+          if (canonical === null || raw === 0) {
+            return undefined;
+          }
+          return canonical / raw;
+        })()
+      : undefined;
+
+    unitAudit.metals[metal] = {
+      qtyUnit,
+      canonicalQtyUnit: canonicalUnit,
+      priceUnit,
+      canonicalPriceUnit: canonicalUnit,
+      ...(conversionFactorExample !== undefined ? { conversionFactorExample } : {}),
+      warnings,
+    };
   }
 
   const totalRevenue_USD = new Array<number | null>(expectedLength).fill(null);
@@ -439,6 +512,7 @@ function buildSnapshotSeries(args: {
     economicsBreakdown: hasAnyEconomicsBreakdown ? economicsBreakdown : undefined,
     royaltiesDetail: royaltiesDetail.length > 0 ? royaltiesDetail : undefined,
     taxesDetail: taxesDetail.federalIncomeTaxUSD || taxesDetail.municipalRevenueTaxUSD ? taxesDetail : undefined,
+    unitAudit,
   };
 }
 
@@ -658,6 +732,12 @@ export async function runCorporateSnapshotPipeline(args: {
               Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),
             payableQtyUnitByMetal: { ...parsed.engineInputWithoutPrices.payableQtyUnitByMetal },
+            priceUSDUnitByMetal: Object.fromEntries(
+              Object.keys(parsed.engineInputWithoutPrices.priceKeyByMetal).map((metal) => [metal, `USD_${canonicalUnitForMetal(metal)}`]),
+            ),
+            spotPriceUSDByMetal: Object.fromEntries(
+              Object.entries(resolved.spotPriceUSDByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
+            ),
             revenueByMetal_USD: Object.fromEntries(
               Object.entries(out.revenue.byMetalRevenueUSD).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),

@@ -22,6 +22,7 @@ test('snapshot series exposes aligned totalRevenue_USD', async () => {
   assert.ok(result.snapshot.series);
   assert.equal(result.snapshot.series.totalRevenue_USD.length, result.snapshot.aggregation.corporateMasterN + 1);
   assert.equal(result.snapshot.series.periodIndex.length, result.snapshot.aggregation.corporateMasterN + 1);
+  assert.ok(result.snapshot.series.unitAudit);
 });
 
 test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async () => {

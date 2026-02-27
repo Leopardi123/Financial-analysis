@@ -75,6 +75,16 @@ export type CorporateSnapshotSeries = {
     federalIncomeTaxUSD?: Array<number | null>;
     municipalRevenueTaxUSD?: Array<number | null>;
   };
+  unitAudit?: {
+    metals: Record<string, {
+      qtyUnit: string;
+      canonicalQtyUnit: 'toz' | 'lb' | 'tonne';
+      priceUnit: string;
+      canonicalPriceUnit: 'toz' | 'lb' | 'tonne';
+      conversionFactorExample?: number;
+      warnings: string[];
+    }>;
+  };
 };
 
 export type CorporateSnapshot = {
