@@ -10,6 +10,8 @@ import { getCompanyProject, getCompanyProjectsBySymbol, type CompanyProjectSumma
 import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
+import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
+import { buildOperationsGridModel } from "../pages/projectOperationsGrid.ts";
 import {
   buildSeries,
   buildSeriesData,
@@ -761,6 +763,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectSelectorOpen, setProjectSelectorOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
+  const [selectedProjectRawJson, setSelectedProjectRawJson] = useState<Record<string, unknown> | null>(null);
 
   const [snapshotDiscountRateInput] = useState("0.10");
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
@@ -1030,6 +1033,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     setSelectedProjectName(projectName ?? null);
     setProjectSelectorOpen(false);
     setProjectSnapshotData(null);
+    setSelectedProjectRawJson(null);
     setProjectSnapshotLoading(true);
     setProjectSnapshotError(null);
     setProjectSnapshotWarnings([]);
@@ -1068,9 +1072,11 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       }
       setSelectedProjectId(project.project_id);
       setSelectedProjectName(project.project_name ?? null);
+      setSelectedProjectRawJson(project.raw_json as Record<string, unknown>);
       setProjectSnapshotData(result.snapshot as unknown as Record<string, unknown>);
     } catch (error) {
       setProjectSnapshotData(null);
+      setSelectedProjectRawJson(null);
       setProjectSnapshotError((error as Error).message);
     } finally {
       setProjectSnapshotLoading(false);
@@ -1925,6 +1931,67 @@ Capital Available: ${availableLabel}`,
       { label: "shares_post_financing", value: financing.shares_post_financing },
     ];
   })();
+
+
+  const parsedSelectedProject = useMemo(() => {
+    if (!selectedProjectRawJson) return null;
+    try {
+      return parseProjectJsonV1WithContext(selectedProjectRawJson);
+    } catch {
+      return null;
+    }
+  }, [selectedProjectRawJson]);
+
+  const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
+
+  const projectExcelGrid = useMemo(() => {
+    if (!parsedSelectedProject) return null;
+    const base = buildOperationsGridModel({
+      masterN: parsedSelectedProject.engineInputWithoutPrices.masterN,
+      productionStartPeriod: parsedSelectedProject.engineInputWithoutPrices.productionStartPeriod,
+      periodEndDatesUtc: parsedSelectedProject.engineInputWithoutPrices.periodEndDatesUtc,
+      operations: {
+        oreMilledTonnes: parsedSelectedProject.context.operations?.oreMilledTonnes,
+        oreMinedTonnes: parsedSelectedProject.context.operations?.oreMinedTonnes,
+        oreTonnageUnit: parsedSelectedProject.context.operations?.oreTonnageUnit,
+        capacity: {
+          throughputUnit: parsedSelectedProject.context.operations?.capacity?.throughputUnit,
+          nameplateThroughput: parsedSelectedProject.context.operations?.capacity?.nameplateThroughput,
+          utilizationPct: parsedSelectedProject.context.operations?.capacity?.utilizationPct,
+        },
+      },
+      metals: {
+        payableQtyByMetal: parsedSelectedProject.engineInputWithoutPrices.payableQtyByMetal,
+        payableQtyUnitByMetal: parsedSelectedProject.engineInputWithoutPrices.payableQtyUnitByMetal,
+      },
+    });
+
+    const econDefs = [
+      ["Capex (USD)", projectSeries?.capexUSD],
+      ["FCFF (USD)", projectSeries?.fcffUSD],
+      ["EBIT (USD)", projectSeries?.ebitUSD],
+      ["Tax (USD)", projectSeries?.taxUSD],
+      ["Operating costs (USD)", projectSeries?.operatingCostsUSD],
+      ["Sustaining capex (USD)", projectSeries?.sustainingCapexUSD],
+      ["Royalties (USD)", projectSeries?.royaltiesUSD],
+      ["Reclamation (USD)", projectSeries?.reclamationUSD],
+    ] as const;
+
+    const economicsRows = econDefs
+      .map(([label, value]) => ({ label, values: Array.isArray(value) ? value as Array<number | null> : null }))
+      .filter((row) => row.values !== null)
+      .map((row) => ({ label: row.label, values: row.values as Array<number | null> }));
+
+    return {
+      ...base,
+      tMinusTp: base.tMinusTp.map((value) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return value;
+        return num < 0 ? "" : value;
+      }),
+      rows: [...base.rows, ...economicsRows],
+    };
+  }, [parsedSelectedProject, projectSeries]);
 
   const reportedChartContext: ReportedChartContext = {
     resolveUnitMeta,
@@ -2800,7 +2867,7 @@ Capital Available: ${availableLabel}`,
             <>
               <h1 className="subrub">{selectedProjectName?.trim() || selectedProjectId}</h1>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); }}>
+                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); }}>
                   Back to projects
                 </button>
                 <a href={`/company/${encodeURIComponent(ticker)}/projects?projectId=${encodeURIComponent(selectedProjectId)}`} className="button-link" style={{ alignSelf: "center" }}>
@@ -2820,6 +2887,45 @@ Capital Available: ${availableLabel}`,
                     </div>
                   ))}
                 </div>
+              )}
+
+              {projectExcelGrid && (
+                <section style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                  <h2 className="subrub small" style={{ margin: 0 }}>Operations & series</h2>
+                  {projectExcelGrid.notes.map((note) => <p key={note} className="bread" style={{ margin: 0 }}>{note}</p>)}
+                  {projectExcelGrid.warnings.map((warning) => <p key={warning} className="bread" style={{ margin: 0 }}>{warning}</p>)}
+                  <div style={{ display: "grid", gap: 2, fontSize: 12, border: "1px solid #d8e0d2", borderRadius: 6, padding: "6px 8px", background: "#fff" }}>
+                    <div><strong>Nameplate throughput:</strong> {formatPanelValue(projectExcelGrid.capacity.nameplateThroughput)} {projectExcelGrid.capacity.throughputUnit ?? ""}</div>
+                    <div><strong>Utilization:</strong> {projectExcelGrid.capacity.utilizationPct === null ? "—" : `${formatPanelValue(projectExcelGrid.capacity.utilizationPct * 100)}%`}</div>
+                    <div><strong>Effective throughput:</strong> {formatPanelValue(projectExcelGrid.capacity.effectiveThroughput)} {projectExcelGrid.capacity.throughputUnit ?? ""}</div>
+                  </div>
+                  <div style={{ overflowX: "auto", border: "1px solid #d8e0d2", borderRadius: 8, background: "#fff" }}>
+                    <table style={{ width: "100%", minWidth: 760, borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: "left", padding: "4px 6px", background: "#f4f8f0" }}>Year</th>
+                          {projectExcelGrid.years.map((value, idx) => <th key={`year-${idx}`} style={{ textAlign: "right", padding: "4px 6px", background: "#f4f8f0" }}>{value}</th>)}
+                        </tr>
+                        <tr>
+                          <th style={{ textAlign: "left", padding: "4px 6px", background: "#f4f8f0" }}>t</th>
+                          {projectExcelGrid.tIndex.map((value, idx) => <th key={`t-${idx}`} style={{ textAlign: "right", padding: "4px 6px", background: "#f4f8f0" }}>{value}</th>)}
+                        </tr>
+                        <tr>
+                          <th style={{ textAlign: "left", padding: "4px 6px", background: "#f4f8f0" }}>t - tp</th>
+                          {projectExcelGrid.tMinusTp.map((value, idx) => <th key={`tp-${idx}`} style={{ textAlign: "right", padding: "4px 6px", background: "#f4f8f0" }}>{value}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {projectExcelGrid.rows.map((row) => (
+                          <tr key={row.label}>
+                            <th style={{ textAlign: "left", padding: "4px 6px", borderTop: "1px solid #e5ebdf", position: "sticky", left: 0, background: "#fbfdf8" }}>{row.label}</th>
+                            {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`} style={{ textAlign: "right", padding: "4px 6px", borderTop: "1px solid #e5ebdf" }}>{formatPanelValue(row.values[t] ?? null)}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
               )}
 
               <details style={{ marginTop: 12 }}>
