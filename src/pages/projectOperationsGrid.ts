@@ -23,6 +23,12 @@ export type OperationsGridInput = {
     priceUSDByMetal?: Record<string, Array<number | null>>;
     operatingCostsUSD?: Array<number | null>;
     royaltiesUSD?: Array<number | null>;
+    royaltiesDetail?: Array<{
+      id?: string;
+      base?: string | null;
+      rateType?: string | null;
+      rate?: number | null;
+    }> | null;
     ebitdaUSD?: Array<number | null>;
     ebitUSD?: Array<number | null>;
     depreciationUSD?: Array<number | null>;
@@ -167,28 +173,55 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   const grossProfit = Array.from({ length: columnCount }, (_, t) => {
     const revenue = grossRevenue[t];
     const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
-    const royalties = input.economics?.royaltiesUSD?.[t] ?? 0;
-    if (revenue === null || operatingCost === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost) || !Number.isFinite(royalties)) return null;
-    return revenue - operatingCost - royalties;
+    if (revenue === null || operatingCost === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost)) return null;
+    return revenue - operatingCost;
   });
   if (metals.length > 0) rows.push({ label: 'Gross profit (USD)', values: grossProfit });
 
-  const explicitEbitda = input.economics?.ebitdaUSD;
-  const hasDepreciation = Array.isArray(input.economics?.depreciationUSD);
-  const ebitda = Array.from({ length: columnCount }, (_, t) => {
-    if (Array.isArray(explicitEbitda)) {
-      const value = explicitEbitda[t] ?? null;
-      return value !== null && Number.isFinite(value) ? value : null;
+  const royaltiesDetail = input.economics?.royaltiesDetail ?? null;
+  const hasRoyaltiesDetail = Array.isArray(royaltiesDetail) && royaltiesDetail.length > 0;
+  const effectiveRoyaltiesUSD = Array.from({ length: columnCount }, (_, t) => {
+    if (!hasRoyaltiesDetail) {
+      const fallback = input.economics?.royaltiesUSD?.[t] ?? 0;
+      return Number.isFinite(fallback) ? fallback : null;
     }
-    if (!hasDepreciation) return null;
-    const ebit = input.economics?.ebitUSD?.[t] ?? null;
-    const depreciation = input.economics?.depreciationUSD?.[t] ?? null;
-    if (ebit === null || depreciation === null || !Number.isFinite(ebit) || !Number.isFinite(depreciation)) return null;
-    return ebit + depreciation;
+    let sum = 0;
+    for (const detail of royaltiesDetail ?? []) {
+      const base = detail.base ?? null;
+      const rateType = detail.rateType ?? null;
+      const ratePct = detail.rate;
+      const rateFraction = typeof ratePct === 'number' && Number.isFinite(ratePct) ? ratePct / 100 : null;
+      if (rateFraction === null || base !== 'revenue' || rateType !== 'NSR_pct') return null;
+      const revenue = grossRevenue[t];
+      if (revenue === null || !Number.isFinite(revenue)) return null;
+      sum += revenue * rateFraction;
+    }
+    return sum;
   });
-  if (Array.isArray(input.economics?.ebitUSD)) {
-    rows.push({ label: 'EBITDA (USD, includes royalties)', values: ebitda });
-    rows.push({ label: 'EBIT (USD)', values: input.economics?.ebitUSD ?? [] });
+  if (metals.length > 0) rows.push({ label: 'Royalties (USD)', values: effectiveRoyaltiesUSD });
+
+  const ebitda = Array.from({ length: columnCount }, (_, t) => {
+    const revenue = grossRevenue[t];
+    const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
+    const royalties = effectiveRoyaltiesUSD[t] ?? null;
+    if (revenue === null || operatingCost === null || royalties === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost) || !Number.isFinite(royalties)) return null;
+    return revenue - operatingCost - royalties;
+  });
+
+  const hasDepreciation = Array.isArray(input.economics?.depreciationUSD);
+  const ebit = Array.from({ length: columnCount }, (_, t) => {
+    if (!hasDepreciation) {
+      const explicit = input.economics?.ebitUSD?.[t] ?? null;
+      return explicit !== null && Number.isFinite(explicit) ? explicit : null;
+    }
+    const ebitdaValue = ebitda[t];
+    const depreciation = input.economics?.depreciationUSD?.[t] ?? null;
+    if (ebitdaValue === null || depreciation === null || !Number.isFinite(ebitdaValue) || !Number.isFinite(depreciation)) return null;
+    return ebitdaValue - depreciation;
+  });
+  if (Array.isArray(input.economics?.ebitUSD) || hasDepreciation) {
+    rows.push({ label: 'EBITDA (USD)', values: ebitda });
+    rows.push({ label: 'EBIT (USD)', values: ebit });
   }
   if (Array.isArray(input.economics?.taxableIncomeUSD)) {
     rows.push({ label: 'Taxable income (USD)', values: input.economics?.taxableIncomeUSD ?? [] });

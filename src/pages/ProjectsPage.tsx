@@ -390,8 +390,32 @@ export default function ProjectsPage() {
         payableQtyByMetal: raw.engineInputWithoutPrices.payableQtyByMetal,
         payableQtyUnitByMetal: raw.engineInputWithoutPrices.payableQtyUnitByMetal,
       },
+      economics: {
+        priceUSDByMetal: series?.revenueByMetal_USD
+          ? Object.fromEntries(
+            Object.entries(series.revenueByMetal_USD).map(([metal, revenueSeries]) => {
+              const qty = raw.engineInputWithoutPrices.payableQtyByMetal[metal] ?? [];
+              const derivedPrices = revenueSeries.map((revenue, t) => {
+                const quantity = qty[t];
+                if (revenue === null || quantity === null || !Number.isFinite(revenue) || !Number.isFinite(quantity) || quantity === 0) return null;
+                return revenue / quantity;
+              });
+              return [metal, derivedPrices];
+            }),
+          )
+          : undefined,
+        operatingCostsUSD: series?.operatingCostsUSD,
+        royaltiesUSD: series?.royaltiesUSD,
+        royaltiesDetail: raw.engineInputWithoutPrices.royaltiesDetail,
+        ebitdaUSD: series?.ebitdaUSD,
+        ebitUSD: series?.ebitUSD,
+        depreciationUSD: series?.depreciationUSD,
+        taxableIncomeUSD: series?.taxableIncomeUSD,
+        taxUSD: series?.taxUSD,
+        effectiveTaxRate: series?.effectiveTaxRate,
+      },
     });
-  }, [parsedProject]);
+  }, [parsedProject, series]);
 
   const economicsRows = useMemo(() => {
     if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;

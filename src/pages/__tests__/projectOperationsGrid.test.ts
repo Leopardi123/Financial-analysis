@@ -84,12 +84,45 @@ test('grade/recovery rows precede payable and derived revenue rows include EBITD
   assert(labels.includes('Revenue Au (USD)'));
   assert(labels.includes('Gross revenue (USD)'));
   assert(labels.includes('Gross profit (USD)'));
-  assert(labels.includes('EBITDA (USD, includes royalties)'));
+  assert(labels.includes('Royalties (USD)'));
+  assert(labels.includes('EBITDA (USD)'));
 
   const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
   assert.deepEqual(byLabel.get('Recovery Au (%)'), [90, 88]);
   assert.deepEqual(byLabel.get('Revenue Au (USD)'), [2000000, 1995000]);
   assert.deepEqual(byLabel.get('Gross revenue (USD)'), [2008000, 2003610]);
   assert.deepEqual(byLabel.get('Gross profit (USD)'), [1208000, 1193610]);
-  assert.deepEqual(byLabel.get('EBITDA (USD, includes royalties)'), [1400000, 1315000]);
+  assert.deepEqual(byLabel.get('Royalties (USD)'), [0, 0]);
+  assert.deepEqual(byLabel.get('EBITDA (USD)'), [1208000, 1193610]);
+});
+
+test('royalties detail drives royalties row and EBITDA consistently', () => {
+  const model = buildOperationsGridModel({
+    masterN: 0,
+    productionStartPeriod: 0,
+    periodEndDatesUtc: ['2026-12-31'],
+    operations: null,
+    metals: {
+      payableQtyByMetal: { Au: [100] },
+      payableQtyUnitByMetal: { Au: 'toz' },
+    },
+    economics: {
+      priceUSDByMetal: { Au: [2000] },
+      operatingCostsUSD: [100000],
+      royaltiesUSD: [1],
+      royaltiesDetail: [
+        { id: 'emx', base: 'revenue', rateType: 'NSR_pct', rate: 1 },
+        { id: 'prov', base: 'revenue', rateType: 'NSR_pct', rate: 3 },
+      ],
+      ebitUSD: [0],
+      depreciationUSD: [10000],
+    },
+  });
+
+  const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
+  assert.deepEqual(byLabel.get('Gross revenue (USD)'), [200000]);
+  assert.deepEqual(byLabel.get('Gross profit (USD)'), [100000]);
+  assert.deepEqual(byLabel.get('Royalties (USD)'), [8000]);
+  assert.deepEqual(byLabel.get('EBITDA (USD)'), [92000]);
+  assert.deepEqual(byLabel.get('EBIT (USD)'), [82000]);
 });
