@@ -20,6 +20,12 @@ export interface ProviderPriceRow {
   close: number;
 }
 
+export interface LegacyCommodityQuoteRow {
+  symbol: string;
+  price: number;
+  name?: string;
+}
+
 type FmpQuoteRow = {
   price?: number;
   timestamp?: number;
@@ -67,6 +73,58 @@ function normalizeHistoricalRow(row: Record<string, unknown>): FmpHistoricalRow 
   };
 }
 
+function normalizeLegacyHistoricalChartRows(rows: unknown): FmpHistoricalRow[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  return rows
+    .map((row) => (typeof row === 'object' && row !== null ? normalizeHistoricalRow(row as Record<string, unknown>) : null))
+    .filter((row): row is FmpHistoricalRow => row !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+
+function subtractUtcDays(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function todayUtcDateString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export async function resolveLegacyCloseOnOrBefore(
+  symbol: string,
+  targetDateUtc: string,
+  deps: {
+    fetchApiV3JsonFn?: typeof fetchApiV3Json;
+  } = {},
+): Promise<{ close: number | null; warnings: string[] }> {
+  const fetchApiV3JsonFn = deps.fetchApiV3JsonFn ?? fetchApiV3Json;
+  const warnings: string[] = [];
+  const todayUtc = todayUtcDateString();
+  const clampedTo = targetDateUtc > todayUtc ? todayUtc : targetDateUtc;
+  if (targetDateUtc > todayUtc) {
+    warnings.push(`targetDate ${targetDateUtc} is in the future; clamped to ${todayUtc}`);
+  }
+
+  const from = subtractUtcDays(clampedTo, 14);
+  const path = `historical-chart/1day/${encodeURIComponent(symbol)}`;
+  const response = await fetchApiV3JsonFn<unknown>(path, { from, to: clampedTo });
+  const rows = normalizeLegacyHistoricalChartRows(response);
+  const eligible = rows.filter((row) => row.date <= clampedTo);
+  const latest = eligible[eligible.length - 1];
+  if (!latest) {
+    warnings.push(`No close on or before ${clampedTo} for ${symbol}`);
+    warnings.push(`legacyFetch: GET /api/v3/${path}?from=${from}&to=${clampedTo}`);
+    return { close: null, warnings };
+  }
+
+  return { close: latest.close, warnings };
+}
+
+
 export async function fetchQuote(symbol: string): Promise<FmpQuoteResult> {
   const rows = await fetchStableJson<FmpQuoteRow[]>('quote', { symbol });
   const quote = rows?.[0];
@@ -78,6 +136,41 @@ export async function fetchQuote(symbol: string): Promise<FmpQuoteResult> {
     price: quote.price,
     asof: toIsoUtc(quote.timestamp ?? quote.date),
   };
+}
+
+export async function fetchLegacyCommodityQuotes(
+  deps: {
+    fetchApiV3JsonFn?: typeof fetchApiV3Json;
+  } = {},
+): Promise<LegacyCommodityQuoteRow[]> {
+  const fetchApiV3JsonFn = deps.fetchApiV3JsonFn ?? fetchApiV3Json;
+  const rows = await fetchApiV3JsonFn<Array<Record<string, unknown>>>('quotes/commodity');
+  return rows
+    .map((row) => {
+      const symbol = typeof row.symbol === 'string' ? row.symbol.trim().toUpperCase() : null;
+      const price = typeof row.price === 'number' && Number.isFinite(row.price) ? row.price : null;
+      if (!symbol || price === null) {
+        return null;
+      }
+      return {
+        symbol,
+        price,
+        ...(typeof row.name === 'string' ? { name: row.name } : {}),
+      };
+    })
+    .filter((row): row is LegacyCommodityQuoteRow => row !== null);
+}
+
+export async function getLegacyQuote(
+  symbol: string,
+  deps: {
+    fetchLegacyCommodityQuotesFn?: typeof fetchLegacyCommodityQuotes;
+  } = {},
+): Promise<LegacyCommodityQuoteRow | null> {
+  const fetchLegacyCommodityQuotesFn = deps.fetchLegacyCommodityQuotesFn ?? fetchLegacyCommodityQuotes;
+  const normalized = symbol.trim().toUpperCase();
+  const quotes = await fetchLegacyCommodityQuotesFn();
+  return quotes.find((quote) => quote.symbol === normalized) ?? null;
 }
 
 export async function fetchHistoricalEodFull(symbol: string): Promise<FmpHistoricalRow[]> {
@@ -111,9 +204,15 @@ export async function fetchHistorical(
   }
 
   const symbol = legacySymbol ?? provider_symbol;
-  const response = legacySymbol
-    ? await fetchApiV3Json<FmpHistoricalResponse>(`historical-price-full/${encodeURIComponent(symbol)}`, { from: fromUtc, to: toUtc })
-    : await fetchStableJson<FmpHistoricalResponse>('historical-price-eod/full', { symbol });
+  if (legacySymbol) {
+    const response = await fetchApiV3Json<unknown>(`historical-chart/1day/${encodeURIComponent(symbol)}`, { from: fromUtc, to: toUtc });
+    const rows = normalizeLegacyHistoricalChartRows(response);
+    return rows
+      .filter((row) => row.date >= fromUtc && row.date <= toUtc)
+      .map((row) => ({ dateUtc: row.date, close: row.close }));
+  }
+
+  const response = await fetchStableJson<FmpHistoricalResponse>('historical-price-eod/full', { symbol });
   const sourceRows = Array.isArray(response) ? response : Array.isArray(response?.historical) ? response.historical : [];
   const rows = sourceRows
     .map((row) => normalizeHistoricalRow(row))

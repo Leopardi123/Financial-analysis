@@ -7,9 +7,7 @@ export type FxScenario =
   | { mode: 'percentile'; lookbackYears: number; percentile: number }
   | { mode: 'fixed'; fixedFx?: number };
 
-type LegacyHistoricalResponse = {
-  historical?: Array<Record<string, unknown>>;
-} | Array<Record<string, unknown>>;
+type LegacyHistoricalResponse = Array<Record<string, unknown>>;
 
 type FxHistoryRow = { date: string; close: number };
 
@@ -17,6 +15,16 @@ function subtractUtcYears(dateStr: string, years: number): string {
   const date = new Date(`${dateStr}T00:00:00Z`);
   date.setUTCFullYear(date.getUTCFullYear() - years);
   return date.toISOString().slice(0, 10);
+}
+
+function subtractUtcDays(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function todayUtcDateString(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function resolveSpot(rows: FxHistoryRow[], anchorDateUtc: string): number | null {
@@ -59,8 +67,7 @@ function invertFx(value: number | null): number | null {
 }
 
 function normalizeLegacyRows(response: LegacyHistoricalResponse): FxHistoryRow[] {
-  const rows = Array.isArray(response) ? response : Array.isArray(response?.historical) ? response.historical : [];
-  return rows
+  return response
     .map((row) => {
       const date = typeof row.date === 'string' ? row.date.slice(0, 10) : null;
       const close = typeof row.close === 'number' && Number.isFinite(row.close) ? row.close : null;
@@ -81,9 +88,10 @@ export async function resolveFxUSDToTarget(
     allowRefresh: boolean;
   },
   deps: {
-    fetchHistorical?: (symbol: string) => Promise<LegacyHistoricalResponse>;
+    fetchHistorical?: (params: { symbol: string; from: string; to: string; path: string }) => Promise<LegacyHistoricalResponse>;
   } = {},
 ): Promise<{ fx: number | null; warnings: string[] }> {
+  void args.allowRefresh;
   const normalizedCurrency = args.targetCurrency.toUpperCase();
   if (normalizedCurrency === 'USD') {
     return { fx: 1, warnings: [] };
@@ -96,34 +104,51 @@ export async function resolveFxUSDToTarget(
     return { fx: null, warnings: ['FX fixed scenario missing fixedFx > 0'] };
   }
 
+  const warnings: string[] = [];
+  const seenWarnings = new Set<string>();
+  const pushWarning = (message: string) => {
+    if (!seenWarnings.has(message)) {
+      seenWarnings.add(message);
+      warnings.push(message);
+    }
+  };
+
+  const todayUtc = todayUtcDateString();
+  const clampedAnchorDateUtc = args.anchorDateUtc > todayUtc ? todayUtc : args.anchorDateUtc;
+  if (args.anchorDateUtc > todayUtc) {
+    pushWarning(`targetDate ${args.anchorDateUtc} is in the future; clamped to ${todayUtc}`);
+  }
 
   const fromUtc = args.scenario.mode === 'percentile'
-    ? subtractUtcYears(args.anchorDateUtc, args.scenario.lookbackYears)
-    : subtractUtcYears(args.anchorDateUtc, 20);
+    ? subtractUtcYears(clampedAnchorDateUtc, args.scenario.lookbackYears)
+    : subtractUtcDays(clampedAnchorDateUtc, 14);
 
-  const warnings: string[] = [];
   const candidates = fxLookupCandidatesUSDTo(normalizedCurrency);
 
   for (const candidate of candidates) {
     const symbol = getLegacySymbolForPriceKey(candidate.priceKey);
     if (!symbol) {
-      warnings.push(`Unknown legacy priceKey mapping: ${candidate.priceKey}`);
+      pushWarning(`Unknown legacy priceKey mapping: ${candidate.priceKey}`);
       continue;
     }
 
-    const fetchHistorical = deps.fetchHistorical ?? ((legacySymbol: string) => fetchApiV3Json<LegacyHistoricalResponse>(`historical-price-full/${encodeURIComponent(legacySymbol)}`, { from: fromUtc, to: args.anchorDateUtc }));
-    const response = await fetchHistorical(symbol);
+    const path = `historical-chart/1day/${encodeURIComponent(symbol)}`;
+    const fetchHistorical = deps.fetchHistorical ?? ((params: { symbol: string; from: string; to: string; path: string }) =>
+      fetchApiV3Json<LegacyHistoricalResponse>(params.path, { from: params.from, to: params.to }));
+
+    const response = await fetchHistorical({ symbol, from: fromUtc, to: clampedAnchorDateUtc, path });
     const rows = normalizeLegacyRows(response);
     if (rows.length === 0) {
-      warnings.push(`No price data returned from FMP legacy v3 for symbol ${symbol}`);
+      pushWarning(`No price data returned from FMP legacy v3 for symbol ${symbol}`);
+      pushWarning(`legacyFetch: GET /api/v3/${path}?from=${fromUtc}&to=${clampedAnchorDateUtc}`);
       continue;
     }
 
     const rawFx = args.scenario.mode === 'spot'
-      ? resolveSpot(rows, args.anchorDateUtc)
+      ? resolveSpot(rows, clampedAnchorDateUtc)
       : resolvePercentile({
           rows,
-          anchorDateUtc: args.anchorDateUtc,
+          anchorDateUtc: clampedAnchorDateUtc,
           lookbackYears: args.scenario.lookbackYears,
           percentile: args.scenario.percentile,
         });
@@ -134,10 +159,10 @@ export async function resolveFxUSDToTarget(
     }
 
     const modeReason = args.scenario.mode === 'percentile'
-      ? `No closes in trailing ${args.scenario.lookbackYears}y window for ${candidate.priceKey} <= ${args.anchorDateUtc}`
-      : `No close on or before ${args.anchorDateUtc} for ${candidate.priceKey}`;
+      ? `No closes in trailing ${args.scenario.lookbackYears}y window for ${candidate.priceKey} <= ${clampedAnchorDateUtc}`
+      : `No close on or before ${clampedAnchorDateUtc} for ${candidate.priceKey}`;
 
-    warnings.push(modeReason);
+    pushWarning(modeReason);
   }
 
   return { fx: null, warnings };

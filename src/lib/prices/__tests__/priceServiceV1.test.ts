@@ -2,6 +2,7 @@ import { convertPriceToCanonical } from '../units/convert.ts';
 import { UNIT_CONSTANTS } from '../units/types.ts';
 import { downsampleDailyToMonthlyEom } from '../store/monthly.ts';
 import { resolvePriceSeries } from '../resolve.ts';
+import { fetchLegacyCommodityQuotes, getLegacyQuote } from '../providers/fmp.ts';
 import { getProviderMapping } from '../registry/getPriceKeyMeta.ts';
 
 function assert(condition: unknown, message: string): void {
@@ -75,6 +76,23 @@ function assertApprox(actual: number, expected: number, tolerance: number, label
     },
   );
   assert(percentile.values[0] === 2, `Expected floor quantile=2, got ${String(percentile.values[0])}`);
+
+
+  const legacyCommodityQuotes = await fetchLegacyCommodityQuotes({
+    fetchApiV3JsonFn: (async (path) => {
+      assert(path === 'quotes/commodity', `Expected quotes/commodity path, got ${path}`);
+      return [
+        { symbol: 'GCUSD', name: 'Gold Futures', price: 5190 },
+        { symbol: 'HGUSD', name: 'Copper', price: 4.25 },
+      ];
+    }) as typeof import('../../../../api/_fmp.ts').fetchApiV3Json,
+  });
+  assert(legacyCommodityQuotes.some((row) => row.symbol === 'GCUSD'), 'legacy commodity quotes should include GCUSD');
+
+  const legacyGc = await getLegacyQuote('GCUSD', {
+    fetchLegacyCommodityQuotesFn: async () => legacyCommodityQuotes,
+  });
+  assert(legacyGc?.symbol === 'GCUSD', 'getLegacyQuote should match exact legacy symbol');
 
   let threw = false;
   try {

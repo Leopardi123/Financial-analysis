@@ -1,6 +1,6 @@
 import { convertPriceToCanonical } from './units/convert.ts';
 import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.ts';
-import { fetchHistorical, type ProviderPriceRow } from './providers/fmp.ts';
+import { fetchHistorical, getLegacyQuote, type ProviderPriceRow } from './providers/fmp.ts';
 import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.ts';
 import { getLegacySymbolForPriceKey } from './providers/legacyCommoditySymbolMap.ts';
 
@@ -17,6 +17,7 @@ type ResolveDeps = {
   fetchHistoricalFn: typeof fetchHistorical;
   upsertMonthlySeriesFn: typeof upsertMonthlySeries;
   getMonthlySeriesFn: typeof getMonthlySeries;
+  getLegacyQuoteFn: typeof getLegacyQuote;
 };
 
 function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
@@ -27,6 +28,7 @@ function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
     fetchHistoricalFn: deps.fetchHistoricalFn ?? fetchHistorical,
     upsertMonthlySeriesFn: deps.upsertMonthlySeriesFn ?? upsertMonthlySeries,
     getMonthlySeriesFn: deps.getMonthlySeriesFn ?? getMonthlySeries,
+    getLegacyQuoteFn: deps.getLegacyQuoteFn ?? getLegacyQuote,
   };
 }
 
@@ -97,9 +99,16 @@ export async function resolvePriceSeries(
   }
 
   const warnings: string[] = [];
+  const seenWarnings = new Set<string>();
+  const pushWarning = (message: string) => {
+    if (!seenWarnings.has(message)) {
+      seenWarnings.add(message);
+      warnings.push(message);
+    }
+  };
   const legacySymbol = getLegacySymbolForPriceKey(args.price_key);
   if (!legacySymbol) {
-    warnings.push(`Unknown commodity priceKey ${args.price_key}; provide legacy symbol`);
+    pushWarning(`Unknown commodity priceKey ${args.price_key}; provide legacy symbol`);
   }
 
   const maxDate = sortedAnchors[sortedAnchors.length - 1];
@@ -115,8 +124,19 @@ export async function resolvePriceSeries(
   }
 
   const rows = await resolvedDeps.getMonthlySeriesFn(args.price_key, fromUtc, maxDate);
+  let quoteFallbackClose: number | null = null;
   if (rows.length === 0 && legacySymbol) {
-    warnings.push(`No price data returned from FMP legacy v3 for symbol ${legacySymbol}`);
+    pushWarning(`No price data returned from FMP legacy v3 for symbol ${legacySymbol}`);
+    pushWarning(`legacyFetch: GET /api/v3/historical-chart/1day/${legacySymbol}?from=${fromUtc}&to=${maxDate}`);
+    if (args.scenario.mode === 'spot') {
+      const quote = await resolvedDeps.getLegacyQuoteFn(legacySymbol);
+      if (quote) {
+        quoteFallbackClose = quote.price;
+      } else {
+        pushWarning(`No legacy quote for commodity symbol ${legacySymbol} via /api/v3/quotes/commodity`);
+        pushWarning('legacyFetch: GET /api/v3/quotes/commodity');
+      }
+    }
   }
 
   if (args.scenario.mode === 'spot') {
@@ -124,7 +144,10 @@ export async function resolvePriceSeries(
       const eligible = rows.filter((row) => row.dateUtc <= anchorDateUtc);
       const latest = eligible[eligible.length - 1];
       if (!latest) {
-        warnings.push(`No close on or before ${anchorDateUtc} for ${args.price_key}`);
+        if (quoteFallbackClose !== null) {
+          return quoteFallbackClose;
+        }
+        pushWarning(`No close on or before ${anchorDateUtc} for ${args.price_key}`);
         return null;
       }
       return latest.value;
@@ -141,7 +164,7 @@ export async function resolvePriceSeries(
       .sort((a, b) => a - b);
 
     if (windowValues.length === 0) {
-      warnings.push(`No closes in trailing ${percentileScenario.lookbackYears}y window for ${args.price_key} <= ${anchorDateUtc}`);
+      pushWarning(`No closes in trailing ${percentileScenario.lookbackYears}y window for ${args.price_key} <= ${anchorDateUtc}`);
       return null;
     }
 

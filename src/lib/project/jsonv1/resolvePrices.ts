@@ -4,7 +4,7 @@ import type { ProjectEngineFullProductionV1Input } from '../types.ts';
 import type { QtyUnit } from './schema.ts';
 import type { ParsedProjectJsonV1 } from './parse.ts';
 import { resolvePriceSeries, type PriceScenario as CorePriceScenario } from '../../prices/resolve.ts';
-import { getCommodityPriceKeyForLegacySymbol } from '../../prices/providers/legacyCommoditySymbolMap.ts';
+import { getCommodityPriceKeyForLegacySymbol, getLegacySymbolForPriceKey } from '../../prices/providers/legacyCommoditySymbolMap.ts';
 
 export type PriceScenario =
   | { mode: 'spot' }
@@ -91,6 +91,13 @@ export async function resolveProjectPricesToEngineInput(
   const resolvePriceSeriesFn = deps.resolvePriceSeriesFn ?? resolvePriceSeries;
   const scenario = args.scenario ?? { mode: 'spot' };
   const warnings: string[] = [];
+  const seenWarnings = new Set<string>();
+  const pushWarning = (message: string) => {
+    if (!seenWarnings.has(message)) {
+      seenWarnings.add(message);
+      warnings.push(message);
+    }
+  };
   const projectId = args.projectId ?? 'unknown';
 
   const masterN = parsed.engineInputWithoutPrices.masterN;
@@ -127,7 +134,7 @@ export async function resolveProjectPricesToEngineInput(
         allowRefresh: args.allowRefresh === true,
       });
       if (resolvedSpot.warnings.length > 0) {
-        warnings.push(...resolvedSpot.warnings);
+        resolvedSpot.warnings.forEach((warning) => pushWarning(warning));
       }
 
       const scalar = resolvedSpot.values[0] ?? null;
@@ -142,7 +149,7 @@ export async function resolveProjectPricesToEngineInput(
       allowRefresh: args.allowRefresh === true,
     });
     if (resolved.warnings.length > 0) {
-      warnings.push(...resolved.warnings);
+      resolved.warnings.forEach((warning) => pushWarning(warning));
     }
     return resolved.values;
   }
@@ -162,6 +169,10 @@ export async function resolveProjectPricesToEngineInput(
       metal,
     });
 
+    if (getLegacySymbolForPriceKey(priceKey) === null) {
+      pushWarning(`Unknown legacy commodity symbol for metal=${metal} priceKey=${priceKey}`);
+    }
+
     spotPriceUSDByMetal[metal] = await resolveSeriesForPriceKey(priceKey);
 
     if (scenario.mode === 'spot') {
@@ -178,7 +189,7 @@ export async function resolveProjectPricesToEngineInput(
         ? `Missing fixed price for key ${priceKey}`
         : `No closes in trailing ${scenario.lookbackYears}y window`;
 
-      warnings.push(`projectId=${projectId} metal=${metal} key=${priceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
+      pushWarning(`projectId=${projectId} metal=${metal} key=${priceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
     });
   }
 
@@ -193,7 +204,7 @@ export async function resolveProjectPricesToEngineInput(
       const reason = scenario.mode === 'fixed'
         ? `Missing fixed price for key ${parsed.engineInputWithoutPrices.auPriceKey}`
         : `No closes in trailing ${scenario.lookbackYears}y window`;
-      warnings.push(`projectId=${projectId} metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
+      pushWarning(`projectId=${projectId} metal=Au key=${parsed.engineInputWithoutPrices.auPriceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
     });
   }
 
