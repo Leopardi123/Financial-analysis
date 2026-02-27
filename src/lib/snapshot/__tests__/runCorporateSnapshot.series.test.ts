@@ -345,3 +345,47 @@ test('tax chain uses EBIT=EBITDA-depreciation and taxRate null yields null tax',
   if (!nullTaxResult.ok) return;
   assert.ok((nullTaxResult.snapshot.series?.taxUSD ?? []).every((value) => value === null));
 });
+
+test('project identity checks report no failures on valid periods and cannot evaluate on null FCFF inputs', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  const operating = series.operatingCostsUSD as Array<number | null>;
+  rawJson.economicsBreakdown = undefined;
+  series.sustainingCapexUSD = operating.map(() => 0);
+  series.siteGandA_USD = operating.map(() => 0);
+  series.reclamationUSD = operating.map(() => 0);
+  series.byproductCreditsUSD = operating.map(() => 0);
+  series.depreciationUSD = operating.map(() => 0);
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const identityWarnings = (result.diagnostics.warnings ?? []).filter((warning) => warning.includes('IDENTITY FAIL'));
+  assert.equal(identityWarnings.length, 0);
+
+  const cannotEvaluateWarnings = (result.diagnostics.warnings ?? []).filter((warning) => warning.includes('cannot evaluate FCFF identity'));
+  assert.equal(cannotEvaluateWarnings.length, 0);
+
+  const nullBody = await loadFixture();
+  const nullProjects = nullBody.projects as Array<Record<string, unknown>>;
+  const nullRawJson = nullProjects[0].rawJson as Record<string, unknown>;
+  const nullSeries = nullRawJson.series as Record<string, unknown>;
+  const baseArray = nullSeries.capexUSD as Array<number | null>;
+  nullRawJson.economicsBreakdown = undefined;
+  nullSeries.sustainingCapexUSD = baseArray.map(() => 0);
+  nullSeries.siteGandA_USD = baseArray.map(() => 0);
+  nullSeries.reclamationUSD = baseArray.map(() => 0);
+  nullSeries.byproductCreditsUSD = undefined;
+  nullSeries.depreciationUSD = baseArray.map(() => 0);
+
+  const nullResult = await runCorporateSnapshotPipeline({ body: nullBody, refresh: false });
+  assert.equal(nullResult.ok, true);
+  if (!nullResult.ok) return;
+
+  const nullWarnings = nullResult.diagnostics.warnings ?? [];
+  assert.ok(nullWarnings.some((warning) => warning.includes('cannot evaluate FCFF identity at t=2')));
+  assert.equal(nullWarnings.some((warning) => warning.includes('IDENTITY FAIL t=')), false);
+});
