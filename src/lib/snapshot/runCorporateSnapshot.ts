@@ -131,7 +131,9 @@ type EconomicsBreakdownSeries = {
 type RoyaltyDetailSeries = {
   id: string;
   label: string;
+  name?: string | null;
   base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
+  rateType?: string | null;
   rate: number | null;
   royaltyUSD: Array<number | null>;
 };
@@ -526,6 +528,11 @@ function buildSnapshotSeries(args: {
   };
 }
 
+function isAllNullOrNonFinite(series: Array<number | null> | null | undefined): boolean {
+  if (!Array.isArray(series) || series.length === 0) return true;
+  return series.every((value) => value === null || !Number.isFinite(value));
+}
+
 type SnapshotDiagnostics = {
   warnings: string[];
   errors: string[];
@@ -644,6 +651,7 @@ export async function runCorporateSnapshotPipeline(args: {
       },
       {
         projectToSeries: async ({ projectId, rawJson }) => {
+          const rawJsonRecord = rawJson as Record<string, unknown>;
           const parsed = parseProjectJsonV1(rawJson);
           diagnostics.warnings.push(...parsed.warnings);
           const periodEndDatesUtc = parsed.engineInputWithoutPrices.periodEndDatesUtc;
@@ -707,42 +715,67 @@ export async function runCorporateSnapshotPipeline(args: {
           });
 
           const projectEconomicsBreakdown = parsed.context.economicsBreakdown;
-          const ebitdaSeries = out.phase1.ebitUSD.map((ebit, idx) => {
-            const finiteEbit = toFiniteOrNull(ebit);
-            const finiteTax = toFiniteOrNull(taxByRule[idx]);
-            if (finiteEbit === null) {
-              return null;
-            }
-            return finiteTax === null ? finiteEbit : finiteEbit + finiteTax;
-          });
-
+          let anyItemDerivedFromRevenueRates = false;
           const royaltiesDetail = (projectEconomicsBreakdown?.royaltiesDetail ?? []).map((detail) => {
             const explicitRoyaltyUSD = detail.royaltyUSD ? sanitizeSeries(detail.royaltyUSD) : null;
+            const shouldDeriveItemSeries = isAllNullOrNonFinite(explicitRoyaltyUSD);
             const rate = toFiniteOrNull(detail.rate);
-            const baseSeries = detail.base === 'revenue'
-              ? out.revenue.grossRevenueUSD
-              : detail.base === 'ebit'
-                ? out.phase1.ebitUSD
-                : detail.base === 'ebitda'
-                  ? ebitdaSeries
-                  : nullSeries;
 
-            const royaltyUSD = explicitRoyaltyUSD ?? baseSeries.map((value) => {
-              const finiteBase = toFiniteOrNull(value);
-              if (finiteBase === null || rate === null) {
-                return null;
-              }
-              return Math.max(0, finiteBase) * rate;
-            });
+            if (detail.base !== 'revenue' && shouldDeriveItemSeries) {
+              diagnostics.warnings.push(`royaltiesDetail: unknown base=${String(detail.base)}; royaltyUSD left null`);
+            }
+
+            const royaltyUSD = shouldDeriveItemSeries
+              ? out.revenue.grossRevenueUSD.map((value) => {
+                  const finiteBase = toFiniteOrNull(value);
+                  if (detail.base !== 'revenue' || detail.rateType !== 'NSR_pct' || finiteBase === null || rate === null) {
+                    return null;
+                  }
+                  anyItemDerivedFromRevenueRates = true;
+                  return Math.max(0, finiteBase) * (rate / 100);
+                })
+              : (explicitRoyaltyUSD as Array<number | null>);
 
             return {
               id: detail.id,
               label: detail.label,
+              name: detail.name,
               base: detail.base,
+              rateType: detail.rateType,
               rate,
               royaltyUSD: sanitizeSeries(royaltyUSD),
             };
           });
+
+          let derivedRoyaltiesUSDFromDetail: Array<number | null> | null = null;
+          if (royaltiesDetail.length > 0) {
+            derivedRoyaltiesUSDFromDetail = Array.from({ length: projectLength }, (_, t) => {
+              let sum = 0;
+              let hasFinite = false;
+              for (const item of royaltiesDetail) {
+                const value = item.royaltyUSD[t];
+                const finite = toFiniteOrNull(value);
+                if (finite === null) continue;
+                hasFinite = true;
+                sum += finite;
+              }
+              return hasFinite ? sum : null;
+            });
+            if (anyItemDerivedFromRevenueRates) {
+              diagnostics.warnings.push('royaltiesDetail: derived royaltyUSD from base=revenue using NSR_pct rate(s); summed into series.royaltiesUSD');
+            }
+          }
+
+          const rawSeriesRoyalties = (rawJsonRecord.series as { royaltiesUSD?: Array<number | null> } | undefined)?.royaltiesUSD;
+          const existingSeriesRoyaltiesUSD = Array.from({ length: projectLength }, (_, t) => {
+            const value = rawSeriesRoyalties?.[t] ?? null;
+            return toFiniteOrNull(value);
+          });
+          const shouldFillSeriesRoyaltiesFromDetail =
+            derivedRoyaltiesUSDFromDetail !== null && isAllNullOrNonFinite(existingSeriesRoyaltiesUSD);
+          const royaltiesUSDForSeries = shouldFillSeriesRoyaltiesFromDetail && derivedRoyaltiesUSDFromDetail
+            ? derivedRoyaltiesUSDFromDetail
+            : existingSeriesRoyaltiesUSD;
 
           const taxesDetail = projectEconomicsBreakdown?.taxesDetail
             ? {
@@ -802,7 +835,7 @@ export async function runCorporateSnapshotPipeline(args: {
               operatingCostsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD),
               sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
               siteGandA_USD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.siteGandA_USD),
-              royaltiesUSD: sanitizeSeries(out.nationalTake.totalRoyaltiesUSD),
+              royaltiesUSD: sanitizeSeries(royaltiesUSDForSeries),
               reclamationUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD),
               byproductCreditsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.byproductCreditsUSD ?? nullSeries),
               sustainingCostUSD: sanitizeSeries(out.phase1.sustainingCostUSD),

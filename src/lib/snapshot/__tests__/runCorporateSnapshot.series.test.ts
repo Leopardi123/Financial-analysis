@@ -200,3 +200,97 @@ test('projects-mode per-share metrics default to post-financing FD shares while 
 
   assert.equal(fdResult.snapshot.EV_perShare_TargetCurrency, baseResult.snapshot.EV_perShare_TargetCurrency);
 });
+
+test('royaltiesDetail derives royaltyUSD from revenue NSR_pct and only backfills series royalties when missing', async () => {
+  const baseBody = await loadFixture();
+  const projects = baseBody.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  const templateLength = (series.operatingCostsUSD as Array<number | null>).length;
+  const allNullRoyalties = new Array<number | null>(templateLength).fill(null);
+
+  rawJson.economicsBreakdown = {
+    royaltiesDetail: [
+      {
+        id: 'nsr-1',
+        label: 'NSR 1%',
+        name: 'NSR 1%',
+        base: 'revenue',
+        rateType: 'NSR_pct',
+        rate: 1,
+        royaltyUSD: allNullRoyalties,
+      },
+      {
+        id: 'nsr-3',
+        label: 'NSR 3%',
+        name: 'NSR 3%',
+        base: 'revenue',
+        rateType: 'NSR_pct',
+        rate: 3,
+        royaltyUSD: allNullRoyalties,
+      },
+    ],
+  };
+
+  series.royaltiesUSD = allNullRoyalties;
+  const resultA = await runCorporateSnapshotPipeline({ body: baseBody, refresh: false });
+  assert.equal(resultA.ok, true);
+  if (!resultA.ok) return;
+
+  const grossA = resultA.snapshot.series?.totalRevenue_USD ?? [];
+  const royaltiesA = resultA.snapshot.series?.royaltiesUSD ?? [];
+  assert.equal(grossA.length, royaltiesA.length);
+  for (let t = 0; t < grossA.length; t += 1) {
+    const gross = grossA[t];
+    const royalty = royaltiesA[t];
+    if (gross === null) {
+      assert.equal(royalty, null);
+      continue;
+    }
+    assert.ok(royalty !== null);
+    assert.ok(Math.abs((royalty as number) - (gross * 0.04)) < 1e-6);
+  }
+
+  assert.ok(
+    resultA.diagnostics.warnings.includes('royaltiesDetail: derived royaltyUSD from base=revenue using NSR_pct rate(s); summed into series.royaltiesUSD'),
+  );
+
+  const bodyB = JSON.parse(JSON.stringify(baseBody)) as Record<string, unknown>;
+  const projectsB = bodyB.projects as Array<Record<string, unknown>>;
+  const rawJsonB = projectsB[0].rawJson as Record<string, unknown>;
+  const seriesB = rawJsonB.series as Record<string, unknown>;
+  const existingRoyalties = (seriesB.operatingCostsUSD as Array<number | null>).map((_, idx) => idx + 11);
+  seriesB.royaltiesUSD = existingRoyalties;
+
+  const resultB = await runCorporateSnapshotPipeline({ body: bodyB, refresh: false });
+  assert.equal(resultB.ok, true);
+  if (!resultB.ok) return;
+
+  assert.deepEqual(resultB.snapshot.series?.royaltiesUSD, existingRoyalties);
+  const detail = resultB.snapshot.series?.royaltiesDetail ?? [];
+  assert.equal(detail.length, 2);
+  const derivedTotal = (detail[0].royaltyUSD ?? []).map((_, t) => {
+    let sum = 0;
+    let hasFinite = false;
+    for (const item of detail) {
+      const value = item.royaltyUSD?.[t] ?? null;
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        hasFinite = true;
+        sum += value;
+      }
+    }
+    return hasFinite ? sum : null;
+  });
+
+  const grossB = resultB.snapshot.series?.totalRevenue_USD ?? [];
+  for (let t = 0; t < grossB.length; t += 1) {
+    const gross = grossB[t];
+    const royalty = derivedTotal[t];
+    if (gross === null) {
+      assert.equal(royalty, null);
+      continue;
+    }
+    assert.ok(royalty !== null);
+    assert.ok(Math.abs((royalty as number) - (gross * 0.04)) < 1e-6);
+  }
+});
