@@ -56,7 +56,11 @@ function makeOutputStub(input: {
       totalRoyaltiesUSD: [],
       phase1: {
         sustainingCostUSD: input.sustainingCostUSD,
+        ebitdaUSD: [],
+        depreciationUSD: [],
         ebitUSD: [],
+        taxableIncomeUSD: [],
+        effectiveTaxRate: [],
         taxUSD: [],
         nopatUSD: [],
         fcffUSD: input.fcffUSD,
@@ -72,7 +76,11 @@ function makeOutputStub(input: {
     itemTakeUSDById: {},
     phase1: {
       sustainingCostUSD: input.sustainingCostUSD,
+      ebitdaUSD: [],
+      depreciationUSD: [],
       ebitUSD: [],
+      taxableIncomeUSD: [],
+      effectiveTaxRate: [],
       taxUSD: [],
       nopatUSD: [],
       fcffUSD: input.fcffUSD,

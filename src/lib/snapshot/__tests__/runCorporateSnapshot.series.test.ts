@@ -294,3 +294,54 @@ test('royaltiesDetail derives royaltyUSD from revenue NSR_pct and only backfills
     assert.ok(Math.abs((royalty as number) - (gross * 0.04)) < 1e-6);
   }
 });
+
+test('tax chain uses EBIT=EBITDA-depreciation and taxRate null yields null tax', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+
+  rawJson.economics = { ...(rawJson.economics as Record<string, unknown>), taxRate: 0.25 };
+  series.depreciationUSD = (series.operatingCostsUSD as Array<number | null>).map(() => 10);
+  series.royaltiesUSD = (series.operatingCostsUSD as Array<number | null>).map(() => null);
+  rawJson.economicsBreakdown = {
+    royaltiesDetail: [
+      { id: 'nsr-5', label: 'NSR 5%', base: 'revenue', rateType: 'NSR_pct', rate: 5 },
+    ],
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const outSeries = result.snapshot.series;
+  assert.ok(outSeries);
+  const ebitda = outSeries?.ebitdaUSD ?? [];
+  const ebit = outSeries?.ebitUSD ?? [];
+  const dep = outSeries?.depreciationUSD ?? [];
+  const tax = outSeries?.taxUSD ?? [];
+  const taxableIncome = outSeries?.taxableIncomeUSD ?? [];
+  const royalties = outSeries?.royaltiesUSD ?? [];
+
+  for (let t = 0; t < ebitda.length; t += 1) {
+    if (ebitda[t] === null || dep[t] === null) {
+      assert.equal(ebit[t], null);
+      continue;
+    }
+    assert.equal(ebit[t], (ebitda[t] as number) - (dep[t] as number));
+    assert.ok(royalties[t] === null || royalties[t]! >= 0);
+    const expectedTaxable = Math.max(0, ebit[t] as number);
+    assert.equal(taxableIncome[t], expectedTaxable);
+    assert.equal(tax[t], expectedTaxable * 0.25);
+  }
+
+  const nullTaxBody = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
+  const nullProjects = nullTaxBody.projects as Array<Record<string, unknown>>;
+  const nullRaw = nullProjects[0].rawJson as Record<string, unknown>;
+  nullRaw.economics = { ...(nullRaw.economics as Record<string, unknown>), taxRate: null };
+
+  const nullTaxResult = await runCorporateSnapshotPipeline({ body: nullTaxBody, refresh: false });
+  assert.equal(nullTaxResult.ok, true);
+  if (!nullTaxResult.ok) return;
+  assert.ok((nullTaxResult.snapshot.series?.taxUSD ?? []).every((value) => value === null));
+});

@@ -84,12 +84,12 @@ test('grade/recovery rows precede payable and derived revenue rows include EBITD
   assert(labels.includes('Revenue Au (USD)'));
   assert(labels.includes('Gross revenue (USD)'));
   assert(labels.includes('Gross profit (USD)'));
-  assert(labels.includes('EBITDA (USD)'));
+  assert(labels.includes('EBITDA (USD, includes royalties)'));
 
   const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
   assert.deepEqual(byLabel.get('Recovery Au (%)'), [90, 88]);
   assert.deepEqual(byLabel.get('Revenue Au (USD)'), [2000000, 1995000]);
   assert.deepEqual(byLabel.get('Gross revenue (USD)'), [2008000, 2003610]);
   assert.deepEqual(byLabel.get('Gross profit (USD)'), [1208000, 1193610]);
-  assert.deepEqual(byLabel.get('EBITDA (USD)'), [1400000, 1315000]);
+  assert.deepEqual(byLabel.get('EBITDA (USD, includes royalties)'), [1400000, 1315000]);
 });

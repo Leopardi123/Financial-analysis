@@ -9,7 +9,7 @@ import type { ProjectTakeMVIInput, ProjectTakeMVIOutput, TakeItemMVI } from './t
 export type ProjectPhase1Input = {
   masterN: number;
   productionStartPeriod: number;
-  taxRate?: number;
+  taxRate?: number | null;
   capexUSD: (number | null)[];
   revenueUSD: (number | null)[];
   operatingCostsUSD: (number | null)[];
@@ -18,12 +18,17 @@ export type ProjectPhase1Input = {
   siteGandA_USD: (number | null)[];
   reclamationUSD: (number | null)[];
   byproductCreditsUSD?: (number | null)[] | null;
+  depreciationUSD?: (number | null)[] | null;
   workingCapitalDeltaUSD?: (number | null)[] | null;
 };
 
 export type ProjectPhase1Output = {
   sustainingCostUSD: (number | null)[];
+  ebitdaUSD: (number | null)[];
+  depreciationUSD: (number | null)[];
   ebitUSD: (number | null)[];
+  taxableIncomeUSD: (number | null)[];
+  effectiveTaxRate: (number | null)[];
   taxUSD: (number | null)[];
   nopatUSD: (number | null)[];
   fcffUSD: (number | null)[];

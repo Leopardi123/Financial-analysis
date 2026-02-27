@@ -22,8 +22,13 @@ export type OperationsGridInput = {
   economics?: {
     priceUSDByMetal?: Record<string, Array<number | null>>;
     operatingCostsUSD?: Array<number | null>;
+    royaltiesUSD?: Array<number | null>;
+    ebitdaUSD?: Array<number | null>;
     ebitUSD?: Array<number | null>;
     depreciationUSD?: Array<number | null>;
+    taxableIncomeUSD?: Array<number | null>;
+    taxUSD?: Array<number | null>;
+    effectiveTaxRate?: Array<number | null>;
   };
 };
 
@@ -162,13 +167,19 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   const grossProfit = Array.from({ length: columnCount }, (_, t) => {
     const revenue = grossRevenue[t];
     const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
-    if (revenue === null || operatingCost === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost)) return null;
-    return revenue - operatingCost;
+    const royalties = input.economics?.royaltiesUSD?.[t] ?? 0;
+    if (revenue === null || operatingCost === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost) || !Number.isFinite(royalties)) return null;
+    return revenue - operatingCost - royalties;
   });
   if (metals.length > 0) rows.push({ label: 'Gross profit (USD)', values: grossProfit });
 
+  const explicitEbitda = input.economics?.ebitdaUSD;
   const hasDepreciation = Array.isArray(input.economics?.depreciationUSD);
   const ebitda = Array.from({ length: columnCount }, (_, t) => {
+    if (Array.isArray(explicitEbitda)) {
+      const value = explicitEbitda[t] ?? null;
+      return value !== null && Number.isFinite(value) ? value : null;
+    }
     if (!hasDepreciation) return null;
     const ebit = input.economics?.ebitUSD?.[t] ?? null;
     const depreciation = input.economics?.depreciationUSD?.[t] ?? null;
@@ -176,8 +187,17 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
     return ebit + depreciation;
   });
   if (Array.isArray(input.economics?.ebitUSD)) {
-    rows.push({ label: 'EBITDA (USD)', values: ebitda });
+    rows.push({ label: 'EBITDA (USD, includes royalties)', values: ebitda });
     rows.push({ label: 'EBIT (USD)', values: input.economics?.ebitUSD ?? [] });
+  }
+  if (Array.isArray(input.economics?.taxableIncomeUSD)) {
+    rows.push({ label: 'Taxable income (USD)', values: input.economics?.taxableIncomeUSD ?? [] });
+  }
+  if (Array.isArray(input.economics?.taxUSD)) {
+    rows.push({ label: 'Tax (USD)', values: input.economics?.taxUSD ?? [] });
+  }
+  if (Array.isArray(input.economics?.effectiveTaxRate)) {
+    rows.push({ label: 'Effective tax rate', values: input.economics?.effectiveTaxRate ?? [] });
   }
 
   const totals: Array<{ label: string; value: number | null }> = [];
