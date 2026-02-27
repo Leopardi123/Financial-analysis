@@ -70,6 +70,7 @@ export type CorporateSnapshotSeries = {
   workingCapitalDeltaUSD?: Array<number | null>;
   fcffUSD: Array<number | null>;
   capexUSD: Array<number | null>;
+  totalCapexUSD: Array<number | null>;
   economicsBreakdown?: CorporateSnapshotEconomicsBreakdownSeries;
   royaltiesDetail?: Array<{
     id: string;

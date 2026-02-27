@@ -43,6 +43,7 @@ type SeriesShape = {
   workingCapitalDeltaUSD?: Array<number | null>;
   fcffUSD?: Array<number | null>;
   capexUSD?: Array<number | null>;
+  totalCapexUSD?: Array<number | null>;
   unitAudit?: {
     metals: Record<string, {
       qtyUnit: string;
@@ -461,6 +462,7 @@ export default function ProjectsPage() {
       { label: 'Effective tax rate', values: series.effectiveTaxRate },
       { label: 'FCFF', values: series.fcffUSD },
       { label: 'Capex', values: series.capexUSD },
+      { label: 'Total Capex', values: series.totalCapexUSD },
     ];
 
     for (const definition of definitions) {

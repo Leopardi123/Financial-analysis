@@ -41,6 +41,20 @@ function sanitizeSeries(series: Array<number | null>): Array<number | null> {
   return series.map((value) => toFiniteOrNull(value));
 }
 
+function deriveTotalCapexSeries(
+  capexUSD: Array<number | null>,
+  sustainingCapexUSD: Array<number | null>,
+): Array<number | null> {
+  return capexUSD.map((capex, t) => {
+    const capexAtT = toFiniteOrNull(capex);
+    const sustainingAtT = toFiniteOrNull(sustainingCapexUSD[t]);
+    if (capexAtT === null || sustainingAtT === null) {
+      return null;
+    }
+    return capexAtT + sustainingAtT;
+  });
+}
+
 function materiallyDifferentSeries(
   left: Array<number | null>,
   right: Array<number | null>,
@@ -194,6 +208,7 @@ type ProjectSeriesContext = {
     workingCapitalDeltaUSD: Array<number | null>;
     fcffUSD: Array<number | null>;
     capexUSD: Array<number | null>;
+    totalCapexUSD: Array<number | null>;
   };
 };
 
@@ -226,6 +241,7 @@ function validateProjectIdentities(input: {
   depreciationUSD: Array<number | null>;
   taxUSD: Array<number | null>;
   capexUSD: Array<number | null>;
+  totalCapexUSD: Array<number | null>;
   workingCapitalDeltaUSD: Array<number | null>;
   sustainingCapexUSD: Array<number | null>;
   reclamationUSD: Array<number | null>;
@@ -348,24 +364,20 @@ function validateProjectIdentities(input: {
     }
 
     const fcffActual = toFiniteOrNull(input.fcffUSD[t]);
-    const capex = toFiniteOrNull(input.capexUSD[t]);
+    const totalCapex = toFiniteOrNull(input.totalCapexUSD[t]);
     const wc = toFiniteOrNull(input.workingCapitalDeltaUSD[t]);
-    const sust = toFiniteOrNull(input.sustainingCapexUSD[t]);
     const recl = toFiniteOrNull(input.reclamationUSD[t]);
-    const byp = toFiniteOrNull(input.byproductCreditsUSD[t]);
     const tax = toFiniteOrNull(input.taxUSD[t]);
     if (
       ebitActual !== null
       && tax !== null
       && dep !== null
-      && capex !== null
+      && totalCapex !== null
       && wc !== null
-      && sust !== null
       && recl !== null
-      && byp !== null
       && fcffActual !== null
     ) {
-      const expected = ebitActual - tax + dep - capex - wc - sust - recl + byp;
+      const expected = ebitActual - tax + dep - totalCapex - wc - recl;
       if (Math.abs(expected - fcffActual) > EPS_USD) {
         diagnostics.push(formatFail(t, 'FCFF identity', expected, fcffActual));
         checks.fcff = 'fail';
@@ -600,6 +612,7 @@ function buildSnapshotSeries(args: {
   const workingCapitalDeltaUSD = aggregateEconomic('workingCapitalDeltaUSD');
   const fcffUSD = aggregateEconomic('fcffUSD');
   const capexUSD = aggregateEconomic('capexUSD');
+  const totalCapexUSD = deriveTotalCapexSeries(capexUSD, sustainingCapexUSD);
 
   const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> }>, label: string): Array<number | null> =>
     sumStrictAlignedSeries({
@@ -756,6 +769,7 @@ function buildSnapshotSeries(args: {
     workingCapitalDeltaUSD,
     fcffUSD,
     capexUSD,
+    totalCapexUSD,
     economicsBreakdown: hasAnyEconomicsBreakdown ? economicsBreakdown : undefined,
     royaltiesDetail: royaltiesDetail.length > 0 ? royaltiesDetail : undefined,
     taxesDetail: taxesDetail.federalIncomeTaxUSD || taxesDetail.municipalRevenueTaxUSD ? taxesDetail : undefined,
@@ -1108,6 +1122,7 @@ export async function runCorporateSnapshotPipeline(args: {
             depreciationUSD,
             taxUSD: sanitizeSeries(taxByRule),
             capexUSD: sanitizeSeries(out.capexUSD_used),
+            totalCapexUSD: sanitizeSeries(out.phase1.totalCapexUSD),
             workingCapitalDeltaUSD: sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective),
             sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
             reclamationUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD),
@@ -1198,6 +1213,7 @@ export async function runCorporateSnapshotPipeline(args: {
               workingCapitalDeltaUSD: sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective),
               fcffUSD: sanitizeSeries(out.phase1.fcffUSD),
               capexUSD: sanitizeSeries(out.capexUSD_used),
+              totalCapexUSD: sanitizeSeries(out.phase1.totalCapexUSD),
             },
           });
 
