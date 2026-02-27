@@ -309,6 +309,27 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
         baseDefinition: { baseType: 'REVENUE' },
         rateDefinition: { rateType: 'FIXED', rate: 0.00 },
       },
+      {
+        id: 'example_gov_sliding',
+        type: 'AD_VALOREM',
+        jurisdictionLevel: 'national',
+        appliesTo: {
+          scope: 'project',
+          metals: ['ALL'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: {
+          rateType: 'TIERED',
+          tiers: [
+            { thresholdType: 'price', thresholdValue: 1500, rate: 0.02 },
+            { thresholdType: 'price', thresholdValue: 2000, rate: 0.03 },
+          ],
+        },
+        priceKey: 'XAU_USD_TOZ',
+      },
     ],
     operations: {
       capacity: { throughputUnit: 'tpd', nameplateThroughput: 10000, utilizationPct: null },

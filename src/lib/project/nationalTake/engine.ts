@@ -73,6 +73,10 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
     productionStartPeriod: input.phase1.productionStartPeriod,
     grossRevenueUSD: input.grossRevenueUSD,
     revenueByMetalUSD: input.byMetalRevenueUSD ?? undefined,
+    spotPriceUSDByMetal: input.spotPriceUSDByMetal ?? undefined,
+    priceSeriesByKey: input.priceSeriesByKey ?? undefined,
+    priceKeyByMetal: input.priceKeyByMetal ?? undefined,
+    auPriceKey: input.auPriceKey ?? undefined,
     takeItems: input.items,
   });
 
@@ -87,7 +91,7 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
   if (takeMviOut.includedCount >= 1) {
     royaltiesEffective = takeMviOut.totalTakeUSD;
     diagnostics.push(
-      `takeItems: using TotalTake_USD computed from takeItems (count=${takeMviOut.includedCount}, base=REVENUE, rateType=FIXED)`,
+      `takeItems: using TotalTake_USD computed from takeItems (count=${takeMviOut.includedCount}, base=REVENUE, rateType=FIXED|TIERED)`,
     );
     diagnostics.push(`takeItems: included ${takeMviOut.includedSummaries.join(', ')}`);
   } else if (anyFinite(input.phase1.royaltiesUSD)) {

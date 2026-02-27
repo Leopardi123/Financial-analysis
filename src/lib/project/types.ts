@@ -156,6 +156,9 @@ export type ProjectEngineFullProductionV1Input = {
 
   payableQtyByMetal: Record<string, (number | null)[]>;
   spotPriceUSDByMetal: Record<string, (number | null)[]>;
+  priceSeriesByKey?: Record<string, (number | null)[]>;
+  priceKeyByMetal?: Record<string, string>;
+  auPriceKey?: string | null;
 
   takeItems: unknown[];
 

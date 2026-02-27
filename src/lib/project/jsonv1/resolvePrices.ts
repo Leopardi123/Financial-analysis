@@ -113,6 +113,7 @@ export async function resolveProjectPricesToEngineInput(
   const spotAnchorDateUtc = scenario.mode === 'spot' ? todayUtc : '';
 
   const spotPriceUSDByMetal: Record<string, Array<number | null>> = {};
+  const priceSeriesByKey: Record<string, Array<number | null>> = {};
   const payableQtyByMetalCanonical: Record<string, Array<number | null>> = {};
 
   const coreScenario: CorePriceScenario = scenario.mode === 'fixed'
@@ -173,7 +174,9 @@ export async function resolveProjectPricesToEngineInput(
       pushWarning(`Unknown legacy commodity symbol for metal=${metal} priceKey=${priceKey}`);
     }
 
-    spotPriceUSDByMetal[metal] = await resolveSeriesForPriceKey(priceKey);
+    const resolvedSeries = await resolveSeriesForPriceKey(priceKey);
+    spotPriceUSDByMetal[metal] = resolvedSeries;
+    priceSeriesByKey[priceKey] = [...resolvedSeries];
 
     if (scenario.mode === 'spot') {
       continue;
@@ -194,6 +197,7 @@ export async function resolveProjectPricesToEngineInput(
   }
 
   let auPriceUSDPerOz: Array<number | null> = await resolveSeriesForPriceKey(parsed.engineInputWithoutPrices.auPriceKey);
+  priceSeriesByKey[parsed.engineInputWithoutPrices.auPriceKey] = [...auPriceUSDPerOz];
 
   if (scenario.mode !== 'spot') {
     auPriceUSDPerOz.forEach((value, index) => {
@@ -225,6 +229,9 @@ export async function resolveProjectPricesToEngineInput(
     streamsByMetal: parsed.engineInputWithoutPrices.streamsByMetal,
     payableQtyByMetal: payableQtyByMetalCanonical,
     spotPriceUSDByMetal,
+    priceSeriesByKey,
+    priceKeyByMetal: parsed.engineInputWithoutPrices.priceKeyByMetal,
+    auPriceKey: parsed.engineInputWithoutPrices.auPriceKey,
     takeItems: parsed.engineInputWithoutPrices.takeItems,
     royaltiesDetail: parsed.engineInputWithoutPrices.royaltiesDetail ?? null,
     phase1: parsed.engineInputWithoutPrices.phase1,

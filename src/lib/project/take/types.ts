@@ -7,7 +7,7 @@ export type TakeJurisdictionLevel =
 
 export type TakeBaseType = 'REVENUE' | 'BY_METAL_REVENUE' | 'PAYABLE_QTY';
 
-export type TakeRateType = 'FIXED' | 'TIERED_REVENUE';
+export type TakeRateType = 'FIXED' | 'TIERED' | 'TIERED_REVENUE';
 
 export type TakeItemMVI = {
   id: string;
@@ -18,7 +18,13 @@ export type TakeItemMVI = {
   baseType: TakeBaseType;
   rateType: TakeRateType;
   rateFixed?: number | null;
-  tiers?: Array<{ thresholdUSD: number; rate: number }> | null;
+  tiers?: Array<{
+    thresholdUSD: number;
+    thresholdType?: 'price' | 'revenue';
+    thresholdValue?: number;
+    rate: number;
+  }> | null;
+  priceKey?: string | null;
   cap?: {
     capType: 'none' | 'revenue' | 'payableQty';
     capAmountUSD?: number | null;

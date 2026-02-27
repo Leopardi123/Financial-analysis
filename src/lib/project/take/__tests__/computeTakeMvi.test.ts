@@ -193,5 +193,150 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
     'missing metal diagnostic emitted',
   );
 
+
+
+  const tieredPrice = computeTotalTakeUSD_MVI({
+    masterN: 2,
+    productionStartPeriod: 0,
+    grossRevenueUSD: [100, 100, 100],
+    revenueByMetalUSD: {
+      Au: [100, 100, 100],
+    },
+    spotPriceUSDByMetal: {
+      Au: [1400, 1600, 2100],
+    },
+    takeItems: [
+      {
+        id: 'tier_price',
+        type: 'government',
+        jurisdictionLevel: 'national',
+        appliesTo: {
+          scope: 'metalSpecific',
+          metals: ['Au'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: {
+          rateType: 'TIERED',
+          tiers: [
+            { thresholdType: 'price', thresholdValue: 1500, rate: 0.02 },
+            { thresholdType: 'price', thresholdValue: 2000, rate: 0.03 },
+          ],
+        },
+      },
+    ],
+  });
+  assertDeepEqual(tieredPrice.totalTakeUSD, [0, 2, 3], 'tiered price thresholds apply progressive top-hit rate');
+
+  const tieredRevenue = computeTotalTakeUSD_MVI({
+    masterN: 2,
+    productionStartPeriod: 0,
+    grossRevenueUSD: [90, 150, 250],
+    revenueByMetalUSD: {
+      Au: [90, 150, 250],
+    },
+    takeItems: [
+      {
+        id: 'tier_revenue',
+        type: 'government',
+        jurisdictionLevel: 'national',
+        appliesTo: {
+          scope: 'project',
+          metals: ['ALL'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: {
+          rateType: 'TIERED',
+          tiers: [
+            { thresholdType: 'revenue', thresholdValue: 100, rate: 0.01 },
+            { thresholdType: 'revenue', thresholdValue: 200, rate: 0.02 },
+          ],
+        },
+      },
+    ],
+  });
+  assertDeepEqual(tieredRevenue.totalTakeUSD, [0, 1.5, 5], 'tiered revenue thresholds use base revenue metric');
+
+  const mixedThresholdRejected = computeTotalTakeUSD_MVI({
+    masterN: 0,
+    productionStartPeriod: 0,
+    grossRevenueUSD: [100],
+    revenueByMetalUSD: {
+      Au: [100],
+    },
+    takeItems: [
+      {
+        id: 'mixed_tiers',
+        type: 'government',
+        jurisdictionLevel: 'national',
+        appliesTo: {
+          scope: 'project',
+          metals: ['ALL'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: {
+          rateType: 'TIERED',
+          tiers: [
+            { thresholdType: 'price', thresholdValue: 1000, rate: 0.01 },
+            { thresholdType: 'revenue', thresholdValue: 200, rate: 0.02 },
+          ],
+        },
+      },
+    ],
+  });
+  assertDeepEqual(mixedThresholdRejected.totalTakeUSD, [0], 'mixed thresholdType tiers are ignored');
+  assert(
+    mixedThresholdRejected.diagnostics.some((line) => line.includes('mixed thresholdType not supported')),
+    'mixed thresholdType emits diagnostic',
+  );
+
+  const missingPriceKeyMultiMetal = computeTotalTakeUSD_MVI({
+    masterN: 0,
+    productionStartPeriod: 0,
+    grossRevenueUSD: [100],
+    revenueByMetalUSD: {
+      Au: [60],
+      Ag: [40],
+    },
+    spotPriceUSDByMetal: {
+      Au: [1900],
+      Ag: [25],
+    },
+    takeItems: [
+      {
+        id: 'tier_no_pricekey',
+        type: 'government',
+        jurisdictionLevel: 'national',
+        appliesTo: {
+          scope: 'project',
+          metals: ['ALL'],
+          geography: 'ALL',
+          timing: { start_t: null, end_t: null },
+          volumeCap: { capType: 'none', capAmount: null, capMetal: null },
+        },
+        baseDefinition: { baseType: 'REVENUE' },
+        rateDefinition: {
+          rateType: 'TIERED',
+          tiers: [
+            { thresholdType: 'price', thresholdValue: 1500, rate: 0.02 },
+          ],
+        },
+      },
+    ],
+  });
+  assertDeepEqual(missingPriceKeyMultiMetal.totalTakeUSD, [0], 'missing priceKey in multi-metal project is ignored');
+  assert(
+    missingPriceKeyMultiMetal.diagnostics.some((line) => line.includes('price threshold requires priceKey (multi-metal project)')),
+    'missing priceKey multi-metal diagnostic emitted',
+  );
+
   console.log('Take MVI compute tests passed');
 })();
