@@ -499,7 +499,7 @@ export type ParsedProjectJsonV1 = {
   engineInputWithoutPrices: Omit<ProjectEngineFullProductionV1Input, 'spotPriceUSDByMetal' | 'aisc'> & {
     payableQtyByMetal: Record<string, Array<number | null>>;
     streamsByMetal: Record<string, import('../streams/types').StreamMVIConfig> | null;
-    takeItems: Array<import('../take/types').TakeItemMVI>;
+    takeItems: Array<unknown>;
     masterN: number;
     productionStartPeriod: number;
     taxRate: number | null;
