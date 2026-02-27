@@ -30,6 +30,15 @@ type SeriesShape = {
   taxUSD?: Array<number | null>;
   fcffUSD?: Array<number | null>;
   capexUSD?: Array<number | null>;
+  unitAudit?: {
+    metals: Record<string, {
+      qtyUnit: string;
+      canonicalQtyUnit: string;
+      priceUnit: string;
+      canonicalPriceUnit: string;
+      warnings: string[];
+    }>;
+  };
 };
 
 function getRouteProjectId(pathname: string): string | null {
@@ -447,6 +456,34 @@ export default function ProjectsPage() {
             <div>
               <h3>Warnings</h3>
               <ul>{snapshotWarnings.map((item) => <li key={item}>{item}</li>)}</ul>
+            </div>
+          )}
+        </details>
+
+        <details>
+          <summary>Unit Audit</summary>
+          {!series?.unitAudit || Object.keys(series.unitAudit.metals ?? {}).length === 0 ? (
+            <p>No unit audit data.</p>
+          ) : (
+            <div>
+              {Object.entries(series.unitAudit.metals)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([metal, audit]) => (
+                  <div key={metal} style={{ marginBottom: '0.75rem' }}>
+                    <h3>{metal}</h3>
+                    <ul>
+                      <li>qty unit: {audit.qtyUnit}</li>
+                      <li>price unit: {audit.priceUnit}</li>
+                      <li>canonical unit: {audit.canonicalQtyUnit}</li>
+                    </ul>
+                    {audit.warnings.length > 0 && (
+                      <>
+                        <h4>Warnings</h4>
+                        <ul>{audit.warnings.map((warning) => <li key={`${metal}-${warning}`}>{warning}</li>)}</ul>
+                      </>
+                    )}
+                  </div>
+                ))}
             </div>
           )}
         </details>
