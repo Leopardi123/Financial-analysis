@@ -353,6 +353,12 @@ export default function CompanyProjectsEditorPage() {
             />
           </label>
 
+          <p className="save-meta">
+            Optional JSON hints: operations.gradeByMetal is per-period head grade in the unit defined by operations.gradeUnitByMetal;
+            operations.recoveryPctByMetal is per-period metallurgical recovery (0..1 or 0..100);
+            series.depreciationUSD is optional for EBITDA display (if omitted, EBITDA shows null).
+          </p>
+
           <div className="editor-actions">
             <button type="button" onClick={handleValidate}>Validate</button>
             <button type="button" onClick={() => void handleSave()} disabled={!canSave}>{saving ? 'Saving…' : 'Save'}</button>
