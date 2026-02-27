@@ -24,8 +24,10 @@ function assertAlmostEqual(actual: number | null, expected: number, message: str
 
   assertAlmostEqual(simple.metrics.Payback_approx_years, 2.5, 'Payback_approx_years matches expected');
   assertAlmostEqual(simple.metrics.Payback_real_years, 2.5, 'Payback_real_years matches expected');
-  assertAlmostEqual(simple.metrics.ROI_10Y_pct, 160, 'ROI_10Y_pct computes over available window');
+  assertEqual(simple.metrics.ROI_10Y_pct, null, 'ROI_10Y_pct is strict and null when 10Y window is unavailable');
   assertAlmostEqual(simple.metrics.LOM_average_EBIT_ROCE_pct, 60, 'LOM_average_EBIT_ROCE_pct computes average EBIT ROCE');
+  assertAlmostEqual(simple.metrics.Kapitalavkastning_LOM, 1.6, 'Kapitalavkastning_LOM equals CF_LOM / initial capex');
+  assertAlmostEqual(simple.metrics.Kapitalavkastning_per_Ar_LOM, 0.4, 'Kapitalavkastning_per_Ar_LOM equals annualized CF return');
 
   const dfExpected = (60 / 1.1 ** 2 + 60 / 1.1 ** 3 + 60 / 1.1 ** 4 + 60 / 1.1 ** 5) / 100 * 100;
   assertAlmostEqual(simple.metrics.LOM_discounted_EBIT_ROCE_pct, dfExpected, 'discounted EBIT ROCE uses DF_toToday');
@@ -68,6 +70,17 @@ function assertAlmostEqual(actual: number | null, expected: number, message: str
     discountedEbitExpected,
     'discounted EBIT ROCE discounts each period to today',
   );
+
+
+  const roiStrict = computeLista3aProjectEfficiencyMetrics({
+    masterN: 11,
+    productionStartPeriod: 2,
+    discountRate: 0.1,
+    capexUSD_total: [-100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    fcffUSD_total: [0, 0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+    ebitUSD_total: [0, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+  });
+  assertAlmostEqual(roiStrict.metrics.ROI_10Y_pct, 100, 'ROI_10Y_pct computes when strict 10Y window exists');
 
   console.log('Lista3A project efficiency tests passed');
 })();

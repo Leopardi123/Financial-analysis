@@ -126,3 +126,34 @@
   font-weight: 700;
   background: #f0f5ea;
 }
+
+.projects-key-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.projects-key-metrics-column {
+  display: grid;
+  gap: 6px;
+}
+
+.projects-key-metrics-column h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.projects-key-metrics-table {
+  min-width: 0;
+}
+
+.projects-key-metrics-table th,
+.projects-key-metrics-table td {
+  font-size: 12px;
+}
+
+@media (max-width: 980px) {
+  .projects-key-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}

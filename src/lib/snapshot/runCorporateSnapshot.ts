@@ -11,6 +11,7 @@ import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
 import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics } from './lista2CfDcf.ts';
+import { computeLista2ProductionOperationalMetrics } from './lista2ProductionOperational.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
@@ -1378,6 +1379,14 @@ export async function runCorporateSnapshotPipeline(args: {
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
 
+    const lista2Production = computeLista2ProductionOperationalMetrics({
+      masterN: aggregation.corporateMasterN,
+      productionStartPeriod: corporateProductionStartPeriod,
+      payableAuEqOz_total: aggregation.payableAuEqOz_total,
+      aiscAuEqUSDPerOz_LOM: aggregation.aiscAuEqUSDPerOz_LOM,
+      capexUSD_total: aggregation.capexUSD_total,
+    });
+
     const rawBody = args.body as Record<string, unknown>;
     const rawBalance = rawBody.balanceSheet;
     const totalStockholdersEquity_USD =
@@ -1405,6 +1414,7 @@ export async function runCorporateSnapshotPipeline(args: {
       fcffUSD_total: aggregation.fcffUSD_total,
       ebitUSD_total: snapshotSeries.ebitUSD,
       capexUSD_total: aggregation.capexUSD_total,
+      payableAuEqOz_total: aggregation.payableAuEqOz_total,
     });
     diagnostics.warnings.push(...lista3a.warnings);
 
@@ -1414,6 +1424,7 @@ export async function runCorporateSnapshotPipeline(args: {
       financing,
       market: marketInput,
       lista2CfDcf: lista2.metrics,
+      lista2ProductionOperational: lista2Production,
       lista3aProjectEfficiency: lista3a.metrics,
       lista4TenYear: lista4,
     });

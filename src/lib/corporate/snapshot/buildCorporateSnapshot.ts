@@ -1,7 +1,15 @@
 import type { CorporateFinancingOutput } from '../financing/types.ts';
 import type { CorporateAggregationOutput } from '../types.ts';
 import type { CorporateSnapshot, MarketValueInput, MarketValueOutput } from './types.ts';
+import {
+  computeLista1FinancialValuationMetrics,
+  type Lista1FinancialValuationMetrics,
+} from '../../snapshot/lista1FinancialValuation.ts';
 import { makeNullLista2CfDcfMetrics, type Lista2CfDcfMetrics } from '../../snapshot/lista2CfDcf.ts';
+import {
+  makeNullLista2ProductionOperationalMetrics,
+  type Lista2ProductionOperationalMetrics,
+} from '../../snapshot/lista2ProductionOperational.ts';
 import {
   makeNullLista3aProjectEfficiencyMetrics,
   type Lista3aProjectEfficiencyMetrics,
@@ -94,7 +102,9 @@ export function buildCorporateSnapshot(args: {
   aggregation: CorporateAggregationOutput;
   financing: CorporateFinancingOutput;
   market: MarketValueInput;
+  lista1FinancialValuation?: Lista1FinancialValuationMetrics;
   lista2CfDcf?: Lista2CfDcfMetrics;
+  lista2ProductionOperational?: Lista2ProductionOperationalMetrics;
   lista3aProjectEfficiency?: Lista3aProjectEfficiencyMetrics;
   lista4TenYear?: Lista4TenYearMetrics;
 }): CorporateSnapshot {
@@ -103,7 +113,15 @@ export function buildCorporateSnapshot(args: {
     financing: args.financing,
   });
 
+  const lista1 = args.lista1FinancialValuation ?? computeLista1FinancialValuationMetrics({
+    npvToday_TargetCurrency: args.financing.NPV_today_TargetCurrency,
+    navToday_TargetCurrency: args.financing.NAV_today_TargetCurrency,
+    ev_TargetCurrency: marketValue.EV_TargetCurrency,
+    shares_post_financing: args.financing.shares_post_financing,
+    shares_current: args.market.shares_current,
+  });
   const lista2 = args.lista2CfDcf ?? makeNullLista2CfDcfMetrics();
+  const lista2Production = args.lista2ProductionOperational ?? makeNullLista2ProductionOperationalMetrics();
   const lista3a = args.lista3aProjectEfficiency ?? makeNullLista3aProjectEfficiencyMetrics();
   const lista4Base = args.lista4TenYear ?? makeNullLista4TenYearMetrics();
   const lista4: Lista4TenYearMetrics = {
@@ -129,7 +147,9 @@ export function buildCorporateSnapshot(args: {
     P_over_NAV: marketValue.P_over_NAV,
     NPV_today_TargetCurrency: toFiniteOrNull(args.financing.NPV_today_TargetCurrency),
     NAV_today_TargetCurrency: toFiniteOrNull(args.financing.NAV_today_TargetCurrency),
+    ...lista1,
     ...lista2,
+    ...lista2Production,
     ...lista3a,
     ...lista4,
   };

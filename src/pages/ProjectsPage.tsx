@@ -321,37 +321,48 @@ export default function ProjectsPage() {
     };
   }, [lockedTargetCurrency, companyStatements, profileDefaults, projectId, symbol]);
 
-  const metrics = useMemo(() => {
-    if (!snapshotData) return [] as Array<{ label: string; value: unknown }>;
-    const aggregation = (snapshotData.aggregation ?? {}) as Record<string, unknown>;
+  const listaTables = useMemo(() => {
+    const rows = {
+      lista1: [
+        { label: 'NPV_today_TargetCurrency', value: snapshotData?.NPV_today_TargetCurrency ?? null },
+        { label: 'NPV_today_perShare_TargetCurrency', value: snapshotData?.NPV_today_perShare_TargetCurrency ?? null },
+        { label: 'NAV_today_TargetCurrency', value: snapshotData?.NAV_today_TargetCurrency ?? null },
+        { label: 'NAV_today_perShare_TargetCurrency', value: snapshotData?.NAV_today_perShare_TargetCurrency ?? null },
+        { label: 'DCF_prodStart_exCapex_TargetCurrency', value: snapshotData?.DCF_prodStart_exCapex_TargetCurrency ?? null },
+        { label: 'DCF_prodStart_exCapex_perShare_TargetCurrency', value: snapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null },
+        { label: 'DCF_prodStart_present_TargetCurrency', value: snapshotData?.DCF_prodStart_present_TargetCurrency ?? null },
+        { label: 'DCF_prodStart_present_perShare_TargetCurrency', value: snapshotData?.DCF_prodStart_present_perShare_TargetCurrency ?? null },
+        { label: 'CF_LOM_TargetCurrency', value: snapshotData?.CF_LOM_TargetCurrency ?? null },
+        { label: 'CF_LOM_perShare_TargetCurrency', value: snapshotData?.CF_LOM_perShare_TargetCurrency ?? null },
+        { label: 'EV_TargetCurrency', value: snapshotData?.EV_TargetCurrency ?? null },
+        { label: 'EVPS_TargetCurrency', value: snapshotData?.EVPS_TargetCurrency ?? null },
+        { label: 'EV_over_NPV', value: snapshotData?.EV_over_NPV ?? null },
+        { label: 'EV_over_NAV', value: snapshotData?.EV_over_NAV ?? null },
+        { label: 'P_over_NAV', value: snapshotData?.P_over_NAV ?? null },
+        { label: 'NPV_over_ETLV', value: snapshotData?.NPV_over_ETLV ?? null },
+        { label: 'DCF_present_over_ETLV', value: snapshotData?.DCF_present_over_ETLV ?? null },
+      ],
+      lista2: [
+        { label: 'Time_to_production (tp)', value: snapshotData?.Time_to_production ?? null },
+        { label: 'LOM (period count)', value: snapshotData?.LOM_periods ?? null },
+        { label: 'LOM_production_AuEq_Oz', value: snapshotData?.LOM_production_AuEq_Oz ?? null },
+        { label: 'Annual_production_AuEq_Oz', value: snapshotData?.Annual_production_AuEq_Oz ?? null },
+        { label: 'AISC_AuEq_USD_per_Oz_LOM', value: snapshotData?.AISC_AuEq_USD_per_Oz_LOM ?? null },
+        { label: 'CAPEX_per_annual_AuEq_Oz', value: snapshotData?.CAPEX_per_annual_AuEq_Oz ?? null },
+      ],
+      lista3: [
+        { label: 'Payback_approx_years', value: snapshotData?.Payback_approx_years ?? null },
+        { label: 'Payback_real_years', value: snapshotData?.Payback_real_years ?? null },
+        { label: 'LOM_average_EBIT_ROCE_pct', value: snapshotData?.LOM_average_EBIT_ROCE_pct ?? null },
+        { label: 'LOM_discounted_EBIT_ROCE_pct', value: snapshotData?.LOM_discounted_EBIT_ROCE_pct ?? null },
+        { label: 'ROI_10Y_pct', value: snapshotData?.ROI_10Y_pct ?? null },
+        { label: 'Kapitalavkastning_LOM', value: snapshotData?.Kapitalavkastning_LOM ?? null },
+        { label: 'Kapitalavkastning_per_Ar_LOM', value: snapshotData?.Kapitalavkastning_per_Ar_LOM ?? null },
+      ],
+    };
 
-    return [
-      { label: 'price_current_TargetCurrency', value: readFiniteNumber(profileDefaults?.price) },
-      { label: 'targetCurrency (locked from profile)', value: lockedTargetCurrency },
-      { label: 'MarketCap_TargetCurrency', value: snapshotData.MarketCap_TargetCurrency },
-      { label: 'EV_TargetCurrency', value: snapshotData.EV_TargetCurrency },
-      { label: 'NPV_today_TargetCurrency', value: snapshotData.NPV_today_TargetCurrency },
-      { label: 'NAV_today_TargetCurrency', value: snapshotData.NAV_today_TargetCurrency },
-      { label: 'EV_over_NPV', value: snapshotData.EV_over_NPV },
-      { label: 'EV_over_NAV', value: snapshotData.EV_over_NAV },
-      { label: 'P_over_NAV', value: snapshotData.P_over_NAV },
-      { label: 'CF_LOM_TargetCurrency', value: snapshotData.CF_LOM_TargetCurrency },
-      { label: 'DCF_prodStart_present_TargetCurrency', value: snapshotData.DCF_prodStart_present_TargetCurrency },
-      { label: 'NPV_over_ETLV', value: snapshotData.NPV_over_ETLV },
-      { label: 'DCF_present_over_ETLV', value: snapshotData.DCF_present_over_ETLV },
-      { label: 'Payback_approx_years', value: snapshotData.Payback_approx_years },
-      { label: 'Payback_real_years', value: snapshotData.Payback_real_years },
-      { label: 'ROI_10Y_pct', value: snapshotData.ROI_10Y_pct },
-      { label: 'LOM_average_EBIT_ROCE_pct', value: snapshotData.LOM_average_EBIT_ROCE_pct },
-      { label: 'LOM_discounted_EBIT_ROCE_pct', value: snapshotData.LOM_discounted_EBIT_ROCE_pct },
-      { label: 'Revenue_10Y_TargetCurrency', value: snapshotData.Revenue_10Y_TargetCurrency },
-      { label: 'FCFF_10Y_TargetCurrency', value: snapshotData.FCFF_10Y_TargetCurrency },
-      { label: 'InSituValue_10Y_TargetCurrency', value: snapshotData.InSituValue_10Y_TargetCurrency },
-      { label: 'EV_over_Revenue_10Y', value: snapshotData.EV_over_Revenue_10Y },
-      { label: 'AuEq_Oz_10Y', value: snapshotData.AuEq_Oz_10Y },
-      { label: 'AISC (corp)', value: aggregation.aiscAuEqUSDPerOz_LOM ?? null },
-    ];
-  }, [lockedTargetCurrency, snapshotData, profileDefaults]);
+    return rows;
+  }, [snapshotData]);
 
   const series = (snapshotData?.series ?? null) as SeriesShape | null;
   const parsedProject = useMemo(() => {
@@ -539,11 +550,26 @@ export default function ProjectsPage() {
         {snapshotLoading && <p>Running snapshot…</p>}
         {snapshotError && <p className="status error">{snapshotError}</p>}
 
-        <section className="projects-metrics" aria-label="Key metrics">
-          {metrics.map((metric) => (
-            <article key={metric.label} className="producer-card">
-              <h3>{metric.label}</h3>
-              <p>{formatMetricValue(metric.value)}</p>
+        <section className="projects-key-metrics-grid" aria-label="Key metrics">
+          {[
+            { title: 'Lista 1 — Finansiella nyckeltal och värdering', rows: listaTables.lista1 },
+            { title: 'Lista 2 — Produktion och operativt', rows: listaTables.lista2 },
+            { title: 'Lista 3 — Effektivitet och lönsamhet', rows: listaTables.lista3 },
+          ].map((table) => (
+            <article key={table.title} className="projects-key-metrics-column">
+              <h3>{table.title}</h3>
+              <div className="projects-table-wrap">
+                <table className="projects-table projects-table-tight projects-key-metrics-table">
+                  <tbody>
+                    {table.rows.map((metric) => (
+                      <tr key={metric.label}>
+                        <th>{metric.label}</th>
+                        <td>{formatMetricValue(metric.value)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </article>
           ))}
         </section>

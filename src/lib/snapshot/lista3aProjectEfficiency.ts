@@ -6,6 +6,8 @@ export type Lista3aProjectEfficiencyMetrics = {
   ROI_10Y_pct: NullableNumber;
   LOM_average_EBIT_ROCE_pct: NullableNumber;
   LOM_discounted_EBIT_ROCE_pct: NullableNumber;
+  Kapitalavkastning_LOM: NullableNumber;
+  Kapitalavkastning_per_Ar_LOM: NullableNumber;
 };
 
 export function makeNullLista3aProjectEfficiencyMetrics(): Lista3aProjectEfficiencyMetrics {
@@ -15,6 +17,8 @@ export function makeNullLista3aProjectEfficiencyMetrics(): Lista3aProjectEfficie
     ROI_10Y_pct: null,
     LOM_average_EBIT_ROCE_pct: null,
     LOM_discounted_EBIT_ROCE_pct: null,
+    Kapitalavkastning_LOM: null,
+    Kapitalavkastning_per_Ar_LOM: null,
   };
 }
 
@@ -59,6 +63,7 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
   fcffUSD_total: Array<number | null>;
   ebitUSD_total: Array<number | null>;
   capexUSD_total: Array<number | null>;
+  payableAuEqOz_total?: Array<number | null>;
 }): { metrics: Lista3aProjectEfficiencyMetrics; warnings: string[] } {
   const warnings: string[] = [];
   const out = makeNullLista3aProjectEfficiencyMetrics();
@@ -142,8 +147,8 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
 
   out.Payback_real_years = paybackReal === null ? null : toFiniteOrNull(round1(paybackReal));
 
-  const roiEnd = Math.min(args.masterN, tp + 9);
-  if (roiEnd >= tp) {
+  const roiEnd = tp + 9;
+  if (roiEnd <= args.masterN) {
     let roiSum = 0;
     let roiOk = true;
     for (let t = tp; t <= roiEnd; t += 1) {
@@ -160,11 +165,20 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
     } else {
       warnings.push('roi10y: missing fcff in window');
     }
+  } else {
+    warnings.push('roi10y: strict 10Y window unavailable');
   }
 
   let ebitSum = 0;
   let lomCount = 0;
+  const usePayableLom = Array.isArray(args.payableAuEqOz_total) && args.payableAuEqOz_total.length === expectedLength;
   for (let t = tp; t <= args.masterN; t += 1) {
+    if (usePayableLom) {
+      const payable = args.payableAuEqOz_total?.[t];
+      if (!(typeof payable === 'number' && Number.isFinite(payable) && payable > 0)) {
+        continue;
+      }
+    }
     const ebit = args.ebitUSD_total[t];
     if (!finite(ebit)) {
       continue;
@@ -193,6 +207,19 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
   if (discountedCount > 0) {
     out.LOM_discounted_EBIT_ROCE_pct = toFiniteOrNull((discountedEbit / initialCapexAbs) * 100);
   }
+
+  let cfLom = 0;
+  let cfPeriods = 0;
+  for (let t = tp; t <= args.masterN; t += 1) {
+    const fcff = args.fcffUSD_total[t];
+    if (!finite(fcff)) {
+      continue;
+    }
+    cfLom += fcff;
+    cfPeriods += 1;
+  }
+  out.Kapitalavkastning_LOM = toFiniteOrNull(cfLom / initialCapexAbs);
+  out.Kapitalavkastning_per_Ar_LOM = cfPeriods > 0 ? toFiniteOrNull((cfLom / cfPeriods) / initialCapexAbs) : null;
 
   return { metrics: out, warnings: [...new Set(warnings)] };
 }

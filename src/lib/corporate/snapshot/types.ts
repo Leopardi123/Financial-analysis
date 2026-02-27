@@ -112,6 +112,9 @@ export type CorporateSnapshot = {
   // Convenience
   NPV_today_TargetCurrency: number | null;
   NAV_today_TargetCurrency: number | null;
+  NPV_today_perShare_TargetCurrency: number | null;
+  NAV_today_perShare_TargetCurrency: number | null;
+  EVPS_TargetCurrency: number | null;
 
   CF_LOM_USD: number | null;
   CF_LOM_perShare_USD: number | null;
@@ -134,6 +137,15 @@ export type CorporateSnapshot = {
   ROI_10Y_pct: number | null;
   LOM_average_EBIT_ROCE_pct: number | null;
   LOM_discounted_EBIT_ROCE_pct: number | null;
+  Kapitalavkastning_LOM: number | null;
+  Kapitalavkastning_per_Ar_LOM: number | null;
+
+  Time_to_production: number | null;
+  LOM_periods: number | null;
+  LOM_production_AuEq_Oz: number | null;
+  Annual_production_AuEq_Oz: number | null;
+  AISC_AuEq_USD_per_Oz_LOM: number | null;
+  CAPEX_per_annual_AuEq_Oz: number | null;
 
   NPV_over_ETLV: number | null;
   DCF_present_over_ETLV: number | null;
