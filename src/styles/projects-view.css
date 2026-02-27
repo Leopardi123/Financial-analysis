@@ -95,3 +95,34 @@
   text-align: left;
   background: #fbfdf8;
 }
+
+.projects-table-tight {
+  font-size: 12px;
+}
+
+.projects-table-tight th,
+.projects-table-tight td {
+  padding: 4px 6px;
+}
+
+.projects-capacity-block {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid #d8e0d2;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.projects-warning-note {
+  margin: 0;
+  font-size: 12px;
+  color: #6e4c00;
+}
+
+.projects-subheader-cell {
+  text-align: left !important;
+  font-weight: 700;
+  background: #f0f5ea;
+}

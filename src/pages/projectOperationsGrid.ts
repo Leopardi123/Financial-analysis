@@ -1,0 +1,132 @@
+export type OperationsGridInput = {
+  masterN: number;
+  productionStartPeriod: number | null;
+  periodEndDatesUtc?: Array<string | null>;
+  operations?: {
+    oreMilledTonnes?: Array<number | null>;
+    oreMinedTonnes?: Array<number | null>;
+    oreTonnageUnit?: string | null;
+    capacity?: {
+      throughputUnit?: string | null;
+      nameplateThroughput?: number | null;
+      utilizationPct?: number | null;
+    };
+  } | null;
+  metals: {
+    payableQtyByMetal?: Record<string, Array<number | null>>;
+    payableQtyUnitByMetal?: Record<string, string>;
+  };
+};
+
+export type OperationsGridRow = { label: string; values: Array<number | null> };
+
+export type OperationsGridModel = {
+  columnCount: number;
+  years: string[];
+  tIndex: string[];
+  tMinusTp: string[];
+  rows: OperationsGridRow[];
+  totals: Array<{ label: string; value: number | null }>;
+  capacity: {
+    throughputUnit: string | null;
+    nameplateThroughput: number | null;
+    utilizationPct: number | null;
+    effectiveThroughput: number | null;
+  };
+  warnings: string[];
+  notes: string[];
+};
+
+function yearLabel(value: string | null | undefined): string {
+  if (typeof value !== 'string') return '—';
+  const yearMatch = value.match(/^(\d{4})/);
+  return yearMatch?.[1] ?? '—';
+}
+
+function strictTotal(values: Array<number | null>, startIndex: number): number | null {
+  if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex > values.length) return null;
+  let sum = 0;
+  for (let i = startIndex; i < values.length; i += 1) {
+    const value = values[i];
+    if (value === null || !Number.isFinite(value)) return null;
+    sum += value;
+  }
+  return sum;
+}
+
+export function buildOperationsGridModel(input: OperationsGridInput): OperationsGridModel {
+  const columnCount = Math.max(0, input.masterN + 1);
+  const warnings: string[] = [];
+  const notes: string[] = [];
+  const hasValidPeriodDates = Array.isArray(input.periodEndDatesUtc) && input.periodEndDatesUtc.length === columnCount;
+
+  if (!hasValidPeriodDates) {
+    warnings.push('Period end dates missing or mismatched; showing t-only columns.');
+  }
+
+  if (!input.operations) {
+    notes.push('Operations block missing (capacity/tonnes).');
+  }
+
+  const years = Array.from({ length: columnCount }, (_, t) => hasValidPeriodDates ? yearLabel(input.periodEndDatesUtc?.[t]) : '—');
+  const tIndex = Array.from({ length: columnCount }, (_, t) => `${t}`);
+  const hasValidTp = Number.isInteger(input.productionStartPeriod);
+  const tp = hasValidTp ? (input.productionStartPeriod as number) : null;
+  const tMinusTp = Array.from({ length: columnCount }, (_, t) => (tp === null ? '—' : `${t - tp}`));
+
+  const rows: OperationsGridRow[] = [];
+  const oreUnit = input.operations?.oreTonnageUnit ?? 'tonne';
+
+  if (Array.isArray(input.operations?.oreMilledTonnes)) {
+    rows.push({ label: `Ore milled (${oreUnit})`, values: input.operations?.oreMilledTonnes ?? [] });
+  }
+  if (Array.isArray(input.operations?.oreMinedTonnes)) {
+    rows.push({ label: `Ore mined (${oreUnit})`, values: input.operations?.oreMinedTonnes ?? [] });
+  }
+
+  const metals = Object.keys(input.metals.payableQtyByMetal ?? {}).sort((a, b) => a.localeCompare(b));
+  for (const metal of metals) {
+    const values = input.metals.payableQtyByMetal?.[metal];
+    if (!Array.isArray(values)) continue;
+    const unit = input.metals.payableQtyUnitByMetal?.[metal];
+    rows.push({ label: `Payable ${metal} (${unit ?? '—'})`, values });
+  }
+
+  const totals: Array<{ label: string; value: number | null }> = [];
+  const totalStart = tp ?? -1;
+  if (Array.isArray(input.operations?.oreMilledTonnes)) {
+    totals.push({ label: `Total ore milled (t>=tp) (${oreUnit})`, value: strictTotal(input.operations.oreMilledTonnes, totalStart) });
+  }
+  if (Array.isArray(input.operations?.oreMinedTonnes)) {
+    totals.push({ label: `Total ore mined (t>=tp) (${oreUnit})`, value: strictTotal(input.operations.oreMinedTonnes, totalStart) });
+  }
+  for (const metal of metals) {
+    const values = input.metals.payableQtyByMetal?.[metal];
+    if (!Array.isArray(values)) continue;
+    const unit = input.metals.payableQtyUnitByMetal?.[metal] ?? '—';
+    totals.push({ label: `Total payable ${metal} (t>=tp) (${unit})`, value: strictTotal(values, totalStart) });
+  }
+
+  const nameplateThroughput = input.operations?.capacity?.nameplateThroughput ?? null;
+  const utilizationPct = input.operations?.capacity?.utilizationPct ?? null;
+  const effectiveThroughput = Number.isFinite(nameplateThroughput) && Number.isFinite(utilizationPct)
+    ? (nameplateThroughput as number) * (utilizationPct as number)
+    : null;
+
+  return {
+    columnCount,
+    years,
+    tIndex,
+    tMinusTp,
+    rows,
+    totals,
+    capacity: {
+      throughputUnit: input.operations?.capacity?.throughputUnit ?? null,
+      nameplateThroughput,
+      utilizationPct,
+      effectiveThroughput,
+    },
+    warnings,
+    notes,
+  };
+}
