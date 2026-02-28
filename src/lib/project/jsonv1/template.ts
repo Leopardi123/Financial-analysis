@@ -1,4 +1,5 @@
 import type { ProjectJsonV1, QtyUnit } from './schema.ts';
+import { PRICE_KEY_DEFINITIONS } from '../../prices/keys.ts';
 
 type NullableNumberSeries = Array<number | null>;
 
@@ -19,6 +20,7 @@ const THROUGHPUT_UNIT_CHOICES = ['tpa', 'tpd'] as const;
 const VERSION_CHOICES = ['project_json_v1'] as const;
 const CURRENCY_CHOICES = ['USD'] as const;
 const QTY_UNIT_CHOICES = ['g', 'kg', 'lb', 'long_ton', 'short_ton', 'tonne', 'toz'] as const;
+const PRICE_KEY_CHOICES = PRICE_KEY_DEFINITIONS.map((definition) => definition.priceKey);
 
 type ProjectJsonV1Template = ProjectJsonV1 & Record<string, unknown>;
 
@@ -177,7 +179,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
       projectName: typeof meta.projectName === 'string' ? meta.projectName : '',
       currency: 'USD',
       _choices_currency: [...CURRENCY_CHOICES],
-      notes: typeof meta.notes === 'string' && meta.notes.trim().length > 0 ? meta.notes : 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
+      notes: typeof meta.notes === 'string' && meta.notes.trim().length > 0 ? meta.notes : 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Price key examples: Au=XAU_USD_TOZ, Ag=XAG_USD_TOZ. Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
     },
     time: {
       masterN,
@@ -270,6 +272,12 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     (output.metals.payableQtyUnitByMetal as Record<string, unknown>)[`_choices_${metal}`] = [...QTY_UNIT_CHOICES];
   }
 
+  for (const metal of Object.keys(output.metals.priceKeyByMetal ?? {})) {
+    (output.metals.priceKeyByMetal as Record<string, unknown>)[`_choices_${metal}`] = [...PRICE_KEY_CHOICES];
+  }
+
+  (output.metals as Record<string, unknown>)._choices_auPriceKey = [...PRICE_KEY_CHOICES];
+
   for (const item of Array.isArray(output.takeItems) ? output.takeItems : []) {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) {
       continue;
@@ -319,7 +327,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       projectId: '',
       projectName: '',
       currency: 'USD',
-      notes: 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
+      notes: 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Price key examples: Au=XAU_USD_TOZ, Ag=XAG_USD_TOZ. Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
     },
     time: {
       masterN,
