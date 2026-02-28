@@ -95,6 +95,54 @@ function formatMetricNullReason(value: MetricValue): string {
   return value.value === null ? (value.reason ?? "Missing required input.") : "";
 }
 
+function formatDiscountRateTag(rateInput: string): string {
+  const ratePct = toInputNumber(rateInput);
+  if (typeof ratePct !== "number" || !Number.isFinite(ratePct)) return "";
+  return `${Math.round(ratePct)}`;
+}
+
+function resolveProjectMetricLabel(metricKey: string, discountRateTag: string): string {
+  const npvLabel = `NPV${discountRateTag}`;
+  const metricLabels: Record<string, string> = {
+    NPV_Target: npvLabel,
+    NPV_perShare: `${npvLabel}/aktie`,
+    NAV_Target: "NAV",
+    NAV_perShare: "NAV/aktie",
+    CF_LOM_Target: "CF LOM ETLV",
+    CF_LOM_Target_perShare: "CF LOM ETLV/aktie",
+    DCF_Target: "DCF produktionsstart",
+    DCF_perShare: "DCF produktionsstart/aktie",
+    DCF_Target_discounted: "DCF produktionsstart nuvärde",
+    DCF_Target_discounted_perShare: "DCF produktionsstart nuvärde/aktie",
+    EV_over_NPV: "EV/NPV",
+    EV_over_NAV: "EV/NAV",
+    P_over_NAV: "P/NAV",
+    NPV_over_ETLV: "NPV/ETLV",
+    DCF_over_ETLV: "DCF/ETLV",
+  };
+  return metricLabels[metricKey] ?? metricKey;
+}
+
+const projectSectionMetricOrder: Record<"list2", string[]> = {
+  list2: [
+    "NPV_Target",
+    "NPV_perShare",
+    "NAV_Target",
+    "NAV_perShare",
+    "CF_LOM_Target",
+    "CF_LOM_Target_perShare",
+    "DCF_Target",
+    "DCF_perShare",
+    "DCF_Target_discounted",
+    "DCF_Target_discounted_perShare",
+    "EV_over_NPV",
+    "EV_over_NAV",
+    "P_over_NAV",
+    "NPV_over_ETLV",
+    "DCF_over_ETLV",
+  ],
+};
+
 const PROJECT_SECTION_DEFAULT_OPEN: Record<string, boolean> = {
   list2: true,
   list3: false,
@@ -3173,16 +3221,21 @@ Capital Available: ${availableLabel}`,
                     <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       <div className="compact-metrics-grid">
-                        {Object.entries(metrics).map(([key, value]) => (
+                        {((sectionKey === "list2")
+                          ? projectSectionMetricOrder.list2
+                            .filter((key) => Object.prototype.hasOwnProperty.call(metrics, key))
+                            .map((key) => [key, metrics[key]] as const)
+                          : Object.entries(metrics))
+                        .map(([key, value]) => (
                           <div key={key} className="compact-metric-row">
                             <span className="compact-metric-label-wrap">
-                              <span className="compact-metric-label">{key}</span>
+                              <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                               <InfoPopover
                                 id={`project-${sectionKey}-${key}`}
                                 openId={openInfoId}
                                 onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
                                 onClose={() => setOpenInfoId(null)}
-                                title={key}
+                                title={resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}
                                 sections={[
                                   { heading: "Definition", lines: ["Project KPI in pre-revenue strict mode."] },
                                   { heading: "Formula", lines: ["Exact formula implemented in computeProjectViewMetrics helper."] },
@@ -3193,7 +3246,7 @@ Capital Available: ${availableLabel}`,
                             </span>
                             <span className="compact-metric-dots" />
                             <span className="compact-metric-value">
-                              {formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key.includes("pct") ? "percent" : key === "TP" || key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}
+                              {formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}
                               {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
                             </span>
                           </div>
