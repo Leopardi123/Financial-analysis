@@ -134,8 +134,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             <rect x={232} y={14} width={36} height={92} rx={10} fill="rgba(15, 23, 42, 0.05)" />
             <line x1={0} y1={110} x2={320} y2={110} stroke="rgba(15, 23, 42, 0.14)" strokeWidth={1} />
 
-            <text x={12} y={26} fontSize={10} fill="#6b7280">Nuvärde</text>
-            <text x={238} y={26} fontSize={10} fill="#6b7280">TP</text>
+            <text x={12} y={26} fontSize={10} fill="#6b7280">Nu</text>
+            <text x={238} y={26} fontSize={10} fill="#6b7280">Då</text>
 
             {hasNpv && hasTp && (
               <polygon
