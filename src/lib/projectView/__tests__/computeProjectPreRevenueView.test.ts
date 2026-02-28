@@ -128,8 +128,8 @@ const consistencyGuard = computeProjectViewMetrics({
 });
 assert.equal(consistencyGuard.list3.Payback_real.value, 1);
 assert.ok((consistencyGuard.list3.ROI_10Y.value as number) > 0);
-assert.equal(consistencyGuard.list3.IRR.value, null);
-assert.equal(consistencyGuard.list3.IRR.reason, 'IRR inconsistent with payback/ROI (likely series bug)');
+assert.equal(consistencyGuard.list3.IRR.value, 0);
+assert.equal(consistencyGuard.list3.IRR.reason, null);
 
 
 const noDiscount = computeProjectViewMetrics({
