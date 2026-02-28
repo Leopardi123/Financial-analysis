@@ -1,4 +1,5 @@
 import type { ProjectEngineFullProductionV1Input } from '../types.ts';
+import { PRICE_KEY_DEFINITIONS, PRICE_KEY_SET } from '../../prices/keys.ts';
 import type { ProjectJsonV1, QtyUnit } from './schema.ts';
 
 function isFiniteNumber(value: unknown): value is number {
@@ -180,6 +181,49 @@ function toFiniteOrNull(value: number | null | undefined): number | null {
     return null;
   }
   return value;
+}
+
+const PRICE_KEY_ALIASES: Record<string, string> = {
+  AU: 'XAU_USD_TOZ',
+  GOLD: 'XAU_USD_TOZ',
+  XAU: 'XAU_USD_TOZ',
+  AG: 'XAG_USD_TOZ',
+  SILVER: 'XAG_USD_TOZ',
+  XAG: 'XAG_USD_TOZ',
+};
+
+const VALID_PRICE_KEYS = PRICE_KEY_DEFINITIONS.map((item) => item.priceKey);
+const VALID_PRICE_KEYS_HELP_TEXT = VALID_PRICE_KEYS.join(', ');
+
+function normalizePriceKeyInput(args: {
+  value: string;
+  path: string;
+  diagnostics: NormalizationDiagnostic[];
+}): string {
+  const { value, path, diagnostics } = args;
+  const trimmed = value.trim();
+  const upper = trimmed.toUpperCase();
+  const aliasMapped = PRICE_KEY_ALIASES[upper] ?? upper;
+
+  if (aliasMapped !== value) {
+    diagnostics.push({
+      rule: 'price_key_normalized',
+      path,
+      summary: `Normalized ${JSON.stringify(value)} -> ${JSON.stringify(aliasMapped)}.`,
+    });
+  }
+
+  return aliasMapped;
+}
+
+function assertKnownPriceKey(path: string, priceKey: string): void {
+  if (PRICE_KEY_SET.has(priceKey)) {
+    return;
+  }
+
+  throw new Error(
+    `${path} must be one of: [${VALID_PRICE_KEYS_HELP_TEXT}]. Received ${JSON.stringify(priceKey)}. Example: XAU_USD_TOZ.`,
+  );
 }
 
 function asOptionalSparseSeries(value: unknown, path: string, masterN: number): Array<number | null> | undefined {
@@ -872,7 +916,13 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     if (typeof priceKey !== 'string' || priceKey.trim().length === 0) {
       fail(`metals.priceKeyByMetal.${metal}`, 'non-empty string', priceKey);
     }
-    priceKeyByMetal[metal] = priceKey;
+    const normalizedPriceKey = normalizePriceKeyInput({
+      value: priceKey,
+      path: `metals.priceKeyByMetal.${metal}`,
+      diagnostics: normalizationDiagnostics,
+    });
+    assertKnownPriceKey(`priceKeyByMetal.${metal}`, normalizedPriceKey);
+    priceKeyByMetal[metal] = normalizedPriceKey;
   }
 
   const extraUnitKeys = Object.keys(raw.metals.payableQtyUnitByMetal).filter((key) => !(key in payableQtyByMetal));
@@ -885,9 +935,37 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     fail('metals.priceKeyByMetal', 'same keys as payableQtyByMetal', extraPriceKeys);
   }
 
-  const auPriceKey = raw.metals.auPriceKey;
-  if (typeof auPriceKey !== 'string' || auPriceKey.trim().length === 0) {
-    fail('metals.auPriceKey', 'non-empty string', auPriceKey);
+  const auPriceKeyRaw = raw.metals.auPriceKey;
+  let auPriceKey: string | null = null;
+  if (typeof auPriceKeyRaw === 'string' && auPriceKeyRaw.trim().length > 0) {
+    auPriceKey = normalizePriceKeyInput({
+      value: auPriceKeyRaw,
+      path: 'metals.auPriceKey',
+      diagnostics: normalizationDiagnostics,
+    });
+    assertKnownPriceKey('metals.auPriceKey', auPriceKey);
+  } else if (auPriceKeyRaw !== undefined && auPriceKeyRaw !== null && auPriceKeyRaw !== '') {
+    fail('metals.auPriceKey', 'string | null', auPriceKeyRaw);
+  }
+
+  const auPriceKeyByMetal = priceKeyByMetal.Au;
+  if (auPriceKeyByMetal && !auPriceKey) {
+    auPriceKey = auPriceKeyByMetal;
+    normalizationDiagnostics.push({
+      rule: 'au_price_key_autofill',
+      path: 'metals.auPriceKey',
+      summary: 'Set metals.auPriceKey from metals.priceKeyByMetal.Au for AuEq consistency.',
+    });
+  }
+
+  if (auPriceKeyByMetal && auPriceKey && auPriceKey !== auPriceKeyByMetal) {
+    throw new Error(
+      `metals.auPriceKey (${JSON.stringify(auPriceKey)}) must equal metals.priceKeyByMetal.Au (${JSON.stringify(auPriceKeyByMetal)}) to keep AuEq calculations consistent. Set auPriceKey equal to priceKeyByMetal.Au to keep AuEq calculations consistent.`,
+    );
+  }
+
+  if (!auPriceKey) {
+    fail('metals.auPriceKey', 'non-empty string', auPriceKeyRaw);
   }
 
   const streamsByMetal = raw.streamsByMetal;

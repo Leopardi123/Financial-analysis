@@ -7,6 +7,7 @@ import {
   type CompanyProjectSummary,
 } from '../lib/client/companyProjectsClient.ts';
 import { copyText } from '../lib/client/clipboard.ts';
+import { parseProjectJsonV1 } from '../lib/project/jsonv1/parse.ts';
 import { buildProjectJsonV1Template } from '../lib/project/jsonv1/template.ts';
 import '../styles/company-project-editor.css';
 
@@ -63,6 +64,12 @@ function validateProjectJson(rawJson: string): ValidationState {
   const version = (root as Record<string, unknown>).version;
   if (version !== 'project_json_v1') {
     return { ok: false, error: 'raw.version must be "project_json_v1".', warning: null, parsed: null };
+  }
+
+  try {
+    parseProjectJsonV1(root);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message, warning, parsed: null };
   }
 
   return { ok: true, error: null, warning, parsed: root as Record<string, unknown> };
@@ -503,6 +510,7 @@ export default function CompanyProjectsEditorPage() {
           <p className="save-meta">
             Optional JSON hints: operations.gradeByMetal is per-period head grade in the unit defined by operations.gradeUnitByMetal;
             operations.recoveryPctByMetal is per-period metallurgical recovery (0..1 or 0..100);
+            metals.priceKeyByMetal examples include Au: XAU_USD_TOZ and Ag: XAG_USD_TOZ;
             series.depreciationUSD is optional for EBITDA display (if omitted, EBITDA shows null).
           </p>
 

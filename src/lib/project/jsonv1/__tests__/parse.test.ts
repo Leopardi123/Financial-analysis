@@ -123,6 +123,44 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   metalMismatchPrices.metals.priceKeyByMetal = { Au: 'XAU_USD_TOZ' };
   assertThrows(() => parseProjectJsonV1(metalMismatchPrices), /priceKeyByMetal/, 'throws on payable/price-key mismatch');
 
+  const unknownPriceKey = getProjectJsonV1Template();
+  unknownPriceKey.metals.priceKeyByMetal.Au = 'auu';
+  assertThrows(
+    () => parseProjectJsonV1(unknownPriceKey),
+    /priceKeyByMetal\.Au must be one of: \[[^\]]*XAU_USD_TOZ[^\]]*XAG_USD_TOZ[^\]]*\]\. Received "AUU"\. Example: XAU_USD_TOZ\./,
+    'unknown price key error includes valid keys and example',
+  );
+
+  const aliasPriceKeys = getProjectJsonV1Template();
+  aliasPriceKeys.metals.payableQtyByMetal.Ag = [...aliasPriceKeys.metals.payableQtyByMetal.Au];
+  aliasPriceKeys.metals.payableQtyUnitByMetal.Ag = 'toz';
+  aliasPriceKeys.metals.priceKeyByMetal.Au = 'au';
+  aliasPriceKeys.metals.priceKeyByMetal.Ag = 'ag';
+  const parsedAliasPriceKeys = parseProjectJsonV1(aliasPriceKeys);
+  assertEqual(parsedAliasPriceKeys.engineInputWithoutPrices.priceKeyByMetal.Au, 'XAU_USD_TOZ', 'Au alias normalized to canonical key');
+  assertEqual(parsedAliasPriceKeys.engineInputWithoutPrices.priceKeyByMetal.Ag, 'XAG_USD_TOZ', 'Ag alias normalized to canonical key');
+  assert(
+    parsedAliasPriceKeys.diagnostics.normalization.some((entry) => entry.path === 'metals.priceKeyByMetal.Au' && entry.rule === 'price_key_normalized'),
+    'price key normalization diagnostics include Au alias conversion',
+  );
+
+  const autoFillAuPriceKey = getProjectJsonV1Template();
+  autoFillAuPriceKey.metals.auPriceKey = '';
+  const parsedAutoFillAuPriceKey = parseProjectJsonV1(autoFillAuPriceKey);
+  assertEqual(parsedAutoFillAuPriceKey.engineInputWithoutPrices.auPriceKey, 'XAU_USD_TOZ', 'auPriceKey auto-filled from priceKeyByMetal.Au');
+  assert(
+    parsedAutoFillAuPriceKey.diagnostics.normalization.some((entry) => entry.rule === 'au_price_key_autofill' && entry.path === 'metals.auPriceKey'),
+    'auPriceKey auto-fill emits diagnostic',
+  );
+
+  const mismatchAuPriceKey = getProjectJsonV1Template();
+  mismatchAuPriceKey.metals.auPriceKey = 'XAG_USD_TOZ';
+  assertThrows(
+    () => parseProjectJsonV1(mismatchAuPriceKey),
+    /Set auPriceKey equal to priceKeyByMetal\.Au to keep AuEq calculations consistent\./,
+    'auPriceKey mismatch error includes fix suggestion',
+  );
+
   const negativeQty = getProjectJsonV1Template();
   negativeQty.metals.payableQtyByMetal.Au[1] = -1;
   assertThrows(() => parseProjectJsonV1(negativeQty), /payableQtyByMetal\.Au\[1\]/, 'throws on negative payable qty');
