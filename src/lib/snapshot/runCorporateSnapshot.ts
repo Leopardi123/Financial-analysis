@@ -1419,6 +1419,9 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     snapshot.series = snapshotSeries;
+    snapshot.market = marketInput;
+    snapshot.fx_USD_to_TargetCurrency = fxRate;
+    snapshot.discountRate = input.discountRate;
 
     return { ok: true, snapshot, diagnostics: finalizeDiagnostics(diagnostics) };
   } catch (error) {

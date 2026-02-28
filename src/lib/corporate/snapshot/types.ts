@@ -96,6 +96,10 @@ export type CorporateSnapshotSeries = {
 export type CorporateSnapshot = {
   targetCurrency: string;
 
+  fx_USD_to_TargetCurrency?: number | null;
+  discountRate?: number;
+  market?: MarketValueInput;
+
   aggregation: import('../types.ts').CorporateAggregationOutput;
 
   financing: import('../financing/types.ts').CorporateFinancingOutput;
