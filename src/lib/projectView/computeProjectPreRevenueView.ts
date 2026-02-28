@@ -65,6 +65,90 @@ function sumRange(values: Series, start: number, end: number): NullableNumber {
   return sum;
 }
 
+function sumPayablePositive(values: Series, start: number, end: number): NullableNumber {
+  if (start < 0 || end < start || end >= values.length) return null;
+  let sum = 0;
+  let counted = 0;
+  for (let i = start; i <= end; i += 1) {
+    const payable = values[i];
+    if (finite(payable) && payable > 0) {
+      sum += payable;
+      counted += 1;
+    }
+  }
+  return counted > 0 ? sum : null;
+}
+
+function countPayablePositive(values: Series, start: number, end: number): NullableNumber {
+  if (start < 0 || end < start || end >= values.length) return null;
+  let counted = 0;
+  for (let i = start; i <= end; i += 1) {
+    const payable = values[i];
+    if (finite(payable) && payable > 0) counted += 1;
+  }
+  return counted;
+}
+
+function sumSustainingCostsWherePayablePositive(costs: Series, payable: Series, start: number, end: number): { sumCost: number; sumPay: number } | null {
+  if (start < 0 || end < start || end >= costs.length || end >= payable.length) return null;
+  let sumCost = 0;
+  let sumPay = 0;
+  for (let i = start; i <= end; i += 1) {
+    const pay = payable[i];
+    if (finite(pay) && pay > 0) {
+      const cost = costs[i];
+      if (!finite(cost)) return null;
+      sumCost += cost;
+      sumPay += pay;
+    }
+  }
+  if (sumPay === 0) return null;
+  return { sumCost, sumPay };
+}
+
+function computeIrr(series: Series, end: number): NullableNumber {
+  if (end < 0 || end >= series.length) return null;
+  const cashFlows: number[] = [];
+  for (let i = 0; i <= end; i += 1) {
+    if (!finite(series[i])) return null;
+    cashFlows.push(series[i] as number);
+  }
+  const hasPositive = cashFlows.some((v) => v > 0);
+  const hasNegative = cashFlows.some((v) => v < 0);
+  if (!hasPositive || !hasNegative) return null;
+  const npv = (rate: number): number => {
+    let sum = 0;
+    for (let t = 0; t < cashFlows.length; t += 1) {
+      sum += cashFlows[t] / ((1 + rate) ** t);
+    }
+    return sum;
+  };
+
+  let low = -0.99;
+  let high = 1;
+  let lowVal = npv(low);
+  let highVal = npv(high);
+  for (let i = 0; i < 20 && lowVal * highVal > 0; i += 1) {
+    high *= 2;
+    highVal = npv(high);
+  }
+  if (lowVal * highVal > 0) return null;
+
+  for (let i = 0; i < 100; i += 1) {
+    const mid = (low + high) / 2;
+    const midVal = npv(mid);
+    if (Math.abs(midVal) < 1e-8) return mid;
+    if (lowVal * midVal <= 0) {
+      high = mid;
+      highVal = midVal;
+    } else {
+      low = mid;
+      lowVal = midVal;
+    }
+  }
+  return (low + high) / 2;
+}
+
 function discountToToday(t: number, discountRate: number): number {
   return 1 / ((1 + discountRate) ** t);
 }
@@ -161,12 +245,14 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     : null;
   const dcfTarget = dcfProdStartPresentUSD !== null && fx !== null ? dcfProdStartPresentUSD * fx : null;
 
-  const prodYears = tp !== null && masterN !== null && tp <= masterN ? masterN - tp + 1 : null;
-  const aueqLom = tp !== null && masterN !== null ? sumRange(input.payableAuEqOz, tp, masterN) : null;
+  const prodYears = tp !== null && masterN !== null && tp <= masterN ? countPayablePositive(input.payableAuEqOz, tp, masterN) : null;
+  const aueqLom = tp !== null && masterN !== null && tp <= masterN ? sumPayablePositive(input.payableAuEqOz, tp, masterN) : null;
   const aueqYr = aueqLom !== null && prodYears !== null && prodYears > 0 ? aueqLom / prodYears : null;
-  const sustainingFinite = input.sustainingCostUSD.filter((v): v is number => finite(v));
-  const aiscLom = sustainingFinite.length > 0 ? avg(sustainingFinite) : null;
-  const capexPerAnnual = initialCapexUSD !== null && aueqYr !== null && aueqYr > 0 ? initialCapexUSD / aueqYr : null;
+  const sustainingVsPayable = tp !== null && masterN !== null && tp <= masterN
+    ? sumSustainingCostsWherePayablePositive(input.sustainingCostUSD, input.payableAuEqOz, tp, masterN)
+    : null;
+  const aiscLom = sustainingVsPayable !== null ? sustainingVsPayable.sumCost / sustainingVsPayable.sumPay : null;
+  const capexPerAnnual = initialCapexUSD !== null && aueqYr !== null && aueqYr > 0 ? Math.abs(initialCapexUSD) / aueqYr : null;
 
   const tenYearEnd = tp !== null ? tp + 9 : null;
   const inSitu10YUSD = tp !== null && tenYearEnd !== null && tenYearEnd < input.grossRevenueUSD.length
@@ -186,6 +272,42 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       if (cum >= initialCapexUSD) return i - tp + 1;
     }
     return null;
+  })() : null;
+
+  const paybackReal = initialCapexUSD !== null && tp !== null ? (() => {
+    let cum = 0;
+    for (let i = tp; i < input.fcfUSD.length; i += 1) {
+      const v = input.fcfUSD[i];
+      if (!finite(v)) return null;
+      const cumBefore = cum;
+      cum += v;
+      if (cum >= initialCapexUSD) {
+        if (v <= 0) return null;
+        const remainingBefore = initialCapexUSD - cumBefore;
+        const fraction = remainingBefore / v;
+        const result = (i - tp) + fraction;
+        return Math.round(result * 10) / 10;
+      }
+    }
+    return null;
+  })() : null;
+
+  const irr = masterN !== null ? computeIrr(input.fcfUSD, masterN) : null;
+
+  const roi10y = tp !== null && masterN !== null && initialCapexUSD !== null ? (() => {
+    const end = Math.min(tp + 9, masterN);
+    if (tp < 0 || end < tp) return null;
+    let sum = 0;
+    let count = 0;
+    for (let i = tp; i <= end; i += 1) {
+      const v = input.fcfUSD[i];
+      if (finite(v)) {
+        sum += v;
+        count += 1;
+      }
+    }
+    if (count === 0 || initialCapexUSD === 0) return null;
+    return sum / Math.abs(initialCapexUSD);
   })() : null;
 
   const ebitFinite = input.ebitUSD.filter((v): v is number => finite(v));
@@ -215,15 +337,29 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       TP: mv(tp, 'Missing tp'),
       AuEq_LOM: mv(aueqLom, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing series payableAuEqOz'),
       AuEq_YR: mv(aueqYr, aueqLom === null ? 'Missing AuEq_LOM' : 'Denominator is 0'),
-      AISC_LOM: mv(aiscLom, 'Missing series sustainingCostUSD'),
-      BreakEven_AuEq: mv(aiscLom, 'Missing series sustainingCostUSD'),
+      AISC_LOM: mv(aiscLom, sustainingVsPayable === null ? 'Missing series sustainingCostUSD for payable periods' : null),
+      BreakEven_AuEq: mv(aiscLom, sustainingVsPayable === null ? 'Missing series sustainingCostUSD for payable periods' : null),
       CAPEX_per_Annual_AuEq: mv(capexPerAnnual, initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'Denominator is 0'),
     },
     list3: {
       Payback_approx: mv(paybackApprox, initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'No payback reached in FCF path'),
-      Payback_real: mv(null, 'Discounted path unavailable in strict mode'),
-      IRR: mv(null, 'IRR requires valid sign change; not available'),
-      ROI_10Y: mv(null, '10Y ROI unavailable with strict null gating'),
+      Payback_real: mv(
+        paybackReal,
+        tp === null
+          ? 'Missing tp'
+          : (initialCapexUSD === null
+            ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
+            : (input.fcfUSD.slice(tp).some((v) => !finite(v)) ? 'Missing series fcfUSD' : 'No payback reached in cumulative FCFF')),
+      ),
+      IRR: mv(irr, masterN === null ? 'Missing masterN' : (input.fcfUSD.slice(0, masterN + 1).some((v) => !finite(v)) ? 'Missing series fcfUSD' : 'IRR requires valid sign change')),
+      ROI_10Y: mv(
+        roi10y,
+        tp === null
+          ? 'Missing tp'
+          : (initialCapexUSD === null
+            ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
+            : 'Missing finite fcfUSD in 10Y window'),
+      ),
       LOM_avg_EBIT_ROCE: mv(avgEbit, 'Missing series ebitUSD'),
       LOM_discounted_EBIT_ROCE: mv(null, 'Discounted EBIT ROCE unavailable'),
       Corporate_ROIC: mv(null, 'Corporate ROIC not provided in project scope'),

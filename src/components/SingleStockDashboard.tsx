@@ -1957,6 +1957,15 @@ Capital Available: ${availableLabel}`,
     yAxisTitle: statementCurrency,
   };
 
+  const parsedSelectedProject = useMemo(() => {
+    if (!selectedProjectRawJson) return null;
+    try {
+      return parseProjectJsonV1WithContext(selectedProjectRawJson);
+    } catch {
+      return null;
+    }
+  }, [selectedProjectRawJson]);
+
   const projectViewMetrics = useMemo(() => {
     if (!projectSnapshotData) return null;
     const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
@@ -1964,6 +1973,7 @@ Capital Available: ${availableLabel}`,
       : []);
     const inputs = getProjectInputs({
       snapshot: projectSnapshotData,
+      parsedProject: parsedSelectedProject,
       discountRateInput: riskAdjustedDiscountRatePctInput,
       targetCurrency: lockedTargetCurrency,
     });
@@ -1993,11 +2003,11 @@ Capital Available: ${availableLabel}`,
         cashUsedInput: toInputNumber(projectCashUsedTarget) ?? 0,
       },
     });
-  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
-    const inputs = getProjectInputs({ snapshot: projectSnapshotData, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
+    const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
     const rows = [
       ["price_current_TargetCurrency", inputs.price],
       ["shares_current", inputs.sharesCurrent],
@@ -2025,17 +2035,8 @@ Capital Available: ${availableLabel}`,
       seriesRows,
       missing: validateProjectInputs(inputs),
     };
-  }, [projectSnapshotData, riskAdjustedDiscountRatePctInput, lockedTargetCurrency]);
+  }, [projectSnapshotData, parsedSelectedProject, riskAdjustedDiscountRatePctInput, lockedTargetCurrency]);
 
-
-  const parsedSelectedProject = useMemo(() => {
-    if (!selectedProjectRawJson) return null;
-    try {
-      return parseProjectJsonV1WithContext(selectedProjectRawJson);
-    } catch {
-      return null;
-    }
-  }, [selectedProjectRawJson]);
 
   const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
 
@@ -3164,10 +3165,10 @@ Capital Available: ${availableLabel}`,
                   </div>
 
                   {([
-                    ["list2", "List 2 — CF + Valuation + Production", projectViewMetrics.list2],
-                    ["list3", "List 3 — Efficiency", projectViewMetrics.list3],
-                    ["list4", "List 4 — 10Y / In Situ", projectViewMetrics.list4],
-                    ["list6", "List 6 — M&A", projectViewMetrics.list6],
+                    ["list2", "FINANSIELLA NYCKELTAL OCH VÄRDERING", projectViewMetrics.list2],
+                    ["list3", "EFFEKTIVITET OCH LÖNSAMHET", projectViewMetrics.list3],
+                    ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", projectViewMetrics.list4],
+                    ["list6", "M&A VALUATION", projectViewMetrics.list6],
                   ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
                     <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary><h2 className="subrub small">{title}</h2></summary>
@@ -3202,7 +3203,7 @@ Capital Available: ${availableLabel}`,
                   ))}
 
                   <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list5} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list5: open })); }}>
-                    <summary><h2 className="subrub small">List 5 — Financing (interactive)</h2></summary>
+                    <summary><h2 className="subrub small">FINANSIERING OCH SKULDSÄTTNING</h2></summary>
                     <div className="rr-input-row" style={{ marginTop: 8 }}>
                       <label>Equity %<input value={projectEquityPct} onChange={(event) => setProjectEquityPct(event.target.value)} /></label>
                       <label>Debt %<input value={projectDebtPct} onChange={(event) => setProjectDebtPct(event.target.value)} /></label>
