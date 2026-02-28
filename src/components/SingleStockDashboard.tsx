@@ -3094,7 +3094,7 @@ Capital Available: ${availableLabel}`,
                     ["list4", "List 4 — 10Y / In Situ", projectViewMetrics.list4],
                     ["list6", "List 6 — M&A", projectViewMetrics.list6],
                   ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
-                    <details key={sectionKey} open={projectSectionsOpen[sectionKey]} onToggle={(event) => setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: (event.currentTarget as HTMLDetailsElement).open }))}>
+                    <details key={sectionKey} open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary>{title}</summary>
                       <div className="project-kpi-grid compact" style={{ marginTop: 8 }}>
                         {Object.entries(metrics).map(([key, value]) => (
@@ -3122,7 +3122,7 @@ Capital Available: ${availableLabel}`,
                     </details>
                   ))}
 
-                  <details open={projectSectionsOpen.list5} onToggle={(event) => setProjectSectionsOpen((prev) => ({ ...prev, list5: (event.currentTarget as HTMLDetailsElement).open }))}>
+                  <details open={projectSectionsOpen.list5} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list5: open })); }}>
                     <summary>List 5 — Financing (interactive)</summary>
                     <div className="rr-input-row" style={{ marginTop: 8 }}>
                       <label>Equity %<input value={projectEquityPct} onChange={(event) => setProjectEquityPct(event.target.value)} /></label>
