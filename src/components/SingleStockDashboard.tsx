@@ -857,7 +857,10 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
 
-  const clampPct = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
+  const clampPct = (value: number) => {
+    const roundedToStep = Math.round(value / 5) * 5;
+    return Math.min(100, Math.max(0, roundedToStep));
+  };
 
   const setProjectEquityDebtFromEquity = (value: number) => {
     const equityPct = clampPct(value);
@@ -3304,7 +3307,7 @@ Capital Available: ${availableLabel}`,
                           type="range"
                           min="0"
                           max="100"
-                          step="1"
+                          step="5"
                           value={projectEquityPct}
                           onChange={(event) => setProjectEquityDebtFromEquity(Number(event.target.value))}
                           style={{ width: "100%" }}
@@ -3317,7 +3320,7 @@ Capital Available: ${availableLabel}`,
                           type="range"
                           min="0"
                           max="100"
-                          step="1"
+                          step="5"
                           value={projectDebtPct}
                           onChange={(event) => setProjectEquityDebtFromDebt(Number(event.target.value))}
                           style={{ width: "100%" }}
