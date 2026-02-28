@@ -894,3 +894,20 @@ td.sticky-col {
 .project-collapsible-card > .compact-metrics-grid {
   margin-top: 8px;
 }
+
+.project-value-snapshot-wrap {
+  height: 170px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (min-width: 768px) {
+  .project-value-snapshot-wrap {
+    height: 210px;
+  }
+}
