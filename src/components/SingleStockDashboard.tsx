@@ -3431,9 +3431,17 @@ Capital Available: ${availableLabel}`,
 
               <details style={{ marginTop: 12 }}>
                 <summary>Diagnostics</summary>
-                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && <p>No diagnostics.</p>}
+                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && !projectViewMetrics && <p>No diagnostics.</p>}
                 {projectSnapshotErrors.length > 0 && <ul>{projectSnapshotErrors.map((item) => <li key={`e-${item}`}>{item}</li>)}</ul>}
                 {projectSnapshotWarnings.length > 0 && <ul>{projectSnapshotWarnings.map((item) => <li key={`w-${item}`}>{item}</li>)}</ul>}
+                {projectViewMetrics && (
+                  <>
+                    <h4>Payback real debug</h4>
+                    <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectViewMetrics.diagnostics.payback_real_debug, null, 2)}</pre>
+                    <h4>IRR debug</h4>
+                    <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectViewMetrics.diagnostics.irr_debug, null, 2)}</pre>
+                  </>
+                )}
               </details>
 
               <details style={{ marginTop: 12 }}>
