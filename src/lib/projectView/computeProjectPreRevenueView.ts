@@ -240,10 +240,12 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     return sum;
   })() : null;
 
+  const dcfTarget = dcfProdStartExCapexUSD !== null && fx !== null ? dcfProdStartExCapexUSD * fx : null;
+
   const dcfProdStartPresentUSD = dcfProdStartExCapexUSD !== null && tp !== null && r !== null
     ? dcfProdStartExCapexUSD / ((1 + r) ** tp)
     : null;
-  const dcfTarget = dcfProdStartPresentUSD !== null && fx !== null ? dcfProdStartPresentUSD * fx : null;
+  const dcfTargetDiscounted = dcfProdStartPresentUSD !== null && fx !== null ? dcfProdStartPresentUSD * fx : null;
 
   const prodYears = tp !== null && masterN !== null && tp <= masterN ? countPayablePositive(input.payableAuEqOz, tp, masterN) : null;
   const aueqLom = tp !== null && masterN !== null && tp <= masterN ? sumPayablePositive(input.payableAuEqOz, tp, masterN) : null;
@@ -326,22 +328,21 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       NAV_Target: mv(navTarget, npvTarget === null ? 'Missing NPV_Target' : 'Missing cash_t0 or debt_t0'),
       NAV_perShare: ratio(navTarget, sharesPf),
       CF_LOM_Target: mv(cfLomTarget, fx === null ? 'Missing fx_USD_to_TargetCurrency' : 'Missing series fcfUSD'),
+      CF_LOM_Target_perShare: ratio(cfLomTarget, sharesPf),
       DCF_Target: mv(dcfTarget, tp === null ? 'Missing tp' : (r === null ? 'Missing discountRate r' : (fx === null ? 'Missing fx_USD_to_TargetCurrency' : 'Missing series fcfUSD'))),
       DCF_perShare: ratio(dcfTarget, sharesPf),
+      DCF_Target_discounted: mv(dcfTargetDiscounted, tp === null ? 'Missing tp' : (r === null ? 'Missing discountRate r' : (fx === null ? 'Missing fx_USD_to_TargetCurrency' : 'Missing series fcfUSD'))),
+      DCF_Target_discounted_perShare: ratio(dcfTargetDiscounted, sharesPf),
       EV_over_NPV: ratio(evTarget, npvTarget),
       EV_over_NAV: ratio(evTarget, navTarget),
       P_over_NAV: ratio(marketCapCurrent, navTarget),
       NPV_over_ETLV: ratio(npvTodayUSD, cfLomUSD),
-      DCF_over_ETLV: ratio(dcfProdStartPresentUSD, cfLomUSD),
-      LOM: mv(prodYears, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing tp or masterN'),
-      TP: mv(tp, 'Missing tp'),
-      AuEq_LOM: mv(aueqLom, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing series payableAuEqOz'),
-      AuEq_YR: mv(aueqYr, aueqLom === null ? 'Missing AuEq_LOM' : 'Denominator is 0'),
+      DCF_over_ETLV: ratio(dcfProdStartExCapexUSD, cfLomUSD),
+    },
+    list3: {
       AISC_LOM: mv(aiscLom, sustainingVsPayable === null ? 'Missing series sustainingCostUSD for payable periods' : null),
       BreakEven_AuEq: mv(aiscLom, sustainingVsPayable === null ? 'Missing series sustainingCostUSD for payable periods' : null),
       CAPEX_per_Annual_AuEq: mv(capexPerAnnual, initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'Denominator is 0'),
-    },
-    list3: {
       Payback_approx: mv(paybackApprox, initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'No payback reached in FCF path'),
       Payback_real: mv(
         paybackReal,
@@ -368,6 +369,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       Kapitalavkastning_per_Year: mv(null, 'Source metric unavailable'),
     },
     list4: {
+      LOM: mv(prodYears, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing tp or masterN'),
+      AuEq_LOM: mv(aueqLom, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing series payableAuEqOz'),
+      AuEq_YR: mv(aueqYr, aueqLom === null ? 'Missing AuEq_LOM' : 'Denominator is 0'),
       InSitu_10Y_USD: mv(inSitu10YUSD, tp === null ? 'Missing tp' : (masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing series grossRevenue_USD in 10Y window')),
       InSitu_10Y_perShare_USD: ratio(inSitu10YUSD, sharesPf),
       EV_over_10Y_InSitu: ratio(evUsd, inSitu10YUSD),
