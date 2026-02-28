@@ -10,7 +10,7 @@ import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnap
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
 import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
-import { computeLista2CfDcfMetrics } from './lista2CfDcf.ts';
+import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
@@ -819,6 +819,96 @@ function isAllNullOrNonFinite(series: Array<number | null> | null | undefined): 
   return series.every((value) => value === null || !Number.isFinite(value));
 }
 
+
+
+type DelayScenarioDiagnostics = {
+  k: number;
+  tp_base: number | null;
+  tp_eff: number | null;
+  masterN: number;
+  truncationCount: number;
+  shiftRule: string;
+  samples: {
+    capexUSD: { baseFirst6: Array<number | null>; effectiveFirst6: Array<number | null> };
+    operatingCostsUSD: { baseFirst6: Array<number | null>; effectiveFirst6: Array<number | null> };
+    metalPayableSample: { metal: string; baseFirst6: Array<number | null>; effectiveFirst6: Array<number | null> };
+  };
+};
+
+function shiftSeries(series: Array<number | null>, masterN: number, k: number): { shifted: Array<number | null>; truncated: number } {
+  const out = new Array<number | null>(masterN + 1).fill(null);
+  let truncated = 0;
+  for (let t = 0; t <= masterN; t += 1) {
+    const src = t - k;
+    if (src < 0) continue;
+    if (src <= masterN && src < series.length) {
+      out[t] = toFiniteOrNull(series[src]);
+    }
+  }
+  for (let src = masterN - k + 1; src < series.length; src += 1) {
+    if (src >= 0) truncated += 1;
+  }
+  return { shifted: out, truncated };
+}
+
+function shiftPerPeriodArraysDeep(value: unknown, masterN: number, k: number): { value: unknown; truncationCount: number } {
+  if (Array.isArray(value)) {
+    const isPerPeriod = value.length === masterN + 1 && value.every((item) => item === null || typeof item === 'number');
+    if (isPerPeriod) {
+      const shifted = shiftSeries(value as Array<number | null>, masterN, k);
+      return { value: shifted.shifted, truncationCount: shifted.truncated };
+    }
+    let truncationCount = 0;
+    const mapped = value.map((entry) => {
+      const shifted = shiftPerPeriodArraysDeep(entry, masterN, k);
+      truncationCount += shifted.truncationCount;
+      return shifted.value;
+    });
+    return { value: mapped, truncationCount };
+  }
+
+  if (value && typeof value === 'object') {
+    let truncationCount = 0;
+    const entries = Object.entries(value as Record<string, unknown>).map(([key, entry]) => {
+      const shifted = shiftPerPeriodArraysDeep(entry, masterN, k);
+      truncationCount += shifted.truncationCount;
+      return [key, shifted.value] as const;
+    });
+    return { value: Object.fromEntries(entries), truncationCount };
+  }
+
+  return { value, truncationCount: 0 };
+}
+
+function applyScalarMultiplier(series: Array<number | null>, mult: number | undefined): Array<number | null> {
+  if (!(typeof mult === 'number' && Number.isFinite(mult))) {
+    return series;
+  }
+  return series.map((v) => (v === null ? null : v * mult));
+}
+
+function sumFinite(values: Array<number | null>): number | null {
+  let sum = 0;
+  let has = false;
+  for (const v of values) {
+    if (v === null || !Number.isFinite(v)) continue;
+    has = true;
+    sum += v;
+  }
+  return has ? sum : null;
+}
+
+function discountedSum(values: Array<number | null>, r: number): number | null {
+  let sum = 0;
+  let has = false;
+  for (let t = 0; t < values.length; t += 1) {
+    const v = values[t];
+    if (v === null || !Number.isFinite(v)) continue;
+    has = true;
+    sum += v / ((1 + r) ** t);
+  }
+  return has ? sum : null;
+}
 type SnapshotDiagnostics = {
   warnings: string[];
   errors: string[];
@@ -828,6 +918,7 @@ type SnapshotDiagnostics = {
     projectCount: number;
     symbol?: string;
     fxSource?: 'auto' | 'manual';
+    scenarioDelay?: DelayScenarioDiagnostics;
   };
 };
 
@@ -1333,13 +1424,12 @@ export async function runCorporateSnapshotPipeline(args: {
     const corporateProductionStartPeriod =
       productionStartIndices.length > 0 ? Math.min(...productionStartIndices) : null;
 
+    const delayPeriods = Number.isInteger(input.scenario.delayPeriods) && (input.scenario.delayPeriods as number) >= 0
+      ? input.scenario.delayPeriods as number
+      : 0;
+    const tpEff = corporateProductionStartPeriod === null ? null : corporateProductionStartPeriod + delayPeriods;
+
     const totalFdExtraShares = projectsForBuildFunding.reduce((sum, project) => sum + project.fdExtraShares, 0);
-    const shares_post_financing_fd =
-      typeof financing.shares_post_financing === 'number'
-      && Number.isFinite(financing.shares_post_financing)
-      && financing.shares_post_financing > 0
-        ? financing.shares_post_financing + totalFdExtraShares
-        : null;
 
     if (projectsForBuildFunding.length > 0 && corporateProductionStartPeriod === null) {
       diagnostics.warnings.push(
@@ -1347,11 +1437,89 @@ export async function runCorporateSnapshotPipeline(args: {
       );
     }
 
-    const snapshotSeries = buildSnapshotSeries({
+    const snapshotSeriesBase = buildSnapshotSeries({
       masterN: aggregation.corporateMasterN,
       corporateDates: aggregation.corporatePeriodEndDatesUtc,
       projectSeriesContexts,
     });
+
+    const shiftedDeep = shiftPerPeriodArraysDeep(snapshotSeriesBase, aggregation.corporateMasterN, delayPeriods);
+    const snapshotSeries = shiftedDeep.value as CorporateSnapshotSeries;
+    snapshotSeries.capexUSD = applyScalarMultiplier(snapshotSeries.capexUSD, input.scenario.capexMult);
+    snapshotSeries.operatingCostsUSD = applyScalarMultiplier(snapshotSeries.operatingCostsUSD, input.scenario.opexMult);
+
+    const aggregationEffective = {
+      ...aggregation,
+      capexUSD_total: snapshotSeries.capexUSD,
+      fcffUSD_total: snapshotSeries.fcffUSD,
+      grossRevenueUSD_total: snapshotSeries.totalRevenue_USD,
+      auPriceUSDPerOz: snapshotSeries.priceUsedByMetal_USD.Au ?? aggregation.auPriceUSDPerOz,
+      sustainingCostUSD_total: snapshotSeries.sustainingCostUSD,
+      payableAuEqOz_total: snapshotSeries.payableQtyByMetal.Au ?? aggregation.payableAuEqOz_total,
+      CF_LOM_USD: sumFinite(snapshotSeries.fcffUSD),
+      NPV_today_USD: discountedSum(snapshotSeries.fcffUSD, input.discountRate),
+      aiscAuEqUSDPerOz_LOM: (() => {
+        const cost = sumFinite(snapshotSeries.sustainingCostUSD);
+        const pay = sumFinite(snapshotSeries.payableQtyByMetal.Au ?? []);
+        if (cost === null || pay === null || pay === 0) return null;
+        return cost / pay;
+      })(),
+    };
+
+    const financingEffective = fxRate === null
+      ? financing
+      : computeCorporateFinancing({
+          NPV_today_USD: aggregationEffective.NPV_today_USD,
+          targetCurrency: input.targetCurrency,
+          fx_USD_to_TargetCurrency: fxRate,
+          cash_t0_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? null,
+          debt_t0_TargetCurrency: input.balanceSheet?.debt_t0_TargetCurrency ?? null,
+          shares_current: marketInput.shares_current,
+          price_current_TargetCurrency: marketInput.price_current_TargetCurrency,
+          financingPlan: input.financingPlan,
+          buildFundingNeed_USD: buildFundingNeedUSD,
+        });
+
+    const shares_post_financing_fd_effective =
+      typeof financingEffective.shares_post_financing === 'number'
+      && Number.isFinite(financingEffective.shares_post_financing)
+      && financingEffective.shares_post_financing > 0
+        ? financingEffective.shares_post_financing + totalFdExtraShares
+        : null;
+
+    const delayDiagnostics: DelayScenarioDiagnostics = {
+      k: delayPeriods,
+      tp_base: corporateProductionStartPeriod,
+      tp_eff: tpEff,
+      masterN: aggregation.corporateMasterN,
+      truncationCount: shiftedDeep.truncationCount,
+      shiftRule: 'S_eff[t] = null for t < k; S_eff[t] = S_base[t-k] for k <= t <= masterN; overflow truncated',
+      samples: {
+        capexUSD: {
+          baseFirst6: snapshotSeriesBase.capexUSD.slice(0, 6),
+          effectiveFirst6: snapshotSeries.capexUSD.slice(0, 6),
+        },
+        operatingCostsUSD: {
+          baseFirst6: snapshotSeriesBase.operatingCostsUSD.slice(0, 6),
+          effectiveFirst6: snapshotSeries.operatingCostsUSD.slice(0, 6),
+        },
+        metalPayableSample: {
+          metal: 'Au',
+          baseFirst6: (snapshotSeriesBase.payableQtyByMetal.Au ?? []).slice(0, 6),
+          effectiveFirst6: (snapshotSeries.payableQtyByMetal.Au ?? []).slice(0, 6),
+        },
+      },
+    };
+    diagnostics.meta.scenarioDelay = delayDiagnostics;
+    diagnostics.warnings.push(`Scenario delay diagnostics: tp_base=${String(delayDiagnostics.tp_base)} tp_eff=${String(delayDiagnostics.tp_eff)} k=${delayDiagnostics.k}`);
+    diagnostics.warnings.push(`Scenario shift rule: ${delayDiagnostics.shiftRule}; truncation_count=${delayDiagnostics.truncationCount}`);
+    diagnostics.warnings.push(`Scenario sample capexUSD first6 base=${JSON.stringify(delayDiagnostics.samples.capexUSD.baseFirst6)} effective=${JSON.stringify(delayDiagnostics.samples.capexUSD.effectiveFirst6)}`);
+    diagnostics.warnings.push(`Scenario sample operatingCostsUSD first6 base=${JSON.stringify(delayDiagnostics.samples.operatingCostsUSD.baseFirst6)} effective=${JSON.stringify(delayDiagnostics.samples.operatingCostsUSD.effectiveFirst6)}`);
+    diagnostics.warnings.push(`Scenario sample payableQtyByMetal.${delayDiagnostics.samples.metalPayableSample.metal} first6 base=${JSON.stringify(delayDiagnostics.samples.metalPayableSample.baseFirst6)} effective=${JSON.stringify(delayDiagnostics.samples.metalPayableSample.effectiveFirst6)}`);
+
+    if (tpEff !== null && tpEff > aggregation.corporateMasterN) {
+      diagnostics.errors.push(`Scenario delay failure_reason=tp_eff (${tpEff}) > masterN (${aggregation.corporateMasterN}); LOM=0 and dependent metrics set to null`);
+    }
 
     const fcffIssue = firstFcffIssue({
       revenue: snapshotSeries.totalRevenue_USD,
@@ -1366,18 +1534,19 @@ export async function runCorporateSnapshotPipeline(args: {
       diagnostics.warnings.push(`Lista2 CF+DCF skipped candidate: first invalid FCFF at t=${fcffIssue.t}; component=${fcffIssue.component}`);
     }
 
-    const lista2 = computeLista2CfDcfMetrics({
-      fcfUSD_total: aggregation.fcffUSD_total,
-      masterN: aggregation.corporateMasterN,
-      productionStartPeriod: corporateProductionStartPeriod,
-      discountRate: input.discountRate,
-      shares_post_financing: shares_post_financing_fd,
-      fx_USD_to_TargetCurrency: fxRate,
-      npvToday_USD: aggregation.NPV_today_USD,
-    });
+    const lista2 = tpEff !== null && tpEff > aggregation.corporateMasterN
+      ? { metrics: makeNullLista2CfDcfMetrics(), warnings: ['failure_reason: tp_eff > masterN'], errors: [] }
+      : computeLista2CfDcfMetrics({
+        fcfUSD_total: aggregationEffective.fcffUSD_total,
+        masterN: aggregationEffective.corporateMasterN,
+        productionStartPeriod: tpEff,
+        discountRate: input.discountRate,
+        shares_post_financing: shares_post_financing_fd_effective,
+        fx_USD_to_TargetCurrency: fxRate,
+        npvToday_USD: aggregationEffective.NPV_today_USD,
+      });
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
-
     const rawBody = args.body as Record<string, unknown>;
     const rawBalance = rawBody.balanceSheet;
     const totalStockholdersEquity_USD =
@@ -1388,30 +1557,30 @@ export async function runCorporateSnapshotPipeline(args: {
           : null;
 
     const lista4 = computeLista4TenYearMetrics({
-      masterN: aggregation.corporateMasterN,
-      revenueUSD_total: aggregation.grossRevenueUSD_total,
-      fcffUSD_total: aggregation.fcffUSD_total,
-      auPriceUSDPerOz: aggregation.auPriceUSDPerOz,
+      masterN: aggregationEffective.corporateMasterN,
+      revenueUSD_total: aggregationEffective.grossRevenueUSD_total,
+      fcffUSD_total: aggregationEffective.fcffUSD_total,
+      auPriceUSDPerOz: aggregationEffective.auPriceUSDPerOz,
       fx_USD_to_TargetCurrency: fxRate,
       shares_current: marketInput.shares_current,
-      shares_post_financing: shares_post_financing_fd,
+      shares_post_financing: shares_post_financing_fd_effective,
       ev_TargetCurrency: null,
       totalStockholdersEquity_USD,
     });
     const lista3a = computeLista3aProjectEfficiencyMetrics({
-      masterN: aggregation.corporateMasterN,
-      productionStartPeriod: corporateProductionStartPeriod,
+      masterN: aggregationEffective.corporateMasterN,
+      productionStartPeriod: tpEff,
       discountRate: input.discountRate,
-      fcffUSD_total: aggregation.fcffUSD_total,
+      fcffUSD_total: aggregationEffective.fcffUSD_total,
       ebitUSD_total: snapshotSeries.ebitUSD,
-      capexUSD_total: aggregation.capexUSD_total,
+      capexUSD_total: aggregationEffective.capexUSD_total,
     });
     diagnostics.warnings.push(...lista3a.warnings);
 
     const snapshot = buildCorporateSnapshot({
       targetCurrency: input.targetCurrency,
-      aggregation,
-      financing,
+      aggregation: aggregationEffective,
+      financing: financingEffective,
       market: marketInput,
       lista2CfDcf: lista2.metrics,
       lista3aProjectEfficiency: lista3a.metrics,
