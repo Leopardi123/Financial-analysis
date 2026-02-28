@@ -57,8 +57,31 @@ const multiSignChange = computeProjectViewMetrics({
   productionStartPeriod: 1,
   financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
 });
-assert.equal(multiSignChange.list3.IRR.value, null);
-assert.equal(multiSignChange.list3.IRR.reason, 'IRR requires valid sign change');
+assert.ok((multiSignChange.list3.IRR.value as number) > 0, `Expected positive IRR, got ${multiSignChange.list3.IRR.value}`);
+assert.equal(multiSignChange.list3.IRR.reason, null);
+
+
+const noSignChange = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 3,
+  sharesCurrent: 10,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [0, 0, 0, 0],
+  capexUSD: [100, 0, 0, 0],
+  grossRevenueUSD: [1, 1, 1, 1],
+  ebitUSD: [1, 1, 1, 1],
+  payableAuEqOz: [1, 1, 1, 1],
+  sustainingCostUSD: [1, 1, 1, 1],
+  productionStartPeriod: 1,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assert.equal(noSignChange.list3.IRR.value, null);
+assert.equal(noSignChange.list3.IRR.reason, 'IRR requires valid sign change');
 
 const noDiscount = computeProjectViewMetrics({
   targetCurrency: 'USD',

@@ -106,18 +106,6 @@ function sumSustainingCostsWherePayablePositive(costs: Series, payable: Series, 
   return { sumCost, sumPay };
 }
 
-function countSignChanges(series: number[]): number {
-  let priorSign = 0;
-  let changes = 0;
-  for (const value of series) {
-    const sign = value > 0 ? 1 : (value < 0 ? -1 : 0);
-    if (sign === 0) continue;
-    if (priorSign !== 0 && sign !== priorSign) changes += 1;
-    priorSign = sign;
-  }
-  return changes;
-}
-
 function buildEnterpriseIrrSeries(args: {
   fcfUSD: Series;
   masterN: number;
@@ -125,14 +113,16 @@ function buildEnterpriseIrrSeries(args: {
   initialCapexUSD: number;
 }): number[] | null {
   if (args.masterN < 0 || args.masterN >= args.fcfUSD.length) return null;
-  const series = new Array(args.masterN + 1).fill(0);
-  series[0] = -Math.abs(args.initialCapexUSD);
+  const cashflows = args.fcfUSD.slice(0, args.masterN + 1);
+  if (cashflows.length !== args.masterN + 1) return null;
+  cashflows[0] = -Math.abs(args.initialCapexUSD);
   for (let t = args.tp; t <= args.masterN; t += 1) {
     const fcff = args.fcfUSD[t];
     if (!finite(fcff)) return null;
-    series[t] = fcff;
+    cashflows[t] = fcff;
   }
-  return series;
+  if (cashflows.some((v) => !finite(v))) return null;
+  return cashflows as number[];
 }
 
 function computeIrr(cashFlows: number[]): NullableNumber {
@@ -140,7 +130,6 @@ function computeIrr(cashFlows: number[]): NullableNumber {
   const hasPositive = cashFlows.some((v) => v > 0);
   const hasNegative = cashFlows.some((v) => v < 0);
   if (!hasPositive || !hasNegative) return null;
-  if (countSignChanges(cashFlows) !== 1) return null;
   const npv = (rate: number): number => {
     let sum = 0;
     for (let t = 0; t < cashFlows.length; t += 1) {
@@ -346,7 +335,14 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       initialCapexUSD,
     })
     : null;
-  const irr = irrSeries !== null ? computeIrr(irrSeries) : null;
+  const hasIrrSignChange = irrSeries !== null
+    && irrSeries.some((v) => v < 0)
+    && irrSeries.some((v) => v > 0);
+  const irr = hasIrrSignChange && irrSeries !== null ? computeIrr(irrSeries) : null;
+
+  if (paybackReal !== null && !hasIrrSignChange) {
+    console.error('IRR series invalid despite payback');
+  }
 
   if (paybackReal !== null && irr !== null && irr <= 0) {
     console.warn('IRR inconsistency with payback');
@@ -456,7 +452,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
               ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
               : (irrSeries === null
                 ? 'Missing series fcfUSD'
-                : 'IRR requires valid sign change'))),
+                : (!hasIrrSignChange
+                  ? 'IRR requires valid sign change'
+                  : 'IRR could not be solved')))),
       ),
       ROI_10Y: mv(
         roi10y,
