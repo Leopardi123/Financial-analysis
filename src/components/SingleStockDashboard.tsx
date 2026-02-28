@@ -857,6 +857,22 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
 
+  const clampPct = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
+
+  const setProjectEquityDebtFromEquity = (value: number) => {
+    const equityPct = clampPct(value);
+    const debtPct = 100 - equityPct;
+    setProjectEquityPct(String(equityPct));
+    setProjectDebtPct(String(debtPct));
+  };
+
+  const setProjectEquityDebtFromDebt = (value: number) => {
+    const debtPct = clampPct(value);
+    const equityPct = 100 - debtPct;
+    setProjectDebtPct(String(debtPct));
+    setProjectEquityPct(String(equityPct));
+  };
+
   const [riskAdjustedDiscountRatePctInput, setRiskAdjustedDiscountRatePctInput] = useState("10");
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
@@ -3281,8 +3297,32 @@ Capital Available: ${availableLabel}`,
                   <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list5} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list5: open })); }}>
                     <summary><h2 className="subrub small">FINANSIERING OCH SKULDSÄTTNING</h2></summary>
                     <div className="rr-input-row" style={{ marginTop: 8 }}>
-                      <label>Equity %<input value={projectEquityPct} onChange={(event) => setProjectEquityPct(event.target.value)} /></label>
-                      <label>Debt %<input value={projectDebtPct} onChange={(event) => setProjectDebtPct(event.target.value)} /></label>
+                      <label htmlFor="project-equity-pct-slider">
+                        Equity {projectEquityPct}%
+                        <input
+                          id="project-equity-pct-slider"
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={projectEquityPct}
+                          onChange={(event) => setProjectEquityDebtFromEquity(Number(event.target.value))}
+                          style={{ width: "100%" }}
+                        />
+                      </label>
+                      <label htmlFor="project-debt-pct-slider">
+                        Debt {projectDebtPct}%
+                        <input
+                          id="project-debt-pct-slider"
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={projectDebtPct}
+                          onChange={(event) => setProjectEquityDebtFromDebt(Number(event.target.value))}
+                          style={{ width: "100%" }}
+                        />
+                      </label>
                       <label>Cash Used ({lockedTargetCurrency})<input value={projectCashUsedTarget} onChange={(event) => setProjectCashUsedTarget(event.target.value)} /></label>
                     </div>
                     <div className="compact-metrics-grid">
