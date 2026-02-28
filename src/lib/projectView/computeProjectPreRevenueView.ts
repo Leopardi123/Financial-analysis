@@ -268,7 +268,6 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const tp = Number.isInteger(input.productionStartPeriod) ? input.productionStartPeriod as number : null;
   const masterN = Number.isInteger(input.masterN) ? input.masterN as number : null;
 
-  const debugCashflow = input.meta?.projectId === 'p2' || process.env.NODE_ENV !== 'production';
 
   const debtFrac = Math.max(0, Math.min(1, input.financing.debtPct / 100));
   const equityFracRaw = Math.max(0, Math.min(1, input.financing.equityPct / 100));
