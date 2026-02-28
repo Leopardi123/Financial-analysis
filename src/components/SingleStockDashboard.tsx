@@ -91,6 +91,27 @@ function formatMetricValue(value: MetricValue, kind: "money" | "percent" | "mult
   return `${formatCompactNumber(value.value, 1)}${unit ? ` ${unit}` : ""}`;
 }
 
+function renderProjectMetricValue(args: {
+  metric: MetricValue;
+  formatted: string;
+  infoId: string;
+  onToggle: (id: string) => void;
+}): JSX.Element {
+  if (args.metric.value === null) {
+    return (
+      <button
+        type="button"
+        onClick={() => args.onToggle(args.infoId)}
+        style={{ border: "none", background: "transparent", padding: 0, margin: 0, color: "inherit", font: "inherit", textDecoration: "underline", cursor: "pointer" }}
+        aria-label={`Show why ${args.infoId} is n/a`}
+      >
+        {args.formatted}
+      </button>
+    );
+  }
+  return <>{args.formatted}</>;
+}
+
 const PROJECT_SECTION_DEFAULT_OPEN: Record<string, boolean> = {
   list2: true,
   list3: false,
@@ -3123,12 +3144,14 @@ Capital Available: ${availableLabel}`,
                           { label: "EV (current)", value: projectViewMetrics.marketBox.evCurrent, kind: "money" as const },
                           { label: "Shares Current", value: projectViewMetrics.marketBox.sharesCurrent, kind: "integer" as const },
                           { label: "Shares PF", value: projectViewMetrics.marketBox.sharesPf, kind: "integer" as const },
-                        ].map((metric) => (
+                        ].map((metric) => {
+                          const infoId = `project-market-${metric.label}`;
+                          return (
                           <div key={metric.label} className="compact-metric-row">
                             <span className="compact-metric-label-wrap">
                               <span className="compact-metric-label">{metric.label}</span>
                               <InfoPopover
-                                id={`project-market-${metric.label}`}
+                                id={infoId}
                                 openId={openInfoId}
                                 onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
                                 onClose={() => setOpenInfoId(null)}
@@ -3142,9 +3165,10 @@ Capital Available: ${availableLabel}`,
                               />
                             </span>
                             <span className="compact-metric-dots" />
-                            <span className="compact-metric-value">{formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}</span>
+                            <span className="compact-metric-value">{renderProjectMetricValue({ metric: metric.value, formatted: formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined), infoId, onToggle: (id) => setOpenInfoId((prev) => (prev === id ? null : id)) })}</span>
                           </div>
-                        ))}
+                        );
+                        })}
                       </div>
                     </section>
                   </div>
@@ -3158,12 +3182,14 @@ Capital Available: ${availableLabel}`,
                     <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       <div className="compact-metrics-grid">
-                        {Object.entries(metrics).map(([key, value]) => (
+                        {Object.entries(metrics).map(([key, value]) => {
+                          const infoId = `project-${sectionKey}-${key}`;
+                          return (
                           <div key={key} className="compact-metric-row">
                             <span className="compact-metric-label-wrap">
                               <span className="compact-metric-label">{key}</span>
                               <InfoPopover
-                                id={`project-${sectionKey}-${key}`}
+                                id={infoId}
                                 openId={openInfoId}
                                 onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
                                 onClose={() => setOpenInfoId(null)}
@@ -3177,9 +3203,10 @@ Capital Available: ${availableLabel}`,
                               />
                             </span>
                             <span className="compact-metric-dots" />
-                            <span className="compact-metric-value">{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key.includes("pct") ? "percent" : key === "TP" || key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}</span>
+                            <span className="compact-metric-value">{renderProjectMetricValue({ metric: value, formatted: formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key.includes("pct") ? "percent" : key === "TP" || key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined), infoId, onToggle: (id) => setOpenInfoId((prev) => (prev === id ? null : id)) })}</span>
                           </div>
-                        ))}
+                        );
+                        })}
                       </div>
                     </details>
                   ))}
@@ -3192,12 +3219,14 @@ Capital Available: ${availableLabel}`,
                       <label>Cash Used ({lockedTargetCurrency})<input value={projectCashUsedTarget} onChange={(event) => setProjectCashUsedTarget(event.target.value)} /></label>
                     </div>
                     <div className="compact-metrics-grid">
-                      {Object.entries(projectViewMetrics.list5).map(([key, value]) => (
+                      {Object.entries(projectViewMetrics.list5).map(([key, value]) => {
+                        const infoId = `project-list5-${key}`;
+                        return (
                         <div key={key} className="compact-metric-row">
                           <span className="compact-metric-label-wrap">
                             <span className="compact-metric-label">{key}</span>
                             <InfoPopover
-                              id={`project-list5-${key}`}
+                              id={infoId}
                               openId={openInfoId}
                               onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
                               onClose={() => setOpenInfoId(null)}
@@ -3211,9 +3240,10 @@ Capital Available: ${availableLabel}`,
                             />
                           </span>
                           <span className="compact-metric-dots" />
-                          <span className="compact-metric-value">{formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency)}</span>
+                          <span className="compact-metric-value">{renderProjectMetricValue({ metric: value, formatted: formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency), infoId, onToggle: (id) => setOpenInfoId((prev) => (prev === id ? null : id)) })}</span>
                         </div>
-                      ))}
+                      );
+                      })}
                     </div>
                   </details>
                 </section>
