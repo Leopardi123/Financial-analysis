@@ -52,6 +52,22 @@ function computeInitialCapexAbs(args: {
   return Math.abs(buildCapex);
 }
 
+function computePreRevenueInvestmentFromFcff(args: {
+  fcffUSD_total: Array<number | null>;
+  productionStartPeriod: number;
+}): number | null {
+  let preRevenueFcffSum = 0;
+  for (let t = 0; t < args.productionStartPeriod; t += 1) {
+    const fcff = args.fcffUSD_total[t];
+    if (!finite(fcff)) {
+      return null;
+    }
+    preRevenueFcffSum += fcff;
+  }
+
+  return Math.abs(preRevenueFcffSum);
+}
+
 export function computeLista3aProjectEfficiencyMetrics(args: {
   masterN: number;
   productionStartPeriod: number | null;
@@ -112,31 +128,37 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
     warnings.push('payback: no positive production fcff');
   }
 
-  let remaining = initialCapexAbs;
+  const paybackInitialCapexAbs = computePreRevenueInvestmentFromFcff({
+    fcffUSD_total: args.fcffUSD_total,
+    productionStartPeriod: tp,
+  });
+
+  if (paybackInitialCapexAbs === null || !finite(paybackInitialCapexAbs) || paybackInitialCapexAbs === 0) {
+    out.Payback_real_years = null;
+  }
+
+  let cumulative = 0;
   let paybackReal: number | null = null;
-  for (let t = tp; t <= args.masterN; t += 1) {
-    const fcff = args.fcffUSD_total[t];
-    if (!finite(fcff)) {
-      warnings.push('payback: missing fcff series');
-      paybackReal = null;
-      break;
-    }
-
-    if (remaining <= 0) {
-      paybackReal = t - tp;
-      break;
-    }
-
-    const prevRemaining = remaining;
-    remaining -= fcff;
-
-    if (remaining <= 0) {
-      if (fcff <= 0) {
+  if (paybackInitialCapexAbs !== null && finite(paybackInitialCapexAbs) && paybackInitialCapexAbs > 0) {
+    for (let t = tp; t <= args.masterN; t += 1) {
+      const fcff = args.fcffUSD_total[t];
+      if (!finite(fcff)) {
+        warnings.push('payback: missing fcff series');
         paybackReal = null;
         break;
       }
-      paybackReal = (t - tp) + (prevRemaining / fcff);
-      break;
+
+      cumulative += fcff;
+      if (cumulative >= paybackInitialCapexAbs) {
+        const prev = cumulative - fcff;
+        if (fcff === 0) {
+          paybackReal = null;
+          break;
+        }
+        const fraction = (paybackInitialCapexAbs - prev) / fcff;
+        paybackReal = (t - tp - 1) + fraction;
+        break;
+      }
     }
   }
 

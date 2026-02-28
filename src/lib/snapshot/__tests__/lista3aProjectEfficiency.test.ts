@@ -18,12 +18,12 @@ function assertAlmostEqual(actual: number | null, expected: number, message: str
     productionStartPeriod: 2,
     discountRate: 0.1,
     capexUSD_total: [-50, -50, 0, 0, 0, 0],
-    fcffUSD_total: [0, 0, 40, 40, 40, 40],
+    fcffUSD_total: [-50, -50, 40, 40, 40, 40],
     ebitUSD_total: [0, 0, 60, 60, 60, 60],
   });
 
   assertAlmostEqual(simple.metrics.Payback_approx_years, 2.5, 'Payback_approx_years matches expected');
-  assertAlmostEqual(simple.metrics.Payback_real_years, 2.5, 'Payback_real_years matches expected');
+  assertAlmostEqual(simple.metrics.Payback_real_years, 1.5, 'Payback_real_years matches expected from tp onward');
   assertAlmostEqual(simple.metrics.ROI_10Y_pct, 160, 'ROI_10Y_pct computes over available window');
   assertAlmostEqual(simple.metrics.LOM_average_EBIT_ROCE_pct, 60, 'LOM_average_EBIT_ROCE_pct computes average EBIT ROCE');
 
