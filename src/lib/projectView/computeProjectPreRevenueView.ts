@@ -376,6 +376,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     })
     : null;
 
+  // Keep Payback/IRR/ROI on the exact same FCFF enterprise series to avoid mixed-series inconsistencies.
   const paybackSeries = enterpriseCashflows;
   const irrSeries = enterpriseCashflows;
   const roiSeries = enterpriseCashflows;
@@ -563,7 +564,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
             ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
             : (paybackSeries === null
               ? 'Missing series fcfUSD'
-              : 'Real payback (production years): years from first positive production cashflow period until cumulative FCFF has recovered initial build capex.')),
+              : 'Payback is computed from production start (tp) using FCFF. Pre-production deficit is derived from cumulative FCFF before tp (no capex double-counting).')),
       ),
       IRR: mv(
         irr,
