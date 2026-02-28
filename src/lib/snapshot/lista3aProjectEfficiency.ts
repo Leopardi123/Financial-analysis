@@ -30,6 +30,22 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+function computePreProductionDeficit(args: {
+  fcffUSD_total: Array<number | null>;
+  productionStartPeriod: number;
+}): number | null {
+  let preProductionSum = 0;
+  for (let t = 0; t < args.productionStartPeriod; t += 1) {
+    const fcff = args.fcffUSD_total[t];
+    if (!finite(fcff)) {
+      return null;
+    }
+    preProductionSum += fcff;
+  }
+
+  return -preProductionSum;
+}
+
 function computeInitialCapexAbs(args: {
   capexUSD_total: Array<number | null>;
   productionStartPeriod: number;
@@ -82,34 +98,28 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
     capexUSD_total: args.capexUSD_total,
     productionStartPeriod: tp,
   });
+  const preProductionDeficit = computePreProductionDeficit({
+    fcffUSD_total: args.fcffUSD_total,
+    productionStartPeriod: tp,
+  });
 
-  if (initialCapexAbs === null || !finite(initialCapexAbs) || initialCapexAbs === 0) {
-    return { metrics: out, warnings };
-  }
-
-  let paybackStart: number | null = null;
-  for (let t = tp + 1; t <= args.masterN; t += 1) {
-    const value = args.fcffUSD_total[t];
-    if (finite(value) && value > 0) {
-      paybackStart = t;
-      break;
-    }
+  if (preProductionDeficit === null || !finite(preProductionDeficit)) {
+    warnings.push('payback: missing fcff series');
+    return { metrics: out, warnings: [...new Set(warnings)] };
   }
 
   const productionFcffFinite: number[] = [];
-  if (paybackStart !== null) {
-    for (let t = paybackStart; t <= args.masterN; t += 1) {
-      const value = args.fcffUSD_total[t];
-      if (finite(value) && value > 0) {
-        productionFcffFinite.push(value);
-      }
+  for (let t = tp; t <= args.masterN; t += 1) {
+    const value = args.fcffUSD_total[t];
+    if (finite(value) && value > 0) {
+      productionFcffFinite.push(value);
     }
   }
 
   if (productionFcffFinite.length > 0) {
     const annualAvgFcff = productionFcffFinite.reduce((sum, value) => sum + value, 0) / productionFcffFinite.length;
     if (annualAvgFcff > 0) {
-      out.Payback_approx_years = toFiniteOrNull(initialCapexAbs / annualAvgFcff);
+      out.Payback_approx_years = toFiniteOrNull(preProductionDeficit / annualAvgFcff);
     }
   }
 
@@ -117,29 +127,24 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
     warnings.push('payback: no positive production fcff');
   }
 
-  if (paybackStart === null) {
-    out.Payback_real_years = null;
-  }
-
   let paybackReal: number | null = null;
-  if (paybackStart !== null) {
-    let remaining = initialCapexAbs;
-    for (let t = paybackStart; t <= args.masterN; t += 1) {
+  if (preProductionDeficit <= 0) {
+    paybackReal = 0;
+  } else {
+    let cumulative = -preProductionDeficit;
+    for (let t = tp; t <= args.masterN; t += 1) {
       const fcff = args.fcffUSD_total[t];
       if (!finite(fcff)) {
         warnings.push('payback: missing fcff series');
         paybackReal = null;
         break;
       }
-      if (fcff <= 0) {
-        continue;
-      }
 
-      const prevRemaining = remaining;
-      remaining -= fcff;
-      if (remaining <= 0) {
-        const fraction = prevRemaining / fcff;
-        paybackReal = (t - paybackStart) + fraction;
+      const prev = cumulative;
+      cumulative = prev + fcff;
+      if (prev < 0 && cumulative >= 0) {
+        const fraction = (-prev) / (cumulative - prev);
+        paybackReal = (t - tp) + fraction;
         break;
       }
     }
@@ -160,9 +165,9 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
       roiSum += fcff;
     }
 
-    if (roiOk) {
+    if (roiOk && finite(initialCapexAbs) && initialCapexAbs !== 0) {
       out.ROI_10Y_pct = toFiniteOrNull((roiSum / initialCapexAbs) * 100);
-    } else {
+    } else if (!roiOk) {
       warnings.push('roi10y: missing fcff in window');
     }
   }
@@ -178,7 +183,7 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
     ebitSum += ebit;
   }
 
-  if (lomCount > 0) {
+  if (lomCount > 0 && finite(initialCapexAbs) && initialCapexAbs !== 0) {
     const avgEbit = ebitSum / lomCount;
     out.LOM_average_EBIT_ROCE_pct = toFiniteOrNull((avgEbit / initialCapexAbs) * 100);
   }
@@ -195,7 +200,7 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
     discountedEbit += ebit * dfToToday;
   }
 
-  if (discountedCount > 0) {
+  if (discountedCount > 0 && finite(initialCapexAbs) && initialCapexAbs !== 0) {
     out.LOM_discounted_EBIT_ROCE_pct = toFiniteOrNull((discountedEbit / initialCapexAbs) * 100);
   }
 
