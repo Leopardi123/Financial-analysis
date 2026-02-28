@@ -9,8 +9,13 @@ type ValueRangeSnapshotCardProps = {
   currencyCode?: string;
 };
 
-const Y_TOP = 40;
-const Y_BOTTOM = 150;
+const Y_TOP = 20;
+const Y_BOTTOM = 100;
+const VIEWBOX_WIDTH = 320;
+const VIEWBOX_HEIGHT = 120;
+const X_LEFT = 110;
+const X_RIGHT = 250;
+const MIN_LABEL_SPACING = 12;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -20,14 +25,32 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function formatCompactValue(value: number, currencyCode?: string): string {
-  const abs = Math.abs(value);
-  const sign = value < 0 ? "-" : "";
-  const symbol = currencyCode ? `${currencyCode} ` : "";
-  if (abs >= 1_000_000_000) return `${sign}${symbol}${(abs / 1_000_000_000).toFixed(1)}mdr`;
-  if (abs >= 1_000_000) return `${sign}${symbol}${(abs / 1_000_000).toFixed(1)}mn`;
-  if (abs >= 1_000) return `${sign}${symbol}${(abs / 1_000).toFixed(1)}k`;
-  return `${sign}${symbol}${abs.toLocaleString("sv-SE", { maximumFractionDigits: 1 })}`;
+function formatPerShareValue(value: number): string {
+  const digits = Math.abs(value) < 100 ? 1 : 0;
+  return value.toLocaleString("sv-SE", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function resolveLabelPair(highY: number | null, lowY: number | null): { high: number; low: number } | null {
+  if (highY === null || lowY === null) return null;
+  let high = clamp(highY, Y_TOP, Y_BOTTOM);
+  let low = clamp(lowY, Y_TOP, Y_BOTTOM);
+  if (low - high < MIN_LABEL_SPACING) {
+    const middle = (high + low) / 2;
+    high = middle - MIN_LABEL_SPACING / 2;
+    low = middle + MIN_LABEL_SPACING / 2;
+    if (high < Y_TOP) {
+      high = Y_TOP;
+      low = Y_TOP + MIN_LABEL_SPACING;
+    }
+    if (low > Y_BOTTOM) {
+      low = Y_BOTTOM;
+      high = Y_BOTTOM - MIN_LABEL_SPACING;
+    }
+  }
+  return { high, low };
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
@@ -37,7 +60,6 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     npvHigh,
     tpLow,
     tpHigh,
-    currencyCode,
   } = props;
 
   const npvRange = useMemo(() => {
@@ -65,7 +87,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
 
     const toY = (value: number | null): number | null => {
       if (value === null || min === null || max === null) return null;
-      if (max === min) return 100;
+      if (max === min) return 60;
       const t = (value - min) / (max - min);
       const y = Y_BOTTOM + (Y_TOP - Y_BOTTOM) * t;
       return clamp(y, Y_TOP, Y_BOTTOM);
@@ -83,47 +105,79 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
   const hasNpv = npvRange !== null && points.npvLowY !== null && points.npvHighY !== null;
   const hasTp = tpRange !== null && points.tpLowY !== null && points.tpHighY !== null;
   const hasPrice = isFiniteNumber(priceToday) && points.priceY !== null;
+  const npvLabels = resolveLabelPair(points.npvHighY, points.npvLowY);
+  const tpLabels = resolveLabelPair(points.tpHighY, points.tpLowY);
+
+  const priceLabel = useMemo(() => {
+    if (!hasPrice || points.priceY === null || priceToday === null || !Number.isFinite(priceToday)) return null;
+    const yBase = clamp(points.priceY + 4, Y_TOP, Y_BOTTOM);
+    const tooCloseToRange = (npvLabels !== null && Math.abs(yBase - npvLabels.high) < 10)
+      || (npvLabels !== null && Math.abs(yBase - npvLabels.low) < 10)
+      || (tpLabels !== null && Math.abs(yBase - tpLabels.high) < 10)
+      || (tpLabels !== null && Math.abs(yBase - tpLabels.low) < 10);
+    const y = tooCloseToRange ? clamp(points.priceY - 8, Y_TOP, Y_BOTTOM) : yBase;
+    return {
+      x: 90,
+      y,
+      text: formatPerShareValue(priceToday),
+    };
+  }, [hasPrice, npvLabels, points.priceY, priceToday, tpLabels]);
 
   return (
-    <div style={{ marginTop: 8 }}>
+    <div>
       {!hasNpv && !hasTp ? (
         <p className="status empty" style={{ margin: 0 }}>Saknar intervall-data (NPV/TP)</p>
       ) : (
         <div className="project-value-snapshot-wrap">
-          <svg viewBox="0 0 360 190" role="img" aria-label="Snapshot med NPV- och TP-intervall per aktie" style={{ width: "100%", height: "100%" }}>
+          <svg viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} role="img" aria-label="Snapshot med NPV- och TP-intervall per aktie" style={{ width: "100%", height: "100%" }}>
+            <rect x={92} y={14} width={36} height={92} rx={10} fill="rgba(15, 23, 42, 0.05)" />
+            <rect x={232} y={14} width={36} height={92} rx={10} fill="rgba(15, 23, 42, 0.05)" />
+            <line x1={0} y1={110} x2={320} y2={110} stroke="rgba(15, 23, 42, 0.14)" strokeWidth={1} />
+
+            <text x={12} y={26} fontSize={10} fill="#6b7280">Nuvärde</text>
+            <text x={238} y={26} fontSize={10} fill="#6b7280">TP</text>
+
             {hasNpv && hasTp && (
               <polygon
-                points={`110,${points.npvHighY!} 270,${points.tpHighY!} 270,${points.tpLowY!} 110,${points.npvLowY!}`}
-                fill="rgba(59, 130, 246, 0.16)"
-                stroke="rgba(59, 130, 246, 0.35)"
-                strokeWidth={1.25}
+                points={`${X_LEFT},${points.npvHighY!} ${X_RIGHT},${points.tpHighY!} ${X_RIGHT},${points.tpLowY!} ${X_LEFT},${points.npvLowY!}`}
+                fill="rgba(71, 85, 105, 0.14)"
+                stroke="rgba(71, 85, 105, 0.26)"
+                strokeWidth={1}
               />
             )}
 
             {hasNpv ? (
               <>
-                <line x1={110} y1={points.npvHighY!} x2={110} y2={points.npvLowY!} stroke="#2563eb" strokeWidth={10} strokeLinecap="round" />
-                <text x={30} y={points.npvHighY! + 4} fontSize={11} fill="#1f2937">{formatCompactValue(npvRange.high, currencyCode)}</text>
-                <text x={30} y={points.npvLowY! + 4} fontSize={11} fill="#1f2937">{formatCompactValue(npvRange.low, currencyCode)}</text>
+                <line x1={X_LEFT} y1={points.npvHighY!} x2={X_LEFT} y2={points.npvLowY!} stroke="#64748b" strokeWidth={10} strokeLinecap="round" />
+                {npvLabels && (
+                  <>
+                    <text x={82} y={npvLabels.high + 4} fontSize={11} fill="#1f2937" textAnchor="end">{formatPerShareValue(npvRange.high)}</text>
+                    <text x={82} y={npvLabels.low + 4} fontSize={11} fill="#1f2937" textAnchor="end">{formatPerShareValue(npvRange.low)}</text>
+                  </>
+                )}
               </>
             ) : (
-              <text x={95} y={105} fontSize={11} fill="#6b7280">n/a</text>
+              <text x={82} y={64} fontSize={11} fill="#6b7280" textAnchor="end">n/a</text>
             )}
 
             {hasTp ? (
               <>
-                <line x1={270} y1={points.tpHighY!} x2={270} y2={points.tpLowY!} stroke="#0f766e" strokeWidth={10} strokeLinecap="round" />
-                <text x={282} y={points.tpHighY! + 4} fontSize={11} fill="#1f2937">{formatCompactValue(tpRange.high, currencyCode)}</text>
-                <text x={282} y={points.tpLowY! + 4} fontSize={11} fill="#1f2937">{formatCompactValue(tpRange.low, currencyCode)}</text>
+                <line x1={X_RIGHT} y1={points.tpHighY!} x2={X_RIGHT} y2={points.tpLowY!} stroke="#64748b" strokeWidth={10} strokeLinecap="round" />
+                {tpLabels && (
+                  <>
+                    <text x={270} y={tpLabels.high + 4} fontSize={11} fill="#1f2937">{formatPerShareValue(tpRange.high)}</text>
+                    <text x={270} y={tpLabels.low + 4} fontSize={11} fill="#1f2937">{formatPerShareValue(tpRange.low)}</text>
+                  </>
+                )}
               </>
             ) : (
-              <text x={255} y={105} fontSize={11} fill="#6b7280">n/a</text>
+              <text x={270} y={64} fontSize={11} fill="#6b7280">n/a</text>
             )}
 
-            {hasPrice && (
+            {hasPrice && priceLabel && (
               <>
-                <circle cx={110} cy={points.priceY!} r={5} fill="#dc2626" />
-                <text x={30} y={points.priceY! - 6} fontSize={11} fill="#dc2626">{formatCompactValue(priceToday, currencyCode)}</text>
+                <circle cx={X_LEFT} cy={points.priceY!} r={4} fill="#dc2626" stroke="#ffffff" strokeWidth={1.25} />
+                <text x={priceLabel.x} y={priceLabel.y} fontSize={11} fill="#dc2626" textAnchor="end">{priceLabel.text}</text>
               </>
             )}
           </svg>
