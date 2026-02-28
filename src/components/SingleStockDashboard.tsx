@@ -92,6 +92,11 @@ function formatMetricValue(value: MetricValue, kind: "money" | "percent" | "mult
   return `${formatCompactNumber(value.value, 1)}${unit ? ` ${unit}` : ""}`;
 }
 
+function formatIrrMetricValue(value: MetricValue): string {
+  if (value.value === null) return "n/a";
+  return `${(value.value * 100).toFixed(1)} %`;
+}
+
 function formatMetricNullReason(value: MetricValue): string {
   return value.value === null ? (value.reason ?? "Missing required input.") : "";
 }
@@ -3289,7 +3294,9 @@ Capital Available: ${availableLabel}`,
                             </span>
                             <span className="compact-metric-dots" />
                             <span className="compact-metric-value">
-                              {formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}
+                              {key === "IRR"
+                                ? formatIrrMetricValue(value)
+                                : formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}
                               {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
                             </span>
                           </div>
