@@ -241,6 +241,66 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   };
   assertThrows(() => parseProjectJsonV1(duplicateSiteGanda), /economicsBreakdown\.cogs\.siteGandA_USD/, 'throws on siteGandA duplication');
 
+
+  const scalarGrade = getProjectJsonV1Template();
+  if (scalarGrade.operations == null) {
+    throw new Error('template.operations must be present');
+  }
+  (scalarGrade.operations.gradeByMetal as Record<string, unknown>).Au = 6.86;
+  const parsedScalarGrade = parseProjectJsonV1(scalarGrade);
+  assertEqual(parsedScalarGrade.context.operations?.gradeByMetal?.Au?.length, scalarGrade.time.masterN + 1, 'scalar grade auto-broadcasts to masterN+1');
+  assertEqual(parsedScalarGrade.context.operations?.gradeByMetal?.Au?.[0], 6.86, 'scalar grade broadcast keeps value');
+
+  const scalarGradeBad = getProjectJsonV1Template();
+  if (scalarGradeBad.operations == null) {
+    throw new Error('template.operations must be present');
+  }
+  (scalarGradeBad.operations.gradeByMetal as Record<string, unknown>).Au = 'bad';
+  assertThrows(
+    () => parseProjectJsonV1(scalarGradeBad),
+    /operations\.gradeByMetal\.Au must be an array of length 6 \(masterN\+1\).*Example: \[0, 0, 0, 0, 0, 0\].*Fill array with scalar/,
+    'gradeByMetal scalar mismatch error includes expected length and example',
+  );
+
+  const ozUnit = getProjectJsonV1Template();
+  (ozUnit.metals.payableQtyUnitByMetal as Record<string, unknown>).Au = 'oz';
+  const parsedOzUnit = parseProjectJsonV1(ozUnit);
+  assertEqual(parsedOzUnit.engineInputWithoutPrices.payableQtyUnitByMetal.Au, 'toz', 'oz unit auto-normalizes to toz');
+
+  const duplicateSiteGandaIdentical = getProjectJsonV1Template();
+  duplicateSiteGandaIdentical.series.siteGandA_USD = [0, 9, 0, 0, 0, 0];
+  duplicateSiteGandaIdentical.economicsBreakdown = {
+    cogs: {
+      siteGandA_USD: [0, 9, 0, 0, 0, 0],
+    },
+  };
+  const parsedDedup = parseProjectJsonV1(duplicateSiteGandaIdentical);
+  assertEqual(parsedDedup.context.economicsBreakdown?.cogs?.siteGandA_USD, undefined, 'identical duplicate siteGandA is deduped from economicsBreakdown');
+
+  const duplicateSiteGandaMismatch = getProjectJsonV1Template();
+  duplicateSiteGandaMismatch.series.siteGandA_USD = [0, 9, 0, 0, 0, 0];
+  duplicateSiteGandaMismatch.economicsBreakdown = {
+    cogs: {
+      siteGandA_USD: [0, 8, 0, 0, 0, 0],
+    },
+  };
+  assertThrows(
+    () => parseProjectJsonV1(duplicateSiteGandaMismatch),
+    /First difference at index 1: economicsBreakdown=8, series=9/,
+    'siteGandA mismatch reports first differing index',
+  );
+
+  const nullFd = getProjectJsonV1Template();
+  nullFd.equity = { fdExtraShares: null, fdNotes: '' };
+  assertThrows(
+    () => parseProjectJsonV1(nullFd),
+    /equity\.fdExtraShares must be a finite number >= 0\. Received null\. Example: 0/,
+    'fdExtraShares null has guidance message',
+  );
+
+  assert(parsedDedup.diagnostics.normalization.some((item) => item.rule === 'dedup_identical_site_ganda_overlap'), 'dedup diagnostics captured');
+  assert(parsedOzUnit.diagnostics.normalization.some((item) => item.rule === 'qty_unit_oz_to_toz'), 'unit normalization diagnostics captured');
+
   const invalidOperations = getProjectJsonV1Template();
   if (invalidOperations.operations == null) {
     throw new Error('template.operations must be present');

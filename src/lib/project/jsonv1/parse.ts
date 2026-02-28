@@ -31,6 +31,45 @@ function fail(path: string, expected: string, actual: unknown): never {
   throw new Error(`${path} expected ${expected}, received ${JSON.stringify(actual)}`);
 }
 
+type NormalizationDiagnostic = {
+  rule: string;
+  path: string;
+  summary: string;
+};
+
+function formatValueForMessage(value: unknown): string {
+  if (typeof value === 'number') {
+    return `number ${value}`;
+  }
+  if (value === null) {
+    return 'null';
+  }
+  if (Array.isArray(value)) {
+    return `array(length=${value.length})`;
+  }
+  return `${typeof value} ${JSON.stringify(value)}`;
+}
+
+function formatArrayExample(value: number, length: number): string {
+  return `[${Array.from({ length }, () => String(value)).join(', ')}]`;
+}
+
+function recordSeriesDiagnostic(args: {
+  diagnostics: NormalizationDiagnostic[];
+  rule: string;
+  path: string;
+  series: Array<number | null>;
+}): void {
+  const { diagnostics, rule, path, series } = args;
+  const head = series.slice(0, 3);
+  const tail = series.slice(-3);
+  diagnostics.push({
+    rule,
+    path,
+    summary: `length=${series.length}; head=${JSON.stringify(head)}; tail=${JSON.stringify(tail)}`,
+  });
+}
+
 function asInteger(value: unknown, path: string, min = 0): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < min) {
     fail(path, `integer >= ${min}`, value);
@@ -40,10 +79,11 @@ function asInteger(value: unknown, path: string, min = 0): number {
 
 function asSeries(value: unknown, path: string, expectedLength: number): Array<number | null> {
   if (!Array.isArray(value)) {
-    fail(path, `array length ${expectedLength}`, value);
+    const sample = isFiniteNumber(value) ? formatArrayExample(value, expectedLength) : formatArrayExample(0, expectedLength);
+    throw new Error(`${path} must be an array of length ${expectedLength} (masterN+1). Received ${formatValueForMessage(value)}. Example: ${sample}. Tip: Use 'Fill array with scalar' auto-fix.`);
   }
   if (value.length !== expectedLength) {
-    fail(path, `array length ${expectedLength}`, value.length);
+    throw new Error(`${path} must be an array of length ${expectedLength} (masterN+1). Received array length ${value.length}. Example: ${formatArrayExample(0, expectedLength)}. Tip: Use 'Fill array with scalar' auto-fix for scalar values.`);
   }
   return value as Array<number | null>;
 }
@@ -53,10 +93,19 @@ function normalizeSeriesToMasterLength(args: {
   path: string;
   expectedLength: number;
   safeToZero: boolean;
+  allowScalarBroadcast?: boolean;
+  diagnostics?: NormalizationDiagnostic[];
 }): { series: Array<number | null>; normalized: boolean } {
-  const { value, path, expectedLength, safeToZero } = args;
+  const { value, path, expectedLength, safeToZero, allowScalarBroadcast = false, diagnostics } = args;
   if (!Array.isArray(value)) {
-    fail(path, 'array', value);
+    if (allowScalarBroadcast && isFiniteNumber(value)) {
+      const broadcasted = new Array<number | null>(expectedLength).fill(value);
+      if (diagnostics) {
+        recordSeriesDiagnostic({ diagnostics, rule: 'scalar_to_array_broadcast', path, series: broadcasted });
+      }
+      return { series: broadcasted, normalized: true };
+    }
+    throw new Error(`${path} must be an array of length ${expectedLength} (masterN+1). Received ${formatValueForMessage(value)}. Example: ${formatArrayExample(0, expectedLength)}. Tip: Use 'Fill array with scalar' auto-fix.`);
   }
 
   const normalized = new Array<number | null>(expectedLength).fill(null);
@@ -137,7 +186,7 @@ function asOptionalSparseSeries(value: unknown, path: string, masterN: number): 
   return normalizeSparseSeries(path, value, masterN);
 }
 
-function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: Array<number | null>): ProjectJsonV1['economicsBreakdown'] {
+function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: Array<number | null>, diagnostics: NormalizationDiagnostic[]): ProjectJsonV1['economicsBreakdown'] {
   if (raw === undefined) {
     return undefined;
   }
@@ -196,7 +245,25 @@ function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: A
     }
 
     if (cogs.siteGandA_USD && hasAnyNonNull(cogs.siteGandA_USD) && hasAnyNonZero(siteGandA_USD)) {
-      fail('economicsBreakdown.cogs.siteGandA_USD', 'must not be provided when series.siteGandA_USD has any non-null values', cogs.siteGandA_USD);
+      let firstDiff = -1;
+      for (let i = 0; i < cogs.siteGandA_USD.length; i += 1) {
+        const left = toFiniteOrNull(cogs.siteGandA_USD[i]);
+        const right = toFiniteOrNull(siteGandA_USD[i]);
+        if (left !== right) {
+          firstDiff = i;
+          break;
+        }
+      }
+      if (firstDiff === -1) {
+        cogs.siteGandA_USD = undefined;
+        diagnostics.push({
+          rule: 'dedup_identical_site_ganda_overlap',
+          path: 'economicsBreakdown.cogs.siteGandA_USD',
+          summary: 'Removed duplicate; canonical source is series.siteGandA_USD',
+        });
+      } else {
+        throw new Error(`economicsBreakdown.cogs.siteGandA_USD conflicts with series.siteGandA_USD. Provide site G&A in one place only (prefer series.siteGandA_USD). First difference at index ${firstDiff}: economicsBreakdown=${String(cogs.siteGandA_USD[firstDiff])}, series=${String(siteGandA_USD[firstDiff])}.`);
+      }
     }
 
     out.cogs = cogs;
@@ -420,7 +487,7 @@ function parsePeriodEndDates(raw: unknown, expectedLength: number): Array<string
   return periodEndDatesUtc;
 }
 
-function parseOperations(raw: unknown, masterN: number): { operations: ProjectJsonV1['operations']; normalized: boolean } {
+function parseOperations(raw: unknown, masterN: number, diagnostics: NormalizationDiagnostic[]): { operations: ProjectJsonV1['operations']; normalized: boolean } {
   if (raw == null) {
     return { operations: raw as null, normalized: false };
   }
@@ -504,6 +571,8 @@ function parseOperations(raw: unknown, masterN: number): { operations: ProjectJs
         path: `${path}.${key}`,
         expectedLength: masterN + 1,
         safeToZero: true,
+        allowScalarBroadcast: true,
+        diagnostics,
       });
       normalized = normalized || series.normalized;
       validateNonNegativeFiniteSeries(series.series, `${path}.${key}`);
@@ -550,6 +619,9 @@ export type ProjectJsonV1Context = {
 };
 
 export type ParsedProjectJsonV1 = {
+  diagnostics: {
+    normalization: NormalizationDiagnostic[];
+  };
   engineInputWithoutPrices: Omit<ProjectEngineFullProductionV1Input, 'spotPriceUSDByMetal' | 'aisc'> & {
     payableQtyByMetal: Record<string, Array<number | null>>;
     streamsByMetal: Record<string, import('../streams/types').StreamMVIConfig> | null;
@@ -627,7 +699,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     const rawFdExtraShares = raw.equity.fdExtraShares;
     if (rawFdExtraShares !== undefined) {
       if (!isFiniteNumber(rawFdExtraShares) || rawFdExtraShares < 0) {
-        fail('equity.fdExtraShares', 'finite number >= 0', rawFdExtraShares);
+        throw new Error(`equity.fdExtraShares must be a finite number >= 0. Received ${formatValueForMessage(rawFdExtraShares)}. Example: 0`);
       }
       fdExtraShares = rawFdExtraShares;
     }
@@ -646,6 +718,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   }
 
   const warnings: string[] = [];
+  const normalizationDiagnostics: NormalizationDiagnostic[] = [];
   let projectSeriesNormalized = false;
 
   const capexNormalized = normalizeSeriesToMasterLength({
@@ -653,6 +726,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     path: 'series.capexUSD',
     expectedLength,
     safeToZero: true,
+    diagnostics: normalizationDiagnostics,
   });
   projectSeriesNormalized = projectSeriesNormalized || capexNormalized.normalized;
   const capexUSD = normalizeSpendSeriesAbs(
@@ -665,6 +739,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     path: 'series.operatingCostsUSD',
     expectedLength,
     safeToZero: true,
+    diagnostics: normalizationDiagnostics,
   });
   projectSeriesNormalized = projectSeriesNormalized || operatingCostsNormalized.normalized;
   const operatingCostsUSD = operatingCostsNormalized.series;
@@ -673,6 +748,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     path: 'series.sustainingCapexUSD',
     expectedLength,
     safeToZero: true,
+    diagnostics: normalizationDiagnostics,
   });
   projectSeriesNormalized = projectSeriesNormalized || sustainingCapexNormalized.normalized;
   const sustainingCapexUSD = normalizeSpendSeriesAbs(
@@ -685,6 +761,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     path: 'series.siteGandA_USD',
     expectedLength,
     safeToZero: true,
+    diagnostics: normalizationDiagnostics,
   });
   projectSeriesNormalized = projectSeriesNormalized || siteGandaNormalized.normalized;
   const siteGandA_USD = siteGandaNormalized.series;
@@ -693,6 +770,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     path: 'series.reclamationUSD',
     expectedLength,
     safeToZero: true,
+    diagnostics: normalizationDiagnostics,
   });
   projectSeriesNormalized = projectSeriesNormalized || reclamationNormalized.normalized;
   const reclamationUSD = reclamationNormalized.series;
@@ -738,7 +816,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   }
   const depreciationUSD = depreciationNormalized?.series;
 
-  const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, masterN, siteGandA_USD);
+  const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, masterN, siteGandA_USD, normalizationDiagnostics);
 
   if (!isPlainObject(raw.metals)) {
     fail('metals', 'object', raw.metals);
@@ -776,10 +854,19 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     validateNonNegativeFiniteSeries(payableQtyByMetal[metal], `metals.payableQtyByMetal.${metal}`);
 
     const qtyUnit = raw.metals.payableQtyUnitByMetal[metal];
-    if (typeof qtyUnit !== 'string' || !QTY_UNIT_SET.has(qtyUnit as QtyUnit)) {
-      fail(`metals.payableQtyUnitByMetal.${metal}`, 'known QtyUnit', qtyUnit);
+    if (qtyUnit === 'oz') {
+      payableQtyUnitByMetal[metal] = 'toz';
+      normalizationDiagnostics.push({
+        rule: 'qty_unit_oz_to_toz',
+        path: `metals.payableQtyUnitByMetal.${metal}`,
+        summary: 'Converted oz -> toz',
+      });
+    } else {
+      if (typeof qtyUnit !== 'string' || !QTY_UNIT_SET.has(qtyUnit as QtyUnit)) {
+        throw new Error(`metals.payableQtyUnitByMetal.${metal} must be one of ${JSON.stringify(Array.from(QTY_UNIT_SET))}. Received ${JSON.stringify(qtyUnit)}. Example: "toz". Tip: Use 'Normalize unit oz→toz' auto-fix.`);
+      }
+      payableQtyUnitByMetal[metal] = qtyUnit as QtyUnit;
     }
-    payableQtyUnitByMetal[metal] = qtyUnit as QtyUnit;
 
     const priceKey = raw.metals.priceKeyByMetal[metal];
     if (typeof priceKey !== 'string' || priceKey.trim().length === 0) {
@@ -816,7 +903,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     validateTakeItemsBasicShape(takeItems, 'takeItems');
   }
 
-  const parsedOperations = raw.operations === undefined ? undefined : parseOperations(raw.operations, masterN);
+  const parsedOperations = raw.operations === undefined ? undefined : parseOperations(raw.operations, masterN, normalizationDiagnostics);
   const operations = parsedOperations?.operations;
   projectSeriesNormalized = projectSeriesNormalized || (parsedOperations?.normalized ?? false);
 
@@ -947,6 +1034,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
     },
     engineInput,
     warnings,
+    diagnostics: { normalization: normalizationDiagnostics },
   };
 }
 

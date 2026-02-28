@@ -46,10 +46,16 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
   assertDeepEqual(item._choices_rateType, ['NSR_pct', 'ad_valorem_pct'], 'royalty rateType choices present and sorted');
 
   const defaultTemplate = getProjectJsonV1Template();
+  assertEqual(defaultTemplate.equity?.fdExtraShares, 0, 'template fdExtraShares defaults to 0');
+  assert((defaultTemplate.meta?.notes ?? '').includes('masterN+1'), 'template notes include array length guidance');
+  assertEqual(defaultTemplate.metals.payableQtyUnitByMetal.Au, 'toz', 'template Au unit uses toz');
   const takeItem = (defaultTemplate.takeItems?.[0] ?? null) as Record<string, unknown> | null;
   assert(takeItem != null, 'takeItems[0] exists');
   assertDeepEqual(takeItem?._choices_type, ['AD_VALOREM', 'NSR'], 'take type choices present and sorted');
   assertDeepEqual(takeItem?._choices_jurisdictionLevel, ['contractual', 'municipal', 'national', 'other', 'provincial_state'], 'take jurisdiction choices present and sorted');
+
+  assert(Array.isArray(defaultTemplate.operations?.gradeByMetal?.Au), 'template includes gradeByMetal Au example array');
+  assert(Array.isArray(defaultTemplate.operations?.recoveryPctByMetal?.Au), 'template includes recoveryPctByMetal Au example array');
 
   const capacity = defaultTemplate.operations?.capacity as Record<string, unknown>;
   assertDeepEqual(capacity._choices_throughputUnit, ['tpa', 'tpd'], 'throughput choices present and sorted');

@@ -177,7 +177,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
       projectName: typeof meta.projectName === 'string' ? meta.projectName : '',
       currency: 'USD',
       _choices_currency: [...CURRENCY_CHOICES],
-      notes: typeof meta.notes === 'string' ? meta.notes : '',
+      notes: typeof meta.notes === 'string' && meta.notes.trim().length > 0 ? meta.notes : 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
     },
     time: {
       masterN,
@@ -188,7 +188,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
       taxRate: typeof economics.taxRate === 'number' && Number.isFinite(economics.taxRate) ? economics.taxRate : null,
     },
     equity: {
-      fdExtraShares: typeof equity.fdExtraShares === 'number' && Number.isFinite(equity.fdExtraShares) ? equity.fdExtraShares : null,
+      fdExtraShares: typeof equity.fdExtraShares === 'number' && Number.isFinite(equity.fdExtraShares) ? equity.fdExtraShares : 0,
       fdNotes: typeof equity.fdNotes === 'string' ? equity.fdNotes : '',
     },
     series: {
@@ -308,6 +308,10 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
   const masterN = 5;
   const len = masterN + 1;
   const nulls = Array(len).fill(null) as Array<number | null>;
+  const auGradeExample = [6.86, 6.86, 6.86, 6.86, 6.86, 6.86];
+  const cuGradeExample = [0.45, 0.45, 0.45, 0.45, 0.45, 0.45];
+  const auRecoveryExample = [0.92, 0.92, 0.92, 0.92, 0.92, 0.92];
+  const cuRecoveryExample = [0.88, 0.88, 0.88, 0.88, 0.88, 0.88];
 
   return buildProjectJsonV1Template({
     version: 'project_json_v1',
@@ -315,7 +319,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       projectId: '',
       projectName: '',
       currency: 'USD',
-      notes: '',
+      notes: 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
     },
     time: {
       masterN,
@@ -411,16 +415,16 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       oreMinedTonnes: [...nulls],
       oreTonnageUnit: 'tonne',
       gradeByMetal: {
-        Au: [...nulls],
-        Cu: [...nulls],
+        Au: [...auGradeExample],
+        Cu: [...cuGradeExample],
       },
       gradeUnitByMetal: {
         Au: 'gpt',
         Cu: 'pct',
       },
       recoveryPctByMetal: {
-        Au: [...nulls],
-        Cu: [...nulls],
+        Au: [...auRecoveryExample],
+        Cu: [...cuRecoveryExample],
       },
     },
     economicsBreakdown: {
