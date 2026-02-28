@@ -106,39 +106,107 @@ function sumSustainingCostsWherePayablePositive(costs: Series, payable: Series, 
   return { sumCost, sumPay };
 }
 
-function computeIrr(series: Series, end: number): NullableNumber {
-  if (end < 0 || end >= series.length) return null;
-  const cashFlows: number[] = [];
-  for (let i = 0; i <= end; i += 1) {
-    if (!finite(series[i])) return null;
-    cashFlows.push(series[i] as number);
+function buildEnterpriseIrrSeries(args: {
+  fcfUSD: Series;
+  masterN: number;
+  tp: number;
+  initialCapexUSD: number;
+}): number[] | null {
+  if (args.masterN < 0 || args.masterN >= args.fcfUSD.length) return null;
+  const cashflows = args.fcfUSD.slice(0, args.masterN + 1);
+  if (cashflows.length !== args.masterN + 1) return null;
+  cashflows[0] = -Math.abs(args.initialCapexUSD);
+  for (let t = args.tp; t <= args.masterN; t += 1) {
+    const fcff = args.fcfUSD[t];
+    if (!finite(fcff)) return null;
+    cashflows[t] = fcff;
   }
-  const hasPositive = cashFlows.some((v) => v > 0);
-  const hasNegative = cashFlows.some((v) => v < 0);
-  if (!hasPositive || !hasNegative) return null;
+  if (cashflows.some((v) => !finite(v))) return null;
+  return cashflows as number[];
+}
+
+type IrrSolveResult = {
+  value: number | null;
+  reason: string | null;
+  bracketFound: boolean;
+};
+
+function computeIrr(cashFlows: Array<number | null>): IrrSolveResult {
+  if (cashFlows.length === 0) {
+    return { value: null, reason: 'Invalid cashflow series', bracketFound: false };
+  }
+
+  if (cashFlows.some((v) => !finite(v))) {
+    return { value: null, reason: 'Invalid cashflow series', bracketFound: false };
+  }
+
+  const asFinite = cashFlows as number[];
+  const hasPositive = asFinite.some((v) => v > 0);
+  const hasNegative = asFinite.some((v) => v < 0);
+  if (!hasPositive || !hasNegative) {
+    return { value: null, reason: 'IRR requires valid sign change', bracketFound: false };
+  }
+
   const npv = (rate: number): number => {
+    if (rate <= -1) return Number.NaN;
     let sum = 0;
-    for (let t = 0; t < cashFlows.length; t += 1) {
-      sum += cashFlows[t] / ((1 + rate) ** t);
+    for (let t = 0; t < asFinite.length; t += 1) {
+      const cashflow = asFinite[t];
+      const denom = (1 + rate) ** t;
+      if (!Number.isFinite(denom)) {
+        continue;
+      }
+      sum += cashflow / denom;
     }
     return sum;
   };
 
-  let low = -0.99;
-  let high = 1;
-  let lowVal = npv(low);
-  let highVal = npv(high);
-  for (let i = 0; i < 20 && lowVal * highVal > 0; i += 1) {
-    high *= 2;
-    highVal = npv(high);
+  const rLow = -0.99;
+  const npvLow = npv(rLow);
+  if (!Number.isFinite(npvLow)) {
+    return { value: null, reason: 'Invalid cashflow series', bracketFound: false };
   }
-  if (lowVal * highVal > 0) return null;
+  if (npvLow === 0) {
+    return { value: rLow, reason: null, bracketFound: true };
+  }
+
+  const highCandidates = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
+  let low = rLow;
+  let high = 10.0;
+  let lowVal = npvLow;
+  let highVal = Number.NaN;
+  let bracketFound = false;
+
+  for (const candidate of highCandidates) {
+    const candidateNpv = npv(candidate);
+    if (!Number.isFinite(candidateNpv)) {
+      continue;
+    }
+    if (candidateNpv === 0) {
+      return { value: candidate, reason: null, bracketFound: true };
+    }
+    if (lowVal * candidateNpv < 0) {
+      high = candidate;
+      highVal = candidateNpv;
+      bracketFound = true;
+      break;
+    }
+  }
+
+  if (!bracketFound || !Number.isFinite(highVal)) {
+    return { value: null, reason: 'IRR not bracketed up to 1000%', bracketFound: false };
+  }
 
   for (let i = 0; i < 100; i += 1) {
     const mid = (low + high) / 2;
     const midVal = npv(mid);
-    if (Math.abs(midVal) < 1e-8) return mid;
-    if (lowVal * midVal <= 0) {
+    if (!Number.isFinite(midVal)) {
+      return { value: null, reason: 'Invalid cashflow series', bracketFound: true };
+    }
+    if (Math.abs(midVal) < 1e-8 || Math.abs(high - low) < 1e-12) {
+      return { value: mid, reason: null, bracketFound: true };
+    }
+    if (lowVal * midVal < 0) {
       high = mid;
       highVal = midVal;
     } else {
@@ -146,7 +214,8 @@ function computeIrr(series: Series, end: number): NullableNumber {
       lowVal = midVal;
     }
   }
-  return (low + high) / 2;
+
+  return { value: (low + high) / 2, reason: null, bracketFound: true };
 }
 
 function discountToToday(t: number, discountRate: number): number {
@@ -308,7 +377,45 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     return null;
   })() : null;
 
-  const irr = masterN !== null ? computeIrr(input.fcfUSD, masterN) : null;
+  const irrSeries = (
+    masterN !== null
+    && tp !== null
+    && initialCapexUSD !== null
+    && initialCapexUSD > 0
+  )
+    ? buildEnterpriseIrrSeries({
+      fcfUSD: input.fcfUSD,
+      masterN,
+      tp,
+      initialCapexUSD,
+    })
+    : null;
+  const hasIrrSignChange = irrSeries !== null
+    && irrSeries.some((v) => v < 0)
+    && irrSeries.some((v) => v > 0);
+  const irrSolve = irrSeries !== null ? computeIrr(irrSeries) : { value: null, reason: 'Missing series fcfUSD', bracketFound: false };
+  const irr = irrSolve.value;
+
+  if (paybackReal !== null && !hasIrrSignChange) {
+    console.error('IRR series invalid despite payback');
+  }
+
+  if (paybackReal !== null && irr === null) {
+    const debugSeries = irrSeries ?? [];
+    const finiteSeries = debugSeries.filter((v): v is number => finite(v));
+    const minCashflow = finiteSeries.length > 0 ? Math.min(...finiteSeries) : null;
+    const maxCashflow = finiteSeries.length > 0 ? Math.max(...finiteSeries) : null;
+    console.warn('IRR null despite payback', {
+      first6Cashflows: debugSeries.slice(0, 6),
+      minCashflow,
+      maxCashflow,
+      bracketFound: irrSolve.bracketFound,
+    });
+  }
+
+  if (paybackReal !== null && irr !== null && irr <= 0) {
+    console.warn('IRR inconsistency with payback');
+  }
 
   const roi10y = tp !== null && masterN !== null && initialCapexUSD !== null ? (() => {
     const end = Math.min(tp + 9, masterN);
@@ -404,7 +511,18 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
             ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
             : (input.fcfUSD.slice(tp).some((v) => !finite(v)) ? 'Missing series fcfUSD' : 'No payback reached in cumulative FCFF')),
       ),
-      IRR: mv(irr, masterN === null ? 'Missing masterN' : (input.fcfUSD.slice(0, masterN + 1).some((v) => !finite(v)) ? 'Missing series fcfUSD' : 'IRR requires valid sign change')),
+      IRR: mv(
+        irr,
+        masterN === null
+          ? 'Missing masterN'
+          : (tp === null
+            ? 'Missing tp'
+            : (initialCapexUSD === null
+              ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
+              : (irrSeries === null
+                ? 'Missing series fcfUSD'
+                : (irrSolve.reason ?? 'IRR could not be solved')))),
+      ),
       ROI_10Y: mv(
         roi10y,
         tp === null
