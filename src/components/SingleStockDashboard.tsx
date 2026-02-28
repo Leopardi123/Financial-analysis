@@ -2057,6 +2057,7 @@ Capital Available: ${availableLabel}`,
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
 
     return computeProjectViewMetrics({
+      meta: { projectId: selectedProjectId },
       targetCurrency: String(projectSnapshotData.targetCurrency ?? lockedTargetCurrency),
       fxUSDToTarget: inputs.fx,
       discountRate: inputs.r,
@@ -2079,7 +2080,7 @@ Capital Available: ${availableLabel}`,
         cashUsedInput: toInputNumber(projectCashUsedTarget) ?? 0,
       },
     });
-  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
