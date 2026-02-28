@@ -13,6 +13,7 @@ import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.t
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { buildOperationsGridModel } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
+import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import {
   buildSeries,
   buildSeriesData,
@@ -88,6 +89,10 @@ function formatMetricValue(value: MetricValue, kind: "money" | "percent" | "mult
   if (kind === "integer") return `${Math.round(value.value)}`;
   if (kind === "decimal") return value.value.toFixed(1);
   return `${formatCompactNumber(value.value, 1)}${unit ? ` ${unit}` : ""}`;
+}
+
+function formatMetricNullReason(value: MetricValue): string {
+  return value.value === null ? (value.reason ?? "Missing required input.") : "";
 }
 
 const PROJECT_SECTION_DEFAULT_OPEN: Record<string, boolean> = {
@@ -1947,38 +1952,73 @@ Capital Available: ${availableLabel}`,
 
   const projectViewMetrics = useMemo(() => {
     if (!projectSnapshotData) return null;
-    const financing = (projectSnapshotData.financing ?? {}) as Record<string, unknown>;
+    const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
+      ? raw.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null))
+      : []);
+    const inputs = getProjectInputs({
+      snapshot: projectSnapshotData,
+      discountRateInput: snapshotDiscountRateInput,
+      targetCurrency: lockedTargetCurrency,
+    });
     const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
-    const aggregation = (projectSnapshotData.aggregation ?? {}) as Record<string, unknown>;
-    const series = (projectSnapshotData.series ?? {}) as Record<string, unknown>;
-    const marketInput = (projectSnapshotData.marketInput ?? {}) as Record<string, unknown>;
-
-    const asSeries = (raw: unknown): Array<number | null> => (Array.isArray(raw) ? raw.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null)) : []);
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
-    const fx = asNum(projectSnapshotData.fx_USD_to_TargetCurrency) ?? (typeof projectSnapshotData.targetCurrency === "string" && projectSnapshotData.targetCurrency === "USD" ? 1 : null);
 
     return computeProjectViewMetrics({
       targetCurrency: String(projectSnapshotData.targetCurrency ?? lockedTargetCurrency),
-      fxUSDToTarget: fx,
-      sharesCurrent: asNum(marketInput.shares_current) ?? asNum(financing.shares_post_financing),
-      priceCurrentTarget: asNum(marketInput.price_current_TargetCurrency),
-      cashCurrentTarget: asNum(financing.cash_t0_post_TargetCurrency),
-      debtCurrentTarget: asNum(financing.debt_t0_post_TargetCurrency),
+      fxUSDToTarget: inputs.fx,
+      discountRate: inputs.r,
+      masterN: inputs.masterN,
+      sharesCurrent: inputs.sharesCurrent,
+      priceCurrentTarget: inputs.price,
+      cashCurrentTarget: inputs.cash0,
+      debtCurrentTarget: inputs.debt0,
       enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
-      fcfUSD: asSeries(series.fcffUSD),
-      capexUSD: asSeries(series.capexUSD),
-      grossRevenueUSD: asSeries(series.totalRevenue_USD),
-      ebitUSD: asSeries(series.ebitUSD),
-      payableAuEqOz: asSeries(series.payableAuEqOz),
-      sustainingCostUSD: asSeries(series.sustainingCostUSD),
-      productionStartPeriod: Number.isInteger(aggregation.productionStartPeriod) ? Number(aggregation.productionStartPeriod) : null,
+      fcfUSD: asSeries(inputs.series.fcfUSD),
+      capexUSD: asSeries(inputs.series.capexUSD),
+      grossRevenueUSD: asSeries(inputs.series.grossRevenueUSD),
+      ebitUSD: asSeries(inputs.series.ebitUSD),
+      payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
+      sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
+      productionStartPeriod: inputs.tp,
       financing: {
         equityPct: toInputNumber(projectEquityPct) ?? 100,
         debtPct: toInputNumber(projectDebtPct) ?? 0,
         cashUsedInput: toInputNumber(projectCashUsedTarget) ?? 0,
       },
     });
-  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, lockedTargetCurrency]);
+  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, lockedTargetCurrency, snapshotDiscountRateInput]);
+
+  const projectInputDebug = useMemo(() => {
+    if (!projectSnapshotData) return null;
+    const inputs = getProjectInputs({ snapshot: projectSnapshotData, discountRateInput: snapshotDiscountRateInput, targetCurrency: lockedTargetCurrency });
+    const rows = [
+      ["price_current_TargetCurrency", inputs.price],
+      ["shares_current", inputs.sharesCurrent],
+      ["cash_TargetCurrency", inputs.cash0],
+      ["debt_TargetCurrency", inputs.debt0],
+      ["fx_USD_to_TargetCurrency", inputs.fx],
+      ["discountRate (r)", inputs.r],
+      ["masterN", inputs.masterN],
+      ["tp", inputs.tp],
+      ["shares_post_financing (computed default)", inputs.sharesPostFinancing ?? inputs.sharesCurrent],
+    ];
+    const seriesRows: Array<[string, number[] | null | undefined]> = [
+      ["fcfUSD", inputs.series.fcfUSD],
+      ["capexUSD", inputs.series.capexUSD],
+      ["grossRevenue_USD", inputs.series.grossRevenueUSD],
+      ["AuPrice_USD_per_Oz", inputs.series.auPriceUSD],
+      ["operatingCostsUSD", inputs.series.operatingCostsUSD],
+      ["sustainingCapexUSD", inputs.series.sustainingCapexUSD],
+      ["siteGandA_USD", inputs.series.siteGandAUSD],
+      ["royaltiesUSD", inputs.series.royaltiesUSD],
+      ["reclamationAccrualUSD", inputs.series.reclamationAccrualUSD],
+    ];
+    return {
+      rows,
+      seriesRows,
+      missing: validateProjectInputs(inputs),
+    };
+  }, [projectSnapshotData, snapshotDiscountRateInput, lockedTargetCurrency]);
 
 
   const parsedSelectedProject = useMemo(() => {
@@ -3058,6 +3098,24 @@ Capital Available: ${availableLabel}`,
 
               {projectViewMetrics && (
                 <section className="project-producer-layout" style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                  {(import.meta.env.DEV || (typeof window !== "undefined" && (window.location.hostname.includes("localhost") || new URLSearchParams(window.location.search).get("debug") === "1"))) && projectInputDebug && (
+                    <details className="producer-core-section" open>
+                      <summary><h2 className="subrub small">Project input diagnostics (dev)</h2></summary>
+                      <div style={{ fontSize: 12, paddingTop: 8 }}>
+                        {projectInputDebug.rows.map(([label, value]) => (
+                          <div key={label}><strong>{label}:</strong> {typeof value === "number" && Number.isFinite(value) ? String(value) : "missing"}</div>
+                        ))}
+                        <div style={{ marginTop: 8 }}><strong>Series presence</strong></div>
+                        {projectInputDebug.seriesRows.map(([label, values]) => (
+                          <div key={label}>
+                            <strong>{label}:</strong> {Array.isArray(values) ? `present (length=${values.length})` : "missing"}
+                          </div>
+                        ))}
+                        <div style={{ marginTop: 8 }}><strong>Missing/invalid:</strong> {projectInputDebug.missing.length ? projectInputDebug.missing.join(", ") : "none"}</div>
+                        <div><strong>capex_sign_convention:</strong> {projectViewMetrics.diagnostics.capexSignConvention}</div>
+                      </div>
+                    </details>
+                  )}
                   <div className="producer-core-compact-card">
                     <section className="producer-core-section">
                       <div className="producer-core-title-row">
@@ -3082,13 +3140,16 @@ Capital Available: ${availableLabel}`,
                                 sections={[
                                   { heading: "Definition", lines: ["Project view market metric."] },
                                   { heading: "Formula", lines: [metric.label.includes("MarketCap") ? "MarketCap_current = price_current × shares_current" : metric.label.includes("EV") ? "EV = MarketCap_current + debt_t0 - cash_t0 + EnterpriseAdjustments" : "Per financing equations in List 5."] },
-                                  { heading: "Basis / Unit / Null", lines: ["Basis: equity for MarketCap, enterprise for EV.", `Unit: ${metric.kind === "money" ? lockedTargetCurrency : "shares"}.`, metric.value.nullReason ?? "Null: n/a only when required inputs are missing."] },
+                                  { heading: "Basis / Unit / Null", lines: ["Basis: equity for MarketCap, enterprise for EV.", `Unit: ${metric.kind === "money" ? lockedTargetCurrency : "shares"}.`, metric.value.reason ?? "Null: n/a only when required inputs are missing."] },
                                   { heading: "Interpretation", lines: ["Use current MarketCap and financing-adjusted PF shares for dilution context."] },
                                 ]}
                               />
                             </span>
                             <span className="compact-metric-dots" />
-                            <span className="compact-metric-value">{formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}</span>
+                            <span className="compact-metric-value">
+                              {formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}
+                              {metric.value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(metric.value)}</span>}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -3117,13 +3178,16 @@ Capital Available: ${availableLabel}`,
                                 sections={[
                                   { heading: "Definition", lines: ["Project KPI in pre-revenue strict mode."] },
                                   { heading: "Formula", lines: ["Exact formula implemented in computeProjectViewMetrics helper."] },
-                                  { heading: "Basis / Unit / Null", lines: ["Basis: enterprise/equity per metric family.", "Unit auto-formatted.", value.nullReason ?? "Null rule: returns n/a when input requirements fail."] },
+                                  { heading: "Basis / Unit / Null", lines: ["Basis: enterprise/equity per metric family.", "Unit auto-formatted.", value.reason ?? "Null rule: returns n/a when input requirements fail."] },
                                   { heading: "Interpretation", lines: ["Higher/lower significance depends on metric type and project stage."] },
                                 ]}
                               />
                             </span>
                             <span className="compact-metric-dots" />
-                            <span className="compact-metric-value">{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key.includes("pct") ? "percent" : key === "TP" || key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}</span>
+                            <span className="compact-metric-value">
+                              {formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key.includes("pct") ? "percent" : key === "TP" || key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}
+                              {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -3151,13 +3215,16 @@ Capital Available: ${availableLabel}`,
                               sections={[
                                 { heading: "Definition", lines: ["Financing block metric (does not alter operations series)."] },
                                 { heading: "Formula", lines: ["Computed from Initial CAPEX, cash-first usage, and debt/equity split."] },
-                                { heading: "Basis / Unit / Null", lines: ["Basis: financing and capital structure.", `Unit: ${lockedTargetCurrency} / shares.`, value.nullReason ?? "Null: n/a if required source is missing."] },
+                                { heading: "Basis / Unit / Null", lines: ["Basis: financing and capital structure.", `Unit: ${lockedTargetCurrency} / shares.`, value.reason ?? "Null: n/a if required source is missing."] },
                                 { heading: "Interpretation", lines: ["Shows dilution and balance-sheet impact of funding plan."] },
                               ]}
                             />
                           </span>
                           <span className="compact-metric-dots" />
-                          <span className="compact-metric-value">{formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency)}</span>
+                          <span className="compact-metric-value">
+                            {formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency)}
+                            {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
+                          </span>
                         </div>
                       ))}
                     </div>
