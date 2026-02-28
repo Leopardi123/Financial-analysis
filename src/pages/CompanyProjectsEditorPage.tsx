@@ -68,6 +68,105 @@ function validateProjectJson(rawJson: string): ValidationState {
   return { ok: true, error: null, warning, parsed: root as Record<string, unknown> };
 }
 
+
+
+type ShiftForwardResult = {
+  shifted: Record<string, unknown>;
+  shiftedSeriesCount: number;
+  k: number;
+  tpBase: number;
+  tpEff: number;
+};
+
+function shiftPerPeriodArraysDeep(value: unknown, expectedLength: number, k: number): { value: unknown; shiftedSeriesCount: number } {
+  if (Array.isArray(value)) {
+    const isPerPeriodSeries = value.length === expectedLength && value.every((entry) => entry === null || typeof entry === 'number');
+    if (isPerPeriodSeries) {
+      const shifted = new Array<number | null>(expectedLength).fill(null);
+      for (let t = 0; t < expectedLength; t += 1) {
+        const src = t - k;
+        if (src < 0 || src >= expectedLength) continue;
+        const sourceValue = value[src];
+        shifted[t] = typeof sourceValue === 'number' && Number.isFinite(sourceValue) ? sourceValue : null;
+      }
+      return { value: shifted, shiftedSeriesCount: 1 };
+    }
+
+    let shiftedSeriesCount = 0;
+    const mapped = value.map((entry) => {
+      const shiftedEntry = shiftPerPeriodArraysDeep(entry, expectedLength, k);
+      shiftedSeriesCount += shiftedEntry.shiftedSeriesCount;
+      return shiftedEntry.value;
+    });
+    return { value: mapped, shiftedSeriesCount };
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    let shiftedSeriesCount = 0;
+    const output = Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => {
+        const shiftedEntry = shiftPerPeriodArraysDeep(entry, expectedLength, k);
+        shiftedSeriesCount += shiftedEntry.shiftedSeriesCount;
+        return [key, shiftedEntry.value] as const;
+      }),
+    );
+    return { value: output, shiftedSeriesCount };
+  }
+
+  return { value, shiftedSeriesCount: 0 };
+}
+
+function shiftProjectToTargetProductionYear(projectRaw: Record<string, unknown>, targetYear: number): ShiftForwardResult {
+  const time = projectRaw.time;
+  if (typeof time !== 'object' || time === null || Array.isArray(time)) {
+    throw new Error('Kan inte förskjuta: time saknas i JSON.');
+  }
+
+  const periodEndDatesUtc = (time as Record<string, unknown>).periodEndDatesUtc;
+  if (!Array.isArray(periodEndDatesUtc) || periodEndDatesUtc.length === 0 || !periodEndDatesUtc.every((entry) => typeof entry === 'string')) {
+    throw new Error('Kan inte förskjuta: time.periodEndDatesUtc måste vara en array av datumsträngar.');
+  }
+
+  const productionStartPeriodRaw = (time as Record<string, unknown>).productionStartPeriod;
+  if (!Number.isInteger(productionStartPeriodRaw) || Number(productionStartPeriodRaw) < 0 || Number(productionStartPeriodRaw) >= periodEndDatesUtc.length) {
+    throw new Error('Kan inte förskjuta: time.productionStartPeriod är ogiltig.');
+  }
+
+  const tpBase = Number(productionStartPeriodRaw);
+  const baseDate = periodEndDatesUtc[tpBase] as string;
+  const baseYear = Number.parseInt(baseDate.slice(0, 4), 10);
+  if (!Number.isInteger(baseYear)) {
+    throw new Error('Kan inte förskjuta: hittade inget årtal i production start-datumet.');
+  }
+
+  if (!Number.isInteger(targetYear)) {
+    throw new Error('Målår måste vara ett heltal.');
+  }
+
+  const k = targetYear - baseYear;
+  if (k < 0) {
+    throw new Error(`Målår (${targetYear}) är tidigare än nuvarande produktionsstart (${baseYear}).`);
+  }
+
+  const tpEff = tpBase + k;
+  if (tpEff >= periodEndDatesUtc.length) {
+    throw new Error(`Målår (${targetYear}) ger tp_eff=${tpEff}, vilket ligger utanför tidshorisonten (masterN=${periodEndDatesUtc.length - 1}).`);
+  }
+
+  const shiftedDeep = shiftPerPeriodArraysDeep(projectRaw, periodEndDatesUtc.length, k);
+  const shifted = shiftedDeep.value as Record<string, unknown>;
+  const shiftedTime = { ...(shifted.time as Record<string, unknown>), productionStartPeriod: tpEff };
+  shifted.time = shiftedTime;
+
+  return {
+    shifted,
+    shiftedSeriesCount: shiftedDeep.shiftedSeriesCount,
+    k,
+    tpBase,
+    tpEff,
+  };
+}
+
 export default function CompanyProjectsEditorPage() {
   const symbol = useMemo(() => parseSymbolFromPath(window.location.pathname), []);
   const startWithNewDraft = useMemo(() => {
@@ -90,6 +189,7 @@ export default function CompanyProjectsEditorPage() {
   const [lastSavedAtUtc, setLastSavedAtUtc] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadingProject, setLoadingProject] = useState(false);
+  const [delayTargetYearInput, setDelayTargetYearInput] = useState('');
 
   const parsedValidation = useMemo(() => validateProjectJson(rawJsonInput), [rawJsonInput]);
 
@@ -277,6 +377,32 @@ export default function CompanyProjectsEditorPage() {
     setEditorInfo('Reset to last saved JSON.');
   }
 
+
+
+  function handleShiftProductionToYear(): void {
+    if (!parsedValidation.ok || !parsedValidation.parsed) {
+      setEditorError(parsedValidation.error);
+      return;
+    }
+
+    const targetYear = Number.parseInt(delayTargetYearInput.trim(), 10);
+    if (!Number.isInteger(targetYear)) {
+      setEditorError('Ange ett giltigt målår, t.ex. 2030.');
+      return;
+    }
+
+    try {
+      const shifted = shiftProjectToTargetProductionYear(parsedValidation.parsed, targetYear);
+      setRawJsonInput(JSON.stringify(shifted.shifted, null, 2));
+      setEditorError(null);
+      setEditorInfo(
+        `Försköt produktionen med k=${shifted.k} perioder (tp ${shifted.tpBase} -> ${shifted.tpEff}) mot målår ${targetYear}. Skiftade serier: ${shifted.shiftedSeriesCount}.`,
+      );
+    } catch (error) {
+      setEditorError((error as Error).message);
+    }
+  }
+
   const canSave = Boolean(symbol) && parsedValidation.ok && !saving;
 
   return (
@@ -336,6 +462,27 @@ export default function CompanyProjectsEditorPage() {
               <span>project_name</span>
               <input type="text" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} />
             </label>
+          </div>
+
+          
+
+          <div className="scenario-shift-controls">
+            <h3>Scenario: förskjut produktion framåt</h3>
+            <p className="save-meta">Ange målår för produktionsstart. Editorn flyttar då alla per-periodserier framåt lika mycket och uppdaterar productionStartPeriod.</p>
+            <div className="field-grid">
+              <label>
+                <span>Målår för produktionsstart</span>
+                <input
+                  type="number"
+                  value={delayTargetYearInput}
+                  onChange={(event) => setDelayTargetYearInput(event.target.value)}
+                  placeholder="t.ex. 2030"
+                />
+              </label>
+            </div>
+            <div className="editor-actions">
+              <button type="button" onClick={handleShiftProductionToYear}>Förskjut till målår</button>
+            </div>
           </div>
 
           {editorError && <p className="status error">{editorError}</p>}
