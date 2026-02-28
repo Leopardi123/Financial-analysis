@@ -3,6 +3,7 @@ import Admin from "./Admin";
 import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
+import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
 import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
@@ -2053,6 +2054,18 @@ Capital Available: ${availableLabel}`,
     });
   }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  const snapshotTodayLabel = useMemo(() => `IDAG ${new Date().toISOString().slice(0, 10)}`, []);
+
+  const snapshotProdStartLabel = useMemo(() => {
+    const meta = (selectedProjectRawJson && typeof selectedProjectRawJson === "object")
+      ? ((selectedProjectRawJson.meta as Record<string, unknown> | undefined) ?? null)
+      : null;
+    const productionStartYear = meta && Number.isFinite(meta.productionStartYear)
+      ? String(meta.productionStartYear)
+      : (typeof meta?.productionStartYear === "string" && meta.productionStartYear.trim() ? meta.productionStartYear.trim() : "");
+    return productionStartYear ? `VID PRODUKTIONSSTART ${productionStartYear}` : "VID PRODUKTIONSSTART";
+  }, [selectedProjectRawJson]);
+
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
     const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
@@ -3220,6 +3233,22 @@ Capital Available: ${availableLabel}`,
                   ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
                     <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary><h2 className="subrub small">{title}</h2></summary>
+                      {sectionKey === "list2" && (
+                        <ValueRangeSnapshotCard
+                          priceToday={
+                            projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value > 0
+                              ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesCurrent.value
+                              : null
+                          }
+                          npvLow={projectViewMetrics.list2.NPV_Target?.value ?? null}
+                          npvHigh={projectViewMetrics.list2.NPV_Target?.value ?? null}
+                          tpLow={projectViewMetrics.list2.DCF_Target?.value ?? null}
+                          tpHigh={projectViewMetrics.list2.DCF_Target?.value ?? null}
+                          currencyCode={lockedTargetCurrency}
+                          todayLabel={snapshotTodayLabel}
+                          prodStartLabel={snapshotProdStartLabel}
+                        />
+                      )}
                       <div className="compact-metrics-grid">
                         {((sectionKey === "list2")
                           ? projectSectionMetricOrder.list2
