@@ -178,6 +178,12 @@ function ratio(num: NullableNumber, den: NullableNumber): MetricValue {
   return mv(num / den, null);
 }
 
+function perShareMetric(value: NullableNumber, shares: NullableNumber, missingValueReason: string): MetricValue {
+  if (!finite(value)) return mv(null, missingValueReason);
+  if (!finite(shares) || shares <= 0) return mv(null, 'shares_post_financing <= 0');
+  return mv(value / shares, null);
+}
+
 export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectViewMetrics {
   const fx = finite(input.fxUSDToTarget) && input.fxUSDToTarget > 0 ? input.fxUSDToTarget : null;
   const r = finite(input.discountRate) && input.discountRate > 0 ? input.discountRate : null;
@@ -241,6 +247,14 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   })() : null;
 
   const dcfTarget = dcfProdStartExCapexUSD !== null && fx !== null ? dcfProdStartExCapexUSD * fx : null;
+
+  const npvProdStartUSD = dcfProdStartExCapexUSD !== null && initialCapexUSD !== null
+    ? dcfProdStartExCapexUSD - Math.abs(initialCapexUSD)
+    : null;
+  const npvProdStartTarget = npvProdStartUSD !== null && fx !== null ? npvProdStartUSD * fx : null;
+  const navProdStartTarget = npvProdStartTarget !== null && cashT0 !== null && debtT0 !== null
+    ? npvProdStartTarget + (cashT0 - debtT0)
+    : null;
 
   const dcfProdStartPresentUSD = dcfProdStartExCapexUSD !== null && tp !== null && r !== null
     ? dcfProdStartExCapexUSD / ((1 + r) ** tp)
@@ -325,8 +339,46 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     list2: {
       NPV_Target: mv(npvTarget, r === null ? 'Missing discountRate r' : (fx === null ? 'Missing fx_USD_to_TargetCurrency' : 'Missing series fcfUSD')),
       NPV_perShare: ratio(npvTarget, sharesPf),
+      NPV_prodStart: mv(
+        npvProdStartTarget,
+        initialCapexUSD === null
+          ? 'Missing Initial_CAPEX_USD'
+          : (dcfProdStartExCapexUSD === null
+            ? 'Missing DCF_prodStart_exCapex_USD'
+            : 'Missing fx'),
+      ),
+      NPV_prodStart_perShare: perShareMetric(
+        npvProdStartTarget,
+        sharesPf,
+        initialCapexUSD === null
+          ? 'Missing Initial_CAPEX_USD'
+          : (dcfProdStartExCapexUSD === null
+            ? 'Missing DCF_prodStart_exCapex_USD'
+            : 'Missing fx'),
+      ),
       NAV_Target: mv(navTarget, npvTarget === null ? 'Missing NPV_Target' : 'Missing cash_t0 or debt_t0'),
       NAV_perShare: ratio(navTarget, sharesPf),
+      NAV_prodStart: mv(
+        navProdStartTarget,
+        npvProdStartTarget === null
+          ? (initialCapexUSD === null
+            ? 'Missing Initial_CAPEX_USD'
+            : (dcfProdStartExCapexUSD === null
+              ? 'Missing DCF_prodStart_exCapex_USD'
+              : 'Missing fx'))
+          : 'Missing cash_t0 or debt_t0',
+      ),
+      NAV_prodStart_perShare: perShareMetric(
+        navProdStartTarget,
+        sharesPf,
+        npvProdStartTarget === null
+          ? (initialCapexUSD === null
+            ? 'Missing Initial_CAPEX_USD'
+            : (dcfProdStartExCapexUSD === null
+              ? 'Missing DCF_prodStart_exCapex_USD'
+              : 'Missing fx'))
+          : 'Missing cash_t0 or debt_t0',
+      ),
       CF_LOM_Target: mv(cfLomTarget, fx === null ? 'Missing fx_USD_to_TargetCurrency' : 'Missing series fcfUSD'),
       CF_LOM_Target_perShare: ratio(cfLomTarget, sharesPf),
       DCF_Target: mv(dcfTarget, tp === null ? 'Missing tp' : (r === null ? 'Missing discountRate r' : (fx === null ? 'Missing fx_USD_to_TargetCurrency' : 'Missing series fcfUSD'))),

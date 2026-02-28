@@ -7,8 +7,6 @@ type ValueRangeSnapshotCardProps = {
   tpLow?: number | null;
   tpHigh?: number | null;
   currencyCode?: string;
-  todayLabel?: string;
-  prodStartLabel?: string;
 };
 
 const Y_TOP = 40;
@@ -40,8 +38,6 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     tpLow,
     tpHigh,
     currencyCode,
-    todayLabel = "IDAG",
-    prodStartLabel = "VID PRODUKTIONSSTART",
   } = props;
 
   const npvRange = useMemo(() => {
@@ -89,39 +85,29 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
   const hasPrice = isFiniteNumber(priceToday) && points.priceY !== null;
 
   return (
-    <section className="producer-core-section" style={{ marginTop: 8 }}>
-      <div className="producer-core-title-row" style={{ marginBottom: 6 }}>
-        <h3 className="subrub small" style={{ margin: 0 }}>Värdebild (snapshot)</h3>
-      </div>
-      <p className="bread" style={{ margin: "0 0 8px 0", fontSize: 11 }}>Pris vs Nuvärde vs TP-intervall</p>
-      <div className="project-value-snapshot-wrap">
-        {!hasNpv && !hasTp ? (
-          <p className="status empty" style={{ margin: 0 }}>Saknar intervall-data (NPV/TP)</p>
-        ) : (
-          <svg viewBox="0 0 360 200" role="img" aria-label="Snapshot med NPV- och TP-intervall" style={{ width: "100%", height: "100%" }}>
+    <div style={{ marginTop: 8 }}>
+      {!hasNpv && !hasTp ? (
+        <p className="status empty" style={{ margin: 0 }}>Saknar intervall-data (NPV/TP)</p>
+      ) : (
+        <div className="project-value-snapshot-wrap">
+          <svg viewBox="0 0 360 190" role="img" aria-label="Snapshot med NPV- och TP-intervall per aktie" style={{ width: "100%", height: "100%" }}>
             {hasNpv && hasTp && (
-              <>
-                <line x1={110} y1={(points.npvHighY! + points.npvLowY!) / 2} x2={270} y2={(points.tpHighY! + points.tpLowY!) / 2} stroke="#d1d5db" strokeWidth={2} />
-                <line x1={110} y1={points.npvHighY!} x2={270} y2={points.tpHighY!} stroke="#e5e7eb" strokeWidth={1.5} />
-                <line x1={110} y1={points.npvLowY!} x2={270} y2={points.tpLowY!} stroke="#e5e7eb" strokeWidth={1.5} />
-              </>
+              <polygon
+                points={`110,${points.npvHighY!} 270,${points.tpHighY!} 270,${points.tpLowY!} 110,${points.npvLowY!}`}
+                fill="rgba(59, 130, 246, 0.16)"
+                stroke="rgba(59, 130, 246, 0.35)"
+                strokeWidth={1.25}
+              />
             )}
 
             {hasNpv ? (
               <>
                 <line x1={110} y1={points.npvHighY!} x2={110} y2={points.npvLowY!} stroke="#2563eb" strokeWidth={10} strokeLinecap="round" />
-                <text x={22} y={points.npvHighY! + 4} fontSize={11} fill="#1f2937">{formatCompactValue(npvRange.high, currencyCode)}</text>
-                <text x={22} y={points.npvLowY! + 4} fontSize={11} fill="#1f2937">{formatCompactValue(npvRange.low, currencyCode)}</text>
+                <text x={30} y={points.npvHighY! + 4} fontSize={11} fill="#1f2937">{formatCompactValue(npvRange.high, currencyCode)}</text>
+                <text x={30} y={points.npvLowY! + 4} fontSize={11} fill="#1f2937">{formatCompactValue(npvRange.low, currencyCode)}</text>
               </>
             ) : (
               <text x={95} y={105} fontSize={11} fill="#6b7280">n/a</text>
-            )}
-
-            {hasPrice && (
-              <>
-                <circle cx={110} cy={points.priceY!} r={5} fill="#dc2626" />
-                <text x={22} y={points.priceY! - 6} fontSize={11} fill="#dc2626">{formatCompactValue(priceToday, currencyCode)}</text>
-              </>
             )}
 
             {hasTp ? (
@@ -134,11 +120,15 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               <text x={255} y={105} fontSize={11} fill="#6b7280">n/a</text>
             )}
 
-            <text x={52} y={184} fontSize={10} fill="#374151">{todayLabel}</text>
-            <text x={220} y={184} fontSize={10} fill="#374151">{prodStartLabel}</text>
+            {hasPrice && (
+              <>
+                <circle cx={110} cy={points.priceY!} r={5} fill="#dc2626" />
+                <text x={30} y={points.priceY! - 6} fontSize={11} fill="#dc2626">{formatCompactValue(priceToday, currencyCode)}</text>
+              </>
+            )}
           </svg>
-        )}
-      </div>
-    </section>
+        </div>
+      )}
+    </div>
   );
 }
