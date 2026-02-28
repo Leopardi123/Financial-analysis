@@ -3057,35 +3057,42 @@ Capital Available: ${availableLabel}`,
               {projectSnapshotError && <p className="status error">{projectSnapshotError}</p>}
 
               {projectViewMetrics && (
-                <section style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                  <h2 className="subrub small" style={{ margin: 0 }}>Market Box</h2>
-                  <div className="project-kpi-grid compact">
-                    {[
-                      { label: "MarketCap (current)", value: projectViewMetrics.marketBox.marketCapCurrent, kind: "money" as const },
-                      { label: "EV (current)", value: projectViewMetrics.marketBox.evCurrent, kind: "money" as const },
-                      { label: "Shares Current", value: projectViewMetrics.marketBox.sharesCurrent, kind: "integer" as const },
-                      { label: "Shares PF", value: projectViewMetrics.marketBox.sharesPf, kind: "integer" as const },
-                    ].map((metric) => (
-                      <div key={metric.label} className="producer-card project-kpi-card">
-                        <div className="producer-core-title-row" style={{ marginBottom: 4 }}>
-                          <h3 style={{ margin: 0 }}>{metric.label}</h3>
-                          <InfoPopover
-                            id={`project-market-${metric.label}`}
-                            openId={openInfoId}
-                            onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
-                            onClose={() => setOpenInfoId(null)}
-                            title={metric.label}
-                            sections={[
-                              { heading: "Definition", lines: ["Project view market metric."] },
-                              { heading: "Formula", lines: [metric.label.includes("MarketCap") ? "MarketCap_current = price_current × shares_current" : metric.label.includes("EV") ? "EV = MarketCap_current + debt_t0 - cash_t0 + EnterpriseAdjustments" : "Per financing equations in List 5."] },
-                              { heading: "Basis / Unit / Null", lines: ["Basis: equity for MarketCap, enterprise for EV.", `Unit: ${metric.kind === "money" ? lockedTargetCurrency : "shares"}.`, metric.value.nullReason ?? "Null: n/a only when required inputs are missing."] },
-                              { heading: "Interpretation", lines: ["Use current MarketCap and financing-adjusted PF shares for dilution context."] },
-                            ]}
-                          />
-                        </div>
-                        <p>{formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}</p>
+                <section className="project-producer-layout" style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                  <div className="producer-core-compact-card">
+                    <section className="producer-core-section">
+                      <div className="producer-core-title-row">
+                        <h2 className="subrub small">Market Box</h2>
                       </div>
-                    ))}
+                      <div className="compact-metrics-grid">
+                        {[
+                          { label: "MarketCap (current)", value: projectViewMetrics.marketBox.marketCapCurrent, kind: "money" as const },
+                          { label: "EV (current)", value: projectViewMetrics.marketBox.evCurrent, kind: "money" as const },
+                          { label: "Shares Current", value: projectViewMetrics.marketBox.sharesCurrent, kind: "integer" as const },
+                          { label: "Shares PF", value: projectViewMetrics.marketBox.sharesPf, kind: "integer" as const },
+                        ].map((metric) => (
+                          <div key={metric.label} className="compact-metric-row">
+                            <span className="compact-metric-label-wrap">
+                              <span className="compact-metric-label">{metric.label}</span>
+                              <InfoPopover
+                                id={`project-market-${metric.label}`}
+                                openId={openInfoId}
+                                onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                                onClose={() => setOpenInfoId(null)}
+                                title={metric.label}
+                                sections={[
+                                  { heading: "Definition", lines: ["Project view market metric."] },
+                                  { heading: "Formula", lines: [metric.label.includes("MarketCap") ? "MarketCap_current = price_current × shares_current" : metric.label.includes("EV") ? "EV = MarketCap_current + debt_t0 - cash_t0 + EnterpriseAdjustments" : "Per financing equations in List 5."] },
+                                  { heading: "Basis / Unit / Null", lines: ["Basis: equity for MarketCap, enterprise for EV.", `Unit: ${metric.kind === "money" ? lockedTargetCurrency : "shares"}.`, metric.value.nullReason ?? "Null: n/a only when required inputs are missing."] },
+                                  { heading: "Interpretation", lines: ["Use current MarketCap and financing-adjusted PF shares for dilution context."] },
+                                ]}
+                              />
+                            </span>
+                            <span className="compact-metric-dots" />
+                            <span className="compact-metric-value">{formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
                   </div>
 
                   {([
@@ -3094,13 +3101,13 @@ Capital Available: ${availableLabel}`,
                     ["list4", "List 4 — 10Y / In Situ", projectViewMetrics.list4],
                     ["list6", "List 6 — M&A", projectViewMetrics.list6],
                   ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
-                    <details key={sectionKey} open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
-                      <summary>{title}</summary>
-                      <div className="project-kpi-grid compact" style={{ marginTop: 8 }}>
+                    <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
+                      <summary><h2 className="subrub small">{title}</h2></summary>
+                      <div className="compact-metrics-grid">
                         {Object.entries(metrics).map(([key, value]) => (
-                          <div key={key} className="producer-card project-kpi-card">
-                            <div className="producer-core-title-row" style={{ marginBottom: 4 }}>
-                              <h3 style={{ margin: 0 }}>{key}</h3>
+                          <div key={key} className="compact-metric-row">
+                            <span className="compact-metric-label-wrap">
+                              <span className="compact-metric-label">{key}</span>
                               <InfoPopover
                                 id={`project-${sectionKey}-${key}`}
                                 openId={openInfoId}
@@ -3114,26 +3121,27 @@ Capital Available: ${availableLabel}`,
                                   { heading: "Interpretation", lines: ["Higher/lower significance depends on metric type and project stage."] },
                                 ]}
                               />
-                            </div>
-                            <p>{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key.includes("pct") ? "percent" : key === "TP" || key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}</p>
+                            </span>
+                            <span className="compact-metric-dots" />
+                            <span className="compact-metric-value">{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key.includes("pct") ? "percent" : key === "TP" || key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}</span>
                           </div>
                         ))}
                       </div>
                     </details>
                   ))}
 
-                  <details open={projectSectionsOpen.list5} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list5: open })); }}>
-                    <summary>List 5 — Financing (interactive)</summary>
+                  <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list5} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list5: open })); }}>
+                    <summary><h2 className="subrub small">List 5 — Financing (interactive)</h2></summary>
                     <div className="rr-input-row" style={{ marginTop: 8 }}>
                       <label>Equity %<input value={projectEquityPct} onChange={(event) => setProjectEquityPct(event.target.value)} /></label>
                       <label>Debt %<input value={projectDebtPct} onChange={(event) => setProjectDebtPct(event.target.value)} /></label>
                       <label>Cash Used ({lockedTargetCurrency})<input value={projectCashUsedTarget} onChange={(event) => setProjectCashUsedTarget(event.target.value)} /></label>
                     </div>
-                    <div className="project-kpi-grid compact">
+                    <div className="compact-metrics-grid">
                       {Object.entries(projectViewMetrics.list5).map(([key, value]) => (
-                        <div key={key} className="producer-card project-kpi-card">
-                          <div className="producer-core-title-row" style={{ marginBottom: 4 }}>
-                            <h3 style={{ margin: 0 }}>{key}</h3>
+                        <div key={key} className="compact-metric-row">
+                          <span className="compact-metric-label-wrap">
+                            <span className="compact-metric-label">{key}</span>
                             <InfoPopover
                               id={`project-list5-${key}`}
                               openId={openInfoId}
@@ -3147,8 +3155,9 @@ Capital Available: ${availableLabel}`,
                                 { heading: "Interpretation", lines: ["Shows dilution and balance-sheet impact of funding plan."] },
                               ]}
                             />
-                          </div>
-                          <p>{formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency)}</p>
+                          </span>
+                          <span className="compact-metric-dots" />
+                          <span className="compact-metric-value">{formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency)}</span>
                         </div>
                       ))}
                     </div>
