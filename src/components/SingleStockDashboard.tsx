@@ -12,6 +12,7 @@ import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { buildOperationsGridModel } from "../pages/projectOperationsGrid.ts";
+import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import {
   buildSeries,
   buildSeriesData,
@@ -71,6 +72,31 @@ function formatPanelValue(value: unknown): string {
   }
   return "—";
 }
+
+function formatCompactNumber(value: number, digits = 1): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(digits)}B`;
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(digits)}M`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(digits)}k`;
+  return value.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
+}
+
+function formatMetricValue(value: MetricValue, kind: "money" | "percent" | "multiple" | "decimal" | "integer", unit?: string): string {
+  if (value.value === null) return "n/a";
+  if (kind === "percent") return `${value.value.toFixed(1)}%`;
+  if (kind === "multiple") return `${value.value.toFixed(2)}x`;
+  if (kind === "integer") return `${Math.round(value.value)}`;
+  if (kind === "decimal") return value.value.toFixed(1);
+  return `${formatCompactNumber(value.value, 1)}${unit ? ` ${unit}` : ""}`;
+}
+
+const PROJECT_SECTION_DEFAULT_OPEN: Record<string, boolean> = {
+  list2: true,
+  list3: false,
+  list4: false,
+  list6: false,
+  list5: true,
+};
 
 
 
@@ -764,6 +790,10 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
   const [selectedProjectRawJson, setSelectedProjectRawJson] = useState<Record<string, unknown> | null>(null);
+  const [projectEquityPct, setProjectEquityPct] = useState("100");
+  const [projectDebtPct, setProjectDebtPct] = useState("0");
+  const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
+  const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
 
   const [snapshotDiscountRateInput] = useState("0.10");
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
@@ -1915,22 +1945,40 @@ Capital Available: ${availableLabel}`,
     yAxisTitle: statementCurrency,
   };
 
-  const projectSnapshotMetrics = (() => {
-    if (!projectSnapshotData) return [] as Array<{ label: string; value: unknown }>;
-    const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
+  const projectViewMetrics = useMemo(() => {
+    if (!projectSnapshotData) return null;
     const financing = (projectSnapshotData.financing ?? {}) as Record<string, unknown>;
+    const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const aggregation = (projectSnapshotData.aggregation ?? {}) as Record<string, unknown>;
+    const series = (projectSnapshotData.series ?? {}) as Record<string, unknown>;
+    const marketInput = (projectSnapshotData.marketInput ?? {}) as Record<string, unknown>;
 
-    return [
-      { label: "NPV_today_TargetCurrency", value: projectSnapshotData.NPV_today_TargetCurrency },
-      { label: "NAV_today_TargetCurrency", value: projectSnapshotData.NAV_today_TargetCurrency },
-      { label: "EV_TargetCurrency", value: marketValue.EV_TargetCurrency },
-      { label: "EV_over_NPV", value: marketValue.EV_over_NPV },
-      { label: "P_over_NAV", value: marketValue.P_over_NAV },
-      { label: "AISC_AuEq_USD_per_Oz_LOM", value: aggregation.aiscAuEqUSDPerOz_LOM },
-      { label: "shares_post_financing", value: financing.shares_post_financing },
-    ];
-  })();
+    const asSeries = (raw: unknown): Array<number | null> => (Array.isArray(raw) ? raw.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null)) : []);
+    const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
+    const fx = asNum(projectSnapshotData.fx_USD_to_TargetCurrency) ?? (typeof projectSnapshotData.targetCurrency === "string" && projectSnapshotData.targetCurrency === "USD" ? 1 : null);
+
+    return computeProjectViewMetrics({
+      targetCurrency: String(projectSnapshotData.targetCurrency ?? lockedTargetCurrency),
+      fxUSDToTarget: fx,
+      sharesCurrent: asNum(marketInput.shares_current) ?? asNum(financing.shares_post_financing),
+      priceCurrentTarget: asNum(marketInput.price_current_TargetCurrency),
+      cashCurrentTarget: asNum(financing.cash_t0_post_TargetCurrency),
+      debtCurrentTarget: asNum(financing.debt_t0_post_TargetCurrency),
+      enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
+      fcfUSD: asSeries(series.fcffUSD),
+      capexUSD: asSeries(series.capexUSD),
+      grossRevenueUSD: asSeries(series.totalRevenue_USD),
+      ebitUSD: asSeries(series.ebitUSD),
+      payableAuEqOz: asSeries(series.payableAuEqOz),
+      sustainingCostUSD: asSeries(series.sustainingCostUSD),
+      productionStartPeriod: Number.isInteger(aggregation.productionStartPeriod) ? Number(aggregation.productionStartPeriod) : null,
+      financing: {
+        equityPct: toInputNumber(projectEquityPct) ?? 100,
+        debtPct: toInputNumber(projectDebtPct) ?? 0,
+        cashUsedInput: toInputNumber(projectCashUsedTarget) ?? 0,
+      },
+    });
+  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, lockedTargetCurrency]);
 
 
   const parsedSelectedProject = useMemo(() => {
@@ -3008,15 +3056,104 @@ Capital Available: ${availableLabel}`,
               {projectSnapshotLoading && <p className="bread">Running snapshot…</p>}
               {projectSnapshotError && <p className="status error">{projectSnapshotError}</p>}
 
-              {projectSnapshotMetrics.length > 0 && (
-                <div style={{ marginTop: 16, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-                  {projectSnapshotMetrics.map((metric) => (
-                    <div key={metric.label} className="producer-card">
-                      <h3>{metric.label}</h3>
-                      <p>{formatPanelValue(metric.value)}</p>
-                    </div>
+              {projectViewMetrics && (
+                <section style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                  <h2 className="subrub small" style={{ margin: 0 }}>Market Box</h2>
+                  <div className="project-kpi-grid compact">
+                    {[
+                      { label: "MarketCap (current)", value: projectViewMetrics.marketBox.marketCapCurrent, kind: "money" as const },
+                      { label: "EV (current)", value: projectViewMetrics.marketBox.evCurrent, kind: "money" as const },
+                      { label: "Shares Current", value: projectViewMetrics.marketBox.sharesCurrent, kind: "integer" as const },
+                      { label: "Shares PF", value: projectViewMetrics.marketBox.sharesPf, kind: "integer" as const },
+                    ].map((metric) => (
+                      <div key={metric.label} className="producer-card project-kpi-card">
+                        <div className="producer-core-title-row" style={{ marginBottom: 4 }}>
+                          <h3 style={{ margin: 0 }}>{metric.label}</h3>
+                          <InfoPopover
+                            id={`project-market-${metric.label}`}
+                            openId={openInfoId}
+                            onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                            onClose={() => setOpenInfoId(null)}
+                            title={metric.label}
+                            sections={[
+                              { heading: "Definition", lines: ["Project view market metric."] },
+                              { heading: "Formula", lines: [metric.label.includes("MarketCap") ? "MarketCap_current = price_current × shares_current" : metric.label.includes("EV") ? "EV = MarketCap_current + debt_t0 - cash_t0 + EnterpriseAdjustments" : "Per financing equations in List 5."] },
+                              { heading: "Basis / Unit / Null", lines: ["Basis: equity for MarketCap, enterprise for EV.", `Unit: ${metric.kind === "money" ? lockedTargetCurrency : "shares"}.`, metric.value.nullReason ?? "Null: n/a only when required inputs are missing."] },
+                              { heading: "Interpretation", lines: ["Use current MarketCap and financing-adjusted PF shares for dilution context."] },
+                            ]}
+                          />
+                        </div>
+                        <p>{formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {([
+                    ["list2", "List 2 — CF + Valuation + Production", projectViewMetrics.list2],
+                    ["list3", "List 3 — Efficiency", projectViewMetrics.list3],
+                    ["list4", "List 4 — 10Y / In Situ", projectViewMetrics.list4],
+                    ["list6", "List 6 — M&A", projectViewMetrics.list6],
+                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
+                    <details key={sectionKey} open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
+                      <summary>{title}</summary>
+                      <div className="project-kpi-grid compact" style={{ marginTop: 8 }}>
+                        {Object.entries(metrics).map(([key, value]) => (
+                          <div key={key} className="producer-card project-kpi-card">
+                            <div className="producer-core-title-row" style={{ marginBottom: 4 }}>
+                              <h3 style={{ margin: 0 }}>{key}</h3>
+                              <InfoPopover
+                                id={`project-${sectionKey}-${key}`}
+                                openId={openInfoId}
+                                onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                                onClose={() => setOpenInfoId(null)}
+                                title={key}
+                                sections={[
+                                  { heading: "Definition", lines: ["Project KPI in pre-revenue strict mode."] },
+                                  { heading: "Formula", lines: ["Exact formula implemented in computeProjectViewMetrics helper."] },
+                                  { heading: "Basis / Unit / Null", lines: ["Basis: enterprise/equity per metric family.", "Unit auto-formatted.", value.nullReason ?? "Null rule: returns n/a when input requirements fail."] },
+                                  { heading: "Interpretation", lines: ["Higher/lower significance depends on metric type and project stage."] },
+                                ]}
+                              />
+                            </div>
+                            <p>{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key.includes("pct") ? "percent" : key === "TP" || key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
                   ))}
-                </div>
+
+                  <details open={projectSectionsOpen.list5} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list5: open })); }}>
+                    <summary>List 5 — Financing (interactive)</summary>
+                    <div className="rr-input-row" style={{ marginTop: 8 }}>
+                      <label>Equity %<input value={projectEquityPct} onChange={(event) => setProjectEquityPct(event.target.value)} /></label>
+                      <label>Debt %<input value={projectDebtPct} onChange={(event) => setProjectDebtPct(event.target.value)} /></label>
+                      <label>Cash Used ({lockedTargetCurrency})<input value={projectCashUsedTarget} onChange={(event) => setProjectCashUsedTarget(event.target.value)} /></label>
+                    </div>
+                    <div className="project-kpi-grid compact">
+                      {Object.entries(projectViewMetrics.list5).map(([key, value]) => (
+                        <div key={key} className="producer-card project-kpi-card">
+                          <div className="producer-core-title-row" style={{ marginBottom: 4 }}>
+                            <h3 style={{ margin: 0 }}>{key}</h3>
+                            <InfoPopover
+                              id={`project-list5-${key}`}
+                              openId={openInfoId}
+                              onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                              onClose={() => setOpenInfoId(null)}
+                              title={key}
+                              sections={[
+                                { heading: "Definition", lines: ["Financing block metric (does not alter operations series)."] },
+                                { heading: "Formula", lines: ["Computed from Initial CAPEX, cash-first usage, and debt/equity split."] },
+                                { heading: "Basis / Unit / Null", lines: ["Basis: financing and capital structure.", `Unit: ${lockedTargetCurrency} / shares.`, value.nullReason ?? "Null: n/a if required source is missing."] },
+                                { heading: "Interpretation", lines: ["Shows dilution and balance-sheet impact of funding plan."] },
+                              ]}
+                            />
+                          </div>
+                          <p>{formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </section>
               )}
 
               {projectExcelGrid && (
