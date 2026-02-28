@@ -106,6 +106,32 @@ const notBracketed = computeProjectViewMetrics({
 assert.equal(notBracketed.list3.IRR.value, null);
 assert.equal(notBracketed.list3.IRR.reason, 'IRR not bracketed up to 1000%');
 
+
+const consistencyGuard = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 11,
+  sharesCurrent: 10,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [0, 100, -90, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+  capexUSD: [-100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  grossRevenueUSD: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  ebitUSD: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  payableAuEqOz: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  sustainingCostUSD: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  productionStartPeriod: 1,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assert.equal(consistencyGuard.list3.Payback_real.value, 1);
+assert.ok((consistencyGuard.list3.ROI_10Y.value as number) > 0);
+assert.equal(consistencyGuard.list3.IRR.value, null);
+assert.equal(consistencyGuard.list3.IRR.reason, 'IRR inconsistent with payback/ROI (likely series bug)');
+
+
 const noDiscount = computeProjectViewMetrics({
   targetCurrency: 'USD',
   fxUSDToTarget: 1,

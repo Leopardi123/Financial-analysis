@@ -9,6 +9,9 @@ type FinancingInput = {
 };
 
 export type ProjectViewInputs = {
+  meta?: {
+    projectId?: string | null;
+  };
   targetCurrency: string;
   fxUSDToTarget: NullableNumber;
   discountRate: NullableNumber;
@@ -106,17 +109,16 @@ function sumSustainingCostsWherePayablePositive(costs: Series, payable: Series, 
   return { sumCost, sumPay };
 }
 
-function buildEnterpriseIrrSeries(args: {
+function buildCanonicalEnterpriseCashflows(args: {
   fcfUSD: Series;
   masterN: number;
-  tp: number;
   initialCapexUSD: number;
 }): number[] | null {
   if (args.masterN < 0 || args.masterN >= args.fcfUSD.length) return null;
   const cashflows = args.fcfUSD.slice(0, args.masterN + 1);
   if (cashflows.length !== args.masterN + 1) return null;
   cashflows[0] = -Math.abs(args.initialCapexUSD);
-  for (let t = args.tp; t <= args.masterN; t += 1) {
+  for (let t = 1; t <= args.masterN; t += 1) {
     const fcff = args.fcfUSD[t];
     if (!finite(fcff)) return null;
     cashflows[t] = fcff;
@@ -264,6 +266,8 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const tp = Number.isInteger(input.productionStartPeriod) ? input.productionStartPeriod as number : null;
   const masterN = Number.isInteger(input.masterN) ? input.masterN as number : null;
 
+  const debugCashflow = input.meta?.projectId === 'p2' || process.env.NODE_ENV !== 'production';
+
   const debtFrac = Math.max(0, Math.min(1, input.financing.debtPct / 100));
   const equityFracRaw = Math.max(0, Math.min(1, input.financing.equityPct / 100));
   const normBase = debtFrac + equityFracRaw;
@@ -359,63 +363,45 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     return null;
   })() : null;
 
-  const paybackReal = initialCapexUSD !== null && tp !== null ? (() => {
-    let cum = 0;
-    for (let i = tp; i < input.fcfUSD.length; i += 1) {
-      const v = input.fcfUSD[i];
-      if (!finite(v)) return null;
+  const cashflows = (
+    masterN !== null
+    && initialCapexUSD !== null
+    && initialCapexUSD > 0
+  )
+    ? buildCanonicalEnterpriseCashflows({
+      fcfUSD: input.fcfUSD,
+      masterN,
+      initialCapexUSD,
+    })
+    : null;
+
+  const paybackCashflows = cashflows;
+  const irrCashflows = cashflows;
+
+  const paybackReal = paybackCashflows !== null ? (() => {
+    let cum = paybackCashflows[0] as number;
+    if (cum >= 0) return 0;
+    for (let i = 1; i < paybackCashflows.length; i += 1) {
+      const v = paybackCashflows[i] as number;
       const cumBefore = cum;
       cum += v;
-      if (cum >= initialCapexUSD) {
+      if (cum >= 0) {
         if (v <= 0) return null;
-        const remainingBefore = initialCapexUSD - cumBefore;
+        const remainingBefore = -cumBefore;
         const fraction = remainingBefore / v;
-        const result = (i - tp) + fraction;
+        const result = (i - 1) + fraction;
         return Math.round(result * 10) / 10;
       }
     }
     return null;
   })() : null;
 
-  const irrSeries = (
-    masterN !== null
-    && tp !== null
-    && initialCapexUSD !== null
-    && initialCapexUSD > 0
-  )
-    ? buildEnterpriseIrrSeries({
-      fcfUSD: input.fcfUSD,
-      masterN,
-      tp,
-      initialCapexUSD,
-    })
-    : null;
-  const hasIrrSignChange = irrSeries !== null
-    && irrSeries.some((v) => v < 0)
-    && irrSeries.some((v) => v > 0);
-  const irrSolve = irrSeries !== null ? computeIrr(irrSeries) : { value: null, reason: 'Missing series fcfUSD', bracketFound: false };
-  const irr = irrSolve.value;
-
-  if (paybackReal !== null && !hasIrrSignChange) {
-    console.error('IRR series invalid despite payback');
-  }
-
-  if (paybackReal !== null && irr === null) {
-    const debugSeries = irrSeries ?? [];
-    const finiteSeries = debugSeries.filter((v): v is number => finite(v));
-    const minCashflow = finiteSeries.length > 0 ? Math.min(...finiteSeries) : null;
-    const maxCashflow = finiteSeries.length > 0 ? Math.max(...finiteSeries) : null;
-    console.warn('IRR null despite payback', {
-      first6Cashflows: debugSeries.slice(0, 6),
-      minCashflow,
-      maxCashflow,
-      bracketFound: irrSolve.bracketFound,
-    });
-  }
-
-  if (paybackReal !== null && irr !== null && irr <= 0) {
-    console.warn('IRR inconsistency with payback');
-  }
+  const hasIrrSignChange = irrCashflows !== null
+    && irrCashflows.some((v) => v < 0)
+    && irrCashflows.some((v) => v > 0);
+  const irrSolve = irrCashflows !== null ? computeIrr(irrCashflows) : { value: null, reason: 'Missing series fcfUSD', bracketFound: false };
+  let irr = irrSolve.value;
+  let irrReason = irrSolve.reason;
 
   const roi10y = tp !== null && masterN !== null && initialCapexUSD !== null ? (() => {
     const end = Math.min(tp + 9, masterN);
@@ -432,6 +418,59 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     if (count === 0 || initialCapexUSD === 0) return null;
     return sum / Math.abs(initialCapexUSD);
   })() : null;
+
+  if (paybackReal !== null && roi10y !== null && roi10y > 0 && irr !== null && irr <= 0) {
+    irr = null;
+    irrReason = 'IRR inconsistent with payback/ROI (likely series bug)';
+  }
+
+  if (debugCashflow) {
+    const debugSeries = cashflows ?? [];
+    const finiteSeries = debugSeries.filter((v): v is number => finite(v));
+    const minCashflow = finiteSeries.length > 0 ? Math.min(...finiteSeries) : null;
+    const maxCashflow = finiteSeries.length > 0 ? Math.max(...finiteSeries) : null;
+    const countNeg = finiteSeries.filter((v) => v < 0).length;
+    const countPos = finiteSeries.filter((v) => v > 0).length;
+    const indexedFirst8 = debugSeries.slice(0, 8).map((value, idx) => ({ idx, value }));
+    console.log('projectCashflowDebug', {
+      projectId: input.meta?.projectId ?? null,
+      sameSeriesForPaybackAndIRR: paybackCashflows === irrCashflows,
+      first8Cashflows: indexedFirst8,
+      minCashflow,
+      maxCashflow,
+      countNeg,
+      countPos,
+      tp,
+      masterN,
+      payback_real: paybackReal,
+      irr,
+    });
+  }
+
+  if (paybackCashflows !== irrCashflows) {
+    console.error('Payback and IRR cashflows must reference the exact same array.');
+  }
+
+  if (paybackReal !== null && !hasIrrSignChange) {
+    console.error('IRR series invalid despite payback');
+  }
+
+  if (paybackReal !== null && irr === null) {
+    const debugSeries = irrCashflows ?? [];
+    const finiteSeries = debugSeries.filter((v): v is number => finite(v));
+    const minCashflow = finiteSeries.length > 0 ? Math.min(...finiteSeries) : null;
+    const maxCashflow = finiteSeries.length > 0 ? Math.max(...finiteSeries) : null;
+    console.warn('IRR null despite payback', {
+      first6Cashflows: debugSeries.slice(0, 6),
+      minCashflow,
+      maxCashflow,
+      bracketFound: irrSolve.bracketFound,
+    });
+  }
+
+  if (paybackReal !== null && irr !== null && irr <= 0) {
+    console.warn('IRR inconsistency with payback');
+  }
 
   const ebitFinite = input.ebitUSD.filter((v): v is number => finite(v));
   const avgEbit = ebitFinite.length > 0 ? avg(ebitFinite) : null;
@@ -519,9 +558,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
             ? 'Missing tp'
             : (initialCapexUSD === null
               ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
-              : (irrSeries === null
+              : (irrCashflows === null
                 ? 'Missing series fcfUSD'
-                : (irrSolve.reason ?? 'IRR could not be solved')))),
+                : (irrReason ?? 'IRR could not be solved')))),
       ),
       ROI_10Y: mv(
         roi10y,
