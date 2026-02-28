@@ -800,7 +800,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
 
-  const [snapshotDiscountRateInput] = useState("0.10");
+  const [riskAdjustedDiscountRatePctInput, setRiskAdjustedDiscountRatePctInput] = useState("10");
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
   const [scenarioPercentileInput] = useState("50");
@@ -1019,24 +1019,31 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   }, [ticker]);
 
   const runProjectSnapshotForProject = async (projectId: string, projectName?: string | null) => {
-    const discountRate = toInputNumber(snapshotDiscountRateInput);
+    const discountRatePct = toInputNumber(riskAdjustedDiscountRatePctInput);
+    const discountRate = typeof discountRatePct === "number" && Number.isFinite(discountRatePct)
+      ? discountRatePct / 100
+      : Number.NaN;
     const profileSharesCurrent = resolveCommonSharesCurrent({
       balance: data?.balance as Record<string, Array<number | null>> | undefined,
       income: data?.income as Record<string, Array<number | null>> | undefined,
     });
+    const profileSharesOutstanding = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding) && profile.sharesOutstanding > 0
+      ? profile.sharesOutstanding
+      : undefined;
+    const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding;
     const profilePriceCurrent = typeof profile?.price === "number" ? profile.price : undefined;
     const marketWarnings: string[] = [];
     const marketFromProfile =
-      isPositiveFinite(profileSharesCurrent ?? undefined) && isPositiveFinite(profilePriceCurrent)
+      isPositiveFinite(sharesCurrent) && isPositiveFinite(profilePriceCurrent)
         ? {
-            shares_current: profileSharesCurrent as number,
+            shares_current: sharesCurrent,
             price_current_TargetCurrency: profilePriceCurrent,
           }
         : undefined;
 
     if (!marketFromProfile) {
-      if (!isPositiveFinite(profileSharesCurrent ?? undefined)) {
-        marketWarnings.push("market.shares_current missing (resolved from statements); EV/multiples will be null.");
+      if (!isPositiveFinite(sharesCurrent)) {
+        marketWarnings.push("market.shares_current missing (resolved from statements/profile.sharesOutstanding); EV/multiples will be null.");
       }
       if (!isPositiveFinite(profilePriceCurrent)) {
         marketWarnings.push("market.price_current_TargetCurrency missing from profile.price; EV/multiples may be null.");
@@ -1085,7 +1092,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
 
       const request = buildProjectsSnapshotRequest({
         profile,
-        discountRate: discountRate ?? Number.NaN,
+        discountRate,
         scenario,
         fx: {
           source: lockedTargetCurrency === "USD" ? "manual" : fxSource,
@@ -1957,7 +1964,7 @@ Capital Available: ${availableLabel}`,
       : []);
     const inputs = getProjectInputs({
       snapshot: projectSnapshotData,
-      discountRateInput: snapshotDiscountRateInput,
+      discountRateInput: riskAdjustedDiscountRatePctInput,
       targetCurrency: lockedTargetCurrency,
     });
     const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
@@ -1986,11 +1993,11 @@ Capital Available: ${availableLabel}`,
         cashUsedInput: toInputNumber(projectCashUsedTarget) ?? 0,
       },
     });
-  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, lockedTargetCurrency, snapshotDiscountRateInput]);
+  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
-    const inputs = getProjectInputs({ snapshot: projectSnapshotData, discountRateInput: snapshotDiscountRateInput, targetCurrency: lockedTargetCurrency });
+    const inputs = getProjectInputs({ snapshot: projectSnapshotData, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
     const rows = [
       ["price_current_TargetCurrency", inputs.price],
       ["shares_current", inputs.sharesCurrent],
@@ -2018,7 +2025,7 @@ Capital Available: ${availableLabel}`,
       seriesRows,
       missing: validateProjectInputs(inputs),
     };
-  }, [projectSnapshotData, snapshotDiscountRateInput, lockedTargetCurrency]);
+  }, [projectSnapshotData, riskAdjustedDiscountRatePctInput, lockedTargetCurrency]);
 
 
   const parsedSelectedProject = useMemo(() => {
@@ -3229,6 +3236,20 @@ Capital Available: ${availableLabel}`,
                       ))}
                     </div>
                   </details>
+
+                  <div className="producer-core-compact-card">
+                    <section className="producer-core-section">
+                      <div className="producer-core-title-row">
+                        <h2 className="subrub small">Riskjusterad diskontering</h2>
+                      </div>
+                      <div className="rr-input-row" style={{ marginTop: 8 }}>
+                        <label>
+                          Diskonteringsränta (%)
+                          <input type="text" value={riskAdjustedDiscountRatePctInput} onChange={(event) => setRiskAdjustedDiscountRatePctInput(event.target.value)} />
+                        </label>
+                      </div>
+                    </section>
+                  </div>
                 </section>
               )}
 
