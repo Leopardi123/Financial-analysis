@@ -23,7 +23,7 @@ function assertAlmostEqual(actual: number | null, expected: number, message: str
   });
 
   assertAlmostEqual(simple.metrics.Payback_approx_years, 2.5, 'Payback_approx_years matches expected');
-  assertAlmostEqual(simple.metrics.Payback_real_years, 1.5, 'Payback_real_years matches expected from tp onward');
+  assertAlmostEqual(simple.metrics.Payback_real_years, 2.5, 'Payback_real_years counts from first positive production FCFF');
   assertAlmostEqual(simple.metrics.ROI_10Y_pct, 160, 'ROI_10Y_pct computes over available window');
   assertAlmostEqual(simple.metrics.LOM_average_EBIT_ROCE_pct, 60, 'LOM_average_EBIT_ROCE_pct computes average EBIT ROCE');
 
@@ -51,7 +51,20 @@ function assertAlmostEqual(actual: number | null, expected: number, message: str
     ebitUSD_total: [0, 1, 1, 1, 1],
   });
 
-  assertEqual(missingPathPoint.metrics.Payback_real_years, null, 'missing FCFF point in payback path gives null real payback');
+  assertAlmostEqual(missingPathPoint.metrics.Payback_real_years, 2, 'missing FCFF before production payback start does not block real payback');
+
+
+
+  const productionAnchored = computeLista3aProjectEfficiencyMetrics({
+    masterN: 5,
+    productionStartPeriod: 2,
+    discountRate: 0.1,
+    capexUSD_total: [90e6, 277e6, 161e6, 0, 0, 0],
+    fcffUSD_total: [-90e6, -277e6, -161e6, 329435868.88, 1086926918.88, 1086926918.88],
+    ebitUSD_total: [0, 0, 0, 1, 1, 1],
+  });
+
+  assertAlmostEqual(productionAnchored.metrics.Payback_real_years, 1.2, 'Payback_real_years anchors to first positive production FCFF period');
 
   const discounted = computeLista3aProjectEfficiencyMetrics({
     masterN: 3,

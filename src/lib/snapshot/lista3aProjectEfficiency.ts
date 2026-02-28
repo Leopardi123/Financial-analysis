@@ -34,38 +34,16 @@ function computeInitialCapexAbs(args: {
   capexUSD_total: Array<number | null>;
   productionStartPeriod: number;
 }): number | null {
-  if (args.productionStartPeriod === 0) {
-    return 0;
-  }
-
   let buildCapex = 0;
-  for (let t = 0; t < args.productionStartPeriod; t += 1) {
+  for (let t = 0; t <= args.productionStartPeriod; t += 1) {
     const capex = args.capexUSD_total[t];
     if (!finite(capex)) {
       return null;
     }
-    if (capex < 0) {
-      buildCapex += capex;
-    }
+    buildCapex += Math.abs(capex);
   }
 
-  return Math.abs(buildCapex);
-}
-
-function computePreRevenueInvestmentFromFcff(args: {
-  fcffUSD_total: Array<number | null>;
-  productionStartPeriod: number;
-}): number | null {
-  let preRevenueFcffSum = 0;
-  for (let t = 0; t < args.productionStartPeriod; t += 1) {
-    const fcff = args.fcffUSD_total[t];
-    if (!finite(fcff)) {
-      return null;
-    }
-    preRevenueFcffSum += fcff;
-  }
-
-  return Math.abs(preRevenueFcffSum);
+  return buildCapex;
 }
 
 export function computeLista3aProjectEfficiencyMetrics(args: {
@@ -109,11 +87,22 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
     return { metrics: out, warnings };
   }
 
-  const productionFcffFinite: number[] = [];
-  for (let t = tp; t <= args.masterN; t += 1) {
+  let paybackStart: number | null = null;
+  for (let t = tp + 1; t <= args.masterN; t += 1) {
     const value = args.fcffUSD_total[t];
-    if (finite(value)) {
-      productionFcffFinite.push(value);
+    if (finite(value) && value > 0) {
+      paybackStart = t;
+      break;
+    }
+  }
+
+  const productionFcffFinite: number[] = [];
+  if (paybackStart !== null) {
+    for (let t = paybackStart; t <= args.masterN; t += 1) {
+      const value = args.fcffUSD_total[t];
+      if (finite(value) && value > 0) {
+        productionFcffFinite.push(value);
+      }
     }
   }
 
@@ -128,35 +117,29 @@ export function computeLista3aProjectEfficiencyMetrics(args: {
     warnings.push('payback: no positive production fcff');
   }
 
-  const paybackInitialCapexAbs = computePreRevenueInvestmentFromFcff({
-    fcffUSD_total: args.fcffUSD_total,
-    productionStartPeriod: tp,
-  });
-
-  if (paybackInitialCapexAbs === null || !finite(paybackInitialCapexAbs) || paybackInitialCapexAbs === 0) {
+  if (paybackStart === null) {
     out.Payback_real_years = null;
   }
 
-  let cumulative = 0;
   let paybackReal: number | null = null;
-  if (paybackInitialCapexAbs !== null && finite(paybackInitialCapexAbs) && paybackInitialCapexAbs > 0) {
-    for (let t = tp; t <= args.masterN; t += 1) {
+  if (paybackStart !== null) {
+    let remaining = initialCapexAbs;
+    for (let t = paybackStart; t <= args.masterN; t += 1) {
       const fcff = args.fcffUSD_total[t];
       if (!finite(fcff)) {
         warnings.push('payback: missing fcff series');
         paybackReal = null;
         break;
       }
+      if (fcff <= 0) {
+        continue;
+      }
 
-      cumulative += fcff;
-      if (cumulative >= paybackInitialCapexAbs) {
-        const prev = cumulative - fcff;
-        if (fcff === 0) {
-          paybackReal = null;
-          break;
-        }
-        const fraction = (paybackInitialCapexAbs - prev) / fcff;
-        paybackReal = (t - tp - 1) + fraction;
+      const prevRemaining = remaining;
+      remaining -= fcff;
+      if (remaining <= 0) {
+        const fraction = prevRemaining / fcff;
+        paybackReal = (t - paybackStart) + fraction;
         break;
       }
     }

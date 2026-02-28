@@ -561,7 +561,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
           ? 'Missing tp'
           : (initialCapexUSD === null
             ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
-            : (paybackSeries === null ? 'Missing series fcfUSD' : 'No payback reached in cumulative FCFF')),
+            : (paybackSeries === null
+              ? 'Missing series fcfUSD'
+              : 'Real payback (production years): years from first positive production cashflow period until cumulative FCFF has recovered initial build capex.')),
       ),
       IRR: mv(
         irr,
