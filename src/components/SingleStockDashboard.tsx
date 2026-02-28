@@ -109,6 +109,10 @@ function resolveProjectMetricLabel(metricKey: string, discountRateTag: string): 
     NPV_perShare: `${npvLabel}/aktie`,
     NAV_Target: "NAV",
     NAV_perShare: "NAV/aktie",
+    NPV_prodStart: "NPV prod start",
+    NPV_prodStart_perShare: "NPV prod start/aktie",
+    NAV_prodStart: "NAV prod start",
+    NAV_prodStart_perShare: "NAV prod start/aktie",
     CF_LOM_Target: "CF LOM ETLV",
     CF_LOM_Target_perShare: "CF LOM ETLV/aktie",
     DCF_Target: "DCF produktionsstart",
@@ -130,6 +134,10 @@ const projectSectionMetricOrder: Record<"list2", string[]> = {
     "NPV_perShare",
     "NAV_Target",
     "NAV_perShare",
+    "NPV_prodStart",
+    "NPV_prodStart_perShare",
+    "NAV_prodStart",
+    "NAV_prodStart_perShare",
     "CF_LOM_Target",
     "CF_LOM_Target_perShare",
     "DCF_Target",
@@ -2054,18 +2062,6 @@ Capital Available: ${availableLabel}`,
     });
   }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
-  const snapshotTodayLabel = useMemo(() => `IDAG ${new Date().toISOString().slice(0, 10)}`, []);
-
-  const snapshotProdStartLabel = useMemo(() => {
-    const meta = (selectedProjectRawJson && typeof selectedProjectRawJson === "object")
-      ? ((selectedProjectRawJson.meta as Record<string, unknown> | undefined) ?? null)
-      : null;
-    const productionStartYear = meta && Number.isFinite(meta.productionStartYear)
-      ? String(meta.productionStartYear)
-      : (typeof meta?.productionStartYear === "string" && meta.productionStartYear.trim() ? meta.productionStartYear.trim() : "");
-    return productionStartYear ? `VID PRODUKTIONSSTART ${productionStartYear}` : "VID PRODUKTIONSSTART";
-  }, [selectedProjectRawJson]);
-
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
     const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
@@ -3240,13 +3236,11 @@ Capital Available: ${availableLabel}`,
                               ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesCurrent.value
                               : null
                           }
-                          npvLow={projectViewMetrics.list2.NPV_Target?.value ?? null}
-                          npvHigh={projectViewMetrics.list2.NPV_Target?.value ?? null}
-                          tpLow={projectViewMetrics.list2.DCF_Target?.value ?? null}
-                          tpHigh={projectViewMetrics.list2.DCF_Target?.value ?? null}
+                          npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
+                          npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
+                          tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
+                          tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
                           currencyCode={lockedTargetCurrency}
-                          todayLabel={snapshotTodayLabel}
-                          prodStartLabel={snapshotProdStartLabel}
                         />
                       )}
                       <div className="compact-metrics-grid">

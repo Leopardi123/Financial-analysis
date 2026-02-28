@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { computeProjectViewMetrics } from '../computeProjectPreRevenueView.ts';
 
+function assertApprox(actual: number | null, expected: number, tolerance = 1e-6): void {
+  assert.ok(typeof actual === 'number', `Expected number, got ${actual}`);
+  assert.ok(Math.abs((actual as number) - expected) <= tolerance, `Expected ${expected}, got ${actual}`);
+}
+
 const out = computeProjectViewMetrics({
   targetCurrency: 'CAD',
   fxUSDToTarget: 2,
@@ -24,8 +29,11 @@ const out = computeProjectViewMetrics({
 assert.equal(out.marketBox.marketCapCurrent.value, 1000);
 assert.equal(out.list5.cash_used_Target.value, 50);
 assert.equal(out.list4.InSitu_10Y_USD.value, 1000);
-assert.equal(out.list2.TP.value, 2);
-assert.equal(out.list2.LOM.value, 10);
+assertApprox(out.list2.DCF_Target.value, 2603.60953, 1e-4);
+assertApprox(out.list2.NPV_prodStart.value, 1603.60953, 1e-4);
+assertApprox(out.list2.NAV_prodStart.value, 1653.60953, 1e-4);
+assertApprox(out.list2.NPV_prodStart_perShare.value, 8.22364, 1e-4);
+assertApprox(out.list2.NAV_prodStart_perShare.value, 8.48005, 1e-4);
 assert.equal(out.marketBox.marketCapCurrent.reason, null);
 
 

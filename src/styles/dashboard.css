@@ -897,10 +897,8 @@ td.sticky-col {
 
 .project-value-snapshot-wrap {
   height: 170px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 8px;
-  background: #ffffff;
+  padding: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -908,6 +906,6 @@ td.sticky-col {
 
 @media (min-width: 768px) {
   .project-value-snapshot-wrap {
-    height: 210px;
+    height: 200px;
   }
 }
