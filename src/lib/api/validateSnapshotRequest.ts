@@ -1,7 +1,13 @@
+type SnapshotScenarioControls = {
+  delayPeriods?: number;
+  capexMult?: number;
+  opexMult?: number;
+};
+
 export type SnapshotScenario =
-  | { mode: 'spot' }
-  | { mode: 'percentile'; lookbackYears: number; percentile: number; window: 'trailing'; sampling: 'eod_close'; anchor: 'period_end' }
-  | { mode: 'fixed'; fixedPriceByKey: Record<string, number> };
+  | ({ mode: 'spot' } & SnapshotScenarioControls)
+  | ({ mode: 'percentile'; lookbackYears: number; percentile: number; window: 'trailing'; sampling: 'eod_close'; anchor: 'period_end' } & SnapshotScenarioControls)
+  | ({ mode: 'fixed'; fixedPriceByKey: Record<string, number> } & SnapshotScenarioControls);
 
 export type SnapshotFxConfig = {
   source: 'auto' | 'manual';
@@ -62,6 +68,39 @@ function readNullableFiniteNumber(value: unknown): number | null | undefined {
     return null;
   }
   return readFiniteNumber(value);
+}
+
+function applyScenarioControls(base: SnapshotScenario, scenarioRaw: Record<string, unknown>, errors: string[]): SnapshotScenario {
+  const withControls: SnapshotScenario = { ...base };
+
+  if (scenarioRaw.delayPeriods !== undefined) {
+    const delayPeriods = readFiniteNumber(scenarioRaw.delayPeriods);
+    if (delayPeriods === null || !Number.isInteger(delayPeriods) || delayPeriods < 0) {
+      errors.push('scenario.delayPeriods must be an integer >= 0 when provided');
+    } else {
+      withControls.delayPeriods = delayPeriods;
+    }
+  }
+
+  if (scenarioRaw.capexMult !== undefined) {
+    const capexMult = readFiniteNumber(scenarioRaw.capexMult);
+    if (capexMult === null || capexMult < 0) {
+      errors.push('scenario.capexMult must be finite and >= 0 when provided');
+    } else {
+      withControls.capexMult = capexMult;
+    }
+  }
+
+  if (scenarioRaw.opexMult !== undefined) {
+    const opexMult = readFiniteNumber(scenarioRaw.opexMult);
+    if (opexMult === null || opexMult < 0) {
+      errors.push('scenario.opexMult must be finite and >= 0 when provided');
+    } else {
+      withControls.opexMult = opexMult;
+    }
+  }
+
+  return withControls;
 }
 
 export function validateSnapshotRequest(body: unknown): ValidationResult {
@@ -214,7 +253,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     } else {
       const mode = scenarioRaw.mode;
       if (mode === 'spot') {
-        scenario = { mode: 'spot' };
+        scenario = applyScenarioControls({ mode: 'spot' }, scenarioRaw, errors);
       } else if (mode === 'percentile') {
         const lookbackYears = readFiniteNumber(scenarioRaw.lookbackYears) ?? 10;
         const percentile = readFiniteNumber(scenarioRaw.percentile) ?? 50;
@@ -238,14 +277,14 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
           errors.push('scenario.anchor must be "period_end" when mode=percentile');
         }
 
-        scenario = {
+        scenario = applyScenarioControls({
           mode: 'percentile',
           lookbackYears: Number.isInteger(lookbackYears) ? lookbackYears : 10,
           percentile: Number.isInteger(percentile) ? percentile : 50,
           window: 'trailing',
           sampling: 'eod_close',
           anchor: 'period_end',
-        };
+        }, scenarioRaw, errors);
       } else if (mode === 'fixed') {
         const fixedPriceByKey = scenarioRaw.fixedPriceByKey;
         if (!isObject(fixedPriceByKey) || Object.keys(fixedPriceByKey).length === 0) {
@@ -264,7 +303,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
           }
         }
 
-        scenario = { mode: 'fixed', fixedPriceByKey: normalizedFixed };
+        scenario = applyScenarioControls({ mode: 'fixed', fixedPriceByKey: normalizedFixed }, scenarioRaw, errors);
       } else {
         errors.push('scenario.mode must be one of: spot, percentile, fixed');
       }

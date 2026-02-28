@@ -432,3 +432,40 @@ test('project identity checks report no failures on valid periods and cannot eva
   assert.equal(nullWarnings.some((warning) => warning.includes('cannot evaluate FCFF identity')), false);
   assert.equal(nullWarnings.some((warning) => warning.includes('FCFF identity')), false);
 });
+
+test('delayPeriods=0 with report/spot prices reproduces baseline snapshot metrics', async () => {
+  const baseBody = await loadFixture();
+  const baseResult = await runCorporateSnapshotPipeline({ body: baseBody, refresh: false });
+  assert.equal(baseResult.ok, true);
+  if (!baseResult.ok) return;
+
+  const delayedBody = JSON.parse(JSON.stringify(baseBody)) as Record<string, unknown>;
+  delayedBody.scenario = { ...(delayedBody.scenario as Record<string, unknown>), delayPeriods: 0 };
+  const delayedResult = await runCorporateSnapshotPipeline({ body: delayedBody, refresh: false });
+  assert.equal(delayedResult.ok, true);
+  if (!delayedResult.ok) return;
+
+  const metrics: Array<keyof typeof baseResult.snapshot> = [
+    'NPV_today_TargetCurrency',
+    'CF_LOM_USD',
+    'DCF_prodStart_exCapex_USD',
+    'Payback_real_years',
+  ];
+
+  for (const metric of metrics) {
+    assert.equal(delayedResult.snapshot[metric], baseResult.snapshot[metric]);
+  }
+});
+
+test('delayPeriods edge case tp_eff > masterN yields null dependent metrics with failure reason', async () => {
+  const body = await loadFixture();
+  body.scenario = { ...(body.scenario as Record<string, unknown>), delayPeriods: 100 };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(result.snapshot.DCF_prodStart_exCapex_USD, null);
+  assert.equal(result.snapshot.Payback_real_years, null);
+  assert.ok(result.diagnostics.errors.some((line) => line.includes('failure_reason=tp_eff')));
+});

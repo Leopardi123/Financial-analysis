@@ -93,3 +93,17 @@
     grid-template-columns: 1fr;
   }
 }
+
+.scenario-shift-controls {
+  margin-top: 12px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #e6e6e6;
+  border-radius: 6px;
+  background: #fafcff;
+}
+
+.scenario-shift-controls h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
