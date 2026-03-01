@@ -20,6 +20,7 @@ const out = computeProjectViewMetrics({
   capexUSD: [-300, -200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   grossRevenueUSD: [0, 0, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
   ebitUSD: [0, 0, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20],
+  economicsTaxRate: 0.25,
   payableAuEqOz: [0, 0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
   sustainingCostUSD: [0, 0, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50],
   productionStartPeriod: 2,
@@ -37,6 +38,38 @@ assertApprox(out.list2.NAV_prodStart_perShare.value, 8.48005, 1e-4);
 assert.equal(out.marketBox.marketCapCurrent.reason, null);
 
 assert.ok((out.list3.IRR.value as number) > 0, `Expected positive IRR, got ${out.list3.IRR.value}`);
+assert.ok((out.list3.LOM_discounted_EBIT_ROCE.value as number) > 0, 'Expected finite discounted EBIT ROCE');
+assert.ok((out.list3.LOM_avg_NOPAT_ROIC.value as number) > 0, 'Expected finite avg NOPAT ROIC');
+assert.ok((out.list3.Kapitalavkastning_LOM.value as number) > 0, 'Expected finite Kapitalavkastning_LOM');
+assert.ok((out.list3.Kapitalavkastning_per_Year.value as number) > 0, 'Expected finite Kapitalavkastning_per_Year');
+assert.equal(out.diagnostics.lista3_inputs_debug.failure_reasons.LOM_avg_NOPAT_ROIC, null);
+
+const lista3MissingInputs = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: null,
+  masterN: 2,
+  sharesCurrent: 10,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [-10, 0, 5],
+  capexUSD: [-10, 0, 0],
+  grossRevenueUSD: [1, 1, 1],
+  ebitUSD: [null, null, null],
+  nopatUSD: [null, null, null],
+  df_now: [null, null, null],
+  payableAuEqOz: [1, 1, 1],
+  sustainingCostUSD: [1, 1, 1],
+  productionStartPeriod: 1,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+
+assert.equal(lista3MissingInputs.list3.LOM_discounted_EBIT_ROCE.value, null);
+assert.equal(lista3MissingInputs.list3.LOM_avg_NOPAT_ROIC.value, null);
+assert.equal(lista3MissingInputs.diagnostics.lista3_inputs_debug.failure_reasons.LOM_discounted_EBIT_ROCE, 'Missing discountRate and df_now series');
+assert.equal(lista3MissingInputs.diagnostics.lista3_inputs_debug.failure_reasons.LOM_avg_NOPAT_ROIC, 'Missing nopatUSD and tax inputs (federalIncomeTaxUSD or economics.taxRate)');
 
 const multiSignChange = computeProjectViewMetrics({
   targetCurrency: 'USD',
