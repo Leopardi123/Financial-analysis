@@ -312,6 +312,30 @@ const strict10yMissingWindowValue = computeProjectViewMetrics({
 assert.equal(strict10yMissingWindowValue.list4.InSitu_10Y_USD.reason, 'Missing value(s) in 10Y window (t=0..9)');
 assert.equal(strict10yMissingWindowValue.list4.AuEq_10Y.reason, 'Missing value(s) in 10Y window (t=0..9)');
 
+const delayedStartStillHasTenYearWindow = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 13,
+  sharesCurrent: 10,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: new Array(14).fill(1),
+  capexUSD: new Array(14).fill(-1),
+  grossRevenueUSD: [null, null, null, null, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+  ebitUSD: new Array(14).fill(1),
+  payableAuEqOz: [null, null, null, null, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+  sustainingCostUSD: new Array(14).fill(1),
+  productionStartPeriod: 6,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assert.equal(delayedStartStillHasTenYearWindow.list4.InSitu_10Y_USD.value, 100);
+assert.equal(delayedStartStillHasTenYearWindow.list4.InSitu_10Y_USD.reason, null);
+assert.equal(delayedStartStillHasTenYearWindow.list4.AuEq_10Y.value, 20);
+assert.equal(delayedStartStillHasTenYearWindow.list4.AuEq_10Y.reason, null);
+
 const perShareUpstreamMissingShares = computeProjectViewMetrics({
   targetCurrency: 'USD',
   fxUSDToTarget: 1,

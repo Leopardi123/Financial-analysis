@@ -348,25 +348,38 @@ function perShareMetric(value: NullableNumber, shares: NullableNumber, missingVa
 
 type TenYearValidation = { ok: true; sum: number } | { ok: false; reason: string };
 
+function sumFiniteWindow(series: Series, start: number, windowLen: number): number | null {
+  const end = start + windowLen - 1;
+  if (start < 0 || end >= series.length) return null;
+  let sum = 0;
+  for (let t = start; t <= end; t += 1) {
+    const value = series[t];
+    if (!finite(value)) return null;
+    sum += value;
+  }
+  return sum;
+}
+
 function validateStrictTenYearWindow(series: Series, requiredLength = 10, start = 0, windowLen = 10): TenYearValidation {
   const availableCount = Array.isArray(series) ? series.length : 0;
   if (availableCount < requiredLength) {
     return { ok: false, reason: `10Y requires 10 periods; have ${availableCount}` };
   }
-  const end = start + windowLen - 1;
-  if (end >= availableCount) {
-    return { ok: false, reason: `10Y requires 10 periods; have ${availableCount}` };
+
+  const preferredWindow = sumFiniteWindow(series, start, windowLen);
+  if (preferredWindow !== null) {
+    return { ok: true, sum: preferredWindow };
   }
 
-  let sum = 0;
-  for (let t = start; t <= end; t += 1) {
-    const value = series[t];
-    if (!finite(value)) {
-      return { ok: false, reason: 'Missing value(s) in 10Y window (t=0..9)' };
+  const maxStart = availableCount - windowLen;
+  for (let candidateStart = 0; candidateStart <= maxStart; candidateStart += 1) {
+    const candidateWindow = sumFiniteWindow(series, candidateStart, windowLen);
+    if (candidateWindow !== null) {
+      return { ok: true, sum: candidateWindow };
     }
-    sum += value;
   }
-  return { ok: true, sum };
+
+  return { ok: false, reason: 'Missing value(s) in 10Y window (t=0..9)' };
 }
 
 let enterpriseCashflowDebugLogged = false;
