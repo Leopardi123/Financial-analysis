@@ -342,8 +342,31 @@ function ratio(num: NullableNumber, den: NullableNumber): MetricValue {
 
 function perShareMetric(value: NullableNumber, shares: NullableNumber, missingValueReason: string): MetricValue {
   if (!finite(value)) return mv(null, missingValueReason);
-  if (!finite(shares) || shares <= 0) return mv(null, 'shares_post_financing <= 0');
+  if (!finite(shares) || shares <= 0) return mv(null, 'Missing required upstream input: shares_post_financing');
   return mv(value / shares, null);
+}
+
+type TenYearValidation = { ok: true; sum: number } | { ok: false; reason: string };
+
+function validateStrictTenYearWindow(series: Series, requiredLength = 10, start = 0, windowLen = 10): TenYearValidation {
+  const availableCount = Array.isArray(series) ? series.length : 0;
+  if (availableCount < requiredLength) {
+    return { ok: false, reason: `10Y requires 10 periods; have ${availableCount}` };
+  }
+  const end = start + windowLen - 1;
+  if (end >= availableCount) {
+    return { ok: false, reason: `10Y requires 10 periods; have ${availableCount}` };
+  }
+
+  let sum = 0;
+  for (let t = start; t <= end; t += 1) {
+    const value = series[t];
+    if (!finite(value)) {
+      return { ok: false, reason: 'Missing value(s) in 10Y window (t=0..9)' };
+    }
+    sum += value;
+  }
+  return { ok: true, sum };
 }
 
 let enterpriseCashflowDebugLogged = false;
@@ -435,13 +458,17 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const aiscLom = sustainingVsPayable !== null ? sustainingVsPayable.sumCost / sustainingVsPayable.sumPay : null;
   const capexPerAnnual = initialCapexUSD !== null && aueqYr !== null && aueqYr > 0 ? Math.abs(initialCapexUSD) / aueqYr : null;
 
-  const tenYearEnd = tp !== null ? tp + 9 : null;
-  const inSitu10YUSD = tp !== null && tenYearEnd !== null && tenYearEnd < input.grossRevenueUSD.length
-    ? sumRange(input.grossRevenueUSD, tp, tenYearEnd)
-    : null;
-  const auEq10Y = tp !== null && tenYearEnd !== null && tenYearEnd < input.payableAuEqOz.length
-    ? sumRange(input.payableAuEqOz, tp, tenYearEnd)
-    : null;
+  const inSitu10YValidation = tp !== null
+    ? validateStrictTenYearWindow(input.grossRevenueUSD, 10, tp, 10)
+    : { ok: false as const, reason: 'Missing tp' };
+  const inSitu10YUSD = inSitu10YValidation.ok ? inSitu10YValidation.sum : null;
+  const inSitu10YReason = inSitu10YValidation.ok ? null : inSitu10YValidation.reason;
+
+  const auEq10YValidation = tp !== null
+    ? validateStrictTenYearWindow(input.payableAuEqOz, 10, tp, 10)
+    : { ok: false as const, reason: 'Missing tp' };
+  const auEq10Y = auEq10YValidation.ok ? auEq10YValidation.sum : null;
+  const auEq10YReason = auEq10YValidation.ok ? null : auEq10YValidation.reason;
   const evUsd = evTarget !== null && fx !== null ? evTarget / fx : null;
 
   const paybackApprox = initialCapexUSD !== null && tp !== null ? (() => {
@@ -853,11 +880,11 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       LOM: mv(prodYears, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing tp or masterN'),
       AuEq_LOM: mv(aueqLom, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing series payableAuEqOz'),
       AuEq_YR: mv(aueqYr, aueqLom === null ? 'Missing AuEq_LOM' : 'Denominator is 0'),
-      InSitu_10Y_USD: mv(inSitu10YUSD, tp === null ? 'Missing tp' : (masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing series grossRevenue_USD in 10Y window')),
-      InSitu_10Y_perShare_USD: ratio(inSitu10YUSD, sharesPf),
+      InSitu_10Y_USD: mv(inSitu10YUSD, inSitu10YReason),
+      InSitu_10Y_perShare_USD: perShareMetric(inSitu10YUSD, sharesPf, inSitu10YReason ?? 'Missing numerator input'),
       EV_over_10Y_InSitu: ratio(evUsd, inSitu10YUSD),
-      AuEq_10Y: mv(auEq10Y, tp === null ? 'Missing tp' : 'Missing series payableAuEqOz in 10Y window'),
-      AuEq_10Y_perShare: ratio(auEq10Y, sharesPf),
+      AuEq_10Y: mv(auEq10Y, auEq10YReason),
+      AuEq_10Y_perShare: perShareMetric(auEq10Y, sharesPf, auEq10YReason ?? 'Missing numerator input'),
     },
     list5: {
       Initial_CAPEX_Target: mv(initialCapexTarget, initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'Missing fx_USD_to_TargetCurrency'),
