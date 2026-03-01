@@ -120,19 +120,34 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
     rows.push({ label: `Ore milled (${oreUnit})`, values: input.operations?.oreMilledTonnes ?? [] });
   }
 
+  const oreMilledByPeriod = Array.isArray(input.operations?.oreMilledTonnes)
+    ? Array.from({ length: columnCount }, (_, t) => input.operations?.oreMilledTonnes?.[t] ?? null)
+    : null;
+
+  const maskGradeRecoveryBeforeProduction = (values: Array<number | null>): Array<number | null> => (
+    Array.from({ length: columnCount }, (_, t) => {
+      const rawValue = values[t];
+      if (rawValue === null || !Number.isFinite(rawValue)) return null;
+      if (tp !== null && t < tp) return null;
+      const milled = oreMilledByPeriod?.[t] ?? null;
+      if (milled !== null && Number.isFinite(milled) && milled === 0) return null;
+      return rawValue;
+    })
+  );
+
   const metals = Object.keys(input.metals.payableQtyByMetal ?? {}).sort((a, b) => a.localeCompare(b));
 
   for (const metal of metals) {
     const gradeValues = input.operations?.gradeByMetal?.[metal];
     if (!hasAnyValue(gradeValues)) continue;
     const gradeUnit = input.operations?.gradeUnitByMetal?.[metal] ?? '—';
-    rows.push({ label: `Grade ${metal} (${gradeUnit})`, values: gradeValues });
+    rows.push({ label: `Grade ${metal} (${gradeUnit})`, values: maskGradeRecoveryBeforeProduction(gradeValues) });
   }
 
   for (const metal of metals) {
     const recoveryValues = normalizeRecoverySeries(input.operations?.recoveryPctByMetal?.[metal], columnCount);
     if (!recoveryValues) continue;
-    rows.push({ label: `Recovery ${metal} (%)`, values: recoveryValues });
+    rows.push({ label: `Recovery ${metal} (%)`, values: maskGradeRecoveryBeforeProduction(recoveryValues) });
   }
 
   for (const metal of metals) {
