@@ -43,6 +43,13 @@ assert.ok((out.list3.LOM_avg_NOPAT_ROIC.value as number) > 0, 'Expected finite a
 assert.ok((out.list3.Kapitalavkastning_LOM.value as number) > 0, 'Expected finite Kapitalavkastning_LOM');
 assert.ok((out.list3.Kapitalavkastning_per_Year.value as number) > 0, 'Expected finite Kapitalavkastning_per_Year');
 assert.equal(out.diagnostics.lista3_inputs_debug.failure_reasons.LOM_avg_NOPAT_ROIC, null);
+assertApprox(out.list3.LOM_avg_EBIT_ROCE.value, 0.04, 1e-6);
+assert.equal(out.diagnostics.metrics_debug.LOM_avg_EBIT_ROCE.displayValue, '4.0%');
+assert.equal(out.diagnostics.metrics_debug.ROI_10Y.displayValue, '3.9x');
+assert.equal(out.diagnostics.metrics_debug.Kapitalavkastning_LOM.displayValue, '3.5x');
+assert.equal(out.diagnostics.metrics_debug.Kapitalavkastning_per_Year.displayValue, '0.3x/år');
+assert.equal(out.diagnostics.ui_unit_meta.LOM_avg_EBIT_ROCE.unitType, 'percent');
+assert.equal(out.diagnostics.ui_unit_meta.Kapitalavkastning_per_Year.renderSuffix, 'x/år');
 
 const lista3MissingInputs = computeProjectViewMetrics({
   targetCurrency: 'USD',
@@ -70,6 +77,30 @@ assert.equal(lista3MissingInputs.list3.LOM_discounted_EBIT_ROCE.value, null);
 assert.equal(lista3MissingInputs.list3.LOM_avg_NOPAT_ROIC.value, null);
 assert.equal(lista3MissingInputs.diagnostics.lista3_inputs_debug.failure_reasons.LOM_discounted_EBIT_ROCE, 'Missing discountRate and df_now series');
 assert.equal(lista3MissingInputs.diagnostics.lista3_inputs_debug.failure_reasons.LOM_avg_NOPAT_ROIC, 'Missing nopatUSD and tax inputs (federalIncomeTaxUSD or economics.taxRate)');
+const zeroCapexDenominator = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 2,
+  sharesCurrent: 10,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [10, 10, 10],
+  capexUSD: [0, 0, 0],
+  grossRevenueUSD: [1, 1, 1],
+  ebitUSD: [100, 100, 100],
+  nopatUSD: [50, 50, 50],
+  payableAuEqOz: [1, 1, 1],
+  sustainingCostUSD: [1, 1, 1],
+  productionStartPeriod: 0,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assert.equal(zeroCapexDenominator.list3.LOM_avg_EBIT_ROCE.value, null);
+assert.equal(zeroCapexDenominator.list3.LOM_avg_EBIT_ROCE.reason, 'Denominator is 0');
+assert.equal(zeroCapexDenominator.diagnostics.metrics_debug.LOM_avg_EBIT_ROCE.failure_reason, 'Denominator is 0');
+assert.equal(zeroCapexDenominator.diagnostics.metrics_debug.LOM_avg_EBIT_ROCE.ratio, null);
 
 const multiSignChange = computeProjectViewMetrics({
   targetCurrency: 'USD',

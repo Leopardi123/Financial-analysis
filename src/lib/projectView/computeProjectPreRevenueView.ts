@@ -85,12 +85,22 @@ export type ProjectViewMetrics = {
       ebitUSD_preview: { first3: Array<number | null>; last3: Array<number | null> } | null;
       nopatUSD_preview: { first3: Array<number | null>; last3: Array<number | null> } | null;
       failure_reasons: {
+        LOM_avg_EBIT_ROCE: string | null;
         LOM_discounted_EBIT_ROCE: string | null;
         LOM_avg_NOPAT_ROIC: string | null;
         Kapitalavkastning_LOM: string | null;
         Kapitalavkastning_per_Year: string | null;
       };
     };
+    metrics_debug: {
+      LOM_avg_EBIT_ROCE: { numeratorUSD: number | null; denominatorUSD: number | null; ratio: number | null; displayValue: string | null; unit: 'percent'; failure_reason: string | null };
+      LOM_discounted_EBIT_ROCE: { numeratorUSD_discounted: number | null; denominatorUSD: number | null; ratio: number | null; displayValue: string | null; unit: 'percent'; failure_reason: string | null };
+      LOM_avg_NOPAT_ROIC: { numeratorUSD: number | null; denominatorUSD: number | null; ratio: number | null; displayValue: string | null; unit: 'percent'; failure_reason: string | null };
+      Kapitalavkastning_LOM: { cf_lom_usd: number | null; initial_capex_abs: number | null; multiple: number | null; displayValue: string | null; unit: 'multiple'; failure_reason: string | null };
+      Kapitalavkastning_per_Year: { cf_lom_usd: number | null; LOM: number | null; initial_capex_abs: number | null; perYear: number | null; displayValue: string | null; unit: 'multiple_per_year'; failure_reason: string | null };
+      ROI_10Y: { cf_10y_usd: number | null; initial_capex_abs: number | null; multiple: number | null; displayValue: string | null; unit: 'multiple'; failure_reason: string | null };
+    };
+    ui_unit_meta: Record<string, { unitType: 'percent' | 'multiple' | 'multiple_per_year' | 'currency'; renderSuffix: string }>;
   };
 };
 
@@ -295,6 +305,20 @@ function deriveInitialCapexUSD(capexUSD: Series, tp: number | null): { value: nu
 
 function avg(values: number[]): NullableNumber {
   return values.length ? values.reduce((s, v) => s + v, 0) / values.length : null;
+}
+
+function safeRatio(numerator: number | null, denominator: number | null): { value: number | null; failure_reason: string | null } {
+  if (!finite(numerator)) return { value: null, failure_reason: 'Missing numerator' };
+  if (!finite(denominator)) return { value: null, failure_reason: 'Missing denominator' };
+  if (denominator === 0) return { value: null, failure_reason: 'Denominator is 0' };
+  return { value: numerator / denominator, failure_reason: null };
+}
+
+function formatDebugDisplay(value: number | null, unitType: 'percent' | 'multiple' | 'multiple_per_year'): string | null {
+  if (!finite(value)) return null;
+  if (unitType === 'percent') return `${(value * 100).toFixed(1)}%`;
+  if (unitType === 'multiple_per_year') return `${value.toFixed(1)}x/år`;
+  return `${value.toFixed(1)}x`;
 }
 
 function hasFiniteSeries(values: Series | undefined): values is Series {
@@ -561,6 +585,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     failure_reason: irrReason,
   };
 
+  let roi10yNumerator: number | null = null;
   const roi10y = tp !== null && masterN !== null && initialCapexUSD !== null && roiSeries !== null ? (() => {
     const end = Math.min(tp + 9, masterN);
     if (tp < 0 || end < tp) return null;
@@ -573,8 +598,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
         count += 1;
       }
     }
-    if (count === 0 || initialCapexUSD === 0) return null;
-    return sum / Math.abs(initialCapexUSD);
+    roi10yNumerator = count > 0 ? sum : null;
+    const roi10yRatio = safeRatio(roi10yNumerator, Math.abs(initialCapexUSD));
+    return roi10yRatio.value;
   })() : null;
 
   if (!enterpriseCashflowDebugLogged && enterpriseCashflows !== null) {
@@ -627,9 +653,19 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     console.warn('IRR inconsistency with payback');
   }
 
-  const ebitFinite = input.ebitUSD.filter((v): v is number => finite(v));
-  const avgEbit = ebitFinite.length > 0 ? avg(ebitFinite) : null;
-  const discountedEbitRoce = tp !== null && masterN !== null && initialCapexUSD !== null && initialCapexUSD !== 0 ? (() => {
+  let avgEbitNumerator: number | null = null;
+  const avgEbit = tp !== null && masterN !== null && initialCapexUSD !== null ? (() => {
+    const ebitFinite: number[] = [];
+    for (let t = tp; t <= masterN; t += 1) {
+      const ebit = input.ebitUSD[t];
+      if (finite(ebit)) ebitFinite.push(ebit);
+    }
+    avgEbitNumerator = ebitFinite.length > 0 ? avg(ebitFinite) : null;
+    const avgEbitRatio = safeRatio(avgEbitNumerator, Math.abs(initialCapexUSD));
+    return avgEbitRatio.value;
+  })() : null;
+  let discountedEbitNumerator: number | null = null;
+  const discountedEbitRoce = tp !== null && masterN !== null && initialCapexUSD !== null ? (() => {
     const discountFactors = Array.isArray(input.df_now) && input.df_now.length > 0
       ? input.df_now
       : (r !== null ? Array.from({ length: input.ebitUSD.length }, (_, t) => discountToToday(t, r)) : null);
@@ -644,7 +680,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       count += 1;
     }
     if (count === 0) return null;
-    return sum / Math.abs(initialCapexUSD);
+    discountedEbitNumerator = sum;
+    const discountedRatio = safeRatio(discountedEbitNumerator, Math.abs(initialCapexUSD));
+    return discountedRatio.value;
   })() : null;
 
   const nopatSeries: Series = Array.isArray(input.nopatUSD) ? [...input.nopatUSD] : new Array(input.ebitUSD.length).fill(null);
@@ -667,20 +705,30 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   }
 
   const nopatFinite = nopatSeries.filter((v): v is number => finite(v));
-  const avgNopatRoic = nopatFinite.length > 0 && initialCapexUSD !== null && initialCapexUSD !== 0
-    ? (avg(nopatFinite) as number) / Math.abs(initialCapexUSD)
+  const avgNopatNumerator = nopatFinite.length > 0 ? (avg(nopatFinite) as number) : null;
+  const avgNopatRoic = initialCapexUSD !== null
+    ? safeRatio(avgNopatNumerator, Math.abs(initialCapexUSD)).value
     : null;
 
-  const kapitalavkastningLom = cfLomUSD !== null && initialCapexUSD !== null && initialCapexUSD !== 0
-    ? cfLomUSD / Math.abs(initialCapexUSD)
+  const kapitalavkastningLom = initialCapexUSD !== null
+    ? safeRatio(cfLomUSD, Math.abs(initialCapexUSD)).value
     : null;
   const kapitalavkastningPerYear = kapitalavkastningLom !== null && prodYears !== null && prodYears > 0
     ? kapitalavkastningLom / prodYears
     : null;
 
+  const avgEbitReason = avgEbit !== null
+    ? null
+    : (tp === null || masterN === null
+      ? 'Missing tp/masterN'
+      : (avgEbitNumerator === null ? 'Missing finite ebitUSD observations' : (initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'Denominator is 0')));
   const discountedEbitReason = discountedEbitRoce !== null
     ? null
-    : (r === null && !hasFiniteSeries(input.df_now) ? 'Missing discountRate and df_now series' : 'Missing finite ebitUSD*df_now observations');
+    : (r === null && !hasFiniteSeries(input.df_now)
+      ? 'Missing discountRate and df_now series'
+      : (discountedEbitNumerator === null
+        ? 'Missing finite ebitUSD*df_now observations'
+        : (initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'Denominator is 0')));
   const nopatReason = avgNopatRoic !== null
     ? null
     : (hasFiniteSeries(input.nopatUSD)
@@ -794,7 +842,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
             ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
             : (roiSeries === null ? 'Missing series fcfUSD' : 'Missing finite fcfUSD in 10Y window')),
       ),
-      LOM_avg_EBIT_ROCE: mv(avgEbit, 'Missing series ebitUSD'),
+      LOM_avg_EBIT_ROCE: mv(avgEbit, avgEbitReason),
       LOM_discounted_EBIT_ROCE: mv(discountedEbitRoce, discountedEbitReason),
       Corporate_ROIC: mv(null, 'Corporate ROIC not provided in project scope'),
       LOM_avg_NOPAT_ROIC: mv(avgNopatRoic, nopatReason),
@@ -839,11 +887,77 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
         ebitUSD_preview: previewSeries(input.ebitUSD),
         nopatUSD_preview: previewSeries(nopatSeries),
         failure_reasons: {
+          LOM_avg_EBIT_ROCE: avgEbitReason,
           LOM_discounted_EBIT_ROCE: discountedEbitReason,
           LOM_avg_NOPAT_ROIC: nopatReason,
           Kapitalavkastning_LOM: kapitalReason,
           Kapitalavkastning_per_Year: kapitalPerYearReason,
         },
+      },
+      metrics_debug: {
+        LOM_avg_EBIT_ROCE: {
+          numeratorUSD: avgEbitNumerator,
+          denominatorUSD: finite(initialCapexUSD) ? Math.abs(initialCapexUSD) : null,
+          ratio: avgEbit,
+          displayValue: formatDebugDisplay(avgEbit, 'percent'),
+          unit: 'percent',
+          failure_reason: avgEbitReason,
+        },
+        LOM_discounted_EBIT_ROCE: {
+          numeratorUSD_discounted: discountedEbitNumerator,
+          denominatorUSD: finite(initialCapexUSD) ? Math.abs(initialCapexUSD) : null,
+          ratio: discountedEbitRoce,
+          displayValue: formatDebugDisplay(discountedEbitRoce, 'percent'),
+          unit: 'percent',
+          failure_reason: discountedEbitReason,
+        },
+        LOM_avg_NOPAT_ROIC: {
+          numeratorUSD: avgNopatNumerator,
+          denominatorUSD: finite(initialCapexUSD) ? Math.abs(initialCapexUSD) : null,
+          ratio: avgNopatRoic,
+          displayValue: formatDebugDisplay(avgNopatRoic, 'percent'),
+          unit: 'percent',
+          failure_reason: nopatReason,
+        },
+        Kapitalavkastning_LOM: {
+          cf_lom_usd: cfLomUSD,
+          initial_capex_abs: finite(initialCapexUSD) ? Math.abs(initialCapexUSD) : null,
+          multiple: kapitalavkastningLom,
+          displayValue: formatDebugDisplay(kapitalavkastningLom, 'multiple'),
+          unit: 'multiple',
+          failure_reason: kapitalReason,
+        },
+        Kapitalavkastning_per_Year: {
+          cf_lom_usd: cfLomUSD,
+          LOM: prodYears,
+          initial_capex_abs: finite(initialCapexUSD) ? Math.abs(initialCapexUSD) : null,
+          perYear: kapitalavkastningPerYear,
+          displayValue: formatDebugDisplay(kapitalavkastningPerYear, 'multiple_per_year'),
+          unit: 'multiple_per_year',
+          failure_reason: kapitalPerYearReason,
+        },
+        ROI_10Y: {
+          cf_10y_usd: roi10yNumerator,
+          initial_capex_abs: finite(initialCapexUSD) ? Math.abs(initialCapexUSD) : null,
+          multiple: roi10y,
+          displayValue: formatDebugDisplay(roi10y, 'multiple'),
+          unit: 'multiple',
+          failure_reason: roi10y !== null
+            ? null
+            : (tp === null
+              ? 'Missing tp'
+              : (initialCapexUSD === null
+                ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
+                : (roi10yNumerator === null ? 'Missing finite fcfUSD in 10Y window' : 'Denominator is 0'))),
+        },
+      },
+      ui_unit_meta: {
+        ROI_10Y: { unitType: 'multiple', renderSuffix: 'x' },
+        LOM_avg_EBIT_ROCE: { unitType: 'percent', renderSuffix: '%' },
+        LOM_discounted_EBIT_ROCE: { unitType: 'percent', renderSuffix: '%' },
+        LOM_avg_NOPAT_ROIC: { unitType: 'percent', renderSuffix: '%' },
+        Kapitalavkastning_LOM: { unitType: 'multiple', renderSuffix: 'x' },
+        Kapitalavkastning_per_Year: { unitType: 'multiple_per_year', renderSuffix: 'x/år' },
       },
     },
   };

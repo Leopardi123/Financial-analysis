@@ -83,10 +83,11 @@ function formatCompactNumber(value: number, digits = 1): string {
   return value.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
 }
 
-function formatMetricValue(value: MetricValue, kind: "money" | "percent" | "multiple" | "decimal" | "integer", unit?: string): string {
+function formatMetricValue(value: MetricValue, kind: "money" | "percent" | "multiple" | "multiple_per_year" | "decimal" | "integer", unit?: string): string {
   if (value.value === null) return "n/a";
-  if (kind === "percent") return `${value.value.toFixed(1)}%`;
-  if (kind === "multiple") return `${value.value.toFixed(2)}x`;
+  if (kind === "percent") return `${(value.value * 100).toFixed(1)}%`;
+  if (kind === "multiple") return `${value.value.toFixed(1)}x`;
+  if (kind === "multiple_per_year") return `${value.value.toFixed(1)}x/år`;
   if (kind === "integer") return `${Math.round(value.value)}`;
   if (kind === "decimal") return value.value.toFixed(1);
   return `${formatCompactNumber(value.value, 1)}${unit ? ` ${unit}` : ""}`;
@@ -132,6 +133,17 @@ function resolveProjectMetricLabel(metricKey: string, discountRateTag: string): 
   };
   return metricLabels[metricKey] ?? metricKey;
 }
+
+
+
+const projectMetricUnitMeta: Record<string, { unitType: "percent" | "multiple" | "multiple_per_year" | "currency" | "decimal" | "integer"; renderSuffix: string }> = {
+  ROI_10Y: { unitType: "multiple", renderSuffix: "x" },
+  LOM_avg_EBIT_ROCE: { unitType: "percent", renderSuffix: "%" },
+  LOM_discounted_EBIT_ROCE: { unitType: "percent", renderSuffix: "%" },
+  LOM_avg_NOPAT_ROIC: { unitType: "percent", renderSuffix: "%" },
+  Kapitalavkastning_LOM: { unitType: "multiple", renderSuffix: "x" },
+  Kapitalavkastning_per_Year: { unitType: "multiple_per_year", renderSuffix: "x/år" },
+};
 
 const projectSectionMetricOrder: Record<"list2", string[]> = {
   list2: [
@@ -3302,7 +3314,13 @@ Capital Available: ${availableLabel}`,
                             <span className="compact-metric-value">
                               {key === "IRR"
                                 ? formatIrrMetricValue(value)
-                                : formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined)}
+                                : (() => {
+                                  const meta = projectMetricUnitMeta[key];
+                                  if (meta?.unitType === "percent" || meta?.unitType === "multiple" || meta?.unitType === "multiple_per_year") {
+                                    return formatMetricValue(value, meta.unitType);
+                                  }
+                                  return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined);
+                                })()}
                               {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
                             </span>
                           </div>
