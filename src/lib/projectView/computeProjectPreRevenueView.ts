@@ -25,6 +25,12 @@ export type ProjectViewInputs = {
   capexUSD: Series;
   grossRevenueUSD: Series;
   ebitUSD: Series;
+  nopatUSD?: Series;
+  effectiveTaxRate?: Series;
+  taxUSD?: Series;
+  federalIncomeTaxUSD?: Series;
+  df_now?: Series;
+  economicsTaxRate?: NullableNumber;
   payableAuEqOz: Series;
   sustainingCostUSD: Series;
   productionStartPeriod: number | null;
@@ -71,6 +77,19 @@ export type ProjectViewMetrics = {
       solver: 'bracket+bisection';
       irr_value: number | null;
       failure_reason: string | null;
+    };
+    lista3_inputs_debug: {
+      has_ebit_series: boolean;
+      has_nopat_series: boolean;
+      has_df_now: boolean;
+      ebitUSD_preview: { first3: Array<number | null>; last3: Array<number | null> } | null;
+      nopatUSD_preview: { first3: Array<number | null>; last3: Array<number | null> } | null;
+      failure_reasons: {
+        LOM_discounted_EBIT_ROCE: string | null;
+        LOM_avg_NOPAT_ROIC: string | null;
+        Kapitalavkastning_LOM: string | null;
+        Kapitalavkastning_per_Year: string | null;
+      };
     };
   };
 };
@@ -276,6 +295,18 @@ function deriveInitialCapexUSD(capexUSD: Series, tp: number | null): { value: nu
 
 function avg(values: number[]): NullableNumber {
   return values.length ? values.reduce((s, v) => s + v, 0) / values.length : null;
+}
+
+function hasFiniteSeries(values: Series | undefined): values is Series {
+  return Array.isArray(values) && values.some((v) => finite(v));
+}
+
+function previewSeries(values: Series | undefined): { first3: Array<number | null>; last3: Array<number | null> } | null {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  return {
+    first3: values.slice(0, 3),
+    last3: values.slice(Math.max(0, values.length - 3)),
+  };
 }
 
 function ratio(num: NullableNumber, den: NullableNumber): MetricValue {
@@ -598,6 +629,73 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
 
   const ebitFinite = input.ebitUSD.filter((v): v is number => finite(v));
   const avgEbit = ebitFinite.length > 0 ? avg(ebitFinite) : null;
+  const discountedEbitRoce = tp !== null && masterN !== null && initialCapexUSD !== null && initialCapexUSD !== 0 ? (() => {
+    const discountFactors = Array.isArray(input.df_now) && input.df_now.length > 0
+      ? input.df_now
+      : (r !== null ? Array.from({ length: input.ebitUSD.length }, (_, t) => discountToToday(t, r)) : null);
+    if (!discountFactors) return null;
+    let sum = 0;
+    let count = 0;
+    for (let t = tp; t <= masterN; t += 1) {
+      const ebit = input.ebitUSD[t];
+      const df = discountFactors[t];
+      if (!finite(ebit) || !finite(df)) continue;
+      sum += ebit * df;
+      count += 1;
+    }
+    if (count === 0) return null;
+    return sum / Math.abs(initialCapexUSD);
+  })() : null;
+
+  const nopatSeries: Series = Array.isArray(input.nopatUSD) ? [...input.nopatUSD] : new Array(input.ebitUSD.length).fill(null);
+  if (!hasFiniteSeries(input.nopatUSD)) {
+    for (let t = 0; t < input.ebitUSD.length; t += 1) {
+      const ebit = input.ebitUSD[t];
+      if (!finite(ebit)) {
+        nopatSeries[t] = null;
+        continue;
+      }
+
+      const taxFromFederal = input.federalIncomeTaxUSD?.[t];
+      const taxRateFromFederal = finite(taxFromFederal) && ebit > 0 ? Math.max(0, Math.min(1, taxFromFederal / ebit)) : null;
+      const effectiveTaxRate = finite(input.effectiveTaxRate?.[t])
+        ? Math.max(0, Math.min(1, input.effectiveTaxRate?.[t] as number))
+        : (taxRateFromFederal ?? (finite(input.economicsTaxRate) ? Math.max(0, Math.min(1, input.economicsTaxRate)) : null));
+
+      nopatSeries[t] = effectiveTaxRate === null ? null : ebit * (1 - effectiveTaxRate);
+    }
+  }
+
+  const nopatFinite = nopatSeries.filter((v): v is number => finite(v));
+  const avgNopatRoic = nopatFinite.length > 0 && initialCapexUSD !== null && initialCapexUSD !== 0
+    ? (avg(nopatFinite) as number) / Math.abs(initialCapexUSD)
+    : null;
+
+  const kapitalavkastningLom = cfLomUSD !== null && initialCapexUSD !== null && initialCapexUSD !== 0
+    ? cfLomUSD / Math.abs(initialCapexUSD)
+    : null;
+  const kapitalavkastningPerYear = kapitalavkastningLom !== null && prodYears !== null && prodYears > 0
+    ? kapitalavkastningLom / prodYears
+    : null;
+
+  const discountedEbitReason = discountedEbitRoce !== null
+    ? null
+    : (r === null && !hasFiniteSeries(input.df_now) ? 'Missing discountRate and df_now series' : 'Missing finite ebitUSD*df_now observations');
+  const nopatReason = avgNopatRoic !== null
+    ? null
+    : (hasFiniteSeries(input.nopatUSD)
+      ? 'Missing finite nopatUSD observations'
+      : (hasFiniteSeries(input.federalIncomeTaxUSD)
+        ? 'Cannot infer nopatUSD from federalIncomeTaxUSD (requires positive ebitUSD)'
+        : (finite(input.economicsTaxRate)
+          ? 'Missing finite ebitUSD observations'
+          : 'Missing nopatUSD and tax inputs (federalIncomeTaxUSD or economics.taxRate)')));
+  const kapitalReason = kapitalavkastningLom !== null
+    ? null
+    : (cfLomUSD === null ? 'Missing source metric CF_LOM_USD' : (initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'Initial_CAPEX_USD is 0'));
+  const kapitalPerYearReason = kapitalavkastningPerYear !== null
+    ? null
+    : (kapitalavkastningLom === null ? (kapitalReason ?? 'Missing Kapitalavkastning_LOM') : 'Missing production-year count');
 
   return {
     marketBox: {
@@ -697,11 +795,11 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
             : (roiSeries === null ? 'Missing series fcfUSD' : 'Missing finite fcfUSD in 10Y window')),
       ),
       LOM_avg_EBIT_ROCE: mv(avgEbit, 'Missing series ebitUSD'),
-      LOM_discounted_EBIT_ROCE: mv(null, 'Discounted EBIT ROCE unavailable'),
+      LOM_discounted_EBIT_ROCE: mv(discountedEbitRoce, discountedEbitReason),
       Corporate_ROIC: mv(null, 'Corporate ROIC not provided in project scope'),
-      LOM_avg_NOPAT_ROIC: mv(null, 'Missing series nopatUSD'),
-      Kapitalavkastning_LOM: mv(null, 'Source metric unavailable'),
-      Kapitalavkastning_per_Year: mv(null, 'Source metric unavailable'),
+      LOM_avg_NOPAT_ROIC: mv(avgNopatRoic, nopatReason),
+      Kapitalavkastning_LOM: mv(kapitalavkastningLom, kapitalReason),
+      Kapitalavkastning_per_Year: mv(kapitalavkastningPerYear, kapitalPerYearReason),
     },
     list4: {
       LOM: mv(prodYears, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing tp or masterN'),
@@ -734,6 +832,19 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       capexSignConvention: capexInit.signConvention,
       payback_real_debug: paybackDebug,
       irr_debug: irrDebug,
+      lista3_inputs_debug: {
+        has_ebit_series: hasFiniteSeries(input.ebitUSD),
+        has_nopat_series: hasFiniteSeries(nopatSeries),
+        has_df_now: hasFiniteSeries(input.df_now),
+        ebitUSD_preview: previewSeries(input.ebitUSD),
+        nopatUSD_preview: previewSeries(nopatSeries),
+        failure_reasons: {
+          LOM_discounted_EBIT_ROCE: discountedEbitReason,
+          LOM_avg_NOPAT_ROIC: nopatReason,
+          Kapitalavkastning_LOM: kapitalReason,
+          Kapitalavkastning_per_Year: kapitalPerYearReason,
+        },
+      },
     },
   };
 }

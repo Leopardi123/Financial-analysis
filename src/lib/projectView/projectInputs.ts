@@ -23,6 +23,10 @@ export type ProjectInputs = {
     byproductCreditsUSD?: number[] | null;
     ebitUSD?: number[] | null;
     nopatUSD?: number[] | null;
+    effectiveTaxRate?: number[] | null;
+    taxUSD?: number[] | null;
+    federalIncomeTaxUSD?: number[] | null;
+    df_now?: number[] | null;
     payableAuEqOz?: number[] | null;
     sustainingCostUSD?: number[] | null;
   };
@@ -96,6 +100,10 @@ export function getProjectInputs(rawState: {
       byproductCreditsUSD: asFiniteSeries(series.byproductCreditsUSD),
       ebitUSD: asFiniteSeries(series.ebitUSD),
       nopatUSD: asFiniteSeries(series.nopatUSD),
+      effectiveTaxRate: asFiniteSeries(series.effectiveTaxRate),
+      taxUSD: asFiniteSeries(series.taxUSD),
+      federalIncomeTaxUSD: asFiniteSeries((series.taxesDetail as Record<string, unknown> | undefined)?.federalIncomeTaxUSD),
+      df_now: asFiniteSeries(series.df_now),
       payableAuEqOz: asFiniteSeries(aggregation.payableAuEqOz_total),
       sustainingCostUSD: asFiniteSeries(aggregation.sustainingCostUSD_total),
     },
