@@ -179,7 +179,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
       projectName: typeof meta.projectName === 'string' ? meta.projectName : '',
       currency: 'USD',
       _choices_currency: [...CURRENCY_CHOICES],
-      notes: typeof meta.notes === 'string' && meta.notes.trim().length > 0 ? meta.notes : 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Price key examples: Au=XAU_USD_TOZ, Ag=XAG_USD_TOZ. Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
+      notes: typeof meta.notes === 'string' && meta.notes.trim().length > 0 ? meta.notes : 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Price key examples: Au=XAU_USD_TOZ, Ag=XAG_USD_TOZ, Cu=CU_USD_LB or CU_USD_TONNE. Copper: CU_USD_LB = COMEX basis, CU_USD_TONNE = LME basis. If CU_USD_TONNE series is missing, system can derive from CU_USD_LB using 1 tonne = 2204.6226218 lb (warns about basis). Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
     },
     time: {
       masterN,
@@ -327,7 +327,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       projectId: '',
       projectName: '',
       currency: 'USD',
-      notes: 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Price key examples: Au=XAU_USD_TOZ, Ag=XAG_USD_TOZ. Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
+      notes: 'Per-period arrays must be length masterN+1. Use toz (not oz) for payableQtyUnitByMetal. Price key examples: Au=XAU_USD_TOZ, Ag=XAG_USD_TOZ, Cu=CU_USD_LB or CU_USD_TONNE. Copper: CU_USD_LB = COMEX basis, CU_USD_TONNE = LME basis. If CU_USD_TONNE series is missing, system can derive from CU_USD_LB using 1 tonne = 2204.6226218 lb (warns about basis). Provide site G&A in ONE place only; prefer series.siteGandA_USD.',
     },
     time: {
       masterN,

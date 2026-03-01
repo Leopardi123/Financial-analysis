@@ -131,6 +131,14 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
     'unknown price key error includes valid keys and example',
   );
 
+  const invalidCuPriceKey = getProjectJsonV1Template();
+  invalidCuPriceKey.metals.priceKeyByMetal.Cu = 'cu';
+  assertThrows(
+    () => parseProjectJsonV1(invalidCuPriceKey),
+    /metals\.priceKeyByMetal\.Cu must be one of: \[CU_USD_LB, CU_USD_TONNE\]\. Received "CU"\./,
+    'Cu validator rejects non-canonical shorthand key',
+  );
+
   const aliasPriceKeys = getProjectJsonV1Template();
   aliasPriceKeys.metals.payableQtyByMetal.Ag = [...aliasPriceKeys.metals.payableQtyByMetal.Au];
   aliasPriceKeys.metals.payableQtyUnitByMetal.Ag = 'toz';

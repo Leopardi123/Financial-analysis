@@ -11,6 +11,18 @@ export type PriceScenario =
   | { mode: 'percentile'; lookbackYears: number; percentile: number }
   | { mode: 'fixed'; fixedPriceByKey: Record<string, number> };
 
+const CU_LB_PER_TONNE = 2204.6226218;
+const CU_DERIVED_WARNING = 'Cu COMEX–LME basis can diverge; unit conversion is not basis conversion.';
+
+function inferCuBasisForPriceKey(priceKey: string): 'COMEX' | 'LME' | null {
+  if (priceKey === 'CU_USD_LB') {
+    return 'COMEX';
+  }
+  if (priceKey === 'CU_USD_TONNE') {
+    return 'LME';
+  }
+  return null;
+}
 
 function canonicalQtyUnitFromPriceKey(priceKey: string): 'toz' | 'lb' | 'tonne' {
   let resolvedPriceKey = priceKey;
@@ -155,6 +167,91 @@ export async function resolveProjectPricesToEngineInput(
     return resolved.values;
   }
 
+  async function resolveSeriesWithCuFallback(args: { metal: string; requestedPriceKey: string }): Promise<{
+    resolvedSeries: Array<number | null>;
+    priceKeyUsed: string;
+    derived: boolean;
+    derivedFrom?: string;
+    conversionFactor?: number;
+    inferredBasisRequested?: 'COMEX' | 'LME';
+    inferredBasisSource?: 'COMEX' | 'LME';
+    failureReason?: string;
+  }> {
+    const { metal, requestedPriceKey } = args;
+    const requestedSeries = await resolveSeriesForPriceKey(requestedPriceKey);
+    if (requestedSeries.some((value) => value !== null)) {
+      const inferredBasis = metal === 'Cu' ? inferCuBasisForPriceKey(requestedPriceKey) : null;
+      return {
+        resolvedSeries: requestedSeries,
+        priceKeyUsed: requestedPriceKey,
+        derived: false,
+        ...(inferredBasis ? { inferredBasisRequested: inferredBasis, inferredBasisSource: inferredBasis } : {}),
+      };
+    }
+
+    if (metal !== 'Cu') {
+      return {
+        resolvedSeries: requestedSeries,
+        priceKeyUsed: requestedPriceKey,
+        derived: false,
+        failureReason: `No prices available for requested key ${requestedPriceKey}`,
+      };
+    }
+
+    if (requestedPriceKey === 'CU_USD_TONNE') {
+      const sourceKey = 'CU_USD_LB';
+      const sourceSeries = await resolveSeriesForPriceKey(sourceKey);
+      if (!sourceSeries.some((value) => value !== null)) {
+        return {
+          resolvedSeries: requestedSeries,
+          priceKeyUsed: requestedPriceKey,
+          derived: false,
+          inferredBasisRequested: 'LME',
+          failureReason: 'No prices available for requested key CU_USD_TONNE and fallback key CU_USD_LB',
+        };
+      }
+      return {
+        resolvedSeries: sourceSeries.map((value) => (value === null ? null : value * CU_LB_PER_TONNE)),
+        priceKeyUsed: sourceKey,
+        derived: true,
+        derivedFrom: sourceKey,
+        conversionFactor: CU_LB_PER_TONNE,
+        inferredBasisRequested: 'LME',
+        inferredBasisSource: 'COMEX',
+      };
+    }
+
+    if (requestedPriceKey === 'CU_USD_LB') {
+      const sourceKey = 'CU_USD_TONNE';
+      const sourceSeries = await resolveSeriesForPriceKey(sourceKey);
+      if (!sourceSeries.some((value) => value !== null)) {
+        return {
+          resolvedSeries: requestedSeries,
+          priceKeyUsed: requestedPriceKey,
+          derived: false,
+          inferredBasisRequested: 'COMEX',
+          failureReason: 'No prices available for requested key CU_USD_LB and fallback key CU_USD_TONNE',
+        };
+      }
+      return {
+        resolvedSeries: sourceSeries.map((value) => (value === null ? null : value / CU_LB_PER_TONNE)),
+        priceKeyUsed: sourceKey,
+        derived: true,
+        derivedFrom: sourceKey,
+        conversionFactor: 1 / CU_LB_PER_TONNE,
+        inferredBasisRequested: 'COMEX',
+        inferredBasisSource: 'LME',
+      };
+    }
+
+    return {
+      resolvedSeries: requestedSeries,
+      priceKeyUsed: requestedPriceKey,
+      derived: false,
+      failureReason: `Cu fallback supports only CU_USD_LB and CU_USD_TONNE. Requested ${requestedPriceKey}`,
+    };
+  }
+
   for (const [metal, qtySeries] of Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal)) {
     const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
     if (!priceKey) {
@@ -174,9 +271,19 @@ export async function resolveProjectPricesToEngineInput(
       pushWarning(`Unknown legacy commodity symbol for metal=${metal} priceKey=${priceKey}`);
     }
 
-    const resolvedSeries = await resolveSeriesForPriceKey(priceKey);
-    spotPriceUSDByMetal[metal] = resolvedSeries;
-    priceSeriesByKey[priceKey] = [...resolvedSeries];
+    const resolvedPrice = await resolveSeriesWithCuFallback({ metal, requestedPriceKey: priceKey });
+    spotPriceUSDByMetal[metal] = resolvedPrice.resolvedSeries;
+    priceSeriesByKey[priceKey] = [...resolvedPrice.resolvedSeries];
+    if (resolvedPrice.priceKeyUsed !== priceKey && resolvedPrice.derivedFrom) {
+      priceSeriesByKey[resolvedPrice.derivedFrom] = [...resolvedPrice.resolvedSeries];
+    }
+
+    const needsCuBasisWarning = metal === 'Cu' && resolvedPrice.derived === true;
+    const needsUnitWarning = sourceQtyUnit !== targetQtyUnit;
+    const warningText = needsCuBasisWarning || needsUnitWarning ? CU_DERIVED_WARNING : null;
+    pushWarning(
+      `price_diagnostic metal=${metal} qty_unit=${sourceQtyUnit} price_key_requested=${priceKey} price_key_used=${resolvedPrice.priceKeyUsed} derived=${resolvedPrice.derived}${resolvedPrice.derivedFrom ? ` derived_from=${resolvedPrice.derivedFrom}` : ''}${resolvedPrice.conversionFactor !== undefined ? ` conversion_factor=${resolvedPrice.conversionFactor}` : ''}${resolvedPrice.inferredBasisRequested ? ` inferred_basis_requested=${resolvedPrice.inferredBasisRequested}` : ''}${resolvedPrice.inferredBasisSource ? ` inferred_basis_source=${resolvedPrice.inferredBasisSource}` : ''}${warningText ? ` warning=${JSON.stringify(warningText)}` : ''}${resolvedPrice.failureReason ? ` failure_reason=${JSON.stringify(resolvedPrice.failureReason)}` : ''}`,
+    );
 
     if (scenario.mode === 'spot') {
       continue;

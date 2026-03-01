@@ -30,7 +30,14 @@ export const PRICE_KEY_DEFINITIONS: readonly PriceKeyDefinition[] = [
     kind: "commodity",
     canonicalUnit: "USD_per_lb",
     decimals: 6,
-    description: "Copper price in USD per pound",
+    description: "Copper price in USD per pound (COMEX basis)",
+  },
+  {
+    priceKey: "CU_USD_TONNE",
+    kind: "commodity",
+    canonicalUnit: "USD_per_tonne",
+    decimals: 6,
+    description: "Copper price in USD per tonne (LME basis)",
   },
   {
     priceKey: "ZN_USD_LB",

@@ -921,6 +921,11 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
       path: `metals.priceKeyByMetal.${metal}`,
       diagnostics: normalizationDiagnostics,
     });
+    if (metal === 'Cu' && normalizedPriceKey !== 'CU_USD_LB' && normalizedPriceKey !== 'CU_USD_TONNE') {
+      throw new Error(
+        `metals.priceKeyByMetal.Cu must be one of: [CU_USD_LB, CU_USD_TONNE]. Received ${JSON.stringify(normalizedPriceKey)}. Copper accepts only canonical keys (uppercase); CU_USD_LB = COMEX basis, CU_USD_TONNE = LME basis.`,
+      );
+    }
     assertKnownPriceKey(`priceKeyByMetal.${metal}`, normalizedPriceKey);
     priceKeyByMetal[metal] = normalizedPriceKey;
   }
