@@ -93,6 +93,13 @@ function formatMetricValue(value: MetricValue, kind: "money" | "percent" | "mult
   return `${formatCompactNumber(value.value, 1)}${unit ? ` ${unit}` : ""}`;
 }
 
+function formatAuEq10YPerShareValue(value: MetricValue): string {
+  if (value.value === null) return "n/a";
+  const abs = Math.abs(value.value);
+  if (abs > 0 && abs < 0.01) return value.value < 0 ? ">-0.01" : "<0.01";
+  return value.value.toFixed(2);
+}
+
 function formatIrrMetricValue(value: MetricValue): string {
   if (value.value === null) return "n/a";
   return `${(value.value * 100).toFixed(1)} %`;
@@ -3313,7 +3320,9 @@ Capital Available: ${availableLabel}`,
                             <span className="compact-metric-value">
                               {key === "IRR"
                                 ? formatIrrMetricValue(value)
-                                : (() => {
+                                : key === "AuEq_10Y_perShare"
+                                  ? formatAuEq10YPerShareValue(value)
+                                  : (() => {
                                   const meta = projectMetricUnitMeta[key];
                                   if (meta?.unitType === "percent" || meta?.unitType === "multiple" || meta?.unitType === "multiple_per_year") {
                                     return formatMetricValue(value, meta.unitType);
