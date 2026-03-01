@@ -64,3 +64,54 @@ test('shiftProjectToTargetProductionYear keeps production chain length when dela
   const oreMilled = ((shifted.operations as Record<string, unknown>).oreMilledTonnes as Array<number | null>);
   assert.deepEqual(oreMilled, [null, null, 0, 0, 500000, 500000, 500000]);
 });
+
+
+test('shiftProjectToTargetProductionYear shifts sparse period arrays and preserves production years', () => {
+  const project = {
+    version: 'project_json_v1',
+    time: {
+      masterN: 6,
+      productionStartPeriod: 2,
+      periodEndDatesUtc: ['2026-12-31', '2027-12-31', '2028-12-31', '2029-12-31', '2030-12-31', '2031-12-31', '2032-12-31'],
+    },
+    economics: { taxRate: 0.3 },
+    equity: { fdExtraShares: 0 },
+    series: {
+      capexUSD: [10, 20, 30, 40, 50, 60, 70],
+      operatingCostsUSD: [1, 2, 3, 4, 5, 6, 7],
+      sustainingCapexUSD: [0, 1, 1, 1, 1, 1, 1],
+      siteGandA_USD: [1, 1, 1, 1, 1, 1, 1],
+      depreciationUSD: [0, 0, 0, 0, 0, 0, 0],
+      workingCapitalDeltaUSD: [0, 0, 0, 0, 0, 0, 0],
+      royaltiesUSD: [0, 0, 0, 0, 0, 0, 0],
+      reclamationUSD: [0, 0, 0, 0, 0, 0, 0],
+      byproductCreditsUSD: [0, 0, 0, 0, 0, 0, 0],
+    },
+    metals: {
+      payableQtyByMetal: { Au: [0, 0, 100, 100, 100] },
+      payableQtyUnitByMetal: { Au: 'toz' },
+      priceKeyByMetal: { Au: 'XAU_USD_TOZ' },
+      auPriceKey: 'XAU_USD_TOZ',
+    },
+    operations: {
+      oreMinedTonnes: [0, 0, 500000, 500000, 500000],
+      oreMilledTonnes: [0, 0, 500000, 500000, 500000],
+      oreTonnageUnit: 'tonne',
+      capacity: { throughputUnit: 'tpd', nameplateThroughput: 1500, utilizationPct: 0.92 },
+      gradeByMetal: { Au: [0, 0, 1, 1, 1] },
+      gradeUnitByMetal: { Au: 'g/t' },
+      recoveryPctByMetal: { Au: [0, 0, 0.9, 0.9, 0.9] },
+    },
+  } as Record<string, unknown>;
+
+  const result = shiftProjectToTargetProductionYear(project, 2030);
+  const shifted = result.shifted;
+
+  assert.equal(result.k, 2);
+
+  const payableAu = ((shifted.metals as Record<string, unknown>).payableQtyByMetal as Record<string, unknown>).Au as Array<number | null>;
+  assert.deepEqual(payableAu, [null, null, 0, 0, 100, 100, 100, null, null]);
+
+  const oreMilled = ((shifted.operations as Record<string, unknown>).oreMilledTonnes as Array<number | null>);
+  assert.deepEqual(oreMilled, [null, null, 0, 0, 500000, 500000, 500000, null, null]);
+});

@@ -31,7 +31,9 @@ function extendPeriodEndDatesUtc(periodEndDatesUtc: string[], periodsToAppend: n
 
 function shiftPerPeriodArraysDeep(value: unknown, expectedLength: number, k: number): { value: unknown; shiftedSeriesCount: number } {
   if (Array.isArray(value)) {
-    const isPerPeriodSeries = value.length === expectedLength && value.every((entry) => entry === null || entry === undefined || typeof entry === 'number');
+    const isPerPeriodSeries = value.length > 0
+      && value.length <= expectedLength
+      && value.every((entry) => entry === null || entry === undefined || typeof entry === 'number');
     if (isPerPeriodSeries) {
       const newLength = expectedLength + k;
       const shifted = new Array<number | null>(newLength).fill(null);
@@ -120,4 +122,3 @@ export function shiftProjectToTargetProductionYear(projectRaw: Record<string, un
     tpEff,
   };
 }
-
