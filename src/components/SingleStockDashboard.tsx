@@ -2206,14 +2206,14 @@ Capital Available: ${availableLabel}`,
     const productionRows = [
       { label: `Ore mined (${oreUnit})`, values: seriesByLabel.get(`Ore mined (${oreUnit})`) ?? null },
       { label: `Ore milled (${oreUnit})`, values: seriesByLabel.get(`Ore milled (${oreUnit})`) ?? null },
-      ...orderedPayableMetals.map((metal) => {
+      ...orderedMetals.map((metal) => {
         const unit = gradeUnitByMetal[metal] ?? '—';
         const label = `Grade ${metal} (${unit})`;
         const values = seriesByLabel.get(label) ?? null;
         if (!values || !hasAnySeriesValue(values)) return null;
         return { label, values };
       }),
-      ...orderedPayableMetals.map((metal) => {
+      ...orderedMetals.map((metal) => {
         const label = `Recovery ${metal} (%)`;
         const values = seriesByLabel.get(label) ?? null;
         if (!values || !hasAnySeriesValue(values)) return null;
@@ -2305,14 +2305,50 @@ Capital Available: ${availableLabel}`,
     const depreciationSeries = getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD);
     const hasDepreciationSeries = Array.isArray(depreciationSeries);
 
+    const maxSeriesLength = groupedRows.reduce((max, row) => {
+      if (row.type !== 'data') return max;
+      return Math.max(max, row.values.length);
+    }, 0);
+    const displayColumnCount = Math.max(base.columnCount, maxSeriesLength);
+    const tp = parsedSelectedProject.engineInputWithoutPrices.productionStartPeriod;
+
+    const years = (() => {
+      if (displayColumnCount <= base.years.length) {
+        return base.years;
+      }
+
+      const extended = [...base.years];
+      let lastYear = Number.parseInt(extended[extended.length - 1] ?? '', 10);
+      if (!Number.isInteger(lastYear)) {
+        lastYear = new Date().getUTCFullYear() + base.years.length - 1;
+      }
+
+      while (extended.length < displayColumnCount) {
+        lastYear += 1;
+        extended.push(String(lastYear));
+      }
+
+      return extended;
+    })();
+
+    const tIndex = Array.from({ length: displayColumnCount }, (_, t) => String(t));
+    const tMinusTp = Array.from({ length: displayColumnCount }, (_, t) => {
+      if (!Number.isInteger(tp)) return '—';
+      const diff = t - (tp as number);
+      return diff < 0 ? '' : String(diff);
+    });
+
+    const timelineNotes = displayColumnCount > base.columnCount
+      ? [...base.notes, `Timeline auto-extended to ${displayColumnCount} periods based on longest series.`]
+      : base.notes;
+
     return {
       ...base,
-      tMinusTp: base.tMinusTp.map((value) => {
-        const num = Number(value);
-        if (!Number.isFinite(num)) return value;
-        return num < 0 ? '' : value;
-      }),
-      notes: hasDepreciationSeries ? base.notes : [...base.notes, 'EBITDA requires D&A series; missing => null'],
+      columnCount: displayColumnCount,
+      years,
+      tIndex,
+      tMinusTp,
+      notes: hasDepreciationSeries ? timelineNotes : [...timelineNotes, 'EBITDA requires D&A series; missing => null'],
       rows: groupedRows,
     };
   }, [parsedSelectedProject, projectSeries]);
