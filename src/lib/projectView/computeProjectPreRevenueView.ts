@@ -342,7 +342,7 @@ function ratio(num: NullableNumber, den: NullableNumber): MetricValue {
 
 function perShareMetric(value: NullableNumber, shares: NullableNumber, missingValueReason: string): MetricValue {
   if (!finite(value)) return mv(null, missingValueReason);
-  if (!finite(shares) || shares <= 0) return mv(null, 'Missing required upstream input: shares_post_financing');
+  if (!finite(shares) || shares <= 0) return mv(null, 'Missing or invalid shares_post_financing');
   return mv(value / shares, null);
 }
 
@@ -881,10 +881,10 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       AuEq_LOM: mv(aueqLom, tp !== null && masterN !== null && tp > masterN ? 'tp > masterN' : 'Missing series payableAuEqOz'),
       AuEq_YR: mv(aueqYr, aueqLom === null ? 'Missing AuEq_LOM' : 'Denominator is 0'),
       InSitu_10Y_USD: mv(inSitu10YUSD, inSitu10YReason),
-      InSitu_10Y_perShare_USD: perShareMetric(inSitu10YUSD, sharesPf, inSitu10YReason ?? 'Missing numerator input'),
+      InSitu_10Y_perShare_USD: perShareMetric(inSitu10YUSD, sharesPf, inSitu10YReason ?? 'Missing numerator input: InSitu_10Y_USD'),
       EV_over_10Y_InSitu: ratio(evUsd, inSitu10YUSD),
       AuEq_10Y: mv(auEq10Y, auEq10YReason),
-      AuEq_10Y_perShare: perShareMetric(auEq10Y, sharesPf, auEq10YReason ?? 'Missing numerator input'),
+      AuEq_10Y_perShare: perShareMetric(auEq10Y, sharesPf, auEq10YReason ?? 'Missing numerator input: AuEq_10Y'),
     },
     list5: {
       Initial_CAPEX_Target: mv(initialCapexTarget, initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'Missing fx_USD_to_TargetCurrency'),
