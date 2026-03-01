@@ -2156,8 +2156,12 @@ Capital Available: ${availableLabel}`,
     const recoveryPctByMetal = parsedSelectedProject.context.operations?.recoveryPctByMetal ?? {};
 
     const priorityMetals = ['Au', 'Ag', 'Cu', 'Zn', 'Pb', 'Ni', 'Co', 'Pt', 'Pd'];
-    const presentMetals = Array.from(new Set(Object.keys(payableSeriesByMetal)));
-    const orderedPayableMetals = [
+    const presentMetals = Array.from(new Set([
+      ...Object.keys(payableSeriesByMetal),
+      ...Object.keys(gradeByMetal),
+      ...Object.keys(recoveryPctByMetal),
+    ]));
+    const orderedMetals = [
       ...priorityMetals.filter((metal) => presentMetals.includes(metal)),
       ...presentMetals.filter((metal) => !priorityMetals.includes(metal)).sort((a, b) => a.localeCompare(b)),
     ];
@@ -2199,29 +2203,21 @@ Capital Available: ${availableLabel}`,
     const seriesByLabel = new Map(base.rows.map((row) => [row.label, row.values]));
     const oreUnit = parsedSelectedProject.context.operations?.oreTonnageUnit ?? 'tonne';
 
-    const recoverySeriesFor = (metal: string): Array<number | null> | null => {
-      const values = getSeries(recoveryPctByMetal[metal]);
-      if (!values || !hasAnySeriesValue(values)) return null;
-      const finite = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-      const isFraction = finite.length > 0 && finite.every((value) => value >= 0 && value <= 1);
-      return values.map((value) => (typeof value === 'number' && Number.isFinite(value) ? (isFraction ? value * 100 : value) : null));
-    };
-
     const productionRows = [
       { label: `Ore mined (${oreUnit})`, values: seriesByLabel.get(`Ore mined (${oreUnit})`) ?? null },
       { label: `Ore milled (${oreUnit})`, values: seriesByLabel.get(`Ore milled (${oreUnit})`) ?? null },
-      ...orderedPayableMetals.map((metal) => {
-        const values = getSeries(gradeByMetal[metal]);
+      ...orderedMetals.map((metal) => {
         const unit = gradeUnitByMetal[metal] ?? '—';
+        const values = seriesByLabel.get(`Grade ${metal} (${unit})`) ?? null;
         if (!values || !hasAnySeriesValue(values)) return null;
         return { label: `Grade ${metal} (${unit})`, values };
       }),
-      ...orderedPayableMetals.map((metal) => {
-        const values = recoverySeriesFor(metal);
-        if (!values) return null;
+      ...orderedMetals.map((metal) => {
+        const values = seriesByLabel.get(`Recovery ${metal} (%)`) ?? null;
+        if (!values || !hasAnySeriesValue(values)) return null;
         return { label: `Recovery ${metal} (%)`, values };
       }),
-      ...orderedPayableMetals.map((metal) => {
+      ...orderedMetals.map((metal) => {
         const values = getSeries(payableSeriesByMetal[metal]);
         const unit = payableUnits[metal];
         const include = values !== null && (hasAnySeriesValue(values) || payableSeriesByMetal[metal] !== undefined);
@@ -2232,7 +2228,7 @@ Capital Available: ${availableLabel}`,
       }),
     ].filter((row) => row && row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
 
-    const revenueRows = orderedPayableMetals
+    const revenueRows = orderedMetals
       .map((metal) => ({ label: `Revenue ${metal} (USD)`, values: seriesByLabel.get(`Revenue ${metal} (USD)`) ?? null }))
       .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
 
