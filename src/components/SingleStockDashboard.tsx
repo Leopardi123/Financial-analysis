@@ -2206,16 +2206,18 @@ Capital Available: ${availableLabel}`,
     const productionRows = [
       { label: `Ore mined (${oreUnit})`, values: seriesByLabel.get(`Ore mined (${oreUnit})`) ?? null },
       { label: `Ore milled (${oreUnit})`, values: seriesByLabel.get(`Ore milled (${oreUnit})`) ?? null },
-      ...orderedMetals.map((metal) => {
+      ...orderedPayableMetals.map((metal) => {
         const unit = gradeUnitByMetal[metal] ?? '—';
-        const values = seriesByLabel.get(`Grade ${metal} (${unit})`) ?? null;
+        const label = `Grade ${metal} (${unit})`;
+        const values = seriesByLabel.get(label) ?? null;
         if (!values || !hasAnySeriesValue(values)) return null;
-        return { label: `Grade ${metal} (${unit})`, values };
+        return { label, values };
       }),
-      ...orderedMetals.map((metal) => {
-        const values = seriesByLabel.get(`Recovery ${metal} (%)`) ?? null;
+      ...orderedPayableMetals.map((metal) => {
+        const label = `Recovery ${metal} (%)`;
+        const values = seriesByLabel.get(label) ?? null;
         if (!values || !hasAnySeriesValue(values)) return null;
-        return { label: `Recovery ${metal} (%)`, values };
+        return { label, values };
       }),
       ...orderedMetals.map((metal) => {
         const values = getSeries(payableSeriesByMetal[metal]);

@@ -145,7 +145,8 @@ function shiftPerPeriodArraysDeep(value: unknown, expectedLength: number, k: num
 }
 
 function shiftProjectToTargetProductionYear(projectRaw: Record<string, unknown>, targetYear: number): ShiftForwardResult {
-  const time = projectRaw.time;
+  const normalizedProjectRaw = buildProjectJsonV1Template(projectRaw as never) as Record<string, unknown>;
+  const time = normalizedProjectRaw.time;
   if (typeof time !== 'object' || time === null || Array.isArray(time)) {
     throw new Error('Kan inte förskjuta: time saknas i JSON.');
   }
