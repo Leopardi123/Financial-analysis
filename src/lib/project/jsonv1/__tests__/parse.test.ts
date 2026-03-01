@@ -323,6 +323,16 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   const parsedDedup = parseProjectJsonV1(duplicateSiteGandaIdentical);
   assertEqual(parsedDedup.context.economicsBreakdown?.cogs?.siteGandA_USD, undefined, 'identical duplicate siteGandA is deduped from economicsBreakdown');
 
+  const duplicateSiteGandaNullZeroEquivalent = getProjectJsonV1Template();
+  duplicateSiteGandaNullZeroEquivalent.series.siteGandA_USD = [0, null, 5, 0, null, 3];
+  duplicateSiteGandaNullZeroEquivalent.economicsBreakdown = {
+    cogs: {
+      siteGandA_USD: [null, 0, 5, null, 0, 3],
+    },
+  };
+  const parsedNullZeroDedup = parseProjectJsonV1(duplicateSiteGandaNullZeroEquivalent);
+  assertEqual(parsedNullZeroDedup.context.economicsBreakdown?.cogs?.siteGandA_USD, undefined, 'null vs 0 equivalent duplicate siteGandA is deduped from economicsBreakdown');
+
   const duplicateSiteGandaMismatch = getProjectJsonV1Template();
   duplicateSiteGandaMismatch.series.siteGandA_USD = [0, 9, 0, 0, 0, 0];
   duplicateSiteGandaMismatch.economicsBreakdown = {
@@ -332,7 +342,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   };
   assertThrows(
     () => parseProjectJsonV1(duplicateSiteGandaMismatch),
-    /First difference at index 1: economicsBreakdown=8, series=9/,
+    /First difference at index 1: economicsBreakdown=8, series=9\. Editor cannot auto-resolve because arrays differ\./,
     'siteGandA mismatch reports first differing index',
   );
 
@@ -345,6 +355,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   );
 
   assert(parsedDedup.diagnostics.normalization.some((item) => item.rule === 'dedup_identical_site_ganda_overlap'), 'dedup diagnostics captured');
+  assert(parsedNullZeroDedup.diagnostics.normalization.some((item) => item.summary.includes('Auto-resolved duplicate siteGandA')), 'null/zero equivalent dedup diagnostics captured');
   assert(parsedOzUnit.diagnostics.normalization.some((item) => item.rule === 'qty_unit_oz_to_toz'), 'unit normalization diagnostics captured');
 
   const invalidOperations = getProjectJsonV1Template();
