@@ -2165,6 +2165,7 @@ Capital Available: ${availableLabel}`,
       ...priorityMetals.filter((metal) => presentMetals.includes(metal)),
       ...presentMetals.filter((metal) => !priorityMetals.includes(metal)).sort((a, b) => a.localeCompare(b)),
     ];
+    const orderedPayableMetals = orderedMetals.filter((metal) => Object.prototype.hasOwnProperty.call(payableSeriesByMetal, metal));
 
     const base = buildOperationsGridModel({
       masterN: parsedSelectedProject.engineInputWithoutPrices.masterN,
