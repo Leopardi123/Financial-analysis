@@ -2199,27 +2199,21 @@ Capital Available: ${availableLabel}`,
     const seriesByLabel = new Map(base.rows.map((row) => [row.label, row.values]));
     const oreUnit = parsedSelectedProject.context.operations?.oreTonnageUnit ?? 'tonne';
 
-    const recoverySeriesFor = (metal: string): Array<number | null> | null => {
-      const values = getSeries(recoveryPctByMetal[metal]);
-      if (!values || !hasAnySeriesValue(values)) return null;
-      const finite = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-      const isFraction = finite.length > 0 && finite.every((value) => value >= 0 && value <= 1);
-      return values.map((value) => (typeof value === 'number' && Number.isFinite(value) ? (isFraction ? value * 100 : value) : null));
-    };
-
     const productionRows = [
       { label: `Ore mined (${oreUnit})`, values: seriesByLabel.get(`Ore mined (${oreUnit})`) ?? null },
       { label: `Ore milled (${oreUnit})`, values: seriesByLabel.get(`Ore milled (${oreUnit})`) ?? null },
       ...orderedPayableMetals.map((metal) => {
-        const values = getSeries(gradeByMetal[metal]);
         const unit = gradeUnitByMetal[metal] ?? '—';
+        const label = `Grade ${metal} (${unit})`;
+        const values = seriesByLabel.get(label) ?? null;
         if (!values || !hasAnySeriesValue(values)) return null;
-        return { label: `Grade ${metal} (${unit})`, values };
+        return { label, values };
       }),
       ...orderedPayableMetals.map((metal) => {
-        const values = recoverySeriesFor(metal);
-        if (!values) return null;
-        return { label: `Recovery ${metal} (%)`, values };
+        const label = `Recovery ${metal} (%)`;
+        const values = seriesByLabel.get(label) ?? null;
+        if (!values || !hasAnySeriesValue(values)) return null;
+        return { label, values };
       }),
       ...orderedPayableMetals.map((metal) => {
         const values = getSeries(payableSeriesByMetal[metal]);
