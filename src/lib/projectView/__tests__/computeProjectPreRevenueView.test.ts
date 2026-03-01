@@ -267,4 +267,71 @@ assert.equal(userProvidedSeries.diagnostics.payback_real_debug.clock_definition,
 assert.ok(Array.isArray(userProvidedSeries.diagnostics.payback_real_debug.fcff_used));
 assert.ok(Array.isArray(userProvidedSeries.diagnostics.irr_debug.fcff_used));
 
+const strict10yInsufficientPeriods = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 8,
+  sharesCurrent: 10,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: new Array(9).fill(1),
+  capexUSD: new Array(9).fill(-1),
+  grossRevenueUSD: new Array(9).fill(1),
+  ebitUSD: new Array(9).fill(1),
+  payableAuEqOz: new Array(9).fill(1),
+  sustainingCostUSD: new Array(9).fill(1),
+  productionStartPeriod: 0,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assert.equal(strict10yInsufficientPeriods.list4.InSitu_10Y_USD.value, null);
+assert.equal(strict10yInsufficientPeriods.list4.InSitu_10Y_USD.reason, '10Y requires 10 periods; have 9');
+assert.equal(strict10yInsufficientPeriods.list4.AuEq_10Y.reason, '10Y requires 10 periods; have 9');
+
+const strict10yMissingWindowValue = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 11,
+  sharesCurrent: 10,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: new Array(12).fill(1),
+  capexUSD: new Array(12).fill(-1),
+  grossRevenueUSD: [1, 1, 1, 1, 1, null, 1, 1, 1, 1, 1, 1],
+  ebitUSD: new Array(12).fill(1),
+  payableAuEqOz: [1, 1, 1, 1, 1, null, 1, 1, 1, 1, 1, 1],
+  sustainingCostUSD: new Array(12).fill(1),
+  productionStartPeriod: 0,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assert.equal(strict10yMissingWindowValue.list4.InSitu_10Y_USD.reason, 'Missing value(s) in 10Y window (t=0..9)');
+assert.equal(strict10yMissingWindowValue.list4.AuEq_10Y.reason, 'Missing value(s) in 10Y window (t=0..9)');
+
+const perShareUpstreamMissingShares = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 11,
+  sharesCurrent: null,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: new Array(12).fill(1),
+  capexUSD: new Array(12).fill(-1),
+  grossRevenueUSD: new Array(12).fill(1),
+  ebitUSD: new Array(12).fill(1),
+  payableAuEqOz: new Array(12).fill(1),
+  sustainingCostUSD: new Array(12).fill(1),
+  productionStartPeriod: 0,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assert.equal(perShareUpstreamMissingShares.list4.InSitu_10Y_perShare_USD.reason, 'Missing required upstream input: shares_post_financing');
+assert.equal(perShareUpstreamMissingShares.list4.AuEq_10Y_perShare.reason, 'Missing required upstream input: shares_post_financing');
+
 console.log('ok computeProjectPreRevenueView');

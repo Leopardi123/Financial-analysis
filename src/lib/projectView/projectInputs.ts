@@ -41,6 +41,29 @@ function asFiniteSeries(value: unknown): number[] | null {
   return value.map((item) => (typeof item === 'number' && Number.isFinite(item) ? item : Number.NaN));
 }
 
+function firstFiniteSeries(...candidates: unknown[]): number[] | null {
+  for (const candidate of candidates) {
+    const normalized = asFiniteSeries(candidate);
+    if (normalized !== null) return normalized;
+  }
+  return null;
+}
+
+function derivePayableAuEqOz(grossRevenueUSD: number[] | null, auPriceUSD: number[] | null): number[] | null {
+  if (grossRevenueUSD === null || auPriceUSD === null) return null;
+  const length = Math.min(grossRevenueUSD.length, auPriceUSD.length);
+  if (length === 0) return [];
+  const payable = new Array<number>(length).fill(Number.NaN);
+  for (let t = 0; t < length; t += 1) {
+    const gross = grossRevenueUSD[t];
+    const auPrice = auPriceUSD[t];
+    payable[t] = Number.isFinite(gross) && Number.isFinite(auPrice) && auPrice > 0
+      ? gross / auPrice
+      : Number.NaN;
+  }
+  return payable;
+}
+
 function asIntegerOrNull(value: unknown): number | null {
   return Number.isInteger(value) ? Number(value) : null;
 }
@@ -77,6 +100,21 @@ export function getProjectInputs(rawState: {
     ?? normalizeRate(parsed?.engineInputWithoutPrices?.phase2?.discountRate)
     ?? normalizeRate(rawState.discountRateInput);
 
+  const grossRevenueUSD = firstFiniteSeries(
+    series.grossRevenueUSD,
+    series.totalRevenue_USD,
+    aggregation.grossRevenueUSD_total,
+    aggregation.revenueUSD_total,
+  );
+  const auPriceUSD = firstFiniteSeries(
+    aggregation.auPriceUSDPerOz,
+    series.auPriceUSDPerOz,
+  );
+  const payableAuEqOz = firstFiniteSeries(
+    aggregation.payableAuEqOz_total,
+    series.payableAuEqOz,
+  ) ?? derivePayableAuEqOz(grossRevenueUSD, auPriceUSD);
+
   return {
     fx,
     r,
@@ -90,8 +128,8 @@ export function getProjectInputs(rawState: {
     series: {
       fcfUSD: asFiniteSeries(series.fcffUSD),
       capexUSD: asFiniteSeries(series.capexUSD),
-      grossRevenueUSD: asFiniteSeries(series.totalRevenue_USD),
-      auPriceUSD: asFiniteSeries(aggregation.auPriceUSDPerOz),
+      grossRevenueUSD,
+      auPriceUSD,
       operatingCostsUSD: asFiniteSeries(series.operatingCostsUSD),
       sustainingCapexUSD: asFiniteSeries(series.sustainingCapexUSD),
       siteGandAUSD: asFiniteSeries(series.siteGandA_USD),
@@ -104,7 +142,7 @@ export function getProjectInputs(rawState: {
       taxUSD: asFiniteSeries(series.taxUSD),
       federalIncomeTaxUSD: asFiniteSeries((series.taxesDetail as Record<string, unknown> | undefined)?.federalIncomeTaxUSD),
       df_now: asFiniteSeries(series.df_now),
-      payableAuEqOz: asFiniteSeries(aggregation.payableAuEqOz_total),
+      payableAuEqOz,
       sustainingCostUSD: asFiniteSeries(aggregation.sustainingCostUSD_total),
     },
   };
