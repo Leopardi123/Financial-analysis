@@ -2167,6 +2167,34 @@ Capital Available: ${availableLabel}`,
     ];
     const orderedPayableMetals = orderedMetals.filter((metal) => Object.prototype.hasOwnProperty.call(payableSeriesByMetal, metal));
 
+    const contextSeriesRecord = ((parsedSelectedProject.context.series ?? {}) as Record<string, unknown>);
+
+    const derivePricesFromRevenue = (
+      revenueByMetal: Record<string, Array<number | null>>,
+      qtyByMetal: Record<string, Array<number | null>>,
+    ): Record<string, Array<number | null>> => {
+      const out: Record<string, Array<number | null>> = {};
+      for (const [metal, revenueSeries] of Object.entries(revenueByMetal)) {
+        const qtySeries = qtyByMetal[metal] ?? [];
+        out[metal] = revenueSeries.map((revenue, t) => {
+          const quantity = qtySeries[t];
+          if (revenue === null || quantity === null || !Number.isFinite(revenue) || !Number.isFinite(quantity) || quantity === 0) return null;
+          return revenue / quantity;
+        });
+      }
+      return out;
+    };
+
+    const priceUSDByMetal = (() => {
+      const direct = projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined;
+      if (direct && Object.keys(direct).length > 0) return direct;
+      const revenueByMetal = projectSeriesRecord.revenueByMetal_USD as Record<string, Array<number | null>> | undefined;
+      if (revenueByMetal && Object.keys(revenueByMetal).length > 0) {
+        return derivePricesFromRevenue(revenueByMetal, payableSeriesByMetal);
+      }
+      return {};
+    })();
+
     const base = buildOperationsGridModel({
       masterN: parsedSelectedProject.engineInputWithoutPrices.masterN,
       productionStartPeriod: parsedSelectedProject.engineInputWithoutPrices.productionStartPeriod,
@@ -2189,12 +2217,12 @@ Capital Available: ${availableLabel}`,
         payableQtyUnitByMetal: payableUnits,
       },
       economics: {
-        priceUSDByMetal: (projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {},
-        operatingCostsUSD: getSeries(projectSeriesRecord.operatingCostsUSD) ?? undefined,
-        royaltiesUSD: getSeries(projectSeriesRecord.royaltiesUSD) ?? undefined,
+        priceUSDByMetal,
+        operatingCostsUSD: getSeries(projectSeriesRecord.operatingCostsUSD) ?? getSeries(contextSeriesRecord.operatingCostsUSD) ?? undefined,
+        royaltiesUSD: getSeries(projectSeriesRecord.royaltiesUSD) ?? getSeries(contextSeriesRecord.royaltiesUSD) ?? undefined,
         ebitdaUSD: getSeries(projectSeriesRecord.ebitdaUSD) ?? undefined,
         ebitUSD: getSeries(projectSeriesRecord.ebitUSD) ?? undefined,
-        depreciationUSD: getSeries(projectSeriesRecord.depreciationUSD) ?? getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD) ?? undefined,
+        depreciationUSD: getSeries(projectSeriesRecord.depreciationUSD) ?? getSeries(contextSeriesRecord.depreciationUSD) ?? undefined,
         taxableIncomeUSD: getSeries(projectSeriesRecord.taxableIncomeUSD) ?? undefined,
         taxUSD: getSeries(projectSeriesRecord.taxUSD) ?? undefined,
         effectiveTaxRate: getSeries(projectSeriesRecord.effectiveTaxRate) ?? undefined,
@@ -2259,10 +2287,10 @@ Capital Available: ${availableLabel}`,
       ...revenueRows,
       { label: 'Gross revenue (USD)', values: seriesByLabel.get('Gross revenue (USD)') ?? null },
       { label: 'Gross profit (USD)', values: seriesByLabel.get('Gross profit (USD)') ?? null },
-      { label: 'EBITDA (USD, includes royalties)', values: seriesByLabel.get('EBITDA (USD, includes royalties)') ?? null },
-      { label: 'EBIT (USD)', values: getSeries(projectSeriesRecord.ebitUSD) },
-      { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) },
-      { label: 'Royalties (USD)', values: royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD) },
+      { label: 'EBITDA (USD)', values: seriesByLabel.get('EBITDA (USD)') ?? getSeries(projectSeriesRecord.ebitdaUSD) },
+      { label: 'EBIT (USD)', values: getSeries(projectSeriesRecord.ebitUSD) ?? getSeries(contextSeriesRecord.ebitUSD) },
+      { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) ?? getSeries(contextSeriesRecord.operatingCostsUSD) },
+      { label: 'Royalties (USD)', values: royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD) ?? getSeries(contextSeriesRecord.royaltiesUSD) },
     ]
       .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
 
