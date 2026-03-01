@@ -126,3 +126,25 @@ test('royalties detail drives royalties row and EBITDA consistently', () => {
   assert.deepEqual(byLabel.get('EBITDA (USD)'), [92000]);
   assert.deepEqual(byLabel.get('EBIT (USD)'), [82000]);
 });
+
+test('grade/recovery are masked before production start and when ore milled is zero', () => {
+  const model = buildOperationsGridModel({
+    masterN: 4,
+    productionStartPeriod: 2,
+    periodEndDatesUtc: ['2024-12-31', '2025-12-31', '2026-12-31', '2027-12-31', '2028-12-31'],
+    operations: {
+      oreMilledTonnes: [0, 0, 100, 0, 200],
+      gradeByMetal: { Au: [1, 1.1, 1.2, 1.3, 1.4] },
+      gradeUnitByMetal: { Au: 'gpt' },
+      recoveryPctByMetal: { Au: [0.8, 0.81, 0.82, 0.83, 0.84] },
+    },
+    metals: {
+      payableQtyByMetal: { Au: [10, 11, 12, 13, 14] },
+      payableQtyUnitByMetal: { Au: 'toz' },
+    },
+  });
+
+  const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
+  assert.deepEqual(byLabel.get('Grade Au (gpt)'), [null, null, 1.2, null, 1.4]);
+  assert.deepEqual(byLabel.get('Recovery Au (%)'), [null, null, 82, null, 84]);
+});

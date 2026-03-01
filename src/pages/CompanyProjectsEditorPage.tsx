@@ -32,6 +32,27 @@ function formatTemplate(projectId: string, projectName: string): string {
   return JSON.stringify(template, null, 2);
 }
 
+function addYearsToIsoDate(isoDate: string, yearsToAdd: number): string {
+  const parsed = new Date(isoDate);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Kan inte förskjuta: ogiltigt datum i time.periodEndDatesUtc: ${isoDate}`);
+  }
+  const shifted = new Date(parsed.getTime());
+  shifted.setUTCFullYear(shifted.getUTCFullYear() + yearsToAdd);
+  return shifted.toISOString().slice(0, 10);
+}
+
+function extendPeriodEndDatesUtc(periodEndDatesUtc: string[], periodsToAppend: number): string[] {
+  if (periodsToAppend <= 0) return [...periodEndDatesUtc];
+  const out = [...periodEndDatesUtc];
+  let last = out[out.length - 1];
+  for (let i = 0; i < periodsToAppend; i += 1) {
+    last = addYearsToIsoDate(last, 1);
+    out.push(last);
+  }
+  return out;
+}
+
 function validateProjectJson(rawJson: string): ValidationState {
   let parsed: unknown;
   try {
@@ -87,14 +108,14 @@ type ShiftForwardResult = {
 
 function shiftPerPeriodArraysDeep(value: unknown, expectedLength: number, k: number): { value: unknown; shiftedSeriesCount: number } {
   if (Array.isArray(value)) {
-    const isPerPeriodSeries = value.length === expectedLength && value.every((entry) => entry === null || typeof entry === 'number');
+    const isPerPeriodSeries = value.length === expectedLength && value.every((entry) => entry === null || entry === undefined || typeof entry === 'number');
     if (isPerPeriodSeries) {
-      const shifted = new Array<number | null>(expectedLength).fill(null);
-      for (let t = 0; t < expectedLength; t += 1) {
-        const src = t - k;
-        if (src < 0 || src >= expectedLength) continue;
+      const newLength = expectedLength + k;
+      const shifted = new Array<number | null>(newLength).fill(null);
+      for (let src = 0; src < expectedLength; src += 1) {
+        const destinationIndex = src + k;
         const sourceValue = value[src];
-        shifted[t] = typeof sourceValue === 'number' && Number.isFinite(sourceValue) ? sourceValue : null;
+        shifted[destinationIndex] = typeof sourceValue === 'number' && Number.isFinite(sourceValue) ? sourceValue : null;
       }
       return { value: shifted, shiftedSeriesCount: 1 };
     }
@@ -156,13 +177,15 @@ function shiftProjectToTargetProductionYear(projectRaw: Record<string, unknown>,
   }
 
   const tpEff = tpBase + k;
-  if (tpEff >= periodEndDatesUtc.length) {
-    throw new Error(`Målår (${targetYear}) ger tp_eff=${tpEff}, vilket ligger utanför tidshorisonten (masterN=${periodEndDatesUtc.length - 1}).`);
-  }
-
   const shiftedDeep = shiftPerPeriodArraysDeep(projectRaw, periodEndDatesUtc.length, k);
   const shifted = shiftedDeep.value as Record<string, unknown>;
-  const shiftedTime = { ...(shifted.time as Record<string, unknown>), productionStartPeriod: tpEff };
+  const periodEndDatesUtcExtended = extendPeriodEndDatesUtc(periodEndDatesUtc as string[], k);
+  const shiftedTime = {
+    ...(shifted.time as Record<string, unknown>),
+    productionStartPeriod: tpEff,
+    periodEndDatesUtc: periodEndDatesUtcExtended,
+    masterN: (periodEndDatesUtc.length - 1) + k,
+  };
   shifted.time = shiftedTime;
 
   return {
@@ -403,7 +426,7 @@ export default function CompanyProjectsEditorPage() {
       setRawJsonInput(JSON.stringify(shifted.shifted, null, 2));
       setEditorError(null);
       setEditorInfo(
-        `Försköt produktionen med k=${shifted.k} perioder (tp ${shifted.tpBase} -> ${shifted.tpEff}) mot målår ${targetYear}. Skiftade serier: ${shifted.shiftedSeriesCount}.`,
+        `Försköt produktionen med k=${shifted.k} perioder (tp_base ${shifted.tpBase} -> tp_eff ${shifted.tpEff}) mot målår ${targetYear}. Extended masterN by ${shifted.k}, appended ${shifted.k} dates, shifted arrays without truncation. Skiftade serier: ${shifted.shiftedSeriesCount}.`,
       );
     } catch (error) {
       setEditorError((error as Error).message);
