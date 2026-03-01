@@ -67,6 +67,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       { date: '2023-06-01', close: 4.2 },
       { date: '2024-07-01', close: 4.4 },
     ],
+    CU_USD_TONNE: [],
     ZN_USD_LB: [],
     PB_USD_LB: [],
     NI_USD_LB: [],
@@ -300,7 +301,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       }),
     },
   );
-  assertEqual(spotWarningResolved.diagnostics?.warnings.length, 2, 'spot warnings should emit at most once per unique key');
+  const spotProviderWarnings = (spotWarningResolved.diagnostics?.warnings ?? []).filter((warning) => warning.includes('No close on or before anchor date'));
+  assertEqual(spotProviderWarnings.length, 3, 'spot provider warnings should emit at most once per unique key');
   assert(
     !(spotWarningResolved.diagnostics?.warnings.some((warning) => warning.includes('period end')) ?? false),
     'spot warnings should never reference period end dates',
@@ -331,5 +333,55 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
   assertEqual(fixedMissing.spotPriceUSDByMetal.Au[0], null, 'fixed mode missing key resolves null');
   assert((fixedMissing.diagnostics?.warnings.some((w) => w.includes('Missing fixed price for key XAU_USD_TOZ')) ?? false), 'fixed mode missing key warning contains key');
+
+  const cuTonRequested = getProjectJsonV1Template();
+  cuTonRequested.economicsBreakdown = null;
+  cuTonRequested.time.masterN = 0;
+  cuTonRequested.time.productionStartPeriod = 0;
+  cuTonRequested.time.periodEndDatesUtc = ['2024-12-31'];
+  cuTonRequested.series.capexUSD = [0];
+  cuTonRequested.series.operatingCostsUSD = [0];
+  cuTonRequested.series.sustainingCapexUSD = [0];
+  cuTonRequested.series.siteGandA_USD = [0];
+  cuTonRequested.series.reclamationUSD = [0];
+  cuTonRequested.series.byproductCreditsUSD = [0];
+  cuTonRequested.series.depreciationUSD = [0];
+  cuTonRequested.series.workingCapitalDeltaUSD = [0];
+  cuTonRequested.metals.payableQtyByMetal = { Cu: [1] };
+  cuTonRequested.metals.payableQtyUnitByMetal = { Cu: 'tonne' };
+  cuTonRequested.metals.priceKeyByMetal = { Cu: 'CU_USD_TONNE' };
+  cuTonRequested.metals.auPriceKey = 'XAU_USD_TOZ';
+  if (cuTonRequested.operations) {
+    cuTonRequested.operations.oreMilledTonnes = [null];
+    cuTonRequested.operations.oreMinedTonnes = [null];
+    cuTonRequested.operations.gradeByMetal = { Au: [null], Cu: [null] };
+    cuTonRequested.operations.recoveryPctByMetal = { Au: [null], Cu: [null] };
+  }
+  const parsedCuTonRequested = parseProjectJsonV1(cuTonRequested);
+
+  const derivedTonFromLb = await resolveProjectPricesToEngineInput(
+    { parsed: parsedCuTonRequested, scenario: { mode: 'fixed', fixedPriceByKey: { CU_USD_LB: 4, XAU_USD_TOZ: 2000 } } },
+    { resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc, scenario }) => ({ values: anchorDatesUtc.map(() => (scenario.mode === 'fixed' && Number.isFinite(scenario.fixedByKey[price_key]) ? scenario.fixedByKey[price_key] : null)), warnings: [] }) },
+  );
+  assertEqual(derivedTonFromLb.spotPriceUSDByMetal.Cu[0], 4 * 2204.6226218, 'CU_USD_TONNE derives from CU_USD_LB using tonne/lb factor');
+  assert(derivedTonFromLb.diagnostics?.warnings.some((w) => w.includes('price_diagnostic metal=Cu') && w.includes('price_key_requested=CU_USD_TONNE') && w.includes('price_key_used=CU_USD_LB') && w.includes('derived=true') && w.includes('conversion_factor=2204.6226218') && w.includes('warning="Cu COMEX–LME basis can diverge; unit conversion is not basis conversion."')) ?? false, 'diagnostic shows CU tonne derived from lb with warning');
+
+  const cuLbRequested = JSON.parse(JSON.stringify(cuTonRequested));
+  cuLbRequested.metals.priceKeyByMetal.Cu = 'CU_USD_LB';
+  const parsedCuLbRequested = parseProjectJsonV1(cuLbRequested);
+  const derivedLbFromTon = await resolveProjectPricesToEngineInput(
+    { parsed: parsedCuLbRequested, scenario: { mode: 'fixed', fixedPriceByKey: { CU_USD_TONNE: 8818.4904872, XAU_USD_TOZ: 2000 } } },
+    { resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc, scenario }) => ({ values: anchorDatesUtc.map(() => (scenario.mode === 'fixed' && Number.isFinite(scenario.fixedByKey[price_key]) ? scenario.fixedByKey[price_key] : null)), warnings: [] }) },
+  );
+  assert(Math.abs((derivedLbFromTon.spotPriceUSDByMetal.Cu[0] ?? 0) - 4) < 1e-9, 'CU_USD_LB derives from CU_USD_TONNE using inverse factor');
+  assert(derivedLbFromTon.diagnostics?.warnings.some((w) => w.includes('price_diagnostic metal=Cu') && w.includes('price_key_requested=CU_USD_LB') && w.includes('price_key_used=CU_USD_TONNE') && w.includes('derived=true') && w.includes('warning="Cu COMEX–LME basis can diverge; unit conversion is not basis conversion."')) ?? false, 'diagnostic warns when CU lb is derived from tonne');
+
+  const bothPresentUsesRequested = await resolveProjectPricesToEngineInput(
+    { parsed: parsedCuTonRequested, scenario: { mode: 'fixed', fixedPriceByKey: { CU_USD_LB: 4, CU_USD_TONNE: 9000, XAU_USD_TOZ: 2000 } } },
+    { resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc, scenario }) => ({ values: anchorDatesUtc.map(() => (scenario.mode === 'fixed' && Number.isFinite(scenario.fixedByKey[price_key]) ? scenario.fixedByKey[price_key] : null)), warnings: [] }) },
+  );
+  assertEqual(bothPresentUsesRequested.spotPriceUSDByMetal.Cu[0], 9000, 'when both Cu keys exist, requested key series is used');
+  assert(bothPresentUsesRequested.diagnostics?.warnings.some((w) => w.includes('price_diagnostic metal=Cu') && w.includes('price_key_requested=CU_USD_TONNE') && w.includes('price_key_used=CU_USD_TONNE') && w.includes('derived=false')) ?? false, 'diagnostic marks Cu requested series as non-derived when present');
+
   console.log('Project JSON v1 resolve prices tests passed');
 })();
