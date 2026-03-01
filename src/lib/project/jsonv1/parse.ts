@@ -169,12 +169,6 @@ function hasAnyNonNull(series: Array<number | null>): boolean {
   return series.some((value) => toFiniteOrNull(value) !== null);
 }
 
-function hasAnyNonZero(series: Array<number | null>): boolean {
-  return series.some((value) => {
-    const finite = toFiniteOrNull(value);
-    return finite !== null && finite !== 0;
-  });
-}
 
 function toFiniteOrNull(value: number | null | undefined): number | null {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -812,7 +806,8 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   });
   projectSeriesNormalized = projectSeriesNormalized || siteGandaNormalized.normalized;
   const siteGandA_USD = siteGandaNormalized.series;
-  const hasSeriesSiteGandAInput = hasAnyNonNull(asOptionalSparseSeries(raw.series.siteGandA_USD, 'series.siteGandA_USD', masterN));
+  const rawSeriesSiteGandA = asOptionalSparseSeries(raw.series.siteGandA_USD, 'series.siteGandA_USD', masterN);
+  const hasSeriesSiteGandAInput = rawSeriesSiteGandA !== undefined && hasAnyNonNull(rawSeriesSiteGandA);
   const reclamationNormalized = normalizeSeriesToMasterLength({
     value: raw.series.reclamationUSD,
     path: 'series.reclamationUSD',
