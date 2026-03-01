@@ -169,12 +169,6 @@ function hasAnyNonNull(series: Array<number | null>): boolean {
   return series.some((value) => toFiniteOrNull(value) !== null);
 }
 
-function hasAnyNonZero(series: Array<number | null>): boolean {
-  return series.some((value) => {
-    const finite = toFiniteOrNull(value);
-    return finite !== null && finite !== 0;
-  });
-}
 
 function toFiniteOrNull(value: number | null | undefined): number | null {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -230,7 +224,7 @@ function asOptionalSparseSeries(value: unknown, path: string, masterN: number): 
   return normalizeSparseSeries(path, value, masterN);
 }
 
-function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: Array<number | null>, diagnostics: NormalizationDiagnostic[]): ProjectJsonV1['economicsBreakdown'] {
+function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: Array<number | null>, hasSeriesSiteGandAInput: boolean, diagnostics: NormalizationDiagnostic[]): ProjectJsonV1['economicsBreakdown'] {
   if (raw === undefined) {
     return undefined;
   }
@@ -288,12 +282,15 @@ function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: A
       }
     }
 
-    if (cogs.siteGandA_USD && hasAnyNonNull(cogs.siteGandA_USD) && hasAnyNonZero(siteGandA_USD)) {
+    if (cogs.siteGandA_USD && hasAnyNonNull(cogs.siteGandA_USD) && hasSeriesSiteGandAInput) {
       let firstDiff = -1;
       for (let i = 0; i < cogs.siteGandA_USD.length; i += 1) {
         const left = toFiniteOrNull(cogs.siteGandA_USD[i]);
         const right = toFiniteOrNull(siteGandA_USD[i]);
-        if (left !== right) {
+        const equivalent = left === right
+          || (left === null && right === 0)
+          || (left === 0 && right === null);
+        if (!equivalent) {
           firstDiff = i;
           break;
         }
@@ -303,10 +300,10 @@ function parseEconomicsBreakdown(raw: unknown, masterN: number, siteGandA_USD: A
         diagnostics.push({
           rule: 'dedup_identical_site_ganda_overlap',
           path: 'economicsBreakdown.cogs.siteGandA_USD',
-          summary: 'Removed duplicate; canonical source is series.siteGandA_USD',
+          summary: 'Auto-resolved duplicate siteGandA: kept series.siteGandA_USD, removed economicsBreakdown.cogs.siteGandA_USD (equivalent arrays).',
         });
       } else {
-        throw new Error(`economicsBreakdown.cogs.siteGandA_USD conflicts with series.siteGandA_USD. Provide site G&A in one place only (prefer series.siteGandA_USD). First difference at index ${firstDiff}: economicsBreakdown=${String(cogs.siteGandA_USD[firstDiff])}, series=${String(siteGandA_USD[firstDiff])}.`);
+        throw new Error(`economicsBreakdown.cogs.siteGandA_USD conflicts with series.siteGandA_USD. First difference at index ${firstDiff}: economicsBreakdown=${String(cogs.siteGandA_USD[firstDiff])}, series=${String(siteGandA_USD[firstDiff])}. Editor cannot auto-resolve because arrays differ. Provide site G&A in one place only (prefer series.siteGandA_USD).`);
       }
     }
 
@@ -809,6 +806,8 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   });
   projectSeriesNormalized = projectSeriesNormalized || siteGandaNormalized.normalized;
   const siteGandA_USD = siteGandaNormalized.series;
+  const rawSeriesSiteGandA = asOptionalSparseSeries(raw.series.siteGandA_USD, 'series.siteGandA_USD', masterN);
+  const hasSeriesSiteGandAInput = rawSeriesSiteGandA !== undefined && hasAnyNonNull(rawSeriesSiteGandA);
   const reclamationNormalized = normalizeSeriesToMasterLength({
     value: raw.series.reclamationUSD,
     path: 'series.reclamationUSD',
@@ -860,7 +859,7 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
   }
   const depreciationUSD = depreciationNormalized?.series;
 
-  const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, masterN, siteGandA_USD, normalizationDiagnostics);
+  const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, masterN, siteGandA_USD, hasSeriesSiteGandAInput, normalizationDiagnostics);
 
   if (!isPlainObject(raw.metals)) {
     fail('metals', 'object', raw.metals);
