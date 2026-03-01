@@ -13,6 +13,7 @@ import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { buildOperationsGridModel } from "../pages/projectOperationsGrid.ts";
+import { harmonizeProjectExcelGrid } from "./projectExcelGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import {
@@ -2305,13 +2306,23 @@ Capital Available: ${availableLabel}`,
     const depreciationSeries = getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD);
     const hasDepreciationSeries = Array.isArray(depreciationSeries);
 
+    const harmonizedGrid = harmonizeProjectExcelGrid({
+      base,
+      rows: groupedRows,
+      productionStartPeriod: parsedSelectedProject.engineInputWithoutPrices.productionStartPeriod,
+    });
+
     return {
       ...base,
-      tMinusTp: base.tMinusTp.map((value) => {
+      columnCount: harmonizedGrid.columnCount,
+      years: harmonizedGrid.years,
+      tIndex: harmonizedGrid.tIndex,
+      tMinusTp: harmonizedGrid.tMinusTp.map((value) => {
         const num = Number(value);
         if (!Number.isFinite(num)) return value;
         return num < 0 ? '' : value;
       }),
+      warnings: harmonizedGrid.warnings,
       notes: hasDepreciationSeries ? base.notes : [...base.notes, 'EBITDA requires D&A series; missing => null'],
       rows: groupedRows,
     };
