@@ -2206,14 +2206,14 @@ Capital Available: ${availableLabel}`,
     const productionRows = [
       { label: `Ore mined (${oreUnit})`, values: seriesByLabel.get(`Ore mined (${oreUnit})`) ?? null },
       { label: `Ore milled (${oreUnit})`, values: seriesByLabel.get(`Ore milled (${oreUnit})`) ?? null },
-      ...orderedPayableMetals.map((metal) => {
+      ...orderedMetals.map((metal) => {
         const unit = gradeUnitByMetal[metal] ?? '—';
         const label = `Grade ${metal} (${unit})`;
         const values = seriesByLabel.get(label) ?? null;
         if (!values || !hasAnySeriesValue(values)) return null;
         return { label, values };
       }),
-      ...orderedPayableMetals.map((metal) => {
+      ...orderedMetals.map((metal) => {
         const label = `Recovery ${metal} (%)`;
         const values = seriesByLabel.get(label) ?? null;
         if (!values || !hasAnySeriesValue(values)) return null;
