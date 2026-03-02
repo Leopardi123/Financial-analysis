@@ -3407,7 +3407,10 @@ Capital Available: ${availableLabel}`,
                       })}
                     </div>
                     <p className="bread" style={{ marginTop: 8 }}>
-                      TotalDebt (aggregated): {corporateViewMetrics.list5.TotalDebt?.value === null ? "n/a" : formatMetricValue(corporateViewMetrics.list5.TotalDebt, "money", lockedTargetCurrency)}
+                      {(() => {
+                        const totalDebtMetric = corporateViewMetrics.list5.TotalDebt;
+                        return `TotalDebt (aggregated): ${totalDebtMetric ? formatMetricValue(totalDebtMetric, "money", lockedTargetCurrency) : "n/a"}`;
+                      })()}
                     </p>
                   </details>
 
