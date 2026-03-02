@@ -15,8 +15,8 @@
   "scenario": {
     "mode": "fixed",
     "fixedPriceByKey": {
-      "GCUSD": 2100,
-      "HGUSD": 4.1
+      "XAU_USD_TOZ": 2100,
+      "CU_USD_LB": 4.1
     }
   },
   "fx": {
@@ -187,10 +187,10 @@
             "Cu": "lb"
           },
           "priceKeyByMetal": {
-            "Au": "GCUSD",
-            "Cu": "HGUSD"
+            "Au": "XAU_USD_TOZ",
+            "Cu": "CU_USD_LB"
           },
-          "auPriceKey": "GCUSD"
+          "auPriceKey": "XAU_USD_TOZ"
         },
         "streamsByMetal": null,
         "takeItems": [],

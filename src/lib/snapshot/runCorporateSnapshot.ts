@@ -13,6 +13,7 @@ import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
+import { aggregateProjectsToCorporateTotals } from './aggregateProjectsToCorporateTotals.ts';
 import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
 import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical, convertQuantityToCanonical } from '../units/conversion.ts';
@@ -919,6 +920,17 @@ type SnapshotDiagnostics = {
     symbol?: string;
     fxSource?: 'auto' | 'manual';
     scenarioDelay?: DelayScenarioDiagnostics;
+    corporateTotalsDebug?: {
+      capexUSD_total: Array<number | null>;
+      fcfUSD_total: Array<number | null>;
+      operatingCostsUSD_total?: Array<number | null>;
+      sustainingCapexUSD_total?: Array<number | null>;
+      siteGandA_USD_total?: Array<number | null>;
+      royaltiesUSD_total?: Array<number | null>;
+      reclamationAccrualUSD_total?: Array<number | null>;
+      payable_AuEq_Oz_total?: Array<number | null>;
+      sustainingCostUSD_total?: Array<number | null>;
+    };
   };
 };
 
@@ -1465,6 +1477,42 @@ export async function runCorporateSnapshotPipeline(args: {
         return cost / pay;
       })(),
     };
+
+    if (projectSeriesContexts.length > 1) {
+      const corporateTotals = aggregateProjectsToCorporateTotals(
+        projectSeriesContexts.map((entry) => ({
+          capexUSD: entry.economics.capexUSD,
+          fcfUSD: entry.economics.fcffUSD,
+          operatingCostsUSD: entry.economics.operatingCostsUSD,
+          sustainingCapexUSD: entry.economics.sustainingCapexUSD,
+          siteGandA_USD: entry.economics.siteGandA_USD,
+          royaltiesUSD: entry.economics.royaltiesUSD,
+          reclamationAccrualUSD: entry.economics.reclamationUSD,
+          payable_AuEq_Oz: entry.payableQtyByMetal.Au,
+          sustainingCostUSD: entry.economics.sustainingCostUSD,
+        })),
+        aggregation.corporateMasterN,
+      );
+
+      diagnostics.meta.corporateTotalsDebug = corporateTotals;
+      aggregationEffective.capexUSD_total = applyScalarMultiplier(shiftSeries(corporateTotals.capexUSD_total, aggregation.corporateMasterN, delayPeriods).shifted, input.scenario.capexMult);
+      aggregationEffective.fcffUSD_total = shiftSeries(corporateTotals.fcfUSD_total, aggregation.corporateMasterN, delayPeriods).shifted;
+      aggregationEffective.sustainingCostUSD_total = corporateTotals.sustainingCostUSD_total
+        ? shiftSeries(corporateTotals.sustainingCostUSD_total, aggregation.corporateMasterN, delayPeriods).shifted
+        : aggregationEffective.sustainingCostUSD_total;
+      aggregationEffective.payableAuEqOz_total = corporateTotals.payable_AuEq_Oz_total
+        ? shiftSeries(corporateTotals.payable_AuEq_Oz_total, aggregation.corporateMasterN, delayPeriods).shifted
+        : aggregationEffective.payableAuEqOz_total;
+
+      aggregationEffective.CF_LOM_USD = sumFinite(aggregationEffective.fcffUSD_total);
+      aggregationEffective.NPV_today_USD = discountedSum(aggregationEffective.fcffUSD_total, input.discountRate);
+      aggregationEffective.aiscAuEqUSDPerOz_LOM = (() => {
+        const cost = sumFinite(aggregationEffective.sustainingCostUSD_total);
+        const pay = sumFinite(aggregationEffective.payableAuEqOz_total);
+        if (cost === null || pay === null || pay === 0) return null;
+        return cost / pay;
+      })();
+    }
 
     const financingEffective = fxRate === null
       ? financing
