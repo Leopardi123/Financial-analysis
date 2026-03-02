@@ -17,6 +17,7 @@ export type ProjectViewInputs = {
   discountRate: NullableNumber;
   masterN: number | null;
   sharesCurrent: NullableNumber;
+  sharesPostFinancingInput?: NullableNumber;
   priceCurrentTarget: NullableNumber;
   cashCurrentTarget: NullableNumber;
   debtCurrentTarget: NullableNumber;
@@ -413,7 +414,10 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const debtAddedTarget = remainingNeedTarget !== null ? remainingNeedTarget * normDebtFrac : 0;
   const equityRaiseTarget = remainingNeedTarget !== null ? remainingNeedTarget * equityFrac : 0;
   const newShares = priceCurrent !== null && priceCurrent > 0 ? equityRaiseTarget / priceCurrent : null;
-  const sharesPf = sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null;
+  const sharesPostFinancingInput = finite(input.sharesPostFinancingInput) && (input.sharesPostFinancingInput as number) > 0
+    ? input.sharesPostFinancingInput as number
+    : null;
+  const sharesPf = sharesPostFinancingInput ?? (sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null);
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
 

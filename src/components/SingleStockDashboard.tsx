@@ -1246,10 +1246,21 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     const equityValues = companyProjects.map((project) => corporateProjectEquityPct[project.project_id] ?? 100);
     const avgEquityPct = equityValues.reduce((sum, value) => sum + value, 0) / equityValues.length;
     const equityFraction = Math.min(1, Math.max(0, avgEquityPct / 100));
+    const financingPlanByProject = Object.fromEntries(
+      companyProjects.map((project) => {
+        const equityPct = corporateProjectEquityPct[project.project_id] ?? 100;
+        const projectEquityFraction = Math.min(1, Math.max(0, equityPct / 100));
+        return [project.project_id, {
+          equity_fraction: projectEquityFraction,
+          debt_fraction: 1 - projectEquityFraction,
+        }];
+      }),
+    );
     return {
       equity_fraction: equityFraction,
       debt_fraction: 1 - equityFraction,
       use_cash_first: true,
+      financingPlanByProject,
     };
   }, [companyProjects, corporateProjectEquityPct]);
 
@@ -1282,7 +1293,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       setCorporateSnapshotLoading(true);
       setCorporateSnapshotError(null);
       try {
-        const response = await fetch("/api/snapshot/corporate", {
+        const response = await fetch(`/api/snapshot/corporate${debugEnabled ? "?debug=1" : ""}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -1294,6 +1305,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
               price_current_TargetCurrency: profilePriceCurrent,
             },
             financingPlan: corporateFinancingPlan,
+            financingPlanByProject: corporateFinancingPlan?.financingPlanByProject,
             scenario: { mode: "spot" },
             fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } },
           }),
@@ -1322,7 +1334,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return () => {
       isMounted = false;
     };
-  }, [companyProjects.length, corporateFinancingPlan, data?.balance, data?.income, lockedTargetCurrency, primaryView, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
+  }, [companyProjects.length, corporateFinancingPlan, data?.balance, data?.income, debugEnabled, lockedTargetCurrency, primaryView, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
 
   const revenueData = buildSeriesData(
     buildSeries(data, [{ label: "Revenue", statement: "income", field: "revenue" }]),
@@ -2186,6 +2198,7 @@ Capital Available: ${availableLabel}`,
       discountRate: inputs.r,
       masterN: inputs.masterN,
       sharesCurrent: inputs.sharesCurrent,
+      sharesPostFinancingInput: inputs.sharesPostFinancing,
       priceCurrentTarget: inputs.price,
       cashCurrentTarget: inputs.cash0,
       debtCurrentTarget: inputs.debt0,
@@ -2224,11 +2237,6 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
-    const equityValues = companyProjects.map((project) => corporateProjectEquityPct[project.project_id] ?? 100);
-    const avgEquityPct = equityValues.length > 0
-      ? equityValues.reduce((sum, value) => sum + value, 0) / equityValues.length
-      : 100;
-
     return computeProjectViewMetrics({
       meta: { projectId: "corporate" },
       targetCurrency: String(corporateSnapshotData.targetCurrency ?? lockedTargetCurrency),
@@ -2236,6 +2244,7 @@ Capital Available: ${availableLabel}`,
       discountRate: inputs.r,
       masterN: inputs.masterN,
       sharesCurrent: inputs.sharesCurrent,
+      sharesPostFinancingInput: inputs.sharesPostFinancing,
       priceCurrentTarget: inputs.price,
       cashCurrentTarget: inputs.cash0,
       debtCurrentTarget: inputs.debt0,
@@ -2254,12 +2263,12 @@ Capital Available: ${availableLabel}`,
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
       financing: {
-        equityPct: avgEquityPct,
-        debtPct: 100 - avgEquityPct,
+        equityPct: 100,
+        debtPct: 0,
         cashUsedInput: 0,
       },
     });
-  }, [companyProjects, corporateProjectEquityPct, corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
@@ -3326,6 +3335,7 @@ Capital Available: ${availableLabel}`,
 {JSON.stringify((() => {
   const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;
   const corporateTotalsDebug = diagnosticsMeta.corporateTotalsDebug ?? null;
+  const corporateFinancingDebug = diagnosticsMeta.corporateFinancingDebug ?? null;
   const snapshotTime = (corporateSnapshotData.time ?? {}) as Record<string, unknown>;
   const masterN = typeof snapshotTime.masterN === "number" ? snapshotTime.masterN : null;
   const aggregation = (corporateSnapshotData.aggregation ?? {}) as Record<string, unknown>;
@@ -3336,6 +3346,7 @@ Capital Available: ${availableLabel}`,
     projectCount: diagnosticsMeta.projectCount ?? null,
     masterN,
     corporateTotalsDebug,
+    corporateFinancingDebug,
     lengthChecks: {
       fcfUSD_total: { len: fcf.length, expected: masterN === null ? null : masterN + 1 },
       capexUSD_total: { len: capex.length, expected: masterN === null ? null : masterN + 1 },
@@ -3377,6 +3388,37 @@ Capital Available: ${availableLabel}`,
                       </div>
                     </section>
                   </div>
+
+                  {debugEnabled && (() => {
+                    const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;
+                    const financingDebug = (diagnosticsMeta.corporateFinancingDebug ?? null) as Record<string, unknown> | null;
+                    const perProject = Array.isArray(financingDebug?.perProjectNewShares) ? financingDebug?.perProjectNewShares as Array<Record<string, unknown>> : [];
+                    if (!financingDebug) return null;
+                    return (
+                      <section className="producer-core-section" style={{ marginTop: 8 }}>
+                        <h3 className="subrub small">Market Box debug</h3>
+                        <div className="compact-metrics-grid">
+                          {["shares_current", "shares_post_financing", "totalNewShares"].map((key) => (
+                            <div key={`corp-debug-${key}`} className="compact-metric-row">
+                              <span className="compact-metric-label">{key}</span>
+                              <span className="compact-metric-dots" />
+                              <span className="compact-metric-value">{formatMetricValue({ value: typeof financingDebug[key] === "number" ? financingDebug[key] as number : null, reason: null }, "integer")}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ marginTop: 8, fontSize: 12 }}>
+                          {perProject.map((item) => (
+                            <div key={`corp-debug-project-${String(item.projectId ?? "unknown")}`}>
+                              <strong>{String(item.projectName ?? item.projectId ?? "unknown")}</strong>: newShares {typeof item.newShares === "number" ? item.newShares.toFixed(2) : "n/a"}
+                              {typeof item.equityFraction === "number" ? `, equity=${(item.equityFraction * 100).toFixed(0)}%` : ""}
+                              {typeof item.debtFraction === "number" ? `, debt=${(item.debtFraction * 100).toFixed(0)}%` : ""}
+                              {typeof item.reasonIfUnavailable === "string" && item.reasonIfUnavailable ? `, ${item.reasonIfUnavailable}` : ""}
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    );
+                  })()}
 
                   <details className="producer-core-section project-collapsible-card" open>
                     <summary><h2 className="subrub small">C CORPORATE FINANCING</h2></summary>

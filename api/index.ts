@@ -37,6 +37,7 @@ function sendValidationError(res: any, error: string, details?: unknown): void {
 
 async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
   const refresh = String(req.query?.refresh ?? "") === "1";
+  const debug = String(req.query?.debug ?? "") === "1";
 
   try {
     const [{ runCorporateSnapshotPipeline }] = await Promise.all([
@@ -44,7 +45,7 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
     ]);
 
     const body = parseRequestBody(req);
-    const result = await runCorporateSnapshotPipeline({ body, refresh });
+    const result = await runCorporateSnapshotPipeline({ body, refresh, debug });
 
     if (!result.ok) {
       res.status(400).json({ ok: false, diagnostics: result.diagnostics });
@@ -229,6 +230,7 @@ export default async function handler(req: any, res: any) {
       const from = String(req.query?.from ?? "").trim();
       const to = String(req.query?.to ?? "").trim();
       const refresh = String(req.query?.refresh ?? "") === "1";
+  const debug = String(req.query?.debug ?? "") === "1";
 
       if (!PRICE_KEY_SET.has(key)) {
         res.status(400).json({ ok: false, error: "invalid key" });

@@ -38,6 +38,10 @@ export type SnapshotRequest = {
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
   };
+  financingPlanByProject?: Record<string, {
+    debt_fraction?: number | null;
+    equity_fraction?: number | null;
+  }>;
   buildFundingNeed_USD?: number | null;
   fx: SnapshotFxConfig;
   scenario: SnapshotScenario;
@@ -233,6 +237,40 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
   const financingPlanRaw = body.financingPlan;
   if (financingPlanRaw !== undefined && financingPlanRaw !== null && !isObject(financingPlanRaw)) {
     errors.push('financingPlan must be an object or null when provided');
+  }
+
+
+  const financingPlanByProjectRaw = body.financingPlanByProject;
+  if (financingPlanByProjectRaw !== undefined && financingPlanByProjectRaw !== null && !isObject(financingPlanByProjectRaw)) {
+    errors.push('financingPlanByProject must be an object or null when provided');
+  }
+
+  const financingPlanByProject: SnapshotRequest['financingPlanByProject'] = {};
+  if (isObject(financingPlanByProjectRaw)) {
+    for (const [projectId, planRaw] of Object.entries(financingPlanByProjectRaw)) {
+      if (!isObject(planRaw)) {
+        errors.push(`financingPlanByProject.${projectId} must be an object`);
+        continue;
+      }
+      const equityFraction = readNullableFiniteNumber(planRaw.equity_fraction);
+      const debtFraction = readNullableFiniteNumber(planRaw.debt_fraction);
+      if (planRaw.equity_fraction !== undefined && equityFraction === null && planRaw.equity_fraction !== null) {
+        errors.push(`financingPlanByProject.${projectId}.equity_fraction must be finite when provided`);
+      }
+      if (planRaw.debt_fraction !== undefined && debtFraction === null && planRaw.debt_fraction !== null) {
+        errors.push(`financingPlanByProject.${projectId}.debt_fraction must be finite when provided`);
+      }
+      if (equityFraction !== undefined && equityFraction !== null && (equityFraction < 0 || equityFraction > 1)) {
+        errors.push(`financingPlanByProject.${projectId}.equity_fraction must be within [0, 1] when provided`);
+      }
+      if (debtFraction !== undefined && debtFraction !== null && (debtFraction < 0 || debtFraction > 1)) {
+        errors.push(`financingPlanByProject.${projectId}.debt_fraction must be within [0, 1] when provided`);
+      }
+      financingPlanByProject[projectId] = {
+        equity_fraction: equityFraction,
+        debt_fraction: debtFraction,
+      };
+    }
   }
 
   const buildFundingNeed = readNullableFiniteNumber(body.buildFundingNeed_USD);
@@ -463,6 +501,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
       isObject(financingPlanRaw) || financingPlanRaw === null
         ? (financingPlanRaw as SnapshotRequest['financingPlan'])
         : undefined,
+    financingPlanByProject: isObject(financingPlanByProjectRaw) ? financingPlanByProject : undefined,
     buildFundingNeed_USD: buildFundingNeed,
     scenario,
   };
