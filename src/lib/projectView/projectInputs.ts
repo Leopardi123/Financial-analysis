@@ -110,6 +110,11 @@ export function getProjectInputs(rawState: {
     aggregation.auPriceUSDPerOz,
     series.auPriceUSDPerOz,
   );
+  const modeledTimeline = (snapshot.modeledValuationTimeline ?? null) as { tps?: unknown } | null;
+  const timelineTps = Array.isArray(modeledTimeline?.tps)
+    ? modeledTimeline.tps.filter((value): value is number => Number.isInteger(value)).sort((a, b) => a - b)
+    : [];
+
   const payableAuEqOz = firstFiniteSeries(
     aggregation.payableAuEqOz_total,
     series.payableAuEqOz,
@@ -118,7 +123,9 @@ export function getProjectInputs(rawState: {
   return {
     fx,
     r,
-    tp: asIntegerOrNull(aggregation.productionStartPeriod) ?? asIntegerOrNull(parsed?.engineInputWithoutPrices?.productionStartPeriod),
+    tp: asIntegerOrNull(aggregation.productionStartPeriod)
+      ?? (timelineTps.length > 0 ? timelineTps[0] : null)
+      ?? asIntegerOrNull(parsed?.engineInputWithoutPrices?.productionStartPeriod),
     masterN: asIntegerOrNull(aggregation.corporateMasterN) ?? asIntegerOrNull(parsed?.engineInputWithoutPrices?.masterN),
     price: asFinite(market.price_current_TargetCurrency),
     sharesCurrent: asFinite(market.shares_current),

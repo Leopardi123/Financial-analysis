@@ -1,11 +1,26 @@
 import { useMemo } from "react";
 
+type TpMarker = {
+  tp: number;
+  high: number | null;
+  low: number | null;
+  yearLabelUsed?: string | null;
+};
+
+function parseYear(value: string | null | undefined): number | null {
+  if (typeof value !== "string") return null;
+  const year = Number(value.slice(0, 4));
+  return Number.isInteger(year) ? year : null;
+}
+
 type ValueRangeSnapshotCardProps = {
   priceToday?: number | null;
   npvLow?: number | null;
   npvHigh?: number | null;
   tpLow?: number | null;
   tpHigh?: number | null;
+  tpMarkers?: TpMarker[];
+  nowYearLabel?: string | null;
   currencyCode?: string;
 };
 
@@ -53,6 +68,30 @@ function resolveLabelPair(highY: number | null, lowY: number | null): { high: nu
   return { high, low };
 }
 
+function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: number | null; high: number | null } | null): TpMarker[] {
+  const normalized = (tpMarkers ?? [])
+    .filter((marker) => Number.isInteger(marker.tp) && marker.tp > 0)
+    .map((marker) => {
+      const high = isFiniteNumber(marker.high) ? marker.high : null;
+      const low = isFiniteNumber(marker.low) ? marker.low : null;
+      if (high === null && low === null) {
+        return { ...marker, high: null, low: null };
+      }
+      if (high === null) {
+        return { ...marker, high: low, low };
+      }
+      if (low === null) {
+        return { ...marker, high, low: high };
+      }
+      return { ...marker, high: Math.max(high, low), low: Math.min(high, low) };
+    })
+    .sort((a, b) => a.tp - b.tp);
+
+  if (normalized.length > 0) return normalized;
+  if (!fallback) return [];
+  return [{ tp: 1, high: fallback.high, low: fallback.low }];
+}
+
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
   const {
     priceToday,
@@ -60,6 +99,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     npvHigh,
     tpLow,
     tpHigh,
+    tpMarkers,
+    nowYearLabel,
   } = props;
 
   const npvRange = useMemo(() => {
@@ -80,8 +121,14 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return null;
   }, [tpLow, tpHigh]);
 
+  const normalizedMarkers = useMemo(
+    () => normalizeTpMarkers(tpMarkers, tpRange),
+    [tpMarkers, tpRange],
+  );
+
   const points = useMemo(() => {
-    const domain = [priceToday, npvRange?.low, npvRange?.high, tpRange?.low, tpRange?.high].filter(isFiniteNumber);
+    const tpMarkerValues = normalizedMarkers.flatMap((marker) => [marker.low, marker.high]);
+    const domain = [priceToday, npvRange?.low, npvRange?.high, ...tpMarkerValues].filter(isFiniteNumber);
     const min = domain.length > 0 ? Math.min(...domain) : null;
     const max = domain.length > 0 ? Math.max(...domain) : null;
 
@@ -93,35 +140,62 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       return clamp(y, Y_TOP, Y_BOTTOM);
     };
 
+    const nowYear = parseYear(nowYearLabel);
+    const markerYears = normalizedMarkers.map((marker) => parseYear(marker.yearLabelUsed));
+    const finiteMarkerYears = markerYears.filter((year): year is number => year !== null);
+    const maxMarkerYear = finiteMarkerYears.length > 0 ? Math.max(...finiteMarkerYears) : null;
+
+    const lastTp = normalizedMarkers.length > 0 ? normalizedMarkers[normalizedMarkers.length - 1].tp : null;
+    const firstTp = normalizedMarkers.length > 0 ? normalizedMarkers[0].tp : null;
+    const markerPoints = normalizedMarkers.map((marker, idx) => {
+      const markerYear = parseYear(marker.yearLabelUsed);
+      let x = X_RIGHT;
+      if (nowYear !== null && markerYear !== null && maxMarkerYear !== null && maxMarkerYear > nowYear) {
+        const ratio = (markerYear - nowYear) / (maxMarkerYear - nowYear);
+        x = clamp(X_LEFT + 30 + ratio * (X_RIGHT - (X_LEFT + 30)), X_LEFT + 30, X_RIGHT);
+      } else if (lastTp !== null && firstTp !== null && lastTp > firstTp) {
+        const ratio = (marker.tp - firstTp) / (lastTp - firstTp);
+        x = clamp(X_LEFT + 30 + ratio * (X_RIGHT - (X_LEFT + 30)), X_LEFT + 30, X_RIGHT);
+      } else if (normalizedMarkers.length > 1) {
+        const step = (X_RIGHT - (X_LEFT + 30)) / (normalizedMarkers.length - 1);
+        x = X_LEFT + 30 + idx * step;
+      }
+
+      return {
+        tp: marker.tp,
+        yearLabelUsed: marker.yearLabelUsed ?? null,
+        x,
+        low: marker.low,
+        high: marker.high,
+        lowY: toY(marker.low),
+        highY: toY(marker.high),
+      };
+    });
+
     return {
       npvLowY: toY(npvRange?.low ?? null),
       npvHighY: toY(npvRange?.high ?? null),
-      tpLowY: toY(tpRange?.low ?? null),
-      tpHighY: toY(tpRange?.high ?? null),
       priceY: toY(isFiniteNumber(priceToday) ? priceToday : null),
+      markerPoints,
     };
-  }, [npvRange, priceToday, tpRange]);
+  }, [npvRange, priceToday, normalizedMarkers, nowYearLabel]);
 
   const hasNpv = npvRange !== null && points.npvLowY !== null && points.npvHighY !== null;
-  const hasTp = tpRange !== null && points.tpLowY !== null && points.tpHighY !== null;
+  const hasTp = points.markerPoints.some((marker) => marker.lowY !== null && marker.highY !== null);
   const hasPrice = isFiniteNumber(priceToday) && points.priceY !== null;
   const npvLabels = resolveLabelPair(points.npvHighY, points.npvLowY);
-  const tpLabels = resolveLabelPair(points.tpHighY, points.tpLowY);
 
   const priceLabel = useMemo(() => {
     if (!hasPrice || points.priceY === null || priceToday === null || !Number.isFinite(priceToday)) return null;
     const yBase = clamp(points.priceY + 4, Y_TOP, Y_BOTTOM);
-    const tooCloseToRange = (npvLabels !== null && Math.abs(yBase - npvLabels.high) < 10)
-      || (npvLabels !== null && Math.abs(yBase - npvLabels.low) < 10)
-      || (tpLabels !== null && Math.abs(yBase - tpLabels.high) < 10)
-      || (tpLabels !== null && Math.abs(yBase - tpLabels.low) < 10);
+    const tooCloseToRange = npvLabels !== null && (Math.abs(yBase - npvLabels.high) < 10 || Math.abs(yBase - npvLabels.low) < 10);
     const y = tooCloseToRange ? clamp(points.priceY - 8, Y_TOP, Y_BOTTOM) : yBase;
     return {
       x: 90,
       y,
       text: formatPerShareValue(priceToday),
     };
-  }, [hasPrice, npvLabels, points.priceY, priceToday, tpLabels]);
+  }, [hasPrice, npvLabels, points.priceY, priceToday]);
 
   return (
     <div>
@@ -131,20 +205,10 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         <div className="project-value-snapshot-wrap">
           <svg viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} role="img" aria-label="Snapshot med NPV- och TP-intervall per aktie" style={{ width: "100%", height: "100%" }}>
             <rect x={92} y={14} width={36} height={92} rx={10} fill="rgba(15, 23, 42, 0.05)" />
-            <rect x={232} y={14} width={36} height={92} rx={10} fill="rgba(15, 23, 42, 0.05)" />
             <line x1={0} y1={110} x2={320} y2={110} stroke="rgba(15, 23, 42, 0.14)" strokeWidth={1} />
 
             <text x={12} y={26} fontSize={10} fill="#6b7280">Nu</text>
-            <text x={238} y={26} fontSize={10} fill="#6b7280">Då</text>
-
-            {hasNpv && hasTp && (
-              <polygon
-                points={`${X_LEFT},${points.npvHighY!} ${X_RIGHT},${points.tpHighY!} ${X_RIGHT},${points.tpLowY!} ${X_LEFT},${points.npvLowY!}`}
-                fill="rgba(71, 85, 105, 0.14)"
-                stroke="rgba(71, 85, 105, 0.26)"
-                strokeWidth={1}
-              />
-            )}
+            <text x={238} y={26} fontSize={10} fill="#6b7280">Prod-start</text>
 
             {hasNpv ? (
               <>
@@ -160,19 +224,35 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               <text x={82} y={64} fontSize={11} fill="#6b7280" textAnchor="end">n/a</text>
             )}
 
-            {hasTp ? (
-              <>
-                <line x1={X_RIGHT} y1={points.tpHighY!} x2={X_RIGHT} y2={points.tpLowY!} stroke="#64748b" strokeWidth={10} strokeLinecap="round" />
-                {tpLabels && (
-                  <>
-                    <text x={270} y={tpLabels.high + 4} fontSize={11} fill="#1f2937">{formatPerShareValue(tpRange.high)}</text>
-                    <text x={270} y={tpLabels.low + 4} fontSize={11} fill="#1f2937">{formatPerShareValue(tpRange.low)}</text>
-                  </>
-                )}
-              </>
-            ) : (
-              <text x={270} y={64} fontSize={11} fill="#6b7280">n/a</text>
-            )}
+            {(() => {
+              const pathPoints = points.markerPoints
+                .filter((marker) => marker.highY !== null && marker.lowY !== null)
+                .map((marker) => ({ x: marker.x, y: ((marker.highY as number) + (marker.lowY as number)) / 2 }));
+              const npvMid = hasNpv && points.npvHighY !== null && points.npvLowY !== null
+                ? { x: X_LEFT, y: (points.npvHighY + points.npvLowY) / 2 }
+                : null;
+              if (pathPoints.length === 0 || npvMid === null) return null;
+              const pointsText = [npvMid, ...pathPoints].map((p) => `${p.x},${p.y}`).join(' ');
+              return <polyline points={pointsText} fill="none" stroke="rgba(71, 85, 105, 0.45)" strokeWidth={1.5} />;
+            })()}
+
+            {points.markerPoints.map((marker) => {
+              if (marker.highY === null || marker.lowY === null || marker.high === null || marker.low === null) return null;
+              const tpLabels = resolveLabelPair(marker.highY, marker.lowY);
+              const label = marker.yearLabelUsed ? marker.yearLabelUsed.slice(0, 4) : `tp=${marker.tp}`;
+              return (
+                <g key={`tp-${marker.tp}`}>
+                  <line x1={marker.x} y1={marker.highY} x2={marker.x} y2={marker.lowY} stroke="#64748b" strokeWidth={6} strokeLinecap="round" />
+                  {tpLabels && (
+                    <>
+                      <text x={marker.x + 8} y={tpLabels.high + 4} fontSize={10} fill="#1f2937">{formatPerShareValue(marker.high)}</text>
+                      <text x={marker.x + 8} y={tpLabels.low + 4} fontSize={10} fill="#1f2937">{formatPerShareValue(marker.low)}</text>
+                    </>
+                  )}
+                  <text x={marker.x - 6} y={108} fontSize={9} fill="#6b7280">{label}</text>
+                </g>
+              );
+            })}
 
             {hasPrice && priceLabel && (
               <>
