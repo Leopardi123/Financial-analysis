@@ -901,12 +901,18 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   };
 
   const [riskAdjustedDiscountRatePctInput, setRiskAdjustedDiscountRatePctInput] = useState("10");
+  const [corporateSnapshotLoading, setCorporateSnapshotLoading] = useState(false);
+  const [corporateSnapshotError, setCorporateSnapshotError] = useState<string | null>(null);
+  const [corporateSnapshotData, setCorporateSnapshotData] = useState<Record<string, unknown> | null>(null);
+  const [corporateDiagnostics, setCorporateDiagnostics] = useState<Record<string, unknown> | null>(null);
+  const [corporateProjectEquityPct, setCorporateProjectEquityPct] = useState<Record<string, number>>({});
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
   const [scenarioPercentileInput] = useState("50");
   const [fixedPriceMapJson] = useState("{\n  \"XAU_USD_TOZ\": 2400\n}");
   const [fxSource] = useState<"auto" | "manual">("auto");
   const [manualFxInput] = useState("");
+  const debugEnabled = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
 
   useEffect(() => {
     let isMounted = true;
@@ -970,6 +976,16 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       isMounted = false;
     };
   }, [ticker]);
+
+  useEffect(() => {
+    setCorporateProjectEquityPct((prev) => {
+      const next: Record<string, number> = {};
+      for (const project of companyProjects) {
+        next[project.project_id] = prev[project.project_id] ?? 100;
+      }
+      return next;
+    });
+  }, [companyProjects]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1224,6 +1240,89 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       setProjectSnapshotLoading(false);
     }
   };
+
+  const corporateFinancingPlan = useMemo(() => {
+    if (companyProjects.length === 0) return undefined;
+    const equityValues = companyProjects.map((project) => corporateProjectEquityPct[project.project_id] ?? 100);
+    const avgEquityPct = equityValues.reduce((sum, value) => sum + value, 0) / equityValues.length;
+    const equityFraction = Math.min(1, Math.max(0, avgEquityPct / 100));
+    return {
+      equity_fraction: equityFraction,
+      debt_fraction: 1 - equityFraction,
+      use_cash_first: true,
+    };
+  }, [companyProjects, corporateProjectEquityPct]);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function runCorporateSnapshot() {
+      if (primaryView !== "modeled") return;
+      if (!ticker || companyProjects.length === 0) {
+        setCorporateSnapshotData(null);
+        setCorporateDiagnostics(null);
+        setCorporateSnapshotError(null);
+        return;
+      }
+      const discountRatePct = toInputNumber(riskAdjustedDiscountRatePctInput);
+      const discountRate = typeof discountRatePct === "number" && Number.isFinite(discountRatePct)
+        ? discountRatePct / 100
+        : 0.1;
+      const profileSharesCurrent = resolveCommonSharesCurrent({
+        balance: data?.balance as Record<string, Array<number | null>> | undefined,
+        income: data?.income as Record<string, Array<number | null>> | undefined,
+      });
+      const profileSharesOutstanding = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding) && profile.sharesOutstanding > 0
+        ? profile.sharesOutstanding
+        : undefined;
+      const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding ?? 1;
+      const profilePriceCurrent = typeof profile?.price === "number" && Number.isFinite(profile.price) && profile.price > 0
+        ? profile.price
+        : 1;
+
+      setCorporateSnapshotLoading(true);
+      setCorporateSnapshotError(null);
+      try {
+        const response = await fetch("/api/snapshot/corporate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            symbol: ticker,
+            targetCurrency: lockedTargetCurrency,
+            discountRate,
+            market: {
+              shares_current: sharesCurrent,
+              price_current_TargetCurrency: profilePriceCurrent,
+            },
+            financingPlan: corporateFinancingPlan,
+            scenario: { mode: "spot" },
+            fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } },
+          }),
+        });
+        const result = await response.json() as { ok?: boolean; snapshot?: Record<string, unknown>; diagnostics?: Record<string, unknown> };
+        if (!isMounted) return;
+        setCorporateDiagnostics((result.diagnostics ?? null) as Record<string, unknown> | null);
+        if (!result.ok || !result.snapshot) {
+          setCorporateSnapshotData(null);
+          setCorporateSnapshotError("Snapshot request failed. Check diagnostics for details.");
+          return;
+        }
+        setCorporateSnapshotData(result.snapshot as unknown as Record<string, unknown>);
+      } catch (error) {
+        if (!isMounted) return;
+        setCorporateSnapshotData(null);
+        setCorporateSnapshotError((error as Error).message);
+      } finally {
+        if (isMounted) {
+          setCorporateSnapshotLoading(false);
+        }
+      }
+    }
+
+    void runCorporateSnapshot();
+    return () => {
+      isMounted = false;
+    };
+  }, [companyProjects.length, corporateFinancingPlan, data?.balance, data?.income, lockedTargetCurrency, primaryView, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
 
   const revenueData = buildSeriesData(
     buildSeries(data, [{ label: "Revenue", statement: "income", field: "revenue" }]),
@@ -2112,6 +2211,56 @@ Capital Available: ${availableLabel}`,
     });
   }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  const corporateViewMetrics = useMemo(() => {
+    if (!corporateSnapshotData) return null;
+    const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
+      ? raw.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null))
+      : []);
+    const inputs = getProjectInputs({
+      snapshot: corporateSnapshotData,
+      parsedProject: null,
+      discountRateInput: riskAdjustedDiscountRatePctInput,
+      targetCurrency: lockedTargetCurrency,
+    });
+    const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
+    const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
+    const equityValues = companyProjects.map((project) => corporateProjectEquityPct[project.project_id] ?? 100);
+    const avgEquityPct = equityValues.length > 0
+      ? equityValues.reduce((sum, value) => sum + value, 0) / equityValues.length
+      : 100;
+
+    return computeProjectViewMetrics({
+      meta: { projectId: "corporate" },
+      targetCurrency: String(corporateSnapshotData.targetCurrency ?? lockedTargetCurrency),
+      fxUSDToTarget: inputs.fx,
+      discountRate: inputs.r,
+      masterN: inputs.masterN,
+      sharesCurrent: inputs.sharesCurrent,
+      priceCurrentTarget: inputs.price,
+      cashCurrentTarget: inputs.cash0,
+      debtCurrentTarget: inputs.debt0,
+      enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
+      fcfUSD: asSeries(inputs.series.fcfUSD),
+      capexUSD: asSeries(inputs.series.capexUSD),
+      grossRevenueUSD: asSeries(inputs.series.grossRevenueUSD),
+      ebitUSD: asSeries(inputs.series.ebitUSD),
+      nopatUSD: asSeries(inputs.series.nopatUSD),
+      effectiveTaxRate: asSeries(inputs.series.effectiveTaxRate),
+      taxUSD: asSeries(inputs.series.taxUSD),
+      federalIncomeTaxUSD: asSeries(inputs.series.federalIncomeTaxUSD),
+      df_now: asSeries(inputs.series.df_now),
+      economicsTaxRate: inputs.r,
+      payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
+      sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
+      productionStartPeriod: inputs.tp,
+      financing: {
+        equityPct: avgEquityPct,
+        debtPct: 100 - avgEquityPct,
+        cashUsedInput: 0,
+      },
+    });
+  }, [companyProjects, corporateProjectEquityPct, corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
     const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
@@ -2538,8 +2687,8 @@ Capital Available: ${availableLabel}`,
         <p className="bread">Company type preset: <strong>{companyType}</strong></p>
         <p className="bread">Target currency: {lockedTargetCurrency} (from profile)</p>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button type="button" onClick={() => setPrimaryView("reported")} disabled={primaryView === "reported"}>Reported (Corporate)</button>
-          <button type="button" onClick={() => setPrimaryView("modeled")} disabled={primaryView === "modeled"}>Modeled (NAV / DCF)</button>
+          <button type="button" onClick={() => setPrimaryView("reported")} disabled={primaryView === "reported"}>Corporate (reported)</button>
+          <button type="button" onClick={() => setPrimaryView("modeled")} disabled={primaryView === "modeled"}>Corporate (modeled)</button>
           {analysisMode === "prerevenue" && (
             <button type="button" onClick={() => setPrimaryView("projects")} disabled={primaryView === "projects"}>Projects</button>
           )}
@@ -3152,14 +3301,153 @@ Capital Available: ${availableLabel}`,
 
       {primaryView === "modeled" && (
         <div className="breadcontainersinglecolumn">
-          <h1 className="subrub">Modeled (NAV / DCF)</h1>
-          <p className="bread">This view will combine corporate net cash, financing and project-level DCF (NPV/NAV) into a corporate valuation framework.</p>
-          <ul>
-            <li>Project-level DCF aggregation</li>
-            <li>Financing block integration (Lista 5)</li>
-            <li>NAV bridge</li>
-            <li>Scenario sets (price decks, discount rates)</li>
-          </ul>
+          <h1 className="subrub">Corporate (modeled)</h1>
+          {companyProjectsLoading && <p className="bread">Loading stored projects…</p>}
+          {companyProjectsError && <p className="status error">{companyProjectsError}</p>}
+          {!companyProjectsLoading && companyProjects.length === 0 && (
+            <>
+              <p className="status empty">No stored projects for this symbol.</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link">Open projects</a>
+                <a href={`/company/${encodeURIComponent(ticker)}/projects?action=new`} className="button-link">Add project</a>
+              </div>
+            </>
+          )}
+
+          {companyProjects.length > 0 && (
+            <section className="project-producer-layout" style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              {corporateSnapshotLoading && <p className="bread">Running corporate snapshot…</p>}
+              {corporateSnapshotError && <p className="status error">{corporateSnapshotError}</p>}
+
+              {debugEnabled && corporateSnapshotData && (
+                <details className="producer-core-section" open>
+                  <summary><h2 className="subrub small">Corporate debug</h2></summary>
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>
+{JSON.stringify((() => {
+  const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;
+  const corporateTotalsDebug = diagnosticsMeta.corporateTotalsDebug ?? null;
+  const snapshotTime = (corporateSnapshotData.time ?? {}) as Record<string, unknown>;
+  const masterN = typeof snapshotTime.masterN === "number" ? snapshotTime.masterN : null;
+  const aggregation = (corporateSnapshotData.aggregation ?? {}) as Record<string, unknown>;
+  const fcf = Array.isArray(aggregation.fcffUSD_total) ? aggregation.fcffUSD_total : [];
+  const capex = Array.isArray(aggregation.capexUSD_total) ? aggregation.capexUSD_total : [];
+  const nullCount = (arr: unknown[]) => arr.filter((value) => value === null).length;
+  return {
+    projectCount: diagnosticsMeta.projectCount ?? null,
+    masterN,
+    corporateTotalsDebug,
+    lengthChecks: {
+      fcfUSD_total: { len: fcf.length, expected: masterN === null ? null : masterN + 1 },
+      capexUSD_total: { len: capex.length, expected: masterN === null ? null : masterN + 1 },
+    },
+    nullCount: {
+      fcfUSD_total: nullCount(fcf),
+      capexUSD_total: nullCount(capex),
+    },
+    fcfUSD_total_preview: {
+      first5: fcf.slice(0, 5),
+      last5: fcf.slice(Math.max(0, fcf.length - 5)),
+    },
+  };
+})(), null, 2)}
+                  </pre>
+                </details>
+              )}
+
+              {corporateViewMetrics && (
+                <>
+                  <div className="producer-core-compact-card">
+                    <section className="producer-core-section">
+                      <div className="producer-core-title-row">
+                        <h2 className="subrub small">Market Box</h2>
+                      </div>
+                      <div className="compact-metrics-grid">
+                        {[
+                          { label: "MarketCap (current)", value: corporateViewMetrics.marketBox.marketCapCurrent, kind: "money" as const },
+                          { label: "EV (current)", value: corporateViewMetrics.marketBox.evCurrent, kind: "money" as const },
+                          { label: "Shares Current", value: corporateViewMetrics.marketBox.sharesCurrent, kind: "integer" as const },
+                          { label: "Shares PF", value: corporateViewMetrics.marketBox.sharesPf, kind: "integer" as const },
+                        ].map((metric) => (
+                          <div key={`corporate-market-${metric.label}`} className="compact-metric-row">
+                            <span className="compact-metric-label">{metric.label}</span>
+                            <span className="compact-metric-dots" />
+                            <span className="compact-metric-value">{formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+
+                  <details className="producer-core-section project-collapsible-card" open>
+                    <summary><h2 className="subrub small">C CORPORATE FINANCING</h2></summary>
+                    <div className="rr-input-row" style={{ marginTop: 8 }}>
+                      {companyProjects.map((project) => {
+                        const hasFinancing = !!((corporateSnapshotData?.financing ?? null) as Record<string, unknown> | null);
+                        const currentEquity = corporateProjectEquityPct[project.project_id] ?? 100;
+                        return (
+                          <label key={`corp-fin-${project.project_id}`} htmlFor={`corp-equity-${project.project_id}`} style={{ opacity: hasFinancing ? 1 : 0.6 }}>
+                            {project.project_name ?? project.project_id} — Equity {currentEquity}%
+                            <input
+                              id={`corp-equity-${project.project_id}`}
+                              type="range"
+                              min="0"
+                              max="100"
+                              step="5"
+                              disabled={!hasFinancing}
+                              value={currentEquity}
+                              onChange={(event) => {
+                                const equityPct = clampPct(Number(event.target.value));
+                                setCorporateProjectEquityPct((prev) => ({ ...prev, [project.project_id]: equityPct }));
+                              }}
+                              style={{ width: "100%" }}
+                            />
+                            {!hasFinancing && <span style={{ display: "block", fontSize: 11 }}>Financing not configured</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="bread" style={{ marginTop: 8 }}>
+                      TotalDebt (aggregated): {corporateViewMetrics.list5.TotalDebt?.value === null ? "n/a" : formatMetricValue(corporateViewMetrics.list5.TotalDebt, "money", lockedTargetCurrency)}
+                    </p>
+                  </details>
+
+                  {([
+                    ["list2", "FINANSIELLA NYCKELTAL OCH VÄRDERING", corporateViewMetrics.list2],
+                    ["list3", "EFFEKTIVITET OCH LÖNSAMHET", corporateViewMetrics.list3],
+                    ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", corporateViewMetrics.list4],
+                    ["list6", "M&A VALUATION", corporateViewMetrics.list6],
+                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
+                    <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
+                      <summary><h2 className="subrub small">{title}</h2></summary>
+                      {sectionKey === "list2" && (
+                        <ValueRangeSnapshotCard
+                          priceToday={
+                            corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0
+                              ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
+                              : null
+                          }
+                          npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
+                          npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
+                          tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
+                          tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
+                          currencyCode={lockedTargetCurrency}
+                        />
+                      )}
+                      <div className="compact-metrics-grid">
+                        {Object.entries(metrics).map(([key, value]) => (
+                          <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
+                            <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
+                            <span className="compact-metric-dots" />
+                            <span className="compact-metric-value">{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ))}
+                </>
+              )}
+            </section>
+          )}
         </div>
       )}
 
