@@ -913,6 +913,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [fxSource] = useState<"auto" | "manual">("auto");
   const [manualFxInput] = useState("");
   const debugEnabled = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
+  const debugFlag = debugEnabled ? "1" : undefined;
 
   useEffect(() => {
     let isMounted = true;
@@ -1294,6 +1295,12 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
               price_current_TargetCurrency: profilePriceCurrent,
             },
             financingPlan: corporateFinancingPlan,
+            projectFinancingOverrides: Object.fromEntries(companyProjects.map((project) => {
+              const equityPct = corporateProjectEquityPct[project.project_id] ?? 100;
+              const equity_fraction = Math.min(1, Math.max(0, equityPct / 100));
+              return [project.project_id, { equity_fraction, debt_fraction: 1 - equity_fraction }];
+            })),
+            debug: debugFlag,
             scenario: { mode: "spot" },
             fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } },
           }),
@@ -1322,7 +1329,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return () => {
       isMounted = false;
     };
-  }, [companyProjects.length, corporateFinancingPlan, data?.balance, data?.income, lockedTargetCurrency, primaryView, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
+  }, [companyProjects, companyProjects.length, corporateFinancingPlan, corporateProjectEquityPct, data?.balance, data?.income, debugFlag, lockedTargetCurrency, primaryView, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
 
   const revenueData = buildSeriesData(
     buildSeries(data, [{ label: "Revenue", statement: "income", field: "revenue" }]),
@@ -2208,6 +2215,7 @@ Capital Available: ${availableLabel}`,
         debtPct: toInputNumber(projectDebtPct) ?? 0,
         cashUsedInput: toInputNumber(projectCashUsedTarget) ?? 0,
       },
+      sharesPostFinancingOverride: inputs.sharesPostFinancing,
     });
   }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
@@ -2228,6 +2236,50 @@ Capital Available: ${availableLabel}`,
     const avgEquityPct = equityValues.length > 0
       ? equityValues.reduce((sum, value) => sum + value, 0) / equityValues.length
       : 100;
+    const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;
+    const prodStartDebug = (diagnosticsMeta.prodStartDebug ?? {}) as Record<string, unknown>;
+    const tpListRaw = Array.isArray(prodStartDebug.tpList) ? prodStartDebug.tpList : [];
+    const tpList = tpListRaw.filter((tp): tp is number => typeof tp === "number" && Number.isInteger(tp) && tp >= 0);
+    const fcfUSD = asSeries(inputs.series.fcfUSD);
+    const capexUSD = asSeries(inputs.series.capexUSD);
+    const prodSeries = tpList.length > 0
+      ? tpList.map((tp) => {
+        const dcfProdStartUSD = (() => {
+          if (!(typeof inputs.r === "number" && inputs.r > 0)) return null;
+          let sum = 0;
+          for (let t = tp; t < fcfUSD.length; t += 1) {
+            const value = fcfUSD[t];
+            if (typeof value !== "number" || !Number.isFinite(value)) return null;
+            sum += value / ((1 + inputs.r) ** (t - tp));
+          }
+          return sum;
+        })();
+        const initialCapexUSD = (() => {
+          if (tp <= 0) return 0;
+          let sum = 0;
+          for (let t = 0; t < Math.min(tp, capexUSD.length); t += 1) {
+            const value = capexUSD[t];
+            if (typeof value !== "number" || !Number.isFinite(value)) return null;
+            if (value < 0) sum += Math.abs(value);
+          }
+          return sum;
+        })();
+        const fx = typeof inputs.fx === "number" && Number.isFinite(inputs.fx) ? inputs.fx : null;
+        const dcfProdStartPresentTarget = dcfProdStartUSD !== null && fx !== null && typeof inputs.r === "number"
+          ? (dcfProdStartUSD / ((1 + inputs.r) ** tp)) * fx
+          : null;
+        const npvProdStartTarget = dcfProdStartUSD !== null && initialCapexUSD !== null && fx !== null
+          ? (dcfProdStartUSD - initialCapexUSD) * fx
+          : null;
+        const navProdStartTarget = npvProdStartTarget !== null && inputs.cash0 !== null && inputs.debt0 !== null
+          ? npvProdStartTarget + (inputs.cash0 - inputs.debt0)
+          : null;
+        const periodDates = ((corporateSnapshotData.series ?? {}) as Record<string, unknown>).periodEndDatesUtc;
+        const dateAtTp = Array.isArray(periodDates) ? periodDates[tp] : null;
+        const year = typeof dateAtTp === "string" ? Number.parseInt(dateAtTp.slice(0, 4), 10) : null;
+        return { tp, year: Number.isFinite(year) ? year : null, dcfProdStartPresentTarget, npvProdStartTarget, navProdStartTarget };
+      })
+      : [];
 
     return computeProjectViewMetrics({
       meta: { projectId: "corporate" },
@@ -2258,8 +2310,10 @@ Capital Available: ${availableLabel}`,
         debtPct: 100 - avgEquityPct,
         cashUsedInput: 0,
       },
+      sharesPostFinancingOverride: inputs.sharesPostFinancing,
+      productionStartSeries: prodSeries,
     });
-  }, [companyProjects, corporateProjectEquityPct, corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [companyProjects, corporateDiagnostics, corporateProjectEquityPct, corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
@@ -3433,17 +3487,59 @@ Capital Available: ${availableLabel}`,
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
+                          tpSeries={(corporateViewMetrics.productionStartSeries ?? []).map((point) => ({
+                            label: String(point.year ?? point.tp),
+                            low: corporateViewMetrics.marketBox.sharesPf.value && corporateViewMetrics.marketBox.sharesPf.value > 0 && typeof point.navProdStartTarget === "number"
+                              ? point.navProdStartTarget / corporateViewMetrics.marketBox.sharesPf.value
+                              : null,
+                            high: corporateViewMetrics.marketBox.sharesPf.value && corporateViewMetrics.marketBox.sharesPf.value > 0 && typeof point.dcfProdStartPresentTarget === "number"
+                              ? point.dcfProdStartPresentTarget / corporateViewMetrics.marketBox.sharesPf.value
+                              : null,
+                          }))}
                           currencyCode={lockedTargetCurrency}
                         />
                       )}
                       <div className="compact-metrics-grid">
-                        {Object.entries(metrics).map(([key, value]) => (
-                          <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
-                            <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
-                            <span className="compact-metric-dots" />
-                            <span className="compact-metric-value">{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency)}</span>
-                          </div>
-                        ))}
+                        {Object.entries(metrics).map(([key, value]) => {
+                          const prodSeries = corporateViewMetrics.productionStartSeries ?? [];
+                          const shouldShowSeries = sectionKey === "list2" && ["NPV_prodStart", "NAV_prodStart", "DCF_Target_discounted"].includes(key) && prodSeries.length > 0;
+                          const displaySeries = shouldShowSeries
+                            ? prodSeries
+                              .map((point) => {
+                                const yearLabel = point.year ?? null;
+                                const rawValue = key === "NPV_prodStart"
+                                  ? point.npvProdStartTarget
+                                  : key === "NAV_prodStart"
+                                    ? point.navProdStartTarget
+                                    : point.dcfProdStartPresentTarget;
+                                return yearLabel !== null && typeof rawValue === "number" && Number.isFinite(rawValue)
+                                  ? { year: yearLabel, value: rawValue }
+                                  : null;
+                              })
+                              .filter((point): point is { year: number; value: number } => point !== null)
+                            : [];
+                          return (
+                            <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row" style={shouldShowSeries ? { display: "block" } : undefined}>
+                              <div style={{ display: "flex", alignItems: "baseline" }}>
+                                <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
+                                <span className="compact-metric-dots" />
+                                <span className="compact-metric-value">{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency)}</span>
+                              </div>
+                              {shouldShowSeries && (
+                                <div style={{ fontSize: 12, marginTop: 2 }}>
+                                  {displaySeries.length > 0
+                                    ? displaySeries.map((point, idx) => (
+                                      <span key={`${key}-${point.year}-${idx}`}>
+                                        {idx > 0 ? ", " : ""}
+                                        <span style={{ color: "#9ca3af" }}>{point.year}:</span> {formatCompactNumber(point.value, 1)} {lockedTargetCurrency}
+                                      </span>
+                                    ))
+                                    : "n/a"}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </details>
                   ))}
