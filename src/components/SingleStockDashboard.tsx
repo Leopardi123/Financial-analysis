@@ -3335,6 +3335,7 @@ Capital Available: ${availableLabel}`,
 {JSON.stringify((() => {
   const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;
   const corporateTotalsDebug = diagnosticsMeta.corporateTotalsDebug ?? null;
+  const corporateFinancingDebug = diagnosticsMeta.corporateFinancingDebug ?? null;
   const snapshotTime = (corporateSnapshotData.time ?? {}) as Record<string, unknown>;
   const masterN = typeof snapshotTime.masterN === "number" ? snapshotTime.masterN : null;
   const aggregation = (corporateSnapshotData.aggregation ?? {}) as Record<string, unknown>;
@@ -3345,6 +3346,7 @@ Capital Available: ${availableLabel}`,
     projectCount: diagnosticsMeta.projectCount ?? null,
     masterN,
     corporateTotalsDebug,
+    corporateFinancingDebug,
     lengthChecks: {
       fcfUSD_total: { len: fcf.length, expected: masterN === null ? null : masterN + 1 },
       capexUSD_total: { len: capex.length, expected: masterN === null ? null : masterN + 1 },

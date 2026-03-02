@@ -1613,6 +1613,7 @@ export async function runCorporateSnapshotPipeline(args: {
       }
 
       let negativeCapexSumProject = 0;
+      let positiveCapexSumProject = 0;
       for (const capexValue of capexBeforeProduction) {
         if (typeof capexValue !== "number" || !Number.isFinite(capexValue)) {
           continue;
@@ -1620,8 +1621,16 @@ export async function runCorporateSnapshotPipeline(args: {
         if (capexValue < 0) {
           negativeCapexSumProject += capexValue;
         }
+        if (capexValue > 0) {
+          positiveCapexSumProject += capexValue;
+        }
       }
-      const buildFundingNeedProjectUSD = Math.abs(negativeCapexSumProject);
+
+      const buildFundingNeedProjectUSD = Math.abs(negativeCapexSumProject) > 0
+        ? Math.abs(negativeCapexSumProject)
+        : positiveCapexSumProject > 0
+          ? positiveCapexSumProject
+          : 0;
       const equityNeedTarget = buildFundingNeedProjectUSD * fxRate * equityFraction;
       return {
         projectId: project.projectId,
