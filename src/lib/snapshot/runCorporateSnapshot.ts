@@ -945,6 +945,19 @@ type SnapshotDiagnostics = {
         reasonIfUnavailable: string | null;
       }>;
     };
+    corporateModeledValuationTimeline?: {
+      tps: number[];
+      lastTp: number | null;
+      rangeEndTp: number | null;
+      markers: Array<{
+        tp: number;
+        yearLabelUsed: string | null;
+        value_high: number | null;
+        value_low: number | null;
+        value_mid_if_any: number | null;
+        nullReasonIfAny: string | null;
+      }>;
+    };
   };
 };
 
