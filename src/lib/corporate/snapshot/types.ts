@@ -164,5 +164,12 @@ export type CorporateSnapshot = {
   BookValue_perShare_USD_shares_post_financing: number | null;
 
   series?: CorporateSnapshotSeries;
+  productionStartSeries?: Array<{
+    tp: number;
+    year: number | null;
+    dcfProdStartPresent_TargetCurrency: number | null;
+    npvProdStart_TargetCurrency: number | null;
+    navProdStart_TargetCurrency: number | null;
+  }>;
 
 };

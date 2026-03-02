@@ -948,7 +948,7 @@ type SnapshotDiagnostics = {
       tpList: number[];
       lastTp: number | null;
       tpToYear: Record<string, number | null>;
-      dcfProdStartSeries?: Array<{ year: number | null; valueTargetCurrency: number | null }>;
+      dcfProdStartSeries?: Array<{ year: number | null; valueTargetCurrency: number | null; npvProdStartTarget?: number | null; navProdStartTarget?: number | null }>;
     };
   };
 };
@@ -1051,8 +1051,6 @@ export async function runCorporateSnapshotPipeline(args: {
       productionStartPeriod: number;
       periodEndDatesUtc: string[];
       fdExtraShares: number;
-      capexUSD: Array<number | null>;
-      impliedBuildFundingNeedUSD: number | null;
     }>;
 
     const projectSeriesContexts: ProjectSeriesContext[] = [];
@@ -1076,28 +1074,12 @@ export async function runCorporateSnapshotPipeline(args: {
             throw new Error(`Project ${projectId} is missing integer productionStartPeriod`);
           }
 
-          const capexSeriesForFunding = sanitizeSeries(parsed.engineInputWithoutPrices.phase1.capexUSD);
-          const impliedBuildFundingNeedUSD = (() => {
-            if (!Number.isInteger(productionStartPeriod)) return null;
-            if (productionStartPeriod <= 0) return 0;
-            if (capexSeriesForFunding.length === 0) return 0;
-            let sum = 0;
-            for (let t = 0; t < Math.min(productionStartPeriod, capexSeriesForFunding.length); t += 1) {
-              const capex = toFiniteOrNull(capexSeriesForFunding[t]);
-              if (capex === null) return null;
-              if (capex < 0) sum += Math.abs(capex);
-            }
-            return sum;
-          })();
-
           projectsForBuildFunding.push({
             projectId,
             projectName: null,
             productionStartPeriod,
             periodEndDatesUtc,
             fdExtraShares: parsed.context.equity?.fdExtraShares ?? 0,
-            capexUSD: capexSeriesForFunding,
-            impliedBuildFundingNeedUSD,
           });
 
           const from = periodEndDatesUtc[0];
@@ -1570,6 +1552,23 @@ export async function runCorporateSnapshotPipeline(args: {
         });
 
     const projectFinancingOverrides = input.projectFinancingOverrides ?? {};
+    const projectBuildFundingNeedUSDById = new Map<string, number | null>();
+
+    for (const project of projectsForBuildFunding) {
+      const projectBuildFundingNeedUSD = deriveBuildFundingNeedUSD({
+        corporatePeriodEndDatesUtc: aggregation.corporatePeriodEndDatesUtc,
+        capexUSD_total: aggregation.capexUSD_total,
+        projects: [
+          {
+            projectId: project.projectId,
+            productionStartPeriod: project.productionStartPeriod,
+            periodEndDatesUtc: project.periodEndDatesUtc,
+          },
+        ],
+      });
+      projectBuildFundingNeedUSDById.set(project.projectId, projectBuildFundingNeedUSD);
+    }
+
     const projectNewShares = projectsForBuildFunding.map((project) => {
       const override = projectFinancingOverrides[project.projectId] ?? null;
       const globalEquityFraction = input.financingPlan?.equity_fraction;
@@ -1585,7 +1584,8 @@ export async function runCorporateSnapshotPipeline(args: {
           ? Math.min(1, Math.max(0, debtFractionRaw))
           : null;
 
-      if (project.impliedBuildFundingNeedUSD === null) {
+      const projectBuildFundingNeedUSD = projectBuildFundingNeedUSDById.get(project.projectId) ?? null;
+      if (projectBuildFundingNeedUSD === null) {
         return {
           projectId: project.projectId,
           projectName: project.projectName,
@@ -1596,7 +1596,7 @@ export async function runCorporateSnapshotPipeline(args: {
         };
       }
 
-      if (project.impliedBuildFundingNeedUSD === 0) {
+      if (projectBuildFundingNeedUSD === 0) {
         return {
           projectId: project.projectId,
           projectName: project.projectName,
@@ -1631,7 +1631,7 @@ export async function runCorporateSnapshotPipeline(args: {
       }
 
       const effectiveEquityFraction = equityFraction ?? 1;
-      const projectBuildNeedTarget = project.impliedBuildFundingNeedUSD * fxRate;
+      const projectBuildNeedTarget = projectBuildFundingNeedUSD * fxRate;
       const projectEquityRaisedTarget = projectBuildNeedTarget * effectiveEquityFraction;
       return {
         projectId: project.projectId,
@@ -1656,7 +1656,6 @@ export async function runCorporateSnapshotPipeline(args: {
           ? null
           : marketInput.shares_current + totalProjectNewShares + totalFdExtraShares
         : null;
-
     const delayDiagnostics: DelayScenarioDiagnostics = {
       k: delayPeriods,
       tp_base: corporateProductionStartPeriod,
@@ -1762,6 +1761,7 @@ export async function runCorporateSnapshotPipeline(args: {
     snapshot.fx_USD_to_TargetCurrency = fxRate;
     snapshot.discountRate = input.discountRate;
 
+
     const tpList = Array.from(new Set(projectsForBuildFunding.map((project) => project.productionStartPeriod))).sort((a, b) => a - b);
     const lastTp = tpList.length > 0 ? tpList[tpList.length - 1] : null;
     const tpToYear: Record<string, number | null> = Object.fromEntries(tpList.map((tp) => {
@@ -1772,19 +1772,50 @@ export async function runCorporateSnapshotPipeline(args: {
     }));
 
     const prodStartSeriesDebug = tpList.map((tp) => {
-      const dcfProdStartPresentTarget = (() => {
-        if (fxRate === null) return null;
-        let dcfAtTp = 0;
+      const dcfProdStartExCapexUSD = (() => {
+        let sum = 0;
         for (let t = tp; t < aggregationEffective.fcffUSD_total.length; t += 1) {
           const fcff = toFiniteOrNull(aggregationEffective.fcffUSD_total[t]);
           if (fcff === null) return null;
-          dcfAtTp += fcff / ((1 + input.discountRate) ** (t - tp));
+          sum += fcff / ((1 + input.discountRate) ** (t - tp));
         }
-        return (dcfAtTp / ((1 + input.discountRate) ** tp)) * fxRate;
+        return sum;
       })();
+      const initialCapexUSD = deriveBuildFundingNeedUSD({
+        corporatePeriodEndDatesUtc: aggregation.corporatePeriodEndDatesUtc,
+        capexUSD_total: aggregation.capexUSD_total,
+        projects: projectsForBuildFunding
+          .filter((project) => project.productionStartPeriod === tp)
+          .map((project) => ({
+            projectId: project.projectId,
+            productionStartPeriod: project.productionStartPeriod,
+            periodEndDatesUtc: project.periodEndDatesUtc,
+          })),
+      });
+      const dcfProdStartPresentTarget = dcfProdStartExCapexUSD !== null && fxRate !== null
+        ? (dcfProdStartExCapexUSD / ((1 + input.discountRate) ** tp)) * fxRate
+        : null;
+      const npvProdStartTarget = dcfProdStartExCapexUSD !== null && initialCapexUSD !== null && fxRate !== null
+        ? (dcfProdStartExCapexUSD - Math.abs(initialCapexUSD)) * fxRate
+        : null;
+      const navProdStartTarget = npvProdStartTarget !== null
+        && typeof financingEffective.cash_t0_post_TargetCurrency === 'number'
+        && Number.isFinite(financingEffective.cash_t0_post_TargetCurrency)
+        && typeof financingEffective.debt_t0_post_TargetCurrency === 'number'
+        && Number.isFinite(financingEffective.debt_t0_post_TargetCurrency)
+          ? npvProdStartTarget + (financingEffective.cash_t0_post_TargetCurrency - financingEffective.debt_t0_post_TargetCurrency)
+          : null;
       const year = tpToYear[String(tp)] ?? null;
-      return { year, valueTargetCurrency: dcfProdStartPresentTarget };
+      return { year, valueTargetCurrency: dcfProdStartPresentTarget, npvProdStartTarget, navProdStartTarget };
     });
+
+    snapshot.productionStartSeries = prodStartSeriesDebug.map((point, idx2) => ({
+      tp: tpList[idx2] ?? 0,
+      year: point.year,
+      dcfProdStartPresent_TargetCurrency: point.valueTargetCurrency,
+      npvProdStart_TargetCurrency: point.npvProdStartTarget ?? null,
+      navProdStart_TargetCurrency: point.navProdStartTarget ?? null,
+    }));
 
     if (debugEnabled) {
       diagnostics.meta.financingDebug = {
@@ -1797,7 +1828,7 @@ export async function runCorporateSnapshotPipeline(args: {
         tpList,
         lastTp,
         tpToYear,
-        dcfProdStartSeries: prodStartSeriesDebug,
+        dcfProdStartSeries: prodStartSeriesDebug.map((point) => ({ year: point.year, valueTargetCurrency: point.valueTargetCurrency, npvProdStartTarget: point.npvProdStartTarget ?? null, navProdStartTarget: point.navProdStartTarget ?? null })),
       };
     }
 
