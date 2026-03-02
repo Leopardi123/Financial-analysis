@@ -6,19 +6,19 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 100%;
+  right: 0;
   background: #edeee0;
   text-align: center;
-  padding: 12px 0;
+  padding: calc(var(--safe-top, 0px) + 12px) 0 12px;
   font-family: "Josefin Sans", sans-serif;
   letter-spacing: 3px;
   font-size: 15px;
   font-weight: 900;
-  z-index: 10;
+  z-index: 1000;
 }
 
 .dashboard-content {
-  padding-top: 60px;
+  padding-top: calc(var(--safe-top, 0px) + 60px);
 }
 
 .section {

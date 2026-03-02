@@ -5,13 +5,17 @@
   box-sizing: border-box;
 }
 
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
 body {
   margin: 0;
   font-family: "Merriweather", serif;
   background: #edeee0;
   color: #1e1e1e;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right)
-    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
   min-height: 100vh;
 }
 
