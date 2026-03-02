@@ -931,6 +931,25 @@ type SnapshotDiagnostics = {
       payable_AuEq_Oz_total?: Array<number | null>;
       sustainingCostUSD_total?: Array<number | null>;
     };
+    financingDebug?: {
+      shares_current: number | null;
+      shares_post_financing: number | null;
+      projectNewShares: Array<{
+        projectId: string;
+        projectName: string | null;
+        newShares: number | null;
+        equityFraction: number | null;
+        debtFraction: number | null;
+        reason: string | null;
+      }>;
+      totalNewShares: number;
+    };
+    prodStartDebug?: {
+      tpList: number[];
+      lastTp: number | null;
+      tpToYear: Record<string, number | null>;
+      dcfProdStartSeries?: Array<{ year: number | null; valueTargetCurrency: number | null; npvProdStartTargetCurrency: number | null; navProdStartTargetCurrency: number | null }>;
+    };
   };
 };
 
@@ -963,6 +982,8 @@ export async function runCorporateSnapshotPipeline(args: {
     }
 
     const input = validation.value;
+    const bodyRecord = args.body as Record<string, unknown>;
+    const debugEnabled = String(bodyRecord.debug ?? '') === '1';
 
     const projects = typeof input.symbol === 'string'
       ? await loadProjectsForSymbol(input.symbol)
@@ -1026,9 +1047,11 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const projectsForBuildFunding = [] as Array<{
       projectId: string;
+      projectName: string | null;
       productionStartPeriod: number;
       periodEndDatesUtc: string[];
       fdExtraShares: number;
+      capexUSD: Array<number | null>;
     }>;
 
     const projectSeriesContexts: ProjectSeriesContext[] = [];
@@ -1054,9 +1077,11 @@ export async function runCorporateSnapshotPipeline(args: {
 
           projectsForBuildFunding.push({
             projectId,
+            projectName: typeof rawJsonRecord.projectName === 'string' ? rawJsonRecord.projectName : null,
             productionStartPeriod,
             periodEndDatesUtc,
             fdExtraShares: parsed.context.equity?.fdExtraShares ?? 0,
+            capexUSD: [],
           });
 
           const from = periodEndDatesUtc[0];
@@ -1194,6 +1219,10 @@ export async function runCorporateSnapshotPipeline(args: {
               royaltiesUSD,
             },
           });
+          const fundingProject = projectsForBuildFunding.find((entry) => entry.projectId === projectId);
+          if (fundingProject) {
+            fundingProject.capexUSD = sanitizeSeries(out.capexUSD_used);
+          }
           const ebitdaUSD = sanitizeSeries(out.phase1.ebitdaUSD);
           const ebitUSD = ebitdaUSD.map((ebitda, t) => {
             const dep = depreciationUSD[t];
@@ -1528,12 +1557,105 @@ export async function runCorporateSnapshotPipeline(args: {
           buildFundingNeed_USD: buildFundingNeedUSD,
         });
 
+    const projectFinancingOverrides = input.projectFinancingOverrides ?? {};
+    const projectNewShares = projectsForBuildFunding.map((project) => {
+      const override = projectFinancingOverrides[project.projectId] ?? null;
+      const globalEquityFraction = input.financingPlan?.equity_fraction;
+      const globalDebtFraction = input.financingPlan?.debt_fraction;
+      const equityFractionRaw = override?.equity_fraction ?? globalEquityFraction ?? null;
+      const debtFractionRaw = override?.debt_fraction ?? globalDebtFraction ?? null;
+      const equityFraction =
+        typeof equityFractionRaw === 'number' && Number.isFinite(equityFractionRaw)
+          ? Math.min(1, Math.max(0, equityFractionRaw))
+          : null;
+      const debtFraction =
+        typeof debtFractionRaw === 'number' && Number.isFinite(debtFractionRaw)
+          ? Math.min(1, Math.max(0, debtFractionRaw))
+          : null;
+
+      const projectBuildFundingNeedUSD = deriveBuildFundingNeedUSD({
+        corporatePeriodEndDatesUtc: project.periodEndDatesUtc,
+        capexUSD_total: project.capexUSD,
+        projects: [{ projectId: project.projectId, productionStartPeriod: project.productionStartPeriod, periodEndDatesUtc: project.periodEndDatesUtc }],
+      });
+
+      if (projectBuildFundingNeedUSD === null) {
+        return {
+          projectId: project.projectId,
+          projectName: project.projectName,
+          newShares: null as number | null,
+          equityFraction,
+          debtFraction,
+          reason: 'missing_project_build_funding_need',
+        };
+      }
+
+      if (projectBuildFundingNeedUSD === 0) {
+        return {
+          projectId: project.projectId,
+          projectName: project.projectName,
+          newShares: 0,
+          equityFraction,
+          debtFraction,
+          reason: null,
+        };
+      }
+
+      if (fxRate === null) {
+        return {
+          projectId: project.projectId,
+          projectName: project.projectName,
+          newShares: null as number | null,
+          equityFraction,
+          debtFraction,
+          reason: 'missing_fx',
+        };
+      }
+
+      const raisePrice = input.financingPlan?.equity_raise_price_TargetCurrency ?? marketInput.price_current_TargetCurrency;
+      if (!(typeof raisePrice === 'number' && Number.isFinite(raisePrice) && raisePrice > 0)) {
+        return {
+          projectId: project.projectId,
+          projectName: project.projectName,
+          newShares: null as number | null,
+          equityFraction,
+          debtFraction,
+          reason: 'missing_equity_raise_price',
+        };
+      }
+
+      const effectiveEquityFraction = equityFraction ?? 1;
+      const projectBuildNeedTarget = projectBuildFundingNeedUSD * fxRate;
+      const projectEquityRaisedTarget = projectBuildNeedTarget * effectiveEquityFraction;
+      return {
+        projectId: project.projectId,
+        projectName: project.projectName,
+        newShares: projectEquityRaisedTarget > 0 ? projectEquityRaisedTarget / raisePrice : 0,
+        equityFraction,
+        debtFraction,
+        reason: null,
+      };
+    });
+
+    const totalProjectNewShares = projectNewShares.reduce((sum, row) => (
+      typeof row.newShares === 'number' && Number.isFinite(row.newShares) ? sum + row.newShares : sum
+    ), 0);
+    const hasAnyNullProjectNewShares = projectNewShares.some((row) => row.newShares === null);
+
     const shares_post_financing_fd_effective =
-      typeof financingEffective.shares_post_financing === 'number'
-      && Number.isFinite(financingEffective.shares_post_financing)
-      && financingEffective.shares_post_financing > 0
-        ? financingEffective.shares_post_financing + totalFdExtraShares
+      typeof marketInput.shares_current === 'number'
+      && Number.isFinite(marketInput.shares_current)
+      && marketInput.shares_current > 0
+        ? hasAnyNullProjectNewShares
+          ? null
+          : marketInput.shares_current + totalProjectNewShares + totalFdExtraShares
         : null;
+
+    const financingEffectiveAdjusted = {
+      ...financingEffective,
+      new_shares: hasAnyNullProjectNewShares ? null : totalProjectNewShares,
+      shares_post_financing: shares_post_financing_fd_effective,
+    };
 
     const delayDiagnostics: DelayScenarioDiagnostics = {
       k: delayPeriods,
@@ -1628,7 +1750,7 @@ export async function runCorporateSnapshotPipeline(args: {
     const snapshot = buildCorporateSnapshot({
       targetCurrency: input.targetCurrency,
       aggregation: aggregationEffective,
-      financing: financingEffective,
+      financing: financingEffectiveAdjusted,
       market: marketInput,
       lista2CfDcf: lista2.metrics,
       lista3aProjectEfficiency: lista3a.metrics,
@@ -1639,6 +1761,72 @@ export async function runCorporateSnapshotPipeline(args: {
     snapshot.market = marketInput;
     snapshot.fx_USD_to_TargetCurrency = fxRate;
     snapshot.discountRate = input.discountRate;
+
+    const tpList = Array.from(new Set(projectsForBuildFunding.map((project) => project.productionStartPeriod))).sort((a, b) => a - b);
+    const lastTp = tpList.length > 0 ? tpList[tpList.length - 1] : null;
+    const tpToYear: Record<string, number | null> = Object.fromEntries(tpList.map((tp) => {
+      const date = aggregation.corporatePeriodEndDatesUtc[tp];
+      if (typeof date !== 'string') return [String(tp), null];
+      const year = Number.parseInt(date.slice(0, 4), 10);
+      return [String(tp), Number.isFinite(year) ? year : null];
+    }));
+
+    const corporateDateToIndex = new Map<string, number>(aggregation.corporatePeriodEndDatesUtc.map((date, idx) => [date, idx]));
+    const projectById = new Map(projectsForBuildFunding.map((project) => [project.projectId, project]));
+    const prodStartSeriesDebug = tpList.map((tp) => {
+      const tpDate = aggregation.corporatePeriodEndDatesUtc[tp] ?? null;
+      const values = (() => {
+        if (fxRate === null || typeof tpDate !== 'string') return { dcfProdStartPresentTarget: null, npvProdStartTarget: null, navProdStartTarget: null };
+        let corporateSumAtTpUSD = 0;
+        let initialCapexBeforeTpUSD = 0;
+        for (const context of projectSeriesContexts) {
+          const projectMeta = projectById.get(context.projectId);
+          if (!projectMeta) continue;
+          if (projectMeta.productionStartPeriod > tp) {
+            continue;
+          }
+          let projectSumAtTpUSD = 0;
+          for (let i = 0; i < context.periodEndDatesUtc.length; i += 1) {
+            const date = context.periodEndDatesUtc[i];
+            const capex = toFiniteOrNull(projectMeta.capexUSD[i]);
+            if (date < tpDate) {
+              if (capex === null) return { dcfProdStartPresentTarget: null, npvProdStartTarget: null, navProdStartTarget: null };
+              if (capex < 0) initialCapexBeforeTpUSD += Math.abs(capex);
+            }
+            if (date < tpDate) continue;
+            const corpIdx = corporateDateToIndex.get(date);
+            if (corpIdx === undefined || corpIdx < tp) continue;
+            const fcff = toFiniteOrNull(context.economics.fcffUSD[i]);
+            if (fcff === null) return { dcfProdStartPresentTarget: null, npvProdStartTarget: null, navProdStartTarget: null };
+            projectSumAtTpUSD += fcff / ((1 + input.discountRate) ** (corpIdx - tp));
+          }
+          corporateSumAtTpUSD += projectSumAtTpUSD;
+        }
+        const dcfProdStartPresentTarget = (corporateSumAtTpUSD / ((1 + input.discountRate) ** tp)) * fxRate;
+        const npvProdStartTarget = (corporateSumAtTpUSD - initialCapexBeforeTpUSD) * fxRate;
+        const navProdStartTarget = financingEffectiveAdjusted.cash_t0_post_TargetCurrency !== null && financingEffectiveAdjusted.debt_t0_post_TargetCurrency !== null
+          ? npvProdStartTarget + (financingEffectiveAdjusted.cash_t0_post_TargetCurrency - financingEffectiveAdjusted.debt_t0_post_TargetCurrency)
+          : null;
+        return { dcfProdStartPresentTarget, npvProdStartTarget, navProdStartTarget };
+      })();
+      const year = tpToYear[String(tp)] ?? null;
+      return { year, valueTargetCurrency: values.dcfProdStartPresentTarget, npvProdStartTargetCurrency: values.npvProdStartTarget, navProdStartTargetCurrency: values.navProdStartTarget };
+    });
+
+    if (debugEnabled) {
+      diagnostics.meta.financingDebug = {
+        shares_current: marketInput.shares_current,
+        shares_post_financing: shares_post_financing_fd_effective,
+        projectNewShares,
+        totalNewShares: totalProjectNewShares,
+      };
+      diagnostics.meta.prodStartDebug = {
+        tpList,
+        lastTp,
+        tpToYear,
+        dcfProdStartSeries: prodStartSeriesDebug,
+      };
+    }
 
     return { ok: true, snapshot, diagnostics: finalizeDiagnostics(diagnostics) };
   } catch (error) {

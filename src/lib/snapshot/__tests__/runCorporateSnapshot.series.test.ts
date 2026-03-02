@@ -469,3 +469,31 @@ test('delayPeriods edge case tp_eff > masterN yields null dependent metrics with
   assert.equal(result.snapshot.Payback_real_years, null);
   assert.ok(result.diagnostics.errors.some((line) => line.includes('failure_reason=tp_eff')));
 });
+
+
+test('debug mode includes production start list and financing new shares breakdown', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  projects.push(JSON.parse(JSON.stringify(projects[0])));
+  projects[1].projectId = 'p2';
+  const raw1 = projects[0].rawJson as Record<string, unknown>;
+  const raw2 = projects[1].rawJson as Record<string, unknown>;
+  (raw1.time as Record<string, unknown>).productionStartPeriod = 1;
+  (raw2.time as Record<string, unknown>).productionStartPeriod = 3;
+  (body as Record<string, unknown>).debug = '1';
+  (body as Record<string, unknown>).projectFinancingOverrides = {
+    [String(projects[0].projectId)]: { equity_fraction: 1, debt_fraction: 0 },
+    p2: { equity_fraction: 1, debt_fraction: 0 },
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const meta = result.diagnostics.meta as Record<string, unknown>;
+  const prod = meta.prodStartDebug as Record<string, unknown>;
+  const fin = meta.financingDebug as Record<string, unknown>;
+  assert.ok(Array.isArray(prod.tpList));
+  assert.equal(typeof prod.lastTp, 'number');
+  assert.ok(Array.isArray(fin.projectNewShares));
+});

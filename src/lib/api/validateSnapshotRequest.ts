@@ -38,6 +38,10 @@ export type SnapshotRequest = {
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
   };
+  projectFinancingOverrides?: Record<string, {
+    equity_fraction?: number | null;
+    debt_fraction?: number | null;
+  }>;
   buildFundingNeed_USD?: number | null;
   fx: SnapshotFxConfig;
   scenario: SnapshotScenario;
@@ -233,6 +237,11 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
   const financingPlanRaw = body.financingPlan;
   if (financingPlanRaw !== undefined && financingPlanRaw !== null && !isObject(financingPlanRaw)) {
     errors.push('financingPlan must be an object or null when provided');
+  }
+
+  const projectFinancingOverridesRaw = body.projectFinancingOverrides;
+  if (projectFinancingOverridesRaw !== undefined && projectFinancingOverridesRaw !== null && !isObject(projectFinancingOverridesRaw)) {
+    errors.push('projectFinancingOverrides must be an object when provided');
   }
 
   const buildFundingNeed = readNullableFiniteNumber(body.buildFundingNeed_USD);
@@ -462,6 +471,10 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     financingPlan:
       isObject(financingPlanRaw) || financingPlanRaw === null
         ? (financingPlanRaw as SnapshotRequest['financingPlan'])
+        : undefined,
+    projectFinancingOverrides:
+      isObject(projectFinancingOverridesRaw)
+        ? (projectFinancingOverridesRaw as SnapshotRequest['projectFinancingOverrides'])
         : undefined,
     buildFundingNeed_USD: buildFundingNeed,
     scenario,

@@ -6,6 +6,7 @@ type ValueRangeSnapshotCardProps = {
   npvHigh?: number | null;
   tpLow?: number | null;
   tpHigh?: number | null;
+  tpSeries?: Array<{ label: string; low: number | null; high: number | null }>;
   currencyCode?: string;
 };
 
@@ -15,6 +16,8 @@ const VIEWBOX_WIDTH = 320;
 const VIEWBOX_HEIGHT = 120;
 const X_LEFT = 110;
 const X_RIGHT = 250;
+const X_SERIES_START = 200;
+const X_SERIES_END = 285;
 const MIN_LABEL_SPACING = 12;
 
 function isFiniteNumber(value: unknown): value is number {
@@ -60,6 +63,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     npvHigh,
     tpLow,
     tpHigh,
+    tpSeries,
   } = props;
 
   const npvRange = useMemo(() => {
@@ -72,16 +76,36 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
   }, [npvLow, npvHigh]);
 
   const tpRange = useMemo(() => {
+    if (Array.isArray(tpSeries) && tpSeries.length > 0) {
+      const ranges = tpSeries
+        .map((entry) => {
+          const low = isFiniteNumber(entry.low) ? entry.low : null;
+          const high = isFiniteNumber(entry.high) ? entry.high : null;
+          if (low !== null && high !== null) return { label: entry.label, low: Math.min(low, high), high: Math.max(low, high) };
+          if (low !== null) return { label: entry.label, low, high: low };
+          if (high !== null) return { label: entry.label, low: high, high };
+          return { label: entry.label, low: null, high: null };
+        })
+        .filter((entry) => entry.low !== null && entry.high !== null) as Array<{ label: string; low: number; high: number }>;
+      if (ranges.length > 0) {
+        return ranges;
+      }
+    }
     const low = isFiniteNumber(tpLow) ? tpLow : null;
     const high = isFiniteNumber(tpHigh) ? tpHigh : null;
-    if (low !== null && high !== null) return { low: Math.min(low, high), high: Math.max(low, high) };
-    if (low !== null) return { low, high: low };
-    if (high !== null) return { low: high, high };
-    return null;
-  }, [tpLow, tpHigh]);
+    if (low !== null && high !== null) return [{ label: "tp", low: Math.min(low, high), high: Math.max(low, high) }];
+    if (low !== null) return [{ label: "tp", low, high: low }];
+    if (high !== null) return [{ label: "tp", low: high, high }];
+    return [];
+  }, [tpHigh, tpLow, tpSeries]);
 
   const points = useMemo(() => {
-    const domain = [priceToday, npvRange?.low, npvRange?.high, tpRange?.low, tpRange?.high].filter(isFiniteNumber);
+    const domain = [
+      priceToday,
+      npvRange?.low,
+      npvRange?.high,
+      ...tpRange.flatMap((entry) => [entry.low, entry.high]),
+    ].filter(isFiniteNumber);
     const min = domain.length > 0 ? Math.min(...domain) : null;
     const max = domain.length > 0 ? Math.max(...domain) : null;
 
@@ -96,17 +120,27 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return {
       npvLowY: toY(npvRange?.low ?? null),
       npvHighY: toY(npvRange?.high ?? null),
-      tpLowY: toY(tpRange?.low ?? null),
-      tpHighY: toY(tpRange?.high ?? null),
+      tpSeriesY: tpRange.map((entry) => ({
+        label: entry.label,
+        lowY: toY(entry.low),
+        highY: toY(entry.high),
+        low: entry.low,
+        high: entry.high,
+      })),
       priceY: toY(isFiniteNumber(priceToday) ? priceToday : null),
     };
   }, [npvRange, priceToday, tpRange]);
 
   const hasNpv = npvRange !== null && points.npvLowY !== null && points.npvHighY !== null;
-  const hasTp = tpRange !== null && points.tpLowY !== null && points.tpHighY !== null;
+  const hasTp = points.tpSeriesY.some((entry) => entry.lowY !== null && entry.highY !== null);
   const hasPrice = isFiniteNumber(priceToday) && points.priceY !== null;
   const npvLabels = resolveLabelPair(points.npvHighY, points.npvLowY);
-  const tpLabels = resolveLabelPair(points.tpHighY, points.tpLowY);
+  const tpFirst = points.tpSeriesY[0] ?? null;
+  const tpLabels = tpFirst ? resolveLabelPair(tpFirst.highY, tpFirst.lowY) : null;
+  const tpSeriesX = points.tpSeriesY.map((entry, index, arr) => ({
+    ...entry,
+    x: arr.length === 1 ? X_RIGHT : X_SERIES_START + ((X_SERIES_END - X_SERIES_START) * index) / Math.max(1, arr.length - 1),
+  }));
 
   const priceLabel = useMemo(() => {
     if (!hasPrice || points.priceY === null || priceToday === null || !Number.isFinite(priceToday)) return null;
@@ -137,9 +171,9 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             <text x={12} y={26} fontSize={10} fill="#6b7280">Nu</text>
             <text x={238} y={26} fontSize={10} fill="#6b7280">Då</text>
 
-            {hasNpv && hasTp && (
+            {hasNpv && hasTp && tpSeriesX[0] && tpSeriesX[tpSeriesX.length - 1] && (
               <polygon
-                points={`${X_LEFT},${points.npvHighY!} ${X_RIGHT},${points.tpHighY!} ${X_RIGHT},${points.tpLowY!} ${X_LEFT},${points.npvLowY!}`}
+                points={`${X_LEFT},${points.npvHighY!} ${tpSeriesX[tpSeriesX.length - 1].x},${tpSeriesX[0].highY!} ${tpSeriesX[tpSeriesX.length - 1].x},${tpSeriesX[0].lowY!} ${X_LEFT},${points.npvLowY!}`}
                 fill="rgba(71, 85, 105, 0.14)"
                 stroke="rgba(71, 85, 105, 0.26)"
                 strokeWidth={1}
@@ -162,13 +196,16 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
 
             {hasTp ? (
               <>
-                <line x1={X_RIGHT} y1={points.tpHighY!} x2={X_RIGHT} y2={points.tpLowY!} stroke="#64748b" strokeWidth={10} strokeLinecap="round" />
-                {tpLabels && (
-                  <>
-                    <text x={270} y={tpLabels.high + 4} fontSize={11} fill="#1f2937">{formatPerShareValue(tpRange.high)}</text>
-                    <text x={270} y={tpLabels.low + 4} fontSize={11} fill="#1f2937">{formatPerShareValue(tpRange.low)}</text>
-                  </>
-                )}
+                {tpSeriesX.map((entry, idx) => (
+                  entry.lowY !== null && entry.highY !== null
+                    ? <line key={`tp-${entry.label}-${idx}`} x1={entry.x} y1={entry.highY} x2={entry.x} y2={entry.lowY} stroke="#64748b" strokeWidth={10} strokeLinecap="round" />
+                    : null
+                ))}
+                {tpSeriesX.map((entry, idx) => (
+                  entry.lowY !== null && entry.highY !== null
+                    ? <text key={`tp-label-${entry.label}-${idx}`} x={entry.x + 8} y={Math.min(entry.lowY + 14, 108)} fontSize={9} fill="#6b7280">{entry.label}</text>
+                    : null
+                ))}
               </>
             ) : (
               <text x={270} y={64} fontSize={11} fill="#6b7280">n/a</text>
