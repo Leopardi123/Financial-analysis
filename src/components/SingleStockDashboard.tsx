@@ -4,6 +4,7 @@ import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
+import CorporateValueRangeSnapshotCard from "./project/CorporateValueRangeSnapshotCard";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
 import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
@@ -3336,9 +3337,9 @@ Capital Available: ${availableLabel}`,
   const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;
   const corporateTotalsDebug = diagnosticsMeta.corporateTotalsDebug ?? null;
   const corporateFinancingDebug = diagnosticsMeta.corporateFinancingDebug ?? null;
-  const snapshotTime = (corporateSnapshotData.time ?? {}) as Record<string, unknown>;
-  const masterN = typeof snapshotTime.masterN === "number" ? snapshotTime.masterN : null;
+  const corporateModeledValuationTimeline = diagnosticsMeta.corporateModeledValuationTimeline ?? (corporateSnapshotData.modeledValuationTimeline ?? null);
   const aggregation = (corporateSnapshotData.aggregation ?? {}) as Record<string, unknown>;
+  const masterN = typeof aggregation.corporateMasterN === "number" ? aggregation.corporateMasterN : null;
   const fcf = Array.isArray(aggregation.fcffUSD_total) ? aggregation.fcffUSD_total : [];
   const capex = Array.isArray(aggregation.capexUSD_total) ? aggregation.capexUSD_total : [];
   const nullCount = (arr: unknown[]) => arr.filter((value) => value === null).length;
@@ -3347,6 +3348,7 @@ Capital Available: ${availableLabel}`,
     masterN,
     corporateTotalsDebug,
     corporateFinancingDebug,
+    corporateModeledValuationTimeline,
     lengthChecks: {
       fcfUSD_total: { len: fcf.length, expected: masterN === null ? null : masterN + 1 },
       capexUSD_total: { len: capex.length, expected: masterN === null ? null : masterN + 1 },
@@ -3465,7 +3467,7 @@ Capital Available: ${availableLabel}`,
                     <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
-                        <ValueRangeSnapshotCard
+                        <CorporateValueRangeSnapshotCard
                           priceToday={
                             corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0
                               ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
@@ -3473,9 +3475,23 @@ Capital Available: ${availableLabel}`,
                           }
                           npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
-                          tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
-                          tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
-                          currencyCode={lockedTargetCurrency}
+                          tpMarkers={(() => {
+                            const modeledTimeline = (corporateSnapshotData?.modeledValuationTimeline ?? null) as {
+                              markers?: Array<{
+                                tp: number;
+                                yearLabelUsed: string | null;
+                                value_high: number | null;
+                                value_low: number | null;
+                              }>;
+                            } | null;
+                            if (!modeledTimeline || !Array.isArray(modeledTimeline.markers)) return undefined;
+                            return modeledTimeline.markers.map((marker) => ({
+                              tp: marker.tp,
+                              high: marker.value_high,
+                              low: marker.value_low,
+                              yearLabelUsed: marker.yearLabelUsed,
+                            }));
+                          })()}
                         />
                       )}
                       <div className="compact-metrics-grid">
