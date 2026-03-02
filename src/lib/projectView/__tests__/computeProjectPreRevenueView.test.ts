@@ -402,4 +402,28 @@ const auEqPerShareInvalidShares = computeProjectViewMetrics({
 assert.equal(auEqPerShareInvalidShares.list4.AuEq_10Y_perShare.value, null);
 assert.equal(auEqPerShareInvalidShares.list4.AuEq_10Y_perShare.reason, 'Missing or invalid shares_post_financing');
 
+
+const overrideSharesPf = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 2,
+  sharesCurrent: 100,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [0, 1, 1],
+  capexUSD: [-10, 0, 0],
+  grossRevenueUSD: [1, 1, 1],
+  ebitUSD: [1, 1, 1],
+  payableAuEqOz: [1, 1, 1],
+  sustainingCostUSD: [1, 1, 1],
+  productionStartPeriod: 1,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+  sharesPostFinancingOverride: 250,
+});
+assert.equal(overrideSharesPf.marketBox.sharesPf.value, 250);
+
 console.log('ok computeProjectPreRevenueView');
+

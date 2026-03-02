@@ -35,6 +35,8 @@ export type ProjectViewInputs = {
   sustainingCostUSD: Series;
   productionStartPeriod: number | null;
   financing: FinancingInput;
+  sharesPostFinancingOverride?: NullableNumber;
+  productionStartSeries?: Array<{ tp: number; year: number | null; dcfProdStartPresentTarget: NullableNumber; npvProdStartTarget: NullableNumber; navProdStartTarget: NullableNumber }>;
 };
 
 export type MetricValue = { value: NullableNumber; reason: string | null };
@@ -51,6 +53,7 @@ export type ProjectViewMetrics = {
   list4: Record<string, MetricValue>;
   list5: Record<string, MetricValue>;
   list6: Record<string, MetricValue>;
+  productionStartSeries?: Array<{ tp: number; year: number | null; dcfProdStartPresentTarget: NullableNumber; npvProdStartTarget: NullableNumber; navProdStartTarget: NullableNumber }>;
   diagnostics: {
     capexSignConvention: 'negative_spend' | 'positive_spend' | 'none';
     payback_real_debug: {
@@ -413,7 +416,10 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const debtAddedTarget = remainingNeedTarget !== null ? remainingNeedTarget * normDebtFrac : 0;
   const equityRaiseTarget = remainingNeedTarget !== null ? remainingNeedTarget * equityFrac : 0;
   const newShares = priceCurrent !== null && priceCurrent > 0 ? equityRaiseTarget / priceCurrent : null;
-  const sharesPf = sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null;
+  const sharesPfComputed = sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null;
+  const sharesPf = finite(input.sharesPostFinancingOverride) && (input.sharesPostFinancingOverride as number) > 0
+    ? input.sharesPostFinancingOverride as number
+    : sharesPfComputed;
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
 
@@ -916,6 +922,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       MA_Median: mv(null, 'M&A comparables not provided in current dataset'),
       Premium_vs_EV: mv(null, 'M&A comparables not provided in current dataset'),
     },
+    productionStartSeries: input.productionStartSeries,
     diagnostics: {
       capexSignConvention: capexInit.signConvention,
       payback_real_debug: paybackDebug,

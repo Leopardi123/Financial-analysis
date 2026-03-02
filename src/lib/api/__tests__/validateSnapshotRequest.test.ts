@@ -109,5 +109,20 @@ function assert(condition: boolean, message: string): void {
   });
   assert(!missingSymbolInvalid.ok, 'missing symbol/projects should fail validation');
 
+
+
+  const projectFinancingOverridesValid = validateSnapshotRequest({
+    targetCurrency: 'SEK',
+    discountRate: 0.1,
+    fx_USD_to_TargetCurrency: 10,
+    market: {
+      shares_current: 100000000,
+      price_current_TargetCurrency: 12.5,
+    },
+    projects: [{ projectId: 'p1', rawJson }],
+    projectFinancingOverrides: { p1: { equity_fraction: 1, debt_fraction: 0 } },
+  });
+  assert(projectFinancingOverridesValid.ok, 'projectFinancingOverrides should validate in projects mode');
+
   console.log('validateSnapshotRequest tests passed');
 })();
