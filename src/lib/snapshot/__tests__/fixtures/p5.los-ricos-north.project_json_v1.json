@@ -1,0 +1,664 @@
+{
+  "version": "project_json_v1",
+  "_choices_version": [
+    "project_json_v1"
+  ],
+  "meta": {
+    "projectId": "p5",
+    "projectName": "Los Ricos North",
+    "currency": "USD",
+    "_choices_currency": [
+      "USD"
+    ],
+    "notes": "Based on May 2023 PEA. Combined Open Pit and Underground project. Full units used."
+  },
+  "time": {
+    "masterN": 13,
+    "productionStartPeriod": 5,
+    "periodEndDatesUtc": [
+      "2026-12-31",
+      "2027-12-31",
+      "2028-12-31",
+      "2029-12-31",
+      "2030-12-31",
+      "2031-12-31",
+      "2032-12-31",
+      "2033-12-31",
+      "2034-12-31",
+      "2035-12-31",
+      "2036-12-31",
+      "2037-12-31",
+      "2038-12-31",
+      "2039-12-31"
+    ]
+  },
+  "economics": {
+    "taxRate": 0.3
+  },
+  "equity": {
+    "fdExtraShares": 0,
+    "fdNotes": "Mexico Special Mining Duty applies."
+  },
+  "series": {
+    "capexUSD": [
+      null,
+      null,
+      null,
+      69500000,
+      69500000,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "operatingCostsUSD": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      48000000,
+      48000000,
+      48000000,
+      48000000,
+      48000000,
+      48000000,
+      48000000,
+      48000000,
+      48000000
+    ],
+    "sustainingCapexUSD": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      7000000,
+      9500000,
+      9500000,
+      9500000,
+      9500000,
+      9500000,
+      9500000,
+      9500000,
+      9500000
+    ],
+    "siteGandA_USD": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      2500000,
+      2500000,
+      2500000,
+      2500000,
+      2500000,
+      2500000,
+      2500000,
+      2500000,
+      2500000
+    ],
+    "depreciationUSD": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      10000000,
+      10000000,
+      10000000,
+      10000000,
+      10000000,
+      10000000,
+      10000000,
+      10000000,
+      10000000
+    ],
+    "workingCapitalDeltaUSD": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      5500000,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "royaltiesUSD": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      3200000,
+      3200000,
+      3200000,
+      3200000,
+      3200000,
+      3200000,
+      3200000,
+      3200000,
+      3200000
+    ],
+    "reclamationUSD": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "byproductCreditsUSD": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "metals": {
+    "payableQtyByMetal": {
+      "Au": [
+        null,
+        null,
+        null,
+        0,
+        0,
+        25000,
+        25000,
+        25000,
+        25000,
+        25000,
+        25000,
+        25000,
+        25000,
+        25000
+      ],
+      "Ag": [
+        null,
+        null,
+        null,
+        0,
+        0,
+        2800000,
+        2800000,
+        2800000,
+        2800000,
+        2800000,
+        2800000,
+        2800000,
+        2800000,
+        2800000
+      ]
+    },
+    "payableQtyUnitByMetal": {
+      "Au": "toz",
+      "Ag": "toz",
+      "_choices_Au": [
+        "g",
+        "kg",
+        "lb",
+        "long_ton",
+        "short_ton",
+        "tonne",
+        "toz"
+      ],
+      "_choices_Ag": [
+        "g",
+        "kg",
+        "lb",
+        "long_ton",
+        "short_ton",
+        "tonne",
+        "toz"
+      ]
+    },
+    "priceKeyByMetal": {
+      "Au": "XAU_USD_TOZ",
+      "Ag": "XAG_USD_TOZ",
+      "_choices_Au": [
+        "XAU_USD_TOZ",
+        "XAG_USD_TOZ",
+        "CU_USD_LB",
+        "CU_USD_TONNE",
+        "ZN_USD_LB",
+        "PB_USD_LB",
+        "NI_USD_LB",
+        "USD_SEK",
+        "EUR_USD",
+        "USD_CAD"
+      ],
+      "_choices_Ag": [
+        "XAU_USD_TOZ",
+        "XAG_USD_TOZ",
+        "CU_USD_LB",
+        "CU_USD_TONNE",
+        "ZN_USD_LB",
+        "PB_USD_LB",
+        "NI_USD_LB",
+        "USD_SEK",
+        "EUR_USD",
+        "USD_CAD"
+      ]
+    },
+    "auPriceKey": "XAU_USD_TOZ",
+    "_choices_auPriceKey": [
+      "XAU_USD_TOZ",
+      "XAG_USD_TOZ",
+      "CU_USD_LB",
+      "CU_USD_TONNE",
+      "ZN_USD_LB",
+      "PB_USD_LB",
+      "NI_USD_LB",
+      "USD_SEK",
+      "EUR_USD",
+      "USD_CAD"
+    ]
+  },
+  "streamsByMetal": null,
+  "takeItems": [],
+  "operations": {
+    "capacity": {
+      "throughputUnit": "tpd",
+      "_choices_throughputUnit": [
+        "tpa",
+        "tpd"
+      ],
+      "nameplateThroughput": 1500,
+      "utilizationPct": 0.92
+    },
+    "oreMilledTonnes": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000
+    ],
+    "oreMinedTonnes": [
+      null,
+      null,
+      null,
+      0,
+      0,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000,
+      500000
+    ],
+    "oreTonnageUnit": "tonne",
+    "_choices_oreTonnageUnit": [
+      "long_ton",
+      "short_ton",
+      "tonne"
+    ],
+    "gradeByMetal": {
+      "Au": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "Ag": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "gradeUnitByMetal": {
+      "Au": "g/t",
+      "Ag": "g/t"
+    },
+    "recoveryPctByMetal": {
+      "Au": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "Ag": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  },
+  "economicsBreakdown": {
+    "meta": {
+      "defaultSource": "PEA",
+      "_choices_defaultSource": [
+        "FS",
+        "Other",
+        "PEA",
+        "PFS"
+      ],
+      "notes": "PEA level study. High silver grades support strong economics."
+    },
+    "cogs": {
+      "miningUSD": [
+        null,
+        null,
+        null,
+        0,
+        0,
+        22500000,
+        22500000,
+        22500000,
+        22500000,
+        22500000,
+        22500000,
+        22500000,
+        22500000,
+        22500000
+      ],
+      "millingUSD": [
+        null,
+        null,
+        null,
+        0,
+        0,
+        21000000,
+        21000000,
+        21000000,
+        21000000,
+        21000000,
+        21000000,
+        21000000,
+        21000000,
+        21000000
+      ],
+      "utilitiesUSD": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "maintenanceUSD": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "campUSD": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "siteGandA_USD": [
+        null,
+        null,
+        null,
+        0,
+        0,
+        2500000,
+        2500000,
+        2500000,
+        2500000,
+        2500000,
+        2500000,
+        2500000,
+        2500000,
+        2500000
+      ]
+    },
+    "selling": {
+      "treatmentChargesUSD": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "refiningChargesUSD": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "tcRcUSD": [
+        null,
+        null,
+        null,
+        0,
+        0,
+        900000,
+        900000,
+        900000,
+        900000,
+        900000,
+        900000,
+        900000,
+        900000,
+        900000
+      ],
+      "transportUSD": [
+        null,
+        null,
+        null,
+        0,
+        0,
+        350000,
+        350000,
+        350000,
+        350000,
+        350000,
+        350000,
+        350000,
+        350000,
+        350000
+      ]
+    },
+    "royaltiesDetail": [
+      {
+        "id": "royalty_1",
+        "label": "Mexico Special Duty",
+        "name": "Special Mining Duty",
+        "base": "ebitda",
+        "rateType": null,
+        "rate": 0.075,
+        "royaltyUSD": [
+          null,
+          null,
+          null,
+          0,
+          0,
+          3200000,
+          3200000,
+          3200000,
+          3200000,
+          3200000,
+          3200000,
+          3200000,
+          3200000,
+          3200000
+        ],
+        "source": "PEA",
+        "notes": null,
+        "_choices_base": [
+          "ebit",
+          "ebitda",
+          "quantity",
+          "revenue"
+        ],
+        "_choices_rateType": [
+          "NSR_pct",
+          "ad_valorem_pct"
+        ],
+        "_choices_source": [
+          "FS",
+          "Other",
+          "PEA",
+          "PFS"
+        ]
+      }
+    ],
+    "taxesDetail": {
+      "federalIncomeTaxUSD": [
+        null,
+        null,
+        null,
+        0,
+        0,
+        0,
+        9000000,
+        18000000,
+        18000000,
+        18000000,
+        18000000,
+        18000000,
+        18000000,
+        18000000
+      ],
+      "municipalRevenueTaxUSD": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  }
+}
