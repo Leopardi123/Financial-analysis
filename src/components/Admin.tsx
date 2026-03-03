@@ -121,6 +121,10 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [tickerNextOffset, setTickerNextOffset] = useState<number | null>(null);
   const [tickerProgressUnit, setTickerProgressUnit] = useState<"rows" | "targets">("targets");
   const [tickerProgressPercentShown, setTickerProgressPercentShown] = useState(0);
+  const [debugParamEnabled, setDebugParamEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("admin.debugParamEnabled") === "1";
+  });
 
   const autoRefreshRunningRef = useRef(false);
   const autoRefreshPausedRef = useRef(false);
@@ -150,13 +154,22 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     ].slice(0, 20));
   }
 
+  function withAdminQuery(url: string): string {
+    if (!debugParamEnabled || typeof window === "undefined") {
+      return url;
+    }
+    const asUrl = new URL(url, window.location.origin);
+    asUrl.searchParams.set("debug", "1");
+    return `${asUrl.pathname}${asUrl.search}`;
+  }
+
   async function postJson(title: string, url: string, body: Record<string, unknown>) {
     setLoadingKey(title);
     updateLog(title, "loading", "LOADING...");
     try {
       const controller = new AbortController();
       const timeoutId = window.setTimeout(() => controller.abort(), 45000);
-      const response = await fetch(url, {
+      const response = await fetch(withAdminQuery(url), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -229,6 +242,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     ? Math.min(100, Math.round((companiesProcessedTotal / companiesTotalToProcess) * 100))
     : 0;
   const tickerProgressPercent = tickerProgressPercentShown;
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("admin.debugParamEnabled", debugParamEnabled ? "1" : "0");
+    }
+  }, [debugParamEnabled]);
 
   useEffect(() => {
     return () => {
@@ -529,6 +548,17 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setTickerAutoMessage("Pausing after current ticker batch...");
   }
 
+  function openAppFromAdmin() {
+    if (typeof window === "undefined") return;
+    const appUrl = new URL(window.location.href);
+    if (debugParamEnabled) {
+      appUrl.searchParams.set("debug", "1");
+    } else {
+      appUrl.searchParams.delete("debug");
+    }
+    window.open(appUrl.toString(), "_blank", "noopener,noreferrer");
+  }
+
   return (
     <div className="admin">
       <div className="admin-guidance">
@@ -825,6 +855,20 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               />
               Visa logg
             </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={debugParamEnabled}
+                onChange={(event) => setDebugParamEnabled(event.target.checked)}
+              />
+              Debug (debug=1)
+            </label>
+            <button
+              type="button"
+              onClick={openAppFromAdmin}
+            >
+              {debugParamEnabled ? "Open app (debug)" : "Open app"}
+            </button>
           </div>
         </div>
       </div>
