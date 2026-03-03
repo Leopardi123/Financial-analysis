@@ -2488,7 +2488,6 @@ Capital Available: ${availableLabel}`,
     } | null;
     const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
     const financing = (corporateSnapshotData.financing ?? null) as Record<string, unknown> | null;
-    const corporateSeries = (corporateSnapshotData.series ?? null) as { periodEndDatesUtc?: Array<string | null> } | null;
     const sharesPf = typeof financing?.shares_post_financing === "number"
       ? (financing.shares_post_financing as number)
       : null;
@@ -2501,13 +2500,14 @@ Capital Available: ${availableLabel}`,
     const todayHigh = (typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
       ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
       : corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value) ?? null;
+    const currentYear = new Date().getUTCFullYear();
     const points = [
       {
         pointType: "today" as const,
         tp: null,
         tIndexUsed: 0,
-        yearLabelUsed: Array.isArray(corporateSeries?.periodEndDatesUtc) ? (corporateSeries.periodEndDatesUtc?.[0] ?? null) : null,
-        yearLabelSource: "series.periodEndDatesUtc[0]",
+        yearLabelUsed: String(currentYear),
+        yearLabelSource: "currentYear",
         lowValueUsed: todayLow,
         highValueUsed: todayHigh,
         lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
@@ -2525,7 +2525,7 @@ Capital Available: ${availableLabel}`,
         expectedMappingPreview: {
           low: todayLow,
           high: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency : null,
-          yearLabel: Array.isArray(corporateSeries?.periodEndDatesUtc) ? (corporateSeries.periodEndDatesUtc?.[0] ?? null) : null,
+          yearLabel: String(currentYear),
         },
       },
       ...markers.map((marker) => ({
