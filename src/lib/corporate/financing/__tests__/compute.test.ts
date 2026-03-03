@@ -89,5 +89,16 @@ function baseInput(): CorporateFinancingInput {
   const case6 = computeCorporateFinancing(case6Input);
   assertClose(case6.Debt_to_Equity_ratio, 0.25, 'case6 debt-to-equity should use market-now equity');
 
+  const case7Input = baseInput();
+  case7Input.NPV_today_USD = 10;
+  case7Input.fx_USD_to_TargetCurrency = 10;
+  case7Input.cash_t0_TargetCurrency = 0;
+  case7Input.debt_t0_TargetCurrency = 40;
+  case7Input.buildFundingNeed_USD = 0;
+  const case7 = computeCorporateFinancing(case7Input);
+  assertEqual(case7.NPV_today_TargetCurrency, 100, 'case7 npv should equal 100 in target currency');
+  assertEqual(case7.NAV_today_TargetCurrency, 60, 'case7 nav should include debt at t0');
+  assertEqual((case7.NAV_today_TargetCurrency as number) - (case7.NPV_today_TargetCurrency as number), -40, 'case7 nav-npv delta should equal -40');
+
   console.log('Corporate financing Lista 5 tests passed');
 })();
