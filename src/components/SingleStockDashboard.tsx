@@ -114,6 +114,20 @@ function getMarkerYearLabel(yearLabelUsed: string | null, tp: number): string {
   return `tp=${tp}`;
 }
 
+function isDebugEnabledInClient(): boolean {
+  if (typeof window === "undefined") return false;
+  const fromQuery = new URLSearchParams(window.location.search).get("debug") === "1";
+  const fromAdminStorage = window.localStorage.getItem("admin.debugParamEnabled") === "1";
+  return fromQuery || fromAdminStorage;
+}
+
+function withDebugQueryPath(path: string, debugEnabled: boolean): string {
+  if (!debugEnabled || typeof window === "undefined") return path;
+  const asUrl = new URL(path, window.location.origin);
+  asUrl.searchParams.set("debug", "1");
+  return `${asUrl.pathname}${asUrl.search}`;
+}
+
 function formatMetricNullReason(value: MetricValue): string {
   return value.value === null ? (value.reason ?? "Missing required input.") : "";
 }
@@ -921,7 +935,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [fixedPriceMapJson] = useState("{\n  \"XAU_USD_TOZ\": 2400\n}");
   const [fxSource] = useState<"auto" | "manual">("auto");
   const [manualFxInput] = useState("");
-  const debugEnabled = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
+  const debugEnabled = isDebugEnabledInClient();
 
   useEffect(() => {
     let isMounted = true;
@@ -1302,7 +1316,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       setCorporateSnapshotLoading(true);
       setCorporateSnapshotError(null);
       try {
-        const response = await fetch(`/api/snapshot/corporate${debugEnabled ? "?debug=1" : ""}`, {
+        const response = await fetch(withDebugQueryPath("/api/snapshot/corporate", debugEnabled), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -2381,6 +2395,192 @@ Capital Available: ${availableLabel}`,
     };
   }, [projectSnapshotData, parsedSelectedProject, riskAdjustedDiscountRatePctInput, lockedTargetCurrency]);
 
+
+
+
+  const projectTimelineDebug = useMemo(() => {
+    if (!projectSnapshotData || !projectViewMetrics) return null;
+    const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
+    const snapshotSeries = (projectSnapshotData.series ?? null) as { periodEndDatesUtc?: Array<string | null> } | null;
+    const periodEndDatesUtc = Array.isArray(snapshotSeries?.periodEndDatesUtc) ? snapshotSeries.periodEndDatesUtc : [];
+    const sharesCurrent = typeof inputs.sharesCurrent === "number" && Number.isFinite(inputs.sharesCurrent) ? inputs.sharesCurrent : null;
+    const sharesPostFinancing = typeof inputs.sharesPostFinancing === "number" && Number.isFinite(inputs.sharesPostFinancing) ? inputs.sharesPostFinancing : sharesCurrent;
+    const sharedPerShareBasis = {
+      usesShares: (sharesPostFinancing !== null ? "shares_post_financing" : "shares_current") as "shares_post_financing" | "shares_current",
+      sharesValue: sharesPostFinancing ?? sharesCurrent ?? 0,
+    };
+    const tp = Number.isInteger(inputs.tp) ? inputs.tp as number : null;
+    const resolveLabel = (idx: number | null): { label: string | null; source: string; reason?: string } => {
+      if (idx === null) return { label: null, source: "periodEndDatesUtc[null]", reason: "Missing t index." };
+      const raw = periodEndDatesUtc[idx];
+      if (typeof raw === "string" && raw.trim()) return { label: raw, source: `periodEndDatesUtc[${idx}]` };
+      return { label: null, source: `periodEndDatesUtc[${idx}]`, reason: "Missing periodEndDatesUtc value at index." };
+    };
+    const todayLabel = resolveLabel(0);
+    const prodLabel = resolveLabel(tp);
+    const points = [
+      {
+        pointType: "today" as const,
+        tp: null,
+        tIndexUsed: 0,
+        yearLabelUsed: todayLabel.label,
+        yearLabelSource: todayLabel.source,
+        lowValueUsed: projectViewMetrics.list2.NPV_perShare?.value ?? null,
+        highValueUsed: projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null,
+        lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
+        highSource: { metricKey: "DCF_Target_discounted_perShare", description: "ValueRangeSnapshotCard npvHigh" },
+        perShareBasis: sharedPerShareBasis,
+        nullReasons: {
+          ...(projectViewMetrics.list2.NPV_perShare?.value === null ? { low: projectViewMetrics.list2.NPV_perShare?.reason ?? "Metric is null." } : {}),
+          ...(projectViewMetrics.list2.DCF_Target_discounted_perShare?.value === null ? { high: projectViewMetrics.list2.DCF_Target_discounted_perShare?.reason ?? "Metric is null." } : {}),
+          ...(todayLabel.reason ? { yearLabel: todayLabel.reason } : {}),
+        },
+        sanity: {
+          lowLEHigh: (typeof projectViewMetrics.list2.NPV_perShare?.value === "number" && typeof projectViewMetrics.list2.DCF_Target_discounted_perShare?.value === "number")
+            ? projectViewMetrics.list2.NPV_perShare.value <= projectViewMetrics.list2.DCF_Target_discounted_perShare.value
+            : null,
+          notes: "If false, low/high may be swapped in source metrics for today point.",
+        },
+      },
+      {
+        pointType: "prodStart" as const,
+        tp,
+        tIndexUsed: tp,
+        yearLabelUsed: prodLabel.label,
+        yearLabelSource: prodLabel.source,
+        lowValueUsed: projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null,
+        highValueUsed: projectViewMetrics.list2.DCF_perShare?.value ?? null,
+        lowSource: { metricKey: "NAV_prodStart_perShare", description: "ValueRangeSnapshotCard tpLow" },
+        highSource: { metricKey: "DCF_perShare", description: "ValueRangeSnapshotCard tpHigh" },
+        perShareBasis: sharedPerShareBasis,
+        nullReasons: {
+          ...(projectViewMetrics.list2.NAV_prodStart_perShare?.value === null ? { low: projectViewMetrics.list2.NAV_prodStart_perShare?.reason ?? "Metric is null." } : {}),
+          ...(projectViewMetrics.list2.DCF_perShare?.value === null ? { high: projectViewMetrics.list2.DCF_perShare?.reason ?? "Metric is null." } : {}),
+          ...(prodLabel.reason ? { yearLabel: prodLabel.reason } : {}),
+        },
+        sanity: {
+          lowLEHigh: (typeof projectViewMetrics.list2.NAV_prodStart_perShare?.value === "number" && typeof projectViewMetrics.list2.DCF_perShare?.value === "number")
+            ? projectViewMetrics.list2.NAV_prodStart_perShare.value <= projectViewMetrics.list2.DCF_perShare.value
+            : null,
+          notes: "If false, low/high may be swapped in source metrics for prodStart point.",
+        },
+      },
+    ];
+    return {
+      chart: "project.modeled.valuationTimeline",
+      points,
+    };
+  }, [projectSnapshotData, parsedSelectedProject, projectViewMetrics, riskAdjustedDiscountRatePctInput, lockedTargetCurrency]);
+
+  useEffect(() => {
+    if (debugEnabled && projectTimelineDebug) {
+      console.debug("[project-modeled-valuation-timeline-debug]", projectTimelineDebug);
+    }
+  }, [debugEnabled, projectTimelineDebug]);
+
+  const corporateTimelineDebug = useMemo(() => {
+    if (!corporateSnapshotData || !corporateViewMetrics) return null;
+    const timeline = (corporateSnapshotData.modeledValuationTimeline ?? null) as {
+      tps?: number[];
+      lastTp?: number | null;
+      rangeEndTp?: number | null;
+      markers?: Array<{ tp: number; yearLabelUsed: string | null; corporateTpIndexUsed?: number | null; value_high: number | null; value_low: number | null }>;
+    } | null;
+    const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
+    const financing = (corporateSnapshotData.financing ?? null) as Record<string, unknown> | null;
+    const corporateSeries = (corporateSnapshotData.series ?? null) as { periodEndDatesUtc?: Array<string | null> } | null;
+    const sharesPf = typeof financing?.shares_post_financing === "number"
+      ? (financing.shares_post_financing as number)
+      : null;
+    const sharesCurrent = corporateViewMetrics.marketBox.sharesCurrent.value;
+    const shareBasis = {
+      usesShares: (sharesPf !== null ? "shares_post_financing" : "shares_current") as "shares_post_financing" | "shares_current",
+      sharesValue: sharesPf ?? sharesCurrent ?? 0,
+    };
+    const todayLow = corporateViewMetrics.list2.NPV_perShare?.value ?? null;
+    const todayHigh = (typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
+      ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
+      : corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value) ?? null;
+    const points = [
+      {
+        pointType: "today" as const,
+        tp: null,
+        tIndexUsed: 0,
+        yearLabelUsed: Array.isArray(corporateSeries?.periodEndDatesUtc) ? (corporateSeries.periodEndDatesUtc?.[0] ?? null) : null,
+        yearLabelSource: "series.periodEndDatesUtc[0]",
+        lowValueUsed: todayLow,
+        highValueUsed: todayHigh,
+        lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
+        highSource: { metricKey: "DCF_prodStart_present_perShare_TargetCurrency|DCF_Target_discounted_perShare", description: "ValueRangeSnapshotCard npvHigh current fallback chain" },
+        perShareBasis: shareBasis,
+        nullReasons: {
+          ...(todayLow === null ? { low: corporateViewMetrics.list2.NPV_perShare?.reason ?? "Metric is null." } : {}),
+          ...(todayHigh === null ? { high: "Both corporate snapshot and list2 discounted DCF per share are null." } : {}),
+        },
+        sanity: {
+          lowLEHigh: (typeof todayLow === "number" && typeof todayHigh === "number") ? todayLow <= todayHigh : null,
+          notes: "todayLow should map to NPV_today_perShare and todayHigh to DCF_prodStart_present_perShare.",
+        },
+        mappingUsed: { todayLow: "NPV_today_perShare", todayHigh: "DCF_prodStart_present_perShare" },
+        expectedMappingPreview: {
+          low: todayLow,
+          high: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency : null,
+          yearLabel: Array.isArray(corporateSeries?.periodEndDatesUtc) ? (corporateSeries.periodEndDatesUtc?.[0] ?? null) : null,
+        },
+      },
+      ...markers.map((marker) => ({
+        pointType: "prodStart" as const,
+        tp: marker.tp,
+        tIndexUsed: typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp,
+        yearLabelUsed: marker.yearLabelUsed ?? null,
+        yearLabelSource: typeof marker.corporateTpIndexUsed === "number" ? `modeledValuationTimeline.markers[*].yearLabelUsed (corporate index ${marker.corporateTpIndexUsed})` : "modeledValuationTimeline.markers[*].yearLabelUsed",
+        lowValueUsed: marker.value_low,
+        highValueUsed: marker.value_high,
+        lowSource: { metricKey: "modeledValuationTimeline.markers.value_low", description: "Current chart mapping uses marker.value_low" },
+        highSource: { metricKey: "modeledValuationTimeline.markers.value_high", description: "Current chart mapping uses marker.value_high" },
+        perShareBasis: shareBasis,
+        nullReasons: {
+          ...(marker.value_low === null ? { low: "Marker low is null." } : {}),
+          ...(marker.value_high === null ? { high: "Marker high is null." } : {}),
+        },
+        sanity: {
+          lowLEHigh: (typeof marker.value_low === "number" && typeof marker.value_high === "number") ? marker.value_low <= marker.value_high : null,
+          notes: "If false, low/high are swapped versus chart intent.",
+        },
+        mappingUsed: {
+          todayLow: "NPV_today_perShare",
+          todayHigh: "DCF_prodStart_present_perShare",
+          prodStartLow: "NPV_prodStart_perShare@tp (currently NOT used in chart)",
+          prodStartHigh: "DCF_prodStart_perShare@tp",
+        },
+        expectedMappingPreview: {
+          low: null,
+          high: marker.value_high,
+          yearLabel: marker.yearLabelUsed ?? null,
+          notes: "NPV_prodStart_perShare@tp is not available in current marker payload; preview low stays null until exposed from backend.",
+        },
+      })),
+    ];
+    return {
+      chart: "corporate.modeled.valuationTimeline",
+      corporateTpsList: Array.isArray(timeline?.tps) ? timeline?.tps : markers.map((m) => m.tp),
+      lastTp: timeline?.lastTp ?? null,
+      rangeEndTpUsed: timeline?.rangeEndTp ?? null,
+      mappingUsed: {
+        todayLow: "NPV_today_perShare",
+        todayHigh: "DCF_prodStart_present_perShare",
+        prodStartLow: "NPV_prodStart_perShare@tp",
+        prodStartHigh: "DCF_prodStart_perShare@tp",
+      },
+      points,
+    };
+  }, [corporateSnapshotData, corporateViewMetrics]);
+
+  useEffect(() => {
+    if (debugEnabled && corporateTimelineDebug) {
+      console.debug("[corporate-modeled-valuation-timeline-debug]", corporateTimelineDebug);
+    }
+  }, [corporateTimelineDebug, debugEnabled]);
 
   const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
 
@@ -3557,6 +3757,7 @@ Capital Available: ${availableLabel}`,
                     <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
+                        <>
                         <ValueRangeSnapshotCard
                           priceToday={
                             corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0
@@ -3592,6 +3793,13 @@ Capital Available: ${availableLabel}`,
                           })()}
                           currencyCode={lockedTargetCurrency}
                         />
+                        {debugEnabled && corporateTimelineDebug && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Valuation timeline debug</summary>
+                            <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 8 }}>{JSON.stringify(corporateTimelineDebug, null, 2)}</pre>
+                          </details>
+                        )}
+                        </>
                       )}
                       <div className="compact-metrics-grid">
                         {Object.entries(metrics).map(([key, value]) => (
@@ -3666,7 +3874,7 @@ Capital Available: ${availableLabel}`,
 
               {projectViewMetrics && (
                 <section className="project-producer-layout" style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                  {(import.meta.env.DEV || (typeof window !== "undefined" && (window.location.hostname.includes("localhost") || new URLSearchParams(window.location.search).get("debug") === "1"))) && projectInputDebug && (
+                  {(import.meta.env.DEV || debugEnabled) && projectInputDebug && (
                     <details className="producer-core-section" open>
                       <summary><h2 className="subrub small">Project input diagnostics (dev)</h2></summary>
                       <div style={{ fontSize: 12, paddingTop: 8 }}>
@@ -3733,6 +3941,7 @@ Capital Available: ${availableLabel}`,
                     <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
+                        <>
                         <ValueRangeSnapshotCard
                           priceToday={
                             projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value > 0
@@ -3745,6 +3954,13 @@ Capital Available: ${availableLabel}`,
                           tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
                           currencyCode={lockedTargetCurrency}
                         />
+                        {debugEnabled && projectTimelineDebug && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Valuation timeline debug</summary>
+                            <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 8 }}>{JSON.stringify(projectTimelineDebug, null, 2)}</pre>
+                          </details>
+                        )}
+                        </>
                       )}
                       <div className="compact-metrics-grid">
                         {((sectionKey === "list2")
