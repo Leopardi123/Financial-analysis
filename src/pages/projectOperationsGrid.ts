@@ -1,7 +1,7 @@
 export type OperationsGridInput = {
   masterN: number;
   productionStartPeriod: number | null;
-  periodEndDatesUtc?: Array<string | null>;
+  productionStartYear: number | null;
   operations?: {
     oreMilledTonnes?: Array<number | null>;
     oreMinedTonnes?: Array<number | null>;
@@ -57,12 +57,6 @@ export type OperationsGridModel = {
   notes: string[];
 };
 
-function yearLabel(value: string | null | undefined): string {
-  if (typeof value !== 'string') return '—';
-  const yearMatch = value.match(/^(\d{4})/);
-  return yearMatch?.[1] ?? '—';
-}
-
 function strictTotal(values: Array<number | null>, startIndex: number): number | null {
   if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex > values.length) return null;
   let sum = 0;
@@ -94,20 +88,16 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   const columnCount = Math.max(0, input.masterN + 1);
   const warnings: string[] = [];
   const notes: string[] = [];
-  const hasValidPeriodDates = Array.isArray(input.periodEndDatesUtc) && input.periodEndDatesUtc.length === columnCount;
-
-  if (!hasValidPeriodDates) {
-    warnings.push('Period end dates missing or mismatched; showing t-only columns.');
-  }
-
   if (!input.operations) {
     notes.push('Operations block missing (capacity/tonnes).');
   }
 
-  const years = Array.from({ length: columnCount }, (_, t) => hasValidPeriodDates ? yearLabel(input.periodEndDatesUtc?.[t]) : '—');
-  const tIndex = Array.from({ length: columnCount }, (_, t) => `${t}`);
   const hasValidTp = Number.isInteger(input.productionStartPeriod);
   const tp = hasValidTp ? (input.productionStartPeriod as number) : null;
+  const hasValidProductionStartYear = Number.isInteger(input.productionStartYear);
+  const startYear = hasValidProductionStartYear && tp !== null ? (input.productionStartYear as number) - tp : null;
+  const years = Array.from({ length: columnCount }, (_, t) => (startYear === null ? '—' : String(startYear + t)));
+  const tIndex = Array.from({ length: columnCount }, (_, t) => `${t}`);
   const tMinusTp = Array.from({ length: columnCount }, (_, t) => (tp === null ? '—' : `${t - tp}`));
 
   const rows: OperationsGridRow[] = [];

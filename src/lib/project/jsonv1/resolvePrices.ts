@@ -99,7 +99,7 @@ export async function resolveProjectPricesToEngineInput(
   },
   deps: { resolvePriceSeriesFn?: typeof resolvePriceSeries } = {},
 ): Promise<ProjectEngineFullProductionV1Input & { diagnostics?: { warnings: string[] } }> {
-  const { parsed, from } = args;
+  const { parsed } = args;
   const resolvePriceSeriesFn = deps.resolvePriceSeriesFn ?? resolvePriceSeries;
   const scenario = args.scenario ?? { mode: 'spot' };
   const warnings: string[] = [];
@@ -114,12 +114,13 @@ export async function resolveProjectPricesToEngineInput(
 
   const masterN = parsed.engineInputWithoutPrices.masterN;
   const len = masterN + 1;
+  const tp = parsed.engineInputWithoutPrices.productionStartPeriod;
+  const productionStartYear = parsed.engineInputWithoutPrices.productionStartYear;
   const targets = parsed.engineInputWithoutPrices.periodEndDatesUtc
     ? [...parsed.engineInputWithoutPrices.periodEndDatesUtc]
     : Array.from({ length: len }, (_item, t) => {
-        const date = new Date(`${from}T00:00:00Z`);
-        date.setUTCDate(date.getUTCDate() + t * 365);
-        return date.toISOString().slice(0, 10);
+        const year = productionStartYear + (t - tp);
+        return `${year}-12-31`;
       });
   const todayUtc = todayUtcDateString();
   const spotAnchorDateUtc = scenario.mode === 'spot' ? todayUtc : '';

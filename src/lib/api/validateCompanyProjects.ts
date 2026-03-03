@@ -1,6 +1,6 @@
 import { parseProjectJsonV1WithContext } from '../project/jsonv1/parse.ts';
 
-const JSON_VERSION = 'project_json_v1';
+const JSON_VERSION = 'project_json_v2';
 
 export type CompanyProjectUpsertInput = {
   symbol: string;

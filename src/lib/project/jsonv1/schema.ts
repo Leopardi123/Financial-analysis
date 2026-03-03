@@ -5,7 +5,7 @@ export type QtyUnit = 'toz' | 'g' | 'kg' | 'lb' | 'tonne' | 'short_ton' | 'long_
 export type PriceUnit = 'USD_per_toz' | 'USD_per_lb' | 'USD_per_tonne';
 
 export type ProjectJsonV1 = {
-  version: 'project_json_v1';
+  version: 'project_json_v2';
 
   meta?: {
     projectId?: string;
@@ -17,7 +17,7 @@ export type ProjectJsonV1 = {
   time: {
     masterN: number;
     productionStartPeriod: number;
-    periodEndDatesUtc?: Array<string>;
+    productionStartYear: number;
   };
 
   economics: {

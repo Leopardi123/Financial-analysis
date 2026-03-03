@@ -12,7 +12,8 @@ import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
-import { buildOperationsGridModel } from "../pages/projectOperationsGrid.ts";
+import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
+import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import {
@@ -113,6 +114,7 @@ function getMarkerYearLabel(yearLabelUsed: string | null, tp: number): string {
   }
   return `tp=${tp}`;
 }
+
 
 function isDebugEnabledInClient(): boolean {
   if (typeof window === "undefined") return false;
@@ -2488,7 +2490,6 @@ Capital Available: ${availableLabel}`,
     } | null;
     const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
     const financing = (corporateSnapshotData.financing ?? null) as Record<string, unknown> | null;
-    const corporateSeries = (corporateSnapshotData.series ?? null) as { periodEndDatesUtc?: Array<string | null> } | null;
     const sharesPf = typeof financing?.shares_post_financing === "number"
       ? (financing.shares_post_financing as number)
       : null;
@@ -2501,13 +2502,14 @@ Capital Available: ${availableLabel}`,
     const todayHigh = (typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
       ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
       : corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value) ?? null;
+    const currentYear = new Date().getUTCFullYear();
     const points = [
       {
         pointType: "today" as const,
         tp: null,
         tIndexUsed: 0,
-        yearLabelUsed: Array.isArray(corporateSeries?.periodEndDatesUtc) ? (corporateSeries.periodEndDatesUtc?.[0] ?? null) : null,
-        yearLabelSource: "series.periodEndDatesUtc[0]",
+        yearLabelUsed: String(currentYear),
+        yearLabelSource: "currentYear",
         lowValueUsed: todayLow,
         highValueUsed: todayHigh,
         lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
@@ -2525,7 +2527,7 @@ Capital Available: ${availableLabel}`,
         expectedMappingPreview: {
           low: todayLow,
           high: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency : null,
-          yearLabel: Array.isArray(corporateSeries?.periodEndDatesUtc) ? (corporateSeries.periodEndDatesUtc?.[0] ?? null) : null,
+          yearLabel: String(currentYear),
         },
       },
       ...markers.map((marker) => ({
@@ -2584,37 +2586,22 @@ Capital Available: ${availableLabel}`,
 
   const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
 
-  const projectExcelGrid = useMemo(() => {
+  const projectOperationsGridInput = useMemo((): OperationsGridInput | null => {
     if (!parsedSelectedProject) return null;
-
     const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
     const getSeries = (raw: unknown): Array<number | null> | null => (Array.isArray(raw) ? raw as Array<number | null> : null);
-    const hasAnySeriesValue = (series: Array<number | null> | null | undefined): boolean => (
-      Array.isArray(series) && series.some((value) => value !== null && Number.isFinite(value))
-    );
-
     const payableUnits = parsedSelectedProject.engineInputWithoutPrices.payableQtyUnitByMetal ?? {};
     const payableSeriesByMetal = parsedSelectedProject.engineInputWithoutPrices.payableQtyByMetal ?? {};
     const gradeByMetal = parsedSelectedProject.context.operations?.gradeByMetal ?? {};
     const gradeUnitByMetal = parsedSelectedProject.context.operations?.gradeUnitByMetal ?? {};
     const recoveryPctByMetal = parsedSelectedProject.context.operations?.recoveryPctByMetal ?? {};
 
-    const priorityMetals = ['Au', 'Ag', 'Cu', 'Zn', 'Pb', 'Ni', 'Co', 'Pt', 'Pd'];
-    const presentMetals = Array.from(new Set([
-      ...Object.keys(payableSeriesByMetal),
-      ...Object.keys(gradeByMetal),
-      ...Object.keys(recoveryPctByMetal),
-    ]));
-    const orderedMetals = [
-      ...priorityMetals.filter((metal) => presentMetals.includes(metal)),
-      ...presentMetals.filter((metal) => !priorityMetals.includes(metal)).sort((a, b) => a.localeCompare(b)),
-    ];
-    const orderedPayableMetals = orderedMetals.filter((metal) => Object.prototype.hasOwnProperty.call(payableSeriesByMetal, metal));
-
-    const base = buildOperationsGridModel({
+    return {
       masterN: parsedSelectedProject.engineInputWithoutPrices.masterN,
       productionStartPeriod: parsedSelectedProject.engineInputWithoutPrices.productionStartPeriod,
-      periodEndDatesUtc: parsedSelectedProject.engineInputWithoutPrices.periodEndDatesUtc,
+      productionStartYear: Number.isInteger((selectedProjectRawJson?.time as { productionStartYear?: number } | undefined)?.productionStartYear)
+        ? ((selectedProjectRawJson?.time as { productionStartYear?: number }).productionStartYear as number)
+        : null,
       operations: {
         oreMilledTonnes: parsedSelectedProject.context.operations?.oreMilledTonnes,
         oreMinedTonnes: parsedSelectedProject.context.operations?.oreMinedTonnes,
@@ -2643,7 +2630,37 @@ Capital Available: ${availableLabel}`,
         taxUSD: getSeries(projectSeriesRecord.taxUSD) ?? undefined,
         effectiveTaxRate: getSeries(projectSeriesRecord.effectiveTaxRate) ?? undefined,
       },
-    });
+    };
+  }, [parsedSelectedProject, projectSeries]);
+
+  const projectExcelGrid = useMemo(() => {
+    if (!parsedSelectedProject || !projectOperationsGridInput) return null;
+
+    const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
+    const getSeries = (raw: unknown): Array<number | null> | null => (Array.isArray(raw) ? raw as Array<number | null> : null);
+    const hasAnySeriesValue = (series: Array<number | null> | null | undefined): boolean => (
+      Array.isArray(series) && series.some((value) => value !== null && Number.isFinite(value))
+    );
+
+    const payableUnits = parsedSelectedProject.engineInputWithoutPrices.payableQtyUnitByMetal ?? {};
+    const payableSeriesByMetal = parsedSelectedProject.engineInputWithoutPrices.payableQtyByMetal ?? {};
+    const gradeByMetal = parsedSelectedProject.context.operations?.gradeByMetal ?? {};
+    const gradeUnitByMetal = parsedSelectedProject.context.operations?.gradeUnitByMetal ?? {};
+    const recoveryPctByMetal = parsedSelectedProject.context.operations?.recoveryPctByMetal ?? {};
+
+    const priorityMetals = ['Au', 'Ag', 'Cu', 'Zn', 'Pb', 'Ni', 'Co', 'Pt', 'Pd'];
+    const presentMetals = Array.from(new Set([
+      ...Object.keys(payableSeriesByMetal),
+      ...Object.keys(gradeByMetal),
+      ...Object.keys(recoveryPctByMetal),
+    ]));
+    const orderedMetals = [
+      ...priorityMetals.filter((metal) => presentMetals.includes(metal)),
+      ...presentMetals.filter((metal) => !priorityMetals.includes(metal)).sort((a, b) => a.localeCompare(b)),
+    ];
+    const orderedPayableMetals = orderedMetals.filter((metal) => Object.prototype.hasOwnProperty.call(payableSeriesByMetal, metal));
+
+    const base = buildOperationsGridModel(projectOperationsGridInput);
 
     const seriesByLabel = new Map(base.rows.map((row) => [row.label, row.values]));
     const oreUnit = parsedSelectedProject.context.operations?.oreTonnageUnit ?? 'tonne';
@@ -2760,8 +2777,150 @@ Capital Available: ${availableLabel}`,
       notes: hasDepreciationSeries ? base.notes : [...base.notes, 'EBITDA requires D&A series; missing => null'],
       rows: groupedRows,
     };
-  }, [parsedSelectedProject, projectSeries]);
+  }, [parsedSelectedProject, projectSeries, projectOperationsGridInput]);
 
+  const projectMountDebug = useMemo(() => {
+    const rawJson = selectedProjectRawJson;
+    const rawTime = rawJson && typeof rawJson.time === "object" && rawJson.time !== null && !Array.isArray(rawJson.time)
+      ? rawJson.time as Record<string, unknown>
+      : null;
+    const tp = Number.isInteger(projectOperationsGridInput?.productionStartPeriod)
+      ? projectOperationsGridInput?.productionStartPeriod as number
+      : null;
+    const productionStartYear = Number.isInteger(projectOperationsGridInput?.productionStartYear) ? projectOperationsGridInput?.productionStartYear as number : null;
+    const yearAtT0 = productionStartYear !== null && tp !== null ? productionStartYear - tp : null;
+    const yearAtTpDerived = productionStartYear;
+    const first8Years = projectOperationsGridInput?.masterN !== undefined && yearAtT0 !== null
+      ? Array.from({ length: Math.min(8, (projectOperationsGridInput.masterN + 1)) }, (_, i) => yearAtT0 + i)
+      : [];
+
+    const alignmentSources: Record<string, Array<number | null> | undefined> = {
+      'operations.oreMinedTonnes': projectOperationsGridInput?.operations?.oreMinedTonnes,
+      'operations.oreMilledTonnes': projectOperationsGridInput?.operations?.oreMilledTonnes,
+      'series.capexUSD': parsedSelectedProject?.engineInputWithoutPrices.phase1.capexUSD,
+      'metals.payableQtyByMetal.Au': projectOperationsGridInput?.metals?.payableQtyByMetal?.Au,
+      'metals.payableQtyByMetal.Ag': projectOperationsGridInput?.metals?.payableQtyByMetal?.Ag,
+      'metals.payableQtyByMetal.Cu': projectOperationsGridInput?.metals?.payableQtyByMetal?.Cu,
+    };
+
+    const productionDriverFirstNonZeroIndex = buildProductionDriverFirstNonZeroMap({
+      oreMinedTonnes: projectOperationsGridInput?.operations?.oreMinedTonnes,
+      oreMilledTonnes: projectOperationsGridInput?.operations?.oreMilledTonnes,
+      payableQtyByMetal: projectOperationsGridInput?.metals?.payableQtyByMetal,
+    });
+    const productionStartIndexCandidateValue = productionStartIndexCandidate(productionDriverFirstNonZeroIndex);
+
+    const alignmentCheck = Object.fromEntries(Object.entries(alignmentSources).map(([key, values]) => {
+      const nonZero = firstNonZeroIndex(values);
+      const valueAtTp = tp === null ? null : (values?.[tp] ?? null);
+      const valueAtTpPlus1 = tp === null ? null : (values?.[tp + 1] ?? null);
+      return [key, {
+        valueAtTp,
+        valueAtTpPlus1,
+        firstNonZeroIndex: nonZero,
+        doesFirstNonZeroEqualTp: tp === null || nonZero === null ? null : nonZero === tp,
+      }];
+    }));
+
+    const yearAtTp = yearAtTpDerived;
+    const expectedYearAtTp = rawTime && Number.isInteger(rawTime.productionStartYear)
+      ? rawTime.productionStartYear
+      : null;
+    const yearAtCand = productionStartIndexCandidateValue === null || yearAtT0 === null ? null : (yearAtT0 + productionStartIndexCandidateValue);
+
+    const parseError = (() => {
+      if (!rawJson) return "No selected project raw JSON.";
+      if (!parsedSelectedProject) return "Project JSON parse failed for strict project_json_v2 validation. Check tp/year and production-driver alignment.";
+      return null;
+    })();
+
+    return {
+      parseError,
+      raw: {
+        version: rawJson?.version ?? null,
+        time: {
+          masterN: rawTime?.masterN ?? null,
+          productionStartPeriod: rawTime?.productionStartPeriod ?? null,
+          productionStartYear: rawTime?.productionStartYear ?? null,
+          first8Years,
+        },
+      },
+      engine: {
+        masterN: projectOperationsGridInput?.masterN ?? null,
+        productionStartPeriod: projectOperationsGridInput?.productionStartPeriod ?? null,
+        productionStartYear: productionStartYear,
+        yearAtT0,
+        yearAtTp,
+        first8Years,
+      },
+      alignmentCheck,
+      productionStartIndexCandidate: productionStartIndexCandidateValue,
+      driverFirstNonZeroIndex: productionDriverFirstNonZeroIndex,
+      timeDebugV2: {
+        yearAtT0,
+        yearAtTp,
+        first8Years,
+        yearAtTpEqualsProductionStartYear: yearAtTp !== null && expectedYearAtTp !== null ? yearAtTp === expectedYearAtTp : false,
+        tpWithinBounds: tp !== null && typeof projectOperationsGridInput?.masterN === "number" ? tp >= 0 && tp <= projectOperationsGridInput.masterN : false,
+      },
+      yearCheck: {
+        yearAtT0,
+        yearAtTp,
+        yearAtCand,
+        expectedYearAtTp,
+        doesYearMatchTp: yearAtTp === null || expectedYearAtTp === null ? null : yearAtTp === expectedYearAtTp,
+      },
+    };
+  }, [projectOperationsGridInput, parsedSelectedProject, selectedProjectRawJson]);
+
+
+  const strictTpAlignmentError = useMemo(() => {
+    const timeDebug = (projectMountDebug as { timeDebugV2?: { yearAtTpEqualsProductionStartYear?: boolean; tpWithinBounds?: boolean } } | null)?.timeDebugV2;
+    if (timeDebug && (timeDebug.yearAtTpEqualsProductionStartYear === false || timeDebug.tpWithinBounds === false)) {
+      return {
+        message: "Project time debug (v2) asserts failed. Modeling blocked.",
+        driverFirstNonZeroIndex: (projectMountDebug as Record<string, unknown>)?.driverFirstNonZeroIndex ?? null,
+      };
+    }
+
+    const message = typeof projectMountDebug === "object" && projectMountDebug !== null && typeof (projectMountDebug as Record<string, unknown>).parseError === "string"
+      ? (projectMountDebug as Record<string, unknown>).parseError as string
+      : null;
+    if (message) {
+      return {
+        message,
+        driverFirstNonZeroIndex: (projectMountDebug as Record<string, unknown>).driverFirstNonZeroIndex ?? null,
+      };
+    }
+    const debug = projectMountDebug as Record<string, unknown>;
+    const tpRaw = debug?.engine && typeof debug.engine === "object" ? (debug.engine as Record<string, unknown>).productionStartPeriod : null;
+    const candidateRaw = debug?.productionStartIndexCandidate;
+    const yearCheck = (debug?.yearCheck && typeof debug.yearCheck === "object") ? debug.yearCheck as Record<string, unknown> : null;
+    const tp = Number.isInteger(tpRaw) ? tpRaw as number : null;
+    const candidate = Number.isInteger(candidateRaw) ? candidateRaw as number : null;
+    const yearAtTp = Number.isInteger(yearCheck?.yearAtTp) ? yearCheck?.yearAtTp as number : null;
+    const expectedYearAtTp = Number.isInteger(yearCheck?.expectedYearAtTp) ? yearCheck?.expectedYearAtTp as number : null;
+    const yearAtCand = Number.isInteger(yearCheck?.yearAtCand) ? yearCheck?.yearAtCand as number : null;
+    if (tp !== null && candidate !== null && candidate !== tp) {
+      return {
+        message: `tp mismatch: tp=${tp} (year ${yearAtTp ?? "n/a"}) but first production driver is at index ${candidate} (year ${yearAtCand ?? "n/a"}). Fix by either changing tp or shifting your production-driver series so first non-zero equals tp.`,
+        driverFirstNonZeroIndex: debug.driverFirstNonZeroIndex ?? null,
+      };
+    }
+    if (tp !== null && tp > 0 && candidate === null) {
+      return {
+        message: "No production series has non-zero values, cannot validate tp.",
+        driverFirstNonZeroIndex: debug.driverFirstNonZeroIndex ?? null,
+      };
+    }
+    if (yearAtTp !== null && expectedYearAtTp !== null && yearAtTp !== expectedYearAtTp) {
+      return {
+        message: `time.productionStartYear mismatch: productionStartYear=${expectedYearAtTp} but yearAtTp=${yearAtTp}.`,
+        driverFirstNonZeroIndex: debug.driverFirstNonZeroIndex ?? null,
+      };
+    }
+    return null;
+  }, [projectMountDebug]);
   const reportedChartContext: ReportedChartContext = {
     resolveUnitMeta,
     marketCurrency,
@@ -4133,6 +4292,14 @@ Capital Available: ${availableLabel}`,
 
               <details style={{ marginTop: 12 }}>
                 <summary>Diagnostics</summary>
+                {strictTpAlignmentError && (
+                  <div style={{ border: "1px solid #dc2626", background: "#fee2e2", color: "#7f1d1d", padding: "10px", borderRadius: 6, marginTop: 10 }}>
+                    <strong>Project validation error:</strong> {strictTpAlignmentError.message}
+                    {strictTpAlignmentError.driverFirstNonZeroIndex && (
+                      <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>{JSON.stringify(strictTpAlignmentError.driverFirstNonZeroIndex, null, 2)}</pre>
+                    )}
+                  </div>
+                )}
                 {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && !projectViewMetrics && <p>No diagnostics.</p>}
                 {projectSnapshotErrors.length > 0 && <ul>{projectSnapshotErrors.map((item) => <li key={`e-${item}`}>{item}</li>)}</ul>}
                 {projectSnapshotWarnings.length > 0 && <ul>{projectSnapshotWarnings.map((item) => <li key={`w-${item}`}>{item}</li>)}</ul>}
@@ -4144,6 +4311,8 @@ Capital Available: ${availableLabel}`,
                     <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectViewMetrics.diagnostics.irr_debug, null, 2)}</pre>
                   </>
                 )}
+                <h4>---- PROJECT MOUNT DEBUG ----</h4>
+                <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectMountDebug, null, 2)}</pre>
               </details>
 
               <details style={{ marginTop: 12 }}>

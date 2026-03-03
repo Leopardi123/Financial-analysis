@@ -17,7 +17,7 @@ const TAKE_SCOPE_CHOICES = ['metalSpecific', 'project'] as const;
 const TAKE_THRESHOLD_TYPE_CHOICES = ['price', 'revenue'] as const;
 const TAKE_TYPE_CHOICES = ['AD_VALOREM', 'NSR'] as const;
 const THROUGHPUT_UNIT_CHOICES = ['tpa', 'tpd'] as const;
-const VERSION_CHOICES = ['project_json_v1'] as const;
+const VERSION_CHOICES = ['project_json_v2'] as const;
 const CURRENCY_CHOICES = ['USD'] as const;
 const QTY_UNIT_CHOICES = ['g', 'kg', 'lb', 'long_ton', 'short_ton', 'tonne', 'toz'] as const;
 const PRICE_KEY_CHOICES = PRICE_KEY_DEFINITIONS.map((definition) => definition.priceKey);
@@ -49,10 +49,6 @@ function normalizeSeries(value: unknown, length: number): NullableNumberSeries {
   return normalized;
 }
 
-function buildPeriodEndDatesUtc(masterN: number): string[] {
-  const startYear = new Date().getUTCFullYear();
-  return Array.from({ length: masterN + 1 }, (_, index) => `${startYear + index}-12-31`);
-}
 
 function normalizeSeriesMap(value: unknown, length: number): Record<string, NullableNumberSeries> {
   const raw = asRecord(value);
@@ -150,12 +146,6 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     : DEFAULT_MASTER_N;
   const seriesLength = masterN + 1;
 
-  const existingPeriodEndDates = Array.isArray(rootTime.periodEndDatesUtc)
-    ? rootTime.periodEndDatesUtc.filter((item): item is string => typeof item === 'string').slice(0, seriesLength)
-    : [];
-  const generatedPeriodEndDates = buildPeriodEndDatesUtc(masterN);
-  const periodEndDatesUtc = generatedPeriodEndDates.map((date, index) => existingPeriodEndDates[index] ?? date);
-
   const meta = asRecord(root.meta);
   const economics = asRecord(root.economics);
   const equity = asRecord(root.equity);
@@ -172,7 +162,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     : asRecord(economicsBreakdown.taxesDetail);
 
   const output = {
-    version: 'project_json_v1',
+    version: 'project_json_v2',
     _choices_version: [...VERSION_CHOICES],
     meta: {
       projectId: typeof meta.projectId === 'string' ? meta.projectId : '',
@@ -184,7 +174,9 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     time: {
       masterN,
       productionStartPeriod: Number.isInteger(rootTime.productionStartPeriod) ? rootTime.productionStartPeriod as number : 0,
-      periodEndDatesUtc,
+      productionStartYear: Number.isInteger(rootTime.productionStartYear)
+        ? rootTime.productionStartYear as number
+        : (new Date().getUTCFullYear() + (Number.isInteger(rootTime.productionStartPeriod) ? rootTime.productionStartPeriod as number : 0)),
     },
     economics: {
       taxRate: typeof economics.taxRate === 'number' && Number.isFinite(economics.taxRate) ? economics.taxRate : null,
@@ -320,9 +312,12 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
   const cuGradeExample = [0.45, 0.45, 0.45, 0.45, 0.45, 0.45];
   const auRecoveryExample = [0.92, 0.92, 0.92, 0.92, 0.92, 0.92];
   const cuRecoveryExample = [0.88, 0.88, 0.88, 0.88, 0.88, 0.88];
+  const productionSeriesExample = Array.from({ length: len }, (_, t) => (t < 2 ? 0 : 1000));
+  const payableAuExample = Array.from({ length: len }, (_, t) => (t < 2 ? 0 : 100));
+  const payableCuExample = Array.from({ length: len }, (_, t) => (t < 2 ? 0 : 2000));
 
   return buildProjectJsonV1Template({
-    version: 'project_json_v1',
+    version: 'project_json_v2',
     meta: {
       projectId: '',
       projectName: '',
@@ -332,7 +327,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     time: {
       masterN,
       productionStartPeriod: 2,
-      periodEndDatesUtc: ['2026-12-31', '2027-12-31', '2028-12-31', '2029-12-31', '2030-12-31', '2031-12-31'],
+      productionStartYear: new Date().getUTCFullYear() + 2,
     },
     economics: { taxRate: 0 },
     equity: {
@@ -352,8 +347,8 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     },
     metals: {
       payableQtyByMetal: {
-        Au: [...nulls],
-        Cu: [...nulls],
+        Au: [...payableAuExample],
+        Cu: [...payableCuExample],
       },
       payableQtyUnitByMetal: {
         Au: 'toz',
@@ -419,8 +414,8 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     ],
     operations: {
       capacity: { throughputUnit: 'tpd', nameplateThroughput: 10000, utilizationPct: null },
-      oreMilledTonnes: [...nulls],
-      oreMinedTonnes: [...nulls],
+      oreMilledTonnes: [...productionSeriesExample],
+      oreMinedTonnes: [...productionSeriesExample],
       oreTonnageUnit: 'tonne',
       gradeByMetal: {
         Au: [...auGradeExample],

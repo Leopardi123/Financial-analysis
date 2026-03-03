@@ -454,14 +454,23 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
         continue;
       }
 
-      if (rawJson.version !== 'project_json_v1') {
-        errors.push(`projects[${i}].rawJson.version must be "project_json_v1"`);
+      if (rawJson.version !== 'project_json_v2') {
+        errors.push(`projects[${i}].rawJson.version must be "project_json_v2"`);
       }
-
       const time = rawJson.time;
-      const periodEndDates = isObject(time) ? time.periodEndDatesUtc : undefined;
-      if (!Array.isArray(periodEndDates) || periodEndDates.length === 0) {
-        errors.push(`projects[${i}].rawJson.time.periodEndDatesUtc is required and must be a non-empty array`);
+      const masterN = isObject(time) ? readFiniteNumber(time.masterN) : null;
+      const tp = isObject(time) ? readFiniteNumber(time.productionStartPeriod) : null;
+      const psy = isObject(time) ? readFiniteNumber(time.productionStartYear) : null;
+      if (!isObject(time)) {
+        errors.push(`projects[${i}].rawJson.time must be an object`);
+      } else {
+        const masterNInt = Number.isInteger(masterN) ? (masterN as number) : null;
+        const tpInt = Number.isInteger(tp) ? (tp as number) : null;
+        const psyInt = Number.isInteger(psy) ? (psy as number) : null;
+        if (masterNInt === null || masterNInt < 0) errors.push(`projects[${i}].rawJson.time.masterN must be integer >= 0`);
+        if (tpInt === null || tpInt < 0 || (masterNInt !== null && tpInt > masterNInt)) errors.push(`projects[${i}].rawJson.time.productionStartPeriod must be integer in [0, masterN]`);
+        if (psyInt === null || psyInt < 1900 || psyInt > 2200) errors.push(`projects[${i}].rawJson.time.productionStartYear must be 4-digit integer in range 1900..2200`);
+        if ((time as Record<string, unknown>).periodEndDatesUtc !== undefined) errors.push(`projects[${i}].rawJson.time.periodEndDatesUtc is not allowed in project_json_v2. Remove it.`);
       }
 
       projects.push({

@@ -70,6 +70,18 @@ function readFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+
+function firstNonZeroIndex(values: Array<number | null> | undefined): number | null {
+  if (!Array.isArray(values)) return null;
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (typeof value === 'number' && Number.isFinite(value) && value !== 0) {
+      return i;
+    }
+  }
+  return null;
+}
+
 function resolveProfileTargetCurrency(profile: Record<string, unknown> | null): string {
   const profileCurrency = typeof profile?.currency === 'string' ? profile.currency.trim().toUpperCase() : '';
   return profileCurrency || 'USD';
@@ -369,14 +381,14 @@ export default function ProjectsPage() {
     return idx.map((value) => `t${value}`);
   }, [series]);
 
-  const operationsGrid = useMemo(() => {
+  const operationsGridInput = useMemo(() => {
     const raw = parsedProject;
     if (!raw) return null;
     const masterN = raw.engineInputWithoutPrices.masterN;
-    return buildOperationsGridModel({
+    return {
       masterN,
       productionStartPeriod: raw.engineInputWithoutPrices.productionStartPeriod,
-      periodEndDatesUtc: raw.engineInputWithoutPrices.periodEndDatesUtc,
+      productionStartYear: (selectedProject?.raw_json as { time?: { productionStartYear?: number } } | null)?.time?.productionStartYear ?? null,
       operations: {
         oreMilledTonnes: raw.context.operations?.oreMilledTonnes,
         oreMinedTonnes: raw.context.operations?.oreMinedTonnes,
@@ -415,8 +427,92 @@ export default function ProjectsPage() {
         taxUSD: series?.taxUSD,
         effectiveTaxRate: series?.effectiveTaxRate,
       },
-    });
+    };
   }, [parsedProject, series]);
+
+  const operationsGrid = useMemo(() => {
+    if (!operationsGridInput) return null;
+    return buildOperationsGridModel(operationsGridInput);
+  }, [operationsGridInput]);
+
+  const projectMountDebug = useMemo(() => {
+    const rawJson = (selectedProject?.raw_json ?? null) as Record<string, unknown> | null;
+    const rawTime = rawJson && typeof rawJson.time === 'object' && rawJson.time !== null && !Array.isArray(rawJson.time)
+      ? rawJson.time as Record<string, unknown>
+      : null;
+    const tp = Number.isInteger(operationsGridInput?.productionStartPeriod)
+      ? operationsGridInput?.productionStartPeriod as number
+      : null;
+    const engineMasterN = operationsGridInput?.masterN ?? null;
+    const productionStartYear = Number.isInteger(operationsGridInput?.productionStartYear) ? operationsGridInput?.productionStartYear as number : null;
+    const yearAtT0 = (productionStartYear !== null && tp !== null) ? (productionStartYear - tp) : null;
+    const derivedYearAtTp = productionStartYear;
+    const first8Years = engineMasterN === null || yearAtT0 === null
+      ? []
+      : Array.from({ length: Math.min(8, engineMasterN + 1) }, (_, i) => yearAtT0 + i);
+
+    const alignmentSources: Record<string, Array<number | null> | undefined> = {
+      operations_oreMinedTonnes: operationsGridInput?.operations?.oreMinedTonnes,
+      operations_oreMilledTonnes: operationsGridInput?.operations?.oreMilledTonnes,
+      series_capexUSD: parsedProject?.engineInputWithoutPrices.phase1.capexUSD,
+      metals_payableQtyByMetal_Au: operationsGridInput?.metals?.payableQtyByMetal?.Au,
+      metals_payableQtyByMetal_Ag: operationsGridInput?.metals?.payableQtyByMetal?.Ag,
+      metals_payableQtyByMetal_Cu: operationsGridInput?.metals?.payableQtyByMetal?.Cu,
+    };
+
+    const alignmentCheck = Object.fromEntries(Object.entries(alignmentSources).map(([key, values]) => {
+      const nonZero = firstNonZeroIndex(values);
+      const valueAtTp = tp === null ? null : (values?.[tp] ?? null);
+      const valueAtTpPlus1 = tp === null ? null : (values?.[tp + 1] ?? null);
+      return [key, {
+        valueAtTp,
+        valueAtTpPlus1,
+        firstNonZeroIndex: nonZero,
+        doesFirstNonZeroEqualTp: tp === null || nonZero === null ? null : nonZero === tp,
+      }];
+    }));
+
+    const yearAtTp = derivedYearAtTp;
+    const expectedYearAtTp = rawTime && Number.isInteger(rawTime.productionStartYear)
+      ? rawTime.productionStartYear
+      : null;
+    const tpWithinBounds = tp !== null && engineMasterN !== null ? tp >= 0 && tp <= engineMasterN : false;
+    const yearAtTpEqualsProductionStartYear = yearAtTp !== null && expectedYearAtTp !== null ? yearAtTp === expectedYearAtTp : false;
+
+    return {
+      raw: {
+        version: rawJson?.version ?? null,
+        time: {
+          masterN: rawTime?.masterN ?? null,
+          productionStartPeriod: rawTime?.productionStartPeriod ?? null,
+          productionStartYear: rawTime?.productionStartYear ?? null,
+          first8Years,
+        },
+      },
+      engine: {
+        masterN: operationsGridInput?.masterN ?? null,
+        productionStartPeriod: operationsGridInput?.productionStartPeriod ?? null,
+        productionStartYear: productionStartYear,
+        yearAtT0,
+        yearAtTp,
+        first8Years,
+      },
+      alignmentCheck,
+      timeDebugV2: {
+        yearAtT0,
+        yearAtTp,
+        first8Years,
+        yearAtTpEqualsProductionStartYear,
+        tpWithinBounds,
+      },
+      yearCheck: {
+        yearAtT0,
+        yearAtTp,
+        expectedYearAtTp,
+        doesYearMatchTp: yearAtTp === null || expectedYearAtTp === null ? null : yearAtTp === expectedYearAtTp,
+      },
+    };
+  }, [operationsGridInput, parsedProject, selectedProject]);
 
   const economicsRows = useMemo(() => {
     if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
@@ -621,6 +717,15 @@ export default function ProjectsPage() {
               <ul>{snapshotWarnings.map((item) => <li key={item}>{item}</li>)}</ul>
             </div>
           )}
+          {projectMountDebug && typeof projectMountDebug === 'object' && (
+            (() => {
+              const t = (projectMountDebug as { timeDebugV2?: { yearAtTpEqualsProductionStartYear?: boolean; tpWithinBounds?: boolean } }).timeDebugV2;
+              const invalid = t ? (t.yearAtTpEqualsProductionStartYear === false || t.tpWithinBounds === false) : false;
+              return invalid ? <p className="status error">Project time debug (v2) asserts failed. Modeling blocked.</p> : null;
+            })()
+          )}
+          <h3>---- PROJECT MOUNT DEBUG ----</h3>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(projectMountDebug, null, 2)}</pre>
         </details>
 
         <details>
