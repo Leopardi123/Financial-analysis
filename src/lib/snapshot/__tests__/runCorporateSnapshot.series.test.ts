@@ -7,7 +7,19 @@ import { runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
 async function loadFixture(): Promise<Record<string, unknown>> {
   const fixturePath = path.resolve('scripts/fixtures/snapshot-requests/abra_minimal.json');
   const fixtureRaw = await readFile(fixturePath, 'utf8');
-  return JSON.parse(fixtureRaw) as Record<string, unknown>;
+  const parsed = JSON.parse(fixtureRaw) as Record<string, unknown>;
+  const currentYear = new Date().getUTCFullYear();
+  const projects = Array.isArray(parsed.projects) ? parsed.projects as Array<Record<string, unknown>> : [];
+  for (const project of projects) {
+    const rawJson = (project.rawJson ?? null) as Record<string, unknown> | null;
+    if (!rawJson || typeof rawJson !== 'object') continue;
+    rawJson.version = 'project_json_v2';
+    const time = (rawJson.time ?? null) as Record<string, unknown> | null;
+    if (!time || typeof time !== 'object') continue;
+    const tp = Number.isInteger(time.productionStartPeriod) ? (time.productionStartPeriod as number) : 0;
+    time.productionStartYear = currentYear + tp;
+  }
+  return parsed;
 }
 
 test('snapshot series exposes aligned totalRevenue_USD', async () => {

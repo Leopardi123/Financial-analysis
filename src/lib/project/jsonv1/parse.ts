@@ -28,6 +28,46 @@ function stripChoiceKeysDeep<T>(value: T): T {
   return out as T;
 }
 
+function deepCloneJsonValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function isPeriodSeriesCandidate(value: unknown, expectedLength: number): value is Array<number | null> {
+  return Array.isArray(value)
+    && value.length === expectedLength
+    && value.every((item) => item === null || typeof item === 'number');
+}
+
+function shiftArray(arr: Array<number | null>, shift: number): Array<number | null> {
+  const len = arr.length;
+  const newArr = new Array<number | null>(len).fill(null);
+  for (let t = 0; t < len; t += 1) {
+    const srcIndex = t - shift;
+    if (srcIndex >= 0 && srcIndex < len) {
+      newArr[t] = arr[srcIndex];
+    }
+  }
+  return newArr;
+}
+
+function shiftPeriodSeriesDeep(value: unknown, expectedLength: number, shift: number): unknown {
+  if (isPeriodSeriesCandidate(value, expectedLength)) {
+    return shiftArray(value, shift);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => shiftPeriodSeriesDeep(item, expectedLength, shift));
+  }
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value)) {
+    out[key] = shiftPeriodSeriesDeep(nested, expectedLength, shift);
+  }
+  return out;
+}
+
 function fail(path: string, expected: string, actual: unknown): never {
   throw new Error(`${path} expected ${expected}, received ${JSON.stringify(actual)}`);
 }
@@ -702,14 +742,14 @@ function normalizeSpendSeriesAbs(
   return normalized;
 }
 
-export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
+export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
   raw = stripChoiceKeysDeep(raw);
   if (!isPlainObject(raw)) {
     fail('root', 'object', raw);
   }
 
-  if (raw.version !== 'project_json_v1') {
-    fail('version', '"project_json_v1"', raw.version);
+  if (raw.version !== 'project_json_v2') {
+    throw new Error('Only project_json_v2 supported in rolling model.');
   }
 
   if (!isPlainObject(raw.time)) {
@@ -718,7 +758,30 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
 
   const masterN = asInteger(raw.time.masterN, 'time.masterN', 0);
   const productionStartPeriod = asInteger(raw.time.productionStartPeriod, 'time.productionStartPeriod', 0);
+  const productionStartYear = asInteger(raw.time.productionStartYear, 'time.productionStartYear', Number.MIN_SAFE_INTEGER);
+  if (productionStartPeriod > masterN) {
+    throw new Error(`time.productionStartPeriod must be <= time.masterN. Received productionStartPeriod=${productionStartPeriod}, masterN=${masterN}.`);
+  }
   const expectedLength = masterN + 1;
+
+  const currentYear = new Date().getUTCFullYear();
+  const impliedStartYear = productionStartYear - productionStartPeriod;
+  const shiftYears = currentYear - impliedStartYear;
+  if ((raw as Record<string, unknown>).debug === true) {
+    console.debug({
+      currentYear,
+      productionStartYear,
+      impliedStartYear,
+      shiftYears,
+    });
+  }
+
+  const shiftedRaw = shiftPeriodSeriesDeep(deepCloneJsonValue(raw), expectedLength, shiftYears);
+  if (!isPlainObject(shiftedRaw)) {
+    fail('root', 'object', shiftedRaw);
+  }
+
+  raw = shiftedRaw;
   const periodEndDatesUtc = parsePeriodEndDates(raw.time.periodEndDatesUtc, expectedLength);
 
   if (!isPlainObject(raw.economics)) {

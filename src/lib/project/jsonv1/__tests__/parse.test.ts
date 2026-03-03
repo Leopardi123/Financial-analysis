@@ -65,7 +65,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
 
   const wrongVersion = getProjectJsonV1Template();
   (wrongVersion as { version: string }).version = 'wrong';
-  assertThrows(() => parseProjectJsonV1(wrongVersion), /version/, 'throws on wrong version');
+  assertThrows(() => parseProjectJsonV1(wrongVersion), /Only project_json_v2 supported in rolling model\./, 'throws on wrong version');
 
   const badMasterN = getProjectJsonV1Template();
   (badMasterN.time as { masterN: number | string }).masterN = 1.2;
