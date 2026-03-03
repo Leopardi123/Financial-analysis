@@ -952,6 +952,8 @@ type SnapshotDiagnostics = {
       markers: Array<{
         tp: number;
         yearLabelUsed: string | null;
+        corporateTpIndexUsed: number | null;
+        fcfTailSumUSD: number | null;
         value_high: number | null;
         value_low: number | null;
         value_mid_if_any: number | null;

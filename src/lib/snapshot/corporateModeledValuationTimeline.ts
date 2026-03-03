@@ -3,6 +3,8 @@ import { computeLista2CfDcfMetrics } from './lista2CfDcf.ts';
 export type CorporateModeledTimelineMarker = {
   tp: number;
   yearLabelUsed: string | null;
+  corporateTpIndexUsed: number | null;
+  fcfTailSumUSD: number | null;
   value_high: number | null;
   value_low: number | null;
   value_mid_if_any: number | null;
@@ -56,6 +58,8 @@ export function buildCorporateModeledValuationTimeline(args: {
       return {
         tp,
         yearLabelUsed: tpDates.length > 0 ? tpDates[0] : null,
+        corporateTpIndexUsed: null,
+        fcfTailSumUSD: null,
         value_high: null,
         value_low: null,
         value_mid_if_any: null,
@@ -71,6 +75,8 @@ export function buildCorporateModeledValuationTimeline(args: {
       return {
         tp,
         yearLabelUsed,
+        corporateTpIndexUsed: null,
+        fcfTailSumUSD: null,
         value_high: null,
         value_low: null,
         value_mid_if_any: null,
@@ -90,6 +96,12 @@ export function buildCorporateModeledValuationTimeline(args: {
 
     const valueHigh = lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
     const valueLow = lista2.metrics.DCF_prodStart_present_perShare_TargetCurrency;
+    const fcfTailSumUSD = args.fcfUSD_total
+      .slice(corporateTp)
+      .reduce<number | null>((sum, value) => {
+        if (sum === null || value === null || !Number.isFinite(value)) return null;
+        return sum + value;
+      }, 0);
     const nullReasonIfAny = valueHigh === null || valueLow === null
       ? [...lista2.errors, ...lista2.warnings].join(' | ') || 'Missing required valuation inputs'
       : null;
@@ -97,6 +109,8 @@ export function buildCorporateModeledValuationTimeline(args: {
     return {
       tp,
       yearLabelUsed,
+      corporateTpIndexUsed: corporateTp,
+      fcfTailSumUSD,
       value_high: valueHigh,
       value_low: valueLow,
       value_mid_if_any: null,

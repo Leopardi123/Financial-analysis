@@ -63,6 +63,10 @@ test('corporate modeled valuation timeline supports multiple productionStartPeri
   const markerByTp = new Map(timeline.markers.map((marker) => [marker.tp, marker]));
   assert.equal(markerByTp.get(4)?.yearLabelUsed, '2029-12-31');
   assert.equal(markerByTp.get(5)?.yearLabelUsed, '2031-12-31');
+  assert.equal(Number.isInteger(markerByTp.get(4)?.corporateTpIndexUsed), true);
+  assert.equal(Number.isInteger(markerByTp.get(5)?.corporateTpIndexUsed), true);
+  assert.equal(typeof markerByTp.get(4)?.fcfTailSumUSD, 'number');
+  assert.equal(typeof markerByTp.get(5)?.fcfTailSumUSD, 'number');
 
   const diagnosticsMeta = (result.diagnostics.meta ?? {}) as Record<string, unknown>;
   const timelineDebug = diagnosticsMeta.corporateModeledValuationTimeline as { tps?: number[]; lastTp?: number | null } | undefined;

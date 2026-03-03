@@ -182,6 +182,14 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             )}
 
             {hasNpv && hasTp && (
+              <polygon
+                points={`${X_LEFT},${points.npvHighY} ${validMarkers.map((m) => `${m.x},${m.highY!}`).join(" ")} ${[...validMarkers].reverse().map((m) => `${m.x},${m.lowY!}`).join(" ")} ${X_LEFT},${points.npvLowY}`}
+                fill="rgba(100, 116, 139, 0.12)"
+                stroke="none"
+              />
+            )}
+
+            {hasNpv && hasTp && (
               <>
                 <polyline
                   points={`${X_LEFT},${points.npvHighY} ${validMarkers.map((m) => `${m.x},${m.highY!}`).join(" ")}`}
