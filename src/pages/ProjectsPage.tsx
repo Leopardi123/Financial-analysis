@@ -510,6 +510,63 @@ export default function ProjectsPage() {
     };
   }, [operationsGridInput, parsedProject, selectedProject]);
 
+  const yearMappingDebug = useMemo(() => {
+    const rawJson = (selectedProject?.raw_json ?? null) as Record<string, unknown> | null;
+    const rawTime = rawJson && typeof rawJson.time === 'object' && rawJson.time !== null && !Array.isArray(rawJson.time)
+      ? rawJson.time as Record<string, unknown>
+      : null;
+    const rawPeriodEndDates = Array.isArray(rawTime?.periodEndDatesUtc)
+      ? rawTime?.periodEndDatesUtc as Array<string | null>
+      : [];
+    const enginePeriodEndDates = Array.isArray(operationsGridInput?.periodEndDatesUtc)
+      ? operationsGridInput?.periodEndDatesUtc as Array<string | null>
+      : [];
+    const tp = Number.isInteger(operationsGridInput?.productionStartPeriod)
+      ? operationsGridInput?.productionStartPeriod as number
+      : null;
+    const yearAtT0 = readYearFromDate(enginePeriodEndDates[0] ?? null);
+    const yearAtTp = tp === null ? null : readYearFromDate(enginePeriodEndDates[tp] ?? null);
+    const expectedYearAtTp = Number.isInteger(rawTime?.productionStartYear)
+      ? rawTime?.productionStartYear
+      : null;
+    const usesPeriodEndDatesForYearRow = Array.isArray(operationsGridInput?.periodEndDatesUtc)
+      && operationsGridInput.periodEndDatesUtc.length === ((operationsGridInput?.masterN ?? -1) + 1);
+
+    return {
+      raw_time: {
+        productionStartYear: rawTime?.productionStartYear ?? null,
+        productionStartPeriod: rawTime?.productionStartPeriod ?? null,
+        masterN: rawTime?.masterN ?? null,
+        firstPeriodEndDate: rawPeriodEndDates[0] ?? null,
+        first5PeriodEndDates: rawPeriodEndDates.slice(0, 5),
+      },
+      engine_time: {
+        productionStartYear: null,
+        productionStartPeriod: operationsGridInput?.productionStartPeriod ?? null,
+        masterN: operationsGridInput?.masterN ?? null,
+        firstPeriodEndDate: enginePeriodEndDates[0] ?? null,
+        first5PeriodEndDates: enginePeriodEndDates.slice(0, 5),
+      },
+      derived_years_from_periods: {
+        yearAtT0,
+        yearAtTp,
+        expectedYearAtTp,
+        doesYearAtTpMatchExpected: yearAtTp === null || expectedYearAtTp === null ? null : yearAtTp === expectedYearAtTp,
+      },
+      rolling_detection: {
+        currentYearUsedBySystem: null,
+        detectedShiftFromCalendar: yearAtT0 === null ? null : null,
+        tpUsedByTable: tp,
+        tpAfterAnyInternalShift: tp,
+      },
+      header_builder_inputs: {
+        usesPeriodEndDatesForYearRow,
+        usesProductionStartYearDirectly: false,
+        yearRowPreviewFirst6: Array.isArray(operationsGrid?.years) ? operationsGrid.years.slice(0, 6) : [],
+      },
+    };
+  }, [operationsGrid, operationsGridInput, selectedProject]);
+
   const economicsRows = useMemo(() => {
     if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
     const rows: Array<{ label: string; unit?: string; values: Array<number | null> }> = [];
@@ -715,6 +772,8 @@ export default function ProjectsPage() {
           )}
           <h3>---- PROJECT MOUNT DEBUG ----</h3>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(projectMountDebug, null, 2)}</pre>
+          <h3>---- YEAR MAPPING DEBUG ----</h3>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(yearMappingDebug, null, 2)}</pre>
         </details>
 
         <details>
