@@ -1806,6 +1806,7 @@ export async function runCorporateSnapshotPipeline(args: {
       shares_post_financing: shares_post_financing_fd_effective,
       fx_USD_to_TargetCurrency: fxRate,
       npvToday_USD: aggregationEffective.NPV_today_USD,
+      includeDebugSanity: debug,
     });
     snapshot.market = marketInput;
     snapshot.fx_USD_to_TargetCurrency = fxRate;
