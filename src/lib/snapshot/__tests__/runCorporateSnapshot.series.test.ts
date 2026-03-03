@@ -7,7 +7,19 @@ import { runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
 async function loadFixture(): Promise<Record<string, unknown>> {
   const fixturePath = path.resolve('scripts/fixtures/snapshot-requests/abra_minimal.json');
   const fixtureRaw = await readFile(fixturePath, 'utf8');
-  return JSON.parse(fixtureRaw) as Record<string, unknown>;
+  const parsed = JSON.parse(fixtureRaw) as Record<string, unknown>;
+  const currentYear = new Date().getUTCFullYear();
+  const projects = Array.isArray(parsed.projects) ? parsed.projects as Array<Record<string, unknown>> : [];
+  for (const project of projects) {
+    const rawJson = (project.rawJson ?? null) as Record<string, unknown> | null;
+    if (!rawJson || typeof rawJson !== 'object') continue;
+    rawJson.version = 'project_json_v2';
+    const time = (rawJson.time ?? null) as Record<string, unknown> | null;
+    if (!time || typeof time !== 'object') continue;
+    const tp = Number.isInteger(time.productionStartPeriod) ? (time.productionStartPeriod as number) : 0;
+    time.productionStartYear = currentYear + tp;
+  }
+  return parsed;
 }
 
 test('snapshot series exposes aligned totalRevenue_USD', async () => {
@@ -134,14 +146,17 @@ test('projects-mode normalizes sparse/null project series and computes Lista2 me
   series.reclamationUSD = [null, null, 2];
   series.byproductCreditsUSD = [null, null, null];
 
-  operations.oreMilledTonnes = [1000, null, 1200];
-  operations.oreMinedTonnes = [900, null];
-  operations.gradeByMetal = { Au: [null, 1.2, null] };
-  operations.recoveryPctByMetal = { Au: [0.9, null] };
+  const time = rawJson.time as Record<string, unknown>;
+  const tp = Number.isInteger(time.productionStartPeriod) ? (time.productionStartPeriod as number) : 0;
+
+  operations.oreMilledTonnes = [0, 0, 0, 0, 0, 0].map((_, idx) => (idx < tp ? 0 : (idx === tp ? 1000 : idx === tp + 2 ? 1200 : null)));
+  operations.oreMinedTonnes = [0, 0, 0, 0, 0, 0].map((_, idx) => (idx < tp ? 0 : (idx === tp ? 900 : null)));
+  operations.gradeByMetal = { Au: [null, null, null, null, null, null].map((value, idx) => (idx === tp + 1 ? 1.2 : value)) };
+  operations.recoveryPctByMetal = { Au: [null, null, null, null, null, null].map((value, idx) => (idx === tp ? 0.9 : value)) };
 
   const payableQtyByMetal = metals.payableQtyByMetal as Record<string, Array<number | null>>;
   const firstMetal = Object.keys(payableQtyByMetal)[0];
-  payableQtyByMetal[firstMetal] = [100, null, 130, null];
+  payableQtyByMetal[firstMetal] = [0, 0, 0, 0, 0, 0].map((_, idx) => (idx < tp ? 0 : (idx === tp ? 100 : idx === tp + 2 ? 130 : null)));
 
   const result = await runCorporateSnapshotPipeline({ body, refresh: false });
   assert.equal(result.ok, true);

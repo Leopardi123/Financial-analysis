@@ -17,6 +17,7 @@ export function makeHarnessProjectJson(): ProjectJsonV1 {
     time: {
       masterN,
       productionStartPeriod: 1,
+      productionStartYear: new Date().getUTCFullYear() + 1,
     },
     series: {
       ...template.series,

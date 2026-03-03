@@ -1,6 +1,7 @@
 import type { ProjectEngineFullProductionV1Input } from '../types.ts';
 import { PRICE_KEY_DEFINITIONS, PRICE_KEY_SET } from '../../prices/keys.ts';
 import type { ProjectJsonV1, QtyUnit } from './schema.ts';
+import { buildProductionDriverFirstNonZeroMap, productionStartIndexCandidate } from '../validation/productionStartAlignment.ts';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -26,6 +27,46 @@ function stripChoiceKeysDeep<T>(value: T): T {
     out[key] = stripChoiceKeysDeep(nested);
   }
   return out as T;
+}
+
+function deepCloneJsonValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function isPeriodSeriesCandidate(value: unknown, expectedLength: number): value is Array<number | null> {
+  return Array.isArray(value)
+    && value.length === expectedLength
+    && value.every((item) => item === null || typeof item === 'number');
+}
+
+function shiftArray(arr: Array<number | null>, shift: number): Array<number | null> {
+  const len = arr.length;
+  const newArr = new Array<number | null>(len).fill(null);
+  for (let t = 0; t < len; t += 1) {
+    const srcIndex = t - shift;
+    if (srcIndex >= 0 && srcIndex < len) {
+      newArr[t] = arr[srcIndex];
+    }
+  }
+  return newArr;
+}
+
+function shiftPeriodSeriesDeep(value: unknown, expectedLength: number, shift: number): unknown {
+  if (isPeriodSeriesCandidate(value, expectedLength)) {
+    return shiftArray(value, shift);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => shiftPeriodSeriesDeep(item, expectedLength, shift));
+  }
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value)) {
+    out[key] = shiftPeriodSeriesDeep(nested, expectedLength, shift);
+  }
+  return out;
 }
 
 function fail(path: string, expected: string, actual: unknown): never {
@@ -498,6 +539,19 @@ function isIsoDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+
+function readYearAtPeriod(periodEndDatesUtc: string[], index: number, label: string): number {
+  const dateAtIndex = periodEndDatesUtc[index];
+  if (typeof dateAtIndex !== 'string') {
+    throw new Error(`Cannot read ${label}: missing periodEndDatesUtc at index ${index}.`);
+  }
+  const year = Number.parseInt(dateAtIndex.slice(0, 4), 10);
+  if (!Number.isInteger(year)) {
+    throw new Error(`Cannot parse ${label}: invalid year in periodEndDatesUtc[${index}] (${dateAtIndex}).`);
+  }
+  return year;
+}
+
 function parsePeriodEndDates(raw: unknown, expectedLength: number): Array<string> | undefined {
   if (raw === undefined) {
     return undefined;
@@ -702,14 +756,14 @@ function normalizeSpendSeriesAbs(
   return normalized;
 }
 
-export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
+export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
   raw = stripChoiceKeysDeep(raw);
   if (!isPlainObject(raw)) {
     fail('root', 'object', raw);
   }
 
-  if (raw.version !== 'project_json_v1') {
-    fail('version', '"project_json_v1"', raw.version);
+  if (raw.version !== 'project_json_v2') {
+    throw new Error('Only project_json_v2 supported in rolling model.');
   }
 
   if (!isPlainObject(raw.time)) {
@@ -718,8 +772,67 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
 
   const masterN = asInteger(raw.time.masterN, 'time.masterN', 0);
   const productionStartPeriod = asInteger(raw.time.productionStartPeriod, 'time.productionStartPeriod', 0);
+  const productionStartYear = asInteger(raw.time.productionStartYear, 'time.productionStartYear', 1000);
+  if (productionStartYear > 9999) {
+    throw new Error(`time.productionStartYear must be a 4-digit integer. Received productionStartYear=${productionStartYear}.`);
+  }
+  if (productionStartPeriod > masterN) {
+    throw new Error(`time.productionStartPeriod must be <= time.masterN. Received productionStartPeriod=${productionStartPeriod}, masterN=${masterN}.`);
+  }
   const expectedLength = masterN + 1;
   const periodEndDatesUtc = parsePeriodEndDates(raw.time.periodEndDatesUtc, expectedLength);
+
+  if (!Array.isArray(periodEndDatesUtc) || periodEndDatesUtc.length <= productionStartPeriod) {
+    throw new Error('time.periodEndDatesUtc is required for strict project_json_v2 tp/year validation and must include index tp.');
+  }
+  const yearAtTp = readYearAtPeriod(periodEndDatesUtc, productionStartPeriod, 'time.periodEndDatesUtc[tp]');
+  if (yearAtTp !== productionStartYear) {
+    throw new Error(`time.productionStartYear mismatch: productionStartYear=${productionStartYear} but yearAtTp=${yearAtTp} from periodEndDatesUtc[${productionStartPeriod}].`);
+  }
+
+  const rawOperations = raw.operations;
+  const operationsRecord = isPlainObject(rawOperations) ? rawOperations : null;
+  const rawMetals = raw.metals;
+  const metalsRecord = isPlainObject(rawMetals) ? rawMetals : null;
+  const payableRecord = isPlainObject(metalsRecord?.payableQtyByMetal) ? metalsRecord.payableQtyByMetal : {};
+  const alignmentPayableQtyByMetalRaw = Object.fromEntries(
+    Object.entries(payableRecord).map(([metal, values]) => [metal, Array.isArray(values) ? values as Array<number | null | undefined> : null]),
+  ) as Record<string, Array<number | null | undefined> | null>;
+
+  const driverFirstNonZeroIndex = buildProductionDriverFirstNonZeroMap({
+    oreMinedTonnes: Array.isArray(operationsRecord?.oreMinedTonnes) ? operationsRecord.oreMinedTonnes as Array<number | null | undefined> : null,
+    oreMilledTonnes: Array.isArray(operationsRecord?.oreMilledTonnes) ? operationsRecord.oreMilledTonnes as Array<number | null | undefined> : null,
+    payableQtyByMetal: alignmentPayableQtyByMetalRaw,
+  });
+  const productionStartIndex = productionStartIndexCandidate(driverFirstNonZeroIndex);
+  if (productionStartIndex === null && productionStartPeriod > 0) {
+    throw new Error('No production series has non-zero values, cannot validate tp.');
+  }
+  if (productionStartIndex !== null && productionStartIndex !== productionStartPeriod) {
+    const yearAtCand = readYearAtPeriod(periodEndDatesUtc, productionStartIndex, 'time.periodEndDatesUtc[candidate]');
+    throw new Error(
+      `tp mismatch: tp=${productionStartPeriod} (year ${yearAtTp}) but first production driver is at index ${productionStartIndex} (year ${yearAtCand}). Fix by either changing tp or shifting your production-driver series so first non-zero equals tp. Drivers=${JSON.stringify(driverFirstNonZeroIndex)}`,
+    );
+  }
+
+  const currentYear = new Date().getUTCFullYear();
+  const impliedStartYear = productionStartYear - productionStartPeriod;
+  const shiftYears = currentYear - impliedStartYear;
+  if ((raw as Record<string, unknown>).debug === true) {
+    console.debug({
+      currentYear,
+      productionStartYear,
+      impliedStartYear,
+      shiftYears,
+    });
+  }
+
+  const shiftedRaw = shiftPeriodSeriesDeep(deepCloneJsonValue(raw), expectedLength, shiftYears);
+  if (!isPlainObject(shiftedRaw)) {
+    fail('root', 'object', shiftedRaw);
+  }
+
+  raw = shiftedRaw;
 
   if (!isPlainObject(raw.economics)) {
     fail('economics', 'object', raw.economics);

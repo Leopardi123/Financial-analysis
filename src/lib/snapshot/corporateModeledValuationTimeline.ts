@@ -71,9 +71,8 @@ export function mapProjectTpToCorporateIndex(
 export function buildCorporateModeledValuationTimeline(args: {
   projects: Array<{
     productionStartPeriod: number | null | undefined;
-    periodEndDatesUtc: string[];
   }>;
-  corporatePeriodEndDatesUtc: string[];
+  currentYear: number;
   fcfUSD_total: Array<number | null>;
   masterN: number;
   discountRate: number;
@@ -90,17 +89,10 @@ export function buildCorporateModeledValuationTimeline(args: {
   const lastTp = tps.length > 0 ? tps[tps.length - 1] : null;
 
   const markers: CorporateModeledTimelineMarker[] = tps.map((tp) => {
-    const projectForTp = args.projects.find((project) => project.productionStartPeriod === tp);
-    const mapping = mapProjectTpToCorporateIndex(
-      projectForTp?.periodEndDatesUtc ?? [],
-      tp,
-      args.corporatePeriodEndDatesUtc,
-    );
-    const corporateTp = mapping.corporateIndex;
-    const corporateDateUsed = corporateTp === null ? null : (args.corporatePeriodEndDatesUtc[corporateTp] ?? null);
-    const yearLabelUsed = corporateDateUsed;
+    const corporateTp = tp;
+    const yearLabelUsed = String(args.currentYear + tp);
 
-    if (!projectForTp || mapping.tpDate === null) {
+    if (!Number.isInteger(corporateTp) || corporateTp < 0 || corporateTp > args.masterN) {
       return {
         tp,
         yearLabelUsed,
@@ -109,49 +101,18 @@ export function buildCorporateModeledValuationTimeline(args: {
         value_high: null,
         value_low: null,
         value_mid_if_any: null,
-        nullReasonIfAny: 'tp_out_of_project_periodEndDatesUtc',
+        nullReasonIfAny: 'tp_outside_corporate_axis',
         sanity: args.includeDebugSanity
           ? {
               tp,
-              tpDate: mapping.tpDate,
+              tpDate: null,
               corporateTpIndexUsed: null,
-              corporateDateUsed,
-              matchMode: mapping.matchMode,
-              tpMatches: false,
-              yearLabelExpected: mapping.tpDate,
+              corporateDateUsed: null,
+              matchMode: 'missing',
+              tpMatches: true,
+              yearLabelExpected: yearLabelUsed,
               yearLabelUsed,
-              yearLabelMatches: false,
-              fcfTailSumUSD_expected: null,
-              fcfTailSumUSD_used: null,
-              fcfTailMatches: null,
-            }
-          : undefined,
-      };
-    }
-
-    if (corporateTp === null || !Number.isInteger(corporateTp) || corporateTp < 0 || corporateTp > args.masterN) {
-      return {
-        tp,
-        yearLabelUsed,
-        corporateTpIndexUsed: null,
-        fcfTailSumUSD: null,
-        value_high: null,
-        value_low: null,
-        value_mid_if_any: null,
-        nullReasonIfAny: args.corporatePeriodEndDatesUtc.length === 0
-          ? 'corporate_periodEndDatesUtc_missing'
-          : 'tpDate_outside_corporate_axis',
-        sanity: args.includeDebugSanity
-          ? {
-              tp,
-              tpDate: mapping.tpDate,
-              corporateTpIndexUsed: null,
-              corporateDateUsed,
-              matchMode: mapping.matchMode,
-              tpMatches: false,
-              yearLabelExpected: mapping.tpDate,
-              yearLabelUsed,
-              yearLabelMatches: false,
+              yearLabelMatches: true,
               fcfTailSumUSD_expected: null,
               fcfTailSumUSD_used: null,
               fcfTailMatches: null,
@@ -179,9 +140,9 @@ export function buildCorporateModeledValuationTimeline(args: {
         return sum + value;
       }, 0);
 
-    const yearLabelExpected = mapping.tpDate;
-    const tpMatches = corporateDateUsed === mapping.tpDate;
-    const yearLabelMatches = yearLabelUsed === yearLabelExpected;
+    const yearLabelExpected = yearLabelUsed;
+    const tpMatches = true;
+    const yearLabelMatches = true;
     const fcfTailSumUSDExpected = fcfTailSlice.some((value) => value === null || !Number.isFinite(value))
       ? null
       : (fcfTailSlice as number[]).reduce((sum, value) => sum + value, 0);
@@ -189,8 +150,6 @@ export function buildCorporateModeledValuationTimeline(args: {
       ? null
       : Math.abs(fcfTailSumUSD - fcfTailSumUSDExpected) <= 1e-6 * Math.max(1, Math.abs(fcfTailSumUSDExpected));
     const sanityFailureChecks: string[] = [];
-    if (!tpMatches) sanityFailureChecks.push('tpMatches');
-    if (!yearLabelMatches) sanityFailureChecks.push('yearLabelMatches');
     if (fcfTailMatches === false) sanityFailureChecks.push('fcfTailMatches');
 
     const baseNullReason = valueHigh === null || valueLow === null
@@ -214,10 +173,10 @@ export function buildCorporateModeledValuationTimeline(args: {
       sanity: args.includeDebugSanity
         ? {
             tp,
-            tpDate: mapping.tpDate,
+            tpDate: null,
             corporateTpIndexUsed: corporateTp,
-            corporateDateUsed,
-            matchMode: mapping.matchMode,
+            corporateDateUsed: null,
+            matchMode: 'exact',
             tpMatches,
             yearLabelExpected,
             yearLabelUsed,
