@@ -105,6 +105,15 @@ function formatIrrMetricValue(value: MetricValue): string {
   return `${(value.value * 100).toFixed(1)} %`;
 }
 
+function getMarkerYearLabel(yearLabelUsed: string | null, tp: number): string {
+  if (typeof yearLabelUsed === "string" && yearLabelUsed.trim()) {
+    const yearMatch = yearLabelUsed.match(/\d{4}/);
+    if (yearMatch) return yearMatch[0];
+    return yearLabelUsed;
+  }
+  return `tp=${tp}`;
+}
+
 function formatMetricNullReason(value: MetricValue): string {
   return value.value === null ? (value.reason ?? "Missing required input.") : "";
 }
@@ -2270,6 +2279,76 @@ Capital Available: ${availableLabel}`,
     });
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  const corporateProdStartMarkerTextByKey = useMemo(() => {
+    const timeline = corporateSnapshotData?.modeledValuationTimeline as {
+      markers?: Array<{
+        tp: number;
+        yearLabelUsed: string | null;
+        value_high: number | null;
+      }>;
+    } | null | undefined;
+    const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
+    if (markers.length < 2) return {} as Record<string, string>;
+
+    const financing = (corporateSnapshotData?.financing ?? {}) as Record<string, unknown>;
+    const sharesPf = typeof financing.shares_post_financing === "number" && Number.isFinite(financing.shares_post_financing) && financing.shares_post_financing > 0
+      ? financing.shares_post_financing
+      : null;
+    const cashT0 = typeof financing.cash_t0_post_TargetCurrency === "number" && Number.isFinite(financing.cash_t0_post_TargetCurrency)
+      ? financing.cash_t0_post_TargetCurrency
+      : null;
+    const debtT0 = typeof financing.debt_t0_post_TargetCurrency === "number" && Number.isFinite(financing.debt_t0_post_TargetCurrency)
+      ? financing.debt_t0_post_TargetCurrency
+      : null;
+    const netCashPerShare = sharesPf !== null && cashT0 !== null && debtT0 !== null
+      ? (cashT0 - debtT0) / sharesPf
+      : null;
+
+    const makeJoined = (
+      metricKey: "NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare",
+    ): string | null => {
+      const parts: string[] = [];
+      for (const marker of markers) {
+        const year = getMarkerYearLabel(marker.yearLabelUsed ?? null, marker.tp);
+        const npvProdStartPerShare = typeof marker.value_high === "number" && Number.isFinite(marker.value_high) ? marker.value_high : null;
+        const navProdStartPerShare = npvProdStartPerShare !== null && netCashPerShare !== null
+          ? npvProdStartPerShare + netCashPerShare
+          : null;
+
+        const value = (() => {
+          if (metricKey === "NPV_prodStart_perShare") return npvProdStartPerShare;
+          if (metricKey === "NPV_prodStart") return npvProdStartPerShare !== null && sharesPf !== null ? npvProdStartPerShare * sharesPf : null;
+          if (metricKey === "NAV_prodStart_perShare") return navProdStartPerShare;
+          return navProdStartPerShare !== null && sharesPf !== null ? navProdStartPerShare * sharesPf : null;
+        })();
+
+        if (value === null) continue;
+        const kind = metricKey.includes("perShare") ? "money" as const : "money" as const;
+        parts.push(`${year}: ${formatMetricValue({ value, reason: null }, kind, lockedTargetCurrency)}`);
+      }
+      return parts.length > 0 ? parts.join(", ") : null;
+    };
+
+    const result: Record<string, string> = {};
+    (["NPV_prodStart", "NPV_prodStart_perShare", "NAV_prodStart", "NAV_prodStart_perShare"] as const).forEach((key) => {
+      const joined = makeJoined(key);
+      if (joined) {
+        result[key] = joined;
+      }
+    });
+
+    if (debugEnabled) {
+      console.debug("[corporate-prod-start-markers]", {
+        markerCount: markers.length,
+        sharesPf,
+        netCashPerShare,
+        formatted: result,
+      });
+    }
+
+    return result;
+  }, [corporateSnapshotData, debugEnabled, lockedTargetCurrency]);
+
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
     const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
@@ -3519,7 +3598,13 @@ Capital Available: ${availableLabel}`,
                           <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
                             <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                             <span className="compact-metric-dots" />
-                            <span className="compact-metric-value">{formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency)}</span>
+                            <span className="compact-metric-value">{
+                              value.value === null
+                              && sectionKey === "list2"
+                              && corporateProdStartMarkerTextByKey[key]
+                                ? corporateProdStartMarkerTextByKey[key]
+                                : formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency)
+                            }</span>
                           </div>
                         ))}
                       </div>
