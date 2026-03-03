@@ -1084,7 +1084,11 @@ export async function runCorporateSnapshotPipeline(args: {
 
           projectsForBuildFunding.push({
             projectId,
-            projectName: projectId,
+            projectName: (() => {
+              const meta = rawJsonRecord.meta as Record<string, unknown> | undefined;
+              const fromMeta = meta && typeof meta.projectName === 'string' ? meta.projectName : null;
+              return fromMeta ?? projectId;
+            })(),
             productionStartPeriod,
             periodEndDatesUtc,
             fdExtraShares: parsed.context.equity?.fdExtraShares ?? 0,

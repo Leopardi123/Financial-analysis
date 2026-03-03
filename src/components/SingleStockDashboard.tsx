@@ -3342,12 +3342,19 @@ Capital Available: ${availableLabel}`,
   const fcf = Array.isArray(aggregation.fcffUSD_total) ? aggregation.fcffUSD_total : [];
   const capex = Array.isArray(aggregation.capexUSD_total) ? aggregation.capexUSD_total : [];
   const nullCount = (arr: unknown[]) => arr.filter((value) => value === null).length;
+  const list2Debug = {
+    DCF_prodStart_present_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_present_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency : null,
+    DCF_prodStart_present_perShare_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency : null,
+    DCF_prodStart_exCapex_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_exCapex_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_exCapex_TargetCurrency : null,
+    DCF_prodStart_exCapex_perShare_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_exCapex_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_exCapex_perShare_TargetCurrency : null,
+  };
   return {
     projectCount: diagnosticsMeta.projectCount ?? null,
     masterN,
     corporateTotalsDebug,
     corporateFinancingDebug,
     corporateModeledValuationTimeline,
+    list2Debug,
     lengthChecks: {
       fcfUSD_total: { len: fcf.length, expected: masterN === null ? null : masterN + 1 },
       capexUSD_total: { len: capex.length, expected: masterN === null ? null : masterN + 1 },
