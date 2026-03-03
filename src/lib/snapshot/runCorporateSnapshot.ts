@@ -951,6 +951,8 @@ type SnapshotDiagnostics = {
         NPV_today_TargetCurrency: number | null;
         cash_t0_TargetCurrency: number | null;
         debt_t0_TargetCurrency: number | null;
+        debt_t0_base_TargetCurrency: number | null;
+        debt_t0_projectFinancing_TargetCurrency: number | null;
         NAV_today_TargetCurrency: number | null;
         delta_NAV_minus_NPV: number | null;
       };
@@ -1704,13 +1706,14 @@ export async function runCorporateSnapshotPipeline(args: {
         ? marketInput.shares_current + totalNewShares
         : null;
 
-    const debtPreTarget = input.balanceSheet?.debt_t0_TargetCurrency ?? null;
-    const debtPostTarget =
-      typeof debtPreTarget === 'number'
-      && Number.isFinite(debtPreTarget)
-      && totalDebt_TargetCurrency !== null
-        ? debtPreTarget + totalDebt_TargetCurrency
-        : financingEffective.debt_t0_post_TargetCurrency;
+    const debtPreTargetRaw = input.balanceSheet?.debt_t0_TargetCurrency ?? null;
+    const debtPreTarget =
+      typeof debtPreTargetRaw === 'number' && Number.isFinite(debtPreTargetRaw)
+        ? debtPreTargetRaw
+        : 0;
+    const debtPostTarget = totalDebt_TargetCurrency !== null
+      ? debtPreTarget + totalDebt_TargetCurrency
+      : financingEffective.debt_t0_post_TargetCurrency;
     const navTodayTarget =
       financingEffective.NPV_today_TargetCurrency === null
       || financingEffective.cash_t0_post_TargetCurrency === null
@@ -1756,6 +1759,8 @@ export async function runCorporateSnapshotPipeline(args: {
           NPV_today_TargetCurrency: financingSnapshot.NPV_today_TargetCurrency,
           cash_t0_TargetCurrency: financingSnapshot.cash_t0_post_TargetCurrency,
           debt_t0_TargetCurrency: financingSnapshot.debt_t0_post_TargetCurrency,
+          debt_t0_base_TargetCurrency: debtPreTarget,
+          debt_t0_projectFinancing_TargetCurrency: totalDebt_TargetCurrency,
           NAV_today_TargetCurrency: financingSnapshot.NAV_today_TargetCurrency,
           delta_NAV_minus_NPV:
             financingSnapshot.NAV_today_TargetCurrency === null || financingSnapshot.NPV_today_TargetCurrency === null

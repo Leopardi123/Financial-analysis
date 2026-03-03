@@ -403,3 +403,25 @@ assert.equal(auEqPerShareInvalidShares.list4.AuEq_10Y_perShare.value, null);
 assert.equal(auEqPerShareInvalidShares.list4.AuEq_10Y_perShare.reason, 'Missing or invalid shares_post_financing');
 
 console.log('ok computeProjectPreRevenueView');
+
+const navUsesDebtAtT0 = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 0,
+  sharesCurrent: 10,
+  priceCurrentTarget: 1,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 40,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [100],
+  capexUSD: [0],
+  grossRevenueUSD: [0],
+  ebitUSD: [0],
+  payableAuEqOz: [1],
+  sustainingCostUSD: [0],
+  productionStartPeriod: 0,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assert.equal(navUsesDebtAtT0.list2.NPV_Target.value, 100);
+assert.equal(navUsesDebtAtT0.list2.NAV_Target.value, 60);

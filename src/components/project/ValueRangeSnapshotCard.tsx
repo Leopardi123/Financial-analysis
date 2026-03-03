@@ -156,10 +156,10 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
   return (
     <div>
       {!hasNpv && !hasTp ? (
-        <p className="status empty" style={{ margin: 0 }}>Saknar intervall-data (NPV/TP)</p>
+        <p className="status empty" style={{ margin: 0 }}>Saknar intervall-data (Nu/Prod start)</p>
       ) : (
         <div className="project-value-snapshot-wrap">
-          <svg viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} role="img" aria-label="Snapshot med NPV- och TP-intervall per aktie" style={{ width: "100%", height: "100%" }}>
+          <svg viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} role="img" aria-label="Snapshot med nuvärde och produktionsstartvärde per aktie" style={{ width: "100%", height: "100%" }}>
             <rect x={92} y={14} width={36} height={92} rx={10} fill="rgba(15, 23, 42, 0.05)" />
             <rect x={RIGHT_BLOCK_X} y={14} width={RIGHT_BLOCK_WIDTH} height={92} rx={10} fill="rgba(15, 23, 42, 0.05)" />
             <line x1={0} y1={110} x2={320} y2={110} stroke="rgba(15, 23, 42, 0.14)" strokeWidth={1} />

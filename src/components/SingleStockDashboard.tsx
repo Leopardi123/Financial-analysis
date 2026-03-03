@@ -3563,7 +3563,13 @@ Capital Available: ${availableLabel}`,
                               ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
                               : null
                           }
-                          npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
+                          npvLow={
+                            (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency)
+                              ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency
+                              : null)
+                            ?? corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value
+                            ?? null
+                          }
                           npvHigh={
                             (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency)
                               ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency
@@ -3571,25 +3577,20 @@ Capital Available: ${availableLabel}`,
                             ?? corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value
                             ?? null
                           }
-                          tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
-                          tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
-                          tpMarkers={(() => {
-                            const modeledTimeline = (corporateSnapshotData?.modeledValuationTimeline ?? null) as {
-                              markers?: Array<{
-                                tp: number;
-                                yearLabelUsed: string | null;
-                                value_high: number | null;
-                                value_low: number | null;
-                              }>;
-                            } | null;
-                            if (!modeledTimeline || !Array.isArray(modeledTimeline.markers)) return undefined;
-                            return modeledTimeline.markers.map((marker) => ({
-                              tp: marker.tp,
-                              high: marker.value_high,
-                              low: marker.value_low,
-                              yearLabelUsed: marker.yearLabelUsed,
-                            }));
-                          })()}
+                          tpLow={
+                            (typeof corporateSnapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency)
+                              ? corporateSnapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency
+                              : null)
+                            ?? corporateViewMetrics.list2.DCF_perShare?.value
+                            ?? null
+                          }
+                          tpHigh={
+                            (typeof corporateSnapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency)
+                              ? corporateSnapshotData?.DCF_prodStart_exCapex_perShare_TargetCurrency
+                              : null)
+                            ?? corporateViewMetrics.list2.DCF_perShare?.value
+                            ?? null
+                          }
                           currencyCode={lockedTargetCurrency}
                         />
                       )}
