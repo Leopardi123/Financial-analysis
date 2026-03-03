@@ -164,5 +164,20 @@ export type CorporateSnapshot = {
   BookValue_perShare_USD_shares_post_financing: number | null;
 
   series?: CorporateSnapshotSeries;
+  modeledValuationTimeline?: {
+    tps: number[];
+    lastTp: number | null;
+    rangeEndTp: number | null;
+    markers: Array<{
+      tp: number;
+      yearLabelUsed: string | null;
+      corporateTpIndexUsed: number | null;
+      fcfTailSumUSD: number | null;
+      value_high: number | null;
+      value_low: number | null;
+      value_mid_if_any: number | null;
+      nullReasonIfAny: string | null;
+    }>;
+  };
 
 };

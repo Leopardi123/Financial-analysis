@@ -13,6 +13,7 @@ import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
+import { buildCorporateModeledValuationTimeline } from './corporateModeledValuationTimeline.ts';
 import { aggregateProjectsToCorporateTotals } from './aggregateProjectsToCorporateTotals.ts';
 import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
 import { canonicalUnitForMetal } from '../units/metalUnits.ts';
@@ -944,6 +945,21 @@ type SnapshotDiagnostics = {
         reasonIfUnavailable: string | null;
       }>;
     };
+    corporateModeledValuationTimeline?: {
+      tps: number[];
+      lastTp: number | null;
+      rangeEndTp: number | null;
+      markers: Array<{
+        tp: number;
+        yearLabelUsed: string | null;
+        corporateTpIndexUsed: number | null;
+        fcfTailSumUSD: number | null;
+        value_high: number | null;
+        value_low: number | null;
+        value_mid_if_any: number | null;
+        nullReasonIfAny: string | null;
+      }>;
+    };
   };
 };
 
@@ -1070,7 +1086,11 @@ export async function runCorporateSnapshotPipeline(args: {
 
           projectsForBuildFunding.push({
             projectId,
-            projectName: projectId,
+            projectName: (() => {
+              const meta = rawJsonRecord.meta as Record<string, unknown> | undefined;
+              const fromMeta = meta && typeof meta.projectName === 'string' ? meta.projectName : null;
+              return fromMeta ?? projectId;
+            })(),
             productionStartPeriod,
             periodEndDatesUtc,
             fdExtraShares: parsed.context.equity?.fdExtraShares ?? 0,
@@ -1774,9 +1794,26 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     snapshot.series = snapshotSeries;
+    snapshot.modeledValuationTimeline = buildCorporateModeledValuationTimeline({
+      projects: projectsForBuildFunding.map((project) => ({
+        productionStartPeriod: project.productionStartPeriod,
+        periodEndDatesUtc: project.periodEndDatesUtc,
+      })),
+      corporatePeriodEndDatesUtc: aggregation.corporatePeriodEndDatesUtc,
+      fcfUSD_total: aggregationEffective.fcffUSD_total,
+      masterN: aggregationEffective.corporateMasterN,
+      discountRate: input.discountRate,
+      shares_post_financing: shares_post_financing_fd_effective,
+      fx_USD_to_TargetCurrency: fxRate,
+      npvToday_USD: aggregationEffective.NPV_today_USD,
+    });
     snapshot.market = marketInput;
     snapshot.fx_USD_to_TargetCurrency = fxRate;
     snapshot.discountRate = input.discountRate;
+
+    if (debug) {
+      diagnostics.meta.corporateModeledValuationTimeline = snapshot.modeledValuationTimeline;
+    }
 
     return { ok: true, snapshot, diagnostics: finalizeDiagnostics(diagnostics) };
   } catch (error) {
