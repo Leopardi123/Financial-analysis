@@ -469,3 +469,41 @@ test('delayPeriods edge case tp_eff > masterN yields null dependent metrics with
   assert.equal(result.snapshot.Payback_real_years, null);
   assert.ok(result.diagnostics.errors.some((line) => line.includes('failure_reason=tp_eff')));
 });
+
+test('corporate modeled aggregates debt by project financing fractions and keeps new shares equity-only', async () => {
+  const body = await loadFixture();
+  const secondProject = JSON.parse(JSON.stringify((body.projects as Array<Record<string, unknown>>)[0])) as Record<string, unknown>;
+  secondProject.projectId = 'ABRA_MINIMAL_2';
+  const secondRaw = secondProject.rawJson as Record<string, unknown>;
+  (secondRaw.meta as Record<string, unknown>).projectId = 'ABRA_MINIMAL_2';
+  (secondRaw.meta as Record<string, unknown>).projectName = 'Abra Minimal 2';
+  ((secondRaw.series as Record<string, unknown>).capexUSD as number[])[0] = 100000000;
+  ((secondRaw.series as Record<string, unknown>).capexUSD as number[])[1] = 50000000;
+  (body.projects as Array<Record<string, unknown>>).push(secondProject);
+
+  body.financingPlan = {
+    equity_fraction: 0.5,
+    debt_fraction: 0.5,
+    equity_raise_price_TargetCurrency: 1,
+  };
+  body.financingPlanByProject = {
+    ABRA_MINIMAL: { equity_fraction: 0.5, debt_fraction: 0.5 },
+    ABRA_MINIMAL_2: { equity_fraction: 0.5, debt_fraction: 0.5 },
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const totalCapexToFinanceUSD = (200000000 + 120000000) + (100000000 + 50000000);
+  const expectedDebtUSD = totalCapexToFinanceUSD * 0.5;
+  const fx = (body.fx as Record<string, unknown>).manual_fx_USD_to_TargetCurrency as number;
+  const expectedNewShares = (totalCapexToFinanceUSD * 0.5 * fx) / 1;
+
+  const financingDebug = result.diagnostics.meta.corporateFinancingDebug;
+  assert.ok(financingDebug);
+  assert.ok(financingDebug?.totalDebt_USD !== null);
+  assert.ok(financingDebug?.totalNewShares !== null);
+  assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
+  assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
+});

@@ -3344,7 +3344,7 @@ Capital Available: ${availableLabel}`,
   const nullCount = (arr: unknown[]) => arr.filter((value) => value === null).length;
   const list2Debug = {
     DCF_prodStart_present_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_present_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency : null,
-    DCF_prodStart_present_perShare_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency : null,
+    DCF_prodStart_present_perShare_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency : null,
     DCF_prodStart_exCapex_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_exCapex_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_exCapex_TargetCurrency : null,
     DCF_prodStart_exCapex_perShare_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_exCapex_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_exCapex_perShare_TargetCurrency : null,
   };
@@ -3406,7 +3406,7 @@ Capital Available: ${availableLabel}`,
                       <section className="producer-core-section" style={{ marginTop: 8 }}>
                         <h3 className="subrub small">Market Box debug</h3>
                         <div className="compact-metrics-grid">
-                          {["shares_current", "shares_post_financing", "totalNewShares"].map((key) => (
+                          {["shares_current", "shares_post_financing", "totalNewShares", "totalDebt_USD", "totalDebt_TargetCurrency"].map((key) => (
                             <div key={`corp-debug-${key}`} className="compact-metric-row">
                               <span className="compact-metric-label">{key}</span>
                               <span className="compact-metric-dots" />
@@ -3418,6 +3418,7 @@ Capital Available: ${availableLabel}`,
                           {perProject.map((item) => (
                             <div key={`corp-debug-project-${String(item.projectId ?? "unknown")}`}>
                               <strong>{String(item.projectName ?? item.projectId ?? "unknown")}</strong>: newShares {typeof item.newShares === "number" ? item.newShares.toFixed(2) : "n/a"}
+                              {typeof item.debtAmount_USD === "number" ? `, debtUSD=${item.debtAmount_USD.toFixed(2)}` : ""}
                               {typeof item.equityFraction === "number" ? `, equity=${(item.equityFraction * 100).toFixed(0)}%` : ""}
                               {typeof item.debtFraction === "number" ? `, debt=${(item.debtFraction * 100).toFixed(0)}%` : ""}
                               {typeof item.reasonIfUnavailable === "string" && item.reasonIfUnavailable ? `, ${item.reasonIfUnavailable}` : ""}
@@ -3458,8 +3459,12 @@ Capital Available: ${availableLabel}`,
                     </div>
                     <p className="bread" style={{ marginTop: 8 }}>
                       {(() => {
-                        const totalDebtMetric = corporateViewMetrics.list5.TotalDebt;
-                        return `TotalDebt (aggregated): ${totalDebtMetric ? formatMetricValue(totalDebtMetric, "money", lockedTargetCurrency) : "n/a"}`;
+                        const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;
+                        const financingDebug = (diagnosticsMeta.corporateFinancingDebug ?? null) as Record<string, unknown> | null;
+                        const totalDebtTarget = typeof financingDebug?.totalDebt_TargetCurrency === "number"
+                          ? financingDebug.totalDebt_TargetCurrency
+                          : null;
+                        return `TotalDebt (aggregated): ${totalDebtTarget === null ? "n/a" : formatMetricValue({ value: totalDebtTarget, reason: null }, "money", lockedTargetCurrency)}`;
                       })()}
                     </p>
                   </details>
@@ -3480,7 +3485,13 @@ Capital Available: ${availableLabel}`,
                               : null
                           }
                           npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
-                          npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
+                          npvHigh={
+                            (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency)
+                              ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency
+                              : null)
+                            ?? corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value
+                            ?? null
+                          }
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
                           tpMarkers={(() => {
