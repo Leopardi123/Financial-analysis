@@ -1704,11 +1704,13 @@ export async function runCorporateSnapshotPipeline(args: {
         ? marketInput.shares_current + totalNewShares
         : null;
 
-    const debtPreTarget = input.balanceSheet?.debt_t0_TargetCurrency ?? null;
+    const debtPreTargetRaw = input.balanceSheet?.debt_t0_TargetCurrency;
+    const debtPreTarget =
+      typeof debtPreTargetRaw === 'number' && Number.isFinite(debtPreTargetRaw)
+        ? debtPreTargetRaw
+        : 0;
     const debtPostTarget =
-      typeof debtPreTarget === 'number'
-      && Number.isFinite(debtPreTarget)
-      && totalDebt_TargetCurrency !== null
+      totalDebt_TargetCurrency !== null
         ? debtPreTarget + totalDebt_TargetCurrency
         : financingEffective.debt_t0_post_TargetCurrency;
     const navTodayTarget =

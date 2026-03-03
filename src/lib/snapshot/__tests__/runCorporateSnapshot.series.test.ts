@@ -507,3 +507,31 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
 });
+
+
+test('corporate modeled NAV delta applies aggregated debt when balanceSheet is missing', async () => {
+  const body = await loadFixture();
+  delete (body as { balanceSheet?: unknown }).balanceSheet;
+
+  body.financingPlan = {
+    equity_fraction: 0.6,
+    debt_fraction: 0.4,
+    equity_raise_price_TargetCurrency: 1,
+  };
+  body.financingPlanByProject = {
+    ABRA_MINIMAL: { equity_fraction: 0.6, debt_fraction: 0.4 },
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const financingDebug = result.diagnostics.meta.corporateFinancingDebug;
+  assert.ok(financingDebug);
+  assert.ok(financingDebug?.totalDebt_TargetCurrency !== null);
+  assert.equal(financingDebug?.navEqCheck?.debt_t0_TargetCurrency, financingDebug?.totalDebt_TargetCurrency);
+  assert.equal(
+    financingDebug?.navEqCheck?.delta_NAV_minus_NPV,
+    -(financingDebug?.totalDebt_TargetCurrency as number),
+  );
+});
