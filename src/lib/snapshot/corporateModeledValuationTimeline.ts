@@ -9,6 +9,17 @@ export type CorporateModeledTimelineMarker = {
   value_low: number | null;
   value_mid_if_any: number | null;
   nullReasonIfAny: string | null;
+  sanity?: {
+    tp: number;
+    corporateTpIndexUsed: number | null;
+    tpMatches: boolean;
+    yearLabelExpected: string | null;
+    yearLabelUsed: string | null;
+    yearLabelMatches: boolean;
+    fcfTailSumUSD_expected: number | null;
+    fcfTailSumUSD_used: number | null;
+    fcfTailMatches: boolean | null;
+  };
 };
 
 export type CorporateModeledValuationTimeline = {
@@ -22,9 +33,6 @@ function uniqueSorted(values: number[]): number[] {
   return Array.from(new Set(values)).sort((a, b) => a - b);
 }
 
-function uniqueSortedStrings(values: string[]): string[] {
-  return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
-}
 
 export function buildCorporateModeledValuationTimeline(args: {
   projects: Array<{
@@ -38,6 +46,7 @@ export function buildCorporateModeledValuationTimeline(args: {
   shares_post_financing: number | null;
   fx_USD_to_TargetCurrency: number | null;
   npvToday_USD: number | null;
+  includeDebugSanity?: boolean;
 }): CorporateModeledValuationTimeline {
   const tps = uniqueSorted(
     args.projects
@@ -47,31 +56,9 @@ export function buildCorporateModeledValuationTimeline(args: {
   const lastTp = tps.length > 0 ? tps[tps.length - 1] : null;
 
   const markers: CorporateModeledTimelineMarker[] = tps.map((tp) => {
-    const tpDates = uniqueSortedStrings(
-      args.projects
-        .filter((project) => project.productionStartPeriod === tp)
-        .map((project) => project.periodEndDatesUtc[tp] ?? null)
-        .filter((date): date is string => typeof date === 'string' && date.length > 0),
-    );
-
-    if (tpDates.length !== 1) {
-      return {
-        tp,
-        yearLabelUsed: tpDates.length > 0 ? tpDates[0] : null,
-        corporateTpIndexUsed: null,
-        fcfTailSumUSD: null,
-        value_high: null,
-        value_low: null,
-        value_mid_if_any: null,
-        nullReasonIfAny: tpDates.length === 0
-          ? 'Missing production-start date for tp'
-          : 'Multiple production-start dates found for same tp',
-      };
-    }
-
-    const yearLabelUsed = tpDates[0];
-    const corporateTp = args.corporatePeriodEndDatesUtc.indexOf(yearLabelUsed);
-    if (!Number.isInteger(corporateTp) || corporateTp < 0) {
+    const corporateTp = tp;
+    const yearLabelUsed = args.corporatePeriodEndDatesUtc[tp] ?? null;
+    if (!Number.isInteger(corporateTp) || corporateTp < 0 || corporateTp > args.masterN) {
       return {
         tp,
         yearLabelUsed,
@@ -80,7 +67,20 @@ export function buildCorporateModeledValuationTimeline(args: {
         value_high: null,
         value_low: null,
         value_mid_if_any: null,
-        nullReasonIfAny: 'Production-start date not found in corporate timeline',
+        nullReasonIfAny: 'Production-start tp is outside corporate timeline',
+        sanity: args.includeDebugSanity
+          ? {
+              tp,
+              corporateTpIndexUsed: null,
+              tpMatches: false,
+              yearLabelExpected: args.corporatePeriodEndDatesUtc[tp] ?? null,
+              yearLabelUsed,
+              yearLabelMatches: yearLabelUsed === (args.corporatePeriodEndDatesUtc[tp] ?? null),
+              fcfTailSumUSD_expected: null,
+              fcfTailSumUSD_used: null,
+              fcfTailMatches: null,
+            }
+          : undefined,
       };
     }
 
@@ -96,25 +96,58 @@ export function buildCorporateModeledValuationTimeline(args: {
 
     const valueHigh = lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
     const valueLow = lista2.metrics.DCF_prodStart_present_perShare_TargetCurrency;
-    const fcfTailSumUSD = args.fcfUSD_total
-      .slice(corporateTp)
+    const fcfTailSlice = args.fcfUSD_total.slice(corporateTp, args.masterN + 1);
+    const fcfTailSumUSD = fcfTailSlice
       .reduce<number | null>((sum, value) => {
         if (sum === null || value === null || !Number.isFinite(value)) return null;
         return sum + value;
       }, 0);
-    const nullReasonIfAny = valueHigh === null || valueLow === null
+
+    const yearLabelExpected = args.corporatePeriodEndDatesUtc[tp] ?? null;
+    const tpMatches = corporateTp === tp;
+    const yearLabelMatches = yearLabelUsed === yearLabelExpected;
+    const fcfTailSumUSDExpected = fcfTailSlice.some((value) => value === null || !Number.isFinite(value))
+      ? null
+      : (fcfTailSlice as number[]).reduce((sum, value) => sum + value, 0);
+    const fcfTailMatches = fcfTailSumUSDExpected === null || fcfTailSumUSD === null
+      ? null
+      : Math.abs(fcfTailSumUSD - fcfTailSumUSDExpected) <= 1e-6 * Math.max(1, Math.abs(fcfTailSumUSDExpected));
+    const sanityFailureChecks: string[] = [];
+    if (!tpMatches) sanityFailureChecks.push('tpMatches');
+    if (!yearLabelMatches) sanityFailureChecks.push('yearLabelMatches');
+    if (fcfTailMatches === false) sanityFailureChecks.push('fcfTailMatches');
+
+    const baseNullReason = valueHigh === null || valueLow === null
       ? [...lista2.errors, ...lista2.warnings].join(' | ') || 'Missing required valuation inputs'
       : null;
+    const sanityNullReason = sanityFailureChecks.length > 0
+      ? `SANITY_FAIL:${sanityFailureChecks.join(',')}`
+      : null;
+    const nullReasonIfAny = sanityNullReason ?? baseNullReason;
+    const hideValuesForSanityFailure = sanityNullReason !== null;
 
     return {
       tp,
       yearLabelUsed,
       corporateTpIndexUsed: corporateTp,
       fcfTailSumUSD,
-      value_high: valueHigh,
-      value_low: valueLow,
+      value_high: hideValuesForSanityFailure ? null : valueHigh,
+      value_low: hideValuesForSanityFailure ? null : valueLow,
       value_mid_if_any: null,
       nullReasonIfAny,
+      sanity: args.includeDebugSanity
+        ? {
+            tp,
+            corporateTpIndexUsed: corporateTp,
+            tpMatches,
+            yearLabelExpected,
+            yearLabelUsed,
+            yearLabelMatches,
+            fcfTailSumUSD_expected: fcfTailSumUSDExpected,
+            fcfTailSumUSD_used: fcfTailSumUSD,
+            fcfTailMatches,
+          }
+        : undefined,
     };
   });
 

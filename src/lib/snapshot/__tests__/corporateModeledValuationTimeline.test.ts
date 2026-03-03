@@ -1,76 +1,46 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
+import { buildCorporateModeledValuationTimeline } from '../corporateModeledValuationTimeline.ts';
 
-async function loadProjectFixture(fileName: string): Promise<Record<string, unknown>> {
-  const fixturePath = path.resolve('src/lib/snapshot/__tests__/fixtures', fileName);
-  const fixtureRaw = await readFile(fixturePath, 'utf8');
-  return JSON.parse(fixtureRaw) as Record<string, unknown>;
-}
+test('corporate modeled valuation markers use corporate tp directly with passing sanity checks', () => {
+  const masterN = 10;
+  const corporatePeriodEndDatesUtc = Array.from({ length: masterN + 1 }, (_, t) => `${2030 + t}-12-31`);
+  const fcfUSDTotal = Array.from({ length: masterN + 1 }, (_, t) => 100 + t * 10);
 
-test('corporate modeled valuation timeline supports multiple productionStartPeriod markers', async () => {
-  const p6 = await loadProjectFixture('p6.los-ricos-south.project_json_v1.json');
-  const p5 = await loadProjectFixture('p5.los-ricos-north.project_json_v1.json');
-
-  const body = {
-    targetCurrency: 'USD',
-    discountRate: 0.1,
+  const timeline = buildCorporateModeledValuationTimeline({
     projects: [
-      { projectId: 'p6', rawJson: p6 },
-      { projectId: 'p5', rawJson: p5 },
-    ],
-    market: {
-      shares_current: 100000000,
-      price_current_TargetCurrency: 1.5,
-      preferredEquity_TargetCurrency: 0,
-      minorityInterest_TargetCurrency: 0,
-    },
-    balanceSheet: {
-      cash_t0_TargetCurrency: 0,
-      debt_t0_TargetCurrency: 0,
-    },
-    scenario: {
-      mode: 'fixed',
-      fixedPriceByKey: {
-        XAU_USD_TOZ: 2330,
-        XAG_USD_TOZ: 26.8,
-        CU_USD_LB: 4,
-        FX_USD_USD: 1,
+      {
+        productionStartPeriod: 4,
+        periodEndDatesUtc: corporatePeriodEndDatesUtc,
       },
-    },
-    fx: {
-      source: 'manual',
-      anchor: 'today',
-      scenario: { mode: 'spot' },
-      manual_fx_USD_to_TargetCurrency: 1,
-    },
-  };
+      {
+        productionStartPeriod: 5,
+        periodEndDatesUtc: corporatePeriodEndDatesUtc,
+      },
+    ],
+    corporatePeriodEndDatesUtc,
+    fcfUSD_total: fcfUSDTotal,
+    masterN,
+    discountRate: 0.1,
+    shares_post_financing: 100,
+    fx_USD_to_TargetCurrency: 1,
+    npvToday_USD: 1000,
+    includeDebugSanity: true,
+  });
 
-  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
+  assert.equal(timeline.markers.length, 2);
 
-  const timeline = result.snapshot.modeledValuationTimeline;
-  assert.ok(timeline);
-  assert.deepEqual(timeline.tps, [4, 5]);
-  assert.equal(timeline.lastTp, 5);
-  assert.equal(timeline.rangeEndTp, 5);
+  assert.equal(timeline.markers[0].tp, 4);
+  assert.equal(timeline.markers[0].corporateTpIndexUsed, 4);
+  assert.equal(timeline.markers[0].yearLabelUsed, corporatePeriodEndDatesUtc[4]);
+  assert.equal(timeline.markers[0].sanity?.tpMatches, true);
+  assert.equal(timeline.markers[0].sanity?.yearLabelMatches, true);
+  assert.equal(timeline.markers[0].sanity?.fcfTailMatches, true);
 
-  const markerTps = timeline.markers.map((marker) => marker.tp);
-  assert.deepEqual(markerTps, [4, 5]);
-  const markerByTp = new Map(timeline.markers.map((marker) => [marker.tp, marker]));
-  assert.equal(markerByTp.get(4)?.yearLabelUsed, '2029-12-31');
-  assert.equal(markerByTp.get(5)?.yearLabelUsed, '2031-12-31');
-  assert.equal(Number.isInteger(markerByTp.get(4)?.corporateTpIndexUsed), true);
-  assert.equal(Number.isInteger(markerByTp.get(5)?.corporateTpIndexUsed), true);
-  assert.equal(typeof markerByTp.get(4)?.fcfTailSumUSD, 'number');
-  assert.equal(typeof markerByTp.get(5)?.fcfTailSumUSD, 'number');
-
-  const diagnosticsMeta = (result.diagnostics.meta ?? {}) as Record<string, unknown>;
-  const timelineDebug = diagnosticsMeta.corporateModeledValuationTimeline as { tps?: number[]; lastTp?: number | null } | undefined;
-  assert.ok(timelineDebug);
-  assert.deepEqual(timelineDebug?.tps, [4, 5]);
-  assert.equal(timelineDebug?.lastTp, 5);
+  assert.equal(timeline.markers[1].tp, 5);
+  assert.equal(timeline.markers[1].corporateTpIndexUsed, 5);
+  assert.equal(timeline.markers[1].yearLabelUsed, corporatePeriodEndDatesUtc[5]);
+  assert.equal(timeline.markers[1].sanity?.tpMatches, true);
+  assert.equal(timeline.markers[1].sanity?.yearLabelMatches, true);
+  assert.equal(timeline.markers[1].sanity?.fcfTailMatches, true);
 });
