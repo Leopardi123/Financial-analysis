@@ -123,6 +123,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [tickerProgressPercentShown, setTickerProgressPercentShown] = useState(0);
   const [debugParamEnabled, setDebugParamEnabled] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("debug") === "1") return true;
     return window.localStorage.getItem("admin.debugParamEnabled") === "1";
   });
 
@@ -558,6 +560,18 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     }
     window.open(appUrl.toString(), "_blank", "noopener,noreferrer");
   }
+  function handleDebugParamToggle(nextEnabled: boolean) {
+    setDebugParamEnabled(nextEnabled);
+    if (typeof window === "undefined") return;
+    const appUrl = new URL(window.location.href);
+    if (nextEnabled) {
+      appUrl.searchParams.set("debug", "1");
+    } else {
+      appUrl.searchParams.delete("debug");
+    }
+    window.history.replaceState({}, "", `${appUrl.pathname}${appUrl.search}${appUrl.hash}`);
+  }
+
 
   return (
     <div className="admin">
@@ -859,7 +873,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               <input
                 type="checkbox"
                 checked={debugParamEnabled}
-                onChange={(event) => setDebugParamEnabled(event.target.checked)}
+                onChange={(event) => handleDebugParamToggle(event.target.checked)}
               />
               Debug (debug=1)
             </label>

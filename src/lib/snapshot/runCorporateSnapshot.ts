@@ -1706,10 +1706,12 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const debtPreTarget = input.balanceSheet?.debt_t0_TargetCurrency ?? null;
     const debtPostTarget =
-      typeof debtPreTarget === 'number'
-      && Number.isFinite(debtPreTarget)
-      && totalDebt_TargetCurrency !== null
-        ? debtPreTarget + totalDebt_TargetCurrency
+      totalDebt_TargetCurrency !== null
+        ? (
+            typeof debtPreTarget === 'number' && Number.isFinite(debtPreTarget)
+              ? debtPreTarget + totalDebt_TargetCurrency
+              : totalDebt_TargetCurrency
+          )
         : financingEffective.debt_t0_post_TargetCurrency;
     const navTodayTarget =
       financingEffective.NPV_today_TargetCurrency === null
