@@ -33,6 +33,20 @@ function formatTemplate(projectId: string, projectName: string): string {
   return JSON.stringify(template, null, 2);
 }
 
+function readRootTime(root: Record<string, unknown>): Record<string, unknown> | null {
+  const time = root.time;
+  if (typeof time !== 'object' || time === null || Array.isArray(time)) {
+    return null;
+  }
+  return time as Record<string, unknown>;
+}
+
+function parseStrictYear(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1900 && value <= 2200
+    ? value
+    : null;
+}
+
 
 function validateProjectJson(rawJson: string): ValidationState {
   let parsed: unknown;
@@ -64,8 +78,32 @@ function validateProjectJson(rawJson: string): ValidationState {
   }
 
   const version = (root as Record<string, unknown>).version;
-  if (version !== 'project_json_v1') {
-    return { ok: false, error: 'raw.version must be "project_json_v1".', warning: null, parsed: null };
+  if (version !== 'project_json_v2') {
+    return {
+      ok: false,
+      error: 'raw.version must be "project_json_v2". Update version to project_json_v2 and add time.productionStartYear.',
+      warning: null,
+      parsed: null,
+    };
+  }
+
+  const time = readRootTime(root as Record<string, unknown>);
+  if (!time) {
+    return { ok: false, error: 'time must be an object and include time.productionStartYear.', warning: null, parsed: null };
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(time, 'productionStartYear')) {
+    return { ok: false, error: 'time.productionStartYear is required for project_json_v2.', warning: null, parsed: null };
+  }
+
+  const productionStartYear = parseStrictYear(time.productionStartYear);
+  if (productionStartYear === null) {
+    return {
+      ok: false,
+      error: 'time.productionStartYear must be a 4-digit integer in range 1900–2200.',
+      warning: null,
+      parsed: null,
+    };
   }
 
   try {
@@ -102,6 +140,38 @@ export default function CompanyProjectsEditorPage() {
   const [delayTargetYearInput, setDelayTargetYearInput] = useState('');
 
   const parsedValidation = useMemo(() => validateProjectJson(rawJsonInput), [rawJsonInput]);
+  const parsedTime = useMemo(() => {
+    if (!parsedValidation.ok || !parsedValidation.parsed) {
+      return null;
+    }
+    return readRootTime(parsedValidation.parsed);
+  }, [parsedValidation]);
+  const productionStartPeriodValue = useMemo(
+    () => (Number.isInteger(parsedTime?.productionStartPeriod) ? String(parsedTime?.productionStartPeriod) : ''),
+    [parsedTime],
+  );
+  const productionStartYearValue = useMemo(
+    () => (Number.isInteger(parsedTime?.productionStartYear) ? String(parsedTime?.productionStartYear) : ''),
+    [parsedTime],
+  );
+
+  function updateTimeField(field: 'productionStartPeriod' | 'productionStartYear', value: number): void {
+    if (!parsedValidation.ok || !parsedValidation.parsed) {
+      setEditorError(parsedValidation.error ?? 'Fix JSON validation errors before editing time fields.');
+      return;
+    }
+
+    const nextRoot = JSON.parse(JSON.stringify(parsedValidation.parsed)) as Record<string, unknown>;
+    const time = readRootTime(nextRoot);
+    if (!time) {
+      setEditorError('time must be an object in raw JSON.');
+      return;
+    }
+
+    time[field] = value;
+    setRawJsonInput(JSON.stringify(nextRoot, null, 2));
+    setEditorError(null);
+  }
 
   async function refreshList(nextSelectedProjectId?: string): Promise<CompanyProjectSummary[]> {
     if (!symbol) {
@@ -146,7 +216,7 @@ export default function CompanyProjectsEditorPage() {
     setLoadingProject(true);
     try {
       const project = await getCompanyProject(symbol, projectId);
-      const rawJson = JSON.stringify(buildProjectJsonV1Template(project.raw_json as never), null, 2);
+      const rawJson = JSON.stringify(project.raw_json, null, 2);
       setIsNewDraft(false);
       setSelectedProjectId(project.project_id);
       setProjectIdInput(project.project_id);
@@ -371,6 +441,37 @@ export default function CompanyProjectsEditorPage() {
             <label>
               <span>project_name</span>
               <input type="text" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} />
+            </label>
+            <label>
+              <span>time.productionStartPeriod (tp)</span>
+              <input
+                type="number"
+                value={productionStartPeriodValue}
+                onChange={(event) => {
+                  const next = Number.parseInt(event.target.value, 10);
+                  if (!Number.isInteger(next) || next < 0) {
+                    setEditorError('time.productionStartPeriod must be an integer >= 0.');
+                    return;
+                  }
+                  updateTimeField('productionStartPeriod', next);
+                }}
+              />
+            </label>
+            <label>
+              <span>time.productionStartYear (required)</span>
+              <input
+                type="number"
+                required
+                value={productionStartYearValue}
+                onChange={(event) => {
+                  const next = Number.parseInt(event.target.value, 10);
+                  if (!Number.isInteger(next) || next < 1900 || next > 2200) {
+                    setEditorError('time.productionStartYear must be a 4-digit integer in range 1900–2200.');
+                    return;
+                  }
+                  updateTimeField('productionStartYear', next);
+                }}
+              />
             </label>
           </div>
 
