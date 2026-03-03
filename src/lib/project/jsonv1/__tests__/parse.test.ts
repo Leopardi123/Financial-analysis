@@ -65,7 +65,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
 
   const wrongVersion = getProjectJsonV1Template();
   (wrongVersion as { version: string }).version = 'wrong';
-  assertThrows(() => parseProjectJsonV1(wrongVersion), /version/, 'throws on wrong version');
+  assertThrows(() => parseProjectJsonV1(wrongVersion), /Only project_json_v2 supported in rolling model\./, 'throws on wrong version');
 
   const badMasterN = getProjectJsonV1Template();
   (badMasterN.time as { masterN: number | string }).masterN = 1.2;
@@ -170,8 +170,8 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   );
 
   const negativeQty = getProjectJsonV1Template();
-  negativeQty.metals.payableQtyByMetal.Au[1] = -1;
-  assertThrows(() => parseProjectJsonV1(negativeQty), /payableQtyByMetal\.Au\[1\]/, 'throws on negative payable qty');
+  negativeQty.metals.payableQtyByMetal.Au[2] = -1;
+  assertThrows(() => parseProjectJsonV1(negativeQty), /payableQtyByMetal\.Au\[2\]/, 'throws on negative payable qty');
 
   const legacy = getProjectJsonV1Template();
   legacy.metals.spotPriceUSDByMetal = { Au: new Array(legacy.time.masterN + 1).fill(10), Cu: new Array(legacy.time.masterN + 1).fill(4) };
@@ -231,6 +231,8 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   if (sparseOperations.operations == null) {
     throw new Error('template.operations must be present');
   }
+  sparseOperations.time.productionStartPeriod = 0;
+  sparseOperations.time.productionStartYear = Number.parseInt((sparseOperations.time.periodEndDatesUtc ?? ['2026-12-31'])[0].slice(0, 4), 10);
   sparseOperations.operations.oreMilledTonnes = [10, 20];
   const parsedSparseOperations = parseProjectJsonV1(sparseOperations);
   assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.length, 6, 'sparse operations series padded to masterN+1');
