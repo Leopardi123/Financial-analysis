@@ -936,14 +936,24 @@ type SnapshotDiagnostics = {
       shares_current: number | null;
       shares_post_financing: number | null;
       totalNewShares: number | null;
+      totalDebt_USD: number | null;
+      totalDebt_TargetCurrency: number | null;
       perProjectNewShares: Array<{
         projectId: string;
         projectName: string;
         equityFraction: number | null;
         debtFraction: number | null;
         newShares: number | null;
+        debtAmount_USD: number | null;
         reasonIfUnavailable: string | null;
       }>;
+      navEqCheck?: {
+        NPV_today_TargetCurrency: number | null;
+        cash_t0_TargetCurrency: number | null;
+        debt_t0_TargetCurrency: number | null;
+        NAV_today_TargetCurrency: number | null;
+        delta_NAV_minus_NPV: number | null;
+      };
     };
     corporateModeledValuationTimeline?: {
       tps: number[];
@@ -1583,7 +1593,8 @@ export async function runCorporateSnapshotPipeline(args: {
           equityFraction,
           debtFraction,
           newShares: null,
-          reasonIfUnavailable: 'newShares not computed: missing inputs project capex series',
+          debtAmount_USD: null,
+          reasonIfUnavailable: 'project financing not computed: missing inputs project capex series',
         };
       }
       const capexBeforeProduction = projectCapexSeries.slice(0, Math.max(0, project.productionStartPeriod));
@@ -1594,7 +1605,8 @@ export async function runCorporateSnapshotPipeline(args: {
           equityFraction,
           debtFraction,
           newShares: null,
-          reasonIfUnavailable: 'newShares not computed: missing inputs capexUSD build-window values',
+          debtAmount_USD: null,
+          reasonIfUnavailable: 'project financing not computed: missing inputs capexUSD build-window values',
         };
       }
 
@@ -1605,7 +1617,8 @@ export async function runCorporateSnapshotPipeline(args: {
           equityFraction,
           debtFraction,
           newShares: null,
-          reasonIfUnavailable: 'newShares not computed: missing inputs fx_USD_to_TargetCurrency',
+          debtAmount_USD: null,
+          reasonIfUnavailable: 'project financing not computed: missing inputs fx_USD_to_TargetCurrency',
         };
       }
 
@@ -1617,25 +1630,27 @@ export async function runCorporateSnapshotPipeline(args: {
           equityFraction,
           debtFraction,
           newShares: null,
-          reasonIfUnavailable: 'newShares not computed: missing inputs equity_raise_price_TargetCurrency_perShare',
+          debtAmount_USD: null,
+          reasonIfUnavailable: 'project financing not computed: missing inputs equity_raise_price_TargetCurrency_perShare',
         };
       }
 
-      if (equityFraction === null) {
+      if (equityFraction === null || debtFraction === null) {
         return {
           projectId: project.projectId,
           projectName: project.projectName,
           equityFraction,
           debtFraction,
           newShares: null,
-          reasonIfUnavailable: 'newShares not computed: missing inputs equity_fraction',
+          debtAmount_USD: null,
+          reasonIfUnavailable: 'project financing not computed: missing inputs equity_fraction or debt_fraction',
         };
       }
 
       let negativeCapexSumProject = 0;
       let positiveCapexSumProject = 0;
       for (const capexValue of capexBeforeProduction) {
-        if (typeof capexValue !== "number" || !Number.isFinite(capexValue)) {
+        if (typeof capexValue !== 'number' || !Number.isFinite(capexValue)) {
           continue;
         }
         if (capexValue < 0) {
@@ -1646,18 +1661,21 @@ export async function runCorporateSnapshotPipeline(args: {
         }
       }
 
-      const buildFundingNeedProjectUSD = Math.abs(negativeCapexSumProject) > 0
+      const projectCapexToFinance_USD = Math.abs(negativeCapexSumProject) > 0
         ? Math.abs(negativeCapexSumProject)
         : positiveCapexSumProject > 0
           ? positiveCapexSumProject
           : 0;
-      const equityNeedTarget = buildFundingNeedProjectUSD * fxRate * equityFraction;
+      const equityAmount_USD = projectCapexToFinance_USD * equityFraction;
+      const debtAmount_USD = projectCapexToFinance_USD * debtFraction;
+      const equityNeedTarget = equityAmount_USD * fxRate;
       return {
         projectId: project.projectId,
         projectName: project.projectName,
         equityFraction,
         debtFraction,
         newShares: equityNeedTarget / raisePrice,
+        debtAmount_USD,
         reasonIfUnavailable: null,
       };
     });
@@ -1666,6 +1684,18 @@ export async function runCorporateSnapshotPipeline(args: {
     const totalNewShares = hasUnavailableProjectShares
       ? null
       : perProjectNewShares.reduce((sum: number, project) => sum + (project.newShares as number), 0);
+    const hasUnavailableProjectDebt = perProjectNewShares.some((project) => project.debtAmount_USD === null);
+    const totalDebt_USD = hasUnavailableProjectDebt
+      ? null
+      : perProjectNewShares.reduce((sum: number, project) => sum + (project.debtAmount_USD as number), 0);
+    const totalDebt_TargetCurrency =
+      totalDebt_USD !== null
+      && fxRate !== null
+      && Number.isFinite(fxRate)
+      && fxRate > 0
+        ? totalDebt_USD * fxRate
+        : null;
+
     const sharesPostFinancingAggregated =
       typeof marketInput.shares_current === 'number'
       && Number.isFinite(marketInput.shares_current)
@@ -1674,14 +1704,19 @@ export async function runCorporateSnapshotPipeline(args: {
         ? marketInput.shares_current + totalNewShares
         : null;
 
-    if (debug) {
-      diagnostics.meta.corporateFinancingDebug = {
-        shares_current: marketInput.shares_current,
-        shares_post_financing: sharesPostFinancingAggregated ?? financingEffective.shares_post_financing,
-        totalNewShares,
-        perProjectNewShares,
-      };
-    }
+    const debtPreTarget = input.balanceSheet?.debt_t0_TargetCurrency ?? null;
+    const debtPostTarget =
+      typeof debtPreTarget === 'number'
+      && Number.isFinite(debtPreTarget)
+      && totalDebt_TargetCurrency !== null
+        ? debtPreTarget + totalDebt_TargetCurrency
+        : financingEffective.debt_t0_post_TargetCurrency;
+    const navTodayTarget =
+      financingEffective.NPV_today_TargetCurrency === null
+      || financingEffective.cash_t0_post_TargetCurrency === null
+      || debtPostTarget === null
+        ? null
+        : financingEffective.NPV_today_TargetCurrency + (financingEffective.cash_t0_post_TargetCurrency - debtPostTarget);
 
     const sharesPostFinancingForSnapshot = sharesPostFinancingAggregated ?? financingEffective.shares_post_financing;
     const shares_post_financing_fd_effective =
@@ -1691,7 +1726,44 @@ export async function runCorporateSnapshotPipeline(args: {
         ? sharesPostFinancingForSnapshot + totalFdExtraShares
         : null;
 
-    const financingSnapshot = { ...financingEffective, shares_post_financing: sharesPostFinancingForSnapshot };
+    const financingSnapshot = {
+      ...financingEffective,
+      new_debt_TargetCurrency: totalDebt_TargetCurrency ?? financingEffective.new_debt_TargetCurrency,
+      debt_t0_post_TargetCurrency: debtPostTarget,
+      debt_TargetCurrency_t0: debtPostTarget,
+      NAV_today_TargetCurrency: navTodayTarget,
+      navToday_TargetCurrency: navTodayTarget,
+      netCash_TargetCurrency_t0:
+        financingEffective.cash_t0_post_TargetCurrency === null || debtPostTarget === null
+          ? financingEffective.netCash_TargetCurrency_t0
+          : financingEffective.cash_t0_post_TargetCurrency - debtPostTarget,
+      evAdditive_Component_TargetCurrency_t0:
+        financingEffective.cash_t0_post_TargetCurrency === null || debtPostTarget === null
+          ? financingEffective.evAdditive_Component_TargetCurrency_t0
+          : debtPostTarget - financingEffective.cash_t0_post_TargetCurrency,
+      shares_post_financing: sharesPostFinancingForSnapshot,
+    };
+
+    if (debug) {
+      diagnostics.meta.corporateFinancingDebug = {
+        shares_current: marketInput.shares_current,
+        shares_post_financing: sharesPostFinancingForSnapshot,
+        totalNewShares,
+        totalDebt_USD,
+        totalDebt_TargetCurrency,
+        perProjectNewShares,
+        navEqCheck: {
+          NPV_today_TargetCurrency: financingSnapshot.NPV_today_TargetCurrency,
+          cash_t0_TargetCurrency: financingSnapshot.cash_t0_post_TargetCurrency,
+          debt_t0_TargetCurrency: financingSnapshot.debt_t0_post_TargetCurrency,
+          NAV_today_TargetCurrency: financingSnapshot.NAV_today_TargetCurrency,
+          delta_NAV_minus_NPV:
+            financingSnapshot.NAV_today_TargetCurrency === null || financingSnapshot.NPV_today_TargetCurrency === null
+              ? null
+              : financingSnapshot.NAV_today_TargetCurrency - financingSnapshot.NPV_today_TargetCurrency,
+        },
+      };
+    }
 
     const delayDiagnostics: DelayScenarioDiagnostics = {
       k: delayPeriods,
