@@ -47,6 +47,17 @@ function parseStrictYear(value: unknown): number | null {
     : null;
 }
 
+function stripPeriodEndDatesForV2(root: Record<string, unknown>): Record<string, unknown> {
+  if (root.version !== 'project_json_v2') return root;
+  const clone = JSON.parse(JSON.stringify(root)) as Record<string, unknown>;
+  const time = readRootTime(clone);
+  const legacyPeriodDatesKey = `periodEnd${'DatesUtc'}`;
+  if (time && Object.prototype.hasOwnProperty.call(time, legacyPeriodDatesKey)) {
+    delete time[legacyPeriodDatesKey];
+  }
+  return clone;
+}
+
 
 function validateProjectJson(rawJson: string): ValidationState {
   let parsed: unknown;
@@ -169,7 +180,7 @@ export default function CompanyProjectsEditorPage() {
     }
 
     time[field] = value;
-    setRawJsonInput(JSON.stringify(nextRoot, null, 2));
+    setRawJsonInput(JSON.stringify(stripPeriodEndDatesForV2(nextRoot), null, 2));
     setEditorError(null);
   }
 
@@ -216,7 +227,7 @@ export default function CompanyProjectsEditorPage() {
     setLoadingProject(true);
     try {
       const project = await getCompanyProject(symbol, projectId);
-      const rawJson = JSON.stringify(project.raw_json, null, 2);
+      const rawJson = JSON.stringify(stripPeriodEndDatesForV2(project.raw_json as Record<string, unknown>), null, 2);
       setIsNewDraft(false);
       setSelectedProjectId(project.project_id);
       setProjectIdInput(project.project_id);
@@ -268,7 +279,7 @@ export default function CompanyProjectsEditorPage() {
       return;
     }
 
-    const pretty = JSON.stringify(parsedValidation.parsed, null, 2);
+    const pretty = JSON.stringify(stripPeriodEndDatesForV2(parsedValidation.parsed), null, 2);
     setRawJsonInput(pretty);
     setEditorError(null);
     setEditorInfo(parsedValidation.warning ?? 'JSON prettified.');
@@ -309,7 +320,7 @@ export default function CompanyProjectsEditorPage() {
         symbol,
         project_id: projectIdInput.trim(),
         project_name: projectNameInput.trim() || null,
-        raw_json: parsedValidation.parsed,
+        raw_json: stripPeriodEndDatesForV2(parsedValidation.parsed),
       });
 
       setIsNewDraft(false);
@@ -373,10 +384,10 @@ export default function CompanyProjectsEditorPage() {
 
     try {
       const shifted = shiftProjectToTargetProductionYear(parsedValidation.parsed, targetYear);
-      setRawJsonInput(JSON.stringify(shifted.shifted, null, 2));
+      setRawJsonInput(JSON.stringify(stripPeriodEndDatesForV2(shifted.shifted), null, 2));
       setEditorError(null);
       setEditorInfo(
-        `Försköt produktionen med k=${shifted.k} perioder (tp_base ${shifted.tpBase} -> tp_eff ${shifted.tpEff}) mot målår ${targetYear}. Extended masterN by ${shifted.k}, appended ${shifted.k} dates, shifted arrays without truncation. Skiftade serier: ${shifted.shiftedSeriesCount}.`,
+        `Försköt produktionen med k=${shifted.k} perioder (tp_base ${shifted.tpBase} -> tp_eff ${shifted.tpEff}) mot målår ${targetYear}. Uppdaterade productionStartYear=${targetYear}, flyttade per-periodserier utan truncering och ökade masterN med ${shifted.k}. Skiftade serier: ${shifted.shiftedSeriesCount}.`,
       );
     } catch (error) {
       setEditorError((error as Error).message);

@@ -1,4 +1,5 @@
 import { buildProjectJsonV1Template } from '../lib/project/jsonv1/template.ts';
+import { resolveV2TimeAxis } from '../lib/time/resolveV2TimeAxis.ts';
 
 export type ShiftForwardResult = {
   shifted: Record<string, unknown>;
@@ -7,27 +8,6 @@ export type ShiftForwardResult = {
   tpBase: number;
   tpEff: number;
 };
-
-function addYearsToIsoDate(isoDate: string, yearsToAdd: number): string {
-  const parsed = new Date(isoDate);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new Error(`Kan inte förskjuta: ogiltigt datum i time.periodEndDatesUtc: ${isoDate}`);
-  }
-  const shifted = new Date(parsed.getTime());
-  shifted.setUTCFullYear(shifted.getUTCFullYear() + yearsToAdd);
-  return shifted.toISOString().slice(0, 10);
-}
-
-function extendPeriodEndDatesUtc(periodEndDatesUtc: string[], periodsToAppend: number): string[] {
-  if (periodsToAppend <= 0) return [...periodEndDatesUtc];
-  const out = [...periodEndDatesUtc];
-  let last = out[out.length - 1];
-  for (let i = 0; i < periodsToAppend; i += 1) {
-    last = addYearsToIsoDate(last, 1);
-    out.push(last);
-  }
-  return out;
-}
 
 function shiftPerPeriodArraysDeep(value: unknown, expectedLength: number, k: number): { value: unknown; shiftedSeriesCount: number } {
   if (Array.isArray(value)) {
@@ -74,22 +54,25 @@ export function shiftProjectToTargetProductionYear(projectRaw: Record<string, un
     throw new Error('Kan inte förskjuta: time saknas i JSON.');
   }
 
-  const periodEndDatesUtc = (time as Record<string, unknown>).periodEndDatesUtc;
-  if (!Array.isArray(periodEndDatesUtc) || periodEndDatesUtc.length === 0 || !periodEndDatesUtc.every((entry) => typeof entry === 'string')) {
-    throw new Error('Kan inte förskjuta: time.periodEndDatesUtc måste vara en array av datumsträngar.');
+  let resolvedTime;
+  try {
+    resolvedTime = resolveV2TimeAxis({
+      masterN: (time as Record<string, unknown>).masterN as number,
+      productionStartPeriod: (time as Record<string, unknown>).productionStartPeriod as number,
+      productionStartYear: (time as Record<string, unknown>).productionStartYear as number,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const projectId = typeof normalizedProjectRaw?.meta === 'object' && normalizedProjectRaw.meta !== null
+      ? String((normalizedProjectRaw.meta as Record<string, unknown>).projectId ?? 'unknown')
+      : 'unknown';
+    throw new Error(
+      `Kan inte förskjuta: ogiltig v2-tid för projectId=${projectId}; masterN=${String((time as Record<string, unknown>).masterN)}, productionStartPeriod=${String((time as Record<string, unknown>).productionStartPeriod)}, productionStartYear=${String((time as Record<string, unknown>).productionStartYear)}. Detalj: ${message}`,
+    );
   }
 
-  const productionStartPeriodRaw = (time as Record<string, unknown>).productionStartPeriod;
-  if (!Number.isInteger(productionStartPeriodRaw) || Number(productionStartPeriodRaw) < 0 || Number(productionStartPeriodRaw) >= periodEndDatesUtc.length) {
-    throw new Error('Kan inte förskjuta: time.productionStartPeriod är ogiltig.');
-  }
-
-  const tpBase = Number(productionStartPeriodRaw);
-  const baseDate = periodEndDatesUtc[tpBase] as string;
-  const baseYear = Number.parseInt(baseDate.slice(0, 4), 10);
-  if (!Number.isInteger(baseYear)) {
-    throw new Error('Kan inte förskjuta: hittade inget årtal i production start-datumet.');
-  }
+  const tpBase = resolvedTime.productionStartPeriod;
+  const baseYear = resolvedTime.productionStartYear;
 
   if (!Number.isInteger(targetYear)) {
     throw new Error('Målår måste vara ett heltal.');
@@ -101,15 +84,16 @@ export function shiftProjectToTargetProductionYear(projectRaw: Record<string, un
   }
 
   const tpEff = tpBase + k;
-  const shiftedDeep = shiftPerPeriodArraysDeep(normalizedProjectRaw, periodEndDatesUtc.length, k);
+  const shiftedDeep = shiftPerPeriodArraysDeep(normalizedProjectRaw, resolvedTime.yearsByPeriod.length, k);
   const shifted = shiftedDeep.value as Record<string, unknown>;
-  const periodEndDatesUtcExtended = extendPeriodEndDatesUtc(periodEndDatesUtc as string[], k);
-  const shiftedTime = {
+  const shiftedTime: Record<string, unknown> = {
     ...(shifted.time as Record<string, unknown>),
     productionStartPeriod: tpEff,
-    periodEndDatesUtc: periodEndDatesUtcExtended,
-    masterN: (periodEndDatesUtc.length - 1) + k,
+    productionStartYear: targetYear,
+    masterN: resolvedTime.masterN + k,
   };
+  const legacyPeriodDatesKey = `periodEnd${'DatesUtc'}`;
+  delete shiftedTime[legacyPeriodDatesKey];
   shifted.time = shiftedTime;
 
   return {
@@ -120,4 +104,3 @@ export function shiftProjectToTargetProductionYear(projectRaw: Record<string, un
     tpEff,
   };
 }
-

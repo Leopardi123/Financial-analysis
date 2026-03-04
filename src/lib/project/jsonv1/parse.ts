@@ -2,6 +2,7 @@ import type { ProjectEngineFullProductionV1Input } from '../types.ts';
 import { PRICE_KEY_DEFINITIONS, PRICE_KEY_SET } from '../../prices/keys.ts';
 import type { ProjectJsonV1, QtyUnit } from './schema.ts';
 import { buildProductionDriverFirstNonZeroMap, productionStartIndexCandidate } from '../validation/productionStartAlignment.ts';
+import { resolveV2TimeAxis } from '../../time/resolveV2TimeAxis.ts';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -495,40 +496,6 @@ function asRecordOfSeries(value: unknown, path: string, expectedLength: number):
 
 const QTY_UNIT_SET = new Set<QtyUnit>(['toz', 'g', 'kg', 'lb', 'tonne', 'short_ton', 'long_ton']);
 
-function isIsoDate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-function parsePeriodEndDates(raw: unknown, expectedLength: number): Array<string> | undefined {
-  if (raw === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(raw)) {
-    fail('time.periodEndDatesUtc', `array length ${expectedLength}`, raw);
-  }
-
-  if (raw.length !== expectedLength) {
-    fail('time.periodEndDatesUtc', `array length ${expectedLength}`, raw.length);
-  }
-
-  const periodEndDatesUtc: string[] = [];
-  for (let i = 0; i < raw.length; i += 1) {
-    const value = raw[i];
-    if (typeof value !== 'string' || !isIsoDate(value)) {
-      fail(`time.periodEndDatesUtc[${i}]`, 'YYYY-MM-DD string', value);
-    }
-
-    if (i > 0 && raw[i - 1] >= value) {
-      fail(`time.periodEndDatesUtc[${i}]`, `strictly increasing date after ${raw[i - 1]}`, value);
-    }
-
-    periodEndDatesUtc.push(value);
-  }
-
-  return periodEndDatesUtc;
-}
-
 function parseOperations(raw: unknown, masterN: number, diagnostics: NormalizationDiagnostic[]): { operations: ProjectJsonV1['operations']; normalized: boolean } {
   if (raw == null) {
     return { operations: raw as null, normalized: false };
@@ -674,7 +641,7 @@ export type ParsedProjectJsonV1 = {
     priceKeyByMetal: Record<string, string>;
     auPriceKey: string;
     payableQtyUnitByMetal: Record<string, QtyUnit>;
-    periodEndDatesUtc?: Array<string>;
+    yearsByPeriod: number[];
   };
   context: ProjectJsonV1Context;
   priceOverrides: NonNullable<ProjectJsonV1['priceOverrides']>;
@@ -727,18 +694,8 @@ export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
     throw new Error(`time.productionStartPeriod must be <= time.masterN. Received productionStartPeriod=${productionStartPeriod}, masterN=${masterN}.`);
   }
   const expectedLength = masterN + 1;
-  const periodEndDatesUtc = parsePeriodEndDates(raw.time.periodEndDatesUtc, expectedLength);
-
-  if (!Array.isArray(periodEndDatesUtc) || periodEndDatesUtc.length <= productionStartPeriod) {
-    throw new Error('time.periodEndDatesUtc is required for strict project_json_v2 tp/year validation and must include index tp.');
-  }
-  const yearAtTp = Number.parseInt(periodEndDatesUtc[productionStartPeriod].slice(0, 4), 10);
-  if (!Number.isInteger(yearAtTp)) {
-    throw new Error(`Cannot parse year at time.periodEndDatesUtc[${productionStartPeriod}] for strict tp/year validation.`);
-  }
-  if (yearAtTp !== productionStartYear) {
-    throw new Error(`time.productionStartYear mismatch: productionStartYear=${productionStartYear} but yearAtTp=${yearAtTp} from periodEndDatesUtc[${productionStartPeriod}].`);
-  }
+  const yearsByPeriod = resolveV2TimeAxis({ masterN, productionStartPeriod, productionStartYear }).yearsByPeriod;
+  const yearAtTp = yearsByPeriod[productionStartPeriod];
 
   const rawOperations = raw.operations;
   const operationsRecord = isPlainObject(rawOperations) ? rawOperations : null;
@@ -759,7 +716,7 @@ export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
     throw new Error('No production series has non-zero values, cannot validate tp.');
   }
   if (productionStartIndex !== null && productionStartIndex !== productionStartPeriod) {
-    const yearAtCand = Number.parseInt(periodEndDatesUtc[productionStartIndex].slice(0, 4), 10);
+    const yearAtCand = yearsByPeriod[productionStartIndex];
     throw new Error(
       `tp mismatch: tp=${productionStartPeriod} (year ${yearAtTp}) but first production driver is at index ${productionStartIndex} (year ${yearAtCand}). Fix by either changing tp or shifting your production-driver series so first non-zero equals tp. Drivers=${JSON.stringify(driverFirstNonZeroIndex)}`,
     );
@@ -1153,7 +1110,7 @@ export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
       priceKeyByMetal,
       auPriceKey,
       payableQtyUnitByMetal,
-      periodEndDatesUtc,
+      yearsByPeriod,
     },
     context: {
       operations: operations ?? null,

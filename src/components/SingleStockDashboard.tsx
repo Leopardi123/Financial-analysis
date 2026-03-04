@@ -106,14 +106,6 @@ function formatIrrMetricValue(value: MetricValue): string {
   return `${(value.value * 100).toFixed(1)} %`;
 }
 
-function readYearFromDate(value: unknown): number | null {
-  if (typeof value !== "string") return null;
-  const match = value.match(/^(\d{4})/);
-  if (!match) return null;
-  const year = Number.parseInt(match[1], 10);
-  return Number.isInteger(year) ? year : null;
-}
-
 function requireYearsByPeriod(series: unknown): number[] {
   const y = (series as { yearsByPeriod?: unknown } | null | undefined)?.yearsByPeriod;
   if (!Array.isArray(y) || y.length === 0 || !y.every((v: unknown) => Number.isFinite(v))) {
@@ -2434,8 +2426,7 @@ Capital Available: ${availableLabel}`,
   const projectTimelineDebug = useMemo(() => {
     if (!projectSnapshotData || !projectViewMetrics) return null;
     const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
-    const snapshotSeries = (projectSnapshotData.series ?? null) as { periodEndDatesUtc?: Array<string | null> } | null;
-    const periodEndDatesUtc = Array.isArray(snapshotSeries?.periodEndDatesUtc) ? snapshotSeries.periodEndDatesUtc : [];
+    const yearsByPeriod = requireYearsByPeriod((projectSnapshotData.series ?? null) as { yearsByPeriod?: number[] } | null);
     const sharesCurrent = typeof inputs.sharesCurrent === "number" && Number.isFinite(inputs.sharesCurrent) ? inputs.sharesCurrent : null;
     const sharesPostFinancing = typeof inputs.sharesPostFinancing === "number" && Number.isFinite(inputs.sharesPostFinancing) ? inputs.sharesPostFinancing : sharesCurrent;
     const sharedPerShareBasis = {
@@ -2444,10 +2435,10 @@ Capital Available: ${availableLabel}`,
     };
     const tp = Number.isInteger(inputs.tp) ? inputs.tp as number : null;
     const resolveLabel = (idx: number | null): { label: string | null; source: string; reason?: string } => {
-      if (idx === null) return { label: null, source: "periodEndDatesUtc[null]", reason: "Missing t index." };
-      const raw = periodEndDatesUtc[idx];
-      if (typeof raw === "string" && raw.trim()) return { label: raw, source: `periodEndDatesUtc[${idx}]` };
-      return { label: null, source: `periodEndDatesUtc[${idx}]`, reason: "Missing periodEndDatesUtc value at index." };
+      if (idx === null) return { label: null, source: "yearsByPeriod[null]", reason: "Missing t index." };
+      const raw = yearsByPeriod[idx];
+      if (Number.isFinite(raw)) return { label: String(raw), source: `yearsByPeriod[${idx}]` };
+      return { label: null, source: `yearsByPeriod[${idx}]`, reason: "Missing yearsByPeriod value at index." };
     };
     const todayLabel = resolveLabel(0);
     const prodLabel = resolveLabel(tp);
@@ -2638,7 +2629,7 @@ Capital Available: ${availableLabel}`,
     return {
       masterN: parsedSelectedProject.engineInputWithoutPrices.masterN,
       productionStartPeriod: parsedSelectedProject.engineInputWithoutPrices.productionStartPeriod,
-      periodEndDatesUtc: parsedSelectedProject.engineInputWithoutPrices.periodEndDatesUtc,
+      yearsByPeriod: parsedSelectedProject.engineInputWithoutPrices.yearsByPeriod,
       operations: {
         oreMilledTonnes: parsedSelectedProject.context.operations?.oreMilledTonnes,
         oreMinedTonnes: parsedSelectedProject.context.operations?.oreMinedTonnes,
@@ -2824,8 +2815,8 @@ Capital Available: ${availableLabel}`,
     const tp = Number.isInteger(projectOperationsGridInput?.productionStartPeriod)
       ? projectOperationsGridInput?.productionStartPeriod as number
       : null;
-    const enginePeriodEndDates = Array.isArray(projectOperationsGridInput?.periodEndDatesUtc)
-      ? projectOperationsGridInput.periodEndDatesUtc as Array<string | null>
+    const yearsByPeriod = Array.isArray(projectOperationsGridInput?.yearsByPeriod)
+      ? projectOperationsGridInput.yearsByPeriod
       : [];
 
     const alignmentSources: Record<string, Array<number | null> | undefined> = {
@@ -2856,12 +2847,12 @@ Capital Available: ${availableLabel}`,
       }];
     }));
 
-    const yearAtT0 = readYearFromDate(enginePeriodEndDates[0] ?? null);
-    const yearAtTp = tp === null ? null : readYearFromDate(enginePeriodEndDates[tp] ?? null);
+    const yearAtT0 = Number.isInteger(yearsByPeriod[0]) ? yearsByPeriod[0] : null;
+    const yearAtTp = tp === null ? null : (Number.isInteger(yearsByPeriod[tp]) ? yearsByPeriod[tp] : null);
     const expectedYearAtTp = rawTime && Number.isInteger(rawTime.productionStartYear)
       ? rawTime.productionStartYear
       : null;
-    const yearAtCand = productionStartIndexCandidateValue === null ? null : readYearFromDate(enginePeriodEndDates[productionStartIndexCandidateValue] ?? null);
+    const yearAtCand = productionStartIndexCandidateValue === null ? null : (Number.isInteger(yearsByPeriod[productionStartIndexCandidateValue]) ? yearsByPeriod[productionStartIndexCandidateValue] : null);
 
     const parseError = (() => {
       if (!rawJson) return "No selected project raw JSON.";
@@ -2877,16 +2868,14 @@ Capital Available: ${availableLabel}`,
           masterN: rawTime?.masterN ?? null,
           productionStartPeriod: rawTime?.productionStartPeriod ?? null,
           productionStartYear: rawTime?.productionStartYear ?? null,
-          periodEndDatesUtc_first8: Array.isArray(rawTime?.periodEndDatesUtc)
-            ? (rawTime.periodEndDatesUtc as Array<unknown>).slice(0, 8)
-            : null,
+          yearsByPeriod_first8: yearsByPeriod.slice(0, 8),
         },
       },
       engine: {
         masterN: projectOperationsGridInput?.masterN ?? null,
         productionStartPeriod: projectOperationsGridInput?.productionStartPeriod ?? null,
         productionStartYear: expectedYearAtTp,
-        periodEndDatesUtc_first8: enginePeriodEndDates.slice(0, 8),
+        yearsByPeriod_first8: yearsByPeriod.slice(0, 8),
       },
       alignmentCheck,
       productionStartIndexCandidate: productionStartIndexCandidateValue,

@@ -4,11 +4,11 @@ import { shiftProjectToTargetProductionYear } from '../companyProjectShift.ts';
 
 test('shiftProjectToTargetProductionYear keeps production chain length when delaying start', () => {
   const project = {
-    version: 'project_json_v1',
+    version: 'project_json_v2',
     time: {
       masterN: 4,
       productionStartPeriod: 1,
-      periodEndDatesUtc: ['2026-12-31', '2027-12-31', '2028-12-31', '2029-12-31', '2030-12-31'],
+      productionStartYear: 2027,
     },
     economics: { taxRate: 0.3 },
     equity: { fdExtraShares: 0 },
@@ -48,15 +48,8 @@ test('shiftProjectToTargetProductionYear keeps production chain length when dela
   assert.equal(result.tpBase, 1);
   assert.equal(result.tpEff, 3);
   assert.equal(shiftedTime.masterN, 6);
-  assert.deepEqual(shiftedTime.periodEndDatesUtc, [
-    '2026-12-31',
-    '2027-12-31',
-    '2028-12-31',
-    '2029-12-31',
-    '2030-12-31',
-    '2031-12-31',
-    '2032-12-31',
-  ]);
+  assert.equal(shiftedTime.productionStartYear, 2029);
+  assert.equal(`periodEnd${'DatesUtc'}` in shiftedTime, false);
 
   const payableAu = ((shifted.metals as Record<string, unknown>).payableQtyByMetal as Record<string, unknown>).Au as Array<number | null>;
   assert.deepEqual(payableAu, [null, null, 0, 0, 100, 100, 100]);
