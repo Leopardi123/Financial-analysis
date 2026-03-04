@@ -17,7 +17,7 @@ const TAKE_SCOPE_CHOICES = ['metalSpecific', 'project'] as const;
 const TAKE_THRESHOLD_TYPE_CHOICES = ['price', 'revenue'] as const;
 const TAKE_TYPE_CHOICES = ['AD_VALOREM', 'NSR'] as const;
 const THROUGHPUT_UNIT_CHOICES = ['tpa', 'tpd'] as const;
-const VERSION_CHOICES = ['project_json_v1'] as const;
+const VERSION_CHOICES = ['project_json_v2'] as const;
 const CURRENCY_CHOICES = ['USD'] as const;
 const QTY_UNIT_CHOICES = ['g', 'kg', 'lb', 'long_ton', 'short_ton', 'tonne', 'toz'] as const;
 const PRICE_KEY_CHOICES = PRICE_KEY_DEFINITIONS.map((definition) => definition.priceKey);
@@ -172,7 +172,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     : asRecord(economicsBreakdown.taxesDetail);
 
   const output = {
-    version: 'project_json_v1',
+    version: 'project_json_v2',
     _choices_version: [...VERSION_CHOICES],
     meta: {
       projectId: typeof meta.projectId === 'string' ? meta.projectId : '',
@@ -184,6 +184,9 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     time: {
       masterN,
       productionStartPeriod: Number.isInteger(rootTime.productionStartPeriod) ? rootTime.productionStartPeriod as number : 0,
+      productionStartYear: Number.isInteger(rootTime.productionStartYear)
+        ? rootTime.productionStartYear as number
+        : (new Date().getUTCFullYear() + (Number.isInteger(rootTime.productionStartPeriod) ? rootTime.productionStartPeriod as number : 0)),
       periodEndDatesUtc,
     },
     economics: {
@@ -320,9 +323,12 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
   const cuGradeExample = [0.45, 0.45, 0.45, 0.45, 0.45, 0.45];
   const auRecoveryExample = [0.92, 0.92, 0.92, 0.92, 0.92, 0.92];
   const cuRecoveryExample = [0.88, 0.88, 0.88, 0.88, 0.88, 0.88];
+  const productionSeriesExample = Array.from({ length: len }, (_, t) => (t < 2 ? 0 : 1000));
+  const payableAuExample = Array.from({ length: len }, (_, t) => (t < 2 ? 0 : 100));
+  const payableCuExample = Array.from({ length: len }, (_, t) => (t < 2 ? 0 : 2000));
 
   return buildProjectJsonV1Template({
-    version: 'project_json_v1',
+    version: 'project_json_v2',
     meta: {
       projectId: '',
       projectName: '',
@@ -332,6 +338,7 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     time: {
       masterN,
       productionStartPeriod: 2,
+      productionStartYear: new Date().getUTCFullYear() + 2,
       periodEndDatesUtc: ['2026-12-31', '2027-12-31', '2028-12-31', '2029-12-31', '2030-12-31', '2031-12-31'],
     },
     economics: { taxRate: 0 },
@@ -352,8 +359,8 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     },
     metals: {
       payableQtyByMetal: {
-        Au: [...nulls],
-        Cu: [...nulls],
+        Au: [...payableAuExample],
+        Cu: [...payableCuExample],
       },
       payableQtyUnitByMetal: {
         Au: 'toz',
@@ -419,8 +426,8 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     ],
     operations: {
       capacity: { throughputUnit: 'tpd', nameplateThroughput: 10000, utilizationPct: null },
-      oreMilledTonnes: [...nulls],
-      oreMinedTonnes: [...nulls],
+      oreMilledTonnes: [...productionSeriesExample],
+      oreMinedTonnes: [...productionSeriesExample],
       oreTonnageUnit: 'tonne',
       gradeByMetal: {
         Au: [...auGradeExample],
