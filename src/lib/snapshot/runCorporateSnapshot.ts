@@ -1987,24 +1987,11 @@ export async function runCorporateSnapshotPipeline(args: {
         const dcfPerShare = reasonIfNull === null && dcfTotal !== null && sharesDenom !== null ? dcfTotal / sharesDenom : null;
         const navPerShare = reasonIfNull === null && navTotal !== null && sharesDenom !== null ? navTotal / sharesDenom : null;
 
-        const tpDebugMetrics = computeLista2CfDcfMetrics({
-          fcfUSD_total: aggregationEffective.fcffUSD_total,
-          capexUSD_total: aggregationEffective.capexUSD_total,
-          masterN: aggregationEffective.corporateMasterN,
-          productionStartPeriod: tp,
-          discountRate: input.discountRate,
-          shares_post_financing: shares_post_financing_fd_effective,
-          fx_USD_to_TargetCurrency: fxRate,
-          npvToday_USD: aggregationEffective.NPV_today_USD,
-          netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
-        });
-        diagnostics.warnings.push(...tpDebugMetrics.warnings);
-        diagnostics.errors.push(...tpDebugMetrics.errors);
         lista2DebugByTp[tp] = {
-          DCF_prodStart_exCapex_TargetCurrency: tpDebugMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency,
-          NAV_prodStart_TargetCurrency: tpDebugMetrics.metrics.NAV_prodStart_TargetCurrency,
-          DCF_prodStart_exCapex_perShare_TargetCurrency: tpDebugMetrics.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
-          NAV_prodStart_perShare_TargetCurrency: tpDebugMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
+          DCF_prodStart_exCapex_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency,
+          NAV_prodStart_TargetCurrency: tpMetrics.metrics.NAV_prodStart_TargetCurrency,
+          DCF_prodStart_exCapex_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+          NAV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
         };
 
         const ratioToNpv =
