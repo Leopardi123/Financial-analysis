@@ -74,6 +74,7 @@ export function buildCorporateModeledValuationTimeline(args: {
   }>;
   yearsByPeriod: number[];
   fcfUSD_total: Array<number | null>;
+  capexUSD_total: Array<number | null>;
   masterN: number;
   discountRate: number;
   shares_post_financing: number | null;
@@ -131,6 +132,7 @@ export function buildCorporateModeledValuationTimeline(args: {
 
     const lista2 = computeLista2CfDcfMetrics({
       fcfUSD_total: args.fcfUSD_total,
+      capexUSD_total: args.capexUSD_total,
       masterN: args.masterN,
       productionStartPeriod: corporateTp,
       discountRate: args.discountRate,

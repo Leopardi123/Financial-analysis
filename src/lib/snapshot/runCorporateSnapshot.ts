@@ -1845,6 +1845,7 @@ export async function runCorporateSnapshotPipeline(args: {
       ? { metrics: makeNullLista2CfDcfMetrics(), warnings: ['failure_reason: tp_eff > masterN'], errors: [] }
       : computeLista2CfDcfMetrics({
         fcfUSD_total: aggregationEffective.fcffUSD_total,
+        capexUSD_total: aggregationEffective.capexUSD_total,
         masterN: aggregationEffective.corporateMasterN,
         productionStartPeriod: tpEff,
         discountRate: input.discountRate,
@@ -1902,6 +1903,7 @@ export async function runCorporateSnapshotPipeline(args: {
       })),
       yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
       fcfUSD_total: aggregationEffective.fcffUSD_total,
+      capexUSD_total: aggregationEffective.capexUSD_total,
       masterN: aggregationEffective.corporateMasterN,
       discountRate: input.discountRate,
       shares_post_financing: shares_post_financing_fd_effective,
