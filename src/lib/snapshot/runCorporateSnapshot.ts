@@ -996,6 +996,10 @@ type SnapshotDiagnostics = {
           value_high_total_TargetCurrency: number | null;
           lista2_DCF_prodStart_exCapex_TargetCurrency_used: number | null;
           lista2_NAV_prodStart_TargetCurrency_used: number | null;
+          lista2_DCF_prodStart_exCapex_TargetCurrency_debug?: number | null;
+          lista2_NAV_prodStart_TargetCurrency_debug?: number | null;
+          lista2_DCF_match?: boolean | null;
+          lista2_NAV_match?: boolean | null;
         };
       }>;
     };
@@ -1939,6 +1943,13 @@ export async function runCorporateSnapshotPipeline(args: {
         ? financingSnapshot.NPV_today_TargetCurrency / sharesDenom
         : null;
 
+    const lista2DebugByTp: Record<number, {
+      DCF_prodStart_exCapex_TargetCurrency: number | null;
+      NAV_prodStart_TargetCurrency: number | null;
+      DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+      NAV_prodStart_perShare_TargetCurrency: number | null;
+    }> = {};
+
     const lista2MetricsByTp = Object.fromEntries(
       candidateTps.map((tp) => {
         const tpMetrics = computeLista2CfDcfMetrics({
@@ -1967,6 +1978,13 @@ export async function runCorporateSnapshotPipeline(args: {
 
         const dcfPerShare = reasonIfNull === null && dcfTotal !== null && sharesDenom !== null ? dcfTotal / sharesDenom : null;
         const navPerShare = reasonIfNull === null && navTotal !== null && sharesDenom !== null ? navTotal / sharesDenom : null;
+
+        lista2DebugByTp[tp] = {
+          DCF_prodStart_exCapex_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency,
+          NAV_prodStart_TargetCurrency: tpMetrics.metrics.NAV_prodStart_TargetCurrency,
+          DCF_prodStart_exCapex_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+          NAV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
+        };
 
         const ratioToNpv =
           typeof dcfPerShare === 'number' && typeof npvTodayPerShare === 'number'
@@ -2037,6 +2055,7 @@ export async function runCorporateSnapshotPipeline(args: {
       masterN: aggregationEffective.corporateMasterN,
       shares_post_financing: shares_post_financing_fd_effective,
       lista2MetricsByTp,
+      lista2DebugByTp,
       includeDebugSanity: debug,
       diagnosticsWarnings: diagnostics.warnings,
     });

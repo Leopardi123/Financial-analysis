@@ -5,6 +5,13 @@ type TimelineLista2Metrics = {
   NAV_prodStart_perShare_TargetCurrency: number | null;
 };
 
+type TimelineLista2DebugMetrics = {
+  DCF_prodStart_exCapex_TargetCurrency: number | null;
+  NAV_prodStart_TargetCurrency: number | null;
+  DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+  NAV_prodStart_perShare_TargetCurrency: number | null;
+};
+
 export type CorporateModeledTimelineMarker = {
   tp: number;
   yearLabelUsed: string | null;
@@ -21,6 +28,10 @@ export type CorporateModeledTimelineMarker = {
     value_high_total_TargetCurrency: number | null;
     lista2_DCF_prodStart_exCapex_TargetCurrency_used: number | null;
     lista2_NAV_prodStart_TargetCurrency_used: number | null;
+    lista2_DCF_prodStart_exCapex_TargetCurrency_debug?: number | null;
+    lista2_NAV_prodStart_TargetCurrency_debug?: number | null;
+    lista2_DCF_match?: boolean | null;
+    lista2_NAV_match?: boolean | null;
   };
   sanity?: {
     tp: number;
@@ -91,6 +102,7 @@ export function buildCorporateModeledValuationTimeline(args: {
   masterN: number;
   shares_post_financing: number | null;
   lista2MetricsByTp: Record<number, TimelineLista2Metrics | undefined>;
+  lista2DebugByTp?: Record<number, TimelineLista2DebugMetrics | undefined>;
   includeDebugSanity?: boolean;
   diagnosticsWarnings?: string[];
 }): CorporateModeledValuationTimeline {
@@ -141,23 +153,18 @@ export function buildCorporateModeledValuationTimeline(args: {
     }
 
     const lista2ForTp = args.lista2MetricsByTp[corporateTp];
+    const lista2DebugForTp = args.lista2DebugByTp?.[corporateTp] ?? null;
     const denom = Number.isFinite(args.shares_post_financing) ? args.shares_post_financing : null;
     const valueLowTotalRaw = lista2ForTp?.NAV_prodStart_TargetCurrency ?? null;
     const valueHighTotalRaw = lista2ForTp?.DCF_prodStart_exCapex_TargetCurrency ?? null;
     const valueLowTotal = Number.isFinite(valueLowTotalRaw) ? valueLowTotalRaw : null;
     const valueHighTotal = Number.isFinite(valueHighTotalRaw) ? valueHighTotalRaw : null;
-    const valueLowPerShareRaw = lista2ForTp?.NAV_prodStart_perShare_TargetCurrency ?? null;
-    const valueHighPerShareRaw = lista2ForTp?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null;
-    const valueLowPerShare = Number.isFinite(valueLowPerShareRaw)
-      ? valueLowPerShareRaw
-      : valueLowTotal !== null && denom !== null && denom > 0
-        ? valueLowTotal / denom
-        : null;
-    const valueHighPerShare = Number.isFinite(valueHighPerShareRaw)
-      ? valueHighPerShareRaw
-      : valueHighTotal !== null && denom !== null && denom > 0
-        ? valueHighTotal / denom
-        : null;
+    const valueLowPerShare = valueLowTotal !== null && denom !== null && denom > 0
+      ? valueLowTotal / denom
+      : null;
+    const valueHighPerShare = valueHighTotal !== null && denom !== null && denom > 0
+      ? valueHighTotal / denom
+      : null;
 
     if (valueLowTotal === null) {
       args.diagnosticsWarnings?.push('Missing NAV_prodStart_TargetCurrency for marker low');
@@ -184,9 +191,6 @@ export function buildCorporateModeledValuationTimeline(args: {
     const fcfTailMatches = fcfTailSumUSDExpected === null || fcfTailSumUSD === null
       ? null
       : Math.abs(fcfTailSumUSD - fcfTailSumUSDExpected) <= 1e-6 * Math.max(1, Math.abs(fcfTailSumUSDExpected));
-    const sanityFailureChecks: string[] = [];
-    if (fcfTailMatches === false) sanityFailureChecks.push('fcfTailMatches');
-
     const invalidDenominator = denom === null || denom <= 0;
     const denominatorNullReason = invalidDenominator
       ? 'Invalid shares_post_financing denominator'
@@ -194,20 +198,32 @@ export function buildCorporateModeledValuationTimeline(args: {
     const reasonParts: string[] = [];
     if (valueLowTotal === null) reasonParts.push('missing NAV_prodStart_TargetCurrency for marker low');
     if (valueHighTotal === null) reasonParts.push('missing DCF_prodStart_exCapex_TargetCurrency for marker high');
-    const baseNullReason = reasonParts.length > 0 ? reasonParts.join(' | ') : null;
-    const sanityNullReason = sanityFailureChecks.length > 0
-      ? `SANITY_FAIL:${sanityFailureChecks.join(',')}`
+
+    const lista2DcfDebug = typeof lista2DebugForTp?.DCF_prodStart_exCapex_TargetCurrency === 'number'
+      ? lista2DebugForTp.DCF_prodStart_exCapex_TargetCurrency
       : null;
-    const nullReasonIfAny = sanityNullReason ?? baseNullReason;
-    const hideValuesForSanityFailure = sanityNullReason !== null;
+    const lista2NavDebug = typeof lista2DebugForTp?.NAV_prodStart_TargetCurrency === 'number'
+      ? lista2DebugForTp.NAV_prodStart_TargetCurrency
+      : null;
+    const dcfMatchesDebug = valueHighTotal !== null && lista2DcfDebug !== null
+      ? Math.abs(valueHighTotal - lista2DcfDebug) <= 1e-6 * Math.max(1, Math.abs(lista2DcfDebug))
+      : null;
+    const navMatchesDebug = valueLowTotal !== null && lista2NavDebug !== null
+      ? Math.abs(valueLowTotal - lista2NavDebug) <= 1e-6 * Math.max(1, Math.abs(lista2NavDebug))
+      : null;
+    if (dcfMatchesDebug === false || navMatchesDebug === false) {
+      reasonParts.push('marker != lista2; proxy path still active');
+    }
+    const nullReasonIfAny = reasonParts.length > 0 ? reasonParts.join(' | ') : null;
+    const enforceNullForMismatch = dcfMatchesDebug === false || navMatchesDebug === false;
 
     return {
       tp,
       yearLabelUsed,
       corporateTpIndexUsed: corporateTp,
       fcfTailSumUSD,
-      value_high: hideValuesForSanityFailure ? null : valueHighPerShare,
-      value_low: hideValuesForSanityFailure ? null : valueLowPerShare,
+      value_high: enforceNullForMismatch ? null : valueHighPerShare,
+      value_low: enforceNullForMismatch ? null : valueLowPerShare,
       value_mid_if_any: null,
       nullReasonIfAny: denominatorNullReason ?? nullReasonIfAny,
       debug: {
@@ -217,6 +233,10 @@ export function buildCorporateModeledValuationTimeline(args: {
         value_high_total_TargetCurrency: valueHighTotal,
         lista2_DCF_prodStart_exCapex_TargetCurrency_used: valueHighTotal,
         lista2_NAV_prodStart_TargetCurrency_used: valueLowTotal,
+        lista2_DCF_prodStart_exCapex_TargetCurrency_debug: lista2DcfDebug,
+        lista2_NAV_prodStart_TargetCurrency_debug: lista2NavDebug,
+        lista2_DCF_match: dcfMatchesDebug,
+        lista2_NAV_match: navMatchesDebug,
       },
       sanity: args.includeDebugSanity
         ? {
