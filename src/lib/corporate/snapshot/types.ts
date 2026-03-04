@@ -178,20 +178,14 @@ export type CorporateSnapshot = {
     NAV_prodStart_perShare_TargetCurrency: number | null;
     __debug?: {
       sharesDenomUsed: number | null;
-      sharesDenomKind: 'shares_post_financing';
+      sharesDenomKind: 'shares_post_financing' | 'invalid' | string;
       shares_post_financing: number | null;
       NAV_prodStart_total_TargetCurrency: number | null;
       DCF_prodStart_exCapex_total_TargetCurrency: number | null;
       fxUsed: number | null;
       discountRateUsed: number | null;
-      reasonIfNull: string | null;
-      checks: {
-        npvToday_perShare: number | null;
-        dcfPresent_perShare: number | null;
-        dcfExCapex_byTp_perShare: number | null;
-        navProdStart_byTp_perShare: number | null;
-        note: string;
-      };
+      productionStartPeriodUsed?: number;
+      nullReasonIfAny: string | null;
     };
   }>;
   modeledValuationTimeline?: {

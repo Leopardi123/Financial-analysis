@@ -12,11 +12,6 @@ type TimelineLista2DebugMetrics = {
   NAV_prodStart_perShare_TargetCurrency: number | null;
 };
 
-type CorporateList2DebugTotals = {
-  DCF_prodStart_exCapex_TargetCurrency: number | null;
-  NAV_prodStart_TargetCurrency?: number | null;
-};
-
 export type CorporateModeledTimelineMarker = {
   tp: number;
   yearLabelUsed: string | null;
@@ -116,7 +111,6 @@ export function buildCorporateModeledValuationTimeline(args: {
   shares_post_financing: number | null;
   lista2MetricsByTp: Record<number, TimelineLista2Metrics | undefined>;
   lista2DebugByTp?: Record<number, TimelineLista2DebugMetrics | undefined>;
-  corporateList2Debug?: CorporateList2DebugTotals;
   fxUsed?: number | null;
   discountRateUsed?: number | null;
   includeDebugSanity?: boolean;
@@ -214,11 +208,12 @@ export function buildCorporateModeledValuationTimeline(args: {
     if (valueLowTotal === null) reasonParts.push('missing NAV_prodStart_TargetCurrency for marker low');
     if (valueHighTotal === null) reasonParts.push('missing DCF_prodStart_exCapex_TargetCurrency for marker high');
 
-    const lista2DcfDebug = typeof args.corporateList2Debug?.DCF_prodStart_exCapex_TargetCurrency === 'number'
-      ? args.corporateList2Debug.DCF_prodStart_exCapex_TargetCurrency
+    const lista2DebugForTp = args.lista2DebugByTp?.[corporateTp] ?? null;
+    const lista2DcfDebug = typeof lista2DebugForTp?.DCF_prodStart_exCapex_TargetCurrency === 'number'
+      ? lista2DebugForTp.DCF_prodStart_exCapex_TargetCurrency
       : null;
-    const lista2NavDebug = typeof args.corporateList2Debug?.NAV_prodStart_TargetCurrency === 'number'
-      ? args.corporateList2Debug.NAV_prodStart_TargetCurrency
+    const lista2NavDebug = typeof lista2DebugForTp?.NAV_prodStart_TargetCurrency === 'number'
+      ? lista2DebugForTp.NAV_prodStart_TargetCurrency
       : null;
     const deltaDcf = valueHighTotal !== null && lista2DcfDebug !== null ? valueHighTotal - lista2DcfDebug : null;
     const deltaNav = valueLowTotal !== null && lista2NavDebug !== null ? valueLowTotal - lista2NavDebug : null;
@@ -228,10 +223,10 @@ export function buildCorporateModeledValuationTimeline(args: {
     const navMatchesDebug = relDeltaNav !== null ? relDeltaNav < 1e-6 : null;
     const mismatchAgainstList2Debug = dcfMatchesDebug === false || navMatchesDebug === false;
     if (mismatchAgainstList2Debug) {
-      reasonParts.push('markers use proxy totals; mismatch vs corporate list2Debug (no fallback)');
+      reasonParts.push('markers != list2Debug; refusing to display inconsistent byTp values (no fallback)');
     }
     const nullReasonIfAny = mismatchAgainstList2Debug
-      ? 'markers use proxy totals; mismatch vs corporate list2Debug (no fallback)'
+      ? 'markers != list2Debug; refusing to display inconsistent byTp values (no fallback)'
       : (reasonParts.length > 0 ? reasonParts.join(' | ') : null);
 
     return {

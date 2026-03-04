@@ -1944,13 +1944,6 @@ export async function runCorporateSnapshotPipeline(args: {
     const sharesDenom = typeof shares_post_financing_fd_effective === 'number' && Number.isFinite(shares_post_financing_fd_effective) && shares_post_financing_fd_effective > 0
       ? shares_post_financing_fd_effective
       : null;
-    const npvTodayPerShare =
-      sharesDenom !== null
-      && typeof financingSnapshot.NPV_today_TargetCurrency === 'number'
-      && Number.isFinite(financingSnapshot.NPV_today_TargetCurrency)
-        ? financingSnapshot.NPV_today_TargetCurrency / sharesDenom
-        : null;
-
     const lista2DebugByTp: Record<number, {
       DCF_prodStart_exCapex_TargetCurrency: number | null;
       NAV_prodStart_TargetCurrency: number | null;
@@ -1994,14 +1987,6 @@ export async function runCorporateSnapshotPipeline(args: {
           NAV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
         };
 
-        const ratioToNpv =
-          typeof dcfPerShare === 'number' && typeof npvTodayPerShare === 'number'
-            ? Math.abs(dcfPerShare - npvTodayPerShare) / Math.max(1, Math.abs(npvTodayPerShare))
-            : null;
-        if (ratioToNpv !== null && ratioToNpv < 0.02) {
-          diagnostics.warnings.push(`list2MetricsByTp[${tp}] invariant warning: dcfExCapex_byTp_perShare is within 2% of npvToday_perShare (possible aliasing).`);
-        }
-
         return [tp, {
           DCF_prodStart_exCapex_TargetCurrency: dcfTotal,
           DCF_prodStart_exCapex_perShare_TargetCurrency: dcfPerShare,
@@ -2009,26 +1994,40 @@ export async function runCorporateSnapshotPipeline(args: {
           NAV_prodStart_perShare_TargetCurrency: navPerShare,
           __debug: {
             sharesDenomUsed: sharesDenom,
-            sharesDenomKind: 'shares_post_financing' as const,
+            sharesDenomKind: (sharesDenom !== null ? 'shares_post_financing' : 'invalid') as 'shares_post_financing' | 'invalid',
             shares_post_financing: shares_post_financing_fd_effective,
+            productionStartPeriodUsed: tp,
             NAV_prodStart_total_TargetCurrency: navTotal,
             DCF_prodStart_exCapex_total_TargetCurrency: dcfTotal,
             fxUsed: fxRate,
             discountRateUsed: input.discountRate,
-            reasonIfNull,
-            checks: {
-              npvToday_perShare: npvTodayPerShare,
-              dcfPresent_perShare: lista2.metrics.DCF_prodStart_present_perShare_TargetCurrency,
-              dcfExCapex_byTp_perShare: dcfPerShare,
-              navProdStart_byTp_perShare: navPerShare,
-              note: 'dcfExCapex_byTp_perShare must NOT equal npvToday_perShare unless coincidence',
-            },
+            nullReasonIfAny: reasonIfNull,
           },
         }];
       }),
     );
 
     snapshot.list2MetricsByTp = lista2MetricsByTp;
+
+    if (process.env.NODE_ENV !== 'production' && typeof tpEff === 'number') {
+      const atTp = lista2MetricsByTp[tpEff];
+      if (atTp) {
+        const eps = 1e-6;
+        const dcfExpected = lista2.metrics.DCF_prodStart_exCapex_TargetCurrency;
+        const navExpected = lista2.metrics.NAV_prodStart_TargetCurrency;
+        const dcfActual = atTp.DCF_prodStart_exCapex_TargetCurrency;
+        const navActual = atTp.NAV_prodStart_TargetCurrency;
+        const dcfMismatch = dcfExpected !== null && dcfActual !== null
+          ? Math.abs(dcfActual - dcfExpected) > eps * Math.max(1, Math.abs(dcfExpected))
+          : dcfExpected !== dcfActual;
+        const navMismatch = navExpected !== null && navActual !== null
+          ? Math.abs(navActual - navExpected) > eps * Math.max(1, Math.abs(navExpected))
+          : navExpected !== navActual;
+        if (dcfMismatch || navMismatch) {
+          throw new Error(`single source of truth violation: list2MetricsByTp[tpEff=${tpEff}] does not match corporate list2 totals`);
+        }
+      }
+    }
 
     if (debug) {
       const tp4 = lista2MetricsByTp[4] ?? null;
@@ -2064,10 +2063,6 @@ export async function runCorporateSnapshotPipeline(args: {
       shares_post_financing: shares_post_financing_fd_effective,
       lista2MetricsByTp,
       lista2DebugByTp,
-      corporateList2Debug: {
-        DCF_prodStart_exCapex_TargetCurrency: lista2.metrics.DCF_prodStart_exCapex_TargetCurrency,
-        NAV_prodStart_TargetCurrency: lista2.metrics.NAV_prodStart_TargetCurrency,
-      },
       fxUsed: fxRate,
       discountRateUsed: input.discountRate,
       includeDebugSanity: debug,
