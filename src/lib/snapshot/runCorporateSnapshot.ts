@@ -2009,22 +2009,38 @@ export async function runCorporateSnapshotPipeline(args: {
 
     snapshot.list2MetricsByTp = lista2MetricsByTp;
 
-    if (process.env.NODE_ENV !== 'production' && typeof tpEff === 'number') {
-      const atTp = lista2MetricsByTp[tpEff];
-      if (atTp) {
-        const eps = 1e-6;
-        const dcfExpected = lista2.metrics.DCF_prodStart_exCapex_TargetCurrency;
-        const navExpected = lista2.metrics.NAV_prodStart_TargetCurrency;
-        const dcfActual = atTp.DCF_prodStart_exCapex_TargetCurrency;
-        const navActual = atTp.NAV_prodStart_TargetCurrency;
-        const dcfMismatch = dcfExpected !== null && dcfActual !== null
-          ? Math.abs(dcfActual - dcfExpected) > eps * Math.max(1, Math.abs(dcfExpected))
-          : dcfExpected !== dcfActual;
-        const navMismatch = navExpected !== null && navActual !== null
-          ? Math.abs(navActual - navExpected) > eps * Math.max(1, Math.abs(navExpected))
-          : navExpected !== navActual;
+    if (process.env.NODE_ENV !== 'production') {
+      const eps = 1e-6;
+      const hasMismatch = (left: number | null, right: number | null): boolean => (
+        left !== null && right !== null
+          ? Math.abs(left - right) > eps * Math.max(1, Math.abs(right))
+          : left !== right
+      );
+
+      for (const tp of candidateTps) {
+        const fromByTp = lista2MetricsByTp[tp] ?? null;
+        const fromDebug = lista2DebugByTp[tp] ?? null;
+        if (!fromByTp || !fromDebug) continue;
+
+        const dcfMismatch = hasMismatch(fromByTp.DCF_prodStart_exCapex_TargetCurrency, fromDebug.DCF_prodStart_exCapex_TargetCurrency);
+        const navMismatch = hasMismatch(fromByTp.NAV_prodStart_TargetCurrency, fromDebug.NAV_prodStart_TargetCurrency);
         if (dcfMismatch || navMismatch) {
-          throw new Error(`single source of truth violation: list2MetricsByTp[tpEff=${tpEff}] does not match corporate list2 totals`);
+          throw new Error(
+            `single source of truth violation: list2MetricsByTp[tp=${tp}] does not match list2DebugByTp `
+            + `(DCF byTp=${String(fromByTp.DCF_prodStart_exCapex_TargetCurrency)} debug=${String(fromDebug.DCF_prodStart_exCapex_TargetCurrency)}; `
+            + `NAV byTp=${String(fromByTp.NAV_prodStart_TargetCurrency)} debug=${String(fromDebug.NAV_prodStart_TargetCurrency)})`,
+          );
+        }
+      }
+
+      if (typeof tpEff === 'number') {
+        const atTp = lista2MetricsByTp[tpEff];
+        if (atTp) {
+          const dcfMismatch = hasMismatch(atTp.DCF_prodStart_exCapex_TargetCurrency, lista2.metrics.DCF_prodStart_exCapex_TargetCurrency);
+          const navMismatch = hasMismatch(atTp.NAV_prodStart_TargetCurrency, lista2.metrics.NAV_prodStart_TargetCurrency);
+          if (dcfMismatch || navMismatch) {
+            throw new Error(`single source of truth violation: list2MetricsByTp[tpEff=${tpEff}] does not match corporate list2 totals`);
+          }
         }
       }
     }

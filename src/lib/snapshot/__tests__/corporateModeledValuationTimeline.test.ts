@@ -116,6 +116,78 @@ test('corporate modeled valuation markers use rolling timeline labels and tp ind
 });
 
 
+test('corporate modeled valuation marker totals are sourced directly from lista2 metrics with no time conversion', () => {
+  const timeline = buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 4 }],
+    yearsByPeriod: [2025, 2026, 2027, 2028, 2029, 2030],
+    fcfUSD_total: [10, 20, 30, 40, 50, 60],
+    capexUSD_total: [0, 0, 0, 0, 0, 0],
+    masterN: 5,
+    shares_post_financing: 100,
+    lista2MetricsByTp: {
+      4: {
+        NAV_prodStart_TargetCurrency: 100,
+        NAV_prodStart_perShare_TargetCurrency: 1,
+        DCF_prodStart_exCapex_TargetCurrency: 250,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 2.5,
+      },
+    },
+    lista2DebugByTp: {
+      4: {
+        NAV_prodStart_TargetCurrency: 100,
+        NAV_prodStart_perShare_TargetCurrency: 1,
+        DCF_prodStart_exCapex_TargetCurrency: 250,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 2.5,
+      },
+    },
+    discountRateUsed: 0.10,
+  });
+
+  const marker = timeline.markers[0];
+  assert.equal(marker.debug?.value_high_total_TargetCurrency, 250);
+  assert.equal(marker.debug?.value_low_total_TargetCurrency, 100);
+  assert.equal(marker.debug?.lista2_DCF_prodStart_exCapex_TargetCurrency_debug, 250);
+  assert.equal(marker.debug?.lista2_NAV_prodStart_TargetCurrency_debug, 100);
+  assert.equal(marker.debug?.lista2_DCF_match, true);
+  assert.equal(marker.debug?.lista2_NAV_match, true);
+  assert.equal(marker.debugTime?.appliedTimeConversion, 'none');
+  assert.equal(marker.debugTime?.powFactor_used_if_any, null);
+  assert.equal(marker.debugTime?.value_total_from_any_internal_recompute_high, null);
+  assert.equal(marker.debugTime?.value_total_from_any_internal_recompute_low, null);
+  assert.equal(marker.debugTime?.value_total_from_list2MetricsByTp_high, 250);
+  assert.equal(marker.debugTime?.value_total_from_list2MetricsByTp_low, 100);
+  assert.equal(marker.debugTime?.value_total_from_list2Debug_high, 250);
+  assert.equal(marker.debugTime?.value_total_from_list2Debug_low, 100);
+});
+
+test('corporate modeled valuation timeline throws in dev/test when list2 byTp and debug differ', () => {
+  assert.throws(() => buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 4 }],
+    yearsByPeriod: [2025, 2026, 2027, 2028, 2029, 2030],
+    fcfUSD_total: [10, 20, 30, 40, 50, 60],
+    capexUSD_total: [0, 0, 0, 0, 0, 0],
+    masterN: 5,
+    shares_post_financing: 100,
+    lista2MetricsByTp: {
+      4: {
+        NAV_prodStart_TargetCurrency: 100,
+        NAV_prodStart_perShare_TargetCurrency: 1,
+        DCF_prodStart_exCapex_TargetCurrency: 250,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 2.5,
+      },
+    },
+    lista2DebugByTp: {
+      4: {
+        NAV_prodStart_TargetCurrency: 99,
+        NAV_prodStart_perShare_TargetCurrency: 0.99,
+        DCF_prodStart_exCapex_TargetCurrency: 249,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 2.49,
+      },
+    },
+  }), /single source of truth violation in modeled valuation timeline/);
+});
+
+
 test('corporate modeled valuation marker year labels come directly from yearsByPeriod[tp]', () => {
   const yearsByPeriod = [
     2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033,

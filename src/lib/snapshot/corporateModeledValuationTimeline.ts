@@ -28,7 +28,13 @@ export type CorporateModeledTimelineMarker = {
     appliedTimeConversion: string | null;
     rawInput_total_TargetCurrency: number | null;
     final_total_TargetCurrency: number | null;
-    sourceMetricKey: string;
+    sourceMetricKey: 'list2MetricsByTp.NAV_prodStart_TargetCurrency|list2MetricsByTp.DCF_prodStart_exCapex_TargetCurrency';
+    value_total_from_list2MetricsByTp_low: number | null;
+    value_total_from_list2MetricsByTp_high: number | null;
+    value_total_from_list2Debug_low: number | null;
+    value_total_from_list2Debug_high: number | null;
+    value_total_from_any_internal_recompute_low: number | null;
+    value_total_from_any_internal_recompute_high: number | null;
     list2Debug_total_TargetCurrency: number | null;
     ratio_final_over_list2Debug: number | null;
     expectedPow_if_any: number | null;
@@ -222,8 +228,8 @@ export function buildCorporateModeledValuationTimeline(args: {
 
     const deltaDcf = valueHighTotal !== null && lista2DcfDebug !== null ? valueHighTotal - lista2DcfDebug : null;
     const deltaNav = valueLowTotal !== null && lista2NavDebug !== null ? valueLowTotal - lista2NavDebug : null;
-    const relDeltaDcf = deltaDcf !== null ? Math.abs(deltaDcf) / Math.max(1, Math.abs(lista2DcfDebug as number)) : null;
-    const relDeltaNav = deltaNav !== null ? Math.abs(deltaNav) / Math.max(1, Math.abs(lista2NavDebug as number)) : null;
+    const relDeltaDcf = deltaDcf !== null && lista2DcfDebug !== null ? Math.abs(deltaDcf) / Math.max(1, Math.abs(lista2DcfDebug)) : null;
+    const relDeltaNav = deltaNav !== null && lista2NavDebug !== null ? Math.abs(deltaNav) / Math.max(1, Math.abs(lista2NavDebug)) : null;
     const dcfMatchesDebug = relDeltaDcf !== null ? relDeltaDcf < 1e-6 : null;
     const navMatchesDebug = relDeltaNav !== null ? relDeltaNav < 1e-6 : null;
 
@@ -232,12 +238,22 @@ export function buildCorporateModeledValuationTimeline(args: {
       nullReasonIfAny = 'missing list2MetricsByTp[tp]';
     } else if (denom === null || denom <= 0) {
       nullReasonIfAny = 'Invalid shares_post_financing denominator';
-    } else if (valueLowTotal === null || valueHighTotal === null) {
-      nullReasonIfAny = 'missing fcf series';
+    } else if (valueLowTotal === null) {
+      nullReasonIfAny = 'missing NAV_prodStart_TargetCurrency';
+    } else if (valueHighTotal === null) {
+      nullReasonIfAny = 'missing DCF_prodStart_exCapex_TargetCurrency';
     }
 
     if (dcfMatchesDebug === false || navMatchesDebug === false) {
       nullReasonIfAny = 'explicit null propagation (no fallback)';
+    }
+
+    if (process.env.NODE_ENV !== 'production' && (dcfMatchesDebug === false || navMatchesDebug === false)) {
+      throw new Error(
+        `single source of truth violation in modeled valuation timeline at tp=${tp}: `
+        + `list2MetricsByTp DCF=${String(valueHighTotal)} NAV=${String(valueLowTotal)} vs `
+        + `list2DebugByTp DCF=${String(lista2DcfDebug)} NAV=${String(lista2NavDebug)}`,
+      );
     }
 
     const expectedPow = args.discountRateUsed !== null && args.discountRateUsed !== undefined && Number.isFinite(args.discountRateUsed)
@@ -246,9 +262,6 @@ export function buildCorporateModeledValuationTimeline(args: {
     const ratioFinalOverList2Debug = valueHighTotal !== null && lista2DcfDebug !== null && lista2DcfDebug !== 0
       ? valueHighTotal / lista2DcfDebug
       : null;
-    const doubleConversionConfirmed = ratioFinalOverList2Debug !== null && expectedPow !== null
-      ? Math.abs(ratioFinalOverList2Debug - expectedPow) / Math.max(1, Math.abs(expectedPow)) < 0.02
-      : false;
 
     return {
       tp,
@@ -263,10 +276,16 @@ export function buildCorporateModeledValuationTimeline(args: {
         tp,
         discountRateUsed: args.discountRateUsed ?? null,
         powFactor_used_if_any: null,
-        appliedTimeConversion: doubleConversionConfirmed ? "DOUBLE_CONVERSION_CONFIRMED" : null,
+        appliedTimeConversion: 'none',
         rawInput_total_TargetCurrency: valueHighTotal,
         final_total_TargetCurrency: valueHighTotal,
-        sourceMetricKey: "list2MetricsByTp.DCF_prodStart_exCapex_TargetCurrency",
+        sourceMetricKey: 'list2MetricsByTp.NAV_prodStart_TargetCurrency|list2MetricsByTp.DCF_prodStart_exCapex_TargetCurrency',
+        value_total_from_list2MetricsByTp_low: valueLowTotal,
+        value_total_from_list2MetricsByTp_high: valueHighTotal,
+        value_total_from_list2Debug_low: lista2NavDebug,
+        value_total_from_list2Debug_high: lista2DcfDebug,
+        value_total_from_any_internal_recompute_low: null,
+        value_total_from_any_internal_recompute_high: null,
         list2Debug_total_TargetCurrency: lista2DcfDebug,
         ratio_final_over_list2Debug: ratioFinalOverList2Debug,
         expectedPow_if_any: expectedPow,
