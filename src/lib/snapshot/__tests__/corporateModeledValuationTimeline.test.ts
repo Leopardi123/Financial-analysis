@@ -157,7 +157,7 @@ test('corporate modeled valuation timeline throws when tp is outside yearsByPeri
 });
 
 
-test('corporate modeled valuation marker low becomes null and emits diagnostics warning when NAV metric is missing', () => {
+test('corporate modeled valuation marker values become null when NAV metric is missing (no fallback)', () => {
   const warnings: string[] = [];
   const timeline = buildCorporateModeledValuationTimeline({
     projects: [{ productionStartPeriod: 2 }],
@@ -177,9 +177,39 @@ test('corporate modeled valuation marker low becomes null and emits diagnostics 
     diagnosticsWarnings: warnings,
   });
 
-  assert.equal(timeline.markers[0]?.value_low, null);
-  assert.equal(timeline.markers[0]?.value_high, 0.6636363636363636);
-  assert.ok(warnings.includes('Missing NAV_prodStart_TargetCurrency for marker low'));
+  const marker = timeline.markers[0];
+  assert.equal(marker?.value_low, null);
+  assert.equal(marker?.value_high, null);
+  assert.match(marker?.nullReasonIfAny ?? '', /missing/i);
+  assert.equal(marker?.debug?.value_low_total_TargetCurrency, null);
+  assert.equal(marker?.debug?.value_high_total_TargetCurrency, 66.36363636363636);
+  assert.ok(warnings.some((warning) => /missing nav/i.test(warning)));
+});
+
+test('corporate modeled valuation marker values become null when DCF metric is missing (no fallback)', () => {
+  const timeline = buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 2 }],
+    yearsByPeriod: [2025, 2026, 2027, 2028],
+    fcfUSD_total: [10, 20, 30, 40],
+    capexUSD_total: [null, null, 0, 0],
+    masterN: 3,
+    shares_post_financing: 100,
+    lista2MetricsByTp: {
+      2: {
+        NAV_prodStart_TargetCurrency: 66.36363636363636,
+        NAV_prodStart_perShare_TargetCurrency: 0.6636363636363636,
+        DCF_prodStart_exCapex_TargetCurrency: null,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: null,
+      },
+    },
+  });
+
+  const marker = timeline.markers[0];
+  assert.equal(marker?.value_low, null);
+  assert.equal(marker?.value_high, null);
+  assert.match(marker?.nullReasonIfAny ?? '', /missing/i);
+  assert.equal(marker?.debug?.value_low_total_TargetCurrency, 66.36363636363636);
+  assert.equal(marker?.debug?.value_high_total_TargetCurrency, null);
 });
 
 test('corporate modeled valuation marker uses fd effective shares denominator over fallback shares_post_financing', () => {
