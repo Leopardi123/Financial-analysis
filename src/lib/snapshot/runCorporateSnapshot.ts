@@ -976,6 +976,8 @@ type SnapshotDiagnostics = {
           sharesDenominatorType: 'shares_post_financing';
           value_low_total_TargetCurrency: number | null;
           value_high_total_TargetCurrency: number | null;
+          lista2_DCF_prodStart_exCapex_TargetCurrency_used: number | null;
+          lista2_NAV_prodStart_TargetCurrency_used: number | null;
         };
       }>;
     };
@@ -1903,6 +1905,33 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     snapshot.series = snapshotSeries;
+    const lista2MetricsByTp = Object.fromEntries(
+      projectsForBuildFunding
+        .map((project) => project.productionStartPeriod)
+        .filter((tp): tp is number => Number.isInteger(tp) && tp > 0 && tp <= aggregationEffective.corporateMasterN)
+        .map((tp) => {
+          const tpMetrics = computeLista2CfDcfMetrics({
+            fcfUSD_total: aggregationEffective.fcffUSD_total,
+            capexUSD_total: aggregationEffective.capexUSD_total,
+            masterN: aggregationEffective.corporateMasterN,
+            productionStartPeriod: tp,
+            discountRate: input.discountRate,
+            shares_post_financing: shares_post_financing_fd_effective,
+            fx_USD_to_TargetCurrency: fxRate,
+            npvToday_USD: aggregationEffective.NPV_today_USD,
+            netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+          });
+          diagnostics.warnings.push(...tpMetrics.warnings);
+          diagnostics.errors.push(...tpMetrics.errors);
+          return [tp, {
+            DCF_prodStart_exCapex_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency,
+            DCF_prodStart_exCapex_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+            NAV_prodStart_TargetCurrency: tpMetrics.metrics.NAV_prodStart_TargetCurrency,
+            NAV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
+          }];
+        }),
+    );
+
     snapshot.modeledValuationTimeline = buildCorporateModeledValuationTimeline({
       projects: projectsForBuildFunding.map((project) => ({
         productionStartPeriod: project.productionStartPeriod,
@@ -1911,12 +1940,8 @@ export async function runCorporateSnapshotPipeline(args: {
       fcfUSD_total: aggregationEffective.fcffUSD_total,
       capexUSD_total: aggregationEffective.capexUSD_total,
       masterN: aggregationEffective.corporateMasterN,
-      discountRate: input.discountRate,
-      shares_post_financing_fd_effective,
       shares_post_financing: shares_post_financing_fd_effective,
-      fx_USD_to_TargetCurrency: fxRate,
-      npvToday_USD: aggregationEffective.NPV_today_USD,
-      netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+      lista2MetricsByTp,
       includeDebugSanity: debug,
       diagnosticsWarnings: diagnostics.warnings,
     });

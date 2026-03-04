@@ -81,11 +81,15 @@ test('corporate modeled valuation markers use rolling timeline labels and tp ind
     fcfUSD_total: fcfUSDTotal,
     capexUSD_total: [100, 100, 100, 100, 0, 0, 0, 0, 0, 0],
     masterN,
-    discountRate: 0.1,
     shares_post_financing: 100,
-    fx_USD_to_TargetCurrency: 1,
-    npvToday_USD: 1000,
-    netCash_t0_post_TargetCurrency: 50,
+    lista2MetricsByTp: {
+      4: {
+        NAV_prodStart_TargetCurrency: -3.934778424225897,
+        NAV_prodStart_perShare_TargetCurrency: -0.03934778424225897,
+        DCF_prodStart_exCapex_TargetCurrency: 346.0652215757741,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 3.460652215757741,
+      },
+    },
     includeDebugSanity: true,
   });
 
@@ -100,6 +104,10 @@ test('corporate modeled valuation markers use rolling timeline labels and tp ind
   assert.equal(marker.sanity?.corporateDateUsed, null);
   assert.equal(marker.debug?.sharesDenominatorType, 'shares_post_financing');
   assert.equal(marker.debug?.sharesDenominatorUsed, 100);
+  assert.equal(marker.debug?.value_low_total_TargetCurrency, -3.934778424225897);
+  assert.equal(marker.debug?.value_high_total_TargetCurrency, 346.0652215757741);
+  assert.equal(marker.debug?.lista2_NAV_prodStart_TargetCurrency_used, -3.934778424225897);
+  assert.equal(marker.debug?.lista2_DCF_prodStart_exCapex_TargetCurrency_used, 346.0652215757741);
 
   const expectedTailSum = fcfUSDTotal.slice(4, masterN + 1).reduce((sum, value) => sum + value, 0);
   assert.equal(marker.fcfTailSumUSD, expectedTailSum);
@@ -119,11 +127,15 @@ test('corporate modeled valuation marker year labels come directly from yearsByP
     fcfUSD_total: Array.from({ length: 19 }, () => 1),
     capexUSD_total: Array.from({ length: 19 }, () => 0),
     masterN: 18,
-    discountRate: 0.1,
     shares_post_financing: 100,
-    fx_USD_to_TargetCurrency: 1,
-    npvToday_USD: 1000,
-    netCash_t0_post_TargetCurrency: 50,
+    lista2MetricsByTp: {
+      4: {
+        NAV_prodStart_TargetCurrency: 50,
+        NAV_prodStart_perShare_TargetCurrency: 0.5,
+        DCF_prodStart_exCapex_TargetCurrency: 150,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 1.5,
+      },
+    },
   });
 
   assert.equal(yearsByPeriod[0], 2025);
@@ -139,11 +151,8 @@ test('corporate modeled valuation timeline throws when tp is outside yearsByPeri
     fcfUSD_total: [1, 1, 1],
     capexUSD_total: [0, 0, 0],
     masterN: 2,
-    discountRate: 0.1,
     shares_post_financing: 100,
-    fx_USD_to_TargetCurrency: 1,
-    npvToday_USD: 1000,
-    netCash_t0_post_TargetCurrency: 50,
+    lista2MetricsByTp: {},
   }), /outside yearsByPeriod bounds/);
 });
 
@@ -156,17 +165,21 @@ test('corporate modeled valuation marker low becomes null and emits diagnostics 
     fcfUSD_total: [10, 20, 30, 40],
     capexUSD_total: [null, null, 0, 0],
     masterN: 3,
-    discountRate: 0.1,
     shares_post_financing: 100,
-    fx_USD_to_TargetCurrency: 1,
-    npvToday_USD: 100,
-    netCash_t0_post_TargetCurrency: 10,
+    lista2MetricsByTp: {
+      2: {
+        NAV_prodStart_TargetCurrency: null,
+        NAV_prodStart_perShare_TargetCurrency: null,
+        DCF_prodStart_exCapex_TargetCurrency: 66.36363636363636,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 0.6636363636363636,
+      },
+    },
     diagnosticsWarnings: warnings,
   });
 
   assert.equal(timeline.markers[0]?.value_low, null);
   assert.equal(timeline.markers[0]?.value_high, 0.6636363636363636);
-  assert.ok(warnings.includes('Missing NAV_prodStart_TargetCurrency for corporate modeled marker'));
+  assert.ok(warnings.includes('Missing NAV_prodStart_TargetCurrency for marker low'));
 });
 
 test('corporate modeled valuation marker uses fd effective shares denominator over fallback shares_post_financing', () => {
@@ -176,12 +189,15 @@ test('corporate modeled valuation marker uses fd effective shares denominator ov
     fcfUSD_total: [0, 0, 0, 0],
     capexUSD_total: [0, 0, 0, 0],
     masterN: 3,
-    discountRate: 0.1,
-    shares_post_financing_fd_effective: 507023430,
-    shares_post_financing: 358330464,
-    fx_USD_to_TargetCurrency: 1,
-    npvToday_USD: 0,
-    netCash_t0_post_TargetCurrency: 0,
+    shares_post_financing: 507023430,
+    lista2MetricsByTp: {
+      2: {
+        NAV_prodStart_TargetCurrency: 0,
+        NAV_prodStart_perShare_TargetCurrency: 0,
+        DCF_prodStart_exCapex_TargetCurrency: 0,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 0,
+      },
+    },
   });
 
   const marker = timeline.markers[0];
@@ -196,12 +212,15 @@ test('corporate modeled valuation marker nulls values when shares denominator is
     fcfUSD_total: [10, 20, 30],
     capexUSD_total: [10, 0, 0],
     masterN: 2,
-    discountRate: 0.1,
-    shares_post_financing_fd_effective: 0,
     shares_post_financing: 0,
-    fx_USD_to_TargetCurrency: 1,
-    npvToday_USD: 100,
-    netCash_t0_post_TargetCurrency: 10,
+    lista2MetricsByTp: {
+      1: {
+        NAV_prodStart_TargetCurrency: 10,
+        NAV_prodStart_perShare_TargetCurrency: null,
+        DCF_prodStart_exCapex_TargetCurrency: 20,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: null,
+      },
+    },
   });
 
   const marker = timeline.markers[0];
