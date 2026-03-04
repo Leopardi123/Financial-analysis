@@ -1851,6 +1851,7 @@ export async function runCorporateSnapshotPipeline(args: {
         shares_post_financing: shares_post_financing_fd_effective,
         fx_USD_to_TargetCurrency: fxRate,
         npvToday_USD: aggregationEffective.NPV_today_USD,
+        netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
       });
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
@@ -1906,7 +1907,9 @@ export async function runCorporateSnapshotPipeline(args: {
       shares_post_financing: shares_post_financing_fd_effective,
       fx_USD_to_TargetCurrency: fxRate,
       npvToday_USD: aggregationEffective.NPV_today_USD,
+      netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
       includeDebugSanity: debug,
+      diagnosticsWarnings: diagnostics.warnings,
     });
     snapshot.market = marketInput;
     snapshot.fx_USD_to_TargetCurrency = fxRate;

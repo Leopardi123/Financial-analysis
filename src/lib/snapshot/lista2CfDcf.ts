@@ -15,6 +15,8 @@ export type Lista2CfDcfMetrics = {
   DCF_prodStart_exCapex_perShare_TargetCurrency: NullableNumber;
   DCF_prodStart_present_TargetCurrency: NullableNumber;
   DCF_prodStart_present_perShare_TargetCurrency: NullableNumber;
+  NAV_prodStart_TargetCurrency: NullableNumber;
+  NAV_prodStart_perShare_TargetCurrency: NullableNumber;
   NPV_over_ETLV: NullableNumber;
   DCF_present_over_ETLV: NullableNumber;
   DCF_prodStart_over_ETLV: NullableNumber;
@@ -28,6 +30,7 @@ type Input = {
   shares_post_financing: number | null;
   fx_USD_to_TargetCurrency: number | null;
   npvToday_USD: number | null;
+  netCash_t0_post_TargetCurrency?: number | null;
 };
 
 export function makeNullLista2CfDcfMetrics(): Lista2CfDcfMetrics {
@@ -46,6 +49,8 @@ export function makeNullLista2CfDcfMetrics(): Lista2CfDcfMetrics {
     DCF_prodStart_exCapex_perShare_TargetCurrency: null,
     DCF_prodStart_present_TargetCurrency: null,
     DCF_prodStart_present_perShare_TargetCurrency: null,
+    NAV_prodStart_TargetCurrency: null,
+    NAV_prodStart_perShare_TargetCurrency: null,
     NPV_over_ETLV: null,
     DCF_present_over_ETLV: null,
     DCF_prodStart_over_ETLV: null,
@@ -162,6 +167,17 @@ export function computeLista2CfDcfMetrics(input: Input): {
   const DCF_prodStart_exCapex_perShare_TargetCurrency = toTarget(DCF_prodStart_exCapex_perShare_USD, fx);
   const DCF_prodStart_present_TargetCurrency = toTarget(dcfProdStart_present, fx);
   const DCF_prodStart_present_perShare_TargetCurrency = toTarget(DCF_prodStart_present_perShare_USD, fx);
+  const netCash_t0_post_TargetCurrency =
+    input.netCash_t0_post_TargetCurrency !== null
+    && input.netCash_t0_post_TargetCurrency !== undefined
+    && Number.isFinite(input.netCash_t0_post_TargetCurrency)
+      ? input.netCash_t0_post_TargetCurrency
+      : null;
+  const NAV_prodStart_TargetCurrency =
+    DCF_prodStart_exCapex_TargetCurrency !== null && netCash_t0_post_TargetCurrency !== null
+      ? DCF_prodStart_exCapex_TargetCurrency + netCash_t0_post_TargetCurrency
+      : null;
+  const NAV_prodStart_perShare_TargetCurrency = toPerShare(NAV_prodStart_TargetCurrency, shares);
 
   const cfDenominator = cfLom !== 0 ? cfLom : null;
 
@@ -181,6 +197,8 @@ export function computeLista2CfDcfMetrics(input: Input): {
       DCF_prodStart_exCapex_perShare_TargetCurrency,
       DCF_prodStart_present_TargetCurrency,
       DCF_prodStart_present_perShare_TargetCurrency,
+      NAV_prodStart_TargetCurrency,
+      NAV_prodStart_perShare_TargetCurrency,
       NPV_over_ETLV:
         cfDenominator !== null && input.npvToday_USD !== null && Number.isFinite(input.npvToday_USD)
           ? input.npvToday_USD / cfDenominator
