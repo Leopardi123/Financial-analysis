@@ -98,6 +98,8 @@ test('corporate modeled valuation markers use rolling timeline labels and tp ind
   assert.equal(marker.sanity?.matchMode, 'exact');
   assert.equal(marker.sanity?.tpDate, null);
   assert.equal(marker.sanity?.corporateDateUsed, null);
+  assert.equal(marker.debug?.sharesDenominatorType, 'shares_post_financing');
+  assert.equal(marker.debug?.sharesDenominatorUsed, 100);
 
   const expectedTailSum = fcfUSDTotal.slice(4, masterN + 1).reduce((sum, value) => sum + value, 0);
   assert.equal(marker.fcfTailSumUSD, expectedTailSum);
@@ -164,5 +166,46 @@ test('corporate modeled valuation marker low becomes null and emits diagnostics 
 
   assert.equal(timeline.markers[0]?.value_low, null);
   assert.equal(timeline.markers[0]?.value_high, 0.6636363636363636);
-  assert.ok(warnings.includes('Missing NAV_prodStart_perShare_TargetCurrency for corporate modeled marker'));
+  assert.ok(warnings.includes('Missing NAV_prodStart_TargetCurrency for corporate modeled marker'));
+});
+
+test('corporate modeled valuation marker uses fd effective shares denominator over fallback shares_post_financing', () => {
+  const timeline = buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 2 }],
+    yearsByPeriod: [2025, 2026, 2027, 2028],
+    fcfUSD_total: [0, 0, 0, 0],
+    capexUSD_total: [0, 0, 0, 0],
+    masterN: 3,
+    discountRate: 0.1,
+    shares_post_financing_fd_effective: 507023430,
+    shares_post_financing: 358330464,
+    fx_USD_to_TargetCurrency: 1,
+    npvToday_USD: 0,
+    netCash_t0_post_TargetCurrency: 0,
+  });
+
+  const marker = timeline.markers[0];
+  assert.equal(marker.debug?.sharesDenominatorUsed, 507023430);
+  assert.equal(marker.debug?.sharesDenominatorType, 'shares_post_financing');
+});
+
+test('corporate modeled valuation marker nulls values when shares denominator is invalid', () => {
+  const timeline = buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 1 }],
+    yearsByPeriod: [2025, 2026, 2027],
+    fcfUSD_total: [10, 20, 30],
+    capexUSD_total: [10, 0, 0],
+    masterN: 2,
+    discountRate: 0.1,
+    shares_post_financing_fd_effective: 0,
+    shares_post_financing: 0,
+    fx_USD_to_TargetCurrency: 1,
+    npvToday_USD: 100,
+    netCash_t0_post_TargetCurrency: 10,
+  });
+
+  const marker = timeline.markers[0];
+  assert.equal(marker.value_low, null);
+  assert.equal(marker.value_high, null);
+  assert.equal(marker.nullReasonIfAny, 'Invalid shares_post_financing denominator');
 });
