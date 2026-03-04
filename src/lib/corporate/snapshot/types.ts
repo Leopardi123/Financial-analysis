@@ -93,6 +93,11 @@ export type CorporateSnapshotSeries = {
   };
 };
 
+export type CorporateSnapshotList2 = {
+  metrics: import('../../snapshot/lista2CfDcf.ts').Lista2CfDcfMetrics;
+  nullReasons: import('../../snapshot/lista2CfDcf.ts').Lista2CfDcfNullReasons;
+};
+
 export type CorporateSnapshot = {
   targetCurrency: string;
 
@@ -133,6 +138,8 @@ export type CorporateSnapshot = {
   DCF_prodStart_present_TargetCurrency: number | null;
   DCF_prodStart_present_perShare_TargetCurrency: number | null;
 
+
+  list2: CorporateSnapshotList2;
   Payback_approx_years: number | null;
   Payback_real_years: number | null;
   ROI_10Y_pct: number | null;

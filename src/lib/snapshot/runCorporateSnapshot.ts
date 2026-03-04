@@ -10,7 +10,7 @@ import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnap
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
 import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
-import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics } from './lista2CfDcf.ts';
+import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics, makeNullLista2CfDcfNullReasons } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import { buildCorporateModeledValuationTimeline } from './corporateModeledValuationTimeline.ts';
@@ -1850,7 +1850,7 @@ export async function runCorporateSnapshotPipeline(args: {
     }
 
     const lista2 = tpEff !== null && tpEff > aggregation.corporateMasterN
-      ? { metrics: makeNullLista2CfDcfMetrics(), warnings: ['failure_reason: tp_eff > masterN'], errors: [] }
+      ? { metrics: makeNullLista2CfDcfMetrics(), nullReasons: makeNullLista2CfDcfNullReasons('invalid tp'), warnings: ['failure_reason: tp_eff > masterN'], errors: [] }
       : computeLista2CfDcfMetrics({
         fcfUSD_total: aggregationEffective.fcffUSD_total,
         capexUSD_total: aggregationEffective.capexUSD_total,
@@ -1900,6 +1900,7 @@ export async function runCorporateSnapshotPipeline(args: {
       financing: financingSnapshot,
       market: marketInput,
       lista2CfDcf: lista2.metrics,
+      lista2NullReasons: lista2.nullReasons,
       lista3aProjectEfficiency: lista3a.metrics,
       lista4TenYear: lista4,
     });

@@ -224,6 +224,44 @@ const PROJECT_SECTION_DEFAULT_OPEN: Record<string, boolean> = {
 
 
 
+
+
+type SnapshotList2Shape = {
+  metrics?: Record<string, unknown>;
+  nullReasons?: Record<string, unknown>;
+};
+
+function toMetricValue(rawValue: unknown, rawReason: unknown): MetricValue {
+  return {
+    value: typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null,
+    reason: typeof rawReason === "string" && rawReason.trim().length > 0 ? rawReason : null,
+  };
+}
+
+function buildList2MetricsFromSnapshot(snapshotData: Record<string, unknown> | null): Record<string, MetricValue> | null {
+  if (!snapshotData) return null;
+  const list2 = (snapshotData.list2 ?? null) as SnapshotList2Shape | null;
+  const metrics = (list2?.metrics ?? null) as Record<string, unknown> | null;
+  if (!metrics) return null;
+  const nullReasons = (list2?.nullReasons ?? {}) as Record<string, unknown>;
+
+  // Nyckeltal Lista2 uses backend snapshot.list2.metrics as source of truth.
+  return {
+    NPV_prodStart: toMetricValue(metrics.NPV_prodStart_TargetCurrency, nullReasons.NAV_prodStart),
+    NPV_prodStart_perShare: toMetricValue(metrics.NPV_prodStart_perShare_TargetCurrency, nullReasons.NAV_prodStart),
+    NAV_prodStart: toMetricValue(metrics.NAV_prodStart_TargetCurrency, nullReasons.NAV_prodStart),
+    NAV_prodStart_perShare: toMetricValue(metrics.NAV_prodStart_perShare_TargetCurrency, nullReasons.NAV_prodStart),
+    CF_LOM_Target: toMetricValue(metrics.CF_LOM_TargetCurrency, nullReasons.CF_LOM),
+    CF_LOM_Target_perShare: toMetricValue(metrics.CF_LOM_perShare_TargetCurrency, nullReasons.CF_LOM),
+    DCF_Target: toMetricValue(metrics.DCF_prodStart_exCapex_TargetCurrency, nullReasons.DCF_prodStart_exCapex),
+    DCF_perShare: toMetricValue(metrics.DCF_prodStart_exCapex_perShare_TargetCurrency, nullReasons.DCF_prodStart_exCapex),
+    DCF_Target_discounted: toMetricValue(metrics.DCF_prodStart_present_TargetCurrency, nullReasons.DCF_prodStart_present),
+    DCF_Target_discounted_perShare: toMetricValue(metrics.DCF_prodStart_present_perShare_TargetCurrency, nullReasons.DCF_prodStart_present),
+    NPV_over_ETLV: toMetricValue(metrics.NPV_over_ETLV, null),
+    DCF_over_ETLV: toMetricValue(metrics.DCF_present_over_ETLV, null),
+  };
+}
+
 type CompactMetric = { label: string; value: unknown; infoKey?: string };
 
 function renderCompactMetrics(
@@ -2318,6 +2356,9 @@ Capital Available: ${availableLabel}`,
     });
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  const projectSnapshotList2Metrics = useMemo(() => buildList2MetricsFromSnapshot(projectSnapshotData), [projectSnapshotData]);
+  const corporateSnapshotList2Metrics = useMemo(() => buildList2MetricsFromSnapshot(corporateSnapshotData), [corporateSnapshotData]);
+
   const corporateProdStartMarkerTextByKey = useMemo(() => {
     if (!corporateSnapshotData) return {} as Record<string, string>;
 
@@ -3933,7 +3974,9 @@ Capital Available: ${availableLabel}`,
                     ["list3", "EFFEKTIVITET OCH LÖNSAMHET", corporateViewMetrics.list3],
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", corporateViewMetrics.list4],
                     ["list6", "M&A VALUATION", corporateViewMetrics.list6],
-                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
+                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => {
+                    const metricsForDisplay = sectionKey === "list2" && corporateSnapshotList2Metrics ? corporateSnapshotList2Metrics : metrics;
+                    return (
                     <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
@@ -3983,7 +4026,7 @@ Capital Available: ${availableLabel}`,
                         </>
                       )}
                       <div className="compact-metrics-grid">
-                        {Object.entries(metrics).map(([key, value]) => (
+                        {Object.entries(metricsForDisplay).map(([key, value]) => (
                           <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
                             <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                             <span className="compact-metric-dots" />
@@ -3998,7 +4041,8 @@ Capital Available: ${availableLabel}`,
                         ))}
                       </div>
                     </details>
-                  ))}
+                    );
+                  })}
                 </>
                   );
                 } catch {
@@ -4122,7 +4166,9 @@ Capital Available: ${availableLabel}`,
                     ["list3", "EFFEKTIVITET OCH LÖNSAMHET", projectViewMetrics.list3],
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", projectViewMetrics.list4],
                     ["list6", "M&A VALUATION", projectViewMetrics.list6],
-                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
+                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => {
+                    const metricsForDisplay = sectionKey === "list2" && projectSnapshotList2Metrics ? projectSnapshotList2Metrics : metrics;
+                    return (
                     <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
@@ -4150,9 +4196,9 @@ Capital Available: ${availableLabel}`,
                       <div className="compact-metrics-grid">
                         {((sectionKey === "list2")
                           ? projectSectionMetricOrder.list2
-                            .filter((key) => Object.prototype.hasOwnProperty.call(metrics, key))
-                            .map((key) => [key, metrics[key]] as const)
-                          : Object.entries(metrics))
+                             .filter((key) => Object.prototype.hasOwnProperty.call(metricsForDisplay, key))
+                            .map((key) => [key, metricsForDisplay[key]] as const)
+                          : Object.entries(metricsForDisplay))
                         .map(([key, value]) => (
                           <div key={key} className="compact-metric-row">
                             <span className="compact-metric-label-wrap">
@@ -4184,13 +4230,14 @@ Capital Available: ${availableLabel}`,
                                   }
                                   return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined);
                                 })()}
-                              {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
+                              {debugEnabled && value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
                             </span>
                           </div>
                         ))}
                       </div>
                     </details>
-                  ))}
+                    );
+                  })}
 
                   <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list5} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list5: open })); }}>
                     <summary><h2 className="subrub small">FINANSIERING OCH SKULDSÄTTNING</h2></summary>
@@ -4245,7 +4292,7 @@ Capital Available: ${availableLabel}`,
                           <span className="compact-metric-dots" />
                           <span className="compact-metric-value">
                             {formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency)}
-                            {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
+                            {debugEnabled && value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
                           </span>
                         </div>
                       ))}

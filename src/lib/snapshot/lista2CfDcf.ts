@@ -15,11 +15,20 @@ export type Lista2CfDcfMetrics = {
   DCF_prodStart_exCapex_perShare_TargetCurrency: NullableNumber;
   DCF_prodStart_present_TargetCurrency: NullableNumber;
   DCF_prodStart_present_perShare_TargetCurrency: NullableNumber;
+  NPV_prodStart_TargetCurrency: NullableNumber;
+  NPV_prodStart_perShare_TargetCurrency: NullableNumber;
   NAV_prodStart_TargetCurrency: NullableNumber;
   NAV_prodStart_perShare_TargetCurrency: NullableNumber;
   NPV_over_ETLV: NullableNumber;
   DCF_present_over_ETLV: NullableNumber;
   DCF_prodStart_over_ETLV: NullableNumber;
+};
+
+export type Lista2CfDcfNullReasons = {
+  DCF_prodStart_present: string | null;
+  DCF_prodStart_exCapex: string | null;
+  CF_LOM: string | null;
+  NAV_prodStart: string | null;
 };
 
 type Input = {
@@ -50,11 +59,22 @@ export function makeNullLista2CfDcfMetrics(): Lista2CfDcfMetrics {
     DCF_prodStart_exCapex_perShare_TargetCurrency: null,
     DCF_prodStart_present_TargetCurrency: null,
     DCF_prodStart_present_perShare_TargetCurrency: null,
+    NPV_prodStart_TargetCurrency: null,
+    NPV_prodStart_perShare_TargetCurrency: null,
     NAV_prodStart_TargetCurrency: null,
     NAV_prodStart_perShare_TargetCurrency: null,
     NPV_over_ETLV: null,
     DCF_present_over_ETLV: null,
     DCF_prodStart_over_ETLV: null,
+  };
+}
+
+export function makeNullLista2CfDcfNullReasons(reason: string | null = null): Lista2CfDcfNullReasons {
+  return {
+    DCF_prodStart_present: reason,
+    DCF_prodStart_exCapex: reason,
+    CF_LOM: reason,
+    NAV_prodStart: reason,
   };
 }
 
@@ -87,12 +107,14 @@ function deriveInitialCapexUSD(capexUSD: Array<number | null> | undefined, tp: n
 
 export function computeLista2CfDcfMetrics(input: Input): {
   metrics: Lista2CfDcfMetrics;
+  nullReasons: Lista2CfDcfNullReasons;
   warnings: string[];
   errors: string[];
 } {
   const warnings: string[] = [];
   const errors: string[] = [];
   const nullMetrics = makeNullLista2CfDcfMetrics();
+  const nullReasons = makeNullLista2CfDcfNullReasons();
 
   const expectedLength = input.masterN + 1;
   const normalizedFcf = new Array<number | null>(expectedLength).fill(null);
@@ -118,24 +140,24 @@ export function computeLista2CfDcfMetrics(input: Input): {
 
   if (normalizedFcf.every((value) => value === null)) {
     warnings.push('Lista2 CF+DCF skipped: fcfUSD_total has no finite periods after normalization');
-    return { metrics: nullMetrics, warnings, errors };
+    return { metrics: nullMetrics, nullReasons: makeNullLista2CfDcfNullReasons('missing fcf series'), warnings, errors };
   }
 
   if (!Number.isInteger(input.productionStartPeriod)) {
     warnings.push('Lista2 CF+DCF skipped: productionStartPeriod is missing');
-    return { metrics: nullMetrics, warnings, errors };
+    return { metrics: nullMetrics, nullReasons: makeNullLista2CfDcfNullReasons('invalid tp'), warnings, errors };
   }
 
   const tp = input.productionStartPeriod as number;
 
   if (tp < 0 || tp > input.masterN) {
     errors.push(`Lista2 CF+DCF failed: productionStartPeriod ${tp} is outside [0, ${input.masterN}]`);
-    return { metrics: nullMetrics, warnings, errors };
+    return { metrics: nullMetrics, nullReasons: makeNullLista2CfDcfNullReasons('invalid tp'), warnings, errors };
   }
 
   if (!(input.discountRate > 0) || !Number.isFinite(input.discountRate)) {
     errors.push('Lista2 CF+DCF failed: discountRate must be finite and > 0');
-    return { metrics: nullMetrics, warnings, errors };
+    return { metrics: nullMetrics, nullReasons: makeNullLista2CfDcfNullReasons('invalid discount rate'), warnings, errors };
   }
 
   let cfLom = 0;
@@ -161,6 +183,10 @@ export function computeLista2CfDcfMetrics(input: Input): {
       : null;
   if (shares === null) {
     warnings.push('Lista2 CF+DCF per-share metrics set to null: shares_post_financing_fd <= 0 or missing');
+    nullReasons.DCF_prodStart_present = 'invalid shares_post_financing';
+    nullReasons.DCF_prodStart_exCapex = 'invalid shares_post_financing';
+    nullReasons.CF_LOM = 'invalid shares_post_financing';
+    nullReasons.NAV_prodStart = 'invalid shares_post_financing';
   }
 
   const fx =
@@ -169,6 +195,10 @@ export function computeLista2CfDcfMetrics(input: Input): {
       : null;
   if (fx === null) {
     warnings.push('Lista2 CF+DCF target-currency metrics set to null: fx_USD_to_TargetCurrency missing');
+    nullReasons.DCF_prodStart_present = 'missing fx';
+    nullReasons.DCF_prodStart_exCapex = 'missing fx';
+    nullReasons.CF_LOM = 'missing fx';
+    nullReasons.NAV_prodStart = 'missing fx';
   }
 
   const CF_LOM_perShare_USD = toPerShare(cfLom, shares);
@@ -184,6 +214,7 @@ export function computeLista2CfDcfMetrics(input: Input): {
   const initialCapexUSD = deriveInitialCapexUSD(input.capexUSD_total, tp);
   if (initialCapexUSD === null) {
     warnings.push('Lista2 CF+DCF NAV prod-start metrics set to null: missing capexUSD_total before tp');
+    nullReasons.NAV_prodStart = 'missing initial capex';
   }
   const NPV_prodStart_USD =
     dcfProdStart_exCapex !== null && initialCapexUSD !== null
@@ -196,10 +227,14 @@ export function computeLista2CfDcfMetrics(input: Input): {
     && Number.isFinite(input.netCash_t0_post_TargetCurrency)
       ? input.netCash_t0_post_TargetCurrency
       : null;
+  const NPV_prodStart_perShare_TargetCurrency = toPerShare(NPV_prodStart_TargetCurrency, shares);
   const NAV_prodStart_TargetCurrency =
     NPV_prodStart_TargetCurrency !== null && netCash_t0_post_TargetCurrency !== null
       ? NPV_prodStart_TargetCurrency + netCash_t0_post_TargetCurrency
       : null;
+  if (NAV_prodStart_TargetCurrency === null && nullReasons.NAV_prodStart === null) {
+    nullReasons.NAV_prodStart = netCash_t0_post_TargetCurrency === null ? 'missing net cash t0 post' : 'missing nav inputs';
+  }
   const NAV_prodStart_perShare_TargetCurrency = toPerShare(NAV_prodStart_TargetCurrency, shares);
 
   const cfDenominator = cfLom !== 0 ? cfLom : null;
@@ -220,6 +255,8 @@ export function computeLista2CfDcfMetrics(input: Input): {
       DCF_prodStart_exCapex_perShare_TargetCurrency,
       DCF_prodStart_present_TargetCurrency,
       DCF_prodStart_present_perShare_TargetCurrency,
+      NPV_prodStart_TargetCurrency,
+      NPV_prodStart_perShare_TargetCurrency,
       NAV_prodStart_TargetCurrency,
       NAV_prodStart_perShare_TargetCurrency,
       NPV_over_ETLV:
@@ -229,6 +266,7 @@ export function computeLista2CfDcfMetrics(input: Input): {
       DCF_present_over_ETLV: cfDenominator !== null ? dcfProdStart_present / cfDenominator : null,
       DCF_prodStart_over_ETLV: cfDenominator !== null ? dcfProdStart_exCapex / cfDenominator : null,
     },
+    nullReasons,
     warnings,
     errors,
   };
