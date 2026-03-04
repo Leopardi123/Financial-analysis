@@ -182,5 +182,107 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     'missing periodEndDatesUtc should throw clear error',
   );
 
+
+  const v2CalendarAligned = await aggregateProjectsCorporateV1(
+    {
+      discountRate: 0.1,
+      projects: [
+        {
+          projectId: 'v2-A',
+          rawJson: {
+            version: 'project_json_v2',
+            time: { masterN: 6, productionStartPeriod: 4, productionStartYear: 2029 },
+          },
+        },
+        {
+          projectId: 'v2-B',
+          rawJson: {
+            version: 'project_json_v2',
+            time: { masterN: 7, productionStartPeriod: 5, productionStartYear: 2031 },
+          },
+        },
+        {
+          projectId: 'v2-C',
+          rawJson: {
+            version: 'project_json_v2',
+            time: { masterN: 1, productionStartPeriod: 0, productionStartYear: 2026 },
+          },
+        },
+      ],
+    },
+    makeDepsByProjectId({
+      'v2-A': {
+        periodEndDatesUtc: ['ignore'],
+        fcffUSD: [1, 1, 1, 1, 1, 1, 1],
+        capexUSD: [-1, -1, -1, -1, -1, -1, -1],
+        grossRevenueUSD: [10, 10, 10, 10, 10, 10, 10],
+        auPriceUSDPerOz: [1000, 1000, 1000, 1000, 1000, 1000, 1000],
+        sustainingCostUSD: [2, 2, 2, 2, 2, 2, 2],
+        payableAuEqOz: [1, 1, 1, 1, 1, 1, 1],
+      },
+      'v2-B': {
+        periodEndDatesUtc: ['ignore'],
+        fcffUSD: [2, 2, 2, 2, 2, 2, 2, 2],
+        capexUSD: [-2, -2, -2, -2, -2, -2, -2, -2],
+        grossRevenueUSD: [20, 20, 20, 20, 20, 20, 20, 20],
+        auPriceUSDPerOz: [2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000],
+        sustainingCostUSD: [4, 4, 4, 4, 4, 4, 4, 4],
+        payableAuEqOz: [2, 2, 2, 2, 2, 2, 2, 2],
+      },
+      'v2-C': {
+        periodEndDatesUtc: ['ignore'],
+        fcffUSD: [3, 3],
+        capexUSD: [-3, -3],
+        grossRevenueUSD: [30, 30],
+        auPriceUSDPerOz: [3000, 3000],
+        sustainingCostUSD: [6, 6],
+        payableAuEqOz: [3, 3],
+      },
+    }),
+  );
+
+  assertDeepEqual(
+    v2CalendarAligned.corporateYearsByPeriod,
+    [2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033],
+    'v2 corporate calendar axis should span min..max years',
+  );
+  assertDeepEqual(
+    v2CalendarAligned.fcffUSD_total,
+    [1, 6, 6, 3, 3, 3, 3, 2, 2],
+    'v2 corporate aggregation should align by calendar year',
+  );
+
+  await assertRejects(
+    () =>
+      aggregateProjectsCorporateV1(
+        {
+          discountRate: 0.1,
+          projects: [
+            {
+              projectId: 'bad-v2',
+              rawJson: ({
+                version: 'project_json_v2',
+                time: { masterN: 3, productionStartPeriod: 1 },
+              } as any),
+            },
+          ],
+        },
+        makeDepsByProjectId({
+          'bad-v2': {
+            periodEndDatesUtc: ['ignore'],
+            fcffUSD: [1, 1, 1, 1],
+            capexUSD: [0, 0, 0, 0],
+            grossRevenueUSD: [0, 0, 0, 0],
+            auPriceUSDPerOz: [1000, 1000, 1000, 1000],
+            sustainingCostUSD: [0, 0, 0, 0],
+            payableAuEqOz: [1, 1, 1, 1],
+          },
+        }),
+      ),
+    /Corporate v2 invalid project time inputs.*bad-v2/s,
+    'v2 invalid project time should include projectId in clear error',
+  );
+
+
   console.log('Corporate aggregateProjects tests passed');
 })();
