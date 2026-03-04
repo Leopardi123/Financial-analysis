@@ -11,8 +11,7 @@ export type CorporateAggregationInput = {
 };
 
 export type CorporateAggregationOutput = {
-  corporatePeriodEndDatesUtc: string[];
-  corporateYearsByPeriod?: number[];
+  corporateYearsByPeriod: number[];
   corporateMasterN: number;
   capexUSD_total: Array<number | null>;
   fcffUSD_total: Array<number | null>;
@@ -32,7 +31,6 @@ export type CorporateAggregationOutput = {
 };
 
 export type CorporateProjectEngineSnapshot = {
-  periodEndDatesUtc: string[];
   yearsByPeriod?: number[];
   capexUSD: Array<number | null>;
   fcffUSD: Array<number | null>;

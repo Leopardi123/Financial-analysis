@@ -53,7 +53,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     },
     makeDepsByProjectId({
       A: {
-        periodEndDatesUtc: ['2024-12-31', '2025-12-31', '2026-12-31'],
+        yearsByPeriod: [2024, 2025, 2026],
         fcffUSD: [10, 10, 10],
         capexUSD: [-1, -1, -1],
         grossRevenueUSD: [100, 100, 100],
@@ -62,7 +62,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
         payableAuEqOz: [1, 1, 1],
       },
       B: {
-        periodEndDatesUtc: ['2024-12-31', '2025-12-31', '2026-12-31'],
+        yearsByPeriod: [2024, 2025, 2026],
         fcffUSD: [20, 20, 20],
         capexUSD: [-2, -2, -2],
         grossRevenueUSD: [200, 200, 200],
@@ -75,7 +75,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
 
   assertDeepEqual(sameDates.fcffUSD_total, [30, 30, 30], 'same-date projects should aggregate fcff');
   assertDeepEqual(sameDates.capexUSD_total, [-3, -3, -3], 'same-date projects should aggregate capex');
-  assertDeepEqual(sameDates.corporatePeriodEndDatesUtc, ['2024-12-31', '2025-12-31', '2026-12-31'], 'same-date grid');
+  assertDeepEqual(sameDates.corporateYearsByPeriod, [2024, 2025, 2026], 'same-date grid');
   assertApproxEqual(sameDates.aiscAuEqUSDPerOz_LOM as number, 5, 1e-12, 'corporate AISC should follow aggregated flow rule');
 
   const expectedNpv = 30 * (1 + 1 / 1.1 + 1 / 1.1 ** 2);
@@ -91,7 +91,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     },
     makeDepsByProjectId({
       A: {
-        periodEndDatesUtc: ['2024-12-31', '2025-12-31'],
+        yearsByPeriod: [2024, 2025],
         fcffUSD: [10, 10],
         capexUSD: [-1, -1],
         grossRevenueUSD: [100, 100],
@@ -100,7 +100,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
         payableAuEqOz: [1, 1],
       },
       B: {
-        periodEndDatesUtc: ['2025-12-31', '2026-12-31'],
+        yearsByPeriod: [2025, 2026],
         fcffUSD: [20, 20],
         capexUSD: [-2, -2],
         grossRevenueUSD: [200, 200],
@@ -111,7 +111,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     }),
   );
 
-  assertDeepEqual(unionDates.corporatePeriodEndDatesUtc, ['2024-12-31', '2025-12-31', '2026-12-31'], 'union grid should dedupe and sort dates');
+  assertDeepEqual(unionDates.corporateYearsByPeriod, [2024, 2025, 2026], 'union grid should dedupe and sort dates');
   assertDeepEqual(unionDates.fcffUSD_total, [10, 30, 20], 'missing periods should contribute zero on union grid');
   assertDeepEqual(unionDates.capexUSD_total, [-1, -3, -2], 'capex union-grid aggregation should use missing as zero');
 
@@ -125,7 +125,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     },
     makeDepsByProjectId({
       A: {
-        periodEndDatesUtc: ['2024-12-31', '2025-12-31'],
+        yearsByPeriod: [2024, 2025],
         fcffUSD: [10, null],
         capexUSD: [-1, -1],
         grossRevenueUSD: [100, 100],
@@ -134,7 +134,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
         payableAuEqOz: [1, 1],
       },
       B: {
-        periodEndDatesUtc: ['2024-12-31', '2025-12-31'],
+        yearsByPeriod: [2024, 2025],
         fcffUSD: [20, 20],
         capexUSD: [-2, -2],
         grossRevenueUSD: [200, 200],
@@ -178,8 +178,8 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
           })) as unknown as CorporateAggregationDeps['runProjectEngine'],
         },
       ),
-    /Project missing-dates is missing time\.periodEndDatesUtc; required for corporate aggregation v1\./,
-    'missing periodEndDatesUtc should throw clear error',
+    /Invalid v2 time for project missing-dates: masterN=2, productionStartPeriod=0, productionStartYear=undefined/,
+    'invalid v2 time should throw clear error',
   );
 
 
@@ -212,7 +212,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     },
     makeDepsByProjectId({
       'v2-A': {
-        periodEndDatesUtc: ['ignore'],
+        yearsByPeriod: [2000],
         fcffUSD: [1, 1, 1, 1, 1, 1, 1],
         capexUSD: [-1, -1, -1, -1, -1, -1, -1],
         grossRevenueUSD: [10, 10, 10, 10, 10, 10, 10],
@@ -221,7 +221,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
         payableAuEqOz: [1, 1, 1, 1, 1, 1, 1],
       },
       'v2-B': {
-        periodEndDatesUtc: ['ignore'],
+        yearsByPeriod: [2000],
         fcffUSD: [2, 2, 2, 2, 2, 2, 2, 2],
         capexUSD: [-2, -2, -2, -2, -2, -2, -2, -2],
         grossRevenueUSD: [20, 20, 20, 20, 20, 20, 20, 20],
@@ -230,7 +230,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
         payableAuEqOz: [2, 2, 2, 2, 2, 2, 2, 2],
       },
       'v2-C': {
-        periodEndDatesUtc: ['ignore'],
+        yearsByPeriod: [2000],
         fcffUSD: [3, 3],
         capexUSD: [-3, -3],
         grossRevenueUSD: [30, 30],
@@ -269,7 +269,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
         },
         makeDepsByProjectId({
           'bad-v2': {
-            periodEndDatesUtc: ['ignore'],
+            yearsByPeriod: [2000],
             fcffUSD: [1, 1, 1, 1],
             capexUSD: [0, 0, 0, 0],
             grossRevenueUSD: [0, 0, 0, 0],

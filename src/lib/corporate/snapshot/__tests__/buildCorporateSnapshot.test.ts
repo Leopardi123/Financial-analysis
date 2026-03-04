@@ -38,7 +38,7 @@ function baseFinancing(): CorporateFinancingOutput {
 
 function baseAggregation(): CorporateAggregationOutput {
   return {
-    corporatePeriodEndDatesUtc: [],
+    corporateYearsByPeriod: [],
     corporateMasterN: 0,
     capexUSD_total: [],
     fcffUSD_total: [],

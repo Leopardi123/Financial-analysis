@@ -9,11 +9,14 @@ import type {
   CorporateProjectEngineSnapshot,
 } from './types.ts';
 
-type ProjectTimeKind = 'v1' | 'v2';
-
-function getProjectTimeKind(project: any): ProjectTimeKind {
-  return project?.version === 'project_json_v2' ? 'v2' : 'v1';
-}
+type V2ProjectAxis = {
+  projectId: string;
+  masterN: number;
+  productionStartPeriod: number;
+  productionStartYear: number;
+  yearsByPeriod: number[];
+  yearToT: Map<number, number>;
+};
 
 function validateBaseInput(input: CorporateAggregationInput): void {
   if (!(input.discountRate > 0 && input.discountRate <= 0.25)) {
@@ -25,84 +28,71 @@ function validateBaseInput(input: CorporateAggregationInput): void {
   }
 }
 
-function buildCorporateDateGrid(projects: CorporateProjectEngineSnapshot[]): string[] {
-  const allDates = projects.flatMap((project) => project.periodEndDatesUtc);
-  return [...new Set(allDates)].sort((a, b) => a.localeCompare(b));
-}
+function getV2AxisOrThrow(projectId: string, rawJson: unknown): V2ProjectAxis {
+  const time = (rawJson as {
+    time?: {
+      masterN?: unknown;
+      productionStartPeriod?: unknown;
+      productionStartYear?: unknown;
+    };
+  }).time;
 
-function sumStrictByDateGrid(
-  corporateDates: string[],
-  projects: CorporateProjectEngineSnapshot[],
-  readSeries: (project: CorporateProjectEngineSnapshot) => Array<number | null>,
-): Array<number | null> {
-  const sums = new Array<number>(corporateDates.length).fill(0);
-  const nullAtDate = new Array<boolean>(corporateDates.length).fill(false);
+  const masterN = time?.masterN;
+  const productionStartPeriod = time?.productionStartPeriod;
+  const productionStartYear = time?.productionStartYear;
 
-  for (const project of projects) {
-    const dateToProjectIndex = new Map<string, number>(project.periodEndDatesUtc.map((date, index) => [date, index]));
-    const series = readSeries(project);
+  try {
+    const resolved = resolveV2TimeAxis({
+      masterN: masterN as number,
+      productionStartPeriod: productionStartPeriod as number,
+      productionStartYear: productionStartYear as number,
+    });
 
-    for (let corporateIndex = 0; corporateIndex < corporateDates.length; corporateIndex += 1) {
-      if (nullAtDate[corporateIndex]) {
-        continue;
-      }
-
-      const date = corporateDates[corporateIndex];
-      const projectIndex = dateToProjectIndex.get(date);
-      if (projectIndex === undefined) {
-        continue;
-      }
-
-      const value = series[projectIndex];
-      if (value === null) {
-        nullAtDate[corporateIndex] = true;
-        continue;
-      }
-
-      sums[corporateIndex] += value;
-    }
+    return {
+      projectId,
+      masterN: resolved.masterN,
+      productionStartPeriod: resolved.productionStartPeriod,
+      productionStartYear: resolved.productionStartYear,
+      yearsByPeriod: resolved.yearsByPeriod,
+      yearToT: new Map<number, number>(resolved.yearsByPeriod.map((year, t) => [year, t])),
+    };
+  } catch {
+    throw new Error(
+      `Invalid v2 time for project ${projectId}: masterN=${String(masterN)}, productionStartPeriod=${String(productionStartPeriod)}, productionStartYear=${String(productionStartYear)}`,
+    );
   }
-
-  return sums.map((value, index) => (nullAtDate[index] ? null : value));
 }
-
-type V2ProjectAxis = {
-  projectId: string;
-  masterN: number;
-  productionStartPeriod: number;
-  productionStartYear: number;
-  yearsByPeriod: number[];
-};
 
 function sumStrictByYearGrid(
   corporateYears: number[],
-  projects: Array<CorporateProjectEngineSnapshot & { yearsByPeriod: number[] }>,
+  projects: Array<CorporateProjectEngineSnapshot & { yearToT: Map<number, number> }>,
   readSeries: (project: CorporateProjectEngineSnapshot) => Array<number | null>,
 ): Array<number | null> {
   const sums = new Array<number>(corporateYears.length).fill(0);
+  const hasContributor = new Array<boolean>(corporateYears.length).fill(false);
   const nullAtYear = new Array<boolean>(corporateYears.length).fill(false);
-  const yearToCorporateIndex = new Map<number, number>(corporateYears.map((year, index) => [year, index]));
 
   for (const project of projects) {
     const series = readSeries(project);
-    for (let t = 0; t < project.yearsByPeriod.length; t += 1) {
-      const year = project.yearsByPeriod[t];
-      const corporateIndex = yearToCorporateIndex.get(year);
-      if (corporateIndex === undefined || nullAtYear[corporateIndex] || t >= series.length) {
+    for (let j = 0; j < corporateYears.length; j += 1) {
+      if (nullAtYear[j]) {
         continue;
       }
-
+      const t = project.yearToT.get(corporateYears[j]);
+      if (t === undefined) {
+        continue;
+      }
+      hasContributor[j] = true;
       const value = series[t];
       if (value === null) {
-        nullAtYear[corporateIndex] = true;
+        nullAtYear[j] = true;
         continue;
       }
-
-      sums[corporateIndex] += value;
+      sums[j] += value;
     }
   }
 
-  return sums.map((value, index) => (nullAtYear[index] ? null : value));
+  return sums.map((value, j) => (nullAtYear[j] || !hasContributor[j] ? null : value));
 }
 
 function computeStrictValueMetrics(args: {
@@ -167,40 +157,12 @@ function assertSeriesLength(series: Array<number | null>, expectedLength: number
   }
 }
 
-async function defaultProjectToSeries(args: {
-  projectId: string;
-  rawJson: unknown;
-}): Promise<CorporateProjectEngineSnapshot> {
-  const parsed = parseProjectJsonV1(args.rawJson);
-  const periodEndDatesUtc = parsed.engineInputWithoutPrices.periodEndDatesUtc;
-  if (!periodEndDatesUtc) {
-    throw new Error(`Project ${args.projectId} is missing time.periodEndDatesUtc; required for corporate aggregation v1.`);
-  }
-
-  const resolved = await resolveProjectPricesToEngineInput({
-    parsed,
-    from: periodEndDatesUtc[0],
-    to: periodEndDatesUtc[periodEndDatesUtc.length - 1],
-  });
-  const out = computeProjectEngineFullProductionV1(resolved);
-
-  return {
-    periodEndDatesUtc,
-    capexUSD: out.capexUSD_used,
-    fcffUSD: out.phase1.fcffUSD,
-    grossRevenueUSD: out.revenue.grossRevenueUSD,
-    auPriceUSDPerOz: resolved.aisc.auPriceUSDPerOz,
-    sustainingCostUSD: out.phase1.sustainingCostUSD,
-    payableAuEqOz: out.aisc.payableAuEqOz,
-  };
-}
-
 async function projectToSeriesViaDeps(
-  args: { projectId: string; rawJson: unknown },
+  args: { projectId: string; rawJson: unknown; yearsByPeriod: number[] },
   deps: CorporateAggregationDeps,
 ): Promise<CorporateProjectEngineSnapshot> {
   if (deps.projectToSeries) {
-    return deps.projectToSeries(args);
+    return deps.projectToSeries({ projectId: args.projectId, rawJson: args.rawJson });
   }
 
   const parse = deps.parseProject ?? parseProjectJsonV1;
@@ -208,22 +170,12 @@ async function projectToSeriesViaDeps(
   const runProjectEngine = deps.runProjectEngine ?? computeProjectEngineFullProductionV1;
 
   const parsed = parse(args.rawJson);
-  const periodEndDatesUtc = parsed.engineInputWithoutPrices.periodEndDatesUtc;
-
-  if (!periodEndDatesUtc) {
-    throw new Error(`Project ${args.projectId} is missing time.periodEndDatesUtc; required for corporate aggregation v1.`);
-  }
-
-  const resolvedInput = await resolvePrices({
-    parsed,
-    from: periodEndDatesUtc[0],
-    to: periodEndDatesUtc[periodEndDatesUtc.length - 1],
-  });
-
+  const from = `${args.yearsByPeriod[0]}-12-31`;
+  const to = `${args.yearsByPeriod[args.yearsByPeriod.length - 1]}-12-31`;
+  const resolvedInput = await resolvePrices({ parsed, from, to });
   const out = runProjectEngine(resolvedInput);
 
   return {
-    periodEndDatesUtc,
     capexUSD: out.capexUSD_used,
     fcffUSD: out.phase1.fcffUSD,
     grossRevenueUSD: out.revenue.grossRevenueUSD,
@@ -239,27 +191,18 @@ export async function aggregateProjectsCorporateV1(
 ): Promise<CorporateAggregationOutput> {
   validateBaseInput(input);
 
-  const kinds = new Set(input.projects.map((project) => getProjectTimeKind((project.rawJson ?? null) as Record<string, unknown> | null)));
-  if (kinds.size > 1) {
-    throw new Error('Corporate aggregation does not support mixed project time axes (v1 uses periodEndDatesUtc, v2 derives years from productionStartYear/productionStartPeriod).');
-  }
+  const v2ProjectAxes = input.projects.map((project) => getV2AxisOrThrow(project.projectId, project.rawJson));
 
-  const isAllV2 = kinds.has('v2');
-
-  const projects = deps.projectToSeries || deps.parseProject || deps.resolvePrices || deps.runProjectEngine
-    ? await Promise.all(input.projects.map((project) => projectToSeriesViaDeps({ projectId: project.projectId, rawJson: project.rawJson }, deps)))
-    : await Promise.all(input.projects.map((project) => defaultProjectToSeries({ projectId: project.projectId, rawJson: project.rawJson })));
+  const projects = await Promise.all(
+    input.projects.map((project, index) => projectToSeriesViaDeps({
+      projectId: project.projectId,
+      rawJson: project.rawJson,
+      yearsByPeriod: v2ProjectAxes[index].yearsByPeriod,
+    }, deps)),
+  );
 
   for (let index = 0; index < input.projects.length; index += 1) {
-    const periodLength = isAllV2
-      ? (() => {
-          const time = ((input.projects[index].rawJson as { time?: { masterN?: number } }).time ?? null);
-          if (!time || !Number.isInteger(time.masterN) || (time.masterN as number) < 0) {
-            throw new Error(`Project ${input.projects[index].projectId} is missing integer time.masterN`);
-          }
-          return (time.masterN as number) + 1;
-        })()
-      : projects[index].periodEndDatesUtc.length;
+    const periodLength = v2ProjectAxes[index].masterN + 1;
     const projectId = input.projects[index].projectId;
 
     assertSeriesLength(projects[index].capexUSD, periodLength, projectId, 'capexUSD');
@@ -270,119 +213,17 @@ export async function aggregateProjectsCorporateV1(
     assertSeriesLength(projects[index].payableAuEqOz, periodLength, projectId, 'payableAuEqOz');
   }
 
-  if (!isAllV2) {
-    const corporatePeriodEndDatesUtc = buildCorporateDateGrid(projects);
-    const corporateMasterN = corporatePeriodEndDatesUtc.length - 1;
-
-    const capexUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.capexUSD);
-    const fcffUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.fcffUSD);
-    const grossRevenueUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.grossRevenueUSD);
-    const auPriceUSDPerOz = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.auPriceUSDPerOz);
-    const sustainingCostUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.sustainingCostUSD);
-    const payableAuEqOz_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.payableAuEqOz);
-
-    const valueMetrics = computeStrictValueMetrics({ fcffUSD_total, discountRate: input.discountRate });
-    const aiscAuEqUSDPerOz_LOM = computeCorporateAiscLom({
-      sustainingCostUSD_total,
-      payableAuEqOz_total,
-    });
-
-    const nullPeriods = fcffUSD_total.filter((value) => value === null).length;
-
-    return {
-      corporatePeriodEndDatesUtc,
-      corporateMasterN,
-      capexUSD_total,
-      fcffUSD_total,
-      grossRevenueUSD_total,
-      auPriceUSDPerOz,
-      sustainingCostUSD_total,
-      payableAuEqOz_total,
-      aiscAuEqUSDPerOz_LOM,
-      CF_LOM_USD: valueMetrics.CF_LOM_USD,
-      NPV_today_USD: valueMetrics.NPV_today_USD,
-      diagnostics: {
-        projectCount: input.projects.length,
-        usedDatesCount: corporatePeriodEndDatesUtc.length,
-        nullPeriods,
-        notes: [],
-      },
-    };
-  }
-
-  const v2ProjectAxes: V2ProjectAxis[] = [];
-  const invalidV2Time: Array<{ projectId: string; masterN: unknown; tp: unknown; tpYear: unknown; reason: string }> = [];
-
-  for (const project of input.projects) {
-    const time = (project.rawJson as {
-      time?: {
-        masterN?: number;
-        productionStartPeriod?: number;
-        productionStartYear?: number;
-      };
-    }).time;
-    const masterN = time?.masterN;
-    const tp = time?.productionStartPeriod;
-    const tpYear = time?.productionStartYear;
-
-    if (!Number.isInteger(masterN) || !Number.isInteger(tp) || !Number.isInteger(tpYear)) {
-      invalidV2Time.push({
-        projectId: project.projectId,
-        masterN,
-        tp,
-        tpYear,
-        reason: 'Missing integer required fields {masterN, productionStartPeriod, productionStartYear}.',
-      });
-      continue;
-    }
-
-    try {
-      const resolved = resolveV2TimeAxis({
-        masterN: masterN as number,
-        productionStartPeriod: tp as number,
-        productionStartYear: tpYear as number,
-      });
-      if (resolved.yearsByPeriod.length !== (masterN as number) + 1 || !resolved.yearsByPeriod.every((year) => Number.isFinite(year))) {
-        invalidV2Time.push({
-          projectId: project.projectId,
-          masterN,
-          tp,
-          tpYear,
-          reason: 'resolveV2TimeAxis returned invalid yearsByPeriod.',
-        });
-        continue;
-      }
-      v2ProjectAxes.push({
-        projectId: project.projectId,
-        masterN: masterN as number,
-        productionStartPeriod: tp as number,
-        productionStartYear: tpYear as number,
-        yearsByPeriod: resolved.yearsByPeriod,
-      });
-    } catch (error) {
-      invalidV2Time.push({
-        projectId: project.projectId,
-        masterN,
-        tp,
-        tpYear,
-        reason: (error as Error).message,
-      });
-    }
-  }
-
-  if (invalidV2Time.length > 0) {
-    const offendingProjectIds = invalidV2Time.map((entry) => entry.projectId).join(', ');
-    const details = invalidV2Time.map((entry) => `${entry.projectId}:{masterN=${String(entry.masterN)},tp=${String(entry.tp)},tpYear=${String(entry.tpYear)},reason=${entry.reason}}`).join('; ');
-    throw new Error(`Corporate v2 invalid project time inputs for projectId(s): ${offendingProjectIds}. Details: ${details}`);
-  }
-
   const minYear = Math.min(...v2ProjectAxes.flatMap((time) => time.yearsByPeriod));
   const maxYear = Math.max(...v2ProjectAxes.flatMap((time) => time.yearsByPeriod));
   const corporateYearsByPeriod = Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i);
+  const yearToCorporateIndex = new Map<number, number>(corporateYearsByPeriod.map((year, j) => [year, j]));
+  if (yearToCorporateIndex.size !== corporateYearsByPeriod.length) {
+    throw new Error('Corporate years axis contains duplicate years');
+  }
 
   const projectsWithYears = projects.map((projectSeries, index) => ({
     ...projectSeries,
-    yearsByPeriod: v2ProjectAxes[index].yearsByPeriod,
+    yearToT: v2ProjectAxes[index].yearToT,
   }));
 
   const capexUSD_total = sumStrictByYearGrid(corporateYearsByPeriod, projectsWithYears, (project) => project.capexUSD);
@@ -401,9 +242,8 @@ export async function aggregateProjectsCorporateV1(
   const nullPeriods = fcffUSD_total.filter((value) => value === null).length;
 
   return {
-    corporatePeriodEndDatesUtc: corporateYearsByPeriod.map((year) => `${year}-12-31`),
-    corporateMasterN: corporateYearsByPeriod.length - 1,
     corporateYearsByPeriod,
+    corporateMasterN: corporateYearsByPeriod.length - 1,
     capexUSD_total,
     fcffUSD_total,
     grossRevenueUSD_total,
@@ -418,8 +258,9 @@ export async function aggregateProjectsCorporateV1(
       usedDatesCount: corporateYearsByPeriod.length,
       nullPeriods,
       notes: [
-        `corporateYears_first8=${JSON.stringify(corporateYearsByPeriod.slice(0, 8))}`,
-        `lastYear=${String(corporateYearsByPeriod[corporateYearsByPeriod.length - 1] ?? null)}`,
+        `corporateYearsByPeriod_first8=${JSON.stringify(corporateYearsByPeriod.slice(0, 8))}`,
+        `corporateMinYear=${String(minYear)}`,
+        `corporateMaxYear=${String(maxYear)}`,
       ],
     },
   };

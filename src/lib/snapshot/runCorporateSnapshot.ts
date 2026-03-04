@@ -99,30 +99,30 @@ function sumComponentsAtIndex(components: Array<number | null>): number | null {
 }
 
 function sumStrictAlignedSeries(args: {
-  corporateDates: string[];
-  projectDateSeries: Array<{ projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> }>;
+  corporateYearsByPeriod: number[];
+  projectDateSeries: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>;
   label: string;
 }): Array<number | null> {
-  const sums = new Array<number>(args.corporateDates.length).fill(0);
-  const hasContributor = new Array<boolean>(args.corporateDates.length).fill(false);
-  const nullAtDate = new Array<boolean>(args.corporateDates.length).fill(false);
+  const sums = new Array<number>(args.corporateYearsByPeriod.length).fill(0);
+  const hasContributor = new Array<boolean>(args.corporateYearsByPeriod.length).fill(false);
+  const nullAtDate = new Array<boolean>(args.corporateYearsByPeriod.length).fill(false);
 
   for (const projectSeries of args.projectDateSeries) {
     assertSeriesLength(
       projectSeries.series,
-      projectSeries.periodEndDatesUtc.length,
+      projectSeries.yearsByPeriod.length,
       `${args.label} project=${projectSeries.projectId}`,
     );
 
-    const dateToIndex = new Map<string, number>(
-      projectSeries.periodEndDatesUtc.map((date, idx) => [date, idx]),
+    const dateToIndex = new Map<number, number>(
+      projectSeries.yearsByPeriod.map((date, idx) => [date, idx]),
     );
 
-    for (let t = 0; t < args.corporateDates.length; t += 1) {
+    for (let t = 0; t < args.corporateYearsByPeriod.length; t += 1) {
       if (nullAtDate[t]) {
         continue;
       }
-      const projectIndex = dateToIndex.get(args.corporateDates[t]);
+      const projectIndex = dateToIndex.get(args.corporateYearsByPeriod[t]);
       if (projectIndex === undefined) {
         continue;
       }
@@ -178,7 +178,7 @@ type TaxesDetailSeries = {
 
 type ProjectSeriesContext = {
   projectId: string;
-  periodEndDatesUtc: string[];
+  yearsByPeriod: number[];
   payableQtyByMetal: Record<string, Array<number | null>>;
   payableQtyUnitByMetal: Record<string, string>;
   priceUSDUnitByMetal: Record<string, string>;
@@ -420,25 +420,16 @@ function validateProjectIdentities(input: {
 
 function buildSnapshotSeries(args: {
   masterN: number;
-  corporateDates: string[];
-  corporateYearsByPeriod?: number[];
+  corporateYearsByPeriod: number[];
   projectSeriesContexts: ProjectSeriesContext[];
 }): CorporateSnapshotSeries {
   const expectedLength = args.masterN + 1;
-  if (args.corporateDates.length > 0 && args.corporateDates.length !== expectedLength) {
-    throw new Error(`series.periodEndDatesUtc length must equal masterN+1 (${expectedLength})`);
-  }
-  if (Array.isArray(args.corporateYearsByPeriod) && args.corporateYearsByPeriod.length !== expectedLength) {
+  if (args.corporateYearsByPeriod.length !== expectedLength) {
     throw new Error(`series.yearsByPeriod length must equal masterN+1 (${expectedLength})`);
   }
 
   const periodIndex = Array.from({ length: expectedLength }, (_, i) => i);
-  const periodEndDatesUtc = args.corporateDates.length > 0
-    ? args.corporateDates.map((date) => (typeof date === 'string' ? date : null))
-    : Array.from({ length: expectedLength }, () => null);
-  const yearsByPeriod = Array.isArray(args.corporateYearsByPeriod)
-    ? [...args.corporateYearsByPeriod]
-    : undefined;
+  const yearsByPeriod = [...args.corporateYearsByPeriod];
 
   const throughputUnits = new Set(args.projectSeriesContexts.map((entry) => entry.operations.throughputUnit).filter((v) => v !== null));
   const throughputUnit = throughputUnits.size === 1 ? [...throughputUnits][0] as 'tpd' | 'tpa' : null;
@@ -447,24 +438,24 @@ function buildSnapshotSeries(args: {
   const utilizationVals = args.projectSeriesContexts.map((entry) => entry.operations.utilizationPct).filter((v): v is number => v !== null);
 
   const oreMinedTonnes = sumStrictAlignedSeries({
-    corporateDates: args.corporateDates,
+    corporateYearsByPeriod: args.corporateYearsByPeriod,
     projectDateSeries: args.projectSeriesContexts
       .filter((entry) => Array.isArray(entry.operations.oreMinedTonnes))
       .map((entry) => ({
         projectId: entry.projectId,
-        periodEndDatesUtc: entry.periodEndDatesUtc,
+        yearsByPeriod: entry.yearsByPeriod,
         series: sanitizeSeries(entry.operations.oreMinedTonnes ?? []),
       })),
     label: 'series.oreMinedTonnes',
   });
 
   const oreMilledTonnes = sumStrictAlignedSeries({
-    corporateDates: args.corporateDates,
+    corporateYearsByPeriod: args.corporateYearsByPeriod,
     projectDateSeries: args.projectSeriesContexts
       .filter((entry) => Array.isArray(entry.operations.oreMilledTonnes))
       .map((entry) => ({
         projectId: entry.projectId,
-        periodEndDatesUtc: entry.periodEndDatesUtc,
+        yearsByPeriod: entry.yearsByPeriod,
         series: sanitizeSeries(entry.operations.oreMilledTonnes ?? []),
       })),
     label: 'series.oreMilledTonnes',
@@ -483,7 +474,7 @@ function buildSnapshotSeries(args: {
       .filter((entry) => Array.isArray(entry.payableQtyByMetal[metal]))
       .map((entry) => ({
         projectId: entry.projectId,
-        periodEndDatesUtc: entry.periodEndDatesUtc,
+        yearsByPeriod: entry.yearsByPeriod,
         series: sanitizeSeries(entry.payableQtyByMetal[metal]),
       }));
 
@@ -491,7 +482,7 @@ function buildSnapshotSeries(args: {
       .filter((entry) => Array.isArray(entry.revenueByMetal_USD[metal]))
       .map((entry) => ({
         projectId: entry.projectId,
-        periodEndDatesUtc: entry.periodEndDatesUtc,
+        yearsByPeriod: entry.yearsByPeriod,
         series: sanitizeSeries(entry.revenueByMetal_USD[metal]),
       }));
 
@@ -499,12 +490,12 @@ function buildSnapshotSeries(args: {
       .filter((entry) => Array.isArray(entry.spotPriceUSDByMetal[metal]))
       .map((entry) => ({
         projectId: entry.projectId,
-        periodEndDatesUtc: entry.periodEndDatesUtc,
+        yearsByPeriod: entry.yearsByPeriod,
         series: sanitizeSeries(entry.spotPriceUSDByMetal[metal]),
       }));
 
-    payableQtyByMetal[metal] = sumStrictAlignedSeries({ corporateDates: args.corporateDates, projectDateSeries: qtyProjects, label: `series.payableQtyByMetal.${metal}` });
-    const fallbackRevenue = sumStrictAlignedSeries({ corporateDates: args.corporateDates, projectDateSeries: revenueProjects, label: `series.revenueByMetal_USD.${metal}` });
+    payableQtyByMetal[metal] = sumStrictAlignedSeries({ corporateYearsByPeriod: args.corporateYearsByPeriod, projectDateSeries: qtyProjects, label: `series.payableQtyByMetal.${metal}` });
+    const fallbackRevenue = sumStrictAlignedSeries({ corporateYearsByPeriod: args.corporateYearsByPeriod, projectDateSeries: revenueProjects, label: `series.revenueByMetal_USD.${metal}` });
 
     const unitSet = new Set(args.projectSeriesContexts.map((entry) => entry.payableQtyUnitByMetal[metal]).filter((v): v is string => typeof v === 'string'));
     if (unitSet.size > 1) {
@@ -530,7 +521,7 @@ function buildSnapshotSeries(args: {
     for (let t = 0; t < expectedLength; t += 1) {
       const spotValues = spotPriceProjects
         .map((project) => {
-          const idx = project.periodEndDatesUtc.indexOf(args.corporateDates[t]);
+          const idx = project.yearsByPeriod.indexOf(args.corporateYearsByPeriod[t]);
           return idx >= 0 ? project.series[idx] : null;
         })
         .filter((value): value is number => value !== null);
@@ -601,10 +592,10 @@ function buildSnapshotSeries(args: {
   }
 
   const aggregateEconomic = (label: keyof ProjectSeriesContext['economics']): Array<number | null> => sumStrictAlignedSeries({
-    corporateDates: args.corporateDates,
+    corporateYearsByPeriod: args.corporateYearsByPeriod,
     projectDateSeries: args.projectSeriesContexts.map((entry) => ({
       projectId: entry.projectId,
-      periodEndDatesUtc: entry.periodEndDatesUtc,
+      yearsByPeriod: entry.yearsByPeriod,
       series: sanitizeSeries(entry.economics[label]),
     })),
     label: `series.${label}`,
@@ -628,9 +619,9 @@ function buildSnapshotSeries(args: {
   const capexUSD = aggregateEconomic('capexUSD');
   const totalCapexUSD = deriveTotalCapexSeries(capexUSD, sustainingCapexUSD);
 
-  const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> }>, label: string): Array<number | null> =>
+  const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>, label: string): Array<number | null> =>
     sumStrictAlignedSeries({
-      corporateDates: args.corporateDates,
+      corporateYearsByPeriod: args.corporateYearsByPeriod,
       projectDateSeries: seriesByProject,
       label,
     });
@@ -647,11 +638,11 @@ function buildSnapshotSeries(args: {
         }
         return {
           projectId: entry.projectId,
-          periodEndDatesUtc: entry.periodEndDatesUtc,
+          yearsByPeriod: entry.yearsByPeriod,
           series: sanitizeSeries(series),
         };
       })
-      .filter((value): value is { projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> } => value !== null);
+      .filter((value): value is { projectId: string; yearsByPeriod: number[]; series: Array<number | null> } => value !== null);
 
     if (contributing.length === 0) {
       return undefined;
@@ -719,7 +710,7 @@ function buildSnapshotSeries(args: {
     label: string;
     base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
     rate: number | null;
-    projectSeries: Array<{ projectId: string; periodEndDatesUtc: string[]; series: Array<number | null> }>;
+    projectSeries: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>;
   }>();
 
   for (const entry of args.projectSeriesContexts) {
@@ -735,7 +726,7 @@ function buildSnapshotSeries(args: {
       }
       royaltiesById.get(detail.id)?.projectSeries.push({
         projectId: entry.projectId,
-        periodEndDatesUtc: entry.periodEndDatesUtc,
+        yearsByPeriod: entry.yearsByPeriod,
         series: sanitizeSeries(detail.royaltyUSD),
       });
     }
@@ -756,7 +747,6 @@ function buildSnapshotSeries(args: {
 
   return {
     periodIndex,
-    periodEndDatesUtc,
     yearsByPeriod,
     oreMinedTonnes,
     oreMilledTonnes,
@@ -1040,7 +1030,6 @@ export async function runCorporateSnapshotPipeline(args: {
     const firstProjectTime = typeof projects[0]?.rawJson?.time === 'object' && projects[0]?.rawJson?.time !== null
       ? (projects[0].rawJson.time as Record<string, unknown>)
       : undefined;
-    const firstProjectPeriodEnd = firstProjectTime?.periodEndDatesUtc;
     const firstProjectYears = (() => {
       if (!firstProjectTime) return undefined;
       if (!Number.isInteger(firstProjectTime.masterN) || !Number.isInteger(firstProjectTime.productionStartPeriod) || !Number.isInteger(firstProjectTime.productionStartYear)) {
@@ -1052,9 +1041,9 @@ export async function runCorporateSnapshotPipeline(args: {
         productionStartYear: firstProjectTime.productionStartYear as number,
       }).yearsByPeriod;
     })();
-    const t0AnchorDate = Array.isArray(firstProjectPeriodEnd) && typeof firstProjectPeriodEnd[0] === 'string'
-      ? firstProjectPeriodEnd[0]
-      : (Array.isArray(firstProjectYears) && Number.isFinite(firstProjectYears[0]) ? `${firstProjectYears[0]}-12-31` : null);
+    const t0AnchorDate = Array.isArray(firstProjectYears) && Number.isFinite(firstProjectYears[0])
+      ? `${firstProjectYears[0]}-12-31`
+      : null;
     const spotAnchorDateUtc = input.fx.anchor === 't0_period_end'
       ? (t0AnchorDate ?? getTodayUtcDateString())
       : getTodayUtcDateString();
@@ -1093,8 +1082,9 @@ export async function runCorporateSnapshotPipeline(args: {
     const projectsForBuildFunding = [] as Array<{
       projectId: string;
       projectName: string;
+      masterN: number;
       productionStartPeriod: number;
-      periodEndDatesUtc: string[];
+      yearsByPeriod: number[];
       fdExtraShares: number;
     }>;
 
@@ -1110,13 +1100,25 @@ export async function runCorporateSnapshotPipeline(args: {
           const rawJsonRecord = rawJson as Record<string, unknown>;
           const parsed = parseProjectJsonV1(rawJson);
           diagnostics.warnings.push(...parsed.warnings);
-          const periodEndDatesUtc = parsed.engineInputWithoutPrices.periodEndDatesUtc;
-          const productionStartPeriod = parsed.engineInputWithoutPrices.productionStartPeriod;
-          if (!periodEndDatesUtc || periodEndDatesUtc.length === 0) {
-            throw new Error(`Project ${projectId} is missing time.periodEndDatesUtc; required for corporate aggregation v1.`);
-          }
-          if (!Number.isInteger(productionStartPeriod)) {
-            throw new Error(`Project ${projectId} is missing integer productionStartPeriod`);
+          const rawTime = (rawJsonRecord.time ?? null) as {
+            masterN?: unknown;
+            productionStartPeriod?: unknown;
+            productionStartYear?: unknown;
+          } | null;
+          let yearsByPeriod: number[];
+          let productionStartPeriod: number;
+          try {
+            const resolvedTime = resolveV2TimeAxis({
+              masterN: rawTime?.masterN as number,
+              productionStartPeriod: rawTime?.productionStartPeriod as number,
+              productionStartYear: rawTime?.productionStartYear as number,
+            });
+            yearsByPeriod = resolvedTime.yearsByPeriod;
+            productionStartPeriod = resolvedTime.productionStartPeriod;
+          } catch {
+            throw new Error(
+              `Invalid v2 time for project ${projectId}: masterN=${String(rawTime?.masterN)}, productionStartPeriod=${String(rawTime?.productionStartPeriod)}, productionStartYear=${String(rawTime?.productionStartYear)}`,
+            );
           }
 
           projectsForBuildFunding.push({
@@ -1126,13 +1128,14 @@ export async function runCorporateSnapshotPipeline(args: {
               const fromMeta = meta && typeof meta.projectName === 'string' ? meta.projectName : null;
               return fromMeta ?? projectId;
             })(),
+            masterN: yearsByPeriod.length - 1,
             productionStartPeriod,
-            periodEndDatesUtc,
+            yearsByPeriod,
             fdExtraShares: parsed.context.equity?.fdExtraShares ?? 0,
           });
 
-          const from = periodEndDatesUtc[0];
-          const to = periodEndDatesUtc[periodEndDatesUtc.length - 1];
+          const from = `${yearsByPeriod[0]}-12-31`;
+          const to = `${yearsByPeriod[yearsByPeriod.length - 1]}-12-31`;
 
           const resolved = await resolveProjectPricesToEngineInput(
             { parsed, from, to, scenario: resolverScenario, projectId, spotAnchorDateUtc },
@@ -1144,33 +1147,33 @@ export async function runCorporateSnapshotPipeline(args: {
           if (resolverScenario.mode !== 'spot') {
             for (const [metal, series] of Object.entries(resolved.spotPriceUSDByMetal)) {
               const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
-              const missingDates = series
-                .map((value, index) => (value === null ? periodEndDatesUtc[index] : null))
-                .filter((value): value is string => typeof value === 'string');
+              const missingYears = series
+                .map((value, index) => (value === null ? yearsByPeriod[index] : null))
+                .filter((value): value is number => typeof value === 'number');
 
-              if (missingDates.length > 0) {
+              if (missingYears.length > 0) {
                 diagnostics.warnings.push(
-                  `Missing price coverage for project=${projectId} metal=${metal} priceKey=${priceKey} missingPeriods=${missingDates.length} firstMissingDate=${missingDates[0]}`,
+                  `Missing price coverage for project=${projectId} metal=${metal} priceKey=${priceKey} missingPeriods=${missingYears.length} firstMissingYear=${missingYears[0]}`,
                 );
               }
             }
 
-            const missingAuDates = resolved.aisc.auPriceUSDPerOz
-              .map((value, index) => (value === null ? periodEndDatesUtc[index] : null))
-              .filter((value): value is string => typeof value === 'string');
-            if (missingAuDates.length > 0) {
+            const missingAuYears = resolved.aisc.auPriceUSDPerOz
+              .map((value, index) => (value === null ? yearsByPeriod[index] : null))
+              .filter((value): value is number => typeof value === 'number');
+            if (missingAuYears.length > 0) {
               diagnostics.warnings.push(
-                `Missing price coverage for project=${projectId} metal=Au priceKey=${parsed.engineInputWithoutPrices.auPriceKey} missingPeriods=${missingAuDates.length} firstMissingDate=${missingAuDates[0]}`,
+                `Missing price coverage for project=${projectId} metal=Au priceKey=${parsed.engineInputWithoutPrices.auPriceKey} missingPeriods=${missingAuYears.length} firstMissingYear=${missingAuYears[0]}`,
               );
             }
           }
 
           const rawSeriesRoyalties = (rawJsonRecord.series as { royaltiesUSD?: Array<number | null> } | undefined)?.royaltiesUSD;
-          const explicitRoyaltiesUSD = Array.from({ length: periodEndDatesUtc.length }, (_, t) => toFiniteOrNull(rawSeriesRoyalties?.[t] ?? null));
+          const explicitRoyaltiesUSD = Array.from({ length: yearsByPeriod.length }, (_, t) => toFiniteOrNull(rawSeriesRoyalties?.[t] ?? null));
 
           const outPreRoyalties = computeProjectEngineFullProductionV1(resolved);
           diagnostics.warnings.push(...outPreRoyalties.nationalTake.diagnostics);
-          const projectLength = periodEndDatesUtc.length;
+          const projectLength = yearsByPeriod.length;
           const nullSeries = new Array<number | null>(projectLength).fill(null);
           const taxRate = parsed.engineInputWithoutPrices.taxRate;
           const depreciationUSD = sanitizeSeries(parsed.context.series?.depreciationUSD ?? nullSeries);
@@ -1288,7 +1291,7 @@ export async function runCorporateSnapshotPipeline(args: {
             : null;
 
           const identityValidation = validateProjectIdentities({
-            periodLabels: periodEndDatesUtc,
+            periodLabels: yearsByPeriod.map((year) => String(year)),
             productionStartPeriod,
             taxRate,
             grossRevenueUSD,
@@ -1330,7 +1333,7 @@ export async function runCorporateSnapshotPipeline(args: {
 
           projectSeriesContexts.push({
             projectId,
-            periodEndDatesUtc,
+            yearsByPeriod,
             payableQtyByMetal: Object.fromEntries(
               Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),
@@ -1393,7 +1396,7 @@ export async function runCorporateSnapshotPipeline(args: {
           });
 
           return {
-            periodEndDatesUtc,
+            yearsByPeriod,
             capexUSD: out.capexUSD_used,
             fcffUSD: out.phase1.fcffUSD,
             grossRevenueUSD: out.revenue.grossRevenueUSD,
@@ -1414,7 +1417,8 @@ export async function runCorporateSnapshotPipeline(args: {
         'buildFundingNeed_USD derived from capex schedule using first production date window',
       );
       buildFundingNeedUSD = deriveBuildFundingNeedUSD({
-        corporatePeriodEndDatesUtc: aggregation.corporatePeriodEndDatesUtc,
+        yearsByPeriod: aggregation.corporateYearsByPeriod,
+        masterN: aggregation.corporateMasterN,
         capexUSD_total: aggregation.capexUSD_total,
         projects: projectsForBuildFunding,
       });
@@ -1499,8 +1503,8 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const productionStartIndices = projectsForBuildFunding
       .map((project) => {
-        const productionDate = project.periodEndDatesUtc[project.productionStartPeriod];
-        const corporateIndex = aggregation.corporatePeriodEndDatesUtc.indexOf(productionDate);
+        const productionDate = project.yearsByPeriod[project.productionStartPeriod];
+        const corporateIndex = aggregation.corporateYearsByPeriod.indexOf(productionDate);
         return corporateIndex >= 0 ? corporateIndex : null;
       })
       .filter((value): value is number => value !== null);
@@ -1523,7 +1527,6 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const snapshotSeriesBase = buildSnapshotSeries({
       masterN: aggregation.corporateMasterN,
-      corporateDates: aggregation.corporatePeriodEndDatesUtc,
       corporateYearsByPeriod: aggregation.corporateYearsByPeriod,
       projectSeriesContexts,
     });
