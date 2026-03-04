@@ -37,6 +37,40 @@ test('snapshot series exposes aligned totalRevenue_USD', async () => {
   assert.ok(result.snapshot.series.unitAudit);
 });
 
+
+test('list2 per-tp DCF keeps explicit prodStart vs present time basis and valuation timeline uses matching per-tp highs', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const byTp = result.snapshot.list2MetricsByTp ?? {};
+  const tps = Object.keys(byTp).map((key) => Number(key)).sort((a, b) => a - b);
+  assert.ok(tps.length > 0);
+
+  for (const tp of tps) {
+    const metrics = byTp[tp];
+    assert.ok(metrics);
+    const exCapex = metrics?.DCF_prodStart_exCapex_TargetCurrency ?? null;
+    const present = metrics?.DCF_prodStart_present_TargetCurrency ?? null;
+    if (exCapex !== null && present !== null) {
+      const expected = exCapex / Math.pow(1 + 0.1, tp);
+      assert.ok(Math.abs(present - expected) <= 1e-6 * Math.max(1, Math.abs(expected)));
+    }
+  }
+
+  const timeline = result.snapshot.modeledValuationTimeline;
+  assert.ok(timeline);
+  const markers = timeline?.markers ?? [];
+  assert.ok(markers.length > 0);
+  for (const marker of markers) {
+    const tpMetrics = byTp[marker.tp];
+    if (!tpMetrics) continue;
+    const expectedPerShare = tpMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
+    assert.equal(marker.value_high, expectedPerShare);
+  }
+});
+
 test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async () => {
   const body = await loadFixture();
   const result = await runCorporateSnapshotPipeline({ body, refresh: false });

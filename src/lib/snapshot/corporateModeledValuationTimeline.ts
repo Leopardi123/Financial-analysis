@@ -1,14 +1,18 @@
 type TimelineLista2Metrics = {
   DCF_prodStart_exCapex_TargetCurrency: number | null;
   DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+  DCF_prodStart_present_TargetCurrency?: number | null;
+  DCF_prodStart_present_perShare_TargetCurrency?: number | null;
   NAV_prodStart_TargetCurrency: number | null;
   NAV_prodStart_perShare_TargetCurrency: number | null;
 };
 
 type TimelineLista2DebugMetrics = {
   DCF_prodStart_exCapex_TargetCurrency: number | null;
+  DCF_prodStart_present_TargetCurrency?: number | null;
   NAV_prodStart_TargetCurrency: number | null;
   DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+  DCF_prodStart_present_perShare_TargetCurrency?: number | null;
   NAV_prodStart_perShare_TargetCurrency: number | null;
 };
 

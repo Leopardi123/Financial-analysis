@@ -963,18 +963,23 @@ type SnapshotDiagnostics = {
         list2_NAV_prodStart_perShare_TargetCurrency: number | null;
         list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: number | null;
         list2_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        list2_DCF_prodStart_present_perShare_TargetCurrency: number | null;
         list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        list2MetricsByTp_DCF_prodStart_present_perShare_TargetCurrency: number | null;
         byTpDebug: Record<string, unknown> | null;
       };
       tp5: {
         list2_NAV_prodStart_perShare_TargetCurrency: number | null;
         list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: number | null;
         list2_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        list2_DCF_prodStart_present_perShare_TargetCurrency: number | null;
         list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        list2MetricsByTp_DCF_prodStart_present_perShare_TargetCurrency: number | null;
         byTpDebug: Record<string, unknown> | null;
       };
       shares_post_financing_list2: number | null;
       shares_post_financing_list2ByTp: number | null;
+      lista2TpRule_lastTp?: number | null;
     };
     corporateModeledValuationTimeline?: {
       tps: number[];
@@ -1549,11 +1554,14 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const corporateProductionStartPeriod =
       productionStartIndices.length > 0 ? Math.min(...productionStartIndices) : null;
+    const corporateLastProductionStartPeriod =
+      productionStartIndices.length > 0 ? Math.max(...productionStartIndices) : null;
 
     const delayPeriods = Number.isInteger(input.scenario.delayPeriods) && (input.scenario.delayPeriods as number) >= 0
       ? input.scenario.delayPeriods as number
       : 0;
     const tpEff = corporateProductionStartPeriod === null ? null : corporateProductionStartPeriod + delayPeriods;
+    const tpLastEff = corporateLastProductionStartPeriod === null ? null : corporateLastProductionStartPeriod + delayPeriods;
 
     const totalFdExtraShares = projectsForBuildFunding.reduce((sum, project) => sum + project.fdExtraShares, 0);
 
@@ -1879,13 +1887,14 @@ export async function runCorporateSnapshotPipeline(args: {
       diagnostics.warnings.push(`Lista2 CF+DCF skipped candidate: first invalid FCFF at t=${fcffIssue.t}; component=${fcffIssue.component}`);
     }
 
-    const lista2 = tpEff !== null && tpEff > aggregation.corporateMasterN
-      ? { metrics: makeNullLista2CfDcfMetrics(), nullReasons: makeNullLista2CfDcfNullReasons('invalid tp'), warnings: ['failure_reason: tp_eff > masterN'], errors: [] }
+    const lista2TpRule = tpLastEff;
+    const lista2 = lista2TpRule !== null && lista2TpRule > aggregation.corporateMasterN
+      ? { metrics: makeNullLista2CfDcfMetrics(), nullReasons: makeNullLista2CfDcfNullReasons('invalid tp'), warnings: ['failure_reason: tp_last_eff > masterN'], errors: [] }
       : computeLista2CfDcfMetrics({
         fcfUSD_total: aggregationEffective.fcffUSD_total,
         capexUSD_total: aggregationEffective.capexUSD_total,
         masterN: aggregationEffective.corporateMasterN,
-        productionStartPeriod: tpEff,
+        productionStartPeriod: lista2TpRule,
         discountRate: input.discountRate,
         shares_post_financing: shares_post_financing_fd_effective,
         fx_USD_to_TargetCurrency: fxRate,
@@ -1936,23 +1945,25 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     snapshot.series = snapshotSeries;
-    const candidateTps = [...new Set(
+    const corporateTpsList = [...new Set(
       projectsForBuildFunding
-        .map((project) => project.productionStartPeriod)
+        .map((project) => project.productionStartPeriod + delayPeriods)
         .filter((tp): tp is number => Number.isInteger(tp) && tp > 0 && tp <= aggregationEffective.corporateMasterN),
-    )];
+    )].sort((a, b) => a - b);
     const sharesDenom = typeof shares_post_financing_fd_effective === 'number' && Number.isFinite(shares_post_financing_fd_effective) && shares_post_financing_fd_effective > 0
       ? shares_post_financing_fd_effective
       : null;
     const lista2DebugByTp: Record<number, {
       DCF_prodStart_exCapex_TargetCurrency: number | null;
+      DCF_prodStart_present_TargetCurrency: number | null;
       NAV_prodStart_TargetCurrency: number | null;
       DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+      DCF_prodStart_present_perShare_TargetCurrency: number | null;
       NAV_prodStart_perShare_TargetCurrency: number | null;
     }> = {};
 
     const lista2MetricsByTp = Object.fromEntries(
-      candidateTps.map((tp) => {
+      corporateTpsList.map((tp) => {
         const tpMetrics = computeLista2CfDcfMetrics({
           fcfUSD_total: aggregationEffective.fcffUSD_total,
           capexUSD_total: aggregationEffective.capexUSD_total,
@@ -1968,6 +1979,7 @@ export async function runCorporateSnapshotPipeline(args: {
         diagnostics.errors.push(...tpMetrics.errors);
 
         const dcfTotal = tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency;
+        const dcfPresentTotal = tpMetrics.metrics.DCF_prodStart_present_TargetCurrency;
         const navTotal = tpMetrics.metrics.NAV_prodStart_TargetCurrency;
         const denomMismatch = sharesDenom !== shares_post_financing_fd_effective;
         const denomInvalid = sharesDenom === null;
@@ -1978,18 +1990,23 @@ export async function runCorporateSnapshotPipeline(args: {
             : null;
 
         const dcfPerShare = reasonIfNull === null && dcfTotal !== null && sharesDenom !== null ? dcfTotal / sharesDenom : null;
+        const dcfPresentPerShare = reasonIfNull === null && dcfPresentTotal !== null && sharesDenom !== null ? dcfPresentTotal / sharesDenom : null;
         const navPerShare = reasonIfNull === null && navTotal !== null && sharesDenom !== null ? navTotal / sharesDenom : null;
 
         lista2DebugByTp[tp] = {
           DCF_prodStart_exCapex_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency,
+          DCF_prodStart_present_TargetCurrency: tpMetrics.metrics.DCF_prodStart_present_TargetCurrency,
           NAV_prodStart_TargetCurrency: tpMetrics.metrics.NAV_prodStart_TargetCurrency,
           DCF_prodStart_exCapex_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+          DCF_prodStart_present_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_present_perShare_TargetCurrency,
           NAV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
         };
 
         return [tp, {
           DCF_prodStart_exCapex_TargetCurrency: dcfTotal,
           DCF_prodStart_exCapex_perShare_TargetCurrency: dcfPerShare,
+          DCF_prodStart_present_TargetCurrency: dcfPresentTotal,
+          DCF_prodStart_present_perShare_TargetCurrency: dcfPresentPerShare,
           NAV_prodStart_TargetCurrency: navTotal,
           NAV_prodStart_perShare_TargetCurrency: navPerShare,
           __debug: {
@@ -1999,6 +2016,7 @@ export async function runCorporateSnapshotPipeline(args: {
             productionStartPeriodUsed: tp,
             NAV_prodStart_total_TargetCurrency: navTotal,
             DCF_prodStart_exCapex_total_TargetCurrency: dcfTotal,
+            DCF_prodStart_present_total_TargetCurrency: dcfPresentTotal,
             fxUsed: fxRate,
             discountRateUsed: input.discountRate,
             nullReasonIfAny: reasonIfNull,
@@ -2017,29 +2035,48 @@ export async function runCorporateSnapshotPipeline(args: {
           : left !== right
       );
 
-      for (const tp of candidateTps) {
+      for (const tp of corporateTpsList) {
         const fromByTp = lista2MetricsByTp[tp] ?? null;
         const fromDebug = lista2DebugByTp[tp] ?? null;
         if (!fromByTp || !fromDebug) continue;
 
         const dcfMismatch = hasMismatch(fromByTp.DCF_prodStart_exCapex_TargetCurrency, fromDebug.DCF_prodStart_exCapex_TargetCurrency);
+        const dcfPresentMismatch = hasMismatch(fromByTp.DCF_prodStart_present_TargetCurrency ?? null, fromDebug.DCF_prodStart_present_TargetCurrency);
         const navMismatch = hasMismatch(fromByTp.NAV_prodStart_TargetCurrency, fromDebug.NAV_prodStart_TargetCurrency);
-        if (dcfMismatch || navMismatch) {
+        if (dcfMismatch || dcfPresentMismatch || navMismatch) {
           throw new Error(
             `single source of truth violation: list2MetricsByTp[tp=${tp}] does not match list2DebugByTp `
-            + `(DCF byTp=${String(fromByTp.DCF_prodStart_exCapex_TargetCurrency)} debug=${String(fromDebug.DCF_prodStart_exCapex_TargetCurrency)}; `
+            + `(DCF exCapex byTp=${String(fromByTp.DCF_prodStart_exCapex_TargetCurrency)} debug=${String(fromDebug.DCF_prodStart_exCapex_TargetCurrency)}; `
+            + `DCF present byTp=${String(fromByTp.DCF_prodStart_present_TargetCurrency ?? null)} debug=${String(fromDebug.DCF_prodStart_present_TargetCurrency)}; `
             + `NAV byTp=${String(fromByTp.NAV_prodStart_TargetCurrency)} debug=${String(fromDebug.NAV_prodStart_TargetCurrency)})`,
+          );
+        }
+
+        const expectedPresent = fromByTp.DCF_prodStart_exCapex_TargetCurrency !== null
+          ? fromByTp.DCF_prodStart_exCapex_TargetCurrency / Math.pow(1 + input.discountRate, tp)
+          : null;
+        const presentInvariantMismatch = hasMismatch(fromByTp.DCF_prodStart_present_TargetCurrency ?? null, expectedPresent);
+        if (presentInvariantMismatch) {
+          throw new Error(
+            `time-basis invariant violation: list2MetricsByTp[tp=${tp}] present != exCapex/(1+r)^tp `
+            + `(present=${String(fromByTp.DCF_prodStart_present_TargetCurrency ?? null)} expected=${String(expectedPresent)})`,
           );
         }
       }
 
-      if (typeof tpEff === 'number') {
-        const atTp = lista2MetricsByTp[tpEff];
+      if (typeof lista2TpRule === 'number') {
+        const atTp = lista2MetricsByTp[lista2TpRule] ?? null;
         if (atTp) {
           const dcfMismatch = hasMismatch(atTp.DCF_prodStart_exCapex_TargetCurrency, lista2.metrics.DCF_prodStart_exCapex_TargetCurrency);
+          const dcfPresentMismatch = hasMismatch(atTp.DCF_prodStart_present_TargetCurrency ?? null, lista2.metrics.DCF_prodStart_present_TargetCurrency);
           const navMismatch = hasMismatch(atTp.NAV_prodStart_TargetCurrency, lista2.metrics.NAV_prodStart_TargetCurrency);
-          if (dcfMismatch || navMismatch) {
-            throw new Error(`single source of truth violation: list2MetricsByTp[tpEff=${tpEff}] does not match corporate list2 totals`);
+          if (dcfMismatch || dcfPresentMismatch || navMismatch) {
+            throw new Error(
+              `single source of truth violation: list2MetricsByTp[lastTp=${lista2TpRule}] does not match corporate list2 totals `
+              + `(DCF exCapex byTp=${String(atTp.DCF_prodStart_exCapex_TargetCurrency)} list2=${String(lista2.metrics.DCF_prodStart_exCapex_TargetCurrency)}; `
+              + `DCF present byTp=${String(atTp.DCF_prodStart_present_TargetCurrency ?? null)} list2=${String(lista2.metrics.DCF_prodStart_present_TargetCurrency)}; `
+              + `NAV byTp=${String(atTp.NAV_prodStart_TargetCurrency)} list2=${String(lista2.metrics.NAV_prodStart_TargetCurrency)})`,
+            );
           }
         }
       }
@@ -2053,24 +2090,29 @@ export async function runCorporateSnapshotPipeline(args: {
           list2_NAV_prodStart_perShare_TargetCurrency: lista2.metrics.NAV_prodStart_perShare_TargetCurrency,
           list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: tp4?.NAV_prodStart_perShare_TargetCurrency ?? null,
           list2_DCF_prodStart_exCapex_perShare_TargetCurrency: lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+          list2_DCF_prodStart_present_perShare_TargetCurrency: lista2.metrics.DCF_prodStart_present_perShare_TargetCurrency,
           list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: tp4?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+          list2MetricsByTp_DCF_prodStart_present_perShare_TargetCurrency: tp4?.DCF_prodStart_present_perShare_TargetCurrency ?? null,
           byTpDebug: tp4?.__debug ?? null,
         },
         tp5: {
           list2_NAV_prodStart_perShare_TargetCurrency: lista2.metrics.NAV_prodStart_perShare_TargetCurrency,
           list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: tp5?.NAV_prodStart_perShare_TargetCurrency ?? null,
           list2_DCF_prodStart_exCapex_perShare_TargetCurrency: lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+          list2_DCF_prodStart_present_perShare_TargetCurrency: lista2.metrics.DCF_prodStart_present_perShare_TargetCurrency,
           list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: tp5?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+          list2MetricsByTp_DCF_prodStart_present_perShare_TargetCurrency: tp5?.DCF_prodStart_present_perShare_TargetCurrency ?? null,
           byTpDebug: tp5?.__debug ?? null,
         },
         shares_post_financing_list2: shares_post_financing_fd_effective,
         shares_post_financing_list2ByTp: sharesDenom,
+        lista2TpRule_lastTp: lista2TpRule,
       };
     }
 
     snapshot.modeledValuationTimeline = buildCorporateModeledValuationTimeline({
-      projects: projectsForBuildFunding.map((project) => ({
-        productionStartPeriod: project.productionStartPeriod,
+      projects: corporateTpsList.map((tp) => ({
+        productionStartPeriod: tp,
       })),
       yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
       fcfUSD_total: aggregationEffective.fcffUSD_total,

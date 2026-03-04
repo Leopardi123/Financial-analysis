@@ -174,6 +174,8 @@ export type CorporateSnapshot = {
   list2MetricsByTp?: Record<number, {
     DCF_prodStart_exCapex_TargetCurrency: number | null;
     DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+    DCF_prodStart_present_TargetCurrency?: number | null;
+    DCF_prodStart_present_perShare_TargetCurrency?: number | null;
     NAV_prodStart_TargetCurrency: number | null;
     NAV_prodStart_perShare_TargetCurrency: number | null;
     __debug?: {
@@ -182,6 +184,7 @@ export type CorporateSnapshot = {
       shares_post_financing: number | null;
       NAV_prodStart_total_TargetCurrency: number | null;
       DCF_prodStart_exCapex_total_TargetCurrency: number | null;
+      DCF_prodStart_present_total_TargetCurrency?: number | null;
       fxUsed: number | null;
       discountRateUsed: number | null;
       productionStartPeriodUsed?: number;
