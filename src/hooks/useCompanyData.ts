@@ -1,6 +1,15 @@
 import { useCallback, useState } from "react";
 import type { CompanyResponse } from "../components/Viewer";
 
+function normalizeClientErrorMessage(message: string | null | undefined, fallback: string): string {
+  const normalized = (message ?? '').trim();
+  if (!normalized) return fallback;
+  if (normalized.includes('did not match the expected pattern')) {
+    return fallback;
+  }
+  return normalized;
+}
+
 export default function useCompanyData(initialTicker = "AAPL") {
   const [ticker, setTicker] = useState(initialTicker);
   const [loading, setLoading] = useState(false);
@@ -28,7 +37,7 @@ export default function useCompanyData(initialTicker = "AAPL") {
       }
       setData(payload);
     } catch (err) {
-      setError((err as Error).message);
+      setError(normalizeClientErrorMessage((err as Error).message, "Failed to load company data."));
       setData(null);
     } finally {
       setLoading(false);
