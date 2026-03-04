@@ -1,3 +1,5 @@
+import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
+
 type SnapshotScenarioControls = {
   delayPeriods?: number;
   capexMult?: number;
@@ -454,14 +456,61 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
         continue;
       }
 
-      if (rawJson.version !== 'project_json_v2') {
-        errors.push(`projects[${i}].rawJson.version must be "project_json_v2"`);
+      if (rawJson.version !== 'project_json_v2' && rawJson.version !== 'project_json_v1') {
+        errors.push(`projects[${i}].rawJson.version must be "project_json_v1" or "project_json_v2"`);
       }
 
       const time = rawJson.time;
-      const periodEndDates = isObject(time) ? time.periodEndDatesUtc : undefined;
-      if (!Array.isArray(periodEndDates) || periodEndDates.length === 0) {
-        errors.push(`projects[${i}].rawJson.time.periodEndDatesUtc is required and must be a non-empty array`);
+      if (!isObject(time)) {
+        errors.push(`projects[${i}].rawJson.time must be an object`);
+      } else if (rawJson.version === 'project_json_v1') {
+        const masterN = readFiniteNumber(time.masterN);
+        const periodEndDates = time.periodEndDatesUtc;
+        if (!Array.isArray(periodEndDates)) {
+          errors.push(`projects[${i}].rawJson.time.periodEndDatesUtc is required and must be an array`);
+        } else if (masterN !== null && Number.isInteger(masterN) && masterN >= 0 && periodEndDates.length !== masterN + 1) {
+          errors.push(`projects[${i}].rawJson.time.periodEndDatesUtc length must equal masterN + 1`);
+        } else if (periodEndDates.length === 0) {
+          errors.push(`projects[${i}].rawJson.time.periodEndDatesUtc is required and must be a non-empty array`);
+        }
+      } else if (rawJson.version === 'project_json_v2') {
+        const masterN = readFiniteNumber(time.masterN);
+        if (masterN === null || !Number.isInteger(masterN) || masterN < 0) {
+          errors.push(`projects[${i}].rawJson.time.masterN must be an integer >= 0`);
+        }
+
+        const productionStartPeriod = readFiniteNumber(time.productionStartPeriod);
+        if (productionStartPeriod === null || !Number.isInteger(productionStartPeriod)) {
+          errors.push(`projects[${i}].rawJson.time.productionStartPeriod must be an integer`);
+        } else if (masterN !== null && Number.isInteger(masterN) && masterN >= 0 && (productionStartPeriod < 0 || productionStartPeriod > masterN)) {
+          errors.push(`projects[${i}].rawJson.time.productionStartPeriod must satisfy 0 <= productionStartPeriod <= masterN`);
+        }
+
+        const productionStartYear = readFiniteNumber(time.productionStartYear);
+        if (productionStartYear === null || !Number.isInteger(productionStartYear)) {
+          errors.push(`projects[${i}].rawJson.time.productionStartYear must be a finite integer`);
+        }
+
+        try {
+          const resolved = resolveV2TimeAxis({
+            masterN: time.masterN as number,
+            productionStartPeriod: time.productionStartPeriod as number,
+            productionStartYear: time.productionStartYear as number,
+          });
+
+          const existingDiagnostics = isObject(rawJson.diagnostics) ? rawJson.diagnostics : {};
+          rawJson.diagnostics = {
+            ...existingDiagnostics,
+            time: {
+              ...(isObject(existingDiagnostics.time) ? existingDiagnostics.time : {}),
+              v2YearsByPeriod_first8: resolved.yearsByPeriod.slice(0, 8),
+              v2ProductionStartYear: resolved.productionStartYear,
+            },
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push(`projects[${i}].rawJson.time invalid for project_json_v2: ${message}`);
+        }
       }
 
       projects.push({
