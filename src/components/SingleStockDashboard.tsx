@@ -106,21 +106,25 @@ function formatIrrMetricValue(value: MetricValue): string {
   return `${(value.value * 100).toFixed(1)} %`;
 }
 
-function getMarkerYearLabel(yearLabelUsed: string | null, tp: number): string {
-  if (typeof yearLabelUsed === "string" && yearLabelUsed.trim()) {
-    const yearMatch = yearLabelUsed.match(/\d{4}/);
-    if (yearMatch) return yearMatch[0];
-    return yearLabelUsed;
-  }
-  return `tp=${tp}`;
-}
-
 function readYearFromDate(value: unknown): number | null {
   if (typeof value !== "string") return null;
   const match = value.match(/^(\d{4})/);
   if (!match) return null;
   const year = Number.parseInt(match[1], 10);
   return Number.isInteger(year) ? year : null;
+}
+
+function requireYearsByPeriod(series: unknown): number[] {
+  const y = (series as { yearsByPeriod?: unknown } | null | undefined)?.yearsByPeriod;
+  if (!Array.isArray(y) || y.length === 0 || !y.every((v: unknown) => Number.isFinite(v))) {
+    throw new Error("Corporate modeled requires series.yearsByPeriod (v2 time axis).");
+  }
+  return y as number[];
+}
+
+function yearLabel(yearsByPeriod: number[], t: number): string {
+  const y = yearsByPeriod[t];
+  return Number.isFinite(y) ? String(y) : "—";
 }
 
 
@@ -2314,10 +2318,18 @@ Capital Available: ${availableLabel}`,
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const corporateProdStartMarkerTextByKey = useMemo(() => {
-    const timeline = corporateSnapshotData?.modeledValuationTimeline as {
+    if (!corporateSnapshotData) return {} as Record<string, string>;
+
+    let yearsByPeriod: number[];
+    try {
+      yearsByPeriod = requireYearsByPeriod(corporateSnapshotData.series);
+    } catch {
+      return {} as Record<string, string>;
+    }
+    const timeline = corporateSnapshotData.modeledValuationTimeline as {
       markers?: Array<{
         tp: number;
-        yearLabelUsed: string | null;
+        corporateTpIndexUsed?: number | null;
         value_high: number | null;
       }>;
     } | null | undefined;
@@ -2343,7 +2355,8 @@ Capital Available: ${availableLabel}`,
     ): string | null => {
       const parts: string[] = [];
       for (const marker of markers) {
-        const year = getMarkerYearLabel(marker.yearLabelUsed ?? null, marker.tp);
+        const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
+        const year = yearLabel(yearsByPeriod, tIndex);
         const npvProdStartPerShare = typeof marker.value_high === "number" && Number.isFinite(marker.value_high) ? marker.value_high : null;
         const navProdStartPerShare = npvProdStartPerShare !== null && netCashPerShare !== null
           ? npvProdStartPerShare + netCashPerShare
@@ -2500,11 +2513,17 @@ Capital Available: ${availableLabel}`,
 
   const corporateTimelineDebug = useMemo(() => {
     if (!corporateSnapshotData || !corporateViewMetrics) return null;
+    let yearsByPeriod: number[];
+    try {
+      yearsByPeriod = requireYearsByPeriod(corporateSnapshotData.series);
+    } catch {
+      return null;
+    }
     const timeline = (corporateSnapshotData.modeledValuationTimeline ?? null) as {
       tps?: number[];
       lastTp?: number | null;
       rangeEndTp?: number | null;
-      markers?: Array<{ tp: number; yearLabelUsed: string | null; corporateTpIndexUsed?: number | null; value_high: number | null; value_low: number | null }>;
+      markers?: Array<{ tp: number; corporateTpIndexUsed?: number | null; value_high: number | null; value_low: number | null }>;
     } | null;
     const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
     const financing = (corporateSnapshotData.financing ?? null) as Record<string, unknown> | null;
@@ -2520,14 +2539,13 @@ Capital Available: ${availableLabel}`,
     const todayHigh = (typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
       ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
       : corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value) ?? null;
-    const currentYear = new Date().getUTCFullYear();
     const points = [
       {
         pointType: "today" as const,
         tp: null,
         tIndexUsed: 0,
-        yearLabelUsed: String(currentYear),
-        yearLabelSource: "currentYear",
+        yearLabelUsed: yearLabel(yearsByPeriod, 0),
+        yearLabelSource: "series.yearsByPeriod[0]",
         lowValueUsed: todayLow,
         highValueUsed: todayHigh,
         lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
@@ -2545,41 +2563,44 @@ Capital Available: ${availableLabel}`,
         expectedMappingPreview: {
           low: todayLow,
           high: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency : null,
-          yearLabel: String(currentYear),
+          yearLabel: yearLabel(yearsByPeriod, 0),
         },
       },
-      ...markers.map((marker) => ({
-        pointType: "prodStart" as const,
-        tp: marker.tp,
-        tIndexUsed: typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp,
-        yearLabelUsed: marker.yearLabelUsed ?? null,
-        yearLabelSource: typeof marker.corporateTpIndexUsed === "number" ? `modeledValuationTimeline.markers[*].yearLabelUsed (corporate index ${marker.corporateTpIndexUsed})` : "modeledValuationTimeline.markers[*].yearLabelUsed",
-        lowValueUsed: marker.value_low,
-        highValueUsed: marker.value_high,
-        lowSource: { metricKey: "modeledValuationTimeline.markers.value_low", description: "Current chart mapping uses marker.value_low" },
-        highSource: { metricKey: "modeledValuationTimeline.markers.value_high", description: "Current chart mapping uses marker.value_high" },
-        perShareBasis: shareBasis,
-        nullReasons: {
-          ...(marker.value_low === null ? { low: "Marker low is null." } : {}),
-          ...(marker.value_high === null ? { high: "Marker high is null." } : {}),
-        },
-        sanity: {
-          lowLEHigh: (typeof marker.value_low === "number" && typeof marker.value_high === "number") ? marker.value_low <= marker.value_high : null,
-          notes: "If false, low/high are swapped versus chart intent.",
-        },
-        mappingUsed: {
-          todayLow: "NPV_today_perShare",
-          todayHigh: "DCF_prodStart_present_perShare",
-          prodStartLow: "NPV_prodStart_perShare@tp (currently NOT used in chart)",
-          prodStartHigh: "DCF_prodStart_perShare@tp",
-        },
-        expectedMappingPreview: {
-          low: null,
-          high: marker.value_high,
-          yearLabel: marker.yearLabelUsed ?? null,
-          notes: "NPV_prodStart_perShare@tp is not available in current marker payload; preview low stays null until exposed from backend.",
-        },
-      })),
+      ...markers.map((marker) => {
+        const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
+        return {
+          pointType: "prodStart" as const,
+          tp: marker.tp,
+          tIndexUsed: tIndex,
+          yearLabelUsed: yearLabel(yearsByPeriod, tIndex),
+          yearLabelSource: `series.yearsByPeriod[${tIndex}]`,
+          lowValueUsed: marker.value_low,
+          highValueUsed: marker.value_high,
+          lowSource: { metricKey: "modeledValuationTimeline.markers.value_low", description: "Current chart mapping uses marker.value_low" },
+          highSource: { metricKey: "modeledValuationTimeline.markers.value_high", description: "Current chart mapping uses marker.value_high" },
+          perShareBasis: shareBasis,
+          nullReasons: {
+            ...(marker.value_low === null ? { low: "Marker low is null." } : {}),
+            ...(marker.value_high === null ? { high: "Marker high is null." } : {}),
+          },
+          sanity: {
+            lowLEHigh: (typeof marker.value_low === "number" && typeof marker.value_high === "number") ? marker.value_low <= marker.value_high : null,
+            notes: "If false, low/high are swapped versus chart intent.",
+          },
+          mappingUsed: {
+            todayLow: "NPV_today_perShare",
+            todayHigh: "DCF_prodStart_present_perShare",
+            prodStartLow: "NPV_prodStart_perShare@tp (currently NOT used in chart)",
+            prodStartHigh: "DCF_prodStart_perShare@tp",
+          },
+          expectedMappingPreview: {
+            low: null,
+            high: marker.value_high,
+            yearLabel: yearLabel(yearsByPeriod, tIndex),
+            notes: "NPV_prodStart_perShare@tp is not available in current marker payload; preview low stays null until exposed from backend.",
+          },
+        };
+      }),
     ];
     return {
       chart: "corporate.modeled.valuationTimeline",
@@ -3810,7 +3831,10 @@ Capital Available: ${availableLabel}`,
                 </details>
               )}
 
-              {corporateViewMetrics && (
+              {corporateViewMetrics && (() => {
+                try {
+                  const yearsByPeriod = requireYearsByPeriod(corporateSnapshotData?.series);
+                  return (
                 <>
                   <div className="producer-core-compact-card">
                     <section className="producer-core-section">
@@ -3936,18 +3960,21 @@ Capital Available: ${availableLabel}`,
                             const modeledTimeline = (corporateSnapshotData?.modeledValuationTimeline ?? null) as {
                               markers?: Array<{
                                 tp: number;
-                                yearLabelUsed: string | null;
+                                corporateTpIndexUsed?: number | null;
                                 value_high: number | null;
                                 value_low: number | null;
                               }>;
                             } | null;
                             if (!modeledTimeline || !Array.isArray(modeledTimeline.markers)) return undefined;
-                            return modeledTimeline.markers.map((marker) => ({
-                              tp: marker.tp,
-                              high: marker.value_high,
-                              low: marker.value_low,
-                              yearLabelUsed: marker.yearLabelUsed,
-                            }));
+                            return modeledTimeline.markers.map((marker) => {
+                              const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
+                              return {
+                                tp: marker.tp,
+                                high: marker.value_high,
+                                low: marker.value_low,
+                                yearLabelUsed: yearLabel(yearsByPeriod, tIndex),
+                              };
+                            });
                           })()}
                           currencyCode={lockedTargetCurrency}
                         />
@@ -3977,7 +4004,11 @@ Capital Available: ${availableLabel}`,
                     </details>
                   ))}
                 </>
-              )}
+                  );
+                } catch {
+                  return <p className="status error">Missing yearsByPeriod in corporate snapshot. See diagnostics.</p>;
+                }
+              })()}
             </section>
           )}
         </div>
