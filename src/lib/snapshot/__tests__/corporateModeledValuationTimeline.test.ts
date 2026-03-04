@@ -55,7 +55,7 @@ test('mapProjectTpToCorporateIndex returns missing when tp is out of range', () 
   assert.equal(mapped.matchMode, 'missing');
 });
 
-test('corporate modeled valuation markers map production start to corporate axis by date and slice FCF tail from mapped index', () => {
+test('corporate modeled valuation markers use rolling timeline labels and tp index directly', () => {
   const corporatePeriodEndDatesUtc = [
     '2025-09-30',
     '2025-12-31',
@@ -75,10 +75,9 @@ test('corporate modeled valuation markers map production start to corporate axis
     projects: [
       {
         productionStartPeriod: 4,
-        periodEndDatesUtc: ['2025-12-31', '2026-12-31', '2027-12-31', '2028-12-31', '2029-12-31'],
       },
     ],
-    corporatePeriodEndDatesUtc,
+    currentYear: 2027,
     fcfUSD_total: fcfUSDTotal,
     masterN,
     discountRate: 0.1,
@@ -92,15 +91,12 @@ test('corporate modeled valuation markers map production start to corporate axis
   const marker = timeline.markers[0];
 
   assert.equal(marker.tp, 4);
-  assert.equal(marker.corporateTpIndexUsed, 9);
-  assert.equal(marker.yearLabelUsed, '2029-12-31');
+  assert.equal(marker.corporateTpIndexUsed, 4);
+  assert.equal(marker.yearLabelUsed, '2031');
   assert.equal(marker.sanity?.matchMode, 'exact');
-  assert.equal(marker.sanity?.tpDate, '2029-12-31');
-  assert.equal(marker.sanity?.corporateDateUsed, '2029-12-31');
-  assert.equal(marker.sanity?.yearLabelUsed, marker.sanity?.corporateDateUsed);
+  assert.equal(marker.sanity?.tpDate, null);
+  assert.equal(marker.sanity?.corporateDateUsed, null);
 
-  const oldBehaviorTailSum = fcfUSDTotal.slice(4, masterN + 1).reduce((sum, value) => sum + value, 0);
-  const newBehaviorTailSum = fcfUSDTotal.slice(9, masterN + 1).reduce((sum, value) => sum + value, 0);
-  assert.notEqual(oldBehaviorTailSum, newBehaviorTailSum);
-  assert.equal(marker.fcfTailSumUSD, newBehaviorTailSum);
+  const expectedTailSum = fcfUSDTotal.slice(4, masterN + 1).reduce((sum, value) => sum + value, 0);
+  assert.equal(marker.fcfTailSumUSD, expectedTailSum);
 });
