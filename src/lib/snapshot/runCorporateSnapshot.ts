@@ -18,6 +18,7 @@ import { aggregateProjectsToCorporateTotals } from './aggregateProjectsToCorpora
 import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
 import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical, convertQuantityToCanonical } from '../units/conversion.ts';
+import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -214,6 +215,8 @@ type ProjectSeriesContext = {
   };
 };
 
+type PeriodLabel = string;
+
 type ProjectIdentityValidationResult = {
   diagnostics: string[];
   flags: {
@@ -234,7 +237,7 @@ type ProjectIdentityValidationResult = {
 };
 
 function validateProjectIdentities(input: {
-  periodEndDatesUtc: string[];
+  periodLabels: PeriodLabel[];
   productionStartPeriod: number;
   taxRate: number | null;
   grossRevenueUSD: Array<number | null>;
@@ -280,12 +283,12 @@ function validateProjectIdentities(input: {
   }
 
   const formatFail = (t: number, label: string, expected: number, actual: number): string => {
-    const date = input.periodEndDatesUtc[t] ?? String(t);
+    const date = input.periodLabels[t] ?? String(t);
     const diff = expected - actual;
     return `IDENTITY FAIL t=${t} year=${date} ${label}: expected=${String(expected)} actual=${String(actual)} diff=${String(diff)}`;
   };
 
-  for (let t = 0; t < input.periodEndDatesUtc.length; t += 1) {
+  for (let t = 0; t < input.periodLabels.length; t += 1) {
     const checks: ProjectIdentityValidationResult['perPeriod'][number]['checks'] = {
       grossProfit: 'cannot_evaluate',
       ebitda: 'cannot_evaluate',
@@ -391,12 +394,12 @@ function validateProjectIdentities(input: {
         checks.fcff = 'pass';
       }
     } else if (t >= input.productionStartPeriod) {
-      diagnostics.push(`Identity checks: cannot evaluate FCFF identity at t=${t} year=${input.periodEndDatesUtc[t] ?? String(t)} because one or more required inputs are null/non-finite`);
+      diagnostics.push(`Identity checks: cannot evaluate FCFF identity at t=${t} year=${input.periodLabels[t] ?? String(t)} because one or more required inputs are null/non-finite`);
     }
 
     perPeriod.push({
       t,
-      yearOrPeriodEndDate: input.periodEndDatesUtc[t] ?? String(t),
+      yearOrPeriodEndDate: input.periodLabels[t] ?? String(t),
       checks,
     });
   }
@@ -418,15 +421,24 @@ function validateProjectIdentities(input: {
 function buildSnapshotSeries(args: {
   masterN: number;
   corporateDates: string[];
+  corporateYearsByPeriod?: number[];
   projectSeriesContexts: ProjectSeriesContext[];
 }): CorporateSnapshotSeries {
   const expectedLength = args.masterN + 1;
-  if (args.corporateDates.length !== expectedLength) {
+  if (args.corporateDates.length > 0 && args.corporateDates.length !== expectedLength) {
     throw new Error(`series.periodEndDatesUtc length must equal masterN+1 (${expectedLength})`);
+  }
+  if (Array.isArray(args.corporateYearsByPeriod) && args.corporateYearsByPeriod.length !== expectedLength) {
+    throw new Error(`series.yearsByPeriod length must equal masterN+1 (${expectedLength})`);
   }
 
   const periodIndex = Array.from({ length: expectedLength }, (_, i) => i);
-  const periodEndDatesUtc = args.corporateDates.map((date) => (typeof date === 'string' ? date : null));
+  const periodEndDatesUtc = args.corporateDates.length > 0
+    ? args.corporateDates.map((date) => (typeof date === 'string' ? date : null))
+    : Array.from({ length: expectedLength }, () => null);
+  const yearsByPeriod = Array.isArray(args.corporateYearsByPeriod)
+    ? [...args.corporateYearsByPeriod]
+    : undefined;
 
   const throughputUnits = new Set(args.projectSeriesContexts.map((entry) => entry.operations.throughputUnit).filter((v) => v !== null));
   const throughputUnit = throughputUnits.size === 1 ? [...throughputUnits][0] as 'tpd' | 'tpa' : null;
@@ -745,6 +757,7 @@ function buildSnapshotSeries(args: {
   return {
     periodIndex,
     periodEndDatesUtc,
+    yearsByPeriod,
     oreMinedTonnes,
     oreMilledTonnes,
     throughputUnit,
@@ -1024,12 +1037,24 @@ export async function runCorporateSnapshotPipeline(args: {
         ? { mode: 'fixed' as const, fixedPriceByKey: input.scenario.fixedPriceByKey }
         : { mode: 'spot' as const };
 
-    const firstProjectPeriodEnd = typeof projects[0]?.rawJson?.time === 'object' && projects[0]?.rawJson?.time !== null
-      ? (projects[0].rawJson.time as Record<string, unknown>).periodEndDatesUtc
+    const firstProjectTime = typeof projects[0]?.rawJson?.time === 'object' && projects[0]?.rawJson?.time !== null
+      ? (projects[0].rawJson.time as Record<string, unknown>)
       : undefined;
+    const firstProjectPeriodEnd = firstProjectTime?.periodEndDatesUtc;
+    const firstProjectYears = (() => {
+      if (!firstProjectTime) return undefined;
+      if (!Number.isInteger(firstProjectTime.masterN) || !Number.isInteger(firstProjectTime.productionStartPeriod) || !Number.isInteger(firstProjectTime.productionStartYear)) {
+        return undefined;
+      }
+      return resolveV2TimeAxis({
+        masterN: firstProjectTime.masterN as number,
+        productionStartPeriod: firstProjectTime.productionStartPeriod as number,
+        productionStartYear: firstProjectTime.productionStartYear as number,
+      }).yearsByPeriod;
+    })();
     const t0AnchorDate = Array.isArray(firstProjectPeriodEnd) && typeof firstProjectPeriodEnd[0] === 'string'
       ? firstProjectPeriodEnd[0]
-      : null;
+      : (Array.isArray(firstProjectYears) && Number.isFinite(firstProjectYears[0]) ? `${firstProjectYears[0]}-12-31` : null);
     const spotAnchorDateUtc = input.fx.anchor === 't0_period_end'
       ? (t0AnchorDate ?? getTodayUtcDateString())
       : getTodayUtcDateString();
@@ -1263,7 +1288,7 @@ export async function runCorporateSnapshotPipeline(args: {
             : null;
 
           const identityValidation = validateProjectIdentities({
-            periodEndDatesUtc,
+            periodLabels: periodEndDatesUtc,
             productionStartPeriod,
             taxRate,
             grossRevenueUSD,
@@ -1499,6 +1524,7 @@ export async function runCorporateSnapshotPipeline(args: {
     const snapshotSeriesBase = buildSnapshotSeries({
       masterN: aggregation.corporateMasterN,
       corporateDates: aggregation.corporatePeriodEndDatesUtc,
+      corporateYearsByPeriod: aggregation.corporateYearsByPeriod,
       projectSeriesContexts,
     });
 

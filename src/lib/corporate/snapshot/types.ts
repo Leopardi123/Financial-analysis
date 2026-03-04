@@ -44,6 +44,7 @@ export type CorporateSnapshotEconomicsBreakdownSeries = {
 export type CorporateSnapshotSeries = {
   periodIndex: number[];
   periodEndDatesUtc: Array<string | null>;
+  yearsByPeriod?: number[];
   oreMinedTonnes: Array<number | null>;
   oreMilledTonnes: Array<number | null>;
   throughputUnit: 'tpd' | 'tpa' | null;

@@ -1343,12 +1343,22 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
             fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } },
           }),
         });
-        const result = await response.json() as { ok?: boolean; snapshot?: Record<string, unknown>; diagnostics?: Record<string, unknown> };
+        const result = await response.json() as {
+          ok?: boolean;
+          snapshot?: Record<string, unknown>;
+          diagnostics?: { errors?: string[] } & Record<string, unknown>;
+        };
         if (!isMounted) return;
         setCorporateDiagnostics((result.diagnostics ?? null) as Record<string, unknown> | null);
         if (!result.ok || !result.snapshot) {
           setCorporateSnapshotData(null);
-          setCorporateSnapshotError("Snapshot request failed. Check diagnostics for details.");
+          const diagnosticsErrors = Array.isArray(result.diagnostics?.errors)
+            ? result.diagnostics.errors.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            : [];
+          const errorDetails = diagnosticsErrors.length > 0
+            ? `\n${diagnosticsErrors.join("\n")}`
+            : "";
+          setCorporateSnapshotError(`Snapshot request failed.${errorDetails}`);
           return;
         }
         setCorporateSnapshotData(result.snapshot as unknown as Record<string, unknown>);
