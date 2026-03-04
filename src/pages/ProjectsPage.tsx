@@ -70,6 +70,26 @@ function readFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+
+function readYearFromDate(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/^(\d{4})/);
+  if (!match) return null;
+  const year = Number.parseInt(match[1], 10);
+  return Number.isInteger(year) ? year : null;
+}
+
+function firstNonZeroIndex(values: Array<number | null> | undefined): number | null {
+  if (!Array.isArray(values)) return null;
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (typeof value === 'number' && Number.isFinite(value) && value !== 0) {
+      return i;
+    }
+  }
+  return null;
+}
+
 function resolveProfileTargetCurrency(profile: Record<string, unknown> | null): string {
   const profileCurrency = typeof profile?.currency === 'string' ? profile.currency.trim().toUpperCase() : '';
   return profileCurrency || 'USD';
@@ -369,11 +389,11 @@ export default function ProjectsPage() {
     return idx.map((value) => `t${value}`);
   }, [series]);
 
-  const operationsGrid = useMemo(() => {
+  const operationsGridInput = useMemo(() => {
     const raw = parsedProject;
     if (!raw) return null;
     const masterN = raw.engineInputWithoutPrices.masterN;
-    return buildOperationsGridModel({
+    return {
       masterN,
       productionStartPeriod: raw.engineInputWithoutPrices.productionStartPeriod,
       periodEndDatesUtc: raw.engineInputWithoutPrices.periodEndDatesUtc,
@@ -415,8 +435,80 @@ export default function ProjectsPage() {
         taxUSD: series?.taxUSD,
         effectiveTaxRate: series?.effectiveTaxRate,
       },
-    });
+    };
   }, [parsedProject, series]);
+
+  const operationsGrid = useMemo(() => {
+    if (!operationsGridInput) return null;
+    return buildOperationsGridModel(operationsGridInput);
+  }, [operationsGridInput]);
+
+  const projectMountDebug = useMemo(() => {
+    const rawJson = (selectedProject?.raw_json ?? null) as Record<string, unknown> | null;
+    const rawTime = rawJson && typeof rawJson.time === 'object' && rawJson.time !== null && !Array.isArray(rawJson.time)
+      ? rawJson.time as Record<string, unknown>
+      : null;
+    const tp = Number.isInteger(operationsGridInput?.productionStartPeriod)
+      ? operationsGridInput?.productionStartPeriod as number
+      : null;
+    const enginePeriodEndDates = Array.isArray(operationsGridInput?.periodEndDatesUtc)
+      ? operationsGridInput?.periodEndDatesUtc as Array<string | null>
+      : [];
+
+    const alignmentSources: Record<string, Array<number | null> | undefined> = {
+      operations_oreMinedTonnes: operationsGridInput?.operations?.oreMinedTonnes,
+      operations_oreMilledTonnes: operationsGridInput?.operations?.oreMilledTonnes,
+      series_capexUSD: parsedProject?.engineInputWithoutPrices.phase1.capexUSD,
+      metals_payableQtyByMetal_Au: operationsGridInput?.metals?.payableQtyByMetal?.Au,
+      metals_payableQtyByMetal_Ag: operationsGridInput?.metals?.payableQtyByMetal?.Ag,
+      metals_payableQtyByMetal_Cu: operationsGridInput?.metals?.payableQtyByMetal?.Cu,
+    };
+
+    const alignmentCheck = Object.fromEntries(Object.entries(alignmentSources).map(([key, values]) => {
+      const nonZero = firstNonZeroIndex(values);
+      const valueAtTp = tp === null ? null : (values?.[tp] ?? null);
+      const valueAtTpPlus1 = tp === null ? null : (values?.[tp + 1] ?? null);
+      return [key, {
+        valueAtTp,
+        valueAtTpPlus1,
+        firstNonZeroIndex: nonZero,
+        doesFirstNonZeroEqualTp: tp === null || nonZero === null ? null : nonZero === tp,
+      }];
+    }));
+
+    const yearAtT0 = readYearFromDate(enginePeriodEndDates[0] ?? null);
+    const yearAtTp = tp === null ? null : readYearFromDate(enginePeriodEndDates[tp] ?? null);
+    const expectedYearAtTp = rawTime && Number.isInteger(rawTime.productionStartYear)
+      ? rawTime.productionStartYear
+      : null;
+
+    return {
+      raw: {
+        version: rawJson?.version ?? null,
+        time: {
+          masterN: rawTime?.masterN ?? null,
+          productionStartPeriod: rawTime?.productionStartPeriod ?? null,
+          productionStartYear: rawTime?.productionStartYear ?? null,
+          periodEndDatesUtc_first8: Array.isArray(rawTime?.periodEndDatesUtc)
+            ? (rawTime?.periodEndDatesUtc as Array<unknown>).slice(0, 8)
+            : null,
+        },
+      },
+      engine: {
+        masterN: operationsGridInput?.masterN ?? null,
+        productionStartPeriod: operationsGridInput?.productionStartPeriod ?? null,
+        productionStartYear: expectedYearAtTp,
+        periodEndDatesUtc_first8: enginePeriodEndDates.slice(0, 8),
+      },
+      alignmentCheck,
+      yearCheck: {
+        yearAtT0,
+        yearAtTp,
+        expectedYearAtTp,
+        doesYearMatchTp: yearAtTp === null || expectedYearAtTp === null ? null : yearAtTp === expectedYearAtTp,
+      },
+    };
+  }, [operationsGridInput, parsedProject, selectedProject]);
 
   const economicsRows = useMemo(() => {
     if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
@@ -621,6 +713,8 @@ export default function ProjectsPage() {
               <ul>{snapshotWarnings.map((item) => <li key={item}>{item}</li>)}</ul>
             </div>
           )}
+          <h3>---- PROJECT MOUNT DEBUG ----</h3>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(projectMountDebug, null, 2)}</pre>
         </details>
 
         <details>

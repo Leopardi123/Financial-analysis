@@ -1869,9 +1869,8 @@ export async function runCorporateSnapshotPipeline(args: {
     snapshot.modeledValuationTimeline = buildCorporateModeledValuationTimeline({
       projects: projectsForBuildFunding.map((project) => ({
         productionStartPeriod: project.productionStartPeriod,
-        periodEndDatesUtc: project.periodEndDatesUtc,
       })),
-      corporatePeriodEndDatesUtc: aggregation.corporatePeriodEndDatesUtc,
+      currentYear: new Date().getUTCFullYear(),
       fcfUSD_total: aggregationEffective.fcffUSD_total,
       masterN: aggregationEffective.corporateMasterN,
       discountRate: input.discountRate,

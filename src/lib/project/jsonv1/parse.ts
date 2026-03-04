@@ -1,6 +1,7 @@
 import type { ProjectEngineFullProductionV1Input } from '../types.ts';
 import { PRICE_KEY_DEFINITIONS, PRICE_KEY_SET } from '../../prices/keys.ts';
 import type { ProjectJsonV1, QtyUnit } from './schema.ts';
+import { buildProductionDriverFirstNonZeroMap, productionStartIndexCandidate } from '../validation/productionStartAlignment.ts';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -702,14 +703,14 @@ function normalizeSpendSeriesAbs(
   return normalized;
 }
 
-export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
+export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
   raw = stripChoiceKeysDeep(raw);
   if (!isPlainObject(raw)) {
     fail('root', 'object', raw);
   }
 
-  if (raw.version !== 'project_json_v1') {
-    fail('version', '"project_json_v1"', raw.version);
+  if (raw.version !== 'project_json_v2') {
+    throw new Error('Only project_json_v2 supported in rolling model.');
   }
 
   if (!isPlainObject(raw.time)) {
@@ -718,8 +719,63 @@ export function parseProjectJsonV1(raw: unknown): ParsedProjectJsonV1 {
 
   const masterN = asInteger(raw.time.masterN, 'time.masterN', 0);
   const productionStartPeriod = asInteger(raw.time.productionStartPeriod, 'time.productionStartPeriod', 0);
+  const productionStartYear = asInteger(raw.time.productionStartYear, 'time.productionStartYear', 1000);
+  if (productionStartYear > 9999) {
+    throw new Error(`time.productionStartYear must be a 4-digit integer. Received productionStartYear=${productionStartYear}.`);
+  }
+  if (productionStartPeriod > masterN) {
+    throw new Error(`time.productionStartPeriod must be <= time.masterN. Received productionStartPeriod=${productionStartPeriod}, masterN=${masterN}.`);
+  }
   const expectedLength = masterN + 1;
   const periodEndDatesUtc = parsePeriodEndDates(raw.time.periodEndDatesUtc, expectedLength);
+
+  if (!Array.isArray(periodEndDatesUtc) || periodEndDatesUtc.length <= productionStartPeriod) {
+    throw new Error('time.periodEndDatesUtc is required for strict project_json_v2 tp/year validation and must include index tp.');
+  }
+  const yearAtTp = Number.parseInt(periodEndDatesUtc[productionStartPeriod].slice(0, 4), 10);
+  if (!Number.isInteger(yearAtTp)) {
+    throw new Error(`Cannot parse year at time.periodEndDatesUtc[${productionStartPeriod}] for strict tp/year validation.`);
+  }
+  if (yearAtTp !== productionStartYear) {
+    throw new Error(`time.productionStartYear mismatch: productionStartYear=${productionStartYear} but yearAtTp=${yearAtTp} from periodEndDatesUtc[${productionStartPeriod}].`);
+  }
+
+  const rawOperations = raw.operations;
+  const operationsRecord = isPlainObject(rawOperations) ? rawOperations : null;
+  const rawMetals = raw.metals;
+  const metalsRecord = isPlainObject(rawMetals) ? rawMetals : null;
+  const payableRecord = isPlainObject(metalsRecord?.payableQtyByMetal) ? metalsRecord.payableQtyByMetal : {};
+  const alignmentPayableQtyByMetalRaw = Object.fromEntries(
+    Object.entries(payableRecord).map(([metal, values]) => [metal, Array.isArray(values) ? values as Array<number | null | undefined> : null]),
+  ) as Record<string, Array<number | null | undefined> | null>;
+
+  const driverFirstNonZeroIndex = buildProductionDriverFirstNonZeroMap({
+    oreMinedTonnes: Array.isArray(operationsRecord?.oreMinedTonnes) ? operationsRecord.oreMinedTonnes as Array<number | null | undefined> : null,
+    oreMilledTonnes: Array.isArray(operationsRecord?.oreMilledTonnes) ? operationsRecord.oreMilledTonnes as Array<number | null | undefined> : null,
+    payableQtyByMetal: alignmentPayableQtyByMetalRaw,
+  });
+  const productionStartIndex = productionStartIndexCandidate(driverFirstNonZeroIndex);
+  if (productionStartIndex === null && productionStartPeriod > 0) {
+    throw new Error('No production series has non-zero values, cannot validate tp.');
+  }
+  if (productionStartIndex !== null && productionStartIndex !== productionStartPeriod) {
+    const yearAtCand = Number.parseInt(periodEndDatesUtc[productionStartIndex].slice(0, 4), 10);
+    throw new Error(
+      `tp mismatch: tp=${productionStartPeriod} (year ${yearAtTp}) but first production driver is at index ${productionStartIndex} (year ${yearAtCand}). Fix by either changing tp or shifting your production-driver series so first non-zero equals tp. Drivers=${JSON.stringify(driverFirstNonZeroIndex)}`,
+    );
+  }
+
+  const currentYear = new Date().getUTCFullYear();
+  const impliedStartYear = productionStartYear - productionStartPeriod;
+  const shiftYears = currentYear - impliedStartYear;
+  if ((raw as Record<string, unknown>).debug === true) {
+    console.debug({
+      currentYear,
+      productionStartYear,
+      impliedStartYear,
+      shiftYears,
+    });
+  }
 
   if (!isPlainObject(raw.economics)) {
     fail('economics', 'object', raw.economics);

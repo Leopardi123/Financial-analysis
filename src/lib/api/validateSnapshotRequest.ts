@@ -454,8 +454,8 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
         continue;
       }
 
-      if (rawJson.version !== 'project_json_v1') {
-        errors.push(`projects[${i}].rawJson.version must be "project_json_v1"`);
+      if (rawJson.version !== 'project_json_v2') {
+        errors.push(`projects[${i}].rawJson.version must be "project_json_v2"`);
       }
 
       const time = rawJson.time;
