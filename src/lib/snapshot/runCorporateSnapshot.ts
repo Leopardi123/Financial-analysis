@@ -964,12 +964,14 @@ type SnapshotDiagnostics = {
         list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: number | null;
         list2_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
         list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        byTpDebug: Record<string, unknown> | null;
       };
       tp5: {
         list2_NAV_prodStart_perShare_TargetCurrency: number | null;
         list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: number | null;
         list2_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
         list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        byTpDebug: Record<string, unknown> | null;
       };
       shares_post_financing_list2: number | null;
       shares_post_financing_list2ByTp: number | null;
@@ -1922,31 +1924,82 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     snapshot.series = snapshotSeries;
-    const lista2MetricsByTp = Object.fromEntries(
+    const candidateTps = [...new Set(
       projectsForBuildFunding
         .map((project) => project.productionStartPeriod)
-        .filter((tp): tp is number => Number.isInteger(tp) && tp > 0 && tp <= aggregationEffective.corporateMasterN)
-        .map((tp) => {
-          const tpMetrics = computeLista2CfDcfMetrics({
-            fcfUSD_total: aggregationEffective.fcffUSD_total,
-            capexUSD_total: aggregationEffective.capexUSD_total,
-            masterN: aggregationEffective.corporateMasterN,
-            productionStartPeriod: tp,
-            discountRate: input.discountRate,
+        .filter((tp): tp is number => Number.isInteger(tp) && tp > 0 && tp <= aggregationEffective.corporateMasterN),
+    )];
+    const sharesDenom = typeof shares_post_financing_fd_effective === 'number' && Number.isFinite(shares_post_financing_fd_effective) && shares_post_financing_fd_effective > 0
+      ? shares_post_financing_fd_effective
+      : null;
+    const npvTodayPerShare =
+      sharesDenom !== null
+      && typeof financingSnapshot.NPV_today_TargetCurrency === 'number'
+      && Number.isFinite(financingSnapshot.NPV_today_TargetCurrency)
+        ? financingSnapshot.NPV_today_TargetCurrency / sharesDenom
+        : null;
+
+    const lista2MetricsByTp = Object.fromEntries(
+      candidateTps.map((tp) => {
+        const tpMetrics = computeLista2CfDcfMetrics({
+          fcfUSD_total: aggregationEffective.fcffUSD_total,
+          capexUSD_total: aggregationEffective.capexUSD_total,
+          masterN: aggregationEffective.corporateMasterN,
+          productionStartPeriod: tp,
+          discountRate: input.discountRate,
+          shares_post_financing: shares_post_financing_fd_effective,
+          fx_USD_to_TargetCurrency: fxRate,
+          npvToday_USD: aggregationEffective.NPV_today_USD,
+          netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+        });
+        diagnostics.warnings.push(...tpMetrics.warnings);
+        diagnostics.errors.push(...tpMetrics.errors);
+
+        const dcfTotal = tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency;
+        const navTotal = tpMetrics.metrics.NAV_prodStart_TargetCurrency;
+        const denomMismatch = sharesDenom !== shares_post_financing_fd_effective;
+        const denomInvalid = sharesDenom === null;
+        const reasonIfNull = denomMismatch
+          ? 'denominator mismatch: denomSharesUsed != shares_post_financing'
+          : denomInvalid
+            ? 'invalid shares_post_financing'
+            : null;
+
+        const dcfPerShare = reasonIfNull === null && dcfTotal !== null && sharesDenom !== null ? dcfTotal / sharesDenom : null;
+        const navPerShare = reasonIfNull === null && navTotal !== null && sharesDenom !== null ? navTotal / sharesDenom : null;
+
+        const ratioToNpv =
+          typeof dcfPerShare === 'number' && typeof npvTodayPerShare === 'number'
+            ? Math.abs(dcfPerShare - npvTodayPerShare) / Math.max(1, Math.abs(npvTodayPerShare))
+            : null;
+        if (ratioToNpv !== null && ratioToNpv < 0.02) {
+          diagnostics.warnings.push(`list2MetricsByTp[${tp}] invariant warning: dcfExCapex_byTp_perShare is within 2% of npvToday_perShare (possible aliasing).`);
+        }
+
+        return [tp, {
+          DCF_prodStart_exCapex_TargetCurrency: dcfTotal,
+          DCF_prodStart_exCapex_perShare_TargetCurrency: dcfPerShare,
+          NAV_prodStart_TargetCurrency: navTotal,
+          NAV_prodStart_perShare_TargetCurrency: navPerShare,
+          __debug: {
+            sharesDenomUsed: sharesDenom,
+            sharesDenomKind: 'shares_post_financing' as const,
             shares_post_financing: shares_post_financing_fd_effective,
-            fx_USD_to_TargetCurrency: fxRate,
-            npvToday_USD: aggregationEffective.NPV_today_USD,
-            netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
-          });
-          diagnostics.warnings.push(...tpMetrics.warnings);
-          diagnostics.errors.push(...tpMetrics.errors);
-          return [tp, {
-            DCF_prodStart_exCapex_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency,
-            DCF_prodStart_exCapex_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
-            NAV_prodStart_TargetCurrency: tpMetrics.metrics.NAV_prodStart_TargetCurrency,
-            NAV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
-          }];
-        }),
+            NAV_prodStart_total_TargetCurrency: navTotal,
+            DCF_prodStart_exCapex_total_TargetCurrency: dcfTotal,
+            fxUsed: fxRate,
+            discountRateUsed: input.discountRate,
+            reasonIfNull,
+            checks: {
+              npvToday_perShare: npvTodayPerShare,
+              dcfPresent_perShare: lista2.metrics.DCF_prodStart_present_perShare_TargetCurrency,
+              dcfExCapex_byTp_perShare: dcfPerShare,
+              navProdStart_byTp_perShare: navPerShare,
+              note: 'dcfExCapex_byTp_perShare must NOT equal npvToday_perShare unless coincidence',
+            },
+          },
+        }];
+      }),
     );
 
     snapshot.list2MetricsByTp = lista2MetricsByTp;
@@ -1960,15 +2013,17 @@ export async function runCorporateSnapshotPipeline(args: {
           list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: tp4?.NAV_prodStart_perShare_TargetCurrency ?? null,
           list2_DCF_prodStart_exCapex_perShare_TargetCurrency: lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
           list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: tp4?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+          byTpDebug: tp4?.__debug ?? null,
         },
         tp5: {
           list2_NAV_prodStart_perShare_TargetCurrency: lista2.metrics.NAV_prodStart_perShare_TargetCurrency,
           list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: tp5?.NAV_prodStart_perShare_TargetCurrency ?? null,
           list2_DCF_prodStart_exCapex_perShare_TargetCurrency: lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
           list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: tp5?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+          byTpDebug: tp5?.__debug ?? null,
         },
         shares_post_financing_list2: shares_post_financing_fd_effective,
-        shares_post_financing_list2ByTp: shares_post_financing_fd_effective,
+        shares_post_financing_list2ByTp: sharesDenom,
       };
     }
 
