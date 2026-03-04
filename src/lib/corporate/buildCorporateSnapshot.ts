@@ -24,52 +24,36 @@ export async function buildCorporateSnapshot(
   const buildFundingNeed_USD =
     input.financingInput.buildFundingNeed_USD === undefined
       ? deriveBuildFundingNeedUSD({
-          corporatePeriodEndDatesUtc: aggregation.corporatePeriodEndDatesUtc,
+          yearsByPeriod: aggregation.corporateYearsByPeriod,
+          masterN: aggregation.corporateMasterN,
           capexUSD_total: aggregation.capexUSD_total,
           projects: input.aggregationInput.projects.map((project) => {
             const raw = project.rawJson as {
-              version?: string;
               time?: {
                 masterN?: number;
                 productionStartPeriod?: number;
                 productionStartYear?: number;
-                periodEndDatesUtc?: string[];
               };
             };
-            const productionStartPeriodRaw = raw.time?.productionStartPeriod;
 
-            if (!Number.isInteger(productionStartPeriodRaw)) {
-              throw new Error(`Project ${project.projectId} is missing integer time.productionStartPeriod`);
+            const time = raw.time;
+            if (!time || !Number.isInteger(time.masterN) || !Number.isInteger(time.productionStartPeriod) || !Number.isInteger(time.productionStartYear)) {
+              throw new Error(
+                `Invalid v2 time for project ${project.projectId}: masterN=${String(time?.masterN)}, productionStartPeriod=${String(time?.productionStartPeriod)}, productionStartYear=${String(time?.productionStartYear)}`,
+              );
             }
 
-            if (raw.version === 'project_json_v2') {
-              const time = raw.time;
-              if (!time || !Number.isInteger(time.masterN) || !Number.isInteger(time.productionStartYear)) {
-                throw new Error(`Project ${project.projectId} is missing required v2 time fields {masterN, productionStartPeriod, productionStartYear}.`);
-              }
-
-              const resolved = resolveV2TimeAxis({
-                masterN: time.masterN as number,
-                productionStartPeriod: productionStartPeriodRaw as number,
-                productionStartYear: time.productionStartYear as number,
-              });
-
-              return {
-                projectId: project.projectId,
-                productionStartPeriod: productionStartPeriodRaw as number,
-                periodEndDatesUtc: resolved.yearsByPeriod.map((year) => `${year}-12-31`),
-              };
-            }
-
-            const periodEndDatesUtc = raw.time?.periodEndDatesUtc;
-            if (!Array.isArray(periodEndDatesUtc) || periodEndDatesUtc.length === 0) {
-              throw new Error(`Project ${project.projectId} is missing non-empty time.periodEndDatesUtc`);
-            }
+            const resolved = resolveV2TimeAxis({
+              masterN: time.masterN as number,
+              productionStartPeriod: time.productionStartPeriod as number,
+              productionStartYear: time.productionStartYear as number,
+            });
 
             return {
               projectId: project.projectId,
-              productionStartPeriod: productionStartPeriodRaw as number,
-              periodEndDatesUtc,
+              productionStartPeriod: resolved.productionStartPeriod,
+              yearsByPeriod: resolved.yearsByPeriod,
+              masterN: resolved.masterN,
             };
           }),
         })

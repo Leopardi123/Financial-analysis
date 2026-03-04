@@ -1,52 +1,60 @@
 export function deriveBuildFundingNeedUSD(args: {
-  corporatePeriodEndDatesUtc: string[];
+  yearsByPeriod: number[];
+  masterN: number;
   capexUSD_total: Array<number | null>;
   projects: Array<{
     projectId: string;
+    masterN: number;
     productionStartPeriod: number;
-    periodEndDatesUtc: string[];
+    yearsByPeriod: number[];
   }>;
 }): number | null {
-  const { corporatePeriodEndDatesUtc, capexUSD_total, projects } = args;
+  const { yearsByPeriod, masterN, capexUSD_total, projects } = args;
 
-  if (capexUSD_total.length !== corporatePeriodEndDatesUtc.length) {
-    throw new Error('capexUSD_total length must match corporatePeriodEndDatesUtc length');
+  if (yearsByPeriod.length !== masterN + 1) {
+    throw new Error('yearsByPeriod length must equal masterN+1');
+  }
+
+  if (capexUSD_total.length !== yearsByPeriod.length) {
+    throw new Error('capexUSD_total length must match yearsByPeriod length');
   }
 
   if (projects.length === 0) {
     throw new Error('Cannot derive build funding need without projects');
   }
 
-  let corporateFirstProdDateUtc: string | null = null;
+  let corporateFirstProductionYear: number | null = null;
 
   for (const project of projects) {
-    const { productionStartPeriod, periodEndDatesUtc, projectId } = project;
-    if (!Number.isInteger(productionStartPeriod)) {
-      throw new Error(`Project ${projectId} has non-integer productionStartPeriod`);
+    const { productionStartPeriod, yearsByPeriod: projectYears, masterN: projectMasterN, projectId } = project;
+    if (!Number.isInteger(projectMasterN) || projectMasterN < 0) {
+      throw new Error(`Project ${projectId} has invalid masterN=${String(projectMasterN)}`);
     }
-    if (productionStartPeriod < 0 || productionStartPeriod >= periodEndDatesUtc.length) {
-      throw new Error(`Project ${projectId} productionStartPeriod is out of range for periodEndDatesUtc`);
+    if (projectYears.length !== projectMasterN + 1) {
+      throw new Error(`Project ${projectId} yearsByPeriod length must equal masterN+1`);
     }
-
-    const prodDate = periodEndDatesUtc[productionStartPeriod];
-    if (typeof prodDate !== 'string' || prodDate.length === 0) {
-      throw new Error(`Project ${projectId} production start date is missing`);
+    if (!Number.isInteger(productionStartPeriod) || productionStartPeriod < 0 || productionStartPeriod >= projectYears.length) {
+      throw new Error(`Project ${projectId} productionStartPeriod is out of range for yearsByPeriod`);
     }
 
-    if (corporateFirstProdDateUtc === null || prodDate < corporateFirstProdDateUtc) {
-      corporateFirstProdDateUtc = prodDate;
+    const productionYear = projectYears[productionStartPeriod];
+    if (!Number.isFinite(productionYear)) {
+      throw new Error(`Project ${projectId} production start year is missing`);
+    }
+
+    if (corporateFirstProductionYear === null || productionYear < corporateFirstProductionYear) {
+      corporateFirstProductionYear = productionYear;
     }
   }
 
-  if (corporateFirstProdDateUtc === null) {
-    throw new Error('Unable to derive corporate first production date');
+  if (corporateFirstProductionYear === null) {
+    throw new Error('Unable to derive corporate first production year');
   }
 
   let negativeCapexSum = 0;
 
-  for (let t = 0; t < corporatePeriodEndDatesUtc.length; t += 1) {
-    const periodEndDateUtc = corporatePeriodEndDatesUtc[t];
-    if (periodEndDateUtc < corporateFirstProdDateUtc) {
+  for (let t = 0; t < yearsByPeriod.length; t += 1) {
+    if (yearsByPeriod[t] < corporateFirstProductionYear) {
       const capex = capexUSD_total[t];
       if (capex === null) {
         return null;
