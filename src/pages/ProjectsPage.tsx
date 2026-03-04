@@ -6,13 +6,13 @@ import { buildTransposedTable } from '../lib/ui/tables/buildTransposedTable.ts';
 import { resolveCommonSharesCurrent } from '../lib/market/resolveSharesCurrent.ts';
 import { parseProjectJsonV1WithContext } from '../lib/project/jsonv1/parse.ts';
 import { buildOperationsGridModel } from './projectOperationsGrid.ts';
+import { resolveV2TimeAxis } from '../lib/time/resolveV2TimeAxis.ts';
 import '../styles/projects-view.css';
 
 const DEFAULT_SYMBOL = 'AAPL';
 
 type SeriesShape = {
   periodIndex?: number[];
-  periodEndDatesUtc?: Array<string | null>;
   oreMinedTonnes?: Array<number | null>;
   oreMilledTonnes?: Array<number | null>;
   nameplateThroughput?: number | null;
@@ -70,14 +70,6 @@ function readFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-
-function readYearFromDate(value: unknown): number | null {
-  if (typeof value !== 'string') return null;
-  const match = value.match(/^(\d{4})/);
-  if (!match) return null;
-  const year = Number.parseInt(match[1], 10);
-  return Number.isInteger(year) ? year : null;
-}
 
 function firstNonZeroIndex(values: Array<number | null> | undefined): number | null {
   if (!Array.isArray(values)) return null;
@@ -392,11 +384,28 @@ export default function ProjectsPage() {
   const operationsGridInput = useMemo(() => {
     const raw = parsedProject;
     if (!raw) return null;
-    const masterN = raw.engineInputWithoutPrices.masterN;
+    const rawJson = (selectedProject?.raw_json ?? null) as Record<string, unknown> | null;
+    const rawTime = rawJson && typeof rawJson.time === 'object' && rawJson.time !== null && !Array.isArray(rawJson.time)
+      ? rawJson.time as Record<string, unknown>
+      : null;
+    let resolvedTime;
+    try {
+      resolvedTime = resolveV2TimeAxis({
+        masterN: rawTime?.masterN as number,
+        productionStartPeriod: rawTime?.productionStartPeriod as number,
+        productionStartYear: rawTime?.productionStartYear as number,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const projectLabel = selectedProject?.project_id ?? 'unknown';
+      throw new Error(
+        `Invalid project time in ProjectsPage for projectId=${projectLabel}: ${message}; masterN=${String(rawTime?.masterN)}, productionStartPeriod=${String(rawTime?.productionStartPeriod)}, productionStartYear=${String(rawTime?.productionStartYear)}`,
+      );
+    }
     return {
-      masterN,
-      productionStartPeriod: raw.engineInputWithoutPrices.productionStartPeriod,
-      periodEndDatesUtc: raw.engineInputWithoutPrices.periodEndDatesUtc,
+      masterN: resolvedTime.masterN,
+      productionStartPeriod: resolvedTime.productionStartPeriod,
+      yearsByPeriod: resolvedTime.yearsByPeriod,
       operations: {
         oreMilledTonnes: raw.context.operations?.oreMilledTonnes,
         oreMinedTonnes: raw.context.operations?.oreMinedTonnes,
@@ -436,7 +445,7 @@ export default function ProjectsPage() {
         effectiveTaxRate: series?.effectiveTaxRate,
       },
     };
-  }, [parsedProject, series]);
+  }, [parsedProject, selectedProject, series]);
 
   const operationsGrid = useMemo(() => {
     if (!operationsGridInput) return null;
@@ -451,8 +460,8 @@ export default function ProjectsPage() {
     const tp = Number.isInteger(operationsGridInput?.productionStartPeriod)
       ? operationsGridInput?.productionStartPeriod as number
       : null;
-    const enginePeriodEndDates = Array.isArray(operationsGridInput?.periodEndDatesUtc)
-      ? operationsGridInput?.periodEndDatesUtc as Array<string | null>
+    const yearsByPeriod = Array.isArray(operationsGridInput?.yearsByPeriod)
+      ? operationsGridInput.yearsByPeriod
       : [];
 
     const alignmentSources: Record<string, Array<number | null> | undefined> = {
@@ -476,8 +485,8 @@ export default function ProjectsPage() {
       }];
     }));
 
-    const yearAtT0 = readYearFromDate(enginePeriodEndDates[0] ?? null);
-    const yearAtTp = tp === null ? null : readYearFromDate(enginePeriodEndDates[tp] ?? null);
+    const yearAtT0 = Number.isInteger(yearsByPeriod[0]) ? yearsByPeriod[0] : null;
+    const yearAtTp = tp === null ? null : (Number.isInteger(yearsByPeriod[tp]) ? yearsByPeriod[tp] : null);
     const expectedYearAtTp = rawTime && Number.isInteger(rawTime.productionStartYear)
       ? rawTime.productionStartYear
       : null;
@@ -489,8 +498,8 @@ export default function ProjectsPage() {
           masterN: rawTime?.masterN ?? null,
           productionStartPeriod: rawTime?.productionStartPeriod ?? null,
           productionStartYear: rawTime?.productionStartYear ?? null,
-          periodEndDatesUtc_first8: Array.isArray(rawTime?.periodEndDatesUtc)
-            ? (rawTime?.periodEndDatesUtc as Array<unknown>).slice(0, 8)
+          yearsByPeriod_first8: Array.isArray(yearsByPeriod)
+            ? yearsByPeriod.slice(0, 8)
             : null,
         },
       },
@@ -498,7 +507,7 @@ export default function ProjectsPage() {
         masterN: operationsGridInput?.masterN ?? null,
         productionStartPeriod: operationsGridInput?.productionStartPeriod ?? null,
         productionStartYear: expectedYearAtTp,
-        periodEndDatesUtc_first8: enginePeriodEndDates.slice(0, 8),
+        yearsByPeriod_first8: yearsByPeriod.slice(0, 8),
       },
       alignmentCheck,
       yearCheck: {

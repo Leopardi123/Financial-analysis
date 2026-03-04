@@ -6,7 +6,7 @@ test('operations grid headers render year, t, and t-tp', () => {
   const model = buildOperationsGridModel({
     masterN: 2,
     productionStartPeriod: 1,
-    periodEndDatesUtc: ['2024-12-31', '2025-12-31', '2026-12-31'],
+    yearsByPeriod: [2024, 2025, 2026],
     operations: null,
     metals: { payableQtyByMetal: {}, payableQtyUnitByMetal: {} },
   });
@@ -20,7 +20,7 @@ test('metals rows are alphabetical', () => {
   const model = buildOperationsGridModel({
     masterN: 0,
     productionStartPeriod: 0,
-    periodEndDatesUtc: ['2024-12-31'],
+    yearsByPeriod: [2024],
     operations: null,
     metals: {
       payableQtyByMetal: { Zn: [2], Au: [1], Ag: [3] },
@@ -35,7 +35,7 @@ test('totals are strict and return em dash value when null appears in production
   const model = buildOperationsGridModel({
     masterN: 2,
     productionStartPeriod: 1,
-    periodEndDatesUtc: ['2024-12-31', '2025-12-31', '2026-12-31'],
+    yearsByPeriod: [2024, 2025, 2026],
     operations: {
       oreMilledTonnes: [10, null, 30],
       oreMinedTonnes: [10, 20, 30],
@@ -57,7 +57,7 @@ test('grade/recovery rows precede payable and derived revenue rows include EBITD
   const model = buildOperationsGridModel({
     masterN: 1,
     productionStartPeriod: 0,
-    periodEndDatesUtc: ['2026-12-31', '2027-12-31'],
+    yearsByPeriod: [2026, 2027],
     operations: {
       oreMinedTonnes: [100, 110],
       oreMilledTonnes: [90, 100],
@@ -100,7 +100,7 @@ test('royalties detail drives royalties row and EBITDA consistently', () => {
   const model = buildOperationsGridModel({
     masterN: 0,
     productionStartPeriod: 0,
-    periodEndDatesUtc: ['2026-12-31'],
+    yearsByPeriod: [2026],
     operations: null,
     metals: {
       payableQtyByMetal: { Au: [100] },
@@ -131,7 +131,7 @@ test('grade/recovery are masked before production start and when ore milled is z
   const model = buildOperationsGridModel({
     masterN: 4,
     productionStartPeriod: 2,
-    periodEndDatesUtc: ['2024-12-31', '2025-12-31', '2026-12-31', '2027-12-31', '2028-12-31'],
+    yearsByPeriod: [2024, 2025, 2026, 2027, 2028],
     operations: {
       oreMilledTonnes: [0, 0, 100, 0, 200],
       gradeByMetal: { Au: [1, 1.1, 1.2, 1.3, 1.4] },

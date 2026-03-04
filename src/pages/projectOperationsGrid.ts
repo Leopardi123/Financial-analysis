@@ -1,7 +1,7 @@
 export type OperationsGridInput = {
   masterN: number;
   productionStartPeriod: number | null;
-  periodEndDatesUtc?: Array<string | null>;
+  yearsByPeriod: number[];
   operations?: {
     oreMilledTonnes?: Array<number | null>;
     oreMinedTonnes?: Array<number | null>;
@@ -57,10 +57,8 @@ export type OperationsGridModel = {
   notes: string[];
 };
 
-function yearLabel(value: string | null | undefined): string {
-  if (typeof value !== 'string') return '—';
-  const yearMatch = value.match(/^(\d{4})/);
-  return yearMatch?.[1] ?? '—';
+function yearLabel(value: number | null | undefined): string {
+  return Number.isInteger(value) ? String(value) : '—';
 }
 
 function strictTotal(values: Array<number | null>, startIndex: number): number | null {
@@ -94,17 +92,17 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   const columnCount = Math.max(0, input.masterN + 1);
   const warnings: string[] = [];
   const notes: string[] = [];
-  const hasValidPeriodDates = Array.isArray(input.periodEndDatesUtc) && input.periodEndDatesUtc.length === columnCount;
+  const hasValidYearsByPeriod = Array.isArray(input.yearsByPeriod) && input.yearsByPeriod.length === columnCount;
 
-  if (!hasValidPeriodDates) {
-    warnings.push('Period end dates missing or mismatched; showing t-only columns.');
+  if (!hasValidYearsByPeriod) {
+    warnings.push('yearsByPeriod missing or mismatched; showing t-only columns.');
   }
 
   if (!input.operations) {
     notes.push('Operations block missing (capacity/tonnes).');
   }
 
-  const years = Array.from({ length: columnCount }, (_, t) => hasValidPeriodDates ? yearLabel(input.periodEndDatesUtc?.[t]) : '—');
+  const years = Array.from({ length: columnCount }, (_, t) => hasValidYearsByPeriod ? yearLabel(input.yearsByPeriod[t]) : '—');
   const tIndex = Array.from({ length: columnCount }, (_, t) => `${t}`);
   const hasValidTp = Number.isInteger(input.productionStartPeriod);
   const tp = hasValidTp ? (input.productionStartPeriod as number) : null;
