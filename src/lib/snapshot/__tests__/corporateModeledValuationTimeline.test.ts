@@ -77,7 +77,7 @@ test('corporate modeled valuation markers use rolling timeline labels and tp ind
         productionStartPeriod: 4,
       },
     ],
-    currentYear: 2027,
+    yearsByPeriod: [2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034],
     fcfUSD_total: fcfUSDTotal,
     masterN,
     discountRate: 0.1,
@@ -92,11 +92,47 @@ test('corporate modeled valuation markers use rolling timeline labels and tp ind
 
   assert.equal(marker.tp, 4);
   assert.equal(marker.corporateTpIndexUsed, 4);
-  assert.equal(marker.yearLabelUsed, '2031');
+  assert.equal(marker.yearLabelUsed, '2029');
   assert.equal(marker.sanity?.matchMode, 'exact');
   assert.equal(marker.sanity?.tpDate, null);
   assert.equal(marker.sanity?.corporateDateUsed, null);
 
   const expectedTailSum = fcfUSDTotal.slice(4, masterN + 1).reduce((sum, value) => sum + value, 0);
   assert.equal(marker.fcfTailSumUSD, expectedTailSum);
+});
+
+
+test('corporate modeled valuation marker year labels come directly from yearsByPeriod[tp]', () => {
+  const yearsByPeriod = [
+    2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033,
+    2034, 2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043,
+  ];
+  const timeline = buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 4 }],
+    yearsByPeriod,
+    fcfUSD_total: Array.from({ length: 19 }, () => 1),
+    masterN: 18,
+    discountRate: 0.1,
+    shares_post_financing: 100,
+    fx_USD_to_TargetCurrency: 1,
+    npvToday_USD: 1000,
+  });
+
+  assert.equal(yearsByPeriod[0], 2025);
+  assert.equal(yearsByPeriod[4], 2029);
+  assert.equal(timeline.markers[0]?.yearLabelUsed, '2029');
+});
+
+
+test('corporate modeled valuation timeline throws when tp is outside yearsByPeriod bounds', () => {
+  assert.throws(() => buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 4 }],
+    yearsByPeriod: [2025, 2026, 2027],
+    fcfUSD_total: [1, 1, 1],
+    masterN: 2,
+    discountRate: 0.1,
+    shares_post_financing: 100,
+    fx_USD_to_TargetCurrency: 1,
+    npvToday_USD: 1000,
+  }), /outside yearsByPeriod bounds/);
 });

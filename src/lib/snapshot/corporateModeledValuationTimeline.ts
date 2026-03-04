@@ -72,7 +72,7 @@ export function buildCorporateModeledValuationTimeline(args: {
   projects: Array<{
     productionStartPeriod: number | null | undefined;
   }>;
-  currentYear: number;
+  yearsByPeriod: number[];
   fcfUSD_total: Array<number | null>;
   masterN: number;
   discountRate: number;
@@ -90,7 +90,13 @@ export function buildCorporateModeledValuationTimeline(args: {
 
   const markers: CorporateModeledTimelineMarker[] = tps.map((tp) => {
     const corporateTp = tp;
-    const yearLabelUsed = String(args.currentYear + tp);
+    if (tp < 0 || tp >= args.yearsByPeriod.length) {
+      throw new Error(
+        `corporate modeled timeline: tp ${tp} is outside yearsByPeriod bounds (length=${args.yearsByPeriod.length})`,
+      );
+    }
+    const markerYear = args.yearsByPeriod[tp];
+    const yearLabelUsed = String(markerYear);
 
     if (!Number.isInteger(corporateTp) || corporateTp < 0 || corporateTp > args.masterN) {
       return {
