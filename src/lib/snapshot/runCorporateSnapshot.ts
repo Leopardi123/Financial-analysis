@@ -971,6 +971,12 @@ type SnapshotDiagnostics = {
         value_low: number | null;
         value_mid_if_any: number | null;
         nullReasonIfAny: string | null;
+        debug?: {
+          sharesDenominatorUsed: number | null;
+          sharesDenominatorType: 'shares_post_financing';
+          value_low_total_TargetCurrency: number | null;
+          value_high_total_TargetCurrency: number | null;
+        };
       }>;
     };
   };
@@ -1906,6 +1912,7 @@ export async function runCorporateSnapshotPipeline(args: {
       capexUSD_total: aggregationEffective.capexUSD_total,
       masterN: aggregationEffective.corporateMasterN,
       discountRate: input.discountRate,
+      shares_post_financing_fd_effective,
       shares_post_financing: shares_post_financing_fd_effective,
       fx_USD_to_TargetCurrency: fxRate,
       npvToday_USD: aggregationEffective.NPV_today_USD,

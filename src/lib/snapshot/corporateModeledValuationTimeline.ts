@@ -9,6 +9,12 @@ export type CorporateModeledTimelineMarker = {
   value_low: number | null;
   value_mid_if_any: number | null;
   nullReasonIfAny: string | null;
+  debug?: {
+    sharesDenominatorUsed: number | null;
+    sharesDenominatorType: 'shares_post_financing';
+    value_low_total_TargetCurrency: number | null;
+    value_high_total_TargetCurrency: number | null;
+  };
   sanity?: {
     tp: number;
     tpDate: string | null;
@@ -77,6 +83,7 @@ export function buildCorporateModeledValuationTimeline(args: {
   capexUSD_total: Array<number | null>;
   masterN: number;
   discountRate: number;
+  shares_post_financing_fd_effective?: number | null;
   shares_post_financing: number | null;
   fx_USD_to_TargetCurrency: number | null;
   npvToday_USD: number | null;
@@ -142,16 +149,27 @@ export function buildCorporateModeledValuationTimeline(args: {
       netCash_t0_post_TargetCurrency: args.netCash_t0_post_TargetCurrency,
     });
 
-    const rawValueLow = lista2.metrics.NAV_prodStart_perShare_TargetCurrency;
-    const rawValueHigh = lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
-    const valueLow = Number.isFinite(rawValueLow) ? rawValueLow : null;
-    const valueHigh = Number.isFinite(rawValueHigh) ? rawValueHigh : null;
+    const denomRaw = args.shares_post_financing_fd_effective ?? args.shares_post_financing;
+    const denom = Number.isFinite(denomRaw) ? denomRaw : null;
+    const valueLowTotalRaw = lista2.metrics.NAV_prodStart_TargetCurrency;
+    const valueHighTotalRaw = lista2.metrics.DCF_prodStart_exCapex_TargetCurrency;
+    const valueLowTotal = Number.isFinite(valueLowTotalRaw) ? valueLowTotalRaw : null;
+    const valueHighTotal = Number.isFinite(valueHighTotalRaw) ? valueHighTotalRaw : null;
+    const valueLow = valueLowTotal !== null && denom !== null && denom > 0
+      ? valueLowTotal / denom
+      : null;
+    const valueHigh = valueHighTotal !== null && denom !== null && denom > 0
+      ? valueHighTotal / denom
+      : null;
 
-    if (valueLow === null) {
-      args.diagnosticsWarnings?.push('Missing NAV_prodStart_perShare_TargetCurrency for corporate modeled marker');
+    if (valueLowTotal === null) {
+      args.diagnosticsWarnings?.push('Missing NAV_prodStart_TargetCurrency for corporate modeled marker');
     }
-    if (valueHigh === null) {
-      args.diagnosticsWarnings?.push('Missing DCF_prodStart_exCapex_perShare_TargetCurrency for corporate modeled marker');
+    if (valueHighTotal === null) {
+      args.diagnosticsWarnings?.push('Missing DCF_prodStart_exCapex_TargetCurrency for corporate modeled marker');
+    }
+    if (denom === null || denom <= 0) {
+      args.diagnosticsWarnings?.push('Invalid shares_post_financing denominator for corporate modeled marker');
     }
     const fcfTailSlice = args.fcfUSD_total.slice(corporateTp, args.masterN + 1);
     const fcfTailSumUSD = fcfTailSlice
@@ -172,6 +190,10 @@ export function buildCorporateModeledValuationTimeline(args: {
     const sanityFailureChecks: string[] = [];
     if (fcfTailMatches === false) sanityFailureChecks.push('fcfTailMatches');
 
+    const invalidDenominator = denom === null || denom <= 0;
+    const denominatorNullReason = invalidDenominator
+      ? 'Invalid shares_post_financing denominator'
+      : null;
     const baseNullReason = valueHigh === null || valueLow === null
       ? [...lista2.errors, ...lista2.warnings].join(' | ') || 'Missing required valuation inputs'
       : null;
@@ -189,7 +211,13 @@ export function buildCorporateModeledValuationTimeline(args: {
       value_high: hideValuesForSanityFailure ? null : valueHigh,
       value_low: hideValuesForSanityFailure ? null : valueLow,
       value_mid_if_any: null,
-      nullReasonIfAny,
+      nullReasonIfAny: denominatorNullReason ?? nullReasonIfAny,
+      debug: {
+        sharesDenominatorUsed: denom,
+        sharesDenominatorType: 'shares_post_financing',
+        value_low_total_TargetCurrency: valueLowTotal,
+        value_high_total_TargetCurrency: valueHighTotal,
+      },
       sanity: args.includeDebugSanity
         ? {
             tp,
