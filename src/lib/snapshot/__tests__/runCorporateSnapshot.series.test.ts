@@ -69,6 +69,25 @@ test('list2 per-tp DCF keeps explicit prodStart vs present time basis and valuat
     const expectedPerShare = tpMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
     assert.equal(marker.value_high, expectedPerShare);
   }
+
+  const lastTp = timeline?.lastTp ?? null;
+  assert.ok(typeof lastTp === 'number');
+  const exCapexLastTp = result.snapshot.DCF_prodStart_exCapex_TargetCurrency;
+  const presentLastTp = result.snapshot.DCF_prodStart_present_TargetCurrency;
+  if (typeof lastTp === 'number' && exCapexLastTp !== null && presentLastTp !== null) {
+    const expectedPresent = exCapexLastTp / Math.pow(1 + 0.1, lastTp);
+    assert.ok(Math.abs(presentLastTp - expectedPresent) <= 1e-6 * Math.max(1, Math.abs(expectedPresent)));
+  }
+
+  const timeBasis = (result.diagnostics.meta?.lista2DebugTimeBasis ?? null) as {
+    tpChosenForPresent: number;
+    impliedTpRounded: number | null;
+  } | null;
+  assert.ok(timeBasis);
+  assert.equal(timeBasis?.tpChosenForPresent, lastTp);
+  if (typeof lastTp === 'number' && typeof timeBasis?.impliedTpRounded === 'number') {
+    assert.ok(Math.abs(timeBasis.impliedTpRounded - lastTp) <= 1e-6);
+  }
 });
 
 test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async () => {

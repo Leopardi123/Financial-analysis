@@ -185,6 +185,17 @@ export type CorporateSnapshot = {
       NAV_prodStart_total_TargetCurrency: number | null;
       DCF_prodStart_exCapex_total_TargetCurrency: number | null;
       DCF_prodStart_present_total_TargetCurrency?: number | null;
+      presentTimeBasisCheck?: {
+        tpChosenForPresent: number;
+        impliedTpRounded: number | null;
+        ex: number | null;
+        pv: number | null;
+        ratio: number | null;
+        powChosen: number | null;
+        pvFromChosen: number | null;
+        deltaPv: number | null;
+        valid: boolean;
+      };
       fxUsed: number | null;
       discountRateUsed: number | null;
       productionStartPeriodUsed?: number;

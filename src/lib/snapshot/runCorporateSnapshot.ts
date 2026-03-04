@@ -10,7 +10,7 @@ import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnap
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
 import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
-import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics, makeNullLista2CfDcfNullReasons } from './lista2CfDcf.ts';
+import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics, makeNullLista2CfDcfNullReasons, type Lista2CfDcfMetrics, type Lista2CfDcfNullReasons } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import { buildCorporateModeledValuationTimeline } from './corporateModeledValuationTimeline.ts';
@@ -82,6 +82,93 @@ function assertSeriesLength(
   if (series.length !== expectedLength) {
     throw new Error(`${label} length must equal masterN+1 (${expectedLength})`);
   }
+}
+
+type DcfPresentInvariantDiagnostic = {
+  tpChosenForPresent: number;
+  impliedTpRounded: number | null;
+  ex: number | null;
+  pv: number | null;
+  ratio: number | null;
+  powChosen: number | null;
+  pvFromChosen: number | null;
+  deltaPv: number | null;
+  valid: boolean;
+};
+
+function enforceDcfPresentInvariant(args: {
+  metrics: Lista2CfDcfMetrics;
+  nullReasons: Lista2CfDcfNullReasons;
+  tpChosenForPresent: number;
+  discountRate: number;
+}): {
+  metrics: Lista2CfDcfMetrics;
+  nullReasons: Lista2CfDcfNullReasons;
+  diagnostic: DcfPresentInvariantDiagnostic;
+} {
+  const ex = toFiniteOrNull(args.metrics.DCF_prodStart_exCapex_TargetCurrency);
+  const pv = toFiniteOrNull(args.metrics.DCF_prodStart_present_TargetCurrency);
+  const denom = Math.log(1 + args.discountRate);
+  const ratio = ex !== null && pv !== null && ex > 0 && pv > 0 ? ex / pv : null;
+  const impliedTp = ratio !== null && Number.isFinite(denom) && denom !== 0
+    ? Math.log(ratio) / denom
+    : null;
+  const impliedTpRounded = impliedTp !== null && Number.isFinite(impliedTp)
+    ? Math.round(impliedTp * 1_000_000) / 1_000_000
+    : null;
+  const powChosen = Number.isFinite(args.discountRate)
+    ? Math.pow(1 + args.discountRate, args.tpChosenForPresent)
+    : null;
+  const pvFromChosen = ex !== null && powChosen !== null && Number.isFinite(powChosen) && powChosen !== 0
+    ? ex / powChosen
+    : null;
+  const deltaPv = pv !== null && pvFromChosen !== null ? pv - pvFromChosen : null;
+  const tolerance = pvFromChosen !== null ? Math.max(1e-6 * Math.abs(pvFromChosen), 1e-4) : null;
+  const valid = deltaPv !== null && tolerance !== null ? Math.abs(deltaPv) <= tolerance : true;
+
+  if (valid) {
+    return {
+      metrics: args.metrics,
+      nullReasons: args.nullReasons,
+      diagnostic: {
+        tpChosenForPresent: args.tpChosenForPresent,
+        impliedTpRounded,
+        ex,
+        pv,
+        ratio,
+        powChosen,
+        pvFromChosen,
+        deltaPv,
+        valid,
+      },
+    };
+  }
+
+  return {
+    metrics: {
+      ...args.metrics,
+      DCF_prodStart_present_TargetCurrency: null,
+      DCF_prodStart_present_perShare_TargetCurrency: null,
+      DCF_prodStart_present_USD: null,
+      DCF_prodStart_present_perShare_USD: null,
+      DCF_present_over_ETLV: null,
+    },
+    nullReasons: {
+      ...args.nullReasons,
+      DCF_prodStart_present: 'DCF_prodStart_present tp mismatch (impliedTp != chosenTp)',
+    },
+    diagnostic: {
+      tpChosenForPresent: args.tpChosenForPresent,
+      impliedTpRounded,
+      ex,
+      pv,
+      ratio,
+      powChosen,
+      pvFromChosen,
+      deltaPv,
+      valid,
+    },
+  };
 }
 
 
@@ -957,6 +1044,17 @@ type SnapshotDiagnostics = {
         NAV_today_TargetCurrency: number | null;
         delta_NAV_minus_NPV: number | null;
       };
+    };
+    lista2DebugTimeBasis?: {
+      tpChosenForPresent: number;
+      impliedTpRounded: number | null;
+      ex: number | null;
+      pv: number | null;
+      ratio: number | null;
+      powChosen: number | null;
+      pvFromChosen: number | null;
+      deltaPv: number | null;
+      valid: boolean;
     };
     lista2ByTpDebug?: {
       tp4: {
@@ -1888,7 +1986,7 @@ export async function runCorporateSnapshotPipeline(args: {
     }
 
     const lista2TpRule = tpLastEff;
-    const lista2 = lista2TpRule !== null && lista2TpRule > aggregation.corporateMasterN
+    const lista2Base = lista2TpRule !== null && lista2TpRule > aggregation.corporateMasterN
       ? { metrics: makeNullLista2CfDcfMetrics(), nullReasons: makeNullLista2CfDcfNullReasons('invalid tp'), warnings: ['failure_reason: tp_last_eff > masterN'], errors: [] }
       : computeLista2CfDcfMetrics({
         fcfUSD_total: aggregationEffective.fcffUSD_total,
@@ -1901,6 +1999,24 @@ export async function runCorporateSnapshotPipeline(args: {
         npvToday_USD: aggregationEffective.NPV_today_USD,
         netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
       });
+    let lista2 = lista2Base;
+    if (typeof lista2TpRule === 'number') {
+      const invariant = enforceDcfPresentInvariant({
+        metrics: lista2Base.metrics,
+        nullReasons: lista2Base.nullReasons,
+        tpChosenForPresent: lista2TpRule,
+        discountRate: input.discountRate,
+      });
+      if (!invariant.diagnostic.valid) {
+        diagnostics.warnings.push('lista2 invariant: DCF_prodStart_present tp mismatch (impliedTp != chosenTp); present fields were nulled');
+      }
+      diagnostics.meta.lista2DebugTimeBasis = invariant.diagnostic;
+      lista2 = {
+        ...lista2Base,
+        metrics: invariant.metrics,
+        nullReasons: invariant.nullReasons,
+      };
+    }
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
     const rawBody = args.body as Record<string, unknown>;
@@ -1946,8 +2062,8 @@ export async function runCorporateSnapshotPipeline(args: {
 
     snapshot.series = snapshotSeries;
     const corporateTpsList = [...new Set(
-      projectsForBuildFunding
-        .map((project) => project.productionStartPeriod + delayPeriods)
+      productionStartIndices
+        .map((tp) => tp + delayPeriods)
         .filter((tp): tp is number => Number.isInteger(tp) && tp > 0 && tp <= aggregationEffective.corporateMasterN),
     )].sort((a, b) => a - b);
     const sharesDenom = typeof shares_post_financing_fd_effective === 'number' && Number.isFinite(shares_post_financing_fd_effective) && shares_post_financing_fd_effective > 0
@@ -1964,7 +2080,7 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const lista2MetricsByTp = Object.fromEntries(
       corporateTpsList.map((tp) => {
-        const tpMetrics = computeLista2CfDcfMetrics({
+        const tpMetricsBase = computeLista2CfDcfMetrics({
           fcfUSD_total: aggregationEffective.fcffUSD_total,
           capexUSD_total: aggregationEffective.capexUSD_total,
           masterN: aggregationEffective.corporateMasterN,
@@ -1975,8 +2091,23 @@ export async function runCorporateSnapshotPipeline(args: {
           npvToday_USD: aggregationEffective.NPV_today_USD,
           netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
         });
-        diagnostics.warnings.push(...tpMetrics.warnings);
-        diagnostics.errors.push(...tpMetrics.errors);
+        const invariant = enforceDcfPresentInvariant({
+          metrics: tpMetricsBase.metrics,
+          nullReasons: tpMetricsBase.nullReasons,
+          tpChosenForPresent: tp,
+          discountRate: input.discountRate,
+        });
+        if (!invariant.diagnostic.valid) {
+          diagnostics.warnings.push(`list2MetricsByTp invariant failed at tp=${tp}: DCF_prodStart_present tp mismatch (impliedTp != chosenTp); present fields were nulled`);
+        }
+        diagnostics.warnings.push(...tpMetricsBase.warnings);
+        diagnostics.errors.push(...tpMetricsBase.errors);
+
+        const tpMetrics = {
+          ...tpMetricsBase,
+          metrics: invariant.metrics,
+          nullReasons: invariant.nullReasons,
+        };
 
         const dcfTotal = tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency;
         const dcfPresentTotal = tpMetrics.metrics.DCF_prodStart_present_TargetCurrency;
@@ -2017,6 +2148,7 @@ export async function runCorporateSnapshotPipeline(args: {
             NAV_prodStart_total_TargetCurrency: navTotal,
             DCF_prodStart_exCapex_total_TargetCurrency: dcfTotal,
             DCF_prodStart_present_total_TargetCurrency: dcfPresentTotal,
+            presentTimeBasisCheck: invariant.diagnostic,
             fxUsed: fxRate,
             discountRateUsed: input.discountRate,
             nullReasonIfAny: reasonIfNull,
@@ -2057,8 +2189,8 @@ export async function runCorporateSnapshotPipeline(args: {
           : null;
         const presentInvariantMismatch = hasMismatch(fromByTp.DCF_prodStart_present_TargetCurrency ?? null, expectedPresent);
         if (presentInvariantMismatch) {
-          throw new Error(
-            `time-basis invariant violation: list2MetricsByTp[tp=${tp}] present != exCapex/(1+r)^tp `
+          diagnostics.warnings.push(
+            `time-basis invariant warning: list2MetricsByTp[tp=${tp}] present != exCapex/(1+r)^tp `
             + `(present=${String(fromByTp.DCF_prodStart_present_TargetCurrency ?? null)} expected=${String(expectedPresent)})`,
           );
         }

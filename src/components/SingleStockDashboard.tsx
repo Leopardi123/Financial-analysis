@@ -2589,11 +2589,14 @@ Capital Available: ${availableLabel}`,
       sharesValue: sharesPf ?? sharesCurrent ?? 0,
     };
     const todayLow = corporateList2MetricsForDisplay?.NPV_perShare?.value ?? null;
-    const todayHigh = corporateList2MetricsForDisplay?.DCF_Target_discounted_perShare?.value ?? null;
+    const todayHigh = typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number"
+      ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
+      : null;
     const lista2ByTp = (corporateSnapshotData.list2MetricsByTp ?? null) as Record<number, {
       DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
       NAV_prodStart_perShare_TargetCurrency: number | null;
     }> | null;
+    const list2NullReasons = (corporateSnapshotData.list2 as { nullReasons?: { DCF_prodStart_present?: string | null } } | undefined)?.nullReasons ?? null;
     const points = [
       {
         pointType: "today" as const,
@@ -2604,11 +2607,11 @@ Capital Available: ${availableLabel}`,
         lowValueUsed: todayLow,
         highValueUsed: todayHigh,
         lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
-        highSource: { metricKey: "list2.DCF_Target_discounted_perShare", description: "ValueRangeSnapshotCard npvHigh" },
+        highSource: { metricKey: "list2.DCF_prodStart_present_perShare_TargetCurrency", description: "ValueRangeSnapshotCard npvHigh" },
         perShareBasis: shareBasis,
         nullReasons: {
           ...(todayLow === null ? { low: corporateViewMetrics.list2.NPV_perShare?.reason ?? "Metric is null." } : {}),
-          ...(todayHigh === null ? { high: corporateList2MetricsForDisplay?.DCF_Target_discounted_perShare?.reason ?? "Metric is null." } : {}),
+          ...(todayHigh === null ? { high: list2NullReasons?.DCF_prodStart_present ?? "Metric is null." } : {}),
         },
         sanity: {
           lowLEHigh: (typeof todayLow === "number" && typeof todayHigh === "number") ? todayLow <= todayHigh : null,
@@ -2647,7 +2650,7 @@ Capital Available: ${availableLabel}`,
           },
           mappingUsed: {
             todayLow: "list2.NPV_perShare",
-            todayHigh: "list2.DCF_Target_discounted_perShare",
+            todayHigh: "list2.DCF_prodStart_present_perShare_TargetCurrency",
             prodStartLow: "list2MetricsByTp.NAV_prodStart_perShare_TargetCurrency",
             prodStartHigh: "list2MetricsByTp.DCF_prodStart_exCapex_perShare_TargetCurrency",
           },
@@ -2666,7 +2669,7 @@ Capital Available: ${availableLabel}`,
       rangeEndTpUsed: timeline?.rangeEndTp ?? null,
       mappingUsed: {
         todayLow: "list2.NPV_perShare",
-        todayHigh: "list2.DCF_Target_discounted_perShare",
+        todayHigh: "list2.DCF_prodStart_present_perShare_TargetCurrency",
         prodStartLow: "list2MetricsByTp.NAV_prodStart_perShare_TargetCurrency",
         prodStartHigh: "list2MetricsByTp.DCF_prodStart_exCapex_perShare_TargetCurrency",
       },
