@@ -188,6 +188,36 @@ test('corporate modeled valuation timeline throws in dev/test when list2 byTp an
 });
 
 
+
+
+test('corporate modeled valuation timeline creates markers only for real project tps (no synthetic range anchor)', () => {
+  const timeline = buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 4 }, { productionStartPeriod: 6 }],
+    yearsByPeriod: [2025, 2026, 2027, 2028, 2029, 2030, 2031],
+    fcfUSD_total: [10, 20, 30, 40, 50, 60, 70],
+    capexUSD_total: [0, 0, 0, 0, 0, 0, 0],
+    masterN: 6,
+    shares_post_financing: 100,
+    lista2MetricsByTp: {
+      4: {
+        NAV_prodStart_TargetCurrency: 100,
+        NAV_prodStart_perShare_TargetCurrency: 1,
+        DCF_prodStart_exCapex_TargetCurrency: 200,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 2,
+      },
+      6: {
+        NAV_prodStart_TargetCurrency: 120,
+        NAV_prodStart_perShare_TargetCurrency: 1.2,
+        DCF_prodStart_exCapex_TargetCurrency: 220,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: 2.2,
+      },
+    },
+  });
+
+  assert.deepEqual(timeline.tps, [4, 6]);
+  assert.deepEqual(timeline.markers.map((marker) => marker.tp), [4, 6]);
+  assert.equal(timeline.markers.some((marker) => marker.tp === 1), false);
+});
 test('corporate modeled valuation marker year labels come directly from yearsByPeriod[tp]', () => {
   const yearsByPeriod = [
     2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033,

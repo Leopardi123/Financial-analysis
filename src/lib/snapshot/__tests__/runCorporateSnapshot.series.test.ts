@@ -90,6 +90,28 @@ test('list2 per-tp DCF keeps explicit prodStart vs present time basis and valuat
   }
 });
 
+
+
+test('debug tpOrigins reports only project-origin tps and no synthetic timeline marker tps', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const origins = (result.diagnostics.meta?.corporateModeledValuationTimelineOrigins ?? null) as {
+    tpOrigins: Array<{ tp: number; originKind: 'project' | 'synthetic'; fromProjects: Array<{ projectId: string; productionStartPeriod: number }> }>;
+    syntheticTpWarning: boolean;
+    syntheticTps: number[];
+  } | null;
+
+  assert.ok(origins);
+  assert.equal(origins?.syntheticTpWarning, false);
+  assert.deepEqual(origins?.syntheticTps ?? [], []);
+  for (const origin of origins?.tpOrigins ?? []) {
+    assert.equal(origin.originKind, 'project');
+    assert.ok(origin.fromProjects.length > 0);
+  }
+});
 test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async () => {
   const body = await loadFixture();
   const result = await runCorporateSnapshotPipeline({ body, refresh: false });

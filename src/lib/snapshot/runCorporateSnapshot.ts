@@ -1079,6 +1079,25 @@ type SnapshotDiagnostics = {
       shares_post_financing_list2ByTp: number | null;
       lista2TpRule_lastTp?: number | null;
     };
+    corporateModeledValuationTimelineOrigins?: {
+      timelineWindow: {
+        lastTp: number | null;
+        rangeStartTp: number | null;
+        rangeEndTp: number | null;
+        windowSizeUsed: number | null;
+      };
+      tpOrigins: Array<{
+        tp: number;
+        fromProjects: Array<{
+          projectId: string;
+          projectName: string;
+          productionStartPeriod: number;
+        }>;
+        originKind: 'project' | 'synthetic';
+      }>;
+      syntheticTpWarning: boolean;
+      syntheticTps: number[];
+    };
     corporateModeledValuationTimeline?: {
       tps: number[];
       lastTp: number | null;
@@ -1642,12 +1661,20 @@ export async function runCorporateSnapshotPipeline(args: {
           buildFundingNeed_USD: buildFundingNeedUSD,
         });
 
-    const productionStartIndices = projectsForBuildFunding
-      .map((project) => {
-        const productionDate = project.yearsByPeriod[project.productionStartPeriod];
-        const corporateIndex = aggregation.corporateYearsByPeriod.indexOf(productionDate);
-        return corporateIndex >= 0 ? corporateIndex : null;
-      })
+    const projectTpOrigins = projectsForBuildFunding.map((project) => {
+      const productionDate = project.yearsByPeriod[project.productionStartPeriod];
+      const corporateIndexRaw = aggregation.corporateYearsByPeriod.indexOf(productionDate);
+      const corporateTp = corporateIndexRaw >= 0 ? corporateIndexRaw : null;
+      return {
+        projectId: project.projectId,
+        projectName: project.projectName,
+        projectProductionStartPeriod: project.productionStartPeriod,
+        corporateTp,
+      };
+    });
+
+    const productionStartIndices = projectTpOrigins
+      .map((entry) => entry.corporateTp)
       .filter((value): value is number => value !== null);
 
     const corporateProductionStartPeriod =
@@ -2061,11 +2088,16 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     snapshot.series = snapshotSeries;
-    const corporateTpsList = [...new Set(
-      productionStartIndices
-        .map((tp) => tp + delayPeriods)
-        .filter((tp): tp is number => Number.isInteger(tp) && tp > 0 && tp <= aggregationEffective.corporateMasterN),
+    const projectTpOriginsEffective = projectTpOrigins.map((entry) => ({
+      ...entry,
+      effectiveTp: entry.corporateTp === null ? null : entry.corporateTp + delayPeriods,
+    }));
+    const projectTps = [...new Set(
+      projectTpOriginsEffective
+        .map((entry) => entry.effectiveTp)
+        .filter((tp): tp is number => typeof tp === 'number' && Number.isInteger(tp) && tp > 0 && tp <= aggregationEffective.corporateMasterN),
     )].sort((a, b) => a - b);
+    const corporateTpsList = projectTps;
     const sharesDenom = typeof shares_post_financing_fd_effective === 'number' && Number.isFinite(shares_post_financing_fd_effective) && shares_post_financing_fd_effective > 0
       ? shares_post_financing_fd_effective
       : null;
@@ -2239,6 +2271,35 @@ export async function runCorporateSnapshotPipeline(args: {
         shares_post_financing_list2: shares_post_financing_fd_effective,
         shares_post_financing_list2ByTp: sharesDenom,
         lista2TpRule_lastTp: lista2TpRule,
+      };
+
+      const timelineLastTp = corporateTpsList.length > 0 ? corporateTpsList[corporateTpsList.length - 1] : null;
+      const timelineWindow = {
+        lastTp: timelineLastTp,
+        rangeStartTp: null,
+        rangeEndTp: timelineLastTp,
+        windowSizeUsed: null,
+      };
+      const tpOrigins = corporateTpsList.map((tp) => {
+        const fromProjects = projectTpOriginsEffective
+          .filter((entry) => entry.effectiveTp === tp)
+          .map((entry) => ({
+            projectId: entry.projectId,
+            projectName: entry.projectName,
+            productionStartPeriod: entry.projectProductionStartPeriod,
+          }));
+        return {
+          tp,
+          fromProjects,
+          originKind: (fromProjects.length > 0 ? 'project' : 'synthetic') as 'project' | 'synthetic',
+        };
+      });
+      const syntheticTps = tpOrigins.filter((entry) => entry.originKind === 'synthetic').map((entry) => entry.tp);
+      diagnostics.meta.corporateModeledValuationTimelineOrigins = {
+        timelineWindow,
+        tpOrigins,
+        syntheticTpWarning: syntheticTps.length > 0,
+        syntheticTps,
       };
     }
 
