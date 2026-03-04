@@ -1899,7 +1899,7 @@ export async function runCorporateSnapshotPipeline(args: {
       projects: projectsForBuildFunding.map((project) => ({
         productionStartPeriod: project.productionStartPeriod,
       })),
-      currentYear: new Date().getUTCFullYear(),
+      yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
       fcfUSD_total: aggregationEffective.fcffUSD_total,
       masterN: aggregationEffective.corporateMasterN,
       discountRate: input.discountRate,
