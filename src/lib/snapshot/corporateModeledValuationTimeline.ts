@@ -32,6 +32,14 @@ export type CorporateModeledTimelineMarker = {
     lista2_NAV_prodStart_TargetCurrency_debug?: number | null;
     lista2_DCF_match?: boolean | null;
     lista2_NAV_match?: boolean | null;
+    list2Debug_DCF_prodStart_exCapex_TargetCurrency?: number | null;
+    list2Debug_NAV_prodStart_TargetCurrency?: number | null;
+    delta_DCF?: number | null;
+    delta_NAV?: number | null;
+    relDelta_DCF?: number | null;
+    relDelta_NAV?: number | null;
+    fxUsed?: number | null;
+    discountRateUsed?: number | null;
   };
   sanity?: {
     tp: number;
@@ -103,6 +111,8 @@ export function buildCorporateModeledValuationTimeline(args: {
   shares_post_financing: number | null;
   lista2MetricsByTp: Record<number, TimelineLista2Metrics | undefined>;
   lista2DebugByTp?: Record<number, TimelineLista2DebugMetrics | undefined>;
+  fxUsed?: number | null;
+  discountRateUsed?: number | null;
   includeDebugSanity?: boolean;
   diagnosticsWarnings?: string[];
 }): CorporateModeledValuationTimeline {
@@ -205,25 +215,27 @@ export function buildCorporateModeledValuationTimeline(args: {
     const lista2NavDebug = typeof lista2DebugForTp?.NAV_prodStart_TargetCurrency === 'number'
       ? lista2DebugForTp.NAV_prodStart_TargetCurrency
       : null;
-    const dcfMatchesDebug = valueHighTotal !== null && lista2DcfDebug !== null
-      ? Math.abs(valueHighTotal - lista2DcfDebug) <= 1e-6 * Math.max(1, Math.abs(lista2DcfDebug))
-      : null;
-    const navMatchesDebug = valueLowTotal !== null && lista2NavDebug !== null
-      ? Math.abs(valueLowTotal - lista2NavDebug) <= 1e-6 * Math.max(1, Math.abs(lista2NavDebug))
-      : null;
-    if (dcfMatchesDebug === false || navMatchesDebug === false) {
-      reasonParts.push('marker != lista2; proxy path still active');
+    const deltaDcf = valueHighTotal !== null && lista2DcfDebug !== null ? valueHighTotal - lista2DcfDebug : null;
+    const deltaNav = valueLowTotal !== null && lista2NavDebug !== null ? valueLowTotal - lista2NavDebug : null;
+    const relDeltaDcf = deltaDcf !== null ? Math.abs(deltaDcf) / Math.max(1, Math.abs(lista2DcfDebug as number)) : null;
+    const relDeltaNav = deltaNav !== null ? Math.abs(deltaNav) / Math.max(1, Math.abs(lista2NavDebug as number)) : null;
+    const dcfMatchesDebug = relDeltaDcf !== null ? relDeltaDcf < 1e-6 : null;
+    const navMatchesDebug = relDeltaNav !== null ? relDeltaNav < 1e-6 : null;
+    const mismatchAgainstList2Debug = dcfMatchesDebug === false || navMatchesDebug === false;
+    if (mismatchAgainstList2Debug) {
+      reasonParts.push('markers != list2Debug; refusing to display inconsistent byTp values (no fallback)');
     }
-    const nullReasonIfAny = reasonParts.length > 0 ? reasonParts.join(' | ') : null;
-    const enforceNullForMismatch = dcfMatchesDebug === false || navMatchesDebug === false;
+    const nullReasonIfAny = mismatchAgainstList2Debug
+      ? 'markers != list2Debug; refusing to display inconsistent byTp values (no fallback)'
+      : (reasonParts.length > 0 ? reasonParts.join(' | ') : null);
 
     return {
       tp,
       yearLabelUsed,
       corporateTpIndexUsed: corporateTp,
       fcfTailSumUSD,
-      value_high: enforceNullForMismatch ? null : valueHighPerShare,
-      value_low: enforceNullForMismatch ? null : valueLowPerShare,
+      value_high: mismatchAgainstList2Debug ? null : valueHighPerShare,
+      value_low: mismatchAgainstList2Debug ? null : valueLowPerShare,
       value_mid_if_any: null,
       nullReasonIfAny: denominatorNullReason ?? nullReasonIfAny,
       debug: {
@@ -237,6 +249,14 @@ export function buildCorporateModeledValuationTimeline(args: {
         lista2_NAV_prodStart_TargetCurrency_debug: lista2NavDebug,
         lista2_DCF_match: dcfMatchesDebug,
         lista2_NAV_match: navMatchesDebug,
+        list2Debug_DCF_prodStart_exCapex_TargetCurrency: lista2DcfDebug,
+        list2Debug_NAV_prodStart_TargetCurrency: lista2NavDebug,
+        delta_DCF: deltaDcf,
+        delta_NAV: deltaNav,
+        relDelta_DCF: relDeltaDcf,
+        relDelta_NAV: relDeltaNav,
+        fxUsed: args.fxUsed ?? null,
+        discountRateUsed: args.discountRateUsed ?? null,
       },
       sanity: args.includeDebugSanity
         ? {
