@@ -21,6 +21,18 @@ export type CorporateModeledTimelineMarker = {
   value_low: number | null;
   value_mid_if_any: number | null;
   nullReasonIfAny: string | null;
+  debugTime?: {
+    tp: number;
+    discountRateUsed: number | null;
+    powFactor_used_if_any: number | null;
+    appliedTimeConversion: string | null;
+    rawInput_total_TargetCurrency: number | null;
+    final_total_TargetCurrency: number | null;
+    sourceMetricKey: string;
+    list2Debug_total_TargetCurrency: number | null;
+    ratio_final_over_list2Debug: number | null;
+    expectedPow_if_any: number | null;
+  };
   debug?: {
     sharesDenominatorUsed: number | null;
     sharesDenominatorType: 'shares_post_financing';
@@ -200,14 +212,6 @@ export function buildCorporateModeledValuationTimeline(args: {
     const fcfTailMatches = fcfTailSumUSDExpected === null || fcfTailSumUSD === null
       ? null
       : Math.abs(fcfTailSumUSD - fcfTailSumUSDExpected) <= 1e-6 * Math.max(1, Math.abs(fcfTailSumUSDExpected));
-    const invalidDenominator = denom === null || denom <= 0;
-    const denominatorNullReason = invalidDenominator
-      ? 'Invalid shares_post_financing denominator'
-      : null;
-    const reasonParts: string[] = [];
-    if (valueLowTotal === null) reasonParts.push('missing NAV_prodStart_TargetCurrency for marker low');
-    if (valueHighTotal === null) reasonParts.push('missing DCF_prodStart_exCapex_TargetCurrency for marker high');
-
     const lista2DebugForTp = args.lista2DebugByTp?.[corporateTp] ?? null;
     const lista2DcfDebug = typeof lista2DebugForTp?.DCF_prodStart_exCapex_TargetCurrency === 'number'
       ? lista2DebugForTp.DCF_prodStart_exCapex_TargetCurrency
@@ -215,29 +219,58 @@ export function buildCorporateModeledValuationTimeline(args: {
     const lista2NavDebug = typeof lista2DebugForTp?.NAV_prodStart_TargetCurrency === 'number'
       ? lista2DebugForTp.NAV_prodStart_TargetCurrency
       : null;
+
     const deltaDcf = valueHighTotal !== null && lista2DcfDebug !== null ? valueHighTotal - lista2DcfDebug : null;
     const deltaNav = valueLowTotal !== null && lista2NavDebug !== null ? valueLowTotal - lista2NavDebug : null;
     const relDeltaDcf = deltaDcf !== null ? Math.abs(deltaDcf) / Math.max(1, Math.abs(lista2DcfDebug as number)) : null;
     const relDeltaNav = deltaNav !== null ? Math.abs(deltaNav) / Math.max(1, Math.abs(lista2NavDebug as number)) : null;
     const dcfMatchesDebug = relDeltaDcf !== null ? relDeltaDcf < 1e-6 : null;
     const navMatchesDebug = relDeltaNav !== null ? relDeltaNav < 1e-6 : null;
-    const mismatchAgainstList2Debug = dcfMatchesDebug === false || navMatchesDebug === false;
-    if (mismatchAgainstList2Debug) {
-      reasonParts.push('markers != list2Debug; refusing to display inconsistent byTp values (no fallback)');
+
+    let nullReasonIfAny: string | null = null;
+    if (!lista2ForTp) {
+      nullReasonIfAny = 'missing list2MetricsByTp[tp]';
+    } else if (denom === null || denom <= 0) {
+      nullReasonIfAny = 'Invalid shares_post_financing denominator';
+    } else if (valueLowTotal === null || valueHighTotal === null) {
+      nullReasonIfAny = 'missing fcf series';
     }
-    const nullReasonIfAny = mismatchAgainstList2Debug
-      ? 'markers != list2Debug; refusing to display inconsistent byTp values (no fallback)'
-      : (reasonParts.length > 0 ? reasonParts.join(' | ') : null);
+
+    if (dcfMatchesDebug === false || navMatchesDebug === false) {
+      nullReasonIfAny = 'explicit null propagation (no fallback)';
+    }
+
+    const expectedPow = args.discountRateUsed !== null && args.discountRateUsed !== undefined && Number.isFinite(args.discountRateUsed)
+      ? Math.pow(1 + args.discountRateUsed, tp)
+      : null;
+    const ratioFinalOverList2Debug = valueHighTotal !== null && lista2DcfDebug !== null && lista2DcfDebug !== 0
+      ? valueHighTotal / lista2DcfDebug
+      : null;
+    const doubleConversionConfirmed = ratioFinalOverList2Debug !== null && expectedPow !== null
+      ? Math.abs(ratioFinalOverList2Debug - expectedPow) / Math.max(1, Math.abs(expectedPow)) < 0.02
+      : false;
 
     return {
       tp,
       yearLabelUsed,
       corporateTpIndexUsed: corporateTp,
       fcfTailSumUSD,
-      value_high: mismatchAgainstList2Debug ? null : valueHighPerShare,
-      value_low: mismatchAgainstList2Debug ? null : valueLowPerShare,
+      value_high: nullReasonIfAny !== null ? null : valueHighPerShare,
+      value_low: nullReasonIfAny !== null ? null : valueLowPerShare,
       value_mid_if_any: null,
-      nullReasonIfAny: denominatorNullReason ?? nullReasonIfAny,
+      nullReasonIfAny,
+      debugTime: {
+        tp,
+        discountRateUsed: args.discountRateUsed ?? null,
+        powFactor_used_if_any: null,
+        appliedTimeConversion: doubleConversionConfirmed ? "DOUBLE_CONVERSION_CONFIRMED" : null,
+        rawInput_total_TargetCurrency: valueHighTotal,
+        final_total_TargetCurrency: valueHighTotal,
+        sourceMetricKey: "list2MetricsByTp.DCF_prodStart_exCapex_TargetCurrency",
+        list2Debug_total_TargetCurrency: lista2DcfDebug,
+        ratio_final_over_list2Debug: ratioFinalOverList2Debug,
+        expectedPow_if_any: expectedPow,
+      },
       debug: {
         sharesDenominatorUsed: denom,
         sharesDenominatorType: 'shares_post_financing',
