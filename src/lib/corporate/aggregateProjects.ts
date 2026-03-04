@@ -1,12 +1,19 @@
 import { computeProjectEngineFullProductionV1 } from '../project/engineFullProductionV1.ts';
 import { parseProjectJsonV1 } from '../project/jsonv1/parse.ts';
 import { resolveProjectPricesToEngineInput } from '../project/jsonv1/resolvePrices.ts';
+import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
 import type {
   CorporateAggregationDeps,
   CorporateAggregationInput,
   CorporateAggregationOutput,
   CorporateProjectEngineSnapshot,
 } from './types.ts';
+
+type ProjectTimeKind = 'v1' | 'v2';
+
+function getProjectTimeKind(project: any): ProjectTimeKind {
+  return project?.version === 'project_json_v2' ? 'v2' : 'v1';
+}
 
 function validateBaseInput(input: CorporateAggregationInput): void {
   if (!(input.discountRate > 0 && input.discountRate <= 0.25)) {
@@ -57,6 +64,34 @@ function sumStrictByDateGrid(
   }
 
   return sums.map((value, index) => (nullAtDate[index] ? null : value));
+}
+
+function sumStrictByPeriodGrid(
+  corporateLength: number,
+  projects: CorporateProjectEngineSnapshot[],
+  readSeries: (project: CorporateProjectEngineSnapshot) => Array<number | null>,
+): Array<number | null> {
+  const sums = new Array<number>(corporateLength).fill(0);
+  const nullAtPeriod = new Array<boolean>(corporateLength).fill(false);
+
+  for (const project of projects) {
+    const series = readSeries(project);
+    for (let t = 0; t < corporateLength; t += 1) {
+      if (nullAtPeriod[t] || t >= series.length) {
+        continue;
+      }
+
+      const value = series[t];
+      if (value === null) {
+        nullAtPeriod[t] = true;
+        continue;
+      }
+
+      sums[t] += value;
+    }
+  }
+
+  return sums.map((value, t) => (nullAtPeriod[t] ? null : value));
 }
 
 function computeStrictValueMetrics(args: {
@@ -193,12 +228,27 @@ export async function aggregateProjectsCorporateV1(
 ): Promise<CorporateAggregationOutput> {
   validateBaseInput(input);
 
+  const kinds = new Set(input.projects.map((project) => getProjectTimeKind((project.rawJson ?? null) as Record<string, unknown> | null)));
+  if (kinds.size > 1) {
+    throw new Error('Corporate aggregation does not support mixed project time axes (v1 uses periodEndDatesUtc, v2 derives years from productionStartYear/productionStartPeriod).');
+  }
+
+  const isAllV2 = kinds.has('v2');
+
   const projects = deps.projectToSeries || deps.parseProject || deps.resolvePrices || deps.runProjectEngine
     ? await Promise.all(input.projects.map((project) => projectToSeriesViaDeps({ projectId: project.projectId, rawJson: project.rawJson }, deps)))
     : await Promise.all(input.projects.map((project) => defaultProjectToSeries({ projectId: project.projectId, rawJson: project.rawJson })));
 
   for (let index = 0; index < input.projects.length; index += 1) {
-    const periodLength = projects[index].periodEndDatesUtc.length;
+    const periodLength = isAllV2
+      ? (() => {
+          const time = ((input.projects[index].rawJson as { time?: { masterN?: number } }).time ?? null);
+          if (!time || !Number.isInteger(time.masterN) || (time.masterN as number) < 0) {
+            throw new Error(`Project ${input.projects[index].projectId} is missing integer time.masterN`);
+          }
+          return (time.masterN as number) + 1;
+        })()
+      : projects[index].periodEndDatesUtc.length;
     const projectId = input.projects[index].projectId;
 
     assertSeriesLength(projects[index].capexUSD, periodLength, projectId, 'capexUSD');
@@ -209,15 +259,87 @@ export async function aggregateProjectsCorporateV1(
     assertSeriesLength(projects[index].payableAuEqOz, periodLength, projectId, 'payableAuEqOz');
   }
 
-  const corporatePeriodEndDatesUtc = buildCorporateDateGrid(projects);
-  const corporateMasterN = corporatePeriodEndDatesUtc.length - 1;
+  if (!isAllV2) {
+    const corporatePeriodEndDatesUtc = buildCorporateDateGrid(projects);
+    const corporateMasterN = corporatePeriodEndDatesUtc.length - 1;
 
-  const capexUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.capexUSD);
-  const fcffUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.fcffUSD);
-  const grossRevenueUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.grossRevenueUSD);
-  const auPriceUSDPerOz = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.auPriceUSDPerOz);
-  const sustainingCostUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.sustainingCostUSD);
-  const payableAuEqOz_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.payableAuEqOz);
+    const capexUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.capexUSD);
+    const fcffUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.fcffUSD);
+    const grossRevenueUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.grossRevenueUSD);
+    const auPriceUSDPerOz = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.auPriceUSDPerOz);
+    const sustainingCostUSD_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.sustainingCostUSD);
+    const payableAuEqOz_total = sumStrictByDateGrid(corporatePeriodEndDatesUtc, projects, (project) => project.payableAuEqOz);
+
+    const valueMetrics = computeStrictValueMetrics({ fcffUSD_total, discountRate: input.discountRate });
+    const aiscAuEqUSDPerOz_LOM = computeCorporateAiscLom({
+      sustainingCostUSD_total,
+      payableAuEqOz_total,
+    });
+
+    const nullPeriods = fcffUSD_total.filter((value) => value === null).length;
+
+    return {
+      corporatePeriodEndDatesUtc,
+      corporateMasterN,
+      capexUSD_total,
+      fcffUSD_total,
+      grossRevenueUSD_total,
+      auPriceUSDPerOz,
+      sustainingCostUSD_total,
+      payableAuEqOz_total,
+      aiscAuEqUSDPerOz_LOM,
+      CF_LOM_USD: valueMetrics.CF_LOM_USD,
+      NPV_today_USD: valueMetrics.NPV_today_USD,
+      diagnostics: {
+        projectCount: input.projects.length,
+        usedDatesCount: corporatePeriodEndDatesUtc.length,
+        nullPeriods,
+        notes: [],
+      },
+    };
+  }
+
+  const timeTuples = input.projects.map((project) => {
+    const time = (project.rawJson as {
+      time?: {
+        masterN?: number;
+        productionStartPeriod?: number;
+        productionStartYear?: number;
+      };
+    }).time;
+    if (!time || !Number.isInteger(time.masterN) || !Number.isInteger(time.productionStartPeriod) || !Number.isInteger(time.productionStartYear)) {
+      throw new Error(`Project ${project.projectId} is missing required v2 time fields {masterN, productionStartPeriod, productionStartYear}.`);
+    }
+    return {
+      projectId: project.projectId,
+      masterN: time.masterN as number,
+      productionStartPeriod: time.productionStartPeriod as number,
+      productionStartYear: time.productionStartYear as number,
+    };
+  });
+
+  const tpYearPairs = [...new Set(timeTuples.map((time) => `${time.productionStartPeriod}|${time.productionStartYear}`))];
+  if (tpYearPairs.length > 1) {
+    throw new Error(`Corporate v2 requires consistent productionStartPeriod and productionStartYear across projects; found: ${tpYearPairs.join(', ')}`);
+  }
+
+  const maxMasterN = Math.max(...timeTuples.map((time) => time.masterN));
+  const [tpRaw, tpYearRaw] = tpYearPairs[0].split('|');
+  const productionStartPeriod = Number(tpRaw);
+  const productionStartYear = Number(tpYearRaw);
+  const yearsByPeriod = resolveV2TimeAxis({
+    masterN: maxMasterN,
+    productionStartPeriod,
+    productionStartYear,
+  }).yearsByPeriod;
+
+  const corporateLength = maxMasterN + 1;
+  const capexUSD_total = sumStrictByPeriodGrid(corporateLength, projects, (project) => project.capexUSD);
+  const fcffUSD_total = sumStrictByPeriodGrid(corporateLength, projects, (project) => project.fcffUSD);
+  const grossRevenueUSD_total = sumStrictByPeriodGrid(corporateLength, projects, (project) => project.grossRevenueUSD);
+  const auPriceUSDPerOz = sumStrictByPeriodGrid(corporateLength, projects, (project) => project.auPriceUSDPerOz);
+  const sustainingCostUSD_total = sumStrictByPeriodGrid(corporateLength, projects, (project) => project.sustainingCostUSD);
+  const payableAuEqOz_total = sumStrictByPeriodGrid(corporateLength, projects, (project) => project.payableAuEqOz);
 
   const valueMetrics = computeStrictValueMetrics({ fcffUSD_total, discountRate: input.discountRate });
   const aiscAuEqUSDPerOz_LOM = computeCorporateAiscLom({
@@ -228,8 +350,9 @@ export async function aggregateProjectsCorporateV1(
   const nullPeriods = fcffUSD_total.filter((value) => value === null).length;
 
   return {
-    corporatePeriodEndDatesUtc,
-    corporateMasterN,
+    corporatePeriodEndDatesUtc: yearsByPeriod.map((year) => `${year}-12-31`),
+    corporateMasterN: maxMasterN,
+    corporateYearsByPeriod: yearsByPeriod,
     capexUSD_total,
     fcffUSD_total,
     grossRevenueUSD_total,
@@ -241,9 +364,9 @@ export async function aggregateProjectsCorporateV1(
     NPV_today_USD: valueMetrics.NPV_today_USD,
     diagnostics: {
       projectCount: input.projects.length,
-      usedDatesCount: corporatePeriodEndDatesUtc.length,
+      usedDatesCount: yearsByPeriod.length,
       nullPeriods,
-      notes: [],
+      notes: [`yearsByPeriod_first8=${JSON.stringify(yearsByPeriod.slice(0, 8))}`],
     },
   };
 }
