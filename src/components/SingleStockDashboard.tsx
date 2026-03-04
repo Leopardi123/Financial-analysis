@@ -224,6 +224,48 @@ const PROJECT_SECTION_DEFAULT_OPEN: Record<string, boolean> = {
 
 
 
+
+
+type SnapshotList2Shape = {
+  metrics?: Record<string, unknown>;
+  nullReasons?: Record<string, unknown>;
+};
+
+function toMetricValue(rawValue: unknown, rawReason: unknown): MetricValue {
+  return {
+    value: typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null,
+    reason: typeof rawReason === "string" && rawReason.trim().length > 0 ? rawReason : null,
+  };
+}
+
+function applySnapshotList2Overrides(
+  baseList2: Record<string, MetricValue>,
+  snapshotData: Record<string, unknown> | null,
+): Record<string, MetricValue> {
+  const list2 = (snapshotData?.list2 ?? null) as SnapshotList2Shape | null;
+  const metrics = (list2?.metrics ?? null) as Record<string, unknown> | null;
+  if (!metrics) return baseList2;
+  const nullReasons = (list2?.nullReasons ?? {}) as Record<string, unknown>;
+
+  // Nyckeltal Lista2 uses one canonical keyset (computeProjectViewMetrics.list2),
+  // with backend snapshot.list2.metrics overrides for shared CF/DCF prod-start fields.
+  return {
+    ...baseList2,
+    NPV_prodStart: toMetricValue(metrics.NPV_prodStart_TargetCurrency, nullReasons.NAV_prodStart),
+    NPV_prodStart_perShare: toMetricValue(metrics.NPV_prodStart_perShare_TargetCurrency, nullReasons.NAV_prodStart),
+    NAV_prodStart: toMetricValue(metrics.NAV_prodStart_TargetCurrency, nullReasons.NAV_prodStart),
+    NAV_prodStart_perShare: toMetricValue(metrics.NAV_prodStart_perShare_TargetCurrency, nullReasons.NAV_prodStart),
+    CF_LOM_Target: toMetricValue(metrics.CF_LOM_TargetCurrency, nullReasons.CF_LOM),
+    CF_LOM_Target_perShare: toMetricValue(metrics.CF_LOM_perShare_TargetCurrency, nullReasons.CF_LOM),
+    DCF_Target: toMetricValue(metrics.DCF_prodStart_exCapex_TargetCurrency, nullReasons.DCF_prodStart_exCapex),
+    DCF_perShare: toMetricValue(metrics.DCF_prodStart_exCapex_perShare_TargetCurrency, nullReasons.DCF_prodStart_exCapex),
+    DCF_Target_discounted: toMetricValue(metrics.DCF_prodStart_present_TargetCurrency, nullReasons.DCF_prodStart_present),
+    DCF_Target_discounted_perShare: toMetricValue(metrics.DCF_prodStart_present_perShare_TargetCurrency, nullReasons.DCF_prodStart_present),
+    NPV_over_ETLV: toMetricValue(metrics.NPV_over_ETLV, baseList2.NPV_over_ETLV?.reason ?? null),
+    DCF_over_ETLV: toMetricValue(metrics.DCF_present_over_ETLV, baseList2.DCF_over_ETLV?.reason ?? null),
+  };
+}
+
 type CompactMetric = { label: string; value: unknown; infoKey?: string };
 
 function renderCompactMetrics(
@@ -2318,6 +2360,17 @@ Capital Available: ${availableLabel}`,
     });
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  const projectList2MetricsForDisplay = useMemo(() => (
+    projectViewMetrics
+      ? applySnapshotList2Overrides(projectViewMetrics.list2, projectSnapshotData)
+      : null
+  ), [projectSnapshotData, projectViewMetrics]);
+  const corporateList2MetricsForDisplay = useMemo(() => (
+    corporateViewMetrics
+      ? applySnapshotList2Overrides(corporateViewMetrics.list2, corporateSnapshotData)
+      : null
+  ), [corporateSnapshotData, corporateViewMetrics]);
+
   const corporateProdStartMarkerTextByKey = useMemo(() => {
     if (!corporateSnapshotData) return {} as Record<string, string>;
 
@@ -2535,10 +2588,12 @@ Capital Available: ${availableLabel}`,
       usesShares: (sharesPf !== null ? "shares_post_financing" : "shares_current") as "shares_post_financing" | "shares_current",
       sharesValue: sharesPf ?? sharesCurrent ?? 0,
     };
-    const todayLow = corporateViewMetrics.list2.NPV_perShare?.value ?? null;
-    const todayHigh = (typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
-      ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
-      : null);
+    const todayLow = corporateList2MetricsForDisplay?.NPV_perShare?.value ?? null;
+    const todayHigh = corporateList2MetricsForDisplay?.DCF_Target_discounted_perShare?.value ?? null;
+    const lista2ByTp = (corporateSnapshotData.list2MetricsByTp ?? null) as Record<number, {
+      DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+      NAV_prodStart_perShare_TargetCurrency: number | null;
+    }> | null;
     const points = [
       {
         pointType: "today" as const,
@@ -2549,11 +2604,11 @@ Capital Available: ${availableLabel}`,
         lowValueUsed: todayLow,
         highValueUsed: todayHigh,
         lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
-        highSource: { metricKey: "DCF_prodStart_present_perShare_TargetCurrency", description: "ValueRangeSnapshotCard npvHigh" },
+        highSource: { metricKey: "list2.DCF_Target_discounted_perShare", description: "ValueRangeSnapshotCard npvHigh" },
         perShareBasis: shareBasis,
         nullReasons: {
           ...(todayLow === null ? { low: corporateViewMetrics.list2.NPV_perShare?.reason ?? "Metric is null." } : {}),
-          ...(todayHigh === null ? { high: "Both corporate snapshot and list2 discounted DCF per share are null." } : {}),
+          ...(todayHigh === null ? { high: corporateList2MetricsForDisplay?.DCF_Target_discounted_perShare?.reason ?? "Metric is null." } : {}),
         },
         sanity: {
           lowLEHigh: (typeof todayLow === "number" && typeof todayHigh === "number") ? todayLow <= todayHigh : null,
@@ -2562,42 +2617,44 @@ Capital Available: ${availableLabel}`,
         mappingUsed: { todayLow: "NPV_today_perShare", todayHigh: "DCF_prodStart_present_perShare" },
         expectedMappingPreview: {
           low: todayLow,
-          high: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency : null,
+          high: todayHigh,
           yearLabel: yearLabel(yearsByPeriod, 0),
         },
       },
       ...markers.map((marker) => {
         const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
+        const markerValues = lista2ByTp?.[marker.tp] ?? null;
         return {
           pointType: "prodStart" as const,
           tp: marker.tp,
           tIndexUsed: tIndex,
           yearLabelUsed: yearLabel(yearsByPeriod, tIndex),
           yearLabelSource: `series.yearsByPeriod[${tIndex}]`,
-          lowValueUsed: marker.value_low,
-          highValueUsed: marker.value_high,
-          lowSource: { metricKey: "modeledValuationTimeline.markers.value_low", description: "Current chart mapping uses marker.value_low" },
-          highSource: { metricKey: "modeledValuationTimeline.markers.value_high", description: "Current chart mapping uses marker.value_high" },
+          lowValueUsed: markerValues?.NAV_prodStart_perShare_TargetCurrency ?? null,
+          highValueUsed: markerValues?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+          lowSource: { metricKey: "list2MetricsByTp.NAV_prodStart_perShare_TargetCurrency", description: "ValueRangeSnapshotCard tp marker low" },
+          highSource: { metricKey: "list2MetricsByTp.DCF_prodStart_exCapex_perShare_TargetCurrency", description: "ValueRangeSnapshotCard tp marker high" },
           perShareBasis: shareBasis,
           nullReasons: {
-            ...(marker.value_low === null ? { low: "Marker low is null." } : {}),
-            ...(marker.value_high === null ? { high: "Marker high is null." } : {}),
+            ...(markerValues?.NAV_prodStart_perShare_TargetCurrency === null || markerValues?.NAV_prodStart_perShare_TargetCurrency === undefined ? { low: "list2MetricsByTp marker low is null." } : {}),
+            ...(markerValues?.DCF_prodStart_exCapex_perShare_TargetCurrency === null || markerValues?.DCF_prodStart_exCapex_perShare_TargetCurrency === undefined ? { high: "list2MetricsByTp marker high is null." } : {}),
           },
           sanity: {
-            lowLEHigh: (typeof marker.value_low === "number" && typeof marker.value_high === "number") ? marker.value_low <= marker.value_high : null,
-            notes: "If false, low/high are swapped versus chart intent.",
+            lowLEHigh: (typeof markerValues?.NAV_prodStart_perShare_TargetCurrency === "number" && typeof markerValues?.DCF_prodStart_exCapex_perShare_TargetCurrency === "number")
+              ? markerValues.NAV_prodStart_perShare_TargetCurrency <= markerValues.DCF_prodStart_exCapex_perShare_TargetCurrency
+              : null,
+            notes: "Prod-start marker values should match Lista2-per-tp values.",
           },
           mappingUsed: {
-            todayLow: "NPV_today_perShare",
-            todayHigh: "DCF_prodStart_present_perShare",
-            prodStartLow: "NPV_prodStart_perShare@tp (currently NOT used in chart)",
-            prodStartHigh: "DCF_prodStart_perShare@tp",
+            todayLow: "list2.NPV_perShare",
+            todayHigh: "list2.DCF_Target_discounted_perShare",
+            prodStartLow: "list2MetricsByTp.NAV_prodStart_perShare_TargetCurrency",
+            prodStartHigh: "list2MetricsByTp.DCF_prodStart_exCapex_perShare_TargetCurrency",
           },
           expectedMappingPreview: {
-            low: null,
-            high: marker.value_high,
+            low: markerValues?.NAV_prodStart_perShare_TargetCurrency ?? null,
+            high: markerValues?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
             yearLabel: yearLabel(yearsByPeriod, tIndex),
-            notes: "NPV_prodStart_perShare@tp is not available in current marker payload; preview low stays null until exposed from backend.",
           },
         };
       }),
@@ -2608,14 +2665,14 @@ Capital Available: ${availableLabel}`,
       lastTp: timeline?.lastTp ?? null,
       rangeEndTpUsed: timeline?.rangeEndTp ?? null,
       mappingUsed: {
-        todayLow: "NPV_today_perShare",
-        todayHigh: "DCF_prodStart_present_perShare",
-        prodStartLow: "NPV_prodStart_perShare@tp",
-        prodStartHigh: "DCF_prodStart_perShare@tp",
+        todayLow: "list2.NPV_perShare",
+        todayHigh: "list2.DCF_Target_discounted_perShare",
+        prodStartLow: "list2MetricsByTp.NAV_prodStart_perShare_TargetCurrency",
+        prodStartHigh: "list2MetricsByTp.DCF_prodStart_exCapex_perShare_TargetCurrency",
       },
       points,
     };
-  }, [corporateSnapshotData, corporateViewMetrics]);
+  }, [corporateSnapshotData, corporateViewMetrics, corporateList2MetricsForDisplay]);
 
   useEffect(() => {
     if (debugEnabled && corporateTimelineDebug) {
@@ -3933,7 +3990,9 @@ Capital Available: ${availableLabel}`,
                     ["list3", "EFFEKTIVITET OCH LÖNSAMHET", corporateViewMetrics.list3],
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", corporateViewMetrics.list4],
                     ["list6", "M&A VALUATION", corporateViewMetrics.list6],
-                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
+                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => {
+                    const metricsForDisplay = sectionKey === "list2" && corporateList2MetricsForDisplay ? corporateList2MetricsForDisplay : metrics;
+                    return (
                     <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
@@ -3944,30 +4003,29 @@ Capital Available: ${availableLabel}`,
                               ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
                               : null
                           }
-                          npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
-                          npvHigh={
-                            (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency)
-                              ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency
-                              : null)
-                          }
-                          tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
-                          tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
+                          npvLow={corporateList2MetricsForDisplay?.NPV_perShare?.value ?? null}
+                          npvHigh={corporateList2MetricsForDisplay?.DCF_Target_discounted_perShare?.value ?? null}
+                          tpLow={corporateList2MetricsForDisplay?.NAV_prodStart_perShare?.value ?? null}
+                          tpHigh={corporateList2MetricsForDisplay?.DCF_perShare?.value ?? null}
                           tpMarkers={(() => {
                             const modeledTimeline = (corporateSnapshotData?.modeledValuationTimeline ?? null) as {
                               markers?: Array<{
                                 tp: number;
                                 corporateTpIndexUsed?: number | null;
-                                value_high: number | null;
-                                value_low: number | null;
                               }>;
                             } | null;
-                            if (!modeledTimeline || !Array.isArray(modeledTimeline.markers)) return undefined;
+                            const lista2ByTp = (corporateSnapshotData?.list2MetricsByTp ?? null) as Record<number, {
+                              DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+                              NAV_prodStart_perShare_TargetCurrency: number | null;
+                            }> | null;
+                            if (!modeledTimeline || !Array.isArray(modeledTimeline.markers) || !lista2ByTp) return undefined;
                             return modeledTimeline.markers.map((marker) => {
                               const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
+                              const lista2Tp = lista2ByTp[marker.tp] ?? null;
                               return {
                                 tp: marker.tp,
-                                high: marker.value_high,
-                                low: marker.value_low,
+                                high: lista2Tp?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+                                low: lista2Tp?.NAV_prodStart_perShare_TargetCurrency ?? null,
                                 yearLabelUsed: yearLabel(yearsByPeriod, tIndex),
                               };
                             });
@@ -3983,7 +4041,12 @@ Capital Available: ${availableLabel}`,
                         </>
                       )}
                       <div className="compact-metrics-grid">
-                        {Object.entries(metrics).map(([key, value]) => (
+                        {((sectionKey === "list2")
+                          ? projectSectionMetricOrder.list2
+                            .filter((key) => Object.prototype.hasOwnProperty.call(metricsForDisplay, key))
+                            .map((key) => [key, metricsForDisplay[key]] as const)
+                          : Object.entries(metricsForDisplay))
+                        .map(([key, value]) => (
                           <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
                             <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                             <span className="compact-metric-dots" />
@@ -3998,7 +4061,8 @@ Capital Available: ${availableLabel}`,
                         ))}
                       </div>
                     </details>
-                  ))}
+                    );
+                  })}
                 </>
                   );
                 } catch {
@@ -4122,7 +4186,9 @@ Capital Available: ${availableLabel}`,
                     ["list3", "EFFEKTIVITET OCH LÖNSAMHET", projectViewMetrics.list3],
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", projectViewMetrics.list4],
                     ["list6", "M&A VALUATION", projectViewMetrics.list6],
-                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
+                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => {
+                    const metricsForDisplay = sectionKey === "list2" && projectList2MetricsForDisplay ? projectList2MetricsForDisplay : metrics;
+                    return (
                     <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
@@ -4150,9 +4216,9 @@ Capital Available: ${availableLabel}`,
                       <div className="compact-metrics-grid">
                         {((sectionKey === "list2")
                           ? projectSectionMetricOrder.list2
-                            .filter((key) => Object.prototype.hasOwnProperty.call(metrics, key))
-                            .map((key) => [key, metrics[key]] as const)
-                          : Object.entries(metrics))
+                             .filter((key) => Object.prototype.hasOwnProperty.call(metricsForDisplay, key))
+                            .map((key) => [key, metricsForDisplay[key]] as const)
+                          : Object.entries(metricsForDisplay))
                         .map(([key, value]) => (
                           <div key={key} className="compact-metric-row">
                             <span className="compact-metric-label-wrap">
@@ -4184,13 +4250,14 @@ Capital Available: ${availableLabel}`,
                                   }
                                   return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined);
                                 })()}
-                              {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
+                              {debugEnabled && value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
                             </span>
                           </div>
                         ))}
                       </div>
                     </details>
-                  ))}
+                    );
+                  })}
 
                   <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list5} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list5: open })); }}>
                     <summary><h2 className="subrub small">FINANSIERING OCH SKULDSÄTTNING</h2></summary>
@@ -4245,7 +4312,7 @@ Capital Available: ${availableLabel}`,
                           <span className="compact-metric-dots" />
                           <span className="compact-metric-value">
                             {formatMetricValue(value, key.includes("Shares") ? "integer" : "money", key.includes("Shares") ? undefined : lockedTargetCurrency)}
-                            {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
+                            {debugEnabled && value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
                           </span>
                         </div>
                       ))}

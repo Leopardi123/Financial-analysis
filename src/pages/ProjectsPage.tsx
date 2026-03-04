@@ -336,6 +336,8 @@ export default function ProjectsPage() {
   const metrics = useMemo(() => {
     if (!snapshotData) return [] as Array<{ label: string; value: unknown }>;
     const aggregation = (snapshotData.aggregation ?? {}) as Record<string, unknown>;
+    const list2 = (snapshotData.list2 ?? {}) as { metrics?: Record<string, unknown>; nullReasons?: Record<string, unknown> };
+    const list2Metrics = (list2.metrics ?? {}) as Record<string, unknown>;
 
     return [
       { label: 'price_current_TargetCurrency', value: readFiniteNumber(profileDefaults?.price) },
@@ -347,8 +349,11 @@ export default function ProjectsPage() {
       { label: 'EV_over_NPV', value: snapshotData.EV_over_NPV },
       { label: 'EV_over_NAV', value: snapshotData.EV_over_NAV },
       { label: 'P_over_NAV', value: snapshotData.P_over_NAV },
-      { label: 'CF_LOM_TargetCurrency', value: snapshotData.CF_LOM_TargetCurrency },
-      { label: 'DCF_prodStart_present_TargetCurrency', value: snapshotData.DCF_prodStart_present_TargetCurrency },
+      { label: 'CF_LOM_TargetCurrency', value: list2Metrics.CF_LOM_TargetCurrency ?? null },
+      { label: 'DCF_prodStart_exCapex_TargetCurrency', value: list2Metrics.DCF_prodStart_exCapex_TargetCurrency ?? null },
+      { label: 'DCF_prodStart_present_TargetCurrency', value: list2Metrics.DCF_prodStart_present_TargetCurrency ?? null },
+      { label: 'DCF_prodStart_exCapex_perShare_TargetCurrency', value: list2Metrics.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null },
+      { label: 'DCF_prodStart_present_perShare_TargetCurrency', value: list2Metrics.DCF_prodStart_present_perShare_TargetCurrency ?? null },
       { label: 'NPV_over_ETLV', value: snapshotData.NPV_over_ETLV },
       { label: 'DCF_present_over_ETLV', value: snapshotData.DCF_present_over_ETLV },
       { label: 'Payback_approx_years', value: snapshotData.Payback_approx_years },

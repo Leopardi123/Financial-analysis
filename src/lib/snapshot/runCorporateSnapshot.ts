@@ -10,7 +10,7 @@ import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnap
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
 import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
-import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics } from './lista2CfDcf.ts';
+import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics, makeNullLista2CfDcfNullReasons } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import { buildCorporateModeledValuationTimeline } from './corporateModeledValuationTimeline.ts';
@@ -958,6 +958,22 @@ type SnapshotDiagnostics = {
         delta_NAV_minus_NPV: number | null;
       };
     };
+    lista2ByTpDebug?: {
+      tp4: {
+        list2_NAV_prodStart_perShare_TargetCurrency: number | null;
+        list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: number | null;
+        list2_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+      };
+      tp5: {
+        list2_NAV_prodStart_perShare_TargetCurrency: number | null;
+        list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: number | null;
+        list2_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+      };
+      shares_post_financing_list2: number | null;
+      shares_post_financing_list2ByTp: number | null;
+    };
     corporateModeledValuationTimeline?: {
       tps: number[];
       lastTp: number | null;
@@ -1850,7 +1866,7 @@ export async function runCorporateSnapshotPipeline(args: {
     }
 
     const lista2 = tpEff !== null && tpEff > aggregation.corporateMasterN
-      ? { metrics: makeNullLista2CfDcfMetrics(), warnings: ['failure_reason: tp_eff > masterN'], errors: [] }
+      ? { metrics: makeNullLista2CfDcfMetrics(), nullReasons: makeNullLista2CfDcfNullReasons('invalid tp'), warnings: ['failure_reason: tp_eff > masterN'], errors: [] }
       : computeLista2CfDcfMetrics({
         fcfUSD_total: aggregationEffective.fcffUSD_total,
         capexUSD_total: aggregationEffective.capexUSD_total,
@@ -1900,6 +1916,7 @@ export async function runCorporateSnapshotPipeline(args: {
       financing: financingSnapshot,
       market: marketInput,
       lista2CfDcf: lista2.metrics,
+      lista2NullReasons: lista2.nullReasons,
       lista3aProjectEfficiency: lista3a.metrics,
       lista4TenYear: lista4,
     });
@@ -1931,6 +1948,29 @@ export async function runCorporateSnapshotPipeline(args: {
           }];
         }),
     );
+
+    snapshot.list2MetricsByTp = lista2MetricsByTp;
+
+    if (debug) {
+      const tp4 = lista2MetricsByTp[4] ?? null;
+      const tp5 = lista2MetricsByTp[5] ?? null;
+      diagnostics.meta.lista2ByTpDebug = {
+        tp4: {
+          list2_NAV_prodStart_perShare_TargetCurrency: lista2.metrics.NAV_prodStart_perShare_TargetCurrency,
+          list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: tp4?.NAV_prodStart_perShare_TargetCurrency ?? null,
+          list2_DCF_prodStart_exCapex_perShare_TargetCurrency: lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+          list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: tp4?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+        },
+        tp5: {
+          list2_NAV_prodStart_perShare_TargetCurrency: lista2.metrics.NAV_prodStart_perShare_TargetCurrency,
+          list2MetricsByTp_NAV_prodStart_perShare_TargetCurrency: tp5?.NAV_prodStart_perShare_TargetCurrency ?? null,
+          list2_DCF_prodStart_exCapex_perShare_TargetCurrency: lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+          list2MetricsByTp_DCF_prodStart_exCapex_perShare_TargetCurrency: tp5?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+        },
+        shares_post_financing_list2: shares_post_financing_fd_effective,
+        shares_post_financing_list2ByTp: shares_post_financing_fd_effective,
+      };
+    }
 
     snapshot.modeledValuationTimeline = buildCorporateModeledValuationTimeline({
       projects: projectsForBuildFunding.map((project) => ({
