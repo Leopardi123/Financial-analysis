@@ -79,11 +79,13 @@ test('corporate modeled valuation markers use rolling timeline labels and tp ind
     ],
     yearsByPeriod: [2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034],
     fcfUSD_total: fcfUSDTotal,
+    capexUSD_total: [100, 100, 100, 100, 0, 0, 0, 0, 0, 0],
     masterN,
     discountRate: 0.1,
     shares_post_financing: 100,
     fx_USD_to_TargetCurrency: 1,
     npvToday_USD: 1000,
+    netCash_t0_post_TargetCurrency: 50,
     includeDebugSanity: true,
   });
 
@@ -99,6 +101,8 @@ test('corporate modeled valuation markers use rolling timeline labels and tp ind
 
   const expectedTailSum = fcfUSDTotal.slice(4, masterN + 1).reduce((sum, value) => sum + value, 0);
   assert.equal(marker.fcfTailSumUSD, expectedTailSum);
+  assert.ok(Math.abs((marker.value_low ?? 0) - (-0.03934778424225897)) < 1e-12);
+  assert.equal(marker.value_high, 3.460652215757741);
 });
 
 
@@ -111,11 +115,13 @@ test('corporate modeled valuation marker year labels come directly from yearsByP
     projects: [{ productionStartPeriod: 4 }],
     yearsByPeriod,
     fcfUSD_total: Array.from({ length: 19 }, () => 1),
+    capexUSD_total: Array.from({ length: 19 }, () => 0),
     masterN: 18,
     discountRate: 0.1,
     shares_post_financing: 100,
     fx_USD_to_TargetCurrency: 1,
     npvToday_USD: 1000,
+    netCash_t0_post_TargetCurrency: 50,
   });
 
   assert.equal(yearsByPeriod[0], 2025);
@@ -129,10 +135,34 @@ test('corporate modeled valuation timeline throws when tp is outside yearsByPeri
     projects: [{ productionStartPeriod: 4 }],
     yearsByPeriod: [2025, 2026, 2027],
     fcfUSD_total: [1, 1, 1],
+    capexUSD_total: [0, 0, 0],
     masterN: 2,
     discountRate: 0.1,
     shares_post_financing: 100,
     fx_USD_to_TargetCurrency: 1,
     npvToday_USD: 1000,
+    netCash_t0_post_TargetCurrency: 50,
   }), /outside yearsByPeriod bounds/);
+});
+
+
+test('corporate modeled valuation marker low becomes null and emits diagnostics warning when NAV metric is missing', () => {
+  const warnings: string[] = [];
+  const timeline = buildCorporateModeledValuationTimeline({
+    projects: [{ productionStartPeriod: 2 }],
+    yearsByPeriod: [2025, 2026, 2027, 2028],
+    fcfUSD_total: [10, 20, 30, 40],
+    capexUSD_total: [null, null, 0, 0],
+    masterN: 3,
+    discountRate: 0.1,
+    shares_post_financing: 100,
+    fx_USD_to_TargetCurrency: 1,
+    npvToday_USD: 100,
+    netCash_t0_post_TargetCurrency: 10,
+    diagnosticsWarnings: warnings,
+  });
+
+  assert.equal(timeline.markers[0]?.value_low, null);
+  assert.equal(timeline.markers[0]?.value_high, 0.6636363636363636);
+  assert.ok(warnings.includes('Missing NAV_prodStart_perShare_TargetCurrency for corporate modeled marker'));
 });

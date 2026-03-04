@@ -74,12 +74,15 @@ export function buildCorporateModeledValuationTimeline(args: {
   }>;
   yearsByPeriod: number[];
   fcfUSD_total: Array<number | null>;
+  capexUSD_total: Array<number | null>;
   masterN: number;
   discountRate: number;
   shares_post_financing: number | null;
   fx_USD_to_TargetCurrency: number | null;
   npvToday_USD: number | null;
+  netCash_t0_post_TargetCurrency: number | null;
   includeDebugSanity?: boolean;
+  diagnosticsWarnings?: string[];
 }): CorporateModeledValuationTimeline {
   const tps = uniqueSorted(
     args.projects
@@ -129,16 +132,27 @@ export function buildCorporateModeledValuationTimeline(args: {
 
     const lista2 = computeLista2CfDcfMetrics({
       fcfUSD_total: args.fcfUSD_total,
+      capexUSD_total: args.capexUSD_total,
       masterN: args.masterN,
       productionStartPeriod: corporateTp,
       discountRate: args.discountRate,
       shares_post_financing: args.shares_post_financing,
       fx_USD_to_TargetCurrency: args.fx_USD_to_TargetCurrency,
       npvToday_USD: args.npvToday_USD,
+      netCash_t0_post_TargetCurrency: args.netCash_t0_post_TargetCurrency,
     });
 
-    const valueHigh = lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
-    const valueLow = lista2.metrics.DCF_prodStart_present_perShare_TargetCurrency;
+    const rawValueLow = lista2.metrics.NAV_prodStart_perShare_TargetCurrency;
+    const rawValueHigh = lista2.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
+    const valueLow = Number.isFinite(rawValueLow) ? rawValueLow : null;
+    const valueHigh = Number.isFinite(rawValueHigh) ? rawValueHigh : null;
+
+    if (valueLow === null) {
+      args.diagnosticsWarnings?.push('Missing NAV_prodStart_perShare_TargetCurrency for corporate modeled marker');
+    }
+    if (valueHigh === null) {
+      args.diagnosticsWarnings?.push('Missing DCF_prodStart_exCapex_perShare_TargetCurrency for corporate modeled marker');
+    }
     const fcfTailSlice = args.fcfUSD_total.slice(corporateTp, args.masterN + 1);
     const fcfTailSumUSD = fcfTailSlice
       .reduce<number | null>((sum, value) => {

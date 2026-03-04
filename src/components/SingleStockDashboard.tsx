@@ -134,6 +134,15 @@ function withDebugQueryPath(path: string, debugEnabled: boolean): string {
   return `${asUrl.pathname}${asUrl.search}`;
 }
 
+function normalizeClientErrorMessage(message: string | null | undefined, fallback: string): string {
+  const normalized = (message ?? "").trim();
+  if (!normalized) return fallback;
+  if (normalized.includes("did not match the expected pattern")) {
+    return fallback;
+  }
+  return normalized;
+}
+
 function formatMetricNullReason(value: MetricValue): string {
   return value.value === null ? (value.reason ?? "Missing required input.") : "";
 }
@@ -1075,7 +1084,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       const list = Array.isArray(payload.tickers) ? payload.tickers : [];
       setAvailableTickers(list);
     } catch (error) {
-      setTickersError((error as Error).message);
+      setTickersError(normalizeClientErrorMessage((error as Error).message, "Failed to load tickers."));
       console.error("Failed to load tickers", error);
     }
   };
@@ -2529,7 +2538,7 @@ Capital Available: ${availableLabel}`,
     const todayLow = corporateViewMetrics.list2.NPV_perShare?.value ?? null;
     const todayHigh = (typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
       ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
-      : corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value) ?? null;
+      : null);
     const points = [
       {
         pointType: "today" as const,
@@ -2540,7 +2549,7 @@ Capital Available: ${availableLabel}`,
         lowValueUsed: todayLow,
         highValueUsed: todayHigh,
         lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
-        highSource: { metricKey: "DCF_prodStart_present_perShare_TargetCurrency|DCF_Target_discounted_perShare", description: "ValueRangeSnapshotCard npvHigh current fallback chain" },
+        highSource: { metricKey: "DCF_prodStart_present_perShare_TargetCurrency", description: "ValueRangeSnapshotCard npvHigh" },
         perShareBasis: shareBasis,
         nullReasons: {
           ...(todayLow === null ? { low: corporateViewMetrics.list2.NPV_perShare?.reason ?? "Metric is null." } : {}),
@@ -3940,8 +3949,6 @@ Capital Available: ${availableLabel}`,
                             (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency)
                               ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency
                               : null)
-                            ?? corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value
-                            ?? null
                           }
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
