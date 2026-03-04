@@ -12,6 +12,11 @@ type TimelineLista2DebugMetrics = {
   NAV_prodStart_perShare_TargetCurrency: number | null;
 };
 
+type CorporateList2DebugTotals = {
+  DCF_prodStart_exCapex_TargetCurrency: number | null;
+  NAV_prodStart_TargetCurrency?: number | null;
+};
+
 export type CorporateModeledTimelineMarker = {
   tp: number;
   yearLabelUsed: string | null;
@@ -32,8 +37,8 @@ export type CorporateModeledTimelineMarker = {
     lista2_NAV_prodStart_TargetCurrency_debug?: number | null;
     lista2_DCF_match?: boolean | null;
     lista2_NAV_match?: boolean | null;
-    list2Debug_DCF_prodStart_exCapex_TargetCurrency?: number | null;
-    list2Debug_NAV_prodStart_TargetCurrency?: number | null;
+    expected_list2Debug_DCF_prodStart_exCapex_TargetCurrency?: number | null;
+    expected_list2Debug_NAV_prodStart_TargetCurrency?: number | null;
     delta_DCF?: number | null;
     delta_NAV?: number | null;
     relDelta_DCF?: number | null;
@@ -111,6 +116,7 @@ export function buildCorporateModeledValuationTimeline(args: {
   shares_post_financing: number | null;
   lista2MetricsByTp: Record<number, TimelineLista2Metrics | undefined>;
   lista2DebugByTp?: Record<number, TimelineLista2DebugMetrics | undefined>;
+  corporateList2Debug?: CorporateList2DebugTotals;
   fxUsed?: number | null;
   discountRateUsed?: number | null;
   includeDebugSanity?: boolean;
@@ -163,7 +169,6 @@ export function buildCorporateModeledValuationTimeline(args: {
     }
 
     const lista2ForTp = args.lista2MetricsByTp[corporateTp];
-    const lista2DebugForTp = args.lista2DebugByTp?.[corporateTp] ?? null;
     const denom = Number.isFinite(args.shares_post_financing) ? args.shares_post_financing : null;
     const valueLowTotalRaw = lista2ForTp?.NAV_prodStart_TargetCurrency ?? null;
     const valueHighTotalRaw = lista2ForTp?.DCF_prodStart_exCapex_TargetCurrency ?? null;
@@ -209,11 +214,11 @@ export function buildCorporateModeledValuationTimeline(args: {
     if (valueLowTotal === null) reasonParts.push('missing NAV_prodStart_TargetCurrency for marker low');
     if (valueHighTotal === null) reasonParts.push('missing DCF_prodStart_exCapex_TargetCurrency for marker high');
 
-    const lista2DcfDebug = typeof lista2DebugForTp?.DCF_prodStart_exCapex_TargetCurrency === 'number'
-      ? lista2DebugForTp.DCF_prodStart_exCapex_TargetCurrency
+    const lista2DcfDebug = typeof args.corporateList2Debug?.DCF_prodStart_exCapex_TargetCurrency === 'number'
+      ? args.corporateList2Debug.DCF_prodStart_exCapex_TargetCurrency
       : null;
-    const lista2NavDebug = typeof lista2DebugForTp?.NAV_prodStart_TargetCurrency === 'number'
-      ? lista2DebugForTp.NAV_prodStart_TargetCurrency
+    const lista2NavDebug = typeof args.corporateList2Debug?.NAV_prodStart_TargetCurrency === 'number'
+      ? args.corporateList2Debug.NAV_prodStart_TargetCurrency
       : null;
     const deltaDcf = valueHighTotal !== null && lista2DcfDebug !== null ? valueHighTotal - lista2DcfDebug : null;
     const deltaNav = valueLowTotal !== null && lista2NavDebug !== null ? valueLowTotal - lista2NavDebug : null;
@@ -223,10 +228,10 @@ export function buildCorporateModeledValuationTimeline(args: {
     const navMatchesDebug = relDeltaNav !== null ? relDeltaNav < 1e-6 : null;
     const mismatchAgainstList2Debug = dcfMatchesDebug === false || navMatchesDebug === false;
     if (mismatchAgainstList2Debug) {
-      reasonParts.push('markers != list2Debug; refusing to display inconsistent byTp values (no fallback)');
+      reasonParts.push('markers use proxy totals; mismatch vs corporate list2Debug (no fallback)');
     }
     const nullReasonIfAny = mismatchAgainstList2Debug
-      ? 'markers != list2Debug; refusing to display inconsistent byTp values (no fallback)'
+      ? 'markers use proxy totals; mismatch vs corporate list2Debug (no fallback)'
       : (reasonParts.length > 0 ? reasonParts.join(' | ') : null);
 
     return {
@@ -249,8 +254,8 @@ export function buildCorporateModeledValuationTimeline(args: {
         lista2_NAV_prodStart_TargetCurrency_debug: lista2NavDebug,
         lista2_DCF_match: dcfMatchesDebug,
         lista2_NAV_match: navMatchesDebug,
-        list2Debug_DCF_prodStart_exCapex_TargetCurrency: lista2DcfDebug,
-        list2Debug_NAV_prodStart_TargetCurrency: lista2NavDebug,
+        expected_list2Debug_DCF_prodStart_exCapex_TargetCurrency: lista2DcfDebug,
+        expected_list2Debug_NAV_prodStart_TargetCurrency: lista2NavDebug,
         delta_DCF: deltaDcf,
         delta_NAV: deltaNav,
         relDelta_DCF: relDeltaDcf,

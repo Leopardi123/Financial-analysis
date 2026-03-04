@@ -1000,8 +1000,8 @@ type SnapshotDiagnostics = {
           lista2_NAV_prodStart_TargetCurrency_debug?: number | null;
           lista2_DCF_match?: boolean | null;
           lista2_NAV_match?: boolean | null;
-          list2Debug_DCF_prodStart_exCapex_TargetCurrency?: number | null;
-          list2Debug_NAV_prodStart_TargetCurrency?: number | null;
+          expected_list2Debug_DCF_prodStart_exCapex_TargetCurrency?: number | null;
+          expected_list2Debug_NAV_prodStart_TargetCurrency?: number | null;
           delta_DCF?: number | null;
           delta_NAV?: number | null;
           relDelta_DCF?: number | null;
@@ -2077,6 +2077,10 @@ export async function runCorporateSnapshotPipeline(args: {
       shares_post_financing: shares_post_financing_fd_effective,
       lista2MetricsByTp,
       lista2DebugByTp,
+      corporateList2Debug: {
+        DCF_prodStart_exCapex_TargetCurrency: lista2.metrics.DCF_prodStart_exCapex_TargetCurrency,
+        NAV_prodStart_TargetCurrency: lista2.metrics.NAV_prodStart_TargetCurrency,
+      },
       fxUsed: fxRate,
       discountRateUsed: input.discountRate,
       includeDebugSanity: debug,
