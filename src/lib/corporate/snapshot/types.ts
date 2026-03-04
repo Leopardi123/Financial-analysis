@@ -171,6 +171,12 @@ export type CorporateSnapshot = {
   BookValue_perShare_USD_shares_post_financing: number | null;
 
   series?: CorporateSnapshotSeries;
+  list2MetricsByTp?: Record<number, {
+    DCF_prodStart_exCapex_TargetCurrency: number | null;
+    DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+    NAV_prodStart_TargetCurrency: number | null;
+    NAV_prodStart_perShare_TargetCurrency: number | null;
+  }>;
   modeledValuationTimeline?: {
     tps: number[];
     lastTp: number | null;

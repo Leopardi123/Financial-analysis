@@ -1933,6 +1933,8 @@ export async function runCorporateSnapshotPipeline(args: {
         }),
     );
 
+    snapshot.list2MetricsByTp = lista2MetricsByTp;
+
     snapshot.modeledValuationTimeline = buildCorporateModeledValuationTimeline({
       projects: projectsForBuildFunding.map((project) => ({
         productionStartPeriod: project.productionStartPeriod,
