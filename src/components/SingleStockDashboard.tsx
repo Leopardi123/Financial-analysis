@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps } from "react";
+import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import Admin from "./Admin";
 import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
@@ -177,6 +177,104 @@ function resolveProjectMetricLabel(metricKey: string, discountRateTag: string): 
     DCF_over_ETLV: "DCF/ETLV",
   };
   return metricLabels[metricKey] ?? metricKey;
+}
+
+type ProdStartDebugData = {
+  npvProdStart: number | null;
+  npvProdStartPerShare: number | null;
+  navProdStart: number | null;
+  navProdStartPerShare: number | null;
+  dcfProdStart: number | null;
+  dcfProdStartPerShare: number | null;
+};
+
+function renderProdStartDebugWindow(args: {
+  data: ProdStartDebugData;
+  targetCurrency: string;
+}): ReactNode {
+  const {
+    data,
+    targetCurrency,
+  } = args;
+  const netCashContribution =
+    data.navProdStart !== null && data.npvProdStart !== null
+      ? data.navProdStart - data.npvProdStart
+      : null;
+  const netCashContributionPerShare =
+    data.navProdStartPerShare !== null && data.npvProdStartPerShare !== null
+      ? data.navProdStartPerShare - data.npvProdStartPerShare
+      : null;
+  const impliedInitialCapex =
+    data.dcfProdStart !== null && data.npvProdStart !== null
+      ? data.dcfProdStart - data.npvProdStart
+      : null;
+  const impliedInitialCapexPerShare =
+    data.dcfProdStartPerShare !== null && data.npvProdStartPerShare !== null
+      ? data.dcfProdStartPerShare - data.npvProdStartPerShare
+      : null;
+  const dcfMinusNav =
+    data.dcfProdStart !== null && data.navProdStart !== null
+      ? data.dcfProdStart - data.navProdStart
+      : null;
+  const dcfMinusNavIdentity =
+    impliedInitialCapex !== null && netCashContribution !== null
+      ? impliedInitialCapex - netCashContribution
+      : null;
+
+  return (
+    <details style={{ marginTop: 10 }}>
+      <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug: NPV/NAV/DCF vid produktionsstart</summary>
+      <div style={{ marginTop: 8, fontSize: 12, color: "#1f2937", display: "grid", gap: 6 }}>
+        <div>
+          <strong>Definitioner (totaler):</strong>
+          <br />
+          NPV prod start = DCF produktionsstart − Initial CAPEX
+          <br />
+          NAV prod start = NPV prod start + (kassa₀ − skuld₀)
+        </div>
+        <div>
+          <strong>Insatta värden ({targetCurrency}):</strong>
+          <br />
+          DCF produktionsstart = {formatMetricValue({ value: data.dcfProdStart, reason: null }, "money", targetCurrency)}
+          <br />
+          NPV prod start = {formatMetricValue({ value: data.npvProdStart, reason: null }, "money", targetCurrency)}
+          <br />
+          NAV prod start = {formatMetricValue({ value: data.navProdStart, reason: null }, "money", targetCurrency)}
+          <br />
+          Implied Initial CAPEX = DCF − NPV = {formatMetricValue({ value: impliedInitialCapex, reason: null }, "money", targetCurrency)}
+          <br />
+          Net cash-bidrag (kassa₀ − skuld₀) = NAV − NPV = {formatMetricValue({ value: netCashContribution, reason: null }, "money", targetCurrency)}
+        </div>
+        <div>
+          <strong>Likhetskontroll (DCF vs NAV):</strong>
+          <br />
+          DCF − NAV = {formatMetricValue({ value: dcfMinusNav, reason: null }, "money", targetCurrency)}
+          <br />
+          Samma differens via beståndsdelar = Initial CAPEX − net cash-bidrag = {formatMetricValue({ value: dcfMinusNavIdentity, reason: null }, "money", targetCurrency)}
+          <br />
+          {dcfMinusNav !== null && Math.abs(dcfMinusNav) < 1e-6
+            ? "Slutsats: DCF och NAV är numeriskt lika i denna snapshot."
+            : "Slutsats: DCF och NAV skiljer sig med differensen ovan; fönstret visar exakt vilka komponenter som driver skillnaden."}
+        </div>
+        <div>
+          <strong>Per aktie ({targetCurrency}/aktie):</strong>
+          <br />
+          DCF/aktie = {formatMetricValue({ value: data.dcfProdStartPerShare, reason: null }, "money", targetCurrency)}
+          <br />
+          NPV prod start/aktie = {formatMetricValue({ value: data.npvProdStartPerShare, reason: null }, "money", targetCurrency)}
+          <br />
+          NAV prod start/aktie = {formatMetricValue({ value: data.navProdStartPerShare, reason: null }, "money", targetCurrency)}
+          <br />
+          Initial CAPEX/aktie (implied) = {formatMetricValue({ value: impliedInitialCapexPerShare, reason: null }, "money", targetCurrency)}
+          <br />
+          Net cash-bidrag/aktie (implied) = {formatMetricValue({ value: netCashContributionPerShare, reason: null }, "money", targetCurrency)}
+        </div>
+        <div style={{ color: "#6b7280" }}>
+          Källa: list2-metriker i denna vy. Identity check används för transparens: DCF − NAV ska matcha (DCF − NPV) − (NAV − NPV).
+        </div>
+      </div>
+    </details>
+  );
 }
 
 
@@ -3997,6 +4095,17 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
+                      {sectionKey === "list2" && renderProdStartDebugWindow({
+                        data: {
+                          npvProdStart: metrics.NPV_prodStart?.value ?? null,
+                          npvProdStartPerShare: metrics.NPV_prodStart_perShare?.value ?? null,
+                          navProdStart: metrics.NAV_prodStart?.value ?? null,
+                          navProdStartPerShare: metrics.NAV_prodStart_perShare?.value ?? null,
+                          dcfProdStart: metrics.DCF_Target?.value ?? null,
+                          dcfProdStartPerShare: metrics.DCF_perShare?.value ?? null,
+                        },
+                        targetCurrency: lockedTargetCurrency,
+                      })}
                     </details>
                   ))}
                 </>
@@ -4189,6 +4298,17 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
+                      {sectionKey === "list2" && renderProdStartDebugWindow({
+                        data: {
+                          npvProdStart: metrics.NPV_prodStart?.value ?? null,
+                          npvProdStartPerShare: metrics.NPV_prodStart_perShare?.value ?? null,
+                          navProdStart: metrics.NAV_prodStart?.value ?? null,
+                          navProdStartPerShare: metrics.NAV_prodStart_perShare?.value ?? null,
+                          dcfProdStart: metrics.DCF_Target?.value ?? null,
+                          dcfProdStartPerShare: metrics.DCF_perShare?.value ?? null,
+                        },
+                        targetCurrency: lockedTargetCurrency,
+                      })}
                     </details>
                   ))}
 
