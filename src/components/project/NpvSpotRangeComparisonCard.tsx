@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import ChartCard from '../ChartCard.tsx';
+import { useMemo, useRef } from 'react';
+import { Chart } from 'react-google-charts';
 
 type RangeNode = {
   npvToday: number | null;
@@ -20,6 +20,8 @@ type Props = {
 };
 
 export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, currencyCode, formatMoney }: Props) {
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
   const chartData = useMemo(() => {
     if (!range) return null;
     const len = Math.min(yearsByPeriod.length, range.base.npvSeries.length, range.low.npvSeries.length, range.high.npvSeries.length);
@@ -36,7 +38,7 @@ export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, curre
     }
 
     return [
-      ['Period', 'Low', 'Band', 'Base', { role: 'tooltip', type: 'string' }],
+      ['PeriodIndex', 'Low', 'Band', 'Base', { role: 'tooltip', type: 'string' }],
       ...rows,
     ] as (string | number | null)[][];
   }, [range, yearsByPeriod, formatMoney]);
@@ -61,31 +63,49 @@ export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, curre
           ))}
         </div>
         {range && chartData && (
-          <div style={{ marginTop: 8 }}>
-            <ChartCard
-              title="NPV timeline (base + spot band)"
+          <div
+            className="spot-range-chart-guard"
+            onTouchStart={(event) => {
+              const touch = event.touches[0];
+              if (!touch) return;
+              touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+            }}
+            onTouchMove={(event) => {
+              const start = touchStartRef.current;
+              const touch = event.touches[0];
+              if (!start || !touch) return;
+              const dx = Math.abs(touch.clientX - start.x);
+              const dy = Math.abs(touch.clientY - start.y);
+              if (dx > dy && dx > 6) {
+                event.preventDefault();
+              }
+            }}
+            style={{ marginTop: 8 }}
+          >
+            <Chart
               chartType="ComboChart"
+              width="100%"
+              height="260px"
               data={chartData}
-              height={260}
               options={{
-                isStacked: true,
+                backgroundColor: '#e0e9ce',
                 legend: { position: 'none' },
+                isStacked: true,
+                chartArea: { left: 64, right: 16, top: 16, bottom: 36, width: '100%', height: '75%' },
                 hAxis: {
-                  slantedText: false,
-                  ticks: yearsByPeriod.map((year, idx) => ({ v: idx, f: String(year) })),
+                  textPosition: 'none',
                 },
-                seriesType: 'line',
+                vAxis: { title: currencyCode },
+                tooltip: { trigger: 'focus' },
                 colors: ['transparent', '#A8C686', '#2C3E50'],
+                seriesType: 'line',
                 areaOpacity: 0.32,
                 series: {
                   0: { type: 'area', lineWidth: 0, visibleInLegend: false, enableInteractivity: false },
                   1: { type: 'area', lineWidth: 0, visibleInLegend: false },
-                  2: { type: 'line', lineWidth: 3, pointSize: 0 },
+                  2: { type: 'line', lineWidth: 3, pointSize: 0, visibleInLegend: false },
                 },
               }}
-              yAxisTitle={currencyCode}
-              unitLabel={currencyCode}
-              unitKind="money"
             />
           </div>
         )}

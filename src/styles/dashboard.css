@@ -924,3 +924,13 @@ td.sticky-col {
   scroll-snap-align: start;
   min-width: 0;
 }
+
+.project-list2-pager {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+
+.spot-range-chart-guard {
+  overflow-x: hidden;
+  touch-action: pan-y;
+}

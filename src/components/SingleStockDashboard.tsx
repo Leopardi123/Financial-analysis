@@ -4770,7 +4770,7 @@ Capital Available: ${availableLabel}`,
                   </div>
 
                   {([
-                    ["list2", "FINANSIELLA NYCKELTAL · VÄRDEINTERVALL", projectViewMetrics.list2],
+                    ["list2", "FINANSIELLA NYCKELTAL OCH VÄRDERING", projectViewMetrics.list2],
                     ["list3", "EFFEKTIVITET OCH LÖNSAMHET", projectViewMetrics.list3],
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", projectViewMetrics.list4],
                     ["list6", "M&A VALUATION", projectViewMetrics.list6],
@@ -4857,6 +4857,9 @@ Capital Available: ${availableLabel}`,
                             )}
                           </div>
                           <div className="project-list2-page">
+                            <div className="producer-core-title-row" style={{ marginBottom: 8 }}>
+                              <h2 className="subrub small" style={{ margin: 0 }}>FINANSIELLA NYCKELTAL · VÄRDEINTERVALL</h2>
+                            </div>
                             <NpvSpotRangeComparisonCard
                               range={(projectSnapshotData?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null> }; base: { npvToday: number | null; npvSeries: Array<number | null> }; high: { npvToday: number | null; npvSeries: Array<number | null> } } | null } } | undefined)?.modeled?.npvSpotRange ?? null}
                               yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
