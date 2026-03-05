@@ -233,9 +233,9 @@ function renderProdStartDebugWindow(args: {
     tp_k: number;
     windowYears: number[];
     windowCapexUSD: Array<number | null>;
-    windowCapexUSD_sum: number | null;
+    windowCapexUSD_sum_strict: number | null;
     fx_USD_to_TargetCurrency: number | null;
-    windowCapexTarget_sum: number | null;
+    windowCapexTarget_sum_strict: number | null;
   }>;
 }): ReactNode {
   const {
@@ -400,9 +400,9 @@ function renderProdStartDebugWindow(args: {
                 <div>tp_prev = {entry.tp_prev}, tp_k = {entry.tp_k}</div>
                 <div>years: {entry.windowYears.join(", ")}</div>
                 <div>capexUSD: {entry.windowCapexUSD.map((value) => (value === null ? "null" : String(value))).join(", ")}</div>
-                <div>sumUSD: {entry.windowCapexUSD_sum === null ? "n/a" : String(entry.windowCapexUSD_sum)}</div>
+                <div>sumUSD: {entry.windowCapexUSD_sum_strict === null ? "n/a" : String(entry.windowCapexUSD_sum_strict)}</div>
                 <div>FX: {entry.fx_USD_to_TargetCurrency === null ? "n/a" : String(entry.fx_USD_to_TargetCurrency)}</div>
-                <div>sumTarget: {entry.windowCapexTarget_sum === null ? "n/a" : String(entry.windowCapexTarget_sum)}</div>
+                <div>sumTarget: {entry.windowCapexTarget_sum_strict === null ? "n/a" : String(entry.windowCapexTarget_sum_strict)}</div>
               </div>
             ))}
           </div>
@@ -4460,6 +4460,38 @@ Capital Available: ${availableLabel}`,
                             <div><strong>shares_post_financing:</strong> {formatDebugNumericValue(corporateLista3Debug?.shares_post_financing ?? null)}</div>
                             <div><strong>series.fcfUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.fcfUSD_total ?? null)}</div>
                             <div><strong>series.capexUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.capexUSD_total ?? null)}</div>
+                            <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6 }}>
+                              <div><strong>CAPEX sanity block</strong></div>
+                              {(() => {
+                                const tpMain = corporateLista3Debug?.tp_main;
+                                const capexSeries = Array.isArray(corporateLista3Debug?.series?.capexUSD_total)
+                                  ? corporateLista3Debug.series.capexUSD_total
+                                  : [];
+                                const preTpCapex = typeof tpMain === "number" && Number.isInteger(tpMain) && tpMain >= 0
+                                  ? capexSeries.slice(0, tpMain)
+                                  : [];
+                                const preTpCapexSum = preTpCapex.length > 0 && preTpCapex.every((value) => typeof value === "number" && Number.isFinite(value))
+                                  ? preTpCapex.reduce<number>((sum, value) => {
+                                    const numericValue = typeof value === "number" && Number.isFinite(value) ? value : 0;
+                                    return sum + numericValue;
+                                  }, 0)
+                                  : null;
+                                const initialCapexMain = typeof corporateLista3Debug?.initialCapexUSD_main === "number" && Number.isFinite(corporateLista3Debug.initialCapexUSD_main)
+                                  ? corporateLista3Debug.initialCapexUSD_main
+                                  : null;
+                                const delta = initialCapexMain !== null && preTpCapexSum !== null
+                                  ? initialCapexMain - preTpCapexSum
+                                  : null;
+                                return (
+                                  <>
+                                    <div>capexUSD_total[0..tp_main-1]: {formatDebugNumericValue(preTpCapex)}</div>
+                                    <div>sum(capexUSD_total[0..tp_main-1]): {formatDebugNumericValue(preTpCapexSum)}</div>
+                                    <div>initialCapexUSD_main: {formatDebugNumericValue(initialCapexMain)}</div>
+                                    <div>delta = initialCapexUSD_main - sum(pre-tp capex): {formatDebugNumericValue(delta)}</div>
+                                  </>
+                                );
+                              })()}
+                            </div>
                             {corporateLista3DebugDisplayOrder.map((metricKey) => {
                               const payload = corporateLista3Debug?.perMetric?.[metricKey];
                               const inputs = payload?.inputs ?? {};
@@ -4505,9 +4537,9 @@ Capital Available: ${availableLabel}`,
                                 tp_k: number;
                                 windowYears: number[];
                                 windowCapexUSD: Array<number | null>;
-                                windowCapexUSD_sum: number | null;
+                                windowCapexUSD_sum_strict: number | null;
                                 fx_USD_to_TargetCurrency: number | null;
-                                windowCapexTarget_sum: number | null;
+                                windowCapexTarget_sum_strict: number | null;
                               }>;
                             };
                           } | null;

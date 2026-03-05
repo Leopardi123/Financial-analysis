@@ -1035,9 +1035,9 @@ type SnapshotDiagnostics = {
         tp_k: number;
         windowYears: number[];
         windowCapexUSD: Array<number | null>;
-        windowCapexUSD_sum: number | null;
+        windowCapexUSD_sum_strict: number | null;
         fx_USD_to_TargetCurrency: number | null;
-        windowCapexTarget_sum: number | null;
+        windowCapexTarget_sum_strict: number | null;
       }>;
     };
     corporateFinancingDebug?: {
@@ -2363,13 +2363,13 @@ export async function runCorporateSnapshotPipeline(args: {
         .sort((a, b) => b - a)[0] ?? 0;
       const windowYears = aggregationEffective.corporateYearsByPeriod.slice(prevMilestoneTp, tp);
       const windowCapexUSD = aggregationEffective.capexUSD_total.slice(prevMilestoneTp, tp);
-      const windowCapexUSD_sum = windowCapexUSD.some((value) => value === null || value === undefined || !Number.isFinite(value))
+      const windowCapexUSD_sum_strict = windowCapexUSD.some((value) => value === null || value === undefined || !Number.isFinite(value))
         ? null
         : (windowCapexUSD as number[]).reduce((sum, value) => sum + value, 0);
       const fx_USD_to_TargetCurrency = fxRate !== null && Number.isFinite(fxRate) ? fxRate : null;
-      const windowCapexTarget_sum =
-        windowCapexUSD_sum !== null && fx_USD_to_TargetCurrency !== null
-          ? windowCapexUSD_sum * fx_USD_to_TargetCurrency
+      const windowCapexTarget_sum_strict =
+        windowCapexUSD_sum_strict !== null && fx_USD_to_TargetCurrency !== null
+          ? windowCapexUSD_sum_strict * fx_USD_to_TargetCurrency
           : null;
       return {
         milestoneYear: year,
@@ -2377,9 +2377,9 @@ export async function runCorporateSnapshotPipeline(args: {
         tp_k: tp,
         windowYears,
         windowCapexUSD,
-        windowCapexUSD_sum,
+        windowCapexUSD_sum_strict,
         fx_USD_to_TargetCurrency,
-        windowCapexTarget_sum,
+        windowCapexTarget_sum_strict,
       };
     });
 
