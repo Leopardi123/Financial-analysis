@@ -176,6 +176,26 @@ export type CorporateSnapshot = {
   BookValue_perShare_USD_shares_post_financing: number | null;
 
   series?: CorporateSnapshotSeries;
+
+  project?: {
+    modeled?: {
+      npvSpotRange?: {
+        low: {
+          npvToday: number | null;
+          npvSeries: Array<number | null>;
+        };
+        base: {
+          npvToday: number | null;
+          npvSeries: Array<number | null>;
+        };
+        high: {
+          npvToday: number | null;
+          npvSeries: Array<number | null>;
+        };
+      } | null;
+    };
+  };
+
   modeledValuationTimeline?: {
     tps: number[];
     lastTp: number | null;

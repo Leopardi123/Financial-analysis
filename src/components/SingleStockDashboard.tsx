@@ -4,6 +4,7 @@ import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
+import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
 import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
@@ -4778,18 +4779,29 @@ Capital Available: ${availableLabel}`,
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
                         <>
-                        <ValueRangeSnapshotCard
-                          priceToday={
-                            projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value > 0
-                              ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesCurrent.value
-                              : null
-                          }
-                          npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
-                          npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
-                          tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
-                          tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
-                          currencyCode={lockedTargetCurrency}
-                        />
+                        <div className="project-list2-pager" aria-label="Project modeled valuation pages">
+                          <div className="project-list2-page">
+                            <ValueRangeSnapshotCard
+                              priceToday={
+                                projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value > 0
+                                  ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesCurrent.value
+                                  : null
+                              }
+                              npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
+                              npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
+                              tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
+                              tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
+                              currencyCode={lockedTargetCurrency}
+                            />
+                          </div>
+                          <div className="project-list2-page">
+                            <NpvSpotRangeComparisonCard
+                              range={(projectSnapshotData?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null> }; base: { npvToday: number | null; npvSeries: Array<number | null> }; high: { npvToday: number | null; npvSeries: Array<number | null> } } | null } } | undefined)?.modeled?.npvSpotRange ?? null}
+                              yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                              currencyCode={lockedTargetCurrency}
+                            />
+                          </div>
+                        </div>
                         {debugEnabled && projectTimelineDebug && (
                           <details style={{ marginTop: 8 }}>
                             <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Valuation timeline debug</summary>
