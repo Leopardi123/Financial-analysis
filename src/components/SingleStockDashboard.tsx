@@ -2497,7 +2497,7 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
-    return computeProjectViewMetrics({
+    const computed = computeProjectViewMetrics({
       meta: { projectId: "corporate" },
       targetCurrency: String(corporateSnapshotData.targetCurrency ?? lockedTargetCurrency),
       fxUSDToTarget: inputs.fx,
@@ -2528,6 +2528,36 @@ Capital Available: ${availableLabel}`,
         cashUsedInput: 0,
       },
     });
+    const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
+      Payback_approx_years?: number | null;
+      Payback_real_years?: number | null;
+      ROI_10Y_pct?: number | null;
+      IRR?: number | null;
+    } }).lista3Metrics;
+    if (!corporateLista3) {
+      return computed;
+    }
+
+    const toMetricValue = (value: number | null | undefined, reason: string): MetricValue => ({
+      value: typeof value === "number" && Number.isFinite(value) ? value : null,
+      reason: typeof value === "number" && Number.isFinite(value) ? null : reason,
+    });
+
+    return {
+      ...computed,
+      list3: {
+        ...computed.list3,
+        Payback_approx: toMetricValue(corporateLista3.Payback_approx_years, "Missing corporate.lista3Metrics.Payback_approx_years"),
+        Payback_real: toMetricValue(corporateLista3.Payback_real_years, "Missing corporate.lista3Metrics.Payback_real_years"),
+        ROI_10Y: toMetricValue(
+          typeof corporateLista3.ROI_10Y_pct === "number" && Number.isFinite(corporateLista3.ROI_10Y_pct)
+            ? corporateLista3.ROI_10Y_pct / 100
+            : null,
+          "Missing corporate.lista3Metrics.ROI_10Y_pct",
+        ),
+        IRR: toMetricValue(corporateLista3.IRR, "Missing corporate.lista3Metrics.IRR"),
+      },
+    };
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const corporateProdStartMarkerValuesByKey = useMemo(() => {

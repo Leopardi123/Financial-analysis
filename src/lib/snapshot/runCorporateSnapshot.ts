@@ -12,6 +12,7 @@ import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
+import { computeLista3 } from '../metrics/lista3.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import { buildCorporateModeledValuationTimeline } from './corporateModeledValuationTimeline.ts';
 import { aggregateProjectsToCorporateTotals } from './aggregateProjectsToCorporateTotals.ts';
@@ -82,6 +83,17 @@ function assertSeriesLength(
   if (series.length !== expectedLength) {
     throw new Error(`${label} length must equal masterN+1 (${expectedLength})`);
   }
+}
+
+function sumStrict(values: Array<number | null>): number | null {
+  let sum = 0;
+  for (const value of values) {
+    if (value === null || value === undefined || !Number.isFinite(value)) {
+      return null;
+    }
+    sum += value;
+  }
+  return sum;
 }
 
 
@@ -1043,6 +1055,12 @@ type SnapshotDiagnostics = {
         };
       }>;
     };
+    corporateLista3Debug?: {
+      tp_main: number | null;
+      initialCapexUSD_main: number | null;
+      hasFcfSeries: boolean;
+      hasCapexSeries: boolean;
+    };
   };
 };
 
@@ -1960,17 +1978,6 @@ export async function runCorporateSnapshotPipeline(args: {
     });
     diagnostics.warnings.push(...lista3a.warnings);
 
-    const snapshot = buildCorporateSnapshot({
-      targetCurrency: input.targetCurrency,
-      aggregation: aggregationEffective,
-      financing: financingSnapshot,
-      market: marketInput,
-      lista2CfDcf: lista2.metrics,
-      lista3aProjectEfficiency: lista3a.metrics,
-      lista4TenYear: lista4,
-    });
-
-    snapshot.series = snapshotSeries;
     const milestoneYears = [...new Set(
       projectsForBuildFunding
         .filter((project) => project.productionStartPeriod > 0)
@@ -1985,6 +1992,38 @@ export async function runCorporateSnapshotPipeline(args: {
     const milestonePairs = milestoneYears
       .map((year) => ({ year, tp: milestoneTpByYear[year] }))
       .filter(({ tp }) => Number.isInteger(tp) && tp >= 0 && tp <= aggregationEffective.corporateMasterN);
+
+    const tp_main = milestonePairs.length > 0 ? milestonePairs[0].tp : null;
+    const initialCapexUSD_main = tp_main === null
+      ? null
+      : sumStrict(aggregationEffective.capexUSD_total.slice(0, tp_main));
+    const corporateLista3 = computeLista3({
+      masterN: aggregationEffective.corporateMasterN,
+      tp: tp_main,
+      fcfUSD: aggregationEffective.fcffUSD_total,
+      initialCapexUSD: initialCapexUSD_main,
+      strictRoi10Y: true,
+    });
+
+    diagnostics.meta.corporateLista3Debug = {
+      tp_main,
+      initialCapexUSD_main,
+      hasFcfSeries: Array.isArray(aggregationEffective.fcffUSD_total),
+      hasCapexSeries: Array.isArray(aggregationEffective.capexUSD_total),
+    };
+
+    const snapshot = buildCorporateSnapshot({
+      targetCurrency: input.targetCurrency,
+      aggregation: aggregationEffective,
+      financing: financingSnapshot,
+      market: marketInput,
+      lista2CfDcf: lista2.metrics,
+      lista3aProjectEfficiency: lista3a.metrics,
+      lista4TenYear: lista4,
+      corporateLista3Metrics: corporateLista3,
+    });
+
+    snapshot.series = snapshotSeries;
 
     const corporateProdStartCapexWindowDebug = milestonePairs.map(({ year, tp }) => {
       const prevMilestoneTp = milestonePairs

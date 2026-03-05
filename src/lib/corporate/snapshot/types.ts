@@ -1,3 +1,4 @@
+import type { Lista3Metrics } from '../../metrics/lista3.ts';
 export type MarketValueInput = {
   // Market-now equity inputs
   shares_current: number | null;
@@ -138,6 +139,10 @@ export type CorporateSnapshot = {
   ROI_10Y_pct: number | null;
   LOM_average_EBIT_ROCE_pct: number | null;
   LOM_discounted_EBIT_ROCE_pct: number | null;
+
+  corporate?: {
+    lista3Metrics: Lista3Metrics;
+  };
 
   NPV_over_ETLV: number | null;
   DCF_present_over_ETLV: number | null;

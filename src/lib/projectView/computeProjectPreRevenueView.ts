@@ -1,3 +1,5 @@
+import { computeLista3 } from '../metrics/lista3.ts';
+
 export type NullableNumber = number | null;
 
 type Series = Array<number | null>;
@@ -488,16 +490,17 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const auEq10YReason = auEq10YValidation.ok ? null : auEq10YValidation.reason;
   const evUsd = evTarget !== null && fx !== null ? evTarget / fx : null;
 
-  const paybackApprox = initialCapexUSD !== null && tp !== null ? (() => {
-    let cum = 0;
-    for (let i = tp; i < input.fcfUSD.length; i += 1) {
-      const v = input.fcfUSD[i];
-      if (!finite(v)) return null;
-      cum += v;
-      if (cum >= initialCapexUSD) return i - tp + 1;
-    }
-    return null;
-  })() : null;
+  const sharedLista3 = masterN !== null
+    ? computeLista3({
+      masterN,
+      tp,
+      fcfUSD: input.fcfUSD,
+      initialCapexUSD,
+      strictRoi10Y: false,
+    })
+    : null;
+
+  const paybackApprox = sharedLista3?.Payback_approx_years ?? null;
 
   const enterpriseCashflows = masterN !== null
     ? buildCanonicalEnterpriseCashflows({
@@ -612,7 +615,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     bracketFound: false,
     signChangePattern: [],
   };
-  let irr = irrSolve.value;
+  let irr = sharedLista3?.IRR ?? irrSolve.value;
   let irrReason = irrSolve.reason;
 
   const irrDebug = {
@@ -643,8 +646,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       }
     }
     roi10yNumerator = count > 0 ? sum : null;
-    const roi10yRatio = safeRatio(roi10yNumerator, Math.abs(initialCapexUSD));
-    return roi10yRatio.value;
+    return sharedLista3?.ROI_10Y_pct !== null && sharedLista3?.ROI_10Y_pct !== undefined
+      ? sharedLista3.ROI_10Y_pct / 100
+      : safeRatio(roi10yNumerator, Math.abs(initialCapexUSD)).value;
   })() : null;
 
   if (!enterpriseCashflowDebugLogged && enterpriseCashflows !== null) {

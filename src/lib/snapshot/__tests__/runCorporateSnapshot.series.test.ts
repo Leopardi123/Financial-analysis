@@ -694,3 +694,21 @@ test('corporate DCF produktionsstart nuvärde scalar uses earliest milestone onl
   assert.ok(Math.abs((result.DCF_prodStart_present_TargetCurrency as number) - expectedPresent) <= 1e-12);
   assert.ok(Math.abs((result.DCF_prodStart_present_perShare_TargetCurrency as number) - (expectedPresent / 20)) <= 1e-12);
 });
+
+test('corporate lista3 metrics are populated from corporate aggregates', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const lista3 = result.snapshot.corporate?.lista3Metrics;
+  assert.ok(lista3);
+  assert.equal(typeof result.diagnostics.meta.corporateLista3Debug?.hasFcfSeries, 'boolean');
+  assert.equal(typeof result.diagnostics.meta.corporateLista3Debug?.hasCapexSeries, 'boolean');
+  assert.ok([
+    lista3?.Payback_approx_years,
+    lista3?.Payback_real_years,
+    lista3?.ROI_10Y_pct,
+    lista3?.IRR,
+  ].some((value) => value !== null));
+});
