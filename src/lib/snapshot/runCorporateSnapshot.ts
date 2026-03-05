@@ -96,6 +96,37 @@ function sumStrict(values: Array<number | null>): number | null {
   return sum;
 }
 
+function safeRatio(numerator: number | null, denominator: number | null): number | null {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return null;
+  }
+  return (numerator as number) / (denominator as number);
+}
+
+function sumWherePayablePositive(args: {
+  payableAuEqOz: Array<number | null>;
+  sourceUSD: Array<number | null>;
+  tp: number;
+  masterN: number;
+}): { sumPayable: number; sumSource: number; payableCount: number } | null {
+  let sumPayable = 0;
+  let sumSource = 0;
+  let payableCount = 0;
+  for (let t = args.tp; t <= args.masterN; t += 1) {
+    const payable = toFiniteOrNull(args.payableAuEqOz[t]);
+    if (payable === null) continue;
+    if (payable <= 0) continue;
+    const source = toFiniteOrNull(args.sourceUSD[t]);
+    if (source === null) {
+      return null;
+    }
+    sumPayable += payable;
+    sumSource += source;
+    payableCount += 1;
+  }
+  return { sumPayable, sumSource, payableCount };
+}
+
 
 function sumComponentsAtIndex(components: Array<number | null>): number | null {
   let sum = 0;
@@ -1070,7 +1101,12 @@ type SnapshotDiagnostics = {
         inputs: Record<string, unknown>;
         intermediates: Record<string, unknown>;
         missingInputs: string[];
-        output: { value: number | null };
+        output: {
+          value: number | null;
+          computedValuePreview?: number | null;
+          storedValue?: number | null;
+          nullReason?: string | null;
+        };
       }>;
     };
   };
@@ -2019,7 +2055,140 @@ export async function runCorporateSnapshotPipeline(args: {
       paybackRealUseInitialCapex: true,
       paybackApproxAsRatio: true,
     }, { debug: true });
-    const corporateLista3 = corporateLista3Result.metrics;
+    const discountFactors_toToday = Array.from(
+      { length: aggregationEffective.corporateMasterN + 1 },
+      (_, t) => 1 / ((1 + input.discountRate) ** t),
+    );
+
+    const computeAiscLom = (): { value: number | null; nullReason: string | null } => {
+      if (tp_main === null || tp_main > aggregationEffective.corporateMasterN) {
+        return { value: null, nullReason: 'domain rule: tp_main invalid for production window' };
+      }
+      const sustainingVsPayable = sumWherePayablePositive({
+        payableAuEqOz: aggregationEffective.payableAuEqOz_total,
+        sourceUSD: aggregationEffective.sustainingCostUSD_total,
+        tp: tp_main,
+        masterN: aggregationEffective.corporateMasterN,
+      });
+      if (sustainingVsPayable === null) {
+        return { value: null, nullReason: 'domain rule: sustainingCostUSD missing where payableAuEqOz>0' };
+      }
+      if (sustainingVsPayable.sumPayable <= 0) {
+        return { value: null, nullReason: 'domain rule: ΣpayableAuEqOz==0 for t>=tp' };
+      }
+      return { value: sustainingVsPayable.sumSource / sustainingVsPayable.sumPayable, nullReason: null };
+    };
+
+    const computeBreakEven = (): { value: number | null; nullReason: string | null } => {
+      const aisc = computeAiscLom();
+      if (aisc.value === null || tp_main === null) {
+        return { value: null, nullReason: aisc.nullReason };
+      }
+      const capexTotal = sumStrict(aggregationEffective.capexUSD_total.slice(0, aggregationEffective.corporateMasterN + 1));
+      if (capexTotal === null) {
+        return { value: null, nullReason: 'domain rule: capexUSD_total contains non-finite values' };
+      }
+      const sustainingVsPayable = sumWherePayablePositive({
+        payableAuEqOz: aggregationEffective.payableAuEqOz_total,
+        sourceUSD: aggregationEffective.sustainingCostUSD_total,
+        tp: tp_main,
+        masterN: aggregationEffective.corporateMasterN,
+      });
+      if (sustainingVsPayable === null || sustainingVsPayable.sumPayable <= 0) {
+        return { value: null, nullReason: 'domain rule: ΣpayableAuEqOz==0 for t>=tp' };
+      }
+      return {
+        value: (capexTotal + sustainingVsPayable.sumSource) / sustainingVsPayable.sumPayable,
+        nullReason: null,
+      };
+    };
+
+    const computeCapexPerAnnual = (): { value: number | null; nullReason: string | null } => {
+      if (tp_main === null || tp_main > aggregationEffective.corporateMasterN) {
+        return { value: null, nullReason: 'domain rule: tp_main invalid for production window' };
+      }
+      if (!Number.isFinite(initialCapexUSD_main)) {
+        return { value: null, nullReason: 'domain rule: Initial_CAPEX_USD missing' };
+      }
+      let sumPayable = 0;
+      let lom = 0;
+      for (let t = tp_main; t <= aggregationEffective.corporateMasterN; t += 1) {
+        const payable = toFiniteOrNull(aggregationEffective.payableAuEqOz_total[t]);
+        if (payable === null || payable <= 0) continue;
+        sumPayable += payable;
+        lom += 1;
+      }
+      if (lom <= 0) return { value: null, nullReason: 'domain rule: LOM==0 (no payableAuEqOz>0 for t>=tp)' };
+      const annualAuEq = sumPayable / lom;
+      const ratio = safeRatio(Math.abs(initialCapexUSD_main as number), annualAuEq);
+      return ratio === null
+        ? { value: null, nullReason: 'domain rule: annual AuEq denominator is 0' }
+        : { value: ratio, nullReason: null };
+    };
+
+    const computeAvgEbitRoce = (): { value: number | null; nullReason: string | null } => {
+      if (tp_main === null || tp_main > aggregationEffective.corporateMasterN) {
+        return { value: null, nullReason: 'domain rule: tp_main invalid for production window' };
+      }
+      if (!Number.isFinite(initialCapexUSD_main)) {
+        return { value: null, nullReason: 'domain rule: Initial_CAPEX_USD missing' };
+      }
+      const ebitFinite: number[] = [];
+      for (let t = tp_main; t <= aggregationEffective.corporateMasterN; t += 1) {
+        const ebit = toFiniteOrNull(snapshotSeries.ebitUSD[t]);
+        if (ebit !== null) ebitFinite.push(ebit);
+      }
+      if (ebitFinite.length < 1) {
+        return { value: null, nullReason: 'domain rule: missing finite EBIT in tp..masterN' };
+      }
+      const avgEbit = ebitFinite.reduce((sum, value) => sum + value, 0) / ebitFinite.length;
+      const ratio = safeRatio(avgEbit, Math.abs(initialCapexUSD_main as number));
+      return ratio === null
+        ? { value: null, nullReason: 'domain rule: Initial_CAPEX_USD denominator is 0' }
+        : { value: ratio, nullReason: null };
+    };
+
+    const computeDiscountedEbitRoce = (): { value: number | null; nullReason: string | null } => {
+      if (tp_main === null || tp_main > aggregationEffective.corporateMasterN) {
+        return { value: null, nullReason: 'domain rule: tp_main invalid for production window' };
+      }
+      if (!Number.isFinite(initialCapexUSD_main)) {
+        return { value: null, nullReason: 'domain rule: Initial_CAPEX_USD missing' };
+      }
+      let discountedSum = 0;
+      let count = 0;
+      for (let t = tp_main; t <= aggregationEffective.corporateMasterN; t += 1) {
+        const ebit = toFiniteOrNull(snapshotSeries.ebitUSD[t]);
+        const df = toFiniteOrNull(discountFactors_toToday[t]);
+        if (ebit === null || df === null) continue;
+        discountedSum += ebit * df;
+        count += 1;
+      }
+      if (count < 1) {
+        return { value: null, nullReason: 'domain rule: missing finite EBIT*discountFactor in tp..masterN' };
+      }
+      const ratio = safeRatio(discountedSum, Math.abs(initialCapexUSD_main as number));
+      return ratio === null
+        ? { value: null, nullReason: 'domain rule: Initial_CAPEX_USD denominator is 0' }
+        : { value: ratio, nullReason: null };
+    };
+
+    const additionalLista3ByMetric = {
+      AISC_LOM: computeAiscLom(),
+      BreakEven_AuEq: computeBreakEven(),
+      CAPEX_per_Annual_AuEq: computeCapexPerAnnual(),
+      LOM_avg_EBIT_ROCE: computeAvgEbitRoce(),
+      LOM_discounted_EBIT_ROCE: computeDiscountedEbitRoce(),
+    };
+
+    const corporateLista3 = {
+      ...corporateLista3Result.metrics,
+      AISC_LOM: additionalLista3ByMetric.AISC_LOM.value,
+      BreakEven_AuEq: additionalLista3ByMetric.BreakEven_AuEq.value,
+      CAPEX_per_Annual_AuEq: additionalLista3ByMetric.CAPEX_per_Annual_AuEq.value,
+      LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.value,
+      LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.value,
+    };
 
     const corporateLista3Debug = {
       ...corporateLista3Result.debug,
@@ -2055,7 +2224,12 @@ export async function runCorporateSnapshotPipeline(args: {
       inputs: Record<string, unknown>;
       intermediates: Record<string, unknown>;
       missingInputs: string[];
-      output: { value: number | null };
+      output: {
+        value: number | null;
+        computedValuePreview?: number | null;
+        storedValue?: number | null;
+        nullReason?: string | null;
+      };
     } | undefined>;
 
     const ensureMetricPayload = (metricKey: string) => {
@@ -2074,7 +2248,12 @@ export async function runCorporateSnapshotPipeline(args: {
         inputs: Record<string, unknown>;
         intermediates: Record<string, unknown>;
         missingInputs: string[];
-        output: { value: number | null };
+        output: {
+          value: number | null;
+          computedValuePreview?: number | null;
+          storedValue?: number | null;
+          nullReason?: string | null;
+        };
       };
     };
 
@@ -2117,6 +2296,47 @@ export async function runCorporateSnapshotPipeline(args: {
       };
       const computedMissing = requiredInputs.filter((inputKey) => !hasRequiredInputValue(commonInputValues[inputKey]));
       payload.missingInputs = [...new Set([...(Array.isArray(payload.missingInputs) ? payload.missingInputs : []), ...computedMissing])];
+    });
+
+    const previewValues: Record<string, number | null> = {
+      AISC_LOM: additionalLista3ByMetric.AISC_LOM.value,
+      BreakEven_AuEq: additionalLista3ByMetric.BreakEven_AuEq.value,
+      CAPEX_per_Annual_AuEq: additionalLista3ByMetric.CAPEX_per_Annual_AuEq.value,
+      LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.value,
+      LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.value,
+    };
+
+    const reasonByMetric: Record<string, string | null> = {
+      AISC_LOM: additionalLista3ByMetric.AISC_LOM.nullReason,
+      BreakEven_AuEq: additionalLista3ByMetric.BreakEven_AuEq.nullReason,
+      CAPEX_per_Annual_AuEq: additionalLista3ByMetric.CAPEX_per_Annual_AuEq.nullReason,
+      LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.nullReason,
+      LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.nullReason,
+    };
+
+    Object.keys(previewValues).forEach((metricKey) => {
+      const payload = ensureMetricPayload(metricKey);
+      const storedValue = (corporateLista3 as Record<string, unknown>)[metricKey];
+      const finiteStoredValue = typeof storedValue === 'number' && Number.isFinite(storedValue)
+        ? storedValue
+        : null;
+      const computedValuePreview = previewValues[metricKey];
+      payload.output.computedValuePreview = computedValuePreview;
+      payload.output.storedValue = finiteStoredValue;
+      payload.output.value = finiteStoredValue;
+
+      if (finiteStoredValue === null) {
+        const hasKey = Object.prototype.hasOwnProperty.call(corporateLista3, metricKey);
+        if (!hasKey) {
+          payload.output.nullReason = 'not computed / key missing';
+        } else if (computedValuePreview !== null && !Number.isFinite(computedValuePreview)) {
+          payload.output.nullReason = 'NaN/Infinity guarded';
+        } else {
+          payload.output.nullReason = reasonByMetric[metricKey] ?? 'domain rule: metric returned null';
+        }
+      } else {
+        payload.output.nullReason = null;
+      }
     });
 
     diagnostics.meta.corporateLista3Debug = corporateLista3Debug;

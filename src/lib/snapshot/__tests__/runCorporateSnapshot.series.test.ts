@@ -710,5 +710,15 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
     lista3?.Payback_real_years,
     lista3?.ROI_10Y_pct,
     lista3?.IRR,
+    lista3?.AISC_LOM,
+    lista3?.BreakEven_AuEq,
+    lista3?.CAPEX_per_Annual_AuEq,
+    lista3?.LOM_avg_EBIT_ROCE,
+    lista3?.LOM_discounted_EBIT_ROCE,
   ].some((value) => value !== null));
+
+  const debugMetric = result.diagnostics.meta.corporateLista3Debug?.perMetric?.AISC_LOM;
+  assert.ok(debugMetric);
+  assert.equal(typeof debugMetric?.output?.computedValuePreview !== 'undefined', true);
+  assert.equal(typeof debugMetric?.output?.storedValue !== 'undefined', true);
 });
