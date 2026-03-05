@@ -3,6 +3,11 @@ export type Lista3Metrics = {
   Payback_real_years: number | null;
   ROI_10Y_pct: number | null;
   IRR: number | null;
+  AISC_LOM?: number | null;
+  BreakEven_AuEq?: number | null;
+  CAPEX_per_Annual_AuEq?: number | null;
+  LOM_avg_EBIT_ROCE?: number | null;
+  LOM_discounted_EBIT_ROCE?: number | null;
 };
 
 export type Lista3DebugMetric = {
@@ -11,7 +16,12 @@ export type Lista3DebugMetric = {
   inputs: Record<string, unknown>;
   intermediates: Record<string, unknown>;
   missingInputs: string[];
-  output: { value: number | null };
+  output: {
+    value: number | null;
+    computedValuePreview?: number | null;
+    storedValue?: number | null;
+    nullReason?: string | null;
+  };
 };
 
 export type Lista3DebugPayload = {
