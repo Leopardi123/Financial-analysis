@@ -3798,11 +3798,51 @@ Capital Available: ${availableLabel}`,
   const fcf = Array.isArray(aggregation.fcffUSD_total) ? aggregation.fcffUSD_total : [];
   const capex = Array.isArray(aggregation.capexUSD_total) ? aggregation.capexUSD_total : [];
   const nullCount = (arr: unknown[]) => arr.filter((value) => value === null).length;
+  const financing = (corporateSnapshotData.financing ?? {}) as Record<string, unknown>;
+  const sharesPostFinancing = typeof financing.shares_post_financing === "number" && Number.isFinite(financing.shares_post_financing)
+    ? financing.shares_post_financing
+    : null;
+  const cashT0 = typeof financing.cash_t0_post_TargetCurrency === "number" && Number.isFinite(financing.cash_t0_post_TargetCurrency)
+    ? financing.cash_t0_post_TargetCurrency
+    : null;
+  const debtT0 = typeof financing.debt_t0_post_TargetCurrency === "number" && Number.isFinite(financing.debt_t0_post_TargetCurrency)
+    ? financing.debt_t0_post_TargetCurrency
+    : null;
+  const dcfExCapex = typeof corporateSnapshotData.DCF_prodStart_exCapex_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_exCapex_TargetCurrency : null;
+  const dcfExCapexPerShare = typeof corporateSnapshotData.DCF_prodStart_exCapex_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_exCapex_perShare_TargetCurrency : null;
+  const netCash = cashT0 !== null && debtT0 !== null ? cashT0 - debtT0 : null;
+  const netCashPerShare = netCash !== null && sharesPostFinancing !== null && sharesPostFinancing > 0
+    ? netCash / sharesPostFinancing
+    : null;
+  const npvProdStartFromDcf = dcfExCapex !== null && netCash !== null ? dcfExCapex - netCash : null;
+  const npvProdStartPerShareFromDcf = dcfExCapexPerShare !== null && netCashPerShare !== null
+    ? dcfExCapexPerShare - netCashPerShare
+    : null;
+  const navProdStartFromDcf = npvProdStartFromDcf !== null && netCash !== null ? npvProdStartFromDcf + netCash : null;
+  const navProdStartPerShareFromDcf = npvProdStartPerShareFromDcf !== null && netCashPerShare !== null
+    ? npvProdStartPerShareFromDcf + netCashPerShare
+    : null;
   const list2Debug = {
     DCF_prodStart_present_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_present_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency : null,
     DCF_prodStart_present_perShare_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency : null,
-    DCF_prodStart_exCapex_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_exCapex_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_exCapex_TargetCurrency : null,
-    DCF_prodStart_exCapex_perShare_TargetCurrency: typeof corporateSnapshotData.DCF_prodStart_exCapex_perShare_TargetCurrency === "number" ? corporateSnapshotData.DCF_prodStart_exCapex_perShare_TargetCurrency : null,
+    DCF_prodStart_exCapex_TargetCurrency: dcfExCapex,
+    DCF_prodStart_exCapex_perShare_TargetCurrency: dcfExCapexPerShare,
+    relationNPVandDCF: {
+      note: "NPV_prodStart = DCF_prodStart_exCapex - NetCash_t0_post. NAV_prodStart = NPV_prodStart + NetCash_t0_post (= DCF_prodStart_exCapex).",
+      inputs: {
+        shares_post_financing: sharesPostFinancing,
+        cash_t0_post_TargetCurrency: cashT0,
+        debt_t0_post_TargetCurrency: debtT0,
+        netCash_t0_post_TargetCurrency: netCash,
+        netCash_t0_post_perShare_TargetCurrency: netCashPerShare,
+      },
+      derived: {
+        NPV_prodStart_from_DCF_TargetCurrency: npvProdStartFromDcf,
+        NPV_prodStart_perShare_from_DCF_TargetCurrency: npvProdStartPerShareFromDcf,
+        NAV_prodStart_from_DCF_TargetCurrency: navProdStartFromDcf,
+        NAV_prodStart_perShare_from_DCF_TargetCurrency: navProdStartPerShareFromDcf,
+      },
+    },
   };
   return {
     projectCount: diagnosticsMeta.projectCount ?? null,
