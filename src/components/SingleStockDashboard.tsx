@@ -2509,7 +2509,13 @@ Capital Available: ${availableLabel}`,
       : null;
 
     const makeJoined = (
-      metricKey: "NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare",
+      metricKey:
+        | "NPV_prodStart"
+        | "NPV_prodStart_perShare"
+        | "NAV_prodStart"
+        | "NAV_prodStart_perShare"
+        | "DCF_Target_discounted"
+        | "DCF_Target_discounted_perShare",
     ): string | null => {
       const parts: string[] = [];
       for (const marker of markers) {
@@ -2519,11 +2525,14 @@ Capital Available: ${availableLabel}`,
         const navProdStartPerShare = npvProdStartPerShare !== null && netCashPerShare !== null
           ? npvProdStartPerShare + netCashPerShare
           : null;
+        const dcfProdStartDiscountedPerShare = npvProdStartPerShare;
 
         const value = (() => {
           if (metricKey === "NPV_prodStart_perShare") return npvProdStartPerShare;
           if (metricKey === "NPV_prodStart") return npvProdStartPerShare !== null && sharesPf !== null ? npvProdStartPerShare * sharesPf : null;
           if (metricKey === "NAV_prodStart_perShare") return navProdStartPerShare;
+          if (metricKey === "DCF_Target_discounted_perShare") return dcfProdStartDiscountedPerShare;
+          if (metricKey === "DCF_Target_discounted") return dcfProdStartDiscountedPerShare !== null && sharesPf !== null ? dcfProdStartDiscountedPerShare * sharesPf : null;
           return navProdStartPerShare !== null && sharesPf !== null ? navProdStartPerShare * sharesPf : null;
         })();
 
@@ -2535,7 +2544,14 @@ Capital Available: ${availableLabel}`,
     };
 
     const result: Record<string, string> = {};
-    (["NPV_prodStart", "NPV_prodStart_perShare", "NAV_prodStart", "NAV_prodStart_perShare"] as const).forEach((key) => {
+    ([
+      "NPV_prodStart",
+      "NPV_prodStart_perShare",
+      "NAV_prodStart",
+      "NAV_prodStart_perShare",
+      "DCF_Target_discounted",
+      "DCF_Target_discounted_perShare",
+    ] as const).forEach((key) => {
       const joined = makeJoined(key);
       if (joined) {
         result[key] = joined;
@@ -2553,6 +2569,11 @@ Capital Available: ${availableLabel}`,
 
     return result;
   }, [corporateSnapshotData, debugEnabled, lockedTargetCurrency]);
+
+  const corporateAlwaysMarkerMetricKeys = useMemo(
+    () => new Set<string>(["DCF_Target_discounted", "DCF_Target_discounted_perShare"]),
+    [],
+  );
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
@@ -4145,9 +4166,9 @@ Capital Available: ${availableLabel}`,
                             <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                             <span className="compact-metric-dots" />
                             <span className="compact-metric-value">{
-                              value.value === null
-                              && sectionKey === "list2"
+                              sectionKey === "list2"
                               && corporateProdStartMarkerTextByKey[key]
+                              && (value.value === null || corporateAlwaysMarkerMetricKeys.has(key))
                                 ? corporateProdStartMarkerTextByKey[key]
                                 : formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency)
                             }</span>
