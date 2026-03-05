@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
+import { computeEarliestMilestoneDcfPresentScalars, runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
 
 async function loadFixture(): Promise<Record<string, unknown>> {
   const fixturePath = path.resolve('scripts/fixtures/snapshot-requests/abra_minimal.json');
@@ -677,4 +677,20 @@ test('corporate prod-start markers apply incremental initial capex windows to NP
     assert.notEqual(netCash0, null);
     assert.ok(Math.abs(nav - (npv + (netCash0 as number))) <= 0.01);
   }
+});
+
+
+test('corporate DCF produktionsstart nuvärde scalar uses earliest milestone only and per-share uses shares_post_financing', () => {
+  const result = computeEarliestMilestoneDcfPresentScalars({
+    milestones: [
+      { milestoneYear: 2031, tp_k: 6, dcfProdStartExCapex_TargetCurrency: 999 },
+      { milestoneYear: 2029, tp_k: 4, dcfProdStartExCapex_TargetCurrency: 100 },
+    ],
+    discountRate: 0.10,
+    shares_post_financing: 20,
+  });
+
+  const expectedPresent = 100 * (1 / (1.1 ** 4));
+  assert.ok(Math.abs((result.DCF_prodStart_present_TargetCurrency as number) - expectedPresent) <= 1e-12);
+  assert.ok(Math.abs((result.DCF_prodStart_present_perShare_TargetCurrency as number) - (expectedPresent / 20)) <= 1e-12);
 });

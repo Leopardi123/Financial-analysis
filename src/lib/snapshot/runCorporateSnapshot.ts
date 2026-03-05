@@ -914,6 +914,58 @@ function discountedSum(values: Array<number | null>, r: number): number | null {
   }
   return has ? sum : null;
 }
+
+
+export function computeEarliestMilestoneDcfPresentScalars(args: {
+  milestones: Array<{ milestoneYear: number; tp_k: number; dcfProdStartExCapex_TargetCurrency: number | null }>;
+  discountRate: number;
+  shares_post_financing: number | null;
+}): {
+  DCF_prodStart_present_TargetCurrency: number | null;
+  DCF_prodStart_present_perShare_TargetCurrency: number | null;
+} {
+  const earliestMilestone = [...args.milestones]
+    .filter((milestone) => Number.isInteger(milestone.milestoneYear) && Number.isInteger(milestone.tp_k) && milestone.tp_k >= 0)
+    .sort((left, right) => left.milestoneYear - right.milestoneYear)[0] ?? null;
+
+  if (!earliestMilestone) {
+    return {
+      DCF_prodStart_present_TargetCurrency: null,
+      DCF_prodStart_present_perShare_TargetCurrency: null,
+    };
+  }
+
+  if (!Number.isFinite(args.discountRate) || args.discountRate <= 0) {
+    return {
+      DCF_prodStart_present_TargetCurrency: null,
+      DCF_prodStart_present_perShare_TargetCurrency: null,
+    };
+  }
+
+  const dcfProdStartExCapex =
+    earliestMilestone.dcfProdStartExCapex_TargetCurrency !== null
+    && Number.isFinite(earliestMilestone.dcfProdStartExCapex_TargetCurrency)
+      ? earliestMilestone.dcfProdStartExCapex_TargetCurrency
+      : null;
+  const dfToToday = 1 / ((1 + args.discountRate) ** earliestMilestone.tp_k);
+  const dcfProdStartPresent =
+    dcfProdStartExCapex !== null && Number.isFinite(dfToToday)
+      ? dcfProdStartExCapex * dfToToday
+      : null;
+
+  const perShare =
+    dcfProdStartPresent !== null
+    && args.shares_post_financing !== null
+    && Number.isFinite(args.shares_post_financing)
+    && args.shares_post_financing > 0
+      ? dcfProdStartPresent / args.shares_post_financing
+      : null;
+
+  return {
+    DCF_prodStart_present_TargetCurrency: dcfProdStartPresent,
+    DCF_prodStart_present_perShare_TargetCurrency: perShare,
+  };
+}
 type SnapshotDiagnostics = {
   warnings: string[];
   errors: string[];
@@ -2019,6 +2071,21 @@ export async function runCorporateSnapshotPipeline(args: {
           }];
         }),
     );
+
+    const earliestMilestonePresentScalars = computeEarliestMilestoneDcfPresentScalars({
+      milestones: milestonePairs.map(({ year, tp }) => {
+        const metrics = lista2MetricsByTp[tp];
+        return {
+          milestoneYear: year,
+          tp_k: tp,
+          dcfProdStartExCapex_TargetCurrency: metrics?.DCF_prodStart_exCapex_TargetCurrency ?? null,
+        };
+      }),
+      discountRate: input.discountRate,
+      shares_post_financing: shares_post_financing_fd_effective,
+    });
+    snapshot.DCF_prodStart_present_TargetCurrency = earliestMilestonePresentScalars.DCF_prodStart_present_TargetCurrency;
+    snapshot.DCF_prodStart_present_perShare_TargetCurrency = earliestMilestonePresentScalars.DCF_prodStart_present_perShare_TargetCurrency;
 
     if (!diagnostics.meta.corporateTotalsDebug) {
       diagnostics.meta.corporateTotalsDebug = {
