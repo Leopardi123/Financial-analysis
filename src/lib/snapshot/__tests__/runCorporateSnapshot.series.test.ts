@@ -523,9 +523,10 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
 });
 
-test('corporate modeled milestones exclude already-producing current-year projects', async () => {
+test('corporate modeled milestones exclude tp=0 projects and include future tp>0 projects', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;
+  const futureProject = JSON.parse(JSON.stringify(projects[0])) as Record<string, unknown>;
   const firstProjectRaw = projects[0].rawJson as Record<string, unknown>;
   const firstTime = firstProjectRaw.time as Record<string, unknown>;
   const corporateNowYear = (firstTime.productionStartYear as number) - (firstTime.productionStartPeriod as number);
@@ -547,14 +548,13 @@ test('corporate modeled milestones exclude already-producing current-year projec
     payableByMetal[metal] = nextSeries;
   }
 
-  const futureProject = JSON.parse(JSON.stringify(projects[0])) as Record<string, unknown>;
   futureProject.projectId = 'ABRA_FUTURE_MILESTONE';
   const futureRaw = futureProject.rawJson as Record<string, unknown>;
   (futureRaw.meta as Record<string, unknown>).projectId = 'ABRA_FUTURE_MILESTONE';
   (futureRaw.meta as Record<string, unknown>).projectName = 'Abra Future Milestone';
   const futureTime = futureRaw.time as Record<string, unknown>;
-  futureTime.productionStartPeriod = 0;
-  futureTime.productionStartYear = corporateNowYear + 3;
+  futureTime.productionStartPeriod = 2;
+  futureTime.productionStartYear = corporateNowYear + 2;
   projects.push(futureProject);
 
   const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
@@ -563,5 +563,5 @@ test('corporate modeled milestones exclude already-producing current-year projec
 
   const markers = result.snapshot.modeledValuationTimeline?.markers ?? [];
   assert.equal(markers.some((marker) => marker.yearLabelUsed === String(corporateNowYear)), false);
-  assert.equal(markers.some((marker) => marker.yearLabelUsed === String(corporateNowYear + 3)), true);
+  assert.equal(markers.some((marker) => marker.yearLabelUsed === String(corporateNowYear + 2)), true);
 });
