@@ -194,14 +194,37 @@ type ProdStartDebugData = {
   dcfProdStartPerShare: number | null;
 };
 
+type YearlyMetricValue = {
+  year: string;
+  value: number;
+};
+
 function renderProdStartDebugWindow(args: {
   data: ProdStartDebugData;
   targetCurrency: string;
+  yearlyValuesByKey?: Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
 }): ReactNode {
   const {
     data,
     targetCurrency,
+    yearlyValuesByKey,
   } = args;
+  const formatYearlyMoney = (rows: YearlyMetricValue[] | undefined): string | null => {
+    if (!rows || rows.length === 0) return null;
+    return rows.map((row) => `${row.year}: ${formatMetricValue({ value: row.value, reason: null }, "money", targetCurrency)}`).join(", ");
+  };
+  const formatMoneyWithYearlyFallback = (value: number | null, rows: YearlyMetricValue[] | undefined): string => {
+    if (value !== null) return formatMetricValue({ value, reason: null }, "money", targetCurrency);
+    const yearly = formatYearlyMoney(rows);
+    return yearly ?? formatMetricValue({ value: null, reason: null }, "money", targetCurrency);
+  };
+  const deriveYearlyDifference = (left: YearlyMetricValue[] | undefined, right: YearlyMetricValue[] | undefined): YearlyMetricValue[] => {
+    if (!left || !right) return [];
+    const rightByYear = new Map(right.map((row) => [row.year, row.value]));
+    return left
+      .filter((row) => rightByYear.has(row.year))
+      .map((row) => ({ year: row.year, value: row.value - (rightByYear.get(row.year) as number) }));
+  };
   const netCashContributionToday =
     data.navToday !== null && data.npvToday !== null
       ? data.navToday - data.npvToday
@@ -243,6 +266,11 @@ function renderProdStartDebugWindow(args: {
     impliedInitialCapex !== null && netCashContribution !== null
       ? impliedInitialCapex - netCashContribution
       : null;
+
+  const yearlyImpliedInitialCapex = deriveYearlyDifference(yearlyValuesByKey?.DCF_Target, yearlyValuesByKey?.NPV_prodStart);
+  const yearlyNetCashContribution = deriveYearlyDifference(yearlyValuesByKey?.NAV_prodStart, yearlyValuesByKey?.NPV_prodStart);
+  const yearlyDcfMinusNav = deriveYearlyDifference(yearlyValuesByKey?.DCF_Target, yearlyValuesByKey?.NAV_prodStart);
+  const yearlyDcfMinusNavIdentity = deriveYearlyDifference(yearlyImpliedInitialCapex, yearlyNetCashContribution);
 
   return (
     <details style={{ marginTop: 10 }}>
@@ -294,22 +322,22 @@ function renderProdStartDebugWindow(args: {
         <div>
           <strong>Insatta värden ({targetCurrency}):</strong>
           <br />
-          DCF produktionsstart = {formatMetricValue({ value: data.dcfProdStart, reason: null }, "money", targetCurrency)}
+          DCF produktionsstart = {formatMoneyWithYearlyFallback(data.dcfProdStart, yearlyValuesByKey?.DCF_Target)}
           <br />
-          NPV prod start = {formatMetricValue({ value: data.npvProdStart, reason: null }, "money", targetCurrency)}
+          NPV prod start = {formatMoneyWithYearlyFallback(data.npvProdStart, yearlyValuesByKey?.NPV_prodStart)}
           <br />
-          NAV prod start = {formatMetricValue({ value: data.navProdStart, reason: null }, "money", targetCurrency)}
+          NAV prod start = {formatMoneyWithYearlyFallback(data.navProdStart, yearlyValuesByKey?.NAV_prodStart)}
           <br />
-          Implied Initial CAPEX = DCF − NPV = {formatMetricValue({ value: impliedInitialCapex, reason: null }, "money", targetCurrency)}
+          Implied Initial CAPEX = DCF − NPV = {formatMoneyWithYearlyFallback(impliedInitialCapex, yearlyImpliedInitialCapex)}
           <br />
-          Net cash-bidrag (kassa₀ − skuld₀) = NAV − NPV = {formatMetricValue({ value: netCashContribution, reason: null }, "money", targetCurrency)}
+          Net cash-bidrag (kassa₀ − skuld₀) = NAV − NPV = {formatMoneyWithYearlyFallback(netCashContribution, yearlyNetCashContribution)}
         </div>
         <div>
           <strong>Likhetskontroll (DCF vs NAV):</strong>
           <br />
-          DCF − NAV = {formatMetricValue({ value: dcfMinusNav, reason: null }, "money", targetCurrency)}
+          DCF − NAV = {formatMoneyWithYearlyFallback(dcfMinusNav, yearlyDcfMinusNav)}
           <br />
-          Samma differens via beståndsdelar = Initial CAPEX − net cash-bidrag = {formatMetricValue({ value: dcfMinusNavIdentity, reason: null }, "money", targetCurrency)}
+          Samma differens via beståndsdelar = Initial CAPEX − net cash-bidrag = {formatMoneyWithYearlyFallback(dcfMinusNavIdentity, yearlyDcfMinusNavIdentity)}
           <br />
           {dcfMinusNav !== null && Math.abs(dcfMinusNav) < 1e-6
             ? "Slutsats: DCF och NAV är numeriskt lika i denna snapshot."
@@ -2475,14 +2503,14 @@ Capital Available: ${availableLabel}`,
     });
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
-  const corporateProdStartMarkerTextByKey = useMemo(() => {
-    if (!corporateSnapshotData) return {} as Record<string, string>;
+  const corporateProdStartMarkerValuesByKey = useMemo(() => {
+    if (!corporateSnapshotData) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
 
     let yearsByPeriod: number[];
     try {
       yearsByPeriod = requireYearsByPeriod(corporateSnapshotData.series);
     } catch {
-      return {} as Record<string, string>;
+      return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
     }
     const timeline = corporateSnapshotData.modeledValuationTimeline as {
       markers?: Array<{
@@ -2492,7 +2520,7 @@ Capital Available: ${availableLabel}`,
       }>;
     } | null | undefined;
     const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
-    if (markers.length < 2) return {} as Record<string, string>;
+    if (markers.length < 2) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
 
     const financing = (corporateSnapshotData?.financing ?? {}) as Record<string, unknown>;
     const sharesPf = typeof financing.shares_post_financing === "number" && Number.isFinite(financing.shares_post_financing) && financing.shares_post_financing > 0
@@ -2508,7 +2536,7 @@ Capital Available: ${availableLabel}`,
       ? (cashT0 - debtT0) / sharesPf
       : null;
 
-    const makeJoined = (
+    const buildValues = (
       metricKey:
         | "NPV_prodStart"
         | "NPV_prodStart_perShare"
@@ -2516,8 +2544,8 @@ Capital Available: ${availableLabel}`,
         | "NAV_prodStart_perShare"
         | "DCF_Target"
         | "DCF_perShare",
-    ): string | null => {
-      const parts: string[] = [];
+    ): YearlyMetricValue[] => {
+      const values: YearlyMetricValue[] = [];
       for (const marker of markers) {
         const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
         const year = yearLabel(yearsByPeriod, tIndex);
@@ -2537,13 +2565,12 @@ Capital Available: ${availableLabel}`,
         })();
 
         if (value === null) continue;
-        const kind = metricKey.includes("perShare") ? "money" as const : "money" as const;
-        parts.push(`${year}: ${formatMetricValue({ value, reason: null }, kind, lockedTargetCurrency)}`);
+        values.push({ year, value });
       }
-      return parts.length > 0 ? parts.join(", ") : null;
+      return values;
     };
 
-    const result: Record<string, string> = {};
+    const result: Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>> = {};
     ([
       "NPV_prodStart",
       "NPV_prodStart_perShare",
@@ -2552,23 +2579,38 @@ Capital Available: ${availableLabel}`,
       "DCF_Target",
       "DCF_perShare",
     ] as const).forEach((key) => {
-      const joined = makeJoined(key);
-      if (joined) {
-        result[key] = joined;
+      const values = buildValues(key);
+      if (values.length > 0) {
+        result[key] = values;
       }
     });
 
     if (debugEnabled) {
+      const formatted = Object.fromEntries(
+        Object.entries(result).map(([metricKey, values]) => [
+          metricKey,
+          (values ?? []).map((row) => `${row.year}: ${formatMetricValue({ value: row.value, reason: null }, "money", lockedTargetCurrency)}`).join(", "),
+        ]),
+      );
       console.debug("[corporate-prod-start-markers]", {
         markerCount: markers.length,
         sharesPf,
         netCashPerShare,
-        formatted: result,
+        formatted,
       });
     }
 
     return result;
   }, [corporateSnapshotData, debugEnabled, lockedTargetCurrency]);
+
+  const corporateProdStartMarkerTextByKey = useMemo(() => {
+    return Object.fromEntries(
+      Object.entries(corporateProdStartMarkerValuesByKey).map(([metricKey, rows]) => [
+        metricKey,
+        (rows ?? []).map((row) => `${row.year}: ${formatMetricValue({ value: row.value, reason: null }, "money", lockedTargetCurrency)}`).join(", "),
+      ]),
+    ) as Record<string, string>;
+  }, [corporateProdStartMarkerValuesByKey, lockedTargetCurrency]);
 
   const corporateAlwaysMarkerMetricKeys = useMemo(
     () => new Set<string>(["DCF_Target", "DCF_perShare"]),
@@ -4191,6 +4233,7 @@ Capital Available: ${availableLabel}`,
                           dcfProdStartPerShare: metrics.DCF_perShare?.value ?? null,
                         },
                         targetCurrency: lockedTargetCurrency,
+                        yearlyValuesByKey: corporateProdStartMarkerValuesByKey,
                       })}
                     </details>
                   ))}
