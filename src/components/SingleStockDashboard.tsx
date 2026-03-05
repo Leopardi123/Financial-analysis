@@ -106,6 +106,19 @@ function formatIrrMetricValue(value: MetricValue): string {
   return `${(value.value * 100).toFixed(1)} %`;
 }
 
+function formatDebugNumericValue(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value.toLocaleString("en-US", { maximumFractionDigits: 6 });
+  }
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => formatDebugNumericValue(entry)).join(", ")}]`;
+  }
+  return String(value);
+}
+
 function requireYearsByPeriod(series: unknown): number[] {
   const y = (series as { yearsByPeriod?: unknown } | null | undefined)?.yearsByPeriod;
   if (!Array.isArray(y) || y.length === 0 || !y.every((v: unknown) => Number.isFinite(v))) {
@@ -2560,6 +2573,60 @@ Capital Available: ${availableLabel}`,
     };
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  const corporateLista3Debug = useMemo(() => {
+    const corporateSection = ((corporateSnapshotData?.corporate ?? null) as {
+      lista3Debug?: {
+        tp_main: number | null;
+        initialCapexUSD_main: number | null;
+        shares_post_financing: number | null;
+        series?: {
+          fcfUSD_total?: Array<number | null>;
+          capexUSD_total?: Array<number | null>;
+        };
+        perMetric?: Record<string, {
+          formula?: string;
+          inputs?: Record<string, unknown>;
+          intermediates?: Record<string, unknown>;
+          missingInputs?: string[];
+          output?: { value?: number | null };
+        }>;
+      };
+    } | null);
+    return corporateSection?.lista3Debug ?? null;
+  }, [corporateSnapshotData]);
+
+  const corporateLista3DebugDisplayOrder = [
+    "AISC_LOM",
+    "BreakEven_AuEq",
+    "CAPEX_per_Annual_AuEq",
+    "Payback_approx",
+    "Payback_real",
+    "IRR",
+    "ROI_10Y",
+    "LOM_avg_EBIT_ROCE",
+    "LOM_discounted_EBIT_ROCE",
+    "Corporate_ROIC",
+    "LOM_avg_NOPAT_ROIC",
+    "Kapitalavkastning_LOM",
+    "Kapitalavkastning_per_Year",
+  ] as const;
+
+  const corporateLista3DebugFormulaByMetric: Record<string, string> = {
+    AISC_LOM: "Σ sustainingCostUSD where payableAuEqOz>0 / Σ payableAuEqOz where >0",
+    BreakEven_AuEq: "(Σ CAPEX + Σ sustainingCostUSD where payableAuEqOz>0) / Σ payableAuEqOz where >0",
+    CAPEX_per_Annual_AuEq: "|Initial_CAPEX_USD| / (AuEq_LOM / LOM)",
+    Payback_approx: "|Initial_CAPEX_USD| / AnnualAvg_FCFF_USD",
+    Payback_real: "cumulative FCFF from tp until payback; linear interpolation",
+    IRR: "IRR(fcfUSD_total[0..masterN])",
+    ROI_10Y: "Σ FCFF(t=tp..tp+9) / |Initial_CAPEX_USD|",
+    LOM_avg_EBIT_ROCE: "Average EBIT(tp..masterN) / |Initial_CAPEX_USD|",
+    LOM_discounted_EBIT_ROCE: "Σ EBIT(t)*df_now(t) / |Initial_CAPEX_USD|",
+    Corporate_ROIC: "Corporate scope input (not provided in current dataset)",
+    LOM_avg_NOPAT_ROIC: "Average NOPAT(tp..masterN) / |Initial_CAPEX_USD|",
+    Kapitalavkastning_LOM: "Σ FCFF(tp..masterN) / |Initial_CAPEX_USD|",
+    Kapitalavkastning_per_Year: "(Σ FCFF(tp..masterN) / |Initial_CAPEX_USD|) / LOM",
+  };
+
   const corporateProdStartMarkerValuesByKey = useMemo(() => {
     if (!corporateSnapshotData) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
 
@@ -4349,6 +4416,49 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
+                      {sectionKey === "list3" && (
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug (Lista 3)</summary>
+                          <div style={{ marginTop: 8, fontSize: 12, display: "grid", gap: 8 }}>
+                            <div><strong>tp_main:</strong> {formatDebugNumericValue(corporateLista3Debug?.tp_main ?? null)}</div>
+                            <div><strong>initialCapexUSD_main:</strong> {formatDebugNumericValue(corporateLista3Debug?.initialCapexUSD_main ?? null)}</div>
+                            <div><strong>shares_post_financing:</strong> {formatDebugNumericValue(corporateLista3Debug?.shares_post_financing ?? null)}</div>
+                            <div><strong>series.fcfUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.fcfUSD_total ?? null)}</div>
+                            <div><strong>series.capexUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.capexUSD_total ?? null)}</div>
+                            {corporateLista3DebugDisplayOrder.map((metricKey) => {
+                              const metricValue = metrics[metricKey] ?? { value: null, reason: null };
+                              const payload = corporateLista3Debug?.perMetric?.[metricKey];
+                              const inputs = payload?.inputs ?? {};
+                              const intermediates = payload?.intermediates ?? {};
+                              const missingInputs = Array.isArray(payload?.missingInputs) ? payload?.missingInputs : [];
+                              return (
+                                <div key={`corp-list3-debug-${metricKey}`} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6 }}>
+                                  <div><strong>{resolveProjectMetricLabel(metricKey, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</strong></div>
+                                  <div>Output value: {formatDebugNumericValue(payload?.output?.value ?? metricValue.value ?? null)}</div>
+                                  <div>Formula: {payload?.formula ?? corporateLista3DebugFormulaByMetric[metricKey] ?? "n/a"}</div>
+                                  <div>Inputs:</div>
+                                  <div style={{ paddingLeft: 12 }}>
+                                    {Object.keys(inputs).length > 0
+                                      ? Object.entries(inputs).map(([inputKey, inputValue]) => (
+                                        <div key={`corp-list3-debug-${metricKey}-input-${inputKey}`}>{inputKey}: {formatDebugNumericValue(inputValue)}</div>
+                                      ))
+                                      : <div>none</div>}
+                                  </div>
+                                  <div>Intermediates:</div>
+                                  <div style={{ paddingLeft: 12 }}>
+                                    {Object.keys(intermediates).length > 0
+                                      ? Object.entries(intermediates).map(([intermediateKey, intermediateValue]) => (
+                                        <div key={`corp-list3-debug-${metricKey}-intermediate-${intermediateKey}`}>{intermediateKey}: {formatDebugNumericValue(intermediateValue)}</div>
+                                      ))
+                                      : <div>none</div>}
+                                  </div>
+                                  <div>Missing inputs: {missingInputs.length > 0 ? missingInputs.join(", ") : "none"}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      )}
                       {sectionKey === "list2" && renderProdStartDebugWindow({
                         capexWindows: (() => {
                           const diagnosticsMeta = (corporateDiagnostics?.meta ?? null) as {
@@ -4585,6 +4695,49 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
+                      {sectionKey === "list3" && (
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug (Lista 3)</summary>
+                          <div style={{ marginTop: 8, fontSize: 12, display: "grid", gap: 8 }}>
+                            <div><strong>tp_main:</strong> {formatDebugNumericValue(corporateLista3Debug?.tp_main ?? null)}</div>
+                            <div><strong>initialCapexUSD_main:</strong> {formatDebugNumericValue(corporateLista3Debug?.initialCapexUSD_main ?? null)}</div>
+                            <div><strong>shares_post_financing:</strong> {formatDebugNumericValue(corporateLista3Debug?.shares_post_financing ?? null)}</div>
+                            <div><strong>series.fcfUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.fcfUSD_total ?? null)}</div>
+                            <div><strong>series.capexUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.capexUSD_total ?? null)}</div>
+                            {corporateLista3DebugDisplayOrder.map((metricKey) => {
+                              const metricValue = metrics[metricKey] ?? { value: null, reason: null };
+                              const payload = corporateLista3Debug?.perMetric?.[metricKey];
+                              const inputs = payload?.inputs ?? {};
+                              const intermediates = payload?.intermediates ?? {};
+                              const missingInputs = Array.isArray(payload?.missingInputs) ? payload?.missingInputs : [];
+                              return (
+                                <div key={`corp-list3-debug-${metricKey}`} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6 }}>
+                                  <div><strong>{resolveProjectMetricLabel(metricKey, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</strong></div>
+                                  <div>Output value: {formatDebugNumericValue(payload?.output?.value ?? metricValue.value ?? null)}</div>
+                                  <div>Formula: {payload?.formula ?? corporateLista3DebugFormulaByMetric[metricKey] ?? "n/a"}</div>
+                                  <div>Inputs:</div>
+                                  <div style={{ paddingLeft: 12 }}>
+                                    {Object.keys(inputs).length > 0
+                                      ? Object.entries(inputs).map(([inputKey, inputValue]) => (
+                                        <div key={`corp-list3-debug-${metricKey}-input-${inputKey}`}>{inputKey}: {formatDebugNumericValue(inputValue)}</div>
+                                      ))
+                                      : <div>none</div>}
+                                  </div>
+                                  <div>Intermediates:</div>
+                                  <div style={{ paddingLeft: 12 }}>
+                                    {Object.keys(intermediates).length > 0
+                                      ? Object.entries(intermediates).map(([intermediateKey, intermediateValue]) => (
+                                        <div key={`corp-list3-debug-${metricKey}-intermediate-${intermediateKey}`}>{intermediateKey}: {formatDebugNumericValue(intermediateValue)}</div>
+                                      ))
+                                      : <div>none</div>}
+                                  </div>
+                                  <div>Missing inputs: {missingInputs.length > 0 ? missingInputs.join(", ") : "none"}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      )}
                       {sectionKey === "list2" && renderProdStartDebugWindow({
                         data: {
                           npvToday: metrics.NPV_Target?.value ?? null,

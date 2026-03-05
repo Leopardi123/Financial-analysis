@@ -7,7 +7,7 @@ import {
   type Lista3aProjectEfficiencyMetrics,
 } from '../../snapshot/lista3aProjectEfficiency.ts';
 import { makeNullLista4TenYearMetrics, type Lista4TenYearMetrics } from '../../snapshot/lista4TenYear.ts';
-import type { Lista3Metrics } from '../../metrics/lista3.ts';
+import type { Lista3DebugPayload, Lista3Metrics } from '../../metrics/lista3.ts';
 
 function toFiniteOrNull(value: number | null | undefined): number | null {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -99,6 +99,12 @@ export function buildCorporateSnapshot(args: {
   lista3aProjectEfficiency?: Lista3aProjectEfficiencyMetrics;
   lista4TenYear?: Lista4TenYearMetrics;
   corporateLista3Metrics?: Lista3Metrics;
+  corporateLista3Debug?: Lista3DebugPayload & {
+    shares_post_financing: number | null;
+    series: Lista3DebugPayload['series'] & {
+      capexUSD_total: Array<number | null>;
+    };
+  };
 }): CorporateSnapshot {
   const marketValue = computeMarketValue({
     market: args.market,
@@ -141,6 +147,7 @@ export function buildCorporateSnapshot(args: {
         ROI_10Y_pct: null,
         IRR: null,
       },
+      lista3Debug: args.corporateLista3Debug,
     },
   };
 }

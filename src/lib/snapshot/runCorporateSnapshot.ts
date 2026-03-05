@@ -1058,8 +1058,18 @@ type SnapshotDiagnostics = {
     corporateLista3Debug?: {
       tp_main: number | null;
       initialCapexUSD_main: number | null;
-      hasFcfSeries: boolean;
-      hasCapexSeries: boolean;
+      shares_post_financing: number | null;
+      series: {
+        fcfUSD_total: Array<number | null>;
+        capexUSD_total: Array<number | null>;
+      };
+      perMetric: Record<string, {
+        formula: string;
+        inputs: Record<string, unknown>;
+        intermediates: Record<string, unknown>;
+        missingInputs: string[];
+        output: { value: number | null };
+      }>;
     };
   };
 };
@@ -1997,20 +2007,25 @@ export async function runCorporateSnapshotPipeline(args: {
     const initialCapexUSD_main = tp_main === null
       ? null
       : sumStrict(aggregationEffective.capexUSD_total.slice(0, tp_main));
-    const corporateLista3 = computeLista3({
+    const corporateLista3Result = computeLista3({
       masterN: aggregationEffective.corporateMasterN,
       tp: tp_main,
       fcfUSD: aggregationEffective.fcffUSD_total,
       initialCapexUSD: initialCapexUSD_main,
       strictRoi10Y: true,
-    });
+    }, { debug: true });
+    const corporateLista3 = corporateLista3Result.metrics;
 
-    diagnostics.meta.corporateLista3Debug = {
-      tp_main,
-      initialCapexUSD_main,
-      hasFcfSeries: Array.isArray(aggregationEffective.fcffUSD_total),
-      hasCapexSeries: Array.isArray(aggregationEffective.capexUSD_total),
+    const corporateLista3Debug = {
+      ...corporateLista3Result.debug,
+      shares_post_financing: shares_post_financing_fd_effective,
+      series: {
+        ...corporateLista3Result.debug.series,
+        capexUSD_total: aggregationEffective.capexUSD_total.slice(0, Math.max(0, aggregationEffective.corporateMasterN + 1)),
+      },
     };
+
+    diagnostics.meta.corporateLista3Debug = corporateLista3Debug;
 
     const snapshot = buildCorporateSnapshot({
       targetCurrency: input.targetCurrency,
@@ -2021,6 +2036,7 @@ export async function runCorporateSnapshotPipeline(args: {
       lista3aProjectEfficiency: lista3a.metrics,
       lista4TenYear: lista4,
       corporateLista3Metrics: corporateLista3,
+      corporateLista3Debug,
     });
 
     snapshot.series = snapshotSeries;

@@ -703,8 +703,8 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
 
   const lista3 = result.snapshot.corporate?.lista3Metrics;
   assert.ok(lista3);
-  assert.equal(typeof result.diagnostics.meta.corporateLista3Debug?.hasFcfSeries, 'boolean');
-  assert.equal(typeof result.diagnostics.meta.corporateLista3Debug?.hasCapexSeries, 'boolean');
+  assert.ok(Array.isArray(result.diagnostics.meta.corporateLista3Debug?.series.fcfUSD_total));
+  assert.ok(Array.isArray(result.diagnostics.meta.corporateLista3Debug?.series.capexUSD_total));
   assert.ok([
     lista3?.Payback_approx_years,
     lista3?.Payback_real_years,
