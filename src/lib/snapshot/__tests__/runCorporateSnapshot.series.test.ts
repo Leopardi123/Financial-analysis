@@ -522,3 +522,46 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
 });
+
+test('corporate modeled milestones exclude already-producing current-year projects', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const firstProjectRaw = projects[0].rawJson as Record<string, unknown>;
+  const firstTime = firstProjectRaw.time as Record<string, unknown>;
+  const corporateNowYear = (firstTime.productionStartYear as number) - (firstTime.productionStartPeriod as number);
+
+  firstTime.productionStartPeriod = 0;
+  firstTime.productionStartYear = corporateNowYear;
+  const firstOperations = firstProjectRaw.operations as Record<string, unknown>;
+  const firstMetals = firstProjectRaw.metals as Record<string, unknown>;
+  const oreMined = [...(firstOperations.oreMinedTonnes as Array<number | null>)];
+  const oreMilled = [...(firstOperations.oreMilledTonnes as Array<number | null>)];
+  const payableByMetal = firstMetals.payableQtyByMetal as Record<string, Array<number | null>>;
+  oreMined[0] = typeof oreMined[0] === 'number' && oreMined[0] > 0 ? oreMined[0] : oreMined.find((value) => typeof value === 'number' && value > 0) ?? 1;
+  oreMilled[0] = typeof oreMilled[0] === 'number' && oreMilled[0] > 0 ? oreMilled[0] : oreMilled.find((value) => typeof value === 'number' && value > 0) ?? 1;
+  firstOperations.oreMinedTonnes = oreMined;
+  firstOperations.oreMilledTonnes = oreMilled;
+  for (const [metal, series] of Object.entries(payableByMetal)) {
+    const nextSeries = [...series];
+    nextSeries[0] = typeof nextSeries[0] === 'number' && nextSeries[0] > 0 ? nextSeries[0] : nextSeries.find((value) => typeof value === 'number' && value > 0) ?? 1;
+    payableByMetal[metal] = nextSeries;
+  }
+
+  const futureProject = JSON.parse(JSON.stringify(projects[0])) as Record<string, unknown>;
+  futureProject.projectId = 'ABRA_FUTURE_MILESTONE';
+  const futureRaw = futureProject.rawJson as Record<string, unknown>;
+  (futureRaw.meta as Record<string, unknown>).projectId = 'ABRA_FUTURE_MILESTONE';
+  (futureRaw.meta as Record<string, unknown>).projectName = 'Abra Future Milestone';
+  const futureTime = futureRaw.time as Record<string, unknown>;
+  futureTime.productionStartPeriod = 0;
+  futureTime.productionStartYear = corporateNowYear + 3;
+  projects.push(futureProject);
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const markers = result.snapshot.modeledValuationTimeline?.markers ?? [];
+  assert.equal(markers.some((marker) => marker.yearLabelUsed === String(corporateNowYear)), false);
+  assert.equal(markers.some((marker) => marker.yearLabelUsed === String(corporateNowYear + 3)), true);
+});

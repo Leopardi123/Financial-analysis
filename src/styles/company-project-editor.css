@@ -107,3 +107,16 @@
   margin: 0 0 6px;
   font-size: 0.95rem;
 }
+
+
+.checkbox-field {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}

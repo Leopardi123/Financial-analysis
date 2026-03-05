@@ -1909,10 +1909,11 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     snapshot.series = snapshotSeries;
+    const corporateNowYear = aggregationEffective.corporateYearsByPeriod[0] as number;
     const milestoneYears = [...new Set(
       projectsForBuildFunding
         .map((project) => project.productionStartYear)
-        .filter((year): year is number => Number.isInteger(year)),
+        .filter((year): year is number => Number.isInteger(year) && year > corporateNowYear),
     )].sort((a, b) => a - b);
 
     const milestoneTpByYear = Object.fromEntries(
