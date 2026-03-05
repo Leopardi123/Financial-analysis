@@ -715,7 +715,28 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
     lista3?.CAPEX_per_Annual_AuEq,
     lista3?.LOM_avg_EBIT_ROCE,
     lista3?.LOM_discounted_EBIT_ROCE,
+    lista3?.Kapitalavkastning_LOM,
+    lista3?.Kapitalavkastning_per_Year,
   ].some((value) => value !== null));
+
+  assert.equal(typeof lista3?.Kapitalavkastning_LOM === 'number', true);
+  assert.equal(typeof lista3?.Kapitalavkastning_per_Year === 'number', true);
+
+  const kapitalLomDebug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.Kapitalavkastning_LOM;
+  assert.ok(kapitalLomDebug);
+  assert.equal(typeof kapitalLomDebug?.intermediates?.fcf_sum_LOM, 'number');
+  assert.equal(typeof kapitalLomDebug?.intermediates?.LOM_periods, 'number');
+  assert.equal(Array.isArray(kapitalLomDebug?.missingInputs), true);
+
+  const roicDebug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.Corporate_ROIC;
+  const avgNopatRoicDebug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.LOM_avg_NOPAT_ROIC;
+  assert.ok(roicDebug);
+  assert.ok(avgNopatRoicDebug);
+  assert.equal(roicDebug?.output?.value, null);
+  assert.equal(avgNopatRoicDebug?.output?.value, null);
+  assert.equal(roicDebug?.missingInputs?.includes('nopatUSD_total'), true);
+  assert.equal(roicDebug?.missingInputs?.includes('investedCapitalUSD_total'), true);
+  assert.equal(avgNopatRoicDebug?.missingInputs?.includes('nopatUSD_total'), true);
 
   const debugMetric = result.diagnostics.meta.corporateLista3Debug?.perMetric?.AISC_LOM;
   assert.ok(debugMetric);

@@ -2562,6 +2562,10 @@ Capital Available: ${availableLabel}`,
       IRR?: number | null;
       LOM_avg_EBIT_ROCE?: number | null;
       LOM_discounted_EBIT_ROCE?: number | null;
+      Corporate_ROIC?: number | null;
+      LOM_avg_NOPAT_ROIC?: number | null;
+      Kapitalavkastning_LOM?: number | null;
+      Kapitalavkastning_per_Year?: number | null;
     } }).lista3Metrics;
     if (!corporateLista3) {
       return computed;
@@ -2590,6 +2594,10 @@ Capital Available: ${availableLabel}`,
         IRR: toMetricValue(corporateLista3.IRR, "Missing corporate.lista3Metrics.IRR"),
         LOM_avg_EBIT_ROCE: toMetricValue(corporateLista3.LOM_avg_EBIT_ROCE, "Missing corporate.lista3Metrics.LOM_avg_EBIT_ROCE"),
         LOM_discounted_EBIT_ROCE: toMetricValue(corporateLista3.LOM_discounted_EBIT_ROCE, "Missing corporate.lista3Metrics.LOM_discounted_EBIT_ROCE"),
+        Corporate_ROIC: toMetricValue(corporateLista3.Corporate_ROIC, "Missing corporate.lista3Metrics.Corporate_ROIC"),
+        LOM_avg_NOPAT_ROIC: toMetricValue(corporateLista3.LOM_avg_NOPAT_ROIC, "Missing corporate.lista3Metrics.LOM_avg_NOPAT_ROIC"),
+        Kapitalavkastning_LOM: toMetricValue(corporateLista3.Kapitalavkastning_LOM, "Missing corporate.lista3Metrics.Kapitalavkastning_LOM"),
+        Kapitalavkastning_per_Year: toMetricValue(corporateLista3.Kapitalavkastning_per_Year, "Missing corporate.lista3Metrics.Kapitalavkastning_per_Year"),
       },
     };
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
