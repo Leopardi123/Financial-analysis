@@ -141,6 +141,63 @@ function sumComponentsAtIndex(components: Array<number | null>): number | null {
   return hasAny ? sum : null;
 }
 
+type NpvSpotRangeSeries = {
+  npvToday: number | null;
+  npvSeries: Array<number | null>;
+};
+
+function scaleSeries(series: Array<number | null>, factor: number): Array<number | null> {
+  return series.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value * factor : null));
+}
+
+function scaleSpotDeck(
+  spotPriceUSDByMetal: Record<string, Array<number | null>>,
+  factor: number,
+): Record<string, Array<number | null>> {
+  return Object.fromEntries(
+    Object.entries(spotPriceUSDByMetal).map(([metal, series]) => [metal, scaleSeries(series, factor)]),
+  );
+}
+
+function hasValidSpotDeck(
+  spotPriceUSDByMetal: Record<string, Array<number | null>>,
+  expectedLength: number,
+): boolean {
+  const metals = Object.keys(spotPriceUSDByMetal);
+  if (metals.length === 0) return false;
+  for (const metal of metals) {
+    const series = spotPriceUSDByMetal[metal];
+    if (!Array.isArray(series) || series.length < expectedLength) return false;
+    for (let t = 0; t < expectedLength; t += 1) {
+      const value = series[t];
+      if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+    }
+  }
+  return true;
+}
+
+function computeNpvSeriesFromFcff(args: {
+  fcffUSD: Array<number | null>;
+  masterN: number;
+  discountRate: number;
+}): Array<number | null> {
+  const out = new Array<number | null>(args.masterN + 1).fill(null);
+  for (let start = 0; start <= args.masterN; start += 1) {
+    let sum = 0;
+    let ok = true;
+    for (let t = start; t <= args.masterN; t += 1) {
+      const cf = args.fcffUSD[t];
+      if (typeof cf !== 'number' || !Number.isFinite(cf)) {
+        ok = false;
+        break;
+      }
+      sum += cf / ((1 + args.discountRate) ** (t - start));
+    }
+    out[start] = ok ? sum : null;
+  }
+  return out;
+}
+
 function sumStrictAlignedSeries(args: {
   corporateYearsByPeriod: number[];
   projectDateSeries: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>;
@@ -239,6 +296,12 @@ type ProjectSeriesContext = {
   economicsBreakdown: EconomicsBreakdownSeries | null;
   royaltiesDetail: RoyaltyDetailSeries[];
   taxesDetail: TaxesDetailSeries | null;
+  spotRangeFcffByScenario?: {
+    base: Array<number | null>;
+    low: Array<number | null>;
+    high: Array<number | null>;
+  };
+  spotDeckValid?: boolean;
   economics: {
     operatingCostsUSD: Array<number | null>;
     sustainingCapexUSD: Array<number | null>;
@@ -1443,6 +1506,28 @@ export async function runCorporateSnapshotPipeline(args: {
               royaltiesUSD,
             },
           });
+
+          const spotDeckValid = hasValidSpotDeck(resolved.spotPriceUSDByMetal, yearsByPeriod.length);
+          const outLowSpot = spotDeckValid
+            ? computeProjectEngineFullProductionV1({
+                ...resolved,
+                spotPriceUSDByMetal: scaleSpotDeck(resolved.spotPriceUSDByMetal, 0.75),
+                phase1: {
+                  ...resolved.phase1,
+                  royaltiesUSD,
+                },
+              })
+            : null;
+          const outHighSpot = spotDeckValid
+            ? computeProjectEngineFullProductionV1({
+                ...resolved,
+                spotPriceUSDByMetal: scaleSpotDeck(resolved.spotPriceUSDByMetal, 1.25),
+                phase1: {
+                  ...resolved.phase1,
+                  royaltiesUSD,
+                },
+              })
+            : null;
           const ebitdaUSD = sanitizeSeries(out.phase1.ebitdaUSD);
           const ebitUSD = ebitdaUSD.map((ebitda, t) => {
             const dep = depreciationUSD[t];
@@ -1550,6 +1635,14 @@ export async function runCorporateSnapshotPipeline(args: {
               : null,
             royaltiesDetail,
             taxesDetail,
+            spotRangeFcffByScenario: spotDeckValid
+              ? {
+                  base: sanitizeSeries(out.phase1.fcffUSD),
+                  low: sanitizeSeries(outLowSpot?.phase1.fcffUSD ?? nullSeries),
+                  high: sanitizeSeries(outHighSpot?.phase1.fcffUSD ?? nullSeries),
+                }
+              : undefined,
+            spotDeckValid,
             economics: {
               operatingCostsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD),
               sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
@@ -2752,6 +2845,68 @@ export async function runCorporateSnapshotPipeline(args: {
 
     if (debug) {
       diagnostics.meta.corporateModeledValuationTimeline = snapshot.modeledValuationTimeline;
+    }
+
+    const allProjectsHaveValidSpotDeck = projectSeriesContexts.length > 0
+      && projectSeriesContexts.every((ctx) => ctx.spotDeckValid === true && ctx.spotRangeFcffByScenario !== undefined);
+
+    if (projects.length === 1) {
+      const fxForRange = typeof fxRate === 'number' && Number.isFinite(fxRate) ? fxRate : null;
+      const buildNpvRangeSeries = (fcffUSD: Array<number | null>): NpvSpotRangeSeries => {
+        const npvSeriesUSD = computeNpvSeriesFromFcff({
+          fcffUSD,
+          masterN: aggregationEffective.corporateMasterN,
+          discountRate: input.discountRate,
+        });
+        const npvSeries = npvSeriesUSD.map((value) => (value !== null && fxForRange !== null ? value * fxForRange : null));
+        return {
+          npvToday: npvSeries[0] ?? null,
+          npvSeries,
+        };
+      };
+
+      const npvSpotRange = allProjectsHaveValidSpotDeck && fxForRange !== null
+        ? (() => {
+            const lowFcffUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeFcffByScenario!.low,
+              })),
+              label: 'spotRange.low.fcffUSD',
+            });
+            const baseFcffUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeFcffByScenario!.base,
+              })),
+              label: 'spotRange.base.fcffUSD',
+            });
+            const highFcffUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeFcffByScenario!.high,
+              })),
+              label: 'spotRange.high.fcffUSD',
+            });
+            const low = buildNpvRangeSeries(lowFcffUSD);
+            const base = buildNpvRangeSeries(baseFcffUSD);
+            const high = buildNpvRangeSeries(highFcffUSD);
+            base.npvToday = snapshot.NPV_today_TargetCurrency;
+            return { low, base, high };
+          })()
+        : null;
+
+      (snapshot as Record<string, unknown>).project = {
+        modeled: {
+          npvSpotRange,
+        },
+      };
     }
 
     return { ok: true, snapshot, diagnostics: finalizeDiagnostics(diagnostics) };

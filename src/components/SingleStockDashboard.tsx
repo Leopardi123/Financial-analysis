@@ -4,6 +4,7 @@ import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
+import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
 import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
@@ -4776,87 +4777,138 @@ Capital Available: ${availableLabel}`,
                   ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
                     <details key={sectionKey} className="producer-core-section project-collapsible-card" open={projectSectionsOpen[sectionKey]} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, [sectionKey]: open })); }}>
                       <summary><h2 className="subrub small">{title}</h2></summary>
-                      {sectionKey === "list2" && (
+                      {sectionKey === "list2" ? (
+                        <div className="project-list2-pager" aria-label="Project modeled valuation pages">
+                          <div className="project-list2-page">
+                            <ValueRangeSnapshotCard
+                              priceToday={
+                                projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value > 0
+                                  ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesCurrent.value
+                                  : null
+                              }
+                              npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
+                              npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
+                              tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
+                              tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
+                              currencyCode={lockedTargetCurrency}
+                            />
+                            <div className="compact-metrics-grid">
+                              {(projectSectionMetricOrder.list2
+                                .filter((key) => Object.prototype.hasOwnProperty.call(metrics, key))
+                                .map((key) => [key, metrics[key]] as const))
+                              .map(([key, value]) => (
+                                <div key={key} className="compact-metric-row">
+                                  <span className="compact-metric-label-wrap">
+                                    <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
+                                    <InfoPopover
+                                      id={`project-${sectionKey}-${key}`}
+                                      openId={openInfoId}
+                                      onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                                      onClose={() => setOpenInfoId(null)}
+                                      title={resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}
+                                      sections={[
+                                        { heading: "Definition", lines: ["Project KPI in pre-revenue strict mode."] },
+                                        { heading: "Formula", lines: ["Exact formula implemented in computeProjectViewMetrics helper."] },
+                                        { heading: "Basis / Unit / Null", lines: ["Basis: enterprise/equity per metric family.", "Unit auto-formatted.", value.reason ?? "Null rule: returns n/a when input requirements fail."] },
+                                        { heading: "Interpretation", lines: ["Higher/lower significance depends on metric type and project stage."] },
+                                      ]}
+                                    />
+                                  </span>
+                                  <span className="compact-metric-dots" />
+                                  <span className="compact-metric-value">
+                                    {key === "IRR"
+                                      ? formatIrrMetricValue(value)
+                                      : key === "AuEq_10Y_perShare"
+                                        ? formatAuEq10YPerShareValue(value)
+                                        : (() => {
+                                        const meta = projectMetricUnitMeta[key];
+                                        if (meta?.unitType === "percent" || meta?.unitType === "multiple" || meta?.unitType === "multiple_per_year") {
+                                          return formatMetricValue(value, meta.unitType);
+                                        }
+                                        return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined);
+                                      })()}
+                                    {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            {renderProdStartDebugWindow({
+                              data: {
+                                npvToday: metrics.NPV_Target?.value ?? null,
+                                npvTodayPerShare: metrics.NPV_perShare?.value ?? null,
+                                navToday: metrics.NAV_Target?.value ?? null,
+                                navTodayPerShare: metrics.NAV_perShare?.value ?? null,
+                                dcfProdStartDiscounted: metrics.DCF_Target_discounted?.value ?? null,
+                                dcfProdStartDiscountedPerShare: metrics.DCF_Target_discounted_perShare?.value ?? null,
+                                npvProdStart: metrics.NPV_prodStart?.value ?? null,
+                                npvProdStartPerShare: metrics.NPV_prodStart_perShare?.value ?? null,
+                                navProdStart: metrics.NAV_prodStart?.value ?? null,
+                                navProdStartPerShare: metrics.NAV_prodStart_perShare?.value ?? null,
+                                dcfProdStart: metrics.DCF_Target?.value ?? null,
+                                dcfProdStartPerShare: metrics.DCF_perShare?.value ?? null,
+                              },
+                              targetCurrency: lockedTargetCurrency,
+                            })}
+                            {debugEnabled && projectTimelineDebug && (
+                              <details style={{ marginTop: 8 }}>
+                                <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Valuation timeline debug</summary>
+                                <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 8 }}>{JSON.stringify(projectTimelineDebug, null, 2)}</pre>
+                              </details>
+                            )}
+                          </div>
+                          <div className="project-list2-page">
+                            <div className="producer-core-title-row" style={{ marginBottom: 8 }}>
+                              <h2 className="subrub small" style={{ margin: 0 }}>FINANSIELLA NYCKELTAL · VÄRDEINTERVALL</h2>
+                            </div>
+                            <NpvSpotRangeComparisonCard
+                              range={(projectSnapshotData?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null> }; base: { npvToday: number | null; npvSeries: Array<number | null> }; high: { npvToday: number | null; npvSeries: Array<number | null> } } | null } } | undefined)?.modeled?.npvSpotRange ?? null}
+                              yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                              currencyCode={lockedTargetCurrency}
+                              formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
+                            />
+                          </div>
+                        </div>
+                      ) : (
                         <>
-                        <ValueRangeSnapshotCard
-                          priceToday={
-                            projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value > 0
-                              ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesCurrent.value
-                              : null
-                          }
-                          npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
-                          npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
-                          tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
-                          tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
-                          currencyCode={lockedTargetCurrency}
-                        />
-                        {debugEnabled && projectTimelineDebug && (
-                          <details style={{ marginTop: 8 }}>
-                            <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Valuation timeline debug</summary>
-                            <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 8 }}>{JSON.stringify(projectTimelineDebug, null, 2)}</pre>
-                          </details>
-                        )}
+                          <div className="compact-metrics-grid">
+                            {Object.entries(metrics).map(([key, value]) => (
+                              <div key={key} className="compact-metric-row">
+                                <span className="compact-metric-label-wrap">
+                                  <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
+                                  <InfoPopover
+                                    id={`project-${sectionKey}-${key}`}
+                                    openId={openInfoId}
+                                    onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                                    onClose={() => setOpenInfoId(null)}
+                                    title={resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}
+                                    sections={[
+                                      { heading: "Definition", lines: ["Project KPI in pre-revenue strict mode."] },
+                                      { heading: "Formula", lines: ["Exact formula implemented in computeProjectViewMetrics helper."] },
+                                      { heading: "Basis / Unit / Null", lines: ["Basis: enterprise/equity per metric family.", "Unit auto-formatted.", value.reason ?? "Null rule: returns n/a when input requirements fail."] },
+                                      { heading: "Interpretation", lines: ["Higher/lower significance depends on metric type and project stage."] },
+                                    ]}
+                                  />
+                                </span>
+                                <span className="compact-metric-dots" />
+                                <span className="compact-metric-value">
+                                  {key === "IRR"
+                                    ? formatIrrMetricValue(value)
+                                    : key === "AuEq_10Y_perShare"
+                                      ? formatAuEq10YPerShareValue(value)
+                                      : (() => {
+                                      const meta = projectMetricUnitMeta[key];
+                                      if (meta?.unitType === "percent" || meta?.unitType === "multiple" || meta?.unitType === "multiple_per_year") {
+                                        return formatMetricValue(value, meta.unitType);
+                                      }
+                                      return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined);
+                                    })()}
+                                  {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </>
                       )}
-                      <div className="compact-metrics-grid">
-                        {((sectionKey === "list2")
-                          ? projectSectionMetricOrder.list2
-                            .filter((key) => Object.prototype.hasOwnProperty.call(metrics, key))
-                            .map((key) => [key, metrics[key]] as const)
-                          : Object.entries(metrics))
-                        .map(([key, value]) => (
-                          <div key={key} className="compact-metric-row">
-                            <span className="compact-metric-label-wrap">
-                              <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
-                              <InfoPopover
-                                id={`project-${sectionKey}-${key}`}
-                                openId={openInfoId}
-                                onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
-                                onClose={() => setOpenInfoId(null)}
-                                title={resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}
-                                sections={[
-                                  { heading: "Definition", lines: ["Project KPI in pre-revenue strict mode."] },
-                                  { heading: "Formula", lines: ["Exact formula implemented in computeProjectViewMetrics helper."] },
-                                  { heading: "Basis / Unit / Null", lines: ["Basis: enterprise/equity per metric family.", "Unit auto-formatted.", value.reason ?? "Null rule: returns n/a when input requirements fail."] },
-                                  { heading: "Interpretation", lines: ["Higher/lower significance depends on metric type and project stage."] },
-                                ]}
-                              />
-                            </span>
-                            <span className="compact-metric-dots" />
-                            <span className="compact-metric-value">
-                              {key === "IRR"
-                                ? formatIrrMetricValue(value)
-                                : key === "AuEq_10Y_perShare"
-                                  ? formatAuEq10YPerShareValue(value)
-                                  : (() => {
-                                  const meta = projectMetricUnitMeta[key];
-                                  if (meta?.unitType === "percent" || meta?.unitType === "multiple" || meta?.unitType === "multiple_per_year") {
-                                    return formatMetricValue(value, meta.unitType);
-                                  }
-                                  return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", key.includes("InSitu") ? "USD" : undefined);
-                                })()}
-                              {value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(value)}</span>}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                                            {sectionKey === "list2" && renderProdStartDebugWindow({
-                        data: {
-                          npvToday: metrics.NPV_Target?.value ?? null,
-                          npvTodayPerShare: metrics.NPV_perShare?.value ?? null,
-                          navToday: metrics.NAV_Target?.value ?? null,
-                          navTodayPerShare: metrics.NAV_perShare?.value ?? null,
-                          dcfProdStartDiscounted: metrics.DCF_Target_discounted?.value ?? null,
-                          dcfProdStartDiscountedPerShare: metrics.DCF_Target_discounted_perShare?.value ?? null,
-                          npvProdStart: metrics.NPV_prodStart?.value ?? null,
-                          npvProdStartPerShare: metrics.NPV_prodStart_perShare?.value ?? null,
-                          navProdStart: metrics.NAV_prodStart?.value ?? null,
-                          navProdStartPerShare: metrics.NAV_prodStart_perShare?.value ?? null,
-                          dcfProdStart: metrics.DCF_Target?.value ?? null,
-                          dcfProdStartPerShare: metrics.DCF_perShare?.value ?? null,
-                        },
-                        targetCurrency: lockedTargetCurrency,
-                      })}
                     </details>
                   ))}
 
