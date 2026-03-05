@@ -50,6 +50,12 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     'DCF_prodStart_present_TargetCurrency should equal USD * fx',
   );
 
+  assertAlmostEqual(
+    result.metrics.DCF_prodStart_present_perShare_TargetCurrency,
+    (expectedDcfPresent * 2) / 100,
+    'DCF_prodStart_present_perShare_TargetCurrency should use shares_post_financing as denominator',
+  );
+
   const zeroCfLom = computeLista2CfDcfMetrics({
     fcfUSD_total: [0, 0, 0],
     masterN: 2,

@@ -934,6 +934,16 @@ type SnapshotDiagnostics = {
       reclamationAccrualUSD_total?: Array<number | null>;
       payable_AuEq_Oz_total?: Array<number | null>;
       sustainingCostUSD_total?: Array<number | null>;
+      corporateProdStartCapexWindowDebug?: Array<{
+        milestoneYear: number;
+        tp_prev: number;
+        tp_k: number;
+        windowYears: number[];
+        windowCapexUSD: Array<number | null>;
+        windowCapexUSD_sum: number | null;
+        fx_USD_to_TargetCurrency: number | null;
+        windowCapexTarget_sum: number | null;
+      }>;
     };
     corporateFinancingDebug?: {
       shares_current: number | null;
@@ -1920,16 +1930,43 @@ export async function runCorporateSnapshotPipeline(args: {
       milestoneYears.map((year) => [year, aggregationEffective.corporateYearsByPeriod.indexOf(year)]),
     ) as Record<number, number>;
 
+    const milestonePairs = milestoneYears
+      .map((year) => ({ year, tp: milestoneTpByYear[year] }))
+      .filter(({ tp }) => Number.isInteger(tp) && tp >= 0 && tp <= aggregationEffective.corporateMasterN);
+
+    const corporateProdStartCapexWindowDebug = milestonePairs.map(({ year, tp }) => {
+      const prevMilestoneTp = milestonePairs
+        .filter((candidate) => candidate.year < year)
+        .map((candidate) => candidate.tp)
+        .filter((candidateTp): candidateTp is number => Number.isInteger(candidateTp) && candidateTp >= 0 && candidateTp <= tp)
+        .sort((a, b) => b - a)[0] ?? 0;
+      const windowYears = aggregationEffective.corporateYearsByPeriod.slice(prevMilestoneTp, tp);
+      const windowCapexUSD = aggregationEffective.capexUSD_total.slice(prevMilestoneTp, tp);
+      const windowCapexUSD_sum = windowCapexUSD.some((value) => value === null || value === undefined || !Number.isFinite(value))
+        ? null
+        : (windowCapexUSD as number[]).reduce((sum, value) => sum + value, 0);
+      const fx_USD_to_TargetCurrency = fxRate !== null && Number.isFinite(fxRate) ? fxRate : null;
+      const windowCapexTarget_sum =
+        windowCapexUSD_sum !== null && fx_USD_to_TargetCurrency !== null
+          ? windowCapexUSD_sum * fx_USD_to_TargetCurrency
+          : null;
+      return {
+        milestoneYear: year,
+        tp_prev: prevMilestoneTp,
+        tp_k: tp,
+        windowYears,
+        windowCapexUSD,
+        windowCapexUSD_sum,
+        fx_USD_to_TargetCurrency,
+        windowCapexTarget_sum,
+      };
+    });
+
     const lista2MetricsByTp = Object.fromEntries(
-      milestoneYears
-        .map((year) => ({ year, tp: milestoneTpByYear[year] }))
-        .filter(({ tp }) => Number.isInteger(tp) && tp >= 0 && tp <= aggregationEffective.corporateMasterN)
+      milestonePairs
         .map(({ year, tp }) => {
-          const prevMilestoneTp = milestoneYears
-            .filter((candidate) => candidate < year)
-            .map((candidate) => milestoneTpByYear[candidate])
-            .filter((candidateTp): candidateTp is number => Number.isInteger(candidateTp) && candidateTp >= 0 && candidateTp <= tp)
-            .sort((a, b) => b - a)[0] ?? 0;
+          const capexWindowDebug = corporateProdStartCapexWindowDebug.find((entry) => entry.milestoneYear === year) ?? null;
+          const prevMilestoneTp = capexWindowDebug?.tp_prev ?? 0;
 
           const tpMetrics = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
@@ -1972,6 +2009,8 @@ export async function runCorporateSnapshotPipeline(args: {
           return [tp, {
             DCF_prodStart_exCapex_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency,
             DCF_prodStart_exCapex_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
+            DCF_prodStart_present_TargetCurrency: tpMetrics.metrics.DCF_prodStart_present_TargetCurrency,
+            DCF_prodStart_present_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_present_perShare_TargetCurrency,
             NAV_prodStart_TargetCurrency: tpMetrics.metrics.NAV_prodStart_TargetCurrency,
             NAV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
             NPV_prodStart_TargetCurrency: tpMetrics.metrics.NPV_prodStart_TargetCurrency,
@@ -1980,6 +2019,18 @@ export async function runCorporateSnapshotPipeline(args: {
           }];
         }),
     );
+
+    if (!diagnostics.meta.corporateTotalsDebug) {
+      diagnostics.meta.corporateTotalsDebug = {
+        capexUSD_total: aggregationEffective.capexUSD_total,
+        fcfUSD_total: aggregationEffective.fcffUSD_total,
+      };
+    }
+    diagnostics.meta.corporateTotalsDebug.corporateProdStartCapexWindowDebug = corporateProdStartCapexWindowDebug;
+
+    if (process.env.NEXT_PUBLIC_DEBUG_PRODSTART === '1') {
+      console.debug('[corporate-prod-start-capex-window-debug]', corporateProdStartCapexWindowDebug);
+    }
 
     snapshot.modeledValuationTimeline = buildCorporateModeledValuationTimeline({
       projects: milestoneYears.map((year) => ({

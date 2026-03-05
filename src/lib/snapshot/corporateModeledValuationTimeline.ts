@@ -1,6 +1,8 @@
 type TimelineLista2Metrics = {
   DCF_prodStart_exCapex_TargetCurrency: number | null;
   DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+  DCF_prodStart_present_TargetCurrency: number | null;
+  DCF_prodStart_present_perShare_TargetCurrency: number | null;
   NAV_prodStart_TargetCurrency: number | null;
   NAV_prodStart_perShare_TargetCurrency: number | null;
   NPV_prodStart_TargetCurrency: number | null;
@@ -20,6 +22,8 @@ export type CorporateModeledTimelineMarker = {
   lista2Metrics?: {
     DCF_prodStart_exCapex_TargetCurrency: number | null;
     DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+    DCF_prodStart_present_TargetCurrency: number | null;
+    DCF_prodStart_present_perShare_TargetCurrency: number | null;
     NPV_prodStart_TargetCurrency: number | null;
     NPV_prodStart_perShare_TargetCurrency: number | null;
     NAV_prodStart_TargetCurrency: number | null;
@@ -226,6 +230,8 @@ export function buildCorporateModeledValuationTimeline(args: {
       lista2Metrics: {
         DCF_prodStart_exCapex_TargetCurrency: lista2ForTp?.DCF_prodStart_exCapex_TargetCurrency ?? null,
         DCF_prodStart_exCapex_perShare_TargetCurrency: lista2ForTp?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+        DCF_prodStart_present_TargetCurrency: lista2ForTp?.DCF_prodStart_present_TargetCurrency ?? null,
+        DCF_prodStart_present_perShare_TargetCurrency: lista2ForTp?.DCF_prodStart_present_perShare_TargetCurrency ?? null,
         NPV_prodStart_TargetCurrency: lista2ForTp?.NPV_prodStart_TargetCurrency ?? null,
         NPV_prodStart_perShare_TargetCurrency: lista2ForTp?.NPV_prodStart_perShare_TargetCurrency ?? null,
         NAV_prodStart_TargetCurrency: lista2ForTp?.NAV_prodStart_TargetCurrency ?? null,
