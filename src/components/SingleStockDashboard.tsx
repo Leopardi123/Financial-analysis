@@ -2596,6 +2596,7 @@ Capital Available: ${availableLabel}`,
           formula?: string;
           inputs?: Record<string, unknown>;
           intermediates?: Record<string, unknown>;
+          requiredInputs?: string[];
           missingInputs?: string[];
           output?: { value?: number | null };
         }>;
@@ -4445,12 +4446,14 @@ Capital Available: ${availableLabel}`,
                               const payload = corporateLista3Debug?.perMetric?.[metricKey];
                               const inputs = payload?.inputs ?? {};
                               const intermediates = payload?.intermediates ?? {};
+                              const requiredInputs = Array.isArray(payload?.requiredInputs) ? payload.requiredInputs : [];
                               const missingInputs = Array.isArray(payload?.missingInputs) ? payload?.missingInputs : [];
                               return (
                                 <div key={`corp-list3-debug-${metricKey}`} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6 }}>
                                   <div><strong>{resolveProjectMetricLabel(metricKey, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</strong></div>
                                   <div>Output value: {formatDebugNumericValue(payload?.output?.value ?? null)}</div>
                                   <div>Formula: {payload?.formula ?? corporateLista3DebugFormulaByMetric[metricKey] ?? "n/a"}</div>
+                                  <div>Required inputs: {requiredInputs.length > 0 ? `[${requiredInputs.join(', ')}]` : 'none'}</div>
                                   <div>Inputs:</div>
                                   <div style={{ paddingLeft: 12 }}>
                                     {Object.keys(inputs).length > 0

@@ -2017,6 +2017,7 @@ export async function runCorporateSnapshotPipeline(args: {
       strictRoi10Y: true,
       roiAsRatio: true,
       paybackRealUseInitialCapex: true,
+      paybackApproxAsRatio: true,
     }, { debug: true });
     const corporateLista3 = corporateLista3Result.metrics;
 
@@ -2039,46 +2040,83 @@ export async function runCorporateSnapshotPipeline(args: {
       ? null
       : Math.abs(initialCapexUSD_main);
 
-    const hasFiniteValue = (value: unknown): boolean => {
-      if (Array.isArray(value)) return value.every((item) => typeof item === 'number' && Number.isFinite(item));
+    const hasRequiredInputValue = (value: unknown): boolean => {
+      if (Array.isArray(value)) {
+        if (value.length < 1) return false;
+        const finiteCount = value.filter((item) => typeof item === 'number' && Number.isFinite(item)).length;
+        return finiteCount > 0;
+      }
       return typeof value === 'number' && Number.isFinite(value);
     };
-    const addCorporateMissingInputs = (metricKey: string, requiredInputs: string[], inputValues: Record<string, unknown>) => {
-      const payload = (corporateLista3Debug.perMetric as Record<string, {
+
+    const perMetric = corporateLista3Debug.perMetric as Record<string, {
+      formula: string;
+      requiredInputs?: string[];
+      inputs: Record<string, unknown>;
+      intermediates: Record<string, unknown>;
+      missingInputs: string[];
+      output: { value: number | null };
+    } | undefined>;
+
+    const ensureMetricPayload = (metricKey: string) => {
+      if (!perMetric[metricKey]) {
+        perMetric[metricKey] = {
+          formula: 'n/a',
+          inputs: {},
+          intermediates: {},
+          missingInputs: [],
+          output: { value: null },
+        };
+      }
+      return perMetric[metricKey] as {
+        formula: string;
+        requiredInputs?: string[];
         inputs: Record<string, unknown>;
+        intermediates: Record<string, unknown>;
         missingInputs: string[];
-      } | undefined>)[metricKey];
-      if (!payload) return;
-      payload.inputs = { ...payload.inputs, ...inputValues, requiredInputs };
-      const computedMissing = requiredInputs.filter((key) => !hasFiniteValue(inputValues[key]));
-      payload.missingInputs = [...new Set([...(Array.isArray(payload.missingInputs) ? payload.missingInputs : []), ...computedMissing])];
+        output: { value: number | null };
+      };
     };
 
-    addCorporateMissingInputs('AISC_LOM', ['sustainingCostUSD_total', 'payableAuEqOz_total', 'tp_main'], {
-      sustainingCostUSD_total: aggregationEffective.sustainingCostUSD_total,
-      payableAuEqOz_total: aggregationEffective.payableAuEqOz_total,
-      tp_main,
-    });
-    addCorporateMissingInputs('CAPEX_per_Annual_AuEq', ['initialCapexUSD_main', 'payableAuEqOz_total', 'tp_main', 'masterN'], {
-      initialCapexUSD_main,
-      payableAuEqOz_total: aggregationEffective.payableAuEqOz_total,
+    const metricRequirements: Record<string, string[]> = {
+      AISC_LOM: ['sustainingCostUSD_total', 'payableAuEqOz_total', 'tp_main'],
+      BreakEven_AuEq: ['capexUSD_total', 'sustainingCostUSD_total', 'payableAuEqOz_total', 'tp_main'],
+      CAPEX_per_Annual_AuEq: ['initialCapexUSD_main', 'payableAuEqOz_total', 'tp_main', 'masterN'],
+      Payback_approx: ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'],
+      Payback_real: ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'],
+      IRR: ['fcfUSD_total', 'masterN'],
+      ROI_10Y: ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'],
+      LOM_avg_EBIT_ROCE: ['ebitUSD_total', 'initialCapexUSD_main', 'tp_main'],
+      LOM_discounted_EBIT_ROCE: ['ebitUSD_total', 'discountFactors_toToday', 'initialCapexUSD_main', 'tp_main'],
+      Corporate_ROIC: ['nopatUSD_total', 'investedCapitalUSD_total'],
+      LOM_avg_NOPAT_ROIC: ['nopatUSD_total', 'initialCapexUSD_main', 'tp_main'],
+      Kapitalavkastning_LOM: ['fcfUSD_total', 'initialCapexUSD_main', 'tp_main'],
+      Kapitalavkastning_per_Year: ['fcfUSD_total', 'initialCapexUSD_main', 'tp_main'],
+    };
+
+    const commonInputValues: Record<string, unknown> = {
       tp_main,
       masterN: aggregationEffective.corporateMasterN,
-    });
-    addCorporateMissingInputs('Payback_approx', ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'], {
       initialCapexUSD_main,
       fcfUSD_total: aggregationEffective.fcffUSD_total,
-      tp_main,
-    });
-    addCorporateMissingInputs('Payback_real', ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'], {
-      initialCapexUSD_main,
-      fcfUSD_total: aggregationEffective.fcffUSD_total,
-      tp_main,
-    });
-    addCorporateMissingInputs('EBIT_ROCE', ['ebitUSD_total', 'initialCapexUSD_main', 'tp_main'], {
+      capexUSD_total: aggregationEffective.capexUSD_total,
+      sustainingCostUSD_total: aggregationEffective.sustainingCostUSD_total,
+      payableAuEqOz_total: aggregationEffective.payableAuEqOz_total,
       ebitUSD_total: snapshotSeries.ebitUSD,
-      initialCapexUSD_main,
-      tp_main,
+      nopatUSD_total: null,
+      discountFactors_toToday: Array.from({ length: aggregationEffective.corporateMasterN + 1 }, (_, t) => 1 / ((1 + input.discountRate) ** t)),
+      investedCapitalUSD_total: null,
+    };
+
+    Object.entries(metricRequirements).forEach(([metricKey, requiredInputs]) => {
+      const payload = ensureMetricPayload(metricKey);
+      payload.requiredInputs = requiredInputs;
+      payload.inputs = {
+        ...payload.inputs,
+        ...Object.fromEntries(requiredInputs.map((inputKey) => [inputKey, commonInputValues[inputKey] ?? null])),
+      };
+      const computedMissing = requiredInputs.filter((inputKey) => !hasRequiredInputValue(commonInputValues[inputKey]));
+      payload.missingInputs = [...new Set([...(Array.isArray(payload.missingInputs) ? payload.missingInputs : []), ...computedMissing])];
     });
 
     diagnostics.meta.corporateLista3Debug = corporateLista3Debug;

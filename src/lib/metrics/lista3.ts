@@ -7,6 +7,7 @@ export type Lista3Metrics = {
 
 export type Lista3DebugMetric = {
   formula: string;
+  requiredInputs?: string[];
   inputs: Record<string, unknown>;
   intermediates: Record<string, unknown>;
   missingInputs: string[];
@@ -111,6 +112,7 @@ type Lista3Args = {
   strictRoi10Y?: boolean;
   roiAsRatio?: boolean;
   paybackRealUseInitialCapex?: boolean;
+  paybackApproxAsRatio?: boolean;
 };
 
 type Lista3DebugOptions = { debug: true };
@@ -211,23 +213,32 @@ export function computeLista3(args: Lista3Args, options?: Lista3DebugOptions): L
   debugData.perMetric.Payback_real.inputs.fcfUSD_total_slice = enterpriseCashflows.slice(tp, masterN + 1);
   debugData.perMetric.IRR.inputs.fcfUSD_total = enterpriseCashflows;
 
-  let cumApprox = 0;
-  const cumApproxSeries: Array<{ t: number; cumulative: number }> = [];
-  for (let i = tp; i < enterpriseCashflows.length; i += 1) {
-    const v = enterpriseCashflows[i] as number;
-    cumApprox += v;
-    cumApproxSeries.push({ t: i, cumulative: cumApprox });
-    if (cumApprox >= initialCapexUSD) {
-      out.Payback_approx_years = i - tp + 1;
-      break;
-    }
-  }
   const fcffSumLom = (enterpriseCashflows as number[]).slice(tp).reduce((sum, v) => sum + v, 0);
   const annualAvgFcff = enterpriseCashflows.length - tp > 0 ? fcffSumLom / (enterpriseCashflows.length - tp) : null;
+  if (args.paybackApproxAsRatio) {
+    if (annualAvgFcff !== null && annualAvgFcff > 0) {
+      out.Payback_approx_years = Math.abs(initialCapexUSD) / annualAvgFcff;
+    }
+  } else {
+    let cumApprox = 0;
+    const cumApproxSeriesLegacy: Array<{ t: number; cumulative: number }> = [];
+    for (let i = tp; i < enterpriseCashflows.length; i += 1) {
+      const v = enterpriseCashflows[i] as number;
+      cumApprox += v;
+      cumApproxSeriesLegacy.push({ t: i, cumulative: cumApprox });
+      if (cumApprox >= initialCapexUSD) {
+        out.Payback_approx_years = i - tp + 1;
+        break;
+      }
+    }
+    debugData.perMetric.Payback_approx.intermediates.cumulativeSeries = cumApproxSeriesLegacy;
+  }
   debugData.perMetric.Payback_approx.intermediates = {
     FCFF_sum_LOM_USD: fcffSumLom,
     AnnualAvg_FCFF_USD: annualAvgFcff,
-    cumulativeSeries: cumApproxSeries,
+    ...(debugData.perMetric.Payback_approx.intermediates.cumulativeSeries
+      ? { cumulativeSeries: debugData.perMetric.Payback_approx.intermediates.cumulativeSeries }
+      : {}),
   };
 
   const investmentAbs = args.paybackRealUseInitialCapex
