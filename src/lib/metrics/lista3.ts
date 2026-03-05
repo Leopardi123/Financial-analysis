@@ -8,6 +8,10 @@ export type Lista3Metrics = {
   CAPEX_per_Annual_AuEq?: number | null;
   LOM_avg_EBIT_ROCE?: number | null;
   LOM_discounted_EBIT_ROCE?: number | null;
+  Corporate_ROIC?: number | null;
+  LOM_avg_NOPAT_ROIC?: number | null;
+  Kapitalavkastning_LOM?: number | null;
+  Kapitalavkastning_per_Year?: number | null;
 };
 
 export type Lista3DebugMetric = {

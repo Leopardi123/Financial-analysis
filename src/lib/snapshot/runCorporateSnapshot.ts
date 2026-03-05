@@ -2173,6 +2173,119 @@ export async function runCorporateSnapshotPipeline(args: {
         : { value: ratio, nullReason: null };
     };
 
+    const computeKapitalavkastningMetrics = (): {
+      kapitalavkastningLom: number | null;
+      kapitalavkastningPerYear: number | null;
+      nullReason: string | null;
+      intermediates: {
+        capex0: number | null;
+        fcf_sum_LOM: number | null;
+        LOM_periods: number | null;
+      };
+      inputsUsed: {
+        tp_main: number | null;
+        masterN: number;
+        initialCapexUSD_main: number | null;
+        fcf_slice_summary: {
+          rangeStart: number | null;
+          rangeEnd: number;
+          finiteCount: number;
+          finiteSum: number | null;
+        };
+      };
+    } => {
+      const capex0Raw = Number.isFinite(initialCapexUSD_main) ? Math.abs(initialCapexUSD_main as number) : null;
+      const capex0 = typeof capex0Raw === 'number' && capex0Raw > 0 ? capex0Raw : null;
+      const baseInputs = {
+        tp_main,
+        masterN: aggregationEffective.corporateMasterN,
+        initialCapexUSD_main,
+      };
+      if (capex0 === null) {
+        return {
+          kapitalavkastningLom: null,
+          kapitalavkastningPerYear: null,
+          nullReason: 'domain rule: |Initial_CAPEX_USD| must be > 0',
+          intermediates: { capex0, fcf_sum_LOM: null, LOM_periods: null },
+          inputsUsed: {
+            ...baseInputs,
+            fcf_slice_summary: {
+              rangeStart: tp_main,
+              rangeEnd: aggregationEffective.corporateMasterN,
+              finiteCount: 0,
+              finiteSum: null,
+            },
+          },
+        };
+      }
+      if (tp_main === null || tp_main < 0 || tp_main > aggregationEffective.corporateMasterN) {
+        return {
+          kapitalavkastningLom: null,
+          kapitalavkastningPerYear: null,
+          nullReason: 'domain rule: tp_main invalid for [tp..masterN] window',
+          intermediates: { capex0, fcf_sum_LOM: null, LOM_periods: null },
+          inputsUsed: {
+            ...baseInputs,
+            fcf_slice_summary: {
+              rangeStart: tp_main,
+              rangeEnd: aggregationEffective.corporateMasterN,
+              finiteCount: 0,
+              finiteSum: null,
+            },
+          },
+        };
+      }
+
+      let fcfSumLom = 0;
+      let lomPeriods = 0;
+      for (let t = tp_main; t <= aggregationEffective.corporateMasterN; t += 1) {
+        const fcf = toFiniteOrNull(aggregationEffective.fcffUSD_total[t]);
+        if (fcf === null) continue;
+        fcfSumLom += fcf;
+        lomPeriods += 1;
+      }
+      if (lomPeriods < 1) {
+        return {
+          kapitalavkastningLom: null,
+          kapitalavkastningPerYear: null,
+          nullReason: 'domain rule: no finite FCFF values in [tp..masterN]',
+          intermediates: { capex0, fcf_sum_LOM: null, LOM_periods: 0 },
+          inputsUsed: {
+            ...baseInputs,
+            fcf_slice_summary: {
+              rangeStart: tp_main,
+              rangeEnd: aggregationEffective.corporateMasterN,
+              finiteCount: 0,
+              finiteSum: null,
+            },
+          },
+        };
+      }
+
+      const kapitalavkastningLom = fcfSumLom / capex0;
+      return {
+        kapitalavkastningLom,
+        kapitalavkastningPerYear: kapitalavkastningLom / lomPeriods,
+        nullReason: null,
+        intermediates: {
+          capex0,
+          fcf_sum_LOM: fcfSumLom,
+          LOM_periods: lomPeriods,
+        },
+        inputsUsed: {
+          ...baseInputs,
+          fcf_slice_summary: {
+            rangeStart: tp_main,
+            rangeEnd: aggregationEffective.corporateMasterN,
+            finiteCount: lomPeriods,
+            finiteSum: fcfSumLom,
+          },
+        },
+      };
+    };
+
+    const kapitalavkastningMetrics = computeKapitalavkastningMetrics();
+
     const additionalLista3ByMetric = {
       AISC_LOM: computeAiscLom(),
       BreakEven_AuEq: computeBreakEven(),
@@ -2188,6 +2301,8 @@ export async function runCorporateSnapshotPipeline(args: {
       CAPEX_per_Annual_AuEq: additionalLista3ByMetric.CAPEX_per_Annual_AuEq.value,
       LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.value,
       LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.value,
+      Kapitalavkastning_LOM: kapitalavkastningMetrics.kapitalavkastningLom,
+      Kapitalavkastning_per_Year: kapitalavkastningMetrics.kapitalavkastningPerYear,
     };
 
     const corporateLista3Debug = {
@@ -2298,12 +2413,38 @@ export async function runCorporateSnapshotPipeline(args: {
       payload.missingInputs = [...new Set([...(Array.isArray(payload.missingInputs) ? payload.missingInputs : []), ...computedMissing])];
     });
 
+    const kapitalLomPayload = ensureMetricPayload('Kapitalavkastning_LOM');
+    kapitalLomPayload.formula = 'Σ FCFF(t=tp..masterN) / |Initial_CAPEX_USD|';
+    kapitalLomPayload.inputs = {
+      ...kapitalLomPayload.inputs,
+      ...kapitalavkastningMetrics.inputsUsed,
+    };
+    kapitalLomPayload.intermediates = {
+      ...kapitalLomPayload.intermediates,
+      ...kapitalavkastningMetrics.intermediates,
+    };
+
+    const kapitalPerYearPayload = ensureMetricPayload('Kapitalavkastning_per_Year');
+    kapitalPerYearPayload.formula = '(Σ FCFF(t=tp..masterN) / |Initial_CAPEX_USD|) / LOM_periods';
+    kapitalPerYearPayload.inputs = {
+      ...kapitalPerYearPayload.inputs,
+      ...kapitalavkastningMetrics.inputsUsed,
+    };
+    kapitalPerYearPayload.intermediates = {
+      ...kapitalPerYearPayload.intermediates,
+      ...kapitalavkastningMetrics.intermediates,
+    };
+
     const previewValues: Record<string, number | null> = {
       AISC_LOM: additionalLista3ByMetric.AISC_LOM.value,
       BreakEven_AuEq: additionalLista3ByMetric.BreakEven_AuEq.value,
       CAPEX_per_Annual_AuEq: additionalLista3ByMetric.CAPEX_per_Annual_AuEq.value,
       LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.value,
       LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.value,
+      Corporate_ROIC: null,
+      LOM_avg_NOPAT_ROIC: null,
+      Kapitalavkastning_LOM: kapitalavkastningMetrics.kapitalavkastningLom,
+      Kapitalavkastning_per_Year: kapitalavkastningMetrics.kapitalavkastningPerYear,
     };
 
     const reasonByMetric: Record<string, string | null> = {
@@ -2312,6 +2453,10 @@ export async function runCorporateSnapshotPipeline(args: {
       CAPEX_per_Annual_AuEq: additionalLista3ByMetric.CAPEX_per_Annual_AuEq.nullReason,
       LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.nullReason,
       LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.nullReason,
+      Corporate_ROIC: 'domain rule: missing required inputs',
+      LOM_avg_NOPAT_ROIC: 'domain rule: missing required inputs',
+      Kapitalavkastning_LOM: kapitalavkastningMetrics.nullReason,
+      Kapitalavkastning_per_Year: kapitalavkastningMetrics.nullReason,
     };
 
     Object.keys(previewValues).forEach((metricKey) => {
