@@ -2442,6 +2442,68 @@ Capital Available: ${availableLabel}`,
     return result;
   }, [corporateSnapshotData, debugEnabled, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  const corporateList2Debug = useMemo(() => {
+    if (!debugEnabled || !corporateSnapshotData || !corporateViewMetrics) return null;
+
+    const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
+      ? raw.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null))
+      : []);
+    const inputs = getProjectInputs({
+      snapshot: corporateSnapshotData,
+      parsedProject: null,
+      discountRateInput: riskAdjustedDiscountRatePctInput,
+      targetCurrency: lockedTargetCurrency,
+    });
+
+    let yearsByPeriod: number[];
+    try {
+      yearsByPeriod = requireYearsByPeriod(corporateSnapshotData.series);
+    } catch {
+      return {
+        reason: "Missing yearsByPeriod in corporate snapshot.",
+      };
+    }
+
+    const timeline = corporateSnapshotData.modeledValuationTimeline as {
+      markers?: Array<{
+        tp: number;
+        corporateTpIndexUsed?: number | null;
+        value_high: number | null;
+      }>;
+    } | null | undefined;
+    const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
+    const dfNow = asSeries(inputs.series.df_now);
+
+    return {
+      markerCount: markers.length,
+      keysUsingMarkerText: Object.keys(corporateProdStartMarkerTextByKey),
+      markerTextByKey: corporateProdStartMarkerTextByKey,
+      list2RawValues: {
+        NPV_prodStart: corporateViewMetrics.list2.NPV_prodStart ?? null,
+        NPV_prodStart_perShare: corporateViewMetrics.list2.NPV_prodStart_perShare ?? null,
+        NAV_prodStart: corporateViewMetrics.list2.NAV_prodStart ?? null,
+        NAV_prodStart_perShare: corporateViewMetrics.list2.NAV_prodStart_perShare ?? null,
+        DCF_prodStart_exCapex: corporateViewMetrics.list2.DCF_prodStart_exCapex ?? null,
+        DCF_prodStart_exCapex_perShare: corporateViewMetrics.list2.DCF_prodStart_exCapex_perShare ?? null,
+        DCF_prodStart_present: corporateViewMetrics.list2.DCF_prodStart_present ?? null,
+        DCF_prodStart_present_perShare: corporateViewMetrics.list2.DCF_prodStart_present_perShare ?? null,
+      },
+      markerInputs: markers.map((marker) => {
+        const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
+        const dfAtTp = typeof dfNow[tIndex] === "number" && Number.isFinite(dfNow[tIndex]) ? dfNow[tIndex] : null;
+        return {
+          tp: marker.tp,
+          corporateTpIndexUsed: marker.corporateTpIndexUsed ?? null,
+          tIndexUsed: tIndex,
+          yearLabelUsed: yearLabel(yearsByPeriod, tIndex),
+          markerValueHigh_perShare: marker.value_high,
+          dfNowAtTp: dfAtTp,
+        };
+      }),
+      joinFormat: "YYYY: <value> CAD",
+    };
+  }, [corporateProdStartMarkerTextByKey, corporateSnapshotData, corporateViewMetrics, debugEnabled, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
     const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
@@ -4042,6 +4104,12 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
+                      {debugEnabled && sectionKey === "list2" && corporateList2Debug && (
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Lista2 creation debug</summary>
+                          <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 8 }}>{JSON.stringify(corporateList2Debug, null, 2)}</pre>
+                        </details>
+                      )}
                     </details>
                   ))}
                 </>
