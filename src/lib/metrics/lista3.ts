@@ -5,6 +5,28 @@ export type Lista3Metrics = {
   IRR: number | null;
 };
 
+export type Lista3DebugMetric = {
+  formula: string;
+  inputs: Record<string, unknown>;
+  intermediates: Record<string, unknown>;
+  missingInputs: string[];
+  output: { value: number | null };
+};
+
+export type Lista3DebugPayload = {
+  tp_main: number | null;
+  initialCapexUSD_main: number | null;
+  series: {
+    fcfUSD_total: Array<number | null>;
+  };
+  perMetric: {
+    Payback_approx: Lista3DebugMetric;
+    Payback_real: Lista3DebugMetric;
+    IRR: Lista3DebugMetric;
+    ROI_10Y: Lista3DebugMetric;
+  };
+};
+
 function finite(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
@@ -71,36 +93,130 @@ function computeIrr(cashFlows: Array<number | null>): number | null {
   return (low + high) / 2;
 }
 
-export function computeLista3(args: {
+type Lista3Args = {
   masterN: number;
   tp: number | null;
   fcfUSD: Array<number | null>;
   initialCapexUSD: number | null;
   strictRoi10Y?: boolean;
-}): Lista3Metrics {
+};
+
+type Lista3DebugOptions = { debug: true };
+
+export function computeLista3(args: Lista3Args): Lista3Metrics;
+export function computeLista3(args: Lista3Args, options: Lista3DebugOptions): { metrics: Lista3Metrics; debug: Lista3DebugPayload };
+export function computeLista3(args: Lista3Args, options?: Lista3DebugOptions): Lista3Metrics | { metrics: Lista3Metrics; debug: Lista3DebugPayload } {
   const out: Lista3Metrics = {
     Payback_approx_years: null,
     Payback_real_years: null,
     ROI_10Y_pct: null,
     IRR: null,
   };
+  const debugData: Lista3DebugPayload = {
+    tp_main: args.tp,
+    initialCapexUSD_main: finite(args.initialCapexUSD) ? args.initialCapexUSD : null,
+    series: {
+      fcfUSD_total: args.fcfUSD.slice(0, Math.max(0, args.masterN + 1)),
+    },
+    perMetric: {
+      Payback_approx: {
+        formula: '|Initial_CAPEX_USD| / AnnualAvg_FCFF_USD',
+        inputs: {
+          Initial_CAPEX_USD: finite(args.initialCapexUSD) ? args.initialCapexUSD : null,
+          tp_main: args.tp,
+          masterN: args.masterN,
+        },
+        intermediates: {},
+        missingInputs: [],
+        output: { value: null },
+      },
+      Payback_real: {
+        formula: 'cumulative FCFF from tp until payback; linear interpolation',
+        inputs: {
+          Initial_CAPEX_USD: finite(args.initialCapexUSD) ? args.initialCapexUSD : null,
+          tp_main: args.tp,
+        },
+        intermediates: {},
+        missingInputs: [],
+        output: { value: null },
+      },
+      IRR: {
+        formula: 'IRR(fcfUSD_total[0..masterN])',
+        inputs: {
+          masterN: args.masterN,
+        },
+        intermediates: {},
+        missingInputs: [],
+        output: { value: null },
+      },
+      ROI_10Y: {
+        formula: 'Σ FCFF(t=tp..tp+9) / |Initial_CAPEX_USD|',
+        inputs: {
+          Initial_CAPEX_USD: finite(args.initialCapexUSD) ? args.initialCapexUSD : null,
+          tp_main: args.tp,
+        },
+        intermediates: {},
+        missingInputs: [],
+        output: { value: null },
+      },
+    },
+  };
+
   const { masterN, tp, initialCapexUSD } = args;
-  if (!Number.isInteger(tp) || tp === null || tp < 0 || tp > masterN) return out;
-  if (!finite(initialCapexUSD) || initialCapexUSD === 0) return out;
-  if (args.fcfUSD.length < masterN + 1) return out;
+  if (!Number.isInteger(tp) || tp === null || tp < 0 || tp > masterN) {
+    debugData.perMetric.Payback_approx.missingInputs.push('tp_main');
+    debugData.perMetric.Payback_real.missingInputs.push('tp_main');
+    debugData.perMetric.ROI_10Y.missingInputs.push('tp_main');
+    debugData.perMetric.Payback_approx.intermediates.invalid_tp = true;
+    debugData.perMetric.Payback_real.intermediates.invalid_tp = true;
+    debugData.perMetric.ROI_10Y.intermediates.invalid_tp = true;
+    return options?.debug ? { metrics: out, debug: debugData } : out;
+  }
+  if (!finite(initialCapexUSD) || initialCapexUSD === 0) {
+    debugData.perMetric.Payback_approx.missingInputs.push('Initial_CAPEX_USD');
+    debugData.perMetric.Payback_real.missingInputs.push('Initial_CAPEX_USD');
+    debugData.perMetric.ROI_10Y.missingInputs.push('Initial_CAPEX_USD');
+    return options?.debug ? { metrics: out, debug: debugData } : out;
+  }
+  if (args.fcfUSD.length < masterN + 1) {
+    debugData.perMetric.Payback_approx.missingInputs.push('fcfUSD_total');
+    debugData.perMetric.Payback_real.missingInputs.push('fcfUSD_total');
+    debugData.perMetric.ROI_10Y.missingInputs.push('fcfUSD_total');
+    debugData.perMetric.IRR.missingInputs.push('fcfUSD_total');
+    return options?.debug ? { metrics: out, debug: debugData } : out;
+  }
 
   const enterpriseCashflows = args.fcfUSD.slice(0, masterN + 1);
-  if (enterpriseCashflows.some((v) => !finite(v))) return out;
+  if (enterpriseCashflows.some((v) => !finite(v))) {
+    debugData.perMetric.Payback_approx.missingInputs.push('fcfUSD_total contains non-finite values');
+    debugData.perMetric.Payback_real.missingInputs.push('fcfUSD_total contains non-finite values');
+    debugData.perMetric.ROI_10Y.missingInputs.push('fcfUSD_total contains non-finite values');
+    debugData.perMetric.IRR.missingInputs.push('fcfUSD_total contains non-finite values');
+    return options?.debug ? { metrics: out, debug: debugData } : out;
+  }
+
+  debugData.perMetric.Payback_approx.inputs.LOM_periods = enterpriseCashflows.length - tp;
+  debugData.perMetric.Payback_real.inputs.fcfUSD_total_slice = enterpriseCashflows.slice(tp, masterN + 1);
+  debugData.perMetric.IRR.inputs.fcfUSD_total = enterpriseCashflows;
 
   let cumApprox = 0;
+  const cumApproxSeries: Array<{ t: number; cumulative: number }> = [];
   for (let i = tp; i < enterpriseCashflows.length; i += 1) {
     const v = enterpriseCashflows[i] as number;
     cumApprox += v;
+    cumApproxSeries.push({ t: i, cumulative: cumApprox });
     if (cumApprox >= initialCapexUSD) {
       out.Payback_approx_years = i - tp + 1;
       break;
     }
   }
+  const fcffSumLom = (enterpriseCashflows as number[]).slice(tp).reduce((sum, v) => sum + v, 0);
+  const annualAvgFcff = enterpriseCashflows.length - tp > 0 ? fcffSumLom / (enterpriseCashflows.length - tp) : null;
+  debugData.perMetric.Payback_approx.intermediates = {
+    FCFF_sum_LOM_USD: fcffSumLom,
+    AnnualAvg_FCFF_USD: annualAvgFcff,
+    cumulativeSeries: cumApproxSeries,
+  };
 
   let investmentAbs = 0;
   for (let t = 0; t <= tp; t += 1) {
@@ -109,18 +225,25 @@ export function computeLista3(args: {
   }
   if (investmentAbs > 0) {
     let cumulative = -investmentAbs;
+    const cumulativeSeries: Array<{ t: number; cumulative: number }> = [];
     for (let t = tp; t <= masterN; t += 1) {
       const cf = enterpriseCashflows[t] as number;
       const prev = cumulative;
       cumulative += cf;
+       cumulativeSeries.push({ t, cumulative });
       if (prev < 0 && cumulative >= 0 && cf > 0) {
         out.Payback_real_years = round1((t - tp) + ((-prev) / cf));
+        debugData.perMetric.Payback_real.intermediates.firstPaybackIndex = t;
+        debugData.perMetric.Payback_real.intermediates.interpolation = (-prev) / cf;
         break;
       }
     }
+    debugData.perMetric.Payback_real.intermediates.cumulativeSeries = cumulativeSeries;
   }
+  debugData.perMetric.Payback_real.intermediates.investmentAbs = investmentAbs;
 
   out.IRR = computeIrr(enterpriseCashflows);
+  debugData.perMetric.IRR.intermediates.solver = 'bracket+bisection';
 
   const roiEnd = tp + 9;
   if (roiEnd <= masterN || !args.strictRoi10Y) {
@@ -132,10 +255,19 @@ export function computeLista3(args: {
       sum += cf;
       count += 1;
     }
+    debugData.perMetric.ROI_10Y.inputs.fcff_10y_slice = enterpriseCashflows.slice(tp, boundedEnd + 1);
+    debugData.perMetric.ROI_10Y.intermediates.fcff_10y_sum = sum;
     if ((!args.strictRoi10Y && count > 0) || (args.strictRoi10Y && roiEnd <= masterN)) {
       out.ROI_10Y_pct = (sum / Math.abs(initialCapexUSD)) * 100;
     }
+  } else {
+    debugData.perMetric.ROI_10Y.missingInputs.push('10Y window incomplete under strictRoi10Y');
   }
 
-  return out;
+  debugData.perMetric.Payback_approx.output.value = out.Payback_approx_years;
+  debugData.perMetric.Payback_real.output.value = out.Payback_real_years;
+  debugData.perMetric.IRR.output.value = out.IRR;
+  debugData.perMetric.ROI_10Y.output.value = out.ROI_10Y_pct;
+
+  return options?.debug ? { metrics: out, debug: debugData } : out;
 }

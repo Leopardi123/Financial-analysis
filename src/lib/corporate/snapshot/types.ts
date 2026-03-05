@@ -1,4 +1,5 @@
 import type { Lista3Metrics } from '../../metrics/lista3.ts';
+import type { Lista3DebugPayload } from '../../metrics/lista3.ts';
 export type MarketValueInput = {
   // Market-now equity inputs
   shares_current: number | null;
@@ -142,6 +143,12 @@ export type CorporateSnapshot = {
 
   corporate?: {
     lista3Metrics: Lista3Metrics;
+    lista3Debug?: Lista3DebugPayload & {
+      shares_post_financing: number | null;
+      series: Lista3DebugPayload['series'] & {
+        capexUSD_total: Array<number | null>;
+      };
+    };
   };
 
   NPV_over_ETLV: number | null;
