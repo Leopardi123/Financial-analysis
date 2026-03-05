@@ -10,6 +10,7 @@ import { copyText } from '../lib/client/clipboard.ts';
 import { parseProjectJsonV1 } from '../lib/project/jsonv1/parse.ts';
 import { buildProjectJsonV1Template } from '../lib/project/jsonv1/template.ts';
 import { shiftProjectToTargetProductionYear } from './companyProjectShift.ts';
+import { convertProjectJsonV1ToV2 } from '../lib/projectJson/convertV1ToV2.ts';
 import '../styles/company-project-editor.css';
 
 type ValidationState = {
@@ -462,6 +463,49 @@ export default function CompanyProjectsEditorPage() {
 
 
 
+
+  function handleConvertV1ToV2(): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawJsonInput);
+    } catch (error) {
+      setEditorError(`Invalid JSON: ${(error as Error).message || 'Unable to parse JSON.'}`);
+      setEditorInfo(null);
+      return;
+    }
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      setEditorError('JSON root must be an object.');
+      setEditorInfo(null);
+      return;
+    }
+
+    const root = parsed as Record<string, unknown>;
+    if (root.version !== 'project_json_v1') {
+      setEditorError(null);
+      setEditorInfo('Only v1 can be converted.');
+      return;
+    }
+
+    const hasUnsavedChanges = savedRawJson == null ? rawJsonInput.trim().length > 0 : rawJsonInput !== savedRawJson;
+    if (hasUnsavedChanges) {
+      const confirmed = window.confirm('This will overwrite the editor content.');
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    try {
+      const converted = convertProjectJsonV1ToV2(root);
+      setRawJsonInput(JSON.stringify(converted, null, 2));
+      setEditorError(null);
+      setEditorInfo('Converted project JSON from v1 to v2.');
+    } catch (error) {
+      setEditorError((error as Error).message || 'Failed to convert project JSON.');
+      setEditorInfo(null);
+    }
+  }
+
   function handleShiftProductionToYear(): void {
     if (!parsedValidation.ok || !parsedValidation.parsed) {
       setEditorError(parsedValidation.error);
@@ -644,6 +688,7 @@ export default function CompanyProjectsEditorPage() {
             <button type="button" onClick={() => void handleSave()} disabled={!canSave}>{saving ? 'Saving…' : 'Save'}</button>
             <button type="button" onClick={() => void handleCopyTemplate()}>Copy template</button>
             <button type="button" onClick={handlePrettify}>Prettify JSON</button>
+            <button type="button" onClick={handleConvertV1ToV2}>Convert v1 → v2</button>
             <button type="button" onClick={handleResetToSaved} disabled={savedRawJson == null}>Reset to saved</button>
           </div>
 
