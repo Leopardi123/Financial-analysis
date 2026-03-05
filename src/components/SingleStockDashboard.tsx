@@ -2285,7 +2285,7 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
-    return computeProjectViewMetrics({
+    const baseMetrics = computeProjectViewMetrics({
       meta: { projectId: "corporate" },
       targetCurrency: String(corporateSnapshotData.targetCurrency ?? lockedTargetCurrency),
       fxUSDToTarget: inputs.fx,
@@ -2316,10 +2316,25 @@ Capital Available: ${availableLabel}`,
         cashUsedInput: 0,
       },
     });
+    baseMetrics.list2.DCF_prodStart_exCapex = { value: null, reason: "Derived from corporate modeled valuation timeline markers" };
+    baseMetrics.list2.DCF_prodStart_exCapex_perShare = { value: null, reason: "Derived from corporate modeled valuation timeline markers" };
+    baseMetrics.list2.DCF_prodStart_present = { value: null, reason: "Derived from corporate modeled valuation timeline markers" };
+    baseMetrics.list2.DCF_prodStart_present_perShare = { value: null, reason: "Derived from corporate modeled valuation timeline markers" };
+    return baseMetrics;
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const corporateProdStartMarkerTextByKey = useMemo(() => {
     if (!corporateSnapshotData) return {} as Record<string, string>;
+
+    const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
+      ? raw.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null))
+      : []);
+    const inputs = getProjectInputs({
+      snapshot: corporateSnapshotData,
+      parsedProject: null,
+      discountRateInput: riskAdjustedDiscountRatePctInput,
+      targetCurrency: lockedTargetCurrency,
+    });
 
     let yearsByPeriod: number[];
     try {
@@ -2351,14 +2366,31 @@ Capital Available: ${availableLabel}`,
       ? (cashT0 - debtT0) / sharesPf
       : null;
 
+    const dfNow = asSeries(inputs.series.df_now);
+
     const makeJoined = (
-      metricKey: "NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare",
+      metricKey:
+      | "NPV_prodStart"
+      | "NPV_prodStart_perShare"
+      | "NAV_prodStart"
+      | "NAV_prodStart_perShare"
+      | "DCF_prodStart_exCapex"
+      | "DCF_prodStart_exCapex_perShare"
+      | "DCF_prodStart_present"
+      | "DCF_prodStart_present_perShare",
     ): string | null => {
       const parts: string[] = [];
       for (const marker of markers) {
         const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
         const year = yearLabel(yearsByPeriod, tIndex);
-        const npvProdStartPerShare = typeof marker.value_high === "number" && Number.isFinite(marker.value_high) ? marker.value_high : null;
+        const dcfProdStartExCapexPerShare = typeof marker.value_high === "number" && Number.isFinite(marker.value_high) ? marker.value_high : null;
+        const dfAtTp = typeof dfNow[tIndex] === "number" && Number.isFinite(dfNow[tIndex]) ? (dfNow[tIndex] as number) : null;
+        const dcfProdStartPresentPerShare = dcfProdStartExCapexPerShare !== null && dfAtTp !== null
+          ? dcfProdStartExCapexPerShare * dfAtTp
+          : null;
+        const npvProdStartPerShare = dcfProdStartExCapexPerShare !== null && netCashPerShare !== null
+          ? dcfProdStartExCapexPerShare - netCashPerShare
+          : null;
         const navProdStartPerShare = npvProdStartPerShare !== null && netCashPerShare !== null
           ? npvProdStartPerShare + netCashPerShare
           : null;
@@ -2367,6 +2399,10 @@ Capital Available: ${availableLabel}`,
           if (metricKey === "NPV_prodStart_perShare") return npvProdStartPerShare;
           if (metricKey === "NPV_prodStart") return npvProdStartPerShare !== null && sharesPf !== null ? npvProdStartPerShare * sharesPf : null;
           if (metricKey === "NAV_prodStart_perShare") return navProdStartPerShare;
+          if (metricKey === "DCF_prodStart_exCapex_perShare") return dcfProdStartExCapexPerShare;
+          if (metricKey === "DCF_prodStart_exCapex") return dcfProdStartExCapexPerShare !== null && sharesPf !== null ? dcfProdStartExCapexPerShare * sharesPf : null;
+          if (metricKey === "DCF_prodStart_present_perShare") return dcfProdStartPresentPerShare;
+          if (metricKey === "DCF_prodStart_present") return dcfProdStartPresentPerShare !== null && sharesPf !== null ? dcfProdStartPresentPerShare * sharesPf : null;
           return navProdStartPerShare !== null && sharesPf !== null ? navProdStartPerShare * sharesPf : null;
         })();
 
@@ -2378,7 +2414,16 @@ Capital Available: ${availableLabel}`,
     };
 
     const result: Record<string, string> = {};
-    (["NPV_prodStart", "NPV_prodStart_perShare", "NAV_prodStart", "NAV_prodStart_perShare"] as const).forEach((key) => {
+    ([
+      "NPV_prodStart",
+      "NPV_prodStart_perShare",
+      "NAV_prodStart",
+      "NAV_prodStart_perShare",
+      "DCF_prodStart_exCapex",
+      "DCF_prodStart_exCapex_perShare",
+      "DCF_prodStart_present",
+      "DCF_prodStart_present_perShare",
+    ] as const).forEach((key) => {
       const joined = makeJoined(key);
       if (joined) {
         result[key] = joined;
@@ -2395,7 +2440,7 @@ Capital Available: ${availableLabel}`,
     }
 
     return result;
-  }, [corporateSnapshotData, debugEnabled, lockedTargetCurrency]);
+  }, [corporateSnapshotData, debugEnabled, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
