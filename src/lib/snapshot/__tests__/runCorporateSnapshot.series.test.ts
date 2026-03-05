@@ -561,7 +561,120 @@ test('corporate modeled milestones exclude tp=0 projects and include future tp>0
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  const markers = result.snapshot.modeledValuationTimeline?.markers ?? [];
+  const markers = (result.snapshot.modeledValuationTimeline?.markers ?? []) as Array<{
+    yearLabelUsed: string | null;
+    lista2Metrics?: {
+      DCF_prodStart_exCapex_TargetCurrency: number | null;
+      NPV_prodStart_TargetCurrency: number | null;
+      NAV_prodStart_TargetCurrency: number | null;
+      InitialCAPEX_incremental_TargetCurrency: number | null;
+    };
+  }>;
   assert.equal(markers.some((marker) => marker.yearLabelUsed === String(corporateNowYear)), false);
   assert.equal(markers.some((marker) => marker.yearLabelUsed === String(corporateNowYear + 2)), true);
+});
+
+
+test('corporate prod-start markers apply incremental initial capex windows to NPV and NAV', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const template = JSON.parse(JSON.stringify(projects[0])) as Record<string, unknown>;
+  const templateRaw = template.rawJson as Record<string, unknown>;
+  const templateTime = templateRaw.time as Record<string, unknown>;
+  const corporateNowYear = (templateTime.productionStartYear as number) - (templateTime.productionStartPeriod as number);
+
+  const makeProject = (projectId: string, tp: number, capexByTp: Record<number, number>): Record<string, unknown> => {
+    const project = JSON.parse(JSON.stringify(template)) as Record<string, unknown>;
+    const raw = project.rawJson as Record<string, unknown>;
+    const time = raw.time as Record<string, unknown>;
+    const meta = raw.meta as Record<string, unknown>;
+    const series = raw.series as Record<string, unknown>;
+
+    project.projectId = projectId;
+    meta.projectId = projectId;
+    meta.projectName = projectId;
+    time.productionStartPeriod = tp;
+    time.productionStartYear = corporateNowYear + tp;
+
+    const capexTemplate = series.capexUSD as Array<number | null>;
+    const sustainingTemplate = series.sustainingCapexUSD as Array<number | null>;
+    const capex = capexTemplate.map(() => 0);
+    const sustaining = sustainingTemplate.map(() => 0);
+    for (const [tpKey, value] of Object.entries(capexByTp)) {
+      const idx = Number(tpKey);
+      if (Number.isInteger(idx) && idx >= 0 && idx < capex.length) {
+        capex[idx] = value;
+      }
+    }
+    series.capexUSD = capex;
+    series.sustainingCapexUSD = sustaining;
+
+    const operations = raw.operations as Record<string, unknown>;
+    const metals = raw.metals as Record<string, unknown>;
+    const oreMined = [...(operations.oreMinedTonnes as Array<number | null>)];
+    const oreMilled = [...(operations.oreMilledTonnes as Array<number | null>)];
+    const oreMinedPositive = oreMined.find((value) => typeof value === 'number' && value > 0) ?? 1;
+    const oreMilledPositive = oreMilled.find((value) => typeof value === 'number' && value > 0) ?? 1;
+    for (let i = 0; i < oreMined.length; i += 1) oreMined[i] = i < tp ? 0 : (i === tp ? oreMinedPositive : oreMined[i]);
+    for (let i = 0; i < oreMilled.length; i += 1) oreMilled[i] = i < tp ? 0 : (i === tp ? oreMilledPositive : oreMilled[i]);
+    operations.oreMinedTonnes = oreMined;
+    operations.oreMilledTonnes = oreMilled;
+
+    const payableByMetal = metals.payableQtyByMetal as Record<string, Array<number | null>>;
+    for (const [metal, seriesByMetal] of Object.entries(payableByMetal)) {
+      const nextSeries = [...seriesByMetal];
+      const positive = nextSeries.find((value) => typeof value === 'number' && value > 0) ?? 1;
+      for (let i = 0; i < nextSeries.length; i += 1) {
+        nextSeries[i] = i < tp ? 0 : (i === tp ? positive : nextSeries[i]);
+      }
+      payableByMetal[metal] = nextSeries;
+    }
+
+    return project;
+  };
+
+  body.projects = [
+    makeProject('ABRA_TP0', 0, {}),
+    makeProject('ABRA_2029', 2, { 0: 40, 1: 60 }),
+    makeProject('ABRA_2031', 4, { 2: 50 }),
+  ];
+
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const markers = (result.snapshot.modeledValuationTimeline?.markers ?? []) as Array<{
+    yearLabelUsed: string | null;
+    lista2Metrics?: {
+      DCF_prodStart_exCapex_TargetCurrency: number | null;
+      NPV_prodStart_TargetCurrency: number | null;
+      NAV_prodStart_TargetCurrency: number | null;
+      InitialCAPEX_incremental_TargetCurrency: number | null;
+    };
+  }>;
+  const years = markers.map((marker) => marker.yearLabelUsed);
+  assert.deepEqual(years, [String(corporateNowYear + 2), String(corporateNowYear + 4)]);
+
+  for (const marker of markers) {
+    const metrics = marker.lista2Metrics;
+    assert.ok(metrics);
+    assert.notEqual(metrics?.DCF_prodStart_exCapex_TargetCurrency, null);
+    assert.notEqual(metrics?.NPV_prodStart_TargetCurrency, null);
+    assert.notEqual(metrics?.InitialCAPEX_incremental_TargetCurrency, null);
+    assert.notEqual(metrics?.NAV_prodStart_TargetCurrency, null);
+
+    const dcf = metrics?.DCF_prodStart_exCapex_TargetCurrency as number;
+    const npv = metrics?.NPV_prodStart_TargetCurrency as number;
+    const nav = metrics?.NAV_prodStart_TargetCurrency as number;
+    const initialCapex = metrics?.InitialCAPEX_incremental_TargetCurrency as number;
+
+    if (initialCapex > 0) {
+      assert.notEqual(dcf, npv);
+    }
+    assert.ok(Math.abs((dcf - npv) - initialCapex) <= 0.01);
+    const netCash0 = result.snapshot.financing.netCash_TargetCurrency_t0;
+    assert.notEqual(netCash0, null);
+    assert.ok(Math.abs(nav - (npv + (netCash0 as number))) <= 0.01);
+  }
 });

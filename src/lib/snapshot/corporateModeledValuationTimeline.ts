@@ -3,9 +3,9 @@ type TimelineLista2Metrics = {
   DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
   NAV_prodStart_TargetCurrency: number | null;
   NAV_prodStart_perShare_TargetCurrency: number | null;
-  NPV_prodStart_TargetCurrency?: number | null;
-  NPV_prodStart_perShare_TargetCurrency?: number | null;
-  InitialCAPEX_incremental_TargetCurrency?: number | null;
+  NPV_prodStart_TargetCurrency: number | null;
+  NPV_prodStart_perShare_TargetCurrency: number | null;
+  InitialCAPEX_incremental_TargetCurrency: number | null;
 };
 
 export type CorporateModeledTimelineMarker = {
