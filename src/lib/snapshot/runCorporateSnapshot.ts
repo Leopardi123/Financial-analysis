@@ -1056,6 +1056,8 @@ type SnapshotDiagnostics = {
       }>;
     };
     corporateLista3Debug?: {
+      scope?: 'corporate' | 'project';
+      sourcePath?: string;
       tp_main: number | null;
       initialCapexUSD_main: number | null;
       shares_post_financing: number | null;
@@ -2013,17 +2015,71 @@ export async function runCorporateSnapshotPipeline(args: {
       fcfUSD: aggregationEffective.fcffUSD_total,
       initialCapexUSD: initialCapexUSD_main,
       strictRoi10Y: true,
+      roiAsRatio: true,
+      paybackRealUseInitialCapex: true,
     }, { debug: true });
     const corporateLista3 = corporateLista3Result.metrics;
 
     const corporateLista3Debug = {
       ...corporateLista3Result.debug,
+      scope: 'corporate' as const,
+      sourcePath: 'snapshot.corporate.lista3Metrics',
       shares_post_financing: shares_post_financing_fd_effective,
       series: {
         ...corporateLista3Result.debug.series,
         capexUSD_total: aggregationEffective.capexUSD_total.slice(0, Math.max(0, aggregationEffective.corporateMasterN + 1)),
       },
     };
+    corporateLista3Debug.perMetric.Payback_approx.output.value = corporateLista3.Payback_approx_years;
+    corporateLista3Debug.perMetric.Payback_real.output.value = corporateLista3.Payback_real_years;
+    corporateLista3Debug.perMetric.ROI_10Y.output.value = corporateLista3.ROI_10Y_pct;
+    corporateLista3Debug.perMetric.IRR.output.value = corporateLista3.IRR;
+    corporateLista3Debug.perMetric.Payback_real.inputs.initialCapexUSD_main_passed = initialCapexUSD_main;
+    corporateLista3Debug.perMetric.Payback_real.intermediates.investmentAbs_used = initialCapexUSD_main === null
+      ? null
+      : Math.abs(initialCapexUSD_main);
+
+    const hasFiniteValue = (value: unknown): boolean => {
+      if (Array.isArray(value)) return value.every((item) => typeof item === 'number' && Number.isFinite(item));
+      return typeof value === 'number' && Number.isFinite(value);
+    };
+    const addCorporateMissingInputs = (metricKey: string, requiredInputs: string[], inputValues: Record<string, unknown>) => {
+      const payload = (corporateLista3Debug.perMetric as Record<string, {
+        inputs: Record<string, unknown>;
+        missingInputs: string[];
+      } | undefined>)[metricKey];
+      if (!payload) return;
+      payload.inputs = { ...payload.inputs, ...inputValues, requiredInputs };
+      const computedMissing = requiredInputs.filter((key) => !hasFiniteValue(inputValues[key]));
+      payload.missingInputs = [...new Set([...(Array.isArray(payload.missingInputs) ? payload.missingInputs : []), ...computedMissing])];
+    };
+
+    addCorporateMissingInputs('AISC_LOM', ['sustainingCostUSD_total', 'payableAuEqOz_total', 'tp_main'], {
+      sustainingCostUSD_total: aggregationEffective.sustainingCostUSD_total,
+      payableAuEqOz_total: aggregationEffective.payableAuEqOz_total,
+      tp_main,
+    });
+    addCorporateMissingInputs('CAPEX_per_Annual_AuEq', ['initialCapexUSD_main', 'payableAuEqOz_total', 'tp_main', 'masterN'], {
+      initialCapexUSD_main,
+      payableAuEqOz_total: aggregationEffective.payableAuEqOz_total,
+      tp_main,
+      masterN: aggregationEffective.corporateMasterN,
+    });
+    addCorporateMissingInputs('Payback_approx', ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'], {
+      initialCapexUSD_main,
+      fcfUSD_total: aggregationEffective.fcffUSD_total,
+      tp_main,
+    });
+    addCorporateMissingInputs('Payback_real', ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'], {
+      initialCapexUSD_main,
+      fcfUSD_total: aggregationEffective.fcffUSD_total,
+      tp_main,
+    });
+    addCorporateMissingInputs('EBIT_ROCE', ['ebitUSD_total', 'initialCapexUSD_main', 'tp_main'], {
+      ebitUSD_total: snapshotSeries.ebitUSD,
+      initialCapexUSD_main,
+      tp_main,
+    });
 
     diagnostics.meta.corporateLista3Debug = corporateLista3Debug;
 
