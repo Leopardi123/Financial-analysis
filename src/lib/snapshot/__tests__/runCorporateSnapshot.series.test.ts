@@ -743,3 +743,49 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
   assert.equal(typeof debugMetric?.output?.computedValuePreview !== 'undefined', true);
   assert.equal(typeof debugMetric?.output?.storedValue !== 'undefined', true);
 });
+
+test('corporate nopat aggregation populates Lista3 LOM_avg_NOPAT_ROIC when all project tax inputs exist', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const lista3 = result.snapshot.corporate?.lista3Metrics;
+  const nopatSeries = result.diagnostics.meta.corporateLista3Debug?.series?.nopatUSD_total;
+  assert.ok(Array.isArray(nopatSeries));
+
+  const hasNullInLomRange = (() => {
+    const tpMain = result.diagnostics.meta.corporateLista3Debug?.tp_main;
+    if (!Array.isArray(nopatSeries) || typeof tpMain !== 'number' || tpMain < 0) return true;
+    return nopatSeries.slice(tpMain).some((value) => value === null);
+  })();
+
+  if (hasNullInLomRange) {
+    assert.equal(lista3?.LOM_avg_NOPAT_ROIC, null);
+  } else {
+    assert.equal(typeof lista3?.LOM_avg_NOPAT_ROIC, 'number');
+  }
+});
+
+test('corporate nopat strict mode nulls periods when any project taxRate is missing', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const economics = (rawJson.economics ?? {}) as Record<string, unknown>;
+  economics.taxRate = null;
+  rawJson.economics = economics;
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const lista3 = result.snapshot.corporate?.lista3Metrics;
+  assert.equal(lista3?.LOM_avg_NOPAT_ROIC, null);
+
+  const nopatSeries = result.diagnostics.meta.corporateLista3Debug?.series?.nopatUSD_total ?? [];
+  assert.equal(nopatSeries.some((value) => value === null), true);
+
+  const missing = result.diagnostics.meta.corporateLista3Debug?.corporateNopatInputs?.missingInputs ?? [];
+  assert.equal(missing.length > 0, true);
+  assert.equal(missing.some((entry) => entry.projectId === String(projects[0].projectId ?? projects[0].project_id)), true);
+});
