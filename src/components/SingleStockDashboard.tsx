@@ -203,11 +203,22 @@ function renderProdStartDebugWindow(args: {
   data: ProdStartDebugData;
   targetCurrency: string;
   yearlyValuesByKey?: Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
+  capexWindows?: Array<{
+    milestoneYear: number;
+    tp_prev: number;
+    tp_k: number;
+    windowYears: number[];
+    windowCapexUSD: Array<number | null>;
+    windowCapexUSD_sum: number | null;
+    fx_USD_to_TargetCurrency: number | null;
+    windowCapexTarget_sum: number | null;
+  }>;
 }): ReactNode {
   const {
     data,
     targetCurrency,
     yearlyValuesByKey,
+    capexWindows,
   } = args;
   const formatYearlyMoney = (rows: YearlyMetricValue[] | undefined): string | null => {
     if (!rows || rows.length === 0) return null;
@@ -356,6 +367,22 @@ function renderProdStartDebugWindow(args: {
           <br />
           Net cash-bidrag/aktie (implied) = {formatMetricValue({ value: netCashContributionPerShare, reason: null }, "money", targetCurrency)}
         </div>
+        {Array.isArray(capexWindows) && capexWindows.length > 0 && (
+          <div>
+            <strong>CAPEX window debug:</strong>
+            {capexWindows.map((entry) => (
+              <div key={`capex-window-${entry.milestoneYear}-${entry.tp_k}`} style={{ marginTop: 6 }}>
+                <div>Milestone {entry.milestoneYear}</div>
+                <div>tp_prev = {entry.tp_prev}, tp_k = {entry.tp_k}</div>
+                <div>years: {entry.windowYears.join(", ")}</div>
+                <div>capexUSD: {entry.windowCapexUSD.map((value) => (value === null ? "null" : String(value))).join(", ")}</div>
+                <div>sumUSD: {entry.windowCapexUSD_sum === null ? "n/a" : String(entry.windowCapexUSD_sum)}</div>
+                <div>FX: {entry.fx_USD_to_TargetCurrency === null ? "n/a" : String(entry.fx_USD_to_TargetCurrency)}</div>
+                <div>sumTarget: {entry.windowCapexTarget_sum === null ? "n/a" : String(entry.windowCapexTarget_sum)}</div>
+              </div>
+            ))}
+          </div>
+        )}
         <div style={{ color: "#6b7280" }}>
           Källa: list2-metriker i denna vy. Identity check används för transparens: DCF − NAV ska matcha (DCF − NPV) − (NAV − NPV).
         </div>
@@ -2524,11 +2551,13 @@ Capital Available: ${availableLabel}`,
           NAV_prodStart_TargetCurrency?: number | null;
           NAV_prodStart_perShare_TargetCurrency?: number | null;
           InitialCAPEX_incremental_TargetCurrency?: number | null;
+          DCF_prodStart_present_TargetCurrency?: number | null;
+          DCF_prodStart_present_perShare_TargetCurrency?: number | null;
         };
       }>;
     } | null | undefined;
     const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
-    if (markers.length < 2) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
+    if (markers.length < 1) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
 
     const financing = (corporateSnapshotData?.financing ?? {}) as Record<string, unknown>;
     const sharesPf = typeof financing.shares_post_financing === "number" && Number.isFinite(financing.shares_post_financing) && financing.shares_post_financing > 0
@@ -2639,6 +2668,23 @@ Capital Available: ${availableLabel}`,
       ]),
     ) as Record<string, string>;
   }, [corporateProdStartMarkerValuesByKey, lockedTargetCurrency]);
+
+
+  const corporateList2ScalarTextByKey = useMemo(() => {
+    const discounted = typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number"
+      && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_TargetCurrency)
+      ? formatMetricValue({ value: corporateSnapshotData.DCF_prodStart_present_TargetCurrency, reason: null }, "money", lockedTargetCurrency)
+      : null;
+    const discountedPerShare = typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number"
+      && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
+      ? formatMetricValue({ value: corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency, reason: null }, "money", lockedTargetCurrency)
+      : null;
+
+    return {
+      DCF_Target_discounted: discounted,
+      DCF_Target_discounted_perShare: discountedPerShare,
+    } as const;
+  }, [corporateSnapshotData, lockedTargetCurrency]);
 
   const corporateAlwaysMarkerMetricKeys = useMemo(
     () => new Set<string>(["DCF_Target", "DCF_perShare"]),
@@ -4236,23 +4282,77 @@ Capital Available: ${availableLabel}`,
                             <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                             <span className="compact-metric-dots" />
                             <span className="compact-metric-value">{
-                              sectionKey === "list2"
-                              && corporateProdStartMarkerTextByKey[key]
-                              && (value.value === null || corporateAlwaysMarkerMetricKeys.has(key))
-                                ? corporateProdStartMarkerTextByKey[key]
-                                : formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency)
+                              (() => {
+                                if (sectionKey === "list2" && (key === "DCF_Target_discounted" || key === "DCF_Target_discounted_perShare")) {
+                                  const scalarText = corporateList2ScalarTextByKey[key];
+                                  if (import.meta.env.DEV) {
+                                    const debugPanelValue = key === "DCF_Target_discounted"
+                                      ? (typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_TargetCurrency)
+                                        ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency
+                                        : null)
+                                      : (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
+                                        ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
+                                        : null);
+                                    if (debugPanelValue !== null && scalarText === null) {
+                                      console.assert(false, "[corporate-list2-scalar-missing] discounted DCF available in debug panel but missing in list render", {
+                                        missingKey: key,
+                                        availableMetricKeys: Object.keys(metrics),
+                                        snapshotKeys: Object.keys((corporateSnapshotData ?? {}) as Record<string, unknown>),
+                                      });
+                                    }
+                                  }
+                                  if (scalarText !== null) {
+                                    return scalarText;
+                                  }
+                                }
+
+                                if (
+                                  sectionKey === "list2"
+                                  && corporateProdStartMarkerTextByKey[key]
+                                  && (value.value === null || corporateAlwaysMarkerMetricKeys.has(key))
+                                ) {
+                                  return corporateProdStartMarkerTextByKey[key];
+                                }
+                                return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency);
+                              })()
                             }</span>
                           </div>
                         ))}
                       </div>
                       {sectionKey === "list2" && renderProdStartDebugWindow({
+                        capexWindows: (() => {
+                          const diagnosticsMeta = (corporateDiagnostics?.meta ?? null) as {
+                            corporateTotalsDebug?: {
+                              corporateProdStartCapexWindowDebug?: Array<{
+                                milestoneYear: number;
+                                tp_prev: number;
+                                tp_k: number;
+                                windowYears: number[];
+                                windowCapexUSD: Array<number | null>;
+                                windowCapexUSD_sum: number | null;
+                                fx_USD_to_TargetCurrency: number | null;
+                                windowCapexTarget_sum: number | null;
+                              }>;
+                            };
+                          } | null;
+                          const windows = diagnosticsMeta?.corporateTotalsDebug?.corporateProdStartCapexWindowDebug;
+                          return Array.isArray(windows) ? windows : undefined;
+                        })(),
                         data: {
                           npvToday: metrics.NPV_Target?.value ?? null,
                           npvTodayPerShare: metrics.NPV_perShare?.value ?? null,
                           navToday: metrics.NAV_Target?.value ?? null,
                           navTodayPerShare: metrics.NAV_perShare?.value ?? null,
-                          dcfProdStartDiscounted: metrics.DCF_Target_discounted?.value ?? null,
-                          dcfProdStartDiscountedPerShare: metrics.DCF_Target_discounted_perShare?.value ?? null,
+                          dcfProdStartDiscounted:
+                            typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number"
+                              && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_TargetCurrency)
+                              ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency
+                              : null,
+                          dcfProdStartDiscountedPerShare:
+                            typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number"
+                              && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
+                              ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
+                              : null,
                           npvProdStart: metrics.NPV_prodStart?.value ?? null,
                           npvProdStartPerShare: metrics.NPV_prodStart_perShare?.value ?? null,
                           navProdStart: metrics.NAV_prodStart?.value ?? null,
