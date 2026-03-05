@@ -2514,8 +2514,8 @@ Capital Available: ${availableLabel}`,
         | "NPV_prodStart_perShare"
         | "NAV_prodStart"
         | "NAV_prodStart_perShare"
-        | "DCF_Target_discounted"
-        | "DCF_Target_discounted_perShare",
+        | "DCF_Target"
+        | "DCF_perShare",
     ): string | null => {
       const parts: string[] = [];
       for (const marker of markers) {
@@ -2525,14 +2525,14 @@ Capital Available: ${availableLabel}`,
         const navProdStartPerShare = npvProdStartPerShare !== null && netCashPerShare !== null
           ? npvProdStartPerShare + netCashPerShare
           : null;
-        const dcfProdStartDiscountedPerShare = npvProdStartPerShare;
+        const dcfProdStartPerShare = npvProdStartPerShare;
 
         const value = (() => {
           if (metricKey === "NPV_prodStart_perShare") return npvProdStartPerShare;
           if (metricKey === "NPV_prodStart") return npvProdStartPerShare !== null && sharesPf !== null ? npvProdStartPerShare * sharesPf : null;
           if (metricKey === "NAV_prodStart_perShare") return navProdStartPerShare;
-          if (metricKey === "DCF_Target_discounted_perShare") return dcfProdStartDiscountedPerShare;
-          if (metricKey === "DCF_Target_discounted") return dcfProdStartDiscountedPerShare !== null && sharesPf !== null ? dcfProdStartDiscountedPerShare * sharesPf : null;
+          if (metricKey === "DCF_perShare") return dcfProdStartPerShare;
+          if (metricKey === "DCF_Target") return dcfProdStartPerShare !== null && sharesPf !== null ? dcfProdStartPerShare * sharesPf : null;
           return navProdStartPerShare !== null && sharesPf !== null ? navProdStartPerShare * sharesPf : null;
         })();
 
@@ -2549,8 +2549,8 @@ Capital Available: ${availableLabel}`,
       "NPV_prodStart_perShare",
       "NAV_prodStart",
       "NAV_prodStart_perShare",
-      "DCF_Target_discounted",
-      "DCF_Target_discounted_perShare",
+      "DCF_Target",
+      "DCF_perShare",
     ] as const).forEach((key) => {
       const joined = makeJoined(key);
       if (joined) {
@@ -2571,7 +2571,7 @@ Capital Available: ${availableLabel}`,
   }, [corporateSnapshotData, debugEnabled, lockedTargetCurrency]);
 
   const corporateAlwaysMarkerMetricKeys = useMemo(
-    () => new Set<string>(["DCF_Target_discounted", "DCF_Target_discounted_perShare"]),
+    () => new Set<string>(["DCF_Target", "DCF_perShare"]),
     [],
   );
 
