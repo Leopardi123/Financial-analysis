@@ -76,6 +76,10 @@ function formatPanelValue(value: unknown): string {
   return "—";
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function formatCompactNumber(value: number, digits = 1): string {
   const abs = Math.abs(value);
   if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(digits)}B`;
@@ -2549,33 +2553,43 @@ Capital Available: ${availableLabel}`,
       },
     });
     const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
+      AISC_LOM?: number | null;
+      BreakEven_AuEq?: number | null;
+      CAPEX_per_Annual_AuEq?: number | null;
       Payback_approx_years?: number | null;
       Payback_real_years?: number | null;
       ROI_10Y_pct?: number | null;
       IRR?: number | null;
+      LOM_avg_EBIT_ROCE?: number | null;
+      LOM_discounted_EBIT_ROCE?: number | null;
     } }).lista3Metrics;
     if (!corporateLista3) {
       return computed;
     }
 
     const toMetricValue = (value: number | null | undefined, reason: string): MetricValue => ({
-      value: typeof value === "number" && Number.isFinite(value) ? value : null,
-      reason: typeof value === "number" && Number.isFinite(value) ? null : reason,
+      value: isFiniteNumber(value) ? value : null,
+      reason: isFiniteNumber(value) ? null : reason,
     });
 
     return {
       ...computed,
       list3: {
         ...computed.list3,
+        AISC_LOM: toMetricValue(corporateLista3.AISC_LOM, "Missing corporate.lista3Metrics.AISC_LOM"),
+        BreakEven_AuEq: toMetricValue(corporateLista3.BreakEven_AuEq, "Missing corporate.lista3Metrics.BreakEven_AuEq"),
+        CAPEX_per_Annual_AuEq: toMetricValue(corporateLista3.CAPEX_per_Annual_AuEq, "Missing corporate.lista3Metrics.CAPEX_per_Annual_AuEq"),
         Payback_approx: toMetricValue(corporateLista3.Payback_approx_years, "Missing corporate.lista3Metrics.Payback_approx_years"),
         Payback_real: toMetricValue(corporateLista3.Payback_real_years, "Missing corporate.lista3Metrics.Payback_real_years"),
         ROI_10Y: toMetricValue(
-          typeof corporateLista3.ROI_10Y_pct === "number" && Number.isFinite(corporateLista3.ROI_10Y_pct)
+          isFiniteNumber(corporateLista3.ROI_10Y_pct)
             ? corporateLista3.ROI_10Y_pct
             : null,
           "Missing corporate.lista3Metrics.ROI_10Y_pct",
         ),
         IRR: toMetricValue(corporateLista3.IRR, "Missing corporate.lista3Metrics.IRR"),
+        LOM_avg_EBIT_ROCE: toMetricValue(corporateLista3.LOM_avg_EBIT_ROCE, "Missing corporate.lista3Metrics.LOM_avg_EBIT_ROCE"),
+        LOM_discounted_EBIT_ROCE: toMetricValue(corporateLista3.LOM_discounted_EBIT_ROCE, "Missing corporate.lista3Metrics.LOM_discounted_EBIT_ROCE"),
       },
     };
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
@@ -4424,6 +4438,10 @@ Capital Available: ${availableLabel}`,
                                   if (key === "ROI_10Y") return formatMetricValue(value, "multiple", lockedTargetCurrency);
                                   if (key === "IRR") return formatIrrMetricValue(value);
                                   if (key.includes("Payback")) return formatMetricValue(value, "decimal", lockedTargetCurrency);
+                                  if (key === "AISC_LOM" || key === "BreakEven_AuEq" || key === "CAPEX_per_Annual_AuEq") return formatMetricValue(value, "decimal", lockedTargetCurrency);
+                                  if (key === "LOM_avg_EBIT_ROCE" || key === "LOM_discounted_EBIT_ROCE") {
+                                    return value.value === null ? "n/a" : value.value.toFixed(2);
+                                  }
                                 }
                                 return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency);
                               })()
