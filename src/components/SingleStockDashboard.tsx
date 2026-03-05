@@ -2516,7 +2516,15 @@ Capital Available: ${availableLabel}`,
       markers?: Array<{
         tp: number;
         corporateTpIndexUsed?: number | null;
-        value_high: number | null;
+        lista2Metrics?: {
+          DCF_prodStart_exCapex_TargetCurrency?: number | null;
+          DCF_prodStart_exCapex_perShare_TargetCurrency?: number | null;
+          NPV_prodStart_TargetCurrency?: number | null;
+          NPV_prodStart_perShare_TargetCurrency?: number | null;
+          NAV_prodStart_TargetCurrency?: number | null;
+          NAV_prodStart_perShare_TargetCurrency?: number | null;
+          InitialCAPEX_incremental_TargetCurrency?: number | null;
+        };
       }>;
     } | null | undefined;
     const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
@@ -2549,19 +2557,39 @@ Capital Available: ${availableLabel}`,
       for (const marker of markers) {
         const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
         const year = yearLabel(yearsByPeriod, tIndex);
-        const npvProdStartPerShare = typeof marker.value_high === "number" && Number.isFinite(marker.value_high) ? marker.value_high : null;
-        const navProdStartPerShare = npvProdStartPerShare !== null && netCashPerShare !== null
-          ? npvProdStartPerShare + netCashPerShare
+        const dcfProdStartPerShareRaw = marker.lista2Metrics?.DCF_prodStart_exCapex_perShare_TargetCurrency;
+        const npvProdStartPerShareRaw = marker.lista2Metrics?.NPV_prodStart_perShare_TargetCurrency;
+        const navProdStartPerShareRaw = marker.lista2Metrics?.NAV_prodStart_perShare_TargetCurrency;
+        const dcfProdStartRaw = marker.lista2Metrics?.DCF_prodStart_exCapex_TargetCurrency;
+        const npvProdStartRaw = marker.lista2Metrics?.NPV_prodStart_TargetCurrency;
+        const navProdStartRaw = marker.lista2Metrics?.NAV_prodStart_TargetCurrency;
+
+        const dcfProdStartPerShare = typeof dcfProdStartPerShareRaw === "number" && Number.isFinite(dcfProdStartPerShareRaw)
+          ? dcfProdStartPerShareRaw
           : null;
-        const dcfProdStartPerShare = npvProdStartPerShare;
+        const npvProdStartPerShare = typeof npvProdStartPerShareRaw === "number" && Number.isFinite(npvProdStartPerShareRaw)
+          ? npvProdStartPerShareRaw
+          : null;
+        const navProdStartPerShare = typeof navProdStartPerShareRaw === "number" && Number.isFinite(navProdStartPerShareRaw)
+          ? navProdStartPerShareRaw
+          : null;
+        const dcfProdStart = typeof dcfProdStartRaw === "number" && Number.isFinite(dcfProdStartRaw)
+          ? dcfProdStartRaw
+          : null;
+        const npvProdStart = typeof npvProdStartRaw === "number" && Number.isFinite(npvProdStartRaw)
+          ? npvProdStartRaw
+          : null;
+        const navProdStart = typeof navProdStartRaw === "number" && Number.isFinite(navProdStartRaw)
+          ? navProdStartRaw
+          : null;
 
         const value = (() => {
           if (metricKey === "NPV_prodStart_perShare") return npvProdStartPerShare;
-          if (metricKey === "NPV_prodStart") return npvProdStartPerShare !== null && sharesPf !== null ? npvProdStartPerShare * sharesPf : null;
+          if (metricKey === "NPV_prodStart") return npvProdStart;
           if (metricKey === "NAV_prodStart_perShare") return navProdStartPerShare;
           if (metricKey === "DCF_perShare") return dcfProdStartPerShare;
-          if (metricKey === "DCF_Target") return dcfProdStartPerShare !== null && sharesPf !== null ? dcfProdStartPerShare * sharesPf : null;
-          return navProdStartPerShare !== null && sharesPf !== null ? navProdStartPerShare * sharesPf : null;
+          if (metricKey === "DCF_Target") return dcfProdStart;
+          return navProdStart;
         })();
 
         if (value === null) continue;
