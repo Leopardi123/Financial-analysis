@@ -1092,6 +1092,7 @@ export async function runCorporateSnapshotPipeline(args: {
       projectName: string;
       masterN: number;
       productionStartPeriod: number;
+      productionStartYear: number;
       yearsByPeriod: number[];
       fdExtraShares: number;
     }>;
@@ -1115,6 +1116,7 @@ export async function runCorporateSnapshotPipeline(args: {
           } | null;
           let yearsByPeriod: number[];
           let productionStartPeriod: number;
+          let productionStartYear: number;
           try {
             const resolvedTime = resolveV2TimeAxis({
               masterN: rawTime?.masterN as number,
@@ -1123,6 +1125,7 @@ export async function runCorporateSnapshotPipeline(args: {
             });
             yearsByPeriod = resolvedTime.yearsByPeriod;
             productionStartPeriod = resolvedTime.productionStartPeriod;
+            productionStartYear = resolvedTime.productionStartYear;
           } catch {
             throw new Error(
               `Invalid v2 time for project ${projectId}: masterN=${String(rawTime?.masterN)}, productionStartPeriod=${String(rawTime?.productionStartPeriod)}, productionStartYear=${String(rawTime?.productionStartYear)}`,
@@ -1138,6 +1141,7 @@ export async function runCorporateSnapshotPipeline(args: {
             })(),
             masterN: yearsByPeriod.length - 1,
             productionStartPeriod,
+            productionStartYear,
             yearsByPeriod,
             fdExtraShares: parsed.context.equity?.fdExtraShares ?? 0,
           });
@@ -1905,16 +1909,34 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     snapshot.series = snapshotSeries;
-    const lista2MetricsByTp = Object.fromEntries(
+    const milestoneYears = [...new Set(
       projectsForBuildFunding
-        .map((project) => project.productionStartPeriod)
-        .filter((tp): tp is number => Number.isInteger(tp) && tp > 0 && tp <= aggregationEffective.corporateMasterN)
-        .map((tp) => {
+        .filter((project) => project.productionStartPeriod > 0)
+        .map((project) => project.productionStartYear)
+        .filter((year): year is number => Number.isInteger(year)),
+    )].sort((a, b) => a - b);
+
+    const milestoneTpByYear = Object.fromEntries(
+      milestoneYears.map((year) => [year, aggregationEffective.corporateYearsByPeriod.indexOf(year)]),
+    ) as Record<number, number>;
+
+    const lista2MetricsByTp = Object.fromEntries(
+      milestoneYears
+        .map((year) => ({ year, tp: milestoneTpByYear[year] }))
+        .filter(({ tp }) => Number.isInteger(tp) && tp >= 0 && tp <= aggregationEffective.corporateMasterN)
+        .map(({ year, tp }) => {
+          const prevMilestoneTp = milestoneYears
+            .filter((candidate) => candidate < year)
+            .map((candidate) => milestoneTpByYear[candidate])
+            .filter((candidateTp): candidateTp is number => Number.isInteger(candidateTp) && candidateTp >= 0 && candidateTp <= tp)
+            .sort((a, b) => b - a)[0] ?? 0;
+
           const tpMetrics = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
             capexUSD_total: aggregationEffective.capexUSD_total,
             masterN: aggregationEffective.corporateMasterN,
             productionStartPeriod: tp,
+            initialCapexStartPeriod: prevMilestoneTp,
             discountRate: input.discountRate,
             shares_post_financing: shares_post_financing_fd_effective,
             fx_USD_to_TargetCurrency: fxRate,
@@ -1923,18 +1945,46 @@ export async function runCorporateSnapshotPipeline(args: {
           });
           diagnostics.warnings.push(...tpMetrics.warnings);
           diagnostics.errors.push(...tpMetrics.errors);
+
+          const dcfCheck = tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency;
+          const npvCheck = tpMetrics.metrics.NPV_prodStart_TargetCurrency;
+          const navCheck = tpMetrics.metrics.NAV_prodStart_TargetCurrency;
+          const initialCapexCheck = tpMetrics.metrics.InitialCAPEX_incremental_TargetCurrency;
+          const netCashCheck = financingSnapshot.netCash_TargetCurrency_t0;
+          if (
+            dcfCheck !== null && npvCheck !== null && initialCapexCheck !== null
+            && Number.isFinite(dcfCheck) && Number.isFinite(npvCheck) && Number.isFinite(initialCapexCheck)
+          ) {
+            const delta = (dcfCheck - npvCheck) - initialCapexCheck;
+            if (Math.abs(delta) > 0.01) {
+              diagnostics.warnings.push(`Corporate prod-start identity fail year=${year}: DCF-NPV-InitialCAPEX_incremental=${String(delta)}`);
+            }
+          }
+          if (
+            dcfCheck !== null && navCheck !== null && initialCapexCheck !== null && netCashCheck !== null
+            && Number.isFinite(dcfCheck) && Number.isFinite(navCheck) && Number.isFinite(initialCapexCheck) && Number.isFinite(netCashCheck)
+          ) {
+            const delta = (dcfCheck - navCheck) - (initialCapexCheck - netCashCheck);
+            if (Math.abs(delta) > 0.01) {
+              diagnostics.warnings.push(`Corporate prod-start identity fail year=${year}: DCF-NAV-(InitialCAPEX_incremental-netCash0)=${String(delta)}`);
+            }
+          }
           return [tp, {
             DCF_prodStart_exCapex_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_TargetCurrency,
             DCF_prodStart_exCapex_perShare_TargetCurrency: tpMetrics.metrics.DCF_prodStart_exCapex_perShare_TargetCurrency,
             NAV_prodStart_TargetCurrency: tpMetrics.metrics.NAV_prodStart_TargetCurrency,
             NAV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NAV_prodStart_perShare_TargetCurrency,
+            NPV_prodStart_TargetCurrency: tpMetrics.metrics.NPV_prodStart_TargetCurrency,
+            NPV_prodStart_perShare_TargetCurrency: tpMetrics.metrics.NPV_prodStart_perShare_TargetCurrency,
+            InitialCAPEX_incremental_TargetCurrency: tpMetrics.metrics.InitialCAPEX_incremental_TargetCurrency,
           }];
         }),
     );
 
     snapshot.modeledValuationTimeline = buildCorporateModeledValuationTimeline({
-      projects: projectsForBuildFunding.map((project) => ({
-        productionStartPeriod: project.productionStartPeriod,
+      projects: milestoneYears.map((year) => ({
+        productionStartPeriod: milestoneTpByYear[year],
+        productionStartYear: year,
       })),
       yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
       fcfUSD_total: aggregationEffective.fcffUSD_total,

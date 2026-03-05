@@ -149,6 +149,7 @@ export default function CompanyProjectsEditorPage() {
   const [saving, setSaving] = useState(false);
   const [loadingProject, setLoadingProject] = useState(false);
   const [delayTargetYearInput, setDelayTargetYearInput] = useState('');
+  const [manualProductionStartDraft, setManualProductionStartDraft] = useState<{ period: number; year: number } | null>(null);
 
   const parsedValidation = useMemo(() => validateProjectJson(rawJsonInput), [rawJsonInput]);
   const parsedTime = useMemo(() => {
@@ -165,6 +166,40 @@ export default function CompanyProjectsEditorPage() {
     () => (Number.isInteger(parsedTime?.productionStartYear) ? String(parsedTime?.productionStartYear) : ''),
     [parsedTime],
   );
+  const editorNowYear = useMemo(() => {
+    const productionStartYear = Number.isInteger(parsedTime?.productionStartYear)
+      ? parsedTime?.productionStartYear as number
+      : null;
+    const productionStartPeriod = Number.isInteger(parsedTime?.productionStartPeriod)
+      ? parsedTime?.productionStartPeriod as number
+      : null;
+    if (productionStartYear !== null && productionStartPeriod !== null) {
+      return productionStartYear - productionStartPeriod;
+    }
+    return new Date().getUTCFullYear();
+  }, [parsedTime]);
+
+  const alreadyProducing = useMemo(
+    () => Number.isInteger(parsedTime?.productionStartPeriod)
+      && Number.isInteger(parsedTime?.productionStartYear)
+      && (parsedTime?.productionStartPeriod as number) === 0
+      && (parsedTime?.productionStartYear as number) === editorNowYear,
+    [editorNowYear, parsedTime],
+  );
+
+  const productionStartInconsistencyWarning = useMemo(() => {
+    if (alreadyProducing) return null;
+    const productionStartPeriod = Number.isInteger(parsedTime?.productionStartPeriod)
+      ? parsedTime?.productionStartPeriod as number
+      : null;
+    const productionStartYear = Number.isInteger(parsedTime?.productionStartYear)
+      ? parsedTime?.productionStartYear as number
+      : null;
+    if (productionStartPeriod === 0 && productionStartYear !== null && productionStartYear > editorNowYear) {
+      return 'Warning: productionStartPeriod=0 while productionStartYear is in the future relative to model now year.';
+    }
+    return null;
+  }, [alreadyProducing, editorNowYear, parsedTime]);
 
   function updateTimeField(field: 'productionStartPeriod' | 'productionStartYear', value: number): void {
     if (!parsedValidation.ok || !parsedValidation.parsed) {
@@ -181,6 +216,48 @@ export default function CompanyProjectsEditorPage() {
 
     time[field] = value;
     setRawJsonInput(JSON.stringify(stripPeriodEndDatesForV2(nextRoot), null, 2));
+    setEditorError(null);
+  }
+
+  function updateProductionStartFields(period: number, year: number): void {
+    if (!parsedValidation.ok || !parsedValidation.parsed) {
+      setEditorError(parsedValidation.error ?? 'Fix JSON validation errors before editing time fields.');
+      return;
+    }
+
+    const nextRoot = JSON.parse(JSON.stringify(parsedValidation.parsed)) as Record<string, unknown>;
+    const time = readRootTime(nextRoot);
+    if (!time) {
+      setEditorError('time must be an object in raw JSON.');
+      return;
+    }
+
+    time.productionStartPeriod = period;
+    time.productionStartYear = year;
+    setRawJsonInput(JSON.stringify(stripPeriodEndDatesForV2(nextRoot), null, 2));
+    setEditorError(null);
+  }
+
+  function handleAlreadyProducingToggle(checked: boolean): void {
+    if (checked) {
+      const currentPeriod = Number.isInteger(parsedTime?.productionStartPeriod)
+        ? parsedTime?.productionStartPeriod as number
+        : null;
+      const currentYear = Number.isInteger(parsedTime?.productionStartYear)
+        ? parsedTime?.productionStartYear as number
+        : null;
+      if (currentPeriod !== null && currentYear !== null && !alreadyProducing) {
+        setManualProductionStartDraft({ period: currentPeriod, year: currentYear });
+      }
+      updateProductionStartFields(0, editorNowYear);
+      return;
+    }
+
+    if (manualProductionStartDraft) {
+      updateProductionStartFields(manualProductionStartDraft.period, manualProductionStartDraft.year);
+      return;
+    }
+
     setEditorError(null);
   }
 
@@ -235,6 +312,7 @@ export default function CompanyProjectsEditorPage() {
       setRawJsonInput(rawJson);
       setSavedRawJson(rawJson);
       setLastSavedAtUtc(project.updated_at_utc);
+      setManualProductionStartDraft(null);
     } catch (error) {
       setEditorError((error as Error).message);
       await refreshList();
@@ -261,6 +339,7 @@ export default function CompanyProjectsEditorPage() {
     setLastSavedAtUtc(null);
     setEditorError(null);
     setEditorInfo('Created a new draft from template.');
+    setManualProductionStartDraft(null);
   }
 
   function handleValidate(): void {
@@ -316,11 +395,23 @@ export default function CompanyProjectsEditorPage() {
     setEditorInfo(null);
 
     try {
+      const rawForSave = JSON.parse(JSON.stringify(parsedValidation.parsed)) as Record<string, unknown>;
+      if (alreadyProducing) {
+        const time = readRootTime(rawForSave);
+        if (!time) {
+          setEditorError('time must be an object in raw JSON.');
+          setSaving(false);
+          return;
+        }
+        time.productionStartPeriod = 0;
+        time.productionStartYear = editorNowYear;
+      }
+
       const result = await upsertCompanyProject({
         symbol,
         project_id: projectIdInput.trim(),
         project_name: projectNameInput.trim() || null,
-        raw_json: stripPeriodEndDatesForV2(parsedValidation.parsed),
+        raw_json: stripPeriodEndDatesForV2(rawForSave),
       });
 
       setIsNewDraft(false);
@@ -353,6 +444,7 @@ export default function CompanyProjectsEditorPage() {
         setRawJsonInput('');
         setSavedRawJson(null);
         setLastSavedAtUtc(null);
+        setManualProductionStartDraft(null);
       }
 
       await refreshList();
@@ -453,6 +545,18 @@ export default function CompanyProjectsEditorPage() {
               <span>project_name</span>
               <input type="text" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} />
             </label>
+            <div className="checkbox-field">
+              <span>Production status</span>
+              <label className="checkbox-inline">
+                <input
+                  type="checkbox"
+                  checked={alreadyProducing}
+                  onChange={(event) => handleAlreadyProducingToggle(event.target.checked)}
+                />
+                <span>Already producing (in production now)</span>
+              </label>
+              <small>Sets productionStartPeriod=0 and productionStartYear to the model's current year ({editorNowYear}).</small>
+            </div>
             <label>
               <span>time.productionStartPeriod (tp)</span>
               <input
@@ -466,6 +570,8 @@ export default function CompanyProjectsEditorPage() {
                   }
                   updateTimeField('productionStartPeriod', next);
                 }}
+                disabled={alreadyProducing}
+                readOnly={alreadyProducing}
               />
             </label>
             <label>
@@ -482,6 +588,8 @@ export default function CompanyProjectsEditorPage() {
                   }
                   updateTimeField('productionStartYear', next);
                 }}
+                disabled={alreadyProducing}
+                readOnly={alreadyProducing}
               />
             </label>
           </div>
@@ -509,6 +617,7 @@ export default function CompanyProjectsEditorPage() {
 
           {editorError && <p className="status error">{editorError}</p>}
           {editorInfo && <p className="status ok">{editorInfo}</p>}
+          {productionStartInconsistencyWarning && <p className="save-meta">{productionStartInconsistencyWarning}</p>}
 
           <label className="json-label">
             <span>raw JSON</span>

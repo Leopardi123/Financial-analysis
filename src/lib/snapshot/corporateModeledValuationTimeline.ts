@@ -3,6 +3,9 @@ type TimelineLista2Metrics = {
   DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
   NAV_prodStart_TargetCurrency: number | null;
   NAV_prodStart_perShare_TargetCurrency: number | null;
+  NPV_prodStart_TargetCurrency?: number | null;
+  NPV_prodStart_perShare_TargetCurrency?: number | null;
+  InitialCAPEX_incremental_TargetCurrency?: number | null;
 };
 
 export type CorporateModeledTimelineMarker = {
@@ -14,6 +17,15 @@ export type CorporateModeledTimelineMarker = {
   value_low: number | null;
   value_mid_if_any: number | null;
   nullReasonIfAny: string | null;
+  lista2Metrics?: {
+    DCF_prodStart_exCapex_TargetCurrency: number | null;
+    DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+    NPV_prodStart_TargetCurrency: number | null;
+    NPV_prodStart_perShare_TargetCurrency: number | null;
+    NAV_prodStart_TargetCurrency: number | null;
+    NAV_prodStart_perShare_TargetCurrency: number | null;
+    InitialCAPEX_incremental_TargetCurrency: number | null;
+  };
   debug?: {
     sharesDenominatorUsed: number | null;
     sharesDenominatorType: 'shares_post_financing';
@@ -84,6 +96,7 @@ export function mapProjectTpToCorporateIndex(
 export function buildCorporateModeledValuationTimeline(args: {
   projects: Array<{
     productionStartPeriod: number | null | undefined;
+    productionStartYear?: number | null | undefined;
   }>;
   yearsByPeriod: number[];
   fcfUSD_total: Array<number | null>;
@@ -97,7 +110,7 @@ export function buildCorporateModeledValuationTimeline(args: {
   const tps = uniqueSorted(
     args.projects
       .map((project) => project.productionStartPeriod)
-      .filter((tp): tp is number => Number.isInteger(tp) && (tp as number) > 0),
+      .filter((tp): tp is number => Number.isInteger(tp) && (tp as number) >= 0),
   );
   const lastTp = tps.length > 0 ? tps[tps.length - 1] : null;
 
@@ -108,8 +121,8 @@ export function buildCorporateModeledValuationTimeline(args: {
         `corporate modeled timeline: tp ${tp} is outside yearsByPeriod bounds (length=${args.yearsByPeriod.length})`,
       );
     }
-    const markerYear = args.yearsByPeriod[tp];
-    const yearLabelUsed = String(markerYear);
+    const markerYear = args.projects.find((project) => project.productionStartPeriod === tp)?.productionStartYear ?? args.yearsByPeriod[tp];
+    const yearLabelUsed = Number.isFinite(markerYear) ? String(markerYear) : null;
 
     if (!Number.isInteger(corporateTp) || corporateTp < 0 || corporateTp > args.masterN) {
       return {
@@ -210,6 +223,15 @@ export function buildCorporateModeledValuationTimeline(args: {
       value_low: hideValuesForSanityFailure ? null : valueLowPerShare,
       value_mid_if_any: null,
       nullReasonIfAny: denominatorNullReason ?? nullReasonIfAny,
+      lista2Metrics: {
+        DCF_prodStart_exCapex_TargetCurrency: lista2ForTp?.DCF_prodStart_exCapex_TargetCurrency ?? null,
+        DCF_prodStart_exCapex_perShare_TargetCurrency: lista2ForTp?.DCF_prodStart_exCapex_perShare_TargetCurrency ?? null,
+        NPV_prodStart_TargetCurrency: lista2ForTp?.NPV_prodStart_TargetCurrency ?? null,
+        NPV_prodStart_perShare_TargetCurrency: lista2ForTp?.NPV_prodStart_perShare_TargetCurrency ?? null,
+        NAV_prodStart_TargetCurrency: lista2ForTp?.NAV_prodStart_TargetCurrency ?? null,
+        NAV_prodStart_perShare_TargetCurrency: lista2ForTp?.NAV_prodStart_perShare_TargetCurrency ?? null,
+        InitialCAPEX_incremental_TargetCurrency: lista2ForTp?.InitialCAPEX_incremental_TargetCurrency ?? null,
+      },
       debug: {
         sharesDenominatorUsed: denom,
         sharesDenominatorType: 'shares_post_financing',
