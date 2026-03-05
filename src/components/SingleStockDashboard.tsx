@@ -116,6 +116,13 @@ function formatDebugNumericValue(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map((entry) => formatDebugNumericValue(entry)).join(", ")}]`;
   }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
   return String(value);
 }
 
@@ -2564,7 +2571,7 @@ Capital Available: ${availableLabel}`,
         Payback_real: toMetricValue(corporateLista3.Payback_real_years, "Missing corporate.lista3Metrics.Payback_real_years"),
         ROI_10Y: toMetricValue(
           typeof corporateLista3.ROI_10Y_pct === "number" && Number.isFinite(corporateLista3.ROI_10Y_pct)
-            ? corporateLista3.ROI_10Y_pct / 100
+            ? corporateLista3.ROI_10Y_pct
             : null,
           "Missing corporate.lista3Metrics.ROI_10Y_pct",
         ),
@@ -2576,6 +2583,8 @@ Capital Available: ${availableLabel}`,
   const corporateLista3Debug = useMemo(() => {
     const corporateSection = ((corporateSnapshotData?.corporate ?? null) as {
       lista3Debug?: {
+        scope?: string | null;
+        sourcePath?: string | null;
         tp_main: number | null;
         initialCapexUSD_main: number | null;
         shares_post_financing: number | null;
@@ -2587,6 +2596,7 @@ Capital Available: ${availableLabel}`,
           formula?: string;
           inputs?: Record<string, unknown>;
           intermediates?: Record<string, unknown>;
+          requiredInputs?: string[];
           missingInputs?: string[];
           output?: { value?: number | null };
         }>;
@@ -4410,6 +4420,11 @@ Capital Available: ${availableLabel}`,
                                 ) {
                                   return corporateProdStartMarkerTextByKey[key];
                                 }
+                                if (sectionKey === "list3") {
+                                  if (key === "ROI_10Y") return formatMetricValue(value, "multiple", lockedTargetCurrency);
+                                  if (key === "IRR") return formatIrrMetricValue(value);
+                                  if (key.includes("Payback")) return formatMetricValue(value, "decimal", lockedTargetCurrency);
+                                }
                                 return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency);
                               })()
                             }</span>
@@ -4418,24 +4433,27 @@ Capital Available: ${availableLabel}`,
                       </div>
                       {sectionKey === "list3" && (
                         <details style={{ marginTop: 8 }}>
-                          <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug (Lista 3)</summary>
+                          <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug (Lista 3 — Corporate)</summary>
                           <div style={{ marginTop: 8, fontSize: 12, display: "grid", gap: 8 }}>
+                            <div><strong>scope:</strong> {formatDebugNumericValue(corporateLista3Debug?.scope ?? null)}</div>
+                            <div><strong>sourcePath:</strong> {formatDebugNumericValue(corporateLista3Debug?.sourcePath ?? null)}</div>
                             <div><strong>tp_main:</strong> {formatDebugNumericValue(corporateLista3Debug?.tp_main ?? null)}</div>
                             <div><strong>initialCapexUSD_main:</strong> {formatDebugNumericValue(corporateLista3Debug?.initialCapexUSD_main ?? null)}</div>
                             <div><strong>shares_post_financing:</strong> {formatDebugNumericValue(corporateLista3Debug?.shares_post_financing ?? null)}</div>
                             <div><strong>series.fcfUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.fcfUSD_total ?? null)}</div>
                             <div><strong>series.capexUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.capexUSD_total ?? null)}</div>
                             {corporateLista3DebugDisplayOrder.map((metricKey) => {
-                              const metricValue = metrics[metricKey] ?? { value: null, reason: null };
                               const payload = corporateLista3Debug?.perMetric?.[metricKey];
                               const inputs = payload?.inputs ?? {};
                               const intermediates = payload?.intermediates ?? {};
+                              const requiredInputs = Array.isArray(payload?.requiredInputs) ? payload.requiredInputs : [];
                               const missingInputs = Array.isArray(payload?.missingInputs) ? payload?.missingInputs : [];
                               return (
                                 <div key={`corp-list3-debug-${metricKey}`} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6 }}>
                                   <div><strong>{resolveProjectMetricLabel(metricKey, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</strong></div>
-                                  <div>Output value: {formatDebugNumericValue(payload?.output?.value ?? metricValue.value ?? null)}</div>
+                                  <div>Output value: {formatDebugNumericValue(payload?.output?.value ?? null)}</div>
                                   <div>Formula: {payload?.formula ?? corporateLista3DebugFormulaByMetric[metricKey] ?? "n/a"}</div>
+                                  <div>Required inputs: {requiredInputs.length > 0 ? `[${requiredInputs.join(', ')}]` : 'none'}</div>
                                   <div>Inputs:</div>
                                   <div style={{ paddingLeft: 12 }}>
                                     {Object.keys(inputs).length > 0
@@ -4695,50 +4713,7 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
-                      {sectionKey === "list3" && (
-                        <details style={{ marginTop: 8 }}>
-                          <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug (Lista 3)</summary>
-                          <div style={{ marginTop: 8, fontSize: 12, display: "grid", gap: 8 }}>
-                            <div><strong>tp_main:</strong> {formatDebugNumericValue(corporateLista3Debug?.tp_main ?? null)}</div>
-                            <div><strong>initialCapexUSD_main:</strong> {formatDebugNumericValue(corporateLista3Debug?.initialCapexUSD_main ?? null)}</div>
-                            <div><strong>shares_post_financing:</strong> {formatDebugNumericValue(corporateLista3Debug?.shares_post_financing ?? null)}</div>
-                            <div><strong>series.fcfUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.fcfUSD_total ?? null)}</div>
-                            <div><strong>series.capexUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.capexUSD_total ?? null)}</div>
-                            {corporateLista3DebugDisplayOrder.map((metricKey) => {
-                              const metricValue = metrics[metricKey] ?? { value: null, reason: null };
-                              const payload = corporateLista3Debug?.perMetric?.[metricKey];
-                              const inputs = payload?.inputs ?? {};
-                              const intermediates = payload?.intermediates ?? {};
-                              const missingInputs = Array.isArray(payload?.missingInputs) ? payload?.missingInputs : [];
-                              return (
-                                <div key={`corp-list3-debug-${metricKey}`} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6 }}>
-                                  <div><strong>{resolveProjectMetricLabel(metricKey, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</strong></div>
-                                  <div>Output value: {formatDebugNumericValue(payload?.output?.value ?? metricValue.value ?? null)}</div>
-                                  <div>Formula: {payload?.formula ?? corporateLista3DebugFormulaByMetric[metricKey] ?? "n/a"}</div>
-                                  <div>Inputs:</div>
-                                  <div style={{ paddingLeft: 12 }}>
-                                    {Object.keys(inputs).length > 0
-                                      ? Object.entries(inputs).map(([inputKey, inputValue]) => (
-                                        <div key={`corp-list3-debug-${metricKey}-input-${inputKey}`}>{inputKey}: {formatDebugNumericValue(inputValue)}</div>
-                                      ))
-                                      : <div>none</div>}
-                                  </div>
-                                  <div>Intermediates:</div>
-                                  <div style={{ paddingLeft: 12 }}>
-                                    {Object.keys(intermediates).length > 0
-                                      ? Object.entries(intermediates).map(([intermediateKey, intermediateValue]) => (
-                                        <div key={`corp-list3-debug-${metricKey}-intermediate-${intermediateKey}`}>{intermediateKey}: {formatDebugNumericValue(intermediateValue)}</div>
-                                      ))
-                                      : <div>none</div>}
-                                  </div>
-                                  <div>Missing inputs: {missingInputs.length > 0 ? missingInputs.join(", ") : "none"}</div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </details>
-                      )}
-                      {sectionKey === "list2" && renderProdStartDebugWindow({
+                                            {sectionKey === "list2" && renderProdStartDebugWindow({
                         data: {
                           npvToday: metrics.NPV_Target?.value ?? null,
                           npvTodayPerShare: metrics.NPV_perShare?.value ?? null,

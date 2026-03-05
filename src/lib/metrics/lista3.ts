@@ -7,6 +7,7 @@ export type Lista3Metrics = {
 
 export type Lista3DebugMetric = {
   formula: string;
+  requiredInputs?: string[];
   inputs: Record<string, unknown>;
   intermediates: Record<string, unknown>;
   missingInputs: string[];
@@ -14,6 +15,8 @@ export type Lista3DebugMetric = {
 };
 
 export type Lista3DebugPayload = {
+  scope?: 'corporate' | 'project';
+  sourcePath?: string;
   tp_main: number | null;
   initialCapexUSD_main: number | null;
   series: {
@@ -35,12 +38,19 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-function computeIrr(cashFlows: Array<number | null>): number | null {
-  if (cashFlows.length === 0 || cashFlows.some((v) => !finite(v))) return null;
+function computeIrr(cashFlows: Array<number | null>): { value: number | null; signChangeCount: number; reason: string | null } {
+  if (cashFlows.length === 0 || cashFlows.some((v) => !finite(v))) return { value: null, signChangeCount: 0, reason: 'solver failed' };
   const asFinite = cashFlows as number[];
+  let signChangeCount = 0;
+  for (let i = 1; i < asFinite.length; i += 1) {
+    if ((asFinite[i - 1] < 0 && asFinite[i] > 0) || (asFinite[i - 1] > 0 && asFinite[i] < 0)) {
+      signChangeCount += 1;
+    }
+  }
   const hasPositive = asFinite.some((v) => v > 0);
   const hasNegative = asFinite.some((v) => v < 0);
-  if (!hasPositive || !hasNegative) return null;
+  if (!hasPositive || !hasNegative) return { value: null, signChangeCount, reason: 'solver failed' };
+  if (signChangeCount >= 2) return { value: null, signChangeCount, reason: 'ambiguous: multiple sign changes' };
 
   const npv = (rate: number): number => {
     if (rate <= -1) return Number.NaN;
@@ -53,8 +63,8 @@ function computeIrr(cashFlows: Array<number | null>): number | null {
 
   const rLow = -0.99;
   const npvLow = npv(rLow);
-  if (!Number.isFinite(npvLow)) return null;
-  if (npvLow === 0) return rLow;
+  if (!Number.isFinite(npvLow)) return { value: null, signChangeCount, reason: 'solver failed' };
+  if (npvLow === 0) return { value: rLow, signChangeCount, reason: null };
 
   const highCandidates = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
   let low = rLow;
@@ -66,7 +76,7 @@ function computeIrr(cashFlows: Array<number | null>): number | null {
   for (const candidate of highCandidates) {
     const candidateNpv = npv(candidate);
     if (!Number.isFinite(candidateNpv)) continue;
-    if (candidateNpv === 0) return candidate;
+    if (candidateNpv === 0) return { value: candidate, signChangeCount, reason: null };
     if (lowVal * candidateNpv < 0) {
       high = candidate;
       highVal = candidateNpv;
@@ -75,13 +85,13 @@ function computeIrr(cashFlows: Array<number | null>): number | null {
     }
   }
 
-  if (!bracketFound || !Number.isFinite(highVal)) return null;
+  if (!bracketFound || !Number.isFinite(highVal)) return { value: null, signChangeCount, reason: 'no root bracketed' };
 
   for (let i = 0; i < 100; i += 1) {
     const mid = (low + high) / 2;
     const midVal = npv(mid);
-    if (!Number.isFinite(midVal)) return null;
-    if (Math.abs(midVal) < 1e-8 || Math.abs(high - low) < 1e-12) return mid;
+    if (!Number.isFinite(midVal)) return { value: null, signChangeCount, reason: 'solver failed' };
+    if (Math.abs(midVal) < 1e-8 || Math.abs(high - low) < 1e-12) return { value: mid, signChangeCount, reason: null };
     if (lowVal * midVal < 0) {
       high = mid;
       highVal = midVal;
@@ -90,8 +100,9 @@ function computeIrr(cashFlows: Array<number | null>): number | null {
       lowVal = midVal;
     }
   }
-  return (low + high) / 2;
+  return { value: (low + high) / 2, signChangeCount, reason: null };
 }
+
 
 type Lista3Args = {
   masterN: number;
@@ -99,6 +110,9 @@ type Lista3Args = {
   fcfUSD: Array<number | null>;
   initialCapexUSD: number | null;
   strictRoi10Y?: boolean;
+  roiAsRatio?: boolean;
+  paybackRealUseInitialCapex?: boolean;
+  paybackApproxAsRatio?: boolean;
 };
 
 type Lista3DebugOptions = { debug: true };
@@ -199,30 +213,44 @@ export function computeLista3(args: Lista3Args, options?: Lista3DebugOptions): L
   debugData.perMetric.Payback_real.inputs.fcfUSD_total_slice = enterpriseCashflows.slice(tp, masterN + 1);
   debugData.perMetric.IRR.inputs.fcfUSD_total = enterpriseCashflows;
 
-  let cumApprox = 0;
-  const cumApproxSeries: Array<{ t: number; cumulative: number }> = [];
-  for (let i = tp; i < enterpriseCashflows.length; i += 1) {
-    const v = enterpriseCashflows[i] as number;
-    cumApprox += v;
-    cumApproxSeries.push({ t: i, cumulative: cumApprox });
-    if (cumApprox >= initialCapexUSD) {
-      out.Payback_approx_years = i - tp + 1;
-      break;
-    }
-  }
   const fcffSumLom = (enterpriseCashflows as number[]).slice(tp).reduce((sum, v) => sum + v, 0);
   const annualAvgFcff = enterpriseCashflows.length - tp > 0 ? fcffSumLom / (enterpriseCashflows.length - tp) : null;
+  if (args.paybackApproxAsRatio) {
+    if (annualAvgFcff !== null && annualAvgFcff > 0) {
+      out.Payback_approx_years = Math.abs(initialCapexUSD) / annualAvgFcff;
+    }
+  } else {
+    let cumApprox = 0;
+    const cumApproxSeriesLegacy: Array<{ t: number; cumulative: number }> = [];
+    for (let i = tp; i < enterpriseCashflows.length; i += 1) {
+      const v = enterpriseCashflows[i] as number;
+      cumApprox += v;
+      cumApproxSeriesLegacy.push({ t: i, cumulative: cumApprox });
+      if (cumApprox >= initialCapexUSD) {
+        out.Payback_approx_years = i - tp + 1;
+        break;
+      }
+    }
+    debugData.perMetric.Payback_approx.intermediates.cumulativeSeries = cumApproxSeriesLegacy;
+  }
   debugData.perMetric.Payback_approx.intermediates = {
     FCFF_sum_LOM_USD: fcffSumLom,
     AnnualAvg_FCFF_USD: annualAvgFcff,
-    cumulativeSeries: cumApproxSeries,
+    ...(debugData.perMetric.Payback_approx.intermediates.cumulativeSeries
+      ? { cumulativeSeries: debugData.perMetric.Payback_approx.intermediates.cumulativeSeries }
+      : {}),
   };
 
-  let investmentAbs = 0;
-  for (let t = 0; t <= tp; t += 1) {
-    const cf = enterpriseCashflows[t] as number;
-    if (cf < 0) investmentAbs += Math.abs(cf);
-  }
+  const investmentAbs = args.paybackRealUseInitialCapex
+    ? Math.abs(initialCapexUSD)
+    : (() => {
+      let acc = 0;
+      for (let t = 0; t <= tp; t += 1) {
+        const cf = enterpriseCashflows[t] as number;
+        if (cf < 0) acc += Math.abs(cf);
+      }
+      return acc;
+    })();
   if (investmentAbs > 0) {
     let cumulative = -investmentAbs;
     const cumulativeSeries: Array<{ t: number; cumulative: number }> = [];
@@ -242,8 +270,11 @@ export function computeLista3(args: Lista3Args, options?: Lista3DebugOptions): L
   }
   debugData.perMetric.Payback_real.intermediates.investmentAbs = investmentAbs;
 
-  out.IRR = computeIrr(enterpriseCashflows);
+  const irrResult = computeIrr(enterpriseCashflows);
+  out.IRR = irrResult.value;
   debugData.perMetric.IRR.intermediates.solver = 'bracket+bisection';
+  debugData.perMetric.IRR.intermediates.signChangeCount = irrResult.signChangeCount;
+  if (irrResult.reason) debugData.perMetric.IRR.intermediates.reason = irrResult.reason;
 
   const roiEnd = tp + 9;
   if (roiEnd <= masterN || !args.strictRoi10Y) {
@@ -258,7 +289,8 @@ export function computeLista3(args: Lista3Args, options?: Lista3DebugOptions): L
     debugData.perMetric.ROI_10Y.inputs.fcff_10y_slice = enterpriseCashflows.slice(tp, boundedEnd + 1);
     debugData.perMetric.ROI_10Y.intermediates.fcff_10y_sum = sum;
     if ((!args.strictRoi10Y && count > 0) || (args.strictRoi10Y && roiEnd <= masterN)) {
-      out.ROI_10Y_pct = (sum / Math.abs(initialCapexUSD)) * 100;
+      const roiRatio = sum / Math.abs(initialCapexUSD);
+      out.ROI_10Y_pct = args.roiAsRatio ? roiRatio : roiRatio * 100;
     }
   } else {
     debugData.perMetric.ROI_10Y.missingInputs.push('10Y window incomplete under strictRoi10Y');
