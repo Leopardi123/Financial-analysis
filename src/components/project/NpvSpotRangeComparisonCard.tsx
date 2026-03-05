@@ -16,31 +16,30 @@ type Props = {
   range: NpvSpotRange;
   yearsByPeriod: number[];
   currencyCode: string;
+  formatMoney: (value: number | null) => string;
 };
 
-function formatMoney(value: number | null, currencyCode: string): string {
-  if (value === null || !Number.isFinite(value)) return 'n/a';
-  return new Intl.NumberFormat('sv-SE', { style: 'currency', currency: currencyCode, maximumFractionDigits: 0 }).format(value);
-}
-
-export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, currencyCode }: Props) {
+export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, currencyCode, formatMoney }: Props) {
   const chartData = useMemo(() => {
     if (!range) return null;
     const len = Math.min(yearsByPeriod.length, range.base.npvSeries.length, range.low.npvSeries.length, range.high.npvSeries.length);
-    const rows: Array<Array<string | number | null>> = [];
+    const rows: Array<Array<number | string | null>> = [];
     for (let t = 0; t < len; t += 1) {
       const low = range.low.npvSeries[t];
       const base = range.base.npvSeries[t];
       const high = range.high.npvSeries[t];
-      const band = (typeof high === 'number' && typeof low === 'number') ? high - low : null;
-      const tooltip = `Year: ${yearsByPeriod[t] ?? t}\nLow: ${formatMoney(typeof low === 'number' ? low : null, currencyCode)}\nBase: ${formatMoney(typeof base === 'number' ? base : null, currencyCode)}\nHigh: ${formatMoney(typeof high === 'number' ? high : null, currencyCode)}`;
-      rows.push([String(yearsByPeriod[t] ?? t), low, band, base, tooltip]);
+      const band = (typeof high === 'number' && Number.isFinite(high) && typeof low === 'number' && Number.isFinite(low))
+        ? high - low
+        : null;
+      const tooltip = `Year: ${yearsByPeriod[t] ?? t}\nLow: ${formatMoney(typeof low === 'number' ? low : null)}\nBase: ${formatMoney(typeof base === 'number' ? base : null)}\nHigh: ${formatMoney(typeof high === 'number' ? high : null)}`;
+      rows.push([t, low, band, base, tooltip]);
     }
+
     return [
       ['Period', 'Low', 'Band', 'Base', { role: 'tooltip', type: 'string' }],
       ...rows,
     ] as (string | number | null)[][];
-  }, [range, yearsByPeriod, currencyCode]);
+  }, [range, yearsByPeriod, formatMoney]);
 
   return (
     <div className="producer-core-compact-card" style={{ marginTop: 8 }}>
@@ -57,7 +56,7 @@ export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, curre
             <div key={label} className="compact-metric-row">
               <span className="compact-metric-label">{label}</span>
               <span className="compact-metric-dots" />
-              <span className="compact-metric-value">{formatMoney(value as number | null, currencyCode)}</span>
+              <span className="compact-metric-value">{formatMoney(value as number | null)}</span>
             </div>
           ))}
         </div>
@@ -71,17 +70,18 @@ export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, curre
               options={{
                 isStacked: true,
                 legend: { position: 'none' },
-                hAxis: { slantedText: false },
+                hAxis: {
+                  slantedText: false,
+                  ticks: yearsByPeriod.map((year, idx) => ({ v: idx, f: String(year) })),
+                },
                 seriesType: 'line',
-                colors: ['transparent', '#bfdbfe', '#0f172a'],
-                areaOpacity: 0.35,
-                lineWidth: 2,
+                colors: ['transparent', '#A8C686', '#2C3E50'],
+                areaOpacity: 0.32,
                 series: {
                   0: { type: 'area', lineWidth: 0, visibleInLegend: false, enableInteractivity: false },
                   1: { type: 'area', lineWidth: 0, visibleInLegend: false },
-                  2: { type: 'line', lineWidth: 2, pointSize: 0 },
+                  2: { type: 'line', lineWidth: 3, pointSize: 0 },
                 },
-                tooltip: { isHtml: false },
               }}
               yAxisTitle={currencyCode}
               unitLabel={currencyCode}
