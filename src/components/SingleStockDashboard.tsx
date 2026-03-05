@@ -2669,6 +2669,23 @@ Capital Available: ${availableLabel}`,
     ) as Record<string, string>;
   }, [corporateProdStartMarkerValuesByKey, lockedTargetCurrency]);
 
+
+  const corporateList2ScalarTextByKey = useMemo(() => {
+    const discounted = typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number"
+      && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_TargetCurrency)
+      ? formatMetricValue({ value: corporateSnapshotData.DCF_prodStart_present_TargetCurrency, reason: null }, "money", lockedTargetCurrency)
+      : null;
+    const discountedPerShare = typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number"
+      && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
+      ? formatMetricValue({ value: corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency, reason: null }, "money", lockedTargetCurrency)
+      : null;
+
+    return {
+      DCF_Target_discounted: discounted,
+      DCF_Target_discounted_perShare: discountedPerShare,
+    } as const;
+  }, [corporateSnapshotData, lockedTargetCurrency]);
+
   const corporateAlwaysMarkerMetricKeys = useMemo(
     () => new Set<string>(["DCF_Target", "DCF_perShare"]),
     [],
@@ -4265,11 +4282,39 @@ Capital Available: ${availableLabel}`,
                             <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                             <span className="compact-metric-dots" />
                             <span className="compact-metric-value">{
-                              sectionKey === "list2"
-                              && corporateProdStartMarkerTextByKey[key]
-                              && (value.value === null || corporateAlwaysMarkerMetricKeys.has(key))
-                                ? corporateProdStartMarkerTextByKey[key]
-                                : formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency)
+                              (() => {
+                                if (sectionKey === "list2" && (key === "DCF_Target_discounted" || key === "DCF_Target_discounted_perShare")) {
+                                  const scalarText = corporateList2ScalarTextByKey[key];
+                                  if (import.meta.env.DEV) {
+                                    const debugPanelValue = key === "DCF_Target_discounted"
+                                      ? (typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_TargetCurrency)
+                                        ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency
+                                        : null)
+                                      : (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
+                                        ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
+                                        : null);
+                                    if (debugPanelValue !== null && scalarText === null) {
+                                      console.assert(false, "[corporate-list2-scalar-missing] discounted DCF available in debug panel but missing in list render", {
+                                        missingKey: key,
+                                        availableMetricKeys: Object.keys(metrics),
+                                        snapshotKeys: Object.keys((corporateSnapshotData ?? {}) as Record<string, unknown>),
+                                      });
+                                    }
+                                  }
+                                  if (scalarText !== null) {
+                                    return scalarText;
+                                  }
+                                }
+
+                                if (
+                                  sectionKey === "list2"
+                                  && corporateProdStartMarkerTextByKey[key]
+                                  && (value.value === null || corporateAlwaysMarkerMetricKeys.has(key))
+                                ) {
+                                  return corporateProdStartMarkerTextByKey[key];
+                                }
+                                return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency);
+                              })()
                             }</span>
                           </div>
                         ))}
