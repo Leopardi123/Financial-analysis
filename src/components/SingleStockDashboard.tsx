@@ -2613,6 +2613,31 @@ Capital Available: ${availableLabel}`,
         series?: {
           fcfUSD_total?: Array<number | null>;
           capexUSD_total?: Array<number | null>;
+          nopatUSD_total?: Array<number | null>;
+        };
+        corporateNopatInputs?: {
+          requiredInputs?: string[];
+          projectInputs?: Array<{
+            projectId?: string;
+            taxRate?: number | null;
+            taxRateByPeriod?: Array<number | null> | null;
+            sampleEbitUSD?: Array<number | null>;
+          }>;
+          perPeriod?: Array<{
+            t?: number;
+            contributions?: Array<{
+              projectId?: string;
+              ebitUSD?: number | null;
+              taxRate?: number | null;
+              nopatContributionUSD?: number | null;
+            }>;
+            nopatUSD_total?: number | null;
+          }>;
+          missingInputs?: Array<{
+            projectId?: string;
+            t?: number;
+            missing?: string[];
+          }>;
         };
         perMetric?: Record<string, {
           formula?: string;
@@ -4468,6 +4493,50 @@ Capital Available: ${availableLabel}`,
                             <div><strong>shares_post_financing:</strong> {formatDebugNumericValue(corporateLista3Debug?.shares_post_financing ?? null)}</div>
                             <div><strong>series.fcfUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.fcfUSD_total ?? null)}</div>
                             <div><strong>series.capexUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.capexUSD_total ?? null)}</div>
+                            <div><strong>series.nopatUSD_total:</strong> {formatDebugNumericValue(corporateLista3Debug?.series?.nopatUSD_total ?? null)}</div>
+                            <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6 }}>
+                              <div><strong>Corporate NOPAT strict aggregation</strong></div>
+                              <div>requiredInputs: {Array.isArray(corporateLista3Debug?.corporateNopatInputs?.requiredInputs) ? `[${corporateLista3Debug?.corporateNopatInputs?.requiredInputs.join(', ')}]` : 'none'}</div>
+                              <div>Project inputs:</div>
+                              <div style={{ paddingLeft: 12 }}>
+                                {Array.isArray(corporateLista3Debug?.corporateNopatInputs?.projectInputs) && corporateLista3Debug.corporateNopatInputs.projectInputs.length > 0
+                                  ? corporateLista3Debug.corporateNopatInputs.projectInputs.map((projectInput: { projectId?: string; taxRate?: number | null; taxRateByPeriod?: Array<number | null> | null; sampleEbitUSD?: Array<number | null> }) => (
+                                    <div key={`corp-list3-nopat-input-${String(projectInput?.projectId ?? 'unknown')}`}>
+                                      {String(projectInput?.projectId ?? 'unknown')}: taxRate={formatDebugNumericValue(projectInput?.taxRate ?? null)}, taxRateByPeriod={formatDebugNumericValue(projectInput?.taxRateByPeriod ?? null)}, sampleEbitUSD[0..6]={formatDebugNumericValue(projectInput?.sampleEbitUSD ?? null)}
+                                    </div>
+                                  ))
+                                  : <div>none</div>}
+                              </div>
+                              <div>Per-period contributions:</div>
+                              <div style={{ paddingLeft: 12 }}>
+                                {Array.isArray(corporateLista3Debug?.corporateNopatInputs?.perPeriod) && corporateLista3Debug.corporateNopatInputs.perPeriod.length > 0
+                                  ? corporateLista3Debug.corporateNopatInputs.perPeriod.map((period: { t?: number; contributions?: Array<{ projectId?: string; ebitUSD?: number | null; taxRate?: number | null; nopatContributionUSD?: number | null }>; nopatUSD_total?: number | null }) => (
+                                    <div key={`corp-list3-nopat-period-${String(period?.t ?? 'na')}`} style={{ marginBottom: 4 }}>
+                                      <div>t={formatDebugNumericValue(period?.t ?? null)} summed_nopatUSD_total={formatDebugNumericValue(period?.nopatUSD_total ?? null)}</div>
+                                      <div style={{ paddingLeft: 12 }}>
+                                        {Array.isArray(period?.contributions) && period.contributions.length > 0
+                                          ? period.contributions.map((contribution: { projectId?: string; ebitUSD?: number | null; taxRate?: number | null; nopatContributionUSD?: number | null }) => (
+                                            <div key={`corp-list3-nopat-period-${String(period?.t ?? 'na')}-project-${String(contribution?.projectId ?? 'unknown')}`}>
+                                              {String(contribution?.projectId ?? 'unknown')}: ebitUSD={formatDebugNumericValue(contribution?.ebitUSD ?? null)}, taxRate={formatDebugNumericValue(contribution?.taxRate ?? null)}, nopatContributionUSD={formatDebugNumericValue(contribution?.nopatContributionUSD ?? null)}
+                                            </div>
+                                          ))
+                                          : <div>none</div>}
+                                      </div>
+                                    </div>
+                                  ))
+                                  : <div>none</div>}
+                              </div>
+                              <div>Missing inputs (strict):</div>
+                              <div style={{ paddingLeft: 12 }}>
+                                {Array.isArray(corporateLista3Debug?.corporateNopatInputs?.missingInputs) && corporateLista3Debug.corporateNopatInputs.missingInputs.length > 0
+                                  ? corporateLista3Debug.corporateNopatInputs.missingInputs.map((missing: { projectId?: string; t?: number; missing?: string[] }, idx: number) => (
+                                    <div key={`corp-list3-nopat-missing-${idx}`}>
+                                      projectId={String(missing?.projectId ?? 'unknown')}, t={formatDebugNumericValue(missing?.t ?? null)}, missing={Array.isArray(missing?.missing) ? `[${missing.missing.join(', ')}]` : '[]'}
+                                    </div>
+                                  ))
+                                  : <div>none</div>}
+                              </div>
+                            </div>
                             <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6 }}>
                               <div><strong>CAPEX sanity block</strong></div>
                               {(() => {

@@ -221,6 +221,8 @@ type TaxesDetailSeries = {
 
 type ProjectSeriesContext = {
   projectId: string;
+  taxRate: number | null;
+  taxRateByPeriod: Array<number | null> | null;
   yearsByPeriod: number[];
   payableQtyByMetal: Record<string, Array<number | null>>;
   payableQtyUnitByMetal: Record<string, string>;
@@ -1095,6 +1097,31 @@ type SnapshotDiagnostics = {
       series: {
         fcfUSD_total: Array<number | null>;
         capexUSD_total: Array<number | null>;
+        nopatUSD_total?: Array<number | null>;
+      };
+      corporateNopatInputs?: {
+        requiredInputs: string[];
+        projectInputs: Array<{
+          projectId: string;
+          taxRate: number | null;
+          taxRateByPeriod: Array<number | null> | null;
+          sampleEbitUSD: Array<number | null>;
+        }>;
+        perPeriod: Array<{
+          t: number;
+          contributions: Array<{
+            projectId: string;
+            ebitUSD: number | null;
+            taxRate: number | null;
+            nopatContributionUSD: number | null;
+          }>;
+          nopatUSD_total: number | null;
+        }>;
+        missingInputs: Array<{
+          projectId: string;
+          t: number;
+          missing: Array<'ebitUSD' | 'taxRate'>;
+        }>;
       };
       perMetric: Record<string, {
         formula: string;
@@ -1316,6 +1343,13 @@ export async function runCorporateSnapshotPipeline(args: {
           const projectLength = yearsByPeriod.length;
           const nullSeries = new Array<number | null>(projectLength).fill(null);
           const taxRate = parsed.engineInputWithoutPrices.taxRate;
+          const rawEconomics = (rawJsonRecord.economics ?? null) as Record<string, unknown> | null;
+          const rawTaxRateByPeriod = Array.isArray(rawEconomics?.taxRateByPeriod)
+            ? rawEconomics.taxRateByPeriod as unknown[]
+            : null;
+          const taxRateByPeriod = rawTaxRateByPeriod
+            ? Array.from({ length: projectLength }, (_, t) => toFiniteOrNull(typeof rawTaxRateByPeriod[t] === 'number' ? rawTaxRateByPeriod[t] as number : null))
+            : null;
           const depreciationUSD = sanitizeSeries(parsed.context.series?.depreciationUSD ?? nullSeries);
           diagnostics.warnings.push(`Tax base: TaxableIncome = max(0, EBIT); EBIT = EBITDA - Depreciation; taxRate=${taxRate === null ? 'null' : String(taxRate)}`);
           const grossRevenueUSD = sanitizeSeries(outPreRoyalties.revenue.grossRevenueUSD);
@@ -1473,6 +1507,8 @@ export async function runCorporateSnapshotPipeline(args: {
 
           projectSeriesContexts.push({
             projectId,
+            taxRate,
+            taxRateByPeriod,
             yearsByPeriod,
             payableQtyByMetal: Object.fromEntries(
               Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
@@ -2045,6 +2081,80 @@ export async function runCorporateSnapshotPipeline(args: {
     const initialCapexUSD_main = tp_main === null
       ? null
       : sumStrict(aggregationEffective.capexUSD_total.slice(0, tp_main));
+
+    const corporateNopatRequiredInputs = ['ebitUSD', 'taxRate'];
+    const corporateNopatProjectInputs = projectSeriesContexts.map((entry) => ({
+      projectId: entry.projectId,
+      taxRate: entry.taxRate,
+      taxRateByPeriod: entry.taxRateByPeriod,
+      sampleEbitUSD: entry.economics.ebitUSD.slice(0, Math.min(7, aggregationEffective.corporateMasterN + 1)),
+    }));
+    const corporateNopatMissingInputs: Array<{ projectId: string; t: number; missing: Array<'ebitUSD' | 'taxRate'> }> = [];
+    const corporateNopatPerPeriod: Array<{
+      t: number;
+      contributions: Array<{ projectId: string; ebitUSD: number | null; taxRate: number | null; nopatContributionUSD: number | null }>;
+      nopatUSD_total: number | null;
+    }> = [];
+    const corporateNopatUSDTotal: Array<number | null> = [];
+
+    for (let t = 0; t <= aggregationEffective.corporateMasterN; t += 1) {
+      let periodHasMissing = false;
+      let periodSum = 0;
+      const contributions: Array<{ projectId: string; ebitUSD: number | null; taxRate: number | null; nopatContributionUSD: number | null }> = [];
+      for (const entry of projectSeriesContexts) {
+        const projectIndex = entry.yearsByPeriod.indexOf(aggregationEffective.corporateYearsByPeriod[t]);
+        const ebitValue = projectIndex >= 0 ? toFiniteOrNull(entry.economics.ebitUSD[projectIndex]) : null;
+        const taxRateAtT = projectIndex >= 0
+          ? (Array.isArray(entry.taxRateByPeriod)
+              ? toFiniteOrNull(entry.taxRateByPeriod[projectIndex])
+              : toFiniteOrNull(entry.taxRate))
+          : null;
+        const missing: Array<'ebitUSD' | 'taxRate'> = [];
+        if (ebitValue === null) missing.push('ebitUSD');
+        if (taxRateAtT === null) missing.push('taxRate');
+        const nopatContributionUSD = missing.length > 0
+          ? null
+          : (ebitValue as number) * (1 - (taxRateAtT as number));
+        contributions.push({
+          projectId: entry.projectId,
+          ebitUSD: ebitValue,
+          taxRate: taxRateAtT,
+          nopatContributionUSD,
+        });
+        if (missing.length > 0) {
+          periodHasMissing = true;
+          corporateNopatMissingInputs.push({ projectId: entry.projectId, t, missing });
+        } else {
+          periodSum += nopatContributionUSD as number;
+        }
+      }
+      const nopatAtT = periodHasMissing ? null : periodSum;
+      corporateNopatUSDTotal.push(nopatAtT);
+      corporateNopatPerPeriod.push({ t, contributions, nopatUSD_total: nopatAtT });
+    }
+
+    const computeAvgNopatRoic = (): { value: number | null; nullReason: string | null } => {
+      const capexAbs = Number.isFinite(initialCapexUSD_main) ? Math.abs(initialCapexUSD_main as number) : null;
+      if (capexAbs === null || capexAbs <= 0) {
+        return { value: null, nullReason: 'domain rule: |Initial_CAPEX_USD| must be > 0' };
+      }
+      if (tp_main === null || tp_main < 0 || tp_main > aggregationEffective.corporateMasterN) {
+        return { value: null, nullReason: 'domain rule: tp_main invalid for [tp..masterN] window' };
+      }
+      const range = corporateNopatUSDTotal.slice(tp_main, aggregationEffective.corporateMasterN + 1);
+      if (range.some((value) => value === null)) {
+        return { value: null, nullReason: 'domain rule: nopatUSD_total strict null in [tp..masterN]' };
+      }
+      const finiteValues = range.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+      if (finiteValues.length < 1) {
+        return { value: null, nullReason: 'domain rule: no finite nopatUSD_total in [tp..masterN]' };
+      }
+      const avgNopat = finiteValues.reduce((sum, value) => sum + value, 0) / finiteValues.length;
+      return { value: avgNopat / capexAbs, nullReason: null };
+    };
+
+    const avgNopatRoic = computeAvgNopatRoic();
+
     const corporateLista3Result = computeLista3({
       masterN: aggregationEffective.corporateMasterN,
       tp: tp_main,
@@ -2301,6 +2411,8 @@ export async function runCorporateSnapshotPipeline(args: {
       CAPEX_per_Annual_AuEq: additionalLista3ByMetric.CAPEX_per_Annual_AuEq.value,
       LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.value,
       LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.value,
+      Corporate_ROIC: null,
+      LOM_avg_NOPAT_ROIC: avgNopatRoic.value,
       Kapitalavkastning_LOM: kapitalavkastningMetrics.kapitalavkastningLom,
       Kapitalavkastning_per_Year: kapitalavkastningMetrics.kapitalavkastningPerYear,
     };
@@ -2313,6 +2425,13 @@ export async function runCorporateSnapshotPipeline(args: {
       series: {
         ...corporateLista3Result.debug.series,
         capexUSD_total: aggregationEffective.capexUSD_total.slice(0, Math.max(0, aggregationEffective.corporateMasterN + 1)),
+        nopatUSD_total: corporateNopatUSDTotal.slice(0, Math.max(0, aggregationEffective.corporateMasterN + 1)),
+      },
+      corporateNopatInputs: {
+        requiredInputs: corporateNopatRequiredInputs,
+        projectInputs: corporateNopatProjectInputs,
+        perPeriod: corporateNopatPerPeriod,
+        missingInputs: corporateNopatMissingInputs,
       },
     };
     corporateLista3Debug.perMetric.Payback_approx.output.value = corporateLista3.Payback_approx_years;
@@ -2397,7 +2516,7 @@ export async function runCorporateSnapshotPipeline(args: {
       sustainingCostUSD_total: aggregationEffective.sustainingCostUSD_total,
       payableAuEqOz_total: aggregationEffective.payableAuEqOz_total,
       ebitUSD_total: snapshotSeries.ebitUSD,
-      nopatUSD_total: null,
+      nopatUSD_total: corporateNopatUSDTotal,
       discountFactors_toToday: Array.from({ length: aggregationEffective.corporateMasterN + 1 }, (_, t) => 1 / ((1 + input.discountRate) ** t)),
       investedCapitalUSD_total: null,
     };
@@ -2442,7 +2561,7 @@ export async function runCorporateSnapshotPipeline(args: {
       LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.value,
       LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.value,
       Corporate_ROIC: null,
-      LOM_avg_NOPAT_ROIC: null,
+      LOM_avg_NOPAT_ROIC: avgNopatRoic.value,
       Kapitalavkastning_LOM: kapitalavkastningMetrics.kapitalavkastningLom,
       Kapitalavkastning_per_Year: kapitalavkastningMetrics.kapitalavkastningPerYear,
     };
@@ -2454,7 +2573,7 @@ export async function runCorporateSnapshotPipeline(args: {
       LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.nullReason,
       LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.nullReason,
       Corporate_ROIC: 'domain rule: missing required inputs',
-      LOM_avg_NOPAT_ROIC: 'domain rule: missing required inputs',
+      LOM_avg_NOPAT_ROIC: avgNopatRoic.nullReason,
       Kapitalavkastning_LOM: kapitalavkastningMetrics.nullReason,
       Kapitalavkastning_per_Year: kapitalavkastningMetrics.nullReason,
     };
