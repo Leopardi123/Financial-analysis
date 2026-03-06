@@ -21,6 +21,8 @@ type ValueRangeSnapshotCardProps = {
     navProdstartPerShareSeries?: Array<number | null>;
   } | null;
   currencyCode?: string;
+  currentYear?: number | null;
+  tpYear?: number | null;
 };
 
 const Y_TOP = 20;
@@ -87,7 +89,7 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currencyCode } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currencyCode, currentYear, tpYear } = props;
   const isProjectMode = mode === "project";
 
   const projectChartModel = useMemo(() => {
@@ -98,24 +100,35 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     if (len < 1) return null;
 
     const rows: Array<Array<number | string | null>> = [];
-    const domainValues: number[] = [];
+    let hasAnyFlowPoint = false;
+
+    rows.push([
+      -1,
+      null,
+      null,
+      null,
+      isFiniteNumber(priceToday) ? priceToday : null,
+      isFiniteNumber(priceToday) ? formatPerShareValue(priceToday) : null,
+      null,
+      null,
+      null,
+    ]);
+
     for (let idx = 0; idx < len; idx += 1) {
+      const x = idx;
       const nav = isFiniteNumber(navSeriesRaw[idx]) ? navSeriesRaw[idx] : null;
       const dcf = isFiniteNumber(dcfSeriesRaw[idx]) ? dcfSeriesRaw[idx] : null;
-      const currentMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
+      const band = nav !== null && dcf !== null ? Math.max(0, dcf - nav) : null;
       const tpLowMarker = idx === 0 && isFiniteNumber(tpLow) ? tpLow : null;
       const tpHighMarker = idx === 0 && isFiniteNumber(tpHigh) ? tpHigh : null;
-      if (nav !== null) domainValues.push(nav);
-      if (dcf !== null) domainValues.push(dcf);
-      if (currentMarker !== null) domainValues.push(currentMarker);
-      if (tpLowMarker !== null) domainValues.push(tpLowMarker);
-      if (tpHighMarker !== null) domainValues.push(tpHighMarker);
+      if (nav !== null || dcf !== null) hasAnyFlowPoint = true;
       rows.push([
-        idx,
+        x,
         nav,
+        band,
         dcf,
-        currentMarker,
-        currentMarker !== null ? formatPerShareValue(currentMarker) : null,
+        null,
+        null,
         tpLowMarker,
         tpLowMarker !== null ? formatPerShareValue(tpLowMarker) : null,
         tpHighMarker,
@@ -123,25 +136,33 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       ]);
     }
 
-    if (domainValues.length < 1) return null;
+    if (!hasAnyFlowPoint && !isFiniteNumber(priceToday) && !isFiniteNumber(tpLow) && !isFiniteNumber(tpHigh)) {
+      return null;
+    }
+
+    const xTicks: Array<{ v: number; f: string }> = [];
+    if (isFiniteNumber(currentYear)) xTicks.push({ v: -1, f: String(Math.round(currentYear)) });
+    if (isFiniteNumber(tpYear)) xTicks.push({ v: 0, f: String(Math.round(tpYear)) });
+
     return {
       data: [
         [
           "Step",
-          "NAV",
+          "NAV floor",
+          "Band",
           "DCF",
           "Current",
           { role: "annotation" },
-          "TP Low",
+          "TP low",
           { role: "annotation" },
-          "TP High",
+          "TP high",
           { role: "annotation" },
         ],
         ...rows,
       ] as (string | number | null | { role: string })[][],
-      ticks: Array.from({ length: len }, (_, idx) => ({ v: idx, f: idx === 0 ? "TP" : `+${idx}` })),
+      xTicks,
     };
-  }, [chartFlows, isProjectMode, priceToday, tpHigh, tpLow]);
+  }, [chartFlows, currentYear, isProjectMode, priceToday, tpHigh, tpLow, tpYear]);
 
   if (isProjectMode) {
     if (!projectChartModel) {
@@ -150,40 +171,44 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return (
       <div className="spot-range-chart-guard" style={{ marginTop: 8 }}>
         <Chart
-          chartType="LineChart"
+          chartType="ComboChart"
           width="100%"
           height="260px"
           data={projectChartModel.data}
           options={{
             backgroundColor: "#e0e9ce",
             legend: { position: "none" },
+            isStacked: true,
             chartArea: { left: 64, right: 22, top: 16, bottom: 36, width: "100%", height: "75%" },
             hAxis: {
               textStyle: { color: "#1f2937", fontSize: 11 },
-              gridlines: { color: "#dbe4cf" },
-              ticks: projectChartModel.ticks,
+              gridlines: { color: "transparent" },
+              minorGridlines: { color: "transparent" },
+              ticks: projectChartModel.xTicks,
             },
             vAxis: {
               title: currencyCode ?? "",
               textStyle: { color: "#1f2937", fontSize: 11 },
               titleTextStyle: { color: "#1f2937", italic: false },
-              gridlines: { color: "#b8c4ad", count: 5 },
-              minorGridlines: { color: "#dbe4cf" },
+              gridlines: { color: "transparent" },
+              minorGridlines: { color: "transparent" },
             },
             tooltip: { trigger: "none" },
-            interpolateNulls: false,
             annotations: {
               alwaysOutside: true,
               textStyle: { color: "#111827", fontSize: 10 },
               stem: { color: "transparent", length: 0 },
             },
-            colors: ["#64748b", "#1f2937", "#be123c", "#111111", "#111111"],
+            colors: ["transparent", "#A8C686", "#1f2937", "#be123c", "#111111", "#111111"],
+            seriesType: "line",
+            areaOpacity: 0.32,
             series: {
-              0: { type: "line", lineWidth: 2, pointSize: 0 },
-              1: { type: "line", lineWidth: 2.5, pointSize: 0 },
-              2: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
-              3: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
-              4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
+              0: { type: "area", lineWidth: 0, visibleInLegend: false, enableInteractivity: false },
+              1: { type: "area", lineWidth: 0, visibleInLegend: false },
+              2: { type: "line", lineWidth: 2.5, pointSize: 0, visibleInLegend: false },
+              3: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              5: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
             },
           }}
         />

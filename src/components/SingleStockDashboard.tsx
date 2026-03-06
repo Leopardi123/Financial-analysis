@@ -4789,6 +4789,19 @@ Capital Available: ${availableLabel}`,
                             const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
                             return projectPayload?.chartFlows ?? null;
                           })()}
+                          currentYear={(() => {
+                            const years = Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod)
+                              ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[])
+                              : [];
+                            return typeof years[0] === "number" && Number.isFinite(years[0]) ? years[0] : null;
+                          })()}
+                          tpYear={(() => {
+                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
+                              ? selectedProjectRawJson.time as Record<string, unknown>
+                              : null;
+                            const value = time?.productionStartYear;
+                            return typeof value === "number" && Number.isFinite(value) ? value : null;
+                          })()}
                           currencyCode={lockedTargetCurrency}
                         />
                         <div className="compact-metrics-grid">
