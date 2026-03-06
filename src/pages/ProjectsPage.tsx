@@ -73,6 +73,13 @@ function readFiniteNumber(value: unknown): number | null {
 
 
 
+
+function numbersMatch(left: number | null | undefined, right: number | null | undefined, epsilon = 1e-6): boolean {
+  if (left === null || left === undefined || !Number.isFinite(left)) return right === null || right === undefined || !Number.isFinite(right as number);
+  if (right === null || right === undefined || !Number.isFinite(right)) return false;
+  return Math.abs(left - right) <= epsilon;
+}
+
 function firstNonZeroIndex(values: Array<number | null> | undefined): number | null {
   if (!Array.isArray(values)) return null;
   for (let i = 0; i < values.length; i += 1) {
@@ -147,6 +154,7 @@ function RenderSeriesTable(props: { title: string; columns: string[]; rows: Arra
 export default function ProjectsPage() {
   const projectId = useMemo(() => getRouteProjectId(window.location.pathname), []);
   const [symbol] = useState(() => getSymbolFromQuery(window.location.search));
+  const debugMode = useMemo(() => new URLSearchParams(window.location.search).get('debug') === '1', []);
   const [projects, setProjects] = useState<CompanyProjectSummary[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -521,10 +529,15 @@ export default function ProjectsPage() {
     };
   }, [operationsGridInput, parsedProject, selectedProject]);
 
+  const economicsPnl = useMemo(() => {
+    if (!series || seriesColumns.length === 0) return null;
+    return buildProjectGridPnl(series, seriesColumns.length);
+  }, [series, seriesColumns.length]);
+
   const economicsRows = useMemo(() => {
-    if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
+    if (!series || seriesColumns.length === 0 || !economicsPnl) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
     const rows: Array<{ label: string; unit?: string; values: Array<number | null> }> = [];
-    const pnl = buildProjectGridPnl(series, seriesColumns.length);
+    const pnl = economicsPnl;
 
     if (Array.isArray(series.totalRevenue_USD)) rows.push({ label: 'Revenue total', unit: 'USD', values: series.totalRevenue_USD });
     for (const metal of Object.keys(pnl.revenueByMetal).sort((a, b) => a.localeCompare(b))) {
@@ -559,7 +572,145 @@ export default function ProjectsPage() {
     }
 
     return rows;
-  }, [series, seriesColumns.length]);
+  }, [economicsPnl, series, seriesColumns.length]);
+
+  const projectGridDebug = useMemo(() => {
+    if (!debugMode || !operationsGridInput || !operationsGrid || !series || !economicsPnl) return null;
+
+    const rowValuesByLabel = new Map(economicsRows.map((row) => [row.label, row.values]));
+    const operationsRowByLabel = new Map(operationsGrid.rows.map((row) => [row.label, row.values]));
+    const pricesByMetal = operationsGridInput.economics?.priceUSDByMetal ?? {};
+    const payablesByMetal = operationsGridInput.metals?.payableQtyByMetal ?? {};
+    const tp = Number.isInteger(operationsGridInput.productionStartPeriod) ? operationsGridInput.productionStartPeriod as number : null;
+    const yearsByPeriod = Array.isArray(operationsGridInput.yearsByPeriod) ? operationsGridInput.yearsByPeriod : [];
+    const rawJson = (selectedProject?.raw_json ?? null) as Record<string, unknown> | null;
+    const rawTime = rawJson && typeof rawJson.time === 'object' && rawJson.time !== null && !Array.isArray(rawJson.time)
+      ? rawJson.time as Record<string, unknown>
+      : null;
+    const lastPeriod = Math.max(0, operationsGrid.columnCount - 1);
+    const keyPeriodCandidates = [0, 1, tp, tp === null ? null : tp + 1, lastPeriod];
+    const keyPeriods = Array.from(new Set(keyPeriodCandidates.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= lastPeriod))).sort((a, b) => a - b);
+    const selectedPeriods = Array.from({ length: operationsGrid.columnCount }, (_, t) => t).map((t) => {
+      const displayRevenueAu = rowValuesByLabel.get('Revenue Au')?.[t] ?? null;
+      const displayRevenueAg = rowValuesByLabel.get('Revenue Ag')?.[t] ?? null;
+      const displayRevenueCu = rowValuesByLabel.get('Revenue Cu')?.[t] ?? null;
+      const displayRevenuePb = rowValuesByLabel.get('Revenue Pb')?.[t] ?? null;
+      const displayRevenueZn = rowValuesByLabel.get('Revenue Zn')?.[t] ?? null;
+      const displayGrossRevenue = rowValuesByLabel.get('Gross revenue')?.[t] ?? null;
+      const displayEbit = rowValuesByLabel.get('EBIT')?.[t] ?? null;
+      const displayTaxableIncome = rowValuesByLabel.get('Taxable income')?.[t] ?? null;
+      const displayTax = rowValuesByLabel.get('Tax')?.[t] ?? null;
+      const displayFcff = rowValuesByLabel.get('FCFF')?.[t] ?? null;
+
+      return {
+        t,
+        year: yearsByPeriod[t] ?? null,
+        isKeyPeriod: keyPeriods.includes(t),
+        rawInputs: {
+          capexUSD: series.capexUSD?.[t] ?? null,
+          operatingCostsUSD: series.operatingCostsUSD?.[t] ?? null,
+          siteGandA_USD: series.siteGandA_USD?.[t] ?? null,
+          sustainingCapexUSD: series.sustainingCapexUSD?.[t] ?? null,
+          royaltiesUSD: series.royaltiesUSD?.[t] ?? null,
+          reclamationUSD: series.reclamationUSD?.[t] ?? null,
+          workingCapitalDeltaUSD: series.workingCapitalDeltaUSD?.[t] ?? null,
+          byproductCreditsUSD: series.byproductCreditsUSD?.[t] ?? null,
+          depreciationUSD: series.depreciationUSD?.[t] ?? null,
+        },
+        payables: {
+          Au: payablesByMetal.Au?.[t] ?? null,
+          Ag: payablesByMetal.Ag?.[t] ?? null,
+          Cu: payablesByMetal.Cu?.[t] ?? null,
+          Pb: payablesByMetal.Pb?.[t] ?? null,
+          Zn: payablesByMetal.Zn?.[t] ?? null,
+        },
+        prices: {
+          Au: pricesByMetal.Au?.[t] ?? null,
+          Ag: pricesByMetal.Ag?.[t] ?? null,
+          Cu: pricesByMetal.Cu?.[t] ?? null,
+          Pb: pricesByMetal.Pb?.[t] ?? null,
+          Zn: pricesByMetal.Zn?.[t] ?? null,
+        },
+        displayRowsSource: {
+          revenueAu_display: displayRevenueAu,
+          revenueAg_display: displayRevenueAg,
+          revenueCu_display: displayRevenueCu,
+          revenuePb_display: displayRevenuePb,
+          revenueZn_display: displayRevenueZn,
+          grossRevenue_display: displayGrossRevenue,
+          grossProfit_display: rowValuesByLabel.get('Gross profit')?.[t] ?? null,
+          ebit_display: displayEbit,
+          taxableIncome_display: displayTaxableIncome,
+          tax_display: displayTax,
+          fcff_display: displayFcff,
+        },
+        snapshotSource: {
+          grossRevenue_snapshot: series.totalRevenue_USD?.[t] ?? null,
+          ebit_snapshot: series.ebitUSD?.[t] ?? null,
+          taxableIncome_snapshot: series.taxableIncomeUSD?.[t] ?? null,
+          tax_snapshot: series.taxUSD?.[t] ?? null,
+          fcff_snapshot: series.fcffUSD?.[t] ?? null,
+        },
+        recomputedPnl: {
+          revenueAu: economicsPnl.revenueByMetal.Au?.[t] ?? null,
+          revenueAg: economicsPnl.revenueByMetal.Ag?.[t] ?? null,
+          revenueCu: economicsPnl.revenueByMetal.Cu?.[t] ?? null,
+          revenuePb: economicsPnl.revenueByMetal.Pb?.[t] ?? null,
+          revenueZn: economicsPnl.revenueByMetal.Zn?.[t] ?? null,
+          grossRevenue: economicsPnl.grossRevenue[t] ?? null,
+          grossProfit: economicsPnl.grossProfit[t] ?? null,
+          ebit: economicsPnl.ebit[t] ?? null,
+          taxableIncome: economicsPnl.taxableIncome[t] ?? null,
+          tax: economicsPnl.tax[t] ?? null,
+          fcff: economicsPnl.fcff[t] ?? null,
+        },
+        comparison: {
+          displayVsRecomputed: {
+            grossRevenue_match: numbersMatch(displayGrossRevenue, economicsPnl.grossRevenue[t]),
+            ebit_match: numbersMatch(displayEbit, economicsPnl.ebit[t]),
+            taxableIncome_match: numbersMatch(displayTaxableIncome, economicsPnl.taxableIncome[t]),
+            tax_match: numbersMatch(displayTax, economicsPnl.tax[t]),
+            fcff_match: numbersMatch(displayFcff, economicsPnl.fcff[t]),
+          },
+          displayVsSnapshot: {
+            grossRevenue_match: numbersMatch(displayGrossRevenue, series.totalRevenue_USD?.[t] ?? null),
+            ebit_match: numbersMatch(displayEbit, series.ebitUSD?.[t] ?? null),
+            taxableIncome_match: numbersMatch(displayTaxableIncome, series.taxableIncomeUSD?.[t] ?? null),
+            tax_match: numbersMatch(displayTax, series.taxUSD?.[t] ?? null),
+            fcff_match: numbersMatch(displayFcff, series.fcffUSD?.[t] ?? null),
+          },
+        },
+        cellRenderRaw: {
+          gradeAu_raw: operationsRowByLabel.get('Grade Au (gpt)')?.[t] ?? operationsRowByLabel.get('Grade Au (—)')?.[t] ?? null,
+          payableAu_raw: operationsRowByLabel.get('Payable Au (toz)')?.[t] ?? null,
+          revenueAu_raw: operationsRowByLabel.get('Revenue Au (USD)')?.[t] ?? displayRevenueAu,
+          ebit_raw: displayEbit,
+        },
+        cellRenderFormatted: {
+          revenueAu_cell: formatTableValue(displayRevenueAu),
+          ebit_cell: formatTableValue(displayEbit),
+        },
+      };
+    });
+
+    const summary = {
+      revenueRowsFrom: 'economicsRows -> buildProjectGridPnl(...).revenueByMetal',
+      ebitRowFrom: 'economicsRows -> buildProjectGridPnl(...).ebit',
+      fcffRowFrom: 'economicsRows -> buildProjectGridPnl(...).fcff',
+      isMixedSource: false,
+      mixedSourceNotes: [],
+    };
+
+    return {
+      sourceOfTruthSummary: summary,
+      projectId: selectedProject?.project_id ?? projectId ?? null,
+      tp,
+      productionStartYear: Number.isInteger(rawTime?.productionStartYear) ? rawTime?.productionStartYear : (tp === null ? null : yearsByPeriod[tp] ?? null),
+      yearsByPeriod,
+      keyPeriods,
+      selectedPeriods,
+    };
+  }, [debugMode, economicsPnl, economicsRows, operationsGrid, operationsGridInput, projectId, selectedProject, series]);
 
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;
@@ -694,6 +845,13 @@ export default function ProjectsPage() {
           )}
         </section>
         <RenderSeriesTable title="Economics" columns={seriesColumns} rows={economicsRows} />
+
+        {debugMode && (
+          <details>
+            <summary>PROJECT GRID DEBUG</summary>
+            <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(projectGridDebug, null, 2)}</pre>
+          </details>
+        )}
 
         <details>
           <summary>Diagnostics</summary>
