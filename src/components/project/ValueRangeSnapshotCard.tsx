@@ -193,19 +193,39 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         orderedLow,
         orderedHigh,
         currentMarker,
-        currentMarker !== null ? ` ↗ ${formatPerShareValue(currentMarker)}` : null,
+        currentMarker !== null ? `${formatPerShareValue(currentMarker)}` : null,
         currentLowMarker,
-        currentLowMarker !== null ? ` ↖ ${formatPerShareValue(currentLowMarker)}` : null,
+        currentLowMarker !== null ? `${formatPerShareValue(currentLowMarker)}` : null,
         currentHighMarker,
-        currentHighMarker !== null ? ` ↗ ${formatPerShareValue(currentHighMarker)}` : null,
+        currentHighMarker !== null ? `${formatPerShareValue(currentHighMarker)}` : null,
         tpLowMarker,
-        tpLowMarker !== null ? ` ↖ ${formatPerShareValue(tpLowMarker)}` : null,
+        tpLowMarker !== null ? `${formatPerShareValue(tpLowMarker)}` : null,
         tpHighMarker,
-        tpHighMarker !== null ? ` ↗ ${formatPerShareValue(tpHighMarker)}` : null,
+        tpHighMarker !== null ? `${formatPerShareValue(tpHighMarker)}` : null,
       ]);
     }
 
     if (domainValues.length < 1) return null;
+
+    const minDomain = Math.min(...domainValues);
+    const maxDomain = Math.max(...domainValues);
+    const domainSpan = Math.max(1e-9, maxDomain - minDomain);
+    const collisionThreshold = domainSpan * 0.06;
+
+    if (rows.length > 0) {
+      const first = rows[0];
+      const currentValue = typeof first[5] === 'number' ? first[5] : null;
+      const currentLow = typeof first[7] === 'number' ? first[7] : null;
+      const currentHigh = typeof first[9] === 'number' ? first[9] : null;
+      const tpLowAtCurrent = typeof first[11] === 'number' ? first[11] : null;
+      const tpHighAtCurrent = typeof first[13] === 'number' ? first[13] : null;
+      const collides = currentValue !== null && [currentLow, currentHigh, tpLowAtCurrent, tpHighAtCurrent]
+        .some((v) => v !== null && Math.abs(v - currentValue) <= collisionThreshold);
+      if (collides) {
+        first[6] = null;
+      }
+    }
+
     return {
       data: [
         [
@@ -228,7 +248,6 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         ...rows,
       ] as (string | number | null | { role: string; type?: string })[][],
       ticks: [
-        { v: -1, f: String(yearNow - 1) },
         { v: 0, f: String(yearNow) },
         { v: tpOffset, f: String(yearTp) },
       ],
@@ -257,7 +276,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               gridlines: { color: "transparent", count: 0 },
               baselineColor: "transparent",
               viewWindowMode: "explicit",
-              viewWindow: { min: -1, max: Math.max(1, (projectChartModel.data.length - 2) as number) },
+              viewWindow: { min: -0.35, max: Math.max(1, (projectChartModel.data.length - 2) as number) },
               ticks: projectChartModel.ticks,
             },
             vAxis: {
@@ -273,7 +292,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             annotations: {
               alwaysOutside: true,
               textStyle: { color: "#111827", fontSize: 9 },
-              stem: { color: "transparent", length: 6 },
+              stem: { color: "#9ca3af", length: 7 },
             },
             colors: ["transparent", "#A8C686", "#2C3E50", "#2C3E50", "#be123c", "#111111", "#111111", "#111111", "#111111"],
             seriesType: "line",
