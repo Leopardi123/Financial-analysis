@@ -4776,11 +4776,7 @@ Capital Available: ${availableLabel}`,
                         <summary><h2 className="subrub small">FINANSIELLA NYCKELTAL OCH VÄRDERING</h2></summary>
                         <ValueRangeSnapshotCard
                           mode="project"
-                          priceToday={
-                            projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesPf.value !== null && projectViewMetrics.marketBox.sharesPf.value > 0
-                              ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesPf.value
-                              : null
-                          }
+                          priceToday={typeof profile?.price === "number" && Number.isFinite(profile.price) ? profile.price : null}
                           npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
                           npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
