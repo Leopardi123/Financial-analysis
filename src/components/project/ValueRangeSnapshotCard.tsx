@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Chart } from "react-google-charts";
 
 type TpMarker = {
   tp: number;
@@ -8,12 +9,19 @@ type TpMarker = {
 };
 
 type ValueRangeSnapshotCardProps = {
+  mode?: "corporate" | "project";
   priceToday?: number | null;
   npvLow?: number | null;
   npvHigh?: number | null;
   tpLow?: number | null;
   tpHigh?: number | null;
   tpMarkers?: TpMarker[];
+  chartFlows?: {
+    dcfProdstartPresentPerShareSeries?: Array<number | null>;
+    navProdstartPerShareSeries?: Array<number | null>;
+  } | null;
+  currentYear?: number | null;
+  tpYear?: number | null;
   currencyCode?: string;
 };
 
@@ -81,7 +89,188 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode } = props;
+  const isProjectMode = mode === "project";
+
+  const projectChartModel = useMemo(() => {
+    if (!isProjectMode) return null;
+    const dcfSeriesRawAll = Array.isArray(chartFlows?.dcfProdstartPresentPerShareSeries) ? chartFlows.dcfProdstartPresentPerShareSeries : [];
+    const navSeriesRawAll = Array.isArray(chartFlows?.navProdstartPerShareSeries) ? chartFlows.navProdstartPerShareSeries : [];
+    const rawLen = Math.max(dcfSeriesRawAll.length, navSeriesRawAll.length);
+    if (rawLen < 1) return null;
+
+    const flowLen = Math.max(1, rawLen - 3);
+    const dcfSeriesRaw = dcfSeriesRawAll.slice(0, flowLen);
+    const navSeriesRaw = navSeriesRawAll.slice(0, flowLen);
+
+    const yearNow = Number.isInteger(currentYear) ? (currentYear as number) : new Date().getFullYear();
+    const yearTp = Number.isInteger(tpYear) ? (tpYear as number) : yearNow + 1;
+    const tpOffset = Math.max(1, yearTp - yearNow);
+    const totalLen = tpOffset + flowLen;
+
+    const highTp = isFiniteNumber(tpHigh) ? tpHigh : (isFiniteNumber(dcfSeriesRaw[0]) ? dcfSeriesRaw[0] : null);
+    const lowTp = isFiniteNumber(tpLow) ? tpLow : (isFiniteNumber(navSeriesRaw[0]) ? navSeriesRaw[0] : null);
+    const lowToday = isFiniteNumber(npvLow) ? npvLow : null;
+
+    const dcfFlowTpPresent0 = isFiniteNumber(dcfSeriesRaw[0]) ? dcfSeriesRaw[0] : null;
+    const inferredRate = (() => {
+      if (tpOffset <= 0 || highTp === null || dcfFlowTpPresent0 === null || dcfFlowTpPresent0 === 0 || highTp <= 0 || dcfFlowTpPresent0 <= 0) return null;
+      const ratio = highTp / dcfFlowTpPresent0;
+      if (!Number.isFinite(ratio) || ratio <= 0) return null;
+      const r = ratio ** (1 / tpOffset) - 1;
+      return Number.isFinite(r) && r > -1 ? r : null;
+    })();
+
+    const highByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
+    const lowByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
+
+    for (let idx = 0; idx < totalLen; idx += 1) {
+      if (idx <= tpOffset) {
+        if (highTp !== null) {
+          if (inferredRate !== null) {
+            highByIndex[idx] = highTp / ((1 + inferredRate) ** (tpOffset - idx));
+          } else {
+            const start = isFiniteNumber(npvHigh) ? npvHigh : highTp;
+            const t = tpOffset === 0 ? 1 : idx / tpOffset;
+            highByIndex[idx] = start + (highTp - start) * t;
+          }
+        }
+
+        if (lowTp !== null) {
+          if (lowToday !== null) {
+            if (lowToday > 0 && lowTp > 0) {
+              const g = (lowTp / lowToday) ** (1 / tpOffset) - 1;
+              lowByIndex[idx] = lowToday * ((1 + g) ** idx);
+            } else {
+              const t = tpOffset === 0 ? 1 : idx / tpOffset;
+              lowByIndex[idx] = lowToday + (lowTp - lowToday) * t;
+            }
+          } else {
+            lowByIndex[idx] = lowTp;
+          }
+        }
+      } else {
+        const flowIndex = idx - tpOffset;
+        const navAtIdx = isFiniteNumber(navSeriesRaw[flowIndex]) ? navSeriesRaw[flowIndex] : null;
+        const dcfPresentAtIdx = isFiniteNumber(dcfSeriesRaw[flowIndex]) ? dcfSeriesRaw[flowIndex] : null;
+        lowByIndex[idx] = navAtIdx;
+        if (dcfPresentAtIdx !== null) {
+          if (inferredRate !== null) {
+            highByIndex[idx] = dcfPresentAtIdx * ((1 + inferredRate) ** idx);
+          } else {
+            highByIndex[idx] = dcfPresentAtIdx;
+          }
+        }
+      }
+    }
+
+    if (lowTp !== null) lowByIndex[tpOffset] = lowTp;
+    if (highTp !== null) highByIndex[tpOffset] = highTp;
+
+    const rows: Array<Array<number | string | null>> = [];
+    const domainValues: number[] = [];
+    for (let idx = 0; idx < totalLen; idx += 1) {
+      const low = lowByIndex[idx];
+      const high = highByIndex[idx];
+      const orderedLow = low !== null && high !== null ? Math.min(low, high) : low;
+      const orderedHigh = low !== null && high !== null ? Math.max(low, high) : high;
+      const band = orderedLow !== null && orderedHigh !== null ? orderedHigh - orderedLow : null;
+      const currentMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
+      const tpLowMarker = idx === tpOffset && lowTp !== null ? lowTp : null;
+      const tpHighMarker = idx === tpOffset && highTp !== null ? highTp : null;
+
+      for (const value of [orderedLow, orderedHigh, currentMarker, tpLowMarker, tpHighMarker]) {
+        if (typeof value === 'number' && Number.isFinite(value)) domainValues.push(value);
+      }
+
+      rows.push([
+        idx,
+        orderedLow,
+        band,
+        currentMarker,
+        currentMarker !== null ? formatPerShareValue(currentMarker) : null,
+        tpLowMarker,
+        tpLowMarker !== null ? ` ${formatPerShareValue(tpLowMarker)}` : null,
+        tpHighMarker,
+        tpHighMarker !== null ? ` ${formatPerShareValue(tpHighMarker)}` : null,
+      ]);
+    }
+
+    if (domainValues.length < 1) return null;
+    return {
+      data: [
+        [
+          'Index',
+          'Low',
+          'Band',
+          'Current',
+          { role: 'annotation', type: 'string' },
+          'TP Low',
+          { role: 'annotation', type: 'string' },
+          'TP High',
+          { role: 'annotation', type: 'string' },
+        ],
+        ...rows,
+      ] as (string | number | null | { role: string; type?: string })[][],
+      ticks: [
+        { v: 0, f: String(yearNow) },
+        { v: tpOffset, f: String(yearTp) },
+      ],
+    };
+  }, [chartFlows, currentYear, isProjectMode, npvHigh, npvLow, priceToday, tpHigh, tpLow, tpYear]);
+
+  if (isProjectMode) {
+    if (!projectChartModel) {
+      return <p className="status empty" style={{ margin: 0 }}>Saknar intervall-data (NPV/TP)</p>;
+    }
+    return (
+      <div className="spot-range-chart-guard" style={{ marginTop: 8 }}>
+        <Chart
+          chartType="ComboChart"
+          width="100%"
+          height="260px"
+          data={projectChartModel.data}
+          options={{
+            backgroundColor: "#e0e9ce",
+            legend: { position: "none" },
+            isStacked: true,
+            areaOpacity: 1,
+            chartArea: { left: 64, right: 22, top: 16, bottom: 36, width: "100%", height: "75%" },
+            hAxis: {
+              textStyle: { color: "#1f2937", fontSize: 11 },
+              gridlines: { color: "transparent", count: 0 },
+              baselineColor: "transparent",
+              ticks: projectChartModel.ticks,
+            },
+            vAxis: {
+              title: currencyCode ?? "",
+              textPosition: "none",
+              titleTextStyle: { color: "#1f2937", italic: false },
+              gridlines: { color: "transparent", count: 0 },
+              minorGridlines: { color: "transparent", count: 0 },
+              baselineColor: "transparent",
+            },
+            tooltip: { trigger: "none" },
+            interpolateNulls: false,
+            annotations: {
+              alwaysOutside: true,
+              textStyle: { color: "#111827", fontSize: 10 },
+              stem: { color: "transparent", length: 0 },
+            },
+            colors: ["#e0e9ce", "#A8C686", "#be123c", "#111111", "#111111"],
+            seriesType: "line",
+            series: {
+              0: { type: "area", lineWidth: 0, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
+              1: { type: "area", lineWidth: 0, pointSize: 0, visibleInLegend: false },
+              2: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              3: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+            },
+          }}
+        />
+      </div>
+    );
+  }
 
   const npvRange = useMemo(() => {
     const low = isFiniteNumber(npvLow) ? npvLow : null;

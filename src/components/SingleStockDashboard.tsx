@@ -4775,15 +4775,28 @@ Capital Available: ${availableLabel}`,
                       <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list2} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list2: open })); }}>
                         <summary><h2 className="subrub small">FINANSIELLA NYCKELTAL OCH VÄRDERING</h2></summary>
                         <ValueRangeSnapshotCard
-                          priceToday={
-                            projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value > 0
-                              ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesCurrent.value
-                              : null
-                          }
+                          mode="project"
+                          priceToday={typeof profile?.price === "number" && Number.isFinite(profile.price) ? profile.price : null}
                           npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
                           npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
+                          chartFlows={(() => {
+                            const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
+                            return projectPayload?.chartFlows ?? null;
+                          })()}
+                          currentYear={(() => {
+                            const series = (projectSnapshotData?.series ?? null) as { yearsByPeriod?: number[] } | null;
+                            const firstYear = Array.isArray(series?.yearsByPeriod) ? series?.yearsByPeriod[0] : null;
+                            return typeof firstYear === "number" && Number.isFinite(firstYear) ? firstYear : null;
+                          })()}
+                          tpYear={(() => {
+                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
+                              ? selectedProjectRawJson.time as Record<string, unknown>
+                              : null;
+                            const value = time?.productionStartYear;
+                            return typeof value === "number" && Number.isFinite(value) ? value : null;
+                          })()}
                           currencyCode={lockedTargetCurrency}
                         />
                         <div className="compact-metrics-grid">
