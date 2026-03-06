@@ -193,15 +193,15 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         orderedLow,
         orderedHigh,
         currentMarker,
-        currentMarker !== null ? formatPerShareValue(currentMarker) : null,
+        currentMarker !== null ? ` ↗ ${formatPerShareValue(currentMarker)}` : null,
         currentLowMarker,
-        currentLowMarker !== null ? ` ${formatPerShareValue(currentLowMarker)}` : null,
+        currentLowMarker !== null ? ` ↖ ${formatPerShareValue(currentLowMarker)}` : null,
         currentHighMarker,
-        currentHighMarker !== null ? ` ${formatPerShareValue(currentHighMarker)}` : null,
+        currentHighMarker !== null ? ` ↗ ${formatPerShareValue(currentHighMarker)}` : null,
         tpLowMarker,
-        tpLowMarker !== null ? ` ${formatPerShareValue(tpLowMarker)}` : null,
+        tpLowMarker !== null ? ` ↖ ${formatPerShareValue(tpLowMarker)}` : null,
         tpHighMarker,
-        tpHighMarker !== null ? ` ${formatPerShareValue(tpHighMarker)}` : null,
+        tpHighMarker !== null ? ` ↗ ${formatPerShareValue(tpHighMarker)}` : null,
       ]);
     }
 
@@ -228,6 +228,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         ...rows,
       ] as (string | number | null | { role: string; type?: string })[][],
       ticks: [
+        { v: -1, f: String(yearNow - 1) },
         { v: 0, f: String(yearNow) },
         { v: tpOffset, f: String(yearTp) },
       ],
@@ -250,11 +251,13 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             legend: { position: "none" },
             isStacked: true,
             areaOpacity: 0.32,
-            chartArea: { left: 64, right: 22, top: 16, bottom: 36, width: "100%", height: "75%" },
+            chartArea: { left: 64, right: 40, top: 16, bottom: 36, width: "100%", height: "75%" },
             hAxis: {
               textStyle: { color: "#1f2937", fontSize: 11 },
               gridlines: { color: "transparent", count: 0 },
               baselineColor: "transparent",
+              viewWindowMode: "explicit",
+              viewWindow: { min: -1, max: Math.max(1, (projectChartModel.data.length - 2) as number) },
               ticks: projectChartModel.ticks,
             },
             vAxis: {
@@ -269,8 +272,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             interpolateNulls: false,
             annotations: {
               alwaysOutside: true,
-              textStyle: { color: "#111827", fontSize: 10 },
-              stem: { color: "transparent", length: 0 },
+              textStyle: { color: "#111827", fontSize: 9 },
+              stem: { color: "transparent", length: 6 },
             },
             colors: ["transparent", "#A8C686", "#2C3E50", "#2C3E50", "#be123c", "#111111", "#111111", "#111111", "#111111"],
             seriesType: "line",
