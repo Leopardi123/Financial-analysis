@@ -934,3 +934,61 @@ td.sticky-col {
   overflow-x: hidden;
   touch-action: pan-y;
 }
+
+
+.npv-range-interval-card .producer-core-title-row {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.spot-context-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #94a3b8;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #334155;
+  background: #f8fafc;
+}
+
+.value-interval-table {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid #d1d5db;
+}
+
+.value-interval-header,
+.value-interval-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.value-interval-header {
+  padding: 8px 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #334155;
+  text-align: center;
+  border-bottom: 1px solid #d1d5db;
+}
+
+.value-interval-block {
+  padding: 10px 0;
+  border-bottom: 1px solid #d1d5db;
+}
+
+.value-interval-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 6px;
+}
+
+.value-interval-values span {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
