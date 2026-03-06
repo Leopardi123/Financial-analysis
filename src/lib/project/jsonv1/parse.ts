@@ -22,7 +22,7 @@ function stripChoiceKeysDeep<T>(value: T): T {
 
   const out: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
-    if (key.startsWith('_choices_')) {
+    if (key.startsWith('_choices_') || key.startsWith('_description_') || key.startsWith('_example_')) {
       continue;
     }
     out[key] = stripChoiceKeysDeep(nested);

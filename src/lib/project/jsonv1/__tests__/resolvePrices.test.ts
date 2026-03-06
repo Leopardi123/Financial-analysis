@@ -20,8 +20,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   base.economicsBreakdown = null;
   base.time.masterN = 2;
   base.time.productionStartPeriod = 1;
-  base.time.periodEndDatesUtc = [`${currentYear}-12-31`, `${currentYear + 1}-12-31`, `${currentYear + 2}-12-31`];
-  base.time.productionStartYear = Number.parseInt(base.time.periodEndDatesUtc[base.time.productionStartPeriod].slice(0, 4), 10);
+  base.time.productionStartYear = currentYear + 1;
 
   base.series.capexUSD = [100, 20, 10];
   base.series.operatingCostsUSD = [0, 1, 2];
@@ -140,7 +139,6 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   missingEarlierData.economicsBreakdown = null;
   missingEarlierData.time.masterN = 0;
   missingEarlierData.time.productionStartPeriod = 0;
-  missingEarlierData.time.periodEndDatesUtc = [`${currentYear}-01-01`];
   missingEarlierData.time.productionStartYear = currentYear;
   missingEarlierData.series.capexUSD = [0];
   missingEarlierData.series.operatingCostsUSD = [0];
@@ -177,7 +175,6 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   fallbackBase.economicsBreakdown = null;
   fallbackBase.time.masterN = 0;
   fallbackBase.time.productionStartPeriod = 0;
-  fallbackBase.time.periodEndDatesUtc = [`${currentYear}-12-31`];
   fallbackBase.time.productionStartYear = currentYear;
   fallbackBase.series.capexUSD = [0];
   fallbackBase.series.operatingCostsUSD = [0];
@@ -209,7 +206,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     },
   );
 
-  assertEqual(fallbackResolved.meta?.usedFallbackDateMapping, undefined, 'fallback date mapping is not used when periodEndDatesUtc is present');
+  assertEqual(fallbackResolved.meta?.usedFallbackDateMapping, undefined, 'fallback date mapping is not used for v2 canonical time axis');
 
   const withOverrides = {
     ...parsed,
@@ -342,7 +339,6 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   cuTonRequested.economicsBreakdown = null;
   cuTonRequested.time.masterN = 0;
   cuTonRequested.time.productionStartPeriod = 0;
-  cuTonRequested.time.periodEndDatesUtc = [`${currentYear}-12-31`];
   cuTonRequested.time.productionStartYear = currentYear;
   cuTonRequested.series.capexUSD = [0];
   cuTonRequested.series.operatingCostsUSD = [0];

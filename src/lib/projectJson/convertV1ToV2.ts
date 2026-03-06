@@ -88,9 +88,6 @@ export function convertProjectJsonV1ToV2(input: unknown): JsonRecord {
       productionStartYear: Object.prototype.hasOwnProperty.call(input.time, 'productionStartYear')
         ? input.time.productionStartYear
         : null,
-      periodEndDatesUtc: Object.prototype.hasOwnProperty.call(input.time, 'periodEndDatesUtc')
-        ? input.time.periodEndDatesUtc
-        : null,
     },
     economics: Object.prototype.hasOwnProperty.call(input, 'economics') ? input.economics : null,
     metals: Object.prototype.hasOwnProperty.call(input, 'metals') ? input.metals : null,
