@@ -130,9 +130,9 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
           if (inferredRate !== null) {
             highByIndex[idx] = highTp / ((1 + inferredRate) ** (tpOffset - idx));
           } else {
-            const start = isFiniteNumber(npvHigh) ? npvHigh : highTp;
+            const startValue = isFiniteNumber(npvHigh) ? npvHigh : highTp;
             const t = tpOffset === 0 ? 1 : idx / tpOffset;
-            highByIndex[idx] = start + (highTp - start) * t;
+            highByIndex[idx] = startValue + (highTp - startValue) * t;
           }
         }
 
@@ -169,17 +169,21 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
 
     const rows: Array<Array<number | string | null>> = [];
     const domainValues: number[] = [];
+
     for (let idx = 0; idx < totalLen; idx += 1) {
       const low = lowByIndex[idx];
       const high = highByIndex[idx];
       const orderedLow = low !== null && high !== null ? Math.min(low, high) : low;
       const orderedHigh = low !== null && high !== null ? Math.max(low, high) : high;
       const band = orderedLow !== null && orderedHigh !== null ? orderedHigh - orderedLow : null;
-      const currentMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
-      const tpLowMarker = idx === tpOffset && lowTp !== null ? lowTp : null;
-      const tpHighMarker = idx === tpOffset && highTp !== null ? highTp : null;
 
-      for (const value of [orderedLow, orderedHigh, currentMarker, tpLowMarker, tpHighMarker]) {
+      const nowMarketMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
+      const nowLowMarker = idx === 0 ? orderedLow : null;
+      const nowHighMarker = idx === 0 ? orderedHigh : null;
+      const tpLowMarker = idx === tpOffset ? orderedLow : null;
+      const tpHighMarker = idx === tpOffset ? orderedHigh : null;
+
+      for (const value of [orderedLow, orderedHigh, nowMarketMarker, nowLowMarker, nowHighMarker, tpLowMarker, tpHighMarker]) {
         if (typeof value === 'number' && Number.isFinite(value)) domainValues.push(value);
       }
 
@@ -187,28 +191,51 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         idx,
         orderedLow,
         band,
-        currentMarker,
-        currentMarker !== null ? formatPerShareValue(currentMarker) : null,
+        orderedLow,
+        orderedHigh,
+        nowMarketMarker,
+        nowMarketMarker !== null ? ` ${formatPerShareValue(nowMarketMarker)}` : null,
+        nowMarketMarker !== null ? `Aktiepris (nu)\nÅr: ${yearNow}\nVärde: ${formatPerShareValue(nowMarketMarker)}` : null,
+        nowLowMarker,
+        nowLowMarker !== null ? ` ${formatPerShareValue(nowLowMarker)}` : null,
+        nowLowMarker !== null ? `Låg (nu)\nÅr: ${yearNow}\nVärde: ${formatPerShareValue(nowLowMarker)}` : null,
+        nowHighMarker,
+        nowHighMarker !== null ? ` ${formatPerShareValue(nowHighMarker)}` : null,
+        nowHighMarker !== null ? `Hög (nu)\nÅr: ${yearNow}\nVärde: ${formatPerShareValue(nowHighMarker)}` : null,
         tpLowMarker,
         tpLowMarker !== null ? ` ${formatPerShareValue(tpLowMarker)}` : null,
+        tpLowMarker !== null ? `Låg (TP)\nÅr: ${yearTp}\nVärde: ${formatPerShareValue(tpLowMarker)}` : null,
         tpHighMarker,
         tpHighMarker !== null ? ` ${formatPerShareValue(tpHighMarker)}` : null,
+        tpHighMarker !== null ? `Hög (TP)\nÅr: ${yearTp}\nVärde: ${formatPerShareValue(tpHighMarker)}` : null,
       ]);
     }
 
     if (domainValues.length < 1) return null;
+
     return {
       data: [
         [
           'Index',
-          'Low',
+          'LowBase',
           'Band',
-          'Current',
+          'LowLine',
+          'HighLine',
+          'NowMarket',
           { role: 'annotation', type: 'string' },
-          'TP Low',
+          { role: 'tooltip', type: 'string' },
+          'NowLow',
           { role: 'annotation', type: 'string' },
-          'TP High',
+          { role: 'tooltip', type: 'string' },
+          'NowHigh',
           { role: 'annotation', type: 'string' },
+          { role: 'tooltip', type: 'string' },
+          'TpLow',
+          { role: 'annotation', type: 'string' },
+          { role: 'tooltip', type: 'string' },
+          'TpHigh',
+          { role: 'annotation', type: 'string' },
+          { role: 'tooltip', type: 'string' },
         ],
         ...rows,
       ] as (string | number | null | { role: string; type?: string })[][],
@@ -216,6 +243,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         { v: 0, f: String(yearNow) },
         { v: tpOffset, f: String(yearTp) },
       ],
+      totalLen,
     };
   }, [chartFlows, currentYear, isProjectMode, npvHigh, npvLow, priceToday, tpHigh, tpLow, tpYear]);
 
@@ -234,37 +262,43 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             backgroundColor: "#e0e9ce",
             legend: { position: "none" },
             isStacked: true,
-            areaOpacity: 0.24,
+            areaOpacity: 0.26,
             chartArea: { left: 64, right: 22, top: 16, bottom: 36, width: "100%", height: "75%" },
             hAxis: {
               textStyle: { color: "#1f2937", fontSize: 11 },
-              gridlines: { color: "transparent", count: 0 },
-              baselineColor: "transparent",
+              gridlines: { color: "rgba(184,196,173,0.35)", count: 4 },
+              baselineColor: "rgba(71, 85, 105, 0.45)",
               ticks: projectChartModel.ticks,
+              viewWindow: { min: -1, max: projectChartModel.totalLen - 1 },
             },
             vAxis: {
               title: currencyCode ?? "",
-              textPosition: "none",
+              format: "short",
+              textStyle: { color: "#1f2937", fontSize: 11 },
               titleTextStyle: { color: "#1f2937", italic: false },
-              gridlines: { color: "transparent", count: 0 },
-              minorGridlines: { color: "transparent", count: 0 },
-              baselineColor: "transparent",
+              gridlines: { color: "rgba(184,196,173,0.35)", count: 5 },
+              minorGridlines: { color: "rgba(219,228,207,0.32)", count: 1 },
+              baselineColor: "rgba(71, 85, 105, 0.45)",
             },
-            tooltip: { trigger: "none" },
+            tooltip: { trigger: "focus" },
             interpolateNulls: false,
             annotations: {
               alwaysOutside: true,
               textStyle: { color: "#111827", fontSize: 10 },
               stem: { color: "transparent", length: 0 },
             },
-            colors: ["transparent", "#A8C686", "#be123c", "#111111", "#111111"],
+            colors: ["transparent", "#A8C686", "rgba(71,85,105,0.55)", "rgba(31,41,55,0.55)", "#be123c", "#64748b", "#475569", "#111111", "#111111"],
             seriesType: "line",
             series: {
               0: { type: "area", lineWidth: 0, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
               1: { type: "area", lineWidth: 0, pointSize: 0, visibleInLegend: false },
-              2: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
-              3: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              2: { type: "line", lineWidth: 1, pointSize: 0, visibleInLegend: false },
+              3: { type: "line", lineWidth: 1, pointSize: 0, visibleInLegend: false },
               4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              5: { type: "scatter", pointShape: "circle", pointSize: 5, lineWidth: 0, visibleInLegend: false },
+              6: { type: "scatter", pointShape: "circle", pointSize: 5, lineWidth: 0, visibleInLegend: false },
+              7: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              8: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
             },
           }}
         />
