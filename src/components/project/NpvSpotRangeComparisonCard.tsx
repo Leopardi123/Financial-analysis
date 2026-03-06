@@ -36,6 +36,38 @@ function formatMetricValueByLabel(label: string, value: number | null, formatMon
   return formatMoney(value);
 }
 
+function formatCompactAxisValue(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) {
+    const scaled = value / 1_000_000_000;
+    const rounded = Number(scaled.toFixed(1));
+    return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)}B`;
+  }
+  if (abs >= 1_000_000) {
+    const scaled = value / 1_000_000;
+    const rounded = Number(scaled.toFixed(1));
+    return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)}M`;
+  }
+  const rounded = Number(value.toFixed(1));
+  return rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1);
+}
+
+function buildCompactAxisTicks(values: number[], count = 5): Array<number | { v: number; f: string }> | undefined {
+  if (values.length === 0) return undefined;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return undefined;
+  if (min === max) {
+    return [{ v: min, f: formatCompactAxisValue(min) }];
+  }
+  const ticks: Array<number | { v: number; f: string }> = [];
+  for (let i = 0; i < count; i += 1) {
+    const v = min + ((max - min) * i) / (count - 1);
+    ticks.push({ v, f: formatCompactAxisValue(v) });
+  }
+  return ticks;
+}
+
 export default function NpvSpotRangeComparisonCard({
   range,
   yearsByPeriod,
@@ -85,6 +117,17 @@ export default function NpvSpotRangeComparisonCard({
     ] as (string | number | null)[][];
   }, [range, axisYears, marketCapToday, formatMoney]);
 
+  const yAxisTicks = useMemo(() => {
+    if (!range) return undefined;
+    const values = [
+      ...range.low.npvSeries,
+      ...range.spot.npvSeries,
+      ...range.high.npvSeries,
+      marketCapToday,
+    ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    return buildCompactAxisTicks(values);
+  }, [range, marketCapToday]);
+
   return (
     <div className="producer-core-compact-card" style={{ marginTop: 8 }}>
       <section className="producer-core-section npv-range-interval-card">
@@ -110,10 +153,11 @@ export default function NpvSpotRangeComparisonCard({
                 },
                 vAxis: {
                   title: currencyCode,
-                  textStyle: { color: '#1f2937' },
+                  textStyle: { color: '#1f2937', fontSize: 11 },
                   titleTextStyle: { color: '#1f2937', italic: false },
                   gridlines: { color: '#b8c4ad', count: 5 },
                   minorGridlines: { color: '#dbe4cf' },
+                  ticks: yAxisTicks,
                 },
                 tooltip: { trigger: 'focus' },
                 colors: ['transparent', '#A8C686', '#2C3E50', '#be123c'],

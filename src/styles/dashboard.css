@@ -955,7 +955,8 @@ td.sticky-col {
 .value-interval-table {
   display: grid;
   gap: 0;
-  border-top: 1px solid #d1d5db;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  margin-top: 6px;
 }
 
 .value-interval-header,
@@ -966,25 +967,30 @@ td.sticky-col {
 }
 
 .value-interval-header {
-  padding: 8px 0;
-  font-size: 12px;
+  padding: 6px 0;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   color: #334155;
   text-align: center;
-  border-bottom: 1px solid #d1d5db;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.6px;
+  border-bottom: 1px dotted rgba(0, 0, 0, 0.35);
 }
 
 .value-interval-block {
-  padding: 10px 0;
-  border-bottom: 1px solid #d1d5db;
+  padding: 6px 0;
+  border-bottom: 1px dotted rgba(0, 0, 0, 0.35);
 }
 
 .value-interval-name {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  line-height: 1.2;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.6px;
+  font-weight: 600;
   color: #0f172a;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   text-align: center;
 }
 
@@ -992,4 +998,6 @@ td.sticky-col {
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-size: 13px;
+  line-height: 1.2;
+  font-family: "Merriweather", serif;
 }
