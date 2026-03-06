@@ -403,3 +403,48 @@ assert.equal(auEqPerShareInvalidShares.list4.AuEq_10Y_perShare.value, null);
 assert.equal(auEqPerShareInvalidShares.list4.AuEq_10Y_perShare.reason, 'Missing or invalid shares_post_financing');
 
 console.log('ok computeProjectPreRevenueView');
+
+const financingSharesOverride = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 2,
+  sharesCurrent: 100,
+  sharesPostFinancingInput: 250,
+  priceCurrentTarget: 10,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [-100, 100, 100],
+  capexUSD: [-100, 0, 0],
+  grossRevenueUSD: [1, 1, 1],
+  ebitUSD: [1, 1, 1],
+  payableAuEqOz: [1, 1, 1],
+  sustainingCostUSD: [1, 1, 1],
+  productionStartPeriod: 1,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+assertApprox(financingSharesOverride.marketBox.sharesPf.value, 110, 1e-9);
+
+const financingSharesAllDebt = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 2,
+  sharesCurrent: 100,
+  sharesPostFinancingInput: 250,
+  priceCurrentTarget: 10,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [-100, 100, 100],
+  capexUSD: [-100, 0, 0],
+  grossRevenueUSD: [1, 1, 1],
+  ebitUSD: [1, 1, 1],
+  payableAuEqOz: [1, 1, 1],
+  sustainingCostUSD: [1, 1, 1],
+  productionStartPeriod: 1,
+  financing: { equityPct: 0, debtPct: 100, cashUsedInput: 0 },
+});
+assertApprox(financingSharesAllDebt.marketBox.sharesPf.value, 100, 1e-9);
+
