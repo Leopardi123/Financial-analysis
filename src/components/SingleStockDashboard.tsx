@@ -4775,15 +4775,20 @@ Capital Available: ${availableLabel}`,
                       <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list2} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list2: open })); }}>
                         <summary><h2 className="subrub small">FINANSIELLA NYCKELTAL OCH VÄRDERING</h2></summary>
                         <ValueRangeSnapshotCard
+                          mode="project"
                           priceToday={
-                            projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value !== null && projectViewMetrics.marketBox.sharesCurrent.value > 0
-                              ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesCurrent.value
+                            projectViewMetrics.marketBox.marketCapCurrent.value !== null && projectViewMetrics.marketBox.sharesPf.value !== null && projectViewMetrics.marketBox.sharesPf.value > 0
+                              ? projectViewMetrics.marketBox.marketCapCurrent.value / projectViewMetrics.marketBox.sharesPf.value
                               : null
                           }
                           npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
                           npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
+                          chartFlows={(() => {
+                            const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
+                            return projectPayload?.chartFlows ?? null;
+                          })()}
                           currencyCode={lockedTargetCurrency}
                         />
                         <div className="compact-metrics-grid">

@@ -8,12 +8,17 @@ type TpMarker = {
 };
 
 type ValueRangeSnapshotCardProps = {
+  mode?: "corporate" | "project";
   priceToday?: number | null;
   npvLow?: number | null;
   npvHigh?: number | null;
   tpLow?: number | null;
   tpHigh?: number | null;
   tpMarkers?: TpMarker[];
+  chartFlows?: {
+    dcfProdstartPresentPerShareSeries?: Array<number | null>;
+    navProdstartPerShareSeries?: Array<number | null>;
+  } | null;
   currencyCode?: string;
 };
 
@@ -81,7 +86,7 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows } = props;
 
   const npvRange = useMemo(() => {
     const low = isFiniteNumber(npvLow) ? npvLow : null;
@@ -152,6 +157,39 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
   const hasTp = validMarkers.length > 0;
   const hasPrice = isFiniteNumber(priceToday) && points.priceY !== null;
   const npvLabels = resolveLabelPair(points.npvHighY, points.npvLowY);
+  const isProjectMode = mode === "project";
+
+  const flowPoints = useMemo(() => {
+    const dcfSeriesRaw = Array.isArray(chartFlows?.dcfProdstartPresentPerShareSeries) ? chartFlows?.dcfProdstartPresentPerShareSeries : [];
+    const navSeriesRaw = Array.isArray(chartFlows?.navProdstartPerShareSeries) ? chartFlows?.navProdstartPerShareSeries : [];
+    const len = Math.max(dcfSeriesRaw.length, navSeriesRaw.length);
+    if (!isProjectMode || len < 1) return [] as Array<{ x: number; dcf: number | null; nav: number | null; dcfY: number | null; navY: number | null }>;
+    const dcfSeries = Array.from({ length: len }, (_, idx) => (isFiniteNumber(dcfSeriesRaw[idx]) ? (dcfSeriesRaw[idx] as number) : null));
+    const navSeries = Array.from({ length: len }, (_, idx) => (isFiniteNumber(navSeriesRaw[idx]) ? (navSeriesRaw[idx] as number) : null));
+    const domain = [priceToday, ...dcfSeries, ...navSeries, tpLow, tpHigh, npvLow, npvHigh].filter(isFiniteNumber);
+    const min = domain.length > 0 ? Math.min(...domain) : null;
+    const max = domain.length > 0 ? Math.max(...domain) : null;
+    const toY = (value: number | null): number | null => {
+      if (value === null || min === null || max === null) return null;
+      if (max === min) return 60;
+      const t = (value - min) / (max - min);
+      return clamp(Y_BOTTOM + (Y_TOP - Y_BOTTOM) * t, Y_TOP, Y_BOTTOM);
+    };
+    const xStart = X_LEFT;
+    const xEnd = RIGHT_BLOCK_X + RIGHT_BLOCK_WIDTH - 12;
+    return Array.from({ length: len }, (_, idx) => {
+      const x = len === 1 ? xStart : xStart + ((xEnd - xStart) * idx) / (len - 1);
+      const dcf = dcfSeries[idx] ?? null;
+      const nav = navSeries[idx] ?? null;
+      return { x, dcf, nav, dcfY: toY(dcf), navY: toY(nav) };
+    });
+  }, [chartFlows, isProjectMode, npvHigh, npvLow, priceToday, tpHigh, tpLow]);
+
+  const flowHasSeries = flowPoints.some((point) => point.dcfY !== null || point.navY !== null);
+  const flowStart = flowPoints[0] ?? null;
+  const flowTpLabels = flowStart ? resolveLabelPair(flowStart.dcfY, flowStart.navY) : null;
+  const flowDcfPolyline = flowPoints.filter((point) => point.dcfY !== null).map((point) => `${point.x},${point.dcfY}`).join(" ");
+  const flowNavPolyline = flowPoints.filter((point) => point.navY !== null).map((point) => `${point.x},${point.navY}`).join(" ");
 
   return (
     <div>
@@ -164,8 +202,12 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             <rect x={RIGHT_BLOCK_X} y={14} width={RIGHT_BLOCK_WIDTH} height={92} rx={10} fill="rgba(15, 23, 42, 0.05)" />
             <line x1={0} y1={110} x2={320} y2={110} stroke="rgba(15, 23, 42, 0.14)" strokeWidth={1} />
 
-            <text x={12} y={26} fontSize={10} fill="#6b7280">Nu</text>
-            <text x={RIGHT_BLOCK_X + 8} y={26} fontSize={10} fill="#6b7280">Prod-start</text>
+            {!isProjectMode && (
+              <>
+                <text x={12} y={26} fontSize={10} fill="#6b7280">Nu</text>
+                <text x={RIGHT_BLOCK_X + 8} y={26} fontSize={10} fill="#6b7280">Prod-start</text>
+              </>
+            )}
 
             {hasNpv ? (
               <>
@@ -206,7 +248,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               </>
             )}
 
-            {validMarkers.map((marker) => {
+            {!isProjectMode && validMarkers.map((marker) => {
               const tpLabels = resolveLabelPair(marker.highY!, marker.lowY!);
               const label = marker.yearLabelUsed ? marker.yearLabelUsed.slice(0, 4) : `tp=${marker.tp}`;
               return (
@@ -225,10 +267,33 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               );
             })}
 
+            {isProjectMode && flowHasSeries && (
+              <>
+                {flowNavPolyline.length > 0 && (
+                  <polyline points={flowNavPolyline} fill="none" stroke="rgba(100, 116, 139, 0.7)" strokeWidth={2} />
+                )}
+                {flowDcfPolyline.length > 0 && (
+                  <polyline points={flowDcfPolyline} fill="none" stroke="#1f2937" strokeWidth={2} />
+                )}
+                {flowStart?.dcfY !== null && (
+                  <circle cx={flowStart.x} cy={flowStart.dcfY} r={3.5} fill="#111111" />
+                )}
+                {flowStart?.navY !== null && (
+                  <circle cx={flowStart.x} cy={flowStart.navY} r={3.5} fill="#111111" />
+                )}
+                {flowTpLabels && flowStart && (
+                  <>
+                    <text x={flowStart.x + 8} y={flowTpLabels.high + 4} fontSize={10} fill="#1f2937">{formatPerShareValue(flowStart.dcf as number)}</text>
+                    <text x={flowStart.x + 8} y={flowTpLabels.low + 4} fontSize={10} fill="#1f2937">{formatPerShareValue(flowStart.nav as number)}</text>
+                  </>
+                )}
+              </>
+            )}
+
             {hasPrice && (
               <>
-                <circle cx={X_LEFT} cy={points.priceY!} r={4} fill="#dc2626" stroke="#ffffff" strokeWidth={1.25} />
-                <text x={90} y={clamp(points.priceY! + 4, Y_TOP, Y_BOTTOM)} fontSize={11} fill="#dc2626" textAnchor="end">{formatPerShareValue(priceToday as number)}</text>
+                <circle cx={X_LEFT} cy={points.priceY!} r={3.5} fill="#be123c" />
+                <text x={90} y={clamp(points.priceY! + 4, Y_TOP, Y_BOTTOM)} fontSize={11} fill="#be123c" textAnchor="end">{formatPerShareValue(priceToday as number)}</text>
               </>
             )}
           </svg>
