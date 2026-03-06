@@ -104,36 +104,53 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const tpOffset = Math.max(1, yearTp - yearNow);
     const totalLen = tpOffset + flowLen;
 
+    const navToday = isFiniteNumber(npvLow) ? npvLow : null;
+    const dcfToday = isFiniteNumber(npvHigh) ? npvHigh : null;
+    const navTp = isFiniteNumber(tpLow) ? tpLow : (isFiniteNumber(navSeriesRaw[0]) ? navSeriesRaw[0] : null);
+    const dcfTp = isFiniteNumber(tpHigh) ? tpHigh : (isFiniteNumber(dcfSeriesRaw[0]) ? dcfSeriesRaw[0] : null);
+
     const navByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
     const dcfByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
 
-    navByIndex[0] = isFiniteNumber(npvLow) ? npvLow : null;
-    dcfByIndex[0] = isFiniteNumber(npvHigh) ? npvHigh : null;
+    navByIndex[0] = navToday;
+    dcfByIndex[0] = dcfToday;
+
+    for (let idx = 1; idx <= tpOffset; idx += 1) {
+      const t = idx / tpOffset;
+      navByIndex[idx] = navToday !== null && navTp !== null ? navToday + (navTp - navToday) * t : null;
+      dcfByIndex[idx] = dcfToday !== null && dcfTp !== null ? dcfToday + (dcfTp - dcfToday) * t : null;
+    }
 
     for (let idx = 0; idx < flowLen; idx += 1) {
       const targetIndex = tpOffset + idx;
-      navByIndex[targetIndex] = isFiniteNumber(navSeriesRaw[idx]) ? navSeriesRaw[idx] : null;
-      dcfByIndex[targetIndex] = isFiniteNumber(dcfSeriesRaw[idx]) ? dcfSeriesRaw[idx] : null;
+      const nav = isFiniteNumber(navSeriesRaw[idx]) ? navSeriesRaw[idx] : null;
+      const dcf = isFiniteNumber(dcfSeriesRaw[idx]) ? dcfSeriesRaw[idx] : null;
+      if (nav !== null) navByIndex[targetIndex] = nav;
+      if (dcf !== null) dcfByIndex[targetIndex] = dcf;
     }
 
-    if (isFiniteNumber(tpLow)) navByIndex[tpOffset] = tpLow;
-    if (isFiniteNumber(tpHigh)) dcfByIndex[tpOffset] = tpHigh;
+    if (navTp !== null) navByIndex[tpOffset] = navTp;
+    if (dcfTp !== null) dcfByIndex[tpOffset] = dcfTp;
 
     const rows: Array<Array<number | string | null>> = [];
     const domainValues: number[] = [];
     for (let idx = 0; idx < totalLen; idx += 1) {
       const nav = navByIndex[idx];
       const dcf = dcfByIndex[idx];
+      const low = nav;
+      const band = nav !== null && dcf !== null ? Math.max(0, dcf - nav) : null;
       const currentMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
-      const tpLowMarker = idx === tpOffset && isFiniteNumber(tpLow) ? tpLow : null;
-      const tpHighMarker = idx === tpOffset && isFiniteNumber(tpHigh) ? tpHigh : null;
-      if (nav !== null) domainValues.push(nav);
-      if (dcf !== null) domainValues.push(dcf);
-      if (currentMarker !== null) domainValues.push(currentMarker);
-      if (tpLowMarker !== null) domainValues.push(tpLowMarker);
-      if (tpHighMarker !== null) domainValues.push(tpHighMarker);
+      const tpLowMarker = idx === tpOffset && navTp !== null ? navTp : null;
+      const tpHighMarker = idx === tpOffset && dcfTp !== null ? dcfTp : null;
+
+      for (const value of [nav, dcf, currentMarker, tpLowMarker, tpHighMarker]) {
+        if (typeof value === 'number' && Number.isFinite(value)) domainValues.push(value);
+      }
+
       rows.push([
         idx,
+        low,
+        band,
         nav,
         dcf,
         currentMarker,
@@ -150,6 +167,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       data: [
         [
           "Index",
+          "Low",
+          "Band",
           "NAV",
           "DCF",
           "Current",
@@ -175,13 +194,15 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return (
       <div className="spot-range-chart-guard" style={{ marginTop: 8 }}>
         <Chart
-          chartType="LineChart"
+          chartType="ComboChart"
           width="100%"
           height="260px"
           data={projectChartModel.data}
           options={{
             backgroundColor: "#e0e9ce",
             legend: { position: "none" },
+            isStacked: true,
+            areaOpacity: 0.24,
             chartArea: { left: 64, right: 22, top: 16, bottom: 36, width: "100%", height: "75%" },
             hAxis: {
               textStyle: { color: "#1f2937", fontSize: 11 },
@@ -202,13 +223,16 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               textStyle: { color: "#111827", fontSize: 10 },
               stem: { color: "transparent", length: 0 },
             },
-            colors: ["#64748b", "#1f2937", "#be123c", "#111111", "#111111"],
+            colors: ["transparent", "#A8C686", "#64748b", "#1f2937", "#be123c", "#111111", "#111111"],
+            seriesType: "line",
             series: {
-              0: { type: "line", lineWidth: 2, pointSize: 0 },
-              1: { type: "line", lineWidth: 2.5, pointSize: 0 },
-              2: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
-              3: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
-              4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
+              0: { type: "area", lineWidth: 0, visibleInLegend: false, enableInteractivity: false },
+              1: { type: "area", lineWidth: 0, visibleInLegend: false },
+              2: { type: "line", lineWidth: 1.8, pointSize: 0, visibleInLegend: false },
+              3: { type: "line", lineWidth: 2.2, pointSize: 0, visibleInLegend: false },
+              4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              5: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              6: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
             },
           }}
         />
