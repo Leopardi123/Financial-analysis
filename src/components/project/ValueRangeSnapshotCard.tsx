@@ -20,6 +20,8 @@ type ValueRangeSnapshotCardProps = {
     dcfProdstartPresentPerShareSeries?: Array<number | null>;
     navProdstartPerShareSeries?: Array<number | null>;
   } | null;
+  currentYear?: number | null;
+  tpYear?: number | null;
   currencyCode?: string;
 };
 
@@ -87,24 +89,44 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currencyCode } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode } = props;
   const isProjectMode = mode === "project";
 
   const projectChartModel = useMemo(() => {
     if (!isProjectMode) return null;
     const dcfSeriesRaw = Array.isArray(chartFlows?.dcfProdstartPresentPerShareSeries) ? chartFlows.dcfProdstartPresentPerShareSeries : [];
     const navSeriesRaw = Array.isArray(chartFlows?.navProdstartPerShareSeries) ? chartFlows.navProdstartPerShareSeries : [];
-    const len = Math.max(dcfSeriesRaw.length, navSeriesRaw.length);
-    if (len < 1) return null;
+    const flowLen = Math.max(dcfSeriesRaw.length, navSeriesRaw.length);
+    if (flowLen < 1) return null;
+
+    const yearNow = Number.isInteger(currentYear) ? (currentYear as number) : new Date().getFullYear();
+    const yearTp = Number.isInteger(tpYear) ? (tpYear as number) : yearNow + 1;
+    const tpOffset = Math.max(1, yearTp - yearNow);
+    const totalLen = tpOffset + flowLen;
+
+    const navByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
+    const dcfByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
+
+    navByIndex[0] = isFiniteNumber(npvLow) ? npvLow : null;
+    dcfByIndex[0] = isFiniteNumber(npvHigh) ? npvHigh : null;
+
+    for (let idx = 0; idx < flowLen; idx += 1) {
+      const targetIndex = tpOffset + idx;
+      navByIndex[targetIndex] = isFiniteNumber(navSeriesRaw[idx]) ? navSeriesRaw[idx] : null;
+      dcfByIndex[targetIndex] = isFiniteNumber(dcfSeriesRaw[idx]) ? dcfSeriesRaw[idx] : null;
+    }
+
+    if (isFiniteNumber(tpLow)) navByIndex[tpOffset] = tpLow;
+    if (isFiniteNumber(tpHigh)) dcfByIndex[tpOffset] = tpHigh;
 
     const rows: Array<Array<number | string | null>> = [];
     const domainValues: number[] = [];
-    for (let idx = 0; idx < len; idx += 1) {
-      const nav = isFiniteNumber(navSeriesRaw[idx]) ? navSeriesRaw[idx] : null;
-      const dcf = isFiniteNumber(dcfSeriesRaw[idx]) ? dcfSeriesRaw[idx] : null;
+    for (let idx = 0; idx < totalLen; idx += 1) {
+      const nav = navByIndex[idx];
+      const dcf = dcfByIndex[idx];
       const currentMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
-      const tpLowMarker = idx === 0 && isFiniteNumber(tpLow) ? tpLow : null;
-      const tpHighMarker = idx === 0 && isFiniteNumber(tpHigh) ? tpHigh : null;
+      const tpLowMarker = idx === tpOffset && isFiniteNumber(tpLow) ? tpLow : null;
+      const tpHighMarker = idx === tpOffset && isFiniteNumber(tpHigh) ? tpHigh : null;
       if (nav !== null) domainValues.push(nav);
       if (dcf !== null) domainValues.push(dcf);
       if (currentMarker !== null) domainValues.push(currentMarker);
@@ -127,7 +149,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return {
       data: [
         [
-          "Step",
+          "Index",
           "NAV",
           "DCF",
           "Current",
@@ -138,10 +160,13 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
           { role: "annotation", type: "string" },
         ],
         ...rows,
-      ] as (string | number | null | { role: string })[][],
-      ticks: Array.from({ length: len }, (_, idx) => ({ v: idx, f: idx === 0 ? "TP" : `+${idx}` })),
+      ] as (string | number | null | { role: string; type?: string })[][],
+      ticks: [
+        { v: 0, f: String(yearNow) },
+        { v: tpOffset, f: String(yearTp) },
+      ],
     };
-  }, [chartFlows, isProjectMode, priceToday, tpHigh, tpLow]);
+  }, [chartFlows, currentYear, isProjectMode, npvHigh, npvLow, priceToday, tpHigh, tpLow, tpYear]);
 
   if (isProjectMode) {
     if (!projectChartModel) {
@@ -160,15 +185,15 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             chartArea: { left: 64, right: 22, top: 16, bottom: 36, width: "100%", height: "75%" },
             hAxis: {
               textStyle: { color: "#1f2937", fontSize: 11 },
-              gridlines: { color: "#dbe4cf" },
+              gridlines: { color: "transparent", count: 0 },
               ticks: projectChartModel.ticks,
             },
             vAxis: {
               title: currencyCode ?? "",
               textStyle: { color: "#1f2937", fontSize: 11 },
               titleTextStyle: { color: "#1f2937", italic: false },
-              gridlines: { color: "#b8c4ad", count: 5 },
-              minorGridlines: { color: "#dbe4cf" },
+              gridlines: { color: "transparent", count: 0 },
+              minorGridlines: { color: "transparent", count: 0 },
             },
             tooltip: { trigger: "none" },
             interpolateNulls: false,
