@@ -183,6 +183,9 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         if (typeof value === 'number' && Number.isFinite(value)) domainValues.push(value);
       }
 
+      const currentLowMarker = idx === 0 ? orderedLow : null;
+      const currentHighMarker = idx === 0 ? orderedHigh : null;
+
       rows.push([
         idx,
         orderedLow,
@@ -191,6 +194,10 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         orderedHigh,
         currentMarker,
         currentMarker !== null ? formatPerShareValue(currentMarker) : null,
+        currentLowMarker,
+        currentLowMarker !== null ? ` ${formatPerShareValue(currentLowMarker)}` : null,
+        currentHighMarker,
+        currentHighMarker !== null ? ` ${formatPerShareValue(currentHighMarker)}` : null,
         tpLowMarker,
         tpLowMarker !== null ? ` ${formatPerShareValue(tpLowMarker)}` : null,
         tpHighMarker,
@@ -208,6 +215,10 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
           'Low boundary',
           'High boundary',
           'Current',
+          { role: 'annotation', type: 'string' },
+          'Current Low',
+          { role: 'annotation', type: 'string' },
+          'Current High',
           { role: 'annotation', type: 'string' },
           'TP Low',
           { role: 'annotation', type: 'string' },
@@ -261,16 +272,18 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               textStyle: { color: "#111827", fontSize: 10 },
               stem: { color: "transparent", length: 0 },
             },
-            colors: ["transparent", "#A8C686", "#2C3E50", "#2C3E50", "#be123c", "#111111", "#111111"],
+            colors: ["transparent", "#A8C686", "#2C3E50", "#2C3E50", "#be123c", "#111111", "#111111", "#111111", "#111111"],
             seriesType: "line",
             series: {
               0: { type: "area", lineWidth: 0, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
               1: { type: "area", lineWidth: 0, pointSize: 0, visibleInLegend: false },
-              2: { type: "line", lineWidth: 1.25, pointSize: 0, visibleInLegend: false },
-              3: { type: "line", lineWidth: 1.25, pointSize: 0, visibleInLegend: false },
+              2: { type: "line", lineWidth: 0.62, pointSize: 0, visibleInLegend: false },
+              3: { type: "line", lineWidth: 0.62, pointSize: 0, visibleInLegend: false },
               4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
               5: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
               6: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              7: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
+              8: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
             },
           }}
         />
