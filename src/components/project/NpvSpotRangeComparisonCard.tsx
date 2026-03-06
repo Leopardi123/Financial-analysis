@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { Chart } from 'react-google-charts';
 
 type RangeNode = {
@@ -8,7 +8,7 @@ type RangeNode = {
 
 type NpvSpotRange = {
   low: RangeNode;
-  base: RangeNode;
+  spot: RangeNode;
   high: RangeNode;
 } | null;
 
@@ -20,21 +20,19 @@ type Props = {
 };
 
 export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, currencyCode, formatMoney }: Props) {
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-
   const chartData = useMemo(() => {
     if (!range) return null;
-    const len = Math.min(yearsByPeriod.length, range.base.npvSeries.length, range.low.npvSeries.length, range.high.npvSeries.length);
+    const len = Math.min(yearsByPeriod.length, range.spot.npvSeries.length, range.low.npvSeries.length, range.high.npvSeries.length);
     const rows: Array<Array<number | string | null>> = [];
     for (let t = 0; t < len; t += 1) {
       const low = range.low.npvSeries[t];
-      const base = range.base.npvSeries[t];
+      const spot = range.spot.npvSeries[t];
       const high = range.high.npvSeries[t];
       const band = (typeof high === 'number' && Number.isFinite(high) && typeof low === 'number' && Number.isFinite(low))
         ? high - low
         : null;
-      const tooltip = `Year: ${yearsByPeriod[t] ?? t}\nLow: ${formatMoney(typeof low === 'number' ? low : null)}\nBase: ${formatMoney(typeof base === 'number' ? base : null)}\nHigh: ${formatMoney(typeof high === 'number' ? high : null)}`;
-      rows.push([t, low, band, base, tooltip]);
+      const tooltip = `Year: ${yearsByPeriod[t] ?? t}\nLow: ${formatMoney(typeof low === 'number' ? low : null)}\nSpot: ${formatMoney(typeof spot === 'number' ? spot : null)}\nHigh: ${formatMoney(typeof high === 'number' ? high : null)}`;
+      rows.push([t, low, band, spot, tooltip]);
     }
 
     return [
@@ -45,43 +43,13 @@ export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, curre
 
   return (
     <div className="producer-core-compact-card" style={{ marginTop: 8 }}>
-      <section className="producer-core-section">
+      <section className="producer-core-section npv-range-interval-card">
         <div className="producer-core-title-row">
           <h3 className="subrub small" style={{ margin: 0 }}>NPV (Spot ±25%)</h3>
-        </div>
-        <div className="compact-metrics-grid" style={{ marginTop: 8 }}>
-          {[
-            ['NPV -25%', range?.low.npvToday ?? null],
-            ['NPV Base (Spot)', range?.base.npvToday ?? null],
-            ['NPV +25%', range?.high.npvToday ?? null],
-          ].map(([label, value]) => (
-            <div key={label} className="compact-metric-row">
-              <span className="compact-metric-label">{label}</span>
-              <span className="compact-metric-dots" />
-              <span className="compact-metric-value">{formatMoney(value as number | null)}</span>
-            </div>
-          ))}
+          <span className="spot-context-chip">Spot idag</span>
         </div>
         {range && chartData && (
-          <div
-            className="spot-range-chart-guard"
-            onTouchStart={(event) => {
-              const touch = event.touches[0];
-              if (!touch) return;
-              touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-            }}
-            onTouchMove={(event) => {
-              const start = touchStartRef.current;
-              const touch = event.touches[0];
-              if (!start || !touch) return;
-              const dx = Math.abs(touch.clientX - start.x);
-              const dy = Math.abs(touch.clientY - start.y);
-              if (dx > dy && dx > 6) {
-                event.preventDefault();
-              }
-            }}
-            style={{ marginTop: 8 }}
-          >
+          <div className="spot-range-chart-guard" style={{ marginTop: 8 }}>
             <Chart
               chartType="ComboChart"
               width="100%"
@@ -95,7 +63,12 @@ export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, curre
                 hAxis: {
                   textPosition: 'none',
                 },
-                vAxis: { title: currencyCode },
+                vAxis: {
+                  title: currencyCode,
+                  textStyle: { color: '#1f2937' },
+                  titleTextStyle: { color: '#1f2937', italic: false },
+                  gridlines: { color: '#cbd5e1' },
+                },
                 tooltip: { trigger: 'focus' },
                 colors: ['transparent', '#A8C686', '#2C3E50'],
                 seriesType: 'line',
@@ -109,6 +82,30 @@ export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, curre
             />
           </div>
         )}
+        <div className="value-interval-table" style={{ marginTop: 8 }}>
+          <div className="value-interval-header">
+            <span>Low</span>
+            <span>Spot</span>
+            <span>High</span>
+          </div>
+          {[
+            ['NPV', range?.low.npvToday ?? null, range?.spot.npvToday ?? null, range?.high.npvToday ?? null],
+            ['IRR', null, null, null],
+            ['Payback', null, null, null],
+            ['LOM_avg_EBIT_ROCE', null, null, null],
+            ['Kapitalavkastning_LOM', null, null, null],
+            ['InSitu_10Y_USD', null, null, null],
+          ].map(([label, low, spot, high]) => (
+            <div key={label} className="value-interval-block">
+              <div className="value-interval-name">{label}</div>
+              <div className="value-interval-values">
+                <span>{formatMoney(low as number | null)}</span>
+                <span>{formatMoney(spot as number | null)}</span>
+                <span>{formatMoney(high as number | null)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );
