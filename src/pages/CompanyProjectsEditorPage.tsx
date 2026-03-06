@@ -676,7 +676,10 @@ export default function CompanyProjectsEditorPage() {
           </label>
 
           <p className="save-meta">
-            Optional JSON hints: operations.gradeByMetal is per-period head grade in the unit defined by operations.gradeUnitByMetal;
+            Optional JSON hints: all monetary series are expected in USD millions (not full USD);
+            ore/tonnage inputs are expected in whole tonnes;
+            payable quantities are expected in whole physical units declared by metals.payableQtyUnitByMetal;
+            operations.gradeByMetal is per-period head grade in the unit defined by operations.gradeUnitByMetal;
             operations.recoveryPctByMetal is per-period metallurgical recovery (0..1 or 0..100);
             metals.priceKeyByMetal examples include Au: XAU_USD_TOZ, Ag: XAG_USD_TOZ, and Cu: CU_USD_LB or CU_USD_TONNE;
             Copper: CU_USD_LB = COMEX basis, CU_USD_TONNE = LME basis. If CU_USD_TONNE series is missing, system can derive from CU_USD_LB using 1 tonne = 2204.6226218 lb (warns about basis).
