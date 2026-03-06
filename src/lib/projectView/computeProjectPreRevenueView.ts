@@ -419,7 +419,8 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const sharesPostFinancingInput = finite(input.sharesPostFinancingInput) && (input.sharesPostFinancingInput as number) > 0
     ? input.sharesPostFinancingInput as number
     : null;
-  const sharesPf = sharesPostFinancingInput ?? (sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null);
+  const sharesPfComputed = sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null;
+  const sharesPf = sharesPfComputed ?? sharesPostFinancingInput;
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
 
