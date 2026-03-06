@@ -144,6 +144,11 @@ function sumComponentsAtIndex(components: Array<number | null>): number | null {
 type NpvSpotRangeSeries = {
   npvToday: number | null;
   npvSeries: Array<number | null>;
+  irr: number | null;
+  payback: number | null;
+  lomAvgEbitRoce: number | null;
+  kapitalavkastningLom: number | null;
+  inSitu10YUsd: number | null;
 };
 
 function scaleSeries(series: Array<number | null>, factor: number): Array<number | null> {
@@ -297,6 +302,16 @@ type ProjectSeriesContext = {
   royaltiesDetail: RoyaltyDetailSeries[];
   taxesDetail: TaxesDetailSeries | null;
   spotRangeFcffByScenario?: {
+    base: Array<number | null>;
+    low: Array<number | null>;
+    high: Array<number | null>;
+  };
+  spotRangeEbitByScenario?: {
+    base: Array<number | null>;
+    low: Array<number | null>;
+    high: Array<number | null>;
+  };
+  spotRangeRevenueByScenario?: {
     base: Array<number | null>;
     low: Array<number | null>;
     high: Array<number | null>;
@@ -1528,6 +1543,20 @@ export async function runCorporateSnapshotPipeline(args: {
                 },
               })
             : null;
+          const ebitLowSpot = spotDeckValid
+            ? sanitizeSeries((outLowSpot?.phase1.ebitdaUSD ?? nullSeries).map((ebitda, t) => {
+                const dep = depreciationUSD[t];
+                if (ebitda === null || dep === null) return null;
+                return ebitda - dep;
+              }))
+            : nullSeries;
+          const ebitHighSpot = spotDeckValid
+            ? sanitizeSeries((outHighSpot?.phase1.ebitdaUSD ?? nullSeries).map((ebitda, t) => {
+                const dep = depreciationUSD[t];
+                if (ebitda === null || dep === null) return null;
+                return ebitda - dep;
+              }))
+            : nullSeries;
           const ebitdaUSD = sanitizeSeries(out.phase1.ebitdaUSD);
           const ebitUSD = ebitdaUSD.map((ebitda, t) => {
             const dep = depreciationUSD[t];
@@ -1640,6 +1669,20 @@ export async function runCorporateSnapshotPipeline(args: {
                   base: sanitizeSeries(out.phase1.fcffUSD),
                   low: sanitizeSeries(outLowSpot?.phase1.fcffUSD ?? nullSeries),
                   high: sanitizeSeries(outHighSpot?.phase1.fcffUSD ?? nullSeries),
+                }
+              : undefined,
+            spotRangeEbitByScenario: spotDeckValid
+              ? {
+                  base: sanitizeSeries(ebitUSD),
+                  low: ebitLowSpot,
+                  high: ebitHighSpot,
+                }
+              : undefined,
+            spotRangeRevenueByScenario: spotDeckValid
+              ? {
+                  base: sanitizeSeries(out.revenue.grossRevenueUSD),
+                  low: sanitizeSeries(outLowSpot?.revenue.grossRevenueUSD ?? nullSeries),
+                  high: sanitizeSeries(outHighSpot?.revenue.grossRevenueUSD ?? nullSeries),
                 }
               : undefined,
             spotDeckValid,
@@ -2848,7 +2891,12 @@ export async function runCorporateSnapshotPipeline(args: {
     }
 
     const allProjectsHaveValidSpotDeck = projectSeriesContexts.length > 0
-      && projectSeriesContexts.every((ctx) => ctx.spotDeckValid === true && ctx.spotRangeFcffByScenario !== undefined);
+      && projectSeriesContexts.every(
+        (ctx) => ctx.spotDeckValid === true
+          && ctx.spotRangeFcffByScenario !== undefined
+          && ctx.spotRangeEbitByScenario !== undefined
+          && ctx.spotRangeRevenueByScenario !== undefined,
+      );
 
     if (projects.length === 1) {
       const fxForRange = typeof fxRate === 'number' && Number.isFinite(fxRate) ? fxRate : null;
@@ -2862,7 +2910,59 @@ export async function runCorporateSnapshotPipeline(args: {
         return {
           npvToday: npvSeries[0] ?? null,
           npvSeries,
+          irr: null,
+          payback: null,
+          lomAvgEbitRoce: null,
+          kapitalavkastningLom: null,
+          inSitu10YUsd: null,
         };
+      };
+
+      const computeLomAvgEbitRoce = (ebitUSD: Array<number | null>): number | null => {
+        if (tp_main === null || tp_main > aggregationEffective.corporateMasterN) return null;
+        if (!Number.isFinite(initialCapexUSD_main)) return null;
+        const ebitFinite: number[] = [];
+        for (let t = tp_main; t <= aggregationEffective.corporateMasterN; t += 1) {
+          const ebit = toFiniteOrNull(ebitUSD[t]);
+          if (ebit !== null) ebitFinite.push(ebit);
+        }
+        if (ebitFinite.length < 1) return null;
+        const avgEbit = ebitFinite.reduce((sum, value) => sum + value, 0) / ebitFinite.length;
+        return safeRatio(avgEbit, Math.abs(initialCapexUSD_main as number));
+      };
+
+      const computeKapitalavkastningLom = (fcffUSD: Array<number | null>): number | null => {
+        const capex0Raw = Number.isFinite(initialCapexUSD_main) ? Math.abs(initialCapexUSD_main as number) : null;
+        const capex0 = typeof capex0Raw === 'number' && capex0Raw > 0 ? capex0Raw : null;
+        if (capex0 === null) return null;
+        if (tp_main === null || tp_main < 0 || tp_main > aggregationEffective.corporateMasterN) return null;
+        const fcfSlice = fcffUSD.slice(tp_main, aggregationEffective.corporateMasterN + 1);
+        const fcfSum = sumStrict(fcfSlice);
+        if (fcfSum === null) return null;
+        return fcfSum / capex0;
+      };
+
+      const computeInSitu10YUsd = (revenueUSD: Array<number | null>): number | null => {
+        const t1 = Math.min(aggregationEffective.corporateMasterN, 9);
+        return sumStrict(revenueUSD.slice(0, t1 + 1));
+      };
+
+      const applyScenarioMetrics = (node: NpvSpotRangeSeries, fcffUSD: Array<number | null>, ebitUSD: Array<number | null>, revenueUSD: Array<number | null>): void => {
+        const lista3 = computeLista3({
+          masterN: aggregationEffective.corporateMasterN,
+          tp: tp_main,
+          fcfUSD: fcffUSD,
+          initialCapexUSD: initialCapexUSD_main,
+          strictRoi10Y: true,
+          roiAsRatio: true,
+          paybackRealUseInitialCapex: true,
+          paybackApproxAsRatio: true,
+        });
+        node.irr = lista3.IRR;
+        node.payback = lista3.Payback_real_years;
+        node.lomAvgEbitRoce = computeLomAvgEbitRoce(ebitUSD);
+        node.kapitalavkastningLom = computeKapitalavkastningLom(fcffUSD);
+        node.inSitu10YUsd = computeInSitu10YUsd(revenueUSD);
       };
 
       const npvSpotRange = allProjectsHaveValidSpotDeck && fxForRange !== null
@@ -2895,8 +2995,65 @@ export async function runCorporateSnapshotPipeline(args: {
               label: 'spotRange.high.fcffUSD',
             });
             const low = buildNpvRangeSeries(lowFcffUSD);
+            const lowEbitUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeEbitByScenario!.low,
+              })),
+              label: 'spotRange.low.ebitUSD',
+            });
+            const lowRevenueUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeRevenueByScenario!.low,
+              })),
+              label: 'spotRange.low.revenueUSD',
+            });
             const base = buildNpvRangeSeries(baseFcffUSD);
+            const baseEbitUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeEbitByScenario!.base,
+              })),
+              label: 'spotRange.base.ebitUSD',
+            });
+            const baseRevenueUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeRevenueByScenario!.base,
+              })),
+              label: 'spotRange.base.revenueUSD',
+            });
             const high = buildNpvRangeSeries(highFcffUSD);
+            const highEbitUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeEbitByScenario!.high,
+              })),
+              label: 'spotRange.high.ebitUSD',
+            });
+            const highRevenueUSD = sumStrictAlignedSeries({
+              corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+              projectDateSeries: projectSeriesContexts.map((ctx) => ({
+                projectId: ctx.projectId,
+                yearsByPeriod: ctx.yearsByPeriod,
+                series: ctx.spotRangeRevenueByScenario!.high,
+              })),
+              label: 'spotRange.high.revenueUSD',
+            });
+            applyScenarioMetrics(low, lowFcffUSD, lowEbitUSD, lowRevenueUSD);
+            applyScenarioMetrics(base, baseFcffUSD, baseEbitUSD, baseRevenueUSD);
+            applyScenarioMetrics(high, highFcffUSD, highEbitUSD, highRevenueUSD);
             base.npvToday = snapshot.NPV_today_TargetCurrency;
             return { low, base, high };
           })()

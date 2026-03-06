@@ -4,6 +4,11 @@ import { Chart } from 'react-google-charts';
 type RangeNode = {
   npvToday: number | null;
   npvSeries: Array<number | null>;
+  irr: number | null;
+  payback: number | null;
+  lomAvgEbitRoce: number | null;
+  kapitalavkastningLom: number | null;
+  inSitu10YUsd: number | null;
 };
 
 type NpvSpotRange = {
@@ -22,6 +27,14 @@ type Props = {
   currencyCode: string;
   formatMoney: (value: number | null) => string;
 };
+
+function formatMetricValueByLabel(label: string, value: number | null, formatMoney: (v: number | null) => string): string {
+  if (value === null || !Number.isFinite(value)) return 'n/a';
+  if (label === 'IRR' || label === 'LOM_avg_EBIT_ROCE') return `${(value * 100).toFixed(1)}%`;
+  if (label === 'Payback') return `${value.toFixed(1)} år`;
+  if (label === 'Kapitalavkastning_LOM') return `${value.toFixed(2)}x`;
+  return formatMoney(value);
+}
 
 export default function NpvSpotRangeComparisonCard({
   range,
@@ -124,18 +137,18 @@ export default function NpvSpotRangeComparisonCard({
           </div>
           {[
             ['NPV', range?.low.npvToday ?? null, range?.spot.npvToday ?? null, range?.high.npvToday ?? null],
-            ['IRR', null, null, null],
-            ['Payback', null, null, null],
-            ['LOM_avg_EBIT_ROCE', null, null, null],
-            ['Kapitalavkastning_LOM', null, null, null],
-            ['InSitu_10Y_USD', null, null, null],
+            ['IRR', range?.low.irr ?? null, range?.spot.irr ?? null, range?.high.irr ?? null],
+            ['Payback', range?.low.payback ?? null, range?.spot.payback ?? null, range?.high.payback ?? null],
+            ['LOM_avg_EBIT_ROCE', range?.low.lomAvgEbitRoce ?? null, range?.spot.lomAvgEbitRoce ?? null, range?.high.lomAvgEbitRoce ?? null],
+            ['Kapitalavkastning_LOM', range?.low.kapitalavkastningLom ?? null, range?.spot.kapitalavkastningLom ?? null, range?.high.kapitalavkastningLom ?? null],
+            ['InSitu_10Y_USD', range?.low.inSitu10YUsd ?? null, range?.spot.inSitu10YUsd ?? null, range?.high.inSitu10YUsd ?? null],
           ].map(([label, low, spot, high]) => (
             <div key={label} className="value-interval-block">
               <div className="value-interval-name">{label}</div>
               <div className="value-interval-values">
-                <span>{formatMoney(low as number | null)}</span>
-                <span>{formatMoney(spot as number | null)}</span>
-                <span>{formatMoney(high as number | null)}</span>
+                <span>{formatMetricValueByLabel(label as string, low as number | null, formatMoney)}</span>
+                <span>{formatMetricValueByLabel(label as string, spot as number | null, formatMoney)}</span>
+                <span>{formatMetricValueByLabel(label as string, high as number | null, formatMoney)}</span>
               </div>
             </div>
           ))}
