@@ -555,6 +555,22 @@ export default function ProjectsPage() {
       { label: 'Byproduct credits', values: pnl.byproductCredits },
       { label: 'Capex', values: pnl.capex },
       { label: 'FCFF', values: pnl.fcff },
+
+      // Dedicated table debug shown directly under FCFF.
+      { label: 'DEBUG Production ore mined', values: series.oreMinedTonnes, unit: series.throughputUnit ?? 'tonne' },
+      { label: 'DEBUG Production ore milled', values: series.oreMilledTonnes, unit: series.throughputUnit ?? 'tonne' },
+      { label: 'DEBUG Bridge revenue', values: pnl.grossRevenue },
+      { label: 'DEBUG Bridge - operating costs', values: pnl.operatingCosts?.map((value) => value === null ? null : -value) },
+      { label: 'DEBUG Bridge - site G&A', values: pnl.siteGandA?.map((value) => value === null ? null : -value) },
+      { label: 'DEBUG Bridge - royalties', values: pnl.royalties?.map((value) => value === null ? null : -value) },
+      { label: 'DEBUG Bridge + byproduct credits', values: pnl.byproductCredits },
+      { label: 'DEBUG Bridge - tax', values: pnl.tax?.map((value) => value === null ? null : -value) },
+      { label: 'DEBUG Bridge - sustaining capex', values: pnl.sustainingCapex?.map((value) => value === null ? null : -value) },
+      { label: 'DEBUG Bridge - reclamation', values: pnl.reclamation?.map((value) => value === null ? null : -value) },
+      { label: 'DEBUG Bridge - working capital delta', values: pnl.workingCapitalDelta?.map((value) => value === null ? null : -value) },
+      { label: 'DEBUG Bridge - capex', values: pnl.capex?.map((value) => value === null ? null : -value) },
+      { label: 'DEBUG Bridge = FCFF', values: pnl.fcff },
+
       { label: 'Sustaining cost', values: series.sustainingCostUSD },
       { label: 'Total Capex', values: series.totalCapexUSD },
     ];
