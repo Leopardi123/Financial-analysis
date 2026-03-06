@@ -4865,6 +4865,28 @@ Capital Available: ${availableLabel}`,
                             };
                           })()}
                           yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                          productionStartYear={(() => {
+                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
+                              ? selectedProjectRawJson.time as Record<string, unknown>
+                              : null;
+                            const value = time?.productionStartYear;
+                            return typeof value === "number" && Number.isFinite(value) ? value : null;
+                          })()}
+                          productionStartPeriod={(() => {
+                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
+                              ? selectedProjectRawJson.time as Record<string, unknown>
+                              : null;
+                            const value = time?.productionStartPeriod;
+                            return typeof value === "number" && Number.isFinite(value) ? value : null;
+                          })()}
+                          masterN={(() => {
+                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
+                              ? selectedProjectRawJson.time as Record<string, unknown>
+                              : null;
+                            const value = time?.masterN;
+                            return typeof value === "number" && Number.isFinite(value) ? value : null;
+                          })()}
+                          marketCapToday={projectViewMetrics.marketBox.marketCapCurrent.value}
                           currencyCode={lockedTargetCurrency}
                           formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
                         />
