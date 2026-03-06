@@ -662,16 +662,14 @@ function getMaxAbs(series: Array<number | null>): number {
 
 function maybeWarnLikelyScaleIssue(args: {
   path: string;
-  expectedScale: string;
   series: Array<number | null>;
   threshold: number;
-  hint: string;
   warnings: string[];
 }): void {
-  const { path, expectedScale, series, threshold, hint, warnings } = args;
+  const { path, series, threshold, warnings } = args;
   const maxAbs = getMaxAbs(series);
   if (maxAbs >= threshold) {
-    warnings.push(`${path}: detected very large value (${maxAbs}) for expected scale ${expectedScale}; possible scale mismatch (${hint}).`);
+    warnings.push(`${path}: detected very large value (${maxAbs}); verify this magnitude is intentional and values are entered as full USD (whole dollars).`);
   }
 }
 
@@ -913,26 +911,20 @@ export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
 
   maybeWarnLikelyScaleIssue({
     path: 'series.capexUSD',
-    expectedScale: 'USD millions',
     series: capexUSD,
-    threshold: 1_000_000,
-    hint: 'entered full USD instead of USD millions',
+    threshold: 10_000_000_000,
     warnings,
   });
   maybeWarnLikelyScaleIssue({
     path: 'series.sustainingCapexUSD',
-    expectedScale: 'USD millions',
     series: sustainingCapexUSD,
-    threshold: 1_000_000,
-    hint: 'entered full USD instead of USD millions',
+    threshold: 10_000_000_000,
     warnings,
   });
   maybeWarnLikelyScaleIssue({
     path: 'series.operatingCostsUSD',
-    expectedScale: 'USD millions',
     series: operatingCostsUSD,
-    threshold: 1_000_000,
-    hint: 'entered full USD instead of USD millions',
+    threshold: 10_000_000_000,
     warnings,
   });
 

@@ -676,7 +676,7 @@ export default function CompanyProjectsEditorPage() {
           </label>
 
           <p className="save-meta">
-            Optional JSON hints: all monetary series are expected in USD millions (not full USD);
+            Optional JSON hints: all monetary series are expected in full USD (whole dollars);
             ore/tonnage inputs are expected in whole tonnes;
             payable quantities are expected in whole physical units declared by metals.payableQtyUnitByMetal;
             operations.gradeByMetal is per-period head grade in the unit defined by operations.gradeUnitByMetal;
