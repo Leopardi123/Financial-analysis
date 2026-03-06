@@ -15,38 +15,68 @@ type NpvSpotRange = {
 type Props = {
   range: NpvSpotRange;
   yearsByPeriod: number[];
+  productionStartYear: number | null;
+  productionStartPeriod: number | null;
+  masterN: number | null;
+  marketCapToday: number | null;
   currencyCode: string;
   formatMoney: (value: number | null) => string;
 };
 
-export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, currencyCode, formatMoney }: Props) {
+export default function NpvSpotRangeComparisonCard({
+  range,
+  yearsByPeriod,
+  productionStartYear,
+  productionStartPeriod,
+  masterN,
+  marketCapToday,
+  currencyCode,
+  formatMoney,
+}: Props) {
+  const axisYears = useMemo(() => {
+    if (
+      typeof productionStartYear === 'number'
+      && Number.isFinite(productionStartYear)
+      && typeof productionStartPeriod === 'number'
+      && Number.isFinite(productionStartPeriod)
+      && typeof masterN === 'number'
+      && Number.isFinite(masterN)
+      && masterN >= 0
+    ) {
+      return Array.from({ length: masterN + 1 }, (_, t) => productionStartYear + (t - productionStartPeriod));
+    }
+    return yearsByPeriod;
+  }, [masterN, productionStartPeriod, productionStartYear, yearsByPeriod]);
+
   const chartData = useMemo(() => {
     if (!range) return null;
-    const len = Math.min(yearsByPeriod.length, range.spot.npvSeries.length, range.low.npvSeries.length, range.high.npvSeries.length);
+    const len = Math.min(axisYears.length, range.spot.npvSeries.length, range.low.npvSeries.length, range.high.npvSeries.length);
     const rows: Array<Array<number | string | null>> = [];
     for (let t = 0; t < len; t += 1) {
+      const year = axisYears[t];
+      if (typeof year !== 'number' || !Number.isFinite(year)) continue;
       const low = range.low.npvSeries[t];
       const spot = range.spot.npvSeries[t];
       const high = range.high.npvSeries[t];
       const band = (typeof high === 'number' && Number.isFinite(high) && typeof low === 'number' && Number.isFinite(low))
         ? high - low
         : null;
-      const tooltip = `Year: ${yearsByPeriod[t] ?? t}\nLow: ${formatMoney(typeof low === 'number' ? low : null)}\nSpot: ${formatMoney(typeof spot === 'number' ? spot : null)}\nHigh: ${formatMoney(typeof high === 'number' ? high : null)}`;
-      rows.push([t, low, band, spot, tooltip]);
+      const marketCapHere = t === 0 && typeof marketCapToday === 'number' && Number.isFinite(marketCapToday) ? marketCapToday : null;
+      const tooltip = `Year: ${year}\nHigh: ${formatMoney(typeof high === 'number' ? high : null)}\nSpot: ${formatMoney(typeof spot === 'number' ? spot : null)}\nLow: ${formatMoney(typeof low === 'number' ? low : null)}${marketCapHere === null ? '' : `\nMarket Cap idag: ${formatMoney(marketCapHere)}`}`;
+      rows.push([year, low, band, spot, marketCapHere, tooltip]);
     }
 
     return [
-      ['PeriodIndex', 'Low', 'Band', 'Base', { role: 'tooltip', type: 'string' }],
+      ['Year', 'Low', 'Band', 'Base', 'Market Cap idag', { role: 'tooltip', type: 'string' }],
       ...rows,
     ] as (string | number | null)[][];
-  }, [range, yearsByPeriod, formatMoney]);
+  }, [range, axisYears, marketCapToday, formatMoney]);
 
   return (
     <div className="producer-core-compact-card" style={{ marginTop: 8 }}>
       <section className="producer-core-section npv-range-interval-card">
         <div className="producer-core-title-row">
           <h3 className="subrub small" style={{ margin: 0 }}>NPV (Spot ±25%)</h3>
-          <span className="spot-context-chip">Spot idag</span>
         </div>
         {range && chartData && (
           <div className="spot-range-chart-guard" style={{ marginTop: 8 }}>
@@ -61,22 +91,26 @@ export default function NpvSpotRangeComparisonCard({ range, yearsByPeriod, curre
                 isStacked: true,
                 chartArea: { left: 64, right: 16, top: 16, bottom: 36, width: '100%', height: '75%' },
                 hAxis: {
-                  textPosition: 'none',
+                  format: '####',
+                  textStyle: { color: '#1f2937', fontSize: 11 },
+                  gridlines: { color: '#dbe4cf' },
                 },
                 vAxis: {
                   title: currencyCode,
                   textStyle: { color: '#1f2937' },
                   titleTextStyle: { color: '#1f2937', italic: false },
-                  gridlines: { color: '#cbd5e1' },
+                  gridlines: { color: '#b8c4ad', count: 5 },
+                  minorGridlines: { color: '#dbe4cf' },
                 },
                 tooltip: { trigger: 'focus' },
-                colors: ['transparent', '#A8C686', '#2C3E50'],
+                colors: ['transparent', '#A8C686', '#2C3E50', '#be123c'],
                 seriesType: 'line',
                 areaOpacity: 0.32,
                 series: {
                   0: { type: 'area', lineWidth: 0, visibleInLegend: false, enableInteractivity: false },
                   1: { type: 'area', lineWidth: 0, visibleInLegend: false },
                   2: { type: 'line', lineWidth: 3, pointSize: 0, visibleInLegend: false },
+                  3: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
                 },
               }}
             />
