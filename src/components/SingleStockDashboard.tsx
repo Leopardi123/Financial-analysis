@@ -4856,7 +4856,7 @@ Capital Available: ${availableLabel}`,
                         <summary><h2 className="subrub small">FINANSIELLA NYCKELTAL · VÄRDEINTERVALL</h2></summary>
                         <NpvSpotRangeComparisonCard
                           range={(() => {
-                            const npvRange = (projectSnapshotData?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null> }; base: { npvToday: number | null; npvSeries: Array<number | null> }; high: { npvToday: number | null; npvSeries: Array<number | null> } } | null } } | undefined)?.modeled?.npvSpotRange ?? null;
+                            const npvRange = (projectSnapshotData?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; base: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; high: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null } } | null } } | undefined)?.modeled?.npvSpotRange ?? null;
                             if (!npvRange) return null;
                             return {
                               low: npvRange.low,

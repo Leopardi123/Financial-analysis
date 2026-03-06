@@ -183,14 +183,29 @@ export type CorporateSnapshot = {
         low: {
           npvToday: number | null;
           npvSeries: Array<number | null>;
+          irr: number | null;
+          payback: number | null;
+          lomAvgEbitRoce: number | null;
+          kapitalavkastningLom: number | null;
+          inSitu10YUsd: number | null;
         };
         base: {
           npvToday: number | null;
           npvSeries: Array<number | null>;
+          irr: number | null;
+          payback: number | null;
+          lomAvgEbitRoce: number | null;
+          kapitalavkastningLom: number | null;
+          inSitu10YUsd: number | null;
         };
         high: {
           npvToday: number | null;
           npvSeries: Array<number | null>;
+          irr: number | null;
+          payback: number | null;
+          lomAvgEbitRoce: number | null;
+          kapitalavkastningLom: number | null;
+          inSitu10YUsd: number | null;
         };
       } | null;
     };

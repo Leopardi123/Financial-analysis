@@ -789,3 +789,20 @@ test('corporate nopat strict mode nulls periods when any project taxRate is miss
   assert.equal(missing.length > 0, true);
   assert.equal(missing.some((entry) => entry.projectId === String(projects[0].projectId ?? projects[0].project_id)), true);
 });
+
+test('project npv spot range includes scenario metrics beyond npv', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const range = result.snapshot.project?.modeled?.npvSpotRange;
+  assert.ok(range);
+  assert.equal(Object.prototype.hasOwnProperty.call(range?.base ?? {}, 'irr'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(range?.base ?? {}, 'payback'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(range?.base ?? {}, 'lomAvgEbitRoce'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(range?.base ?? {}, 'kapitalavkastningLom'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(range?.base ?? {}, 'inSitu10YUsd'), true);
+  assert.equal(typeof range?.base.irr === 'number' || range?.base.irr === null, true);
+  assert.equal(typeof range?.base.payback === 'number' || range?.base.payback === null, true);
+});
