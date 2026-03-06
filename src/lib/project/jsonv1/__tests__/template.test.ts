@@ -66,8 +66,8 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
   assert(Array.isArray((defaultTemplate.series as Record<string, unknown>)._example_capexUSD), 'series helper example for capexUSD exists');
 
   assert(typeof (defaultTemplate as Record<string, unknown>)._description_numeric_scale === 'string', 'global numeric scale description exists');
-  assertEqual((defaultTemplate.series as Record<string, unknown>)._unit_capexUSD, 'USD millions', 'capex unit helper is USD millions');
-  assertEqual((defaultTemplate.series as Record<string, unknown>)._unit_operatingCostsUSD, 'USD millions', 'operating costs unit helper is USD millions');
+  assertEqual((defaultTemplate.series as Record<string, unknown>)._unit_capexUSD, 'USD (full dollars)', 'capex unit helper is full USD');
+  assertEqual((defaultTemplate.series as Record<string, unknown>)._unit_operatingCostsUSD, 'USD (full dollars)', 'operating costs unit helper is full USD');
   assertEqual((defaultTemplate.operations as Record<string, unknown>)._unit_oreMinedTonnes, 'tonnes', 'ore mined unit helper is tonnes');
   assertEqual((defaultTemplate.metals as Record<string, unknown>)._unit_payableQtyByMetal, 'Physical units per payableQtyUnitByMetal (no thousand/million scaling)', 'payable quantity unit helper exists');
 

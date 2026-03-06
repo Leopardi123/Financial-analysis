@@ -97,7 +97,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   (withDocHelpers.time as Record<string, unknown>)._example_productionStartPeriod = 2;
   (withDocHelpers.series as Record<string, unknown>)._description_capexUSD = 'ignored';
   (withDocHelpers.series as Record<string, unknown>)._example_capexUSD = [1, 2, 3];
-  (withDocHelpers.series as Record<string, unknown>)._unit_capexUSD = 'USD millions';
+  (withDocHelpers.series as Record<string, unknown>)._unit_capexUSD = 'USD (full dollars)';
   const parsedWithDocHelpers = parseProjectJsonV1(withDocHelpers);
   assertEqual(parsedWithDocHelpers.engineInputWithoutPrices.masterN, withDocHelpers.time.masterN, 'parse ignores _description_/_example_/_unit_ helper keys');
 
@@ -347,12 +347,20 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assert(parsedNullZeroDedup.diagnostics.normalization.some((item) => item.summary.includes('Auto-resolved duplicate siteGandA')), 'null/zero equivalent dedup diagnostics captured');
   assert(parsedOzUnit.diagnostics.normalization.some((item) => item.rule === 'qty_unit_oz_to_toz'), 'unit normalization diagnostics captured');
 
+  const fullUsdMoneySeries = getProjectJsonV1Template();
+  fullUsdMoneySeries.series.capexUSD = [93020000, 0, 0, 0, 0, 0];
+  const parsedFullUsdMoneySeries = parseProjectJsonV1(fullUsdMoneySeries);
+  assert(
+    parsedFullUsdMoneySeries.warnings.every((warning) => !warning.includes('series.capexUSD: detected very large value')),
+    'normal full-USD monetary values do not emit large-value warning',
+  );
+
   const likelyMoneyScaleMismatch = getProjectJsonV1Template();
-  likelyMoneyScaleMismatch.series.capexUSD = [250000000, 0, 0, 0, 0, 0];
+  likelyMoneyScaleMismatch.series.capexUSD = [2500000000000, 0, 0, 0, 0, 0];
   const parsedLikelyMoneyScaleMismatch = parseProjectJsonV1(likelyMoneyScaleMismatch);
   assert(
-    parsedLikelyMoneyScaleMismatch.warnings.some((warning) => warning.includes('series.capexUSD') && warning.includes('possible scale mismatch')),
-    'large monetary values emit likely scale mismatch warning',
+    parsedLikelyMoneyScaleMismatch.warnings.some((warning) => warning.includes('series.capexUSD') && warning.includes('full USD (whole dollars)')),
+    'extreme monetary values emit large-value warning without million-scale assumption',
   );
 
   const likelyTonnageScaleMismatch = getProjectJsonV1Template();
