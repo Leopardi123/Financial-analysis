@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Chart } from "react-google-charts";
 
 type TpMarker = {
   tp: number;
@@ -8,12 +9,17 @@ type TpMarker = {
 };
 
 type ValueRangeSnapshotCardProps = {
+  mode?: "corporate" | "project";
   priceToday?: number | null;
   npvLow?: number | null;
   npvHigh?: number | null;
   tpLow?: number | null;
   tpHigh?: number | null;
   tpMarkers?: TpMarker[];
+  chartFlows?: {
+    dcfProdstartPresentPerShareSeries?: Array<number | null>;
+    navProdstartPerShareSeries?: Array<number | null>;
+  } | null;
   currencyCode?: string;
 };
 
@@ -81,7 +87,109 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currencyCode } = props;
+  const isProjectMode = mode === "project";
+
+  const projectChartModel = useMemo(() => {
+    if (!isProjectMode) return null;
+    const dcfSeriesRaw = Array.isArray(chartFlows?.dcfProdstartPresentPerShareSeries) ? chartFlows.dcfProdstartPresentPerShareSeries : [];
+    const navSeriesRaw = Array.isArray(chartFlows?.navProdstartPerShareSeries) ? chartFlows.navProdstartPerShareSeries : [];
+    const len = Math.max(dcfSeriesRaw.length, navSeriesRaw.length);
+    if (len < 1) return null;
+
+    const rows: Array<Array<number | string | null>> = [];
+    const domainValues: number[] = [];
+    for (let idx = 0; idx < len; idx += 1) {
+      const nav = isFiniteNumber(navSeriesRaw[idx]) ? navSeriesRaw[idx] : null;
+      const dcf = isFiniteNumber(dcfSeriesRaw[idx]) ? dcfSeriesRaw[idx] : null;
+      const currentMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
+      const tpLowMarker = idx === 0 && isFiniteNumber(tpLow) ? tpLow : null;
+      const tpHighMarker = idx === 0 && isFiniteNumber(tpHigh) ? tpHigh : null;
+      if (nav !== null) domainValues.push(nav);
+      if (dcf !== null) domainValues.push(dcf);
+      if (currentMarker !== null) domainValues.push(currentMarker);
+      if (tpLowMarker !== null) domainValues.push(tpLowMarker);
+      if (tpHighMarker !== null) domainValues.push(tpHighMarker);
+      rows.push([
+        idx,
+        nav,
+        dcf,
+        currentMarker,
+        currentMarker !== null ? formatPerShareValue(currentMarker) : null,
+        tpLowMarker,
+        tpLowMarker !== null ? formatPerShareValue(tpLowMarker) : null,
+        tpHighMarker,
+        tpHighMarker !== null ? formatPerShareValue(tpHighMarker) : null,
+      ]);
+    }
+
+    if (domainValues.length < 1) return null;
+    return {
+      data: [
+        [
+          "Step",
+          "NAV",
+          "DCF",
+          "Current",
+          { role: "annotation", type: "string" },
+          "TP Low",
+          { role: "annotation", type: "string" },
+          "TP High",
+          { role: "annotation", type: "string" },
+        ],
+        ...rows,
+      ] as (string | number | null | { role: string })[][],
+      ticks: Array.from({ length: len }, (_, idx) => ({ v: idx, f: idx === 0 ? "TP" : `+${idx}` })),
+    };
+  }, [chartFlows, isProjectMode, priceToday, tpHigh, tpLow]);
+
+  if (isProjectMode) {
+    if (!projectChartModel) {
+      return <p className="status empty" style={{ margin: 0 }}>Saknar intervall-data (NPV/TP)</p>;
+    }
+    return (
+      <div className="spot-range-chart-guard" style={{ marginTop: 8 }}>
+        <Chart
+          chartType="LineChart"
+          width="100%"
+          height="260px"
+          data={projectChartModel.data}
+          options={{
+            backgroundColor: "#e0e9ce",
+            legend: { position: "none" },
+            chartArea: { left: 64, right: 22, top: 16, bottom: 36, width: "100%", height: "75%" },
+            hAxis: {
+              textStyle: { color: "#1f2937", fontSize: 11 },
+              gridlines: { color: "#dbe4cf" },
+              ticks: projectChartModel.ticks,
+            },
+            vAxis: {
+              title: currencyCode ?? "",
+              textStyle: { color: "#1f2937", fontSize: 11 },
+              titleTextStyle: { color: "#1f2937", italic: false },
+              gridlines: { color: "#b8c4ad", count: 5 },
+              minorGridlines: { color: "#dbe4cf" },
+            },
+            tooltip: { trigger: "none" },
+            interpolateNulls: false,
+            annotations: {
+              alwaysOutside: true,
+              textStyle: { color: "#111827", fontSize: 10 },
+              stem: { color: "transparent", length: 0 },
+            },
+            colors: ["#64748b", "#1f2937", "#be123c", "#111111", "#111111"],
+            series: {
+              0: { type: "line", lineWidth: 2, pointSize: 0 },
+              1: { type: "line", lineWidth: 2.5, pointSize: 0 },
+              2: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
+              3: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
+              4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0 },
+            },
+          }}
+        />
+      </div>
+    );
+  }
 
   const npvRange = useMemo(() => {
     const low = isFiniteNumber(npvLow) ? npvLow : null;
