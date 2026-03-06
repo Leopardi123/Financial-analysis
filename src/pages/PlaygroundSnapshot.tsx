@@ -40,8 +40,6 @@ function makeRunnableTemplateProject() {
   const rawJson = getProjectJsonV1Template();
   const len = rawJson.time.masterN + 1;
 
-  rawJson.time.periodEndDatesUtc = ['2019-12-31', '2020-12-31', '2021-12-31', '2022-12-31', '2023-12-31', '2024-12-31'];
-
   rawJson.series.capexUSD = new Array(len).fill(0);
   rawJson.series.operatingCostsUSD = new Array(len).fill(0);
   rawJson.series.sustainingCapexUSD = new Array(len).fill(0);

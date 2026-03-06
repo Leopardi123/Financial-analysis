@@ -92,28 +92,14 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertEqual(parsedShortWorkingCapital.engineInputWithoutPrices.phase1.workingCapitalDeltaUSD?.[5], 0, 'optional working capital tail padded with 0');
 
 
-  const badPeriodEndDatesLength = getProjectJsonV1Template();
-  badPeriodEndDatesLength.time.periodEndDatesUtc = ['2026-12-31'];
-  assertThrows(
-    () => parseProjectJsonV1(badPeriodEndDatesLength),
-    /time\.periodEndDatesUtc/,
-    'throws on periodEndDatesUtc length mismatch',
-  );
+  const withDocHelpers = getProjectJsonV1Template();
+  (withDocHelpers.time as Record<string, unknown>)._description_masterN = 'ignored';
+  (withDocHelpers.time as Record<string, unknown>)._example_productionStartPeriod = 2;
+  (withDocHelpers.series as Record<string, unknown>)._description_capexUSD = 'ignored';
+  (withDocHelpers.series as Record<string, unknown>)._example_capexUSD = [1, 2, 3];
+  const parsedWithDocHelpers = parseProjectJsonV1(withDocHelpers);
+  assertEqual(parsedWithDocHelpers.engineInputWithoutPrices.masterN, withDocHelpers.time.masterN, 'parse ignores _description_/_example_ helper keys');
 
-  const badPeriodEndDatesOrder = getProjectJsonV1Template();
-  badPeriodEndDatesOrder.time.periodEndDatesUtc = [
-    '2026-12-31',
-    '2027-12-31',
-    '2027-12-31',
-    '2029-12-31',
-    '2030-12-31',
-    '2031-12-31',
-  ];
-  assertThrows(
-    () => parseProjectJsonV1(badPeriodEndDatesOrder),
-    /time\.periodEndDatesUtc/,
-    'throws on non-increasing periodEndDatesUtc',
-  );
 
   const metalMismatchUnits = getProjectJsonV1Template();
   metalMismatchUnits.metals.payableQtyUnitByMetal = { Au: 'toz' };
@@ -232,7 +218,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
     throw new Error('template.operations must be present');
   }
   sparseOperations.time.productionStartPeriod = 0;
-  sparseOperations.time.productionStartYear = Number.parseInt((sparseOperations.time.periodEndDatesUtc ?? ['2026-12-31'])[0].slice(0, 4), 10);
+  sparseOperations.time.productionStartYear = new Date().getUTCFullYear();
   sparseOperations.operations.oreMilledTonnes = [10, 20];
   const parsedSparseOperations = parseProjectJsonV1(sparseOperations);
   assertEqual(parsedSparseOperations.context.operations?.oreMilledTonnes?.length, 6, 'sparse operations series padded to masterN+1');

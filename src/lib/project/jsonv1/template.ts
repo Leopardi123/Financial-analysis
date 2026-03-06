@@ -49,11 +49,6 @@ function normalizeSeries(value: unknown, length: number): NullableNumberSeries {
   return normalized;
 }
 
-function buildPeriodEndDatesUtc(masterN: number): string[] {
-  const startYear = new Date().getUTCFullYear();
-  return Array.from({ length: masterN + 1 }, (_, index) => `${startYear + index}-12-31`);
-}
-
 function normalizeSeriesMap(value: unknown, length: number): Record<string, NullableNumberSeries> {
   const raw = asRecord(value);
   const out: Record<string, NullableNumberSeries> = {};
@@ -149,12 +144,10 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     ? requestedMasterN as number
     : DEFAULT_MASTER_N;
   const seriesLength = masterN + 1;
-
-  const existingPeriodEndDates = Array.isArray(rootTime.periodEndDatesUtc)
-    ? rootTime.periodEndDatesUtc.filter((item): item is string => typeof item === 'string').slice(0, seriesLength)
-    : [];
-  const generatedPeriodEndDates = buildPeriodEndDatesUtc(masterN);
-  const periodEndDatesUtc = generatedPeriodEndDates.map((date, index) => existingPeriodEndDates[index] ?? date);
+  const productionStartPeriod = Number.isInteger(rootTime.productionStartPeriod) ? rootTime.productionStartPeriod as number : 0;
+  const productionStartYear = Number.isInteger(rootTime.productionStartYear)
+    ? rootTime.productionStartYear as number
+    : (new Date().getUTCFullYear() + productionStartPeriod);
 
   const meta = asRecord(root.meta);
   const economics = asRecord(root.economics);
@@ -183,11 +176,27 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     },
     time: {
       masterN,
-      productionStartPeriod: Number.isInteger(rootTime.productionStartPeriod) ? rootTime.productionStartPeriod as number : 0,
-      productionStartYear: Number.isInteger(rootTime.productionStartYear)
-        ? rootTime.productionStartYear as number
-        : (new Date().getUTCFullYear() + (Number.isInteger(rootTime.productionStartPeriod) ? rootTime.productionStartPeriod as number : 0)),
-      periodEndDatesUtc,
+      _description_masterN: 'Total number of modeled periods minus 1. All aligned arrays are indexed t=0..masterN and must have length masterN+1.',
+      _example_masterN: 15,
+      productionStartPeriod,
+      _description_productionStartPeriod: '0-based index of the first production period. t=0 is the first model period. The array element at index productionStartPeriod is the first production year.',
+      _example_productionStartPeriod: 2,
+      _description_productionStartPeriod_example: 'Example: if productionStartPeriod = 2, then t=0 is the first model period, t=1 is the second model period, and t=2 is the first production period. In an aligned array like capexUSD, capexUSD[2] belongs to the first production year.',
+      _description_timeseries_alignment: 'All time-series arrays use the same 0-based period index t=0..masterN. The value at index productionStartPeriod is the first production period in all aligned arrays.',
+      _example_timeseries_alignment: {
+        productionStartPeriod: 2,
+        capexUSD: [61.54, 159.11, 0, 5.75, 32.05, 0, 23.05, 5.38, 0, 35.72, 40.25, 0, 0, 0, 0.58, 0],
+        interpretation: [
+          'capexUSD[0] = pre-production / construction period',
+          'capexUSD[1] = pre-production / construction period',
+          'capexUSD[2] = first production period',
+          'capexUSD[3] = second production period',
+        ],
+        note: 'Production starts at capexUSD[2] (index 2), not capexUSD[1].',
+      },
+      productionStartYear,
+      _description_productionStartYear: 'Calendar year at index productionStartPeriod. Derived calendar year per period is year(t) = productionStartYear + (t - productionStartPeriod).',
+      _example_productionStartYear: 2030,
     },
     economics: {
       taxRate: typeof economics.taxRate === 'number' && Number.isFinite(economics.taxRate) ? economics.taxRate : null,
@@ -198,8 +207,14 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     },
     series: {
       capexUSD: normalizeSeries(series.capexUSD, seriesLength),
+      _description_capexUSD: 'Per-period capital expenditure aligned to the common 0-based period index t=0..masterN.',
+      _example_capexUSD: [61.54, 159.11, 0, 5.75],
       operatingCostsUSD: normalizeSeries(series.operatingCostsUSD, seriesLength),
+      _description_operatingCostsUSD: 'Per-period operating costs aligned to the common 0-based period index t=0..masterN.',
+      _example_operatingCostsUSD: [0, 0, 120.5, 121.1],
       sustainingCapexUSD: normalizeSeries(series.sustainingCapexUSD, seriesLength),
+      _description_sustainingCapexUSD: 'Per-period sustaining capital aligned to the common 0-based period index t=0..masterN.',
+      _example_sustainingCapexUSD: [0, 0, 12.0, 14.5],
       siteGandA_USD: normalizeSeries(series.siteGandA_USD, seriesLength),
       depreciationUSD: normalizeSeries(series.depreciationUSD, seriesLength),
       workingCapitalDeltaUSD: normalizeSeries(series.workingCapitalDeltaUSD, seriesLength),
@@ -209,6 +224,8 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     },
     metals: {
       payableQtyByMetal: normalizeSeriesMap(metals.payableQtyByMetal, seriesLength),
+      _description_payableQtyByMetal: 'Per-period payable quantity by metal; each metal array must align to t=0..masterN.',
+      _example_payableQtyByMetal: { Au: [0, 0, 100, 100], Cu: [0, 0, 2000, 2000] },
       payableQtyUnitByMetal: normalizeQtyUnitMap(metals.payableQtyUnitByMetal),
       priceKeyByMetal: normalizeStringMap(metals.priceKeyByMetal),
       auPriceKey: typeof metals.auPriceKey === 'string' ? metals.auPriceKey : '',
@@ -227,14 +244,22 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
         utilizationPct: typeof operationsCapacity.utilizationPct === 'number' && Number.isFinite(operationsCapacity.utilizationPct)
           ? operationsCapacity.utilizationPct
           : null,
+        _description_utilizationPct: 'Plant utilization as a fraction between 0 and 1, not 0 to 100.',
+        _example_utilizationPct: 0.85,
       },
       oreMilledTonnes: normalizeSeries(operations.oreMilledTonnes, seriesLength),
       oreMinedTonnes: normalizeSeries(operations.oreMinedTonnes, seriesLength),
+      _description_oreMinedTonnes: 'Per-period ore mined tonnes aligned to the common 0-based period index t=0..masterN.',
+      _example_oreMinedTonnes: [1000, 1000, 1200, 1300],
       oreTonnageUnit: operations.oreTonnageUnit === 'tonne' || operations.oreTonnageUnit === 'short_ton' || operations.oreTonnageUnit === 'long_ton' ? operations.oreTonnageUnit : null,
       _choices_oreTonnageUnit: [...ORE_TONNAGE_UNIT_CHOICES],
       gradeByMetal: normalizeSeriesMap(operations.gradeByMetal, seriesLength),
+      _description_gradeByMetal: 'Per-period head grade by metal. Each metal array is aligned to t=0..masterN.',
+      _example_gradeByMetal: { Au: [6.86, 6.86, 6.86], Cu: [0.45, 0.45, 0.45] },
       gradeUnitByMetal: normalizeStringMap(operations.gradeUnitByMetal),
       recoveryPctByMetal: normalizeSeriesMap(operations.recoveryPctByMetal, seriesLength),
+      _description_recoveryPctByMetal: 'Per-period metallurgical recovery by metal as a fraction (0..1 preferred). Each metal array is aligned to t=0..masterN.',
+      _example_recoveryPctByMetal: { Au: [0.92, 0.92, 0.92], Cu: [0.88, 0.88, 0.88] },
     },
     economicsBreakdown: {
       meta: {
@@ -339,7 +364,6 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       masterN,
       productionStartPeriod: 2,
       productionStartYear: new Date().getUTCFullYear() + 2,
-      periodEndDatesUtc: ['2026-12-31', '2027-12-31', '2028-12-31', '2029-12-31', '2030-12-31', '2031-12-31'],
     },
     economics: { taxRate: 0 },
     equity: {

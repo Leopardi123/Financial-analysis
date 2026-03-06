@@ -55,7 +55,6 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   assertEqual((converted.meta as Record<string, unknown>).projectId, 'p1', 'meta.projectId mapped');
   assertEqual((converted.meta as Record<string, unknown>).notes, '', 'meta.notes defaulted to empty string');
   assertEqual((converted.time as Record<string, unknown>).productionStartYear, null, 'productionStartYear defaults to null');
-  assertEqual((converted.time as Record<string, unknown>).periodEndDatesUtc, null, 'periodEndDatesUtc defaults to null');
   assertEqual((converted.economics as Record<string, unknown>).discountRate, 0.08, 'economics moved as-is');
   assert(Array.isArray((converted._choices_version as unknown[])), '_choices_version exists');
   assertEqual(((converted.sources as Record<string, unknown>).raw), null, 'sources.raw is null');

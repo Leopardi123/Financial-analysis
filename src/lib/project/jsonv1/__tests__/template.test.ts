@@ -60,6 +60,11 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
   const capacity = defaultTemplate.operations?.capacity as Record<string, unknown>;
   assertDeepEqual(capacity._choices_throughputUnit, ['tpa', 'tpd'], 'throughput choices present and sorted');
 
+  assertEqual((defaultTemplate.time as Record<string, unknown>)._example_productionStartPeriod, 2, 'time helper example documents 0-based productionStartPeriod');
+  assert(typeof (defaultTemplate.time as Record<string, unknown>)._description_timeseries_alignment === 'string', 'time helper alignment description exists');
+  assert(!Object.prototype.hasOwnProperty.call(defaultTemplate.time as Record<string, unknown>, 'periodEndDatesUtc'), 'template no longer includes periodEndDatesUtc');
+  assert(Array.isArray((defaultTemplate.series as Record<string, unknown>)._example_capexUSD), 'series helper example for capexUSD exists');
+
   for (const key of [
     'capexUSD',
     'operatingCostsUSD',
