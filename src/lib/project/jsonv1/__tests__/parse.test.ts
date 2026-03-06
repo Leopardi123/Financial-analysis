@@ -97,8 +97,9 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   (withDocHelpers.time as Record<string, unknown>)._example_productionStartPeriod = 2;
   (withDocHelpers.series as Record<string, unknown>)._description_capexUSD = 'ignored';
   (withDocHelpers.series as Record<string, unknown>)._example_capexUSD = [1, 2, 3];
+  (withDocHelpers.series as Record<string, unknown>)._unit_capexUSD = 'USD millions';
   const parsedWithDocHelpers = parseProjectJsonV1(withDocHelpers);
-  assertEqual(parsedWithDocHelpers.engineInputWithoutPrices.masterN, withDocHelpers.time.masterN, 'parse ignores _description_/_example_ helper keys');
+  assertEqual(parsedWithDocHelpers.engineInputWithoutPrices.masterN, withDocHelpers.time.masterN, 'parse ignores _description_/_example_/_unit_ helper keys');
 
 
   const metalMismatchUnits = getProjectJsonV1Template();
@@ -345,6 +346,28 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assert(parsedDedup.diagnostics.normalization.some((item) => item.rule === 'dedup_identical_site_ganda_overlap'), 'dedup diagnostics captured');
   assert(parsedNullZeroDedup.diagnostics.normalization.some((item) => item.summary.includes('Auto-resolved duplicate siteGandA')), 'null/zero equivalent dedup diagnostics captured');
   assert(parsedOzUnit.diagnostics.normalization.some((item) => item.rule === 'qty_unit_oz_to_toz'), 'unit normalization diagnostics captured');
+
+  const likelyMoneyScaleMismatch = getProjectJsonV1Template();
+  likelyMoneyScaleMismatch.series.capexUSD = [250000000, 0, 0, 0, 0, 0];
+  const parsedLikelyMoneyScaleMismatch = parseProjectJsonV1(likelyMoneyScaleMismatch);
+  assert(
+    parsedLikelyMoneyScaleMismatch.warnings.some((warning) => warning.includes('series.capexUSD') && warning.includes('possible scale mismatch')),
+    'large monetary values emit likely scale mismatch warning',
+  );
+
+  const likelyTonnageScaleMismatch = getProjectJsonV1Template();
+  if (likelyTonnageScaleMismatch.operations == null) {
+    throw new Error('template.operations must be present');
+  }
+  likelyTonnageScaleMismatch.time.productionStartPeriod = 0;
+  likelyTonnageScaleMismatch.time.productionStartYear = new Date().getUTCFullYear();
+  likelyTonnageScaleMismatch.operations.oreMinedTonnes = [1.2, 0, 0, 0, 0, 0];
+  const parsedLikelyTonnageScaleMismatch = parseProjectJsonV1(likelyTonnageScaleMismatch);
+  assert(
+    parsedLikelyTonnageScaleMismatch.warnings.some((warning) => warning.includes('operations.oreMinedTonnes') && warning.includes('whole tonnes')),
+    'small tonnage values emit likely scale mismatch warning',
+  );
+
 
   const invalidOperations = getProjectJsonV1Template();
   if (invalidOperations.operations == null) {

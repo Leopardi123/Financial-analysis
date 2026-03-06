@@ -4,6 +4,8 @@ import { PRICE_KEY_DEFINITIONS } from '../../prices/keys.ts';
 type NullableNumberSeries = Array<number | null>;
 
 const DEFAULT_MASTER_N = 10;
+const MONEY_UNIT_SCALE = 'USD millions';
+const TONNAGE_UNIT_SCALE = 'tonnes';
 
 const ECONOMICS_BREAKDOWN_SOURCE_CHOICES = ['FS', 'Other', 'PEA', 'PFS'] as const;
 const ORE_TONNAGE_UNIT_CHOICES = ['long_ton', 'short_ton', 'tonne'] as const;
@@ -166,6 +168,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
 
   const output = {
     version: 'project_json_v2',
+    _description_numeric_scale: `Global input scale: enter all monetary series in ${MONEY_UNIT_SCALE} (not full USD), and enter tonnage/quantity series in ${TONNAGE_UNIT_SCALE} unless a metal-specific payableQtyUnitByMetal says otherwise.`,
     _choices_version: [...VERSION_CHOICES],
     meta: {
       projectId: typeof meta.projectId === 'string' ? meta.projectId : '',
@@ -207,25 +210,44 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     },
     series: {
       capexUSD: normalizeSeries(series.capexUSD, seriesLength),
-      _description_capexUSD: 'Per-period capital expenditure aligned to the common 0-based period index t=0..masterN.',
+      _description_capexUSD: 'Per-period capital expenditure aligned to t=0..masterN. Enter values in USD millions, not full USD.',
       _example_capexUSD: [61.54, 159.11, 0, 5.75],
+      _unit_capexUSD: MONEY_UNIT_SCALE,
       operatingCostsUSD: normalizeSeries(series.operatingCostsUSD, seriesLength),
-      _description_operatingCostsUSD: 'Per-period operating costs aligned to the common 0-based period index t=0..masterN.',
+      _description_operatingCostsUSD: 'Per-period operating costs aligned to t=0..masterN. Enter values in USD millions, not full USD.',
       _example_operatingCostsUSD: [0, 0, 120.5, 121.1],
+      _unit_operatingCostsUSD: MONEY_UNIT_SCALE,
       sustainingCapexUSD: normalizeSeries(series.sustainingCapexUSD, seriesLength),
-      _description_sustainingCapexUSD: 'Per-period sustaining capital aligned to the common 0-based period index t=0..masterN.',
+      _description_sustainingCapexUSD: 'Per-period sustaining capital aligned to t=0..masterN. Enter values in USD millions, not full USD.',
       _example_sustainingCapexUSD: [0, 0, 12.0, 14.5],
+      _unit_sustainingCapexUSD: MONEY_UNIT_SCALE,
+      _description_revenueUSD: 'Per-period project revenue (if entered in upstream workflows) must use USD millions, not full USD.',
+      _example_revenueUSD: [0, 0, 256.8, 260.1],
+      _unit_revenueUSD: MONEY_UNIT_SCALE,
+      _description_taxesUSD: 'Per-period total taxes (if entered/overridden upstream) must use USD millions, not full USD.',
+      _example_taxesUSD: [0, 0, 35.2, 36.0],
+      _unit_taxesUSD: MONEY_UNIT_SCALE,
       siteGandA_USD: normalizeSeries(series.siteGandA_USD, seriesLength),
       depreciationUSD: normalizeSeries(series.depreciationUSD, seriesLength),
       workingCapitalDeltaUSD: normalizeSeries(series.workingCapitalDeltaUSD, seriesLength),
+      _description_workingCapitalUSD: 'Use series.workingCapitalDeltaUSD for per-period working-capital movement. Enter values in USD millions, not full USD.',
+      _example_workingCapitalUSD: [0, 0, -5.2, 1.1],
+      _unit_workingCapitalUSD: MONEY_UNIT_SCALE,
       royaltiesUSD: normalizeSeries(series.royaltiesUSD, seriesLength),
+      _description_royaltiesUSD: 'Per-period royalties aligned to t=0..masterN. Enter values in USD millions, not full USD.',
+      _example_royaltiesUSD: [0, 0, 12.4, 12.8],
+      _unit_royaltiesUSD: MONEY_UNIT_SCALE,
       reclamationUSD: normalizeSeries(series.reclamationUSD, seriesLength),
       byproductCreditsUSD: normalizeSeries(series.byproductCreditsUSD, seriesLength),
     },
     metals: {
       payableQtyByMetal: normalizeSeriesMap(metals.payableQtyByMetal, seriesLength),
-      _description_payableQtyByMetal: 'Per-period payable quantity by metal; each metal array must align to t=0..masterN.',
+      _description_payableQtyByMetal: 'Per-period payable quantity by metal; each metal array must align to t=0..masterN. Enter physical quantities in whole units, with unit defined by payableQtyUnitByMetal.',
       _example_payableQtyByMetal: { Au: [0, 0, 100, 100], Cu: [0, 0, 2000, 2000] },
+      _unit_payableQtyByMetal: 'Physical units per payableQtyUnitByMetal (no thousand/million scaling)',
+      _description_producedQtyByMetal: 'If you track produced quantities externally, use the same scale convention as payableQtyByMetal: whole physical units defined by each metal unit map.',
+      _example_producedQtyByMetal: { Au: [0, 0, 105, 104], Cu: [0, 0, 2100, 2050] },
+      _unit_producedQtyByMetal: 'Physical units per metal (no thousand/million scaling)',
       payableQtyUnitByMetal: normalizeQtyUnitMap(metals.payableQtyUnitByMetal),
       priceKeyByMetal: normalizeStringMap(metals.priceKeyByMetal),
       auPriceKey: typeof metals.auPriceKey === 'string' ? metals.auPriceKey : '',
@@ -249,8 +271,12 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
       },
       oreMilledTonnes: normalizeSeries(operations.oreMilledTonnes, seriesLength),
       oreMinedTonnes: normalizeSeries(operations.oreMinedTonnes, seriesLength),
-      _description_oreMinedTonnes: 'Per-period ore mined tonnes aligned to the common 0-based period index t=0..masterN.',
+      _description_oreMinedTonnes: 'Per-period ore mined tonnes aligned to t=0..masterN. Enter whole tonnes (not thousand tonnes or million tonnes).',
       _example_oreMinedTonnes: [1000, 1000, 1200, 1300],
+      _unit_oreMinedTonnes: TONNAGE_UNIT_SCALE,
+      _description_oreProcessedTonnes: 'Use operations.oreMilledTonnes as ore processed tonnes. Enter whole tonnes (not thousand tonnes or million tonnes).',
+      _example_oreProcessedTonnes: [950, 980, 1180, 1280],
+      _unit_oreProcessedTonnes: TONNAGE_UNIT_SCALE,
       oreTonnageUnit: operations.oreTonnageUnit === 'tonne' || operations.oreTonnageUnit === 'short_ton' || operations.oreTonnageUnit === 'long_ton' ? operations.oreTonnageUnit : null,
       _choices_oreTonnageUnit: [...ORE_TONNAGE_UNIT_CHOICES],
       gradeByMetal: normalizeSeriesMap(operations.gradeByMetal, seriesLength),

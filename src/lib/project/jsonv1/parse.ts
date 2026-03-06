@@ -22,7 +22,7 @@ function stripChoiceKeysDeep<T>(value: T): T {
 
   const out: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
-    if (key.startsWith('_choices_') || key.startsWith('_description_') || key.startsWith('_example_')) {
+    if (key.startsWith('_choices_') || key.startsWith('_description_') || key.startsWith('_example_') || key.startsWith('_unit_')) {
       continue;
     }
     out[key] = stripChoiceKeysDeep(nested);
@@ -649,6 +649,45 @@ export type ParsedProjectJsonV1 = {
   warnings: string[];
 };
 
+
+function getMaxAbs(series: Array<number | null>): number {
+  let maxAbs = 0;
+  for (const value of series) {
+    if (isFiniteNumber(value)) {
+      maxAbs = Math.max(maxAbs, Math.abs(value));
+    }
+  }
+  return maxAbs;
+}
+
+function maybeWarnLikelyScaleIssue(args: {
+  path: string;
+  expectedScale: string;
+  series: Array<number | null>;
+  threshold: number;
+  hint: string;
+  warnings: string[];
+}): void {
+  const { path, expectedScale, series, threshold, hint, warnings } = args;
+  const maxAbs = getMaxAbs(series);
+  if (maxAbs >= threshold) {
+    warnings.push(`${path}: detected very large value (${maxAbs}) for expected scale ${expectedScale}; possible scale mismatch (${hint}).`);
+  }
+}
+
+function maybeWarnLikelyTonnageScaleIssue(args: {
+  path: string;
+  expectedScale: string;
+  series: Array<number | null>;
+  warnings: string[];
+}): void {
+  const { path, expectedScale, series, warnings } = args;
+  const tinyFraction = series.find((value) => isFiniteNumber(value) && value > 0 && value < 5);
+  if (tinyFraction !== undefined) {
+    warnings.push(`${path}: found small positive value (${tinyFraction}) for expected scale ${expectedScale}; if you intended thousand/million tonnes, convert to whole units.`);
+  }
+}
+
 function normalizeSpendSeriesAbs(
   series: Array<number | null>,
   warningMessage: string,
@@ -872,6 +911,31 @@ export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
   }
   const depreciationUSD = depreciationNormalized?.series;
 
+  maybeWarnLikelyScaleIssue({
+    path: 'series.capexUSD',
+    expectedScale: 'USD millions',
+    series: capexUSD,
+    threshold: 1_000_000,
+    hint: 'entered full USD instead of USD millions',
+    warnings,
+  });
+  maybeWarnLikelyScaleIssue({
+    path: 'series.sustainingCapexUSD',
+    expectedScale: 'USD millions',
+    series: sustainingCapexUSD,
+    threshold: 1_000_000,
+    hint: 'entered full USD instead of USD millions',
+    warnings,
+  });
+  maybeWarnLikelyScaleIssue({
+    path: 'series.operatingCostsUSD',
+    expectedScale: 'USD millions',
+    series: operatingCostsUSD,
+    threshold: 1_000_000,
+    hint: 'entered full USD instead of USD millions',
+    warnings,
+  });
+
   const economicsBreakdown = parseEconomicsBreakdown(raw.economicsBreakdown, masterN, siteGandA_USD, hasSeriesSiteGandAInput, normalizationDiagnostics);
 
   if (!isPlainObject(raw.metals)) {
@@ -940,6 +1004,13 @@ export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
     }
     assertKnownPriceKey(`priceKeyByMetal.${metal}`, normalizedPriceKey);
     priceKeyByMetal[metal] = normalizedPriceKey;
+
+    maybeWarnLikelyTonnageScaleIssue({
+      path: `metals.payableQtyByMetal.${metal}`,
+      expectedScale: 'whole physical units per payableQtyUnitByMetal',
+      series: payableQtyByMetal[metal],
+      warnings,
+    });
   }
 
   const extraUnitKeys = Object.keys(raw.metals.payableQtyUnitByMetal).filter((key) => !(key in payableQtyByMetal));
@@ -1001,6 +1072,22 @@ export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
   const parsedOperations = raw.operations === undefined ? undefined : parseOperations(raw.operations, masterN, normalizationDiagnostics);
   const operations = parsedOperations?.operations;
   projectSeriesNormalized = projectSeriesNormalized || (parsedOperations?.normalized ?? false);
+  if (operations?.oreMinedTonnes) {
+    maybeWarnLikelyTonnageScaleIssue({
+      path: 'operations.oreMinedTonnes',
+      expectedScale: 'whole tonnes',
+      series: operations.oreMinedTonnes,
+      warnings,
+    });
+  }
+  if (operations?.oreMilledTonnes) {
+    maybeWarnLikelyTonnageScaleIssue({
+      path: 'operations.oreMilledTonnes',
+      expectedScale: 'whole tonnes',
+      series: operations.oreMilledTonnes,
+      warnings,
+    });
+  }
 
   const explicitOverrides = raw.priceOverrides;
   if (explicitOverrides !== undefined && explicitOverrides !== null && !isPlainObject(explicitOverrides)) {
