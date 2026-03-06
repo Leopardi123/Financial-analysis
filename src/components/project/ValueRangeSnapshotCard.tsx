@@ -50,6 +50,22 @@ function formatPerShareValue(value: number): string {
   });
 }
 
+function computeViewWindow(domainValues: number[]): { min: number; max: number } | null {
+  if (domainValues.length < 1) return null;
+  const min = Math.min(...domainValues);
+  const max = Math.max(...domainValues);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  if (max === min) {
+    const pad = Math.max(Math.abs(max) * 0.08, 0.5);
+    return { min: min - pad, max: max + pad };
+  }
+  const span = max - min;
+  return {
+    min: min - span * 0.12,
+    max: max + span * 0.12,
+  };
+}
+
 function resolveLabelPair(highY: number | null, lowY: number | null): { high: number; low: number } | null {
   if (highY === null || lowY === null) return null;
   let high = clamp(highY, Y_TOP, Y_BOTTOM);
@@ -203,19 +219,21 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         orderedLow,
         orderedHigh,
         currentMarker,
-        currentMarker !== null && !suppressCurrentPriceLabel ? `  ↗ ${formatPerShareValue(currentMarker)}` : null,
+        currentMarker !== null && !suppressCurrentPriceLabel ? `      ${formatPerShareValue(currentMarker)}` : null,
         currentLowMarker,
-        currentLowMarker !== null ? `  ↖ ${formatPerShareValue(currentLowMarker)}` : null,
+        currentLowMarker !== null ? `      ${formatPerShareValue(currentLowMarker)}` : null,
         currentHighMarker,
-        currentHighMarker !== null ? `  ↗ ${formatPerShareValue(currentHighMarker)}` : null,
+        currentHighMarker !== null ? `      ${formatPerShareValue(currentHighMarker)}` : null,
         tpLowMarker,
-        tpLowMarker !== null ? `  ↖ ${formatPerShareValue(tpLowMarker)}` : null,
+        tpLowMarker !== null ? `      ${formatPerShareValue(tpLowMarker)}` : null,
         tpHighMarker,
-        tpHighMarker !== null ? `  ↗ ${formatPerShareValue(tpHighMarker)}` : null,
+        tpHighMarker !== null ? `      ${formatPerShareValue(tpHighMarker)}` : null,
       ]);
     }
 
     if (domainValues.length < 1) return null;
+    const valueWindow = computeViewWindow(domainValues);
+    if (!valueWindow) return null;
     return {
       yearNow,
       data: [
@@ -239,10 +257,11 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         ...rows,
       ] as (string | number | null | { role: string; type?: string })[][],
       ticks: [
-        { v: yearNow - 1, f: String(yearNow - 1) },
+        { v: yearNow - 1, f: "" },
         { v: yearNow, f: String(yearNow) },
         { v: yearTp, f: String(yearTp) },
       ],
+      valueWindow,
     };
   }, [chartFlows, currentYear, isProjectMode, npvHigh, npvLow, priceToday, tpHigh, tpLow, tpYear]);
 
@@ -255,14 +274,14 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         <Chart
           chartType="ComboChart"
           width="100%"
-          height="260px"
+          height="220px"
           data={projectChartModel.data}
           options={{
             backgroundColor: "#e0e9ce",
             legend: { position: "none" },
             isStacked: true,
             areaOpacity: 0.32,
-            chartArea: { left: 64, right: 56, top: 16, bottom: 36, width: "100%", height: "75%" },
+            chartArea: { left: 64, right: 56, top: 14, bottom: 30, width: "100%", height: "68%" },
             hAxis: {
               textStyle: { color: "#1f2937", fontSize: 11 },
               gridlines: { color: "transparent", count: 0 },
@@ -278,6 +297,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               gridlines: { color: "transparent", count: 0 },
               minorGridlines: { color: "transparent", count: 0 },
               baselineColor: "transparent",
+              viewWindowMode: "explicit",
+              viewWindow: projectChartModel.valueWindow,
             },
             tooltip: { trigger: "none" },
             interpolateNulls: false,
