@@ -84,7 +84,7 @@ test('grade/recovery rows precede payable and derived revenue rows include EBITD
   assert(labels.includes('Revenue Au (USD)'));
   assert(labels.includes('Gross revenue (USD)'));
   assert(labels.includes('Gross profit (USD)'));
-  assert(labels.includes('Royalties (USD)'));
+  assert(!labels.includes('Royalties (USD)'));
   assert(labels.includes('EBITDA (USD)'));
 
   const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
@@ -92,8 +92,29 @@ test('grade/recovery rows precede payable and derived revenue rows include EBITD
   assert.deepEqual(byLabel.get('Revenue Au (USD)'), [2000000, 1995000]);
   assert.deepEqual(byLabel.get('Gross revenue (USD)'), [2008000, 2003610]);
   assert.deepEqual(byLabel.get('Gross profit (USD)'), [1208000, 1193610]);
-  assert.deepEqual(byLabel.get('Royalties (USD)'), [0, 0]);
   assert.deepEqual(byLabel.get('EBITDA (USD)'), [1208000, 1193610]);
+});
+
+test('rows are shown only when at least one cell has a real value', () => {
+  const model = buildOperationsGridModel({
+    masterN: 3,
+    productionStartPeriod: 0,
+    yearsByPeriod: [2024, 2025, 2026, 2027],
+    operations: {
+      oreMinedTonnes: [0, 0, 0, 0],
+      oreMilledTonnes: [0, 0, 125000, 0],
+      oreTonnageUnit: 'tonne',
+    },
+    metals: {
+      payableQtyByMetal: { Au: [0, -5, 0, 0] },
+      payableQtyUnitByMetal: { Au: 'toz' },
+    },
+  });
+
+  const labels = model.rows.map((row) => row.label);
+  assert(!labels.includes('Ore mined (tonne)'));
+  assert(labels.includes('Ore milled (tonne)'));
+  assert(labels.includes('Payable Au (toz)'));
 });
 
 test('royalties detail drives royalties row and EBITDA consistently', () => {

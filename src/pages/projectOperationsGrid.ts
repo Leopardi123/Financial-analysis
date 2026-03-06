@@ -1,3 +1,5 @@
+import { rowHasDisplayValue } from '../lib/project/rowDisplayValue.ts';
+
 export type OperationsGridInput = {
   masterN: number;
   productionStartPeriod: number | null;
@@ -278,7 +280,7 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
     years,
     tIndex,
     tMinusTp,
-    rows,
+    rows: rows.filter((row) => rowHasDisplayValue(row.values)),
     totals,
     capacity: {
       throughputUnit: input.operations?.capacity?.throughputUnit ?? null,

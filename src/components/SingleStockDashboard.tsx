@@ -13,6 +13,7 @@ import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
+import { rowHasDisplayValue } from "../lib/project/rowDisplayValue.ts";
 import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
@@ -3125,10 +3126,6 @@ Capital Available: ${availableLabel}`,
 
     const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
     const getSeries = (raw: unknown): Array<number | null> | null => (Array.isArray(raw) ? raw as Array<number | null> : null);
-    const hasAnySeriesValue = (series: Array<number | null> | null | undefined): boolean => (
-      Array.isArray(series) && series.some((value) => value !== null && Number.isFinite(value))
-    );
-
     const payableUnits = parsedSelectedProject.engineInputWithoutPrices.payableQtyUnitByMetal ?? {};
     const payableSeriesByMetal = parsedSelectedProject.engineInputWithoutPrices.payableQtyByMetal ?? {};
     const gradeByMetal = parsedSelectedProject.context.operations?.gradeByMetal ?? {};
@@ -3159,19 +3156,19 @@ Capital Available: ${availableLabel}`,
         const unit = gradeUnitByMetal[metal] ?? '—';
         const label = `Grade ${metal} (${unit})`;
         const values = seriesByLabel.get(label) ?? null;
-        if (!values || !hasAnySeriesValue(values)) return null;
+        if (!rowHasDisplayValue(values)) return null;
         return { label, values };
       }),
       ...orderedPayableMetals.map((metal) => {
         const label = `Recovery ${metal} (%)`;
         const values = seriesByLabel.get(label) ?? null;
-        if (!values || !hasAnySeriesValue(values)) return null;
+        if (!rowHasDisplayValue(values)) return null;
         return { label, values };
       }),
       ...orderedMetals.map((metal) => {
         const values = getSeries(payableSeriesByMetal[metal]);
         const unit = payableUnits[metal];
-        const include = values !== null && (hasAnySeriesValue(values) || payableSeriesByMetal[metal] !== undefined);
+        const include = rowHasDisplayValue(values);
         return {
           label: `Payable ${metal} (${unit ?? '—'})`,
           values: include ? values : null,
@@ -3181,7 +3178,7 @@ Capital Available: ${availableLabel}`,
 
     const revenueRows = orderedMetals
       .map((metal) => ({ label: `Revenue ${metal} (USD)`, values: seriesByLabel.get(`Revenue ${metal} (USD)`) ?? null }))
-      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const royaltiesFromDetail = (() => {
       const detail = projectSeriesRecord.royaltiesDetail as Array<Record<string, unknown>> | undefined;
@@ -3212,7 +3209,7 @@ Capital Available: ${availableLabel}`,
       { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) },
       { label: 'Royalties (USD)', values: royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD) },
     ]
-      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const taxRows = [
       ['Taxable income (USD)', projectSeriesRecord.taxableIncomeUSD],
@@ -3220,7 +3217,7 @@ Capital Available: ${availableLabel}`,
       ['Effective tax rate', projectSeriesRecord.effectiveTaxRate],
     ]
       .map(([label, values]) => ({ label, values: getSeries(values) }))
-      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const capitalRows = [
       ['Sustaining capex (USD)', projectSeriesRecord.sustainingCapexUSD],
@@ -3229,14 +3226,14 @@ Capital Available: ${availableLabel}`,
       ['Byproduct credits (USD)', projectSeriesRecord.byproductCreditsUSD],
     ]
       .map(([label, values]) => ({ label, values: getSeries(values) }))
-      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const investmentRows = [
       ['Capex (USD)', projectSeriesRecord.capexUSD],
       ['FCFF (USD)', projectSeriesRecord.fcffUSD],
     ]
       .map(([label, values]) => ({ label, values: getSeries(values) }))
-      .filter((row) => row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
+      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const groupedRows: Array<{ type: 'divider'; label: string } | { type: 'data'; label: string; values: Array<number | null> }> = [];
     const addSection = (label: string, rows: Array<{ label: string; values: Array<number | null> }>) => {
