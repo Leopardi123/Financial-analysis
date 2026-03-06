@@ -2900,6 +2900,37 @@ export async function runCorporateSnapshotPipeline(args: {
 
     if (projects.length === 1) {
       const fxForRange = typeof fxRate === 'number' && Number.isFinite(fxRate) ? fxRate : null;
+      const chartFlows = (() => {
+        if (tpEff === null || tpEff < 0 || tpEff > aggregationEffective.corporateMasterN) {
+          return {
+            dcfProdstartPresentPerShareSeries: [] as Array<number | null>,
+            navProdstartPerShareSeries: [] as Array<number | null>,
+          };
+        }
+        const rangeEnd = Math.min(aggregationEffective.corporateMasterN, tpEff + 5);
+        const dcfProdstartPresentPerShareSeries: Array<number | null> = [];
+        const navProdstartPerShareSeries: Array<number | null> = [];
+        for (let tp = tpEff; tp <= rangeEnd; tp += 1) {
+          const metricsAtTp = computeLista2CfDcfMetrics({
+            fcfUSD_total: aggregationEffective.fcffUSD_total,
+            capexUSD_total: aggregationEffective.capexUSD_total,
+            masterN: aggregationEffective.corporateMasterN,
+            productionStartPeriod: tp,
+            discountRate: input.discountRate,
+            shares_post_financing: shares_post_financing_fd_effective,
+            fx_USD_to_TargetCurrency: fxRate,
+            npvToday_USD: aggregationEffective.NPV_today_USD,
+            netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+          });
+          dcfProdstartPresentPerShareSeries.push(metricsAtTp.metrics.DCF_prodStart_present_perShare_TargetCurrency);
+          navProdstartPerShareSeries.push(metricsAtTp.metrics.NAV_prodStart_perShare_TargetCurrency);
+        }
+        return {
+          dcfProdstartPresentPerShareSeries,
+          navProdstartPerShareSeries,
+        };
+      })();
+
       const buildNpvRangeSeries = (fcffUSD: Array<number | null>): NpvSpotRangeSeries => {
         const npvSeriesUSD = computeNpvSeriesFromFcff({
           fcffUSD,
@@ -3060,6 +3091,7 @@ export async function runCorporateSnapshotPipeline(args: {
         : null;
 
       (snapshot as Record<string, unknown>).project = {
+        chartFlows,
         modeled: {
           npvSpotRange,
         },
