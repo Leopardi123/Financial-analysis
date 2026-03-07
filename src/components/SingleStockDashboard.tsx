@@ -96,6 +96,30 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function normalizeRoyaltyToken(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRoyaltyRateType(value: unknown): string | null {
+  const token = normalizeRoyaltyToken(value);
+  if (token === null) return null;
+  const compact = token.replace(/_/g, "");
+  if (compact === "nsrpct") return "nsr_pct";
+  if (compact === "advalorempct") return "ad_valorem_pct";
+  return token;
+}
+
+function parseRoyaltyRate(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function formatCompactNumber(value: number, digits = 1): string {
   const abs = Math.abs(value);
   if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(digits)}B`;
@@ -3208,26 +3232,31 @@ Capital Available: ${availableLabel}`,
       .map((metal) => ({ label: `Revenue ${metal} (USD)`, values: seriesByLabel.get(`Revenue ${metal} (USD)`) ?? null }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
-    const royaltiesFromDetail = (() => {
-      const detail = projectSeriesRecord.royaltiesDetail as Array<Record<string, unknown>> | undefined;
-      if (!Array.isArray(detail) || detail.length === 0) return null;
-      const first = detail[0]?.royaltyUSD;
-      if (!Array.isArray(first)) return null;
-      return Array.from({ length: first.length }, (_, t) => {
-        let sum = 0;
-        let hasFinite = false;
-        for (const item of detail) {
-          const series = item.royaltyUSD as Array<number | null> | undefined;
-          const value = series?.[t];
-          if (typeof value === 'number' && Number.isFinite(value)) {
-            sum += value;
-            hasFinite = true;
-          }
-        }
-        return hasFinite ? sum : null;
-      });
-    })();
+    const detailRules = Array.isArray(projectSeriesRecord.royaltiesDetail)
+      ? projectSeriesRecord.royaltiesDetail as Array<Record<string, unknown>>
+      : [];
+    const computableDetailRules = detailRules
+      .map((detail) => ({
+        baseNormalized: normalizeRoyaltyToken(detail.base),
+        rateTypeNormalized: normalizeRoyaltyRateType(detail.rateType),
+        rateParsed: parseRoyaltyRate(detail.rate),
+      }))
+      .filter((detail) => detail.baseNormalized === 'revenue'
+        && (detail.rateTypeNormalized === 'nsr_pct' || detail.rateTypeNormalized === 'ad_valorem_pct')
+        && detail.rateParsed !== null);
+
     const grossRevenueSeries = seriesByLabel.get('Gross revenue (USD)') ?? getSeries(projectSeriesRecord.totalRevenue_USD);
+    const royaltiesFromDetail = computableDetailRules.length > 0
+      ? Array.from({ length: base.tMinusTp.length }, (_, t) => {
+        const grossRevenue = grossRevenueSeries?.[t] ?? null;
+        if (!isFiniteNumber(grossRevenue)) return null;
+        let sum = 0;
+        for (const rule of computableDetailRules) {
+          sum += grossRevenue * ((rule.rateParsed as number) / 100);
+        }
+        return sum;
+      })
+      : null;
     const resolvedRoyaltiesUSD = royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD);
     const royaltyRatePct = Array.from({ length: base.tMinusTp.length }, (_, t) => {
       if (!royaltiesFromDetail) return null;
@@ -3319,25 +3348,43 @@ Capital Available: ${availableLabel}`,
     const orderedRevenueMetals = Object.keys(revenueByMetal).sort((a, b) => a.localeCompare(b));
     const grossRevenue = seriesOrNull(record.totalRevenue_USD);
     const operatingCosts = seriesOrNull(record.operatingCostsUSD);
-    const royalties = (() => {
-      const detail = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
-      if (detail.length > 0 && Array.isArray(detail[0]?.royaltyUSD)) {
-        const n = (detail[0].royaltyUSD as Array<unknown>).length;
-        return Array.from({ length: n }, (_, t) => {
-          let sum = 0;
-          let hasFinite = false;
-          for (const item of detail) {
-            const value = Array.isArray(item.royaltyUSD) ? item.royaltyUSD[t] : null;
-            if (typeof value === "number" && Number.isFinite(value)) {
-              sum += value;
-              hasFinite = true;
-            }
-          }
-          return hasFinite ? sum : null;
-        });
-      }
-      return seriesOrNull(record.royaltiesUSD);
-    })();
+    const detailRules = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
+    const computableDetailRules = detailRules
+      .map((detail) => ({
+        baseNormalized: normalizeRoyaltyToken(detail.base),
+        rateTypeNormalized: normalizeRoyaltyRateType(detail.rateType),
+        rateParsed: parseRoyaltyRate(detail.rate),
+      }))
+      .filter((detail) => detail.baseNormalized === "revenue"
+        && (detail.rateTypeNormalized === "nsr_pct" || detail.rateTypeNormalized === "ad_valorem_pct")
+        && detail.rateParsed !== null);
+    const detailRateResolved = computableDetailRules[0]?.rateParsed ?? null;
+    const royaltiesFromDetail = computableDetailRules.length > 0
+      ? Array.from({ length: grossRevenue?.length ?? 0 }, (_, t) => {
+        const revenue = grossRevenue?.[t] ?? null;
+        if (!isFiniteNumber(revenue)) return null;
+        let sum = 0;
+        for (const rule of computableDetailRules) {
+          sum += revenue * ((rule.rateParsed as number) / 100);
+        }
+        return sum;
+      })
+      : null;
+    const royaltiesSourceUsed = Array.isArray(royaltiesFromDetail)
+      ? "royaltiesDetail-current-run"
+      : Array.isArray(record.royaltiesUSD)
+        ? "series.royaltiesUSD-fallback"
+        : "null";
+    const royalties = royaltiesFromDetail ?? seriesOrNull(record.royaltiesUSD);
+    const royaltyRatePercentResolved = royaltiesSourceUsed === "royaltiesDetail-current-run" ? detailRateResolved : null;
+    const royaltiesResolvedNumeric = Array.isArray(royalties) && royalties.some((value) => isFiniteNumber(value));
+    const royaltiesFailureReason = royaltiesResolvedNumeric
+      ? null
+      : royaltiesSourceUsed === "null"
+        ? "No royalties source resolved (neither computable royaltiesDetail nor series.royaltiesUSD)"
+        : royaltiesSourceUsed === "series.royaltiesUSD-fallback"
+          ? "Current-run royaltiesDetail not computable; fallback series.royaltiesUSD contains no numeric values"
+          : "Current-run royaltiesDetail computable, but grossRevenueUSD is null in all periods";
     const grossProfit = seriesOrNull(record.grossProfitUSD);
     const ebitda = seriesOrNull(record.ebitdaUSD);
     const ebit = seriesOrNull(record.ebitUSD);
@@ -3357,6 +3404,16 @@ Capital Available: ${availableLabel}`,
     return {
       singleSourceOfTruth: "Instrumentbräda-tabellen läser värden från projectSnapshotData.series (samma källa för raderna i Production → P&L → FCFF).",
       note: "Inga dolda avdrag i UI: negativa EBIT/FCFF kommer från explicita seriekomponenter (costs, royalties, G&A, tax, capex, etc.).",
+      royaltiesDetailPresent: Array.isArray(record.royaltiesDetail),
+      royaltiesDetailRuleCount: detailRules.length,
+      royaltiesDetailComputable: computableDetailRules.length > 0,
+      royaltiesDetailBaseNormalized: computableDetailRules[0]?.baseNormalized ?? null,
+      royaltiesDetailRateTypeNormalized: computableDetailRules[0]?.rateTypeNormalized ?? null,
+      royaltiesDetailRateParsed: detailRateResolved,
+      royaltyRatePercentResolved,
+      royaltiesSourceUsed,
+      royaltiesResolvedNumeric,
+      royaltiesFailureReason,
       ebitSpotlight: firstNegativeEbitPeriod >= 0
         ? {
           t: firstNegativeEbitPeriod,
