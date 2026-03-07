@@ -16,6 +16,7 @@ import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { rowHasDisplayValue } from "../lib/project/rowDisplayValue.ts";
 import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
+import { buildProjectGridPnl } from "../pages/projectGridPnl.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import {
@@ -3176,64 +3177,79 @@ Capital Available: ${availableLabel}`,
       }),
     ].filter((row) => row && row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
 
-    const revenueRows = orderedMetals
-      .map((metal) => ({ label: `Revenue ${metal} (USD)`, values: seriesByLabel.get(`Revenue ${metal} (USD)`) ?? null }))
-      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
+    const projectGridPnl = buildProjectGridPnl(projectSeriesRecord as {
+      revenueByMetal_USD?: Record<string, Array<number | null>>;
+      operatingCostsUSD?: Array<number | null>;
+      sustainingCapexUSD?: Array<number | null>;
+      siteGandA_USD?: Array<number | null>;
+      royaltiesUSD?: Array<number | null>;
+      royaltiesDetail?: Array<{ id: string; label: string; royaltyUSD?: Array<number | null> }>;
+      reclamationUSD?: Array<number | null>;
+      byproductCreditsUSD?: Array<number | null>;
+      sustainingCostUSD?: Array<number | null>;
+      depreciationUSD?: Array<number | null>;
+      taxUSD?: Array<number | null>;
+      workingCapitalDeltaUSD?: Array<number | null>;
+      capexUSD?: Array<number | null>;
+      totalCapexUSD?: Array<number | null>;
+    }, base.columnCount);
 
-    const royaltiesFromDetail = (() => {
-      const detail = projectSeriesRecord.royaltiesDetail as Array<Record<string, unknown>> | undefined;
-      if (!Array.isArray(detail) || detail.length === 0) return null;
-      const first = detail[0]?.royaltyUSD;
-      if (!Array.isArray(first)) return null;
-      return Array.from({ length: first.length }, (_, t) => {
-        let sum = 0;
-        let hasFinite = false;
-        for (const item of detail) {
-          const series = item.royaltyUSD as Array<number | null> | undefined;
-          const value = series?.[t];
-          if (typeof value === 'number' && Number.isFinite(value)) {
-            sum += value;
-            hasFinite = true;
-          }
-        }
-        return hasFinite ? sum : null;
-      });
-    })();
+    const revenueRows = orderedMetals
+      .map((metal) => ({ label: `Revenue ${metal} (USD)`, values: projectGridPnl.revenueByMetal[metal] ?? null }))
+      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const pAndLCoreRows = [
       ...revenueRows,
-      { label: 'Gross revenue (USD)', values: seriesByLabel.get('Gross revenue (USD)') ?? null },
-      { label: 'Gross profit (USD)', values: seriesByLabel.get('Gross profit (USD)') ?? null },
+      { label: 'Gross revenue (USD)', values: projectGridPnl.grossRevenue },
+      { label: 'Gross profit (USD)', values: projectGridPnl.grossProfit },
       { label: 'EBITDA (USD, includes royalties)', values: seriesByLabel.get('EBITDA (USD, includes royalties)') ?? null },
-      { label: 'EBIT (USD)', values: getSeries(projectSeriesRecord.ebitUSD) },
-      { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) },
-      { label: 'Royalties (USD)', values: royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD) },
+      { label: 'EBIT (USD)', values: projectGridPnl.ebit },
+      { label: 'Operating costs (USD)', values: projectGridPnl.operatingCosts },
+      { label: 'Royalties (USD)', values: projectGridPnl.royalties },
     ]
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const taxRows = [
-      ['Taxable income (USD)', projectSeriesRecord.taxableIncomeUSD],
-      ['Tax (USD)', projectSeriesRecord.taxUSD],
-      ['Effective tax rate', projectSeriesRecord.effectiveTaxRate],
+      { label: 'Taxable income (USD)', values: projectGridPnl.taxableIncome },
+      { label: 'Tax (USD)', values: projectGridPnl.tax },
+      { label: 'Effective tax rate', values: projectGridPnl.effectiveTaxRate },
     ]
-      .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const capitalRows = [
-      ['Sustaining capex (USD)', projectSeriesRecord.sustainingCapexUSD],
-      ['Reclamation (USD)', projectSeriesRecord.reclamationUSD],
-      ['Working capital delta (USD)', projectSeriesRecord.workingCapitalDeltaUSD],
-      ['Byproduct credits (USD)', projectSeriesRecord.byproductCreditsUSD],
+      { label: 'Sustaining capex (USD)', values: projectGridPnl.sustainingCapex },
+      { label: 'Reclamation (USD)', values: projectGridPnl.reclamation },
+      { label: 'Working capital delta (USD)', values: projectGridPnl.workingCapitalDelta },
+      { label: 'Byproduct credits (USD)', values: projectGridPnl.byproductCredits },
     ]
-      .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const investmentRows = [
-      ['Capex (USD)', projectSeriesRecord.capexUSD],
-      ['FCFF (USD)', projectSeriesRecord.fcffUSD],
+      { label: 'Capex (USD)', values: projectGridPnl.capex },
+      { label: 'FCFF (USD)', values: projectGridPnl.fcff },
     ]
-      .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
+
+    const compareSeries = (left: Array<number | null> | null, right: Array<number | null>) => Array.from({ length: base.columnCount }, (_, t) => {
+      const snapshotValue = typeof left?.[t] === 'number' && Number.isFinite(left[t] as number) ? left[t] as number : null;
+      const displayValue = right[t];
+      if (snapshotValue === null || displayValue === null) return null;
+      return Math.abs(snapshotValue - displayValue);
+    });
+    const ebitDelta = compareSeries(getSeries(projectSeriesRecord.ebitUSD), projectGridPnl.ebit);
+    const fcffDelta = compareSeries(getSeries(projectSeriesRecord.fcffUSD), projectGridPnl.fcff);
+    const materiallyDifferentPeriods = (values: Array<number | null>) => values.filter((value) => typeof value === 'number' && value > 0.01).length;
+
+    const projectPnlDiagnostics = {
+      sourceOfTruth: 'projectGridPnl (single display model)',
+      mixedSourcingRemovedFrom: 'SingleStockDashboard.projectExcelGrid',
+      snapshotComparison: {
+        ebitDiffPeriodsOver001USD: materiallyDifferentPeriods(ebitDelta),
+        fcffDiffPeriodsOver001USD: materiallyDifferentPeriods(fcffDelta),
+        ebitDelta_first8: ebitDelta.slice(0, 8),
+        fcffDelta_first8: fcffDelta.slice(0, 8),
+      },
+    };
 
     const groupedRows: Array<{ type: 'divider'; label: string } | { type: 'data'; label: string; values: Array<number | null> }> = [];
     const addSection = (label: string, rows: Array<{ label: string; values: Array<number | null> }>) => {
@@ -3260,6 +3276,7 @@ Capital Available: ${availableLabel}`,
       }),
       notes: hasDepreciationSeries ? base.notes : [...base.notes, 'EBITDA requires D&A series; missing => null'],
       rows: groupedRows,
+      projectPnlDiagnostics,
     };
   }, [parsedSelectedProject, projectSeries, projectOperationsGridInput]);
 
@@ -5096,6 +5113,8 @@ Capital Available: ${availableLabel}`,
                     <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectViewMetrics.diagnostics.irr_debug, null, 2)}</pre>
                   </>
                 )}
+                <h4>---- PROJECT GRID P&L DIAGNOSTICS ----</h4>
+                <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectExcelGrid?.projectPnlDiagnostics ?? null, null, 2)}</pre>
                 <h4>---- PROJECT MOUNT DEBUG ----</h4>
                 <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectMountDebug, null, 2)}</pre>
               </details>
