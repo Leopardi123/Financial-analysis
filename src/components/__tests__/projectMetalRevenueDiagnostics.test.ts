@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractFailingMetals, rowHasMetalRevenueFailure } from '../projectMetalRevenueDiagnostics.ts';
+import { extractFailingMetals, extractFallbackOrFailingPriceMetals, rowHasMetalRevenueFailure } from '../projectMetalRevenueDiagnostics.ts';
 
 test('extractFailingMetals keeps only expected-but-missing computations', () => {
   const raw = {
@@ -24,4 +24,13 @@ test('rowHasMetalRevenueFailure marks metal-specific rows and skips inactive lab
   assert.equal(rowHasMetalRevenueFailure('Payable Pb (lb)', metals), true);
   assert.equal(rowHasMetalRevenueFailure('Revenue Pb (USD)', metals), true);
   assert.equal(rowHasMetalRevenueFailure('Payable Au (toz)', metals), false);
+});
+
+test('extractFallbackOrFailingPriceMetals returns json-fallback and failure metals', () => {
+  const metals = extractFallbackOrFailingPriceMetals({
+    Au: { priceSourceUsed: 'live' },
+    Pb: { priceSourceUsed: 'json-fallback' },
+    Zn: { priceSourceUsed: 'failure' },
+  });
+  assert.deepEqual(metals, ['Pb', 'Zn']);
 });

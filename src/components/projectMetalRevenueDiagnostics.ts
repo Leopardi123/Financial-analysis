@@ -19,3 +19,15 @@ export function rowHasMetalRevenueFailure(label: string, metals: string[]): bool
     label.includes(` ${metal} `) || label.includes(` ${metal}(`) || label.includes(` ${metal})`),
   );
 }
+
+export function extractFallbackOrFailingPriceMetals(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  return Object.entries(raw as Record<string, unknown>)
+    .filter(([, itemRaw]) => {
+      const item = (itemRaw ?? null) as Record<string, unknown> | null;
+      const source = typeof item?.priceSourceUsed === 'string' ? item.priceSourceUsed : '';
+      return source === 'json-fallback' || source === 'failure';
+    })
+    .map(([metal]) => metal)
+    .sort((a, b) => a.localeCompare(b));
+}

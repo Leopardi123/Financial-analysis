@@ -11,6 +11,16 @@ export type PriceScenario =
   | { mode: 'percentile'; lookbackYears: number; percentile: number }
   | { mode: 'fixed'; fixedPriceByKey: Record<string, number> };
 
+export type MetalPriceDiagnostic = {
+  priceKeyRequested: string;
+  livePriceAvailable: boolean;
+  livePriceValue: number | null;
+  jsonFallbackAvailable: boolean;
+  jsonFallbackValue: number | null;
+  priceSourceUsed: 'live' | 'json-fallback' | 'failure' | 'scenario-series';
+  reason: string;
+};
+
 const CU_LB_PER_TONNE = 2204.6226218;
 const CU_DERIVED_WARNING = 'Cu COMEX–LME basis can diverge; unit conversion is not basis conversion.';
 
@@ -98,7 +108,15 @@ export async function resolveProjectPricesToEngineInput(
     spotAnchorDateUtc?: string;
   },
   deps: { resolvePriceSeriesFn?: typeof resolvePriceSeries } = {},
-): Promise<ProjectEngineFullProductionV1Input & { diagnostics?: { warnings: string[] } }> {
+): Promise<ProjectEngineFullProductionV1Input & {
+  diagnostics?: {
+    warnings: string[];
+    metalPriceDiagnostics?: Record<string, MetalPriceDiagnostic>;
+    metalsUsingLivePrices?: string[];
+    metalsUsingJsonFallback?: string[];
+    metalsWithPriceFailure?: string[];
+  };
+}> {
   const { parsed } = args;
   const resolvePriceSeriesFn = deps.resolvePriceSeriesFn ?? resolvePriceSeries;
   const scenario = args.scenario ?? { mode: 'spot' };
@@ -121,6 +139,7 @@ export async function resolveProjectPricesToEngineInput(
   const spotPriceUSDByMetal: Record<string, Array<number | null>> = {};
   const priceSeriesByKey: Record<string, Array<number | null>> = {};
   const payableQtyByMetalCanonical: Record<string, Array<number | null>> = {};
+  const metalPriceDiagnostics: Record<string, MetalPriceDiagnostic> = {};
 
   const coreScenario: CorePriceScenario = scenario.mode === 'fixed'
     ? { mode: 'fixed', fixedByKey: scenario.fixedPriceByKey }
@@ -266,11 +285,58 @@ export async function resolveProjectPricesToEngineInput(
     }
 
     const resolvedPrice = await resolveSeriesWithCuFallback({ metal, requestedPriceKey: priceKey });
-    spotPriceUSDByMetal[metal] = resolvedPrice.resolvedSeries;
-    priceSeriesByKey[priceKey] = [...resolvedPrice.resolvedSeries];
-    if (resolvedPrice.priceKeyUsed !== priceKey && resolvedPrice.derivedFrom) {
-      priceSeriesByKey[resolvedPrice.derivedFrom] = [...resolvedPrice.resolvedSeries];
+    const jsonFallbackSeries = parsed.priceOverrides.spotPriceUSDByMetal?.[metal] ?? new Array<number | null>(len).fill(null);
+
+    const livePriceValue = resolvedPrice.resolvedSeries.find((value: number | null) => typeof value === 'number' && Number.isFinite(value)) ?? null;
+    const jsonFallbackValue = jsonFallbackSeries.find((value: number | null) => typeof value === 'number' && Number.isFinite(value)) ?? null;
+    const livePriceAvailable = livePriceValue !== null;
+    const jsonFallbackAvailable = jsonFallbackValue !== null;
+
+    let selectedSeries = [...resolvedPrice.resolvedSeries];
+    let priceSourceUsed: MetalPriceDiagnostic['priceSourceUsed'] = scenario.mode === 'spot' ? 'failure' : 'scenario-series';
+    let sourceReason = scenario.mode === 'spot'
+      ? `Live price unavailable for ${priceKey}; no JSON fallback configured.`
+      : `Scenario mode=${scenario.mode}; resolved scenario series used.`;
+
+    if (scenario.mode === 'spot') {
+      selectedSeries = Array.from({ length: len }, (_, t) => {
+        const live = resolvedPrice.resolvedSeries[t] ?? null;
+        if (typeof live === 'number' && Number.isFinite(live)) return live;
+        const fallback = jsonFallbackSeries[t] ?? null;
+        return typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : null;
+      });
+      const hasAnySelected = selectedSeries.some((value) => typeof value === 'number' && Number.isFinite(value));
+      if (livePriceAvailable) {
+        priceSourceUsed = 'live';
+        sourceReason = `Live spot available for ${priceKey}; using live price.`;
+      } else if (jsonFallbackAvailable && hasAnySelected) {
+        priceSourceUsed = 'json-fallback';
+        sourceReason = `Live price unavailable for ${priceKey}; using project JSON fallback price.`;
+      } else {
+        priceSourceUsed = 'failure';
+        sourceReason = `Live price unavailable for ${priceKey} and JSON fallback is missing.`;
+      }
     }
+
+    spotPriceUSDByMetal[metal] = selectedSeries;
+    priceSeriesByKey[priceKey] = [...selectedSeries];
+    if (resolvedPrice.priceKeyUsed !== priceKey && resolvedPrice.derivedFrom) {
+      priceSeriesByKey[resolvedPrice.derivedFrom] = [...selectedSeries];
+    }
+
+    metalPriceDiagnostics[metal] = {
+      priceKeyRequested: priceKey,
+      livePriceAvailable,
+      livePriceValue,
+      jsonFallbackAvailable,
+      jsonFallbackValue,
+      priceSourceUsed,
+      reason: sourceReason,
+    };
+
+    pushWarning(
+      `price source metal=${metal} -> ${priceSourceUsed}${livePriceAvailable ? '' : ` (live price unavailable for ${priceKey}`}${priceSourceUsed === 'json-fallback' ? `, fallback=${String(jsonFallbackValue)}` : ''}${!livePriceAvailable ? ')' : ''}`,
+    );
 
     const needsCuBasisWarning = metal === 'Cu' && resolvedPrice.derived === true;
     const needsUnitWarning = sourceQtyUnit !== targetQtyUnit;
@@ -296,6 +362,23 @@ export async function resolveProjectPricesToEngineInput(
       pushWarning(`projectId=${projectId} metal=${metal} key=${priceKey} date=${periodEndDate} mode=${scenario.mode} reason=${reason}`);
     });
   }
+
+  const metalsUsingLivePrices = Object.entries(metalPriceDiagnostics)
+    .filter(([, item]) => item.priceSourceUsed === 'live')
+    .map(([metal]) => metal)
+    .sort((a, b) => a.localeCompare(b));
+  const metalsUsingJsonFallback = Object.entries(metalPriceDiagnostics)
+    .filter(([, item]) => item.priceSourceUsed === 'json-fallback')
+    .map(([metal]) => metal)
+    .sort((a, b) => a.localeCompare(b));
+  const metalsWithPriceFailure = Object.entries(metalPriceDiagnostics)
+    .filter(([, item]) => item.priceSourceUsed === 'failure')
+    .map(([metal]) => metal)
+    .sort((a, b) => a.localeCompare(b));
+
+  pushWarning(`metalsUsingLivePrices=[${metalsUsingLivePrices.join(',')}]`);
+  pushWarning(`metalsUsingJsonFallback=[${metalsUsingJsonFallback.join(',')}]`);
+  pushWarning(`metalsWithPriceFailure=[${metalsWithPriceFailure.join(',')}]`);
 
   let auPriceUSDPerOz: Array<number | null> = await resolveSeriesForPriceKey(parsed.engineInputWithoutPrices.auPriceKey);
   priceSeriesByKey[parsed.engineInputWithoutPrices.auPriceKey] = [...auPriceUSDPerOz];
@@ -339,6 +422,16 @@ export async function resolveProjectPricesToEngineInput(
     aisc: {
       auPriceUSDPerOz,
     },
-    ...(warnings.length > 0 ? { diagnostics: { warnings } } : {}),
+    ...(warnings.length > 0 || Object.keys(metalPriceDiagnostics).length > 0
+      ? {
+        diagnostics: {
+          warnings,
+          metalPriceDiagnostics,
+          metalsUsingLivePrices,
+          metalsUsingJsonFallback,
+          metalsWithPriceFailure,
+        },
+      }
+      : {}),
   };
 }

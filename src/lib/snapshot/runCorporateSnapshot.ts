@@ -2,7 +2,7 @@ import { validateSnapshotRequest } from '../api/validateSnapshotRequest.ts';
 import { loadProjectsForSymbol } from '../api/loadProjectsForSymbol.ts';
 import { parseProjectJsonV1 } from '../project/jsonv1/parse.ts';
 import { computeProjectEngineFullProductionV1 } from '../project/engineFullProductionV1.ts';
-import { resolveProjectPricesToEngineInput } from '../project/jsonv1/resolvePrices.ts';
+import { resolveProjectPricesToEngineInput, type MetalPriceDiagnostic } from '../project/jsonv1/resolvePrices.ts';
 import { aggregateProjectsCorporateV1 } from '../corporate/aggregateProjects.ts';
 import { computeCorporateFinancing } from '../corporate/financing/compute.ts';
 import { deriveBuildFundingNeedUSD } from '../corporate/financing/deriveBuildFundingNeed.ts';
@@ -1302,6 +1302,10 @@ type SnapshotDiagnostics = {
       }>;
     };
     metalRevenueDiagnostics?: Record<string, MetalRevenueDiagnosticEntry[]>;
+    metalPriceDiagnostics?: Record<string, MetalPriceDiagnostic>;
+    metalsUsingLivePrices?: string[];
+    metalsUsingJsonFallback?: string[];
+    metalsWithPriceFailure?: string[];
   };
 };
 
@@ -1419,6 +1423,7 @@ export async function runCorporateSnapshotPipeline(args: {
     }>;
 
     const projectSeriesContexts: ProjectSeriesContext[] = [];
+    const metalPriceDiagnosticsByMetal: Record<string, MetalPriceDiagnostic> = {};
 
     const aggregation = await aggregateProjectsCorporateV1(
       {
@@ -1476,6 +1481,12 @@ export async function runCorporateSnapshotPipeline(args: {
           );
 
           diagnostics.warnings.push(...(resolved.diagnostics?.warnings ?? []));
+          const resolvedMetalPriceDiagnostics = (resolved.diagnostics?.metalPriceDiagnostics ?? null) as Record<string, MetalPriceDiagnostic> | null;
+          if (resolvedMetalPriceDiagnostics) {
+            for (const [metal, item] of Object.entries(resolvedMetalPriceDiagnostics)) {
+              metalPriceDiagnosticsByMetal[metal] = item;
+            }
+          }
 
           if (resolverScenario.mode !== 'spot') {
             for (const [metal, series] of Object.entries(resolved.spotPriceUSDByMetal)) {
@@ -1946,6 +1957,24 @@ export async function runCorporateSnapshotPipeline(args: {
       revenueByMetal_USD: snapshotSeries.revenueByMetal_USD,
     });
     diagnostics.meta.metalRevenueDiagnostics = metalRevenueDiagnostics;
+    diagnostics.meta.metalPriceDiagnostics = metalPriceDiagnosticsByMetal;
+    diagnostics.meta.metalsUsingLivePrices = Object.entries(metalPriceDiagnosticsByMetal)
+      .filter(([, item]) => item.priceSourceUsed === 'live')
+      .map(([metal]) => metal)
+      .sort((a, b) => a.localeCompare(b));
+    diagnostics.meta.metalsUsingJsonFallback = Object.entries(metalPriceDiagnosticsByMetal)
+      .filter(([, item]) => item.priceSourceUsed === 'json-fallback')
+      .map(([metal]) => metal)
+      .sort((a, b) => a.localeCompare(b));
+    diagnostics.meta.metalsWithPriceFailure = Object.entries(metalPriceDiagnosticsByMetal)
+      .filter(([, item]) => item.priceSourceUsed === 'failure')
+      .map(([metal]) => metal)
+      .sort((a, b) => a.localeCompare(b));
+
+    for (const [metal, item] of Object.entries(metalPriceDiagnosticsByMetal)) {
+      diagnostics.warnings.push(`price source metal=${metal} -> ${item.priceSourceUsed} (${item.reason})`);
+    }
+
     for (const [metal, failures] of Object.entries(metalRevenueDiagnostics)) {
       if (failures.length === 0) continue;
       const first = failures[0];

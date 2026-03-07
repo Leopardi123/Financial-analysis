@@ -14,7 +14,7 @@ import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { rowHasDisplayValue } from "../lib/project/rowDisplayValue.ts";
-import { extractFailingMetals, rowHasMetalRevenueFailure } from "./projectMetalRevenueDiagnostics.ts";
+import { extractFailingMetals, extractFallbackOrFailingPriceMetals, rowHasMetalRevenueFailure } from "./projectMetalRevenueDiagnostics.ts";
 import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
@@ -3098,6 +3098,12 @@ Capital Available: ${availableLabel}`,
     return extractFailingMetals(projectSnapshotDiagnosticsMeta?.metalRevenueDiagnostics ?? null);
   }, [projectSnapshotDiagnosticsMeta]);
 
+  const projectMetalPriceFallbackOrFailureMetals = useMemo(() => {
+    return extractFallbackOrFailingPriceMetals(projectSnapshotDiagnosticsMeta?.metalPriceDiagnostics ?? null);
+  }, [projectSnapshotDiagnosticsMeta]);
+
+  const projectMetalPriceDiagnostics = (projectSnapshotDiagnosticsMeta?.metalPriceDiagnostics ?? null) as Record<string, Record<string, unknown>> | null;
+
   const projectOperationsGridInput = useMemo((): OperationsGridInput | null => {
     if (!parsedSelectedProject) return null;
     const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
@@ -3257,7 +3263,7 @@ Capital Available: ${availableLabel}`,
       .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
-    const failedMetals = new Set(Object.keys(projectMetalRevenueFailures));
+    const failedMetals = new Set([...Object.keys(projectMetalRevenueFailures), ...projectMetalPriceFallbackOrFailureMetals]);
     const groupedRows: Array<{ type: 'divider'; label: string } | { type: 'data'; label: string; values: Array<number | null>; hasMetalRevenueFailure?: boolean }> = [];
     const addSection = (label: string, rows: Array<{ label: string; values: Array<number | null> }>) => {
       if (rows.length === 0) return;
@@ -3287,7 +3293,7 @@ Capital Available: ${availableLabel}`,
       notes: hasDepreciationSeries ? base.notes : [...base.notes, 'EBITDA requires D&A series; missing => null'],
       rows: groupedRows,
     };
-  }, [parsedSelectedProject, projectSeries, projectOperationsGridInput, projectMetalRevenueFailures]);
+  }, [parsedSelectedProject, projectSeries, projectOperationsGridInput, projectMetalRevenueFailures, projectMetalPriceFallbackOrFailureMetals]);
 
 
   const projectPnlTraceDebugger = useMemo(() => {
@@ -5295,9 +5301,26 @@ Capital Available: ${availableLabel}`,
                     )}
                   </div>
                 )}
-                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && !projectViewMetrics && Object.keys(projectMetalRevenueFailures).length === 0 && <p>No diagnostics.</p>}
+                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && !projectViewMetrics && Object.keys(projectMetalRevenueFailures).length === 0 && projectMetalPriceFallbackOrFailureMetals.length === 0 && <p>No diagnostics.</p>}
                 {projectSnapshotErrors.length > 0 && <ul>{projectSnapshotErrors.map((item) => <li key={`e-${item}`}>{item}</li>)}</ul>}
                 {projectSnapshotWarnings.length > 0 && <ul>{projectSnapshotWarnings.map((item) => <li key={`w-${item}`}>{item}</li>)}</ul>}
+                {projectMetalPriceDiagnostics && (
+                  <>
+                    <h4>Metal price source diagnostics</h4>
+                    <ul>
+                      {Object.entries(projectMetalPriceDiagnostics).map(([metal, item]) => (
+                        <li key={`metal-price-${metal}`}>
+                          price source metal={metal} {'->'} {String(item.priceSourceUsed ?? 'unknown')} ({String(item.reason ?? 'n/a')})
+                        </li>
+                      ))}
+                    </ul>
+                    <p>
+                      metalsUsingLivePrices: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsUsingLivePrices ?? [])}{' | '}
+                      metalsUsingJsonFallback: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsUsingJsonFallback ?? [])}{' | '}
+                      metalsWithPriceFailure: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsWithPriceFailure ?? [])}
+                    </p>
+                  </>
+                )}
                 {Object.keys(projectMetalRevenueFailures).length > 0 && (
                   <>
                     <h4>Metal revenue failures</h4>
