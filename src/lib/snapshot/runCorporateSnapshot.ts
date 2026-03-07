@@ -52,6 +52,18 @@ function toFiniteFromUnknown(value: unknown): number | null {
   return null;
 }
 
+
+export function computeRoyaltiesFromRevenueSeries(args: {
+  grossRevenueUSD: Array<number | null>;
+  ratePct: number;
+}): Array<number | null> {
+  return args.grossRevenueUSD.map((gross) => {
+    const grossFinite = toFiniteOrNull(gross);
+    if (grossFinite === null) return null;
+    return grossFinite * (args.ratePct / 100);
+  });
+}
+
 function sanitizeSeries(series: Array<number | null>): Array<number | null> {
   return series.map((value) => toFiniteOrNull(value));
 }
@@ -1322,6 +1334,9 @@ type SnapshotDiagnostics = {
       royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null';
       royaltiesDetailFailureReason: string | null;
       royaltiesResolvedNumeric: boolean;
+      computedPeriods: number;
+      skippedPeriods: number;
+      grossRevenueNullPeriods: number[];
     }>;
   };
 };
@@ -1556,10 +1571,9 @@ export async function runCorporateSnapshotPipeline(args: {
 
           const projectEconomicsBreakdown = parsed.context.economicsBreakdown;
           const sanitizedGrossRevenueUSD = sanitizeSeries(outPreRoyalties.revenue.grossRevenueUSD);
-          const grossRevenueHasNulls = sanitizedGrossRevenueUSD.some((value) => value === null);
-          if (grossRevenueHasNulls) {
-            diagnostics.warnings.push('royalties: grossRevenueUSD contains nulls; royalties set to null for those periods');
-          }
+          const grossRevenueNullPeriods = sanitizedGrossRevenueUSD
+            .map((value, t) => (value === null ? t : null))
+            .filter((t): t is number => t !== null);
 
           const royaltiesDetailRaw = projectEconomicsBreakdown?.royaltiesDetail ?? null;
           const computableRateTypes = new Set<string>();
@@ -1581,10 +1595,12 @@ export async function runCorporateSnapshotPipeline(args: {
               diagnostics.warnings.push(`royaltiesDetail ignored: ${detail.id} base=${String(detail.base)} rateType=${String(detail.rateType)} rate=${String(detail.rate)}`);
             }
 
-            const royaltyUSD = sanitizedGrossRevenueUSD.map((gross) => {
-              if (!isComputable || gross === null) return null;
-              return gross * ((rate as number) / 100);
-            });
+            const royaltyUSD = isComputable
+              ? computeRoyaltiesFromRevenueSeries({
+                  grossRevenueUSD: sanitizedGrossRevenueUSD,
+                  ratePct: rate as number,
+                })
+              : nullSeries;
 
             return {
               id: detail.id,
@@ -1628,7 +1644,9 @@ export async function runCorporateSnapshotPipeline(args: {
             : hasRoyaltiesDetailArray
               ? 'royaltiesDetail present but no computable revenue-based rate rules'
               : 'royaltiesDetail missing';
-          const royaltiesResolvedNumeric = royaltiesUSD.some((value) => value !== null);
+          const computedPeriods = royaltiesUSD.filter((value) => value !== null).length;
+          const skippedPeriods = royaltiesUSD.length - computedPeriods;
+          const royaltiesResolvedNumeric = computedPeriods > 0;
 
           if (!diagnostics.meta.royaltiesDiagnostics) {
             diagnostics.meta.royaltiesDiagnostics = {};
@@ -1638,10 +1656,14 @@ export async function runCorporateSnapshotPipeline(args: {
             royaltiesSource,
             royaltiesDetailFailureReason,
             royaltiesResolvedNumeric,
+            computedPeriods,
+            skippedPeriods,
+            grossRevenueNullPeriods,
           };
           diagnostics.warnings.push(`royalties source = ${royaltiesSource}`);
           diagnostics.warnings.push(`royaltiesResolvedNumeric: ${String(royaltiesResolvedNumeric)}`);
           diagnostics.warnings.push(`grossRevenueUSD numeric = ${String(sanitizedGrossRevenueUSD.some((value) => value !== null))}`);
+          diagnostics.warnings.push(`royalties computed for ${String(computedPeriods)} periods, skipped ${String(skippedPeriods)} (grossRevenueUSD null)`);
           if (royaltiesDetailFailureReason) {
             diagnostics.warnings.push(`royaltiesDetail failed because ${royaltiesDetailFailureReason}`);
           }

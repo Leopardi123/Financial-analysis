@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { computeEarliestMilestoneDcfPresentScalars, runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
+import { computeEarliestMilestoneDcfPresentScalars, computeRoyaltiesFromRevenueSeries, runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
 
 async function loadFixture(): Promise<Record<string, unknown>> {
   const fixturePath = path.resolve('scripts/fixtures/snapshot-requests/abra_minimal.json');
@@ -97,6 +97,9 @@ test('royalties resolve from royaltiesDetail using current-run gross revenue whe
   const diag = Object.values(result.diagnostics.meta.royaltiesDiagnostics ?? {})[0];
   assert.equal(diag?.royaltiesSource, 'royaltiesDetail-current-run');
   assert.equal(diag?.royaltiesResolvedNumeric, true);
+  assert.equal(diag?.computedPeriods, royalties.length);
+  assert.equal(diag?.skippedPeriods, 0);
+  assert.deepEqual(diag?.grossRevenueNullPeriods ?? [], []);
 });
 
 test('royalties fall back to series.royaltiesUSD when royaltiesDetail is not computable', async () => {
@@ -144,6 +147,24 @@ test('ebit and fcff stay numeric when royalties resolve via fallback series', as
   const fcff = result.snapshot.series?.fcffUSD ?? [];
   assert.ok(ebit.every((value) => typeof value === 'number' && Number.isFinite(value)));
   assert.ok(fcff.every((value) => typeof value === 'number' && Number.isFinite(value)));
+});
+
+
+
+test('royalties helper computes per-period and skips null gross revenue periods', () => {
+  const royalties = computeRoyaltiesFromRevenueSeries({
+    grossRevenueUSD: [null, null, 100, 120],
+    ratePct: 5,
+  });
+  assert.deepEqual(royalties, [null, null, 5, 6]);
+});
+
+test('royalties helper computes numeric royalties when grossRevenueUSD is fully numeric', () => {
+  const royalties = computeRoyaltiesFromRevenueSeries({
+    grossRevenueUSD: [10, 20, 30, 40],
+    ratePct: 5,
+  });
+  assert.deepEqual(royalties, [0.5, 1, 1.5, 2]);
 });
 
 test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async () => {
