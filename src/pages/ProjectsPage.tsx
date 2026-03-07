@@ -109,6 +109,19 @@ function formatTableValue(value: number | null): string {
   return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
 }
 
+function sumFiniteValues(values: Array<number | null> | undefined): number | null {
+  if (!Array.isArray(values)) return null;
+  let sum = 0;
+  let hasFinite = false;
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      sum += value;
+      hasFinite = true;
+    }
+  }
+  return hasFinite ? sum : null;
+}
+
 function RenderSeriesTable(props: { title: string; columns: string[]; rows: Array<{ label: string; unit?: string; values: Array<number | null> }> }) {
   const table = useMemo(() => buildTransposedTable({ columns: props.columns, rows: props.rows }), [props.columns, props.rows]);
 
@@ -610,6 +623,130 @@ export default function ProjectsPage() {
     };
   }, [projectGridPnl, series, seriesColumns.length]);
 
+  const pnlDebugger = useMemo(() => {
+    if (!projectGridPnl || seriesColumns.length === 0) return null;
+    const pnl = projectGridPnl;
+    const firstNegativeEbitPeriod = pnl.ebit.findIndex((value) => typeof value === 'number' && value < 0);
+    const ebitPeriod = firstNegativeEbitPeriod >= 0 ? firstNegativeEbitPeriod : null;
+
+    const sections: Array<{
+      key: string;
+      label: string;
+      formula: string;
+      calculatedIn: string;
+      sourceOfTruth: string;
+      inputs: Array<{ label: string; source: string; series: Array<number | null> | undefined }>;
+      output: Array<number | null>;
+    }> = [
+      {
+        key: 'gross-revenue',
+        label: 'Gross revenue',
+        formula: 'sum(Revenue metal series)',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:grossRevenue',
+        sourceOfTruth: 'projectGridPnl.grossRevenue (derived from revenueByMetal_USD)',
+        inputs: Object.keys(pnl.revenueByMetal)
+          .sort((a, b) => a.localeCompare(b))
+          .map((metal) => ({
+            label: `Revenue ${metal}`,
+            source: `series.revenueByMetal_USD.${metal}`,
+            series: pnl.revenueByMetal[metal],
+          })),
+        output: pnl.grossRevenue,
+      },
+      {
+        key: 'gross-profit',
+        label: 'Gross profit',
+        formula: 'grossRevenue - operatingCosts - royalties - byproductCredits',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:grossProfit',
+        sourceOfTruth: 'projectGridPnl.grossProfit',
+        inputs: [
+          { label: 'Gross revenue', source: 'projectGridPnl.grossRevenue', series: pnl.grossRevenue },
+          { label: 'Operating costs', source: 'series.operatingCostsUSD → projectGridPnl.operatingCosts', series: pnl.operatingCosts },
+          { label: 'Royalties', source: 'series.royaltiesDetail / series.royaltiesUSD → projectGridPnl.royalties', series: pnl.royalties },
+          { label: 'Byproduct credits', source: 'series.byproductCreditsUSD → projectGridPnl.byproductCredits', series: pnl.byproductCredits },
+        ],
+        output: pnl.grossProfit,
+      },
+      {
+        key: 'ebitda',
+        label: 'EBITDA',
+        formula: 'grossRevenue - operatingCosts - royalties',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:ebitda',
+        sourceOfTruth: 'projectGridPnl.ebitda',
+        inputs: [
+          { label: 'Gross revenue', source: 'projectGridPnl.grossRevenue', series: pnl.grossRevenue },
+          { label: 'Operating costs', source: 'projectGridPnl.operatingCosts', series: pnl.operatingCosts },
+          { label: 'Royalties', source: 'projectGridPnl.royalties', series: pnl.royalties },
+        ],
+        output: pnl.ebitda,
+      },
+      {
+        key: 'ebit',
+        label: 'EBIT',
+        formula: 'grossRevenue - operatingCosts - siteG&A - royalties + byproductCredits',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:ebit',
+        sourceOfTruth: 'projectGridPnl.ebit',
+        inputs: [
+          { label: 'Gross revenue', source: 'projectGridPnl.grossRevenue', series: pnl.grossRevenue },
+          { label: 'Operating costs', source: 'projectGridPnl.operatingCosts', series: pnl.operatingCosts },
+          { label: 'Site G&A', source: 'series.siteGandA_USD → projectGridPnl.siteGandA', series: pnl.siteGandA },
+          { label: 'Royalties', source: 'projectGridPnl.royalties', series: pnl.royalties },
+          { label: 'Byproduct credits', source: 'projectGridPnl.byproductCredits', series: pnl.byproductCredits },
+        ],
+        output: pnl.ebit,
+      },
+      {
+        key: 'operating-costs',
+        label: 'Operating costs',
+        formula: 'direct passthrough of operatingCostsUSD',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:operatingCosts',
+        sourceOfTruth: 'projectGridPnl.operatingCosts',
+        inputs: [
+          { label: 'Operating costs raw', source: 'series.operatingCostsUSD', series: series?.operatingCostsUSD },
+        ],
+        output: pnl.operatingCosts,
+      },
+      {
+        key: 'fcff',
+        label: 'FCFF',
+        formula: 'grossRevenue - operatingCosts - siteG&A - royalties - tax - sustainingCapex - reclamation - wcDelta - capex + byproductCredits',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:fcff',
+        sourceOfTruth: 'projectGridPnl.fcff',
+        inputs: [
+          { label: 'Gross revenue', source: 'projectGridPnl.grossRevenue', series: pnl.grossRevenue },
+          { label: 'Operating costs', source: 'projectGridPnl.operatingCosts', series: pnl.operatingCosts },
+          { label: 'Site G&A', source: 'projectGridPnl.siteGandA', series: pnl.siteGandA },
+          { label: 'Royalties', source: 'projectGridPnl.royalties', series: pnl.royalties },
+          { label: 'Tax', source: 'series.taxUSD → projectGridPnl.tax', series: pnl.tax },
+          { label: 'Sustaining capex', source: 'series.sustainingCapexUSD → projectGridPnl.sustainingCapex', series: pnl.sustainingCapex },
+          { label: 'Reclamation', source: 'series.reclamationUSD → projectGridPnl.reclamation', series: pnl.reclamation },
+          { label: 'Working capital delta', source: 'series.workingCapitalDeltaUSD → projectGridPnl.workingCapitalDelta', series: pnl.workingCapitalDelta },
+          { label: 'Capex', source: 'series.capexUSD → projectGridPnl.capex', series: pnl.capex },
+          { label: 'Byproduct credits', source: 'projectGridPnl.byproductCredits', series: pnl.byproductCredits },
+        ],
+        output: pnl.fcff,
+      },
+    ];
+
+    const ebitSpotlight = ebitPeriod === null ? null : {
+      periodIndex: ebitPeriod,
+      label: seriesColumns[ebitPeriod],
+      ebit: pnl.ebit[ebitPeriod],
+      grossRevenue: pnl.grossRevenue[ebitPeriod],
+      operatingCosts: pnl.operatingCosts[ebitPeriod],
+      siteGandA: pnl.siteGandA[ebitPeriod],
+      royalties: pnl.royalties[ebitPeriod],
+      byproductCredits: pnl.byproductCredits[ebitPeriod],
+    };
+
+    return {
+      singleSourceOfTruth: 'Displayed economics values come from projectGridPnl (single display model in ProjectsPage).',
+      extraValuesAlongTheWay: 'projectGridPnl itself is computed from snapshot series inputs (series.*USD) in buildProjectGridPnl.',
+      sections,
+      ebitSpotlight,
+    };
+  }, [projectGridPnl, series, seriesColumns]);
+
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;
     const projectName = typeof meta.projectName === 'string' && meta.projectName.trim() ? meta.projectName : null;
@@ -764,6 +901,51 @@ export default function ProjectsPage() {
           <h3>---- PROJECT MOUNT DEBUG ----</h3>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(projectMountDebug, null, 2)}</pre>
         </section>
+
+        <details>
+          <summary>P&amp;L Debugger (EBIT / FCFF trace)</summary>
+          {!pnlDebugger ? (
+            <p>No P&amp;L debug data yet.</p>
+          ) : (
+            <div className="projects-debugger">
+              <p><strong>Single source of truth:</strong> {pnlDebugger.singleSourceOfTruth}</p>
+              <p><strong>Additional values along the way:</strong> {pnlDebugger.extraValuesAlongTheWay}</p>
+
+              {pnlDebugger.ebitSpotlight ? (
+                <div className="projects-debugger-highlight">
+                  <h3>Why EBIT is negative (first negative period)</h3>
+                  <p>
+                    Period <strong>{pnlDebugger.ebitSpotlight.label}</strong> (t={pnlDebugger.ebitSpotlight.periodIndex}) gives EBIT <strong>{formatTableValue(pnlDebugger.ebitSpotlight.ebit)}</strong>
+                    {' '}= gross revenue ({formatTableValue(pnlDebugger.ebitSpotlight.grossRevenue)})
+                    {' '}− operating costs ({formatTableValue(pnlDebugger.ebitSpotlight.operatingCosts)})
+                    {' '}− site G&amp;A ({formatTableValue(pnlDebugger.ebitSpotlight.siteGandA)})
+                    {' '}− royalties ({formatTableValue(pnlDebugger.ebitSpotlight.royalties)})
+                    {' '}+ byproduct credits ({formatTableValue(pnlDebugger.ebitSpotlight.byproductCredits)}).
+                  </p>
+                </div>
+              ) : (
+                <p>No negative EBIT period found in the loaded data.</p>
+              )}
+
+              {pnlDebugger.sections.map((section) => (
+                <article key={section.key} className="projects-debugger-section">
+                  <h3>{section.label}</h3>
+                  <p><strong>Formula:</strong> <code>{section.formula}</code></p>
+                  <p><strong>Calculated in:</strong> <code>{section.calculatedIn}</code></p>
+                  <p><strong>Resolved source:</strong> {section.sourceOfTruth}</p>
+                  <ul>
+                    {section.inputs.map((input) => (
+                      <li key={`${section.key}-${input.label}`}>
+                        <strong>{input.label}</strong> → {input.source} (sum: {formatTableValue(sumFiniteValues(input.series))})
+                      </li>
+                    ))}
+                  </ul>
+                  <p><strong>Output sum:</strong> {formatTableValue(sumFiniteValues(section.output))}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </details>
 
         <details>
           <summary>Unit Audit</summary>

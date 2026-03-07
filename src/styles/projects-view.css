@@ -126,3 +126,42 @@
   font-weight: 700;
   background: #f0f5ea;
 }
+
+.projects-debugger {
+  margin-top: 8px;
+  display: grid;
+  gap: 10px;
+}
+
+.projects-debugger-highlight {
+  border: 1px solid #d8e0d2;
+  border-radius: 8px;
+  background: #f7fbf2;
+  padding: 10px;
+}
+
+.projects-debugger-highlight h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.projects-debugger-section {
+  border: 1px solid #d8e0d2;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.projects-debugger-section h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.projects-debugger-section p {
+  margin: 4px 0;
+}
+
+.projects-debugger-section ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
