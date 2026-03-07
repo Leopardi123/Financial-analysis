@@ -7,6 +7,7 @@ import { resolveCommonSharesCurrent } from '../lib/market/resolveSharesCurrent.t
 import { parseProjectJsonV1WithContext } from '../lib/project/jsonv1/parse.ts';
 import { buildOperationsGridModel } from './projectOperationsGrid.ts';
 import { resolveV2TimeAxis } from '../lib/time/resolveV2TimeAxis.ts';
+import { buildProjectGridPnl } from './projectGridPnl.ts';
 import '../styles/projects-view.css';
 
 const DEFAULT_SYMBOL = 'AAPL';
@@ -69,6 +70,7 @@ function getSymbolFromQuery(search: string): string {
 function readFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
+
 
 
 function firstNonZeroIndex(values: Array<number | null> | undefined): number | null {
@@ -519,59 +521,92 @@ export default function ProjectsPage() {
     };
   }, [operationsGridInput, parsedProject, selectedProject]);
 
+  const projectGridPnl = useMemo(() => {
+    if (!series || seriesColumns.length === 0) return null;
+    return buildProjectGridPnl(series, seriesColumns.length);
+  }, [series, seriesColumns.length]);
+
   const economicsRows = useMemo(() => {
-    if (!series || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
+    if (!series || !projectGridPnl || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
     const rows: Array<{ label: string; unit?: string; values: Array<number | null> }> = [];
+    const pnl = projectGridPnl;
 
     if (Array.isArray(series.totalRevenue_USD)) rows.push({ label: 'Revenue total', unit: 'USD', values: series.totalRevenue_USD });
-    for (const metal of Object.keys(series.revenueByMetal_USD ?? {}).sort((a, b) => a.localeCompare(b))) {
-      const values = series.revenueByMetal_USD?.[metal];
+    for (const metal of Object.keys(pnl.revenueByMetal).sort((a, b) => a.localeCompare(b))) {
+      const values = pnl.revenueByMetal[metal];
       if (Array.isArray(values)) {
         rows.push({ label: `Revenue ${metal}`, unit: 'USD', values });
       }
     }
 
-    const royaltiesFromDetail = (() => {
-      const detail = (series.royaltiesDetail ?? []) as Array<{ royaltyUSD?: Array<number | null> }>;
-      if (detail.length === 0 || !Array.isArray(detail[0]?.royaltyUSD)) return undefined;
-      const length = detail[0].royaltyUSD?.length ?? 0;
-      return Array.from({ length }, (_, t) => {
-        let sum = 0;
-        let hasFinite = false;
-        for (const item of detail) {
-          const value = item.royaltyUSD?.[t];
-          if (typeof value === 'number' && Number.isFinite(value)) {
-            sum += value;
-            hasFinite = true;
-          }
-        }
-        return hasFinite ? sum : null;
-      });
-    })();
-
-    const definitions: Array<{ label: string; values: Array<number | null> | undefined }> = [
-      { label: 'Operating costs', values: series.operatingCostsUSD },
-      { label: 'Sustaining capex', values: series.sustainingCapexUSD },
-      { label: 'Site G&A', values: series.siteGandA_USD },
-      { label: 'Royalties', values: royaltiesFromDetail ?? series.royaltiesUSD },
-      { label: 'Reclamation', values: series.reclamationUSD },
-      { label: 'Byproduct credits', values: series.byproductCreditsUSD },
+    const definitions: Array<{ label: string; values: Array<number | null> | undefined; unit?: string }> = [
+      { label: 'Gross revenue', values: pnl.grossRevenue },
+      { label: 'Operating costs', values: pnl.operatingCosts },
+      { label: 'Royalties', values: pnl.royalties },
+      { label: 'Gross profit', values: pnl.grossProfit },
+      { label: 'Site G&A', values: pnl.siteGandA },
+      { label: 'EBIT', values: pnl.ebit },
+      { label: 'Taxable income', values: pnl.taxableIncome },
+      { label: 'Tax', values: pnl.tax },
+      { label: 'Effective tax rate', values: pnl.effectiveTaxRate, unit: '' },
+      { label: 'Sustaining capex', values: pnl.sustainingCapex },
+      { label: 'Reclamation', values: pnl.reclamation },
+      { label: 'Working capital delta', values: pnl.workingCapitalDelta },
+      { label: 'Byproduct credits', values: pnl.byproductCredits },
+      { label: 'Capex', values: pnl.capex },
+      { label: 'FCFF', values: pnl.fcff },
       { label: 'Sustaining cost', values: series.sustainingCostUSD },
-      { label: 'EBIT', values: series.ebitUSD },
-      { label: 'Taxable income', values: series.taxableIncomeUSD },
-      { label: 'Tax', values: series.taxUSD },
-      { label: 'Effective tax rate', values: series.effectiveTaxRate },
-      { label: 'FCFF', values: series.fcffUSD },
-      { label: 'Capex', values: series.capexUSD },
       { label: 'Total Capex', values: series.totalCapexUSD },
     ];
 
     for (const definition of definitions) {
-      if (Array.isArray(definition.values)) rows.push({ label: definition.label, unit: 'USD', values: definition.values });
+      if (Array.isArray(definition.values)) rows.push({ label: definition.label, unit: definition.unit ?? 'USD', values: definition.values });
     }
 
     return rows;
-  }, [series, seriesColumns.length]);
+  }, [projectGridPnl, series, seriesColumns.length]);
+
+  const projectPnlDiagnostics = useMemo(() => {
+    if (!series || !projectGridPnl || seriesColumns.length === 0) return null;
+    const compare = (left: Array<number | null> | undefined, right: Array<number | null>) => Array.from({ length: seriesColumns.length }, (_, t) => {
+      const snapshotValue = typeof left?.[t] === 'number' && Number.isFinite(left[t] as number) ? left[t] as number : null;
+      const displayValue = right[t];
+      if (snapshotValue === null || displayValue === null) return null;
+      return Math.abs(snapshotValue - displayValue);
+    });
+    const ebitDelta = compare(series.ebitUSD, projectGridPnl.ebit);
+    const fcffDelta = compare(series.fcffUSD, projectGridPnl.fcff);
+    const materiallyDifferentPeriods = (values: Array<number | null>) => values.filter((value) => typeof value === 'number' && value > 0.01).length;
+
+    return {
+      sourceOfTruth: 'projectGridPnl (single display model)',
+      mixedSourcingRemovedFrom: 'ProjectsPage.economicsRows',
+      rowsFromDisplayPnl: [
+        'Revenue Au/Ag/Cu/Zn/Pb',
+        'Gross revenue',
+        'Gross profit',
+        'Operating costs',
+        'Royalties',
+        'Site G&A',
+        'EBIT',
+        'Taxable income',
+        'Tax',
+        'Effective tax rate',
+        'Sustaining capex',
+        'Reclamation',
+        'Working capital delta',
+        'Byproduct credits',
+        'Capex',
+        'FCFF',
+      ],
+      snapshotComparison: {
+        ebitDiffPeriodsOver001USD: materiallyDifferentPeriods(ebitDelta),
+        fcffDiffPeriodsOver001USD: materiallyDifferentPeriods(fcffDelta),
+        ebitDelta_first8: ebitDelta.slice(0, 8),
+        fcffDelta_first8: fcffDelta.slice(0, 8),
+      },
+    };
+  }, [projectGridPnl, series, seriesColumns.length]);
 
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;
@@ -706,6 +741,11 @@ export default function ProjectsPage() {
           )}
         </section>
         <RenderSeriesTable title="Economics" columns={seriesColumns} rows={economicsRows} />
+
+        <section>
+          <h2>Project Grid P&L diagnostics</h2>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(projectPnlDiagnostics, null, 2)}</pre>
+        </section>
 
         <details>
           <summary>Diagnostics</summary>
