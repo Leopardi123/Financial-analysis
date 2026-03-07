@@ -539,8 +539,26 @@ export default function ProjectsPage() {
 
   const projectGridPnl = useMemo(() => {
     if (!series || seriesColumns.length === 0) return null;
-    return buildProjectGridPnl(series, seriesColumns.length);
-  }, [series, seriesColumns.length]);
+    const royaltiesDetailRaw = parsedProject?.engineInputWithoutPrices.royaltiesDetail ?? series.royaltiesDetail;
+    const royaltiesDetailForPnl = Array.isArray(royaltiesDetailRaw)
+      ? royaltiesDetailRaw
+        .filter((item) => typeof item.id === 'string' && item.id.length > 0 && typeof item.label === 'string' && item.label.length > 0)
+        .map((item) => ({
+          id: item.id as string,
+          label: item.label as string,
+          base: item.base ?? null,
+          rateType: item.rateType ?? null,
+          rate: typeof item.rate === 'number' && Number.isFinite(item.rate) ? item.rate : null,
+          royaltyUSD: 'royaltyUSD' in item && Array.isArray((item as { royaltyUSD?: Array<number | null> }).royaltyUSD)
+            ? (item as { royaltyUSD?: Array<number | null> }).royaltyUSD
+            : undefined,
+        }))
+      : undefined;
+    return buildProjectGridPnl({
+      ...series,
+      royaltiesDetail: royaltiesDetailForPnl,
+    }, seriesColumns.length);
+  }, [parsedProject, series, seriesColumns.length]);
 
   const economicsRows = useMemo(() => {
     if (!series || !projectGridPnl || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
@@ -745,6 +763,13 @@ export default function ProjectsPage() {
     };
 
     const royaltiesDebug = {
+      royaltiesDetailPresent: pnl.royaltiesDetailPresent,
+      royaltiesDetailRuleCount: pnl.royaltiesDetailRuleCount,
+      royaltiesDetailComputable: pnl.royaltiesDetailComputable,
+      royaltiesDetailBaseNormalized: pnl.royaltiesDetailBaseNormalized,
+      royaltiesDetailRateTypeNormalized: pnl.royaltiesDetailRateTypeNormalized,
+      royaltiesDetailRateParsed: pnl.royaltiesDetailRateParsed,
+      royaltyRatePercentResolved: pnl.royaltyRatePercentResolved,
       royaltiesSourceUsed: pnl.royaltiesSourceUsed,
       computationMethod: pnl.royaltiesSourceUsed === 'royaltiesDetail-current-run'
         ? 'Royalties computed from current-run gross revenue using royaltiesDetail percentage rule(s) per period.'
@@ -761,6 +786,7 @@ export default function ProjectsPage() {
       bases: pnl.royaltiesBases,
       effectiveRoyaltyRateByPeriod: pnl.effectiveRoyaltyRateByPeriod,
       royaltiesResolvedNumeric: pnl.royaltiesResolvedNumeric,
+      royaltiesFailureReason: pnl.royaltiesFailureReason,
       royaltiesSumUSD: sumFiniteValues(pnl.royalties),
       royaltiesSeriesFirstN: pnl.royalties.slice(0, 8),
       royaltiesDetailFailureReason: pnl.royaltiesDetailFailureReason,
@@ -773,14 +799,89 @@ export default function ProjectsPage() {
       },
     };
 
+    const tracePeriod = ebitPeriod ?? 0;
+    const revenueByMetalAtTrace = Object.fromEntries(
+      Object.keys(pnl.revenueByMetal)
+        .sort((a, b) => a.localeCompare(b))
+        .map((metal) => [metal, pnl.revenueByMetal[metal]?.[tracePeriod] ?? null]),
+    );
+    const rawRules = parsedProject?.engineInputWithoutPrices.royaltiesDetail ?? null;
+    const royaltiesRuleTrace = (rawRules ?? []).map((rule) => {
+      const baseNormalized = typeof rule.base === 'string' ? rule.base.trim().toLowerCase() : null;
+      const rateTypeNormalized = typeof rule.rateType === 'string' ? rule.rateType.trim().toLowerCase() : null;
+      const rateParsed = typeof rule.rate === 'number' && Number.isFinite(rule.rate) ? rule.rate : null;
+      return {
+        id: rule.id,
+        baseRaw: rule.base ?? null,
+        baseNormalized,
+        rateTypeRaw: rule.rateType ?? null,
+        rateTypeNormalized,
+        rateRaw: rule.rate ?? null,
+        rateParsed,
+        computable: baseNormalized === 'revenue' && (rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct') && rateParsed !== null,
+      };
+    });
+    const royaltiesPathTrace = {
+      periodIndex: tracePeriod,
+      periodLabel: seriesColumns[tracePeriod] ?? `t=${tracePeriod}`,
+      chain: [
+        {
+          stage: 'snapshot.series.revenueByMetal_USD',
+          value: revenueByMetalAtTrace,
+        },
+        {
+          stage: 'buildProjectGridPnl.grossRevenue',
+          value: pnl.grossRevenue[tracePeriod] ?? null,
+        },
+        {
+          stage: 'parsedProject.engineInputWithoutPrices.royaltiesDetail',
+          value: {
+            present: Array.isArray(rawRules),
+            ruleCount: rawRules?.length ?? 0,
+            rules: royaltiesRuleTrace,
+          },
+        },
+        {
+          stage: 'buildProjectGridPnl.royaltiesResolution',
+          value: {
+            source: pnl.royaltiesSourceUsed,
+            royaltyRatePercentResolved: pnl.royaltyRatePercentResolved,
+            royaltyRateAtPeriod: pnl.royaltyRatePct[tracePeriod] ?? null,
+            royaltyUSDAtPeriod: pnl.royalties[tracePeriod] ?? null,
+            royaltiesDetailFailureReason: pnl.royaltiesDetailFailureReason,
+            royaltiesFailureReason: pnl.royaltiesFailureReason,
+          },
+        },
+        {
+          stage: 'downstream.pnl',
+          value: {
+            grossProfit: pnl.grossProfit[tracePeriod] ?? null,
+            ebitda: pnl.ebitda[tracePeriod] ?? null,
+            ebit: pnl.ebit[tracePeriod] ?? null,
+            fcff: pnl.fcff[tracePeriod] ?? null,
+          },
+        },
+        {
+          stage: 'snapshot.series comparison',
+          value: {
+            snapshotTotalRevenue: series?.totalRevenue_USD?.[tracePeriod] ?? null,
+            snapshotRoyaltiesUSD: series?.royaltiesUSD?.[tracePeriod] ?? null,
+            snapshotEbitUSD: series?.ebitUSD?.[tracePeriod] ?? null,
+            snapshotFcffUSD: series?.fcffUSD?.[tracePeriod] ?? null,
+          },
+        },
+      ],
+    };
+
     return {
       singleSourceOfTruth: 'Displayed economics values come from projectGridPnl (single display model in ProjectsPage).',
       extraValuesAlongTheWay: 'projectGridPnl itself is computed from snapshot series inputs (series.*USD) in buildProjectGridPnl.',
       sections,
       ebitSpotlight,
       royaltiesDebug,
+      royaltiesPathTrace,
     };
-  }, [projectGridPnl, series, seriesColumns]);
+  }, [parsedProject, projectGridPnl, series, seriesColumns]);
 
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;
@@ -999,6 +1100,12 @@ export default function ProjectsPage() {
                   <li>usedInEBIT: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInEBIT)}</li>
                   <li>usedInFCFF: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInFCFF)}</li>
                 </ul>
+              </article>
+
+              <article className="projects-debugger-section">
+                <h3>Per-period pipeline trace</h3>
+                <p>Shows each function/data stage for one period to pinpoint where values become null/unusable.</p>
+                <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(pnlDebugger.royaltiesPathTrace, null, 2)}</pre>
               </article>
 
               {pnlDebugger.sections.map((section) => (
