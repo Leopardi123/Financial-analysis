@@ -219,6 +219,15 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
     }
     return sum;
   });
+  const effectiveRoyaltyRatePct = Array.from({ length: columnCount }, (_, t) => {
+    if (!hasComputedRoyalties) return null;
+    const revenue = grossRevenue[t];
+    const royalties = effectiveRoyaltiesUSD[t];
+    if (revenue === null || royalties === null || !Number.isFinite(revenue) || !Number.isFinite(royalties)) return null;
+    if (revenue === 0) return royalties === 0 ? 0 : null;
+    return (royalties / revenue) * 100;
+  });
+  if (metals.length > 0) rows.push({ label: 'Royalty rate (%)', values: effectiveRoyaltyRatePct });
   if (metals.length > 0) rows.push({ label: 'Royalties (USD)', values: effectiveRoyaltiesUSD });
 
   const ebitda = Array.from({ length: columnCount }, (_, t) => {

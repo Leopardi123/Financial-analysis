@@ -3227,17 +3227,32 @@ Capital Available: ${availableLabel}`,
         return hasFinite ? sum : null;
       });
     })();
+    const grossRevenueSeries = seriesByLabel.get('Gross revenue (USD)') ?? getSeries(projectSeriesRecord.totalRevenue_USD);
+    const resolvedRoyaltiesUSD = royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD);
+    const royaltyRatePct = Array.from({ length: base.tMinusTp.length }, (_, t) => {
+      if (!royaltiesFromDetail) return null;
+      const grossRevenue = grossRevenueSeries?.[t] ?? null;
+      const royalties = resolvedRoyaltiesUSD?.[t] ?? null;
+      if (typeof grossRevenue !== 'number' || !Number.isFinite(grossRevenue)) return null;
+      if (typeof royalties !== 'number' || !Number.isFinite(royalties)) return null;
+      if (grossRevenue === 0) return royalties === 0 ? 0 : null;
+      return (royalties / grossRevenue) * 100;
+    });
 
     const pAndLCoreRows = [
       ...revenueRows,
-      { label: 'Gross revenue (USD)', values: seriesByLabel.get('Gross revenue (USD)') ?? null },
+      { label: 'Gross revenue (USD)', values: grossRevenueSeries ?? null },
+      { label: 'Royalty rate (%)', values: royaltyRatePct },
+      { label: 'Royalties (USD)', values: resolvedRoyaltiesUSD },
       { label: 'Gross profit (USD)', values: seriesByLabel.get('Gross profit (USD)') ?? null },
       { label: 'EBITDA (USD, includes royalties)', values: seriesByLabel.get('EBITDA (USD, includes royalties)') ?? null },
       { label: 'EBIT (USD)', values: getSeries(projectSeriesRecord.ebitUSD) },
       { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) },
-      { label: 'Royalties (USD)', values: royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD) },
     ]
-      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
+      .filter((row) => {
+        if (row.label === 'Royalty rate (%)' || row.label === 'Royalties (USD)') return Array.isArray(row.values);
+        return rowHasDisplayValue(row.values);
+      }) as Array<{ label: string; values: Array<number | null> }>;
 
     const taxRows = [
       ['Taxable income (USD)', projectSeriesRecord.taxableIncomeUSD],

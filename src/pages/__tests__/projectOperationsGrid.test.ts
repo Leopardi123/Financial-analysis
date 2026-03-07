@@ -143,6 +143,7 @@ test('royalties detail drives royalties row and EBITDA consistently', () => {
   const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
   assert.deepEqual(byLabel.get('Gross revenue (USD)'), [200000]);
   assert.deepEqual(byLabel.get('Gross profit (USD)'), [100000]);
+  assert.deepEqual(byLabel.get('Royalty rate (%)'), [4]);
   assert.deepEqual(byLabel.get('Royalties (USD)'), [8000]);
   assert.deepEqual(byLabel.get('EBITDA (USD)'), [92000]);
   assert.deepEqual(byLabel.get('EBIT (USD)'), [82000]);
