@@ -7,6 +7,9 @@ export type ProjectGridSeries = {
   royaltiesDetail?: Array<{
     id: string;
     label: string;
+    base?: string | null;
+    rateType?: string | null;
+    rate?: number | null;
     royaltyUSD?: Array<number | null>;
   }>;
   reclamationUSD?: Array<number | null>;
@@ -24,6 +27,18 @@ export type ProjectGridPnlSeries = {
   grossRevenue: Array<number | null>;
   operatingCosts: Array<number | null>;
   royalties: Array<number | null>;
+  royaltyRatePct: Array<number | null>;
+  royaltiesSourceUsed: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null';
+  royaltiesDetailFailureReason: string | null;
+  fallbackReason: string | null;
+  royaltiesResolvedNumeric: boolean;
+  computedPeriods: number;
+  skippedPeriods: number;
+  grossRevenueNullPeriods: number[];
+  royaltiesRuleCount: number;
+  royaltiesRateTypes: string[];
+  royaltiesBases: string[];
+  effectiveRoyaltyRateByPeriod: Array<number | null>;
   siteGandA: Array<number | null>;
   grossProfit: Array<number | null>;
   ebitda: Array<number | null>;
@@ -77,6 +92,19 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
   const operatingCosts = Array.from({ length }, (_, t) => finiteOrNull(series.operatingCostsUSD?.[t]));
   const siteGandA = Array.from({ length }, (_, t) => finiteOrNull(series.siteGandA_USD?.[t]));
   const royalties = Array.from({ length }, (_, t) => finiteOrNull((royaltiesFromDetail ?? series.royaltiesUSD)?.[t]));
+  const royaltiesSourceUsed: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null' = royaltiesFromDetail
+    ? 'royaltiesDetail-current-run'
+    : Array.isArray(series.royaltiesUSD)
+      ? 'series.royaltiesUSD-fallback'
+      : 'null';
+  const royaltiesDetailFailureReason = royaltiesFromDetail
+    ? null
+    : Array.isArray(series.royaltiesDetail)
+      ? 'royaltiesDetail present but no usable royaltyUSD detail series for display source'
+      : 'royaltiesDetail missing';
+  const fallbackReason = royaltiesSourceUsed === 'series.royaltiesUSD-fallback'
+    ? 'royaltiesDetail current-run computation not usable for display source; using explicit series.royaltiesUSD'
+    : null;
   const byproductCredits = Array.from({ length }, (_, t) => finiteOrNull(series.byproductCreditsUSD?.[t]) ?? 0);
   const depreciation = Array.from({ length }, (_, t) => finiteOrNull(series.depreciationUSD?.[t]) ?? 0);
   const tax = Array.from({ length }, (_, t) => finiteOrNull(series.taxUSD?.[t]));
@@ -84,6 +112,23 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
   const reclamation = Array.from({ length }, (_, t) => finiteOrNull(series.reclamationUSD?.[t]));
   const workingCapitalDelta = Array.from({ length }, (_, t) => finiteOrNull(series.workingCapitalDeltaUSD?.[t]));
   const capex = Array.from({ length }, (_, t) => finiteOrNull(series.capexUSD?.[t]));
+  const grossRevenueNullPeriods = grossRevenue
+    .map((value, t) => (value === null ? t : null))
+    .filter((t): t is number => t !== null);
+  const royaltyRatePct = Array.from({ length }, (_, t) => {
+    if (royaltiesSourceUsed !== 'royaltiesDetail-current-run') return null;
+    const gross = grossRevenue[t];
+    const royalty = royalties[t];
+    if (gross === null || royalty === null) return null;
+    if (gross === 0) return royalty === 0 ? 0 : null;
+    return (royalty / gross) * 100;
+  });
+  const computedPeriods = royalties.filter((value) => value !== null).length;
+  const skippedPeriods = royalties.length - computedPeriods;
+  const royaltiesResolvedNumeric = computedPeriods > 0;
+  const royaltiesRuleCount = Array.isArray(series.royaltiesDetail) ? series.royaltiesDetail.length : 0;
+  const royaltiesRateTypes = Array.from(new Set((series.royaltiesDetail ?? []).map((item) => (typeof item.rateType === 'string' ? item.rateType : null)).filter((item): item is string => Boolean(item)))).sort((a, b) => a.localeCompare(b));
+  const royaltiesBases = Array.from(new Set((series.royaltiesDetail ?? []).map((item) => (typeof item.base === 'string' ? item.base : null)).filter((item): item is string => Boolean(item)))).sort((a, b) => a.localeCompare(b));
 
   const grossProfit = Array.from({ length }, (_, t) => {
     const revenue = grossRevenue[t];
@@ -145,6 +190,18 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
     grossRevenue,
     operatingCosts,
     royalties,
+    royaltyRatePct,
+    royaltiesSourceUsed,
+    royaltiesDetailFailureReason,
+    fallbackReason,
+    royaltiesResolvedNumeric,
+    computedPeriods,
+    skippedPeriods,
+    grossRevenueNullPeriods,
+    royaltiesRuleCount,
+    royaltiesRateTypes,
+    royaltiesBases,
+    effectiveRoyaltyRateByPeriod: royaltyRatePct,
     siteGandA,
     grossProfit,
     ebitda,

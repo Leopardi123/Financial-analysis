@@ -129,6 +129,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   assertEqual(resolved.spotPriceUSDByMetal.Au[0], expectedSpotAu, 'spot mode uses today UTC anchor at t0');
   assertEqual(resolved.spotPriceUSDByMetal.Au[1], expectedSpotAu, 'spot mode replicates anchor value at t1');
   assertEqual(resolved.spotPriceUSDByMetal.Au[2], expectedSpotAu, 'spot mode replicates anchor value at t2');
+  assertEqual(resolved.diagnostics?.metalPriceDiagnostics?.Au?.priceSourceUsed, 'live', 'Au should use live price source when available');
 
   const expectedLb = 2204.6226218487757;
   const gotLb = resolved.payableQtyByMetal.Cu[1];
@@ -207,6 +208,54 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   );
 
   assertEqual(fallbackResolved.meta?.usedFallbackDateMapping, undefined, 'fallback date mapping is not used for v2 canonical time axis');
+
+  const pbFallbackBase = getProjectJsonV1Template();
+  pbFallbackBase.economicsBreakdown = null;
+  pbFallbackBase.time.masterN = 0;
+  pbFallbackBase.time.productionStartPeriod = 0;
+  pbFallbackBase.time.productionStartYear = currentYear;
+  pbFallbackBase.series.capexUSD = [0];
+  pbFallbackBase.series.operatingCostsUSD = [0];
+  pbFallbackBase.series.sustainingCapexUSD = [0];
+  pbFallbackBase.series.siteGandA_USD = [0];
+  pbFallbackBase.series.reclamationUSD = [0];
+  pbFallbackBase.series.byproductCreditsUSD = [0];
+  pbFallbackBase.series.depreciationUSD = [0];
+  pbFallbackBase.series.workingCapitalDeltaUSD = [0];
+  pbFallbackBase.metals.payableQtyByMetal = { Pb: [1] };
+  pbFallbackBase.metals.payableQtyUnitByMetal = { Pb: 'lb' };
+  pbFallbackBase.metals.priceKeyByMetal = { Pb: 'PB_USD_LB' };
+  pbFallbackBase.metals.auPriceKey = 'XAU_USD_TOZ';
+  pbFallbackBase.metals.spotPriceUSDByMetal = { Pb: [1.23] };
+  if (pbFallbackBase.operations) {
+    pbFallbackBase.operations.oreMilledTonnes = [null];
+    pbFallbackBase.operations.oreMinedTonnes = [null];
+    pbFallbackBase.operations.gradeByMetal = { Pb: [null] };
+    pbFallbackBase.operations.recoveryPctByMetal = { Pb: [null] };
+  }
+  const pbFallbackParsed = parseProjectJsonV1(pbFallbackBase);
+  const pbFallbackResolved = await resolveProjectPricesToEngineInput(
+    { parsed: pbFallbackParsed },
+    {
+      resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc }) => ({
+        values: anchorDatesUtc.map(() => (price_key === 'XAU_USD_TOZ' ? 1900 : null)),
+        warnings: [],
+      }),
+    },
+  );
+  assertEqual(pbFallbackResolved.spotPriceUSDByMetal.Pb[0], 1.23, 'Pb should use JSON fallback when live is missing');
+  assertEqual(pbFallbackResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'json-fallback', 'Pb should be marked as json-fallback');
+
+  const pbFailureBase = JSON.parse(JSON.stringify(pbFallbackBase));
+  delete pbFailureBase.metals.spotPriceUSDByMetal;
+  const pbFailureParsed = parseProjectJsonV1(pbFailureBase);
+  const pbFailureResolved = await resolveProjectPricesToEngineInput(
+    { parsed: pbFailureParsed },
+    {
+      resolvePriceSeriesFn: async ({ anchorDatesUtc }) => ({ values: anchorDatesUtc.map(() => null), warnings: [] }),
+    },
+  );
+  assertEqual(pbFailureResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'failure', 'Pb should be marked as failure when both live and JSON fallback are missing');
 
   const withOverrides = {
     ...parsed,

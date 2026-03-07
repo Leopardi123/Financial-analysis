@@ -2,7 +2,7 @@ import { validateSnapshotRequest } from '../api/validateSnapshotRequest.ts';
 import { loadProjectsForSymbol } from '../api/loadProjectsForSymbol.ts';
 import { parseProjectJsonV1 } from '../project/jsonv1/parse.ts';
 import { computeProjectEngineFullProductionV1 } from '../project/engineFullProductionV1.ts';
-import { resolveProjectPricesToEngineInput } from '../project/jsonv1/resolvePrices.ts';
+import { resolveProjectPricesToEngineInput, type MetalPriceDiagnostic } from '../project/jsonv1/resolvePrices.ts';
 import { aggregateProjectsCorporateV1 } from '../corporate/aggregateProjects.ts';
 import { computeCorporateFinancing } from '../corporate/financing/compute.ts';
 import { deriveBuildFundingNeedUSD } from '../corporate/financing/deriveBuildFundingNeed.ts';
@@ -39,6 +39,29 @@ function toFiniteOrNull(value: number | null | undefined): number | null {
   }
 
   return value;
+}
+
+function toFiniteFromUnknown(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return toFiniteOrNull(value);
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+
+export function computeRoyaltiesFromRevenueSeries(args: {
+  grossRevenueUSD: Array<number | null>;
+  ratePct: number;
+}): Array<number | null> {
+  return args.grossRevenueUSD.map((gross) => {
+    const grossFinite = toFiniteOrNull(gross);
+    if (grossFinite === null) return null;
+    return grossFinite * (args.ratePct / 100);
+  });
 }
 
 function sanitizeSeries(series: Array<number | null>): Array<number | null> {
@@ -288,6 +311,7 @@ type ProjectSeriesContext = {
   yearsByPeriod: number[];
   payableQtyByMetal: Record<string, Array<number | null>>;
   payableQtyUnitByMetal: Record<string, string>;
+  priceKeyByMetal: Record<string, string>;
   priceUSDUnitByMetal: Record<string, string>;
   spotPriceUSDByMetal: Record<string, Array<number | null>>;
   revenueByMetal_USD: Record<string, Array<number | null>>;
@@ -336,6 +360,26 @@ type ProjectSeriesContext = {
     capexUSD: Array<number | null>;
     totalCapexUSD: Array<number | null>;
   };
+};
+
+type MetalRevenueDiagnosticEntry = {
+  metal: string;
+  t: number;
+  year: number | null;
+  hasPayableQty: boolean;
+  payableQty: number | null;
+  hasPrice: boolean;
+  price: number | null;
+  hasUnit: boolean;
+  unit: string | null;
+  hasPriceKey: boolean;
+  priceKey: string | null;
+  computedRevenueRaw: number | null;
+  computedRevenueDisplay: string;
+  isExpectedToCompute: boolean;
+  didCompute: boolean;
+  failureReasonCode: string;
+  failureReason: string;
 };
 
 type PeriodLabel = string;
@@ -541,6 +585,72 @@ function validateProjectIdentities(input: {
   };
 }
 
+function buildMetalRevenueDiagnostics(args: {
+  corporateYearsByPeriod: number[];
+  projectSeriesContexts: ProjectSeriesContext[];
+  priceUsedByMetal_USD: Record<string, Array<number | null>>;
+  payableQtyByMetal: Record<string, Array<number | null>>;
+  payableQtyUnitByMetal: Record<string, string>;
+  revenueByMetal_USD: Record<string, Array<number | null>>;
+}): Record<string, MetalRevenueDiagnosticEntry[]> {
+  const out: Record<string, MetalRevenueDiagnosticEntry[]> = {};
+  const metals = Object.keys(args.revenueByMetal_USD).sort((a, b) => a.localeCompare(b));
+
+  for (const metal of metals) {
+    const entries: MetalRevenueDiagnosticEntry[] = [];
+    const qtySeries = args.payableQtyByMetal[metal] ?? [];
+    const priceSeries = args.priceUsedByMetal_USD[metal] ?? [];
+    const revenueSeries = args.revenueByMetal_USD[metal] ?? [];
+    const unit = args.payableQtyUnitByMetal[metal] ?? null;
+    const priceKey = (() => {
+      const found = args.projectSeriesContexts
+        .map((entry) => entry.priceKeyByMetal[metal])
+        .find((value) => typeof value === 'string' && value.trim().length > 0);
+      return found ?? null;
+    })();
+
+    for (let t = 0; t < args.corporateYearsByPeriod.length; t += 1) {
+      const payableQty = toFiniteOrNull(qtySeries[t] ?? null);
+      const price = toFiniteOrNull(priceSeries[t] ?? null);
+      const computedRevenueRaw = toFiniteOrNull(revenueSeries[t] ?? null);
+      const hasPayableQty = payableQty !== null && payableQty > 0;
+      const hasPrice = price !== null;
+      const isExpectedToCompute = hasPayableQty && hasPrice;
+      const didCompute = computedRevenueRaw !== null;
+
+      if (!(isExpectedToCompute && !didCompute)) {
+        continue;
+      }
+
+      entries.push({
+        metal,
+        t,
+        year: Number.isFinite(args.corporateYearsByPeriod[t]) ? args.corporateYearsByPeriod[t] : null,
+        hasPayableQty,
+        payableQty,
+        hasPrice,
+        price,
+        hasUnit: typeof unit === 'string' && unit.trim().length > 0,
+        unit,
+        hasPriceKey: typeof priceKey === 'string' && priceKey.trim().length > 0,
+        priceKey,
+        computedRevenueRaw,
+        computedRevenueDisplay: computedRevenueRaw === null ? '—' : String(computedRevenueRaw),
+        isExpectedToCompute,
+        didCompute,
+        failureReasonCode: 'NULL_IN_REVENUE_PIPELINE',
+        failureReason: 'Payable quantity and price exist, but revenueByMetal_USD resolved to null before display/aggregation.',
+      });
+    }
+
+    if (entries.length > 0) {
+      out[metal] = entries;
+    }
+  }
+
+  return out;
+}
+
 function buildSnapshotSeries(args: {
   masterN: number;
   corporateYearsByPeriod: number[];
@@ -697,21 +807,14 @@ function buildSnapshotSeries(args: {
     };
   }
 
-  const totalRevenue_USD = new Array<number | null>(expectedLength).fill(null);
+  const totalRevenue_USD = new Array<number | null>(expectedLength).fill(0);
   for (let t = 0; t < expectedLength; t += 1) {
     let sum = 0;
-    let hasAny = false;
-    let hasNull = false;
     for (const metal of metalKeys) {
-      const revenue = revenueByMetal_USD[metal][t];
-      if (revenue === null) {
-        hasNull = true;
-        continue;
-      }
-      hasAny = true;
+      const revenue = toFiniteOrNull(revenueByMetal_USD[metal][t] ?? null) ?? 0;
       sum += revenue;
     }
-    totalRevenue_USD[t] = hasAny && !hasNull ? sum : null;
+    totalRevenue_USD[t] = sum;
   }
 
   const aggregateEconomic = (label: keyof ProjectSeriesContext['economics']): Array<number | null> => sumStrictAlignedSeries({
@@ -727,20 +830,27 @@ function buildSnapshotSeries(args: {
   const operatingCostsUSD = aggregateEconomic('operatingCostsUSD');
   const sustainingCapexUSD = aggregateEconomic('sustainingCapexUSD');
   const siteGandA_USD = aggregateEconomic('siteGandA_USD');
-  const royaltiesUSD = aggregateEconomic('royaltiesUSD');
+  const royaltiesUSD_raw = aggregateEconomic('royaltiesUSD');
+  const royaltiesUSD = royaltiesUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
   const reclamationUSD = aggregateEconomic('reclamationUSD');
   const byproductCreditsUSD = aggregateEconomic('byproductCreditsUSD');
   const sustainingCostUSD = aggregateEconomic('sustainingCostUSD');
-  const ebitdaUSD = aggregateEconomic('ebitdaUSD');
+  const ebitdaUSD_raw = aggregateEconomic('ebitdaUSD');
   const depreciationUSD = aggregateEconomic('depreciationUSD');
-  const ebitUSD = aggregateEconomic('ebitUSD');
+  const ebitUSD_raw = aggregateEconomic('ebitUSD');
   const taxableIncomeUSD = aggregateEconomic('taxableIncomeUSD');
   const effectiveTaxRate = aggregateEconomic('effectiveTaxRate');
-  const taxUSD = aggregateEconomic('taxUSD');
+  const taxUSD_raw = aggregateEconomic('taxUSD');
+  const taxUSD = taxUSD_raw.some((value) => toFiniteOrNull(value) !== null)
+    ? taxUSD_raw.map((value) => toFiniteOrNull(value) ?? 0)
+    : taxUSD_raw;
   const workingCapitalDeltaUSD = aggregateEconomic('workingCapitalDeltaUSD');
-  const fcffUSD = aggregateEconomic('fcffUSD');
+  const fcffUSD_raw = aggregateEconomic('fcffUSD');
   const capexUSD = aggregateEconomic('capexUSD');
   const totalCapexUSD = deriveTotalCapexSeries(capexUSD, sustainingCapexUSD);
+  const ebitdaUSD = ebitdaUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
+  const ebitUSD = ebitUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
+  const fcffUSD = fcffUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
 
   const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>, label: string): Array<number | null> =>
     sumStrictAlignedSeries({
@@ -1214,6 +1324,20 @@ type SnapshotDiagnostics = {
         };
       }>;
     };
+    metalRevenueDiagnostics?: Record<string, MetalRevenueDiagnosticEntry[]>;
+    metalPriceDiagnostics?: Record<string, MetalPriceDiagnostic>;
+    metalsUsingLivePrices?: string[];
+    metalsUsingJsonFallback?: string[];
+    metalsWithPriceFailure?: string[];
+    royaltiesDiagnostics?: Record<string, {
+      grossRevenueUSDNumeric: boolean;
+      royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null';
+      royaltiesDetailFailureReason: string | null;
+      royaltiesResolvedNumeric: boolean;
+      computedPeriods: number;
+      skippedPeriods: number;
+      grossRevenueNullPeriods: number[];
+    }>;
   };
 };
 
@@ -1331,6 +1455,7 @@ export async function runCorporateSnapshotPipeline(args: {
     }>;
 
     const projectSeriesContexts: ProjectSeriesContext[] = [];
+    const metalPriceDiagnosticsByMetal: Record<string, MetalPriceDiagnostic> = {};
 
     const aggregation = await aggregateProjectsCorporateV1(
       {
@@ -1388,6 +1513,12 @@ export async function runCorporateSnapshotPipeline(args: {
           );
 
           diagnostics.warnings.push(...(resolved.diagnostics?.warnings ?? []));
+          const resolvedMetalPriceDiagnostics = (resolved.diagnostics?.metalPriceDiagnostics ?? null) as Record<string, MetalPriceDiagnostic> | null;
+          if (resolvedMetalPriceDiagnostics) {
+            for (const [metal, item] of Object.entries(resolvedMetalPriceDiagnostics)) {
+              metalPriceDiagnosticsByMetal[metal] = item;
+            }
+          }
 
           if (resolverScenario.mode !== 'spot') {
             for (const [metal, series] of Object.entries(resolved.spotPriceUSDByMetal)) {
@@ -1440,19 +1571,20 @@ export async function runCorporateSnapshotPipeline(args: {
 
           const projectEconomicsBreakdown = parsed.context.economicsBreakdown;
           const sanitizedGrossRevenueUSD = sanitizeSeries(outPreRoyalties.revenue.grossRevenueUSD);
-          const grossRevenueHasNulls = sanitizedGrossRevenueUSD.some((value) => value === null);
-          if (grossRevenueHasNulls) {
-            diagnostics.warnings.push('royalties: grossRevenueUSD contains nulls; royalties set to null for those periods');
-          }
+          const grossRevenueNullPeriods = sanitizedGrossRevenueUSD
+            .map((value, t) => (value === null ? t : null))
+            .filter((t): t is number => t !== null);
 
           const royaltiesDetailRaw = projectEconomicsBreakdown?.royaltiesDetail ?? null;
           const computableRateTypes = new Set<string>();
           let computableRuleCount = 0;
           const royaltiesDetail = (royaltiesDetailRaw ?? []).map((detail) => {
-            const rate = toFiniteOrNull(detail.rate);
+            const rate = toFiniteFromUnknown(detail.rate);
+            const rateType = String(detail.rateType ?? '').trim().toLowerCase();
+            const base = String(detail.base ?? '').trim().toLowerCase();
             const isComputable =
-              detail.base === 'revenue'
-              && (detail.rateType === 'NSR_pct' || detail.rateType === 'ad_valorem_pct')
+              base === 'revenue'
+              && (rateType === 'nsr_pct' || rateType === 'ad_valorem_pct')
               && rate !== null;
 
             if (isComputable) {
@@ -1463,10 +1595,12 @@ export async function runCorporateSnapshotPipeline(args: {
               diagnostics.warnings.push(`royaltiesDetail ignored: ${detail.id} base=${String(detail.base)} rateType=${String(detail.rateType)} rate=${String(detail.rate)}`);
             }
 
-            const royaltyUSD = sanitizedGrossRevenueUSD.map((gross) => {
-              if (!isComputable || gross === null) return null;
-              return gross * ((rate as number) / 100);
-            });
+            const royaltyUSD = isComputable
+              ? computeRoyaltiesFromRevenueSeries({
+                  grossRevenueUSD: sanitizedGrossRevenueUSD,
+                  ratePct: rate as number,
+                })
+              : nullSeries;
 
             return {
               id: detail.id,
@@ -1494,12 +1628,45 @@ export async function runCorporateSnapshotPipeline(args: {
 
           const hasRoyaltiesDetailArray = Array.isArray(royaltiesDetailRaw);
           const hasComputableRoyaltyRules = computableRuleCount > 0;
-          const fallbackRoyaltiesUSD = isAllNullOrNonFinite(explicitRoyaltiesUSD)
-            ? sanitizeSeries(outPreRoyalties.nationalTake.totalRoyaltiesUSD)
-            : explicitRoyaltiesUSD;
+          const hasExplicitRoyalties = !isAllNullOrNonFinite(explicitRoyaltiesUSD);
           const royaltiesUSD = hasComputableRoyaltyRules
             ? sanitizeSeries(computedRoyaltiesUSD)
-            : fallbackRoyaltiesUSD;
+            : hasExplicitRoyalties
+              ? explicitRoyaltiesUSD
+              : nullSeries;
+          const royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null' = hasComputableRoyaltyRules
+            ? 'royaltiesDetail-current-run'
+            : hasExplicitRoyalties
+              ? 'series.royaltiesUSD-fallback'
+              : 'null';
+          const royaltiesDetailFailureReason = hasComputableRoyaltyRules
+            ? null
+            : hasRoyaltiesDetailArray
+              ? 'royaltiesDetail present but no computable revenue-based rate rules'
+              : 'royaltiesDetail missing';
+          const computedPeriods = royaltiesUSD.filter((value) => value !== null).length;
+          const skippedPeriods = royaltiesUSD.length - computedPeriods;
+          const royaltiesResolvedNumeric = computedPeriods > 0;
+
+          if (!diagnostics.meta.royaltiesDiagnostics) {
+            diagnostics.meta.royaltiesDiagnostics = {};
+          }
+          diagnostics.meta.royaltiesDiagnostics[projectId] = {
+            grossRevenueUSDNumeric: sanitizedGrossRevenueUSD.some((value) => value !== null),
+            royaltiesSource,
+            royaltiesDetailFailureReason,
+            royaltiesResolvedNumeric,
+            computedPeriods,
+            skippedPeriods,
+            grossRevenueNullPeriods,
+          };
+          diagnostics.warnings.push(`royalties source = ${royaltiesSource}`);
+          diagnostics.warnings.push(`royaltiesResolvedNumeric: ${String(royaltiesResolvedNumeric)}`);
+          diagnostics.warnings.push(`grossRevenueUSD numeric = ${String(sanitizedGrossRevenueUSD.some((value) => value !== null))}`);
+          diagnostics.warnings.push(`royalties computed for ${String(computedPeriods)} periods, skipped ${String(skippedPeriods)} (grossRevenueUSD null)`);
+          if (royaltiesDetailFailureReason) {
+            diagnostics.warnings.push(`royaltiesDetail failed because ${royaltiesDetailFailureReason}`);
+          }
 
           if (hasComputableRoyaltyRules) {
             const rateTypes = Array.from(computableRateTypes).sort((a, b) => a.localeCompare(b)).join('|');
@@ -1628,6 +1795,7 @@ export async function runCorporateSnapshotPipeline(args: {
               Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),
             payableQtyUnitByMetal: { ...parsed.engineInputWithoutPrices.payableQtyUnitByMetal },
+            priceKeyByMetal: { ...parsed.engineInputWithoutPrices.priceKeyByMetal },
             priceUSDUnitByMetal: Object.fromEntries(
               Object.keys(parsed.engineInputWithoutPrices.priceKeyByMetal).map((metal) => [metal, `USD_${canonicalUnitForMetal(metal)}`]),
             ),
@@ -1847,6 +2015,41 @@ export async function runCorporateSnapshotPipeline(args: {
     const snapshotSeries = shiftedDeep.value as CorporateSnapshotSeries;
     snapshotSeries.capexUSD = applyScalarMultiplier(snapshotSeries.capexUSD, input.scenario.capexMult);
     snapshotSeries.operatingCostsUSD = applyScalarMultiplier(snapshotSeries.operatingCostsUSD, input.scenario.opexMult);
+
+    const metalRevenueDiagnostics = buildMetalRevenueDiagnostics({
+      corporateYearsByPeriod: snapshotSeries.yearsByPeriod,
+      projectSeriesContexts,
+      priceUsedByMetal_USD: snapshotSeries.priceUsedByMetal_USD,
+      payableQtyByMetal: snapshotSeries.payableQtyByMetal,
+      payableQtyUnitByMetal: snapshotSeries.payableQtyUnitByMetal,
+      revenueByMetal_USD: snapshotSeries.revenueByMetal_USD,
+    });
+    diagnostics.meta.metalRevenueDiagnostics = metalRevenueDiagnostics;
+    diagnostics.meta.metalPriceDiagnostics = metalPriceDiagnosticsByMetal;
+    diagnostics.meta.metalsUsingLivePrices = Object.entries(metalPriceDiagnosticsByMetal)
+      .filter(([, item]) => item.priceSourceUsed === 'live')
+      .map(([metal]) => metal)
+      .sort((a, b) => a.localeCompare(b));
+    diagnostics.meta.metalsUsingJsonFallback = Object.entries(metalPriceDiagnosticsByMetal)
+      .filter(([, item]) => item.priceSourceUsed === 'json-fallback')
+      .map(([metal]) => metal)
+      .sort((a, b) => a.localeCompare(b));
+    diagnostics.meta.metalsWithPriceFailure = Object.entries(metalPriceDiagnosticsByMetal)
+      .filter(([, item]) => item.priceSourceUsed === 'failure')
+      .map(([metal]) => metal)
+      .sort((a, b) => a.localeCompare(b));
+
+    for (const [metal, item] of Object.entries(metalPriceDiagnosticsByMetal)) {
+      diagnostics.warnings.push(`price source metal=${metal} -> ${item.priceSourceUsed} (${item.reason})`);
+    }
+
+    for (const [metal, failures] of Object.entries(metalRevenueDiagnostics)) {
+      if (failures.length === 0) continue;
+      const first = failures[0];
+      diagnostics.warnings.push(
+        `metal revenue failure: ${metal} periods=${failures.length} first_t=${first.t} first_year=${String(first.year)} reason=${first.failureReasonCode}`,
+      );
+    }
 
     const aggregationEffective = {
       ...aggregation,

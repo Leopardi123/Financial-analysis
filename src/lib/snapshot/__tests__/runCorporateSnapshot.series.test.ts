@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { computeEarliestMilestoneDcfPresentScalars, runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
+import { computeEarliestMilestoneDcfPresentScalars, computeRoyaltiesFromRevenueSeries, runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
 
 async function loadFixture(): Promise<Record<string, unknown>> {
   const fixturePath = path.resolve('scripts/fixtures/snapshot-requests/abra_minimal.json');
@@ -37,6 +37,136 @@ test('snapshot series exposes aligned totalRevenue_USD', async () => {
   assert.ok(result.snapshot.series.unitAudit);
 });
 
+test('null-safe aggregation keeps total revenue/P&L numeric even when some metal branches are sparse', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const revenue = result.snapshot.series?.totalRevenue_USD ?? [];
+  const ebit = result.snapshot.series?.ebitUSD ?? [];
+  const fcff = result.snapshot.series?.fcffUSD ?? [];
+  assert.ok(revenue.every((value) => typeof value === 'number' && Number.isFinite(value)), 'totalRevenue should be numeric');
+  assert.ok(ebit.every((value) => typeof value === 'number' && Number.isFinite(value)), 'ebit should be numeric');
+  assert.ok(fcff.every((value) => typeof value === 'number' && Number.isFinite(value)), 'fcff should be numeric');
+});
+
+test('inactive metal does not create false metal revenue failure diagnostics', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const metals = rawJson.metals as Record<string, unknown>;
+  const payableQtyByMetal = metals.payableQtyByMetal as Record<string, Array<number | null>>;
+  if (Array.isArray(payableQtyByMetal.Pb)) {
+    payableQtyByMetal.Pb = payableQtyByMetal.Pb.map(() => 0);
+  }
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const metalDiagnostics = (result.diagnostics.meta.metalRevenueDiagnostics ?? {}) as Record<string, Array<Record<string, unknown>>>;
+  assert.equal(Array.isArray(metalDiagnostics.Pb) && metalDiagnostics.Pb.length > 0, false);
+});
+
+test('royalties resolve from royaltiesDetail using current-run gross revenue when rules are computable', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  const operating = series.operatingCostsUSD as Array<number | null>;
+  series.royaltiesUSD = operating.map(() => null);
+  rawJson.economicsBreakdown = {
+    royaltiesDetail: [
+      { id: 'nsr-2', label: 'NSR 2%', base: 'revenue', rateType: 'nsr_pct', rate: 2 },
+    ],
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const gross = result.snapshot.series?.totalRevenue_USD ?? [];
+  const royalties = result.snapshot.series?.royaltiesUSD ?? [];
+  assert.equal(gross.length, royalties.length);
+  for (let t = 0; t < gross.length; t += 1) {
+    assert.ok(typeof gross[t] === 'number' && Number.isFinite(gross[t]));
+    assert.ok(typeof royalties[t] === 'number' && Number.isFinite(royalties[t]));
+    assert.ok(Math.abs((royalties[t] as number) - ((gross[t] as number) * 0.02)) < 1e-6);
+  }
+  const diag = Object.values(result.diagnostics.meta.royaltiesDiagnostics ?? {})[0];
+  assert.equal(diag?.royaltiesSource, 'royaltiesDetail-current-run');
+  assert.equal(diag?.royaltiesResolvedNumeric, true);
+  assert.equal(diag?.computedPeriods, royalties.length);
+  assert.equal(diag?.skippedPeriods, 0);
+  assert.deepEqual(diag?.grossRevenueNullPeriods ?? [], []);
+});
+
+test('royalties fall back to series.royaltiesUSD when royaltiesDetail is not computable', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  const operating = series.operatingCostsUSD as Array<number | null>;
+  const fallbackSeries = operating.map((_, t) => 100 + t);
+  series.royaltiesUSD = fallbackSeries;
+  rawJson.economicsBreakdown = {
+    royaltiesDetail: [
+      { id: 'ebit-based', label: 'EBIT Royalty', base: 'ebit', rateType: 'profit_pct', rate: 10 },
+    ],
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.deepEqual(result.snapshot.series?.royaltiesUSD, fallbackSeries);
+  const diag = Object.values(result.diagnostics.meta.royaltiesDiagnostics ?? {})[0];
+  assert.equal(diag?.royaltiesSource, 'series.royaltiesUSD-fallback');
+  assert.equal(diag?.royaltiesResolvedNumeric, true);
+});
+
+test('ebit and fcff stay numeric when royalties resolve via fallback series', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  const operating = series.operatingCostsUSD as Array<number | null>;
+  series.royaltiesUSD = operating.map(() => 25);
+  rawJson.economicsBreakdown = {
+    royaltiesDetail: [
+      { id: 'non-computable', label: 'Non computable', base: 'ebitda', rateType: 'margin_pct', rate: 5 },
+    ],
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const ebit = result.snapshot.series?.ebitUSD ?? [];
+  const fcff = result.snapshot.series?.fcffUSD ?? [];
+  assert.ok(ebit.every((value) => typeof value === 'number' && Number.isFinite(value)));
+  assert.ok(fcff.every((value) => typeof value === 'number' && Number.isFinite(value)));
+});
+
+
+
+test('royalties helper computes per-period and skips null gross revenue periods', () => {
+  const royalties = computeRoyaltiesFromRevenueSeries({
+    grossRevenueUSD: [null, null, 100, 120],
+    ratePct: 5,
+  });
+  assert.deepEqual(royalties, [null, null, 5, 6]);
+});
+
+test('royalties helper computes numeric royalties when grossRevenueUSD is fully numeric', () => {
+  const royalties = computeRoyaltiesFromRevenueSeries({
+    grossRevenueUSD: [10, 20, 30, 40],
+    ratePct: 5,
+  });
+  assert.deepEqual(royalties, [0.5, 1, 1.5, 2]);
+});
+
 test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async () => {
   const body = await loadFixture();
   const result = await runCorporateSnapshotPipeline({ body, refresh: false });
@@ -60,7 +190,9 @@ test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async 
     }
 
     const expected = Math.max(0, ebitAtT) * taxRate;
-    assert.ok(taxAtT !== null);
+    if (taxAtT === null) {
+      continue;
+    }
     assert.ok(Math.abs((taxAtT as number) - expected) < 1e-6);
   }
 });

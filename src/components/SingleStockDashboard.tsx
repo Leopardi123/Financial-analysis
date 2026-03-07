@@ -14,6 +14,7 @@ import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { rowHasDisplayValue } from "../lib/project/rowDisplayValue.ts";
+import { extractFailingMetals, extractFallbackOrFailingPriceMetals, rowHasMetalRevenueFailure } from "./projectMetalRevenueDiagnostics.ts";
 import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
@@ -76,6 +77,19 @@ function formatPanelValue(value: unknown): string {
     return value;
   }
   return "—";
+}
+
+function sumFiniteSeries(values: Array<number | null> | null | undefined): number | null {
+  if (!Array.isArray(values)) return null;
+  let sum = 0;
+  let hasFinite = false;
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      sum += value;
+      hasFinite = true;
+    }
+  }
+  return hasFinite ? sum : null;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -1148,6 +1162,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectSnapshotError, setProjectSnapshotError] = useState<string | null>(null);
   const [projectSnapshotWarnings, setProjectSnapshotWarnings] = useState<string[]>([]);
   const [projectSnapshotErrors, setProjectSnapshotErrors] = useState<string[]>([]);
+  const [projectSnapshotDiagnosticsMeta, setProjectSnapshotDiagnosticsMeta] = useState<Record<string, unknown> | null>(null);
   const [projectSnapshotData, setProjectSnapshotData] = useState<Record<string, unknown> | null>(null);
   const [projectSelectorOpen, setProjectSelectorOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -1473,6 +1488,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     setProjectSnapshotError(null);
     setProjectSnapshotWarnings([]);
     setProjectSnapshotErrors([]);
+    setProjectSnapshotDiagnosticsMeta(null);
 
     try {
       const project = await getCompanyProject(ticker, projectId);
@@ -1500,6 +1516,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       const result = await postCorporateSnapshot(request, { refresh: lockedTargetCurrency !== "USD" });
       setProjectSnapshotWarnings([...marketWarnings, ...(result.diagnostics?.warnings ?? [])]);
       setProjectSnapshotErrors(result.diagnostics?.errors ?? []);
+      setProjectSnapshotDiagnosticsMeta((result.diagnostics?.meta ?? null) as Record<string, unknown> | null);
       if (!result.ok || !result.snapshot) {
         setProjectSnapshotData(null);
         setProjectSnapshotError((result.diagnostics?.errors ?? ["Snapshot request failed."]).join("\n"));
@@ -1512,6 +1529,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     } catch (error) {
       setProjectSnapshotData(null);
       setSelectedProjectRawJson(null);
+      setProjectSnapshotDiagnosticsMeta(null);
       setProjectSnapshotError((error as Error).message);
     } finally {
       setProjectSnapshotLoading(false);
@@ -3076,6 +3094,16 @@ Capital Available: ${availableLabel}`,
 
   const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
 
+  const projectMetalRevenueFailures = useMemo(() => {
+    return extractFailingMetals(projectSnapshotDiagnosticsMeta?.metalRevenueDiagnostics ?? null);
+  }, [projectSnapshotDiagnosticsMeta]);
+
+  const projectMetalPriceFallbackOrFailureMetals = useMemo(() => {
+    return extractFallbackOrFailingPriceMetals(projectSnapshotDiagnosticsMeta?.metalPriceDiagnostics ?? null);
+  }, [projectSnapshotDiagnosticsMeta]);
+
+  const projectMetalPriceDiagnostics = (projectSnapshotDiagnosticsMeta?.metalPriceDiagnostics ?? null) as Record<string, Record<string, unknown>> | null;
+
   const projectOperationsGridInput = useMemo((): OperationsGridInput | null => {
     if (!parsedSelectedProject) return null;
     const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
@@ -3199,17 +3227,32 @@ Capital Available: ${availableLabel}`,
         return hasFinite ? sum : null;
       });
     })();
+    const grossRevenueSeries = seriesByLabel.get('Gross revenue (USD)') ?? getSeries(projectSeriesRecord.totalRevenue_USD);
+    const resolvedRoyaltiesUSD = royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD);
+    const royaltyRatePct = Array.from({ length: base.tMinusTp.length }, (_, t) => {
+      if (!royaltiesFromDetail) return null;
+      const grossRevenue = grossRevenueSeries?.[t] ?? null;
+      const royalties = resolvedRoyaltiesUSD?.[t] ?? null;
+      if (typeof grossRevenue !== 'number' || !Number.isFinite(grossRevenue)) return null;
+      if (typeof royalties !== 'number' || !Number.isFinite(royalties)) return null;
+      if (grossRevenue === 0) return royalties === 0 ? 0 : null;
+      return (royalties / grossRevenue) * 100;
+    });
 
     const pAndLCoreRows = [
       ...revenueRows,
-      { label: 'Gross revenue (USD)', values: seriesByLabel.get('Gross revenue (USD)') ?? null },
+      { label: 'Gross revenue (USD)', values: grossRevenueSeries ?? null },
+      { label: 'Royalty rate (%)', values: royaltyRatePct },
+      { label: 'Royalties (USD)', values: resolvedRoyaltiesUSD },
       { label: 'Gross profit (USD)', values: seriesByLabel.get('Gross profit (USD)') ?? null },
       { label: 'EBITDA (USD, includes royalties)', values: seriesByLabel.get('EBITDA (USD, includes royalties)') ?? null },
       { label: 'EBIT (USD)', values: getSeries(projectSeriesRecord.ebitUSD) },
       { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) },
-      { label: 'Royalties (USD)', values: royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD) },
     ]
-      .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
+      .filter((row) => {
+        if (row.label === 'Royalty rate (%)' || row.label === 'Royalties (USD)') return Array.isArray(row.values);
+        return rowHasDisplayValue(row.values);
+      }) as Array<{ label: string; values: Array<number | null> }>;
 
     const taxRows = [
       ['Taxable income (USD)', projectSeriesRecord.taxableIncomeUSD],
@@ -3235,11 +3278,15 @@ Capital Available: ${availableLabel}`,
       .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
-    const groupedRows: Array<{ type: 'divider'; label: string } | { type: 'data'; label: string; values: Array<number | null> }> = [];
+    const failedMetals = new Set([...Object.keys(projectMetalRevenueFailures), ...projectMetalPriceFallbackOrFailureMetals]);
+    const groupedRows: Array<{ type: 'divider'; label: string } | { type: 'data'; label: string; values: Array<number | null>; hasMetalRevenueFailure?: boolean }> = [];
     const addSection = (label: string, rows: Array<{ label: string; values: Array<number | null> }>) => {
       if (rows.length === 0) return;
       groupedRows.push({ type: 'divider', label });
-      rows.forEach((row) => groupedRows.push({ type: 'data', ...row }));
+      rows.forEach((row) => {
+        const hasMetalRevenueFailure = rowHasMetalRevenueFailure(row.label, Array.from(failedMetals));
+        groupedRows.push({ type: 'data', ...row, hasMetalRevenueFailure });
+      });
     };
 
     addSection('PRODUCTION', productionRows);
@@ -3261,7 +3308,148 @@ Capital Available: ${availableLabel}`,
       notes: hasDepreciationSeries ? base.notes : [...base.notes, 'EBITDA requires D&A series; missing => null'],
       rows: groupedRows,
     };
-  }, [parsedSelectedProject, projectSeries, projectOperationsGridInput]);
+  }, [parsedSelectedProject, projectSeries, projectOperationsGridInput, projectMetalRevenueFailures, projectMetalPriceFallbackOrFailureMetals]);
+
+
+  const projectPnlTraceDebugger = useMemo(() => {
+    if (!projectSeries) return null;
+    const record = projectSeries as Record<string, unknown>;
+    const seriesOrNull = (value: unknown): Array<number | null> | null => (Array.isArray(value) ? value as Array<number | null> : null);
+    const revenueByMetal = (record.revenueByMetal_USD ?? {}) as Record<string, Array<number | null>>;
+    const orderedRevenueMetals = Object.keys(revenueByMetal).sort((a, b) => a.localeCompare(b));
+    const grossRevenue = seriesOrNull(record.totalRevenue_USD);
+    const operatingCosts = seriesOrNull(record.operatingCostsUSD);
+    const royalties = (() => {
+      const detail = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
+      if (detail.length > 0 && Array.isArray(detail[0]?.royaltyUSD)) {
+        const n = (detail[0].royaltyUSD as Array<unknown>).length;
+        return Array.from({ length: n }, (_, t) => {
+          let sum = 0;
+          let hasFinite = false;
+          for (const item of detail) {
+            const value = Array.isArray(item.royaltyUSD) ? item.royaltyUSD[t] : null;
+            if (typeof value === "number" && Number.isFinite(value)) {
+              sum += value;
+              hasFinite = true;
+            }
+          }
+          return hasFinite ? sum : null;
+        });
+      }
+      return seriesOrNull(record.royaltiesUSD);
+    })();
+    const grossProfit = seriesOrNull(record.grossProfitUSD);
+    const ebitda = seriesOrNull(record.ebitdaUSD);
+    const ebit = seriesOrNull(record.ebitUSD);
+    const siteGandA = seriesOrNull(record.siteGandA_USD);
+    const byproductCredits = seriesOrNull(record.byproductCreditsUSD);
+    const tax = seriesOrNull(record.taxUSD);
+    const sustainingCapex = seriesOrNull(record.sustainingCapexUSD);
+    const reclamation = seriesOrNull(record.reclamationUSD);
+    const workingCapitalDelta = seriesOrNull(record.workingCapitalDeltaUSD);
+    const capex = seriesOrNull(record.capexUSD);
+    const fcff = seriesOrNull(record.fcffUSD);
+
+    const firstNegativeEbitPeriod = Array.isArray(ebit)
+      ? ebit.findIndex((value) => typeof value === "number" && value < 0)
+      : -1;
+
+    return {
+      singleSourceOfTruth: "Instrumentbräda-tabellen läser värden från projectSnapshotData.series (samma källa för raderna i Production → P&L → FCFF).",
+      note: "Inga dolda avdrag i UI: negativa EBIT/FCFF kommer från explicita seriekomponenter (costs, royalties, G&A, tax, capex, etc.).",
+      ebitSpotlight: firstNegativeEbitPeriod >= 0
+        ? {
+          t: firstNegativeEbitPeriod,
+          ebit: ebit?.[firstNegativeEbitPeriod] ?? null,
+          grossRevenue: grossRevenue?.[firstNegativeEbitPeriod] ?? null,
+          operatingCosts: operatingCosts?.[firstNegativeEbitPeriod] ?? null,
+          siteGandA: siteGandA?.[firstNegativeEbitPeriod] ?? null,
+          royalties: royalties?.[firstNegativeEbitPeriod] ?? null,
+          byproductCredits: byproductCredits?.[firstNegativeEbitPeriod] ?? null,
+        }
+        : null,
+      blocks: [
+        {
+          label: "Gross revenue",
+          formula: "Σ Revenue metal (USD)",
+          calculatedIn: "snapshot series pipeline (rendered as totalRevenue_USD)",
+          sourceOfTruth: "series.totalRevenue_USD",
+          inputs: orderedRevenueMetals.map((metal) => ({
+            label: `Revenue ${metal}`,
+            source: `series.revenueByMetal_USD.${metal}`,
+            values: revenueByMetal[metal],
+          })),
+          output: grossRevenue,
+        },
+        {
+          label: "Gross profit",
+          formula: "grossRevenue - operatingCosts - royalties ± byproductCredits",
+          calculatedIn: "snapshot series pipeline (rendered as grossProfitUSD)",
+          sourceOfTruth: "series.grossProfitUSD",
+          inputs: [
+            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
+            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
+            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
+          ],
+          output: grossProfit,
+        },
+        {
+          label: "EBITDA",
+          formula: "grossRevenue - operatingCosts - royalties",
+          calculatedIn: "snapshot series pipeline",
+          sourceOfTruth: "series.ebitdaUSD",
+          inputs: [
+            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
+            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
+          ],
+          output: ebitda,
+        },
+        {
+          label: "EBIT",
+          formula: "grossRevenue - operatingCosts - siteG&A - royalties + byproductCredits",
+          calculatedIn: "snapshot series pipeline",
+          sourceOfTruth: "series.ebitUSD",
+          inputs: [
+            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
+            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
+            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
+            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
+          ],
+          output: ebit,
+        },
+        {
+          label: "Operating costs",
+          formula: "direkt serie (ingen extra härledning i UI)",
+          calculatedIn: "snapshot series pipeline",
+          sourceOfTruth: "series.operatingCostsUSD",
+          inputs: [{ label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts }],
+          output: operatingCosts,
+        },
+        {
+          label: "FCFF",
+          formula: "grossRevenue - operatingCosts - siteG&A - royalties - tax - sustainingCapex - reclamation - workingCapitalDelta - capex + byproductCredits",
+          calculatedIn: "snapshot series pipeline",
+          sourceOfTruth: "series.fcffUSD",
+          inputs: [
+            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
+            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
+            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
+            { label: "Tax", source: "series.taxUSD", values: tax },
+            { label: "Sustaining capex", source: "series.sustainingCapexUSD", values: sustainingCapex },
+            { label: "Reclamation", source: "series.reclamationUSD", values: reclamation },
+            { label: "Working capital delta", source: "series.workingCapitalDeltaUSD", values: workingCapitalDelta },
+            { label: "Capex", source: "series.capexUSD", values: capex },
+            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
+          ],
+          output: fcff,
+        },
+      ],
+    };
+  }, [projectSeries]);
 
   const projectMountDebug = useMemo(() => {
     const rawJson = selectedProjectRawJson;
@@ -4696,7 +4884,7 @@ Capital Available: ${availableLabel}`,
             <>
               <h1 className="subrub">{selectedProjectName?.trim() || selectedProjectId}</h1>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); }}>
+                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); setProjectSnapshotDiagnosticsMeta(null); }}>
                   Back to projects
                 </button>
                 <a href={`/company/${encodeURIComponent(ticker)}/projects?projectId=${encodeURIComponent(selectedProjectId)}`} className="button-link" style={{ alignSelf: "center" }}>
@@ -5063,8 +5251,8 @@ Capital Available: ${availableLabel}`,
                               </tr>
                             )
                             : (
-                              <tr key={row.label}>
-                                <th className="first-col">{row.label}</th>
+                              <tr key={row.label} className={row.hasMetalRevenueFailure ? "project-row-failure" : undefined}>
+                                <th className="first-col">{row.label}{row.hasMetalRevenueFailure ? " ⚠" : ""}</th>
                                 {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`}>{formatPanelValue(row.values[t] ?? null)}</td>)}
                               </tr>
                             )
@@ -5072,6 +5260,49 @@ Capital Available: ${availableLabel}`,
                       </tbody>
                     </table>
                   </div>
+
+                  <details style={{ marginTop: 8, border: "1px solid #d8e0d2", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
+                    <summary><strong>P&L Debugger (varför EBIT blir negativ)</strong></summary>
+                    {!projectPnlTraceDebugger ? (
+                      <p className="bread" style={{ marginTop: 8 }}>Ingen debugdata ännu.</p>
+                    ) : (
+                      <div style={{ display: "grid", gap: 8, marginTop: 8, fontSize: 13 }}>
+                        <p style={{ margin: 0 }}><strong>Single source of truth:</strong> {projectPnlTraceDebugger.singleSourceOfTruth}</p>
+                        <p style={{ margin: 0 }}><strong>Not:</strong> {projectPnlTraceDebugger.note}</p>
+
+                        {projectPnlTraceDebugger.ebitSpotlight && (
+                          <div style={{ border: "1px solid #d8e0d2", borderRadius: 6, background: "#f7fbf2", padding: "8px" }}>
+                            <strong>Första negativa EBIT-period:</strong>
+                            <div>
+                              t={projectPnlTraceDebugger.ebitSpotlight.t}: EBIT {formatPanelValue(projectPnlTraceDebugger.ebitSpotlight.ebit)}
+                              {' '}= Revenue {formatPanelValue(projectPnlTraceDebugger.ebitSpotlight.grossRevenue)}
+                              {' '}− Op.cost {formatPanelValue(projectPnlTraceDebugger.ebitSpotlight.operatingCosts)}
+                              {' '}− Site G&amp;A {formatPanelValue(projectPnlTraceDebugger.ebitSpotlight.siteGandA)}
+                              {' '}− Royalties {formatPanelValue(projectPnlTraceDebugger.ebitSpotlight.royalties)}
+                              {' '}+ Byproduct credits {formatPanelValue(projectPnlTraceDebugger.ebitSpotlight.byproductCredits)}
+                            </div>
+                          </div>
+                        )}
+
+                        {projectPnlTraceDebugger.blocks.map((block) => (
+                          <div key={block.label} style={{ borderTop: "1px solid #e5ebdf", paddingTop: 8 }}>
+                            <div><strong>{block.label}</strong></div>
+                            <div>Formula: <code>{block.formula}</code></div>
+                            <div>Beräknas i: <code>{block.calculatedIn}</code></div>
+                            <div>Källa: {block.sourceOfTruth}</div>
+                            <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
+                              {block.inputs.map((input) => (
+                                <li key={`${block.label}-${input.label}`}>
+                                  <strong>{input.label}</strong> → {input.source}; summa: {formatPanelValue(sumFiniteSeries(input.values))}
+                                </li>
+                              ))}
+                            </ul>
+                            <div><strong>Outputsumma:</strong> {formatPanelValue(sumFiniteSeries(block.output))}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </details>
                 </section>
               )}
 
@@ -5085,9 +5316,45 @@ Capital Available: ${availableLabel}`,
                     )}
                   </div>
                 )}
-                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && !projectViewMetrics && <p>No diagnostics.</p>}
+                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && !projectViewMetrics && Object.keys(projectMetalRevenueFailures).length === 0 && projectMetalPriceFallbackOrFailureMetals.length === 0 && <p>No diagnostics.</p>}
                 {projectSnapshotErrors.length > 0 && <ul>{projectSnapshotErrors.map((item) => <li key={`e-${item}`}>{item}</li>)}</ul>}
                 {projectSnapshotWarnings.length > 0 && <ul>{projectSnapshotWarnings.map((item) => <li key={`w-${item}`}>{item}</li>)}</ul>}
+                {projectMetalPriceDiagnostics && (
+                  <>
+                    <h4>Metal price source diagnostics</h4>
+                    <ul>
+                      {Object.entries(projectMetalPriceDiagnostics).map(([metal, item]) => (
+                        <li key={`metal-price-${metal}`}>
+                          price source metal={metal} {'->'} {String(item.priceSourceUsed ?? 'unknown')} ({String(item.reason ?? 'n/a')})
+                        </li>
+                      ))}
+                    </ul>
+                    <p>
+                      metalsUsingLivePrices: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsUsingLivePrices ?? [])}{' | '}
+                      metalsUsingJsonFallback: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsUsingJsonFallback ?? [])}{' | '}
+                      metalsWithPriceFailure: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsWithPriceFailure ?? [])}
+                    </p>
+                  </>
+                )}
+                {Object.keys(projectMetalRevenueFailures).length > 0 && (
+                  <>
+                    <h4>Metal revenue failures</h4>
+                    <ul>
+                      {Object.entries(projectMetalRevenueFailures).map(([metal, failures]) => {
+                        const first = failures[0] ?? {};
+                        const t = typeof first.t === 'number' ? first.t : null;
+                        const year = typeof first.year === 'number' ? first.year : null;
+                        const reason = typeof first.failureReason === 'string' ? first.failureReason : 'Unknown';
+                        return (
+                          <li key={`metal-failure-${metal}`}>
+                            {metal}: {failures.length} failing periods{t !== null ? `, first at t=${t}` : ''}{year !== null ? ` / year ${year}` : ''}. Reason: {reason}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify({ metalRevenueDiagnostics: projectMetalRevenueFailures }, null, 2)}</pre>
+                  </>
+                )}
                 {projectViewMetrics && (
                   <>
                     <h4>Payback real debug</h4>

@@ -857,6 +857,16 @@ td.sticky-col {
   background: #f4f8f0;
 }
 
+.project-excel-grid .project-row-failure th,
+.project-excel-grid .project-row-failure td {
+  color: #9f1239;
+  background: #fff1f2;
+}
+
+.project-excel-grid .project-row-failure .first-col {
+  background: #ffe4e6;
+}
+
 .project-producer-layout .producer-core-compact-card {
   background: #fafaf7;
 }

@@ -34,3 +34,10 @@ These must be configured in Vercel (or your local environment):
 - `POST /api/company/refresh` — fetch raw data + chunked materialization (requires `x-cron-secret`).
 - `POST /api/cron/refresh` — nightly refresh routine (requires `x-cron-secret`).
 - `GET /api/company` — read-only data from `financial_points_v2`.
+## Local Development
+
+- Install dependencies: `npm install`
+- Start the app: `npm run dev`
+- Run the automated test suite: `npm test`
+- Build production assets: `npm run build`
+

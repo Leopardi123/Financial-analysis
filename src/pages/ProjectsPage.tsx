@@ -30,6 +30,9 @@ type SeriesShape = {
   royaltiesDetail?: Array<{
     id: string;
     label: string;
+    base?: string | null;
+    rateType?: string | null;
+    rate?: number | null;
     royaltyUSD?: Array<number | null>;
   }>;
   reclamationUSD?: Array<number | null>;
@@ -107,6 +110,19 @@ function formatTableValue(value: number | null): string {
   const abs = Math.abs(value);
   const decimals = abs >= 100 ? 0 : abs >= 1 ? 2 : 4;
   return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
+}
+
+function sumFiniteValues(values: Array<number | null> | undefined): number | null {
+  if (!Array.isArray(values)) return null;
+  let sum = 0;
+  let hasFinite = false;
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      sum += value;
+      hasFinite = true;
+    }
+  }
+  return hasFinite ? sum : null;
 }
 
 function RenderSeriesTable(props: { title: string; columns: string[]; rows: Array<{ label: string; unit?: string; values: Array<number | null> }> }) {
@@ -542,7 +558,8 @@ export default function ProjectsPage() {
     const definitions: Array<{ label: string; values: Array<number | null> | undefined; unit?: string }> = [
       { label: 'Gross revenue', values: pnl.grossRevenue },
       { label: 'Operating costs', values: pnl.operatingCosts },
-      { label: 'Royalties', values: pnl.royalties },
+      { label: 'Royalty rate (%)', values: pnl.royaltyRatePct, unit: '%' },
+      { label: 'Royalties (USD)', values: pnl.royalties },
       { label: 'Gross profit', values: pnl.grossProfit },
       { label: 'EBITDA', values: pnl.ebitda },
       { label: 'Site G&A', values: pnl.siteGandA },
@@ -585,10 +602,11 @@ export default function ProjectsPage() {
       rowsFromDisplayPnl: [
         'Revenue Au/Ag/Cu/Zn/Pb',
         'Gross revenue',
+        'Royalty rate (%)',
+        'Royalties (USD)',
         'Gross profit',
         'EBITDA',
         'Operating costs',
-        'Royalties',
         'Site G&A',
         'EBIT',
         'Taxable income',
@@ -609,6 +627,160 @@ export default function ProjectsPage() {
       },
     };
   }, [projectGridPnl, series, seriesColumns.length]);
+
+  const pnlDebugger = useMemo(() => {
+    if (!projectGridPnl || seriesColumns.length === 0) return null;
+    const pnl = projectGridPnl;
+    const firstNegativeEbitPeriod = pnl.ebit.findIndex((value) => typeof value === 'number' && value < 0);
+    const ebitPeriod = firstNegativeEbitPeriod >= 0 ? firstNegativeEbitPeriod : null;
+
+    const sections: Array<{
+      key: string;
+      label: string;
+      formula: string;
+      calculatedIn: string;
+      sourceOfTruth: string;
+      inputs: Array<{ label: string; source: string; series: Array<number | null> | undefined }>;
+      output: Array<number | null>;
+    }> = [
+      {
+        key: 'gross-revenue',
+        label: 'Gross revenue',
+        formula: 'sum(Revenue metal series)',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:grossRevenue',
+        sourceOfTruth: 'projectGridPnl.grossRevenue (derived from revenueByMetal_USD)',
+        inputs: Object.keys(pnl.revenueByMetal)
+          .sort((a, b) => a.localeCompare(b))
+          .map((metal) => ({
+            label: `Revenue ${metal}`,
+            source: `series.revenueByMetal_USD.${metal}`,
+            series: pnl.revenueByMetal[metal],
+          })),
+        output: pnl.grossRevenue,
+      },
+      {
+        key: 'gross-profit',
+        label: 'Gross profit',
+        formula: 'grossRevenue - operatingCosts - royalties - byproductCredits',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:grossProfit',
+        sourceOfTruth: 'projectGridPnl.grossProfit',
+        inputs: [
+          { label: 'Gross revenue', source: 'projectGridPnl.grossRevenue', series: pnl.grossRevenue },
+          { label: 'Operating costs', source: 'series.operatingCostsUSD → projectGridPnl.operatingCosts', series: pnl.operatingCosts },
+          { label: 'Royalties', source: 'series.royaltiesDetail / series.royaltiesUSD → projectGridPnl.royalties', series: pnl.royalties },
+          { label: 'Byproduct credits', source: 'series.byproductCreditsUSD → projectGridPnl.byproductCredits', series: pnl.byproductCredits },
+        ],
+        output: pnl.grossProfit,
+      },
+      {
+        key: 'ebitda',
+        label: 'EBITDA',
+        formula: 'grossRevenue - operatingCosts - royalties',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:ebitda',
+        sourceOfTruth: 'projectGridPnl.ebitda',
+        inputs: [
+          { label: 'Gross revenue', source: 'projectGridPnl.grossRevenue', series: pnl.grossRevenue },
+          { label: 'Operating costs', source: 'projectGridPnl.operatingCosts', series: pnl.operatingCosts },
+          { label: 'Royalties', source: 'projectGridPnl.royalties', series: pnl.royalties },
+        ],
+        output: pnl.ebitda,
+      },
+      {
+        key: 'ebit',
+        label: 'EBIT',
+        formula: 'grossRevenue - operatingCosts - siteG&A - royalties + byproductCredits',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:ebit',
+        sourceOfTruth: 'projectGridPnl.ebit',
+        inputs: [
+          { label: 'Gross revenue', source: 'projectGridPnl.grossRevenue', series: pnl.grossRevenue },
+          { label: 'Operating costs', source: 'projectGridPnl.operatingCosts', series: pnl.operatingCosts },
+          { label: 'Site G&A', source: 'series.siteGandA_USD → projectGridPnl.siteGandA', series: pnl.siteGandA },
+          { label: 'Royalties', source: 'projectGridPnl.royalties', series: pnl.royalties },
+          { label: 'Byproduct credits', source: 'projectGridPnl.byproductCredits', series: pnl.byproductCredits },
+        ],
+        output: pnl.ebit,
+      },
+      {
+        key: 'operating-costs',
+        label: 'Operating costs',
+        formula: 'direct passthrough of operatingCostsUSD',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:operatingCosts',
+        sourceOfTruth: 'projectGridPnl.operatingCosts',
+        inputs: [
+          { label: 'Operating costs raw', source: 'series.operatingCostsUSD', series: series?.operatingCostsUSD },
+        ],
+        output: pnl.operatingCosts,
+      },
+      {
+        key: 'fcff',
+        label: 'FCFF',
+        formula: 'grossRevenue - operatingCosts - siteG&A - royalties - tax - sustainingCapex - reclamation - wcDelta - capex + byproductCredits',
+        calculatedIn: 'src/pages/projectGridPnl.ts#buildProjectGridPnl:fcff',
+        sourceOfTruth: 'projectGridPnl.fcff',
+        inputs: [
+          { label: 'Gross revenue', source: 'projectGridPnl.grossRevenue', series: pnl.grossRevenue },
+          { label: 'Operating costs', source: 'projectGridPnl.operatingCosts', series: pnl.operatingCosts },
+          { label: 'Site G&A', source: 'projectGridPnl.siteGandA', series: pnl.siteGandA },
+          { label: 'Royalties', source: 'projectGridPnl.royalties', series: pnl.royalties },
+          { label: 'Tax', source: 'series.taxUSD → projectGridPnl.tax', series: pnl.tax },
+          { label: 'Sustaining capex', source: 'series.sustainingCapexUSD → projectGridPnl.sustainingCapex', series: pnl.sustainingCapex },
+          { label: 'Reclamation', source: 'series.reclamationUSD → projectGridPnl.reclamation', series: pnl.reclamation },
+          { label: 'Working capital delta', source: 'series.workingCapitalDeltaUSD → projectGridPnl.workingCapitalDelta', series: pnl.workingCapitalDelta },
+          { label: 'Capex', source: 'series.capexUSD → projectGridPnl.capex', series: pnl.capex },
+          { label: 'Byproduct credits', source: 'projectGridPnl.byproductCredits', series: pnl.byproductCredits },
+        ],
+        output: pnl.fcff,
+      },
+    ];
+
+    const ebitSpotlight = ebitPeriod === null ? null : {
+      periodIndex: ebitPeriod,
+      label: seriesColumns[ebitPeriod],
+      ebit: pnl.ebit[ebitPeriod],
+      grossRevenue: pnl.grossRevenue[ebitPeriod],
+      operatingCosts: pnl.operatingCosts[ebitPeriod],
+      siteGandA: pnl.siteGandA[ebitPeriod],
+      royalties: pnl.royalties[ebitPeriod],
+      byproductCredits: pnl.byproductCredits[ebitPeriod],
+    };
+
+    const royaltiesDebug = {
+      royaltiesSourceUsed: pnl.royaltiesSourceUsed,
+      computationMethod: pnl.royaltiesSourceUsed === 'royaltiesDetail-current-run'
+        ? 'Royalties computed from current-run gross revenue using royaltiesDetail percentage rule(s) per period.'
+        : pnl.royaltiesSourceUsed === 'series.royaltiesUSD-fallback'
+          ? 'Royalties fell back to explicit series.royaltiesUSD because current-run royalty computation was not usable.'
+          : 'Royalties unresolved (null source).',
+      grossRevenueUSDNumeric: pnl.grossRevenue.some((value) => value !== null),
+      grossRevenueSum: sumFiniteValues(pnl.grossRevenue),
+      computedPeriods: pnl.computedPeriods,
+      skippedPeriods: pnl.skippedPeriods,
+      grossRevenueNullPeriods: pnl.grossRevenueNullPeriods,
+      ruleCount: pnl.royaltiesRuleCount,
+      rateTypes: pnl.royaltiesRateTypes,
+      bases: pnl.royaltiesBases,
+      effectiveRoyaltyRateByPeriod: pnl.effectiveRoyaltyRateByPeriod,
+      royaltiesResolvedNumeric: pnl.royaltiesResolvedNumeric,
+      royaltiesSumUSD: sumFiniteValues(pnl.royalties),
+      royaltiesSeriesFirstN: pnl.royalties.slice(0, 8),
+      royaltiesDetailFailureReason: pnl.royaltiesDetailFailureReason,
+      fallbackReason: pnl.fallbackReason,
+      downstreamUsage: {
+        usedInGrossProfit: true,
+        usedInEBITDA: true,
+        usedInEBIT: true,
+        usedInFCFF: true,
+      },
+    };
+
+    return {
+      singleSourceOfTruth: 'Displayed economics values come from projectGridPnl (single display model in ProjectsPage).',
+      extraValuesAlongTheWay: 'projectGridPnl itself is computed from snapshot series inputs (series.*USD) in buildProjectGridPnl.',
+      sections,
+      ebitSpotlight,
+      royaltiesDebug,
+    };
+  }, [projectGridPnl, series, seriesColumns]);
 
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;
@@ -764,6 +936,90 @@ export default function ProjectsPage() {
           <h3>---- PROJECT MOUNT DEBUG ----</h3>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(projectMountDebug, null, 2)}</pre>
         </section>
+
+        <details>
+          <summary>P&amp;L Debugger (EBIT / FCFF trace)</summary>
+          {!pnlDebugger ? (
+            <p>No P&amp;L debug data yet.</p>
+          ) : (
+            <div className="projects-debugger">
+              <p><strong>Single source of truth:</strong> {pnlDebugger.singleSourceOfTruth}</p>
+              <p><strong>Additional values along the way:</strong> {pnlDebugger.extraValuesAlongTheWay}</p>
+
+              {pnlDebugger.ebitSpotlight ? (
+                <div className="projects-debugger-highlight">
+                  <h3>Why EBIT is negative (first negative period)</h3>
+                  <p>
+                    Period <strong>{pnlDebugger.ebitSpotlight.label}</strong> (t={pnlDebugger.ebitSpotlight.periodIndex}) gives EBIT <strong>{formatTableValue(pnlDebugger.ebitSpotlight.ebit)}</strong>
+                    {' '}= gross revenue ({formatTableValue(pnlDebugger.ebitSpotlight.grossRevenue)})
+                    {' '}− operating costs ({formatTableValue(pnlDebugger.ebitSpotlight.operatingCosts)})
+                    {' '}− site G&amp;A ({formatTableValue(pnlDebugger.ebitSpotlight.siteGandA)})
+                    {' '}− royalties ({formatTableValue(pnlDebugger.ebitSpotlight.royalties)})
+                    {' '}+ byproduct credits ({formatTableValue(pnlDebugger.ebitSpotlight.byproductCredits)}).
+                  </p>
+                </div>
+              ) : (
+                <p>No negative EBIT period found in the loaded data.</p>
+              )}
+
+              <article className="projects-debugger-section">
+                <h3>Royalties</h3>
+                <p><strong>Source:</strong> {pnlDebugger.royaltiesDebug.royaltiesSourceUsed}</p>
+                <p><strong>Computation:</strong> {pnlDebugger.royaltiesDebug.computationMethod}</p>
+                <p><strong>Computation basis:</strong></p>
+                <ul>
+                  <li>grossRevenueUSDNumeric: {String(pnlDebugger.royaltiesDebug.grossRevenueUSDNumeric)}</li>
+                  <li>grossRevenueSum: {formatTableValue(pnlDebugger.royaltiesDebug.grossRevenueSum)}</li>
+                  <li>computedPeriods: {pnlDebugger.royaltiesDebug.computedPeriods}</li>
+                  <li>skippedPeriods: {pnlDebugger.royaltiesDebug.skippedPeriods}</li>
+                  <li>grossRevenueNullPeriods: [{pnlDebugger.royaltiesDebug.grossRevenueNullPeriods.join(', ')}]</li>
+                </ul>
+                <p><strong>Rate details:</strong></p>
+                <ul>
+                  <li>ruleCount: {pnlDebugger.royaltiesDebug.ruleCount}</li>
+                  <li>rateType(s): {pnlDebugger.royaltiesDebug.rateTypes.join(', ') || '—'}</li>
+                  <li>base(s): {pnlDebugger.royaltiesDebug.bases.join(', ') || '—'}</li>
+                  <li>effectiveRoyaltyRateByPeriod (first 8): [{pnlDebugger.royaltiesDebug.effectiveRoyaltyRateByPeriod.slice(0, 8).map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                </ul>
+                <p><strong>Output:</strong></p>
+                <ul>
+                  <li>royaltiesResolvedNumeric: {String(pnlDebugger.royaltiesDebug.royaltiesResolvedNumeric)}</li>
+                  <li>royaltiesSumUSD: {formatTableValue(pnlDebugger.royaltiesDebug.royaltiesSumUSD)}</li>
+                  <li>royaltiesSeriesFirstN: [{pnlDebugger.royaltiesDebug.royaltiesSeriesFirstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                </ul>
+                <p><strong>Failure / fallback explanation:</strong></p>
+                <ul>
+                  <li>royaltiesDetailFailureReason: {pnlDebugger.royaltiesDebug.royaltiesDetailFailureReason ?? '—'}</li>
+                  <li>fallbackReason: {pnlDebugger.royaltiesDebug.fallbackReason ?? '—'}</li>
+                </ul>
+                <p><strong>Downstream usage:</strong></p>
+                <ul>
+                  <li>usedInGrossProfit: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInGrossProfit)}</li>
+                  <li>usedInEBITDA: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInEBITDA)}</li>
+                  <li>usedInEBIT: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInEBIT)}</li>
+                  <li>usedInFCFF: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInFCFF)}</li>
+                </ul>
+              </article>
+
+              {pnlDebugger.sections.map((section) => (
+                <article key={section.key} className="projects-debugger-section">
+                  <h3>{section.label}</h3>
+                  <p><strong>Formula:</strong> <code>{section.formula}</code></p>
+                  <p><strong>Calculated in:</strong> <code>{section.calculatedIn}</code></p>
+                  <p><strong>Resolved source:</strong> {section.sourceOfTruth}</p>
+                  <ul>
+                    {section.inputs.map((input) => (
+                      <li key={`${section.key}-${input.label}`}>
+                        <strong>{input.label}</strong> → {input.source} (sum: {formatTableValue(sumFiniteValues(input.series))})
+                      </li>
+                    ))}
+                  </ul>
+                  <p><strong>Output sum:</strong> {formatTableValue(sumFiniteValues(section.output))}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </details>
 
         <details>
           <summary>Unit Audit</summary>
