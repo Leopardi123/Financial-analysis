@@ -3263,6 +3263,56 @@ Capital Available: ${availableLabel}`,
     };
   }, [parsedSelectedProject, projectSeries, projectOperationsGridInput]);
 
+  const projectGridPnlDiagnostics = useMemo(() => {
+    if (!projectExcelGrid) {
+      return {
+        status: 'projectExcelGrid unavailable',
+      };
+    }
+
+    const dataRows = projectExcelGrid.rows
+      .filter((row): row is { type: 'data'; label: string; values: Array<number | null> } => row.type === 'data');
+    const byLabel = new Map(dataRows.map((row) => [row.label, row.values]));
+    const first8 = (label: string) => (byLabel.get(label) ?? []).slice(0, 8);
+
+    return {
+      renderLocation: {
+        component: 'SingleStockDashboard',
+        section: 'Project panel',
+        placedBetween: ['Diagnostics', 'Snapshot JSON'],
+      },
+      sourceMapObservedInGridBuilder: {
+        uiComputedFromOperationsGridModel: [
+          'Revenue <metal> (USD)',
+          'Gross revenue (USD)',
+          'Gross profit (USD)',
+          'EBITDA (USD, includes royalties)',
+        ],
+        snapshotSeriesDirect: [
+          'EBIT (USD)',
+          'Operating costs (USD)',
+          'Taxable income (USD)',
+          'Tax (USD)',
+          'Effective tax rate',
+          'Sustaining capex (USD)',
+          'Reclamation (USD)',
+          'Working capital delta (USD)',
+          'Byproduct credits (USD)',
+          'Capex (USD)',
+          'FCFF (USD)',
+        ],
+      },
+      rowPreview_first8: {
+        revenueAuUSD: first8('Revenue Au (USD)'),
+        revenueAgUSD: first8('Revenue Ag (USD)'),
+        grossRevenueUSD: first8('Gross revenue (USD)'),
+        operatingCostsUSD: first8('Operating costs (USD)'),
+        ebitUSD: first8('EBIT (USD)'),
+        fcffUSD: first8('FCFF (USD)'),
+      },
+    };
+  }, [projectExcelGrid]);
+
   const projectMountDebug = useMemo(() => {
     const rawJson = selectedProjectRawJson;
     const rawTime = rawJson && typeof rawJson.time === "object" && rawJson.time !== null && !Array.isArray(rawJson.time)
@@ -5098,6 +5148,11 @@ Capital Available: ${availableLabel}`,
                 )}
                 <h4>---- PROJECT MOUNT DEBUG ----</h4>
                 <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectMountDebug, null, 2)}</pre>
+              </details>
+
+              <details style={{ marginTop: 12 }}>
+                <summary>Project grid P&L debug</summary>
+                <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(projectGridPnlDiagnostics, null, 2)}</pre>
               </details>
 
               <details style={{ marginTop: 12 }}>
