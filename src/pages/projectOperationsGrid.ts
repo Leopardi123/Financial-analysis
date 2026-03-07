@@ -25,11 +25,13 @@ export type OperationsGridInput = {
     priceUSDByMetal?: Record<string, Array<number | null>>;
     operatingCostsUSD?: Array<number | null>;
     royaltiesUSD?: Array<number | null>;
+    siteGandA_USD?: Array<number | null>;
+    byproductCreditsUSD?: Array<number | null>;
     royaltiesDetail?: Array<{
       id?: string;
       base?: string | null;
       rateType?: string | null;
-      rate?: number | null;
+      rate?: number | string | null;
     }> | null;
     ebitdaUSD?: Array<number | null>;
     ebitUSD?: Array<number | null>;
@@ -88,6 +90,34 @@ function normalizeRecoverySeries(values: Array<number | null> | undefined, colum
     if (typeof value !== 'number' || !Number.isFinite(value)) return null;
     return isFraction ? value * 100 : value;
   });
+}
+
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeToken(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRateType(value: string | null | undefined): string | null {
+  const token = normalizeToken(value);
+  if (token === null) return null;
+  const compact = token.replace(/_/g, '');
+  if (compact === 'nsrpct') return 'nsr_pct';
+  if (compact === 'advalorempct') return 'ad_valorem_pct';
+  return token;
+}
+
+function parseFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 export function buildOperationsGridModel(input: OperationsGridInput): OperationsGridModel {
@@ -176,31 +206,28 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   const grossRevenue = Array.from({ length: columnCount }, (_, t) => {
     if (metals.length === 0) return null;
     let sum = 0;
+    let hasFinite = false;
     for (const metal of metals) {
       const value = revenueByMetal[metal]?.[t] ?? null;
-      if (value === null || !Number.isFinite(value)) return null;
+      if (value === null || !Number.isFinite(value)) continue;
       sum += value;
+      hasFinite = true;
     }
-    return sum;
+    return hasFinite ? sum : null;
   });
   if (metals.length > 0) rows.push({ label: 'Gross revenue (USD)', values: grossRevenue });
 
-  const grossProfit = Array.from({ length: columnCount }, (_, t) => {
-    const revenue = grossRevenue[t];
-    const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
-    if (revenue === null || operatingCost === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost)) return null;
-    return revenue - operatingCost;
-  });
-  if (metals.length > 0) rows.push({ label: 'Gross profit (USD)', values: grossProfit });
-
   const royaltiesDetail = input.economics?.royaltiesDetail ?? null;
-  const computableRules = (royaltiesDetail ?? []).filter((detail) => {
-    const rate = detail.rate;
-    return detail.base === 'revenue'
-      && (detail.rateType === 'NSR_pct' || detail.rateType === 'ad_valorem_pct')
-      && typeof rate === 'number'
-      && Number.isFinite(rate);
-  });
+  const computableRules = (royaltiesDetail ?? [])
+    .map((detail) => ({
+      detail,
+      baseNormalized: normalizeToken(detail.base ?? null),
+      rateTypeNormalized: normalizeRateType(detail.rateType ?? null),
+      rateParsed: parseFiniteNumber(detail.rate),
+    }))
+    .filter((item) => item.baseNormalized === 'revenue'
+      && (item.rateTypeNormalized === 'nsr_pct' || item.rateTypeNormalized === 'ad_valorem_pct')
+      && item.rateParsed !== null);
   const hasComputedRoyalties = computableRules.length > 0;
   if (hasComputedRoyalties) {
     notes.push('Royalties (computed)');
@@ -208,14 +235,13 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
 
   const effectiveRoyaltiesUSD = Array.from({ length: columnCount }, (_, t) => {
     if (!hasComputedRoyalties) {
-      const fallback = input.economics?.royaltiesUSD?.[t] ?? 0;
-      return Number.isFinite(fallback) ? fallback : null;
+      return finiteOrNull(input.economics?.royaltiesUSD?.[t]);
     }
     const revenue = grossRevenue[t];
     if (revenue === null || !Number.isFinite(revenue)) return null;
     let sum = 0;
-    for (const detail of computableRules) {
-      sum += revenue * ((detail.rate as number) / 100);
+    for (const item of computableRules) {
+      sum += revenue * ((item.rateParsed as number) / 100);
     }
     return sum;
   });
@@ -230,6 +256,16 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   if (metals.length > 0) rows.push({ label: 'Royalty rate (%)', values: effectiveRoyaltyRatePct });
   if (metals.length > 0) rows.push({ label: 'Royalties (USD)', values: effectiveRoyaltiesUSD });
 
+  const byproductCredits = Array.from({ length: columnCount }, (_, t) => finiteOrNull(input.economics?.byproductCreditsUSD?.[t]) ?? 0);
+  const grossProfit = Array.from({ length: columnCount }, (_, t) => {
+    const revenue = grossRevenue[t];
+    const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
+    const royalties = effectiveRoyaltiesUSD[t] ?? null;
+    if (revenue === null || operatingCost === null || royalties === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost) || !Number.isFinite(royalties)) return null;
+    return revenue - operatingCost - royalties - byproductCredits[t];
+  });
+  if (metals.length > 0) rows.push({ label: 'Gross profit (USD)', values: grossProfit });
+
   const ebitda = Array.from({ length: columnCount }, (_, t) => {
     const revenue = grossRevenue[t];
     const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
@@ -237,20 +273,18 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
     if (revenue === null || operatingCost === null || royalties === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost) || !Number.isFinite(royalties)) return null;
     return revenue - operatingCost - royalties;
   });
+  const siteGandA = Array.from({ length: columnCount }, (_, t) => finiteOrNull(input.economics?.siteGandA_USD?.[t]) ?? 0);
 
-  const hasDepreciation = Array.isArray(input.economics?.depreciationUSD);
   const ebit = Array.from({ length: columnCount }, (_, t) => {
-    if (!hasDepreciation) {
-      const explicit = input.economics?.ebitUSD?.[t] ?? null;
-      return explicit !== null && Number.isFinite(explicit) ? explicit : null;
-    }
-    const ebitdaValue = ebitda[t];
-    const depreciation = input.economics?.depreciationUSD?.[t] ?? null;
-    if (ebitdaValue === null || depreciation === null || !Number.isFinite(ebitdaValue) || !Number.isFinite(depreciation)) return null;
-    return ebitdaValue - depreciation;
+    const revenue = grossRevenue[t];
+    const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
+    const royalties = effectiveRoyaltiesUSD[t] ?? null;
+    if (revenue === null || operatingCost === null || royalties === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost) || !Number.isFinite(royalties)) return null;
+    return revenue - operatingCost - siteGandA[t] - royalties + byproductCredits[t];
   });
-  if (Array.isArray(input.economics?.ebitUSD) || hasDepreciation) {
+  if (metals.length > 0) {
     rows.push({ label: 'EBITDA (USD)', values: ebitda });
+    rows.push({ label: 'Site G&A (USD)', values: siteGandA });
     rows.push({ label: 'EBIT (USD)', values: ebit });
   }
   if (Array.isArray(input.economics?.taxableIncomeUSD)) {

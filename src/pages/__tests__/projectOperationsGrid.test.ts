@@ -53,7 +53,7 @@ test('totals are strict and return em dash value when null appears in production
   assert.equal(totals.get('Total payable Au (t>=tp) (toz)'), null);
 });
 
-test('grade/recovery rows precede payable and derived revenue rows include EBITDA when depreciation exists', () => {
+test('grade/recovery rows precede payable and derived revenue rows include EBITDA when computable', () => {
   const model = buildOperationsGridModel({
     masterN: 1,
     productionStartPeriod: 0,
@@ -83,16 +83,15 @@ test('grade/recovery rows precede payable and derived revenue rows include EBITD
   assert(labels.indexOf('Recovery Cu (%)') < labels.indexOf('Payable Cu (lb)'));
   assert(labels.includes('Revenue Au (USD)'));
   assert(labels.includes('Gross revenue (USD)'));
-  assert(labels.includes('Gross profit (USD)'));
+  assert(!labels.includes('Gross profit (USD)'));
   assert(!labels.includes('Royalties (USD)'));
-  assert(labels.includes('EBITDA (USD)'));
+  assert(!labels.includes('EBITDA (USD)'));
 
   const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
   assert.deepEqual(byLabel.get('Recovery Au (%)'), [90, 88]);
   assert.deepEqual(byLabel.get('Revenue Au (USD)'), [2000000, 1995000]);
   assert.deepEqual(byLabel.get('Gross revenue (USD)'), [2008000, 2003610]);
-  assert.deepEqual(byLabel.get('Gross profit (USD)'), [1208000, 1193610]);
-  assert.deepEqual(byLabel.get('EBITDA (USD)'), [1208000, 1193610]);
+  assert.equal(byLabel.has('EBITDA (USD)'), false);
 });
 
 test('rows are shown only when at least one cell has a real value', () => {
@@ -142,11 +141,35 @@ test('royalties detail drives royalties row and EBITDA consistently', () => {
 
   const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
   assert.deepEqual(byLabel.get('Gross revenue (USD)'), [200000]);
-  assert.deepEqual(byLabel.get('Gross profit (USD)'), [100000]);
+  assert.deepEqual(byLabel.get('Gross profit (USD)'), [92000]);
   assert.deepEqual(byLabel.get('Royalty rate (%)'), [4]);
   assert.deepEqual(byLabel.get('Royalties (USD)'), [8000]);
   assert.deepEqual(byLabel.get('EBITDA (USD)'), [92000]);
-  assert.deepEqual(byLabel.get('EBIT (USD)'), [82000]);
+  assert.deepEqual(byLabel.get('EBIT (USD)'), [92000]);
+});
+
+test('operations grid does not backfill royalties with zero when no computable detail or fallback series exists', () => {
+  const model = buildOperationsGridModel({
+    masterN: 0,
+    productionStartPeriod: 0,
+    yearsByPeriod: [2026],
+    operations: null,
+    metals: {
+      payableQtyByMetal: { Au: [100] },
+      payableQtyUnitByMetal: { Au: 'toz' },
+    },
+    economics: {
+      priceUSDByMetal: { Au: [2000] },
+      operatingCostsUSD: [100000],
+      royaltiesDetail: [
+        { id: 'unsupported', base: 'ebitda', rateType: 'NSR_pct', rate: 2 },
+      ],
+    },
+  });
+
+  const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
+  assert.equal(byLabel.has('Royalties (USD)'), false);
+  assert.equal(byLabel.has('EBIT (USD)'), false);
 });
 
 test('grade/recovery are masked before production start and when ore milled is zero', () => {

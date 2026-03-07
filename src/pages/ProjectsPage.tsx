@@ -455,6 +455,8 @@ export default function ProjectsPage() {
         operatingCostsUSD: series?.operatingCostsUSD,
         royaltiesUSD: series?.royaltiesUSD,
         royaltiesDetail: raw.engineInputWithoutPrices.royaltiesDetail,
+        siteGandA_USD: series?.siteGandA_USD,
+        byproductCreditsUSD: series?.byproductCreditsUSD,
         ebitdaUSD: series?.ebitdaUSD,
         ebitUSD: series?.ebitUSD,
         depreciationUSD: series?.depreciationUSD,
@@ -745,6 +747,13 @@ export default function ProjectsPage() {
     };
 
     const royaltiesDebug = {
+      royaltiesDetailPresent: pnl.royaltiesDetailPresent,
+      royaltiesDetailRuleCount: pnl.royaltiesDetailRuleCount,
+      royaltiesDetailComputable: pnl.royaltiesDetailComputable,
+      royaltiesDetailBaseNormalized: pnl.royaltiesDetailBaseNormalized,
+      royaltiesDetailRateTypeNormalized: pnl.royaltiesDetailRateTypeNormalized,
+      royaltiesDetailRateParsed: pnl.royaltiesDetailRateParsed,
+      royaltyRatePercentResolved: pnl.royaltyRatePercentResolved,
       royaltiesSourceUsed: pnl.royaltiesSourceUsed,
       computationMethod: pnl.royaltiesSourceUsed === 'royaltiesDetail-current-run'
         ? 'Royalties computed from current-run gross revenue using royaltiesDetail percentage rule(s) per period.'
@@ -761,6 +770,7 @@ export default function ProjectsPage() {
       bases: pnl.royaltiesBases,
       effectiveRoyaltyRateByPeriod: pnl.effectiveRoyaltyRateByPeriod,
       royaltiesResolvedNumeric: pnl.royaltiesResolvedNumeric,
+      royaltiesFailureReason: pnl.royaltiesFailureReason,
       royaltiesSumUSD: sumFiniteValues(pnl.royalties),
       royaltiesSeriesFirstN: pnl.royalties.slice(0, 8),
       royaltiesDetailFailureReason: pnl.royaltiesDetailFailureReason,
