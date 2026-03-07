@@ -537,10 +537,22 @@ export default function ProjectsPage() {
     };
   }, [operationsGridInput, parsedProject, selectedProject]);
 
+  const projectGridSeries = useMemo(() => {
+    if (!series) return null;
+    const detailFromCurrentProject = parsedProject?.engineInputWithoutPrices.royaltiesDetail;
+    const royaltiesDetail = Array.isArray(detailFromCurrentProject)
+      ? detailFromCurrentProject
+      : series.royaltiesDetail;
+    return {
+      ...series,
+      royaltiesDetail,
+    };
+  }, [parsedProject, series]);
+
   const projectGridPnl = useMemo(() => {
-    if (!series || seriesColumns.length === 0) return null;
-    return buildProjectGridPnl(series, seriesColumns.length);
-  }, [series, seriesColumns.length]);
+    if (!projectGridSeries || seriesColumns.length === 0) return null;
+    return buildProjectGridPnl(projectGridSeries, seriesColumns.length);
+  }, [projectGridSeries, seriesColumns.length]);
 
   const economicsRows = useMemo(() => {
     if (!series || !projectGridPnl || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
@@ -746,6 +758,9 @@ export default function ProjectsPage() {
 
     const royaltiesDebug = {
       royaltiesDetailPresent: pnl.royaltiesDetailPresent,
+      royaltiesDetailInputSource: Array.isArray(parsedProject?.engineInputWithoutPrices.royaltiesDetail)
+        ? 'parsedProject.engineInputWithoutPrices.royaltiesDetail'
+        : 'snapshot.series.royaltiesDetail',
       royaltiesDetailRuleCount: pnl.royaltiesDetailRuleCount,
       royaltiesDetailComputable: pnl.royaltiesDetailComputable,
       royaltiesDetailBaseNormalized: pnl.royaltiesDetailBaseNormalized,
@@ -788,7 +803,7 @@ export default function ProjectsPage() {
       ebitSpotlight,
       royaltiesDebug,
     };
-  }, [projectGridPnl, series, seriesColumns]);
+  }, [parsedProject, projectGridPnl, series, seriesColumns]);
 
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;

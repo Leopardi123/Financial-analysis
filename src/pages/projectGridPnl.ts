@@ -5,8 +5,8 @@ export type ProjectGridSeries = {
   siteGandA_USD?: Array<number | null>;
   royaltiesUSD?: Array<number | null>;
   royaltiesDetail?: Array<{
-    id: string;
-    label: string;
+    id?: string;
+    label?: string;
     base?: string | null;
     rateType?: string | null;
     rate?: number | null;
