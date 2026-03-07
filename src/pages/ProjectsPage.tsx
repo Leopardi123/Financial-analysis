@@ -87,6 +87,18 @@ function firstNonZeroIndex(values: Array<number | null> | undefined): number | n
   return null;
 }
 
+function isFinitePositive(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function buildHasPayableMetalByPeriod(
+  payableQtyByMetal: Record<string, Array<number | null>> | undefined,
+  length: number,
+): boolean[] {
+  const metals = Object.keys(payableQtyByMetal ?? {});
+  return Array.from({ length }, (_, t) => metals.some((metal) => isFinitePositive(payableQtyByMetal?.[metal]?.[t])));
+}
+
 function resolveProfileTargetCurrency(profile: Record<string, unknown> | null): string {
   const profileCurrency = typeof profile?.currency === 'string' ? profile.currency.trim().toUpperCase() : '';
   return profileCurrency || 'USD';
@@ -649,7 +661,10 @@ export default function ProjectsPage() {
   const pnlDebugger = useMemo(() => {
     if (!projectGridPnl || seriesColumns.length === 0) return null;
     const pnl = projectGridPnl;
-    const firstNegativeEbitPeriod = pnl.ebit.findIndex((value) => typeof value === 'number' && value < 0);
+    const payableQtyByMetal = parsedProject?.engineInputWithoutPrices.payableQtyByMetal ?? series?.payableQtyByMetal;
+    const hasPayableMetalByPeriod = buildHasPayableMetalByPeriod(payableQtyByMetal, seriesColumns.length);
+    const firstPayablePeriod = hasPayableMetalByPeriod.findIndex(Boolean);
+    const firstNegativeEbitPeriod = pnl.ebit.findIndex((value, t) => hasPayableMetalByPeriod[t] && typeof value === 'number' && value < 0);
     const ebitPeriod = firstNegativeEbitPeriod >= 0 ? firstNegativeEbitPeriod : null;
 
     const sections: Array<{
@@ -760,6 +775,66 @@ export default function ProjectsPage() {
       siteGandA: pnl.siteGandA[ebitPeriod],
       royalties: pnl.royalties[ebitPeriod],
       byproductCredits: pnl.byproductCredits[ebitPeriod],
+    };
+
+    const grossToEbitTracePeriod = firstPayablePeriod >= 0 ? firstPayablePeriod : 0;
+    const grossToEbitTrace = {
+      periodIndex: grossToEbitTracePeriod,
+      periodLabel: seriesColumns[grossToEbitTracePeriod] ?? `t=${grossToEbitTracePeriod}`,
+      hasAnyPayableMetal: hasPayableMetalByPeriod[grossToEbitTracePeriod] ?? false,
+      payableQtyByMetal: Object.fromEntries(
+        Object.keys(payableQtyByMetal ?? {})
+          .sort((a, b) => a.localeCompare(b))
+          .map((metal) => [metal, payableQtyByMetal?.[metal]?.[grossToEbitTracePeriod] ?? null]),
+      ),
+      revenueByMetalUSD: Object.fromEntries(
+        Object.keys(pnl.revenueByMetal)
+          .sort((a, b) => a.localeCompare(b))
+          .map((metal) => [metal, pnl.revenueByMetal[metal]?.[grossToEbitTracePeriod] ?? null]),
+      ),
+      stages: {
+        grossRevenue: {
+          formula: 'Σ Revenue metal (USD)',
+          value: pnl.grossRevenue[grossToEbitTracePeriod] ?? null,
+        },
+        royalties: {
+          source: pnl.royaltiesSourceUsed,
+          valueUSD: pnl.royalties[grossToEbitTracePeriod] ?? null,
+          ratePct: pnl.royaltyRatePct[grossToEbitTracePeriod] ?? null,
+          failureReason: pnl.royaltiesFailureReason,
+          detailFailureReason: pnl.royaltiesDetailFailureReason,
+        },
+        grossProfit: {
+          formula: 'grossRevenue - operatingCosts - royalties - byproductCredits',
+          inputs: {
+            grossRevenue: pnl.grossRevenue[grossToEbitTracePeriod] ?? null,
+            operatingCosts: pnl.operatingCosts[grossToEbitTracePeriod] ?? null,
+            royalties: pnl.royalties[grossToEbitTracePeriod] ?? null,
+            byproductCredits: pnl.byproductCredits[grossToEbitTracePeriod] ?? null,
+          },
+          value: pnl.grossProfit[grossToEbitTracePeriod] ?? null,
+        },
+        ebitda: {
+          formula: 'grossRevenue - operatingCosts - royalties',
+          inputs: {
+            grossRevenue: pnl.grossRevenue[grossToEbitTracePeriod] ?? null,
+            operatingCosts: pnl.operatingCosts[grossToEbitTracePeriod] ?? null,
+            royalties: pnl.royalties[grossToEbitTracePeriod] ?? null,
+          },
+          value: pnl.ebitda[grossToEbitTracePeriod] ?? null,
+        },
+        ebit: {
+          formula: 'grossRevenue - operatingCosts - siteG&A - royalties + byproductCredits',
+          inputs: {
+            grossRevenue: pnl.grossRevenue[grossToEbitTracePeriod] ?? null,
+            operatingCosts: pnl.operatingCosts[grossToEbitTracePeriod] ?? null,
+            siteGandA: pnl.siteGandA[grossToEbitTracePeriod] ?? null,
+            royalties: pnl.royalties[grossToEbitTracePeriod] ?? null,
+            byproductCredits: pnl.byproductCredits[grossToEbitTracePeriod] ?? null,
+          },
+          value: pnl.ebit[grossToEbitTracePeriod] ?? null,
+        },
+      },
     };
 
     const royaltiesDebug = {
@@ -878,6 +953,9 @@ export default function ProjectsPage() {
       extraValuesAlongTheWay: 'projectGridPnl itself is computed from snapshot series inputs (series.*USD) in buildProjectGridPnl.',
       sections,
       ebitSpotlight,
+      hasPayableMetalByPeriod,
+      firstPayablePeriod: firstPayablePeriod >= 0 ? firstPayablePeriod : null,
+      grossToEbitTrace,
       royaltiesDebug,
       royaltiesPathTrace,
     };
@@ -1049,7 +1127,7 @@ export default function ProjectsPage() {
 
               {pnlDebugger.ebitSpotlight ? (
                 <div className="projects-debugger-highlight">
-                  <h3>Why EBIT is negative (first negative period)</h3>
+                  <h3>Why EBIT is negative (first negative period with payable metal)</h3>
                   <p>
                     Period <strong>{pnlDebugger.ebitSpotlight.label}</strong> (t={pnlDebugger.ebitSpotlight.periodIndex}) gives EBIT <strong>{formatTableValue(pnlDebugger.ebitSpotlight.ebit)}</strong>
                     {' '}= gross revenue ({formatTableValue(pnlDebugger.ebitSpotlight.grossRevenue)})
@@ -1058,10 +1136,16 @@ export default function ProjectsPage() {
                     {' '}− royalties ({formatTableValue(pnlDebugger.ebitSpotlight.royalties)})
                     {' '}+ byproduct credits ({formatTableValue(pnlDebugger.ebitSpotlight.byproductCredits)}).
                   </p>
+                  <p><strong>Filter:</strong> periods without any payable metal are excluded from this first-negative scan.</p>
                 </div>
               ) : (
-                <p>No negative EBIT period found in the loaded data.</p>
+                <p>No negative EBIT period found among periods that have payable metal.</p>
               )}
+
+              <article className="projects-debugger-section">
+                <h3>Gross revenue → EBIT trace (first year with payable metal)</h3>
+                <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(pnlDebugger.grossToEbitTrace, null, 2)}</pre>
+              </article>
 
               <article className="projects-debugger-section">
                 <h3>Royalties</h3>
