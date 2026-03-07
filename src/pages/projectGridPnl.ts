@@ -1,0 +1,162 @@
+export type ProjectGridSeries = {
+  revenueByMetal_USD?: Record<string, Array<number | null>>;
+  operatingCostsUSD?: Array<number | null>;
+  sustainingCapexUSD?: Array<number | null>;
+  siteGandA_USD?: Array<number | null>;
+  royaltiesUSD?: Array<number | null>;
+  royaltiesDetail?: Array<{
+    id: string;
+    label: string;
+    royaltyUSD?: Array<number | null>;
+  }>;
+  reclamationUSD?: Array<number | null>;
+  byproductCreditsUSD?: Array<number | null>;
+  sustainingCostUSD?: Array<number | null>;
+  depreciationUSD?: Array<number | null>;
+  taxUSD?: Array<number | null>;
+  workingCapitalDeltaUSD?: Array<number | null>;
+  capexUSD?: Array<number | null>;
+  totalCapexUSD?: Array<number | null>;
+};
+
+export type ProjectGridPnlSeries = {
+  revenueByMetal: Record<string, Array<number | null>>;
+  grossRevenue: Array<number | null>;
+  operatingCosts: Array<number | null>;
+  royalties: Array<number | null>;
+  siteGandA: Array<number | null>;
+  grossProfit: Array<number | null>;
+  ebitda: Array<number | null>;
+  ebit: Array<number | null>;
+  taxableIncome: Array<number | null>;
+  tax: Array<number | null>;
+  effectiveTaxRate: Array<number | null>;
+  sustainingCapex: Array<number | null>;
+  reclamation: Array<number | null>;
+  workingCapitalDelta: Array<number | null>;
+  byproductCredits: Array<number | null>;
+  capex: Array<number | null>;
+  fcff: Array<number | null>;
+};
+
+function finiteOrNull(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function buildProjectGridPnl(series: ProjectGridSeries, length: number): ProjectGridPnlSeries {
+  const revenueByMetal = series.revenueByMetal_USD ?? {};
+  const royaltiesFromDetail = (() => {
+    const detail = (series.royaltiesDetail ?? []) as Array<{ royaltyUSD?: Array<number | null> }>;
+    if (detail.length === 0 || !Array.isArray(detail[0]?.royaltyUSD)) return undefined;
+    return Array.from({ length }, (_, t) => {
+      let sum = 0;
+      let hasFinite = false;
+      for (const item of detail) {
+        const value = item.royaltyUSD?.[t];
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          sum += value;
+          hasFinite = true;
+        }
+      }
+      return hasFinite ? sum : null;
+    });
+  })();
+
+  const sortedMetals = Object.keys(revenueByMetal).sort((a, b) => a.localeCompare(b));
+  const grossRevenue = Array.from({ length }, (_, t) => {
+    if (sortedMetals.length === 0) return null;
+    let sum = 0;
+    for (const metal of sortedMetals) {
+      const value = finiteOrNull(revenueByMetal[metal]?.[t]);
+      if (value === null) return null;
+      sum += value;
+    }
+    return sum;
+  });
+
+  const operatingCosts = Array.from({ length }, (_, t) => finiteOrNull(series.operatingCostsUSD?.[t]));
+  const siteGandA = Array.from({ length }, (_, t) => finiteOrNull(series.siteGandA_USD?.[t]));
+  const royalties = Array.from({ length }, (_, t) => finiteOrNull((royaltiesFromDetail ?? series.royaltiesUSD)?.[t]));
+  const byproductCredits = Array.from({ length }, (_, t) => finiteOrNull(series.byproductCreditsUSD?.[t]) ?? 0);
+  const depreciation = Array.from({ length }, (_, t) => finiteOrNull(series.depreciationUSD?.[t]) ?? 0);
+  const tax = Array.from({ length }, (_, t) => finiteOrNull(series.taxUSD?.[t]));
+  const sustainingCapex = Array.from({ length }, (_, t) => finiteOrNull(series.sustainingCapexUSD?.[t]));
+  const reclamation = Array.from({ length }, (_, t) => finiteOrNull(series.reclamationUSD?.[t]));
+  const workingCapitalDelta = Array.from({ length }, (_, t) => finiteOrNull(series.workingCapitalDeltaUSD?.[t]));
+  const capex = Array.from({ length }, (_, t) => finiteOrNull(series.capexUSD?.[t]));
+
+  const grossProfit = Array.from({ length }, (_, t) => {
+    const revenue = grossRevenue[t];
+    const opCost = operatingCosts[t];
+    const royalty = royalties[t];
+    if (revenue === null || opCost === null || royalty === null) return null;
+    return revenue - opCost - royalty - byproductCredits[t];
+  });
+
+
+  const ebitda = Array.from({ length }, (_, t) => {
+    const revenue = grossRevenue[t];
+    const opCost = operatingCosts[t];
+    const royalty = royalties[t];
+    if (revenue === null || opCost === null || royalty === null) return null;
+    return revenue - opCost - royalty;
+  });
+
+  const ebit = Array.from({ length }, (_, t) => {
+    const revenue = grossRevenue[t];
+    const opCost = operatingCosts[t];
+    const gna = siteGandA[t];
+    const royalty = royalties[t];
+    if (revenue === null || opCost === null || gna === null || royalty === null) return null;
+    return revenue - opCost - gna - royalty + byproductCredits[t];
+  });
+
+  const taxableIncome = Array.from({ length }, (_, t) => {
+    const ebitValue = ebit[t];
+    if (ebitValue === null) return null;
+    return ebitValue - depreciation[t];
+  });
+
+  const effectiveTaxRate = Array.from({ length }, (_, t) => {
+    const taxable = taxableIncome[t];
+    const taxValue = tax[t];
+    if (taxable === null || taxValue === null || taxable === 0) return null;
+    return taxValue / taxable;
+  });
+
+  const fcff = Array.from({ length }, (_, t) => {
+    const revenue = grossRevenue[t];
+    const opCost = operatingCosts[t];
+    const gna = siteGandA[t];
+    const royalty = royalties[t];
+    const taxValue = tax[t];
+    const sustaining = sustainingCapex[t];
+    const recl = reclamation[t];
+    const wcDelta = workingCapitalDelta[t];
+    const capexValue = capex[t];
+    if (revenue === null || opCost === null || gna === null || royalty === null || taxValue === null || sustaining === null || recl === null || wcDelta === null || capexValue === null) {
+      return null;
+    }
+    return revenue - opCost - gna - royalty - taxValue - sustaining - recl - wcDelta - capexValue + byproductCredits[t];
+  });
+
+  return {
+    revenueByMetal,
+    grossRevenue,
+    operatingCosts,
+    royalties,
+    siteGandA,
+    grossProfit,
+    ebitda,
+    ebit,
+    taxableIncome,
+    tax,
+    effectiveTaxRate,
+    sustainingCapex,
+    reclamation,
+    workingCapitalDelta,
+    byproductCredits,
+    capex,
+    fcff,
+  };
+}
