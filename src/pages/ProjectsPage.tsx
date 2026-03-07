@@ -539,8 +539,24 @@ export default function ProjectsPage() {
 
   const projectGridPnl = useMemo(() => {
     if (!series || seriesColumns.length === 0) return null;
-    return buildProjectGridPnl(series, seriesColumns.length);
-  }, [series, seriesColumns.length]);
+    const royaltiesDetailFromInput = parsedProject?.engineInputWithoutPrices.royaltiesDetail;
+    const normalizedRoyaltiesDetail = Array.isArray(series.royaltiesDetail)
+      ? series.royaltiesDetail
+      : Array.isArray(royaltiesDetailFromInput)
+        ? royaltiesDetailFromInput.map((item, idx) => ({
+          id: typeof item.id === 'string' && item.id.trim().length > 0 ? item.id : `royalty_${idx + 1}`,
+          label: typeof item.label === 'string' && item.label.trim().length > 0 ? item.label : `Royalty ${idx + 1}`,
+          base: item.base ?? null,
+          rateType: item.rateType ?? null,
+          rate: typeof item.rate === 'number' && Number.isFinite(item.rate) ? item.rate : null,
+          royaltyUSD: undefined,
+        }))
+        : undefined;
+    return buildProjectGridPnl({
+      ...series,
+      royaltiesDetail: normalizedRoyaltiesDetail,
+    }, seriesColumns.length);
+  }, [parsedProject?.engineInputWithoutPrices.royaltiesDetail, series, seriesColumns.length]);
 
   const economicsRows = useMemo(() => {
     if (!series || !projectGridPnl || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
@@ -745,6 +761,13 @@ export default function ProjectsPage() {
     };
 
     const royaltiesDebug = {
+      royaltiesDetailPresent: pnl.royaltiesDetailPresent,
+      royaltiesDetailRuleCount: pnl.royaltiesDetailRuleCount,
+      royaltiesDetailComputable: pnl.royaltiesDetailComputable,
+      royaltiesDetailBaseNormalized: pnl.royaltiesDetailBaseNormalized,
+      royaltiesDetailRateTypeNormalized: pnl.royaltiesDetailRateTypeNormalized,
+      royaltiesDetailRateParsed: pnl.royaltiesDetailRateParsed,
+      royaltyRatePercentResolved: pnl.royaltyRatePercentResolved,
       royaltiesSourceUsed: pnl.royaltiesSourceUsed,
       computationMethod: pnl.royaltiesSourceUsed === 'royaltiesDetail-current-run'
         ? 'Royalties computed from current-run gross revenue using royaltiesDetail percentage rule(s) per period.'
@@ -761,6 +784,7 @@ export default function ProjectsPage() {
       bases: pnl.royaltiesBases,
       effectiveRoyaltyRateByPeriod: pnl.effectiveRoyaltyRateByPeriod,
       royaltiesResolvedNumeric: pnl.royaltiesResolvedNumeric,
+      royaltiesFailureReason: pnl.royaltiesFailureReason,
       royaltiesSumUSD: sumFiniteValues(pnl.royalties),
       royaltiesSeriesFirstN: pnl.royalties.slice(0, 8),
       royaltiesDetailFailureReason: pnl.royaltiesDetailFailureReason,
