@@ -14,6 +14,7 @@ import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { rowHasDisplayValue } from "../lib/project/rowDisplayValue.ts";
+import { extractFailingMetals, rowHasMetalRevenueFailure } from "./projectMetalRevenueDiagnostics.ts";
 import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
@@ -1161,6 +1162,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectSnapshotError, setProjectSnapshotError] = useState<string | null>(null);
   const [projectSnapshotWarnings, setProjectSnapshotWarnings] = useState<string[]>([]);
   const [projectSnapshotErrors, setProjectSnapshotErrors] = useState<string[]>([]);
+  const [projectSnapshotDiagnosticsMeta, setProjectSnapshotDiagnosticsMeta] = useState<Record<string, unknown> | null>(null);
   const [projectSnapshotData, setProjectSnapshotData] = useState<Record<string, unknown> | null>(null);
   const [projectSelectorOpen, setProjectSelectorOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -1486,6 +1488,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     setProjectSnapshotError(null);
     setProjectSnapshotWarnings([]);
     setProjectSnapshotErrors([]);
+    setProjectSnapshotDiagnosticsMeta(null);
 
     try {
       const project = await getCompanyProject(ticker, projectId);
@@ -1513,6 +1516,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       const result = await postCorporateSnapshot(request, { refresh: lockedTargetCurrency !== "USD" });
       setProjectSnapshotWarnings([...marketWarnings, ...(result.diagnostics?.warnings ?? [])]);
       setProjectSnapshotErrors(result.diagnostics?.errors ?? []);
+      setProjectSnapshotDiagnosticsMeta((result.diagnostics?.meta ?? null) as Record<string, unknown> | null);
       if (!result.ok || !result.snapshot) {
         setProjectSnapshotData(null);
         setProjectSnapshotError((result.diagnostics?.errors ?? ["Snapshot request failed."]).join("\n"));
@@ -1525,6 +1529,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     } catch (error) {
       setProjectSnapshotData(null);
       setSelectedProjectRawJson(null);
+      setProjectSnapshotDiagnosticsMeta(null);
       setProjectSnapshotError((error as Error).message);
     } finally {
       setProjectSnapshotLoading(false);
@@ -3089,6 +3094,10 @@ Capital Available: ${availableLabel}`,
 
   const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
 
+  const projectMetalRevenueFailures = useMemo(() => {
+    return extractFailingMetals(projectSnapshotDiagnosticsMeta?.metalRevenueDiagnostics ?? null);
+  }, [projectSnapshotDiagnosticsMeta]);
+
   const projectOperationsGridInput = useMemo((): OperationsGridInput | null => {
     if (!parsedSelectedProject) return null;
     const projectSeriesRecord = (projectSeries ?? {}) as Record<string, unknown>;
@@ -3248,11 +3257,15 @@ Capital Available: ${availableLabel}`,
       .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
-    const groupedRows: Array<{ type: 'divider'; label: string } | { type: 'data'; label: string; values: Array<number | null> }> = [];
+    const failedMetals = new Set(Object.keys(projectMetalRevenueFailures));
+    const groupedRows: Array<{ type: 'divider'; label: string } | { type: 'data'; label: string; values: Array<number | null>; hasMetalRevenueFailure?: boolean }> = [];
     const addSection = (label: string, rows: Array<{ label: string; values: Array<number | null> }>) => {
       if (rows.length === 0) return;
       groupedRows.push({ type: 'divider', label });
-      rows.forEach((row) => groupedRows.push({ type: 'data', ...row }));
+      rows.forEach((row) => {
+        const hasMetalRevenueFailure = rowHasMetalRevenueFailure(row.label, Array.from(failedMetals));
+        groupedRows.push({ type: 'data', ...row, hasMetalRevenueFailure });
+      });
     };
 
     addSection('PRODUCTION', productionRows);
@@ -3274,7 +3287,7 @@ Capital Available: ${availableLabel}`,
       notes: hasDepreciationSeries ? base.notes : [...base.notes, 'EBITDA requires D&A series; missing => null'],
       rows: groupedRows,
     };
-  }, [parsedSelectedProject, projectSeries, projectOperationsGridInput]);
+  }, [parsedSelectedProject, projectSeries, projectOperationsGridInput, projectMetalRevenueFailures]);
 
 
   const projectPnlTraceDebugger = useMemo(() => {
@@ -4850,7 +4863,7 @@ Capital Available: ${availableLabel}`,
             <>
               <h1 className="subrub">{selectedProjectName?.trim() || selectedProjectId}</h1>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); }}>
+                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); setProjectSnapshotDiagnosticsMeta(null); }}>
                   Back to projects
                 </button>
                 <a href={`/company/${encodeURIComponent(ticker)}/projects?projectId=${encodeURIComponent(selectedProjectId)}`} className="button-link" style={{ alignSelf: "center" }}>
@@ -5217,8 +5230,8 @@ Capital Available: ${availableLabel}`,
                               </tr>
                             )
                             : (
-                              <tr key={row.label}>
-                                <th className="first-col">{row.label}</th>
+                              <tr key={row.label} className={row.hasMetalRevenueFailure ? "project-row-failure" : undefined}>
+                                <th className="first-col">{row.label}{row.hasMetalRevenueFailure ? " ⚠" : ""}</th>
                                 {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`}>{formatPanelValue(row.values[t] ?? null)}</td>)}
                               </tr>
                             )
@@ -5282,9 +5295,28 @@ Capital Available: ${availableLabel}`,
                     )}
                   </div>
                 )}
-                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && !projectViewMetrics && <p>No diagnostics.</p>}
+                {projectSnapshotErrors.length === 0 && projectSnapshotWarnings.length === 0 && !projectViewMetrics && Object.keys(projectMetalRevenueFailures).length === 0 && <p>No diagnostics.</p>}
                 {projectSnapshotErrors.length > 0 && <ul>{projectSnapshotErrors.map((item) => <li key={`e-${item}`}>{item}</li>)}</ul>}
                 {projectSnapshotWarnings.length > 0 && <ul>{projectSnapshotWarnings.map((item) => <li key={`w-${item}`}>{item}</li>)}</ul>}
+                {Object.keys(projectMetalRevenueFailures).length > 0 && (
+                  <>
+                    <h4>Metal revenue failures</h4>
+                    <ul>
+                      {Object.entries(projectMetalRevenueFailures).map(([metal, failures]) => {
+                        const first = failures[0] ?? {};
+                        const t = typeof first.t === 'number' ? first.t : null;
+                        const year = typeof first.year === 'number' ? first.year : null;
+                        const reason = typeof first.failureReason === 'string' ? first.failureReason : 'Unknown';
+                        return (
+                          <li key={`metal-failure-${metal}`}>
+                            {metal}: {failures.length} failing periods{t !== null ? `, first at t=${t}` : ''}{year !== null ? ` / year ${year}` : ''}. Reason: {reason}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify({ metalRevenueDiagnostics: projectMetalRevenueFailures }, null, 2)}</pre>
+                  </>
+                )}
                 {projectViewMetrics && (
                   <>
                     <h4>Payback real debug</h4>

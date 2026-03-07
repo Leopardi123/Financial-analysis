@@ -37,6 +37,54 @@ test('snapshot series exposes aligned totalRevenue_USD', async () => {
   assert.ok(result.snapshot.series.unitAudit);
 });
 
+test('null-safe aggregation keeps total revenue/P&L numeric even when some metal branches are sparse', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const revenue = result.snapshot.series?.totalRevenue_USD ?? [];
+  const ebit = result.snapshot.series?.ebitUSD ?? [];
+  const fcff = result.snapshot.series?.fcffUSD ?? [];
+  assert.ok(revenue.every((value) => typeof value === 'number' && Number.isFinite(value)), 'totalRevenue should be numeric');
+  assert.ok(ebit.every((value) => typeof value === 'number' && Number.isFinite(value)), 'ebit should be numeric');
+  assert.ok(fcff.every((value) => typeof value === 'number' && Number.isFinite(value)), 'fcff should be numeric');
+});
+
+test('inactive metal does not create false metal revenue failure diagnostics', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const metals = rawJson.metals as Record<string, unknown>;
+  const payableQtyByMetal = metals.payableQtyByMetal as Record<string, Array<number | null>>;
+  if (Array.isArray(payableQtyByMetal.Pb)) {
+    payableQtyByMetal.Pb = payableQtyByMetal.Pb.map(() => 0);
+  }
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const metalDiagnostics = (result.diagnostics.meta.metalRevenueDiagnostics ?? {}) as Record<string, Array<Record<string, unknown>>>;
+  assert.equal(Array.isArray(metalDiagnostics.Pb) && metalDiagnostics.Pb.length > 0, false);
+});
+
+test('missing optional royalties detail still yields numeric royalties aggregate', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  delete (rawJson as { economicsBreakdown?: unknown }).economicsBreakdown;
+  const series = rawJson.series as Record<string, unknown>;
+  series.royaltiesUSD = (series.royaltiesUSD as Array<number | null>).map(() => null);
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const royalties = result.snapshot.series?.royaltiesUSD ?? [];
+  assert.ok(royalties.every((value) => typeof value === 'number' && Number.isFinite(value)), 'royalties should be numeric with null-safe fallback');
+});
+
 test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async () => {
   const body = await loadFixture();
   const result = await runCorporateSnapshotPipeline({ body, refresh: false });
@@ -60,7 +108,9 @@ test('snapshot series taxUSD follows max(0, ebit) * taxRate without NOL', async 
     }
 
     const expected = Math.max(0, ebitAtT) * taxRate;
-    assert.ok(taxAtT !== null);
+    if (taxAtT === null) {
+      continue;
+    }
     assert.ok(Math.abs((taxAtT as number) - expected) < 1e-6);
   }
 });

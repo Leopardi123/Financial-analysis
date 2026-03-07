@@ -288,6 +288,7 @@ type ProjectSeriesContext = {
   yearsByPeriod: number[];
   payableQtyByMetal: Record<string, Array<number | null>>;
   payableQtyUnitByMetal: Record<string, string>;
+  priceKeyByMetal: Record<string, string>;
   priceUSDUnitByMetal: Record<string, string>;
   spotPriceUSDByMetal: Record<string, Array<number | null>>;
   revenueByMetal_USD: Record<string, Array<number | null>>;
@@ -336,6 +337,26 @@ type ProjectSeriesContext = {
     capexUSD: Array<number | null>;
     totalCapexUSD: Array<number | null>;
   };
+};
+
+type MetalRevenueDiagnosticEntry = {
+  metal: string;
+  t: number;
+  year: number | null;
+  hasPayableQty: boolean;
+  payableQty: number | null;
+  hasPrice: boolean;
+  price: number | null;
+  hasUnit: boolean;
+  unit: string | null;
+  hasPriceKey: boolean;
+  priceKey: string | null;
+  computedRevenueRaw: number | null;
+  computedRevenueDisplay: string;
+  isExpectedToCompute: boolean;
+  didCompute: boolean;
+  failureReasonCode: string;
+  failureReason: string;
 };
 
 type PeriodLabel = string;
@@ -541,6 +562,72 @@ function validateProjectIdentities(input: {
   };
 }
 
+function buildMetalRevenueDiagnostics(args: {
+  corporateYearsByPeriod: number[];
+  projectSeriesContexts: ProjectSeriesContext[];
+  priceUsedByMetal_USD: Record<string, Array<number | null>>;
+  payableQtyByMetal: Record<string, Array<number | null>>;
+  payableQtyUnitByMetal: Record<string, string>;
+  revenueByMetal_USD: Record<string, Array<number | null>>;
+}): Record<string, MetalRevenueDiagnosticEntry[]> {
+  const out: Record<string, MetalRevenueDiagnosticEntry[]> = {};
+  const metals = Object.keys(args.revenueByMetal_USD).sort((a, b) => a.localeCompare(b));
+
+  for (const metal of metals) {
+    const entries: MetalRevenueDiagnosticEntry[] = [];
+    const qtySeries = args.payableQtyByMetal[metal] ?? [];
+    const priceSeries = args.priceUsedByMetal_USD[metal] ?? [];
+    const revenueSeries = args.revenueByMetal_USD[metal] ?? [];
+    const unit = args.payableQtyUnitByMetal[metal] ?? null;
+    const priceKey = (() => {
+      const found = args.projectSeriesContexts
+        .map((entry) => entry.priceKeyByMetal[metal])
+        .find((value) => typeof value === 'string' && value.trim().length > 0);
+      return found ?? null;
+    })();
+
+    for (let t = 0; t < args.corporateYearsByPeriod.length; t += 1) {
+      const payableQty = toFiniteOrNull(qtySeries[t] ?? null);
+      const price = toFiniteOrNull(priceSeries[t] ?? null);
+      const computedRevenueRaw = toFiniteOrNull(revenueSeries[t] ?? null);
+      const hasPayableQty = payableQty !== null && payableQty > 0;
+      const hasPrice = price !== null;
+      const isExpectedToCompute = hasPayableQty && hasPrice;
+      const didCompute = computedRevenueRaw !== null;
+
+      if (!(isExpectedToCompute && !didCompute)) {
+        continue;
+      }
+
+      entries.push({
+        metal,
+        t,
+        year: Number.isFinite(args.corporateYearsByPeriod[t]) ? args.corporateYearsByPeriod[t] : null,
+        hasPayableQty,
+        payableQty,
+        hasPrice,
+        price,
+        hasUnit: typeof unit === 'string' && unit.trim().length > 0,
+        unit,
+        hasPriceKey: typeof priceKey === 'string' && priceKey.trim().length > 0,
+        priceKey,
+        computedRevenueRaw,
+        computedRevenueDisplay: computedRevenueRaw === null ? '—' : String(computedRevenueRaw),
+        isExpectedToCompute,
+        didCompute,
+        failureReasonCode: 'NULL_IN_REVENUE_PIPELINE',
+        failureReason: 'Payable quantity and price exist, but revenueByMetal_USD resolved to null before display/aggregation.',
+      });
+    }
+
+    if (entries.length > 0) {
+      out[metal] = entries;
+    }
+  }
+
+  return out;
+}
+
 function buildSnapshotSeries(args: {
   masterN: number;
   corporateYearsByPeriod: number[];
@@ -697,21 +784,14 @@ function buildSnapshotSeries(args: {
     };
   }
 
-  const totalRevenue_USD = new Array<number | null>(expectedLength).fill(null);
+  const totalRevenue_USD = new Array<number | null>(expectedLength).fill(0);
   for (let t = 0; t < expectedLength; t += 1) {
     let sum = 0;
-    let hasAny = false;
-    let hasNull = false;
     for (const metal of metalKeys) {
-      const revenue = revenueByMetal_USD[metal][t];
-      if (revenue === null) {
-        hasNull = true;
-        continue;
-      }
-      hasAny = true;
+      const revenue = toFiniteOrNull(revenueByMetal_USD[metal][t] ?? null) ?? 0;
       sum += revenue;
     }
-    totalRevenue_USD[t] = hasAny && !hasNull ? sum : null;
+    totalRevenue_USD[t] = sum;
   }
 
   const aggregateEconomic = (label: keyof ProjectSeriesContext['economics']): Array<number | null> => sumStrictAlignedSeries({
@@ -727,20 +807,27 @@ function buildSnapshotSeries(args: {
   const operatingCostsUSD = aggregateEconomic('operatingCostsUSD');
   const sustainingCapexUSD = aggregateEconomic('sustainingCapexUSD');
   const siteGandA_USD = aggregateEconomic('siteGandA_USD');
-  const royaltiesUSD = aggregateEconomic('royaltiesUSD');
+  const royaltiesUSD_raw = aggregateEconomic('royaltiesUSD');
+  const royaltiesUSD = royaltiesUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
   const reclamationUSD = aggregateEconomic('reclamationUSD');
   const byproductCreditsUSD = aggregateEconomic('byproductCreditsUSD');
   const sustainingCostUSD = aggregateEconomic('sustainingCostUSD');
-  const ebitdaUSD = aggregateEconomic('ebitdaUSD');
+  const ebitdaUSD_raw = aggregateEconomic('ebitdaUSD');
   const depreciationUSD = aggregateEconomic('depreciationUSD');
-  const ebitUSD = aggregateEconomic('ebitUSD');
+  const ebitUSD_raw = aggregateEconomic('ebitUSD');
   const taxableIncomeUSD = aggregateEconomic('taxableIncomeUSD');
   const effectiveTaxRate = aggregateEconomic('effectiveTaxRate');
-  const taxUSD = aggregateEconomic('taxUSD');
+  const taxUSD_raw = aggregateEconomic('taxUSD');
+  const taxUSD = taxUSD_raw.some((value) => toFiniteOrNull(value) !== null)
+    ? taxUSD_raw.map((value) => toFiniteOrNull(value) ?? 0)
+    : taxUSD_raw;
   const workingCapitalDeltaUSD = aggregateEconomic('workingCapitalDeltaUSD');
-  const fcffUSD = aggregateEconomic('fcffUSD');
+  const fcffUSD_raw = aggregateEconomic('fcffUSD');
   const capexUSD = aggregateEconomic('capexUSD');
   const totalCapexUSD = deriveTotalCapexSeries(capexUSD, sustainingCapexUSD);
+  const ebitdaUSD = ebitdaUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
+  const ebitUSD = ebitUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
+  const fcffUSD = fcffUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
 
   const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>, label: string): Array<number | null> =>
     sumStrictAlignedSeries({
@@ -1214,6 +1301,7 @@ type SnapshotDiagnostics = {
         };
       }>;
     };
+    metalRevenueDiagnostics?: Record<string, MetalRevenueDiagnosticEntry[]>;
   };
 };
 
@@ -1628,6 +1716,7 @@ export async function runCorporateSnapshotPipeline(args: {
               Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),
             payableQtyUnitByMetal: { ...parsed.engineInputWithoutPrices.payableQtyUnitByMetal },
+            priceKeyByMetal: { ...parsed.engineInputWithoutPrices.priceKeyByMetal },
             priceUSDUnitByMetal: Object.fromEntries(
               Object.keys(parsed.engineInputWithoutPrices.priceKeyByMetal).map((metal) => [metal, `USD_${canonicalUnitForMetal(metal)}`]),
             ),
@@ -1847,6 +1936,23 @@ export async function runCorporateSnapshotPipeline(args: {
     const snapshotSeries = shiftedDeep.value as CorporateSnapshotSeries;
     snapshotSeries.capexUSD = applyScalarMultiplier(snapshotSeries.capexUSD, input.scenario.capexMult);
     snapshotSeries.operatingCostsUSD = applyScalarMultiplier(snapshotSeries.operatingCostsUSD, input.scenario.opexMult);
+
+    const metalRevenueDiagnostics = buildMetalRevenueDiagnostics({
+      corporateYearsByPeriod: snapshotSeries.yearsByPeriod,
+      projectSeriesContexts,
+      priceUsedByMetal_USD: snapshotSeries.priceUsedByMetal_USD,
+      payableQtyByMetal: snapshotSeries.payableQtyByMetal,
+      payableQtyUnitByMetal: snapshotSeries.payableQtyUnitByMetal,
+      revenueByMetal_USD: snapshotSeries.revenueByMetal_USD,
+    });
+    diagnostics.meta.metalRevenueDiagnostics = metalRevenueDiagnostics;
+    for (const [metal, failures] of Object.entries(metalRevenueDiagnostics)) {
+      if (failures.length === 0) continue;
+      const first = failures[0];
+      diagnostics.warnings.push(
+        `metal revenue failure: ${metal} periods=${failures.length} first_t=${first.t} first_year=${String(first.year)} reason=${first.failureReasonCode}`,
+      );
+    }
 
     const aggregationEffective = {
       ...aggregation,
