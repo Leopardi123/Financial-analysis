@@ -30,6 +30,9 @@ type SeriesShape = {
   royaltiesDetail?: Array<{
     id: string;
     label: string;
+    base?: string | null;
+    rateType?: string | null;
+    rate?: number | null;
     royaltyUSD?: Array<number | null>;
   }>;
   reclamationUSD?: Array<number | null>;
@@ -555,7 +558,8 @@ export default function ProjectsPage() {
     const definitions: Array<{ label: string; values: Array<number | null> | undefined; unit?: string }> = [
       { label: 'Gross revenue', values: pnl.grossRevenue },
       { label: 'Operating costs', values: pnl.operatingCosts },
-      { label: 'Royalties', values: pnl.royalties },
+      { label: 'Royalty rate (%)', values: pnl.royaltyRatePct, unit: '%' },
+      { label: 'Royalties (USD)', values: pnl.royalties },
       { label: 'Gross profit', values: pnl.grossProfit },
       { label: 'EBITDA', values: pnl.ebitda },
       { label: 'Site G&A', values: pnl.siteGandA },
@@ -598,10 +602,11 @@ export default function ProjectsPage() {
       rowsFromDisplayPnl: [
         'Revenue Au/Ag/Cu/Zn/Pb',
         'Gross revenue',
+        'Royalty rate (%)',
+        'Royalties (USD)',
         'Gross profit',
         'EBITDA',
         'Operating costs',
-        'Royalties',
         'Site G&A',
         'EBIT',
         'Taxable income',
@@ -739,11 +744,41 @@ export default function ProjectsPage() {
       byproductCredits: pnl.byproductCredits[ebitPeriod],
     };
 
+    const royaltiesDebug = {
+      royaltiesSourceUsed: pnl.royaltiesSourceUsed,
+      computationMethod: pnl.royaltiesSourceUsed === 'royaltiesDetail-current-run'
+        ? 'Royalties computed from current-run gross revenue using royaltiesDetail percentage rule(s) per period.'
+        : pnl.royaltiesSourceUsed === 'series.royaltiesUSD-fallback'
+          ? 'Royalties fell back to explicit series.royaltiesUSD because current-run royalty computation was not usable.'
+          : 'Royalties unresolved (null source).',
+      grossRevenueUSDNumeric: pnl.grossRevenue.some((value) => value !== null),
+      grossRevenueSum: sumFiniteValues(pnl.grossRevenue),
+      computedPeriods: pnl.computedPeriods,
+      skippedPeriods: pnl.skippedPeriods,
+      grossRevenueNullPeriods: pnl.grossRevenueNullPeriods,
+      ruleCount: pnl.royaltiesRuleCount,
+      rateTypes: pnl.royaltiesRateTypes,
+      bases: pnl.royaltiesBases,
+      effectiveRoyaltyRateByPeriod: pnl.effectiveRoyaltyRateByPeriod,
+      royaltiesResolvedNumeric: pnl.royaltiesResolvedNumeric,
+      royaltiesSumUSD: sumFiniteValues(pnl.royalties),
+      royaltiesSeriesFirstN: pnl.royalties.slice(0, 8),
+      royaltiesDetailFailureReason: pnl.royaltiesDetailFailureReason,
+      fallbackReason: pnl.fallbackReason,
+      downstreamUsage: {
+        usedInGrossProfit: true,
+        usedInEBITDA: true,
+        usedInEBIT: true,
+        usedInFCFF: true,
+      },
+    };
+
     return {
       singleSourceOfTruth: 'Displayed economics values come from projectGridPnl (single display model in ProjectsPage).',
       extraValuesAlongTheWay: 'projectGridPnl itself is computed from snapshot series inputs (series.*USD) in buildProjectGridPnl.',
       sections,
       ebitSpotlight,
+      royaltiesDebug,
     };
   }, [projectGridPnl, series, seriesColumns]);
 
@@ -926,6 +961,45 @@ export default function ProjectsPage() {
               ) : (
                 <p>No negative EBIT period found in the loaded data.</p>
               )}
+
+              <article className="projects-debugger-section">
+                <h3>Royalties</h3>
+                <p><strong>Source:</strong> {pnlDebugger.royaltiesDebug.royaltiesSourceUsed}</p>
+                <p><strong>Computation:</strong> {pnlDebugger.royaltiesDebug.computationMethod}</p>
+                <p><strong>Computation basis:</strong></p>
+                <ul>
+                  <li>grossRevenueUSDNumeric: {String(pnlDebugger.royaltiesDebug.grossRevenueUSDNumeric)}</li>
+                  <li>grossRevenueSum: {formatTableValue(pnlDebugger.royaltiesDebug.grossRevenueSum)}</li>
+                  <li>computedPeriods: {pnlDebugger.royaltiesDebug.computedPeriods}</li>
+                  <li>skippedPeriods: {pnlDebugger.royaltiesDebug.skippedPeriods}</li>
+                  <li>grossRevenueNullPeriods: [{pnlDebugger.royaltiesDebug.grossRevenueNullPeriods.join(', ')}]</li>
+                </ul>
+                <p><strong>Rate details:</strong></p>
+                <ul>
+                  <li>ruleCount: {pnlDebugger.royaltiesDebug.ruleCount}</li>
+                  <li>rateType(s): {pnlDebugger.royaltiesDebug.rateTypes.join(', ') || '—'}</li>
+                  <li>base(s): {pnlDebugger.royaltiesDebug.bases.join(', ') || '—'}</li>
+                  <li>effectiveRoyaltyRateByPeriod (first 8): [{pnlDebugger.royaltiesDebug.effectiveRoyaltyRateByPeriod.slice(0, 8).map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                </ul>
+                <p><strong>Output:</strong></p>
+                <ul>
+                  <li>royaltiesResolvedNumeric: {String(pnlDebugger.royaltiesDebug.royaltiesResolvedNumeric)}</li>
+                  <li>royaltiesSumUSD: {formatTableValue(pnlDebugger.royaltiesDebug.royaltiesSumUSD)}</li>
+                  <li>royaltiesSeriesFirstN: [{pnlDebugger.royaltiesDebug.royaltiesSeriesFirstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                </ul>
+                <p><strong>Failure / fallback explanation:</strong></p>
+                <ul>
+                  <li>royaltiesDetailFailureReason: {pnlDebugger.royaltiesDebug.royaltiesDetailFailureReason ?? '—'}</li>
+                  <li>fallbackReason: {pnlDebugger.royaltiesDebug.fallbackReason ?? '—'}</li>
+                </ul>
+                <p><strong>Downstream usage:</strong></p>
+                <ul>
+                  <li>usedInGrossProfit: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInGrossProfit)}</li>
+                  <li>usedInEBITDA: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInEBITDA)}</li>
+                  <li>usedInEBIT: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInEBIT)}</li>
+                  <li>usedInFCFF: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInFCFF)}</li>
+                </ul>
+              </article>
 
               {pnlDebugger.sections.map((section) => (
                 <article key={section.key} className="projects-debugger-section">
