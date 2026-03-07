@@ -36,6 +36,14 @@ export type ProjectGridPnlSeries = {
   skippedPeriods: number;
   grossRevenueNullPeriods: number[];
   royaltiesRuleCount: number;
+  royaltiesDetailPresent: boolean;
+  royaltiesDetailRuleCount: number;
+  royaltiesDetailComputable: boolean;
+  royaltiesDetailBaseNormalized: string | null;
+  royaltiesDetailRateTypeNormalized: string | null;
+  royaltiesDetailRateParsed: number | null;
+  royaltyRatePercentResolved: number | null;
+  royaltiesFailureReason: string | null;
   royaltiesRateTypes: string[];
   royaltiesBases: string[];
   effectiveRoyaltyRateByPeriod: Array<number | null>;
@@ -58,24 +66,35 @@ function finiteOrNull(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function normalizeToken(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRateType(value: string | null | undefined): string | null {
+  const token = normalizeToken(value);
+  if (token === null) return null;
+  const compact = token.replace(/_/g, '');
+  if (compact === 'nsrpct') return 'nsr_pct';
+  if (compact === 'advalorempct') return 'ad_valorem_pct';
+  return token;
+}
+
+function parseFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export function buildProjectGridPnl(series: ProjectGridSeries, length: number): ProjectGridPnlSeries {
   const revenueByMetal = series.revenueByMetal_USD ?? {};
-  const royaltiesFromDetail = (() => {
-    const detail = (series.royaltiesDetail ?? []) as Array<{ royaltyUSD?: Array<number | null> }>;
-    if (detail.length === 0 || !Array.isArray(detail[0]?.royaltyUSD)) return undefined;
-    return Array.from({ length }, (_, t) => {
-      let sum = 0;
-      let hasFinite = false;
-      for (const item of detail) {
-        const value = item.royaltyUSD?.[t];
-        if (typeof value === 'number' && Number.isFinite(value)) {
-          sum += value;
-          hasFinite = true;
-        }
-      }
-      return hasFinite ? sum : null;
-    });
-  })();
+  const royaltiesDetailItems = series.royaltiesDetail ?? [];
+  const royaltiesDetailPresent = Array.isArray(series.royaltiesDetail);
+  const royaltiesDetailRuleCount = royaltiesDetailItems.length;
 
   const sortedMetals = Object.keys(revenueByMetal).sort((a, b) => a.localeCompare(b));
   const grossRevenue = Array.from({ length }, (_, t) => {
@@ -91,6 +110,39 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
 
   const operatingCosts = Array.from({ length }, (_, t) => finiteOrNull(series.operatingCostsUSD?.[t]));
   const siteGandA = Array.from({ length }, (_, t) => finiteOrNull(series.siteGandA_USD?.[t]));
+
+  const firstComputableRule = royaltiesDetailItems.find((item) => {
+    const baseNormalized = normalizeToken(item.base ?? null);
+    const rateTypeNormalized = normalizeRateType(item.rateType ?? null);
+    const rateParsed = parseFiniteNumber(item.rate);
+    return baseNormalized === 'revenue'
+      && (rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct')
+      && rateParsed !== null;
+  });
+  const royaltiesDetailBaseNormalized = firstComputableRule ? normalizeToken(firstComputableRule.base ?? null) : null;
+  const royaltiesDetailRateTypeNormalized = firstComputableRule ? normalizeRateType(firstComputableRule.rateType ?? null) : null;
+  const royaltiesDetailRateParsed = firstComputableRule ? parseFiniteNumber(firstComputableRule.rate) : null;
+  const royaltiesDetailComputable = firstComputableRule !== undefined;
+
+  const royaltiesFromDetail = royaltiesDetailComputable
+    ? Array.from({ length }, (_, t) => {
+      const gross = grossRevenue[t];
+      if (gross === null) return null;
+      let sum = 0;
+      for (const item of royaltiesDetailItems) {
+        const baseNormalized = normalizeToken(item.base ?? null);
+        const rateTypeNormalized = normalizeRateType(item.rateType ?? null);
+        const rateParsed = parseFiniteNumber(item.rate);
+        const isComputableRule = baseNormalized === 'revenue'
+          && (rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct')
+          && rateParsed !== null;
+        if (!isComputableRule) continue;
+        sum += gross * ((rateParsed as number) / 100);
+      }
+      return sum;
+    })
+    : undefined;
+
   const royalties = Array.from({ length }, (_, t) => finiteOrNull((royaltiesFromDetail ?? series.royaltiesUSD)?.[t]));
   const royaltiesSourceUsed: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null' = royaltiesFromDetail
     ? 'royaltiesDetail-current-run'
@@ -99,8 +151,8 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
       : 'null';
   const royaltiesDetailFailureReason = royaltiesFromDetail
     ? null
-    : Array.isArray(series.royaltiesDetail)
-      ? 'royaltiesDetail present but no usable royaltyUSD detail series for display source'
+    : royaltiesDetailPresent
+      ? 'royaltiesDetail present but no computable current-run percentage rule found'
       : 'royaltiesDetail missing';
   const fallbackReason = royaltiesSourceUsed === 'series.royaltiesUSD-fallback'
     ? 'royaltiesDetail current-run computation not usable for display source; using explicit series.royaltiesUSD'
@@ -129,6 +181,14 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
   const royaltiesRuleCount = Array.isArray(series.royaltiesDetail) ? series.royaltiesDetail.length : 0;
   const royaltiesRateTypes = Array.from(new Set((series.royaltiesDetail ?? []).map((item) => (typeof item.rateType === 'string' ? item.rateType : null)).filter((item): item is string => Boolean(item)))).sort((a, b) => a.localeCompare(b));
   const royaltiesBases = Array.from(new Set((series.royaltiesDetail ?? []).map((item) => (typeof item.base === 'string' ? item.base : null)).filter((item): item is string => Boolean(item)))).sort((a, b) => a.localeCompare(b));
+  const royaltyRatePercentResolved = royaltiesSourceUsed === 'royaltiesDetail-current-run' ? royaltiesDetailRateParsed : null;
+  const royaltiesFailureReason = royaltiesResolvedNumeric
+    ? null
+    : royaltiesSourceUsed === 'null'
+      ? 'No royalties source resolved (neither computable royaltiesDetail nor series.royaltiesUSD)'
+      : royaltiesSourceUsed === 'series.royaltiesUSD-fallback'
+        ? 'Current-run royaltiesDetail not computable; fallback series.royaltiesUSD contains no numeric values'
+        : 'Current-run royaltiesDetail computable, but grossRevenueUSD is null in all periods';
 
   const grossProfit = Array.from({ length }, (_, t) => {
     const revenue = grossRevenue[t];
@@ -199,6 +259,14 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
     skippedPeriods,
     grossRevenueNullPeriods,
     royaltiesRuleCount,
+    royaltiesDetailPresent,
+    royaltiesDetailRuleCount,
+    royaltiesDetailComputable,
+    royaltiesDetailBaseNormalized,
+    royaltiesDetailRateTypeNormalized,
+    royaltiesDetailRateParsed,
+    royaltyRatePercentResolved,
+    royaltiesFailureReason,
     royaltiesRateTypes,
     royaltiesBases,
     effectiveRoyaltyRateByPeriod: royaltyRatePct,

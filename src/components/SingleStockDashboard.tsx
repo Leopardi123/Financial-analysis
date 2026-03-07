@@ -17,6 +17,7 @@ import { rowHasDisplayValue } from "../lib/project/rowDisplayValue.ts";
 import { extractFailingMetals, extractFallbackOrFailingPriceMetals, rowHasMetalRevenueFailure } from "./projectMetalRevenueDiagnostics.ts";
 import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
+import { buildProjectGridPnl } from "../pages/projectGridPnl.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import {
@@ -3139,6 +3140,7 @@ Capital Available: ${availableLabel}`,
         priceUSDByMetal: (projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {},
         operatingCostsUSD: getSeries(projectSeriesRecord.operatingCostsUSD) ?? undefined,
         royaltiesUSD: getSeries(projectSeriesRecord.royaltiesUSD) ?? undefined,
+        royaltiesDetail: parsedSelectedProject.engineInputWithoutPrices.royaltiesDetail,
         ebitdaUSD: getSeries(projectSeriesRecord.ebitdaUSD) ?? undefined,
         ebitUSD: getSeries(projectSeriesRecord.ebitUSD) ?? undefined,
         depreciationUSD: getSeries(projectSeriesRecord.depreciationUSD) ?? getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD) ?? undefined,
@@ -3208,46 +3210,46 @@ Capital Available: ${availableLabel}`,
       .map((metal) => ({ label: `Revenue ${metal} (USD)`, values: seriesByLabel.get(`Revenue ${metal} (USD)`) ?? null }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
-    const royaltiesFromDetail = (() => {
-      const detail = projectSeriesRecord.royaltiesDetail as Array<Record<string, unknown>> | undefined;
-      if (!Array.isArray(detail) || detail.length === 0) return null;
-      const first = detail[0]?.royaltyUSD;
-      if (!Array.isArray(first)) return null;
-      return Array.from({ length: first.length }, (_, t) => {
-        let sum = 0;
-        let hasFinite = false;
-        for (const item of detail) {
-          const series = item.royaltyUSD as Array<number | null> | undefined;
-          const value = series?.[t];
-          if (typeof value === 'number' && Number.isFinite(value)) {
-            sum += value;
-            hasFinite = true;
-          }
-        }
-        return hasFinite ? sum : null;
-      });
-    })();
-    const grossRevenueSeries = seriesByLabel.get('Gross revenue (USD)') ?? getSeries(projectSeriesRecord.totalRevenue_USD);
-    const resolvedRoyaltiesUSD = royaltiesFromDetail ?? getSeries(projectSeriesRecord.royaltiesUSD);
-    const royaltyRatePct = Array.from({ length: base.tMinusTp.length }, (_, t) => {
-      if (!royaltiesFromDetail) return null;
-      const grossRevenue = grossRevenueSeries?.[t] ?? null;
-      const royalties = resolvedRoyaltiesUSD?.[t] ?? null;
-      if (typeof grossRevenue !== 'number' || !Number.isFinite(grossRevenue)) return null;
-      if (typeof royalties !== 'number' || !Number.isFinite(royalties)) return null;
-      if (grossRevenue === 0) return royalties === 0 ? 0 : null;
-      return (royalties / grossRevenue) * 100;
-    });
+    const revenueByMetal = (projectSeriesRecord.revenueByMetal_USD ?? {}) as Record<string, unknown>;
+    const revenueByMetal_USD = Object.fromEntries(
+      Object.entries(revenueByMetal)
+        .map(([metal, values]) => [metal, getSeries(values)])
+        .filter(([, values]) => Array.isArray(values)),
+    ) as Record<string, Array<number | null>>;
+    const fallbackRoyaltiesDetail = (parsedSelectedProject.engineInputWithoutPrices.royaltiesDetail ?? []).map((item, idx) => ({
+      id: item.id ?? `royalty_${idx + 1}`,
+      label: item.label ?? item.id ?? `Royalty ${idx + 1}`,
+      base: item.base,
+      rateType: item.rateType,
+      rate: item.rate,
+    }));
+
+    const pnl = buildProjectGridPnl({
+      revenueByMetal_USD,
+      operatingCostsUSD: getSeries(projectSeriesRecord.operatingCostsUSD) ?? undefined,
+      siteGandA_USD: getSeries(projectSeriesRecord.siteGandA_USD) ?? undefined,
+      royaltiesUSD: getSeries(projectSeriesRecord.royaltiesUSD) ?? undefined,
+      royaltiesDetail: Array.isArray(projectSeriesRecord.royaltiesDetail)
+        ? projectSeriesRecord.royaltiesDetail as Array<{ id: string; label: string; base?: string | null; rateType?: string | null; rate?: number | null; royaltyUSD?: Array<number | null> }>
+        : fallbackRoyaltiesDetail,
+      taxUSD: getSeries(projectSeriesRecord.taxUSD) ?? undefined,
+      sustainingCapexUSD: getSeries(projectSeriesRecord.sustainingCapexUSD) ?? undefined,
+      reclamationUSD: getSeries(projectSeriesRecord.reclamationUSD) ?? undefined,
+      workingCapitalDeltaUSD: getSeries(projectSeriesRecord.workingCapitalDeltaUSD) ?? undefined,
+      byproductCreditsUSD: getSeries(projectSeriesRecord.byproductCreditsUSD) ?? undefined,
+      capexUSD: getSeries(projectSeriesRecord.capexUSD) ?? undefined,
+      depreciationUSD: getSeries(projectSeriesRecord.depreciationUSD) ?? getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD) ?? undefined,
+    }, base.tMinusTp.length);
 
     const pAndLCoreRows = [
       ...revenueRows,
-      { label: 'Gross revenue (USD)', values: grossRevenueSeries ?? null },
-      { label: 'Royalty rate (%)', values: royaltyRatePct },
-      { label: 'Royalties (USD)', values: resolvedRoyaltiesUSD },
-      { label: 'Gross profit (USD)', values: seriesByLabel.get('Gross profit (USD)') ?? null },
-      { label: 'EBITDA (USD, includes royalties)', values: seriesByLabel.get('EBITDA (USD, includes royalties)') ?? null },
-      { label: 'EBIT (USD)', values: getSeries(projectSeriesRecord.ebitUSD) },
-      { label: 'Operating costs (USD)', values: getSeries(projectSeriesRecord.operatingCostsUSD) },
+      { label: 'Gross revenue (USD)', values: pnl.grossRevenue },
+      { label: 'Royalty rate (%)', values: pnl.royaltyRatePct },
+      { label: 'Royalties (USD)', values: pnl.royalties },
+      { label: 'Gross profit (USD)', values: pnl.grossProfit },
+      { label: 'EBITDA (USD, includes royalties)', values: pnl.ebitda },
+      { label: 'EBIT (USD)', values: pnl.ebit },
+      { label: 'Operating costs (USD)', values: pnl.operatingCosts },
     ]
       .filter((row) => {
         if (row.label === 'Royalty rate (%)' || row.label === 'Royalties (USD)') return Array.isArray(row.values);
@@ -3255,25 +3257,25 @@ Capital Available: ${availableLabel}`,
       }) as Array<{ label: string; values: Array<number | null> }>;
 
     const taxRows = [
-      ['Taxable income (USD)', projectSeriesRecord.taxableIncomeUSD],
-      ['Tax (USD)', projectSeriesRecord.taxUSD],
-      ['Effective tax rate', projectSeriesRecord.effectiveTaxRate],
+      ['Taxable income (USD)', pnl.taxableIncome],
+      ['Tax (USD)', pnl.tax],
+      ['Effective tax rate', pnl.effectiveTaxRate],
     ]
       .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const capitalRows = [
-      ['Sustaining capex (USD)', projectSeriesRecord.sustainingCapexUSD],
-      ['Reclamation (USD)', projectSeriesRecord.reclamationUSD],
-      ['Working capital delta (USD)', projectSeriesRecord.workingCapitalDeltaUSD],
-      ['Byproduct credits (USD)', projectSeriesRecord.byproductCreditsUSD],
+      ['Sustaining capex (USD)', pnl.sustainingCapex],
+      ['Reclamation (USD)', pnl.reclamation],
+      ['Working capital delta (USD)', pnl.workingCapitalDelta],
+      ['Byproduct credits (USD)', pnl.byproductCredits],
     ]
       .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
 
     const investmentRows = [
-      ['Capex (USD)', projectSeriesRecord.capexUSD],
-      ['FCFF (USD)', projectSeriesRecord.fcffUSD],
+      ['Capex (USD)', pnl.capex],
+      ['FCFF (USD)', pnl.fcff],
     ]
       .map(([label, values]) => ({ label, values: getSeries(values) }))
       .filter((row) => rowHasDisplayValue(row.values)) as Array<{ label: string; values: Array<number | null> }>;
@@ -3315,48 +3317,80 @@ Capital Available: ${availableLabel}`,
     if (!projectSeries) return null;
     const record = projectSeries as Record<string, unknown>;
     const seriesOrNull = (value: unknown): Array<number | null> | null => (Array.isArray(value) ? value as Array<number | null> : null);
-    const revenueByMetal = (record.revenueByMetal_USD ?? {}) as Record<string, Array<number | null>>;
+    const revenueByMetal = (record.revenueByMetal_USD ?? {}) as Record<string, unknown>;
+    const revenueByMetal_USD = Object.fromEntries(
+      Object.entries(revenueByMetal)
+        .map(([metal, values]) => [metal, seriesOrNull(values)])
+        .filter(([, values]) => Array.isArray(values)),
+    ) as Record<string, Array<number | null>>;
     const orderedRevenueMetals = Object.keys(revenueByMetal).sort((a, b) => a.localeCompare(b));
-    const grossRevenue = seriesOrNull(record.totalRevenue_USD);
-    const operatingCosts = seriesOrNull(record.operatingCostsUSD);
-    const royalties = (() => {
-      const detail = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
-      if (detail.length > 0 && Array.isArray(detail[0]?.royaltyUSD)) {
-        const n = (detail[0].royaltyUSD as Array<unknown>).length;
-        return Array.from({ length: n }, (_, t) => {
-          let sum = 0;
-          let hasFinite = false;
-          for (const item of detail) {
-            const value = Array.isArray(item.royaltyUSD) ? item.royaltyUSD[t] : null;
-            if (typeof value === "number" && Number.isFinite(value)) {
-              sum += value;
-              hasFinite = true;
-            }
-          }
-          return hasFinite ? sum : null;
-        });
-      }
-      return seriesOrNull(record.royaltiesUSD);
-    })();
-    const grossProfit = seriesOrNull(record.grossProfitUSD);
-    const ebitda = seriesOrNull(record.ebitdaUSD);
-    const ebit = seriesOrNull(record.ebitUSD);
-    const siteGandA = seriesOrNull(record.siteGandA_USD);
-    const byproductCredits = seriesOrNull(record.byproductCreditsUSD);
-    const tax = seriesOrNull(record.taxUSD);
-    const sustainingCapex = seriesOrNull(record.sustainingCapexUSD);
-    const reclamation = seriesOrNull(record.reclamationUSD);
-    const workingCapitalDelta = seriesOrNull(record.workingCapitalDeltaUSD);
-    const capex = seriesOrNull(record.capexUSD);
-    const fcff = seriesOrNull(record.fcffUSD);
+    const fallbackRoyaltiesDetail = (parsedSelectedProject?.engineInputWithoutPrices.royaltiesDetail ?? []).map((item, idx) => ({
+      id: item.id ?? `royalty_${idx + 1}`,
+      label: item.label ?? item.id ?? `Royalty ${idx + 1}`,
+      base: item.base,
+      rateType: item.rateType,
+      rate: item.rate,
+    }));
+    const derivedLength = Math.max(
+      ...Object.values(revenueByMetal_USD).map((values) => values.length),
+      seriesOrNull(record.totalRevenue_USD)?.length ?? 0,
+      seriesOrNull(record.operatingCostsUSD)?.length ?? 0,
+      seriesOrNull(record.royaltiesUSD)?.length ?? 0,
+      0,
+    );
+    if (derivedLength === 0) return null;
+
+    const pnl = buildProjectGridPnl({
+      revenueByMetal_USD,
+      operatingCostsUSD: seriesOrNull(record.operatingCostsUSD) ?? undefined,
+      siteGandA_USD: seriesOrNull(record.siteGandA_USD) ?? undefined,
+      royaltiesUSD: seriesOrNull(record.royaltiesUSD) ?? undefined,
+      royaltiesDetail: Array.isArray(record.royaltiesDetail)
+        ? record.royaltiesDetail as Array<{ id: string; label: string; base?: string | null; rateType?: string | null; rate?: number | null; royaltyUSD?: Array<number | null> }>
+        : fallbackRoyaltiesDetail,
+      taxUSD: seriesOrNull(record.taxUSD) ?? undefined,
+      sustainingCapexUSD: seriesOrNull(record.sustainingCapexUSD) ?? undefined,
+      reclamationUSD: seriesOrNull(record.reclamationUSD) ?? undefined,
+      workingCapitalDeltaUSD: seriesOrNull(record.workingCapitalDeltaUSD) ?? undefined,
+      byproductCreditsUSD: seriesOrNull(record.byproductCreditsUSD) ?? undefined,
+      capexUSD: seriesOrNull(record.capexUSD) ?? undefined,
+      depreciationUSD: seriesOrNull(record.depreciationUSD) ?? seriesOrNull((parsedSelectedProject?.context.series ?? {}).depreciationUSD) ?? undefined,
+    }, derivedLength);
+
+    const grossRevenue = pnl.grossRevenue;
+    const operatingCosts = pnl.operatingCosts;
+    const royalties = pnl.royalties;
+    const grossProfit = pnl.grossProfit;
+    const ebitda = pnl.ebitda;
+    const ebit = pnl.ebit;
+    const siteGandA = pnl.siteGandA;
+    const byproductCredits = pnl.byproductCredits;
+    const tax = pnl.tax;
+    const sustainingCapex = pnl.sustainingCapex;
+    const reclamation = pnl.reclamation;
+    const workingCapitalDelta = pnl.workingCapitalDelta;
+    const capex = pnl.capex;
+    const fcff = pnl.fcff;
 
     const firstNegativeEbitPeriod = Array.isArray(ebit)
       ? ebit.findIndex((value) => typeof value === "number" && value < 0)
       : -1;
 
     return {
-      singleSourceOfTruth: "Instrumentbräda-tabellen läser värden från projectSnapshotData.series (samma källa för raderna i Production → P&L → FCFF).",
-      note: "Inga dolda avdrag i UI: negativa EBIT/FCFF kommer från explicita seriekomponenter (costs, royalties, G&A, tax, capex, etc.).",
+      singleSourceOfTruth: "Instrumentbräda-tabellen läser P&L-värden från projectGridPnl (beräknat i UI från snapshot-serier).",
+      note: "Royalties i denna vy beräknas current-run från royaltiesDetail-regler när de är computable; annars fallback till series.royaltiesUSD.",
+      royaltiesDebug: {
+        royaltiesDetailPresent: pnl.royaltiesDetailPresent,
+        royaltiesDetailRuleCount: pnl.royaltiesDetailRuleCount,
+        royaltiesDetailComputable: pnl.royaltiesDetailComputable,
+        royaltiesDetailBaseNormalized: pnl.royaltiesDetailBaseNormalized,
+        royaltiesDetailRateTypeNormalized: pnl.royaltiesDetailRateTypeNormalized,
+        royaltiesDetailRateParsed: pnl.royaltiesDetailRateParsed,
+        royaltyRatePercentResolved: pnl.royaltyRatePercentResolved,
+        royaltiesSourceUsed: pnl.royaltiesSourceUsed,
+        royaltiesResolvedNumeric: pnl.royaltiesResolvedNumeric,
+        royaltiesFailureReason: pnl.royaltiesFailureReason,
+      },
       ebitSpotlight: firstNegativeEbitPeriod >= 0
         ? {
           t: firstNegativeEbitPeriod,
@@ -3372,84 +3406,84 @@ Capital Available: ${availableLabel}`,
         {
           label: "Gross revenue",
           formula: "Σ Revenue metal (USD)",
-          calculatedIn: "snapshot series pipeline (rendered as totalRevenue_USD)",
-          sourceOfTruth: "series.totalRevenue_USD",
+          calculatedIn: "src/pages/projectGridPnl.ts#buildProjectGridPnl:grossRevenue",
+          sourceOfTruth: "projectGridPnl.grossRevenue",
           inputs: orderedRevenueMetals.map((metal) => ({
             label: `Revenue ${metal}`,
             source: `series.revenueByMetal_USD.${metal}`,
-            values: revenueByMetal[metal],
+            values: revenueByMetal_USD[metal],
           })),
           output: grossRevenue,
         },
         {
           label: "Gross profit",
           formula: "grossRevenue - operatingCosts - royalties ± byproductCredits",
-          calculatedIn: "snapshot series pipeline (rendered as grossProfitUSD)",
-          sourceOfTruth: "series.grossProfitUSD",
+          calculatedIn: "src/pages/projectGridPnl.ts#buildProjectGridPnl:grossProfit",
+          sourceOfTruth: "projectGridPnl.grossProfit",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
-            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
-            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
-            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
+            { label: "Gross revenue", source: "projectGridPnl.grossRevenue", values: grossRevenue },
+            { label: "Operating costs", source: "projectGridPnl.operatingCosts", values: operatingCosts },
+            { label: "Royalties", source: "projectGridPnl.royalties", values: royalties },
+            { label: "Byproduct credits", source: "projectGridPnl.byproductCredits", values: byproductCredits },
           ],
           output: grossProfit,
         },
         {
           label: "EBITDA",
           formula: "grossRevenue - operatingCosts - royalties",
-          calculatedIn: "snapshot series pipeline",
-          sourceOfTruth: "series.ebitdaUSD",
+          calculatedIn: "src/pages/projectGridPnl.ts#buildProjectGridPnl:ebitda",
+          sourceOfTruth: "projectGridPnl.ebitda",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
-            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
-            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
+            { label: "Gross revenue", source: "projectGridPnl.grossRevenue", values: grossRevenue },
+            { label: "Operating costs", source: "projectGridPnl.operatingCosts", values: operatingCosts },
+            { label: "Royalties", source: "projectGridPnl.royalties", values: royalties },
           ],
           output: ebitda,
         },
         {
           label: "EBIT",
           formula: "grossRevenue - operatingCosts - siteG&A - royalties + byproductCredits",
-          calculatedIn: "snapshot series pipeline",
-          sourceOfTruth: "series.ebitUSD",
+          calculatedIn: "src/pages/projectGridPnl.ts#buildProjectGridPnl:ebit",
+          sourceOfTruth: "projectGridPnl.ebit",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
-            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
-            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
-            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
-            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
+            { label: "Gross revenue", source: "projectGridPnl.grossRevenue", values: grossRevenue },
+            { label: "Operating costs", source: "projectGridPnl.operatingCosts", values: operatingCosts },
+            { label: "Site G&A", source: "projectGridPnl.siteGandA", values: siteGandA },
+            { label: "Royalties", source: "projectGridPnl.royalties", values: royalties },
+            { label: "Byproduct credits", source: "projectGridPnl.byproductCredits", values: byproductCredits },
           ],
           output: ebit,
         },
         {
           label: "Operating costs",
           formula: "direkt serie (ingen extra härledning i UI)",
-          calculatedIn: "snapshot series pipeline",
-          sourceOfTruth: "series.operatingCostsUSD",
-          inputs: [{ label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts }],
+          calculatedIn: "src/pages/projectGridPnl.ts#buildProjectGridPnl:operatingCosts",
+          sourceOfTruth: "projectGridPnl.operatingCosts",
+          inputs: [{ label: "Operating costs", source: "series.operatingCostsUSD → projectGridPnl.operatingCosts", values: operatingCosts }],
           output: operatingCosts,
         },
         {
           label: "FCFF",
           formula: "grossRevenue - operatingCosts - siteG&A - royalties - tax - sustainingCapex - reclamation - workingCapitalDelta - capex + byproductCredits",
-          calculatedIn: "snapshot series pipeline",
-          sourceOfTruth: "series.fcffUSD",
+          calculatedIn: "src/pages/projectGridPnl.ts#buildProjectGridPnl:fcff",
+          sourceOfTruth: "projectGridPnl.fcff",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
-            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
-            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
-            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
-            { label: "Tax", source: "series.taxUSD", values: tax },
-            { label: "Sustaining capex", source: "series.sustainingCapexUSD", values: sustainingCapex },
-            { label: "Reclamation", source: "series.reclamationUSD", values: reclamation },
-            { label: "Working capital delta", source: "series.workingCapitalDeltaUSD", values: workingCapitalDelta },
-            { label: "Capex", source: "series.capexUSD", values: capex },
-            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
+            { label: "Gross revenue", source: "projectGridPnl.grossRevenue", values: grossRevenue },
+            { label: "Operating costs", source: "projectGridPnl.operatingCosts", values: operatingCosts },
+            { label: "Site G&A", source: "projectGridPnl.siteGandA", values: siteGandA },
+            { label: "Royalties", source: "projectGridPnl.royalties", values: royalties },
+            { label: "Tax", source: "projectGridPnl.tax", values: tax },
+            { label: "Sustaining capex", source: "projectGridPnl.sustainingCapex", values: sustainingCapex },
+            { label: "Reclamation", source: "projectGridPnl.reclamation", values: reclamation },
+            { label: "Working capital delta", source: "projectGridPnl.workingCapitalDelta", values: workingCapitalDelta },
+            { label: "Capex", source: "projectGridPnl.capex", values: capex },
+            { label: "Byproduct credits", source: "projectGridPnl.byproductCredits", values: byproductCredits },
           ],
           output: fcff,
         },
       ],
     };
-  }, [projectSeries]);
+  }, [parsedSelectedProject, projectSeries]);
 
   const projectMountDebug = useMemo(() => {
     const rawJson = selectedProjectRawJson;
