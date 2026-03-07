@@ -41,6 +41,17 @@ function toFiniteOrNull(value: number | null | undefined): number | null {
   return value;
 }
 
+function toFiniteFromUnknown(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return toFiniteOrNull(value);
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function sanitizeSeries(series: Array<number | null>): Array<number | null> {
   return series.map((value) => toFiniteOrNull(value));
 }
@@ -1306,6 +1317,12 @@ type SnapshotDiagnostics = {
     metalsUsingLivePrices?: string[];
     metalsUsingJsonFallback?: string[];
     metalsWithPriceFailure?: string[];
+    royaltiesDiagnostics?: Record<string, {
+      grossRevenueUSDNumeric: boolean;
+      royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null';
+      royaltiesDetailFailureReason: string | null;
+      royaltiesResolvedNumeric: boolean;
+    }>;
   };
 };
 
@@ -1548,10 +1565,12 @@ export async function runCorporateSnapshotPipeline(args: {
           const computableRateTypes = new Set<string>();
           let computableRuleCount = 0;
           const royaltiesDetail = (royaltiesDetailRaw ?? []).map((detail) => {
-            const rate = toFiniteOrNull(detail.rate);
+            const rate = toFiniteFromUnknown(detail.rate);
+            const rateType = String(detail.rateType ?? '').trim().toLowerCase();
+            const base = String(detail.base ?? '').trim().toLowerCase();
             const isComputable =
-              detail.base === 'revenue'
-              && (detail.rateType === 'NSR_pct' || detail.rateType === 'ad_valorem_pct')
+              base === 'revenue'
+              && (rateType === 'nsr_pct' || rateType === 'ad_valorem_pct')
               && rate !== null;
 
             if (isComputable) {
@@ -1593,12 +1612,39 @@ export async function runCorporateSnapshotPipeline(args: {
 
           const hasRoyaltiesDetailArray = Array.isArray(royaltiesDetailRaw);
           const hasComputableRoyaltyRules = computableRuleCount > 0;
-          const fallbackRoyaltiesUSD = isAllNullOrNonFinite(explicitRoyaltiesUSD)
-            ? sanitizeSeries(outPreRoyalties.nationalTake.totalRoyaltiesUSD)
-            : explicitRoyaltiesUSD;
+          const hasExplicitRoyalties = !isAllNullOrNonFinite(explicitRoyaltiesUSD);
           const royaltiesUSD = hasComputableRoyaltyRules
             ? sanitizeSeries(computedRoyaltiesUSD)
-            : fallbackRoyaltiesUSD;
+            : hasExplicitRoyalties
+              ? explicitRoyaltiesUSD
+              : nullSeries;
+          const royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null' = hasComputableRoyaltyRules
+            ? 'royaltiesDetail-current-run'
+            : hasExplicitRoyalties
+              ? 'series.royaltiesUSD-fallback'
+              : 'null';
+          const royaltiesDetailFailureReason = hasComputableRoyaltyRules
+            ? null
+            : hasRoyaltiesDetailArray
+              ? 'royaltiesDetail present but no computable revenue-based rate rules'
+              : 'royaltiesDetail missing';
+          const royaltiesResolvedNumeric = royaltiesUSD.some((value) => value !== null);
+
+          if (!diagnostics.meta.royaltiesDiagnostics) {
+            diagnostics.meta.royaltiesDiagnostics = {};
+          }
+          diagnostics.meta.royaltiesDiagnostics[projectId] = {
+            grossRevenueUSDNumeric: sanitizedGrossRevenueUSD.some((value) => value !== null),
+            royaltiesSource,
+            royaltiesDetailFailureReason,
+            royaltiesResolvedNumeric,
+          };
+          diagnostics.warnings.push(`royalties source = ${royaltiesSource}`);
+          diagnostics.warnings.push(`royaltiesResolvedNumeric: ${String(royaltiesResolvedNumeric)}`);
+          diagnostics.warnings.push(`grossRevenueUSD numeric = ${String(sanitizedGrossRevenueUSD.some((value) => value !== null))}`);
+          if (royaltiesDetailFailureReason) {
+            diagnostics.warnings.push(`royaltiesDetail failed because ${royaltiesDetailFailureReason}`);
+          }
 
           if (hasComputableRoyaltyRules) {
             const rateTypes = Array.from(computableRateTypes).sort((a, b) => a.localeCompare(b)).join('|');
