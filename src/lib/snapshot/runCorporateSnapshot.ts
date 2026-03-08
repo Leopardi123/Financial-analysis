@@ -835,9 +835,23 @@ function buildSnapshotSeries(args: {
   const reclamationUSD = aggregateEconomic('reclamationUSD');
   const byproductCreditsUSD = aggregateEconomic('byproductCreditsUSD');
   const sustainingCostUSD = aggregateEconomic('sustainingCostUSD');
-  const ebitdaUSD_raw = aggregateEconomic('ebitdaUSD');
   const depreciationUSD = aggregateEconomic('depreciationUSD');
-  const ebitUSD_raw = aggregateEconomic('ebitUSD');
+  const ebitdaUSD = totalRevenue_USD.map((revenue, t) => {
+    const rev = toFiniteOrNull(revenue);
+    if (rev === null) return null;
+    const op = toFiniteOrNull(operatingCostsUSD[t]) ?? 0;
+    const sc = toFiniteOrNull(sustainingCapexUSD[t]) ?? 0;
+    const ga = toFiniteOrNull(siteGandA_USD[t]) ?? 0;
+    const roy = toFiniteOrNull(royaltiesUSD[t]) ?? 0;
+    const rec = toFiniteOrNull(reclamationUSD[t]) ?? 0;
+    const bp = toFiniteOrNull(byproductCreditsUSD[t]) ?? 0;
+    return rev - op - sc - ga - roy - rec + bp;
+  });
+  const ebitUSD = ebitdaUSD.map((ebitda, t) => {
+    if (ebitda === null) return null;
+    const dep = toFiniteOrNull(depreciationUSD[t]) ?? 0;
+    return ebitda - dep;
+  });
   const taxableIncomeUSD = aggregateEconomic('taxableIncomeUSD');
   const effectiveTaxRate = aggregateEconomic('effectiveTaxRate');
   const taxUSD_raw = aggregateEconomic('taxUSD');
@@ -845,12 +859,25 @@ function buildSnapshotSeries(args: {
     ? taxUSD_raw.map((value) => toFiniteOrNull(value) ?? 0)
     : taxUSD_raw;
   const workingCapitalDeltaUSD = aggregateEconomic('workingCapitalDeltaUSD');
-  const fcffUSD_raw = aggregateEconomic('fcffUSD');
   const capexUSD = aggregateEconomic('capexUSD');
   const totalCapexUSD = deriveTotalCapexSeries(capexUSD, sustainingCapexUSD);
-  const ebitdaUSD = ebitdaUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
-  const ebitUSD = ebitUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
-  const fcffUSD = fcffUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
+  const fcffUSD = ebitUSD.map((ebitValue, t) => {
+    if (ebitValue === null) return null;
+    const taxValue = toFiniteOrNull(taxUSD[t]) ?? 0;
+    const depValue = toFiniteOrNull(depreciationUSD[t]) ?? 0;
+    const sustainingCapexValue = toFiniteOrNull(sustainingCapexUSD[t]) ?? 0;
+    const capexValue = toFiniteOrNull(capexUSD[t]) ?? 0;
+    const workingCapitalValue = toFiniteOrNull(workingCapitalDeltaUSD[t]) ?? 0;
+    const reclamationValue = toFiniteOrNull(reclamationUSD[t]) ?? 0;
+
+    return ebitValue
+      - taxValue
+      + depValue
+      - sustainingCapexValue
+      - capexValue
+      - workingCapitalValue
+      - reclamationValue;
+  });
 
   const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>, label: string): Array<number | null> =>
     sumStrictAlignedSeries({
@@ -1332,11 +1359,17 @@ type SnapshotDiagnostics = {
     royaltiesDiagnostics?: Record<string, {
       grossRevenueUSDNumeric: boolean;
       royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null';
+      royaltiesComputedFromSeriesName: 'outPreRoyalties.revenue.grossRevenueUSD' | 'resolved.totalRevenue_USD' | 'series.royaltiesUSD-fallback' | 'null';
       royaltiesDetailFailureReason: string | null;
       royaltiesResolvedNumeric: boolean;
       computedPeriods: number;
       skippedPeriods: number;
       grossRevenueNullPeriods: number[];
+      grossRevenueSeriesUsedByRoyalties_firstPeriods: Array<number | null>;
+      grossRevenueSeriesExposedToTable_firstPeriods: Array<number | null>;
+      grossRevenueSeriesMatch: boolean;
+      royaltyRatePercentResolved_firstPeriods: Array<number | null>;
+      royaltiesResolvedUSD_firstPeriods: Array<number | null>;
     }>;
   };
 };
@@ -1571,7 +1604,21 @@ export async function runCorporateSnapshotPipeline(args: {
 
           const projectEconomicsBreakdown = parsed.context.economicsBreakdown;
           const sanitizedGrossRevenueUSD = sanitizeSeries(outPreRoyalties.revenue.grossRevenueUSD);
-          const grossRevenueNullPeriods = sanitizedGrossRevenueUSD
+          const grossRevenueResolvedForTable = Array.from({ length: projectLength }, (_, t) => {
+            let sum = 0;
+            for (const series of Object.values(outPreRoyalties.revenue.byMetalRevenueUSD)) {
+              sum += toFiniteOrNull(series?.[t] ?? null) ?? 0;
+            }
+            return sum;
+          });
+          const grossRevenueForRoyalties = Object.keys(outPreRoyalties.revenue.byMetalRevenueUSD).length > 0
+            ? sanitizeSeries(grossRevenueResolvedForTable)
+            : sanitizedGrossRevenueUSD;
+          const grossRevenueSourceForRoyalties: 'outPreRoyalties.revenue.grossRevenueUSD' | 'resolved.totalRevenue_USD' = Object.keys(outPreRoyalties.revenue.byMetalRevenueUSD).length > 0
+            ? 'resolved.totalRevenue_USD'
+            : 'outPreRoyalties.revenue.grossRevenueUSD';
+
+          const grossRevenueNullPeriods = grossRevenueForRoyalties
             .map((value, t) => (value === null ? t : null))
             .filter((t): t is number => t !== null);
 
@@ -1597,7 +1644,7 @@ export async function runCorporateSnapshotPipeline(args: {
 
             const royaltyUSD = isComputable
               ? computeRoyaltiesFromRevenueSeries({
-                  grossRevenueUSD: sanitizedGrossRevenueUSD,
+                  grossRevenueUSD: grossRevenueForRoyalties,
                   ratePct: rate as number,
                 })
               : nullSeries;
@@ -1613,7 +1660,7 @@ export async function runCorporateSnapshotPipeline(args: {
             };
           });
 
-          const computedRoyaltiesUSD = sanitizedGrossRevenueUSD.map((gross, t) => {
+          const computedRoyaltiesUSD = grossRevenueForRoyalties.map((gross, t) => {
             if (gross === null) return null;
             let sum = 0;
             let hasAny = false;
@@ -1647,23 +1694,52 @@ export async function runCorporateSnapshotPipeline(args: {
           const computedPeriods = royaltiesUSD.filter((value) => value !== null).length;
           const skippedPeriods = royaltiesUSD.length - computedPeriods;
           const royaltiesResolvedNumeric = computedPeriods > 0;
+          const grossRevenueSeriesMatch = grossRevenueForRoyalties.length === grossRevenueResolvedForTable.length
+            && grossRevenueForRoyalties.every((value, t) => value === grossRevenueResolvedForTable[t]);
+          const firstMismatchIndex = grossRevenueSeriesMatch
+            ? -1
+            : grossRevenueForRoyalties.findIndex((value, t) => value !== grossRevenueResolvedForTable[t]);
+          const royaltyRatePercentResolved = royaltiesUSD.map((value, t) => {
+            const gross = grossRevenueForRoyalties[t];
+            const roy = toFiniteOrNull(value);
+            if (gross === null || roy === null) return null;
+            if (gross === 0) return roy === 0 ? 0 : null;
+            return (roy / gross) * 100;
+          });
+          const previewPeriods = Math.min(projectLength, 8);
 
           if (!diagnostics.meta.royaltiesDiagnostics) {
             diagnostics.meta.royaltiesDiagnostics = {};
           }
           diagnostics.meta.royaltiesDiagnostics[projectId] = {
-            grossRevenueUSDNumeric: sanitizedGrossRevenueUSD.some((value) => value !== null),
+            grossRevenueUSDNumeric: grossRevenueForRoyalties.some((value) => value !== null),
             royaltiesSource,
+            royaltiesComputedFromSeriesName: hasComputableRoyaltyRules
+              ? grossRevenueSourceForRoyalties
+              : hasExplicitRoyalties
+                ? 'series.royaltiesUSD-fallback'
+                : 'null',
             royaltiesDetailFailureReason,
             royaltiesResolvedNumeric,
             computedPeriods,
             skippedPeriods,
             grossRevenueNullPeriods,
+            grossRevenueSeriesUsedByRoyalties_firstPeriods: grossRevenueForRoyalties.slice(0, previewPeriods),
+            grossRevenueSeriesExposedToTable_firstPeriods: grossRevenueResolvedForTable.slice(0, previewPeriods),
+            grossRevenueSeriesMatch,
+            royaltyRatePercentResolved_firstPeriods: royaltyRatePercentResolved.slice(0, previewPeriods),
+            royaltiesResolvedUSD_firstPeriods: royaltiesUSD.slice(0, previewPeriods),
           };
           diagnostics.warnings.push(`royalties source = ${royaltiesSource}`);
           diagnostics.warnings.push(`royaltiesResolvedNumeric: ${String(royaltiesResolvedNumeric)}`);
-          diagnostics.warnings.push(`grossRevenueUSD numeric = ${String(sanitizedGrossRevenueUSD.some((value) => value !== null))}`);
+          diagnostics.warnings.push(`grossRevenueUSD numeric = ${String(grossRevenueForRoyalties.some((value) => value !== null))}`);
           diagnostics.warnings.push(`royalties computed for ${String(computedPeriods)} periods, skipped ${String(skippedPeriods)} (grossRevenueUSD null)`);
+          diagnostics.warnings.push(`royalties gross revenue series = ${grossRevenueSourceForRoyalties}`);
+          if (!grossRevenueSeriesMatch && firstMismatchIndex >= 0) {
+            diagnostics.warnings.push(
+              `royalties gross revenue mismatch at t=${String(firstMismatchIndex)} used=${String(grossRevenueForRoyalties[firstMismatchIndex])} exposed=${String(grossRevenueResolvedForTable[firstMismatchIndex])}`,
+            );
+          }
           if (royaltiesDetailFailureReason) {
             diagnostics.warnings.push(`royaltiesDetail failed because ${royaltiesDetailFailureReason}`);
           }

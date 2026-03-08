@@ -3317,7 +3317,12 @@ Capital Available: ${availableLabel}`,
     const seriesOrNull = (value: unknown): Array<number | null> | null => (Array.isArray(value) ? value as Array<number | null> : null);
     const revenueByMetal = (record.revenueByMetal_USD ?? {}) as Record<string, Array<number | null>>;
     const orderedRevenueMetals = Object.keys(revenueByMetal).sort((a, b) => a.localeCompare(b));
-    const grossRevenue = seriesOrNull(record.totalRevenue_USD);
+    const grossRevenueFromPhase1 = seriesOrNull(record.grossRevenueUSD);
+    const grossRevenueFromRevenueTable = seriesOrNull(record.totalRevenue_USD);
+    const grossRevenue = grossRevenueFromPhase1 ?? grossRevenueFromRevenueTable;
+    const grossRevenueSource = grossRevenueFromPhase1
+      ? 'series.grossRevenueUSD'
+      : 'series.totalRevenue_USD';
     const operatingCosts = seriesOrNull(record.operatingCostsUSD);
     const royalties = (() => {
       const detail = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
@@ -3353,6 +3358,155 @@ Capital Available: ${availableLabel}`,
     const firstNegativeEbitPeriod = Array.isArray(ebit)
       ? ebit.findIndex((value) => typeof value === "number" && value < 0)
       : -1;
+    const firstRevenuePeriod = Array.isArray(grossRevenue)
+      ? grossRevenue.findIndex((value) => typeof value === "number" && Number.isFinite(value) && value > 0)
+      : -1;
+    const fallbackPeriod = Array.isArray(grossRevenue) && grossRevenue.length > 0
+      ? Math.min(6, grossRevenue.length - 1)
+      : -1;
+    const spotlightPeriod = firstRevenuePeriod >= 0
+      ? firstRevenuePeriod
+      : fallbackPeriod;
+
+    const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+    const asNumberOrNull = (value: unknown): number | null => (isFiniteNumber(value) ? value : null);
+    const seriesValue = (series: Array<number | null> | null, t: number): number | null => {
+      if (!Array.isArray(series) || t < 0) return null;
+      return asNumberOrNull(series[t]);
+    };
+
+    const royaltiesDiagnosticsByProject = (projectSnapshotDiagnosticsMeta?.royaltiesDiagnostics ?? null) as Record<string, Record<string, unknown>> | null;
+    const projectRoyaltyDiagnostics = selectedProjectId && royaltiesDiagnosticsByProject
+      ? (royaltiesDiagnosticsByProject[selectedProjectId] ?? null)
+      : null;
+    const royaltiesDetailFromSnapshot = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
+    const royaltiesDetailFromJson = (() => {
+      const rawEco = (selectedProjectRawJson?.economicsBreakdown ?? null) as Record<string, unknown> | null;
+      const rawDetail = rawEco?.royaltiesDetail;
+      return Array.isArray(rawDetail) ? rawDetail as Array<Record<string, unknown>> : [];
+    })();
+    const royaltiesRulesSource = royaltiesDetailFromJson.length > 0
+      ? royaltiesDetailFromJson
+      : royaltiesDetailFromSnapshot;
+    const royaltiesSnapshotById = new Map(
+      royaltiesDetailFromSnapshot.map((detail) => [String(detail.id ?? ''), detail]),
+    );
+
+    const royaltiesRulesDebug = royaltiesRulesSource.map((detail, idx) => {
+      const base = String(detail.base ?? '').trim().toLowerCase();
+      const rateType = String(detail.rateType ?? '').trim().toLowerCase();
+      const rate = asNumberOrNull(detail.rate);
+      const ruleId = String(detail.id ?? `rule-${idx}`);
+      const snapshotMatch = royaltiesSnapshotById.get(ruleId);
+      const royaltySeries = Array.isArray(snapshotMatch?.royaltyUSD)
+        ? snapshotMatch.royaltyUSD as Array<number | null>
+        : (Array.isArray(detail.royaltyUSD) ? detail.royaltyUSD as Array<number | null> : null);
+      const grossAtSpotlight = seriesValue(grossRevenue, spotlightPeriod);
+      const royaltyAtSpotlight = seriesValue(royaltySeries, spotlightPeriod);
+      const requirements = [
+        {
+          label: 'base måste vara "revenue"',
+          passed: base === 'revenue',
+          actual: base || '(tomt)',
+        },
+        {
+          label: 'rateType måste vara "nsr_pct" eller "ad_valorem_pct"',
+          passed: rateType === 'nsr_pct' || rateType === 'ad_valorem_pct',
+          actual: rateType || '(tomt)',
+        },
+        {
+          label: 'rate måste vara ett ändligt tal',
+          passed: rate !== null,
+          actual: detail.rate ?? null,
+        },
+        {
+          label: `gross revenue måste vara numerisk i spotlight t=${spotlightPeriod}`,
+          passed: grossAtSpotlight !== null,
+          actual: grossAtSpotlight,
+        },
+      ];
+      return {
+        id: ruleId,
+        label: String(detail.label ?? detail.name ?? `Rule ${idx + 1}`),
+        hasTechnicalFields: typeof detail.base !== 'undefined' || typeof detail.rateType !== 'undefined' || typeof detail.rate !== 'undefined',
+        royaltySeriesSource: Array.isArray(snapshotMatch?.royaltyUSD) ? 'series.royaltiesDetail' : 'json.royaltiesDetail',
+        rate,
+        rateType,
+        base,
+        royaltyAtSpotlight,
+        grossRevenueAtSpotlight: grossAtSpotlight,
+        requirements,
+      };
+    });
+
+    const ebitWalkthrough = (() => {
+      if (spotlightPeriod < 0) return null;
+      const inputRows = [
+        { key: 'Gross revenue', rawValue: seriesValue(grossRevenue, spotlightPeriod), sign: '+' },
+        { key: 'Operating costs', rawValue: seriesValue(operatingCosts, spotlightPeriod), sign: '-' },
+        { key: 'Sustaining capex', rawValue: seriesValue(sustainingCapex, spotlightPeriod), sign: '-' },
+        { key: 'Site G&A', rawValue: seriesValue(siteGandA, spotlightPeriod), sign: '-' },
+        { key: 'Royalties', rawValue: seriesValue(royalties, spotlightPeriod), sign: '-' },
+        { key: 'Reclamation', rawValue: seriesValue(reclamation, spotlightPeriod), sign: '-' },
+        { key: 'Byproduct credits', rawValue: seriesValue(byproductCredits, spotlightPeriod), sign: '+' },
+      ] as const;
+      const inputRowsWithEngineValue = inputRows.map((row) => ({
+        ...row,
+        usedByEngine: row.rawValue ?? 0,
+      }));
+      const coercedToZero = inputRowsWithEngineValue
+        .filter((row) => row.rawValue === null)
+        .map((row) => row.key);
+      const ebitdaComputed = inputRowsWithEngineValue[0].usedByEngine
+        - inputRowsWithEngineValue[1].usedByEngine
+        - inputRowsWithEngineValue[2].usedByEngine
+        - inputRowsWithEngineValue[3].usedByEngine
+        - inputRowsWithEngineValue[4].usedByEngine
+        - inputRowsWithEngineValue[5].usedByEngine
+        + inputRowsWithEngineValue[6].usedByEngine;
+      const depreciationAtSpotlight = seriesValue((seriesOrNull((parsedSelectedProject?.context?.series ?? {}).depreciationUSD) ?? null), spotlightPeriod)
+        ?? seriesValue((seriesOrNull(record.depreciationUSD) ?? null), spotlightPeriod);
+      const depreciationUsedByEngine = depreciationAtSpotlight ?? 0;
+      const ebitComputed = ebitdaComputed - depreciationUsedByEngine;
+      const ebitReported = seriesValue(ebit, spotlightPeriod);
+      const taxAtSpotlight = seriesValue(tax, spotlightPeriod);
+      const capexAtSpotlight = seriesValue(capex, spotlightPeriod);
+      const sustainingCapexAtSpotlight = seriesValue(sustainingCapex, spotlightPeriod);
+      const workingCapitalDeltaAtSpotlight = seriesValue(workingCapitalDelta, spotlightPeriod);
+      const reclamationAtSpotlight = seriesValue(reclamation, spotlightPeriod);
+      const fcffRecomputedFromEbit = ebitReported === null
+        ? null
+        : ebitReported
+          - (taxAtSpotlight ?? 0)
+          + (depreciationAtSpotlight ?? 0)
+          - (sustainingCapexAtSpotlight ?? 0)
+          - (capexAtSpotlight ?? 0)
+          - (workingCapitalDeltaAtSpotlight ?? 0)
+          - (reclamationAtSpotlight ?? 0);
+      const fcffReported = seriesValue(fcff, spotlightPeriod);
+      const fcffDiff = fcffRecomputedFromEbit !== null && fcffReported !== null
+        ? fcffReported - fcffRecomputedFromEbit
+        : null;
+      return {
+        t: spotlightPeriod,
+        ebitReported,
+        ebitComputed,
+        ebitdaComputed,
+        depreciationAtSpotlight,
+        depreciationUsedByEngine,
+        taxAtSpotlight,
+        capexAtSpotlight,
+        sustainingCapexAtSpotlight,
+        workingCapitalDeltaAtSpotlight,
+        reclamationAtSpotlight,
+        fcffRecomputedFromEbit,
+        fcffReported,
+        fcffDiff,
+        inputRows: inputRowsWithEngineValue,
+        coercedToZero,
+        grossRevenueSource,
+      };
+    })();
 
     return {
       singleSourceOfTruth: "Instrumentbräda-tabellen läser värden från projectSnapshotData.series (samma källa för raderna i Production → P&L → FCFF).",
@@ -3368,12 +3522,28 @@ Capital Available: ${availableLabel}`,
           byproductCredits: byproductCredits?.[firstNegativeEbitPeriod] ?? null,
         }
         : null,
+      ebitWalkthrough,
+      royaltiesRuleChecks: royaltiesRulesDebug,
+      royaltiesPipelineDiagnostics: projectRoyaltyDiagnostics,
+      grossRevenueSource,
+      grossRevenueCrossCheck: (() => {
+        if (!grossRevenueFromPhase1 || !grossRevenueFromRevenueTable || spotlightPeriod < 0) return null;
+        const phase1Value = seriesValue(grossRevenueFromPhase1, spotlightPeriod);
+        const revenueTableValue = seriesValue(grossRevenueFromRevenueTable, spotlightPeriod);
+        if (phase1Value === null || revenueTableValue === null) return null;
+        return {
+          t: spotlightPeriod,
+          phase1GrossRevenue: phase1Value,
+          revenueTableGrossRevenue: revenueTableValue,
+          diff: revenueTableValue - phase1Value,
+        };
+      })(),
       blocks: [
         {
           label: "Gross revenue",
           formula: "Σ Revenue metal (USD)",
           calculatedIn: "snapshot series pipeline (rendered as totalRevenue_USD)",
-          sourceOfTruth: "series.totalRevenue_USD",
+          sourceOfTruth: grossRevenueSource,
           inputs: orderedRevenueMetals.map((metal) => ({
             label: `Revenue ${metal}`,
             source: `series.revenueByMetal_USD.${metal}`,
@@ -3383,11 +3553,11 @@ Capital Available: ${availableLabel}`,
         },
         {
           label: "Gross profit",
-          formula: "grossRevenue - operatingCosts - royalties ± byproductCredits",
+          formula: "grossRevenue - operatingCosts",
           calculatedIn: "snapshot series pipeline (rendered as grossProfitUSD)",
           sourceOfTruth: "series.grossProfitUSD",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Gross revenue", source: grossRevenueSource, values: grossRevenue },
             { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
             { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
             { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
@@ -3396,27 +3566,28 @@ Capital Available: ${availableLabel}`,
         },
         {
           label: "EBITDA",
-          formula: "grossRevenue - operatingCosts - royalties",
+          formula: "grossRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits",
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.ebitdaUSD",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Gross revenue", source: grossRevenueSource, values: grossRevenue },
             { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
+            { label: "Sustaining capex", source: "series.sustainingCapexUSD", values: sustainingCapex },
+            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
             { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
+            { label: "Reclamation", source: "series.reclamationUSD", values: reclamation },
+            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
           ],
           output: ebitda,
         },
         {
           label: "EBIT",
-          formula: "grossRevenue - operatingCosts - siteG&A - royalties + byproductCredits",
+          formula: "EBITDA - depreciation",
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.ebitUSD",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
-            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
-            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
-            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
-            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
+            { label: "EBITDA", source: "series.ebitdaUSD", values: ebitda },
+            { label: "Depreciation", source: "series.depreciationUSD", values: seriesOrNull(record.depreciationUSD) },
           ],
           output: ebit,
         },
@@ -3434,7 +3605,7 @@ Capital Available: ${availableLabel}`,
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.fcffUSD",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Gross revenue", source: grossRevenueSource, values: grossRevenue },
             { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
             { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
             { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
@@ -3449,7 +3620,7 @@ Capital Available: ${availableLabel}`,
         },
       ],
     };
-  }, [projectSeries]);
+  }, [parsedSelectedProject, projectSeries, projectSnapshotDiagnosticsMeta, selectedProjectId, selectedProjectRawJson]);
 
   const projectMountDebug = useMemo(() => {
     const rawJson = selectedProjectRawJson;
@@ -5283,6 +5454,94 @@ Capital Available: ${availableLabel}`,
                             </div>
                           </div>
                         )}
+
+                        {projectPnlTraceDebugger.ebitWalkthrough && (
+                          <div style={{ border: "1px solid #d8e0d2", borderRadius: 6, background: "#fff", padding: "8px" }}>
+                            <strong>Noggrann steg-för-steg: Gross revenue → EBITDA → EBIT → FCFF (spotlight)</strong>
+                            <div style={{ marginTop: 4, color: "#374151" }}>Spotlight väljs som första t med revenue &gt; 0, annars fallback t=6.</div>
+                            <div style={{ marginTop: 4 }}>t={projectPnlTraceDebugger.ebitWalkthrough.t}</div>
+                            <div style={{ marginTop: 4 }}>Gross revenue-källa i walkthrough: <code>{projectPnlTraceDebugger.ebitWalkthrough.grossRevenueSource}</code></div>
+                            <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
+                              {projectPnlTraceDebugger.ebitWalkthrough.inputRows.map((row) => (
+                                <li key={`walk-${row.key}`}>
+                                  {row.sign} {row.key}: {formatPanelValue(row.rawValue)}
+                                  {row.rawValue === null && <span> (engine använder 0)</span>}
+                                </li>
+                              ))}
+                            </ul>
+                            <div>EBITDA (computed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.ebitdaComputed)}</div>
+                            <div>Depreciation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight)}</div>
+                            {projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight === null && (
+                              <div>Depreciation saknas i raden; engine använder 0 i beräkningen.</div>
+                            )}
+                            <div>EBIT (computed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.ebitComputed)}</div>
+                            <div>EBIT (series.ebitUSD): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.ebitReported)}</div>
+                            <div style={{ marginTop: 6 }}><strong>FCFF-led (från EBIT):</strong></div>
+                            <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
+                              <li>- Tax: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.taxAtSpotlight)}</li>
+                              <li>+ Depreciation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight)}</li>
+                              <li>- Sustaining capex: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.sustainingCapexAtSpotlight)}</li>
+                              <li>- Capex: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.capexAtSpotlight)}</li>
+                              <li>- Working capital delta: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.workingCapitalDeltaAtSpotlight)}</li>
+                              <li>- Reclamation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.reclamationAtSpotlight)}</li>
+                            </ul>
+                            <div>fcffRecomputedFromEbit: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffRecomputedFromEbit)}</div>
+                            <div>FCFF (series.fcffUSD): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffReported)}</div>
+                            <div>FCFF diff (series - recomputed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffDiff)}</div>
+                            {projectPnlTraceDebugger.ebitWalkthrough.fcffRecomputedFromEbit === null && (
+                              <div style={{ color: "#7f1d1d" }}>
+                                fcffRecomputedFromEbit är null eftersom EBIT saknas i perioden.
+                              </div>
+                            )}
+                            {projectPnlTraceDebugger.ebitWalkthrough.coercedToZero.length > 0 && (
+                              <div style={{ color: "#1f2937", marginTop: 6 }}>
+                                Inputs som var null men behandlades som 0 av engine: {projectPnlTraceDebugger.ebitWalkthrough.coercedToZero.join(', ')}.
+                              </div>
+                            )}
+                            {projectPnlTraceDebugger.grossRevenueCrossCheck && (
+                              <div style={{ marginTop: 6, color: "#7f1d1d" }}>
+                                Kontroll t={projectPnlTraceDebugger.grossRevenueCrossCheck.t}: phase1 gross revenue ({formatPanelValue(projectPnlTraceDebugger.grossRevenueCrossCheck.phase1GrossRevenue)}) vs revenue-tabell ({formatPanelValue(projectPnlTraceDebugger.grossRevenueCrossCheck.revenueTableGrossRevenue)}), diff={formatPanelValue(projectPnlTraceDebugger.grossRevenueCrossCheck.diff)}.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div style={{ border: "1px solid #d8e0d2", borderRadius: 6, background: "#fff", padding: "8px" }}>
+                          <strong>Royalties-regler (%): kravkontroll</strong>
+                          {projectPnlTraceDebugger.royaltiesRuleChecks.length === 0 ? (
+                            <div style={{ marginTop: 6 }}>Inga royaltiesDetail-regler hittades. Då används fallback: <code>series.royaltiesUSD</code> om den finns, annars null-serie.</div>
+                          ) : (
+                            <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+                              {projectPnlTraceDebugger.royaltiesRuleChecks.map((rule) => (
+                                <div key={`rule-${rule.id}`} style={{ borderTop: "1px solid #e5ebdf", paddingTop: 6 }}>
+                                  <div><strong>{rule.label}</strong> ({rule.id})</div>
+                                  <div>base={rule.base || '—'}, rateType={rule.rateType || '—'}, rate={formatPanelValue(rule.rate)}</div>
+                                  <div>grossRevenue i spotlight (från {projectPnlTraceDebugger.grossRevenueSource}): {formatPanelValue(rule.grossRevenueAtSpotlight)}</div>
+                                  <div>royalty-serie källa: <code>{rule.royaltySeriesSource}</code></div>
+                                  <div>royaltyUSD i spotlight: {formatPanelValue(rule.royaltyAtSpotlight)}</div>
+                                  {!rule.hasTechnicalFields && (
+                                    <div style={{ color: "#7f1d1d" }}>
+                                      Snapshot-serien innehåller bara id/label/royaltyUSD. base/rateType/rate läses därför från JSON-indata när den finns.
+                                    </div>
+                                  )}
+                                  <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
+                                    {rule.requirements.map((req) => (
+                                      <li key={`${rule.id}-${req.label}`}>
+                                        {req.passed ? '✅' : '❌'} {req.label}; aktuellt värde: {String(req.actual)}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {projectPnlTraceDebugger.royaltiesPipelineDiagnostics && (
+                            <div style={{ marginTop: 8 }}>
+                              <strong>Pipeline-diagnostik (körning):</strong>
+                              <pre style={{ whiteSpace: "pre-wrap", margin: "6px 0 0 0" }}>{JSON.stringify(projectPnlTraceDebugger.royaltiesPipelineDiagnostics, null, 2)}</pre>
+                            </div>
+                          )}
+                        </div>
 
                         {projectPnlTraceDebugger.blocks.map((block) => (
                           <div key={block.label} style={{ borderTop: "1px solid #e5ebdf", paddingTop: 8 }}>
