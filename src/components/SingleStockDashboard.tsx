@@ -250,6 +250,126 @@ type ProdStartPipelineDebug = {
   }>;
 };
 
+type ProdStartPipelineStep = ProdStartPipelineDebug['steps'][number];
+
+function asFiniteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function formatMathRow(label: string, a: number | null, op: string, b: number | null, result: number | null): string {
+  return `${label} = ${String(a)} ${op} ${String(b)} = ${String(result)}`;
+}
+
+function buildProdStartPipelineDebug(list2DebugRaw: Record<string, unknown> | null): ProdStartPipelineDebug | undefined {
+  if (!list2DebugRaw) return undefined;
+  const lista2Metrics = (list2DebugRaw.lista2Metrics ?? null) as Record<string, unknown> | null;
+  const initialCapexWindow = (list2DebugRaw.initialCapexWindow ?? null) as Record<string, unknown> | null;
+  const checks = (list2DebugRaw.consistencyChecks ?? null) as Record<string, Record<string, unknown>> | null;
+  const excerpts = (list2DebugRaw.excerpts ?? null) as Record<string, unknown> | null;
+  const fcffWindow = (list2DebugRaw.fcffWindowFromTp ?? null) as Record<string, unknown> | null;
+  const financingInputs = (list2DebugRaw.financingInputs ?? null) as Record<string, unknown> | null;
+  const npvMath = (list2DebugRaw.npvMath ?? null) as Record<string, unknown> | null;
+
+  const dcfEx = asFiniteOrNull(lista2Metrics?.DCF_prodStart_exCapex_USD);
+  const dcfPresent = asFiniteOrNull(lista2Metrics?.DCF_prodStart_present_USD);
+  const npvProdUsd = asFiniteOrNull(lista2Metrics?.NPV_prodStart_USD);
+  const npvTodayUsd = asFiniteOrNull(lista2Metrics?.NPV_today_USD);
+  const initialCapexSumUsd = asFiniteOrNull(initialCapexWindow?.sumUSD ?? npvMath?.initialCapexSum_USD);
+
+  const steps: ProdStartPipelineStep[] = [
+    {
+      title: '1. FCFF-källa (USD)',
+      source: String(list2DebugRaw.sourcePath_fcfUSD_total ?? 'snapshot.series.fcffUSD'),
+      content: {
+        fullLength: excerpts?.fullLength ?? null,
+        excerpt_first10: excerpts?.fcff_first10 ?? null,
+        excerptNote: excerpts?.truncated === true ? 'excerpt (first10)' : 'full array shown',
+        fcffWindowFromTp: fcffWindow?.values ?? null,
+      },
+      handling: 'Arrayen används som enda FCFF-källa i Lista2. Den normaliseras till masterN+1 i computeLista2CfDcfMetrics; null/non-finite hanteras enligt Lista2-regler.',
+      result: `tp=${String(list2DebugRaw.productionStartPeriod ?? null)}, r=${String(list2DebugRaw.discountRate ?? null)}, fcffWindow=[${String(fcffWindow?.startIndex ?? null)}..${String(fcffWindow?.endIndex ?? null)}]`,
+    },
+    {
+      title: '2. DCF_prodStart_exCapex_USD',
+      source: 'computeLista2CfDcfMetrics.DCF_prodStart_exCapex_USD',
+      content: {
+        dcfAtTpContributions_excerpt: Array.isArray(list2DebugRaw.dcfAtTpContributions) ? (list2DebugRaw.dcfAtTpContributions as unknown[]).slice(0, 8) : null,
+        contributionLength: Array.isArray(list2DebugRaw.dcfAtTpContributions) ? (list2DebugRaw.dcfAtTpContributions as unknown[]).length : null,
+      },
+      handling: 'Diskonterar FCFF för t>=tp till värde vid tp med faktor 1/(1+r)^(t-tp).',
+      result: `DCF_prodStart_exCapex_USD=${String(dcfEx)}`,
+    },
+    {
+      title: '3. DCF_prodStart_present_USD',
+      source: 'computeLista2CfDcfMetrics.DCF_prodStart_present_USD',
+      content: {
+        dcfProdStart_exCapex_USD: dcfEx,
+        tp: list2DebugRaw.productionStartPeriod ?? null,
+        r: list2DebugRaw.discountRate ?? null,
+      },
+      handling: 'Diskonterar värde vid tp tillbaka till idag: DCF_present = DCF_at_tp * 1/(1+r)^tp.',
+      result: `DCF_prodStart_present_USD=${String(dcfPresent)}`,
+    },
+    {
+      title: '4. Initial CAPEX-fönster',
+      source: String(list2DebugRaw.sourcePath_capexUSD_total ?? 'snapshot.series.capexUSD'),
+      content: {
+        fullLength: excerpts?.fullLength ?? null,
+        excerpt_first10: excerpts?.capex_first10 ?? null,
+        window: `[${String(initialCapexWindow?.startIndexInclusive ?? 0)}, ${String(initialCapexWindow?.endIndexExclusive ?? null)})`,
+        initialCapexWindow_values: initialCapexWindow?.values ?? null,
+      },
+      handling: 'Initial CAPEX tas från explicit indexfönster [startInclusive, endExclusive). Null i fönstret ger null-summa enligt Lista2.',
+      result: `initialCapexSum_USD=${String(initialCapexSumUsd)}`,
+    },
+    {
+      title: '5. NPV_prodStart_USD',
+      source: 'computeLista2CfDcfMetrics.NPV_prodStart_USD',
+      content: {
+        dcfProdStart_exCapex_USD: dcfEx,
+        initialCapexSum_USD: initialCapexSumUsd,
+      },
+      handling: 'Använder faktisk Lista2-formel för prod-start NPV.',
+      result: `${formatMathRow('NPV_prodStart_USD', dcfEx, '-', initialCapexSumUsd, npvProdUsd)}`,
+    },
+    {
+      title: '6. NPV_today_USD',
+      source: String(list2DebugRaw.sourcePath_npvToday_USD ?? 'aggregation.NPV_today_USD'),
+      content: {
+        npvToday_USD: npvTodayUsd,
+        relation: 'Detta är today-NPV i USD och är separat från NPV_prodStart_USD.',
+      },
+      handling: 'Hämtas från aggregation-lagret och används i Lista2-kvoter (t.ex. NPV_over_ETLV).',
+      result: `NPV_today_USD=${String(npvTodayUsd)}`,
+    },
+    {
+      title: '7. NAV och presentation',
+      source: String(list2DebugRaw.sourcePath_netCash_t0_post_TargetCurrency ?? 'financingSnapshot.netCash_TargetCurrency_t0'),
+      content: {
+        netCash_t0_post_TargetCurrency: financingInputs?.netCash_t0_post_TargetCurrency ?? null,
+        fx_USD_to_TargetCurrency: list2DebugRaw.fx_USD_to_TargetCurrency ?? null,
+        shares_current: list2DebugRaw.shares_current ?? null,
+        shares_post_financing: list2DebugRaw.shares_post_financing ?? null,
+        NPV_prodStart_TargetCurrency: lista2Metrics?.NPV_prodStart_TargetCurrency ?? null,
+        NAV_prodStart_TargetCurrency: lista2Metrics?.NAV_prodStart_TargetCurrency ?? null,
+        NPV_prodStart_perShare_TargetCurrency: lista2Metrics?.NPV_prodStart_perShare_TargetCurrency ?? null,
+        NAV_prodStart_perShare_TargetCurrency: lista2Metrics?.NAV_prodStart_perShare_TargetCurrency ?? null,
+      },
+      handling: 'USD-beräkning sker först; därefter FX-konvertering till TargetCurrency. NAV lägger till netCash i TargetCurrency. Per-share använder shares_post_financing.',
+      result: `NAV_prodStart_TargetCurrency=${String(lista2Metrics?.NAV_prodStart_TargetCurrency ?? null)}`,
+    },
+    {
+      title: '8. Identity / consistency checks',
+      source: 'list2ComputationDebug.consistencyChecks',
+      content: checks ?? null,
+      handling: 'Varje check visar expected, actual och diff för DCF/NPV/NAV/per-share-identiteter.',
+      result: `check_1_diff=${String(checks?.check_1_dcf_present_from_tp?.diff ?? null)}, check_2_diff=${String(checks?.check_2_npv_from_dcf_minus_capex?.diff ?? null)}, check_3_diff=${String(checks?.check_3_nav_from_npv_plus_netcash?.diff ?? null)}`,
+    },
+  ];
+
+  return { steps };
+}
+
 function renderProdStartDebugWindow(args: {
   data: ProdStartDebugData;
   targetCurrency: string;
@@ -5036,45 +5156,7 @@ Capital Available: ${availableLabel}`,
                         pipelineDebug: (() => {
                           const meta = (corporateDiagnostics?.meta ?? null) as Record<string, unknown> | null;
                           const list2Debug = (meta?.list2ComputationDebug ?? null) as Record<string, unknown> | null;
-                          if (!list2Debug) return undefined;
-                          const metrics = (list2Debug.lista2Metrics ?? null) as Record<string, unknown> | null;
-                          return {
-                            steps: [
-                              {
-                                title: 'FCFF-källa (USD)',
-                                source: String(list2Debug.sourcePath_fcfUSD_total ?? 'snapshot.series.fcffUSD'),
-                                content: list2Debug.fcfUSD_total_first10 ?? null,
-                                handling: 'Normaliseras till masterN+1 och används direkt som input till Lista2 (DCF/NPV).',
-                                result: `masterN=${String(list2Debug.masterN ?? 'n/a')}, tp=${String(list2Debug.productionStartPeriod ?? 'n/a')}`,
-                              },
-                              {
-                                title: 'DCF vid produktionsstart (USD)',
-                                source: 'computeLista2CfDcfMetrics -> DCF_prodStart_exCapex_USD',
-                                content: metrics?.DCF_prodStart_exCapex_USD ?? null,
-                                handling: 'Diskonterar FCFF för t>=tp till tp (produktionsstart).',
-                                result: `DCF_prodStart_exCapex_USD=${String(metrics?.DCF_prodStart_exCapex_USD ?? null)}`,
-                              },
-                              {
-                                title: 'NPV vid produktionsstart (USD)',
-                                source: String(list2Debug.sourcePath_capexUSD_total ?? 'snapshot.series.capexUSD'),
-                                content: list2Debug.capexUSD_total_first10 ?? null,
-                                handling: 'InitialCAPEX_incremental summeras i capex-fönster före tp och subtraheras från DCF_prodStart_exCapex.',
-                                result: `NPV_prodStart_USD=${String(metrics?.NPV_prodStart_USD ?? null)}`,
-                              },
-                              {
-                                title: 'NAV/TargetCurrency + per-share',
-                                source: String(list2Debug.sourcePath_netCash_t0_post_TargetCurrency ?? 'financingSnapshot.netCash_TargetCurrency_t0'),
-                                content: {
-                                  fx_USD_to_TargetCurrency: list2Debug.fx_USD_to_TargetCurrency ?? null,
-                                  shares_post_financing: list2Debug.shares_post_financing ?? null,
-                                  NAV_prodStart_TargetCurrency: metrics?.NAV_prodStart_TargetCurrency ?? null,
-                                  NPV_prodStart_TargetCurrency: metrics?.NPV_prodStart_TargetCurrency ?? null,
-                                },
-                                handling: 'USD-värden konverteras med fx, NAV adderar netCash_t0 och per-share använder shares_post_financing.',
-                                result: `NAV_prodStart_TargetCurrency=${String(metrics?.NAV_prodStart_TargetCurrency ?? null)}`,
-                              },
-                            ],
-                          };
+                          return buildProdStartPipelineDebug(list2Debug);
                         })(),
                       })}
                     </details>
@@ -5284,44 +5366,7 @@ Capital Available: ${availableLabel}`,
                           targetCurrency: lockedTargetCurrency,
                           pipelineDebug: (() => {
                             const list2Debug = (projectSnapshotDiagnosticsMeta?.list2ComputationDebug ?? null) as Record<string, unknown> | null;
-                            if (!list2Debug) return undefined;
-                            const metrics = (list2Debug.lista2Metrics ?? null) as Record<string, unknown> | null;
-                            return {
-                              steps: [
-                                {
-                                  title: 'FCFF-källa (USD)',
-                                  source: String(list2Debug.sourcePath_fcfUSD_total ?? 'snapshot.series.fcffUSD'),
-                                  content: list2Debug.fcfUSD_total_first10 ?? null,
-                                  handling: 'Normaliseras till masterN+1 och används som enda FCFF-källa för Lista2.',
-                                  result: `tp=${String(list2Debug.productionStartPeriod ?? 'n/a')}, r=${String(list2Debug.discountRate ?? 'n/a')}`,
-                                },
-                                {
-                                  title: 'DCF_prodStart_present_USD',
-                                  source: 'computeLista2CfDcfMetrics.DCF_prodStart_present_USD',
-                                  content: metrics?.DCF_prodStart_present_USD ?? null,
-                                  handling: 'DCF_prodStart_exCapex diskonteras från tp till idag med samma r.',
-                                  result: `DCF_prodStart_present_USD=${String(metrics?.DCF_prodStart_present_USD ?? null)}`,
-                                },
-                                {
-                                  title: 'NPV_prodStart_USD',
-                                  source: String(list2Debug.sourcePath_capexUSD_total ?? 'snapshot.series.capexUSD'),
-                                  content: list2Debug.capexUSD_total_first10 ?? null,
-                                  handling: 'Initial CAPEX-fönster [tp_prev,tp) dras av från DCF_prodStart_exCapex.',
-                                  result: `NPV_prodStart_USD=${String(metrics?.NPV_prodStart_USD ?? null)}`,
-                                },
-                                {
-                                  title: 'NAV/TargetCurrency/per-share',
-                                  source: String(list2Debug.sourcePath_netCash_t0_post_TargetCurrency ?? 'financingSnapshot.netCash_TargetCurrency_t0'),
-                                  content: {
-                                    fx_USD_to_TargetCurrency: list2Debug.fx_USD_to_TargetCurrency ?? null,
-                                    shares_post_financing: list2Debug.shares_post_financing ?? null,
-                                    NAV_prodStart_TargetCurrency: metrics?.NAV_prodStart_TargetCurrency ?? null,
-                                  },
-                                  handling: 'TargetCurrency används endast i sista steg (presentation), inte i intern FCFF/DCF-kalkyl.',
-                                  result: `NAV_prodStart_TargetCurrency=${String(metrics?.NAV_prodStart_TargetCurrency ?? null)}`,
-                                },
-                              ],
-                            };
+                            return buildProdStartPipelineDebug(list2Debug);
                           })(),
                         })}
                         {debugEnabled && projectTimelineDebug && (

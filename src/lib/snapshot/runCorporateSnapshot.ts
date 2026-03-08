@@ -1385,19 +1385,63 @@ type SnapshotDiagnostics = {
       sourcePath_fcfUSD_total: string;
       sourcePath_capexUSD_total: string;
       sourcePath_netCash_t0_post_TargetCurrency: string;
+      sourcePath_npvToday_USD: string;
       masterN: number;
       productionStartPeriod: number | null;
       discountRate: number;
       fx_USD_to_TargetCurrency: number | null;
       shares_post_financing: number | null;
-      fcfUSD_total_first10: Array<number | null>;
-      capexUSD_total_first10: Array<number | null>;
+      shares_current: number | null;
+      fcfUSD_total: Array<number | null>;
+      capexUSD_total: Array<number | null>;
+      excerpts: {
+        fcff_first10: Array<number | null>;
+        capex_first10: Array<number | null>;
+        truncated: boolean;
+        fullLength: number;
+      };
+      fcffWindowFromTp: {
+        startIndex: number | null;
+        endIndex: number;
+        values: Array<number | null>;
+      };
+      dcfAtTpContributions: Array<{
+        t: number;
+        fcffUSD: number | null;
+        discountFactorToTp: number | null;
+        discountedContributionUSD: number | null;
+      }>;
+      initialCapexWindow: {
+        startIndexInclusive: number;
+        endIndexExclusive: number | null;
+        values: Array<number | null>;
+        sumUSD: number | null;
+      };
+      npvMath: {
+        expression: string;
+        dcfProdStart_exCapex_USD: number | null;
+        initialCapexSum_USD: number | null;
+        npvProdStart_USD: number | null;
+      };
+      consistencyChecks: {
+        check_1_dcf_present_from_tp: { expected: number | null; actual: number | null; diff: number | null };
+        check_2_npv_from_dcf_minus_capex: { expected: number | null; actual: number | null; diff: number | null };
+        check_3_nav_from_npv_plus_netcash: { expected: number | null; actual: number | null; diff: number | null };
+        check_4_per_share_npv_prod_start: { expected: number | null; actual: number | null; diff: number | null };
+        check_5_per_share_nav_prod_start: { expected: number | null; actual: number | null; diff: number | null };
+      };
       lista2Metrics: {
         DCF_prodStart_exCapex_USD: number | null;
         DCF_prodStart_present_USD: number | null;
         NPV_prodStart_USD: number | null;
+        NPV_today_USD: number | null;
         NPV_prodStart_TargetCurrency: number | null;
         NAV_prodStart_TargetCurrency: number | null;
+        NPV_prodStart_perShare_TargetCurrency: number | null;
+        NAV_prodStart_perShare_TargetCurrency: number | null;
+      };
+      financingInputs: {
+        netCash_t0_post_TargetCurrency: number | null;
       };
     };
     royaltiesDiagnostics?: Record<string, {
@@ -2525,23 +2569,130 @@ export async function runCorporateSnapshotPipeline(args: {
       });
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
+    const fullFcff = aggregationEffective.fcffUSD_total;
+    const fullCapex = aggregationEffective.capexUSD_total;
+    const fullLength = fullFcff.length;
+    const tpForDebug = Number.isInteger(tpEff) ? tpEff as number : null;
+    const fcffWindowFromTpValues = tpForDebug === null ? [] : fullFcff.slice(tpForDebug);
+    const dcfAtTpContributions = tpForDebug === null
+      ? []
+      : Array.from({ length: aggregationEffective.corporateMasterN - tpForDebug + 1 }, (_, offset) => {
+          const t = tpForDebug + offset;
+          const fcffUSD = toFiniteOrNull(fullFcff[t]);
+          const discountFactorToTp = fcffUSD === null ? null : 1 / ((1 + input.discountRate) ** (t - tpForDebug));
+          return {
+            t,
+            fcffUSD,
+            discountFactorToTp,
+            discountedContributionUSD: fcffUSD === null || discountFactorToTp === null ? null : fcffUSD * discountFactorToTp,
+          };
+        });
+    const initialCapexWindowStart = 0;
+    const initialCapexWindowEnd = tpForDebug;
+    const initialCapexWindowValues = tpForDebug === null ? [] : fullCapex.slice(initialCapexWindowStart, tpForDebug);
+    const initialCapexWindowSum = initialCapexWindowValues.length === 0
+      ? (tpForDebug === 0 ? 0 : null)
+      : (initialCapexWindowValues.some((value) => value === null || !Number.isFinite(value))
+        ? null
+        : (initialCapexWindowValues as number[]).reduce((sum, value) => sum + value, 0));
+    const dfToToday_tp = tpForDebug === null ? null : 1 / ((1 + input.discountRate) ** tpForDebug);
+    const check1Expected = lista2.metrics.DCF_prodStart_exCapex_USD !== null && dfToToday_tp !== null
+      ? lista2.metrics.DCF_prodStart_exCapex_USD * dfToToday_tp
+      : null;
+    const check2Expected = lista2.metrics.DCF_prodStart_exCapex_USD !== null && initialCapexWindowSum !== null
+      ? lista2.metrics.DCF_prodStart_exCapex_USD - initialCapexWindowSum
+      : null;
+    const check3Expected = lista2.metrics.NPV_prodStart_TargetCurrency !== null
+      && financingSnapshot.netCash_TargetCurrency_t0 !== null
+      ? lista2.metrics.NPV_prodStart_TargetCurrency + financingSnapshot.netCash_TargetCurrency_t0
+      : null;
+    const check4Expected = lista2.metrics.NPV_prodStart_TargetCurrency !== null
+      && shares_post_financing_fd_effective !== null
+      && shares_post_financing_fd_effective > 0
+      ? lista2.metrics.NPV_prodStart_TargetCurrency / shares_post_financing_fd_effective
+      : null;
+    const check5Expected = lista2.metrics.NAV_prodStart_TargetCurrency !== null
+      && shares_post_financing_fd_effective !== null
+      && shares_post_financing_fd_effective > 0
+      ? lista2.metrics.NAV_prodStart_TargetCurrency / shares_post_financing_fd_effective
+      : null;
+
     diagnostics.meta.list2ComputationDebug = {
       sourcePath_fcfUSD_total: 'snapshot.series.fcffUSD',
       sourcePath_capexUSD_total: 'snapshot.series.capexUSD',
       sourcePath_netCash_t0_post_TargetCurrency: 'financingSnapshot.netCash_TargetCurrency_t0',
+      sourcePath_npvToday_USD: 'aggregation.NPV_today_USD',
       masterN: aggregationEffective.corporateMasterN,
       productionStartPeriod: tpEff,
       discountRate: input.discountRate,
       fx_USD_to_TargetCurrency: fxRate,
       shares_post_financing: shares_post_financing_fd_effective,
-      fcfUSD_total_first10: aggregationEffective.fcffUSD_total.slice(0, 10),
-      capexUSD_total_first10: aggregationEffective.capexUSD_total.slice(0, 10),
+      shares_current: marketInput.shares_current,
+      fcfUSD_total: fullFcff,
+      capexUSD_total: fullCapex,
+      excerpts: {
+        fcff_first10: fullFcff.slice(0, 10),
+        capex_first10: fullCapex.slice(0, 10),
+        truncated: fullLength > 10,
+        fullLength,
+      },
+      fcffWindowFromTp: {
+        startIndex: tpForDebug,
+        endIndex: aggregationEffective.corporateMasterN,
+        values: fcffWindowFromTpValues,
+      },
+      dcfAtTpContributions,
+      initialCapexWindow: {
+        startIndexInclusive: initialCapexWindowStart,
+        endIndexExclusive: initialCapexWindowEnd,
+        values: initialCapexWindowValues,
+        sumUSD: initialCapexWindowSum,
+      },
+      npvMath: {
+        expression: 'NPV_prodStart_USD = DCF_prodStart_exCapex_USD - initialCapexSum_USD',
+        dcfProdStart_exCapex_USD: lista2.metrics.DCF_prodStart_exCapex_USD,
+        initialCapexSum_USD: initialCapexWindowSum,
+        npvProdStart_USD: lista2.metrics.NPV_prodStart_USD,
+      },
+      consistencyChecks: {
+        check_1_dcf_present_from_tp: {
+          expected: check1Expected,
+          actual: lista2.metrics.DCF_prodStart_present_USD,
+          diff: check1Expected !== null && lista2.metrics.DCF_prodStart_present_USD !== null ? lista2.metrics.DCF_prodStart_present_USD - check1Expected : null,
+        },
+        check_2_npv_from_dcf_minus_capex: {
+          expected: check2Expected,
+          actual: lista2.metrics.NPV_prodStart_USD,
+          diff: check2Expected !== null && lista2.metrics.NPV_prodStart_USD !== null ? lista2.metrics.NPV_prodStart_USD - check2Expected : null,
+        },
+        check_3_nav_from_npv_plus_netcash: {
+          expected: check3Expected,
+          actual: lista2.metrics.NAV_prodStart_TargetCurrency,
+          diff: check3Expected !== null && lista2.metrics.NAV_prodStart_TargetCurrency !== null ? lista2.metrics.NAV_prodStart_TargetCurrency - check3Expected : null,
+        },
+        check_4_per_share_npv_prod_start: {
+          expected: check4Expected,
+          actual: lista2.metrics.NPV_prodStart_perShare_TargetCurrency,
+          diff: check4Expected !== null && lista2.metrics.NPV_prodStart_perShare_TargetCurrency !== null ? lista2.metrics.NPV_prodStart_perShare_TargetCurrency - check4Expected : null,
+        },
+        check_5_per_share_nav_prod_start: {
+          expected: check5Expected,
+          actual: lista2.metrics.NAV_prodStart_perShare_TargetCurrency,
+          diff: check5Expected !== null && lista2.metrics.NAV_prodStart_perShare_TargetCurrency !== null ? lista2.metrics.NAV_prodStart_perShare_TargetCurrency - check5Expected : null,
+        },
+      },
       lista2Metrics: {
         DCF_prodStart_exCapex_USD: lista2.metrics.DCF_prodStart_exCapex_USD,
         DCF_prodStart_present_USD: lista2.metrics.DCF_prodStart_present_USD,
         NPV_prodStart_USD: lista2.metrics.NPV_prodStart_USD,
+        NPV_today_USD: aggregationEffective.NPV_today_USD,
         NPV_prodStart_TargetCurrency: lista2.metrics.NPV_prodStart_TargetCurrency,
         NAV_prodStart_TargetCurrency: lista2.metrics.NAV_prodStart_TargetCurrency,
+        NPV_prodStart_perShare_TargetCurrency: lista2.metrics.NPV_prodStart_perShare_TargetCurrency,
+        NAV_prodStart_perShare_TargetCurrency: lista2.metrics.NAV_prodStart_perShare_TargetCurrency,
+      },
+      financingInputs: {
+        netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
       },
     };
     const rawBody = args.body as Record<string, unknown>;
