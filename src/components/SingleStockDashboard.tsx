@@ -3317,7 +3317,12 @@ Capital Available: ${availableLabel}`,
     const seriesOrNull = (value: unknown): Array<number | null> | null => (Array.isArray(value) ? value as Array<number | null> : null);
     const revenueByMetal = (record.revenueByMetal_USD ?? {}) as Record<string, Array<number | null>>;
     const orderedRevenueMetals = Object.keys(revenueByMetal).sort((a, b) => a.localeCompare(b));
-    const grossRevenue = seriesOrNull(record.totalRevenue_USD);
+    const grossRevenueFromPhase1 = seriesOrNull(record.grossRevenueUSD);
+    const grossRevenueFromRevenueTable = seriesOrNull(record.totalRevenue_USD);
+    const grossRevenue = grossRevenueFromPhase1 ?? grossRevenueFromRevenueTable;
+    const grossRevenueSource = grossRevenueFromPhase1
+      ? 'series.grossRevenueUSD'
+      : 'series.totalRevenue_USD';
     const operatingCosts = seriesOrNull(record.operatingCostsUSD);
     const royalties = (() => {
       const detail = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
@@ -3421,6 +3426,7 @@ Capital Available: ${availableLabel}`,
         rateType,
         base,
         royaltyAtSpotlight,
+        grossRevenueAtSpotlight: grossAtSpotlight,
         requirements,
       };
     });
@@ -3464,6 +3470,7 @@ Capital Available: ${availableLabel}`,
         depreciationUsedByEngine,
         inputRows: inputRowsWithEngineValue,
         coercedToZero,
+        grossRevenueSource,
       };
     })();
 
@@ -3484,12 +3491,25 @@ Capital Available: ${availableLabel}`,
       ebitWalkthrough,
       royaltiesRuleChecks: royaltiesRulesDebug,
       royaltiesPipelineDiagnostics: projectRoyaltyDiagnostics,
+      grossRevenueSource,
+      grossRevenueCrossCheck: (() => {
+        if (!grossRevenueFromPhase1 || !grossRevenueFromRevenueTable || spotlightPeriod < 0) return null;
+        const phase1Value = seriesValue(grossRevenueFromPhase1, spotlightPeriod);
+        const revenueTableValue = seriesValue(grossRevenueFromRevenueTable, spotlightPeriod);
+        if (phase1Value === null || revenueTableValue === null) return null;
+        return {
+          t: spotlightPeriod,
+          phase1GrossRevenue: phase1Value,
+          revenueTableGrossRevenue: revenueTableValue,
+          diff: revenueTableValue - phase1Value,
+        };
+      })(),
       blocks: [
         {
           label: "Gross revenue",
           formula: "Σ Revenue metal (USD)",
           calculatedIn: "snapshot series pipeline (rendered as totalRevenue_USD)",
-          sourceOfTruth: "series.totalRevenue_USD",
+          sourceOfTruth: grossRevenueSource,
           inputs: orderedRevenueMetals.map((metal) => ({
             label: `Revenue ${metal}`,
             source: `series.revenueByMetal_USD.${metal}`,
@@ -3503,7 +3523,7 @@ Capital Available: ${availableLabel}`,
           calculatedIn: "snapshot series pipeline (rendered as grossProfitUSD)",
           sourceOfTruth: "series.grossProfitUSD",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Gross revenue", source: grossRevenueSource, values: grossRevenue },
             { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
             { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
             { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
@@ -3516,7 +3536,7 @@ Capital Available: ${availableLabel}`,
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.ebitdaUSD",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Gross revenue", source: grossRevenueSource, values: grossRevenue },
             { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
             { label: "Sustaining capex", source: "series.sustainingCapexUSD", values: sustainingCapex },
             { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
@@ -3551,7 +3571,7 @@ Capital Available: ${availableLabel}`,
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.fcffUSD",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
+            { label: "Gross revenue", source: grossRevenueSource, values: grossRevenue },
             { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
             { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
             { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
@@ -5406,6 +5426,7 @@ Capital Available: ${availableLabel}`,
                             <strong>Noggrann steg-för-steg: Gross revenue → EBITDA → EBIT (spotlight)</strong>
                             <div style={{ marginTop: 4, color: "#374151" }}>Spotlight väljs som första t med revenue &gt; 0, annars fallback t=6.</div>
                             <div style={{ marginTop: 4 }}>t={projectPnlTraceDebugger.ebitWalkthrough.t}</div>
+                            <div style={{ marginTop: 4 }}>Gross revenue-källa i walkthrough: <code>{projectPnlTraceDebugger.ebitWalkthrough.grossRevenueSource}</code></div>
                             <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
                               {projectPnlTraceDebugger.ebitWalkthrough.inputRows.map((row) => (
                                 <li key={`walk-${row.key}`}>
@@ -5426,6 +5447,11 @@ Capital Available: ${availableLabel}`,
                                 Inputs som var null men behandlades som 0 av engine: {projectPnlTraceDebugger.ebitWalkthrough.coercedToZero.join(', ')}.
                               </div>
                             )}
+                            {projectPnlTraceDebugger.grossRevenueCrossCheck && (
+                              <div style={{ marginTop: 6, color: "#7f1d1d" }}>
+                                Kontroll t={projectPnlTraceDebugger.grossRevenueCrossCheck.t}: phase1 gross revenue ({formatPanelValue(projectPnlTraceDebugger.grossRevenueCrossCheck.phase1GrossRevenue)}) vs revenue-tabell ({formatPanelValue(projectPnlTraceDebugger.grossRevenueCrossCheck.revenueTableGrossRevenue)}), diff={formatPanelValue(projectPnlTraceDebugger.grossRevenueCrossCheck.diff)}.
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -5439,6 +5465,7 @@ Capital Available: ${availableLabel}`,
                                 <div key={`rule-${rule.id}`} style={{ borderTop: "1px solid #e5ebdf", paddingTop: 6 }}>
                                   <div><strong>{rule.label}</strong> ({rule.id})</div>
                                   <div>base={rule.base || '—'}, rateType={rule.rateType || '—'}, rate={formatPanelValue(rule.rate)}</div>
+                                  <div>grossRevenue i spotlight (från {projectPnlTraceDebugger.grossRevenueSource}): {formatPanelValue(rule.grossRevenueAtSpotlight)}</div>
                                   <div>royaltyUSD i spotlight: {formatPanelValue(rule.royaltyAtSpotlight)}</div>
                                   {!rule.hasTechnicalFields && (
                                     <div style={{ color: "#7f1d1d" }}>
