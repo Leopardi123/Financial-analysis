@@ -64,9 +64,86 @@ test('buildProjectGridPnl resolves royalties detail source and shows royalty rat
   assert.deepEqual(pnl.grossRevenueNullPeriods, [0, 1]);
   assert.deepEqual(pnl.royaltiesRateTypes, ['NSR_pct']);
   assert.deepEqual(pnl.royaltiesBases, ['revenue']);
+  assert.equal(pnl.royaltiesDetailPresent, true);
+  assert.equal(pnl.royaltiesDetailRuleCount, 1);
+  assert.equal(pnl.royaltiesDetailComputable, true);
+  assert.equal(pnl.royaltiesDetailBaseNormalized, 'revenue');
+  assert.equal(pnl.royaltiesDetailRateTypeNormalized, 'nsr_pct');
+  assert.equal(pnl.royaltiesDetailRateParsed, 5);
+  assert.equal(pnl.royaltyRatePercentResolved, 5);
+  assert.equal(pnl.royaltiesFailureReason, null);
+  assert.equal(pnl.royaltiesRuleDiagnostics.length, 1);
+  assert.equal(pnl.royaltiesRuleDiagnostics[0]?.computable, true);
+  assert.equal(pnl.royaltiesPeriodDiagnostics[2]?.failedAtStep, 'none');
+  assert.equal(pnl.royaltiesPeriodDiagnostics[2]?.failureReason, null);
 
   assert.equal(pnl.grossProfit[2], 85);
   assert.equal(pnl.ebitda[2], 85);
   assert.equal(pnl.ebit[2], 85);
   assert.equal(pnl.fcff[2], 85);
+});
+
+test('buildProjectGridPnl computes royalties from royaltiesDetail revenue NSR_pct rate=0.5 even without royaltyUSD series', () => {
+  const pnl = buildProjectGridPnl({
+    revenueByMetal_USD: {
+      Au: [null, null, 100, 120],
+    },
+    operatingCostsUSD: [0, 0, 10, 10],
+    siteGandA_USD: [0, 0, 0, 0],
+    royaltiesDetail: [
+      {
+        id: 'nsr',
+        label: 'NSR',
+        base: 'revenue',
+        rateType: 'NSR_pct',
+        rate: 0.5,
+      },
+    ],
+    taxUSD: [0, 0, 0, 0],
+    sustainingCapexUSD: [0, 0, 0, 0],
+    reclamationUSD: [0, 0, 0, 0],
+    workingCapitalDeltaUSD: [0, 0, 0, 0],
+    capexUSD: [0, 0, 0, 0],
+  }, 4);
+
+  assert.equal(pnl.royaltiesSourceUsed, 'royaltiesDetail-current-run');
+  assert.deepEqual(pnl.royaltyRatePct, [null, null, 0.5, 0.5]);
+  assert.deepEqual(pnl.royalties, [null, null, 0.5, 0.6]);
+  assert.equal(pnl.royaltiesDetailComputable, true);
+  assert.equal(pnl.royaltyRatePercentResolved, 0.5);
+  assert.equal(pnl.royaltiesResolvedNumeric, true);
+  assert.equal(pnl.royaltiesPeriodDiagnostics[0]?.failedAtStep, 'gross-revenue-missing');
+  assert.equal(pnl.royaltiesPeriodDiagnostics[2]?.failedAtStep, 'none');
+});
+
+test('buildProjectGridPnl keeps gross revenue computable when one metal revenue series is null while others are numeric', () => {
+  const pnl = buildProjectGridPnl({
+    revenueByMetal_USD: {
+      Au: [100],
+      Ag: [200],
+      Pb: [null],
+    },
+    operatingCostsUSD: [50],
+    siteGandA_USD: [10],
+    royaltiesDetail: [
+      {
+        id: 'nsr',
+        label: 'NSR',
+        base: 'revenue',
+        rateType: 'NSR_pct',
+        rate: 0.5,
+      },
+    ],
+    taxUSD: [0],
+    sustainingCapexUSD: [0],
+    reclamationUSD: [0],
+    workingCapitalDeltaUSD: [0],
+    capexUSD: [0],
+  }, 1);
+
+  assert.deepEqual(pnl.grossRevenue, [300]);
+  assert.deepEqual(pnl.royaltyRatePct, [0.5]);
+  assert.deepEqual(pnl.royalties, [1.5]);
+  assert.deepEqual(pnl.ebit, [238.5]);
+  assert.equal(pnl.royaltiesSourceUsed, 'royaltiesDetail-current-run');
 });

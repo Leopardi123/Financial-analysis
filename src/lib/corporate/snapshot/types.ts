@@ -77,6 +77,10 @@ export type CorporateSnapshotSeries = {
   royaltiesDetail?: Array<{
     id: string;
     label: string;
+    name?: string | null;
+    base?: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
+    rateType?: string | null;
+    rate?: number | null;
     royaltyUSD: Array<number | null>;
   }>;
   taxesDetail?: {
