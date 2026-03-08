@@ -823,7 +823,7 @@ export default function ProjectsPage() {
         rateTypeNormalized,
         rateRaw: rule.rate ?? null,
         rateParsed,
-        computable: baseNormalized === 'revenue' && (rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct') && rateParsed !== null,
+        computable: baseNormalized === 'revenue' && rateParsed !== null,
       };
     });
     const royaltiesPathTrace = {

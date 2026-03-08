@@ -137,11 +137,8 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
 
   const firstComputableRule = royaltiesDetailItems.find((item) => {
     const baseNormalized = normalizeToken(item.base ?? null);
-    const rateTypeNormalized = normalizeRateType(item.rateType ?? null);
     const rateParsed = parseFiniteNumber(item.rate);
-    return baseNormalized === 'revenue'
-      && (rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct')
-      && rateParsed !== null;
+    return baseNormalized === 'revenue' && rateParsed !== null;
   });
   const royaltiesDetailBaseNormalized = firstComputableRule ? normalizeToken(firstComputableRule.base ?? null) : null;
   const royaltiesDetailRateTypeNormalized = firstComputableRule ? normalizeRateType(firstComputableRule.rateType ?? null) : null;
@@ -151,16 +148,12 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
     const baseNormalized = normalizeToken(item.base ?? null);
     const rateTypeNormalized = normalizeRateType(item.rateType ?? null);
     const rateParsed = parseFiniteNumber(item.rate);
-    const computable = baseNormalized === 'revenue'
-      && (rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct')
-      && rateParsed !== null;
+    const computable = baseNormalized === 'revenue' && rateParsed !== null;
     const failureReason = computable
       ? null
       : baseNormalized !== 'revenue'
         ? `Unsupported base (${String(item.base ?? null)} -> ${String(baseNormalized)})`
-        : !(rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct')
-          ? `Unsupported rateType (${String(item.rateType ?? null)} -> ${String(rateTypeNormalized)})`
-          : 'Rate is missing or non-numeric';
+        : 'Rate is missing or non-numeric';
     return {
       id: item.id,
       label: item.label,
@@ -182,11 +175,8 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
       let sum = 0;
       for (const item of royaltiesDetailItems) {
         const baseNormalized = normalizeToken(item.base ?? null);
-        const rateTypeNormalized = normalizeRateType(item.rateType ?? null);
         const rateParsed = parseFiniteNumber(item.rate);
-        const isComputableRule = baseNormalized === 'revenue'
-          && (rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct')
-          && rateParsed !== null;
+        const isComputableRule = baseNormalized === 'revenue' && rateParsed !== null;
         if (!isComputableRule) continue;
         sum += gross * ((rateParsed as number) / 100);
       }

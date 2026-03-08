@@ -102,6 +102,35 @@ test('royalties resolve from royaltiesDetail using current-run gross revenue whe
   assert.deepEqual(diag?.grossRevenueNullPeriods ?? [], []);
 });
 
+test('royalties resolve from royaltiesDetail when base=revenue and rate is numeric even if rateType missing', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  const series = rawJson.series as Record<string, unknown>;
+  const operating = series.operatingCostsUSD as Array<number | null>;
+  series.royaltiesUSD = operating.map(() => null);
+  rawJson.economicsBreakdown = {
+    royaltiesDetail: [
+      { id: 'rev-rate-only', label: 'Revenue rate only', base: 'revenue', rate: 0.5 },
+    ],
+  };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const gross = result.snapshot.series?.totalRevenue_USD ?? [];
+  const royalties = result.snapshot.series?.royaltiesUSD ?? [];
+  assert.equal(gross.length, royalties.length);
+  for (let t = 0; t < gross.length; t += 1) {
+    assert.ok(typeof gross[t] === 'number' && Number.isFinite(gross[t]));
+    assert.ok(typeof royalties[t] === 'number' && Number.isFinite(royalties[t]));
+    assert.ok(Math.abs((royalties[t] as number) - ((gross[t] as number) * 0.005)) < 1e-6);
+  }
+  const diag = Object.values(result.diagnostics.meta.royaltiesDiagnostics ?? {})[0];
+  assert.equal(diag?.royaltiesSource, 'royaltiesDetail-current-run');
+});
+
 test('royalties fall back to series.royaltiesUSD when royaltiesDetail is not computable', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;

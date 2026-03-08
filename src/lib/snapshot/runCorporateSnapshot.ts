@@ -1588,17 +1588,15 @@ export async function runCorporateSnapshotPipeline(args: {
           let computableRuleCount = 0;
           const royaltiesDetail = (royaltiesDetailRaw ?? []).map((detail) => {
             const rate = toFiniteFromUnknown(detail.rate);
-            const rateType = String(detail.rateType ?? '').trim().toLowerCase();
             const base = String(detail.base ?? '').trim().toLowerCase();
             const isComputable =
               base === 'revenue'
-              && (rateType === 'nsr_pct' || rateType === 'ad_valorem_pct')
               && rate !== null;
 
             if (isComputable) {
               computableRuleCount += 1;
               computableRateTypes.add(String(detail.rateType));
-              diagnostics.warnings.push(`royaltiesDetail used: ${detail.id} rate=${String(rate)}%`);
+              diagnostics.warnings.push(`royaltiesDetail used: ${detail.id} base=${String(detail.base)} rateType=${String(detail.rateType)} rate=${String(rate)}%`);
             } else {
               diagnostics.warnings.push(`royaltiesDetail ignored: ${detail.id} base=${String(detail.base)} rateType=${String(detail.rateType)} rate=${String(detail.rate)}`);
             }
@@ -1650,7 +1648,7 @@ export async function runCorporateSnapshotPipeline(args: {
           const royaltiesDetailFailureReason = hasComputableRoyaltyRules
             ? null
             : hasRoyaltiesDetailArray
-              ? 'royaltiesDetail present but no computable revenue-based rate rules'
+              ? 'royaltiesDetail present but no computable revenue-based rules with numeric rate'
               : 'royaltiesDetail missing';
           const computedPeriods = royaltiesUSD.filter((value) => value !== null).length;
           const skippedPeriods = royaltiesUSD.length - computedPeriods;
@@ -1678,7 +1676,7 @@ export async function runCorporateSnapshotPipeline(args: {
 
           if (hasComputableRoyaltyRules) {
             const rateTypes = Array.from(computableRateTypes).sort((a, b) => a.localeCompare(b)).join('|');
-            diagnostics.warnings.push(`royalties: computed from royaltiesDetail (base=revenue, rateType=${rateTypes}, count=${String(computableRuleCount)})`);
+            diagnostics.warnings.push(`royalties: computed from royaltiesDetail (base=revenue, rateType=${rateTypes || 'any_or_missing'}, count=${String(computableRuleCount)})`);
             diagnostics.warnings.push('Royalties (computed)');
             if (!isAllNullOrNonFinite(explicitRoyaltiesUSD) && materiallyDifferentSeries(royaltiesUSD, explicitRoyaltiesUSD)) {
               diagnostics.warnings.push('royalties: computed royalties used; series.royaltiesUSD ignored due to royaltiesDetail precedence');

@@ -147,3 +147,31 @@ test('buildProjectGridPnl keeps gross revenue computable when one metal revenue 
   assert.deepEqual(pnl.ebit, [238.5]);
   assert.equal(pnl.royaltiesSourceUsed, 'royaltiesDetail-current-run');
 });
+
+test('buildProjectGridPnl treats revenue + numeric rate as computable even when rateType is missing', () => {
+  const pnl = buildProjectGridPnl({
+    revenueByMetal_USD: {
+      Au: [100],
+    },
+    operatingCostsUSD: [10],
+    siteGandA_USD: [0],
+    royaltiesDetail: [
+      {
+        id: 'nsr-no-type',
+        label: 'Revenue pct no type',
+        base: 'revenue',
+        rate: 0.5,
+      },
+    ],
+    taxUSD: [0],
+    sustainingCapexUSD: [0],
+    reclamationUSD: [0],
+    workingCapitalDeltaUSD: [0],
+    capexUSD: [0],
+  }, 1);
+
+  assert.equal(pnl.royaltiesSourceUsed, 'royaltiesDetail-current-run');
+  assert.deepEqual(pnl.royalties, [0.5]);
+  assert.deepEqual(pnl.royaltyRatePct, [0.5]);
+  assert.equal(pnl.royaltiesRuleDiagnostics[0]?.computable, true);
+});
