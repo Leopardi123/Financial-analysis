@@ -539,8 +539,26 @@ export default function ProjectsPage() {
 
   const projectGridPnl = useMemo(() => {
     if (!series || seriesColumns.length === 0) return null;
-    return buildProjectGridPnl(series, seriesColumns.length);
-  }, [series, seriesColumns.length]);
+    const royaltiesDetailRaw = parsedProject?.engineInputWithoutPrices.royaltiesDetail ?? series.royaltiesDetail;
+    const royaltiesDetailForPnl = Array.isArray(royaltiesDetailRaw)
+      ? royaltiesDetailRaw
+        .filter((item) => typeof item.id === 'string' && item.id.length > 0 && typeof item.label === 'string' && item.label.length > 0)
+        .map((item) => ({
+          id: item.id as string,
+          label: item.label as string,
+          base: item.base ?? null,
+          rateType: item.rateType ?? null,
+          rate: typeof item.rate === 'number' && Number.isFinite(item.rate) ? item.rate : null,
+          royaltyUSD: 'royaltyUSD' in item && Array.isArray((item as { royaltyUSD?: Array<number | null> }).royaltyUSD)
+            ? (item as { royaltyUSD?: Array<number | null> }).royaltyUSD
+            : undefined,
+        }))
+      : undefined;
+    return buildProjectGridPnl({
+      ...series,
+      royaltiesDetail: royaltiesDetailForPnl,
+    }, seriesColumns.length);
+  }, [parsedProject, series, seriesColumns.length]);
 
   const economicsRows = useMemo(() => {
     if (!series || !projectGridPnl || seriesColumns.length === 0) return [] as Array<{ label: string; unit?: string; values: Array<number | null> }>;
@@ -741,10 +759,18 @@ export default function ProjectsPage() {
       operatingCosts: pnl.operatingCosts[ebitPeriod],
       siteGandA: pnl.siteGandA[ebitPeriod],
       royalties: pnl.royalties[ebitPeriod],
+      royaltiesDiagnostic: pnl.royaltiesPeriodDiagnostics[ebitPeriod] ?? null,
       byproductCredits: pnl.byproductCredits[ebitPeriod],
     };
 
     const royaltiesDebug = {
+      royaltiesDetailPresent: pnl.royaltiesDetailPresent,
+      royaltiesDetailRuleCount: pnl.royaltiesDetailRuleCount,
+      royaltiesDetailComputable: pnl.royaltiesDetailComputable,
+      royaltiesDetailBaseNormalized: pnl.royaltiesDetailBaseNormalized,
+      royaltiesDetailRateTypeNormalized: pnl.royaltiesDetailRateTypeNormalized,
+      royaltiesDetailRateParsed: pnl.royaltiesDetailRateParsed,
+      royaltyRatePercentResolved: pnl.royaltyRatePercentResolved,
       royaltiesSourceUsed: pnl.royaltiesSourceUsed,
       computationMethod: pnl.royaltiesSourceUsed === 'royaltiesDetail-current-run'
         ? 'Royalties computed from current-run gross revenue using royaltiesDetail percentage rule(s) per period.'
@@ -761,8 +787,14 @@ export default function ProjectsPage() {
       bases: pnl.royaltiesBases,
       effectiveRoyaltyRateByPeriod: pnl.effectiveRoyaltyRateByPeriod,
       royaltiesResolvedNumeric: pnl.royaltiesResolvedNumeric,
+      royaltiesFailureReason: pnl.royaltiesFailureReason,
       royaltiesSumUSD: sumFiniteValues(pnl.royalties),
       royaltiesSeriesFirstN: pnl.royalties.slice(0, 8),
+      royaltiesRuleDiagnostics: pnl.royaltiesRuleDiagnostics,
+      royaltiesPeriodDiagnosticsYearByYear: pnl.royaltiesPeriodDiagnostics.map((item) => ({
+        ...item,
+        periodLabel: seriesColumns[item.periodIndex] ?? `t=${item.periodIndex}`,
+      })),
       royaltiesDetailFailureReason: pnl.royaltiesDetailFailureReason,
       fallbackReason: pnl.fallbackReason,
       downstreamUsage: {
@@ -773,14 +805,100 @@ export default function ProjectsPage() {
       },
     };
 
+    const tracePeriod = ebitPeriod ?? 0;
+    const revenueByMetalAtTrace = Object.fromEntries(
+      Object.keys(pnl.revenueByMetal)
+        .sort((a, b) => a.localeCompare(b))
+        .map((metal) => [metal, pnl.revenueByMetal[metal]?.[tracePeriod] ?? null]),
+    );
+    const rawRules = parsedProject?.engineInputWithoutPrices.royaltiesDetail ?? null;
+    const royaltiesRuleTrace = (rawRules ?? []).map((rule) => {
+      const baseNormalized = typeof rule.base === 'string' ? rule.base.trim().toLowerCase() : null;
+      const rateTypeNormalized = typeof rule.rateType === 'string' ? rule.rateType.trim().toLowerCase() : null;
+      const rateParsed = typeof rule.rate === 'number' && Number.isFinite(rule.rate) ? rule.rate : null;
+      return {
+        id: rule.id,
+        baseRaw: rule.base ?? null,
+        baseNormalized,
+        rateTypeRaw: rule.rateType ?? null,
+        rateTypeNormalized,
+        rateRaw: rule.rate ?? null,
+        rateParsed,
+        computable: baseNormalized === 'revenue' && (rateTypeNormalized === 'nsr_pct' || rateTypeNormalized === 'ad_valorem_pct') && rateParsed !== null,
+      };
+    });
+    const royaltiesPathTrace = {
+      periodIndex: tracePeriod,
+      periodLabel: seriesColumns[tracePeriod] ?? `t=${tracePeriod}`,
+      chain: [
+        {
+          stage: 'snapshot.series.revenueByMetal_USD',
+          value: revenueByMetalAtTrace,
+        },
+        {
+          stage: 'buildProjectGridPnl.grossRevenue',
+          value: pnl.grossRevenue[tracePeriod] ?? null,
+        },
+        {
+          stage: 'parsedProject.engineInputWithoutPrices.royaltiesDetail',
+          value: {
+            present: Array.isArray(rawRules),
+            ruleCount: rawRules?.length ?? 0,
+            rules: royaltiesRuleTrace,
+          },
+        },
+        {
+          stage: 'buildProjectGridPnl.royaltiesResolution',
+          value: {
+            source: pnl.royaltiesSourceUsed,
+            royaltyRatePercentResolved: pnl.royaltyRatePercentResolved,
+            royaltyRateAtPeriod: pnl.royaltyRatePct[tracePeriod] ?? null,
+            royaltyUSDAtPeriod: pnl.royalties[tracePeriod] ?? null,
+            royaltiesDetailFailureReason: pnl.royaltiesDetailFailureReason,
+            royaltiesFailureReason: pnl.royaltiesFailureReason,
+          },
+        },
+        {
+          stage: 'downstream.pnl',
+          value: {
+            grossProfit: pnl.grossProfit[tracePeriod] ?? null,
+            ebitda: pnl.ebitda[tracePeriod] ?? null,
+            ebit: pnl.ebit[tracePeriod] ?? null,
+            fcff: pnl.fcff[tracePeriod] ?? null,
+          },
+        },
+        {
+          stage: 'snapshot.series comparison',
+          value: {
+            snapshotTotalRevenue: series?.totalRevenue_USD?.[tracePeriod] ?? null,
+            snapshotRoyaltiesUSD: series?.royaltiesUSD?.[tracePeriod] ?? null,
+            snapshotEbitUSD: series?.ebitUSD?.[tracePeriod] ?? null,
+            snapshotFcffUSD: series?.fcffUSD?.[tracePeriod] ?? null,
+          },
+        },
+      ],
+    };
+
+    const royaltiesFailureTimeline = pnl.royaltiesPeriodDiagnostics.map((item) => ({
+      periodIndex: item.periodIndex,
+      periodLabel: seriesColumns[item.periodIndex] ?? `t=${item.periodIndex}`,
+      grossRevenueUSD: item.grossRevenueUSD,
+      royaltiesUSDResolved: item.royaltiesUSDResolved,
+      royaltyRatePctResolved: item.royaltyRatePctResolved,
+      failedAtStep: item.failedAtStep,
+      failureReason: item.failureReason,
+    }));
+
     return {
       singleSourceOfTruth: 'Displayed economics values come from projectGridPnl (single display model in ProjectsPage).',
       extraValuesAlongTheWay: 'projectGridPnl itself is computed from snapshot series inputs (series.*USD) in buildProjectGridPnl.',
       sections,
       ebitSpotlight,
       royaltiesDebug,
+      royaltiesPathTrace,
+      royaltiesFailureTimeline,
     };
-  }, [projectGridPnl, series, seriesColumns]);
+  }, [parsedProject, projectGridPnl, series, seriesColumns]);
 
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;
@@ -957,10 +1075,23 @@ export default function ProjectsPage() {
                     {' '}− royalties ({formatTableValue(pnlDebugger.ebitSpotlight.royalties)})
                     {' '}+ byproduct credits ({formatTableValue(pnlDebugger.ebitSpotlight.byproductCredits)}).
                   </p>
+                  <p>
+                    <strong>Royalties failure at this period:</strong>{' '}
+                    {pnlDebugger.ebitSpotlight.royaltiesDiagnostic?.failedAtStep ?? 'none'}
+                    {pnlDebugger.ebitSpotlight.royaltiesDiagnostic?.failureReason
+                      ? ` — ${pnlDebugger.ebitSpotlight.royaltiesDiagnostic.failureReason}`
+                      : ''}
+                  </p>
                 </div>
               ) : (
                 <p>No negative EBIT period found in the loaded data.</p>
               )}
+
+              <article className="projects-debugger-section">
+                <h3>Royalties failure timeline (year-by-year)</h3>
+                <p>Visible in the main EBIT debugger so it is clear exactly where royalties resolution fails.</p>
+                <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(pnlDebugger.royaltiesFailureTimeline, null, 2)}</pre>
+              </article>
 
               <article className="projects-debugger-section">
                 <h3>Royalties</h3>
@@ -992,6 +1123,10 @@ export default function ProjectsPage() {
                   <li>royaltiesDetailFailureReason: {pnlDebugger.royaltiesDebug.royaltiesDetailFailureReason ?? '—'}</li>
                   <li>fallbackReason: {pnlDebugger.royaltiesDebug.fallbackReason ?? '—'}</li>
                 </ul>
+                <p><strong>Rule diagnostics (exact rule-level parsing/matching):</strong></p>
+                <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(pnlDebugger.royaltiesDebug.royaltiesRuleDiagnostics, null, 2)}</pre>
+                <p><strong>Year-by-year royalties resolution diagnostics (exact failure step per period):</strong></p>
+                <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(pnlDebugger.royaltiesDebug.royaltiesPeriodDiagnosticsYearByYear, null, 2)}</pre>
                 <p><strong>Downstream usage:</strong></p>
                 <ul>
                   <li>usedInGrossProfit: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInGrossProfit)}</li>
@@ -999,6 +1134,12 @@ export default function ProjectsPage() {
                   <li>usedInEBIT: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInEBIT)}</li>
                   <li>usedInFCFF: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInFCFF)}</li>
                 </ul>
+              </article>
+
+              <article className="projects-debugger-section">
+                <h3>Per-period pipeline trace</h3>
+                <p>Shows each function/data stage for one period to pinpoint where values become null/unusable.</p>
+                <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(pnlDebugger.royaltiesPathTrace, null, 2)}</pre>
               </article>
 
               {pnlDebugger.sections.map((section) => (
