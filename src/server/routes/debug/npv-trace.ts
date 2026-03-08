@@ -5,9 +5,40 @@ function sanitizeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || 'trace';
 }
 
+async function listRecentTraces(debugDir: string): Promise<Array<{ fileName: string; url: string }>> {
+  try {
+    const entries = await fs.readdir(debugDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map((entry) => entry.name)
+      .sort((a, b) => (a < b ? 1 : -1))
+      .slice(0, 20)
+      .map((fileName) => ({ fileName, url: `/debug/${fileName}` }));
+  } catch {
+    return [];
+  }
+}
+
 export default async function handler(req: any, res: any): Promise<void> {
+  const debugDir = path.resolve(process.cwd(), 'public', 'debug');
+
+  if (req.method === 'GET') {
+    const files = await listRecentTraces(debugDir);
+    res.status(200).json({
+      ok: true,
+      message: 'Use POST with a JSON body to persist an NPV trace file.',
+      usage: {
+        method: 'POST',
+        endpoint: '/api/debug/npv-trace',
+        bodyShape: { label: 'string (optional)', trace: 'object (any debug payload)' },
+      },
+      recentFiles: files,
+    });
+    return;
+  }
+
   if (req.method !== 'POST') {
-    res.status(405).json({ ok: false, error: 'Method not allowed' });
+    res.status(405).json({ ok: false, error: 'Method not allowed', allowedMethods: ['GET', 'POST'] });
     return;
   }
 
@@ -22,7 +53,6 @@ export default async function handler(req: any, res: any): Promise<void> {
     const now = new Date();
     const stamp = now.toISOString().replace(/[.:]/g, '-');
     const fileName = `${stamp}-${sanitizeId(label)}.json`;
-    const debugDir = path.resolve(process.cwd(), 'public', 'debug');
     await fs.mkdir(debugDir, { recursive: true });
 
     const payload = {
