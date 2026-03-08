@@ -3353,6 +3353,103 @@ Capital Available: ${availableLabel}`,
     const firstNegativeEbitPeriod = Array.isArray(ebit)
       ? ebit.findIndex((value) => typeof value === "number" && value < 0)
       : -1;
+    const spotlightPeriod = firstNegativeEbitPeriod >= 0
+      ? firstNegativeEbitPeriod
+      : (Array.isArray(ebit) ? ebit.findIndex((value) => typeof value === "number" && Number.isFinite(value)) : -1);
+
+    const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+    const asNumberOrNull = (value: unknown): number | null => (isFiniteNumber(value) ? value : null);
+    const seriesValue = (series: Array<number | null> | null, t: number): number | null => {
+      if (!Array.isArray(series) || t < 0) return null;
+      return asNumberOrNull(series[t]);
+    };
+
+    const royaltiesDiagnosticsByProject = (projectSnapshotDiagnosticsMeta?.royaltiesDiagnostics ?? null) as Record<string, Record<string, unknown>> | null;
+    const projectRoyaltyDiagnostics = selectedProjectId && royaltiesDiagnosticsByProject
+      ? (royaltiesDiagnosticsByProject[selectedProjectId] ?? null)
+      : null;
+    const royaltiesDetailRaw = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
+    const royaltiesRulesDebug = royaltiesDetailRaw.map((detail, idx) => {
+      const base = String(detail.base ?? '').trim().toLowerCase();
+      const rateType = String(detail.rateType ?? '').trim().toLowerCase();
+      const rate = asNumberOrNull(detail.rate);
+      const royaltySeries = Array.isArray(detail.royaltyUSD) ? detail.royaltyUSD as Array<number | null> : null;
+      const grossAtSpotlight = seriesValue(grossRevenue, spotlightPeriod);
+      const royaltyAtSpotlight = seriesValue(royaltySeries, spotlightPeriod);
+      const requirements = [
+        {
+          label: 'base måste vara "revenue"',
+          passed: base === 'revenue',
+          actual: base || '(tomt)',
+        },
+        {
+          label: 'rateType måste vara "nsr_pct" eller "ad_valorem_pct"',
+          passed: rateType === 'nsr_pct' || rateType === 'ad_valorem_pct',
+          actual: rateType || '(tomt)',
+        },
+        {
+          label: 'rate måste vara ett ändligt tal',
+          passed: rate !== null,
+          actual: detail.rate ?? null,
+        },
+        {
+          label: `gross revenue måste vara numerisk i spotlight t=${spotlightPeriod}`,
+          passed: grossAtSpotlight !== null,
+          actual: grossAtSpotlight,
+        },
+      ];
+      return {
+        id: String(detail.id ?? `rule-${idx}`),
+        label: String(detail.label ?? detail.name ?? `Rule ${idx + 1}`),
+        rate,
+        rateType,
+        base,
+        royaltyAtSpotlight,
+        requirements,
+      };
+    });
+
+    const ebitWalkthrough = (() => {
+      if (spotlightPeriod < 0) return null;
+      const inputRows = [
+        { key: 'Gross revenue', value: seriesValue(grossRevenue, spotlightPeriod), sign: '+' },
+        { key: 'Operating costs', value: seriesValue(operatingCosts, spotlightPeriod), sign: '-' },
+        { key: 'Sustaining capex', value: seriesValue(sustainingCapex, spotlightPeriod), sign: '-' },
+        { key: 'Site G&A', value: seriesValue(siteGandA, spotlightPeriod), sign: '-' },
+        { key: 'Royalties', value: seriesValue(royalties, spotlightPeriod), sign: '-' },
+        { key: 'Reclamation', value: seriesValue(reclamation, spotlightPeriod), sign: '-' },
+        { key: 'Byproduct credits', value: seriesValue(byproductCredits, spotlightPeriod), sign: '+' },
+      ] as const;
+      const missingForEbitda = inputRows.filter((row) => row.value === null).map((row) => row.key);
+      const ebitdaComputed = missingForEbitda.length === 0
+        ? (inputRows[0].value as number)
+          - (inputRows[1].value as number)
+          - (inputRows[2].value as number)
+          - (inputRows[3].value as number)
+          - (inputRows[4].value as number)
+          - (inputRows[5].value as number)
+          + (inputRows[6].value as number)
+        : null;
+      const depreciationAtSpotlight = seriesValue((seriesOrNull((parsedSelectedProject?.context?.series ?? {}).depreciationUSD) ?? null), spotlightPeriod)
+        ?? seriesValue((seriesOrNull(record.depreciationUSD) ?? null), spotlightPeriod);
+      const ebitComputed = ebitdaComputed !== null && depreciationAtSpotlight !== null
+        ? ebitdaComputed - depreciationAtSpotlight
+        : null;
+      const ebitReported = seriesValue(ebit, spotlightPeriod);
+      return {
+        t: spotlightPeriod,
+        ebitReported,
+        ebitComputed,
+        ebitdaComputed,
+        depreciationAtSpotlight,
+        missingForEbitda,
+        missingForEbit: [
+          ...(ebitdaComputed === null ? ['EBITDA'] : []),
+          ...(depreciationAtSpotlight === null ? ['Depreciation'] : []),
+        ],
+        inputRows,
+      };
+    })();
 
     return {
       singleSourceOfTruth: "Instrumentbräda-tabellen läser värden från projectSnapshotData.series (samma källa för raderna i Production → P&L → FCFF).",
@@ -3368,6 +3465,9 @@ Capital Available: ${availableLabel}`,
           byproductCredits: byproductCredits?.[firstNegativeEbitPeriod] ?? null,
         }
         : null,
+      ebitWalkthrough,
+      royaltiesRuleChecks: royaltiesRulesDebug,
+      royaltiesPipelineDiagnostics: projectRoyaltyDiagnostics,
       blocks: [
         {
           label: "Gross revenue",
@@ -3383,7 +3483,7 @@ Capital Available: ${availableLabel}`,
         },
         {
           label: "Gross profit",
-          formula: "grossRevenue - operatingCosts - royalties ± byproductCredits",
+          formula: "grossRevenue - operatingCosts",
           calculatedIn: "snapshot series pipeline (rendered as grossProfitUSD)",
           sourceOfTruth: "series.grossProfitUSD",
           inputs: [
@@ -3396,27 +3496,28 @@ Capital Available: ${availableLabel}`,
         },
         {
           label: "EBITDA",
-          formula: "grossRevenue - operatingCosts - royalties",
+          formula: "grossRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits",
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.ebitdaUSD",
           inputs: [
             { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
             { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
+            { label: "Sustaining capex", source: "series.sustainingCapexUSD", values: sustainingCapex },
+            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
             { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
+            { label: "Reclamation", source: "series.reclamationUSD", values: reclamation },
+            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
           ],
           output: ebitda,
         },
         {
           label: "EBIT",
-          formula: "grossRevenue - operatingCosts - siteG&A - royalties + byproductCredits",
+          formula: "EBITDA - depreciation",
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.ebitUSD",
           inputs: [
-            { label: "Gross revenue", source: "series.totalRevenue_USD", values: grossRevenue },
-            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
-            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
-            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
-            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
+            { label: "EBITDA", source: "series.ebitdaUSD", values: ebitda },
+            { label: "Depreciation", source: "series.depreciationUSD", values: seriesOrNull(record.depreciationUSD) },
           ],
           output: ebit,
         },
@@ -3449,7 +3550,7 @@ Capital Available: ${availableLabel}`,
         },
       ],
     };
-  }, [projectSeries]);
+  }, [parsedSelectedProject, projectSeries, projectSnapshotDiagnosticsMeta, selectedProjectId]);
 
   const projectMountDebug = useMemo(() => {
     const rawJson = selectedProjectRawJson;
@@ -5283,6 +5384,64 @@ Capital Available: ${availableLabel}`,
                             </div>
                           </div>
                         )}
+
+                        {projectPnlTraceDebugger.ebitWalkthrough && (
+                          <div style={{ border: "1px solid #d8e0d2", borderRadius: 6, background: "#fff", padding: "8px" }}>
+                            <strong>Noggrann steg-för-steg: Gross revenue → EBITDA → EBIT (spotlight)</strong>
+                            <div style={{ marginTop: 4 }}>t={projectPnlTraceDebugger.ebitWalkthrough.t}</div>
+                            <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
+                              {projectPnlTraceDebugger.ebitWalkthrough.inputRows.map((row) => (
+                                <li key={`walk-${row.key}`}>
+                                  {row.sign} {row.key}: {formatPanelValue(row.value)}
+                                </li>
+                              ))}
+                            </ul>
+                            <div>EBITDA (computed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.ebitdaComputed)}</div>
+                            <div>Depreciation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight)}</div>
+                            <div>EBIT (computed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.ebitComputed)}</div>
+                            <div>EBIT (series.ebitUSD): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.ebitReported)}</div>
+                            {projectPnlTraceDebugger.ebitWalkthrough.missingForEbitda.length > 0 && (
+                              <div style={{ color: "#7f1d1d", marginTop: 6 }}>
+                                EBITDA blev null eftersom följande inputs saknas/är ej numeriska: {projectPnlTraceDebugger.ebitWalkthrough.missingForEbitda.join(', ')}
+                              </div>
+                            )}
+                            {projectPnlTraceDebugger.ebitWalkthrough.missingForEbit.length > 0 && (
+                              <div style={{ color: "#7f1d1d", marginTop: 6 }}>
+                                EBIT kan avledas till null eftersom: {projectPnlTraceDebugger.ebitWalkthrough.missingForEbit.join(', ')}.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div style={{ border: "1px solid #d8e0d2", borderRadius: 6, background: "#fff", padding: "8px" }}>
+                          <strong>Royalties-regler (%): kravkontroll</strong>
+                          {projectPnlTraceDebugger.royaltiesRuleChecks.length === 0 ? (
+                            <div style={{ marginTop: 6 }}>Inga royaltiesDetail-regler hittades. Då används fallback: <code>series.royaltiesUSD</code> om den finns, annars null-serie.</div>
+                          ) : (
+                            <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+                              {projectPnlTraceDebugger.royaltiesRuleChecks.map((rule) => (
+                                <div key={`rule-${rule.id}`} style={{ borderTop: "1px solid #e5ebdf", paddingTop: 6 }}>
+                                  <div><strong>{rule.label}</strong> ({rule.id})</div>
+                                  <div>base={rule.base || '—'}, rateType={rule.rateType || '—'}, rate={formatPanelValue(rule.rate)}</div>
+                                  <div>royaltyUSD i spotlight: {formatPanelValue(rule.royaltyAtSpotlight)}</div>
+                                  <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
+                                    {rule.requirements.map((req) => (
+                                      <li key={`${rule.id}-${req.label}`}>
+                                        {req.passed ? '✅' : '❌'} {req.label}; aktuellt värde: {String(req.actual)}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {projectPnlTraceDebugger.royaltiesPipelineDiagnostics && (
+                            <div style={{ marginTop: 8 }}>
+                              <strong>Pipeline-diagnostik (körning):</strong>
+                              <pre style={{ whiteSpace: "pre-wrap", margin: "6px 0 0 0" }}>{JSON.stringify(projectPnlTraceDebugger.royaltiesPipelineDiagnostics, null, 2)}</pre>
+                            </div>
+                          )}
+                        </div>
 
                         {projectPnlTraceDebugger.blocks.map((block) => (
                           <div key={block.label} style={{ borderTop: "1px solid #e5ebdf", paddingTop: 8 }}>
