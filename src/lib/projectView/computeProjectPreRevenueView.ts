@@ -104,6 +104,29 @@ export type ProjectViewMetrics = {
       ROI_10Y: { cf_10y_usd: number | null; initial_capex_abs: number | null; multiple: number | null; displayValue: string | null; unit: 'multiple'; failure_reason: string | null };
     };
     ui_unit_meta: Record<string, { unitType: 'percent' | 'multiple' | 'multiple_per_year' | 'currency'; renderSuffix: string }>;
+    npv10_trace: {
+      input: {
+        projectId: string | null;
+        discountRate: number | null;
+        fxUSDToTarget: number | null;
+        productionStartPeriod: number | null;
+        masterN: number | null;
+      };
+      guards: {
+        hasDiscountRate: boolean;
+        hasFx: boolean;
+        hasFiniteFcfSeries: boolean;
+        hasTp: boolean;
+        tpWithinBounds: boolean;
+      };
+      steps: Array<{
+        step: string;
+        formula: string;
+        inputs: Record<string, unknown>;
+        output: number | null;
+        reason: string | null;
+      }>;
+    };
   };
 };
 
@@ -468,6 +491,62 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     ? dcfProdStartExCapexUSD / ((1 + r) ** tp)
     : null;
   const dcfTargetDiscounted = dcfProdStartPresentUSD !== null && fx !== null ? dcfProdStartPresentUSD * fx : null;
+
+  const npv10Trace = {
+    input: {
+      projectId: input.meta?.projectId ?? null,
+      discountRate: r,
+      fxUSDToTarget: fx,
+      productionStartPeriod: tp,
+      masterN,
+    },
+    guards: {
+      hasDiscountRate: r !== null,
+      hasFx: fx !== null,
+      hasFiniteFcfSeries: input.fcfUSD.every((value) => finite(value)),
+      hasTp: tp !== null,
+      tpWithinBounds: tp !== null && masterN !== null ? tp >= 0 && tp <= masterN : false,
+    },
+    steps: [
+      {
+        step: 'NPV_Target',
+        formula: 'NPV_Target = fx × Σ_t=0..N [ fcfUSD[t] / (1+r)^t ]',
+        inputs: { r, fx, fcfLength: input.fcfUSD.length },
+        output: npvTarget,
+        reason: r === null ? 'Missing discountRate r' : (fx === null ? 'Missing fx_USD_to_TargetCurrency' : (npvTodayUSD === null ? 'Missing series fcfUSD' : null)),
+      },
+      {
+        step: 'DCF_Target',
+        formula: 'DCF_Target = fx × Σ_t=tp..N [ fcfUSD[t] / (1+r)^(t-tp) ]',
+        inputs: { r, fx, tp, fcfLength: input.fcfUSD.length },
+        output: dcfTarget,
+        reason: tp === null ? 'Missing tp' : (r === null ? 'Missing discountRate r' : (fx === null ? 'Missing fx_USD_to_TargetCurrency' : (dcfProdStartExCapexUSD === null ? 'Missing series fcfUSD' : null))),
+      },
+      {
+        step: 'DCF_Target_discounted',
+        formula: 'DCF_Target_discounted = DCF_Target / (1+r)^tp',
+        inputs: { dcfProdStartExCapexUSD, r, tp, fx },
+        output: dcfTargetDiscounted,
+        reason: tp === null ? 'Missing tp' : (r === null ? 'Missing discountRate r' : (fx === null ? 'Missing fx_USD_to_TargetCurrency' : (dcfProdStartPresentUSD === null ? 'Missing series fcfUSD' : null))),
+      },
+      {
+        step: 'NPV_prodStart',
+        formula: 'NPV_prodStart = DCF_prodStart_exCapex_USD − |Initial_CAPEX_USD|',
+        inputs: { dcfProdStartExCapexUSD, initialCapexUSD, fx },
+        output: npvProdStartTarget,
+        reason: initialCapexUSD === null
+          ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD')
+          : (dcfProdStartExCapexUSD === null ? 'Missing DCF_prodStart_exCapex_USD' : (fx === null ? 'Missing fx' : null)),
+      },
+      {
+        step: 'NAV_prodStart',
+        formula: 'NAV_prodStart = NPV_prodStart + (cash_t0 − debt_t0)',
+        inputs: { npvProdStartTarget, cashT0, debtT0 },
+        output: navProdStartTarget,
+        reason: npvProdStartTarget === null ? 'Missing NPV_prodStart' : (cashT0 === null || debtT0 === null ? 'Missing cash_t0 or debt_t0' : null),
+      },
+    ],
+  };
 
   const prodYears = tp !== null && masterN !== null && tp <= masterN ? countPayablePositive(input.payableAuEqOz, tp, masterN) : null;
   const aueqLom = tp !== null && masterN !== null && tp <= masterN ? sumPayablePositive(input.payableAuEqOz, tp, masterN) : null;
@@ -1008,6 +1087,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
         Kapitalavkastning_LOM: { unitType: 'multiple', renderSuffix: 'x' },
         Kapitalavkastning_per_Year: { unitType: 'multiple_per_year', renderSuffix: 'x/år' },
       },
+      npv10_trace: npv10Trace,
     },
   };
 }
