@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import Admin from "./Admin";
 import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
@@ -2482,6 +2482,8 @@ Capital Available: ${availableLabel}`,
     }
   }, [selectedProjectRawJson]);
 
+  const lastNpvTraceFingerprintRef = useRef<string | null>(null);
+
   const projectViewMetrics = useMemo(() => {
     if (!projectSnapshotData) return null;
     const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
@@ -2979,6 +2981,59 @@ Capital Available: ${availableLabel}`,
       console.debug("[project-modeled-valuation-timeline-debug]", projectTimelineDebug);
     }
   }, [debugEnabled, projectTimelineDebug]);
+
+  useEffect(() => {
+    if (!debugEnabled || !projectViewMetrics || !projectSnapshotData || !selectedProjectRawJson) return;
+
+    const trace = projectViewMetrics.diagnostics?.npv10_trace;
+    if (!trace) return;
+
+    const fingerprint = JSON.stringify({
+      projectId: selectedProjectId,
+      npvTarget: projectViewMetrics.list2.NPV_Target?.value ?? null,
+      npvProdStart: projectViewMetrics.list2.NPV_prodStart?.value ?? null,
+      navProdStart: projectViewMetrics.list2.NAV_prodStart?.value ?? null,
+      dcfTarget: projectViewMetrics.list2.DCF_Target?.value ?? null,
+      dcfDiscounted: projectViewMetrics.list2.DCF_Target_discounted?.value ?? null,
+      trace,
+    });
+
+    if (lastNpvTraceFingerprintRef.current === fingerprint) return;
+    lastNpvTraceFingerprintRef.current = fingerprint;
+
+    void fetch("/api/debug/npv-trace", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        label: `ui-npv10-${selectedProjectId ?? "project"}` ,
+        source: "single-stock-dashboard",
+        section: "FINANSIELLA NYCKELTAL OCH VÄRDERING / Debug: NPV/NAV/DCF vid produktionsstart",
+        projectId: selectedProjectId ?? null,
+        projectName: typeof selectedProjectRawJson.meta === "object" && selectedProjectRawJson.meta !== null
+          ? ((selectedProjectRawJson.meta as Record<string, unknown>).projectName ?? null)
+          : null,
+        uiInputs: {
+          time: selectedProjectRawJson.time ?? null,
+          economics: selectedProjectRawJson.economics ?? null,
+        },
+        uiMetrics: projectViewMetrics.list2,
+        uiDiagnostics: projectViewMetrics.diagnostics,
+        engineDiagnostics: (projectSnapshotDiagnosticsMeta ?? null),
+        projectSnapshotKeys: Object.keys(projectSnapshotData ?? {}),
+      }),
+    })
+      .then(async (response) => {
+        const json = await response.json().catch(() => null);
+        if (!response.ok) {
+          console.warn("[npv-trace] failed to persist trace", json);
+          return;
+        }
+        console.debug("[npv-trace] persisted", json);
+      })
+      .catch((error) => {
+        console.warn("[npv-trace] request failed", error);
+      });
+  }, [debugEnabled, projectSnapshotData, projectSnapshotDiagnosticsMeta, projectViewMetrics, selectedProjectId, selectedProjectRawJson]);
 
   const corporateTimelineDebug = useMemo(() => {
     if (!corporateSnapshotData || !corporateViewMetrics) return null;
