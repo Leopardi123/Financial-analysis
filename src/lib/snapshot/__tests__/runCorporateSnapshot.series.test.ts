@@ -923,6 +923,20 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
   assert.equal(typeof debugMetric?.output?.storedValue !== 'undefined', true);
 });
 
+
+
+test('corporate NOPAT sampleEbitUSD aligns with snapshot series ebitUSD (single source)', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const snapshotEbit = result.snapshot.series?.ebitUSD ?? [];
+  const sampleEbit = result.diagnostics.meta.corporateLista3Debug?.corporateNopatInputs?.projectInputs?.[0]?.sampleEbitUSD ?? [];
+  assert.ok(sampleEbit.length > 0);
+  assert.deepEqual(snapshotEbit.slice(0, sampleEbit.length), sampleEbit);
+});
+
 test('corporate nopat aggregation populates Lista3 LOM_avg_NOPAT_ROIC when all project tax inputs exist', async () => {
   const body = await loadFixture();
   const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });

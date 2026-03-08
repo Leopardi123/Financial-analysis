@@ -836,22 +836,10 @@ function buildSnapshotSeries(args: {
   const byproductCreditsUSD = aggregateEconomic('byproductCreditsUSD');
   const sustainingCostUSD = aggregateEconomic('sustainingCostUSD');
   const depreciationUSD = aggregateEconomic('depreciationUSD');
-  const ebitdaUSD = totalRevenue_USD.map((revenue, t) => {
-    const rev = toFiniteOrNull(revenue);
-    if (rev === null) return null;
-    const op = toFiniteOrNull(operatingCostsUSD[t]) ?? 0;
-    const sc = toFiniteOrNull(sustainingCapexUSD[t]) ?? 0;
-    const ga = toFiniteOrNull(siteGandA_USD[t]) ?? 0;
-    const roy = toFiniteOrNull(royaltiesUSD[t]) ?? 0;
-    const rec = toFiniteOrNull(reclamationUSD[t]) ?? 0;
-    const bp = toFiniteOrNull(byproductCreditsUSD[t]) ?? 0;
-    return rev - op - sc - ga - roy - rec + bp;
-  });
-  const ebitUSD = ebitdaUSD.map((ebitda, t) => {
-    if (ebitda === null) return null;
-    const dep = toFiniteOrNull(depreciationUSD[t]) ?? 0;
-    return ebitda - dep;
-  });
+  // Single source of truth in live model: consume central phase1 economics series,
+  // do not re-derive EBIT/FCFF from independently reconstructed revenue paths.
+  const ebitdaUSD = aggregateEconomic('ebitdaUSD');
+  const ebitUSD = aggregateEconomic('ebitUSD');
   const taxableIncomeUSD = aggregateEconomic('taxableIncomeUSD');
   const effectiveTaxRate = aggregateEconomic('effectiveTaxRate');
   const taxUSD_raw = aggregateEconomic('taxUSD');
@@ -861,23 +849,7 @@ function buildSnapshotSeries(args: {
   const workingCapitalDeltaUSD = aggregateEconomic('workingCapitalDeltaUSD');
   const capexUSD = aggregateEconomic('capexUSD');
   const totalCapexUSD = deriveTotalCapexSeries(capexUSD, sustainingCapexUSD);
-  const fcffUSD = ebitUSD.map((ebitValue, t) => {
-    if (ebitValue === null) return null;
-    const taxValue = toFiniteOrNull(taxUSD[t]) ?? 0;
-    const depValue = toFiniteOrNull(depreciationUSD[t]) ?? 0;
-    const sustainingCapexValue = toFiniteOrNull(sustainingCapexUSD[t]) ?? 0;
-    const capexValue = toFiniteOrNull(capexUSD[t]) ?? 0;
-    const workingCapitalValue = toFiniteOrNull(workingCapitalDeltaUSD[t]) ?? 0;
-    const reclamationValue = toFiniteOrNull(reclamationUSD[t]) ?? 0;
-
-    return ebitValue
-      - taxValue
-      + depValue
-      - sustainingCapexValue
-      - capexValue
-      - workingCapitalValue
-      - reclamationValue;
-  });
+  const fcffUSD = aggregateEconomic('fcffUSD');
 
   const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>, label: string): Array<number | null> =>
     sumStrictAlignedSeries({
@@ -1799,10 +1771,24 @@ export async function runCorporateSnapshotPipeline(args: {
           const taxByRule = sanitizeSeries(out.phase1.taxUSD);
           const effectiveTaxRate = sanitizeSeries(out.phase1.effectiveTaxRate);
           const usesTaxRateRule = taxRate !== null;
+          const taxExpectedFromCentralEbit = ebitUSD.map((ebit) => (ebit === null || taxRate === null ? null : Math.max(0, ebit) * taxRate));
+          const taxDiffFromCentralRule = taxByRule.map((tax, t) => {
+            const expected = taxExpectedFromCentralEbit[t];
+            if (tax === null || expected === null) return null;
+            return tax - expected;
+          });
+          const taxDiffMaxAbs = taxDiffFromCentralRule.reduce<number>((max, value) => {
+            if (typeof value !== 'number' || !Number.isFinite(value)) return max;
+            return Math.max(max, Math.abs(value));
+          }, 0);
           diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
+          diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (phase1)`);
+          diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (phase1)`);
+          diagnostics.warnings.push(`[${projectId}] sameEbitSource=true`);
           diagnostics.warnings.push(`[${projectId}] tax source of truth=phase1.taxUSD (derived from economics.taxRate + taxableIncomeUSD)`);
           diagnostics.warnings.push(`[${projectId}] tax rule=taxUSD[t]=max(0, EBIT[t])*taxRate`);
           diagnostics.warnings.push(`[${projectId}] tax rate source=${usesTaxRateRule ? 'economics.taxRate' : 'missing economics.taxRate (tax series unresolved)'}`);
+          diagnostics.warnings.push(`[${projectId}] tax consistency maxAbsDiff(actual-vs-expectedFromCentralEbit)=${taxDiffMaxAbs}`);
           if (projectEconomicsBreakdown?.taxesDetail) {
             diagnostics.warnings.push(`[${projectId}] taxesDetail present as reference/debug only (not used as default tax source in live model)`);
           }

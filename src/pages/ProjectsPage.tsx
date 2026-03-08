@@ -778,16 +778,51 @@ export default function ProjectsPage() {
     };
 
     const taxesDetail = (series?.taxesDetail ?? null) as { federalIncomeTaxUSD?: Array<number | null>; municipalRevenueTaxUSD?: Array<number | null> } | null;
+    const economicsTaxRate = readFiniteNumber(((selectedProject?.raw_json as Record<string, unknown> | undefined)?.economics as Record<string, unknown> | undefined)?.taxRate);
+    const taxExpectedFromCentralEbit = pnl.ebit.map((ebit) => {
+      if (ebit === null || economicsTaxRate === null) return null;
+      return Math.max(0, ebit) * economicsTaxRate;
+    });
+    const taxDiff = taxExpectedFromCentralEbit.map((expected, t) => {
+      const actual = pnl.tax[t];
+      if (expected === null || actual === null) return null;
+      return actual - expected;
+    });
+    const fcffExpectedFromCentralTax = pnl.ebit.map((ebit, t) => {
+      const taxValue = pnl.tax[t];
+      const dep = readFiniteNumber(series?.depreciationUSD?.[t]) ?? 0;
+      const sustaining = pnl.sustainingCapex[t];
+      const capexValue = pnl.capex[t];
+      const wcDelta = pnl.workingCapitalDelta[t];
+      const reclamation = pnl.reclamation[t];
+      if (ebit === null || taxValue === null || sustaining === null || capexValue === null || wcDelta === null || reclamation === null) return null;
+      return ebit - taxValue + dep - sustaining - capexValue - wcDelta - reclamation;
+    });
+    const fcffDiff = fcffExpectedFromCentralTax.map((expected, t) => {
+      const actual = pnl.fcff[t];
+      if (expected === null || actual === null) return null;
+      return actual - expected;
+    });
+
     const taxDebug = {
       mode: 'live-model',
       sourceOfTruth: 'series.taxUSD',
       rule: 'taxUSD[t] = max(0, EBIT[t]) * economics.taxRate',
-      taxableBaseSource: 'projectGridPnl.ebit',
+      taxableBaseSource: 'series.ebitUSD → projectGridPnl.ebit',
       taxRateSource: 'economics.taxRate',
+      ebitPath_projectTable: 'series.ebitUSD',
+      ebitPath_corporateNopat: 'projectSeriesContexts.economics.ebitUSD (phase1)',
+      sameEbitSource: true,
       taxSeriesSumUSD: sumFiniteValues(pnl.tax),
       taxableBaseSumUSD: sumFiniteValues(pnl.ebit),
       taxSeriesFirstN: pnl.tax.slice(0, 8),
       taxableBaseFirstN: pnl.ebit.slice(0, 8),
+      taxExpectedFromCentralEbit_firstN: taxExpectedFromCentralEbit.slice(0, 8),
+      taxActualSeries_firstN: pnl.tax.slice(0, 8),
+      taxDiff_firstN: taxDiff.slice(0, 8),
+      fcffExpectedFromCentralTax_firstN: fcffExpectedFromCentralTax.slice(0, 8),
+      fcffActualSeries_firstN: pnl.fcff.slice(0, 8),
+      fcffDiff_firstN: fcffDiff.slice(0, 8),
       taxesDetailReference: {
         present: Boolean(taxesDetail),
         federalIncomeTaxUSD_sum: taxesDetail?.federalIncomeTaxUSD ? sumFiniteValues(taxesDetail.federalIncomeTaxUSD) : null,
@@ -808,7 +843,7 @@ export default function ProjectsPage() {
       royaltiesDebug,
       taxDebug,
     };
-  }, [projectGridPnl, series, seriesColumns]);
+  }, [projectGridPnl, series, seriesColumns, selectedProject]);
 
   const projectTitle = (() => {
     const meta = (selectedProject?.raw_json?.meta ?? {}) as Record<string, unknown>;
@@ -1037,10 +1072,19 @@ export default function ProjectsPage() {
                 <ul>
                   <li>taxRateSource: {pnlDebugger.taxDebug.taxRateSource}</li>
                   <li>taxableBaseSource: {pnlDebugger.taxDebug.taxableBaseSource}</li>
+                  <li>ebitPath_projectTable: {pnlDebugger.taxDebug.ebitPath_projectTable}</li>
+                  <li>ebitPath_corporateNopat: {pnlDebugger.taxDebug.ebitPath_corporateNopat}</li>
+                  <li>sameEbitSource: {String(pnlDebugger.taxDebug.sameEbitSource)}</li>
                   <li>taxableBaseSumUSD: {formatTableValue(pnlDebugger.taxDebug.taxableBaseSumUSD)}</li>
                   <li>taxSeriesSumUSD: {formatTableValue(pnlDebugger.taxDebug.taxSeriesSumUSD)}</li>
                   <li>taxableBaseFirstN: [{pnlDebugger.taxDebug.taxableBaseFirstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
                   <li>taxSeriesFirstN: [{pnlDebugger.taxDebug.taxSeriesFirstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                  <li>taxExpectedFromCentralEbit_firstN: [{pnlDebugger.taxDebug.taxExpectedFromCentralEbit_firstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                  <li>taxActualSeries_firstN: [{pnlDebugger.taxDebug.taxActualSeries_firstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                  <li>taxDiff_firstN: [{pnlDebugger.taxDebug.taxDiff_firstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                  <li>fcffExpectedFromCentralTax_firstN: [{pnlDebugger.taxDebug.fcffExpectedFromCentralTax_firstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                  <li>fcffActualSeries_firstN: [{pnlDebugger.taxDebug.fcffActualSeries_firstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                  <li>fcffDiff_firstN: [{pnlDebugger.taxDebug.fcffDiff_firstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
                 </ul>
                 <p><strong>taxesDetail reference (debug only):</strong></p>
                 <ul>
