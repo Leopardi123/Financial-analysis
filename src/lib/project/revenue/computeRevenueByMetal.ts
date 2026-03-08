@@ -122,19 +122,56 @@ export function computeRevenueByMetalUSD(args: ComputeRevenueByMetalUSDArgs): Co
     }
   }
 
+  const metalHasStartedByPeriod: Record<string, boolean[]> = {};
+  for (const metal of metals) {
+    let started = false;
+    metalHasStartedByPeriod[metal] = new Array<boolean>(expectedLength).fill(false);
+    for (let t = 0; t < expectedLength; t += 1) {
+      const qty = args.payableQtyByMetal[metal]?.[t] ?? null;
+      if (isFiniteNumber(qty) && qty > 0) started = true;
+      metalHasStartedByPeriod[metal][t] = started;
+    }
+  }
+
   const grossRevenueUSD = new Array<number | null>(expectedLength).fill(null);
   for (let t = 0; t < expectedLength; t += 1) {
     let total = 0;
-    let hasNull = false;
+    let hasFiniteRevenue = false;
+    let hasHardMissingInput = false;
     for (const metal of metals) {
       const revenue = revenueByMetalUSD[metal][t];
-      if (!isFiniteNumber(revenue)) {
-        hasNull = true;
+      if (isFiniteNumber(revenue)) {
+        hasFiniteRevenue = true;
+        total += revenue;
+        continue;
+      }
+
+      const qty = args.payableQtyByMetal[metal]?.[t] ?? null;
+      const price = args.priceUSDByMetal[metal]?.[t] ?? null;
+      const qtyIsZero = isFiniteNumber(qty) && qty === 0;
+      const qtyIsPreStartNull = qty === null && metalHasStartedByPeriod[metal]?.[t] === false;
+
+      if (qtyIsPreStartNull || qtyIsZero) {
+        continue;
+      }
+
+      if (!isFiniteNumber(price)) {
+        hasHardMissingInput = true;
+        diagnostics.push(`grossRevenue: t=${t} metal=${metal} missing price for finite payable quantity`);
         break;
       }
-      total += revenue;
+
+      hasHardMissingInput = true;
+      diagnostics.push(`grossRevenue: t=${t} metal=${metal} missing payable quantity for finite price`);
+      break;
     }
-    grossRevenueUSD[t] = hasNull ? null : total;
+
+    if (hasHardMissingInput) {
+      grossRevenueUSD[t] = null;
+      continue;
+    }
+
+    grossRevenueUSD[t] = hasFiniteRevenue ? total : 0;
   }
 
   return {

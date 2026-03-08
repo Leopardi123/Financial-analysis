@@ -49,6 +49,24 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
     'diagnostics include null period summary',
   );
 
+
+
+  const sparseMetals = computeRevenueByMetalUSD({
+    masterN: 2,
+    payableQtyByMetal: {
+      Ag: [100, 110, 120],
+      Cu: [null, null, 10],
+    },
+    priceUSDByMetal: {
+      Ag: [20, 20, 20],
+      Cu: [4, 4, 4],
+    },
+  });
+
+  assertDeepEqual(sparseMetals.revenueByMetalUSD.Ag, [2000, 2200, 2400], 'Ag revenue computes with sparse Cu periods');
+  assertDeepEqual(sparseMetals.revenueByMetalUSD.Cu, [null, null, 40], 'Cu sparse periods stay null per metal');
+  assertDeepEqual(sparseMetals.grossRevenueUSD, [2000, 2200, 2440], 'gross revenue should sum finite metals and treat structurally null/zero qty metals as zero contribution');
+
   const withStreams = computeRevenueByMetalUSD({
     masterN: 0,
     payableQtyByMetal: {

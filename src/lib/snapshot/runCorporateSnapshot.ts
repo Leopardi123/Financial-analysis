@@ -1356,6 +1356,50 @@ type SnapshotDiagnostics = {
     metalsUsingLivePrices?: string[];
     metalsUsingJsonFallback?: string[];
     metalsWithPriceFailure?: string[];
+    projectPipelineDebug?: Array<{
+      projectId: string;
+      sourceOfTruth: {
+        revenue: 'metals.payableQtyByMetal × resolved spotPriceUSDByMetal';
+        fcff: 'project engine phase1.fcffUSD';
+        npvProdStart: 'computeLista2CfDcfMetrics(fcfUSD_total, capexUSD_total, tp)';
+      };
+      mount: {
+        masterN: number;
+        productionStartPeriod: number;
+        productionStartYear: number;
+      };
+      revenueBuild: {
+        payableQtyByMetal_first6: Record<string, Array<number | null>>;
+        priceUSDByMetal_first6: Record<string, Array<number | null>>;
+        revenueByMetalUSD_first6: Record<string, Array<number | null>>;
+        grossRevenueUSD_first6: Array<number | null>;
+      };
+      fcffBuild: {
+        fcffUSD_first6: Array<number | null>;
+        capexUSD_first6: Array<number | null>;
+        operatingCostsUSD_first6: Array<number | null>;
+        taxUSD_first6: Array<number | null>;
+      };
+    }>;
+    list2ComputationDebug?: {
+      sourcePath_fcfUSD_total: string;
+      sourcePath_capexUSD_total: string;
+      sourcePath_netCash_t0_post_TargetCurrency: string;
+      masterN: number;
+      productionStartPeriod: number | null;
+      discountRate: number;
+      fx_USD_to_TargetCurrency: number | null;
+      shares_post_financing: number | null;
+      fcfUSD_total_first10: Array<number | null>;
+      capexUSD_total_first10: Array<number | null>;
+      lista2Metrics: {
+        DCF_prodStart_exCapex_USD: number | null;
+        DCF_prodStart_present_USD: number | null;
+        NPV_prodStart_USD: number | null;
+        NPV_prodStart_TargetCurrency: number | null;
+        NAV_prodStart_TargetCurrency: number | null;
+      };
+    };
     royaltiesDiagnostics?: Record<string, {
       grossRevenueUSDNumeric: boolean;
       royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null';
@@ -1488,6 +1532,7 @@ export async function runCorporateSnapshotPipeline(args: {
     }>;
 
     const projectSeriesContexts: ProjectSeriesContext[] = [];
+    const projectPipelineDebug: NonNullable<SnapshotDiagnostics['meta']['projectPipelineDebug']> = [];
     const metalPriceDiagnosticsByMetal: Record<string, MetalPriceDiagnostic> = {};
 
     const aggregation = await aggregateProjectsCorporateV1(
@@ -1862,6 +1907,38 @@ export async function runCorporateSnapshotPipeline(args: {
             diagnostics.warnings.push(...identityValidation.diagnostics.map((line) => `[${projectId}] ${line}`));
           }
 
+          projectPipelineDebug.push({
+            projectId,
+            sourceOfTruth: {
+              revenue: 'metals.payableQtyByMetal × resolved spotPriceUSDByMetal',
+              fcff: 'project engine phase1.fcffUSD',
+              npvProdStart: 'computeLista2CfDcfMetrics(fcfUSD_total, capexUSD_total, tp)',
+            },
+            mount: {
+              masterN: parsed.engineInputWithoutPrices.masterN,
+              productionStartPeriod,
+              productionStartYear,
+            },
+            revenueBuild: {
+              payableQtyByMetal_first6: Object.fromEntries(
+                Object.entries(parsed.engineInputWithoutPrices.payableQtyByMetal).map(([metal, series]) => [metal, sanitizeSeries(series).slice(0, 6)]),
+              ),
+              priceUSDByMetal_first6: Object.fromEntries(
+                Object.entries(resolved.spotPriceUSDByMetal).map(([metal, series]) => [metal, sanitizeSeries(series).slice(0, 6)]),
+              ),
+              revenueByMetalUSD_first6: Object.fromEntries(
+                Object.entries(out.revenue.byMetalRevenueUSD).map(([metal, series]) => [metal, sanitizeSeries(series).slice(0, 6)]),
+              ),
+              grossRevenueUSD_first6: sanitizeSeries(out.revenue.grossRevenueUSD).slice(0, 6),
+            },
+            fcffBuild: {
+              fcffUSD_first6: sanitizeSeries(out.phase1.fcffUSD).slice(0, 6),
+              capexUSD_first6: sanitizeSeries(out.capexUSD_used).slice(0, 6),
+              operatingCostsUSD_first6: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD).slice(0, 6),
+              taxUSD_first6: sanitizeSeries(taxByRule).slice(0, 6),
+            },
+          });
+
           projectSeriesContexts.push({
             projectId,
             taxRate,
@@ -2100,6 +2177,7 @@ export async function runCorporateSnapshotPipeline(args: {
       payableQtyUnitByMetal: snapshotSeries.payableQtyUnitByMetal,
       revenueByMetal_USD: snapshotSeries.revenueByMetal_USD,
     });
+    diagnostics.meta.projectPipelineDebug = projectPipelineDebug;
     diagnostics.meta.metalRevenueDiagnostics = metalRevenueDiagnostics;
     diagnostics.meta.metalPriceDiagnostics = metalPriceDiagnosticsByMetal;
     diagnostics.meta.metalsUsingLivePrices = Object.entries(metalPriceDiagnosticsByMetal)
@@ -2447,6 +2525,25 @@ export async function runCorporateSnapshotPipeline(args: {
       });
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
+    diagnostics.meta.list2ComputationDebug = {
+      sourcePath_fcfUSD_total: 'snapshot.series.fcffUSD',
+      sourcePath_capexUSD_total: 'snapshot.series.capexUSD',
+      sourcePath_netCash_t0_post_TargetCurrency: 'financingSnapshot.netCash_TargetCurrency_t0',
+      masterN: aggregationEffective.corporateMasterN,
+      productionStartPeriod: tpEff,
+      discountRate: input.discountRate,
+      fx_USD_to_TargetCurrency: fxRate,
+      shares_post_financing: shares_post_financing_fd_effective,
+      fcfUSD_total_first10: aggregationEffective.fcffUSD_total.slice(0, 10),
+      capexUSD_total_first10: aggregationEffective.capexUSD_total.slice(0, 10),
+      lista2Metrics: {
+        DCF_prodStart_exCapex_USD: lista2.metrics.DCF_prodStart_exCapex_USD,
+        DCF_prodStart_present_USD: lista2.metrics.DCF_prodStart_present_USD,
+        NPV_prodStart_USD: lista2.metrics.NPV_prodStart_USD,
+        NPV_prodStart_TargetCurrency: lista2.metrics.NPV_prodStart_TargetCurrency,
+        NAV_prodStart_TargetCurrency: lista2.metrics.NAV_prodStart_TargetCurrency,
+      },
+    };
     const rawBody = args.body as Record<string, unknown>;
     const rawBalance = rawBody.balanceSheet;
     const totalStockholdersEquity_USD =
