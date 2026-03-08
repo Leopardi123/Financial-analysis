@@ -13,16 +13,66 @@ export type PriceScenario =
 
 export type MetalPriceDiagnostic = {
   priceKeyRequested: string;
+  liveSymbol: string | null;
+  liveFeedIdentifier: string | null;
+  liveEndpoint: string | null;
   livePriceAvailable: boolean;
   livePriceValue: number | null;
+  interpretedUnit: string | null;
+  normalizedOutputValue: number | null;
+  sanityBandUsed: { min: number; max: number; unit: string } | null;
+  sanityPass: boolean | null;
+  sanityReason: string | null;
   jsonFallbackAvailable: boolean;
   jsonFallbackValue: number | null;
+  fallbackUsed: boolean;
   priceSourceUsed: 'live' | 'json-fallback' | 'failure' | 'scenario-series';
   reason: string;
 };
 
 const CU_LB_PER_TONNE = 2204.6226218;
 const CU_DERIVED_WARNING = 'Cu COMEX–LME basis can diverge; unit conversion is not basis conversion.';
+
+const BASE_METAL_USD_LB_SANITY_BANDS: Record<string, { min: number; max: number; unit: string }> = {
+  CU_USD_LB: { min: 0.25, max: 15, unit: 'USD/lb' },
+  PB_USD_LB: { min: 0.1, max: 8, unit: 'USD/lb' },
+  ZN_USD_LB: { min: 0.1, max: 8, unit: 'USD/lb' },
+  NI_USD_LB: { min: 0.5, max: 40, unit: 'USD/lb' },
+};
+
+function inferInterpretedUnitFromPriceKey(priceKey: string): string | null {
+  const definition = getPriceKeyDefinition(priceKey);
+  if (definition.canonicalUnit === 'USD_per_lb') return 'USD/lb';
+  if (definition.canonicalUnit === 'USD_per_tonne') return 'USD/tonne';
+  if (definition.canonicalUnit === 'USD_per_toz') return 'USD/toz';
+  return null;
+}
+
+function getSanityBandForPriceKey(priceKey: string): { min: number; max: number; unit: string } | null {
+  return BASE_METAL_USD_LB_SANITY_BANDS[priceKey] ?? null;
+}
+
+function evaluateLiveSanity(args: { priceKey: string; liveValue: number | null }): {
+  pass: boolean | null;
+  reason: string | null;
+  band: { min: number; max: number; unit: string } | null;
+} {
+  const band = getSanityBandForPriceKey(args.priceKey);
+  if (!band) {
+    return { pass: null, reason: null, band: null };
+  }
+  if (args.liveValue === null) {
+    return { pass: null, reason: 'No finite live value to validate.', band };
+  }
+  const pass = args.liveValue >= band.min && args.liveValue <= band.max;
+  return {
+    pass,
+    reason: pass
+      ? `Live value ${args.liveValue} within sanity band ${band.min}..${band.max} ${band.unit}`
+      : `Live value ${args.liveValue} outside sanity band ${band.min}..${band.max} ${band.unit}`,
+    band,
+  };
+}
 
 function inferCuBasisForPriceKey(priceKey: string): 'COMEX' | 'LME' | null {
   if (priceKey === 'CU_USD_LB') {
@@ -298,20 +348,39 @@ export async function resolveProjectPricesToEngineInput(
       ? `Live price unavailable for ${priceKey}; no JSON fallback configured.`
       : `Scenario mode=${scenario.mode}; resolved scenario series used.`;
 
+    const sanity = evaluateLiveSanity({ priceKey, liveValue: livePriceValue });
+
     if (scenario.mode === 'spot') {
       selectedSeries = Array.from({ length: len }, (_, t) => {
-        const live = resolvedPrice.resolvedSeries[t] ?? null;
-        if (typeof live === 'number' && Number.isFinite(live)) return live;
+        const liveRaw = resolvedPrice.resolvedSeries[t] ?? null;
+        const live = typeof liveRaw === 'number' && Number.isFinite(liveRaw) ? liveRaw : null;
+        const liveAccepted = sanity.pass === false ? null : live;
+        if (typeof liveAccepted === 'number' && Number.isFinite(liveAccepted)) return liveAccepted;
         const fallback = jsonFallbackSeries[t] ?? null;
         return typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : null;
       });
       const hasAnySelected = selectedSeries.some((value) => typeof value === 'number' && Number.isFinite(value));
-      if (livePriceAvailable) {
+      const fallbackUsed = selectedSeries.some((value, t) => {
+        const fallback = jsonFallbackSeries[t] ?? null;
+        const liveRaw = resolvedPrice.resolvedSeries[t] ?? null;
+        const live = typeof liveRaw === 'number' && Number.isFinite(liveRaw) ? liveRaw : null;
+        const liveAccepted = sanity.pass === false ? null : live;
+        return typeof fallback === 'number' && Number.isFinite(fallback)
+          && (liveAccepted === null)
+          && value === fallback;
+      });
+
+      if (livePriceAvailable && sanity.pass !== false) {
         priceSourceUsed = 'live';
-        sourceReason = `Live spot available for ${priceKey}; using live price.`;
-      } else if (jsonFallbackAvailable && hasAnySelected) {
+        sourceReason = `Live spot available for ${priceKey}; sanity passed${sanity.reason ? ` (${sanity.reason})` : ''}.`;
+      } else if (fallbackUsed && jsonFallbackAvailable && hasAnySelected) {
         priceSourceUsed = 'json-fallback';
-        sourceReason = `Live price unavailable for ${priceKey}; using project JSON fallback price.`;
+        sourceReason = sanity.pass === false
+          ? `Live spot for ${priceKey} rejected by sanity check; using project JSON fallback price.`
+          : `Live price unavailable for ${priceKey}; using project JSON fallback price.`;
+      } else if (livePriceAvailable && sanity.pass === false) {
+        priceSourceUsed = 'failure';
+        sourceReason = `Live spot for ${priceKey} rejected by sanity check and JSON fallback is missing.`;
       } else {
         priceSourceUsed = 'failure';
         sourceReason = `Live price unavailable for ${priceKey} and JSON fallback is missing.`;
@@ -324,18 +393,31 @@ export async function resolveProjectPricesToEngineInput(
       priceSeriesByKey[resolvedPrice.derivedFrom] = [...selectedSeries];
     }
 
+    const liveSymbol = getLegacySymbolForPriceKey(priceKey);
+    const fallbackUsed = priceSourceUsed === 'json-fallback';
+    const normalizedOutputValue = selectedSeries.find((value: number | null) => typeof value === 'number' && Number.isFinite(value)) ?? null;
+
     metalPriceDiagnostics[metal] = {
       priceKeyRequested: priceKey,
+      liveSymbol,
+      liveFeedIdentifier: liveSymbol ? `FMP legacy commodity symbol ${liveSymbol}` : null,
+      liveEndpoint: liveSymbol ? `/api/v3/historical-price-full/${liveSymbol}` : null,
       livePriceAvailable,
       livePriceValue,
+      interpretedUnit: inferInterpretedUnitFromPriceKey(priceKey),
+      normalizedOutputValue,
+      sanityBandUsed: sanity.band,
+      sanityPass: sanity.pass,
+      sanityReason: sanity.reason,
       jsonFallbackAvailable,
       jsonFallbackValue,
+      fallbackUsed,
       priceSourceUsed,
       reason: sourceReason,
     };
 
     pushWarning(
-      `price source metal=${metal} -> ${priceSourceUsed}${livePriceAvailable ? '' : ` (live price unavailable for ${priceKey}`}${priceSourceUsed === 'json-fallback' ? `, fallback=${String(jsonFallbackValue)}` : ''}${!livePriceAvailable ? ')' : ''}`,
+      `price source metal=${metal} -> ${priceSourceUsed}${livePriceAvailable ? ` live=${String(livePriceValue)}` : ''}${sanity.pass === false ? ` sanity=failed band=${sanity.band ? `${sanity.band.min}-${sanity.band.max} ${sanity.band.unit}` : 'n/a'}` : ''}${priceSourceUsed === 'json-fallback' ? ` fallback=${String(jsonFallbackValue)}` : ''}${!livePriceAvailable ? ` (live price unavailable for ${priceKey})` : ''}`,
     );
 
     const needsCuBasisWarning = metal === 'Cu' && resolvedPrice.derived === true;

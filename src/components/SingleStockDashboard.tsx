@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import Admin from "./Admin";
 import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
@@ -1172,6 +1172,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectDebtPct, setProjectDebtPct] = useState("0");
   const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
+  const [npvTracePersistResult, setNpvTracePersistResult] = useState<{ url: string | null; fileName: string | null; savedAtUtc: string | null; error: string | null }>({ url: null, fileName: null, savedAtUtc: null, error: null });
 
   const clampPct = (value: number) => {
     const roundedToStep = Math.round(value / 5) * 5;
@@ -2482,6 +2483,8 @@ Capital Available: ${availableLabel}`,
     }
   }, [selectedProjectRawJson]);
 
+  const lastNpvTraceFingerprintRef = useRef<string | null>(null);
+
   const projectViewMetrics = useMemo(() => {
     if (!projectSnapshotData) return null;
     const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
@@ -2979,6 +2982,68 @@ Capital Available: ${availableLabel}`,
       console.debug("[project-modeled-valuation-timeline-debug]", projectTimelineDebug);
     }
   }, [debugEnabled, projectTimelineDebug]);
+
+  useEffect(() => {
+    if (!debugEnabled || !projectViewMetrics || !projectSnapshotData || !selectedProjectRawJson) return;
+
+    const trace = projectViewMetrics.diagnostics?.npv10_trace;
+    if (!trace) return;
+
+    const fingerprint = JSON.stringify({
+      projectId: selectedProjectId,
+      npvTarget: projectViewMetrics.list2.NPV_Target?.value ?? null,
+      npvProdStart: projectViewMetrics.list2.NPV_prodStart?.value ?? null,
+      navProdStart: projectViewMetrics.list2.NAV_prodStart?.value ?? null,
+      dcfTarget: projectViewMetrics.list2.DCF_Target?.value ?? null,
+      dcfDiscounted: projectViewMetrics.list2.DCF_Target_discounted?.value ?? null,
+      trace,
+    });
+
+    if (lastNpvTraceFingerprintRef.current === fingerprint) return;
+    lastNpvTraceFingerprintRef.current = fingerprint;
+
+    void fetch("/api/debug/npv-trace", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        label: `ui-npv10-${selectedProjectId ?? "project"}` ,
+        source: "single-stock-dashboard",
+        section: "FINANSIELLA NYCKELTAL OCH VÄRDERING / Debug: NPV/NAV/DCF vid produktionsstart",
+        projectId: selectedProjectId ?? null,
+        projectName: typeof selectedProjectRawJson.meta === "object" && selectedProjectRawJson.meta !== null
+          ? ((selectedProjectRawJson.meta as Record<string, unknown>).projectName ?? null)
+          : null,
+        uiInputs: {
+          time: selectedProjectRawJson.time ?? null,
+          economics: selectedProjectRawJson.economics ?? null,
+        },
+        uiMetrics: projectViewMetrics.list2,
+        uiDiagnostics: projectViewMetrics.diagnostics,
+        engineDiagnostics: (projectSnapshotDiagnosticsMeta ?? null),
+        projectSnapshotKeys: Object.keys(projectSnapshotData ?? {}),
+      }),
+    })
+      .then(async (response) => {
+        const json = await response.json().catch(() => null);
+        if (!response.ok) {
+          const errorMessage = typeof json?.error === "string" ? json.error : "Unknown error while persisting NPV trace.";
+          setNpvTracePersistResult((prev) => ({ ...prev, error: errorMessage }));
+          console.warn("[npv-trace] failed to persist trace", json);
+          return;
+        }
+        setNpvTracePersistResult({
+          url: typeof json?.url === "string" ? json.url : null,
+          fileName: typeof json?.fileName === "string" ? json.fileName : null,
+          savedAtUtc: new Date().toISOString(),
+          error: null,
+        });
+        console.debug("[npv-trace] persisted", json);
+      })
+      .catch((error) => {
+        setNpvTracePersistResult((prev) => ({ ...prev, error: (error as Error).message || "Request failed" }));
+        console.warn("[npv-trace] request failed", error);
+      });
+  }, [debugEnabled, projectSnapshotData, projectSnapshotDiagnosticsMeta, projectViewMetrics, selectedProjectId, selectedProjectRawJson]);
 
   const corporateTimelineDebug = useMemo(() => {
     if (!corporateSnapshotData || !corporateViewMetrics) return null;
@@ -5212,6 +5277,37 @@ Capital Available: ${availableLabel}`,
                           },
                           targetCurrency: lockedTargetCurrency,
                         })}
+                        {debugEnabled && (() => {
+                          const npv10Trace = projectViewMetrics.diagnostics?.npv10_trace ?? null;
+                          return (
+                            <details style={{ marginTop: 8 }}>
+                              <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Djupdebugg NPV10 (UI → motor, alla steg)</summary>
+                              <div style={{ marginTop: 8, fontSize: 11, color: "#0f172a" }}>
+                                <div><strong>Persisted tracefil:</strong> {npvTracePersistResult.url ? <a href={npvTracePersistResult.url} target="_blank" rel="noreferrer">{npvTracePersistResult.fileName ?? npvTracePersistResult.url}</a> : "inte sparad ännu"}</div>
+                                {npvTracePersistResult.savedAtUtc && <div><strong>Senast sparad (UTC):</strong> {npvTracePersistResult.savedAtUtc}</div>}
+                                {npvTracePersistResult.error && <div style={{ color: "#b91c1c" }}><strong>Persist-fel:</strong> {npvTracePersistResult.error}</div>}
+                                <div style={{ marginTop: 8 }}><strong>Steglogg NPV10 (inkl. IF/guards):</strong></div>
+                                <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 6 }}>{JSON.stringify(npv10Trace, null, 2)}</pre>
+                                <div style={{ marginTop: 8 }}><strong>UI indata / val:</strong></div>
+                                <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 6 }}>{JSON.stringify({
+                                  projectId: selectedProjectId,
+                                  projectName: selectedProjectName,
+                                  time: selectedProjectRawJson?.time ?? null,
+                                  economics: selectedProjectRawJson?.economics ?? null,
+                                  financeInputs: {
+                                    projectEquityPct,
+                                    projectDebtPct,
+                                    projectCashUsedTarget,
+                                    riskAdjustedDiscountRatePctInput,
+                                  },
+                                  list2Metrics: projectViewMetrics.list2,
+                                }, null, 2)}</pre>
+                                <div style={{ marginTop: 8 }}><strong>Motor-diagnostik (snapshot):</strong></div>
+                                <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 6 }}>{JSON.stringify(projectSnapshotDiagnosticsMeta ?? null, null, 2)}</pre>
+                              </div>
+                            </details>
+                          );
+                        })()}
                         {debugEnabled && projectTimelineDebug && (
                           <details style={{ marginTop: 8 }}>
                             <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Valuation timeline debug</summary>

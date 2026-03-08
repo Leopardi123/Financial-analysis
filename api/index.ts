@@ -105,6 +105,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
       });
     },
   }),
+  "debug/npv-trace": () => import("../src/server/routes/debug/npv-trace.js"),
   "debug/routes": async () => ({
     default: async (_req: any, res: any) => {
       const routes = Object.keys(ROUTE_MAP)
