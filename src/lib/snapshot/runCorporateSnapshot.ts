@@ -835,9 +835,23 @@ function buildSnapshotSeries(args: {
   const reclamationUSD = aggregateEconomic('reclamationUSD');
   const byproductCreditsUSD = aggregateEconomic('byproductCreditsUSD');
   const sustainingCostUSD = aggregateEconomic('sustainingCostUSD');
-  const ebitdaUSD_raw = aggregateEconomic('ebitdaUSD');
   const depreciationUSD = aggregateEconomic('depreciationUSD');
-  const ebitUSD_raw = aggregateEconomic('ebitUSD');
+  const ebitdaUSD = totalRevenue_USD.map((revenue, t) => {
+    const rev = toFiniteOrNull(revenue);
+    if (rev === null) return null;
+    const op = toFiniteOrNull(operatingCostsUSD[t]) ?? 0;
+    const sc = toFiniteOrNull(sustainingCapexUSD[t]) ?? 0;
+    const ga = toFiniteOrNull(siteGandA_USD[t]) ?? 0;
+    const roy = toFiniteOrNull(royaltiesUSD[t]) ?? 0;
+    const rec = toFiniteOrNull(reclamationUSD[t]) ?? 0;
+    const bp = toFiniteOrNull(byproductCreditsUSD[t]) ?? 0;
+    return rev - op - sc - ga - roy - rec + bp;
+  });
+  const ebitUSD = ebitdaUSD.map((ebitda, t) => {
+    if (ebitda === null) return null;
+    const dep = toFiniteOrNull(depreciationUSD[t]) ?? 0;
+    return ebitda - dep;
+  });
   const taxableIncomeUSD = aggregateEconomic('taxableIncomeUSD');
   const effectiveTaxRate = aggregateEconomic('effectiveTaxRate');
   const taxUSD_raw = aggregateEconomic('taxUSD');
@@ -848,8 +862,6 @@ function buildSnapshotSeries(args: {
   const fcffUSD_raw = aggregateEconomic('fcffUSD');
   const capexUSD = aggregateEconomic('capexUSD');
   const totalCapexUSD = deriveTotalCapexSeries(capexUSD, sustainingCapexUSD);
-  const ebitdaUSD = ebitdaUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
-  const ebitUSD = ebitUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
   const fcffUSD = fcffUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
 
   const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>, label: string): Array<number | null> =>

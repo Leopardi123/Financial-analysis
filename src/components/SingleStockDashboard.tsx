@@ -3388,12 +3388,19 @@ Capital Available: ${availableLabel}`,
     const royaltiesRulesSource = royaltiesDetailFromJson.length > 0
       ? royaltiesDetailFromJson
       : royaltiesDetailFromSnapshot;
+    const royaltiesSnapshotById = new Map(
+      royaltiesDetailFromSnapshot.map((detail) => [String(detail.id ?? ''), detail]),
+    );
 
     const royaltiesRulesDebug = royaltiesRulesSource.map((detail, idx) => {
       const base = String(detail.base ?? '').trim().toLowerCase();
       const rateType = String(detail.rateType ?? '').trim().toLowerCase();
       const rate = asNumberOrNull(detail.rate);
-      const royaltySeries = Array.isArray(detail.royaltyUSD) ? detail.royaltyUSD as Array<number | null> : null;
+      const ruleId = String(detail.id ?? `rule-${idx}`);
+      const snapshotMatch = royaltiesSnapshotById.get(ruleId);
+      const royaltySeries = Array.isArray(snapshotMatch?.royaltyUSD)
+        ? snapshotMatch.royaltyUSD as Array<number | null>
+        : (Array.isArray(detail.royaltyUSD) ? detail.royaltyUSD as Array<number | null> : null);
       const grossAtSpotlight = seriesValue(grossRevenue, spotlightPeriod);
       const royaltyAtSpotlight = seriesValue(royaltySeries, spotlightPeriod);
       const requirements = [
@@ -3419,9 +3426,10 @@ Capital Available: ${availableLabel}`,
         },
       ];
       return {
-        id: String(detail.id ?? `rule-${idx}`),
+        id: ruleId,
         label: String(detail.label ?? detail.name ?? `Rule ${idx + 1}`),
         hasTechnicalFields: typeof detail.base !== 'undefined' || typeof detail.rateType !== 'undefined' || typeof detail.rate !== 'undefined',
+        royaltySeriesSource: Array.isArray(snapshotMatch?.royaltyUSD) ? 'series.royaltiesDetail' : 'json.royaltiesDetail',
         rate,
         rateType,
         base,
@@ -5466,6 +5474,7 @@ Capital Available: ${availableLabel}`,
                                   <div><strong>{rule.label}</strong> ({rule.id})</div>
                                   <div>base={rule.base || '—'}, rateType={rule.rateType || '—'}, rate={formatPanelValue(rule.rate)}</div>
                                   <div>grossRevenue i spotlight (från {projectPnlTraceDebugger.grossRevenueSource}): {formatPanelValue(rule.grossRevenueAtSpotlight)}</div>
+                                  <div>royalty-serie källa: <code>{rule.royaltySeriesSource}</code></div>
                                   <div>royaltyUSD i spotlight: {formatPanelValue(rule.royaltyAtSpotlight)}</div>
                                   {!rule.hasTechnicalFields && (
                                     <div style={{ color: "#7f1d1d" }}>
