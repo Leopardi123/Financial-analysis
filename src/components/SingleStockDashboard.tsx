@@ -3369,7 +3369,30 @@ Capital Available: ${availableLabel}`,
       ? (royaltiesDiagnosticsByProject[selectedProjectId] ?? null)
       : null;
     const royaltiesDetailRaw = Array.isArray(record.royaltiesDetail) ? record.royaltiesDetail as Array<Record<string, unknown>> : [];
+    const royaltiesDetailFromJson = (() => {
+      const economicsBreakdown = selectedProjectRawJson && typeof selectedProjectRawJson.economicsBreakdown === 'object' && selectedProjectRawJson.economicsBreakdown !== null
+        ? selectedProjectRawJson.economicsBreakdown as Record<string, unknown>
+        : null;
+      return Array.isArray(economicsBreakdown?.royaltiesDetail)
+        ? economicsBreakdown?.royaltiesDetail as Array<Record<string, unknown>>
+        : [];
+    })();
+    const explainMissingMatch = (jsonRule: Record<string, unknown> | null, expectedKey: 'base' | 'rateType' | 'rate'): string | null => {
+      if (!jsonRule) return 'ingen matchande royaltiesDetail-rad i json (matchning på id/index)';
+      if (expectedKey in jsonRule) return null;
+      const keys = Object.keys(jsonRule);
+      const keyHints: Record<typeof expectedKey, string[]> = {
+        base: ['royaltyBase', 'baseType', 'basis', 'calculationBase'],
+        rateType: ['royaltyType', 'type', 'method', 'rate_type'],
+        rate: ['percent', 'pct', 'value', 'rate_pct'],
+      };
+      const alternative = keyHints[expectedKey].find((key) => key in jsonRule) ?? null;
+      if (alternative) return `fältet "${expectedKey}" saknas i json; hittade alternativ nyckel "${alternative}"`;
+      return `fältet "${expectedKey}" saknas i json; tillgängliga nycklar: ${keys.length > 0 ? keys.join(', ') : '(inga nycklar)'}`;
+    };
     const royaltiesRulesDebug = royaltiesDetailRaw.map((detail, idx) => {
+      const detailId = String(detail.id ?? `rule-${idx}`);
+      const matchedJsonRule = royaltiesDetailFromJson.find((item) => String(item.id ?? '') === detailId) ?? royaltiesDetailFromJson[idx] ?? null;
       const base = String(detail.base ?? '').trim().toLowerCase();
       const rateType = String(detail.rateType ?? '').trim().toLowerCase();
       const rate = asNumberOrNull(detail.rate);
@@ -3399,12 +3422,28 @@ Capital Available: ${availableLabel}`,
         },
       ];
       return {
-        id: String(detail.id ?? `rule-${idx}`),
+        id: detailId,
         label: String(detail.label ?? detail.name ?? `Rule ${idx + 1}`),
         rate,
         rateType,
         base,
         royaltyAtSpotlight,
+        snapshotRuleInput: {
+          id: detail.id ?? null,
+          label: detail.label ?? null,
+          name: detail.name ?? null,
+          base: detail.base ?? null,
+          rateType: detail.rateType ?? null,
+          rate: detail.rate ?? null,
+          source: detail.source ?? null,
+          notes: detail.notes ?? null,
+        },
+        jsonRuleInput: matchedJsonRule,
+        mismatchReasons: [
+          explainMissingMatch(matchedJsonRule, 'base'),
+          explainMissingMatch(matchedJsonRule, 'rateType'),
+          explainMissingMatch(matchedJsonRule, 'rate'),
+        ].filter((value): value is string => typeof value === 'string' && value.length > 0),
         requirements,
       };
     });
@@ -3467,6 +3506,7 @@ Capital Available: ${availableLabel}`,
         : null,
       ebitWalkthrough,
       royaltiesRuleChecks: royaltiesRulesDebug,
+      royaltiesJsonInputRaw: royaltiesDetailFromJson,
       royaltiesPipelineDiagnostics: projectRoyaltyDiagnostics,
       blocks: [
         {
@@ -3550,7 +3590,7 @@ Capital Available: ${availableLabel}`,
         },
       ],
     };
-  }, [parsedSelectedProject, projectSeries, projectSnapshotDiagnosticsMeta, selectedProjectId]);
+  }, [parsedSelectedProject, projectSeries, projectSnapshotDiagnosticsMeta, selectedProjectId, selectedProjectRawJson]);
 
   const projectMountDebug = useMemo(() => {
     const rawJson = selectedProjectRawJson;
@@ -5415,6 +5455,10 @@ Capital Available: ${availableLabel}`,
 
                         <div style={{ border: "1px solid #d8e0d2", borderRadius: 6, background: "#fff", padding: "8px" }}>
                           <strong>Royalties-regler (%): kravkontroll</strong>
+                          <div style={{ marginTop: 6 }}>
+                            <strong>Indata från JSON (economicsBreakdown.royaltiesDetail):</strong>
+                            <pre style={{ whiteSpace: "pre-wrap", margin: "6px 0 0 0" }}>{JSON.stringify(projectPnlTraceDebugger.royaltiesJsonInputRaw, null, 2)}</pre>
+                          </div>
                           {projectPnlTraceDebugger.royaltiesRuleChecks.length === 0 ? (
                             <div style={{ marginTop: 6 }}>Inga royaltiesDetail-regler hittades. Då används fallback: <code>series.royaltiesUSD</code> om den finns, annars null-serie.</div>
                           ) : (
@@ -5424,6 +5468,14 @@ Capital Available: ${availableLabel}`,
                                   <div><strong>{rule.label}</strong> ({rule.id})</div>
                                   <div>base={rule.base || '—'}, rateType={rule.rateType || '—'}, rate={formatPanelValue(rule.rate)}</div>
                                   <div>royaltyUSD i spotlight: {formatPanelValue(rule.royaltyAtSpotlight)}</div>
+                                  <div style={{ marginTop: 4 }}>
+                                    <strong>Snapshot-input som valideras:</strong>
+                                    <pre style={{ whiteSpace: "pre-wrap", margin: "6px 0 0 0" }}>{JSON.stringify(rule.snapshotRuleInput, null, 2)}</pre>
+                                  </div>
+                                  <div style={{ marginTop: 4 }}>
+                                    <strong>Matchad json-indata:</strong>
+                                    <pre style={{ whiteSpace: "pre-wrap", margin: "6px 0 0 0" }}>{JSON.stringify(rule.jsonRuleInput, null, 2)}</pre>
+                                  </div>
                                   <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
                                     {rule.requirements.map((req) => (
                                       <li key={`${rule.id}-${req.label}`}>
@@ -5431,6 +5483,14 @@ Capital Available: ${availableLabel}`,
                                       </li>
                                     ))}
                                   </ul>
+                                  {rule.mismatchReasons.length > 0 && (
+                                    <div style={{ color: "#7f1d1d", marginTop: 4 }}>
+                                      <strong>Varför matchar de inte:</strong>
+                                      <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
+                                        {rule.mismatchReasons.map((reason) => <li key={`${rule.id}-mismatch-${reason}`}>{reason}</li>)}
+                                      </ul>
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
