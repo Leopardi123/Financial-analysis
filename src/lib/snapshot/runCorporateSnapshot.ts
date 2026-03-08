@@ -1321,13 +1321,14 @@ type SnapshotDiagnostics = {
           taxRate: number | null;
           taxRateByPeriod: Array<number | null> | null;
           sampleEbitUSD: Array<number | null>;
+          sampleTaxUSD?: Array<number | null>;
         }>;
         perPeriod: Array<{
           t: number;
           contributions: Array<{
             projectId: string;
             ebitUSD: number | null;
-            taxRate: number | null;
+            taxUSD: number | null;
             nopatContributionUSD: number | null;
           }>;
           nopatUSD_total: number | null;
@@ -1335,7 +1336,7 @@ type SnapshotDiagnostics = {
         missingInputs: Array<{
           projectId: string;
           t: number;
-          missing: Array<'ebitUSD' | 'taxRate'>;
+          missing: Array<'ebitUSD' | 'taxUSD'>;
         }>;
       };
       perMetric: Record<string, {
@@ -1787,28 +1788,24 @@ export async function runCorporateSnapshotPipeline(args: {
               })
             : null;
           const ebitLowSpot = spotDeckValid
-            ? sanitizeSeries((outLowSpot?.phase1.ebitdaUSD ?? nullSeries).map((ebitda, t) => {
-                const dep = depreciationUSD[t];
-                if (ebitda === null || dep === null) return null;
-                return ebitda - dep;
-              }))
+            ? sanitizeSeries(outLowSpot?.phase1.ebitUSD ?? nullSeries)
             : nullSeries;
           const ebitHighSpot = spotDeckValid
-            ? sanitizeSeries((outHighSpot?.phase1.ebitdaUSD ?? nullSeries).map((ebitda, t) => {
-                const dep = depreciationUSD[t];
-                if (ebitda === null || dep === null) return null;
-                return ebitda - dep;
-              }))
+            ? sanitizeSeries(outHighSpot?.phase1.ebitUSD ?? nullSeries)
             : nullSeries;
           const ebitdaUSD = sanitizeSeries(out.phase1.ebitdaUSD);
-          const ebitUSD = ebitdaUSD.map((ebitda, t) => {
-            const dep = depreciationUSD[t];
-            if (ebitda === null || dep === null) return null;
-            return ebitda - dep;
-          });
-          const taxableIncomeUSD = ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
-          const taxByRule = taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
-          const effectiveTaxRate = ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
+          const ebitUSD = sanitizeSeries(out.phase1.ebitUSD);
+          const taxableIncomeUSD = sanitizeSeries(out.phase1.taxableIncomeUSD);
+          const taxByRule = sanitizeSeries(out.phase1.taxUSD);
+          const effectiveTaxRate = sanitizeSeries(out.phase1.effectiveTaxRate);
+          const usesTaxRateRule = taxRate !== null;
+          diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
+          diagnostics.warnings.push(`[${projectId}] tax source of truth=phase1.taxUSD (derived from economics.taxRate + taxableIncomeUSD)`);
+          diagnostics.warnings.push(`[${projectId}] tax rule=taxUSD[t]=max(0, EBIT[t])*taxRate`);
+          diagnostics.warnings.push(`[${projectId}] tax rate source=${usesTaxRateRule ? 'economics.taxRate' : 'missing economics.taxRate (tax series unresolved)'}`);
+          if (projectEconomicsBreakdown?.taxesDetail) {
+            diagnostics.warnings.push(`[${projectId}] taxesDetail present as reference/debug only (not used as default tax source in live model)`);
+          }
 
           const taxesDetail = projectEconomicsBreakdown?.taxesDetail
             ? {
@@ -1829,7 +1826,7 @@ export async function runCorporateSnapshotPipeline(args: {
             operatingCostsUSD,
             royaltiesUSD,
             depreciationUSD,
-            taxUSD: sanitizeSeries(taxByRule),
+            taxUSD: taxByRule,
             capexUSD: sanitizeSeries(out.capexUSD_used),
             totalCapexUSD: sanitizeSeries(out.phase1.totalCapexUSD),
             workingCapitalDeltaUSD: sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective),
@@ -1940,10 +1937,10 @@ export async function runCorporateSnapshotPipeline(args: {
               sustainingCostUSD: sanitizeSeries(out.phase1.sustainingCostUSD),
               ebitdaUSD,
               depreciationUSD,
-              ebitUSD: sanitizeSeries(ebitUSD),
-              taxableIncomeUSD: sanitizeSeries(taxableIncomeUSD),
-              effectiveTaxRate: sanitizeSeries(effectiveTaxRate),
-              taxUSD: sanitizeSeries(taxByRule),
+            ebitUSD,
+            taxableIncomeUSD,
+            effectiveTaxRate,
+            taxUSD: taxByRule,
               workingCapitalDeltaUSD: sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective),
               fcffUSD: sanitizeSeries(out.phase1.fcffUSD),
               capexUSD: sanitizeSeries(out.capexUSD_used),
@@ -2497,17 +2494,18 @@ export async function runCorporateSnapshotPipeline(args: {
       ? null
       : sumStrict(aggregationEffective.capexUSD_total.slice(0, tp_main));
 
-    const corporateNopatRequiredInputs = ['ebitUSD', 'taxRate'];
+    const corporateNopatRequiredInputs = ['ebitUSD', 'taxUSD'];
     const corporateNopatProjectInputs = projectSeriesContexts.map((entry) => ({
       projectId: entry.projectId,
       taxRate: entry.taxRate,
       taxRateByPeriod: entry.taxRateByPeriod,
       sampleEbitUSD: entry.economics.ebitUSD.slice(0, Math.min(7, aggregationEffective.corporateMasterN + 1)),
+      sampleTaxUSD: entry.economics.taxUSD.slice(0, Math.min(7, aggregationEffective.corporateMasterN + 1)),
     }));
-    const corporateNopatMissingInputs: Array<{ projectId: string; t: number; missing: Array<'ebitUSD' | 'taxRate'> }> = [];
+    const corporateNopatMissingInputs: Array<{ projectId: string; t: number; missing: Array<'ebitUSD' | 'taxUSD'> }> = [];
     const corporateNopatPerPeriod: Array<{
       t: number;
-      contributions: Array<{ projectId: string; ebitUSD: number | null; taxRate: number | null; nopatContributionUSD: number | null }>;
+      contributions: Array<{ projectId: string; ebitUSD: number | null; taxUSD: number | null; nopatContributionUSD: number | null }>;
       nopatUSD_total: number | null;
     }> = [];
     const corporateNopatUSDTotal: Array<number | null> = [];
@@ -2515,25 +2513,21 @@ export async function runCorporateSnapshotPipeline(args: {
     for (let t = 0; t <= aggregationEffective.corporateMasterN; t += 1) {
       let periodHasMissing = false;
       let periodSum = 0;
-      const contributions: Array<{ projectId: string; ebitUSD: number | null; taxRate: number | null; nopatContributionUSD: number | null }> = [];
+      const contributions: Array<{ projectId: string; ebitUSD: number | null; taxUSD: number | null; nopatContributionUSD: number | null }> = [];
       for (const entry of projectSeriesContexts) {
         const projectIndex = entry.yearsByPeriod.indexOf(aggregationEffective.corporateYearsByPeriod[t]);
         const ebitValue = projectIndex >= 0 ? toFiniteOrNull(entry.economics.ebitUSD[projectIndex]) : null;
-        const taxRateAtT = projectIndex >= 0
-          ? (Array.isArray(entry.taxRateByPeriod)
-              ? toFiniteOrNull(entry.taxRateByPeriod[projectIndex])
-              : toFiniteOrNull(entry.taxRate))
-          : null;
-        const missing: Array<'ebitUSD' | 'taxRate'> = [];
+        const taxValue = projectIndex >= 0 ? toFiniteOrNull(entry.economics.taxUSD[projectIndex]) : null;
+        const missing: Array<'ebitUSD' | 'taxUSD'> = [];
         if (ebitValue === null) missing.push('ebitUSD');
-        if (taxRateAtT === null) missing.push('taxRate');
+        if (taxValue === null) missing.push('taxUSD');
         const nopatContributionUSD = missing.length > 0
           ? null
-          : (ebitValue as number) * (1 - (taxRateAtT as number));
+          : (ebitValue as number) - (taxValue as number);
         contributions.push({
           projectId: entry.projectId,
           ebitUSD: ebitValue,
-          taxRate: taxRateAtT,
+          taxUSD: taxValue,
           nopatContributionUSD,
         });
         if (missing.length > 0) {

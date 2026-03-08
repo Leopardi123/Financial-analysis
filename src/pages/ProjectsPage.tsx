@@ -35,6 +35,10 @@ type SeriesShape = {
     rate?: number | null;
     royaltyUSD?: Array<number | null>;
   }>;
+  taxesDetail?: {
+    federalIncomeTaxUSD?: Array<number | null>;
+    municipalRevenueTaxUSD?: Array<number | null>;
+  };
   reclamationUSD?: Array<number | null>;
   byproductCreditsUSD?: Array<number | null>;
   sustainingCostUSD?: Array<number | null>;
@@ -773,12 +777,36 @@ export default function ProjectsPage() {
       },
     };
 
+    const taxesDetail = (series?.taxesDetail ?? null) as { federalIncomeTaxUSD?: Array<number | null>; municipalRevenueTaxUSD?: Array<number | null> } | null;
+    const taxDebug = {
+      mode: 'live-model',
+      sourceOfTruth: 'series.taxUSD',
+      rule: 'taxUSD[t] = max(0, EBIT[t]) * economics.taxRate',
+      taxableBaseSource: 'projectGridPnl.ebit',
+      taxRateSource: 'economics.taxRate',
+      taxSeriesSumUSD: sumFiniteValues(pnl.tax),
+      taxableBaseSumUSD: sumFiniteValues(pnl.ebit),
+      taxSeriesFirstN: pnl.tax.slice(0, 8),
+      taxableBaseFirstN: pnl.ebit.slice(0, 8),
+      taxesDetailReference: {
+        present: Boolean(taxesDetail),
+        federalIncomeTaxUSD_sum: taxesDetail?.federalIncomeTaxUSD ? sumFiniteValues(taxesDetail.federalIncomeTaxUSD) : null,
+        municipalRevenueTaxUSD_sum: taxesDetail?.municipalRevenueTaxUSD ? sumFiniteValues(taxesDetail.municipalRevenueTaxUSD) : null,
+        usedByLiveModelDefault: false,
+      },
+      downstreamUsage: {
+        usedInFCFF: true,
+        usedInDebugPanels: true,
+      },
+    };
+
     return {
       singleSourceOfTruth: 'Displayed economics values come from projectGridPnl (single display model in ProjectsPage).',
       extraValuesAlongTheWay: 'projectGridPnl itself is computed from snapshot series inputs (series.*USD) in buildProjectGridPnl.',
       sections,
       ebitSpotlight,
       royaltiesDebug,
+      taxDebug,
     };
   }, [projectGridPnl, series, seriesColumns]);
 
@@ -998,6 +1026,33 @@ export default function ProjectsPage() {
                   <li>usedInEBITDA: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInEBITDA)}</li>
                   <li>usedInEBIT: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInEBIT)}</li>
                   <li>usedInFCFF: {String(pnlDebugger.royaltiesDebug.downstreamUsage.usedInFCFF)}</li>
+                </ul>
+              </article>
+
+              <article className="projects-debugger-section">
+                <h3>Tax</h3>
+                <p><strong>Mode:</strong> {pnlDebugger.taxDebug.mode}</p>
+                <p><strong>Source of truth:</strong> {pnlDebugger.taxDebug.sourceOfTruth}</p>
+                <p><strong>Rule:</strong> <code>{pnlDebugger.taxDebug.rule}</code></p>
+                <ul>
+                  <li>taxRateSource: {pnlDebugger.taxDebug.taxRateSource}</li>
+                  <li>taxableBaseSource: {pnlDebugger.taxDebug.taxableBaseSource}</li>
+                  <li>taxableBaseSumUSD: {formatTableValue(pnlDebugger.taxDebug.taxableBaseSumUSD)}</li>
+                  <li>taxSeriesSumUSD: {formatTableValue(pnlDebugger.taxDebug.taxSeriesSumUSD)}</li>
+                  <li>taxableBaseFirstN: [{pnlDebugger.taxDebug.taxableBaseFirstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                  <li>taxSeriesFirstN: [{pnlDebugger.taxDebug.taxSeriesFirstN.map((value: number | null) => formatTableValue(value)).join(', ')}]</li>
+                </ul>
+                <p><strong>taxesDetail reference (debug only):</strong></p>
+                <ul>
+                  <li>present: {String(pnlDebugger.taxDebug.taxesDetailReference.present)}</li>
+                  <li>federalIncomeTaxUSD_sum: {formatTableValue(pnlDebugger.taxDebug.taxesDetailReference.federalIncomeTaxUSD_sum)}</li>
+                  <li>municipalRevenueTaxUSD_sum: {formatTableValue(pnlDebugger.taxDebug.taxesDetailReference.municipalRevenueTaxUSD_sum)}</li>
+                  <li>usedByLiveModelDefault: {String(pnlDebugger.taxDebug.taxesDetailReference.usedByLiveModelDefault)}</li>
+                </ul>
+                <p><strong>Downstream usage:</strong></p>
+                <ul>
+                  <li>usedInFCFF: {String(pnlDebugger.taxDebug.downstreamUsage.usedInFCFF)}</li>
+                  <li>usedInDebugPanels: {String(pnlDebugger.taxDebug.downstreamUsage.usedInDebugPanels)}</li>
                 </ul>
               </article>
 
