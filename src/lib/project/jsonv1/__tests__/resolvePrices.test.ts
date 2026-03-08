@@ -257,6 +257,59 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   );
   assertEqual(pbFailureResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'failure', 'Pb should be marked as failure when both live and JSON fallback are missing');
 
+  const znSuspectBase = getProjectJsonV1Template();
+  znSuspectBase.economicsBreakdown = null;
+  znSuspectBase.time.masterN = 0;
+  znSuspectBase.time.productionStartPeriod = 0;
+  znSuspectBase.time.productionStartYear = currentYear;
+  znSuspectBase.series.capexUSD = [0];
+  znSuspectBase.series.operatingCostsUSD = [0];
+  znSuspectBase.series.sustainingCapexUSD = [0];
+  znSuspectBase.series.siteGandA_USD = [0];
+  znSuspectBase.series.reclamationUSD = [0];
+  znSuspectBase.series.byproductCreditsUSD = [0];
+  znSuspectBase.series.depreciationUSD = [0];
+  znSuspectBase.series.workingCapitalDeltaUSD = [0];
+  znSuspectBase.metals.payableQtyByMetal = { Zn: [10] };
+  znSuspectBase.metals.payableQtyUnitByMetal = { Zn: 'lb' };
+  znSuspectBase.metals.priceKeyByMetal = { Zn: 'ZN_USD_LB' };
+  znSuspectBase.metals.auPriceKey = 'XAU_USD_TOZ';
+  znSuspectBase.metals.spotPriceUSDByMetal = { Zn: [1.4] };
+  if (znSuspectBase.operations) {
+    znSuspectBase.operations.oreMilledTonnes = [null];
+    znSuspectBase.operations.oreMinedTonnes = [null];
+    znSuspectBase.operations.gradeByMetal = { Zn: [null] };
+    znSuspectBase.operations.recoveryPctByMetal = { Zn: [null] };
+  }
+  const znSuspectParsed = parseProjectJsonV1(znSuspectBase);
+  const znSuspectResolved = await resolveProjectPricesToEngineInput(
+    { parsed: znSuspectParsed },
+    {
+      resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc }) => ({
+        values: anchorDatesUtc.map(() => (price_key === 'ZN_USD_LB' ? 112.4375 : (price_key === 'XAU_USD_TOZ' ? 1900 : null))),
+        warnings: [],
+      }),
+    },
+  );
+  assertEqual(znSuspectResolved.spotPriceUSDByMetal.Zn[0], 1.4, 'Zn should fall back to JSON when live price is outside sanity band');
+  assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'json-fallback', 'Zn suspect live should be rejected and fallback should be used');
+  assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.sanityPass, false, 'Zn suspect live should fail sanity check');
+
+  const znSuspectNoFallbackBase = JSON.parse(JSON.stringify(znSuspectBase));
+  delete znSuspectNoFallbackBase.metals.spotPriceUSDByMetal;
+  const znSuspectNoFallbackParsed = parseProjectJsonV1(znSuspectNoFallbackBase);
+  const znSuspectNoFallbackResolved = await resolveProjectPricesToEngineInput(
+    { parsed: znSuspectNoFallbackParsed },
+    {
+      resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc }) => ({
+        values: anchorDatesUtc.map(() => (price_key === 'ZN_USD_LB' ? 112.4375 : (price_key === 'XAU_USD_TOZ' ? 1900 : null))),
+        warnings: [],
+      }),
+    },
+  );
+  assertEqual(znSuspectNoFallbackResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'failure', 'Zn suspect live without fallback should fail');
+  assertEqual(znSuspectNoFallbackResolved.spotPriceUSDByMetal.Zn[0], null, 'Zn suspect live without fallback should produce null price');
+
   const withOverrides = {
     ...parsed,
     priceOverrides: {
