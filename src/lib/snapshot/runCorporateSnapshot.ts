@@ -859,10 +859,25 @@ function buildSnapshotSeries(args: {
     ? taxUSD_raw.map((value) => toFiniteOrNull(value) ?? 0)
     : taxUSD_raw;
   const workingCapitalDeltaUSD = aggregateEconomic('workingCapitalDeltaUSD');
-  const fcffUSD_raw = aggregateEconomic('fcffUSD');
   const capexUSD = aggregateEconomic('capexUSD');
   const totalCapexUSD = deriveTotalCapexSeries(capexUSD, sustainingCapexUSD);
-  const fcffUSD = fcffUSD_raw.map((value) => toFiniteOrNull(value) ?? 0);
+  const fcffUSD = ebitUSD.map((ebitValue, t) => {
+    if (ebitValue === null) return null;
+    const taxValue = toFiniteOrNull(taxUSD[t]) ?? 0;
+    const depValue = toFiniteOrNull(depreciationUSD[t]) ?? 0;
+    const sustainingCapexValue = toFiniteOrNull(sustainingCapexUSD[t]) ?? 0;
+    const capexValue = toFiniteOrNull(capexUSD[t]) ?? 0;
+    const workingCapitalValue = toFiniteOrNull(workingCapitalDeltaUSD[t]) ?? 0;
+    const reclamationValue = toFiniteOrNull(reclamationUSD[t]) ?? 0;
+
+    return ebitValue
+      - taxValue
+      + depValue
+      - sustainingCapexValue
+      - capexValue
+      - workingCapitalValue
+      - reclamationValue;
+  });
 
   const aggregateBreakdownSeries = (seriesByProject: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>, label: string): Array<number | null> =>
     sumStrictAlignedSeries({

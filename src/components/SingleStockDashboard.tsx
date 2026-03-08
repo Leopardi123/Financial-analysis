@@ -3474,19 +3474,19 @@ Capital Available: ${availableLabel}`,
       const sustainingCapexAtSpotlight = seriesValue(sustainingCapex, spotlightPeriod);
       const workingCapitalDeltaAtSpotlight = seriesValue(workingCapitalDelta, spotlightPeriod);
       const reclamationAtSpotlight = seriesValue(reclamation, spotlightPeriod);
-      const taxUsedByEngine = taxAtSpotlight ?? 0;
-      const capexUsedByEngine = capexAtSpotlight ?? 0;
-      const sustainingCapexUsedByEngine = sustainingCapexAtSpotlight ?? 0;
-      const workingCapitalUsedByEngine = workingCapitalDeltaAtSpotlight ?? 0;
-      const reclamationUsedByEngine = reclamationAtSpotlight ?? 0;
-      const fcffComputed = ebitComputed
-        - taxUsedByEngine
-        + depreciationUsedByEngine
-        - sustainingCapexUsedByEngine
-        - capexUsedByEngine
-        - workingCapitalUsedByEngine
-        - reclamationUsedByEngine;
+      const fcffRecomputedFromEbit = ebitReported === null
+        ? null
+        : ebitReported
+          - (taxAtSpotlight ?? 0)
+          + (depreciationAtSpotlight ?? 0)
+          - (sustainingCapexAtSpotlight ?? 0)
+          - (capexAtSpotlight ?? 0)
+          - (workingCapitalDeltaAtSpotlight ?? 0)
+          - (reclamationAtSpotlight ?? 0);
       const fcffReported = seriesValue(fcff, spotlightPeriod);
+      const fcffDiff = fcffRecomputedFromEbit !== null && fcffReported !== null
+        ? fcffReported - fcffRecomputedFromEbit
+        : null;
       return {
         t: spotlightPeriod,
         ebitReported,
@@ -3499,8 +3499,9 @@ Capital Available: ${availableLabel}`,
         sustainingCapexAtSpotlight,
         workingCapitalDeltaAtSpotlight,
         reclamationAtSpotlight,
-        fcffComputed,
+        fcffRecomputedFromEbit,
         fcffReported,
+        fcffDiff,
         inputRows: inputRowsWithEngineValue,
         coercedToZero,
         grossRevenueSource,
@@ -5477,15 +5478,21 @@ Capital Available: ${availableLabel}`,
                             <div>EBIT (series.ebitUSD): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.ebitReported)}</div>
                             <div style={{ marginTop: 6 }}><strong>FCFF-led (från EBIT):</strong></div>
                             <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
-                              <li>- Tax: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.taxAtSpotlight)}{projectPnlTraceDebugger.ebitWalkthrough.taxAtSpotlight === null && <span> (engine använder 0)</span>}</li>
-                              <li>+ Depreciation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight)}{projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight === null && <span> (engine använder 0)</span>}</li>
-                              <li>- Sustaining capex: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.sustainingCapexAtSpotlight)}{projectPnlTraceDebugger.ebitWalkthrough.sustainingCapexAtSpotlight === null && <span> (engine använder 0)</span>}</li>
-                              <li>- Capex: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.capexAtSpotlight)}{projectPnlTraceDebugger.ebitWalkthrough.capexAtSpotlight === null && <span> (engine använder 0)</span>}</li>
-                              <li>- Working capital delta: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.workingCapitalDeltaAtSpotlight)}{projectPnlTraceDebugger.ebitWalkthrough.workingCapitalDeltaAtSpotlight === null && <span> (engine använder 0)</span>}</li>
-                              <li>- Reclamation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.reclamationAtSpotlight)}{projectPnlTraceDebugger.ebitWalkthrough.reclamationAtSpotlight === null && <span> (engine använder 0)</span>}</li>
+                              <li>- Tax: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.taxAtSpotlight)}</li>
+                              <li>+ Depreciation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight)}</li>
+                              <li>- Sustaining capex: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.sustainingCapexAtSpotlight)}</li>
+                              <li>- Capex: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.capexAtSpotlight)}</li>
+                              <li>- Working capital delta: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.workingCapitalDeltaAtSpotlight)}</li>
+                              <li>- Reclamation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.reclamationAtSpotlight)}</li>
                             </ul>
-                            <div>FCFF (computed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffComputed)}</div>
+                            <div>fcffRecomputedFromEbit: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffRecomputedFromEbit)}</div>
                             <div>FCFF (series.fcffUSD): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffReported)}</div>
+                            <div>FCFF diff (series - recomputed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffDiff)}</div>
+                            {projectPnlTraceDebugger.ebitWalkthrough.fcffRecomputedFromEbit === null && (
+                              <div style={{ color: "#7f1d1d" }}>
+                                fcffRecomputedFromEbit är null eftersom EBIT saknas i perioden.
+                              </div>
+                            )}
                             {projectPnlTraceDebugger.ebitWalkthrough.coercedToZero.length > 0 && (
                               <div style={{ color: "#1f2937", marginTop: 6 }}>
                                 Inputs som var null men behandlades som 0 av engine: {projectPnlTraceDebugger.ebitWalkthrough.coercedToZero.join(', ')}.
