@@ -256,6 +256,8 @@ test('snapshot series exposes economics breakdown when provided', async () => {
   assert.ok(result.snapshot.series?.economicsBreakdown);
   assert.equal(result.snapshot.series?.economicsBreakdown?.cogs?.miningUSD?.length, result.snapshot.aggregation.corporateMasterN + 1);
   assert.equal(result.snapshot.series?.royaltiesDetail?.[0]?.id, 'nsr');
+  assert.equal(result.snapshot.series?.royaltiesDetail?.[0]?.base, 'revenue');
+  assert.equal(result.snapshot.series?.royaltiesDetail?.[0]?.rate, 0.01);
   assert.equal(result.snapshot.series?.taxesDetail?.municipalRevenueTaxUSD?.length, result.snapshot.aggregation.corporateMasterN + 1);
 });
 

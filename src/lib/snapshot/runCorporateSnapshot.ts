@@ -941,7 +941,9 @@ function buildSnapshotSeries(args: {
   const royaltiesById = new Map<string, {
     id: string;
     label: string;
+    name?: string | null;
     base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
+    rateType?: string | null;
     rate: number | null;
     projectSeries: Array<{ projectId: string; yearsByPeriod: number[]; series: Array<number | null> }>;
   }>();
@@ -952,7 +954,9 @@ function buildSnapshotSeries(args: {
         royaltiesById.set(detail.id, {
           id: detail.id,
           label: detail.label,
+          name: detail.name ?? null,
           base: detail.base,
+          rateType: detail.rateType ?? null,
           rate: detail.rate,
           projectSeries: [],
         });
@@ -970,6 +974,10 @@ function buildSnapshotSeries(args: {
     .map((detail) => ({
       id: detail.id,
       label: detail.label,
+      name: detail.name ?? null,
+      base: detail.base,
+      rateType: detail.rateType ?? null,
+      rate: detail.rate,
       royaltyUSD: aggregateBreakdownSeries(detail.projectSeries, `series.royaltiesDetail.${detail.id}.royaltyUSD`),
     }));
 
