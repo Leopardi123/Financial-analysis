@@ -19,6 +19,8 @@ import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStar
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
+import { getManualMetalPriceStore, saveManualMetalPrice } from "../lib/engine/pricing/manualMetalPriceStore.ts";
+import { collectDashboardTasks } from "../lib/engine/pricing/collectDashboardTasks.ts";
 import {
   buildSeries,
   buildSeriesData,
@@ -529,6 +531,7 @@ function buildProjectsSnapshotRequest(args: {
     shares_current: number;
     price_current_TargetCurrency: number;
   };
+  manualMetalPrices?: SnapshotRequest["manualMetalPrices"];
 }): SnapshotRequest {
   const lockedTargetCurrency = resolveProfileTargetCurrency(args.profile);
   return {
@@ -538,6 +541,7 @@ function buildProjectsSnapshotRequest(args: {
     fx: args.fx,
     market: args.market,
     projects: args.projects,
+    manualMetalPrices: args.manualMetalPrices,
   };
 }
 
@@ -1173,6 +1177,35 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
   const [npvTracePersistResult, setNpvTracePersistResult] = useState<{ url: string | null; fileName: string | null; savedAtUtc: string | null; error: string | null }>({ url: null, fileName: null, savedAtUtc: null, error: null });
+  const [manualPriceStoreVersion, setManualPriceStoreVersion] = useState(0);
+  const [manualPriceModalOpen, setManualPriceModalOpen] = useState(false);
+  const [manualPriceModalTarget, setManualPriceModalTarget] = useState<{ metal: string; metalKey: string; unit: string | null; reason: string | null } | null>(null);
+  const [manualPriceInput, setManualPriceInput] = useState("");
+
+  const manualMetalPrices = useMemo(() => getManualMetalPriceStore(), [manualPriceStoreVersion]);
+
+  const openManualPriceModal = (target: { metal: string; metalKey: string; unit: string | null; reason: string | null }) => {
+    setManualPriceModalTarget(target);
+    setManualPriceInput("");
+    setManualPriceModalOpen(true);
+  };
+
+  const submitManualPrice = async () => {
+    if (!manualPriceModalTarget) return;
+    const value = Number(manualPriceInput);
+    if (!Number.isFinite(value) || value <= 0) return;
+    saveManualMetalPrice({
+      metalKey: manualPriceModalTarget.metalKey,
+      displayName: manualPriceModalTarget.metal,
+      unit: manualPriceModalTarget.unit,
+      value,
+    });
+    setManualPriceStoreVersion((prev) => prev + 1);
+    setManualPriceModalOpen(false);
+    if (selectedProjectId) {
+      await runProjectSnapshotForProject(selectedProjectId, selectedProjectName);
+    }
+  };
 
   const clampPct = (value: number) => {
     const roundedToStep = Math.round(value / 5) * 5;
@@ -1512,6 +1545,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         },
         projects: projectsPayload,
         market: marketFromProfile,
+        manualMetalPrices,
       });
 
       const result = await postCorporateSnapshot(request, { refresh: lockedTargetCurrency !== "USD" });
@@ -1604,6 +1638,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
             financingPlanByProject: corporateFinancingPlan?.financingPlanByProject,
             scenario: { mode: "spot" },
             fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } },
+            manualMetalPrices,
           }),
         });
         const result = await response.json() as {
@@ -1640,7 +1675,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return () => {
       isMounted = false;
     };
-  }, [companyProjects.length, corporateFinancingPlan, data?.balance, data?.income, debugEnabled, lockedTargetCurrency, primaryView, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
+  }, [companyProjects.length, corporateFinancingPlan, data?.balance, data?.income, debugEnabled, lockedTargetCurrency, manualMetalPrices, primaryView, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
 
   const revenueData = buildSeriesData(
     buildSeries(data, [{ label: "Revenue", statement: "income", field: "revenue" }]),
@@ -3157,6 +3192,18 @@ Capital Available: ${availableLabel}`,
     }
   }, [corporateTimelineDebug, debugEnabled]);
 
+  const dashboardTasks = useMemo(() => {
+    const diagnosticsByMetal = ((corporateDiagnostics?.meta as Record<string, unknown> | undefined)?.metalPriceDiagnostics ?? {}) as Record<string, Record<string, unknown>>;
+    const needs = Object.entries(diagnosticsByMetal).map(([metal, item]) => ({
+      projectId: selectedProjectId ?? "global",
+      metal,
+      metalKey: typeof item.priceKeyRequested === "string" ? item.priceKeyRequested : metal,
+      fmpSpotValue: typeof item.livePriceValue === "number" && Number.isFinite(item.livePriceValue) ? item.livePriceValue : null,
+      unit: typeof item.interpretedUnit === "string" ? item.interpretedUnit : null,
+    }));
+    return collectDashboardTasks({ projectPriceNeeds: needs, manualByMetalKey: manualMetalPrices });
+  }, [corporateDiagnostics, manualMetalPrices, selectedProjectId]);
+
   const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
 
   const projectMetalRevenueFailures = useMemo(() => {
@@ -3168,6 +3215,20 @@ Capital Available: ${availableLabel}`,
   }, [projectSnapshotDiagnosticsMeta]);
 
   const projectMetalPriceDiagnostics = (projectSnapshotDiagnosticsMeta?.metalPriceDiagnostics ?? null) as Record<string, Record<string, unknown>> | null;
+  const projectMissingPriceActions = useMemo(() => {
+    const out: Array<{ metal: string; metalKey: string; unit: string | null; reason: string | null }> = [];
+    if (!projectMetalPriceDiagnostics) return out;
+    for (const [metal, item] of Object.entries(projectMetalPriceDiagnostics)) {
+      const source = typeof item.priceSourceUsed === "string" ? item.priceSourceUsed : "";
+      if (source !== "missing" && source !== "expired") continue;
+      const metalKey = typeof item.priceKeyRequested === "string" ? item.priceKeyRequested : metal;
+      const unit = typeof item.interpretedUnit === "string" ? item.interpretedUnit : null;
+      const reason = typeof item.reason === "string" ? item.reason : null;
+      out.push({ metal, metalKey, unit, reason });
+    }
+    return out;
+  }, [projectMetalPriceDiagnostics]);
+
 
   const projectOperationsGridInput = useMemo((): OperationsGridInput | null => {
     if (!parsedSelectedProject) return null;
@@ -3959,6 +4020,29 @@ Capital Available: ${availableLabel}`,
           <p className="bread">Börsvärde: {formatMarketCapValue(marketCapValue)}</p>
         </div>
       )}
+      <div className="breadcontainersinglecolumn">
+        <h2 className="subrub small">Göromål</h2>
+        {dashboardTasks.length === 0 ? (
+          <p className="bread">Inga göromål just nu.</p>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {dashboardTasks.map((task) => (
+              <li key={task.id}>
+                {task.category}: {task.title}.
+                <button
+                  type="button"
+                  className="button-link"
+                  style={{ marginLeft: 6 }}
+                  onClick={() => openManualPriceModal({ metal: task.metal, metalKey: task.metalKey, unit: task.unit, reason: task.resolution.reason })}
+                >
+                  {task.actionLabel}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div className="breadcontainersinglecolumn">
         <h2 className="subrub small">Price History</h2>
         <p className="bread">
@@ -5519,7 +5603,7 @@ Capital Available: ${availableLabel}`,
                             )
                             : (
                               <tr key={row.label} className={row.hasMetalRevenueFailure ? "project-row-failure" : undefined}>
-                                <th className="first-col">{row.label}{row.hasMetalRevenueFailure ? " ⚠" : ""}</th>
+                                <th className="first-col">{row.label}{row.hasMetalRevenueFailure ? " ⚠" : ""}{row.hasMetalRevenueFailure && (() => { const target = projectMissingPriceActions.find((item) => row.label.includes(` ${item.metal} `) || row.label.includes(` ${item.metal}(`)); return target ? (<button type="button" className="button-link" style={{ marginLeft: 6 }} onClick={() => openManualPriceModal(target)}>Klicka här</button>) : null; })()}</th>
                                 {Array.from({ length: projectExcelGrid.columnCount }, (_, t) => <td key={`${row.label}-${t}`}>{formatPanelValue(row.values[t] ?? null)}</td>)}
                               </tr>
                             )
@@ -5686,7 +5770,7 @@ Capital Available: ${availableLabel}`,
                     </ul>
                     <p>
                       metalsUsingLivePrices: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsUsingLivePrices ?? [])}{' | '}
-                      metalsUsingJsonFallback: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsUsingJsonFallback ?? [])}{' | '}
+                      metalsUsingManualFallback: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsUsingManualFallback ?? [])}{' | '}
                       metalsWithPriceFailure: {JSON.stringify(projectSnapshotDiagnosticsMeta?.metalsWithPriceFailure ?? [])}
                     </p>
                   </>
@@ -5730,6 +5814,23 @@ Capital Available: ${availableLabel}`,
           )}
         </div>
       )}
+      {manualPriceModalOpen && manualPriceModalTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "grid", placeItems: "center", zIndex: 2000 }}>
+          <div style={{ background: "#fff", borderRadius: 8, padding: 16, width: "min(92vw, 520px)", display: "grid", gap: 8 }}>
+            <h3 style={{ margin: 0 }}>Ange råvarupris</h3>
+            <p style={{ margin: 0 }}><strong>Råvara:</strong> {manualPriceModalTarget.metal} ({manualPriceModalTarget.metalKey})</p>
+            <p style={{ margin: 0 }}><strong>Enhet:</strong> {manualPriceModalTarget.unit ?? "—"}</p>
+            <p style={{ margin: 0, fontSize: 13 }}>FMP saknar aktuellt spotpris för denna råvara. Ange ett manuellt pris. Priset gäller i 1 månad.</p>
+            {manualPriceModalTarget.reason && <p style={{ margin: 0, fontSize: 12, color: "#7f1d1d" }}>{manualPriceModalTarget.reason}</p>}
+            <input type="number" step="any" value={manualPriceInput} onChange={(event) => setManualPriceInput(event.target.value)} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" onClick={() => setManualPriceModalOpen(false)}>Avbryt</button>
+              <button type="button" onClick={() => void submitManualPrice()}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
