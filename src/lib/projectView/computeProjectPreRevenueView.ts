@@ -822,6 +822,12 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
         continue;
       }
 
+      const taxFromSeries = input.taxUSD?.[t];
+      if (finite(taxFromSeries)) {
+        nopatSeries[t] = ebit - taxFromSeries;
+        continue;
+      }
+
       const taxFromFederal = input.federalIncomeTaxUSD?.[t];
       const taxRateFromFederal = finite(taxFromFederal) && ebit > 0 ? Math.max(0, Math.min(1, taxFromFederal / ebit)) : null;
       const effectiveTaxRate = finite(input.effectiveTaxRate?.[t])
@@ -861,11 +867,13 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     ? null
     : (hasFiniteSeries(input.nopatUSD)
       ? 'Missing finite nopatUSD observations'
+      : (hasFiniteSeries(input.taxUSD)
+        ? 'Cannot infer nopatUSD from taxUSD (requires finite ebitUSD)'
       : (hasFiniteSeries(input.federalIncomeTaxUSD)
         ? 'Cannot infer nopatUSD from federalIncomeTaxUSD (requires positive ebitUSD)'
         : (finite(input.economicsTaxRate)
           ? 'Missing finite ebitUSD observations'
-          : 'Missing nopatUSD and tax inputs (federalIncomeTaxUSD or economics.taxRate)')));
+          : 'Missing nopatUSD and tax inputs (taxUSD, federalIncomeTaxUSD or economics.taxRate)'))));
   const kapitalReason = kapitalavkastningLom !== null
     ? null
     : (cfLomUSD === null ? 'Missing source metric CF_LOM_USD' : (initialCapexUSD === null ? (capexInit.reason ?? 'Missing Initial_CAPEX_USD') : 'Initial_CAPEX_USD is 0'));

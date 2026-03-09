@@ -46,3 +46,28 @@ const preferredAggregationPayable = getProjectInputs({
 assert.deepEqual(preferredAggregationPayable.series.payableAuEqOz, [9, 8, 7]);
 
 console.log('ok projectInputs');
+
+
+const legacyFcfFallback = getProjectInputs({
+  snapshot: {
+    targetCurrency: 'USD',
+    fx_USD_to_TargetCurrency: 1,
+    discountRate: 0.1,
+    aggregation: {
+      productionStartPeriod: 0,
+      corporateMasterN: 1,
+      fcfUSD_total: [3, 4],
+    },
+    series: {
+      fcfUSD: [1, 2],
+      capexUSD: [1, 1],
+      grossRevenueUSD: [10, 20],
+    },
+  },
+  parsedProject: {
+    engineInputWithoutPrices: { taxRate: 0.35 },
+  },
+});
+
+assert.deepEqual(legacyFcfFallback.series.fcfUSD, [1, 2]);
+assert.equal(legacyFcfFallback.economicsTaxRate, 0.35);

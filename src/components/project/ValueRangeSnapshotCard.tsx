@@ -104,6 +104,29 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
   return [{ tp: 1, high: fallback.high, low: fallback.low }];
 }
 
+
+function isProjectChartDataTypeSafe(data: Array<Array<string | number | null | { role: string; type?: string }>>): boolean {
+  if (!Array.isArray(data) || data.length < 2) return false;
+  const numericColumns = new Set([0, 1, 2, 3, 4, 5, 7, 9, 11, 13]);
+  for (let rowIndex = 1; rowIndex < data.length; rowIndex += 1) {
+    const row = data[rowIndex];
+    if (!Array.isArray(row)) return false;
+    for (let col = 0; col < row.length; col += 1) {
+      const value = row[col];
+      if (numericColumns.has(col)) {
+        if (value !== null && !(typeof value === 'number' && Number.isFinite(value))) {
+          return false;
+        }
+      } else {
+        if (value !== null && typeof value !== 'string') {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
   const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode } = props;
   const isProjectMode = mode === "project";
@@ -234,9 +257,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     if (domainValues.length < 1) return null;
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
-    return {
-      yearNow,
-      data: [
+    const data = [
         [
           'Index',
           'Low',
@@ -255,7 +276,13 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
           { role: 'annotation', type: 'string' },
         ],
         ...rows,
-      ] as (string | number | null | { role: string; type?: string })[][],
+      ] as (string | number | null | { role: string; type?: string })[][];
+
+    if (!isProjectChartDataTypeSafe(data)) return null;
+
+    return {
+      yearNow,
+      data,
       ticks: [
         { v: yearNow - 1, f: "" },
         { v: yearNow, f: String(yearNow) },

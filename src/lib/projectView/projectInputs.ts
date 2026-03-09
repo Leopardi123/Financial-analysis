@@ -10,6 +10,7 @@ export type ProjectInputs = {
   cash0: number | null;
   debt0: number | null;
   sharesPostFinancing: number | null;
+  economicsTaxRate: number | null;
   series: {
     fcfUSD?: number[] | null;
     capexUSD?: number[] | null;
@@ -114,6 +115,9 @@ export function getProjectInputs(rawState: {
     aggregation.payableAuEqOz_total,
     series.payableAuEqOz,
   ) ?? derivePayableAuEqOz(grossRevenueUSD, auPriceUSD);
+  const economicsTaxRate = normalizeRate(parsed?.engineInputWithoutPrices?.taxRate)
+    ?? normalizeRate(parsed?.engineInputWithoutPrices?.phase1?.taxRate)
+    ?? null;
 
   return {
     fx,
@@ -125,8 +129,9 @@ export function getProjectInputs(rawState: {
     cash0: asFinite(financing.cash_t0_post_TargetCurrency) ?? asFinite(financing.cash_t0_pre_TargetCurrency),
     debt0: asFinite(financing.debt_t0_post_TargetCurrency) ?? asFinite(financing.debt_t0_pre_TargetCurrency),
     sharesPostFinancing: asFinite(financing.shares_post_financing),
+    economicsTaxRate,
     series: {
-      fcfUSD: asFiniteSeries(series.fcffUSD),
+      fcfUSD: firstFiniteSeries(series.fcffUSD, series.fcfUSD, aggregation.fcffUSD_total, aggregation.fcfUSD_total),
       capexUSD: asFiniteSeries(series.capexUSD),
       grossRevenueUSD,
       auPriceUSD,
