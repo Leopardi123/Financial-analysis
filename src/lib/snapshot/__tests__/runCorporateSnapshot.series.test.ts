@@ -51,6 +51,53 @@ test('null-safe aggregation keeps total revenue/P&L numeric even when some metal
   assert.ok(fcff.every((value) => typeof value === 'number' && Number.isFinite(value)), 'fcff should be numeric');
 });
 
+test('taxUSD is produced from economics.taxRate in live model and flows into FCFF when depreciation series is null', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const rawJson = projects[0].rawJson as Record<string, unknown>;
+  rawJson.economics = { taxRate: 0.35 };
+
+  const series = rawJson.series as Record<string, unknown>;
+  const operating = series.operatingCostsUSD as Array<number | null>;
+  const capex = series.capexUSD as Array<number | null>;
+  const length = operating.length;
+
+  series.operatingCostsUSD = operating.map((_, t) => (t >= 2 ? 100 : 0));
+  series.siteGandA_USD = operating.map(() => 0);
+  series.sustainingCapexUSD = operating.map(() => 0);
+  series.royaltiesUSD = operating.map(() => 0);
+  series.reclamationUSD = operating.map(() => 0);
+  series.byproductCreditsUSD = operating.map(() => 0);
+  series.depreciationUSD = operating.map(() => null);
+  series.workingCapitalDeltaUSD = operating.map(() => 0);
+  series.capexUSD = capex.map((_, t) => (t >= 2 ? 0 : 10));
+
+  const metals = rawJson.metals as Record<string, unknown>;
+  const payableQtyByMetal = metals.payableQtyByMetal as Record<string, Array<number | null>>;
+  const allMetals = Object.keys(payableQtyByMetal);
+  for (const metal of allMetals) {
+    payableQtyByMetal[metal] = Array.from({ length }, (_, t) => (metal === 'Au' && t >= 2 ? 1 : 0));
+  }
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const taxUSD = result.snapshot.series?.taxUSD ?? [];
+  const ebitUSD = result.snapshot.series?.ebitUSD ?? [];
+  const fcffUSD = result.snapshot.series?.fcffUSD ?? [];
+
+  const positiveTaxIndex = taxUSD.findIndex((value) => typeof value === 'number' && value > 0);
+  assert.ok(positiveTaxIndex >= 0, 'expected at least one period with positive tax');
+
+  const t = positiveTaxIndex;
+  const ebit = ebitUSD[t] as number;
+  const tax = taxUSD[t] as number;
+  const fcff = fcffUSD[t] as number;
+  assert.ok(Math.abs(tax - Math.max(0, ebit) * 0.35) < 1e-6, 'tax should follow max(0, EBIT) * taxRate');
+  assert.ok(Math.abs(fcff - (ebit - tax)) < 1e-6, 'FCFF should include central tax series when all other FCFF components are zero');
+});
+
 test('inactive metal does not create false metal revenue failure diagnostics', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;
@@ -865,15 +912,29 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
   assert.ok(roicDebug);
   assert.ok(avgNopatRoicDebug);
   assert.equal(roicDebug?.output?.value, null);
-  assert.equal(avgNopatRoicDebug?.output?.value, null);
-  assert.equal(roicDebug?.missingInputs?.includes('nopatUSD_total'), true);
+  assert.equal(typeof avgNopatRoicDebug?.output?.value === 'number', true);
+  assert.equal(roicDebug?.missingInputs?.includes('nopatUSD_total') ?? false, false);
   assert.equal(roicDebug?.missingInputs?.includes('investedCapitalUSD_total'), true);
-  assert.equal(avgNopatRoicDebug?.missingInputs?.includes('nopatUSD_total'), true);
+  assert.equal(avgNopatRoicDebug?.missingInputs?.includes('nopatUSD_total') ?? false, false);
 
   const debugMetric = result.diagnostics.meta.corporateLista3Debug?.perMetric?.AISC_LOM;
   assert.ok(debugMetric);
   assert.equal(typeof debugMetric?.output?.computedValuePreview !== 'undefined', true);
   assert.equal(typeof debugMetric?.output?.storedValue !== 'undefined', true);
+});
+
+
+
+test('corporate NOPAT sampleEbitUSD aligns with snapshot series ebitUSD (single source)', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const snapshotEbit = result.snapshot.series?.ebitUSD ?? [];
+  const sampleEbit = result.diagnostics.meta.corporateLista3Debug?.corporateNopatInputs?.projectInputs?.[0]?.sampleEbitUSD ?? [];
+  assert.ok(sampleEbit.length > 0);
+  assert.deepEqual(snapshotEbit.slice(0, sampleEbit.length), sampleEbit);
 });
 
 test('corporate nopat aggregation populates Lista3 LOM_avg_NOPAT_ROIC when all project tax inputs exist', async () => {

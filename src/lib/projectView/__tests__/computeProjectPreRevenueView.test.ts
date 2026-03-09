@@ -76,7 +76,7 @@ const lista3MissingInputs = computeProjectViewMetrics({
 assert.equal(lista3MissingInputs.list3.LOM_discounted_EBIT_ROCE.value, null);
 assert.equal(lista3MissingInputs.list3.LOM_avg_NOPAT_ROIC.value, null);
 assert.equal(lista3MissingInputs.diagnostics.lista3_inputs_debug.failure_reasons.LOM_discounted_EBIT_ROCE, 'Missing discountRate and df_now series');
-assert.equal(lista3MissingInputs.diagnostics.lista3_inputs_debug.failure_reasons.LOM_avg_NOPAT_ROIC, 'Missing nopatUSD and tax inputs (federalIncomeTaxUSD or economics.taxRate)');
+assert.equal(lista3MissingInputs.diagnostics.lista3_inputs_debug.failure_reasons.LOM_avg_NOPAT_ROIC, 'Missing nopatUSD and tax inputs (taxUSD, federalIncomeTaxUSD or economics.taxRate)');
 const zeroCapexDenominator = computeProjectViewMetrics({
   targetCurrency: 'USD',
   fxUSDToTarget: 1,
@@ -447,4 +447,3 @@ const financingSharesAllDebt = computeProjectViewMetrics({
   financing: { equityPct: 0, debtPct: 100, cashUsedInput: 0 },
 });
 assertApprox(financingSharesAllDebt.marketBox.sharesPf.value, 100, 1e-9);
-

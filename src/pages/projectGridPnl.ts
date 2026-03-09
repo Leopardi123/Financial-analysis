@@ -1,5 +1,6 @@
 export type ProjectGridSeries = {
   revenueByMetal_USD?: Record<string, Array<number | null>>;
+  totalRevenue_USD?: Array<number | null>;
   operatingCostsUSD?: Array<number | null>;
   sustainingCapexUSD?: Array<number | null>;
   siteGandA_USD?: Array<number | null>;
@@ -16,10 +17,15 @@ export type ProjectGridSeries = {
   byproductCreditsUSD?: Array<number | null>;
   sustainingCostUSD?: Array<number | null>;
   depreciationUSD?: Array<number | null>;
+  ebitdaUSD?: Array<number | null>;
+  ebitUSD?: Array<number | null>;
+  taxableIncomeUSD?: Array<number | null>;
+  effectiveTaxRate?: Array<number | null>;
   taxUSD?: Array<number | null>;
   workingCapitalDeltaUSD?: Array<number | null>;
   capexUSD?: Array<number | null>;
   totalCapexUSD?: Array<number | null>;
+  fcffUSD?: Array<number | null>;
 };
 
 export type ProjectGridPnlSeries = {
@@ -78,7 +84,7 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
   })();
 
   const sortedMetals = Object.keys(revenueByMetal).sort((a, b) => a.localeCompare(b));
-  const grossRevenue = Array.from({ length }, (_, t) => {
+  const grossRevenueFromMetals = Array.from({ length }, (_, t) => {
     if (sortedMetals.length === 0) return null;
     let sum = 0;
     for (const metal of sortedMetals) {
@@ -88,6 +94,7 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
     }
     return sum;
   });
+  const grossRevenue = Array.from({ length }, (_, t) => finiteOrNull(series.totalRevenue_USD?.[t]) ?? grossRevenueFromMetals[t]);
 
   const operatingCosts = Array.from({ length }, (_, t) => finiteOrNull(series.operatingCostsUSD?.[t]));
   const siteGandA = Array.from({ length }, (_, t) => finiteOrNull(series.siteGandA_USD?.[t]));
@@ -138,16 +145,16 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
     return revenue - opCost - royalty - byproductCredits[t];
   });
 
-
-  const ebitda = Array.from({ length }, (_, t) => {
+  const ebitdaFromComponents = Array.from({ length }, (_, t) => {
     const revenue = grossRevenue[t];
     const opCost = operatingCosts[t];
     const royalty = royalties[t];
     if (revenue === null || opCost === null || royalty === null) return null;
     return revenue - opCost - royalty;
   });
+  const ebitda = Array.from({ length }, (_, t) => finiteOrNull(series.ebitdaUSD?.[t]) ?? ebitdaFromComponents[t]);
 
-  const ebit = Array.from({ length }, (_, t) => {
+  const ebitFromComponents = Array.from({ length }, (_, t) => {
     const revenue = grossRevenue[t];
     const opCost = operatingCosts[t];
     const gna = siteGandA[t];
@@ -155,21 +162,24 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
     if (revenue === null || opCost === null || gna === null || royalty === null) return null;
     return revenue - opCost - gna - royalty + byproductCredits[t];
   });
+  const ebit = Array.from({ length }, (_, t) => finiteOrNull(series.ebitUSD?.[t]) ?? ebitFromComponents[t]);
 
-  const taxableIncome = Array.from({ length }, (_, t) => {
+  const taxableIncomeFromComponents = Array.from({ length }, (_, t) => {
     const ebitValue = ebit[t];
     if (ebitValue === null) return null;
     return ebitValue - depreciation[t];
   });
+  const taxableIncome = Array.from({ length }, (_, t) => finiteOrNull(series.taxableIncomeUSD?.[t]) ?? taxableIncomeFromComponents[t]);
 
-  const effectiveTaxRate = Array.from({ length }, (_, t) => {
+  const effectiveTaxRateFromComponents = Array.from({ length }, (_, t) => {
     const taxable = taxableIncome[t];
     const taxValue = tax[t];
     if (taxable === null || taxValue === null || taxable === 0) return null;
     return taxValue / taxable;
   });
+  const effectiveTaxRate = Array.from({ length }, (_, t) => finiteOrNull(series.effectiveTaxRate?.[t]) ?? effectiveTaxRateFromComponents[t]);
 
-  const fcff = Array.from({ length }, (_, t) => {
+  const fcffFromComponents = Array.from({ length }, (_, t) => {
     const revenue = grossRevenue[t];
     const opCost = operatingCosts[t];
     const gna = siteGandA[t];
@@ -184,6 +194,7 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
     }
     return revenue - opCost - gna - royalty - taxValue - sustaining - recl - wcDelta - capexValue + byproductCredits[t];
   });
+  const fcff = Array.from({ length }, (_, t) => finiteOrNull(series.fcffUSD?.[t]) ?? fcffFromComponents[t]);
 
   return {
     revenueByMetal,

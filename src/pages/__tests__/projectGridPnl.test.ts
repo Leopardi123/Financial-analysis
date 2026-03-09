@@ -70,3 +70,34 @@ test('buildProjectGridPnl resolves royalties detail source and shows royalty rat
   assert.equal(pnl.ebit[2], 85);
   assert.equal(pnl.fcff[2], 85);
 });
+
+
+test('buildProjectGridPnl prefers central engine EBIT/FCFF series when provided', () => {
+  const pnl = buildProjectGridPnl({
+    revenueByMetal_USD: {
+      Au: [100],
+    },
+    totalRevenue_USD: [100],
+    operatingCostsUSD: [1],
+    siteGandA_USD: [1],
+    royaltiesUSD: [1],
+    byproductCreditsUSD: [0],
+    depreciationUSD: [50],
+    ebitdaUSD: [97],
+    ebitUSD: [47],
+    taxableIncomeUSD: [47],
+    taxUSD: [16.45],
+    effectiveTaxRate: [0.35],
+    sustainingCapexUSD: [0],
+    reclamationUSD: [0],
+    workingCapitalDeltaUSD: [0],
+    capexUSD: [0],
+    fcffUSD: [30.55],
+  }, 1);
+
+  assert.deepEqual(pnl.ebitda, [97]);
+  assert.deepEqual(pnl.ebit, [47]);
+  assert.deepEqual(pnl.taxableIncome, [47]);
+  assert.deepEqual(pnl.effectiveTaxRate, [0.35]);
+  assert.deepEqual(pnl.fcff, [30.55]);
+});
