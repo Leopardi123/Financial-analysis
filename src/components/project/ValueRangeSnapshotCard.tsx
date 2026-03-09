@@ -23,6 +23,12 @@ type ValueRangeSnapshotCardProps = {
   currentYear?: number | null;
   tpYear?: number | null;
   currencyCode?: string;
+  projectDebug?: {
+    yearsByPeriod?: Array<number | null> | null;
+    fcffProductionTableSeries?: Array<number | null> | null;
+    fcffNpvSeries?: Array<number | null> | null;
+    discountRate?: number | null;
+  } | null;
 };
 
 const Y_TOP = 20;
@@ -128,7 +134,7 @@ function isProjectChartDataTypeSafe(data: Array<Array<string | number | null | {
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode, projectDebug } = props;
   const isProjectMode = mode === "project";
 
   const projectChartModel = useMemo(() => {
@@ -280,6 +286,33 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
 
     if (!isProjectChartDataTypeSafe(data)) return null;
 
+    const debugRows = rows.map((row, idx) => {
+      const discountFactorHigh = inferredRate !== null
+        ? (idx <= tpOffset ? (1 + inferredRate) ** (tpOffset - idx) : 1 / ((1 + inferredRate) ** idx))
+        : null;
+      const discountFactorLow = idx > tpOffset
+        ? null
+        : (lowToday !== null && lowTp !== null && lowToday > 0 && lowTp > 0
+          ? 1 / (((lowTp / lowToday) ** (1 / tpOffset)) ** idx)
+          : null);
+      const discountedHigh = inferredRate !== null && highByIndex[idx] !== null
+        ? (idx <= tpOffset ? highByIndex[idx] : highByIndex[idx] / ((1 + inferredRate) ** idx))
+        : null;
+      const discountedLow = discountFactorLow !== null && lowByIndex[idx] !== null
+        ? lowByIndex[idx] * discountFactorLow
+        : null;
+      return {
+        periodIndex: idx,
+        calendarYear: row[0],
+        undiscountedHigh: highByIndex[idx],
+        undiscountedLow: lowByIndex[idx],
+        discountFactorHigh,
+        discountFactorLow,
+        discountedHigh,
+        discountedLow,
+      };
+    });
+
     return {
       yearNow,
       data,
@@ -289,8 +322,39 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         { v: yearTp, f: String(yearTp) },
       ],
       valueWindow,
+      inferredRate,
+      tpOffset,
+      debugRows,
+      rawFlowSeries: {
+        dcfSeriesRawAll,
+        navSeriesRawAll,
+        dcfSeriesRaw,
+        navSeriesRaw,
+      },
     };
   }, [chartFlows, currentYear, isProjectMode, npvHigh, npvLow, priceToday, tpHigh, tpLow, tpYear]);
+
+  const projectCurveDiagnosis = useMemo(() => {
+    if (!projectChartModel) return null;
+    const firstHighDrop = projectChartModel.debugRows.find((row, idx) => idx > 0 && row.discountedHigh !== null && projectChartModel.debugRows[idx - 1].discountedHigh !== null && (row.discountedHigh as number) < (projectChartModel.debugRows[idx - 1].discountedHigh as number)) ?? null;
+    const firstLowDrop = projectChartModel.debugRows.find((row, idx) => idx > 0 && row.discountedLow !== null && projectChartModel.debugRows[idx - 1].discountedLow !== null && (row.discountedLow as number) < (projectChartModel.debugRows[idx - 1].discountedLow as number)) ?? null;
+    return { firstHighDrop, firstLowDrop };
+  }, [projectChartModel]);
+
+  const fcffComparison = useMemo(() => {
+    if (!projectDebug) return null;
+    const prod = Array.isArray(projectDebug.fcffProductionTableSeries) ? projectDebug.fcffProductionTableSeries : [];
+    const npv = Array.isArray(projectDebug.fcffNpvSeries) ? projectDebug.fcffNpvSeries : [];
+    const len = Math.max(prod.length, npv.length);
+    const rows = Array.from({ length: len }, (_, t) => {
+      const p = prod[t] ?? null;
+      const n = npv[t] ?? null;
+      const diff = p !== null && n !== null ? p - n : null;
+      return { periodIndex: t, fcffProductionTable: p, fcffNpv: n, diff };
+    });
+    const firstDiff = rows.find((row) => row.diff !== null && row.diff !== 0) ?? null;
+    return { rows, match: firstDiff === null, firstDiff };
+  }, [projectDebug]);
 
   if (isProjectMode) {
     if (!projectChartModel) {
@@ -349,6 +413,25 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
             },
           }}
         />
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>debugg fallande graf</summary>
+          <div style={{ marginTop: 8, fontSize: 12, color: "#1f2937", display: "grid", gap: 12 }}>
+            <div><strong>1. Sammanfattning</strong><div>FCFF-serier matchar: {fcffComparison?.match ? "JA" : "NEJ"}</div></div>
+            <div><strong>2. Var räknas serierna ut</strong><div>High/Low-graf: <code>src/components/project/ValueRangeSnapshotCard.tsx :: projectChartModel(useMemo)</code>, input: <code>project.chartFlows.dcfProdstartPresentPerShareSeries/navProdstartPerShareSeries</code>.</div><div>Produktionstabell FCFF: <code>snapshot.series.fcffUSD</code> (från motorn).</div><div>NPV FCFF: <code>getProjectInputs().series.fcfUSD</code> prioriterar <code>snapshot.series.fcffUSD</code>.</div></div>
+            <div><strong>3. Hur räknas serierna ut</strong><div>High före/vid tp: <code>highTp / (1 + inferredRate)^(tpOffset - idx)</code>. High efter tp: <code>dcfPresentAtIdx * (1 + inferredRate)^idx</code>. Low: linjär/growth till tp, därefter <code>navSeriesRaw[flowIndex]</code>. Diskonteringsränta: {projectDebug?.discountRate ?? null}.</div></div>
+            <div style={{ overflowX: "auto" }}><strong>4. Diskonterad serie high/low</strong>
+              <table><thead><tr><th>t</th><th>år</th><th>odisk high</th><th>odisk low</th><th>df high</th><th>df low</th><th>disk high</th><th>disk low</th></tr></thead><tbody>{projectChartModel.debugRows.map((row) => <tr key={`disc-${row.periodIndex}`}><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.undiscountedHigh ?? "null"}</td><td>{row.undiscountedLow ?? "null"}</td><td>{row.discountFactorHigh ?? "null"}</td><td>{row.discountFactorLow ?? "null"}</td><td>{row.discountedHigh ?? "null"}</td><td>{row.discountedLow ?? "null"}</td></tr>)}</tbody></table>
+            </div>
+            <div style={{ overflowX: "auto" }}><strong>5. Odiskonterad grafinput high/low</strong>
+              <table><thead><tr><th>t</th><th>år</th><th>input high (dcf)</th><th>input low (nav)</th></tr></thead><tbody>{projectChartModel.rawFlowSeries.dcfSeriesRawAll.map((_, idx) => <tr key={`raw-${idx}`}><td>{idx}</td><td>{projectDebug?.yearsByPeriod?.[idx] ?? "null"}</td><td>{projectChartModel.rawFlowSeries.dcfSeriesRawAll[idx] ?? "null"}</td><td>{projectChartModel.rawFlowSeries.navSeriesRawAll[idx] ?? "null"}</td></tr>)}</tbody></table>
+            </div>
+            <div style={{ overflowX: "auto" }}><strong>6. FCFF från produktionstabell</strong><table><thead><tr><th>t</th><th>år</th><th>fcffUSD</th><th>source</th></tr></thead><tbody>{(projectDebug?.fcffProductionTableSeries ?? []).map((v, idx) => <tr key={`prod-${idx}`}><td>{idx}</td><td>{projectDebug?.yearsByPeriod?.[idx] ?? "null"}</td><td>{v ?? "null"}</td><td>snapshot.series.fcffUSD</td></tr>)}</tbody></table></div>
+            <div style={{ overflowX: "auto" }}><strong>7. FCFF för NPV</strong><table><thead><tr><th>t</th><th>år</th><th>fcffUSD</th><th>source</th></tr></thead><tbody>{(projectDebug?.fcffNpvSeries ?? []).map((v, idx) => <tr key={`npv-${idx}`}><td>{idx}</td><td>{projectDebug?.yearsByPeriod?.[idx] ?? "null"}</td><td>{v ?? "null"}</td><td>getProjectInputs().series.fcfUSD</td></tr>)}</tbody></table></div>
+            <div style={{ overflowX: "auto" }}><strong>8. Matchningstabell produktionstabell vs NPV</strong><div>FCFF-serier matchar: {fcffComparison?.match ? "JA" : "NEJ"}</div><table><thead><tr><th>t</th><th>fcff_productionTable</th><th>fcff_npv</th><th>diff</th></tr></thead><tbody>{fcffComparison?.rows.map((row) => <tr key={`cmp-${row.periodIndex}`}><td>{row.periodIndex}</td><td>{row.fcffProductionTable ?? "null"}</td><td>{row.fcffNpv ?? "null"}</td><td>{row.diff ?? "null"}</td></tr>)}</tbody></table></div>
+            <div style={{ overflowX: "auto" }}><strong>9. Matchningstabell grafinput vs FCFF</strong><table><thead><tr><th>t</th><th>graf high input</th><th>graf low input</th><th>fcff</th></tr></thead><tbody>{projectChartModel.rawFlowSeries.dcfSeriesRawAll.map((_, idx) => <tr key={`gfcff-${idx}`}><td>{idx}</td><td>{projectChartModel.rawFlowSeries.dcfSeriesRawAll[idx] ?? "null"}</td><td>{projectChartModel.rawFlowSeries.navSeriesRawAll[idx] ?? "null"}</td><td>{projectDebug?.fcffNpvSeries?.[idx] ?? "null"}</td></tr>)}</tbody></table></div>
+            <div><strong>10. Diagnos fallande kurva</strong><div>Första år high faller: {projectCurveDiagnosis?.firstHighDrop?.calendarYear ?? "saknas"}</div><div>Första år low faller: {projectCurveDiagnosis?.firstLowDrop?.calendarYear ?? "saknas"}</div><div>Orsak: jämför odiskonterat flöde och diskonteringsfaktor i tabell 4.</div></div>
+          </div>
+        </details>
       </div>
     );
   }

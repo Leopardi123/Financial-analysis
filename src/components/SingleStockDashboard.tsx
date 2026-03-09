@@ -5290,6 +5290,16 @@ Capital Available: ${availableLabel}`,
                             const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
                             return projectPayload?.chartFlows ?? null;
                           })()}
+                          projectDebug={(() => {
+                            const snapshotSeries = (projectSnapshotData?.series ?? null) as { fcffUSD?: Array<number | null>; yearsByPeriod?: Array<number | null> } | null;
+                            const inputs = getProjectInputs({ snapshot: (projectSnapshotData ?? null) as Record<string, unknown> | null, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
+                            return {
+                              yearsByPeriod: Array.isArray(snapshotSeries?.yearsByPeriod) ? snapshotSeries?.yearsByPeriod : null,
+                              fcffProductionTableSeries: Array.isArray(snapshotSeries?.fcffUSD) ? snapshotSeries.fcffUSD : null,
+                              fcffNpvSeries: Array.isArray(inputs.series.fcfUSD) ? inputs.series.fcfUSD : null,
+                              discountRate: inputs.r,
+                            };
+                          })()}
                           currentYear={(() => {
                             const series = (projectSnapshotData?.series ?? null) as { yearsByPeriod?: number[] } | null;
                             const firstYear = Array.isArray(series?.yearsByPeriod) ? series?.yearsByPeriod[0] : null;
