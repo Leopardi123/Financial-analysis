@@ -1765,11 +1765,41 @@ export async function runCorporateSnapshotPipeline(args: {
           const ebitHighSpot = spotDeckValid
             ? sanitizeSeries(outHighSpot?.phase1.ebitUSD ?? nullSeries)
             : nullSeries;
-          const ebitdaUSD = sanitizeSeries(out.phase1.ebitdaUSD);
-          const ebitUSD = sanitizeSeries(out.phase1.ebitUSD);
-          const taxableIncomeUSD = sanitizeSeries(out.phase1.taxableIncomeUSD);
-          const taxByRule = sanitizeSeries(out.phase1.taxUSD);
-          const effectiveTaxRate = sanitizeSeries(out.phase1.effectiveTaxRate);
+          const siteGandA_USD = sanitizeSeries(parsed.engineInputWithoutPrices.phase1.siteGandA_USD);
+          const sustainingCapexUSD = sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD);
+          const reclamationUSD = sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD);
+          const byproductCreditsUSD = sanitizeSeries(parsed.engineInputWithoutPrices.phase1.byproductCreditsUSD ?? nullSeries);
+          const capexUSD_used = sanitizeSeries(out.capexUSD_used);
+          const workingCapitalDeltaUSD_effective = sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective);
+
+          const ebitdaUSD = grossRevenueUSD.map((revenue, t) => {
+            if (revenue === null) return null;
+            const op = operatingCostsUSD[t] ?? 0;
+            const sc = sustainingCapexUSD[t] ?? 0;
+            const ga = siteGandA_USD[t] ?? 0;
+            const roy = royaltiesUSD[t] ?? 0;
+            const rec = reclamationUSD[t] ?? 0;
+            const bp = byproductCreditsUSD[t] ?? 0;
+            return revenue - op - sc - ga - roy - rec + bp;
+          });
+          const ebitUSD = ebitdaUSD.map((ebitda, t) => {
+            if (ebitda === null) return null;
+            const dep = depreciationUSD[t] ?? 0;
+            return ebitda - dep;
+          });
+          const taxableIncomeUSD = ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
+          const taxByRule = taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
+          const effectiveTaxRate = ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
+          const fcffByCentralEbit = ebitUSD.map((ebit, t) => {
+            if (ebit === null) return null;
+            const tax = taxByRule[t] ?? 0;
+            const dep = depreciationUSD[t] ?? 0;
+            const sc = sustainingCapexUSD[t] ?? 0;
+            const cx = capexUSD_used[t] ?? 0;
+            const dWC = workingCapitalDeltaUSD_effective[t] ?? 0;
+            const rec = reclamationUSD[t] ?? 0;
+            return ebit - tax + dep - sc - cx - dWC - rec;
+          });
           const usesTaxRateRule = taxRate !== null;
           const taxExpectedFromCentralEbit = ebitUSD.map((ebit) => (ebit === null || taxRate === null ? null : Math.max(0, ebit) * taxRate));
           const taxDiffFromCentralRule = taxByRule.map((tax, t) => {
@@ -1782,8 +1812,11 @@ export async function runCorporateSnapshotPipeline(args: {
             return Math.max(max, Math.abs(value));
           }, 0);
           diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
-          diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (phase1)`);
-          diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (phase1)`);
+          diagnostics.warnings.push(`[${projectId}] totalRevenue source path=out.revenue.grossRevenueUSD`);
+          diagnostics.warnings.push(`[${projectId}] ebit source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits - depreciation`);
+          diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - sustainingCapex - capex - workingCapitalDelta - reclamation`);
+          diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
+          diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] sameEbitSource=true`);
           diagnostics.warnings.push(`[${projectId}] tax source of truth=phase1.taxUSD (derived from economics.taxRate + taxableIncomeUSD)`);
           diagnostics.warnings.push(`[${projectId}] tax rule=taxUSD[t]=max(0, EBIT[t])*taxRate`);
@@ -1813,17 +1846,17 @@ export async function runCorporateSnapshotPipeline(args: {
             royaltiesUSD,
             depreciationUSD,
             taxUSD: taxByRule,
-            capexUSD: sanitizeSeries(out.capexUSD_used),
+            capexUSD: capexUSD_used,
             totalCapexUSD: sanitizeSeries(out.phase1.totalCapexUSD),
-            workingCapitalDeltaUSD: sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective),
-            sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
-            reclamationUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD),
-            byproductCreditsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.byproductCreditsUSD ?? nullSeries),
+            workingCapitalDeltaUSD: workingCapitalDeltaUSD_effective,
+            sustainingCapexUSD,
+            reclamationUSD,
+            byproductCreditsUSD,
             grossProfitUSD,
             ebitdaUSD,
             ebitUSD: sanitizeSeries(ebitUSD),
             taxableIncomeUSD: sanitizeSeries(taxableIncomeUSD),
-            fcffUSD: sanitizeSeries(out.phase1.fcffUSD),
+            fcffUSD: sanitizeSeries(fcffByCentralEbit),
             selling: {
               treatmentChargesUSD: projectEconomicsBreakdown?.selling?.treatmentChargesUSD
                 ? sanitizeSeries(projectEconomicsBreakdown.selling.treatmentChargesUSD)
@@ -1893,7 +1926,7 @@ export async function runCorporateSnapshotPipeline(args: {
             taxesDetail,
             spotRangeFcffByScenario: spotDeckValid
               ? {
-                  base: sanitizeSeries(out.phase1.fcffUSD),
+                  base: sanitizeSeries(fcffByCentralEbit),
                   low: sanitizeSeries(outLowSpot?.phase1.fcffUSD ?? nullSeries),
                   high: sanitizeSeries(outHighSpot?.phase1.fcffUSD ?? nullSeries),
                 }
@@ -1915,21 +1948,21 @@ export async function runCorporateSnapshotPipeline(args: {
             spotDeckValid,
             economics: {
               operatingCostsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD),
-              sustainingCapexUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.sustainingCapexUSD),
-              siteGandA_USD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.siteGandA_USD),
+              sustainingCapexUSD,
+              siteGandA_USD,
               royaltiesUSD,
-              reclamationUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.reclamationUSD),
-              byproductCreditsUSD: sanitizeSeries(parsed.engineInputWithoutPrices.phase1.byproductCreditsUSD ?? nullSeries),
+              reclamationUSD,
+              byproductCreditsUSD,
               sustainingCostUSD: sanitizeSeries(out.phase1.sustainingCostUSD),
               ebitdaUSD,
               depreciationUSD,
-            ebitUSD,
-            taxableIncomeUSD,
-            effectiveTaxRate,
-            taxUSD: taxByRule,
-              workingCapitalDeltaUSD: sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective),
-              fcffUSD: sanitizeSeries(out.phase1.fcffUSD),
-              capexUSD: sanitizeSeries(out.capexUSD_used),
+              ebitUSD,
+              taxableIncomeUSD,
+              effectiveTaxRate,
+              taxUSD: taxByRule,
+              workingCapitalDeltaUSD: workingCapitalDeltaUSD_effective,
+              fcffUSD: sanitizeSeries(fcffByCentralEbit),
+              capexUSD: capexUSD_used,
               totalCapexUSD: sanitizeSeries(out.phase1.totalCapexUSD),
             },
           });
@@ -1937,7 +1970,7 @@ export async function runCorporateSnapshotPipeline(args: {
           return {
             yearsByPeriod,
             capexUSD: out.capexUSD_used,
-            fcffUSD: out.phase1.fcffUSD,
+            fcffUSD: fcffByCentralEbit,
             grossRevenueUSD: out.revenue.grossRevenueUSD,
             auPriceUSDPerOz: resolved.aisc.auPriceUSDPerOz,
             sustainingCostUSD: out.phase1.sustainingCostUSD,
