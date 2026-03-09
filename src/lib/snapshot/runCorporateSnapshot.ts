@@ -1772,7 +1772,8 @@ export async function runCorporateSnapshotPipeline(args: {
           const capexUSD_used = sanitizeSeries(out.capexUSD_used);
           const workingCapitalDeltaUSD_effective = sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective);
 
-          const ebitdaUSD = grossRevenueUSD.map((revenue, t) => {
+          const centralRevenueUSD = grossRevenueForRoyalties;
+          const ebitdaUSD = centralRevenueUSD.map((revenue, t) => {
             if (revenue === null) return null;
             const op = operatingCostsUSD[t] ?? 0;
             const sc = sustainingCapexUSD[t] ?? 0;
@@ -1812,7 +1813,7 @@ export async function runCorporateSnapshotPipeline(args: {
             return Math.max(max, Math.abs(value));
           }, 0);
           diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
-          diagnostics.warnings.push(`[${projectId}] totalRevenue source path=out.revenue.grossRevenueUSD`);
+          diagnostics.warnings.push(`[${projectId}] totalRevenue source path=grossRevenueForRoyalties (${grossRevenueSourceForRoyalties})`);
           diagnostics.warnings.push(`[${projectId}] ebit source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits - depreciation`);
           diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - sustainingCapex - capex - workingCapitalDelta - reclamation`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
@@ -1822,6 +1823,12 @@ export async function runCorporateSnapshotPipeline(args: {
           diagnostics.warnings.push(`[${projectId}] tax rule=taxUSD[t]=max(0, EBIT[t])*taxRate`);
           diagnostics.warnings.push(`[${projectId}] tax rate source=${usesTaxRateRule ? 'economics.taxRate' : 'missing economics.taxRate (tax series unresolved)'}`);
           diagnostics.warnings.push(`[${projectId}] tax consistency maxAbsDiff(actual-vs-expectedFromCentralEbit)=${taxDiffMaxAbs}`);
+          const focusPeriods = [2, 3, 4].filter((t) => t >= 0 && t < projectLength);
+          for (const t of focusPeriods) {
+            diagnostics.warnings.push(
+              `[${projectId}] central-ebit-trace t=${t} revenue=${String(centralRevenueUSD[t])} operatingCosts=${String(operatingCostsUSD[t])} siteGandA=${String(siteGandA_USD[t])} royalties=${String(royaltiesUSD[t])} depreciationRaw=${String(parsed.context.series?.depreciationUSD?.[t] ?? null)} depreciationNormalized=${String(depreciationUSD[t] ?? 0)} ebit=${String(ebitUSD[t])} tax=${String(taxByRule[t])} fcff=${String(fcffByCentralEbit[t])}`,
+            );
+          }
           if (projectEconomicsBreakdown?.taxesDetail) {
             diagnostics.warnings.push(`[${projectId}] taxesDetail present as reference/debug only (not used as default tax source in live model)`);
           }
