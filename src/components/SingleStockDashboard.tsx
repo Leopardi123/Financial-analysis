@@ -5300,6 +5300,10 @@ Capital Available: ${availableLabel}`,
                               discountRate: inputs.r,
                               tpPeriod: inputs.tp,
                               debugEnabled,
+                              fxUsdToTarget: inputs.fx,
+                              sharesPostFinancing: inputs.sharesPostFinancing,
+                              netCashTarget: (inputs.cash0 !== null && inputs.debt0 !== null) ? (inputs.cash0 - inputs.debt0) : null,
+                              capexSeries: Array.isArray(inputs.series.capexUSD) ? inputs.series.capexUSD : null,
                             };
                           })()}
                           currentYear={(() => {

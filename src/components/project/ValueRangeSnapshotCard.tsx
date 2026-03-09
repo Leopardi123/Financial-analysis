@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Chart } from "react-google-charts";
+import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
 
 type TpMarker = {
   tp: number;
@@ -30,6 +31,10 @@ type ValueRangeSnapshotCardProps = {
     discountRate?: number | null;
     tpPeriod?: number | null;
     debugEnabled?: boolean;
+    fxUsdToTarget?: number | null;
+    sharesPostFinancing?: number | null;
+    netCashTarget?: number | null;
+    capexSeries?: Array<number | null> | null;
   } | null;
 };
 
@@ -412,7 +417,51 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       .filter((row) => row.postTp);
 
     const focus = points.filter((row) => row.flowIndex >= 0 && row.flowIndex <= 3);
-    return { points, focus };
+
+    const centralTodayBasisRows = focus.map((row) => {
+      const tpAtPoint = tp !== null ? tp + row.flowIndex : null;
+      const hasCentralInputs = tpAtPoint !== null && r !== null && fcffSeries.length > 0;
+      const central = hasCentralInputs
+        ? computeLista2CfDcfMetrics({
+            fcfUSD_total: fcffSeries,
+            masterN: fcffSeries.length - 1,
+            productionStartPeriod: tpAtPoint,
+            discountRate: r as number,
+            shares_post_financing: projectDebug.sharesPostFinancing ?? null,
+            fx_USD_to_TargetCurrency: projectDebug.fxUsdToTarget ?? null,
+            npvToday_USD: null,
+            netCash_t0_post_TargetCurrency: projectDebug.netCashTarget ?? null,
+            capexUSD_total: Array.isArray(projectDebug.capexSeries) ? projectDebug.capexSeries : undefined,
+          })
+        : null;
+
+      const highPresentUsedNow = row.sourceHighRaw ?? null;
+      const highPresentFromCentral = central?.metrics.DCF_prodStart_present_perShare_TargetCurrency ?? null;
+      const lowPresentUsedNow = (() => {
+        if (row.sourceLowRaw === null || r === null || tp === null || row.flowIndex < 0) return null;
+        return row.sourceLowRaw / ((1 + r) ** (tp + row.flowIndex));
+      })();
+      const lowPresentFromCentral = central?.metrics.NAV_prodStart_perShare_TargetCurrency ?? null;
+
+      return {
+        pointLabel: row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`,
+        periodIndex: row.periodIndex,
+        calendarYear: row.calendarYear,
+        highPresentUsedNow,
+        highPresentFromCentral,
+        lowPresentUsedNow,
+        lowPresentFromCentral,
+        highUsedSourceName: 'chartFlows.dcfProdstartPresentPerShareSeries',
+        highCentralSourceName: 'derived from NPV/List2 central FCFF + computeLista2CfDcfMetrics',
+        lowUsedSourceName: 'chartFlows.navProdstartPerShareSeries (normalized to today-basis in debug only)',
+        lowCentralSourceName: 'derived from NPV/List2 central FCFF + computeLista2CfDcfMetrics',
+        diffHighPresent: highPresentUsedNow !== null && highPresentFromCentral !== null ? highPresentUsedNow - highPresentFromCentral : null,
+        diffLowPresent: lowPresentUsedNow !== null && lowPresentFromCentral !== null ? lowPresentUsedNow - lowPresentFromCentral : null,
+        notes: lowPresentUsedNow === null ? 'Low used-now kunde inte normaliseras till today-basis med tillgängliga inputs.' : null,
+      };
+    });
+
+    return { points, focus, centralTodayBasisRows };
   }, [projectChartModel, projectDebug]);
 
   if (isProjectMode) {
@@ -501,6 +550,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               <div style={{ overflowX: "auto" }}><strong>4. Period index mapping</strong><table><thead><tr><th>periodIndex</th><th>calendarYear(graf)</th><th>tp</th><th>tpOffset</th><th>flowIndex</th><th>calendarYear(series)</th><th>exponent(high)</th></tr></thead><tbody>{graphDebug2.points.map((row) => <tr key={`map2-${row.periodIndex}`}><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.tp ?? "null"}</td><td>{projectChartModel.tpOffset}</td><td>{row.flowIndex}</td><td>{row.calendarFromSeries ?? "null"}</td><td>{row.exponentHigh ?? "null"}</td></tr>)}</tbody></table></div>
               <div style={{ overflowX: "auto" }}><strong>5. DCF verification</strong><table><thead><tr><th>point</th><th>source input raw</th><th>basis</th><th>graph value</th><th>correct DCF(t)</th><th>diff</th></tr></thead><tbody>{graphDebug2.focus.map((row) => <tr key={`dcf2-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>{row.sourceHighRaw ?? "null"}</td><td>present/today</td><td>{row.graphHighValue ?? "null"}</td><td>{row.correctHighValue ?? "null"}</td><td>{row.diffHigh ?? "null"}</td></tr>)}</tbody></table></div>
               <div style={{ overflowX: "auto" }}><strong>6. Difference table</strong><table><thead><tr><th>point</th><th>series</th><th>source input</th><th>basis</th><th>graph formula</th><th>graph value</th><th>correct value</th><th>diff</th></tr></thead><tbody>{graphDebug2.focus.flatMap((row) => ([<tr key={`high-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>high</td><td>{row.sourceHighRaw ?? "null"}</td><td>{row.sourceBasisHigh}</td><td>raw * (1+inferredRate)^periodIndex</td><td>{row.graphHighValue ?? "null"}</td><td>{row.correctHighValue ?? "null"}</td><td>{row.diffHigh ?? "null"}</td></tr>, <tr key={`low-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>low</td><td>{row.sourceLowRaw ?? "null"}</td><td>{row.sourceBasisLow}</td><td>raw (ingen uppräkning)</td><td>{row.graphLowValue ?? "null"}</td><td>null</td><td>null</td></tr>]))}</tbody></table></div>
+              <div style={{ overflowX: "auto" }}><strong>Centralkälla vs grafens nuvärden</strong><table><thead><tr><th>point</th><th>periodIndex</th><th>calendarYear</th><th>high_present_used_now</th><th>high_present_from_central_npv_source</th><th>low_present_used_now</th><th>low_present_from_central_npv_source</th><th>high_used_source_name</th><th>high_central_source_name</th><th>low_used_source_name</th><th>low_central_source_name</th><th>diff_high_present</th><th>diff_low_present</th><th>notes</th></tr></thead><tbody>{graphDebug2.centralTodayBasisRows.map((row) => <tr key={`central-vs-graph-${row.periodIndex}`}><td>{row.pointLabel}</td><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.highPresentUsedNow ?? "null"}</td><td>{row.highPresentFromCentral ?? "null"}</td><td>{row.lowPresentUsedNow ?? "null"}</td><td>{row.lowPresentFromCentral ?? "null"}</td><td>{row.highUsedSourceName}</td><td>{row.highCentralSourceName}</td><td>{row.lowUsedSourceName}</td><td>{row.lowCentralSourceName}</td><td>{row.diffHighPresent ?? "null"}</td><td>{row.diffLowPresent ?? "null"}</td><td>{row.notes ?? ""}</td></tr>)}</tbody></table></div>
               <div><strong>TP-ankare</strong><div>TP high kommer från prop <code>tpHigh</code> (list2 DCF_perShare) om finite, annars från <code>dcfSeriesRaw[0]</code> från chartFlows.</div><div>TP+1 för high går via chartFlows + uppräkning med inferredRate-pipeline.</div></div>
             </div>
           </details>
