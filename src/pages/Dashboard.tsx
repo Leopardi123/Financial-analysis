@@ -20,6 +20,10 @@ export default function Dashboard() {
           description="HÄR SKALL EVENTUELLT ALLT ÖVERSIKTLIGT VARA"
           background="#bfcfc2"
         >
+          <div className="breadcontainersinglecolumn">
+            <h2 className="subrub small">Göromål</h2>
+            <p className="bread">Inga göromål just nu.</p>
+          </div>
           <div className="breadcontainerdoublecolumn">
             <div className="subrub">Översiktligheter</div>
             <p className="bread">
