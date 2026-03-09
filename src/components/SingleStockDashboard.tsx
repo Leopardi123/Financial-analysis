@@ -5298,6 +5298,8 @@ Capital Available: ${availableLabel}`,
                               fcffProductionTableSeries: Array.isArray(snapshotSeries?.fcffUSD) ? snapshotSeries.fcffUSD : null,
                               fcffNpvSeries: Array.isArray(inputs.series.fcfUSD) ? inputs.series.fcfUSD : null,
                               discountRate: inputs.r,
+                              tpPeriod: inputs.tp,
+                              debugEnabled,
                             };
                           })()}
                           currentYear={(() => {
