@@ -999,3 +999,25 @@ test('project npv spot range includes scenario metrics beyond npv', async () => 
   assert.equal(typeof range?.base.irr === 'number' || range?.base.irr === null, true);
   assert.equal(typeof range?.base.payback === 'number' || range?.base.payback === null, true);
 });
+
+test('project chart flows expose centrally computed key metrics by period for UI chart rendering', async () => {
+  const body = await loadFixture();
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const chartFlows = result.snapshot.project?.chartFlows;
+  const central = chartFlows?.keyMetricsChartByPeriod;
+  assert.ok(central);
+  assert.equal(Array.isArray(central?.periodIndex), true);
+  assert.equal(Array.isArray(central?.years), true);
+  assert.equal(Array.isArray(central?.dcfProdstartPresentPerShareSeries), true);
+  assert.equal(Array.isArray(central?.navProdstartPerShareSeries), true);
+
+  const length = central?.periodIndex?.length ?? 0;
+  assert.equal(length > 0, true);
+  assert.equal(central?.periodIndex?.[0], 0);
+  assert.equal(central?.years?.length, length);
+  assert.equal(central?.dcfProdstartPresentPerShareSeries?.length, length);
+  assert.equal(central?.navProdstartPerShareSeries?.length, length);
+});

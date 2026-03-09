@@ -3204,11 +3204,40 @@ export async function runCorporateSnapshotPipeline(args: {
           return {
             dcfProdstartPresentPerShareSeries: [] as Array<number | null>,
             navProdstartPerShareSeries: [] as Array<number | null>,
+            keyMetricsChartByPeriod: {
+              periodIndex: [] as number[],
+              years: [] as number[],
+              dcfProdstartPresentPerShareSeries: [] as Array<number | null>,
+              navProdstartPerShareSeries: [] as Array<number | null>,
+            },
           };
         }
         const rangeEnd = Math.min(aggregationEffective.corporateMasterN, tpEff + 5);
         const dcfProdstartPresentPerShareSeries: Array<number | null> = [];
         const navProdstartPerShareSeries: Array<number | null> = [];
+        const periodIndex: number[] = [];
+        const years: number[] = [];
+        const dcfProdstartPresentPerShareSeriesByPeriod: Array<number | null> = [];
+        const navProdstartPerShareSeriesByPeriod: Array<number | null> = [];
+
+        for (let tp = 0; tp <= rangeEnd; tp += 1) {
+          const metricsAtTp = computeLista2CfDcfMetrics({
+            fcfUSD_total: aggregationEffective.fcffUSD_total,
+            capexUSD_total: aggregationEffective.capexUSD_total,
+            masterN: aggregationEffective.corporateMasterN,
+            productionStartPeriod: tp,
+            discountRate: input.discountRate,
+            shares_post_financing: shares_post_financing_fd_effective,
+            fx_USD_to_TargetCurrency: fxRate,
+            npvToday_USD: aggregationEffective.NPV_today_USD,
+            netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+          });
+          periodIndex.push(tp);
+          years.push(aggregationEffective.corporateYearsByPeriod[tp] ?? (new Date().getUTCFullYear() + tp));
+          dcfProdstartPresentPerShareSeriesByPeriod.push(metricsAtTp.metrics.DCF_prodStart_present_perShare_TargetCurrency);
+          navProdstartPerShareSeriesByPeriod.push(metricsAtTp.metrics.NAV_prodStart_perShare_TargetCurrency);
+        }
+
         for (let tp = tpEff; tp <= rangeEnd; tp += 1) {
           const metricsAtTp = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
@@ -3227,6 +3256,12 @@ export async function runCorporateSnapshotPipeline(args: {
         return {
           dcfProdstartPresentPerShareSeries,
           navProdstartPerShareSeries,
+          keyMetricsChartByPeriod: {
+            periodIndex,
+            years,
+            dcfProdstartPresentPerShareSeries: dcfProdstartPresentPerShareSeriesByPeriod,
+            navProdstartPerShareSeries: navProdstartPerShareSeriesByPeriod,
+          },
         };
       })();
 
