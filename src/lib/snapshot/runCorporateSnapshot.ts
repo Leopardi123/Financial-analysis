@@ -1327,7 +1327,7 @@ type SnapshotDiagnostics = {
     metalRevenueDiagnostics?: Record<string, MetalRevenueDiagnosticEntry[]>;
     metalPriceDiagnostics?: Record<string, MetalPriceDiagnostic>;
     metalsUsingLivePrices?: string[];
-    metalsUsingJsonFallback?: string[];
+    metalsUsingManualFallback?: string[];
     metalsWithPriceFailure?: string[];
     royaltiesDiagnostics?: Record<string, {
       grossRevenueUSDNumeric: boolean;
@@ -1514,7 +1514,7 @@ export async function runCorporateSnapshotPipeline(args: {
           const to = `${yearsByPeriod[yearsByPeriod.length - 1]}-12-31`;
 
           const resolved = await resolveProjectPricesToEngineInput(
-            { parsed, from, to, scenario: resolverScenario, projectId, spotAnchorDateUtc },
+            { parsed, from, to, scenario: resolverScenario, projectId, spotAnchorDateUtc, manualMetalPriceByKey: input.manualMetalPrices },
             {},
           );
 
@@ -2126,15 +2126,15 @@ export async function runCorporateSnapshotPipeline(args: {
     diagnostics.meta.metalRevenueDiagnostics = metalRevenueDiagnostics;
     diagnostics.meta.metalPriceDiagnostics = metalPriceDiagnosticsByMetal;
     diagnostics.meta.metalsUsingLivePrices = Object.entries(metalPriceDiagnosticsByMetal)
-      .filter(([, item]) => item.priceSourceUsed === 'live')
+      .filter(([, item]) => item.priceSourceUsed === 'fmp')
       .map(([metal]) => metal)
       .sort((a, b) => a.localeCompare(b));
-    diagnostics.meta.metalsUsingJsonFallback = Object.entries(metalPriceDiagnosticsByMetal)
-      .filter(([, item]) => item.priceSourceUsed === 'json-fallback')
+    diagnostics.meta.metalsUsingManualFallback = Object.entries(metalPriceDiagnosticsByMetal)
+      .filter(([, item]) => item.priceSourceUsed === 'manual')
       .map(([metal]) => metal)
       .sort((a, b) => a.localeCompare(b));
     diagnostics.meta.metalsWithPriceFailure = Object.entries(metalPriceDiagnosticsByMetal)
-      .filter(([, item]) => item.priceSourceUsed === 'failure')
+      .filter(([, item]) => item.priceSourceUsed === 'missing' || item.priceSourceUsed === 'expired')
       .map(([metal]) => metal)
       .sort((a, b) => a.localeCompare(b));
 

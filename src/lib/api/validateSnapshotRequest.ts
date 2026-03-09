@@ -1,4 +1,5 @@
 import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
+import type { ManualMetalPriceEntry } from '../engine/pricing/resolveMetalPrice.ts';
 
 type SnapshotScenarioControls = {
   delayPeriods?: number;
@@ -52,6 +53,7 @@ export type SnapshotRequest = {
     rawJson: Record<string, unknown>;
   }>;
   symbol?: string;
+  manualMetalPrices?: Record<string, ManualMetalPriceEntry>;
 };
 
 type ValidationResult =
@@ -510,6 +512,25 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     }
   }
 
+  const manualMetalPrices: SnapshotRequest['manualMetalPrices'] = (() => {
+    if (!isObject(body.manualMetalPrices)) return undefined;
+    const out: Record<string, ManualMetalPriceEntry> = {};
+    for (const [key, valueRaw] of Object.entries(body.manualMetalPrices)) {
+      if (!isObject(valueRaw)) continue;
+      const value = readFiniteNumber(valueRaw.value);
+      if (value === null) continue;
+      out[key] = {
+        metalKey: typeof valueRaw.metalKey === 'string' ? valueRaw.metalKey : key,
+        displayName: typeof valueRaw.displayName === 'string' ? valueRaw.displayName : key,
+        unit: typeof valueRaw.unit === 'string' ? valueRaw.unit : null,
+        value,
+        enteredAtUtc: typeof valueRaw.enteredAtUtc === 'string' ? valueRaw.enteredAtUtc : new Date().toISOString(),
+        expiresAtUtc: typeof valueRaw.expiresAtUtc === 'string' ? valueRaw.expiresAtUtc : new Date().toISOString(),
+      };
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  })();
+
   if (errors.length > 0) {
     return { ok: false, errors, warnings };
   }
@@ -543,6 +564,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     financingPlanByProject: isObject(financingPlanByProjectRaw) ? financingPlanByProject : undefined,
     buildFundingNeed_USD: buildFundingNeed,
     scenario,
+    manualMetalPrices,
   };
 
   return {

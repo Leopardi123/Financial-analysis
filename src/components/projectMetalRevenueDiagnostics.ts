@@ -26,7 +26,7 @@ export function extractFallbackOrFailingPriceMetals(raw: unknown): string[] {
     .filter(([, itemRaw]) => {
       const item = (itemRaw ?? null) as Record<string, unknown> | null;
       const source = typeof item?.priceSourceUsed === 'string' ? item.priceSourceUsed : '';
-      return source === 'json-fallback' || source === 'failure';
+      return source === 'manual' || source === 'missing' || source === 'expired';
     })
     .map(([metal]) => metal)
     .sort((a, b) => a.localeCompare(b));

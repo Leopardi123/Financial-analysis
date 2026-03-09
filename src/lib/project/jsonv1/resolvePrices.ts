@@ -5,6 +5,7 @@ import type { QtyUnit } from './schema.ts';
 import type { ParsedProjectJsonV1 } from './parse.ts';
 import { resolvePriceSeries, type PriceScenario as CorePriceScenario } from '../../prices/resolve.ts';
 import { getCommodityPriceKeyForLegacySymbol, getLegacySymbolForPriceKey } from '../../prices/providers/legacyCommoditySymbolMap.ts';
+import { resolveMetalPrice, type ManualMetalPriceEntry } from '../../engine/pricing/resolveMetalPrice.ts';
 
 export type PriceScenario =
   | { mode: 'spot' }
@@ -23,10 +24,12 @@ export type MetalPriceDiagnostic = {
   sanityBandUsed: { min: number; max: number; unit: string } | null;
   sanityPass: boolean | null;
   sanityReason: string | null;
-  jsonFallbackAvailable: boolean;
-  jsonFallbackValue: number | null;
+  manualFallbackAvailable: boolean;
+  manualFallbackValue: number | null;
   fallbackUsed: boolean;
-  priceSourceUsed: 'live' | 'json-fallback' | 'failure' | 'scenario-series';
+  priceSourceUsed: 'fmp' | 'manual' | 'missing' | 'expired' | 'scenario-series';
+  manualEnteredAtUtc?: string | null;
+  manualExpiresAtUtc?: string | null;
   reason: string;
 };
 
@@ -156,6 +159,7 @@ export async function resolveProjectPricesToEngineInput(
     allowRefresh?: boolean;
     projectId?: string;
     spotAnchorDateUtc?: string;
+    manualMetalPriceByKey?: Record<string, ManualMetalPriceEntry>;
   },
   deps: { resolvePriceSeriesFn?: typeof resolvePriceSeries } = {},
 ): Promise<ProjectEngineFullProductionV1Input & {
@@ -163,7 +167,7 @@ export async function resolveProjectPricesToEngineInput(
     warnings: string[];
     metalPriceDiagnostics?: Record<string, MetalPriceDiagnostic>;
     metalsUsingLivePrices?: string[];
-    metalsUsingJsonFallback?: string[];
+    metalsUsingManualFallback?: string[];
     metalsWithPriceFailure?: string[];
   };
 }> {
@@ -335,56 +339,31 @@ export async function resolveProjectPricesToEngineInput(
     }
 
     const resolvedPrice = await resolveSeriesWithCuFallback({ metal, requestedPriceKey: priceKey });
-    const jsonFallbackSeries = parsed.priceOverrides.spotPriceUSDByMetal?.[metal] ?? new Array<number | null>(len).fill(null);
 
     const livePriceValue = resolvedPrice.resolvedSeries.find((value: number | null) => typeof value === 'number' && Number.isFinite(value)) ?? null;
-    const jsonFallbackValue = jsonFallbackSeries.find((value: number | null) => typeof value === 'number' && Number.isFinite(value)) ?? null;
     const livePriceAvailable = livePriceValue !== null;
-    const jsonFallbackAvailable = jsonFallbackValue !== null;
 
     let selectedSeries = [...resolvedPrice.resolvedSeries];
-    let priceSourceUsed: MetalPriceDiagnostic['priceSourceUsed'] = scenario.mode === 'spot' ? 'failure' : 'scenario-series';
-    let sourceReason = scenario.mode === 'spot'
-      ? `Live price unavailable for ${priceKey}; no JSON fallback configured.`
-      : `Scenario mode=${scenario.mode}; resolved scenario series used.`;
+    let priceSourceUsed: MetalPriceDiagnostic['priceSourceUsed'] = 'scenario-series';
+    let sourceReason = `Scenario mode=${scenario.mode}; resolved scenario series used.`;
+    let manualFallbackValue: number | null = null;
+    let manualFallbackAvailable = false;
+    let manualEnteredAtUtc: string | null = null;
+    let manualExpiresAtUtc: string | null = null;
 
     const sanity = evaluateLiveSanity({ priceKey, liveValue: livePriceValue });
 
     if (scenario.mode === 'spot') {
-      selectedSeries = Array.from({ length: len }, (_, t) => {
-        const liveRaw = resolvedPrice.resolvedSeries[t] ?? null;
-        const live = typeof liveRaw === 'number' && Number.isFinite(liveRaw) ? liveRaw : null;
-        const liveAccepted = sanity.pass === false ? null : live;
-        if (typeof liveAccepted === 'number' && Number.isFinite(liveAccepted)) return liveAccepted;
-        const fallback = jsonFallbackSeries[t] ?? null;
-        return typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : null;
-      });
-      const hasAnySelected = selectedSeries.some((value) => typeof value === 'number' && Number.isFinite(value));
-      const fallbackUsed = selectedSeries.some((value, t) => {
-        const fallback = jsonFallbackSeries[t] ?? null;
-        const liveRaw = resolvedPrice.resolvedSeries[t] ?? null;
-        const live = typeof liveRaw === 'number' && Number.isFinite(liveRaw) ? liveRaw : null;
-        const liveAccepted = sanity.pass === false ? null : live;
-        return typeof fallback === 'number' && Number.isFinite(fallback)
-          && (liveAccepted === null)
-          && value === fallback;
-      });
-
-      if (livePriceAvailable && sanity.pass !== false) {
-        priceSourceUsed = 'live';
-        sourceReason = `Live spot available for ${priceKey}; sanity passed${sanity.reason ? ` (${sanity.reason})` : ''}.`;
-      } else if (fallbackUsed && jsonFallbackAvailable && hasAnySelected) {
-        priceSourceUsed = 'json-fallback';
-        sourceReason = sanity.pass === false
-          ? `Live spot for ${priceKey} rejected by sanity check; using project JSON fallback price.`
-          : `Live price unavailable for ${priceKey}; using project JSON fallback price.`;
-      } else if (livePriceAvailable && sanity.pass === false) {
-        priceSourceUsed = 'failure';
-        sourceReason = `Live spot for ${priceKey} rejected by sanity check and JSON fallback is missing.`;
-      } else {
-        priceSourceUsed = 'failure';
-        sourceReason = `Live price unavailable for ${priceKey} and JSON fallback is missing.`;
-      }
+      const fmpSpotValue = sanity.pass === false ? null : livePriceValue;
+      const manualEntry = args.manualMetalPriceByKey?.[priceKey] ?? null;
+      const resolved = resolveMetalPrice({ metal, metalKey: priceKey, fmpSpotValue, manualEntry });
+      selectedSeries = new Array<number | null>(len).fill(resolved.value);
+      priceSourceUsed = resolved.source;
+      sourceReason = resolved.reason ?? (resolved.source === 'fmp' ? `FMP spot available for ${priceKey}.` : `Missing spot for ${priceKey}.`);
+      manualFallbackValue = manualEntry?.value ?? null;
+      manualFallbackAvailable = typeof manualEntry?.value === 'number' && Number.isFinite(manualEntry.value);
+      manualEnteredAtUtc = manualEntry?.enteredAtUtc ?? null;
+      manualExpiresAtUtc = manualEntry?.expiresAtUtc ?? null;
     }
 
     spotPriceUSDByMetal[metal] = selectedSeries;
@@ -394,7 +373,7 @@ export async function resolveProjectPricesToEngineInput(
     }
 
     const liveSymbol = getLegacySymbolForPriceKey(priceKey);
-    const fallbackUsed = priceSourceUsed === 'json-fallback';
+    const fallbackUsed = priceSourceUsed === 'manual';
     const normalizedOutputValue = selectedSeries.find((value: number | null) => typeof value === 'number' && Number.isFinite(value)) ?? null;
 
     metalPriceDiagnostics[metal] = {
@@ -409,15 +388,17 @@ export async function resolveProjectPricesToEngineInput(
       sanityBandUsed: sanity.band,
       sanityPass: sanity.pass,
       sanityReason: sanity.reason,
-      jsonFallbackAvailable,
-      jsonFallbackValue,
+      manualFallbackAvailable,
+      manualFallbackValue,
       fallbackUsed,
       priceSourceUsed,
       reason: sourceReason,
+      manualEnteredAtUtc,
+      manualExpiresAtUtc,
     };
 
     pushWarning(
-      `price source metal=${metal} -> ${priceSourceUsed}${livePriceAvailable ? ` live=${String(livePriceValue)}` : ''}${sanity.pass === false ? ` sanity=failed band=${sanity.band ? `${sanity.band.min}-${sanity.band.max} ${sanity.band.unit}` : 'n/a'}` : ''}${priceSourceUsed === 'json-fallback' ? ` fallback=${String(jsonFallbackValue)}` : ''}${!livePriceAvailable ? ` (live price unavailable for ${priceKey})` : ''}`,
+      `price source metal=${metal} -> ${priceSourceUsed}${livePriceAvailable ? ` live=${String(livePriceValue)}` : ''}${sanity.pass === false ? ` sanity=failed band=${sanity.band ? `${sanity.band.min}-${sanity.band.max} ${sanity.band.unit}` : 'n/a'}` : ''}${priceSourceUsed === 'manual' ? ` manualFallback=${String(manualFallbackValue)}` : ''}${!livePriceAvailable ? ` (live price unavailable for ${priceKey})` : ''}`,
     );
 
     const needsCuBasisWarning = metal === 'Cu' && resolvedPrice.derived === true;
@@ -446,20 +427,20 @@ export async function resolveProjectPricesToEngineInput(
   }
 
   const metalsUsingLivePrices = Object.entries(metalPriceDiagnostics)
-    .filter(([, item]) => item.priceSourceUsed === 'live')
+    .filter(([, item]) => item.priceSourceUsed === 'fmp')
     .map(([metal]) => metal)
     .sort((a, b) => a.localeCompare(b));
-  const metalsUsingJsonFallback = Object.entries(metalPriceDiagnostics)
-    .filter(([, item]) => item.priceSourceUsed === 'json-fallback')
+  const metalsUsingManualFallback = Object.entries(metalPriceDiagnostics)
+    .filter(([, item]) => item.priceSourceUsed === 'manual')
     .map(([metal]) => metal)
     .sort((a, b) => a.localeCompare(b));
   const metalsWithPriceFailure = Object.entries(metalPriceDiagnostics)
-    .filter(([, item]) => item.priceSourceUsed === 'failure')
+    .filter(([, item]) => item.priceSourceUsed === 'missing' || item.priceSourceUsed === 'expired')
     .map(([metal]) => metal)
     .sort((a, b) => a.localeCompare(b));
 
   pushWarning(`metalsUsingLivePrices=[${metalsUsingLivePrices.join(',')}]`);
-  pushWarning(`metalsUsingJsonFallback=[${metalsUsingJsonFallback.join(',')}]`);
+  pushWarning(`metalsUsingManualFallback=[${metalsUsingManualFallback.join(',')}]`);
   pushWarning(`metalsWithPriceFailure=[${metalsWithPriceFailure.join(',')}]`);
 
   let auPriceUSDPerOz: Array<number | null> = await resolveSeriesForPriceKey(parsed.engineInputWithoutPrices.auPriceKey);
@@ -478,11 +459,7 @@ export async function resolveProjectPricesToEngineInput(
     });
   }
 
-  if (parsed.priceOverrides.spotPriceUSDByMetal) {
-    for (const [metal, series] of Object.entries(parsed.priceOverrides.spotPriceUSDByMetal)) {
-      spotPriceUSDByMetal[metal] = [...series];
-    }
-  }
+
 
   if (parsed.priceOverrides.auPriceUSDPerOz) {
     auPriceUSDPerOz = [...parsed.priceOverrides.auPriceUSDPerOz];
@@ -510,7 +487,7 @@ export async function resolveProjectPricesToEngineInput(
           warnings,
           metalPriceDiagnostics,
           metalsUsingLivePrices,
-          metalsUsingJsonFallback,
+          metalsUsingManualFallback,
           metalsWithPriceFailure,
         },
       }
