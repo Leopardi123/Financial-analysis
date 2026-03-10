@@ -1216,7 +1216,7 @@ type SingleStockDashboardProps = {
 };
 
 export default function SingleStockDashboard({ onTickerChange }: SingleStockDashboardProps = {}) {
-  const { ticker, data, error, fetchCompany } = useCompanyData("AAPL");
+  const { ticker, data, loading, error, fetchCompany } = useCompanyData("");
   const [quarterlyData, setQuarterlyData] = useState<CompanyResponse | null>(null);
   const [availableTickers, setAvailableTickers] = useState<string[]>([]);
   const [tickersError, setTickersError] = useState<string | null>(null);
@@ -4225,6 +4225,7 @@ Capital Available: ${availableLabel}`,
   const companyHeaderTitle = profile?.companyName
     ? `${profile.companyName}${selectedTickerLabel ? ` (${selectedTickerLabel})` : ""}`
     : selectedTickerLabel;
+  const hasSelectedCompany = Boolean(data?.ticker && !error);
 
   return (
     <div className="single-stock-dashboard">
@@ -4267,63 +4268,59 @@ Capital Available: ${availableLabel}`,
               </button>
             </div>
             {tickersError && <p className="status error">{tickersError}</p>}
+            {loading && <p className="status">Fetching company…</p>}
             {error && <p className="status error">{error}</p>}
           </div>
         </div>
       </div>
 
-      {showAdmin && <Admin onTickersUpserted={loadTickers} />}
+      {hasSelectedCompany && (
+        <>
+          {showAdmin && <Admin onTickersUpserted={loadTickers} />}
 
-      <div className="breadcontainersinglecolumn">
-        <div className="producer-core-compact-card single-stock-header-card">
-          {companyHeaderTitle ? <h1 id="SingleStock_Stock_Name" className="subrub">{companyHeaderTitle}</h1> : null}
-          <section className="producer-core-section single-stock-header-body">
-            <p className="bread">
-              {profile?.description
-                ? String(profile.description)
-                : "Välj ticker för att se bolagsbeskrivning och data."}
-            </p>
-          </section>
-        </div>
-      </div>
-
-      {profile && (
-        <div className="breadcontainersinglecolumn">
-          <div className="producer-core-compact-card company-profile-card">
-            <section className="producer-core-section">
-              <div className="producer-core-title-row">
-                <h2 className="subrub small" style={{ margin: 0 }}>Company Profile</h2>
-              </div>
-              <div className="compact-metrics-grid company-profile-grid">
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Sektor</span>
-                  <span className="compact-metric-value">{String(profile.sector ?? "—")}</span>
+          <div className="breadcontainersinglecolumn">
+            <div className="producer-core-compact-card single-stock-header-card">
+              {companyHeaderTitle ? <h1 id="SingleStock_Stock_Name" className="subrub">{companyHeaderTitle}</h1> : null}
+              <section className="producer-core-section single-stock-header-body">
+                <p className="bread">
+                  {profile?.description
+                    ? String(profile.description)
+                    : "—"}
+                </p>
+              </section>
+              <section className="producer-core-section single-stock-profile-body">
+                <div className="producer-core-title-row">
+                  <h2 className="subrub small" style={{ margin: 0 }}>Company Profile</h2>
                 </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Industri</span>
-                  <span className="compact-metric-value">{String(profile.industry ?? "—")}</span>
+                <div className="compact-metrics-grid company-profile-grid">
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Sektor</span>
+                    <span className="compact-metric-value">{String(profile?.sector ?? "—")}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Industri</span>
+                    <span className="compact-metric-value">{String(profile?.industry ?? "—")}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Valuta</span>
+                    <span className="compact-metric-value">{String(profile?.currency ?? "—")}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Börs</span>
+                    <span className="compact-metric-value">{exchangeDisplay ? String(exchangeDisplay) : "—"}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Aktiepris</span>
+                    <span className="compact-metric-value">{formatPriceValue(priceValue)}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Börsvärde</span>
+                    <span className="compact-metric-value">{formatMarketCapValue(marketCapValue)}</span>
+                  </div>
                 </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Valuta</span>
-                  <span className="compact-metric-value">{String(profile.currency ?? "—")}</span>
-                </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Börs</span>
-                  <span className="compact-metric-value">{exchangeDisplay ? String(exchangeDisplay) : "—"}</span>
-                </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Aktiepris</span>
-                  <span className="compact-metric-value">{formatPriceValue(priceValue)}</span>
-                </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Börsvärde</span>
-                  <span className="compact-metric-value">{formatMarketCapValue(marketCapValue)}</span>
-                </div>
-              </div>
-            </section>
+              </section>
+            </div>
           </div>
-        </div>
-      )}
 
       <div className="breadcontainersinglecolumn">
         <h2 className="subrub small">Göromål</h2>
@@ -6448,6 +6445,8 @@ Capital Available: ${availableLabel}`,
             </>
           )}
         </div>
+      )}
+        </>
       )}
       {manualPriceModalOpen && manualPriceModalTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "grid", placeItems: "center", zIndex: 2000 }}>
