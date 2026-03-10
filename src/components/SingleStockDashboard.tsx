@@ -6,6 +6,7 @@ import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import AlltGickFelCard from "./project/AlltGickFelCard";
+import type { StressOptions } from "../lib/snapshot/applyStressModifiers.ts";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
 import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
@@ -533,6 +534,7 @@ function buildProjectsSnapshotRequest(args: {
     price_current_TargetCurrency: number;
   };
   manualMetalPrices?: SnapshotRequest["manualMetalPrices"];
+  stressOptions?: SnapshotRequest["stressOptions"];
 }): SnapshotRequest {
   const lockedTargetCurrency = resolveProfileTargetCurrency(args.profile);
   return {
@@ -543,6 +545,7 @@ function buildProjectsSnapshotRequest(args: {
     market: args.market,
     projects: args.projects,
     manualMetalPrices: args.manualMetalPrices,
+    stressOptions: args.stressOptions,
   };
 }
 
@@ -1259,6 +1262,11 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
   const [selectedProjectRawJson, setSelectedProjectRawJson] = useState<Record<string, unknown> | null>(null);
+  const [stressOptions, setStressOptions] = useState<StressOptions>({});
+  const [stressSnapshotLoading, setStressSnapshotLoading] = useState(false);
+  const [stressSnapshotError, setStressSnapshotError] = useState<string | null>(null);
+  const [stressSnapshotData, setStressSnapshotData] = useState<Record<string, unknown> | null>(null);
+  const [stressEdgeCases, setStressEdgeCases] = useState<string[]>([]);
   const [projectEquityPct, setProjectEquityPct] = useState("100");
   const [projectDebtPct, setProjectDebtPct] = useState("0");
   const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
@@ -1611,6 +1619,10 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     setProjectSnapshotWarnings([]);
     setProjectSnapshotErrors([]);
     setProjectSnapshotDiagnosticsMeta(null);
+    setStressSnapshotData(null);
+    setStressSnapshotError(null);
+    setStressEdgeCases([]);
+    setStressOptions({});
 
     try {
       const project = await getCompanyProject(ticker, projectId);
@@ -1658,6 +1670,82 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       setProjectSnapshotLoading(false);
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    const hasStress = Object.values(stressOptions).some((value) => value === true);
+    if (!selectedProjectId || !selectedProjectRawJson || !hasStress) {
+      setStressSnapshotData(null);
+      setStressSnapshotError(null);
+      setStressEdgeCases([]);
+      setStressSnapshotLoading(false);
+      return;
+    }
+
+    const run = async () => {
+      setStressSnapshotLoading(true);
+      setStressSnapshotError(null);
+      setStressEdgeCases([]);
+      try {
+        const discountRatePct = toInputNumber(riskAdjustedDiscountRatePctInput);
+        const discountRate = typeof discountRatePct === "number" && Number.isFinite(discountRatePct)
+          ? discountRatePct / 100
+          : Number.NaN;
+        const profileSharesCurrent = resolveCommonSharesCurrent({
+          balance: data?.balance as Record<string, Array<number | null>> | undefined,
+          income: data?.income as Record<string, Array<number | null>> | undefined,
+        });
+        const profileSharesOutstanding = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding) && profile.sharesOutstanding > 0
+          ? profile.sharesOutstanding
+          : undefined;
+        const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding;
+        const profilePriceCurrent = typeof profile?.price === "number" ? profile.price : undefined;
+        const marketFromProfile =
+          isPositiveFinite(sharesCurrent) && isPositiveFinite(profilePriceCurrent)
+            ? {
+                shares_current: sharesCurrent,
+                price_current_TargetCurrency: profilePriceCurrent,
+              }
+            : undefined;
+        const request = buildProjectsSnapshotRequest({
+          profile,
+          discountRate,
+          scenario: { mode: "spot" },
+          fx: {
+            source: lockedTargetCurrency === "USD" ? "manual" : fxSource,
+            anchor: "today",
+            scenario: { mode: "spot" },
+            manual_fx_USD_to_TargetCurrency: lockedTargetCurrency === "USD" ? 1 : toInputNumber(manualFxInput),
+          },
+          projects: [{ projectId: selectedProjectId, rawJson: selectedProjectRawJson }],
+          market: marketFromProfile,
+          manualMetalPrices,
+        });
+        const result = await postCorporateSnapshot({ ...request, stressOptions }, { refresh: lockedTargetCurrency !== "USD" });
+        if (cancelled) return;
+        if (!result.ok || !result.snapshot) {
+          setStressSnapshotData(null);
+          setStressSnapshotError((result.diagnostics?.errors ?? ["Stress snapshot request failed."]).join("\n"));
+          const edge = (((result.diagnostics?.meta ?? {}) as Record<string, unknown>).stress as { edgeCases?: string[] } | undefined)?.edgeCases;
+          setStressEdgeCases(Array.isArray(edge) ? edge : []);
+          return;
+        }
+        setStressSnapshotData(result.snapshot as Record<string, unknown>);
+        const edge = (((result.diagnostics?.meta ?? {}) as Record<string, unknown>).stress as { edgeCases?: string[] } | undefined)?.edgeCases;
+        setStressEdgeCases(Array.isArray(edge) ? edge : []);
+      } catch (error) {
+        if (cancelled) return;
+        setStressSnapshotData(null);
+        setStressSnapshotError((error as Error).message);
+      } finally {
+        if (!cancelled) setStressSnapshotLoading(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId, selectedProjectRawJson, stressOptions, riskAdjustedDiscountRatePctInput, data?.balance, data?.income, profile, lockedTargetCurrency, fxSource, manualFxInput, manualMetalPrices]);
 
   const corporateFinancingPlan = useMemo(() => {
     if (companyProjects.length === 0) return undefined;
@@ -5440,7 +5528,7 @@ Capital Available: ${availableLabel}`,
             <>
               <h1 className="subrub">{selectedProjectName?.trim() || selectedProjectId}</h1>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); setProjectSnapshotDiagnosticsMeta(null); }}>
+                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); setProjectSnapshotDiagnosticsMeta(null); setStressSnapshotData(null); setStressSnapshotError(null); setStressEdgeCases([]); setStressOptions({}); }}>
                   Back to projects
                 </button>
                 <a href={`/company/${encodeURIComponent(ticker)}/projects?projectId=${encodeURIComponent(selectedProjectId)}`} className="button-link" style={{ alignSelf: "center" }}>
@@ -5745,7 +5833,10 @@ Capital Available: ${availableLabel}`,
                         <summary><h2 className="subrub small">ALLT GICK FEL</h2></summary>
                         <AlltGickFelCard
                           range={(() => {
-                            const npvRange = (projectSnapshotData?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; base: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; high: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null } } | null } } | undefined)?.modeled?.npvSpotRange ?? null;
+                            const sourceSnapshot = Object.values(stressOptions).some((value) => value === true)
+                              ? stressSnapshotData
+                              : projectSnapshotData;
+                            const npvRange = (sourceSnapshot?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; base: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; high: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null } } | null } } | undefined)?.modeled?.npvSpotRange ?? null;
                             if (!npvRange) return null;
                             return {
                               low: npvRange.low,
@@ -5754,32 +5845,24 @@ Capital Available: ${availableLabel}`,
                             };
                           })()}
                           yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
-                          productionStartPeriod={(() => {
-                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
-                              ? selectedProjectRawJson.time as Record<string, unknown>
-                              : null;
-                            const value = time?.productionStartPeriod;
-                            return typeof value === "number" && Number.isFinite(value) ? value : null;
-                          })()}
-                          masterN={(() => {
-                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
-                              ? selectedProjectRawJson.time as Record<string, unknown>
-                              : null;
-                            const value = time?.masterN;
-                            return typeof value === "number" && Number.isFinite(value) ? value : null;
-                          })()}
                           marketCapToday={projectViewMetrics.marketBox.marketCapCurrent.value}
                           currencyCode={lockedTargetCurrency}
                           formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
-                          capexSeries={Array.isArray((projectSnapshotData?.series as { capexUSD?: Array<number | null> } | undefined)?.capexUSD) ? ((projectSnapshotData?.series as { capexUSD?: Array<number | null> }).capexUSD as Array<number | null>) : null}
-                          taxRate={(() => {
-                            const economics = selectedProjectRawJson && typeof selectedProjectRawJson.economics === "object" && selectedProjectRawJson.economics !== null
-                              ? selectedProjectRawJson.economics as Record<string, unknown>
-                              : null;
-                            const value = economics?.taxRate;
-                            return typeof value === "number" && Number.isFinite(value) ? value : null;
-                          })()}
-                          debugEnabled={valueIntervalDebugVisible}
+                          stressOptions={stressOptions}
+                          onToggle={(key) => setStressOptions((prev) => ({ ...prev, [key]: !prev[key] }))}
+                          loading={stressSnapshotLoading}
+                          error={stressSnapshotError}
+                          edgeCases={stressEdgeCases}
+                          debugPayload={valueIntervalDebugVisible
+                            ? {
+                                baseInputs: {
+                                  projectId: selectedProjectId,
+                                },
+                                stressOptions,
+                                stressedSnapshot: stressSnapshotData,
+                                edgeCases: stressEdgeCases,
+                              }
+                            : null}
                         />
                       </details>
                     </div>
