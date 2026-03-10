@@ -20,6 +20,7 @@ import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
 import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical, convertQuantityToCanonical } from '../units/conversion.ts';
 import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
+import { applyStressModifiers } from './applyStressModifiers.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -1207,6 +1208,10 @@ type SnapshotDiagnostics = {
     projectCount: number;
     symbol?: string;
     fxSource?: 'auto' | 'manual';
+    stress?: {
+      stressOptions: Record<string, boolean | undefined>;
+      edgeCases: string[];
+    };
     scenarioDelay?: DelayScenarioDiagnostics;
     corporateTotalsDebug?: {
       capexUSD_total: Array<number | null>;
@@ -1378,10 +1383,30 @@ export async function runCorporateSnapshotPipeline(args: {
     }
 
     const input = validation.value;
+    const stressOptions = input.stressOptions ?? {};
+    const hasStress = Object.values(stressOptions).some((value) => value === true);
 
-    const projects = typeof input.symbol === 'string'
+    const loadedProjects = typeof input.symbol === 'string'
       ? await loadProjectsForSymbol(input.symbol)
       : input.projects;
+
+    let projects = loadedProjects;
+    if (hasStress && typeof input.symbol !== 'string') {
+      const stressApplied = applyStressModifiers(input, stressOptions);
+      if (stressApplied.edgeCases.length > 0) {
+        diagnostics.errors.push(...stressApplied.edgeCases);
+        diagnostics.meta.stress = {
+          stressOptions,
+          edgeCases: stressApplied.edgeCases,
+        };
+        return { ok: false, diagnostics: finalizeDiagnostics(diagnostics) };
+      }
+      projects = stressApplied.stressedInput.projects;
+      diagnostics.meta.stress = {
+        stressOptions,
+        edgeCases: [],
+      };
+    }
 
     if (typeof input.symbol === 'string') {
       diagnostics.meta.mode = 'symbol';
@@ -1513,10 +1538,26 @@ export async function runCorporateSnapshotPipeline(args: {
           const from = `${yearsByPeriod[0]}-12-31`;
           const to = `${yearsByPeriod[yearsByPeriod.length - 1]}-12-31`;
 
-          const resolved = await resolveProjectPricesToEngineInput(
+          const resolvedBase = await resolveProjectPricesToEngineInput(
             { parsed, from, to, scenario: resolverScenario, projectId, spotAnchorDateUtc, manualMetalPriceByKey: input.manualMetalPrices },
             {},
           );
+
+          const resolved = stressOptions.spotHalf
+            ? {
+                ...resolvedBase,
+                spotPriceUSDByMetal: Object.fromEntries(
+                  Object.entries(resolvedBase.spotPriceUSDByMetal).map(([metal, series]) => [
+                    metal,
+                    series.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value * 0.5 : null)),
+                  ]),
+                ),
+                aisc: {
+                  ...resolvedBase.aisc,
+                  auPriceUSDPerOz: resolvedBase.aisc.auPriceUSDPerOz.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value * 0.5 : null)),
+                },
+              }
+            : resolvedBase;
 
           diagnostics.warnings.push(...(resolved.diagnostics?.warnings ?? []));
           const resolvedMetalPriceDiagnostics = (resolved.diagnostics?.metalPriceDiagnostics ?? null) as Record<string, MetalPriceDiagnostic> | null;
@@ -2039,6 +2080,11 @@ export async function runCorporateSnapshotPipeline(args: {
       if (fxRate === null) {
         diagnostics.warnings.push('FX missing and auto-resolve failed; target-currency outputs will be null.');
       }
+    }
+
+    if (stressOptions.fxMinus10 && fxRate !== null && Number.isFinite(fxRate)) {
+      // Directionality: USD→target FX deterioration of 10% means multiplying the conversion rate by 0.9.
+      fxRate = fxRate * 0.9;
     }
 
     const marketInput = {

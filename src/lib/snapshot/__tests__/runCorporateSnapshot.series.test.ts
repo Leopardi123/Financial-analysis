@@ -1022,3 +1022,22 @@ test('project npv spot range includes scenario metrics beyond npv', async () => 
   assert.equal(typeof range?.base.irr === 'number' || range?.base.irr === null, true);
   assert.equal(typeof range?.base.payback === 'number' || range?.base.payback === null, true);
 });
+
+test('stressOptions taxPlus5pp recomputes tax series in engine outputs', async () => {
+  const body = await loadFixture();
+  const baseResult = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(baseResult.ok, true);
+  if (!baseResult.ok) return;
+
+  const stressedBody = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
+  stressedBody.stressOptions = { taxPlus5pp: true };
+  const stressedResult = await runCorporateSnapshotPipeline({ body: stressedBody, refresh: false });
+  assert.equal(stressedResult.ok, true);
+  if (!stressedResult.ok) return;
+
+  const baseTax = baseResult.snapshot.series?.taxUSD ?? [];
+  const stressedTax = stressedResult.snapshot.series?.taxUSD ?? [];
+  const idx = baseTax.findIndex((value) => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  assert.ok(idx >= 0, 'expected positive tax period in base case');
+  assert.ok((stressedTax[idx] as number) > (baseTax[idx] as number), 'stressed tax should be higher when tax rate is increased');
+});

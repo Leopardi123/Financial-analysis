@@ -54,6 +54,18 @@ export type SnapshotRequest = {
   }>;
   symbol?: string;
   manualMetalPrices?: Record<string, ManualMetalPriceEntry>;
+  stressOptions?: {
+    initialCapex2x?: boolean;
+    spotHalf?: boolean;
+    tpPlus2?: boolean;
+    sustainingCapex15?: boolean;
+    opex25?: boolean;
+    recoveryMinus10?: boolean;
+    fxMinus10?: boolean;
+    royalty50?: boolean;
+    taxPlus5pp?: boolean;
+    closure2x?: boolean;
+  };
 };
 
 type ValidationResult =
@@ -531,6 +543,24 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     return Object.keys(out).length > 0 ? out : undefined;
   })();
 
+  const stressOptions: SnapshotRequest['stressOptions'] = (() => {
+    if (!isObject(body.stressOptions)) return undefined;
+    const src = body.stressOptions as Record<string, unknown>;
+    const readFlag = (key: string): boolean | undefined => (typeof src[key] === 'boolean' ? src[key] as boolean : undefined);
+    return {
+      initialCapex2x: readFlag('initialCapex2x'),
+      spotHalf: readFlag('spotHalf'),
+      tpPlus2: readFlag('tpPlus2'),
+      sustainingCapex15: readFlag('sustainingCapex15'),
+      opex25: readFlag('opex25'),
+      recoveryMinus10: readFlag('recoveryMinus10'),
+      fxMinus10: readFlag('fxMinus10'),
+      royalty50: readFlag('royalty50'),
+      taxPlus5pp: readFlag('taxPlus5pp'),
+      closure2x: readFlag('closure2x'),
+    };
+  })();
+
   if (errors.length > 0) {
     return { ok: false, errors, warnings };
   }
@@ -565,6 +595,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     buildFundingNeed_USD: buildFundingNeed,
     scenario,
     manualMetalPrices,
+    stressOptions,
   };
 
   return {

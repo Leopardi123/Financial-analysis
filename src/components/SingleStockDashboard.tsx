@@ -5,6 +5,8 @@ import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
+import AlltGickFelCard from "./project/AlltGickFelCard";
+import type { StressOptions } from "../lib/snapshot/applyStressModifiers.ts";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
 import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
@@ -532,6 +534,7 @@ function buildProjectsSnapshotRequest(args: {
     price_current_TargetCurrency: number;
   };
   manualMetalPrices?: SnapshotRequest["manualMetalPrices"];
+  stressOptions?: SnapshotRequest["stressOptions"];
 }): SnapshotRequest {
   const lockedTargetCurrency = resolveProfileTargetCurrency(args.profile);
   return {
@@ -542,6 +545,7 @@ function buildProjectsSnapshotRequest(args: {
     market: args.market,
     projects: args.projects,
     manualMetalPrices: args.manualMetalPrices,
+    stressOptions: args.stressOptions,
   };
 }
 
@@ -1258,6 +1262,12 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
   const [selectedProjectRawJson, setSelectedProjectRawJson] = useState<Record<string, unknown> | null>(null);
+  const [stressOptions, setStressOptions] = useState<StressOptions>({});
+  const [stressSnapshotLoading, setStressSnapshotLoading] = useState(false);
+  const [stressSnapshotError, setStressSnapshotError] = useState<string | null>(null);
+  const [stressSnapshotData, setStressSnapshotData] = useState<Record<string, unknown> | null>(null);
+  const [stressSnapshotDiagnosticsMeta, setStressSnapshotDiagnosticsMeta] = useState<Record<string, unknown> | null>(null);
+  const [stressEdgeCases, setStressEdgeCases] = useState<string[]>([]);
   const [projectEquityPct, setProjectEquityPct] = useState("100");
   const [projectDebtPct, setProjectDebtPct] = useState("0");
   const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
@@ -1610,6 +1620,11 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     setProjectSnapshotWarnings([]);
     setProjectSnapshotErrors([]);
     setProjectSnapshotDiagnosticsMeta(null);
+    setStressSnapshotData(null);
+    setStressSnapshotDiagnosticsMeta(null);
+    setStressSnapshotError(null);
+    setStressEdgeCases([]);
+    setStressOptions({});
 
     try {
       const project = await getCompanyProject(ticker, projectId);
@@ -1657,6 +1672,87 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       setProjectSnapshotLoading(false);
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    const hasStress = Object.values(stressOptions).some((value) => value === true);
+    if (!selectedProjectId || !selectedProjectRawJson || !hasStress) {
+      setStressSnapshotData(null);
+      setStressSnapshotDiagnosticsMeta(null);
+      setStressSnapshotError(null);
+      setStressEdgeCases([]);
+      setStressSnapshotLoading(false);
+      return;
+    }
+
+    const run = async () => {
+      setStressSnapshotLoading(true);
+      setStressSnapshotError(null);
+      setStressEdgeCases([]);
+      setStressSnapshotDiagnosticsMeta(null);
+      try {
+        const discountRatePct = toInputNumber(riskAdjustedDiscountRatePctInput);
+        const discountRate = typeof discountRatePct === "number" && Number.isFinite(discountRatePct)
+          ? discountRatePct / 100
+          : Number.NaN;
+        const profileSharesCurrent = resolveCommonSharesCurrent({
+          balance: data?.balance as Record<string, Array<number | null>> | undefined,
+          income: data?.income as Record<string, Array<number | null>> | undefined,
+        });
+        const profileSharesOutstanding = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding) && profile.sharesOutstanding > 0
+          ? profile.sharesOutstanding
+          : undefined;
+        const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding;
+        const profilePriceCurrent = typeof profile?.price === "number" ? profile.price : undefined;
+        const marketFromProfile =
+          isPositiveFinite(sharesCurrent) && isPositiveFinite(profilePriceCurrent)
+            ? {
+                shares_current: sharesCurrent,
+                price_current_TargetCurrency: profilePriceCurrent,
+              }
+            : undefined;
+        const request = buildProjectsSnapshotRequest({
+          profile,
+          discountRate,
+          scenario: { mode: "spot" },
+          fx: {
+            source: lockedTargetCurrency === "USD" ? "manual" : fxSource,
+            anchor: "today",
+            scenario: { mode: "spot" },
+            manual_fx_USD_to_TargetCurrency: lockedTargetCurrency === "USD" ? 1 : toInputNumber(manualFxInput),
+          },
+          projects: [{ projectId: selectedProjectId, rawJson: selectedProjectRawJson }],
+          market: marketFromProfile,
+          manualMetalPrices,
+        });
+        const result = await postCorporateSnapshot({ ...request, stressOptions }, { refresh: lockedTargetCurrency !== "USD" });
+        if (cancelled) return;
+        if (!result.ok || !result.snapshot) {
+          setStressSnapshotData(null);
+          setStressSnapshotDiagnosticsMeta((result.diagnostics?.meta ?? null) as Record<string, unknown> | null);
+          setStressSnapshotError((result.diagnostics?.errors ?? ["Stress snapshot request failed."]).join("\n"));
+          const edge = (((result.diagnostics?.meta ?? {}) as Record<string, unknown>).stress as { edgeCases?: string[] } | undefined)?.edgeCases;
+          setStressEdgeCases(Array.isArray(edge) ? edge : []);
+          return;
+        }
+        setStressSnapshotData(result.snapshot as Record<string, unknown>);
+        setStressSnapshotDiagnosticsMeta((result.diagnostics?.meta ?? null) as Record<string, unknown> | null);
+        const edge = (((result.diagnostics?.meta ?? {}) as Record<string, unknown>).stress as { edgeCases?: string[] } | undefined)?.edgeCases;
+        setStressEdgeCases(Array.isArray(edge) ? edge : []);
+      } catch (error) {
+        if (cancelled) return;
+        setStressSnapshotData(null);
+        setStressSnapshotDiagnosticsMeta(null);
+        setStressSnapshotError((error as Error).message);
+      } finally {
+        if (!cancelled) setStressSnapshotLoading(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId, selectedProjectRawJson, stressOptions, riskAdjustedDiscountRatePctInput, data?.balance, data?.income, profile, lockedTargetCurrency, fxSource, manualFxInput, manualMetalPrices]);
 
   const corporateFinancingPlan = useMemo(() => {
     if (companyProjects.length === 0) return undefined;
@@ -5439,7 +5535,7 @@ Capital Available: ${availableLabel}`,
             <>
               <h1 className="subrub">{selectedProjectName?.trim() || selectedProjectId}</h1>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); setProjectSnapshotDiagnosticsMeta(null); }}>
+                <button type="button" onClick={() => { setSelectedProjectId(null); setSelectedProjectName(null); setSelectedProjectRawJson(null); setProjectSnapshotData(null); setProjectSnapshotError(null); setProjectSnapshotWarnings([]); setProjectSnapshotErrors([]); setProjectSnapshotDiagnosticsMeta(null); setStressSnapshotData(null); setStressSnapshotDiagnosticsMeta(null); setStressSnapshotError(null); setStressEdgeCases([]); setStressOptions({}); }}>
                   Back to projects
                 </button>
                 <a href={`/company/${encodeURIComponent(ticker)}/projects?projectId=${encodeURIComponent(selectedProjectId)}`} className="button-link" style={{ alignSelf: "center" }}>
@@ -5736,6 +5832,219 @@ Capital Available: ${availableLabel}`,
                           formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
                           debugEnabled={valueIntervalDebugVisible}
                           debugPayload={projectValueIntervalDebug}
+                        />
+                      </details>
+                    </div>
+                    <div className="project-list2-page">
+                      <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list2}>
+                        <summary><h2 className="subrub small">ALLT GICK FEL</h2></summary>
+                        <AlltGickFelCard
+                          range={(() => {
+                            const hasActiveStressOptions = Object.values(stressOptions).some((value) => value === true);
+                            const sourceSnapshot = hasActiveStressOptions
+                              ? stressSnapshotData
+                              : projectSnapshotData;
+                            const npvRange = (sourceSnapshot?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; base: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; high: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null } } | null } } | undefined)?.modeled?.npvSpotRange ?? null;
+                            if (!npvRange) return null;
+                            return {
+                              low: npvRange.low,
+                              spot: npvRange.base,
+                              high: npvRange.high,
+                            };
+                          })()}
+                          yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                          marketCapToday={projectViewMetrics.marketBox.marketCapCurrent.value}
+                          currencyCode={lockedTargetCurrency}
+                          formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
+                          stressOptions={stressOptions}
+                          onToggle={(key) => setStressOptions((prev) => ({ ...prev, [key]: !prev[key] }))}
+                          loading={stressSnapshotLoading}
+                          error={stressSnapshotError}
+                          edgeCases={stressEdgeCases}
+                          debugPayload={valueIntervalDebugVisible
+                            ? (() => {
+                                const hasActiveStressOptions = Object.values(stressOptions).some((value) => value === true);
+                                const stressPipelineInvoked = stressSnapshotLoading || stressSnapshotData !== null || stressSnapshotError !== null || stressEdgeCases.length > 0 || stressSnapshotDiagnosticsMeta !== null;
+                                const baseSnapshotExists = projectSnapshotData !== null;
+                                const stressedSnapshotExists = stressSnapshotData !== null;
+                                const snapshotToRender = hasActiveStressOptions
+                                  ? (stressedSnapshotExists ? "stressedSnapshot" : "none")
+                                  : (baseSnapshotExists ? "baseSnapshot" : "none");
+                                const sourceSnapshot = snapshotToRender === "stressedSnapshot"
+                                  ? stressSnapshotData
+                                  : snapshotToRender === "baseSnapshot"
+                                    ? projectSnapshotData
+                                    : null;
+                                const extractRange = (snapshot: Record<string, unknown> | null) => {
+                                  const npvRange = (snapshot?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; base: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; high: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null } } | null } } | undefined)?.modeled?.npvSpotRange ?? null;
+                                  return npvRange
+                                    ? { low: npvRange.low, spot: npvRange.base, high: npvRange.high }
+                                    : null;
+                                };
+                                const baseRange = extractRange(projectSnapshotData);
+                                const stressedRange = extractRange(stressSnapshotData);
+                                const renderRange = extractRange(sourceSnapshot);
+
+                                const requiredInputPresence = (() => {
+                                  const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
+                                    ? selectedProjectRawJson.time as Record<string, unknown>
+                                    : null;
+                                  const econ = selectedProjectRawJson && typeof selectedProjectRawJson.economics === "object" && selectedProjectRawJson.economics !== null
+                                    ? selectedProjectRawJson.economics as Record<string, unknown>
+                                    : null;
+                                  const series = selectedProjectRawJson && typeof selectedProjectRawJson.series === "object" && selectedProjectRawJson.series !== null
+                                    ? selectedProjectRawJson.series as Record<string, unknown>
+                                    : null;
+                                  const ops = selectedProjectRawJson && typeof selectedProjectRawJson.operations === "object" && selectedProjectRawJson.operations !== null
+                                    ? selectedProjectRawJson.operations as Record<string, unknown>
+                                    : null;
+                                  return {
+                                    'time.masterN': typeof time?.masterN === 'number',
+                                    'time.productionStartPeriod': typeof time?.productionStartPeriod === 'number',
+                                    'economics.taxRate': typeof econ?.taxRate === 'number',
+                                    'series.capexUSD': Array.isArray(series?.capexUSD),
+                                    'series.operatingCostsUSD': Array.isArray(series?.operatingCostsUSD),
+                                    'series.sustainingCapexUSD': Array.isArray(series?.sustainingCapexUSD),
+                                    'series.reclamationUSD': Array.isArray(series?.reclamationUSD),
+                                    'series.royaltiesUSD': Array.isArray(series?.royaltiesUSD),
+                                    'operations.recoveryPctByMetal': typeof ops?.recoveryPctByMetal === 'object' && ops?.recoveryPctByMetal !== null,
+                                    'fx.manual_fx_USD_to_TargetCurrency': typeof toInputNumber(manualFxInput) === 'number',
+                                  };
+                                })();
+
+                                const guard = (name: string, passed: boolean, message: string, path: string, blocking = false) => ({ name, status: passed ? 'PASS' : 'FAIL', severity: passed ? 'info' : (blocking ? 'error' : 'warning'), message, path, blocking });
+                                const guards = [
+                                  guard('noStressUsesBaseSnapshot', !hasActiveStressOptions ? snapshotToRender === 'baseSnapshot' : true, hasActiveStressOptions ? 'stress active' : 'no stress should resolve base snapshot', 'snapshot selection', !hasActiveStressOptions),
+                                  guard('stressPipelineInvokedWhenActive', hasActiveStressOptions ? stressPipelineInvoked : true, hasActiveStressOptions ? 'active stress should invoke pipeline' : 'not applicable', 'stress pipeline', hasActiveStressOptions),
+                                  guard('snapshotToRenderResolved', snapshotToRender !== 'none', `snapshotToRender=${snapshotToRender}`, 'snapshotToRender', true),
+                                  guard('baseSnapshotExists', baseSnapshotExists, 'base snapshot loaded', 'projectSnapshotData', false),
+                                  guard('stressedSnapshotExistsWhenActive', hasActiveStressOptions ? stressedSnapshotExists : true, hasActiveStressOptions ? 'stressed snapshot required when stress active' : 'not applicable', 'stressSnapshotData', hasActiveStressOptions),
+                                  guard('uiMetricPathsPresent', renderRange !== null, 'project.modeled.npvSpotRange.{low|base|high}', 'snapshot.project.modeled.npvSpotRange', true),
+                                  guard('edgeCasesEmpty', stressEdgeCases.length === 0, stressEdgeCases.length === 0 ? 'no stress edge case blockers' : stressEdgeCases.join(' | '), 'diagnostics.meta.stress.edgeCases', true),
+                                ];
+
+                                const uiRows = [
+                                  { row: 'NPV', key: 'npvToday' as const },
+                                  { row: 'IRR', key: 'irr' as const },
+                                  { row: 'Payback', key: 'payback' as const },
+                                  { row: 'LOM_avg_EBIT_ROCE', key: 'lomAvgEbitRoce' as const },
+                                  { row: 'Kapitalavkastning_LOM', key: 'kapitalavkastningLom' as const },
+                                  { row: 'InSitu_10Y_USD', key: 'inSitu10YUsd' as const },
+                                ].map((item) => {
+                                  const low = renderRange ? renderRange.low[item.key] : null;
+                                  const spot = renderRange ? renderRange.spot[item.key] : null;
+                                  const high = renderRange ? renderRange.high[item.key] : null;
+                                  const reason = snapshotToRender === 'none'
+                                    ? 'missing snapshot'
+                                    : renderRange === null
+                                      ? 'missing metric key path'
+                                      : (low === null && spot === null && high === null)
+                                        ? 'null numeric values'
+                                        : 'value present';
+                                  return {
+                                    row: item.row,
+                                    low: { path: `project.modeled.npvSpotRange.low.${item.key}`, value: low },
+                                    spot: { path: `project.modeled.npvSpotRange.base.${item.key}`, value: spot },
+                                    high: { path: `project.modeled.npvSpotRange.high.${item.key}`, value: high },
+                                    reasonForNA: reason,
+                                  };
+                                });
+
+                                const diagnosis = (() => {
+                                  if (!hasActiveStressOptions && stressPipelineInvoked) return 'No active stress options but stress pipeline appears to have run.';
+                                  if (hasActiveStressOptions && stressSnapshotError) return `Stress pipeline failed: ${stressSnapshotError.split('\n')[0]}`;
+                                  if (stressEdgeCases.length > 0) return `Stress pipeline aborted by edge-case guard: ${stressEdgeCases[0]}`;
+                                  if (hasActiveStressOptions && !stressedSnapshotExists) return 'Stress pipeline ran but stressed snapshot is null.';
+                                  if (snapshotToRender !== 'none' && renderRange === null) return 'Snapshot exists but UI binding path project.modeled.npvSpotRange is missing.';
+                                  if (uiRows.every((row) => row.reasonForNA !== 'value present')) return 'Snapshot/path exists but all metric values are null or rejected, resulting in n/a.';
+                                  return 'No blocking issue detected in trace.';
+                                })();
+
+                                return {
+                                  context: {
+                                    route: typeof window !== 'undefined' ? window.location.pathname : null,
+                                    query: typeof window !== 'undefined' ? Object.fromEntries(new URLSearchParams(window.location.search).entries()) : {},
+                                    projectId: selectedProjectId,
+                                    projectName: selectedProjectName,
+                                    debugModeByQueryParam: valueIntervalDebugVisible,
+                                    scope: 'project',
+                                    renderMode: hasActiveStressOptions ? 'stress-mode' : 'baseline-mode',
+                                  },
+                                  stressOptions: {
+                                    raw: stressOptions,
+                                    activeKeys: Object.entries(stressOptions).filter(([, value]) => value === true).map(([key]) => key),
+                                    hasActiveStressOptions,
+                                  },
+                                  snapshotSelection: {
+                                    baseSnapshotExists,
+                                    stressedSnapshotExists,
+                                    stressPipelineInvoked,
+                                    noStressModeIncorrectlyInvokedPipeline: !hasActiveStressOptions && stressPipelineInvoked,
+                                    sourcePathUsedByCard: 'snapshot.project.modeled.npvSpotRange',
+                                    snapshotToRender,
+                                  },
+                                  baseSnapshotSummary: {
+                                    hasModeledData: ((projectSnapshotData?.project as { modeled?: unknown } | undefined)?.modeled ?? null) !== null,
+                                    hasNpvSpotRange: baseRange !== null,
+                                    sample: baseRange
+                                      ? {
+                                          npv: { low: baseRange.low.npvToday, spot: baseRange.spot.npvToday, high: baseRange.high.npvToday },
+                                          irrSpot: baseRange.spot.irr,
+                                          paybackSpot: baseRange.spot.payback,
+                                        }
+                                      : null,
+                                  },
+                                  stressTrace: {
+                                    invoked: stressPipelineInvoked,
+                                    reasonInvoked: hasActiveStressOptions ? 'active stress options' : 'no active stress options',
+                                    status: {
+                                      loading: stressSnapshotLoading,
+                                      error: stressSnapshotError,
+                                    },
+                                    stepA_inputAcquisition: {
+                                      baseInputsFound: selectedProjectRawJson !== null,
+                                      inputSourcePath: 'selectedProjectRawJson + buildProjectsSnapshotRequest',
+                                      requiredInputPresence,
+                                    },
+                                    stepB_applyStressModifiers: {
+                                      success: stressEdgeCases.length === 0,
+                                      edgeCases: stressEdgeCases,
+                                      details: (stressSnapshotDiagnosticsMeta?.stress ?? null),
+                                    },
+                                    stepC_validation: {
+                                      pass: stressSnapshotError === null || !stressSnapshotError.toLowerCase().includes('must'),
+                                      message: stressSnapshotError,
+                                    },
+                                    stepD_engineExecution: {
+                                      attempted: stressPipelineInvoked,
+                                      completed: stressPipelineInvoked && !stressSnapshotLoading,
+                                      skippedReason: !hasActiveStressOptions ? 'no active stress options' : null,
+                                      failedReason: stressSnapshotError,
+                                    },
+                                    stepE_output: {
+                                      snapshotExists: stressedSnapshotExists,
+                                      modeledExists: ((stressSnapshotData?.project as { modeled?: unknown } | undefined)?.modeled ?? null) !== null,
+                                      npvSpotRangeExists: stressedRange !== null,
+                                      metricsSourceExists: stressedRange !== null,
+                                    },
+                                  },
+                                  guards,
+                                  modifierSpecific: {
+                                    initialCapex2x: stressOptions.initialCapex2x ? { attempted: true, tp: (selectedProjectRawJson?.time as Record<string, unknown> | undefined)?.productionStartPeriod ?? null, capexSeriesLength: Array.isArray((selectedProjectRawJson?.series as Record<string, unknown> | undefined)?.capexUSD) ? (((selectedProjectRawJson?.series as Record<string, unknown>).capexUSD as unknown[])?.length ?? null) : null, edgeCases: stressEdgeCases.filter((line) => line.toLowerCase().includes('capex')) } : { attempted: false },
+                                    spotHalf: stressOptions.spotHalf ? { attempted: true, detail: 'Applied in engine after winning price-source resolution (manual -> FMP -> JSON study).' } : { attempted: false },
+                                    tpPlus2: stressOptions.tpPlus2 ? { attempted: true, originalTp: (selectedProjectRawJson?.time as Record<string, unknown> | undefined)?.productionStartPeriod ?? null, stressedTp: typeof (selectedProjectRawJson?.time as Record<string, unknown> | undefined)?.productionStartPeriod === 'number' ? (((selectedProjectRawJson?.time as Record<string, unknown>).productionStartPeriod as number) + 2) : null, masterN: (selectedProjectRawJson?.time as Record<string, unknown> | undefined)?.masterN ?? null, edgeCases: stressEdgeCases.filter((line) => line.toLowerCase().includes('tp')) } : { attempted: false },
+                                    taxPlus5pp: stressOptions.taxPlus5pp ? { attempted: true, originalTaxRate: (selectedProjectRawJson?.economics as Record<string, unknown> | undefined)?.taxRate ?? null, stressTaxExpected: typeof (selectedProjectRawJson?.economics as Record<string, unknown> | undefined)?.taxRate === 'number' ? Math.max(0, Math.min(1, ((selectedProjectRawJson?.economics as Record<string, unknown>).taxRate as number) + 0.05)) : null, recomputeViaEngine: true } : { attempted: false },
+                                    fxMinus10: stressOptions.fxMinus10 ? { attempted: true, manualFxInput: toInputNumber(manualFxInput), direction: 'fx_USD_to_TargetCurrency * 0.9' } : { attempted: false },
+                                  },
+                                  uiBindings: {
+                                    cardMetricSourcePath: 'project.modeled.npvSpotRange',
+                                    pathExistsOnSnapshotToRender: renderRange !== null,
+                                    rows: uiRows,
+                                  },
+                                  diagnosis,
+                                };
+                              })()
+                            : null}
                         />
                       </details>
                     </div>
