@@ -447,3 +447,39 @@ const financingSharesAllDebt = computeProjectViewMetrics({
   financing: { equityPct: 0, debtPct: 100, cashUsedInput: 0 },
 });
 assertApprox(financingSharesAllDebt.marketBox.sharesPf.value, 100, 1e-9);
+
+
+const financingScenarioBase = {
+  targetCurrency: 'USD' as const,
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 4,
+  sharesCurrent: 100,
+  sharesPostFinancingInput: 250,
+  priceCurrentTarget: 10,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [-100, 50, 60, 70, 80],
+  capexUSD: [-100, 0, 0, 0, 0],
+  grossRevenueUSD: [1, 1, 1, 1, 1],
+  ebitUSD: [1, 1, 1, 1, 1],
+  payableAuEqOz: [1, 1, 1, 1, 1],
+  sustainingCostUSD: [1, 1, 1, 1, 1],
+  productionStartPeriod: 1,
+};
+
+const scenarioA_allEquity = computeProjectViewMetrics({
+  ...financingScenarioBase,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+
+const scenarioB_allDebt = computeProjectViewMetrics({
+  ...financingScenarioBase,
+  financing: { equityPct: 0, debtPct: 100, cashUsedInput: 0 },
+});
+
+assertApprox(scenarioA_allEquity.list2.NPV_Target.value, scenarioB_allDebt.list2.NPV_Target.value as number, 1e-9);
+assertApprox(scenarioA_allEquity.list2.CF_LOM_Target.value, scenarioB_allDebt.list2.CF_LOM_Target.value as number, 1e-9);
+assertApprox(scenarioA_allEquity.list2.DCF_Target.value, scenarioB_allDebt.list2.DCF_Target.value as number, 1e-9);
+assert.notEqual(scenarioA_allEquity.marketBox.sharesPf.value, scenarioB_allDebt.marketBox.sharesPf.value);
