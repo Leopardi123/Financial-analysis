@@ -4221,6 +4221,10 @@ Capital Available: ${availableLabel}`,
     statementCurrency,
     mixedCurrencyNote,
   };
+  const selectedTickerLabel = data?.ticker ?? ticker;
+  const companyHeaderTitle = profile?.companyName
+    ? `${profile.companyName}${selectedTickerLabel ? ` (${selectedTickerLabel})` : ""}`
+    : selectedTickerLabel;
 
   return (
     <div className="single-stock-dashboard">
@@ -4272,10 +4276,7 @@ Capital Available: ${availableLabel}`,
 
       <div className="breadcontainersinglecolumn">
         <div className="producer-core-compact-card single-stock-header-card">
-          <h1 id="SingleStock_Stock_Name" className="subrub">
-            {profile?.companyName ? `${profile.companyName}` : data?.ticker ?? ""}
-            {data?.ticker ? ` (${data.ticker})` : ""}
-          </h1>
+          {companyHeaderTitle ? <h1 id="SingleStock_Stock_Name" className="subrub">{companyHeaderTitle}</h1> : null}
           <p className="bread">
             {profile?.description
               ? String(profile.description)
