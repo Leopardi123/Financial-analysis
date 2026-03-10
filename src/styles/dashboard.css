@@ -93,7 +93,7 @@
 .single-stock-dashboard {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 .sector-dashboard {
@@ -282,8 +282,25 @@
   max-width: 860px;
 }
 
+.single-stock-dashboard .breadcontainersinglecolumn {
+  margin-top: 10px;
+  gap: 8px;
+}
+
+.single-stock-dashboard .breadcontainersinglecolumn:first-child {
+  margin-top: 0;
+}
+
+.single-stock-dashboard .producer-core-compact-card {
+  padding: 8px;
+}
+
+.single-stock-dashboard .chartcontainerdoublecolumn {
+  gap: 12px;
+}
+
 .single-stock-search-card .subrub.small {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .single-stock-search-card .stock-selector-row {
@@ -291,11 +308,16 @@
 }
 
 .single-stock-search-card .stock-selector {
-  gap: 10px;
+  gap: 6px;
 }
 
 .single-stock-header-card .subrub {
-  font-size: 28px;
+  font-size: 26px;
+}
+
+.single-stock-header-body {
+  margin-top: 4px;
+  padding: 8px;
 }
 
 .single-stock-header-card .bread {
@@ -310,11 +332,11 @@
 }
 
 .single-stock-tabs + .single-stock-tabs {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .single-stock-tab {
-  padding: 8px 14px;
+  padding: 8px 12px;
   border-radius: 999px;
   border: 1px solid rgba(28, 35, 16, 0.25);
   background: #fff;
@@ -331,6 +353,14 @@
 }
 
 @media (max-width: 700px) {
+  .single-stock-dashboard {
+    gap: 12px;
+  }
+
+  .single-stock-dashboard .breadcontainersinglecolumn {
+    margin-top: 8px;
+  }
+
   .single-stock-tab {
     flex: 1 1 calc(50% - 8px);
     min-height: 40px;

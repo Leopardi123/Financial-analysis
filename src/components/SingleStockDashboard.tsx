@@ -4277,11 +4277,13 @@ Capital Available: ${availableLabel}`,
       <div className="breadcontainersinglecolumn">
         <div className="producer-core-compact-card single-stock-header-card">
           {companyHeaderTitle ? <h1 id="SingleStock_Stock_Name" className="subrub">{companyHeaderTitle}</h1> : null}
-          <p className="bread">
-            {profile?.description
-              ? String(profile.description)
-              : "Välj ticker för att se bolagsbeskrivning och data."}
-          </p>
+          <section className="producer-core-section single-stock-header-body">
+            <p className="bread">
+              {profile?.description
+                ? String(profile.description)
+                : "Välj ticker för att se bolagsbeskrivning och data."}
+            </p>
+          </section>
         </div>
       </div>
 
@@ -4324,62 +4326,6 @@ Capital Available: ${availableLabel}`,
       )}
 
       <div className="breadcontainersinglecolumn">
-        <div className="producer-core-compact-card single-stock-nav-card">
-          <div className="single-stock-tabs" role="tablist" aria-label="Company perspective">
-            <button
-              type="button"
-              className={`single-stock-tab ${analysisMode === "revenue" ? "is-active" : ""}`}
-              onClick={() => setAnalysisMode("revenue")}
-              aria-selected={analysisMode === "revenue"}
-            >
-              Revenue
-            </button>
-            <button
-              type="button"
-              className={`single-stock-tab ${analysisMode === "prerevenue" ? "is-active" : ""}`}
-              onClick={() => setAnalysisMode("prerevenue")}
-              aria-selected={analysisMode === "prerevenue"}
-            >
-              Pre-Revenue
-            </button>
-          </div>
-          <div className="single-stock-tabs single-stock-tabs-secondary" role="tablist" aria-label="Company data views">
-            <button
-              type="button"
-              className={`single-stock-tab ${primaryView === "reported" ? "is-active" : ""}`}
-              onClick={() => setPrimaryView("reported")}
-              aria-selected={primaryView === "reported"}
-            >
-              Reported
-            </button>
-            <button
-              type="button"
-              className={`single-stock-tab ${primaryView === "modeled" ? "is-active" : ""}`}
-              onClick={() => setPrimaryView("modeled")}
-              aria-selected={primaryView === "modeled"}
-            >
-              Modeled
-            </button>
-            {analysisMode === "prerevenue" && (
-              <button
-                type="button"
-                className={`single-stock-tab ${primaryView === "projects" ? "is-active" : ""}`}
-                onClick={() => setPrimaryView("projects")}
-                aria-selected={primaryView === "projects"}
-              >
-                Projects
-              </button>
-            )}
-            {analysisMode === "prerevenue" && (
-              <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
-                Edit projects
-              </a>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="breadcontainersinglecolumn">
         <h2 className="subrub small">Göromål</h2>
         {dashboardTasks.length === 0 ? (
           <p className="bread">Inga göromål just nu.</p>
@@ -4404,9 +4350,6 @@ Capital Available: ${availableLabel}`,
 
       <div className="breadcontainersinglecolumn">
         <h2 className="subrub small">Price History</h2>
-        <p className="bread">
-          Pris- och volymgrafer laddas från backend när historik finns tillgänglig.
-        </p>
         {priceLoading && <p className="status">Fetching data…</p>}
         {!priceLoading && priceError && <p className="status error">{priceError}</p>}
         {!priceLoading && !priceError && !priceData && (
@@ -4478,6 +4421,62 @@ Capital Available: ${availableLabel}`,
           }}
           y2AxisTitle="shares"
         />
+      </div>
+
+      <div className="breadcontainersinglecolumn">
+        <div className="producer-core-compact-card single-stock-nav-card">
+          <div className="single-stock-tabs" role="tablist" aria-label="Company perspective">
+            <button
+              type="button"
+              className={`single-stock-tab ${analysisMode === "revenue" ? "is-active" : ""}`}
+              onClick={() => setAnalysisMode("revenue")}
+              aria-selected={analysisMode === "revenue"}
+            >
+              Revenue
+            </button>
+            <button
+              type="button"
+              className={`single-stock-tab ${analysisMode === "prerevenue" ? "is-active" : ""}`}
+              onClick={() => setAnalysisMode("prerevenue")}
+              aria-selected={analysisMode === "prerevenue"}
+            >
+              Pre-Revenue
+            </button>
+          </div>
+          <div className="single-stock-tabs single-stock-tabs-secondary" role="tablist" aria-label="Company data views">
+            <button
+              type="button"
+              className={`single-stock-tab ${primaryView === "reported" ? "is-active" : ""}`}
+              onClick={() => setPrimaryView("reported")}
+              aria-selected={primaryView === "reported"}
+            >
+              Reported
+            </button>
+            <button
+              type="button"
+              className={`single-stock-tab ${primaryView === "modeled" ? "is-active" : ""}`}
+              onClick={() => setPrimaryView("modeled")}
+              aria-selected={primaryView === "modeled"}
+            >
+              Modeled
+            </button>
+            {analysisMode === "prerevenue" && (
+              <button
+                type="button"
+                className={`single-stock-tab ${primaryView === "projects" ? "is-active" : ""}`}
+                onClick={() => setPrimaryView("projects")}
+                aria-selected={primaryView === "projects"}
+              >
+                Projects
+              </button>
+            )}
+            {analysisMode === "prerevenue" && (
+              <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
+                Edit projects
+              </a>
+            )}
+          </div>
+        </div>
       </div>
 
       {primaryView === "reported" && mixedCurrency && (
