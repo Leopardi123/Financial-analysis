@@ -35,6 +35,15 @@ type ValueRangeSnapshotCardProps = {
     sharesPostFinancing?: number | null;
     netCashTarget?: number | null;
     capexSeries?: Array<number | null> | null;
+    sharesCurrent?: number | null;
+    debtTarget?: number | null;
+    cashTarget?: number | null;
+    equityFraction?: number | null;
+    debtFraction?: number | null;
+    metricPanelSharesUsed?: number | null;
+    marketBoxSharesCurrent?: number | null;
+    marketBoxSharesPf?: number | null;
+    snapshotOrStateIdentifier?: string | null;
   } | null;
 };
 
@@ -483,6 +492,122 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return { points, focus, centralTodayBasisRows };
   }, [projectChartModel, projectDebug]);
 
+  const pointLevelFinancingTrace = useMemo(() => {
+    if (!projectChartModel || !projectDebug?.debugEnabled) return null;
+    const sharesUsed = (typeof projectDebug.sharesPostFinancing === 'number' && Number.isFinite(projectDebug.sharesPostFinancing) && projectDebug.sharesPostFinancing > 0)
+      ? projectDebug.sharesPostFinancing
+      : ((typeof projectDebug.sharesCurrent === 'number' && Number.isFinite(projectDebug.sharesCurrent) && projectDebug.sharesCurrent > 0) ? projectDebug.sharesCurrent : null);
+    const tpIdx = projectChartModel.tpOffset;
+
+    const makePointName = (idx: number): string => {
+      if (idx === 0) return 'today/now';
+      if (idx === tpIdx) return 'TP';
+      if (idx > tpIdx) return `TP+${idx - tpIdx}`;
+      return `preTP-${tpIdx - idx}`;
+    };
+
+    const traceRows = projectChartModel.debugRows
+      .filter((row) => row.periodIndex === 0 || row.periodIndex === tpIdx || (row.periodIndex > tpIdx && row.periodIndex <= tpIdx + 3))
+      .map((row, idx, arr) => {
+        const periodIndex = row.periodIndex;
+        const flowIndex = periodIndex - tpIdx;
+        const highRaw = row.undiscountedHigh ?? null;
+        const lowRaw = row.undiscountedLow ?? null;
+        const renderedHigh = (highRaw !== null && lowRaw !== null) ? Math.max(highRaw, lowRaw) : highRaw;
+        const renderedLow = (highRaw !== null && lowRaw !== null) ? Math.min(highRaw, lowRaw) : lowRaw;
+        const pointSeriesSourceHigh = periodIndex > tpIdx ? 'chartFlows.dcfProdstartPresentPerShareSeries' : (periodIndex === tpIdx ? 'tpHigh prop (fallback chartFlows[0])' : 'npvHigh/tp interpolation pipeline');
+        const pointSeriesSourceLow = periodIndex > tpIdx ? 'chartFlows.navProdstartPerShareSeries' : (periodIndex === tpIdx ? 'tpLow prop (fallback chartFlows[0])' : 'npvLow/tp interpolation pipeline');
+        const pointAnchorHigh = periodIndex === tpIdx ? 'tpHigh prop from list2 DCF_perShare' : (periodIndex === 0 ? 'npvHigh prop from list2 DCF_Target_discounted_perShare' : 'none');
+        const pointAnchorLow = periodIndex === tpIdx ? 'tpLow prop from list2 NAV_prodStart_perShare' : (periodIndex === 0 ? 'npvLow prop from list2 NPV_perShare' : 'none');
+        const exponentUsed = periodIndex > tpIdx ? (row.highExponentAfter ?? null) : (periodIndex === tpIdx ? 0 : null);
+        const scalingFactorUsed = (periodIndex > tpIdx && projectChartModel.inferredRate !== null && exponentUsed !== null)
+          ? ((1 + projectChartModel.inferredRate) ** exponentUsed)
+          : null;
+        const valueBasisUsed = periodIndex > tpIdx ? 'year-basis' : (periodIndex === tpIdx ? 'tp-basis' : 'present/today');
+        const prev = idx > 0 ? arr[idx - 1] : null;
+        return {
+          point_name: makePointName(periodIndex),
+          periodIndex,
+          flowIndex: periodIndex >= tpIdx ? flowIndex : null,
+          calendarYear: row.calendarYear,
+          shares_used: sharesUsed,
+          shares_source_name: sharesUsed === projectDebug.sharesPostFinancing ? 'shares_post_financing from financing block' : 'shares_current fallback',
+          uses_shares_post_financing: sharesUsed !== null && sharesUsed === projectDebug.sharesPostFinancing,
+          shares_current: projectDebug.sharesCurrent ?? null,
+          shares_post_financing: projectDebug.sharesPostFinancing ?? null,
+          debt_used: projectDebug.debtTarget ?? null,
+          debt_source_name: 'debt_TargetCurrency from project inputs/financing',
+          cash_used: projectDebug.cashTarget ?? null,
+          cash_source_name: 'cash_TargetCurrency from project inputs/financing',
+          financing_mix_summary: `equity_fraction=${projectDebug.equityFraction ?? 'null'}, debt_fraction=${projectDebug.debtFraction ?? 'null'}`,
+          enterprise_value_used: null,
+          enterprise_value_source_name: null,
+          equity_value_used_high: renderedHigh !== null && sharesUsed !== null ? renderedHigh * sharesUsed : null,
+          equity_value_used_low: renderedLow !== null && sharesUsed !== null ? renderedLow * sharesUsed : null,
+          equity_value_source_name: 'per-share render value × shares_used (debug reconstruction)',
+          value_basis_used: valueBasisUsed,
+          per_share_value_before_render_high: highRaw,
+          per_share_value_before_render_low: lowRaw,
+          render_formula_high: periodIndex > tpIdx ? 'raw_high * (1+inferredRate)^flowIndex' : (periodIndex === tpIdx ? 'tpHigh anchor' : 'today-to-tp interpolation/discount anchor'),
+          render_formula_low: periodIndex > tpIdx ? 'raw_low direct (no scaling)' : (periodIndex === tpIdx ? 'tpLow anchor' : 'today-to-tp interpolation/growth anchor'),
+          exponent_used_high: exponentUsed,
+          exponent_used_low: null,
+          scaling_factor_used_high: scalingFactorUsed,
+          scaling_factor_used_low: null,
+          rendered_value_high: renderedHigh,
+          rendered_value_low: renderedLow,
+          point_series_source_name_high: pointSeriesSourceHigh,
+          point_series_source_name_low: pointSeriesSourceLow,
+          point_anchor_source_name_high: pointAnchorHigh,
+          point_anchor_source_name_low: pointAnchorLow,
+          uses_same_source_as_previous_point_high: prev ? pointSeriesSourceHigh === (prev.periodIndex > tpIdx ? 'chartFlows.dcfProdstartPresentPerShareSeries' : (prev.periodIndex === tpIdx ? 'tpHigh prop (fallback chartFlows[0])' : 'npvHigh/tp interpolation pipeline')) : null,
+          uses_same_source_as_previous_point_low: prev ? pointSeriesSourceLow === (prev.periodIndex > tpIdx ? 'chartFlows.navProdstartPerShareSeries' : (prev.periodIndex === tpIdx ? 'tpLow prop (fallback chartFlows[0])' : 'npvLow/tp interpolation pipeline')) : null,
+          uses_same_source_as_tp_high: pointSeriesSourceHigh === 'tpHigh prop (fallback chartFlows[0])',
+          uses_same_source_as_tp_low: pointSeriesSourceLow === 'tpLow prop (fallback chartFlows[0])',
+          snapshot_or_state_identifier: projectDebug.snapshotOrStateIdentifier ?? null,
+          point_uses_post_financing_shares: sharesUsed !== null && sharesUsed === projectDebug.sharesPostFinancing,
+          point_uses_current_shares: sharesUsed !== null && sharesUsed === projectDebug.sharesCurrent,
+          point_uses_same_financing_state_as_metric_panel: sharesUsed !== null && sharesUsed === (projectDebug.metricPanelSharesUsed ?? null),
+          point_uses_same_financing_state_as_market_box: sharesUsed !== null && (sharesUsed === (projectDebug.marketBoxSharesPf ?? null) || sharesUsed === (projectDebug.marketBoxSharesCurrent ?? null)),
+          point_uses_same_source_as_rendered_tp: periodIndex === tpIdx ? true : pointSeriesSourceHigh === 'tpHigh prop (fallback chartFlows[0])',
+          point_uses_same_basis_as_rendered_tp: valueBasisUsed === 'tp-basis',
+          notes: periodIndex > tpIdx ? null : 'Anchor/interpolation point; not from post-TP flowIndex path.',
+        };
+      });
+
+    const highRows = traceRows.map((row) => ({
+      series_name: 'high',
+      ...row,
+      per_share_value_before_render: row.per_share_value_before_render_high,
+      render_formula: row.render_formula_high,
+      exponent_used: row.exponent_used_high,
+      scaling_factor_used: row.scaling_factor_used_high,
+      rendered_value: row.rendered_value_high,
+      point_series_source_name: row.point_series_source_name_high,
+      point_anchor_source_name: row.point_anchor_source_name_high,
+      uses_same_source_as_previous_point: row.uses_same_source_as_previous_point_high,
+      uses_same_source_as_tp: row.uses_same_source_as_tp_high,
+      equity_value_used: row.equity_value_used_high,
+    }));
+
+    const lowRows = traceRows.map((row) => ({
+      series_name: 'low',
+      ...row,
+      per_share_value_before_render: row.per_share_value_before_render_low,
+      render_formula: row.render_formula_low,
+      exponent_used: row.exponent_used_low,
+      scaling_factor_used: row.scaling_factor_used_low,
+      rendered_value: row.rendered_value_low,
+      point_series_source_name: row.point_series_source_name_low,
+      point_anchor_source_name: row.point_anchor_source_name_low,
+      uses_same_source_as_previous_point: row.uses_same_source_as_previous_point_low,
+      uses_same_source_as_tp: row.uses_same_source_as_tp_low,
+      equity_value_used: row.equity_value_used_low,
+    }));
+
+    return { highRows, lowRows };
+  }, [projectChartModel, projectDebug]);
+
   if (isProjectMode) {
     if (!projectChartModel) {
       return <p className="status empty" style={{ margin: 0 }}>Saknar intervall-data (NPV/TP)</p>;
@@ -571,6 +696,9 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
               <div style={{ overflowX: "auto" }}><strong>6. Difference table</strong><table><thead><tr><th>point</th><th>series</th><th>source input</th><th>basis</th><th>graph formula</th><th>graph value</th><th>correct value</th><th>diff</th></tr></thead><tbody>{graphDebug2.focus.flatMap((row) => ([<tr key={`high-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>high</td><td>{row.sourceHighRaw ?? "null"}</td><td>{row.sourceBasisHigh}</td><td>raw * (1+inferredRate)^flowIndex (fixad)</td><td>{row.graphHighValue ?? "null"}</td><td>{row.correctHighValue ?? "null"}</td><td>{row.diffHigh ?? "null"}</td></tr>, <tr key={`low-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>low</td><td>{row.sourceLowRaw ?? "null"}</td><td>{row.sourceBasisLow}</td><td>raw (ingen uppräkning)</td><td>{row.graphLowValue ?? "null"}</td><td>null</td><td>null</td></tr>]))}</tbody></table></div>
               <div style={{ overflowX: "auto" }}><strong>High exponent fix verification</strong><table><thead><tr><th>point</th><th>periodIndex</th><th>calendarYear</th><th>source input raw</th><th>source basis</th><th>current exponent used</th><th>corrected exponent</th><th>graph value before fix</th><th>graph value after fix</th><th>diff_before_vs_after</th></tr></thead><tbody>{graphDebug2.focus.map((row) => <tr key={`high-exp-fix-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.sourceHighRaw ?? "null"}</td><td>{row.sourceBasisHigh}</td><td>{row.exponentHighBeforeFix ?? "null"}</td><td>{row.exponentHigh ?? "null"}</td><td>{row.graphHighValueBeforeFix ?? "null"}</td><td>{row.graphHighValue ?? "null"}</td><td>{(row.graphHighValueBeforeFix !== null && row.graphHighValue !== null) ? (row.graphHighValueBeforeFix - row.graphHighValue) : "null"}</td></tr>)}</tbody></table></div>
               <div style={{ overflowX: "auto" }}><strong>Centralkälla vs grafens nuvärden</strong><table><thead><tr><th>point</th><th>periodIndex</th><th>calendarYear</th><th>high_present_used_now</th><th>high_present_from_central_npv_source</th><th>low_present_used_now</th><th>low_present_from_central_npv_source</th><th>high_used_source_name</th><th>high_central_source_name</th><th>low_used_source_name</th><th>low_central_source_name</th><th>diff_high_present</th><th>diff_low_present</th><th>notes</th></tr></thead><tbody>{graphDebug2.centralTodayBasisRows.map((row) => <tr key={`central-vs-graph-${row.periodIndex}`}><td>{row.pointLabel}</td><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.highPresentUsedNow ?? "null"}</td><td>{row.highPresentFromCentral ?? "null"}</td><td>{row.lowPresentUsedNow ?? "null"}</td><td>{row.lowPresentFromCentral ?? "null"}</td><td>{row.highUsedSourceName}</td><td>{row.highCentralSourceName}</td><td>{row.lowUsedSourceName}</td><td>{row.lowCentralSourceName}</td><td>{row.diffHighPresent ?? "null"}</td><td>{row.diffLowPresent ?? "null"}</td><td>{row.notes ?? ""}</td></tr>)}</tbody></table></div>
+              <div style={{ overflowX: "auto" }}><strong>point_level_financing_trace · TABELL A: HIGH POINT TRACE</strong><table><thead><tr><th>point_name</th><th>periodIndex</th><th>flowIndex</th><th>calendarYear</th><th>shares_used</th><th>shares_source_name</th><th>debt_used</th><th>debt_source_name</th><th>cash_used</th><th>cash_source_name</th><th>enterprise_value_used</th><th>enterprise_value_source_name</th><th>equity_value_used</th><th>equity_value_source_name</th><th>value_basis_used</th><th>per_share_value_before_render</th><th>render_formula</th><th>exponent_used</th><th>scaling_factor_used</th><th>rendered_value</th><th>point_series_source_name</th><th>point_anchor_source_name</th><th>uses_shares_post_financing</th><th>uses_same_source_as_tp</th><th>notes</th></tr></thead><tbody>{pointLevelFinancingTrace?.highRows.map((row) => <tr key={`plf-high-${row.point_name}-${row.periodIndex}`}><td>{row.point_name}</td><td>{row.periodIndex}</td><td>{row.flowIndex ?? "null"}</td><td>{row.calendarYear}</td><td>{row.shares_used ?? "null"}</td><td>{row.shares_source_name}</td><td>{row.debt_used ?? "null"}</td><td>{row.debt_source_name}</td><td>{row.cash_used ?? "null"}</td><td>{row.cash_source_name}</td><td>{row.enterprise_value_used ?? "null"}</td><td>{row.enterprise_value_source_name ?? "null"}</td><td>{row.equity_value_used ?? "null"}</td><td>{row.equity_value_source_name}</td><td>{row.value_basis_used}</td><td>{row.per_share_value_before_render ?? "null"}</td><td>{row.render_formula}</td><td>{row.exponent_used ?? "null"}</td><td>{row.scaling_factor_used ?? "null"}</td><td>{row.rendered_value ?? "null"}</td><td>{row.point_series_source_name}</td><td>{row.point_anchor_source_name}</td><td>{row.uses_shares_post_financing ? "true" : "false"}</td><td>{row.uses_same_source_as_tp ? "true" : "false"}</td><td>{row.notes ?? ""}</td></tr>)}</tbody></table></div>
+              <div style={{ overflowX: "auto" }}><strong>point_level_financing_trace · TABELL B: LOW POINT TRACE</strong><table><thead><tr><th>point_name</th><th>periodIndex</th><th>flowIndex</th><th>calendarYear</th><th>shares_used</th><th>shares_source_name</th><th>debt_used</th><th>debt_source_name</th><th>cash_used</th><th>cash_source_name</th><th>enterprise_value_used</th><th>enterprise_value_source_name</th><th>equity_value_used</th><th>equity_value_source_name</th><th>value_basis_used</th><th>per_share_value_before_render</th><th>render_formula</th><th>exponent_used</th><th>scaling_factor_used</th><th>rendered_value</th><th>point_series_source_name</th><th>point_anchor_source_name</th><th>uses_shares_post_financing</th><th>uses_same_source_as_tp</th><th>notes</th></tr></thead><tbody>{pointLevelFinancingTrace?.lowRows.map((row) => <tr key={`plf-low-${row.point_name}-${row.periodIndex}`}><td>{row.point_name}</td><td>{row.periodIndex}</td><td>{row.flowIndex ?? "null"}</td><td>{row.calendarYear}</td><td>{row.shares_used ?? "null"}</td><td>{row.shares_source_name}</td><td>{row.debt_used ?? "null"}</td><td>{row.debt_source_name}</td><td>{row.cash_used ?? "null"}</td><td>{row.cash_source_name}</td><td>{row.enterprise_value_used ?? "null"}</td><td>{row.enterprise_value_source_name ?? "null"}</td><td>{row.equity_value_used ?? "null"}</td><td>{row.equity_value_source_name}</td><td>{row.value_basis_used}</td><td>{row.per_share_value_before_render ?? "null"}</td><td>{row.render_formula}</td><td>{row.exponent_used ?? "null"}</td><td>{row.scaling_factor_used ?? "null"}</td><td>{row.rendered_value ?? "null"}</td><td>{row.point_series_source_name}</td><td>{row.point_anchor_source_name}</td><td>{row.uses_shares_post_financing ? "true" : "false"}</td><td>{row.uses_same_source_as_tp ? "true" : "false"}</td><td>{row.notes ?? ""}</td></tr>)}</tbody></table></div>
+              <div style={{ overflowX: "auto" }}><strong>point_level_financing_trace · FLAGS</strong><table><thead><tr><th>series</th><th>point</th><th>point_uses_post_financing_shares</th><th>point_uses_current_shares</th><th>point_uses_same_financing_state_as_metric_panel</th><th>point_uses_same_financing_state_as_market_box</th><th>point_uses_same_source_as_rendered_tp</th><th>point_uses_same_basis_as_rendered_tp</th><th>uses_same_source_as_previous_point</th><th>financing_mix_summary</th><th>snapshot_or_state_identifier</th></tr></thead><tbody>{[...(pointLevelFinancingTrace?.highRows ?? []), ...(pointLevelFinancingTrace?.lowRows ?? [])].map((row) => <tr key={`plf-flag-${row.series_name}-${row.point_name}-${row.periodIndex}`}><td>{row.series_name}</td><td>{row.point_name}</td><td>{row.point_uses_post_financing_shares ? "true" : "false"}</td><td>{row.point_uses_current_shares ? "true" : "false"}</td><td>{row.point_uses_same_financing_state_as_metric_panel ? "true" : "false"}</td><td>{row.point_uses_same_financing_state_as_market_box ? "true" : "false"}</td><td>{row.point_uses_same_source_as_rendered_tp ? "true" : "false"}</td><td>{row.point_uses_same_basis_as_rendered_tp ? "true" : "false"}</td><td>{row.uses_same_source_as_previous_point === null ? "null" : (row.uses_same_source_as_previous_point ? "true" : "false")}</td><td>{row.financing_mix_summary}</td><td>{row.snapshot_or_state_identifier ?? "null"}</td></tr>)}</tbody></table></div>
               <div><strong>TP-ankare</strong><div>TP high kommer från prop <code>tpHigh</code> (list2 DCF_perShare) om finite, annars från <code>dcfSeriesRaw[0]</code> från chartFlows.</div><div>TP+1 för high går via chartFlows + uppräkning med inferredRate-pipeline.</div></div>
             </div>
           </details>

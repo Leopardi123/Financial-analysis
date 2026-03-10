@@ -5346,6 +5346,15 @@ Capital Available: ${availableLabel}`,
                               sharesPostFinancing: inputs.sharesPostFinancing,
                               netCashTarget: (inputs.cash0 !== null && inputs.debt0 !== null) ? (inputs.cash0 - inputs.debt0) : null,
                               capexSeries: Array.isArray(inputs.series.capexUSD) ? inputs.series.capexUSD : null,
+                              sharesCurrent: inputs.sharesCurrent,
+                              debtTarget: inputs.debt0,
+                              cashTarget: inputs.cash0,
+                              equityFraction: (typeof projectEquityPct === "number" && Number.isFinite(projectEquityPct)) ? projectEquityPct : null,
+                              debtFraction: (typeof projectDebtPct === "number" && Number.isFinite(projectDebtPct)) ? projectDebtPct : null,
+                              metricPanelSharesUsed: (typeof inputs.sharesPostFinancing === "number" && Number.isFinite(inputs.sharesPostFinancing) && inputs.sharesPostFinancing > 0) ? inputs.sharesPostFinancing : inputs.sharesCurrent,
+                              marketBoxSharesCurrent: projectViewMetrics.marketBox.sharesCurrent?.value ?? null,
+                              marketBoxSharesPf: projectViewMetrics.marketBox.sharesPf?.value ?? null,
+                              snapshotOrStateIdentifier: selectedProjectId,
                             };
                           })()}
                           currentYear={(() => {
