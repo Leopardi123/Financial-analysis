@@ -3054,6 +3054,111 @@ Capital Available: ${availableLabel}`,
     };
   }, [projectSnapshotData, parsedSelectedProject, projectViewMetrics, riskAdjustedDiscountRatePctInput, lockedTargetCurrency]);
 
+  const projectValueIntervalDebug = useMemo(() => {
+    if (!debugEnabled || !projectSnapshotData) return null;
+    const diagnosticsMeta = (projectSnapshotDiagnosticsMeta ?? {}) as Record<string, unknown>;
+    const projectModeled = ((projectSnapshotData.project ?? {}) as { modeled?: { npvSpotRange?: unknown } }).modeled ?? {};
+    const npvSpotRange = (projectModeled as { npvSpotRange?: Record<string, unknown> | null }).npvSpotRange ?? null;
+    const rawProject = selectedProjectRawJson ?? {};
+    const rawTime = (rawProject.time ?? {}) as Record<string, unknown>;
+    const rawEconomics = (rawProject.economics ?? {}) as Record<string, unknown>;
+    const inputSeries = ((projectSnapshotData.series ?? {}) as Record<string, unknown>);
+    const metalPriceDiagnostics = (diagnosticsMeta.metalPriceDiagnostics ?? {}) as Record<string, Record<string, unknown>>;
+    const materialMetals = Object.entries(metalPriceDiagnostics)
+      .map(([metal, info]) => ({
+        metal,
+        symbol: info.liveSymbol ?? null,
+        material: true,
+        manualPrice: info.manualFallbackValue ?? null,
+        fmpPrice: info.livePriceValue ?? null,
+        jsonStudyPrice: null,
+        winningSource: info.priceSourceUsed ?? null,
+        timestampUtc: info.manualEnteredAtUtc ?? null,
+        currency: 'USD',
+        finalSpotPrice: info.normalizedOutputValue ?? null,
+      }));
+
+    const scenarioNode = (key: 'low' | 'base' | 'high') => npvSpotRange && typeof npvSpotRange === 'object'
+      ? (npvSpotRange as Record<string, unknown>)[key] as Record<string, unknown> | null
+      : null;
+    const mapStatus = (key: 'LOW' | 'SPOT' | 'HIGH', node: Record<string, unknown> | null) => {
+      if (!node) return `${key}: failed (scenario node missing)`;
+      return `${key}: ok`;
+    };
+
+    return {
+      context: {
+        scope: 'project',
+        route: typeof window !== 'undefined' ? window.location.pathname : null,
+        projectId: selectedProjectId ?? null,
+        projectName: selectedProjectName ?? null,
+        component: 'NpvSpotRangeComparisonCard',
+        selector: 'project.modeled.npvSpotRange',
+        snapshotVersion: projectSnapshotData.snapshotVersion ?? null,
+        dataOrigin: diagnosticsMeta.refresh === true ? 'live calculated snapshot' : 'cached/inline snapshot',
+      },
+      requiredInputs: {
+        time: {
+          masterN: rawTime.masterN ?? null,
+          productionStartPeriod: rawTime.productionStartPeriod ?? null,
+          productionStartYear: rawTime.productionStartYear ?? null,
+          periodLength: Number.isInteger(rawTime.masterN) ? Number(rawTime.masterN) + 1 : null,
+          bounds: {
+            tp_gte_0: Number.isInteger(rawTime.productionStartPeriod) ? Number(rawTime.productionStartPeriod) >= 0 : null,
+            tp_lte_masterN: Number.isInteger(rawTime.productionStartPeriod) && Number.isInteger(rawTime.masterN)
+              ? Number(rawTime.productionStartPeriod) <= Number(rawTime.masterN)
+              : null,
+          },
+        },
+        prices: {
+          metals: materialMetals,
+          missingMaterialPrice: Boolean((diagnosticsMeta.metalsWithPriceFailure as unknown[] | undefined)?.length),
+          scenarioBlocked: !npvSpotRange,
+          priorityRule: 'manual price → FMP price → JSON study price',
+        },
+        economy: {
+          discountRate: projectSnapshotData.discountRate ?? null,
+          taxRate: rawEconomics.taxRate ?? null,
+          fx_USD_to_TargetCurrency: projectSnapshotData.fx_USD_to_TargetCurrency ?? null,
+          targetCurrency: projectSnapshotData.targetCurrency ?? null,
+          shares_current: (projectSnapshotData.market as Record<string, unknown> | undefined)?.shares_current ?? null,
+          shares_post_financing: (projectSnapshotData.financing as Record<string, unknown> | undefined)?.shares_post_financing ?? null,
+          cash_TargetCurrency: (projectSnapshotData.financing as Record<string, unknown> | undefined)?.cash_t0_post_TargetCurrency ?? null,
+          debt_TargetCurrency: (projectSnapshotData.financing as Record<string, unknown> | undefined)?.debt_t0_post_TargetCurrency ?? null,
+        },
+        series: {
+          fcfUSD_len: Array.isArray(inputSeries.fcffUSD) ? inputSeries.fcffUSD.length : null,
+          capexUSD_len: Array.isArray(inputSeries.capexUSD) ? inputSeries.capexUSD.length : null,
+          revenue_len: Array.isArray(inputSeries.totalRevenue_USD) ? inputSeries.totalRevenue_USD.length : null,
+          cost_len: Array.isArray(inputSeries.operatingCostsUSD) ? inputSeries.operatingCostsUSD.length : null,
+        },
+      },
+      scenarioDefinitions: {
+        LOW: 'spot deck with low override from scenario engine (typically -25% for priced material metals)',
+        SPOT: 'spot deck unadjusted',
+        HIGH: 'spot deck with high override from scenario engine (typically +25% for priced material metals)',
+      },
+      scenarioStatusText: [
+        mapStatus('LOW', scenarioNode('low')),
+        mapStatus('SPOT', scenarioNode('base')),
+        mapStatus('HIGH', scenarioNode('high')),
+      ],
+      metricDependencies: {
+        NPV: 'discountRate + fcf series',
+        IRR: 'cash flow series with sign change',
+        Payback: 'cumulative FCF repays initial capex',
+        LOM_avg_EBIT_ROCE: 'EBIT series + initial CAPEX',
+        Kapitalavkastning_LOM: 'CF_LOM / Initial_CAPEX',
+        InSitu_10Y_USD: 'first 10 years of revenue series',
+      },
+      sourcePaths: {
+        calculator: 'src/lib/snapshot/runCorporateSnapshot.ts (project.modeled.npvSpotRange build + applyScenarioMetrics)',
+        selector: 'projectSnapshotData.project.modeled.npvSpotRange',
+        uiGuard: 'src/components/project/NpvSpotRangeComparisonCard.tsx formatMetricValueByLabel',
+      },
+    };
+  }, [debugEnabled, projectSnapshotData, projectSnapshotDiagnosticsMeta, selectedProjectId, selectedProjectName, selectedProjectRawJson]);
+
   useEffect(() => {
     if (debugEnabled && projectTimelineDebug) {
       console.debug("[project-modeled-valuation-timeline-debug]", projectTimelineDebug);
@@ -5541,6 +5646,8 @@ Capital Available: ${availableLabel}`,
                           marketCapToday={projectViewMetrics.marketBox.marketCapCurrent.value}
                           currencyCode={lockedTargetCurrency}
                           formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
+                          debugEnabled={debugEnabled}
+                          debugPayload={projectValueIntervalDebug}
                         />
                       </details>
                     </div>

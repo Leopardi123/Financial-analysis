@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { Chart } from 'react-google-charts';
 
+const ENABLE_VALUE_INTERVAL_DEBUG = true;
+
 type RangeNode = {
   npvToday: number | null;
   npvSeries: Array<number | null>;
@@ -26,6 +28,8 @@ type Props = {
   marketCapToday: number | null;
   currencyCode: string;
   formatMoney: (value: number | null) => string;
+  debugEnabled?: boolean;
+  debugPayload?: Record<string, unknown> | null;
 };
 
 function formatMetricValueByLabel(label: string, value: number | null, formatMoney: (v: number | null) => string): string {
@@ -77,6 +81,8 @@ export default function NpvSpotRangeComparisonCard({
   marketCapToday,
   currencyCode,
   formatMoney,
+  debugEnabled = false,
+  debugPayload = null,
 }: Props) {
   const axisYears = useMemo(() => {
     if (
@@ -127,6 +133,105 @@ export default function NpvSpotRangeComparisonCard({
     ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     return buildCompactAxisTicks(values);
   }, [range, marketCapToday]);
+
+  const metricRows = useMemo<Array<[string, number | null, number | null, number | null]>>(() => ([
+    ['NPV', range?.low.npvToday ?? null, range?.spot.npvToday ?? null, range?.high.npvToday ?? null],
+    ['IRR', range?.low.irr ?? null, range?.spot.irr ?? null, range?.high.irr ?? null],
+    ['Payback', range?.low.payback ?? null, range?.spot.payback ?? null, range?.high.payback ?? null],
+    ['LOM_avg_EBIT_ROCE', range?.low.lomAvgEbitRoce ?? null, range?.spot.lomAvgEbitRoce ?? null, range?.high.lomAvgEbitRoce ?? null],
+    ['Kapitalavkastning_LOM', range?.low.kapitalavkastningLom ?? null, range?.spot.kapitalavkastningLom ?? null, range?.high.kapitalavkastningLom ?? null],
+    ['InSitu_10Y_USD', range?.low.inSitu10YUsd ?? null, range?.spot.inSitu10YUsd ?? null, range?.high.inSitu10YUsd ?? null],
+  ]), [range]);
+
+  const debugText = useMemo(() => {
+    if (!ENABLE_VALUE_INTERVAL_DEBUG || !debugEnabled || !debugPayload) return null;
+    const scenarios: Array<{ key: 'LOW' | 'SPOT' | 'HIGH'; node: RangeNode | null }> = [
+      { key: 'LOW', node: range?.low ?? null },
+      { key: 'SPOT', node: range?.spot ?? null },
+      { key: 'HIGH', node: range?.high ?? null },
+    ];
+    const guardTrace = metricRows.map(([label, low, spot, high]) => {
+      const byScenario = [
+        { scenario: 'LOW', value: low as number | null },
+        { scenario: 'SPOT', value: spot as number | null },
+        { scenario: 'HIGH', value: high as number | null },
+      ].map(({ scenario, value }) => {
+        const formatted = formatMetricValueByLabel(label as string, value, formatMoney);
+        const isNullish = value === null || typeof value === 'undefined';
+        const isFinite = typeof value === 'number' && Number.isFinite(value);
+        const displayAsNA = formatted === 'n/a';
+        const firstNullStage = !range
+          ? 'scenarioEngine.npvSpotRange'
+          : isNullish
+            ? `calculator.${String(label)}.${String(scenario).toLowerCase()}`
+            : (!isFinite && !isNullish)
+              ? `calculator.${String(label)}.${String(scenario).toLowerCase()} (NaN/Infinity)`
+              : displayAsNA
+                ? `ui.format.${String(label)}.${String(scenario).toLowerCase()}`
+                : 'none';
+        return {
+          scenario,
+          raw: value,
+          formatted,
+          guards: {
+            isNullish,
+            isNumber: typeof value === 'number',
+            isFinite,
+            displayAsNA,
+          },
+          firstNullStage,
+        };
+      });
+      return { label, byScenario };
+    });
+
+    const metricStatus = metricRows.map(([label, low, spot, high]) => {
+      const entries = [
+        { scenario: 'LOW', value: low as number | null },
+        { scenario: 'SPOT', value: spot as number | null },
+        { scenario: 'HIGH', value: high as number | null },
+      ].map(({ scenario, value }) => {
+        const status = value === null
+          ? 'null'
+          : (typeof value === 'number' && Number.isFinite(value))
+            ? 'computed'
+            : (typeof value === 'number' && Number.isNaN(value))
+              ? 'NaN'
+              : 'filtered out';
+        const reason = value === null
+          ? `${label} null: value missing from scenario output`
+          : (typeof value === 'number' && Number.isNaN(value))
+            ? `${label} null: computed NaN`
+            : null;
+        return { scenario, status, value, reason };
+      });
+      return { metric: label, entries };
+    });
+
+    const scenarioStatus = scenarios.map(({ key, node }) => {
+      if (!node) return { scenario: key, success: false, reason: 'scenario node missing' };
+      const prices = (debugPayload.scenarioPrices as Record<string, unknown> | null)?.[key] as Record<string, unknown> | undefined;
+      const scenarioFailure = (debugPayload.scenarioFailures as Record<string, unknown> | null)?.[key];
+      return {
+        scenario: key,
+        success: scenarioFailure == null,
+        reason: scenarioFailure ?? null,
+        prices: prices ?? null,
+      };
+    });
+
+    return JSON.stringify({
+      ...debugPayload,
+      metricStatus,
+      scenarioStatus,
+      nullPropagation: guardTrace,
+      renderLayer: {
+        component: 'NpvSpotRangeComparisonCard',
+        formattedWith: 'formatMetricValueByLabel',
+        naRule: 'null/undefined/non-finite => n/a; 0 and negatives are valid',
+      },
+    }, null, 2);
+  }, [debugEnabled, debugPayload, formatMoney, metricRows, range]);
 
   return (
     <div className="producer-core-compact-card" style={{ marginTop: 8 }}>
@@ -179,14 +284,7 @@ export default function NpvSpotRangeComparisonCard({
             <span>Spot</span>
             <span>High</span>
           </div>
-          {[
-            ['NPV', range?.low.npvToday ?? null, range?.spot.npvToday ?? null, range?.high.npvToday ?? null],
-            ['IRR', range?.low.irr ?? null, range?.spot.irr ?? null, range?.high.irr ?? null],
-            ['Payback', range?.low.payback ?? null, range?.spot.payback ?? null, range?.high.payback ?? null],
-            ['LOM_avg_EBIT_ROCE', range?.low.lomAvgEbitRoce ?? null, range?.spot.lomAvgEbitRoce ?? null, range?.high.lomAvgEbitRoce ?? null],
-            ['Kapitalavkastning_LOM', range?.low.kapitalavkastningLom ?? null, range?.spot.kapitalavkastningLom ?? null, range?.high.kapitalavkastningLom ?? null],
-            ['InSitu_10Y_USD', range?.low.inSitu10YUsd ?? null, range?.spot.inSitu10YUsd ?? null, range?.high.inSitu10YUsd ?? null],
-          ].map(([label, low, spot, high]) => (
+          {metricRows.map(([label, low, spot, high]) => (
             <div key={label} className="value-interval-block">
               <div className="value-interval-name">{label}</div>
               <div className="value-interval-values">
@@ -197,6 +295,12 @@ export default function NpvSpotRangeComparisonCard({
             </div>
           ))}
         </div>
+        {debugText && (
+          <div style={{ marginTop: 10, borderTop: '1px dashed #94a3b8', paddingTop: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Debug – Värdeintervall</div>
+            <pre style={{ whiteSpace: 'pre-wrap', overflowX: 'auto', maxWidth: '100%', fontSize: 11, marginTop: 6, color: '#0f172a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{debugText}</pre>
+          </div>
+        )}
       </section>
     </div>
   );
