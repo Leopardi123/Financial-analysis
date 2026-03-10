@@ -1216,7 +1216,7 @@ type SingleStockDashboardProps = {
 };
 
 export default function SingleStockDashboard({ onTickerChange }: SingleStockDashboardProps = {}) {
-  const { ticker, data, error, fetchCompany } = useCompanyData("AAPL");
+  const { ticker, data, loading, error, fetchCompany } = useCompanyData("");
   const [quarterlyData, setQuarterlyData] = useState<CompanyResponse | null>(null);
   const [availableTickers, setAvailableTickers] = useState<string[]>([]);
   const [tickersError, setTickersError] = useState<string | null>(null);
@@ -1236,16 +1236,6 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const [primaryView, setPrimaryView] = useState<PrimaryView>(() => readPrimaryViewFromUrl());
-  const companyType = analysisMode === "prerevenue" ? "Pre-Revenue" : "Revenue";
-  const buildCommitSha =
-    (import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA as string | undefined)
-    || (import.meta.env.VITE_GIT_COMMIT_SHA as string | undefined)
-    || (import.meta.env.VERCEL_GIT_COMMIT_SHA as string | undefined)
-    || "unknown";
-  const buildEnv =
-    (import.meta.env.VITE_VERCEL_ENV as string | undefined)
-    || (import.meta.env.VERCEL_ENV as string | undefined)
-    || "unknown";
   const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const [rrDiscountRateInput, setRrDiscountRateInput] = useState<string>("");
 
@@ -3538,16 +3528,40 @@ Capital Available: ${availableLabel}`,
   }, [corporateTimelineDebug, debugEnabled]);
 
   const dashboardTasks = useMemo(() => {
-    const diagnosticsByMetal = ((corporateDiagnostics?.meta as Record<string, unknown> | undefined)?.metalPriceDiagnostics ?? {}) as Record<string, Record<string, unknown>>;
-    const needs = Object.entries(diagnosticsByMetal).map(([metal, item]) => ({
-      projectId: selectedProjectId ?? "global",
-      metal,
-      metalKey: typeof item.priceKeyRequested === "string" ? item.priceKeyRequested : metal,
-      fmpSpotValue: typeof item.livePriceValue === "number" && Number.isFinite(item.livePriceValue) ? item.livePriceValue : null,
-      unit: typeof item.interpretedUnit === "string" ? item.interpretedUnit : null,
-    }));
-    return collectDashboardTasks({ projectPriceNeeds: needs, manualByMetalKey: manualMetalPrices });
-  }, [corporateDiagnostics, manualMetalPrices, selectedProjectId]);
+    const corporateByMetal = ((corporateDiagnostics?.meta as Record<string, unknown> | undefined)?.metalPriceDiagnostics ?? {}) as Record<string, Record<string, unknown>>;
+    const projectByMetal = ((projectSnapshotDiagnosticsMeta ?? {}) as Record<string, unknown>).metalPriceDiagnostics as Record<string, Record<string, unknown>> | undefined;
+    const needsByKey = new Map<string, {
+      projectId: string;
+      metal: string;
+      metalKey: string;
+      fmpSpotValue: number | null;
+      unit: string | null;
+    }>();
+
+    const pushDiagnostics = (items: Record<string, Record<string, unknown>>, sourceProjectId: string) => {
+      for (const [metal, item] of Object.entries(items)) {
+        const metalKey = typeof item.priceKeyRequested === "string" ? item.priceKeyRequested : metal;
+        const next = {
+          projectId: sourceProjectId,
+          metal,
+          metalKey,
+          fmpSpotValue: typeof item.livePriceValue === "number" && Number.isFinite(item.livePriceValue) ? item.livePriceValue : null,
+          unit: typeof item.interpretedUnit === "string" ? item.interpretedUnit : null,
+        };
+        const prev = needsByKey.get(metalKey);
+        if (!prev || (prev.fmpSpotValue === null && next.fmpSpotValue !== null)) {
+          needsByKey.set(metalKey, next);
+        }
+      }
+    };
+
+    pushDiagnostics(corporateByMetal, "corporate");
+    if (projectByMetal) {
+      pushDiagnostics(projectByMetal, selectedProjectId ?? "project");
+    }
+
+    return collectDashboardTasks({ projectPriceNeeds: [...needsByKey.values()], manualByMetalKey: manualMetalPrices });
+  }, [corporateDiagnostics, manualMetalPrices, projectSnapshotDiagnosticsMeta, selectedProjectId, ticker, primaryView, analysisMode]);
 
   const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
 
@@ -4222,234 +4236,267 @@ Capital Available: ${availableLabel}`,
     statementCurrency,
     mixedCurrencyNote,
   };
+  const selectedTickerLabel = data?.ticker ?? ticker;
+  const companyHeaderTitle = profile?.companyName
+    ? `${profile.companyName}${selectedTickerLabel ? ` (${selectedTickerLabel})` : ""}`
+    : selectedTickerLabel;
+  const hasSelectedCompany = Boolean(data?.ticker && !error);
 
   return (
     <div className="single-stock-dashboard">
-      <div className="stock-selector">
-        <div className="stock-selector-row">
-          <CompanyPicker
-            label="Sök bolagsnamn"
-            placeholder="T.ex. Apple"
-            onSelect={(company) => {
-              onTickerChange?.(company.symbol);
-              void fetchCompany(company.symbol);
-            }}
-          />
-          <select
-            defaultValue="Välj En Aktie"
-            onChange={(event) => {
-              const value = event.target.value;
-              if (value !== "Välj En Aktie") {
-                onTickerChange?.(value);
-                void fetchCompany(value);
-              }
-            }}
-          >
-            <option value="Välj En Aktie">Välj En Aktie</option>
-            {availableTickers.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          {tickersError && <p className="status error">{tickersError}</p>}
-          {error && <p className="status error">{error}</p>}
-        </div>
-
-      </div>
-
-
       <div className="breadcontainersinglecolumn">
-        <button
-          type="button"
-          className="admin-toggle"
-          onClick={() => setShowAdmin((prev) => !prev)}
-        >
-          {showAdmin ? "Dölj admin" : "Visa admin"}
-        </button>
-      </div>
-
-      {showAdmin && <Admin onTickersUpserted={loadTickers} />}
-
-      <div className="breadcontainersinglecolumn">
-        <h1 id="SingleStock_Stock_Name" className="subrub">
-          {profile?.companyName ? `${profile.companyName}` : data?.ticker ?? ""}
-          {data?.ticker ? ` (${data.ticker})` : ""}
-        </h1>
-        <p className="bread">
-          {profile?.description
-            ? String(profile.description)
-            : "Här visas en enstaka aktie och dess analytiska instrumentbräda. Välj ticker och kör refresh i admin om data saknas."}
-        </p>
-      </div>
-
-      {profile && (
-        <div className="breadcontainersinglecolumn">
-          <div className="producer-core-compact-card company-profile-card">
-            <section className="producer-core-section">
-              <div className="producer-core-title-row">
-                <h2 className="subrub small" style={{ margin: 0 }}>Company Profile</h2>
-              </div>
-              <div className="compact-metrics-grid company-profile-grid">
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Sektor</span>
-                  <span className="compact-metric-value">{String(profile.sector ?? "—")}</span>
-                </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Industri</span>
-                  <span className="compact-metric-value">{String(profile.industry ?? "—")}</span>
-                </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Valuta</span>
-                  <span className="compact-metric-value">{String(profile.currency ?? "—")}</span>
-                </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Börs</span>
-                  <span className="compact-metric-value">{exchangeDisplay ? String(exchangeDisplay) : "—"}</span>
-                </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Aktiepris</span>
-                  <span className="compact-metric-value">{formatPriceValue(priceValue)}</span>
-                </div>
-                <div className="compact-metric-row">
-                  <span className="compact-metric-label">Börsvärde</span>
-                  <span className="compact-metric-value">{formatMarketCapValue(marketCapValue)}</span>
-                </div>
-              </div>
-            </section>
+        <div className="producer-core-compact-card single-stock-search-card">
+          <h2 className="subrub small">Single Stock</h2>
+          <div className="stock-selector">
+            <div className="stock-selector-row">
+              <CompanyPicker
+                label="Sök bolagsnamn"
+                placeholder="T.ex. Apple"
+                onSelect={(company) => {
+                  onTickerChange?.(company.symbol);
+                  void fetchCompany(company.symbol);
+                }}
+              />
+              <select
+                defaultValue="Välj En Aktie"
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value !== "Välj En Aktie") {
+                    onTickerChange?.(value);
+                    void fetchCompany(value);
+                  }
+                }}
+              >
+                <option value="Välj En Aktie">Välj En Aktie</option>
+                {availableTickers.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="admin-toggle"
+                onClick={() => setShowAdmin((prev) => !prev)}
+              >
+                {showAdmin ? "Dölj admin" : "Visa admin"}
+              </button>
+            </div>
+            {tickersError && <p className="status error">{tickersError}</p>}
+            {loading && <p className="status">Fetching company…</p>}
+            {error && <p className="status error">{error}</p>}
           </div>
         </div>
-      )}
-      <div className="breadcontainersinglecolumn">
-        <h2 className="subrub small">Göromål</h2>
-        {dashboardTasks.length === 0 ? (
-          <p className="bread">Inga göromål just nu.</p>
-        ) : (
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {dashboardTasks.map((task) => (
-              <li key={task.id}>
-                {task.category}: {task.title}.
+      </div>
+
+      {hasSelectedCompany && (
+        <>
+          {showAdmin && <Admin onTickersUpserted={loadTickers} />}
+
+          <div className="breadcontainersinglecolumn">
+            <div className="producer-core-compact-card single-stock-header-card">
+              {companyHeaderTitle ? <h1 id="SingleStock_Stock_Name" className="subrub">{companyHeaderTitle}</h1> : null}
+              <section className="producer-core-section single-stock-profile-body">
+                <div className="producer-core-title-row">
+                  <h2 className="subrub small" style={{ margin: 0 }}>Company Profile</h2>
+                </div>
+                <div className="compact-metrics-grid company-profile-grid">
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Sektor</span>
+                    <span className="compact-metric-value">{String(profile?.sector ?? "—")}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Industri</span>
+                    <span className="compact-metric-value">{String(profile?.industry ?? "—")}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Valuta</span>
+                    <span className="compact-metric-value">{String(profile?.currency ?? "—")}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Börs</span>
+                    <span className="compact-metric-value">{exchangeDisplay ? String(exchangeDisplay) : "—"}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Aktiepris</span>
+                    <span className="compact-metric-value">{formatPriceValue(priceValue)}</span>
+                  </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Börsvärde</span>
+                    <span className="compact-metric-value">{formatMarketCapValue(marketCapValue)}</span>
+                  </div>
+                </div>
+              </section>
+              <section className="producer-core-section single-stock-header-body">
+                <p className="bread">
+                  {profile?.description
+                    ? String(profile.description)
+                    : "—"}
+                </p>
+              </section>
+              <section className="producer-core-section single-stock-price-body">
+                <div className="producer-core-title-row">
+                  <h2 className="subrub small" style={{ margin: 0 }}>Price History</h2>
+                </div>
+                {priceLoading && <p className="status">Fetching data…</p>}
+                {!priceLoading && priceError && <p className="status error">{priceError}</p>}
+                {!priceLoading && !priceError && !priceData && (
+                  <p className="status empty">No historical data available.</p>
+                )}
+                {!priceLoading && !priceError && priceData && !longVolumeData && !shortVolumeData && (
+                  <p className="status empty">Volume data saknas för vald period.</p>
+                )}
+                <div className="chartcontainerdoublecolumn single-stock-price-charts">
+                  <ReportedChart reportedChartContext={reportedChartContext}
+                    fiscalYearEndMonth={fiscalYearEndMonth}
+                    chartType="ComboChart"
+                    title="Aktieprishistoria"
+                    data={combinedLongPriceVolumeData}
+                    height={260}
+                    options={{
+                      ...priceChartOptions,
+                      colors: [
+                        PRICE_SERIES_COLORS.close,
+                        PRICE_SERIES_COLORS.sma200,
+                        PRICE_SERIES_COLORS.sma50,
+                        "#7a7a7a",
+                      ],
+                      seriesType: "line",
+                      series: {
+                        0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+                        1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        3: { type: "bars", targetAxisIndex: 1 },
+                      },
+                      vAxes: {
+                        0: { title: marketCurrency },
+                        1: { title: "shares", format: "short" },
+                      },
+                      bar: { groupWidth: "45%" },
+                    }}
+                    y2AxisTitle="shares"
+                  />
+                  <ReportedChart reportedChartContext={reportedChartContext}
+                    fiscalYearEndMonth={fiscalYearEndMonth}
+                    chartType="ComboChart"
+                    title="Aktieprishistoria (kort)"
+                    data={combinedShortPriceVolumeData}
+                    height={260}
+                    options={{
+                      ...priceChartOptions,
+                      colors: [
+                        PRICE_SERIES_COLORS.close,
+                        PRICE_SERIES_COLORS.sma200,
+                        PRICE_SERIES_COLORS.sma50,
+                        PRICE_SERIES_COLORS.sma20,
+                        "#7a7a7a",
+                      ],
+                      seriesType: "line",
+                      series: {
+                        0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+                        1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        3: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        4: { type: "bars", targetAxisIndex: 1 },
+                      },
+                      vAxes: {
+                        0: { title: marketCurrency },
+                        1: { title: "shares", format: "short" },
+                      },
+                      bar: { groupWidth: "45%" },
+                    }}
+                    y2AxisTitle="shares"
+                  />
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div className="breadcontainersinglecolumn">
+            <div className="producer-core-compact-card single-stock-tasks-card">
+              <h2 className="subrub small">Göromål</h2>
+              {dashboardTasks.length === 0 ? (
+                <p className="bread">Inga göromål just nu.</p>
+              ) : (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {dashboardTasks.map((task) => (
+                    <li key={task.id}>
+                      {task.category}: {task.title}.
+                      <button
+                        type="button"
+                        className="button-link"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => openManualPriceModal({ metal: task.metal, metalKey: task.metalKey, unit: task.unit, reason: task.resolution.reason })}
+                      >
+                        {task.actionLabel}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div className="breadcontainersinglecolumn">
+            <div className="producer-core-compact-card single-stock-nav-card">
+              <div className="single-stock-tabs single-stock-tabs-primary" role="tablist" aria-label="Company perspective">
                 <button
                   type="button"
-                  className="button-link"
-                  style={{ marginLeft: 6 }}
-                  onClick={() => openManualPriceModal({ metal: task.metal, metalKey: task.metalKey, unit: task.unit, reason: task.resolution.reason })}
+                  className={`single-stock-tab ${analysisMode === "revenue" ? "is-active" : ""}`}
+                  onClick={() => setAnalysisMode("revenue")}
+                  aria-selected={analysisMode === "revenue"}
                 >
-                  {task.actionLabel}
+                  Revenue
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="breadcontainersinglecolumn">
-        <h2 className="subrub small">Price History</h2>
-        <p className="bread">
-          Pris- och volymgrafer laddas från backend när historik finns tillgänglig.
-        </p>
-        {priceLoading && <p className="status">Fetching data…</p>}
-        {!priceLoading && priceError && <p className="status error">{priceError}</p>}
-        {!priceLoading && !priceError && !priceData && (
-          <p className="status empty">No historical data available.</p>
-        )}
-        {!priceLoading && !priceError && priceData && !longVolumeData && !shortVolumeData && (
-          <p className="status empty">Volume data saknas för vald period.</p>
-        )}
-      </div>
-
-      <div className="chartcontainerdoublecolumn">
-        <ReportedChart reportedChartContext={reportedChartContext}
-          fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="ComboChart"
-          title="Aktieprishistoria"
-          data={combinedLongPriceVolumeData}
-          height={260}
-          options={{
-            ...priceChartOptions,
-            colors: [
-              PRICE_SERIES_COLORS.close,
-              PRICE_SERIES_COLORS.sma200,
-              PRICE_SERIES_COLORS.sma50,
-              "#7a7a7a",
-            ],
-            seriesType: "line",
-            series: {
-              0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
-              1: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              2: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              3: { type: "bars", targetAxisIndex: 1 },
-            },
-            vAxes: {
-              0: { title: marketCurrency },
-              1: { title: "shares", format: "short" },
-            },
-            bar: { groupWidth: "45%" },
-          }}
-          y2AxisTitle="shares"
-        />
-        <ReportedChart reportedChartContext={reportedChartContext}
-          fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="ComboChart"
-          title="Aktieprishistoria (kort)"
-          data={combinedShortPriceVolumeData}
-          height={260}
-          options={{
-            ...priceChartOptions,
-            colors: [
-              PRICE_SERIES_COLORS.close,
-              PRICE_SERIES_COLORS.sma200,
-              PRICE_SERIES_COLORS.sma50,
-              PRICE_SERIES_COLORS.sma20,
-              "#7a7a7a",
-            ],
-            seriesType: "line",
-            series: {
-              0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
-              1: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              2: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              3: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              4: { type: "bars", targetAxisIndex: 1 },
-            },
-            vAxes: {
-              0: { title: marketCurrency },
-              1: { title: "shares", format: "short" },
-            },
-            bar: { groupWidth: "45%" },
-          }}
-          y2AxisTitle="shares"
-        />
-      </div>
-
-      <div className="breadcontainersinglecolumn">
-        <h2 className="subrub small">Mode</h2>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button type="button" onClick={() => setAnalysisMode("revenue")} disabled={analysisMode === "revenue"}>
-            Revenue (Producer)
-          </button>
-          <button type="button" onClick={() => setAnalysisMode("prerevenue")} disabled={analysisMode === "prerevenue"}>
-            Pre-Revenue
-          </button>
-        </div>
-      </div>
-
-      <div className="breadcontainersinglecolumn">
-        <h2 className="subrub small">View</h2>
-        <p className="bread">Company type preset: <strong>{companyType}</strong></p>
-        <p className="bread">Target currency: {lockedTargetCurrency} (from profile)</p>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button type="button" onClick={() => setPrimaryView("reported")} disabled={primaryView === "reported"}>Corporate (reported)</button>
-          <button type="button" onClick={() => setPrimaryView("modeled")} disabled={primaryView === "modeled"}>Corporate (modeled)</button>
-          {analysisMode === "prerevenue" && (
-            <button type="button" onClick={() => setPrimaryView("projects")} disabled={primaryView === "projects"}>Projects</button>
-          )}
-          {analysisMode === "prerevenue" && (
-            <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
-              Edit projects
-            </a>
-          )}
-        </div>
-      </div>
+                <button
+                  type="button"
+                  className={`single-stock-tab ${analysisMode === "prerevenue" ? "is-active" : ""}`}
+                  onClick={() => setAnalysisMode("prerevenue")}
+                  aria-selected={analysisMode === "prerevenue"}
+                >
+                  Pre-Revenue
+                </button>
+              </div>
+              <div className="single-stock-subtabs-wrap">
+                <div className="single-stock-subtabs-label">Corporate views</div>
+                <div className="single-stock-tabs single-stock-tabs-secondary" role="tablist" aria-label="Company data views">
+                  <button
+                    type="button"
+                    className={`single-stock-tab single-stock-subtab ${primaryView === "reported" ? "is-active" : ""}`}
+                    onClick={() => setPrimaryView("reported")}
+                    aria-selected={primaryView === "reported"}
+                  >
+                    Reported
+                  </button>
+                  <button
+                    type="button"
+                    className={`single-stock-tab single-stock-subtab ${primaryView === "modeled" ? "is-active" : ""}`}
+                    onClick={() => setPrimaryView("modeled")}
+                    aria-selected={primaryView === "modeled"}
+                  >
+                    Modeled
+                  </button>
+                  {analysisMode === "prerevenue" && (
+                    <button
+                      type="button"
+                      className={`single-stock-tab single-stock-subtab ${primaryView === "projects" ? "is-active" : ""}`}
+                      onClick={() => setPrimaryView("projects")}
+                      aria-selected={primaryView === "projects"}
+                    >
+                      Project
+                    </button>
+                  )}
+                  {analysisMode === "prerevenue" ? (
+                    <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="single-stock-tab single-stock-tab-action">
+                      Edit Project
+                    </a>
+                  ) : (
+                    <span className="single-stock-tab single-stock-tab-action is-disabled" aria-disabled="true">Edit Project</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
 
       {primaryView === "reported" && mixedCurrency && (
         <div className="breadcontainersinglecolumn">
@@ -4461,8 +4508,6 @@ Capital Available: ${availableLabel}`,
         <>
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">Producer Core (PVE v2)</h1>
-            <p className="bread">Efficiency, Resilience, Value och Context snapshots för MAJOR/revenue-mode.</p>
-            <p className="bread" style={{ fontSize: "11px", opacity: 0.8 }}>Build: {buildCommitSha} • Env: {buildEnv}</p>
           </div>
           {producerCoreMissing ? (
             <div className="breadcontainersinglecolumn">
@@ -6420,6 +6465,8 @@ Capital Available: ${availableLabel}`,
             </>
           )}
         </div>
+      )}
+        </>
       )}
       {manualPriceModalOpen && manualPriceModalTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "grid", placeItems: "center", zIndex: 2000 }}>

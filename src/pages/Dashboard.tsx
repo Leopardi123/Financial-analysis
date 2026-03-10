@@ -36,7 +36,7 @@ export default function Dashboard() {
         <Section
           id="singlestock"
           title="SINGLE STOCK DASHBOARD"
-          description="Här skall också finnas en linjegraf som visar upp det historiska aktievärdet som om det vore prissatt i guld."
+          description=""
           background="#e0e9ce"
           defaultOpen
         >
