@@ -1236,7 +1236,6 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const [primaryView, setPrimaryView] = useState<PrimaryView>(() => readPrimaryViewFromUrl());
-  const companyType = analysisMode === "prerevenue" ? "Pre-Revenue" : "Revenue";
   const buildCommitSha =
     (import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA as string | undefined)
     || (import.meta.env.VITE_GIT_COMMIT_SHA as string | undefined)
@@ -4225,62 +4224,64 @@ Capital Available: ${availableLabel}`,
 
   return (
     <div className="single-stock-dashboard">
-      <div className="stock-selector">
-        <div className="stock-selector-row">
-          <CompanyPicker
-            label="Sök bolagsnamn"
-            placeholder="T.ex. Apple"
-            onSelect={(company) => {
-              onTickerChange?.(company.symbol);
-              void fetchCompany(company.symbol);
-            }}
-          />
-          <select
-            defaultValue="Välj En Aktie"
-            onChange={(event) => {
-              const value = event.target.value;
-              if (value !== "Välj En Aktie") {
-                onTickerChange?.(value);
-                void fetchCompany(value);
-              }
-            }}
-          >
-            <option value="Välj En Aktie">Välj En Aktie</option>
-            {availableTickers.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          {tickersError && <p className="status error">{tickersError}</p>}
-          {error && <p className="status error">{error}</p>}
-        </div>
-
-      </div>
-
-
       <div className="breadcontainersinglecolumn">
-        <button
-          type="button"
-          className="admin-toggle"
-          onClick={() => setShowAdmin((prev) => !prev)}
-        >
-          {showAdmin ? "Dölj admin" : "Visa admin"}
-        </button>
+        <div className="producer-core-compact-card single-stock-search-card">
+          <h2 className="subrub small">Single Stock</h2>
+          <div className="stock-selector">
+            <div className="stock-selector-row">
+              <CompanyPicker
+                label="Sök bolagsnamn"
+                placeholder="T.ex. Apple"
+                onSelect={(company) => {
+                  onTickerChange?.(company.symbol);
+                  void fetchCompany(company.symbol);
+                }}
+              />
+              <select
+                defaultValue="Välj En Aktie"
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value !== "Välj En Aktie") {
+                    onTickerChange?.(value);
+                    void fetchCompany(value);
+                  }
+                }}
+              >
+                <option value="Välj En Aktie">Välj En Aktie</option>
+                {availableTickers.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="admin-toggle"
+                onClick={() => setShowAdmin((prev) => !prev)}
+              >
+                {showAdmin ? "Dölj admin" : "Visa admin"}
+              </button>
+            </div>
+            {tickersError && <p className="status error">{tickersError}</p>}
+            {error && <p className="status error">{error}</p>}
+          </div>
+        </div>
       </div>
 
       {showAdmin && <Admin onTickersUpserted={loadTickers} />}
 
       <div className="breadcontainersinglecolumn">
-        <h1 id="SingleStock_Stock_Name" className="subrub">
-          {profile?.companyName ? `${profile.companyName}` : data?.ticker ?? ""}
-          {data?.ticker ? ` (${data.ticker})` : ""}
-        </h1>
-        <p className="bread">
-          {profile?.description
-            ? String(profile.description)
-            : "Här visas en enstaka aktie och dess analytiska instrumentbräda. Välj ticker och kör refresh i admin om data saknas."}
-        </p>
+        <div className="producer-core-compact-card single-stock-header-card">
+          <h1 id="SingleStock_Stock_Name" className="subrub">
+            {profile?.companyName ? `${profile.companyName}` : data?.ticker ?? ""}
+            {data?.ticker ? ` (${data.ticker})` : ""}
+          </h1>
+          <p className="bread">
+            {profile?.description
+              ? String(profile.description)
+              : "Välj ticker för att se bolagsbeskrivning och data."}
+          </p>
+        </div>
       </div>
 
       {profile && (
@@ -4320,6 +4321,63 @@ Capital Available: ${availableLabel}`,
           </div>
         </div>
       )}
+
+      <div className="breadcontainersinglecolumn">
+        <div className="producer-core-compact-card single-stock-nav-card">
+          <div className="single-stock-tabs" role="tablist" aria-label="Company perspective">
+            <button
+              type="button"
+              className={`single-stock-tab ${analysisMode === "revenue" ? "is-active" : ""}`}
+              onClick={() => setAnalysisMode("revenue")}
+              aria-selected={analysisMode === "revenue"}
+            >
+              Revenue
+            </button>
+            <button
+              type="button"
+              className={`single-stock-tab ${analysisMode === "prerevenue" ? "is-active" : ""}`}
+              onClick={() => setAnalysisMode("prerevenue")}
+              aria-selected={analysisMode === "prerevenue"}
+            >
+              Pre-Revenue
+            </button>
+          </div>
+          <div className="single-stock-tabs single-stock-tabs-secondary" role="tablist" aria-label="Company data views">
+            <button
+              type="button"
+              className={`single-stock-tab ${primaryView === "reported" ? "is-active" : ""}`}
+              onClick={() => setPrimaryView("reported")}
+              aria-selected={primaryView === "reported"}
+            >
+              Reported
+            </button>
+            <button
+              type="button"
+              className={`single-stock-tab ${primaryView === "modeled" ? "is-active" : ""}`}
+              onClick={() => setPrimaryView("modeled")}
+              aria-selected={primaryView === "modeled"}
+            >
+              Modeled
+            </button>
+            {analysisMode === "prerevenue" && (
+              <button
+                type="button"
+                className={`single-stock-tab ${primaryView === "projects" ? "is-active" : ""}`}
+                onClick={() => setPrimaryView("projects")}
+                aria-selected={primaryView === "projects"}
+              >
+                Projects
+              </button>
+            )}
+            {analysisMode === "prerevenue" && (
+              <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
+                Edit projects
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="breadcontainersinglecolumn">
         <h2 className="subrub small">Göromål</h2>
         {dashboardTasks.length === 0 ? (
@@ -4419,36 +4477,6 @@ Capital Available: ${availableLabel}`,
           }}
           y2AxisTitle="shares"
         />
-      </div>
-
-      <div className="breadcontainersinglecolumn">
-        <h2 className="subrub small">Mode</h2>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button type="button" onClick={() => setAnalysisMode("revenue")} disabled={analysisMode === "revenue"}>
-            Revenue (Producer)
-          </button>
-          <button type="button" onClick={() => setAnalysisMode("prerevenue")} disabled={analysisMode === "prerevenue"}>
-            Pre-Revenue
-          </button>
-        </div>
-      </div>
-
-      <div className="breadcontainersinglecolumn">
-        <h2 className="subrub small">View</h2>
-        <p className="bread">Company type preset: <strong>{companyType}</strong></p>
-        <p className="bread">Target currency: {lockedTargetCurrency} (from profile)</p>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button type="button" onClick={() => setPrimaryView("reported")} disabled={primaryView === "reported"}>Corporate (reported)</button>
-          <button type="button" onClick={() => setPrimaryView("modeled")} disabled={primaryView === "modeled"}>Corporate (modeled)</button>
-          {analysisMode === "prerevenue" && (
-            <button type="button" onClick={() => setPrimaryView("projects")} disabled={primaryView === "projects"}>Projects</button>
-          )}
-          {analysisMode === "prerevenue" && (
-            <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
-              Edit projects
-            </a>
-          )}
-        </div>
       </div>
 
       {primaryView === "reported" && mixedCurrency && (
