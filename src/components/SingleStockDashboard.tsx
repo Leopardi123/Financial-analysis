@@ -5,6 +5,7 @@ import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
+import AlltGickFelCard from "./project/AlltGickFelCard";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
 import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
@@ -5736,6 +5737,49 @@ Capital Available: ${availableLabel}`,
                           formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
                           debugEnabled={valueIntervalDebugVisible}
                           debugPayload={projectValueIntervalDebug}
+                        />
+                      </details>
+                    </div>
+                    <div className="project-list2-page">
+                      <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list2}>
+                        <summary><h2 className="subrub small">ALLT GICK FEL</h2></summary>
+                        <AlltGickFelCard
+                          range={(() => {
+                            const npvRange = (projectSnapshotData?.project as { modeled?: { npvSpotRange?: { low: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; base: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null }; high: { npvToday: number | null; npvSeries: Array<number | null>; irr: number | null; payback: number | null; lomAvgEbitRoce: number | null; kapitalavkastningLom: number | null; inSitu10YUsd: number | null } } | null } } | undefined)?.modeled?.npvSpotRange ?? null;
+                            if (!npvRange) return null;
+                            return {
+                              low: npvRange.low,
+                              spot: npvRange.base,
+                              high: npvRange.high,
+                            };
+                          })()}
+                          yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                          productionStartPeriod={(() => {
+                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
+                              ? selectedProjectRawJson.time as Record<string, unknown>
+                              : null;
+                            const value = time?.productionStartPeriod;
+                            return typeof value === "number" && Number.isFinite(value) ? value : null;
+                          })()}
+                          masterN={(() => {
+                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
+                              ? selectedProjectRawJson.time as Record<string, unknown>
+                              : null;
+                            const value = time?.masterN;
+                            return typeof value === "number" && Number.isFinite(value) ? value : null;
+                          })()}
+                          marketCapToday={projectViewMetrics.marketBox.marketCapCurrent.value}
+                          currencyCode={lockedTargetCurrency}
+                          formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
+                          capexSeries={Array.isArray((projectSnapshotData?.series as { capexUSD?: Array<number | null> } | undefined)?.capexUSD) ? ((projectSnapshotData?.series as { capexUSD?: Array<number | null> }).capexUSD as Array<number | null>) : null}
+                          taxRate={(() => {
+                            const economics = selectedProjectRawJson && typeof selectedProjectRawJson.economics === "object" && selectedProjectRawJson.economics !== null
+                              ? selectedProjectRawJson.economics as Record<string, unknown>
+                              : null;
+                            const value = economics?.taxRate;
+                            return typeof value === "number" && Number.isFinite(value) ? value : null;
+                          })()}
+                          debugEnabled={valueIntervalDebugVisible}
                         />
                       </details>
                     </div>
