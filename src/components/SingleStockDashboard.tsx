@@ -2939,6 +2939,48 @@ Capital Available: ${availableLabel}`,
 
 
 
+  const financingConsistencyDebug = useMemo(() => {
+    if (!projectViewMetrics || !projectSnapshotData) return null;
+    const inputs = getProjectInputs({ snapshot: projectSnapshotData as Record<string, unknown>, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
+    const sharesUsed = (typeof inputs.sharesPostFinancing === "number" && Number.isFinite(inputs.sharesPostFinancing) && inputs.sharesPostFinancing > 0)
+      ? inputs.sharesPostFinancing
+      : ((typeof inputs.sharesCurrent === "number" && Number.isFinite(inputs.sharesCurrent) && inputs.sharesCurrent > 0) ? inputs.sharesCurrent : null);
+    const graphHighPerShare = projectViewMetrics.list2.DCF_perShare?.value ?? null;
+    const graphLowPerShare = projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null;
+    const graphHighEquity = (typeof graphHighPerShare === "number" && sharesUsed !== null) ? graphHighPerShare * sharesUsed : null;
+    const graphLowEquity = (typeof graphLowPerShare === "number" && sharesUsed !== null) ? graphLowPerShare * sharesUsed : null;
+
+    const rows = [
+      { metric: "NPV", enterprise_value: projectViewMetrics.list2.NPV_Target?.value ?? null, equity_value: projectViewMetrics.list2.NPV_Target?.value ?? null, shares_used: null, source_layer: "1. central project valuation engine" },
+      { metric: "NAV", enterprise_value: null, equity_value: projectViewMetrics.list2.NAV_Target?.value ?? null, shares_used: null, source_layer: "1. central project valuation engine + financing" },
+      { metric: "CF_LOM", enterprise_value: projectViewMetrics.list2.CF_LOM_Target?.value ?? null, equity_value: null, shares_used: null, source_layer: "1. central project valuation engine" },
+      { metric: "DCF_prodstart", enterprise_value: projectViewMetrics.list2.DCF_Target?.value ?? null, equity_value: projectViewMetrics.list2.NPV_prodStart?.value ?? null, shares_used: null, source_layer: "1. central project valuation engine" },
+      { metric: "graph_high", enterprise_value: null, equity_value: graphHighEquity, shares_used: sharesUsed, source_layer: "3. graph rendering layer" },
+      { metric: "graph_low", enterprise_value: null, equity_value: graphLowEquity, shares_used: sharesUsed, source_layer: "3. graph rendering layer" },
+    ];
+
+    const marketCap = projectViewMetrics.marketBox.marketCapCurrent?.value ?? null;
+    const ev = projectViewMetrics.marketBox.evCurrent?.value ?? null;
+    const debt = inputs.debt0;
+    const cash = inputs.cash0;
+    const evFormula = (typeof marketCap === "number" && typeof debt === "number" && typeof cash === "number") ? (marketCap + debt - cash) : null;
+
+    return {
+      financing_mix: { equity_fraction: projectEquityPct ?? null, debt_fraction: projectDebtPct ?? null },
+      shares_current: inputs.sharesCurrent,
+      shares_post_financing: inputs.sharesPostFinancing,
+      debt: debt,
+      cash: cash,
+      market_box: {
+        marketCap,
+        ev,
+        ev_formula_marketCap_plus_debt_minus_cash: evFormula,
+        ev_formula_diff: (typeof ev === "number" && typeof evFormula === "number") ? ev - evFormula : null,
+      },
+      rows,
+    };
+  }, [projectViewMetrics, projectSnapshotData, parsedSelectedProject, riskAdjustedDiscountRatePctInput, lockedTargetCurrency, projectEquityPct, projectDebtPct]);
+
   const projectTimelineDebug = useMemo(() => {
     if (!projectSnapshotData || !projectViewMetrics) return null;
     const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
@@ -5290,6 +5332,22 @@ Capital Available: ${availableLabel}`,
                             const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
                             return projectPayload?.chartFlows ?? null;
                           })()}
+                          projectDebug={(() => {
+                            const snapshotSeries = (projectSnapshotData?.series ?? null) as { fcffUSD?: Array<number | null>; yearsByPeriod?: Array<number | null> } | null;
+                            const inputs = getProjectInputs({ snapshot: (projectSnapshotData ?? null) as Record<string, unknown> | null, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
+                            return {
+                              yearsByPeriod: Array.isArray(snapshotSeries?.yearsByPeriod) ? snapshotSeries?.yearsByPeriod : null,
+                              fcffProductionTableSeries: Array.isArray(snapshotSeries?.fcffUSD) ? snapshotSeries.fcffUSD : null,
+                              fcffNpvSeries: Array.isArray(inputs.series.fcfUSD) ? inputs.series.fcfUSD : null,
+                              discountRate: inputs.r,
+                              tpPeriod: inputs.tp,
+                              debugEnabled,
+                              fxUsdToTarget: inputs.fx,
+                              sharesPostFinancing: inputs.sharesPostFinancing,
+                              netCashTarget: (inputs.cash0 !== null && inputs.debt0 !== null) ? (inputs.cash0 - inputs.debt0) : null,
+                              capexSeries: Array.isArray(inputs.series.capexUSD) ? inputs.series.capexUSD : null,
+                            };
+                          })()}
                           currentYear={(() => {
                             const series = (projectSnapshotData?.series ?? null) as { yearsByPeriod?: number[] } | null;
                             const firstYear = Array.isArray(series?.yearsByPeriod) ? series?.yearsByPeriod[0] : null;
@@ -5392,6 +5450,51 @@ Capital Available: ${availableLabel}`,
                             </details>
                           );
                         })()}
+                        {debugEnabled && financingConsistencyDebug && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>financing_consistency_debug</summary>
+                            <div style={{ marginTop: 8, fontSize: 11, color: "#0f172a", display: "grid", gap: 8 }}>
+                              <div><strong>financing_mix:</strong> equity={financingConsistencyDebug.financing_mix.equity_fraction ?? "null"}, debt={financingConsistencyDebug.financing_mix.debt_fraction ?? "null"}</div>
+                              <div><strong>shares_current:</strong> {financingConsistencyDebug.shares_current ?? "null"} | <strong>shares_post_financing:</strong> {financingConsistencyDebug.shares_post_financing ?? "null"}</div>
+                              <div><strong>debt:</strong> {financingConsistencyDebug.debt ?? "null"} | <strong>cash:</strong> {financingConsistencyDebug.cash ?? "null"}</div>
+                              <div><strong>MarketBox EV check:</strong> EV={financingConsistencyDebug.market_box.ev ?? "null"}, MarketCap+Debt-Cash={financingConsistencyDebug.market_box.ev_formula_marketCap_plus_debt_minus_cash ?? "null"}, diff={financingConsistencyDebug.market_box.ev_formula_diff ?? "null"}</div>
+                              <div style={{ overflowX: "auto" }}>
+                                <table>
+                                  <thead><tr><th>metric</th><th>enterprise_value</th><th>equity_value</th><th>shares_used</th><th>source_layer</th></tr></thead>
+                                  <tbody>
+                                    {financingConsistencyDebug.rows.map((row) => (
+                                      <tr key={`fin-${row.metric}`}>
+                                        <td>{row.metric}</td>
+                                        <td>{row.enterprise_value ?? "null"}</td>
+                                        <td>{row.equity_value ?? "null"}</td>
+                                        <td>{row.shares_used ?? "null"}</td>
+                                        <td>{row.source_layer}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </details>
+                        )}
+                        {debugEnabled && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>debugg fallande graf</summary>
+                            <div style={{ marginTop: 8, fontSize: 11, color: "#0f172a" }}>
+                              Den fulla tabell-debuggen för fallande kurva ligger i grafkortet (ValueRangeSnapshotCard) direkt ovanför listan med nyckeltal i samma sektion.
+                              <div style={{ marginTop: 6 }}><strong>Plats:</strong> FINANSIELLA NYCKELTAL OCH VÄRDERING → under själva grafen.</div>
+                            </div>
+                          </details>
+                        )}
+                        {debugEnabled && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>debugg fallande graf 2</summary>
+                            <div style={{ marginTop: 8, fontSize: 11, color: "#0f172a" }}>
+                              Den fulla sektionen med post-TP exponentverifiering, central-vs-graf-jämförelse och differenstabeller ligger i grafkortet (ValueRangeSnapshotCard) direkt ovanför nyckeltalen.
+                              <div style={{ marginTop: 6 }}><strong>Tips:</strong> scrolla upp i samma kort till grafen och öppna detaljerna där.</div>
+                            </div>
+                          </details>
+                        )}
                         {debugEnabled && projectTimelineDebug && (
                           <details style={{ marginTop: 8 }}>
                             <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Valuation timeline debug</summary>

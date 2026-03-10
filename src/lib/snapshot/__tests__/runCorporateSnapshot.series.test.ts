@@ -369,6 +369,29 @@ test('projects-mode snapshot without market does not throw and nulls EV outputs'
 });
 
 
+
+
+test('financing mix changes shares-per-share outputs but keeps enterprise totals invariant', async () => {
+  const bodyA = await loadFixture();
+  bodyA.financingPlan = { equity_fraction: 1, debt_fraction: 0 };
+  const resultA = await runCorporateSnapshotPipeline({ body: bodyA, refresh: false });
+  assert.equal(resultA.ok, true);
+  if (!resultA.ok) return;
+
+  const bodyB = await loadFixture();
+  bodyB.financingPlan = { equity_fraction: 0, debt_fraction: 1 };
+  const resultB = await runCorporateSnapshotPipeline({ body: bodyB, refresh: false });
+  assert.equal(resultB.ok, true);
+  if (!resultB.ok) return;
+
+  assert.equal(resultA.snapshot.NPV_today_TargetCurrency, resultB.snapshot.NPV_today_TargetCurrency);
+  assert.equal(resultA.snapshot.CF_LOM_TargetCurrency, resultB.snapshot.CF_LOM_TargetCurrency);
+  assert.equal(resultA.snapshot.DCF_prodStart_present_TargetCurrency, resultB.snapshot.DCF_prodStart_present_TargetCurrency);
+
+  assert.notEqual(resultA.snapshot.financing.shares_post_financing, resultB.snapshot.financing.shares_post_financing);
+  assert.notEqual(resultA.snapshot.DCF_prodStart_present_perShare_TargetCurrency, resultB.snapshot.DCF_prodStart_present_perShare_TargetCurrency);
+});
+
 test('projects-mode per-share metrics default to post-financing FD shares while EV per share stays on common shares_current', async () => {
   const body = await loadFixture();
   const baseResult = await runCorporateSnapshotPipeline({ body, refresh: false });
