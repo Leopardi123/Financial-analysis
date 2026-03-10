@@ -1236,15 +1236,6 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const [primaryView, setPrimaryView] = useState<PrimaryView>(() => readPrimaryViewFromUrl());
-  const buildCommitSha =
-    (import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA as string | undefined)
-    || (import.meta.env.VITE_GIT_COMMIT_SHA as string | undefined)
-    || (import.meta.env.VERCEL_GIT_COMMIT_SHA as string | undefined)
-    || "unknown";
-  const buildEnv =
-    (import.meta.env.VITE_VERCEL_ENV as string | undefined)
-    || (import.meta.env.VERCEL_ENV as string | undefined)
-    || "unknown";
   const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const [rrDiscountRateInput, setRrDiscountRateInput] = useState<string>("");
 
@@ -3537,16 +3528,40 @@ Capital Available: ${availableLabel}`,
   }, [corporateTimelineDebug, debugEnabled]);
 
   const dashboardTasks = useMemo(() => {
-    const diagnosticsByMetal = ((corporateDiagnostics?.meta as Record<string, unknown> | undefined)?.metalPriceDiagnostics ?? {}) as Record<string, Record<string, unknown>>;
-    const needs = Object.entries(diagnosticsByMetal).map(([metal, item]) => ({
-      projectId: selectedProjectId ?? "global",
-      metal,
-      metalKey: typeof item.priceKeyRequested === "string" ? item.priceKeyRequested : metal,
-      fmpSpotValue: typeof item.livePriceValue === "number" && Number.isFinite(item.livePriceValue) ? item.livePriceValue : null,
-      unit: typeof item.interpretedUnit === "string" ? item.interpretedUnit : null,
-    }));
-    return collectDashboardTasks({ projectPriceNeeds: needs, manualByMetalKey: manualMetalPrices });
-  }, [corporateDiagnostics, manualMetalPrices, selectedProjectId]);
+    const corporateByMetal = ((corporateDiagnostics?.meta as Record<string, unknown> | undefined)?.metalPriceDiagnostics ?? {}) as Record<string, Record<string, unknown>>;
+    const projectByMetal = ((projectSnapshotDiagnosticsMeta ?? {}) as Record<string, unknown>).metalPriceDiagnostics as Record<string, Record<string, unknown>> | undefined;
+    const needsByKey = new Map<string, {
+      projectId: string;
+      metal: string;
+      metalKey: string;
+      fmpSpotValue: number | null;
+      unit: string | null;
+    }>();
+
+    const pushDiagnostics = (items: Record<string, Record<string, unknown>>, sourceProjectId: string) => {
+      for (const [metal, item] of Object.entries(items)) {
+        const metalKey = typeof item.priceKeyRequested === "string" ? item.priceKeyRequested : metal;
+        const next = {
+          projectId: sourceProjectId,
+          metal,
+          metalKey,
+          fmpSpotValue: typeof item.livePriceValue === "number" && Number.isFinite(item.livePriceValue) ? item.livePriceValue : null,
+          unit: typeof item.interpretedUnit === "string" ? item.interpretedUnit : null,
+        };
+        const prev = needsByKey.get(metalKey);
+        if (!prev || (prev.fmpSpotValue === null && next.fmpSpotValue !== null)) {
+          needsByKey.set(metalKey, next);
+        }
+      }
+    };
+
+    pushDiagnostics(corporateByMetal, "corporate");
+    if (projectByMetal) {
+      pushDiagnostics(projectByMetal, selectedProjectId ?? "project");
+    }
+
+    return collectDashboardTasks({ projectPriceNeeds: [...needsByKey.values()], manualByMetalKey: manualMetalPrices });
+  }, [corporateDiagnostics, manualMetalPrices, projectSnapshotDiagnosticsMeta, selectedProjectId, ticker, primaryView, analysisMode]);
 
   const projectSeries = (projectSnapshotData?.series ?? null) as Record<string, unknown> | null;
 
@@ -4281,13 +4296,6 @@ Capital Available: ${availableLabel}`,
           <div className="breadcontainersinglecolumn">
             <div className="producer-core-compact-card single-stock-header-card">
               {companyHeaderTitle ? <h1 id="SingleStock_Stock_Name" className="subrub">{companyHeaderTitle}</h1> : null}
-              <section className="producer-core-section single-stock-header-body">
-                <p className="bread">
-                  {profile?.description
-                    ? String(profile.description)
-                    : "—"}
-                </p>
-              </section>
               <section className="producer-core-section single-stock-profile-body">
                 <div className="producer-core-title-row">
                   <h2 className="subrub small" style={{ margin: 0 }}>Company Profile</h2>
@@ -4319,162 +4327,176 @@ Capital Available: ${availableLabel}`,
                   </div>
                 </div>
               </section>
+              <section className="producer-core-section single-stock-header-body">
+                <p className="bread">
+                  {profile?.description
+                    ? String(profile.description)
+                    : "—"}
+                </p>
+              </section>
+              <section className="producer-core-section single-stock-price-body">
+                <div className="producer-core-title-row">
+                  <h2 className="subrub small" style={{ margin: 0 }}>Price History</h2>
+                </div>
+                {priceLoading && <p className="status">Fetching data…</p>}
+                {!priceLoading && priceError && <p className="status error">{priceError}</p>}
+                {!priceLoading && !priceError && !priceData && (
+                  <p className="status empty">No historical data available.</p>
+                )}
+                {!priceLoading && !priceError && priceData && !longVolumeData && !shortVolumeData && (
+                  <p className="status empty">Volume data saknas för vald period.</p>
+                )}
+                <div className="chartcontainerdoublecolumn single-stock-price-charts">
+                  <ReportedChart reportedChartContext={reportedChartContext}
+                    fiscalYearEndMonth={fiscalYearEndMonth}
+                    chartType="ComboChart"
+                    title="Aktieprishistoria"
+                    data={combinedLongPriceVolumeData}
+                    height={260}
+                    options={{
+                      ...priceChartOptions,
+                      colors: [
+                        PRICE_SERIES_COLORS.close,
+                        PRICE_SERIES_COLORS.sma200,
+                        PRICE_SERIES_COLORS.sma50,
+                        "#7a7a7a",
+                      ],
+                      seriesType: "line",
+                      series: {
+                        0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+                        1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        3: { type: "bars", targetAxisIndex: 1 },
+                      },
+                      vAxes: {
+                        0: { title: marketCurrency },
+                        1: { title: "shares", format: "short" },
+                      },
+                      bar: { groupWidth: "45%" },
+                    }}
+                    y2AxisTitle="shares"
+                  />
+                  <ReportedChart reportedChartContext={reportedChartContext}
+                    fiscalYearEndMonth={fiscalYearEndMonth}
+                    chartType="ComboChart"
+                    title="Aktieprishistoria (kort)"
+                    data={combinedShortPriceVolumeData}
+                    height={260}
+                    options={{
+                      ...priceChartOptions,
+                      colors: [
+                        PRICE_SERIES_COLORS.close,
+                        PRICE_SERIES_COLORS.sma200,
+                        PRICE_SERIES_COLORS.sma50,
+                        PRICE_SERIES_COLORS.sma20,
+                        "#7a7a7a",
+                      ],
+                      seriesType: "line",
+                      series: {
+                        0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+                        1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        3: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                        4: { type: "bars", targetAxisIndex: 1 },
+                      },
+                      vAxes: {
+                        0: { title: marketCurrency },
+                        1: { title: "shares", format: "short" },
+                      },
+                      bar: { groupWidth: "45%" },
+                    }}
+                    y2AxisTitle="shares"
+                  />
+                </div>
+              </section>
             </div>
           </div>
 
-      <div className="breadcontainersinglecolumn">
-        <h2 className="subrub small">Göromål</h2>
-        {dashboardTasks.length === 0 ? (
-          <p className="bread">Inga göromål just nu.</p>
-        ) : (
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {dashboardTasks.map((task) => (
-              <li key={task.id}>
-                {task.category}: {task.title}.
+          <div className="breadcontainersinglecolumn">
+            <div className="producer-core-compact-card single-stock-tasks-card">
+              <h2 className="subrub small">Göromål</h2>
+              {dashboardTasks.length === 0 ? (
+                <p className="bread">Inga göromål just nu.</p>
+              ) : (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {dashboardTasks.map((task) => (
+                    <li key={task.id}>
+                      {task.category}: {task.title}.
+                      <button
+                        type="button"
+                        className="button-link"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => openManualPriceModal({ metal: task.metal, metalKey: task.metalKey, unit: task.unit, reason: task.resolution.reason })}
+                      >
+                        {task.actionLabel}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div className="breadcontainersinglecolumn">
+            <div className="producer-core-compact-card single-stock-nav-card">
+              <div className="single-stock-tabs single-stock-tabs-primary" role="tablist" aria-label="Company perspective">
                 <button
                   type="button"
-                  className="button-link"
-                  style={{ marginLeft: 6 }}
-                  onClick={() => openManualPriceModal({ metal: task.metal, metalKey: task.metalKey, unit: task.unit, reason: task.resolution.reason })}
+                  className={`single-stock-tab ${analysisMode === "revenue" ? "is-active" : ""}`}
+                  onClick={() => setAnalysisMode("revenue")}
+                  aria-selected={analysisMode === "revenue"}
                 >
-                  {task.actionLabel}
+                  Revenue
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="breadcontainersinglecolumn">
-        <h2 className="subrub small">Price History</h2>
-        {priceLoading && <p className="status">Fetching data…</p>}
-        {!priceLoading && priceError && <p className="status error">{priceError}</p>}
-        {!priceLoading && !priceError && !priceData && (
-          <p className="status empty">No historical data available.</p>
-        )}
-        {!priceLoading && !priceError && priceData && !longVolumeData && !shortVolumeData && (
-          <p className="status empty">Volume data saknas för vald period.</p>
-        )}
-      </div>
-
-      <div className="chartcontainerdoublecolumn">
-        <ReportedChart reportedChartContext={reportedChartContext}
-          fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="ComboChart"
-          title="Aktieprishistoria"
-          data={combinedLongPriceVolumeData}
-          height={260}
-          options={{
-            ...priceChartOptions,
-            colors: [
-              PRICE_SERIES_COLORS.close,
-              PRICE_SERIES_COLORS.sma200,
-              PRICE_SERIES_COLORS.sma50,
-              "#7a7a7a",
-            ],
-            seriesType: "line",
-            series: {
-              0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
-              1: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              2: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              3: { type: "bars", targetAxisIndex: 1 },
-            },
-            vAxes: {
-              0: { title: marketCurrency },
-              1: { title: "shares", format: "short" },
-            },
-            bar: { groupWidth: "45%" },
-          }}
-          y2AxisTitle="shares"
-        />
-        <ReportedChart reportedChartContext={reportedChartContext}
-          fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="ComboChart"
-          title="Aktieprishistoria (kort)"
-          data={combinedShortPriceVolumeData}
-          height={260}
-          options={{
-            ...priceChartOptions,
-            colors: [
-              PRICE_SERIES_COLORS.close,
-              PRICE_SERIES_COLORS.sma200,
-              PRICE_SERIES_COLORS.sma50,
-              PRICE_SERIES_COLORS.sma20,
-              "#7a7a7a",
-            ],
-            seriesType: "line",
-            series: {
-              0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
-              1: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              2: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              3: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
-              4: { type: "bars", targetAxisIndex: 1 },
-            },
-            vAxes: {
-              0: { title: marketCurrency },
-              1: { title: "shares", format: "short" },
-            },
-            bar: { groupWidth: "45%" },
-          }}
-          y2AxisTitle="shares"
-        />
-      </div>
-
-      <div className="breadcontainersinglecolumn">
-        <div className="producer-core-compact-card single-stock-nav-card">
-          <div className="single-stock-tabs" role="tablist" aria-label="Company perspective">
-            <button
-              type="button"
-              className={`single-stock-tab ${analysisMode === "revenue" ? "is-active" : ""}`}
-              onClick={() => setAnalysisMode("revenue")}
-              aria-selected={analysisMode === "revenue"}
-            >
-              Revenue
-            </button>
-            <button
-              type="button"
-              className={`single-stock-tab ${analysisMode === "prerevenue" ? "is-active" : ""}`}
-              onClick={() => setAnalysisMode("prerevenue")}
-              aria-selected={analysisMode === "prerevenue"}
-            >
-              Pre-Revenue
-            </button>
+                <button
+                  type="button"
+                  className={`single-stock-tab ${analysisMode === "prerevenue" ? "is-active" : ""}`}
+                  onClick={() => setAnalysisMode("prerevenue")}
+                  aria-selected={analysisMode === "prerevenue"}
+                >
+                  Pre-Revenue
+                </button>
+              </div>
+              <div className="single-stock-subtabs-wrap">
+                <div className="single-stock-subtabs-label">Corporate views</div>
+                <div className="single-stock-tabs single-stock-tabs-secondary" role="tablist" aria-label="Company data views">
+                  <button
+                    type="button"
+                    className={`single-stock-tab single-stock-subtab ${primaryView === "reported" ? "is-active" : ""}`}
+                    onClick={() => setPrimaryView("reported")}
+                    aria-selected={primaryView === "reported"}
+                  >
+                    Reported
+                  </button>
+                  <button
+                    type="button"
+                    className={`single-stock-tab single-stock-subtab ${primaryView === "modeled" ? "is-active" : ""}`}
+                    onClick={() => setPrimaryView("modeled")}
+                    aria-selected={primaryView === "modeled"}
+                  >
+                    Modeled
+                  </button>
+                  {analysisMode === "prerevenue" && (
+                    <button
+                      type="button"
+                      className={`single-stock-tab single-stock-subtab ${primaryView === "projects" ? "is-active" : ""}`}
+                      onClick={() => setPrimaryView("projects")}
+                      aria-selected={primaryView === "projects"}
+                    >
+                      Project
+                    </button>
+                  )}
+                  {analysisMode === "prerevenue" ? (
+                    <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="single-stock-tab single-stock-tab-action">
+                      Edit Project
+                    </a>
+                  ) : (
+                    <span className="single-stock-tab single-stock-tab-action is-disabled" aria-disabled="true">Edit Project</span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="single-stock-tabs single-stock-tabs-secondary" role="tablist" aria-label="Company data views">
-            <button
-              type="button"
-              className={`single-stock-tab ${primaryView === "reported" ? "is-active" : ""}`}
-              onClick={() => setPrimaryView("reported")}
-              aria-selected={primaryView === "reported"}
-            >
-              Reported
-            </button>
-            <button
-              type="button"
-              className={`single-stock-tab ${primaryView === "modeled" ? "is-active" : ""}`}
-              onClick={() => setPrimaryView("modeled")}
-              aria-selected={primaryView === "modeled"}
-            >
-              Modeled
-            </button>
-            {analysisMode === "prerevenue" && (
-              <button
-                type="button"
-                className={`single-stock-tab ${primaryView === "projects" ? "is-active" : ""}`}
-                onClick={() => setPrimaryView("projects")}
-                aria-selected={primaryView === "projects"}
-              >
-                Projects
-              </button>
-            )}
-            {analysisMode === "prerevenue" && (
-              <a href={`/company/${encodeURIComponent(ticker)}/projects`} className="button-link" style={{ alignSelf: "center" }}>
-                Edit projects
-              </a>
-            )}
-          </div>
-        </div>
-      </div>
 
       {primaryView === "reported" && mixedCurrency && (
         <div className="breadcontainersinglecolumn">
@@ -4486,8 +4508,6 @@ Capital Available: ${availableLabel}`,
         <>
           <div className="breadcontainersinglecolumn">
             <h1 className="subrub">Producer Core (PVE v2)</h1>
-            <p className="bread">Efficiency, Resilience, Value och Context snapshots för MAJOR/revenue-mode.</p>
-            <p className="bread" style={{ fontSize: "11px", opacity: 0.8 }}>Build: {buildCommitSha} • Env: {buildEnv}</p>
           </div>
           {producerCoreMissing ? (
             <div className="breadcontainersinglecolumn">

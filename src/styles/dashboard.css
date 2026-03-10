@@ -278,7 +278,8 @@
 
 .single-stock-search-card,
 .single-stock-header-card,
-.single-stock-nav-card {
+.single-stock-nav-card,
+.single-stock-tasks-card {
   max-width: 860px;
 }
 
@@ -331,6 +332,68 @@
   margin: 0;
 }
 
+.single-stock-price-body {
+  margin-top: 6px;
+  padding: 8px;
+}
+
+.single-stock-price-charts {
+  margin-top: 6px;
+}
+
+.single-stock-tasks-card {
+  background: #f4efd8;
+  border-color: rgba(124, 102, 48, 0.35);
+}
+
+.single-stock-tasks-card .subrub.small {
+  margin-bottom: 2px;
+}
+
+.single-stock-nav-card {
+  background: #f3f4ee;
+}
+
+.single-stock-tabs-primary .single-stock-tab {
+  font-size: 12px;
+  min-height: 38px;
+}
+
+.single-stock-subtabs-wrap {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid rgba(28, 35, 16, 0.12);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.single-stock-subtabs-label {
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 1px;
+  font-size: 10px;
+  text-transform: uppercase;
+  opacity: 0.75;
+  margin-bottom: 6px;
+}
+
+.single-stock-subtab {
+  font-size: 11px;
+  padding: 7px 11px;
+}
+
+.single-stock-tab-action {
+  border-color: #1f2a15;
+  background: #1f2a15;
+  color: #f6f8ef;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.single-stock-tab-action.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .single-stock-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -374,6 +437,10 @@
 
   .single-stock-tabs-secondary .single-stock-tab {
     flex-basis: calc(50% - 8px);
+  }
+
+  .single-stock-subtabs-wrap {
+    padding: 7px;
   }
 }
 
