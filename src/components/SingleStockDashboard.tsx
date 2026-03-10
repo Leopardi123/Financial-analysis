@@ -1129,6 +1129,52 @@ function summarizeChartSeries(data: (string | number | Date | null)[][] | null) 
   };
 }
 
+function combinePriceAndVolumeSeries(
+  priceSeries: (string | number | Date | null)[][] | null,
+  volumeSeries: (string | number | Date | null)[][] | null,
+  includeSma20: boolean,
+) {
+  if (!priceSeries || priceSeries.length < 2) return null;
+
+  const priceRows = priceSeries.slice(1);
+  const volumeRows = volumeSeries?.slice(1) ?? [];
+  const volumeByTimestamp = new Map<number, number | null>();
+
+  volumeRows.forEach((row) => {
+    const date = row[0];
+    const volume = row[1];
+    if (!(date instanceof Date)) return;
+    if (typeof volume === "number" && Number.isFinite(volume)) {
+      volumeByTimestamp.set(date.getTime(), volume);
+      return;
+    }
+    volumeByTimestamp.set(date.getTime(), null);
+  });
+
+  const headers = includeSma20
+    ? ["Date", "Close", "SMA200", "SMA50", "SMA20", "Volume"]
+    : ["Date", "Close", "SMA200", "SMA50", "Volume"];
+
+  const rows = priceRows
+    .map((row) => {
+      const date = row[0];
+      if (!(date instanceof Date)) return null;
+      const close = typeof row[1] === "number" && Number.isFinite(row[1]) ? row[1] : null;
+      const sma200 = typeof row[2] === "number" && Number.isFinite(row[2]) ? row[2] : null;
+      const sma50 = typeof row[3] === "number" && Number.isFinite(row[3]) ? row[3] : null;
+      const sma20 = typeof row[4] === "number" && Number.isFinite(row[4]) ? row[4] : null;
+      const volume = volumeByTimestamp.get(date.getTime()) ?? null;
+      const combinedRow = includeSma20
+        ? [date, close, sma200, sma50, sma20, volume]
+        : [date, close, sma200, sma50, volume];
+      return combinedRow as (string | number | Date | null)[];
+    })
+    .filter((row): row is (string | number | Date | null)[] => row !== null);
+
+  if (rows.length === 0) return null;
+  return [headers, ...rows];
+}
+
 type ReportedChartContext = {
   resolveUnitMeta: (title: string) => ChartUnitMeta;
   marketCurrency: string;
@@ -1788,18 +1834,14 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     },
   };
 
-  const volumeChartOptions = {
-    backgroundColor: "#e0e9ce",
-    colors: [PRICE_SERIES_COLORS.close],
-    legend: { position: "bottom" },
-    hAxis: {
-      format: "yyyy",
-      slantedText: true,
-      slantedTextAngle: 45,
-    },
-    vAxis: { format: "short" },
-    bar: { groupWidth: "45%" },
-  };
+  const combinedLongPriceVolumeData = useMemo(
+    () => combinePriceAndVolumeSeries(priceData?.long?.price ?? null, priceData?.long?.volume ?? null, false),
+    [priceData?.long?.price, priceData?.long?.volume],
+  );
+  const combinedShortPriceVolumeData = useMemo(
+    () => combinePriceAndVolumeSeries(priceData?.short?.price ?? null, priceData?.short?.volume ?? null, true),
+    [priceData?.short?.price, priceData?.short?.volume],
+  );
 
   const longVolumeSummary = useMemo(() => summarizeChartSeries(priceData?.long?.volume ?? null), [priceData?.long?.volume]);
   const shortVolumeSummary = useMemo(() => summarizeChartSeries(priceData?.short?.volume ?? null), [priceData?.short?.volume]);
@@ -1813,8 +1855,12 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       source: "/api/company/price -> payload.long.volume/payload.short.volume",
       long: longVolumeSummary,
       short: shortVolumeSummary,
+      merged: {
+        longRows: combinedLongPriceVolumeData?.length ?? 0,
+        shortRows: combinedShortPriceVolumeData?.length ?? 0,
+      },
     });
-  }, [debugEnabled, longVolumeSummary, shortVolumeSummary, ticker]);
+  }, [combinedLongPriceVolumeData, combinedShortPriceVolumeData, debugEnabled, longVolumeSummary, shortVolumeSummary, ticker]);
 
   const lineBehindBars = {
     seriesType: "bars",
@@ -4219,35 +4265,63 @@ Capital Available: ${availableLabel}`,
       <div className="chartcontainerdoublecolumn">
         <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="LineChart"
+          chartType="ComboChart"
           title="Aktieprishistoria"
-          data={priceData?.long?.price ?? null}
+          data={combinedLongPriceVolumeData}
           height={260}
-          options={priceChartOptions}
+          options={{
+            ...priceChartOptions,
+            colors: [
+              PRICE_SERIES_COLORS.close,
+              PRICE_SERIES_COLORS.sma200,
+              PRICE_SERIES_COLORS.sma50,
+              "#7a7a7a",
+            ],
+            seriesType: "line",
+            series: {
+              0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+              1: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              2: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              3: { type: "bars", targetAxisIndex: 1 },
+            },
+            vAxes: {
+              0: { title: marketCurrency },
+              1: { title: "shares", format: "short" },
+            },
+            bar: { groupWidth: "45%" },
+          }}
+          y2AxisTitle="shares"
         />
         <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="LineChart"
+          chartType="ComboChart"
           title="Aktieprishistoria (kort)"
-          data={priceData?.short?.price ?? null}
+          data={combinedShortPriceVolumeData}
           height={260}
-          options={priceChartOptions}
-        />
-        <ReportedChart reportedChartContext={reportedChartContext}
-          fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="ColumnChart"
-          title="Volume"
-          data={longVolumeData}
-          height={200}
-          options={volumeChartOptions}
-        />
-        <ReportedChart reportedChartContext={reportedChartContext}
-          fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="ColumnChart"
-          title="Volume (kort)"
-          data={shortVolumeData}
-          height={200}
-          options={volumeChartOptions}
+          options={{
+            ...priceChartOptions,
+            colors: [
+              PRICE_SERIES_COLORS.close,
+              PRICE_SERIES_COLORS.sma200,
+              PRICE_SERIES_COLORS.sma50,
+              PRICE_SERIES_COLORS.sma20,
+              "#7a7a7a",
+            ],
+            seriesType: "line",
+            series: {
+              0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+              1: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              2: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              3: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              4: { type: "bars", targetAxisIndex: 1 },
+            },
+            vAxes: {
+              0: { title: marketCurrency },
+              1: { title: "shares", format: "short" },
+            },
+            bar: { groupWidth: "45%" },
+          }}
+          y2AxisTitle="shares"
         />
       </div>
 
