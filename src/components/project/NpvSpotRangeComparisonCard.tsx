@@ -296,10 +296,10 @@ export default function NpvSpotRangeComparisonCard({
           ))}
         </div>
         {debugText && (
-          <div style={{ marginTop: 10, borderTop: '1px dashed #94a3b8', paddingTop: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Debug – Värdeintervall</div>
+          <details style={{ marginTop: 10, borderTop: '1px dashed #94a3b8', paddingTop: 8 }} open>
+            <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#334155' }}>Debug – Värdeintervall</summary>
             <pre style={{ whiteSpace: 'pre-wrap', overflowX: 'auto', maxWidth: '100%', fontSize: 11, marginTop: 6, color: '#0f172a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{debugText}</pre>
-          </div>
+          </details>
         )}
       </section>
     </div>

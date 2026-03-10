@@ -169,6 +169,11 @@ function isDebugEnabledInClient(): boolean {
   return fromQuery || fromAdminStorage;
 }
 
+function isDebugEnabledByQueryParam(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("debug") === "1";
+}
+
 function withDebugQueryPath(path: string, debugEnabled: boolean): string {
   if (!debugEnabled || typeof window === "undefined") return path;
   const asUrl = new URL(path, window.location.origin);
@@ -1239,6 +1244,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [fxSource] = useState<"auto" | "manual">("auto");
   const [manualFxInput] = useState("");
   const debugEnabled = isDebugEnabledInClient();
+  const valueIntervalDebugVisible = isDebugEnabledByQueryParam();
 
   useEffect(() => {
     let isMounted = true;
@@ -5646,7 +5652,7 @@ Capital Available: ${availableLabel}`,
                           marketCapToday={projectViewMetrics.marketBox.marketCapCurrent.value}
                           currencyCode={lockedTargetCurrency}
                           formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}
-                          debugEnabled={debugEnabled}
+                          debugEnabled={valueIntervalDebugVisible}
                           debugPayload={projectValueIntervalDebug}
                         />
                       </details>
