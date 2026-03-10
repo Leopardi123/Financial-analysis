@@ -41,11 +41,6 @@ import {
   getFieldSeries,
 } from "../utils/financial";
 
-const CATEGORIES = ["Välj En Kategori", "Tech", "Industrials", "Consumer"];
-const SUBCATEGORIES = ["Välj En Subkategori", "Software", "Hardware", "Services"];
-
-
-
 type ProducerCorePanel = {
   efficiency?: {
     margin_structure?: { operating_margin?: number | null };
@@ -1090,6 +1085,96 @@ function normalizeDateSeries(data: (string | number | Date | null)[][] | null) {
   return [headers, ...normalizedRows];
 }
 
+function summarizeChartSeries(data: (string | number | Date | null)[][] | null) {
+  if (!data || data.length < 2) {
+    return {
+      rows: 0,
+      firstPoint: null,
+      lastPoint: null,
+      validNumericCount: 0,
+      invalidValueCount: 0,
+      yColumnCount: 0,
+      hasConsistentRowLengths: true,
+    };
+  }
+  const [, ...rows] = data;
+  const yColumnCount = Math.max(0, (data[0]?.length ?? 0) - 1);
+  const firstPoint = rows[0] ?? null;
+  const lastPoint = rows[rows.length - 1] ?? null;
+  let validNumericCount = 0;
+  let invalidValueCount = 0;
+  const hasConsistentRowLengths = rows.every((row) => row.length === yColumnCount + 1);
+
+  rows.forEach((row) => {
+    row.slice(1).forEach((value) => {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        validNumericCount += 1;
+        return;
+      }
+      if (value === null) {
+        return;
+      }
+      invalidValueCount += 1;
+    });
+  });
+
+  return {
+    rows: rows.length,
+    firstPoint,
+    lastPoint,
+    validNumericCount,
+    invalidValueCount,
+    yColumnCount,
+    hasConsistentRowLengths,
+  };
+}
+
+function combinePriceAndVolumeSeries(
+  priceSeries: (string | number | Date | null)[][] | null,
+  volumeSeries: (string | number | Date | null)[][] | null,
+  includeSma20: boolean,
+) {
+  if (!priceSeries || priceSeries.length < 2) return null;
+
+  const priceRows = priceSeries.slice(1);
+  const volumeRows = volumeSeries?.slice(1) ?? [];
+  const volumeByTimestamp = new Map<number, number | null>();
+
+  volumeRows.forEach((row) => {
+    const date = row[0];
+    const volume = row[1];
+    if (!(date instanceof Date)) return;
+    if (typeof volume === "number" && Number.isFinite(volume)) {
+      volumeByTimestamp.set(date.getTime(), volume);
+      return;
+    }
+    volumeByTimestamp.set(date.getTime(), null);
+  });
+
+  const headers = includeSma20
+    ? ["Date", "Close", "SMA200", "SMA50", "SMA20", "Volume"]
+    : ["Date", "Close", "SMA200", "SMA50", "Volume"];
+
+  const rows = priceRows
+    .map((row) => {
+      const date = row[0];
+      if (!(date instanceof Date)) return null;
+      const close = typeof row[1] === "number" && Number.isFinite(row[1]) ? row[1] : null;
+      const sma200 = typeof row[2] === "number" && Number.isFinite(row[2]) ? row[2] : null;
+      const sma50 = typeof row[3] === "number" && Number.isFinite(row[3]) ? row[3] : null;
+      const sma20 = typeof row[4] === "number" && Number.isFinite(row[4]) ? row[4] : null;
+      const volume = volumeByTimestamp.get(date.getTime()) ?? null;
+      const combinedRow = includeSma20
+        ? [date, close, sma200, sma50, sma20, volume]
+        : [date, close, sma200, sma50, volume];
+      return combinedRow as (string | number | Date | null)[];
+    })
+    .filter((row): row is (string | number | Date | null)[] => row !== null);
+
+  if (rows.length === 0) return null;
+  return [headers, ...rows];
+}
+
 type ReportedChartContext = {
   resolveUnitMeta: (title: string) => ChartUnitMeta;
   marketCurrency: string;
@@ -1129,10 +1214,6 @@ type SingleStockDashboardProps = {
 export default function SingleStockDashboard({ onTickerChange }: SingleStockDashboardProps = {}) {
   const { ticker, data, error, fetchCompany } = useCompanyData("AAPL");
   const [quarterlyData, setQuarterlyData] = useState<CompanyResponse | null>(null);
-  const [formTicker, setFormTicker] = useState("");
-  const [formCategory, setFormCategory] = useState("");
-  const [formSubcategory, setFormSubcategory] = useState("");
-  const [formNote, setFormNote] = useState("");
   const [availableTickers, setAvailableTickers] = useState<string[]>([]);
   const [tickersError, setTickersError] = useState<string | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -1753,18 +1834,33 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     },
   };
 
-  const volumeChartOptions = {
-    backgroundColor: "#e0e9ce",
-    colors: [PRICE_SERIES_COLORS.close],
-    legend: { position: "bottom" },
-    hAxis: {
-      format: "yyyy",
-      slantedText: true,
-      slantedTextAngle: 45,
-    },
-    vAxis: { format: "short" },
-    bar: { groupWidth: "45%" },
-  };
+  const combinedLongPriceVolumeData = useMemo(
+    () => combinePriceAndVolumeSeries(priceData?.long?.price ?? null, priceData?.long?.volume ?? null, false),
+    [priceData?.long?.price, priceData?.long?.volume],
+  );
+  const combinedShortPriceVolumeData = useMemo(
+    () => combinePriceAndVolumeSeries(priceData?.short?.price ?? null, priceData?.short?.volume ?? null, true),
+    [priceData?.short?.price, priceData?.short?.volume],
+  );
+
+  const longVolumeSummary = useMemo(() => summarizeChartSeries(priceData?.long?.volume ?? null), [priceData?.long?.volume]);
+  const shortVolumeSummary = useMemo(() => summarizeChartSeries(priceData?.short?.volume ?? null), [priceData?.short?.volume]);
+  const longVolumeData = longVolumeSummary.validNumericCount > 0 ? priceData?.long?.volume ?? null : null;
+  const shortVolumeData = shortVolumeSummary.validNumericCount > 0 ? priceData?.short?.volume ?? null : null;
+
+  useEffect(() => {
+    if (!debugEnabled) return;
+    console.debug("[single-stock-volume-series]", {
+      ticker,
+      source: "/api/company/price -> payload.long.volume/payload.short.volume",
+      long: longVolumeSummary,
+      short: shortVolumeSummary,
+      merged: {
+        longRows: combinedLongPriceVolumeData?.length ?? 0,
+        shortRows: combinedShortPriceVolumeData?.length ?? 0,
+      },
+    });
+  }, [combinedLongPriceVolumeData, combinedShortPriceVolumeData, debugEnabled, longVolumeSummary, shortVolumeSummary, ticker]);
 
   const lineBehindBars = {
     seriesType: "bars",
@@ -4043,20 +4139,6 @@ Capital Available: ${availableLabel}`,
               void fetchCompany(company.symbol);
             }}
           />
-          <select defaultValue={CATEGORIES[0]}>
-            {CATEGORIES.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <select defaultValue={SUBCATEGORIES[0]}>
-            {SUBCATEGORIES.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
           <select
             defaultValue="Välj En Aktie"
             onChange={(event) => {
@@ -4078,64 +4160,6 @@ Capital Available: ${availableLabel}`,
           {error && <p className="status error">{error}</p>}
         </div>
 
-        <div className="stock-selector-row form">
-          <div>
-            <label htmlFor="tickerSymbol">Ticker</label>
-            <input
-              id="tickerSymbol"
-              type="text"
-              placeholder="AAPL"
-              value={formTicker}
-              onChange={(event) => setFormTicker(event.target.value)}
-            />
-          </div>
-          <div>
-            <label htmlFor="category">Kategori</label>
-            <input
-              id="category"
-              type="text"
-              placeholder="Tech"
-              value={formCategory}
-              onChange={(event) => setFormCategory(event.target.value)}
-            />
-          </div>
-          <div>
-            <label htmlFor="subcategory">Underkategori</label>
-            <input
-              id="subcategory"
-              type="text"
-              placeholder="Software"
-              value={formSubcategory}
-              onChange={(event) => setFormSubcategory(event.target.value)}
-            />
-          </div>
-          <div>
-            <label htmlFor="note">Anteckning</label>
-            <input
-              id="note"
-              type="text"
-              placeholder="Notering"
-              value={formNote}
-              onChange={(event) => setFormNote(event.target.value)}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              const nextTicker = formTicker.trim().toUpperCase();
-              if (!nextTicker) {
-                return;
-              }
-              void fetchCompany(nextTicker);
-              setFormTicker("");
-              setFormCategory("");
-              setFormSubcategory("");
-              setFormNote("");
-            }}
-          >
-            Lägg till ticker
-          </button>
-        </div>
       </div>
 
 
@@ -4164,13 +4188,40 @@ Capital Available: ${availableLabel}`,
       </div>
 
       {profile && (
-        <div className="breadcontainerdoublecolumn">
-          <p className="bread">Sektor: {String(profile.sector ?? "—")}</p>
-          <p className="bread">Industri: {String(profile.industry ?? "—")}</p>
-          <p className="bread">Valuta: {String(profile.currency ?? "—")}</p>
-          <p className="bread">Börs: {exchangeDisplay ? String(exchangeDisplay) : "—"}</p>
-          <p className="bread">Aktiepris: {formatPriceValue(priceValue)}</p>
-          <p className="bread">Börsvärde: {formatMarketCapValue(marketCapValue)}</p>
+        <div className="breadcontainersinglecolumn">
+          <div className="producer-core-compact-card company-profile-card">
+            <section className="producer-core-section">
+              <div className="producer-core-title-row">
+                <h2 className="subrub small" style={{ margin: 0 }}>Company Profile</h2>
+              </div>
+              <div className="compact-metrics-grid company-profile-grid">
+                <div className="compact-metric-row">
+                  <span className="compact-metric-label">Sektor</span>
+                  <span className="compact-metric-value">{String(profile.sector ?? "—")}</span>
+                </div>
+                <div className="compact-metric-row">
+                  <span className="compact-metric-label">Industri</span>
+                  <span className="compact-metric-value">{String(profile.industry ?? "—")}</span>
+                </div>
+                <div className="compact-metric-row">
+                  <span className="compact-metric-label">Valuta</span>
+                  <span className="compact-metric-value">{String(profile.currency ?? "—")}</span>
+                </div>
+                <div className="compact-metric-row">
+                  <span className="compact-metric-label">Börs</span>
+                  <span className="compact-metric-value">{exchangeDisplay ? String(exchangeDisplay) : "—"}</span>
+                </div>
+                <div className="compact-metric-row">
+                  <span className="compact-metric-label">Aktiepris</span>
+                  <span className="compact-metric-value">{formatPriceValue(priceValue)}</span>
+                </div>
+                <div className="compact-metric-row">
+                  <span className="compact-metric-label">Börsvärde</span>
+                  <span className="compact-metric-value">{formatMarketCapValue(marketCapValue)}</span>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       )}
       <div className="breadcontainersinglecolumn">
@@ -4206,40 +4257,71 @@ Capital Available: ${availableLabel}`,
         {!priceLoading && !priceError && !priceData && (
           <p className="status empty">No historical data available.</p>
         )}
+        {!priceLoading && !priceError && priceData && !longVolumeData && !shortVolumeData && (
+          <p className="status empty">Volume data saknas för vald period.</p>
+        )}
       </div>
 
       <div className="chartcontainerdoublecolumn">
         <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="LineChart"
+          chartType="ComboChart"
           title="Aktieprishistoria"
-          data={priceData?.long?.price ?? null}
+          data={combinedLongPriceVolumeData}
           height={260}
-          options={priceChartOptions}
+          options={{
+            ...priceChartOptions,
+            colors: [
+              PRICE_SERIES_COLORS.close,
+              PRICE_SERIES_COLORS.sma200,
+              PRICE_SERIES_COLORS.sma50,
+              "#7a7a7a",
+            ],
+            seriesType: "line",
+            series: {
+              0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+              1: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              2: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              3: { type: "bars", targetAxisIndex: 1 },
+            },
+            vAxes: {
+              0: { title: marketCurrency },
+              1: { title: "shares", format: "short" },
+            },
+            bar: { groupWidth: "45%" },
+          }}
+          y2AxisTitle="shares"
         />
         <ReportedChart reportedChartContext={reportedChartContext}
           fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="LineChart"
+          chartType="ComboChart"
           title="Aktieprishistoria (kort)"
-          data={priceData?.short?.price ?? null}
+          data={combinedShortPriceVolumeData}
           height={260}
-          options={priceChartOptions}
-        />
-        <ReportedChart reportedChartContext={reportedChartContext}
-          fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="ColumnChart"
-          title="Volume"
-          data={priceData?.long?.volume ?? null}
-          height={200}
-          options={volumeChartOptions}
-        />
-        <ReportedChart reportedChartContext={reportedChartContext}
-          fiscalYearEndMonth={fiscalYearEndMonth}
-          chartType="ColumnChart"
-          title="Volume (kort)"
-          data={priceData?.short?.volume ?? null}
-          height={200}
-          options={volumeChartOptions}
+          options={{
+            ...priceChartOptions,
+            colors: [
+              PRICE_SERIES_COLORS.close,
+              PRICE_SERIES_COLORS.sma200,
+              PRICE_SERIES_COLORS.sma50,
+              PRICE_SERIES_COLORS.sma20,
+              "#7a7a7a",
+            ],
+            seriesType: "line",
+            series: {
+              0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+              1: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              2: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              3: { type: "line", lineWidth: 1, targetAxisIndex: 0 },
+              4: { type: "bars", targetAxisIndex: 1 },
+            },
+            vAxes: {
+              0: { title: marketCurrency },
+              1: { title: "shares", format: "short" },
+            },
+            bar: { groupWidth: "45%" },
+          }}
+          y2AxisTitle="shares"
         />
       </div>
 

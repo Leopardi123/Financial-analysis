@@ -59,8 +59,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const payload = await fetchApiV3Json<{ historical?: Array<Record<string, unknown>> }>(
-      `historical-price-full/${encodeURIComponent(ticker)}`,
-      { serietype: "line" }
+      `historical-price-full/${encodeURIComponent(ticker)}`
     );
     const points: PricePoint[] = (payload.historical ?? [])
       .filter((row) => typeof row?.date === "string" && typeof row?.close === "number")

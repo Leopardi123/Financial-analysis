@@ -250,9 +250,6 @@
   justify-content: center;
 }
 
-.stock-selector-row.form {
-  align-items: flex-end;
-}
 
 .stock-selector select,
 .stock-selector input {
@@ -586,6 +583,22 @@ td.sticky-col {
 .company-picker-results li.active,
 .company-picker-results li:hover {
   background: #eef4dc;
+}
+
+
+.company-profile-card {
+  max-width: 720px;
+}
+
+.company-profile-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+@media (max-width: 900px) {
+  .company-profile-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .producer-core-compact-card {
