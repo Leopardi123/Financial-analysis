@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Chart } from "react-google-charts";
 
 type GlobalMacroPayload = {
   regime: {
@@ -159,9 +160,83 @@ type GlobalMacroPayload = {
 
 };
 
+
+
+type MacroHistoryPayload = {
+  region: string;
+  resolution: "WEEKLY" | "MONTHLY";
+  rangeYears: number;
+  requestedRangeYears: number | "MAX";
+  earliestRawDate: string | null;
+  latestRawDate: string | null;
+  replayEarliestDateUsed: string | null;
+  replayLatestDateUsed: string | null;
+  generatedPoints: number;
+  regimeChanges: number;
+  overlayChanges: number;
+  blockThresholdChanges: number;
+  dataCoveragePct: number;
+  missingHistoryIndicators: string[];
+  limitingIndicators: Array<{
+    seriesKey: string;
+    earliestDate: string | null;
+    latestDate: string | null;
+    pointCount: number;
+    reason: "starts_after_replay_start" | "ends_before_latest";
+  }>;
+  rangeDebug: {
+    requestedStartDate: string | null;
+    actualStartDate: string | null;
+    actualEndDate: string | null;
+    wasCappedByRawData: boolean;
+    unfilledReason: string | null;
+  };
+  intervals: {
+    regime: Array<{ startDate: string; endDate: string; coreRegimeLabel: string; pointCount: number; topDriver: string | null }>;
+    overlays: {
+      growth: Array<{ startDate: string; endDate: string; value: string; pointCount: number }>;
+      stress: Array<{ startDate: string; endDate: string; value: string; pointCount: number }>;
+      hardAsset: Array<{ startDate: string; endDate: string; value: string; pointCount: number }>;
+    };
+  };
+  template: {
+    templateId: string;
+    updatedAt: string;
+    thresholds: {
+      monetaryDominanceMax: number;
+      balancedMax: number;
+      fiscalPressureMax: number;
+    };
+  };
+  replay: {
+    recomputedAt: string;
+    source: "direct_compute" | "cache";
+  };
+  points: Array<{
+    asOfDate: string;
+    macroScoreTotal: number | null;
+    macroConfidence: number;
+    coreRegimeLabel: string;
+    fiscalScore: number | null;
+    monetaryScore: number | null;
+    inflationScore: number | null;
+    credibilityScore: number | null;
+    growthOverlay: string;
+    stressOverlay: string;
+    hardAssetOverlay: string;
+    regimeChanged: boolean;
+    overlayChanged: boolean;
+    blockThresholdChanged: boolean;
+    previousRegimeLabel: string | null;
+    topDriver: string | null;
+  }>;
+};
 export default function GlobalMacroDashboard() {
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
+  const [macroHistory, setMacroHistory] = useState<MacroHistoryPayload | null>(null);
+  const [historyResolution, setHistoryResolution] = useState<"WEEKLY" | "MONTHLY">("MONTHLY");
+  const [historyRangeYears, setHistoryRangeYears] = useState<number | "MAX">(10);
   const [globalMacroLoading, setGlobalMacroLoading] = useState(false);
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -189,18 +264,29 @@ export default function GlobalMacroDashboard() {
     window.localStorage.setItem("globalMacro.debugAdminSecret", adminSecretInput);
   }, [adminSecretInput]);
 
+  useEffect(() => {
+    if (historyResolution === "MONTHLY" && historyRangeYears !== 10 && historyRangeYears !== 20 && historyRangeYears !== "MAX") {
+      setHistoryRangeYears(10);
+    }
+    if (historyResolution === "WEEKLY" && historyRangeYears !== 1 && historyRangeYears !== 3 && historyRangeYears !== 5) {
+      setHistoryRangeYears(3);
+    }
+  }, [historyResolution, historyRangeYears]);
+
   async function loadGlobalMacro() {    setGlobalMacroLoading(true);
     setGlobalMacroError(null);
     try {
-      const response = await fetch(`/api/sector/global-macro?region=US`);
+      const response = await fetch(`/api/sector/global-macro?region=US&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}`);
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
       }
       setGlobalMacro(payload.globalMacro ?? null);
+      setMacroHistory(payload.macroHistory ?? null);
       setGlobalMacroRaw(payload);
     } catch (error) {
       setGlobalMacro(null);
+      setMacroHistory(null);
       setGlobalMacroRaw(null);
       setGlobalMacroError(error instanceof Error ? error.message : "Okänt fel vid Global Macro-hämtning");
     } finally {
@@ -210,7 +296,7 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     void loadGlobalMacro();
-  }, []);
+  }, [historyResolution, historyRangeYears]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const scoredCount = globalMacroIndicators.filter((item) => item.score !== null).length;
@@ -242,6 +328,51 @@ export default function GlobalMacroDashboard() {
   }
 
   const pipelineDebug = globalMacro?.debug ?? null;
+  const historyPoints = macroHistory?.points ?? [];
+  const scoreHistoryData = useMemo(() => {
+    const rows = historyPoints.map((point) => [
+      new Date(`${point.asOfDate}T00:00:00.000Z`),
+      point.macroScoreTotal,
+      point.regimeChanged ? point.macroScoreTotal : null,
+    ] as (Date | number | null)[]);
+    return [["Date", "Macro score", "Regime change"], ...rows];
+  }, [historyPoints]);
+
+  const blockHistoryData = useMemo(() => {
+    const rows = historyPoints.map((point) => [
+      new Date(`${point.asOfDate}T00:00:00.000Z`),
+      point.fiscalScore,
+      point.monetaryScore,
+      point.inflationScore,
+      point.credibilityScore,
+    ] as (Date | number | null)[]);
+    return [["Date", "Fiscal", "Monetary", "Inflation", "Credibility"], ...rows];
+  }, [historyPoints]);
+
+  const regimeIntervals = macroHistory?.intervals.regime ?? [];
+  const overlayIntervals = macroHistory?.intervals.overlays ?? { growth: [], stress: [], hardAsset: [] };
+  const latestHistoryPoint = historyPoints[historyPoints.length - 1] ?? null;
+  const latestRegimeInterval = regimeIntervals[regimeIntervals.length - 1] ?? null;
+
+
+  function regimeColor(regime: string) {
+    if (regime === "MonetaryDominance") return "#dbeafe";
+    if (regime === "Balanced") return "#dcfce7";
+    if (regime === "FiscalPressureBuilding") return "#fef3c7";
+    if (regime === "FiscalDominanceRisk") return "#fee2e2";
+    return "#e5e7eb";
+  }
+
+  function overlayColor(name: "growth" | "stress" | "hard_asset", value: string) {
+    if (name === "stress") {
+      if (value === "Low") return "#dcfce7";
+      if (value === "Medium") return "#fde68a";
+      return "#fecaca";
+    }
+    if (value === "Weak") return "#fee2e2";
+    if (value === "Neutral") return "#fde68a";
+    return "#dcfce7";
+  }
 
   async function runIngest(mode: "backfill" | "latest") {
     setIngestRunningMode(mode);
@@ -374,6 +505,162 @@ export default function GlobalMacroDashboard() {
                 <li>Clear signals: {globalMacroIndicators.filter((item) => item.signalClass === "clear").length} | strength {globalMacro.regime.clearSignalStrength ?? "—"}</li>
                 <li>Speculative signals: {globalMacroIndicators.filter((item) => item.signalClass === "speculative").length} | strength {globalMacro.regime.speculativeSignalStrength ?? "—"}</li>
               </ul>
+
+
+              <h4>Macro Regime History</h4>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <label>
+                  Resolution
+                  <select value={historyResolution} onChange={(event) => setHistoryResolution(event.target.value as "WEEKLY" | "MONTHLY")} style={{ marginLeft: 6 }}>
+                    <option value="MONTHLY">MONTHLY</option>
+                    <option value="WEEKLY">WEEKLY</option>
+                  </select>
+                </label>
+                <label>
+                  Range
+                  <select value={String(historyRangeYears)} onChange={(event) => setHistoryRangeYears(event.target.value === "MAX" ? "MAX" : Number(event.target.value))} style={{ marginLeft: 6 }}>
+                    {historyResolution === "MONTHLY" ? (
+                      <>
+                        <option value={10}>10 år</option>
+                        <option value={20}>20 år</option>
+                        <option value="MAX">Max</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value={1}>1 år</option>
+                        <option value={3}>3 år</option>
+                        <option value={5}>5 år</option>
+                      </>
+                    )}
+                  </select>
+                </label>
+              </div>
+
+              {macroHistory && historyPoints.length > 0 ? (
+                <>
+                  <h5>1) Macro Score History</h5>
+                  <div style={{ fontSize: 12, marginBottom: 6 }}>
+                    <strong>Score zones:</strong> ≤{macroHistory.template.thresholds.monetaryDominanceMax} MonetaryDominance, {macroHistory.template.thresholds.monetaryDominanceMax + 1}–{macroHistory.template.thresholds.balancedMax} Balanced, {macroHistory.template.thresholds.balancedMax + 1}–{macroHistory.template.thresholds.fiscalPressureMax} FiscalPressureBuilding, &gt;{macroHistory.template.thresholds.fiscalPressureMax} FiscalDominanceRisk.
+                  </div>
+                  <Chart
+                    chartType="LineChart"
+                    data={scoreHistoryData}
+                    width="100%"
+                    height="240px"
+                    options={{
+                      legend: { position: "bottom" },
+                      backgroundColor: "#e0e9ce",
+                      vAxis: {
+                        minValue: 0,
+                        maxValue: 100,
+                        ticks: [
+                          0,
+                          macroHistory.template.thresholds.monetaryDominanceMax,
+                          macroHistory.template.thresholds.balancedMax,
+                          macroHistory.template.thresholds.fiscalPressureMax,
+                          100,
+                        ],
+                      },
+                      series: {
+                        0: { color: "#0f172a", lineWidth: 2 },
+                        1: { color: "#dc2626", lineWidth: 0, pointSize: 4 },
+                      },
+                    }}
+                  />
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8, fontSize: 12 }}>
+                    {(["MonetaryDominance", "Balanced", "FiscalPressureBuilding", "FiscalDominanceRisk"] as const).map((regime) => (
+                      <span key={regime} style={{ padding: "2px 8px", borderRadius: 999, background: regimeColor(regime) }}>{regime}</span>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 12, marginBottom: 12 }}>
+                    Latest punkt: <strong>{latestHistoryPoint?.asOfDate ?? "—"}</strong> | Regim <strong>{latestHistoryPoint?.coreRegimeLabel ?? "—"}</strong> | Score <strong>{typeof latestHistoryPoint?.macroScoreTotal === "number" ? latestHistoryPoint.macroScoreTotal.toFixed(1) : "—"}</strong> | Top driver <strong>{latestHistoryPoint?.topDriver ?? "—"}</strong>
+                  </div>
+
+                  <h5>2) Core Regime Intervals</h5>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                    {regimeIntervals.map((interval) => (
+                      <div key={`interval-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`} style={{ background: regimeColor(interval.coreRegimeLabel), borderRadius: 8, padding: "6px 10px", fontSize: 12 }}>
+                        <strong>{interval.startDate} → {interval.endDate}</strong> · {interval.coreRegimeLabel} · {interval.pointCount} punkter · top driver {interval.topDriver ?? "—"}
+                      </div>
+                    ))}
+                  </div>
+
+                  <h5>3) Block History</h5>
+                  <Chart
+                    chartType="LineChart"
+                    data={blockHistoryData}
+                    width="100%"
+                    height="240px"
+                    options={{
+                      legend: { position: "bottom" },
+                      backgroundColor: "#e0e9ce",
+                      vAxis: { minValue: 0, maxValue: 100 },
+                    }}
+                  />
+
+                  <h5>4) Overlay Timelines</h5>
+                  <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>Growth</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {overlayIntervals.growth.map((interval) => (
+                          <span key={`ov-growth-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("growth", interval.value) }}>
+                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>Stress</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {overlayIntervals.stress.map((interval) => (
+                          <span key={`ov-stress-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("stress", interval.value) }}>
+                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>Hard Asset</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {overlayIntervals.hardAsset.map((interval) => (
+                          <span key={`ov-hard-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("hard_asset", interval.value) }}>
+                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <h5>5) Regime Change Log</h5>
+                  <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Datum</th>
+                          <th>Från</th>
+                          <th>Till</th>
+                          <th>Overlay change</th>
+                          <th>Viktigaste driver</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historyPoints.filter((point) => point.regimeChanged).map((point) => (
+                          <tr key={`change-${point.asOfDate}`}>
+                            <td>{point.asOfDate}</td>
+                            <td>{point.previousRegimeLabel ?? "—"}</td>
+                            <td>{point.coreRegimeLabel}</td>
+                            <td>{point.overlayChanged ? "Ja" : "Nej"}</td>
+                            <td>{point.topDriver ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="status empty">Ingen historik kunde genereras för vald period/upplösning.</div>
+              )}
 
               <h4>Indicator drilldown</h4>
               {globalMacroIndicators.length === 0 ? (
@@ -529,6 +816,30 @@ export default function GlobalMacroDashboard() {
               <ul>
                 <li>indicator snapshots: {pipelineDebug?.snapshotContent.indicatorSnapshotCount ?? "—"}</li>
                 <li>regime snapshots: {pipelineDebug?.snapshotContent.regimeSnapshotCount ?? "—"}</li>
+                <li>history region: {macroHistory?.region ?? "US"}</li>
+                <li>history selected resolution: {macroHistory?.resolution ?? historyResolution}</li>
+                <li>history requested range: {String(macroHistory?.requestedRangeYears ?? historyRangeYears)}</li>
+                <li>history actual rendered range: {(macroHistory?.rangeDebug.actualStartDate ?? "—")} → {(macroHistory?.rangeDebug.actualEndDate ?? "—")}</li>
+                <li>history earliest raw date used: {macroHistory?.replayEarliestDateUsed ?? "—"}</li>
+                <li>history latest raw date used: {macroHistory?.replayLatestDateUsed ?? "—"}</li>
+                <li>history earliest raw available: {macroHistory?.earliestRawDate ?? "—"}</li>
+                <li>history latest raw available: {macroHistory?.latestRawDate ?? "—"}</li>
+                <li>history unfilled reason: {macroHistory?.rangeDebug.unfilledReason ?? "none"}</li>
+                <li>history limiting indicators: {(macroHistory?.limitingIndicators ?? []).map((item) => `${item.seriesKey}:${item.reason}`).join(", ") || "none"}</li>
+                <li>history raw regime points: {macroHistory?.generatedPoints ?? 0}</li>
+                <li>history merged regime intervals: {macroHistory?.intervals.regime.length ?? 0}</li>
+                <li>history true regime changes: {macroHistory?.regimeChanges ?? 0}</li>
+                <li>history raw overlay points: {macroHistory?.generatedPoints ?? 0}</li>
+                <li>history merged overlay intervals: {(macroHistory?.intervals.overlays.growth.length ?? 0) + (macroHistory?.intervals.overlays.stress.length ?? 0) + (macroHistory?.intervals.overlays.hardAsset.length ?? 0)}</li>
+                <li>history overlay rendering mode: timeline_intervals</li>
+                <li>history score thresholds: ≤{macroHistory?.template.thresholds.monetaryDominanceMax ?? "—"} / ≤{macroHistory?.template.thresholds.balancedMax ?? "—"} / ≤{macroHistory?.template.thresholds.fiscalPressureMax ?? "—"}</li>
+                <li>history latest interval regime: {latestRegimeInterval?.coreRegimeLabel ?? "—"}</li>
+                <li>history latest interval top driver: {latestRegimeInterval?.topDriver ?? "—"}</li>
+                <li>history data coverage: {macroHistory?.dataCoveragePct ?? 0}%</li>
+                <li>history missing indicators: {(macroHistory?.missingHistoryIndicators ?? []).join(", ") || "none"}</li>
+                <li>history template/ruleset: {macroHistory?.template?.templateId ?? "—"} (updated {macroHistory?.template?.updatedAt ?? "—"})</li>
+                <li>history recomputed at: {macroHistory?.replay?.recomputedAt ?? "—"}</li>
+                <li>history source: {macroHistory?.replay?.source ?? "direct_compute"}</li>
                 <li>latest snapshot timestamp: {pipelineDebug?.snapshotContent.latestSnapshotTimestamp ?? "null"}</li>
                 <li>snapshotIsEmpty: {String(pipelineDebug?.snapshotContent.snapshotIsEmpty ?? true)}</li>
               </ul>

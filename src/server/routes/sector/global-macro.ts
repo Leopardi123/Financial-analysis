@@ -4,6 +4,7 @@ import { query } from "../../../../api/_db.js";
 import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
 import { runAndPersistMacroSnapshots } from "../../../lib/macro/pipeline.js";
+import { computeMacroRegimeHistory, type HistoryResolution } from "../../../lib/macro/history.js";
 
 type RegimeSnapshotRow = {
   as_of_date: string;
@@ -660,17 +661,35 @@ export default async function handler(req: any, res: any) {
 
   const region = String(req.query?.region ?? "US").toUpperCase();
   const allowLiveFallback = String(req.query?.fallbackLive ?? "1") === "1";
+  const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
+  const historyRangeRaw = String(req.query?.historyRangeYears ?? (historyResolution === "MONTHLY" ? "20" : "3")).toUpperCase();
+  const historyRangeYears = historyRangeRaw === "MAX"
+    ? "MAX"
+    : Number.isFinite(Number(historyRangeRaw))
+      ? Number(historyRangeRaw)
+      : (historyResolution === "MONTHLY" ? 20 : 3);
 
   const snapshot = await readLatestSnapshot(region, allowLiveFallback);
   if (snapshot) {
-    res.status(200).json({ ok: true, globalMacro: snapshot });
+    const history = await computeMacroRegimeHistory({
+      region,
+      resolution: historyResolution as HistoryResolution,
+      rangeYears: historyRangeYears,
+    });
+    res.status(200).json({ ok: true, globalMacro: snapshot, macroHistory: history });
     return;
   }
 
   if (!allowLiveFallback) {
+    const history = await computeMacroRegimeHistory({
+      region,
+      resolution: historyResolution as HistoryResolution,
+      rangeYears: historyRangeYears,
+    });
     res.status(200).json({
       ok: true,
       globalMacro: null,
+      macroHistory: history,
       diagnostics: {
         readMode: "empty_no_snapshot",
         message: "No snapshots found. Run /api/admin/macro/run-engine first.",
@@ -683,9 +702,15 @@ export default async function handler(req: any, res: any) {
   const fallbackSnapshot = await readLatestSnapshot(region, allowLiveFallback);
 
   if (!fallbackSnapshot) {
+    const history = await computeMacroRegimeHistory({
+      region,
+      resolution: historyResolution as HistoryResolution,
+      rangeYears: historyRangeYears,
+    });
     res.status(200).json({
       ok: true,
       globalMacro: null,
+      macroHistory: history,
       diagnostics: {
         readMode: live.emptyInvalid ? "live_fallback_empty_invalid" : "live_fallback_no_snapshot",
         wroteAny: live.wroteAny,
@@ -695,9 +720,16 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
+  const history = await computeMacroRegimeHistory({
+    region,
+    resolution: historyResolution as HistoryResolution,
+    rangeYears: historyRangeYears,
+  });
+
   res.status(200).json({
     ok: true,
     globalMacro: fallbackSnapshot,
+    macroHistory: history,
     diagnostics: {
       readMode: "live_fallback_then_snapshot",
       wroteAny: live.wroteAny,

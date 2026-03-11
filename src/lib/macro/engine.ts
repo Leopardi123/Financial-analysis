@@ -1,4 +1,9 @@
 import { MACRO_INDICATOR_CATALOG, SIGNAL_CLASS_WEIGHT } from "./catalog.ts";
+import {
+  classifyCoreRegimeFromTemplate,
+  classifyOverlayFromTemplate,
+  GLOBAL_MACRO_TEMPLATE,
+} from "./template.ts";
 import type {
   MacroIndicatorCatalogEntry,
   MacroIndicatorSnapshot,
@@ -67,37 +72,11 @@ function percentileRank(series: number[], value: number): number {
   return (leCount / series.length) * 100;
 }
 
-function classifyCoreRegime(score: number | null): MacroRegimeSnapshot["coreRegimeLabel"] {
-  if (score === null) return "DataInsufficient";
-  if (score <= 35) return "MonetaryDominance";
-  if (score <= 55) return "Balanced";
-  if (score <= 75) return "FiscalPressureBuilding";
-  return "FiscalDominanceRisk";
-}
-
-function overlayLabel(type: "growth", weightedAverageScore: number | null): "Weak" | "Neutral" | "Strong";
-function overlayLabel(type: "stress", weightedAverageScore: number | null): "Low" | "Medium" | "High";
-function overlayLabel(type: "hard_asset", weightedAverageScore: number | null): "Weak" | "Neutral" | "Strong";
-function overlayLabel(type: OverlayType, weightedAverageScore: number | null) {
-  if (type === "growth") {
-    if (weightedAverageScore === null || weightedAverageScore <= -0.5) return "Weak";
-    if (weightedAverageScore < 0.5) return "Neutral";
-    return "Strong";
-  }
-  if (type === "stress") {
-    if (weightedAverageScore === null || weightedAverageScore <= -0.5) return "Low";
-    if (weightedAverageScore < 0.5) return "Medium";
-    return "High";
-  }
-  if (weightedAverageScore === null || weightedAverageScore <= -0.5) return "Weak";
-  if (weightedAverageScore < 0.5) return "Neutral";
-  return "Strong";
-}
-
-function latestValueForInput(seriesMap: Map<string, MacroSeriesInput>, input: string) {
+function latestValueForInput(seriesMap: Map<string, MacroSeriesInput>, input: string, asOfDate: string) {
   const series = seriesMap.get(input);
   if (!series) return null;
-  const monthly = toCanonicalMonthly(series.points);
+  const asOfMonth = monthKey(asOfDate);
+  const monthly = toCanonicalMonthly(series.points).filter((point) => point.month <= asOfMonth && point.date <= asOfDate);
   if (monthly.length === 0) return null;
   return monthly;
 }
@@ -107,7 +86,7 @@ function computeIndicatorSnapshot(
   seriesMap: Map<string, MacroSeriesInput>,
   asOfDate: string,
 ): MacroIndicatorSnapshot {
-  const monthly = latestValueForInput(seriesMap, entry.inputs[0]);
+  const monthly = latestValueForInput(seriesMap, entry.inputs[0], asOfDate);
   if (!monthly) {
     return {
       asOfDate,
@@ -249,10 +228,10 @@ export function runGlobalMacroEngine({
     blockScores,
     macroScoreTotal,
     macroConfidence,
-    coreRegimeLabel: classifyCoreRegime(macroScoreTotal),
-    growthOverlay: overlayLabel("growth", overlayAverage("growth")),
-    stressOverlay: overlayLabel("stress", overlayAverage("stress")),
-    hardAssetOverlay: overlayLabel("hard_asset", overlayAverage("hard_asset")),
+    coreRegimeLabel: classifyCoreRegimeFromTemplate(macroScoreTotal, GLOBAL_MACRO_TEMPLATE),
+    growthOverlay: classifyOverlayFromTemplate("growth", overlayAverage("growth"), GLOBAL_MACRO_TEMPLATE),
+    stressOverlay: classifyOverlayFromTemplate("stress", overlayAverage("stress"), GLOBAL_MACRO_TEMPLATE),
+    hardAssetOverlay: classifyOverlayFromTemplate("hard_asset", overlayAverage("hard_asset"), GLOBAL_MACRO_TEMPLATE),
     clearSignalStrength,
     speculativeSignalStrength,
     topDrivers,
