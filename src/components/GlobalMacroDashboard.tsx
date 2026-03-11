@@ -245,6 +245,7 @@ export default function GlobalMacroDashboard() {
   const [adminSecretInput, setAdminSecretInput] = useState("");
   const [ingestRunResult, setIngestRunResult] = useState<Record<string, unknown> | null>(null);
   const [engineRunResult, setEngineRunResult] = useState<Record<string, unknown> | null>(null);
+  const [selectedHistoryDate, setSelectedHistoryDate] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -329,30 +330,64 @@ export default function GlobalMacroDashboard() {
 
   const pipelineDebug = globalMacro?.debug ?? null;
   const historyPoints = macroHistory?.points ?? [];
-  const scoreHistoryData = useMemo(() => {
-    const rows = historyPoints.map((point) => [
-      new Date(`${point.asOfDate}T00:00:00.000Z`),
-      point.macroScoreTotal,
-      point.regimeChanged ? point.macroScoreTotal : null,
-    ] as (Date | number | null)[]);
-    return [["Date", "Macro score", "Regime change"], ...rows];
-  }, [historyPoints]);
-
-  const blockHistoryData = useMemo(() => {
-    const rows = historyPoints.map((point) => [
-      new Date(`${point.asOfDate}T00:00:00.000Z`),
-      point.fiscalScore,
-      point.monetaryScore,
-      point.inflationScore,
-      point.credibilityScore,
-    ] as (Date | number | null)[]);
-    return [["Date", "Fiscal", "Monetary", "Inflation", "Credibility"], ...rows];
-  }, [historyPoints]);
 
   const regimeIntervals = macroHistory?.intervals.regime ?? [];
   const overlayIntervals = macroHistory?.intervals.overlays ?? { growth: [], stress: [], hardAsset: [] };
   const latestHistoryPoint = historyPoints[historyPoints.length - 1] ?? null;
   const latestRegimeInterval = regimeIntervals[regimeIntervals.length - 1] ?? null;
+  const selectedHistoryPoint = useMemo(() => {
+    if (!historyPoints.length) return null;
+    if (!selectedHistoryDate) return latestHistoryPoint;
+    return historyPoints.find((point) => point.asOfDate === selectedHistoryDate) ?? latestHistoryPoint;
+  }, [historyPoints, latestHistoryPoint, selectedHistoryDate]);
+
+  const selectedHistoryDrivers = useMemo(() => {
+    const selectedDriver = selectedHistoryPoint?.topDriver ? [selectedHistoryPoint.topDriver] : [];
+    const latestDrivers = globalMacro?.regime.topDrivers.slice(0, 3).map((driver) => driver.indicatorId) ?? [];
+    return Array.from(new Set([...selectedDriver, ...latestDrivers])).slice(0, 3);
+  }, [globalMacro?.regime.topDrivers, selectedHistoryPoint?.topDriver]);
+
+  const blockHistoryData = useMemo(() => {
+    const rows = historyPoints.map((point) => {
+      const fiscal = point.fiscalScore ?? 0;
+      const monetary = point.monetaryScore ?? 0;
+      const inflation = point.inflationScore ?? 0;
+      const credibility = point.credibilityScore ?? 0;
+      const total = fiscal + monetary + inflation + credibility;
+      const denom = total > 0 ? total : 1;
+      return [
+        new Date(`${point.asOfDate}T00:00:00.000Z`),
+        (fiscal / denom) * 100,
+        (monetary / denom) * 100,
+        (inflation / denom) * 100,
+        (credibility / denom) * 100,
+      ] as (Date | number)[];
+    });
+    return [["Date", "Fiscal", "Monetary", "Inflation", "Credibility"], ...rows];
+  }, [historyPoints]);
+
+  const regimeSummary = useMemo(() => {
+    if (!regimeIntervals.length || !latestRegimeInterval) return null;
+    const longest = regimeIntervals.reduce((max, current) => (
+      current.pointCount > max.pointCount ? current : max
+    ), regimeIntervals[0]);
+    const driverCounts = new Map<string, number>();
+    regimeIntervals.forEach((interval) => {
+      if (!interval.topDriver) return;
+      driverCounts.set(interval.topDriver, (driverCounts.get(interval.topDriver) ?? 0) + 1);
+    });
+    const topDriver = Array.from(driverCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+    return {
+      regimeChanges: macroHistory?.regimeChanges ?? 0,
+      longest,
+      currentDuration: latestRegimeInterval.pointCount,
+      latestChange: (() => {
+        const changes = historyPoints.filter((point) => point.regimeChanged);
+        return changes.length ? changes[changes.length - 1].asOfDate : "—";
+      })(),
+      topDriver,
+    };
+  }, [historyPoints, latestRegimeInterval, macroHistory?.regimeChanges, regimeIntervals]);
 
 
   function regimeColor(regime: string) {
@@ -538,101 +573,143 @@ export default function GlobalMacroDashboard() {
 
               {macroHistory && historyPoints.length > 0 ? (
                 <>
-                  <h5>1) Macro Score History</h5>
+                  <h5>1) Macro Score + Regime Graph</h5>
                   <div style={{ fontSize: 12, marginBottom: 6 }}>
                     <strong>Score zones:</strong> ≤{macroHistory.template.thresholds.monetaryDominanceMax} MonetaryDominance, {macroHistory.template.thresholds.monetaryDominanceMax + 1}–{macroHistory.template.thresholds.balancedMax} Balanced, {macroHistory.template.thresholds.balancedMax + 1}–{macroHistory.template.thresholds.fiscalPressureMax} FiscalPressureBuilding, &gt;{macroHistory.template.thresholds.fiscalPressureMax} FiscalDominanceRisk.
                   </div>
+                  <div style={{ border: "1px solid #cbd5e1", borderRadius: 10, overflow: "hidden", marginBottom: 8 }}>
+                    <div style={{ background: regimeColor("MonetaryDominance"), height: 26, borderBottom: "1px solid #cbd5e1", display: "flex", alignItems: "center", fontSize: 11, paddingLeft: 8 }}>MonetaryDominance</div>
+                    <div style={{ background: regimeColor("Balanced"), height: 26, borderBottom: "1px solid #cbd5e1", display: "flex", alignItems: "center", fontSize: 11, paddingLeft: 8 }}>Balanced</div>
+                    <div style={{ background: regimeColor("FiscalPressureBuilding"), height: 26, borderBottom: "1px solid #cbd5e1", display: "flex", alignItems: "center", fontSize: 11, paddingLeft: 8 }}>FiscalPressureBuilding</div>
+                    <div style={{ background: regimeColor("FiscalDominanceRisk"), height: 26, display: "flex", alignItems: "center", fontSize: 11, paddingLeft: 8 }}>FiscalDominanceRisk</div>
+                  </div>
                   <Chart
                     chartType="LineChart"
-                    data={scoreHistoryData}
+                    data={[
+                      ["Date", "Macro score", "Regime skifte"],
+                      ...historyPoints.map((point) => [
+                        new Date(`${point.asOfDate}T00:00:00.000Z`),
+                        point.macroScoreTotal,
+                        point.regimeChanged ? point.macroScoreTotal : null,
+                      ]),
+                    ]}
                     width="100%"
-                    height="240px"
+                    height="220px"
                     options={{
                       legend: { position: "bottom" },
-                      backgroundColor: "#e0e9ce",
-                      vAxis: {
-                        minValue: 0,
-                        maxValue: 100,
-                        ticks: [
-                          0,
-                          macroHistory.template.thresholds.monetaryDominanceMax,
-                          macroHistory.template.thresholds.balancedMax,
-                          macroHistory.template.thresholds.fiscalPressureMax,
-                          100,
-                        ],
-                      },
+                      backgroundColor: "#f8fafc",
+                      vAxis: { minValue: 0, maxValue: 100 },
                       series: {
-                        0: { color: "#0f172a", lineWidth: 2 },
-                        1: { color: "#dc2626", lineWidth: 0, pointSize: 4 },
+                        0: { color: "#0f172a", lineWidth: 2, pointSize: 2 },
+                        1: { color: "#b91c1c", lineWidth: 0, pointSize: 3 },
                       },
                     }}
                   />
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8, fontSize: 12 }}>
-                    {(["MonetaryDominance", "Balanced", "FiscalPressureBuilding", "FiscalDominanceRisk"] as const).map((regime) => (
-                      <span key={regime} style={{ padding: "2px 8px", borderRadius: 999, background: regimeColor(regime) }}>{regime}</span>
-                    ))}
+                  <div style={{ display: "flex", marginBottom: 10, height: 14, borderRadius: 999, overflow: "hidden", border: "1px solid #cbd5e1" }}>
+                    {regimeIntervals.map((interval) => {
+                      const start = new Date(`${interval.startDate}T00:00:00.000Z`).getTime();
+                      const end = new Date(`${interval.endDate}T00:00:00.000Z`).getTime();
+                      const duration = Math.max(1, end - start);
+                      return (
+                        <button
+                          key={`score-band-${interval.startDate}-${interval.endDate}`}
+                          type="button"
+                          onClick={() => setSelectedHistoryDate(interval.endDate)}
+                          title={`${interval.startDate} → ${interval.endDate} · ${interval.coreRegimeLabel}`}
+                          style={{
+                            flex: `${duration} 0 0`,
+                            minWidth: 8,
+                            border: 0,
+                            padding: 0,
+                            background: regimeColor(interval.coreRegimeLabel),
+                            cursor: "pointer",
+                          }}
+                          aria-label={`${interval.coreRegimeLabel} ${interval.startDate} till ${interval.endDate}`}
+                        />
+                      );
+                    })}
                   </div>
-                  <div style={{ fontSize: 12, marginBottom: 12 }}>
-                    Latest punkt: <strong>{latestHistoryPoint?.asOfDate ?? "—"}</strong> | Regim <strong>{latestHistoryPoint?.coreRegimeLabel ?? "—"}</strong> | Score <strong>{typeof latestHistoryPoint?.macroScoreTotal === "number" ? latestHistoryPoint.macroScoreTotal.toFixed(1) : "—"}</strong> | Top driver <strong>{latestHistoryPoint?.topDriver ?? "—"}</strong>
+                  <div style={{ fontSize: 12, marginBottom: 12, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px" }}>
+                    Vald punkt: <strong>{selectedHistoryPoint?.asOfDate ?? "—"}</strong> | Regim <strong>{selectedHistoryPoint?.coreRegimeLabel ?? "—"}</strong> | Score <strong>{typeof selectedHistoryPoint?.macroScoreTotal === "number" ? selectedHistoryPoint.macroScoreTotal.toFixed(1) : "—"}</strong> | Drivers <strong>{selectedHistoryDrivers.join(", ") || "—"}</strong>
                   </div>
 
-                  <h5>2) Core Regime Intervals</h5>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
-                    {regimeIntervals.map((interval) => (
-                      <div key={`interval-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`} style={{ background: regimeColor(interval.coreRegimeLabel), borderRadius: 8, padding: "6px 10px", fontSize: 12 }}>
-                        <strong>{interval.startDate} → {interval.endDate}</strong> · {interval.coreRegimeLabel} · {interval.pointCount} punkter · top driver {interval.topDriver ?? "—"}
-                      </div>
-                    ))}
+                  <h5>2) Core Regime Timeline</h5>
+                  <div style={{ display: "flex", width: "100%", minHeight: 28, borderRadius: 8, overflow: "hidden", border: "1px solid #cbd5e1", marginBottom: 8 }}>
+                    {regimeIntervals.map((interval) => {
+                      const start = new Date(`${interval.startDate}T00:00:00.000Z`).getTime();
+                      const end = new Date(`${interval.endDate}T00:00:00.000Z`).getTime();
+                      const duration = Math.max(1, end - start);
+                      return (
+                        <details key={`interval-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`} style={{ flex: `${duration} 0 0`, minWidth: 30, background: regimeColor(interval.coreRegimeLabel), borderRight: "1px solid rgba(15,23,42,0.2)", padding: "4px 6px" }}>
+                          <summary style={{ cursor: "pointer", listStyle: "none", fontSize: 11, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{interval.coreRegimeLabel}</summary>
+                          <div style={{ fontSize: 11, marginTop: 4 }}>
+                            {interval.startDate} → {interval.endDate}<br />
+                            duration: {interval.pointCount} punkter<br />
+                            top driver: {interval.topDriver ?? "—"}
+                          </div>
+                        </details>
+                      );
+                    })}
                   </div>
 
-                  <h5>3) Block History</h5>
+                  <h5>3) Block Driver / Block History Visualization</h5>
                   <Chart
-                    chartType="LineChart"
+                    chartType="AreaChart"
                     data={blockHistoryData}
                     width="100%"
                     height="240px"
                     options={{
+                      isStacked: true,
                       legend: { position: "bottom" },
-                      backgroundColor: "#e0e9ce",
-                      vAxis: { minValue: 0, maxValue: 100 },
+                      backgroundColor: "#f8fafc",
+                      vAxis: { minValue: 0, maxValue: 100, title: "Dominans (%)" },
+                      series: {
+                        0: { color: "#2563eb" },
+                        1: { color: "#0ea5e9" },
+                        2: { color: "#f97316" },
+                        3: { color: "#64748b" },
+                      },
                     }}
                   />
 
-                  <h5>4) Overlay Timelines</h5>
-                  <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>Growth</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {overlayIntervals.growth.map((interval) => (
-                          <span key={`ov-growth-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("growth", interval.value) }}>
-                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                          </span>
-                        ))}
+                  <h5>4) Overlay Timeline</h5>
+                  <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+                    {([
+                      ["growth", "Growth", overlayIntervals.growth],
+                      ["stress", "Stress", overlayIntervals.stress],
+                      ["hard_asset", "Hard Asset", overlayIntervals.hardAsset],
+                    ] as const).map(([key, label, intervals]) => (
+                      <div key={key}>
+                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                        <div style={{ display: "flex", minHeight: 24, border: "1px solid #cbd5e1", borderRadius: 8, overflow: "hidden" }}>
+                          {intervals.map((interval) => {
+                            const start = new Date(`${interval.startDate}T00:00:00.000Z`).getTime();
+                            const end = new Date(`${interval.endDate}T00:00:00.000Z`).getTime();
+                            const duration = Math.max(1, end - start);
+                            return (
+                              <details key={`ov-${key}-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ flex: `${duration} 0 0`, minWidth: 20, background: overlayColor(key as "growth" | "stress" | "hard_asset", interval.value), borderRight: "1px solid rgba(15,23,42,0.15)", padding: "3px 5px" }}>
+                                <summary style={{ cursor: "pointer", listStyle: "none", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{interval.value}</summary>
+                                <div style={{ fontSize: 11, marginTop: 2 }}>{interval.startDate} → {interval.endDate} ({interval.pointCount}p)</div>
+                              </details>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>Stress</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {overlayIntervals.stress.map((interval) => (
-                          <span key={`ov-stress-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("stress", interval.value) }}>
-                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>Hard Asset</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {overlayIntervals.hardAsset.map((interval) => (
-                          <span key={`ov-hard-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("hard_asset", interval.value) }}>
-                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                    ))}
                   </div>
 
-                  <h5>5) Regime Change Log</h5>
+                  <h5>5) Compact Regime Summary</h5>
+                  {regimeSummary ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 10 }}>
+                      <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 8, fontSize: 12 }}>Regime skiften<br /><strong>{regimeSummary.regimeChanges}</strong></div>
+                      <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 8, fontSize: 12 }}>Längsta regim<br /><strong>{regimeSummary.longest.coreRegimeLabel}</strong> ({regimeSummary.longest.pointCount}p)</div>
+                      <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 8, fontSize: 12 }}>Nuvarande varaktighet<br /><strong>{regimeSummary.currentDuration} punkter</strong></div>
+                      <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 8, fontSize: 12 }}>Senaste skifte<br /><strong>{regimeSummary.latestChange}</strong></div>
+                      <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 8, fontSize: 12 }}>Vanligaste top driver<br /><strong>{regimeSummary.topDriver}</strong></div>
+                    </div>
+                  ) : null}
+
+                  <h5>6) Detailed Change Log</h5>
                   <div style={{ overflowX: "auto", marginBottom: 8 }}>
                     <table>
                       <thead>
@@ -640,23 +717,37 @@ export default function GlobalMacroDashboard() {
                           <th>Datum</th>
                           <th>Från</th>
                           <th>Till</th>
-                          <th>Overlay change</th>
+                          <th>Duration före (punkter)</th>
                           <th>Viktigaste driver</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {historyPoints.filter((point) => point.regimeChanged).map((point) => (
+                        {historyPoints.filter((point) => point.regimeChanged).map((point, index, changes) => (
                           <tr key={`change-${point.asOfDate}`}>
                             <td>{point.asOfDate}</td>
                             <td>{point.previousRegimeLabel ?? "—"}</td>
                             <td>{point.coreRegimeLabel}</td>
-                            <td>{point.overlayChanged ? "Ja" : "Nej"}</td>
+                            <td>{index === 0 ? "—" : changes[index - 1] ? Math.max(1, historyPoints.findIndex((x) => x.asOfDate === point.asOfDate) - historyPoints.findIndex((x) => x.asOfDate === changes[index - 1].asOfDate)) : "—"}</td>
                             <td>{point.topDriver ?? "—"}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+
+                  <h5>7) Debug</h5>
+                  <details>
+                    <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Visa history-debug</summary>
+                    <ul style={{ fontSize: 12, marginTop: 6 }}>
+                      <li>number of regime intervals: {regimeIntervals.length}</li>
+                      <li>number of regime changes: {macroHistory.regimeChanges}</li>
+                      <li>number of overlay intervals (growth/stress/hard asset): {overlayIntervals.growth.length}/{overlayIntervals.stress.length}/{overlayIntervals.hardAsset.length}</li>
+                      <li>rendering mode block history: stacked-area-dominance</li>
+                      <li>rendering mode overlay history: synced-timeline-bands</li>
+                      <li>selected range: {macroHistory.requestedRangeYears}</li>
+                      <li>selected resolution: {macroHistory.resolution}</li>
+                    </ul>
+                  </details>
                 </>
               ) : (
                 <div className="status empty">Ingen historik kunde genereras för vald period/upplösning.</div>
