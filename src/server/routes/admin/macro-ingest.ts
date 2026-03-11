@@ -30,6 +30,45 @@ function normalizeFmpEodRows(payload: unknown): Array<{ date: string; value: num
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+
+
+type GoldBackfillWindow = { from: string; to: string; label: string };
+
+function isoDateOnly(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function buildGoldBackfillWindows(yearsTotal: number, windowYears: number): GoldBackfillWindow[] {
+  const now = new Date();
+  const windows: GoldBackfillWindow[] = [];
+  const count = Math.ceil(yearsTotal / windowYears);
+  for (let index = 0; index < count; index += 1) {
+    const to = new Date(Date.UTC(now.getUTCFullYear() - (index * windowYears), now.getUTCMonth(), now.getUTCDate()));
+    const from = new Date(Date.UTC(to.getUTCFullYear() - windowYears, to.getUTCMonth(), to.getUTCDate()));
+    windows.push({
+      from: isoDateOnly(from),
+      to: isoDateOnly(to),
+      label: `w${index + 1}`,
+    });
+  }
+  return windows;
+}
+
+function mergeGoldRowsByDate(windows: Array<{ from: string; to: string; rows: Array<{ date: string; value: number | null }> }>) {
+  const byDate = new Map<string, { date: string; value: number | null }>();
+  for (const window of windows) {
+    for (const row of window.rows) {
+      byDate.set(row.date, row);
+    }
+  }
+  const merged = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    rows: merged,
+    minDate: merged[0]?.date ?? null,
+    maxDate: merged[merged.length - 1]?.date ?? null,
+  };
+}
+
 function chunk<T>(items: T[], size: number): T[][] {
   const output: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -153,17 +192,44 @@ export default async function handler(req: any, res: any) {
     }
 
     try {
-      const goldPayload = await fetchStableJson<unknown>("historical-price-eod/full", { symbol: "GCUSD" });
-      const goldRows = normalizeFmpEodRows(goldPayload);
-      sourceSeriesMap.gold_usd = goldRows;
-      debug.fetchedSeries += 1;
-      debug.fetchedObservationCount += goldRows.length;
+      const goldWindows = buildGoldBackfillWindows(15, 5);
+      const goldWindowRows: Array<{ from: string; to: string; rows: Array<{ date: string; value: number | null }> }> = [];
+
+      for (const window of goldWindows) {
+        try {
+          const goldPayload = await fetchStableJson<unknown>("historical-price-eod/full", { symbol: "GCUSD", from: window.from, to: window.to });
+          const rows = normalizeFmpEodRows(goldPayload);
+          goldWindowRows.push({ from: window.from, to: window.to, rows });
+          debug.fetchedObservationCount += rows.length;
+          seriesResults.push({
+            seriesId: `historical-price-eod/full?symbol=GCUSD&from=${window.from}&to=${window.to}`,
+            seriesKey: `gold_usd_window_${window.label}`,
+            fetchSuccess: true,
+            observationsFetched: rows.length,
+            errorMessage: null,
+          });
+        } catch (error) {
+          seriesResults.push({
+            seriesId: `historical-price-eod/full?symbol=GCUSD&from=${window.from}&to=${window.to}`,
+            seriesKey: `gold_usd_window_${window.label}`,
+            fetchSuccess: false,
+            observationsFetched: 0,
+            errorMessage: (error as Error).message,
+          });
+        }
+      }
+
+      const mergedGold = mergeGoldRowsByDate(goldWindowRows);
+      sourceSeriesMap.gold_usd = mergedGold.rows;
+      debug.fetchedSeries += mergedGold.rows.length > 0 ? 1 : 0;
       seriesResults.push({
         seriesId: "historical-price-eod/full?symbol=GCUSD",
         seriesKey: "gold_usd",
-        fetchSuccess: true,
-        observationsFetched: goldRows.length,
-        errorMessage: null,
+        fetchSuccess: mergedGold.rows.length > 0,
+        observationsFetched: mergedGold.rows.length,
+        errorMessage: mergedGold.rows.length > 0
+          ? `gold_backfill windows=${goldWindows.length} deduped=${mergedGold.rows.length} min=${mergedGold.minDate ?? "na"} max=${mergedGold.maxDate ?? "na"}`
+          : "gold_backfill produced no rows",
       });
     } catch (error) {
       seriesResults.push({

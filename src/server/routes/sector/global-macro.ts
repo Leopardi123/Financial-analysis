@@ -241,6 +241,15 @@ async function getLatestIngestRun(region: string) {
   const duplicateOrUnchangedRows = Math.max(0, attemptedInserts - insertedRowCount);
   const fetchedObservationCount = Number(row.fetched_observation_count ?? 0);
 
+  const seriesResults = safeJsonParse<Array<{
+    seriesId: string;
+    seriesKey: string;
+    fetchSuccess: boolean;
+    observationsFetched: number;
+    errorMessage: string | null;
+  }>>(row.series_results_json, []);
+  const goldBackfill = summarizeGoldBackfillFromSeriesResults(seriesResults);
+
   return {
     timestamp: row.attempted_at,
     region: row.region,
@@ -257,13 +266,8 @@ async function getLatestIngestRun(region: string) {
     attemptedInserts,
     insertedRowCount,
     duplicateOrUnchangedRows,
-    seriesResults: safeJsonParse<Array<{
-      seriesId: string;
-      seriesKey: string;
-      fetchSuccess: boolean;
-      observationsFetched: number;
-      errorMessage: string | null;
-    }>>(row.series_results_json, []),
+    seriesResults,
+    goldBackfill,
     failingStep: row.failing_step,
     errorMessage: row.error_message,
     insertSucceeded: insertedRowCount > 0,
@@ -273,6 +277,31 @@ async function getLatestIngestRun(region: string) {
       : insertedRowCount > 0
         ? "inserted_new_rows"
         : "dedupe_or_unchanged_only",
+  };
+}
+
+
+
+function summarizeGoldBackfillFromSeriesResults(seriesResults: Array<{ seriesId: string; seriesKey: string; fetchSuccess: boolean; observationsFetched: number }>) {
+  const windows = seriesResults
+    .filter((row) => row.seriesKey.startsWith("gold_usd_window_"))
+    .map((row) => {
+      const from = /[?&]from=([^&]+)/.exec(row.seriesId)?.[1] ?? null;
+      const to = /[?&]to=([^&]+)/.exec(row.seriesId)?.[1] ?? null;
+      return {
+        seriesId: row.seriesId,
+        from,
+        to,
+        rowsFetched: row.observationsFetched,
+        fetchSuccess: row.fetchSuccess,
+      };
+    });
+
+  return {
+    requestedWindows: windows.length,
+    windowRanges: windows.map((w) => ({ from: w.from, to: w.to })),
+    rowsPerWindow: windows.map((w) => ({ from: w.from, to: w.to, rowsFetched: w.rowsFetched, fetchSuccess: w.fetchSuccess })),
+    totalRowsFetchedAcrossWindows: windows.reduce((sum, item) => sum + item.rowsFetched, 0),
   };
 }
 
@@ -385,6 +414,16 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   const catalog = MACRO_INDICATOR_CATALOG.filter((entry) => entry.region === region);
   const catalogById = new Map(catalog.map((entry) => [entry.indicatorId, entry]));
   const rawStats = await getRawSeriesStats(region);
+  const goldRangeRows = (await query(
+    `SELECT MIN(date) AS min_date, MAX(date) AS max_date
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto' AND series_key = 'gold_usd'`,
+    [region],
+  )) as Array<{ min_date?: string | null; max_date?: string | null }>;
+  const goldDateRange = {
+    minDate: goldRangeRows[0]?.min_date ?? null,
+    maxDate: goldRangeRows[0]?.max_date ?? null,
+  };
   const latestIngestRun = await getLatestIngestRun(region);
   const goldSourceDiagnostics = await getGoldSourceDiagnostics(region);
 
@@ -417,6 +456,8 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   });
 
   const scoredCount = indicators.filter((item) => item.score !== null).length;
+  const goldUsdSnapshot = indicators.find((item) => item.indicatorId === "gold_usd");
+  const goldSpreadSnapshot = indicators.find((item) => item.indicatorId === "gold_minus_real_yield_spread");
   const expectedFromFred = US_FRED_SERIES.map((entry) => entry.seriesKey);
   const expectedFromIndicators = Array.from(new Set(catalog.flatMap((entry) => entry.inputs)));
   const expectedSeriesKeys = Array.from(new Set([...expectedFromFred, ...expectedFromIndicators])).sort();
@@ -592,7 +633,19 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
         latestAttempt: latestIngestRun,
       },
       goldSourceDiagnostics,
-      goldTodo: "TODO: gold_usd and gold_minus_real_yield_spread are intentionally unchanged in this step.",
+      goldBackfillDebug: {
+        ...(latestIngestRun?.goldBackfill ?? {
+          requestedWindows: 0,
+          windowRanges: [],
+          rowsPerWindow: [],
+          totalRowsFetchedAcrossWindows: 0,
+        }),
+        dedupedTotalRows: rawStats.bySeries.get("gold_usd")?.rawCount ?? 0,
+        mergedMinDate: goldDateRange.minDate,
+        mergedMaxDate: goldDateRange.maxDate,
+        resultingCoverage10yPct: goldUsdSnapshot?.coverage10yPct ?? null,
+        resultingSpreadCoverage10yPct: goldSpreadSnapshot?.coverage10yPct ?? null,
+      },
       rootCauseHints,
     },
   };
