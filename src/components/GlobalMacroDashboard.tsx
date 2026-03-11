@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Chart } from "react-google-charts";
 
 type GlobalMacroPayload = {
   regime: {
@@ -159,9 +160,53 @@ type GlobalMacroPayload = {
 
 };
 
+
+
+type MacroHistoryPayload = {
+  region: string;
+  resolution: "WEEKLY" | "MONTHLY";
+  rangeYears: number;
+  earliestRawDate: string | null;
+  latestRawDate: string | null;
+  generatedPoints: number;
+  regimeChanges: number;
+  overlayChanges: number;
+  blockThresholdChanges: number;
+  dataCoveragePct: number;
+  missingHistoryIndicators: string[];
+  template: {
+    templateId: string;
+    updatedAt: string;
+  };
+  replay: {
+    recomputedAt: string;
+    source: "direct_compute" | "cache";
+  };
+  points: Array<{
+    asOfDate: string;
+    macroScoreTotal: number | null;
+    macroConfidence: number;
+    coreRegimeLabel: string;
+    fiscalScore: number | null;
+    monetaryScore: number | null;
+    inflationScore: number | null;
+    credibilityScore: number | null;
+    growthOverlay: string;
+    stressOverlay: string;
+    hardAssetOverlay: string;
+    regimeChanged: boolean;
+    overlayChanged: boolean;
+    blockThresholdChanged: boolean;
+    previousRegimeLabel: string | null;
+    topDriver: string | null;
+  }>;
+};
 export default function GlobalMacroDashboard() {
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
+  const [macroHistory, setMacroHistory] = useState<MacroHistoryPayload | null>(null);
+  const [historyResolution, setHistoryResolution] = useState<"WEEKLY" | "MONTHLY">("MONTHLY");
+  const [historyRangeYears, setHistoryRangeYears] = useState<number>(10);
   const [globalMacroLoading, setGlobalMacroLoading] = useState(false);
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -189,18 +234,29 @@ export default function GlobalMacroDashboard() {
     window.localStorage.setItem("globalMacro.debugAdminSecret", adminSecretInput);
   }, [adminSecretInput]);
 
+  useEffect(() => {
+    if (historyResolution === "MONTHLY" && historyRangeYears !== 10 && historyRangeYears !== 20) {
+      setHistoryRangeYears(10);
+    }
+    if (historyResolution === "WEEKLY" && historyRangeYears !== 1 && historyRangeYears !== 3 && historyRangeYears !== 5) {
+      setHistoryRangeYears(3);
+    }
+  }, [historyResolution, historyRangeYears]);
+
   async function loadGlobalMacro() {    setGlobalMacroLoading(true);
     setGlobalMacroError(null);
     try {
-      const response = await fetch(`/api/sector/global-macro?region=US`);
+      const response = await fetch(`/api/sector/global-macro?region=US&historyResolution=${historyResolution}&historyRangeYears=${historyRangeYears}`);
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
       }
       setGlobalMacro(payload.globalMacro ?? null);
+      setMacroHistory(payload.macroHistory ?? null);
       setGlobalMacroRaw(payload);
     } catch (error) {
       setGlobalMacro(null);
+      setMacroHistory(null);
       setGlobalMacroRaw(null);
       setGlobalMacroError(error instanceof Error ? error.message : "Okänt fel vid Global Macro-hämtning");
     } finally {
@@ -210,7 +266,7 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     void loadGlobalMacro();
-  }, []);
+  }, [historyResolution, historyRangeYears]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const scoredCount = globalMacroIndicators.filter((item) => item.score !== null).length;
@@ -242,6 +298,38 @@ export default function GlobalMacroDashboard() {
   }
 
   const pipelineDebug = globalMacro?.debug ?? null;
+  const historyPoints = macroHistory?.points ?? [];
+  const scoreHistoryData = useMemo(() => {
+    const rows = historyPoints.map((point) => [
+      new Date(`${point.asOfDate}T00:00:00.000Z`),
+      point.macroScoreTotal,
+      point.regimeChanged ? point.macroScoreTotal : null,
+    ] as (Date | number | null)[]);
+    return [["Date", "Macro score", "Regime change"], ...rows];
+  }, [historyPoints]);
+
+  const blockHistoryData = useMemo(() => {
+    const rows = historyPoints.map((point) => [
+      new Date(`${point.asOfDate}T00:00:00.000Z`),
+      point.fiscalScore,
+      point.monetaryScore,
+      point.inflationScore,
+      point.credibilityScore,
+    ] as (Date | number | null)[]);
+    return [["Date", "Fiscal", "Monetary", "Inflation", "Credibility"], ...rows];
+  }, [historyPoints]);
+
+  const overlayHistoryData = useMemo(() => {
+    const scale = { Weak: 0, Low: 0, Neutral: 1, Medium: 1, Strong: 2, High: 2 } as Record<string, number>;
+    const rows = historyPoints.map((point) => [
+      new Date(`${point.asOfDate}T00:00:00.000Z`),
+      scale[point.growthOverlay] ?? 1,
+      scale[point.stressOverlay] ?? 1,
+      scale[point.hardAssetOverlay] ?? 1,
+    ] as (Date | number | null)[]);
+    return [["Date", "Growth", "Stress", "Hard Asset"], ...rows];
+  }, [historyPoints]);
+
 
   async function runIngest(mode: "backfill" | "latest") {
     setIngestRunningMode(mode);
@@ -374,6 +462,130 @@ export default function GlobalMacroDashboard() {
                 <li>Clear signals: {globalMacroIndicators.filter((item) => item.signalClass === "clear").length} | strength {globalMacro.regime.clearSignalStrength ?? "—"}</li>
                 <li>Speculative signals: {globalMacroIndicators.filter((item) => item.signalClass === "speculative").length} | strength {globalMacro.regime.speculativeSignalStrength ?? "—"}</li>
               </ul>
+
+
+              <h4>Macro Regime History</h4>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <label>
+                  Resolution
+                  <select value={historyResolution} onChange={(event) => setHistoryResolution(event.target.value as "WEEKLY" | "MONTHLY")} style={{ marginLeft: 6 }}>
+                    <option value="MONTHLY">MONTHLY</option>
+                    <option value="WEEKLY">WEEKLY</option>
+                  </select>
+                </label>
+                <label>
+                  Range
+                  <select value={historyRangeYears} onChange={(event) => setHistoryRangeYears(Number(event.target.value))} style={{ marginLeft: 6 }}>
+                    {historyResolution === "MONTHLY" ? (
+                      <>
+                        <option value={10}>10 år</option>
+                        <option value={20}>20 år</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value={1}>1 år</option>
+                        <option value={3}>3 år</option>
+                        <option value={5}>5 år</option>
+                      </>
+                    )}
+                  </select>
+                </label>
+              </div>
+
+              {macroHistory && historyPoints.length > 0 ? (
+                <>
+                  <h5>Macro Score History</h5>
+                  <Chart
+                    chartType="LineChart"
+                    data={scoreHistoryData}
+                    width="100%"
+                    height="240px"
+                    options={{
+                      legend: { position: "bottom" },
+                      backgroundColor: "#e0e9ce",
+                      vAxis: { minValue: 0, maxValue: 100 },
+                      series: {
+                        0: { color: "#0f172a", lineWidth: 2 },
+                        1: { color: "#dc2626", lineWidth: 0, pointSize: 5 },
+                      },
+                    }}
+                  />
+
+                  <h5>Core Regime Rendering</h5>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+                    {historyPoints.map((point) => {
+                      const color = point.coreRegimeLabel === "MonetaryDominance"
+                        ? "#dbeafe"
+                        : point.coreRegimeLabel === "Balanced"
+                          ? "#dcfce7"
+                          : point.coreRegimeLabel === "FiscalPressureBuilding"
+                            ? "#fef3c7"
+                            : point.coreRegimeLabel === "FiscalDominanceRisk"
+                              ? "#fee2e2"
+                              : "#e5e7eb";
+                      return (
+                        <span key={`regime-${point.asOfDate}`} style={{ fontSize: 11, padding: "2px 6px", borderRadius: 999, background: color }}>
+                          {point.asOfDate}: {point.coreRegimeLabel}
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  <h5>Block History</h5>
+                  <Chart
+                    chartType="LineChart"
+                    data={blockHistoryData}
+                    width="100%"
+                    height="240px"
+                    options={{
+                      legend: { position: "bottom" },
+                      backgroundColor: "#e0e9ce",
+                      vAxis: { minValue: 0, maxValue: 100 },
+                    }}
+                  />
+
+                  <h5>Overlay History</h5>
+                  <Chart
+                    chartType="LineChart"
+                    data={overlayHistoryData}
+                    width="100%"
+                    height="220px"
+                    options={{
+                      legend: { position: "bottom" },
+                      backgroundColor: "#e0e9ce",
+                      vAxis: { minValue: 0, maxValue: 2, ticks: [0, 1, 2] },
+                    }}
+                  />
+
+                  <h5>Regime Change Log</h5>
+                  <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Datum</th>
+                          <th>Från</th>
+                          <th>Till</th>
+                          <th>Overlay change</th>
+                          <th>Viktigaste driver</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historyPoints.filter((point) => point.regimeChanged).map((point) => (
+                          <tr key={`change-${point.asOfDate}`}>
+                            <td>{point.asOfDate}</td>
+                            <td>{point.previousRegimeLabel ?? "—"}</td>
+                            <td>{point.coreRegimeLabel}</td>
+                            <td>{point.overlayChanged ? "Ja" : "Nej"}</td>
+                            <td>{point.topDriver ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="status empty">Ingen historik kunde genereras för vald period/upplösning.</div>
+              )}
 
               <h4>Indicator drilldown</h4>
               {globalMacroIndicators.length === 0 ? (
@@ -529,6 +741,20 @@ export default function GlobalMacroDashboard() {
               <ul>
                 <li>indicator snapshots: {pipelineDebug?.snapshotContent.indicatorSnapshotCount ?? "—"}</li>
                 <li>regime snapshots: {pipelineDebug?.snapshotContent.regimeSnapshotCount ?? "—"}</li>
+                <li>history region: {macroHistory?.region ?? "US"}</li>
+                <li>history selected resolution: {macroHistory?.resolution ?? historyResolution}</li>
+                <li>history range: {macroHistory?.rangeYears ?? historyRangeYears} years</li>
+                <li>history earliest raw date: {macroHistory?.earliestRawDate ?? "—"}</li>
+                <li>history latest raw date: {macroHistory?.latestRawDate ?? "—"}</li>
+                <li>history generated regime points: {macroHistory?.generatedPoints ?? 0}</li>
+                <li>history regime changes detected: {macroHistory?.regimeChanges ?? 0}</li>
+                <li>history overlay changes: {macroHistory?.overlayChanges ?? 0}</li>
+                <li>history block threshold changes: {macroHistory?.blockThresholdChanges ?? 0}</li>
+                <li>history data coverage: {macroHistory?.dataCoveragePct ?? 0}%</li>
+                <li>history missing indicators: {(macroHistory?.missingHistoryIndicators ?? []).join(", ") || "none"}</li>
+                <li>history template/ruleset: {macroHistory?.template?.templateId ?? "—"} (updated {macroHistory?.template?.updatedAt ?? "—"})</li>
+                <li>history recomputed at: {macroHistory?.replay?.recomputedAt ?? "—"}</li>
+                <li>history source: {macroHistory?.replay?.source ?? "direct_compute"}</li>
                 <li>latest snapshot timestamp: {pipelineDebug?.snapshotContent.latestSnapshotTimestamp ?? "null"}</li>
                 <li>snapshotIsEmpty: {String(pipelineDebug?.snapshotContent.snapshotIsEmpty ?? true)}</li>
               </ul>
