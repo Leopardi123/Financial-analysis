@@ -12,10 +12,9 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "CPILFESL", seriesKey: "core_cpi_us" },
   { fredSeriesId: "T10YIE", seriesKey: "breakeven_10y_us" },
   { fredSeriesId: "BAMLH0A0HYM2", seriesKey: "hy_spread_us" },
-  { fredSeriesId: "GOLDAMGBD228NLBM", seriesKey: "gold_usd", latestLookbackMonths: 12 },
   { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us", latestLookbackMonths: 180, backfillLookbackYears: 25 },
   { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 240, backfillLookbackYears: 25 },
-  { fredSeriesId: "NAPM", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "USPMI", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
 ];
 
 type FredObservation = {
@@ -90,6 +89,25 @@ export async function fetchFredSeries(params: {
     .filter((obs) => /^\d{4}-\d{2}-\d{2}$/.test(obs.date));
 }
 
+function mean(values: number[]): number {
+  return values.reduce((acc, value) => acc + value, 0) / Math.max(1, values.length);
+}
+
+function stdDev(values: number[], avg: number): number {
+  const variance = values.reduce((acc, value) => acc + ((value - avg) ** 2), 0) / Math.max(1, values.length);
+  return Math.sqrt(variance);
+}
+
+function toZScoreByDate(points: Array<{ date: string; value: number | null }>): Map<string, number> {
+  const valid = points.filter((item): item is { date: string; value: number } => typeof item.value === "number");
+  if (valid.length < 2) return new Map();
+  const values = valid.map((item) => item.value);
+  const avg = mean(values);
+  const sd = stdDev(values, avg);
+  if (!Number.isFinite(sd) || sd === 0) return new Map();
+  return new Map(valid.map((item) => [item.date, (item.value - avg) / sd]));
+}
+
 export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; value: number | null }>>) {
   const output: Record<string, Array<{ date: string; value: number | null }>> = {};
 
@@ -110,13 +128,15 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
   const gold = inputs.gold_usd ?? [];
   const real10y = inputs.real_yield_10y_us ?? [];
   if (gold.length > 0 && real10y.length > 0) {
-    const realByDate = new Map(real10y.map((row) => [row.date, row.value]));
+    const goldZ = toZScoreByDate(gold);
+    const realZ = toZScoreByDate(real10y);
     output.gold_minus_real_yield_spread = gold
       .map((row) => {
-        const real = realByDate.get(row.date);
+        const goldNorm = goldZ.get(row.date);
+        const realNorm = realZ.get(row.date);
         return {
           date: row.date,
-          value: row.value !== null && real !== null && real !== undefined ? row.value - real : null,
+          value: goldNorm !== undefined && realNorm !== undefined ? goldNorm - realNorm : null,
         };
       })
       .filter((row) => row.value !== null);

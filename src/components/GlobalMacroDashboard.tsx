@@ -129,6 +129,8 @@ type GlobalMacroPayload = {
     goldSourceDiagnostics?: {
       macroSeriesKey: string;
       macroPipelineSource: string;
+      endpoint?: string;
+      symbol?: string;
       macroRawBySource: Array<{ source: string; pointCount: number; latestDate: string | null }>;
       fmpMapping: { provider: string; providerSymbol: string; providerKind: string } | null;
       fmpMonthlyHistory: { table: string; tablePresent: boolean; pointCount: number; minDate: string | null; maxDate: string | null };
@@ -581,6 +583,8 @@ export default function GlobalMacroDashboard() {
               <ul>
                 <li>macro series key: {pipelineDebug?.goldSourceDiagnostics?.macroSeriesKey ?? "gold_usd"}</li>
                 <li>macro pipeline source: {pipelineDebug?.goldSourceDiagnostics?.macroPipelineSource ?? "unknown"}</li>
+                <li>endpoint: {pipelineDebug?.goldSourceDiagnostics?.endpoint ?? "unknown"}</li>
+                <li>symbol: {pipelineDebug?.goldSourceDiagnostics?.symbol ?? "unknown"}</li>
                 <li>FMP mapping: {pipelineDebug?.goldSourceDiagnostics?.fmpMapping
                   ? `${pipelineDebug.goldSourceDiagnostics.fmpMapping.provider}/${pipelineDebug.goldSourceDiagnostics.fmpMapping.providerSymbol}`
                   : "not found"}</li>

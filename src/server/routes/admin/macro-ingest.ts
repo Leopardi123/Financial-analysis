@@ -2,7 +2,33 @@ import type { InStatement } from "@libsql/client";
 import { assertAdminSecret, getAdminSecret } from "../../../../api/_auth.js";
 import { batch } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { fetchStableJson } from "../../../../api/_fmp.js";
 import { buildDerivedSeries, fetchFredSeries, US_FRED_SERIES } from "../../../lib/macro/fred.js";
+
+
+
+const PMI_FRED_FALLBACK_IDS = ["USPMI", "NAPM"];
+
+function normalizeFmpEodRows(payload: unknown): Array<{ date: string; value: number | null }> {
+  const candidates = Array.isArray(payload)
+    ? payload
+    : (typeof payload === "object" && payload !== null && Array.isArray((payload as { historical?: unknown[] }).historical)
+      ? ((payload as { historical?: unknown[] }).historical as unknown[])
+      : []);
+
+  return candidates
+    .map((row) => {
+      if (typeof row !== "object" || row === null) return null;
+      const dateRaw = (row as { date?: unknown }).date;
+      const closeRaw = (row as { close?: unknown }).close;
+      const date = typeof dateRaw === "string" ? dateRaw.slice(0, 10) : null;
+      const close = typeof closeRaw === "number" && Number.isFinite(closeRaw) ? closeRaw : null;
+      if (!date) return null;
+      return { date, value: close };
+    })
+    .filter((row): row is { date: string; value: number | null } => row !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
 
 function chunk<T>(items: T[], size: number): T[][] {
   const output: T[][] = [];
@@ -84,32 +110,69 @@ export default async function handler(req: any, res: any) {
 
     const sourceSeriesMap: Record<string, Array<{ date: string; value: number | null }>> = {};
     for (const entry of US_FRED_SERIES) {
-      try {
-        const observations = await fetchFredSeries({
-          fredSeriesId: entry.fredSeriesId,
-          mode,
-          latestLookbackMonths: entry.latestLookbackMonths,
-          backfillLookbackYears: entry.backfillLookbackYears,
-        });
-        sourceSeriesMap[entry.seriesKey] = observations;
-        debug.fetchedSeries += 1;
-        debug.fetchedObservationCount += observations.length;
+      const candidateSeriesIds = entry.seriesKey === "pmi_us"
+        ? Array.from(new Set([entry.fredSeriesId, ...PMI_FRED_FALLBACK_IDS]))
+        : [entry.fredSeriesId];
+
+      let fetched = false;
+      const attemptErrors: string[] = [];
+      for (const candidateSeriesId of candidateSeriesIds) {
+        try {
+          const observations = await fetchFredSeries({
+            fredSeriesId: candidateSeriesId,
+            mode,
+            latestLookbackMonths: entry.latestLookbackMonths,
+            backfillLookbackYears: entry.backfillLookbackYears,
+          });
+          sourceSeriesMap[entry.seriesKey] = observations;
+          debug.fetchedSeries += 1;
+          debug.fetchedObservationCount += observations.length;
+          seriesResults.push({
+            seriesId: candidateSeriesId,
+            seriesKey: entry.seriesKey,
+            fetchSuccess: true,
+            observationsFetched: observations.length,
+            errorMessage: null,
+          });
+          fetched = true;
+          break;
+        } catch (error) {
+          attemptErrors.push(`${candidateSeriesId}: ${(error as Error).message}`);
+        }
+      }
+
+      if (!fetched) {
         seriesResults.push({
-          seriesId: entry.fredSeriesId,
-          seriesKey: entry.seriesKey,
-          fetchSuccess: true,
-          observationsFetched: observations.length,
-          errorMessage: null,
-        });
-      } catch (error) {
-        seriesResults.push({
-          seriesId: entry.fredSeriesId,
+          seriesId: candidateSeriesIds.join("|"),
           seriesKey: entry.seriesKey,
           fetchSuccess: false,
           observationsFetched: 0,
-          errorMessage: (error as Error).message,
+          errorMessage: attemptErrors.join("; ") || "All PMI candidates failed",
         });
       }
+    }
+
+    try {
+      const goldPayload = await fetchStableJson<unknown>("historical-price-eod/full", { symbol: "GCUSD" });
+      const goldRows = normalizeFmpEodRows(goldPayload);
+      sourceSeriesMap.gold_usd = goldRows;
+      debug.fetchedSeries += 1;
+      debug.fetchedObservationCount += goldRows.length;
+      seriesResults.push({
+        seriesId: "historical-price-eod/full?symbol=GCUSD",
+        seriesKey: "gold_usd",
+        fetchSuccess: true,
+        observationsFetched: goldRows.length,
+        errorMessage: null,
+      });
+    } catch (error) {
+      seriesResults.push({
+        seriesId: "historical-price-eod/full?symbol=GCUSD",
+        seriesKey: "gold_usd",
+        fetchSuccess: false,
+        observationsFetched: 0,
+        errorMessage: (error as Error).message,
+      });
     }
 
     debug.fetchSucceeded = debug.fetchedSeries > 0;
@@ -131,7 +194,7 @@ export default async function handler(req: any, res: any) {
                   value = excluded.value,
                   fetched_at = excluded.fetched_at
                 WHERE COALESCE(${tables.macroRawDatapoints}.value, -9.99999999e99) != COALESCE(excluded.value, -9.99999999e99)`,
-          args: ["fred", region, seriesKey, point.date, point.value, now],
+          args: [seriesKey === "gold_usd" ? "fmp" : "fred", region, seriesKey, point.date, point.value, now],
         });
       }
     }
@@ -209,10 +272,10 @@ export default async function handler(req: any, res: any) {
     const statusCode = allSeriesFailed ? 502 : 200;
     res.status(statusCode).json({
       ok: !allSeriesFailed,
-      partialSuccess: !allSeriesFailed && debug.fetchedSeries < US_FRED_SERIES.length,
+      partialSuccess: !allSeriesFailed && debug.fetchedSeries < (US_FRED_SERIES.length + 1),
       mode,
       region,
-      sourceSeries: US_FRED_SERIES.map((entry) => entry.seriesKey),
+      sourceSeries: [...US_FRED_SERIES.map((entry) => entry.seriesKey), "gold_usd"],
       sourceRowCount,
       derivedSeries: Object.keys(derivedSeriesMap),
       derivedRowCount,

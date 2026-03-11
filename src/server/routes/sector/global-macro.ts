@@ -295,7 +295,9 @@ async function getGoldSourceDiagnostics(region: string) {
 
   return {
     macroSeriesKey: "gold_usd",
-    macroPipelineSource: "FRED",
+    macroPipelineSource: "FMP",
+    endpoint: "historical-price-eod/full",
+    symbol: "GCUSD",
     macroRawBySource: macroRawRows.map((row) => ({
       source: row.source,
       pointCount: Number(row.point_count ?? 0),
