@@ -247,8 +247,9 @@ async function getLatestIngestRun(region: string) {
     fetchSuccess: boolean;
     observationsFetched: number;
     errorMessage: string | null;
+    meta?: Record<string, unknown>;
   }>>(row.series_results_json, []);
-  const goldBackfill = summarizeGoldBackfillFromSeriesResults(seriesResults);
+  const goldFetch = summarizeGoldFetchFromSeriesResults(seriesResults);
 
   return {
     timestamp: row.attempted_at,
@@ -267,7 +268,7 @@ async function getLatestIngestRun(region: string) {
     insertedRowCount,
     duplicateOrUnchangedRows,
     seriesResults,
-    goldBackfill,
+    goldFetch,
     failingStep: row.failing_step,
     errorMessage: row.error_message,
     insertSucceeded: insertedRowCount > 0,
@@ -282,26 +283,22 @@ async function getLatestIngestRun(region: string) {
 
 
 
-function summarizeGoldBackfillFromSeriesResults(seriesResults: Array<{ seriesId: string; seriesKey: string; fetchSuccess: boolean; observationsFetched: number }>) {
-  const windows = seriesResults
-    .filter((row) => row.seriesKey.startsWith("gold_usd_window_"))
-    .map((row) => {
-      const from = /[?&]from=([^&]+)/.exec(row.seriesId)?.[1] ?? null;
-      const to = /[?&]to=([^&]+)/.exec(row.seriesId)?.[1] ?? null;
-      return {
-        seriesId: row.seriesId,
-        from,
-        to,
-        rowsFetched: row.observationsFetched,
-        fetchSuccess: row.fetchSuccess,
-      };
-    });
-
+function summarizeGoldFetchFromSeriesResults(
+  seriesResults: Array<{ seriesId: string; seriesKey: string; fetchSuccess: boolean; observationsFetched: number; meta?: Record<string, unknown> }>,
+) {
+  const goldRow = seriesResults.find((row) => row.seriesKey === "gold_usd");
+  const meta = (goldRow?.meta ?? {}) as Record<string, unknown>;
   return {
-    requestedWindows: windows.length,
-    windowRanges: windows.map((w) => ({ from: w.from, to: w.to })),
-    rowsPerWindow: windows.map((w) => ({ from: w.from, to: w.to, rowsFetched: w.rowsFetched, fetchSuccess: w.fetchSuccess })),
-    totalRowsFetchedAcrossWindows: windows.reduce((sum, item) => sum + item.rowsFetched, 0),
+    requestPattern: typeof meta.requestPattern === "string" ? meta.requestPattern : "single_request_with_explicit_from_to",
+    endpoint: typeof meta.endpoint === "string" ? meta.endpoint : "historical-price-eod/full",
+    symbol: typeof meta.symbol === "string" ? meta.symbol : "GCUSD",
+    from: typeof meta.from === "string" ? meta.from : null,
+    to: typeof meta.to === "string" ? meta.to : null,
+    fetchedMinDate: typeof meta.fetchedMinDate === "string" ? meta.fetchedMinDate : null,
+    fetchedMaxDate: typeof meta.fetchedMaxDate === "string" ? meta.fetchedMaxDate : null,
+    fetchedRowCount: typeof meta.fetchedRowCount === "number"
+      ? meta.fetchedRowCount
+      : Number(goldRow?.observationsFetched ?? 0),
   };
 }
 
@@ -634,13 +631,15 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       },
       goldSourceDiagnostics,
       goldBackfillDebug: {
-        ...(latestIngestRun?.goldBackfill ?? {
-          requestedWindows: 0,
-          windowRanges: [],
-          rowsPerWindow: [],
-          totalRowsFetchedAcrossWindows: 0,
-        }),
-        dedupedTotalRows: rawStats.bySeries.get("gold_usd")?.rawCount ?? 0,
+        requestPattern: latestIngestRun?.goldFetch?.requestPattern ?? "single_request_with_explicit_from_to",
+        endpoint: latestIngestRun?.goldFetch?.endpoint ?? "historical-price-eod/full",
+        symbol: latestIngestRun?.goldFetch?.symbol ?? "GCUSD",
+        from: latestIngestRun?.goldFetch?.from ?? "2000-01-01",
+        to: latestIngestRun?.goldFetch?.to ?? null,
+        fetchedMinDate: latestIngestRun?.goldFetch?.fetchedMinDate ?? null,
+        fetchedMaxDate: latestIngestRun?.goldFetch?.fetchedMaxDate ?? null,
+        fetchedRowCount: latestIngestRun?.goldFetch?.fetchedRowCount ?? 0,
+        storedRowCount: rawStats.bySeries.get("gold_usd")?.rawCount ?? 0,
         mergedMinDate: goldDateRange.minDate,
         mergedMaxDate: goldDateRange.maxDate,
         resultingCoverage10yPct: goldUsdSnapshot?.coverage10yPct ?? null,

@@ -140,11 +140,15 @@ type GlobalMacroPayload = {
     };
     rootCauseHints: string[];
     goldBackfillDebug?: {
-      requestedWindows: number;
-      windowRanges: Array<{ from: string | null; to: string | null }>;
-      rowsPerWindow: Array<{ from: string | null; to: string | null; rowsFetched: number; fetchSuccess: boolean }>;
-      totalRowsFetchedAcrossWindows: number;
-      dedupedTotalRows: number;
+      requestPattern: string;
+      endpoint: string;
+      symbol: string;
+      from: string | null;
+      to: string | null;
+      fetchedMinDate: string | null;
+      fetchedMaxDate: string | null;
+      fetchedRowCount: number;
+      storedRowCount: number;
       mergedMinDate: string | null;
       mergedMaxDate: string | null;
       resultingCoverage10yPct: number | null;
@@ -597,36 +601,17 @@ export default function GlobalMacroDashboard() {
 
               <h4>Gold backfill debug</h4>
               <ul>
-                <li>requested windows: {pipelineDebug?.goldBackfillDebug?.requestedWindows ?? 0}</li>
-                <li>window ranges: {(pipelineDebug?.goldBackfillDebug?.windowRanges ?? []).map((w) => `${w.from ?? "?"}→${w.to ?? "?"}`).join(", ") || "none"}</li>
-                <li>rows fetched across windows: {pipelineDebug?.goldBackfillDebug?.totalRowsFetchedAcrossWindows ?? 0}</li>
-                <li>deduped total rows: {pipelineDebug?.goldBackfillDebug?.dedupedTotalRows ?? 0}</li>
-                <li>merged min/max: {(pipelineDebug?.goldBackfillDebug?.mergedMinDate ?? "—")} → {(pipelineDebug?.goldBackfillDebug?.mergedMaxDate ?? "—")}</li>
+                <li>request pattern: {pipelineDebug?.goldBackfillDebug?.requestPattern ?? "—"}</li>
+                <li>endpoint: {pipelineDebug?.goldBackfillDebug?.endpoint ?? "—"}</li>
+                <li>symbol: {pipelineDebug?.goldBackfillDebug?.symbol ?? "—"}</li>
+                <li>from/to used: {(pipelineDebug?.goldBackfillDebug?.from ?? "—")} → {(pipelineDebug?.goldBackfillDebug?.to ?? "—")}</li>
+                <li>fetched min/max date: {(pipelineDebug?.goldBackfillDebug?.fetchedMinDate ?? "—")} → {(pipelineDebug?.goldBackfillDebug?.fetchedMaxDate ?? "—")}</li>
+                <li>fetched row count: {pipelineDebug?.goldBackfillDebug?.fetchedRowCount ?? 0}</li>
+                <li>stored min/max date: {(pipelineDebug?.goldBackfillDebug?.mergedMinDate ?? "—")} → {(pipelineDebug?.goldBackfillDebug?.mergedMaxDate ?? "—")}</li>
+                <li>stored row count: {pipelineDebug?.goldBackfillDebug?.storedRowCount ?? 0}</li>
                 <li>gold_usd resulting coverage10yPct: {pipelineDebug?.goldBackfillDebug?.resultingCoverage10yPct?.toFixed?.(1) ?? "—"}%</li>
                 <li>gold_minus_real_yield_spread resulting coverage10yPct: {pipelineDebug?.goldBackfillDebug?.resultingSpreadCoverage10yPct?.toFixed?.(1) ?? "—"}%</li>
               </ul>
-              <div style={{ overflowX: "auto", marginBottom: 8 }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>from</th>
-                      <th>to</th>
-                      <th>rowsFetched</th>
-                      <th>fetchSuccess</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(pipelineDebug?.goldBackfillDebug?.rowsPerWindow ?? []).map((row) => (
-                      <tr key={`${row.from}-${row.to}`}>
-                        <td>{row.from ?? "—"}</td>
-                        <td>{row.to ?? "—"}</td>
-                        <td>{row.rowsFetched}</td>
-                        <td>{row.fetchSuccess ? "yes" : "no"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
 
               <h4>Gold source diagnostics</h4>
               <ul>

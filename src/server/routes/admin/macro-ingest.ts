@@ -31,41 +31,11 @@ function normalizeFmpEodRows(payload: unknown): Array<{ date: string; value: num
 }
 
 
-
-type GoldBackfillWindow = { from: string; to: string; label: string };
-
-function isoDateOnly(value: Date): string {
-  return value.toISOString().slice(0, 10);
-}
-
-function buildGoldBackfillWindows(yearsTotal: number, windowYears: number): GoldBackfillWindow[] {
-  const now = new Date();
-  const windows: GoldBackfillWindow[] = [];
-  const count = Math.ceil(yearsTotal / windowYears);
-  for (let index = 0; index < count; index += 1) {
-    const to = new Date(Date.UTC(now.getUTCFullYear() - (index * windowYears), now.getUTCMonth(), now.getUTCDate()));
-    const from = new Date(Date.UTC(to.getUTCFullYear() - windowYears, to.getUTCMonth(), to.getUTCDate()));
-    windows.push({
-      from: isoDateOnly(from),
-      to: isoDateOnly(to),
-      label: `w${index + 1}`,
-    });
-  }
-  return windows;
-}
-
-function mergeGoldRowsByDate(windows: Array<{ from: string; to: string; rows: Array<{ date: string; value: number | null }> }>) {
-  const byDate = new Map<string, { date: string; value: number | null }>();
-  for (const window of windows) {
-    for (const row of window.rows) {
-      byDate.set(row.date, row);
-    }
-  }
-  const merged = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+function summarizeSeriesRange(rows: Array<{ date: string; value: number | null }>) {
   return {
-    rows: merged,
-    minDate: merged[0]?.date ?? null,
-    maxDate: merged[merged.length - 1]?.date ?? null,
+    minDate: rows[0]?.date ?? null,
+    maxDate: rows[rows.length - 1]?.date ?? null,
+    rowCount: rows.length,
   };
 }
 
@@ -89,6 +59,7 @@ export default async function handler(req: any, res: any) {
     fetchSuccess: boolean;
     observationsFetched: number;
     errorMessage: string | null;
+    meta?: Record<string, unknown>;
   }> = [];
 
   const debug = {
@@ -110,6 +81,15 @@ export default async function handler(req: any, res: any) {
     failingStep: null as string | null,
     errorMessage: null as string | null,
     seriesResults,
+    goldRequest: {
+      endpoint: "historical-price-eod/full",
+      symbol: "GCUSD",
+      from: "2000-01-01",
+      to: new Date().toISOString().slice(0, 10),
+      fetchedMinDate: null as string | null,
+      fetchedMaxDate: null as string | null,
+      fetchedRowCount: 0,
+    },
   };
 
   try {
@@ -192,44 +172,37 @@ export default async function handler(req: any, res: any) {
     }
 
     try {
-      const goldWindows = buildGoldBackfillWindows(15, 5);
-      const goldWindowRows: Array<{ from: string; to: string; rows: Array<{ date: string; value: number | null }> }> = [];
+      const goldFrom = "2000-01-01";
+      const goldTo = new Date().toISOString().slice(0, 10);
+      debug.goldRequest.from = goldFrom;
+      debug.goldRequest.to = goldTo;
 
-      for (const window of goldWindows) {
-        try {
-          const goldPayload = await fetchStableJson<unknown>("historical-price-eod/full", { symbol: "GCUSD", from: window.from, to: window.to });
-          const rows = normalizeFmpEodRows(goldPayload);
-          goldWindowRows.push({ from: window.from, to: window.to, rows });
-          debug.fetchedObservationCount += rows.length;
-          seriesResults.push({
-            seriesId: `historical-price-eod/full?symbol=GCUSD&from=${window.from}&to=${window.to}`,
-            seriesKey: `gold_usd_window_${window.label}`,
-            fetchSuccess: true,
-            observationsFetched: rows.length,
-            errorMessage: null,
-          });
-        } catch (error) {
-          seriesResults.push({
-            seriesId: `historical-price-eod/full?symbol=GCUSD&from=${window.from}&to=${window.to}`,
-            seriesKey: `gold_usd_window_${window.label}`,
-            fetchSuccess: false,
-            observationsFetched: 0,
-            errorMessage: (error as Error).message,
-          });
-        }
-      }
+      const goldPayload = await fetchStableJson<unknown>("historical-price-eod/full", { symbol: "GCUSD", from: goldFrom, to: goldTo });
+      const goldRows = normalizeFmpEodRows(goldPayload);
+      const goldRange = summarizeSeriesRange(goldRows);
+      debug.goldRequest.fetchedMinDate = goldRange.minDate;
+      debug.goldRequest.fetchedMaxDate = goldRange.maxDate;
+      debug.goldRequest.fetchedRowCount = goldRange.rowCount;
 
-      const mergedGold = mergeGoldRowsByDate(goldWindowRows);
-      sourceSeriesMap.gold_usd = mergedGold.rows;
-      debug.fetchedSeries += mergedGold.rows.length > 0 ? 1 : 0;
+      sourceSeriesMap.gold_usd = goldRows;
+      debug.fetchedSeries += goldRows.length > 0 ? 1 : 0;
+      debug.fetchedObservationCount += goldRows.length;
       seriesResults.push({
-        seriesId: "historical-price-eod/full?symbol=GCUSD",
+        seriesId: `historical-price-eod/full?symbol=GCUSD&from=${goldFrom}&to=${goldTo}`,
         seriesKey: "gold_usd",
-        fetchSuccess: mergedGold.rows.length > 0,
-        observationsFetched: mergedGold.rows.length,
-        errorMessage: mergedGold.rows.length > 0
-          ? `gold_backfill windows=${goldWindows.length} deduped=${mergedGold.rows.length} min=${mergedGold.minDate ?? "na"} max=${mergedGold.maxDate ?? "na"}`
-          : "gold_backfill produced no rows",
+        fetchSuccess: goldRows.length > 0,
+        observationsFetched: goldRows.length,
+        errorMessage: null,
+        meta: {
+          requestPattern: "single_request_with_explicit_from_to",
+          endpoint: "historical-price-eod/full",
+          symbol: "GCUSD",
+          from: goldFrom,
+          to: goldTo,
+          fetchedMinDate: goldRange.minDate,
+          fetchedMaxDate: goldRange.maxDate,
+          fetchedRowCount: goldRange.rowCount,
+        },
       });
     } catch (error) {
       seriesResults.push({
@@ -238,6 +211,13 @@ export default async function handler(req: any, res: any) {
         fetchSuccess: false,
         observationsFetched: 0,
         errorMessage: (error as Error).message,
+        meta: {
+          requestPattern: "single_request_with_explicit_from_to",
+          endpoint: "historical-price-eod/full",
+          symbol: "GCUSD",
+          from: debug.goldRequest.from,
+          to: debug.goldRequest.to,
+        },
       });
     }
 
