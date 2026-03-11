@@ -1,3 +1,4 @@
+import { getAdminSecret } from "../../../../api/_auth.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { query } from "../../../../api/_db.js";
 import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
@@ -39,6 +40,25 @@ type RawStatsRow = {
   series_key: string;
   raw_count: number | string;
   latest_raw_date: string | null;
+};
+
+type IngestRunRow = {
+  attempted_at: string;
+  region: string;
+  mode: string;
+  success: number | string;
+  fred_api_key_present: number | string;
+  admin_authorized: number | string;
+  db_connected: number | string;
+  fetch_started: number | string;
+  fetch_succeeded: number | string;
+  fetched_series: number | string;
+  fetched_observation_count: number | string;
+  insert_attempted: number | string;
+  attempted_inserts: number | string;
+  inserted_row_count: number | string;
+  failing_step: string | null;
+  error_message: string | null;
 };
 
 function safeJsonParse<T>(value: string | null, fallback: T): T {
@@ -84,7 +104,42 @@ async function getRawSeriesStats(region: string) {
   };
 }
 
-async function readLatestSnapshot(region: string) {
+async function getLatestIngestRun(region: string) {
+  const rows = (await query(
+    `SELECT attempted_at, region, mode, success, fred_api_key_present, admin_authorized,
+            db_connected, fetch_started, fetch_succeeded, fetched_series, fetched_observation_count,
+            insert_attempted, attempted_inserts, inserted_row_count, failing_step, error_message
+     FROM ${tables.macroIngestRuns}
+     WHERE region = ?
+     ORDER BY attempted_at DESC
+     LIMIT 1`,
+    [region],
+  )) as unknown as IngestRunRow[];
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    timestamp: row.attempted_at,
+    region: row.region,
+    mode: row.mode,
+    success: Number(row.success ?? 0) === 1,
+    fredApiKeyPresent: Number(row.fred_api_key_present ?? 0) === 1,
+    adminAuthorized: Number(row.admin_authorized ?? 0) === 1,
+    dbConnected: Number(row.db_connected ?? 0) === 1,
+    fetchStarted: Number(row.fetch_started ?? 0) === 1,
+    fetchSucceeded: Number(row.fetch_succeeded ?? 0) === 1,
+    fetchedSeries: Number(row.fetched_series ?? 0),
+    fetchedObservationCount: Number(row.fetched_observation_count ?? 0),
+    insertAttempted: Number(row.insert_attempted ?? 0) === 1,
+    attemptedInserts: Number(row.attempted_inserts ?? 0),
+    insertedRowCount: Number(row.inserted_row_count ?? 0),
+    failingStep: row.failing_step,
+    errorMessage: row.error_message,
+    insertSucceeded: Number(row.inserted_row_count ?? 0) > 0,
+  };
+}
+
+async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   const regimeRows = (await query(
     `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
@@ -111,6 +166,7 @@ async function readLatestSnapshot(region: string) {
   const catalog = MACRO_INDICATOR_CATALOG.filter((entry) => entry.region === region);
   const catalogById = new Map(catalog.map((entry) => [entry.indicatorId, entry]));
   const rawStats = await getRawSeriesStats(region);
+  const latestIngestRun = await getLatestIngestRun(region);
 
   const indicators = indicatorRows.map((row) => {
     const indicatorId = String(row.indicator_id);
@@ -188,11 +244,13 @@ async function readLatestSnapshot(region: string) {
   const regimeSnapshotCount = Number(regimeCountRows[0]?.total ?? 0);
   const snapshotIsEmpty = indicatorSnapshotCount === 0 || indicators.every((item) => item.valueLatest === null);
   const partialData = indicators.length > 0 && scoredCount < indicators.length;
-  const snapshotHealth = snapshotIsEmpty
-    ? "empty"
-    : partialData
-      ? "partial"
-      : "healthy";
+  const snapshotHealth = rawStats.totalRawPointCount === 0 && snapshotIsEmpty
+    ? "empty_invalid"
+    : snapshotIsEmpty
+      ? "empty"
+      : partialData
+        ? "partial"
+        : "healthy";
 
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
@@ -206,6 +264,9 @@ async function readLatestSnapshot(region: string) {
   }
   if (indicatorInputStatus.some((item) => item.expectedInputs.length > 0 && item.foundInputs.length === 0)) {
     rootCauseHints.push("Derived or required input series missing for one or more indicators");
+  }
+  if (latestIngestRun && !latestIngestRun.success) {
+    rootCauseHints.push(`Latest ingest failed at step: ${latestIngestRun.failingStep ?? "unknown"}`);
   }
   if (rootCauseHints.length === 0) {
     rootCauseHints.push("No obvious pipeline issue detected");
@@ -248,7 +309,7 @@ async function readLatestSnapshot(region: string) {
         dataStatus: indicators.length > 0 ? "snapshot" : "insufficient",
         snapshotAsOfDate: regimeRow.as_of_date,
         snapshotHealth,
-        fallbackLive: false,
+        fallbackLive: allowLiveFallback,
         primaryPath: true,
       },
       rawDataStats: {
@@ -266,6 +327,12 @@ async function readLatestSnapshot(region: string) {
         latestSnapshotTimestamp: regimeRow.updated_at ?? regimeRow.as_of_date,
         snapshotIsEmpty,
       },
+      ingestionDebug: {
+        endpointReachable: true,
+        fredApiKeyPresent: String(process.env.FRED_API_KEY ?? "").trim().length > 0,
+        adminSecretConfigured: Boolean(getAdminSecret()),
+        latestAttempt: latestIngestRun,
+      },
       rootCauseHints,
     },
   };
@@ -282,7 +349,7 @@ export default async function handler(req: any, res: any) {
   const region = String(req.query?.region ?? "US").toUpperCase();
   const allowLiveFallback = String(req.query?.fallbackLive ?? "1") === "1";
 
-  const snapshot = await readLatestSnapshot(region);
+  const snapshot = await readLatestSnapshot(region, allowLiveFallback);
   if (snapshot) {
     res.status(200).json({ ok: true, globalMacro: snapshot });
     return;
@@ -301,7 +368,20 @@ export default async function handler(req: any, res: any) {
   }
 
   const live = await runAndPersistMacroSnapshots({ region });
-  const fallbackSnapshot = await readLatestSnapshot(region);
+  const fallbackSnapshot = await readLatestSnapshot(region, allowLiveFallback);
+
+  if (!fallbackSnapshot) {
+    res.status(200).json({
+      ok: true,
+      globalMacro: null,
+      diagnostics: {
+        readMode: live.emptyInvalid ? "live_fallback_empty_invalid" : "live_fallback_no_snapshot",
+        wroteAny: live.wroteAny,
+        rawPointCount: live.rawPointCount,
+      },
+    });
+    return;
+  }
 
   res.status(200).json({
     ok: true,

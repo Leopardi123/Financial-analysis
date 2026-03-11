@@ -20,6 +20,7 @@ const TABLES = {
   macroIndicatorCatalog: "macro_indicator_catalog",
   macroIndicatorSnapshots: "macro_indicator_snapshots",
   macroRegimeSnapshots: "macro_regime_snapshots",
+  macroIngestRuns: "macro_ingest_runs",
 };
 
 export async function ensureSchema() {
@@ -237,6 +238,29 @@ export async function ensureSchema() {
     )`
   );
 
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.macroIngestRuns} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      attempted_at TEXT NOT NULL,
+      region TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      success INTEGER NOT NULL,
+      fred_api_key_present INTEGER NOT NULL,
+      admin_authorized INTEGER NOT NULL,
+      db_connected INTEGER NOT NULL,
+      fetch_started INTEGER NOT NULL,
+      fetch_succeeded INTEGER NOT NULL,
+      fetched_series INTEGER NOT NULL,
+      fetched_observation_count INTEGER NOT NULL,
+      insert_attempted INTEGER NOT NULL,
+      attempted_inserts INTEGER NOT NULL,
+      inserted_row_count INTEGER NOT NULL,
+      failing_step TEXT,
+      error_message TEXT
+    )`
+  );
+
   await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companyProjects} (
       id TEXT PRIMARY KEY,
@@ -325,6 +349,11 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_macro_regime_snapshots_region_date
             ON ${TABLES.macroRegimeSnapshots} (region, as_of_date)`,
+    },
+
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_macro_ingest_runs_region_attempted
+            ON ${TABLES.macroIngestRuns} (region, attempted_at DESC)`,
     },
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_company_projects_symbol

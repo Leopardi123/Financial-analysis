@@ -46,7 +46,7 @@ type GlobalMacroPayload = {
       readMode: string;
       dataStatus: string;
       snapshotAsOfDate: string | null;
-      snapshotHealth: "healthy" | "partial" | "empty" | "invalid";
+      snapshotHealth: "healthy" | "partial" | "empty" | "empty_invalid" | "invalid";
       fallbackLive: boolean;
       primaryPath: boolean;
     };
@@ -80,6 +80,30 @@ type GlobalMacroPayload = {
       latestSnapshotTimestamp: string | null;
       snapshotIsEmpty: boolean;
     };
+    ingestionDebug: {
+      endpointReachable: boolean;
+      fredApiKeyPresent: boolean;
+      adminSecretConfigured: boolean;
+      latestAttempt: {
+        timestamp: string;
+        region: string;
+        mode: string;
+        success: boolean;
+        fredApiKeyPresent: boolean;
+        adminAuthorized: boolean;
+        dbConnected: boolean;
+        fetchStarted: boolean;
+        fetchSucceeded: boolean;
+        fetchedSeries: number;
+        fetchedObservationCount: number;
+        insertAttempted: boolean;
+        attemptedInserts: number;
+        insertedRowCount: number;
+        insertSucceeded: boolean;
+        failingStep: string | null;
+        errorMessage: string | null;
+      } | null;
+    };
     rootCauseHints: string[];
   };
 
@@ -91,6 +115,8 @@ export default function GlobalMacroDashboard() {
   const [globalMacroLoading, setGlobalMacroLoading] = useState(false);
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
+  const [ingestRunningMode, setIngestRunningMode] = useState<"backfill" | "latest" | null>(null);
+  const [ingestRunResult, setIngestRunResult] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -98,37 +124,28 @@ export default function GlobalMacroDashboard() {
     setDebugEnabled(query.get("debug") === "1");
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    async function loadGlobalMacro() {
-      setGlobalMacroLoading(true);
-      setGlobalMacroError(null);
-      try {
-        const response = await fetch(`/api/sector/global-macro?region=US`);
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
-        }
-        if (active) {
-          setGlobalMacro(payload.globalMacro ?? null);
-          setGlobalMacroRaw(payload);
-        }
-      } catch (error) {
-        if (active) {
-          setGlobalMacro(null);
-          setGlobalMacroRaw(null);
-          setGlobalMacroError(error instanceof Error ? error.message : "Okänt fel vid Global Macro-hämtning");
-        }
-      } finally {
-        if (active) {
-          setGlobalMacroLoading(false);
-        }
+  async function loadGlobalMacro() {
+    setGlobalMacroLoading(true);
+    setGlobalMacroError(null);
+    try {
+      const response = await fetch(`/api/sector/global-macro?region=US`);
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
       }
+      setGlobalMacro(payload.globalMacro ?? null);
+      setGlobalMacroRaw(payload);
+    } catch (error) {
+      setGlobalMacro(null);
+      setGlobalMacroRaw(null);
+      setGlobalMacroError(error instanceof Error ? error.message : "Okänt fel vid Global Macro-hämtning");
+    } finally {
+      setGlobalMacroLoading(false);
     }
+  }
+
+  useEffect(() => {
     void loadGlobalMacro();
-    return () => {
-      active = false;
-    };
   }, []);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
@@ -161,6 +178,29 @@ export default function GlobalMacroDashboard() {
   }
 
   const pipelineDebug = globalMacro?.debug ?? null;
+
+  async function runIngest(mode: "backfill" | "latest") {
+    setIngestRunningMode(mode);
+    setIngestRunResult(null);
+    try {
+      const response = await fetch(`/api/admin/macro/ingest?mode=${mode}&region=US`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+      setIngestRunResult({ status: response.status, ok: response.ok, payload, mode, timestamp: new Date().toISOString() });
+      await loadGlobalMacro();
+    } catch (error) {
+      setIngestRunResult({
+        status: 0,
+        ok: false,
+        mode,
+        timestamp: new Date().toISOString(),
+        payload: { error: error instanceof Error ? error.message : "Unknown ingest error" },
+      });
+    } finally {
+      setIngestRunningMode(null);
+    }
+  }
 
   return (
     <div className="sector-dashboard">
@@ -357,6 +397,48 @@ export default function GlobalMacroDashboard() {
                   <li key={hint}>{hint}</li>
                 ))}
               </ul>
+
+              <h4>Ingestion debug</h4>
+              <ul>
+                <li>admin ingest endpoint reachable: {String(pipelineDebug?.ingestionDebug.endpointReachable ?? false)}</li>
+                <li>FRED_API_KEY exists: {String(pipelineDebug?.ingestionDebug.fredApiKeyPresent ?? false)}</li>
+                <li>admin secret configured: {String(pipelineDebug?.ingestionDebug.adminSecretConfigured ?? false)}</li>
+              </ul>
+              {pipelineDebug?.ingestionDebug.latestAttempt ? (
+                <ul>
+                  <li>latest attempt timestamp: {pipelineDebug.ingestionDebug.latestAttempt.timestamp}</li>
+                  <li>region: {pipelineDebug.ingestionDebug.latestAttempt.region}</li>
+                  <li>mode: {pipelineDebug.ingestionDebug.latestAttempt.mode}</li>
+                  <li>success: {String(pipelineDebug.ingestionDebug.latestAttempt.success)}</li>
+                  <li>fetched observations: {pipelineDebug.ingestionDebug.latestAttempt.fetchedObservationCount}</li>
+                  <li>attempted inserts: {pipelineDebug.ingestionDebug.latestAttempt.attemptedInserts}</li>
+                  <li>actual inserted rows: {pipelineDebug.ingestionDebug.latestAttempt.insertedRowCount}</li>
+                  <li>insert succeeded: {String(pipelineDebug.ingestionDebug.latestAttempt.insertSucceeded)}</li>
+                  <li>admin authorized: {String(pipelineDebug.ingestionDebug.latestAttempt.adminAuthorized)}</li>
+                  <li>failing step: {pipelineDebug.ingestionDebug.latestAttempt.failingStep ?? "none"}</li>
+                  <li>error message: {pipelineDebug.ingestionDebug.latestAttempt.errorMessage ?? "none"}</li>
+                </ul>
+              ) : (
+                <div className="status empty">No ingest attempts logged yet.</div>
+              )}
+
+              {debugEnabled && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <button type="button" disabled={ingestRunningMode !== null} onClick={() => void runIngest("backfill")}>
+                    {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}
+                  </button>
+                  <button type="button" disabled={ingestRunningMode !== null} onClick={() => void runIngest("latest")}>
+                    {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}
+                  </button>
+                </div>
+              )}
+
+              {ingestRunResult && (
+                <div>
+                  <h4>Last manual ingest test result</h4>
+                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(ingestRunResult, null, 2)}</pre>
+                </div>
+              )}
 
               {debugEnabled && (
                 <>

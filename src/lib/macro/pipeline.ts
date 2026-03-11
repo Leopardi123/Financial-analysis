@@ -171,6 +171,21 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
     [region],
   )) as unknown as RawPointRow[];
 
+  if (rawPoints.length === 0) {
+    return {
+      asOfDate: params.asOfDate ?? null,
+      region,
+      rawPointCount: 0,
+      indicatorCount: 0,
+      indicatorWrites: 0,
+      regimeWrites: 0,
+      wroteAny: false,
+      emptyInvalid: true,
+      regime: null,
+      indicators: [],
+    };
+  }
+
   const series = bySeries(rawPoints);
   const seriesMap = new Map(series.map((item) => [item.seriesKey, item]));
 
@@ -336,6 +351,7 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
     indicatorWrites: indicatorStatements.length,
     regimeWrites: regimeStatements.length,
     wroteAny: statements.length > 0,
+    emptyInvalid: false,
     regime,
     indicators,
   };
