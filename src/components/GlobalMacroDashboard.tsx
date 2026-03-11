@@ -116,7 +116,10 @@ export default function GlobalMacroDashboard() {
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [ingestRunningMode, setIngestRunningMode] = useState<"backfill" | "latest" | null>(null);
+  const [engineRunning, setEngineRunning] = useState(false);
+  const [adminSecretInput, setAdminSecretInput] = useState("");
   const [ingestRunResult, setIngestRunResult] = useState<Record<string, unknown> | null>(null);
+  const [engineRunResult, setEngineRunResult] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -124,8 +127,19 @@ export default function GlobalMacroDashboard() {
     setDebugEnabled(query.get("debug") === "1");
   }, []);
 
-  async function loadGlobalMacro() {
-    setGlobalMacroLoading(true);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("globalMacro.debugAdminSecret") ?? "";
+    if (saved) setAdminSecretInput(saved);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("globalMacro.debugAdminSecret", adminSecretInput);
+  }, [adminSecretInput]);
+
+  async function loadGlobalMacro() {    setGlobalMacroLoading(true);
     setGlobalMacroError(null);
     try {
       const response = await fetch(`/api/sector/global-macro?region=US`);
@@ -185,9 +199,20 @@ export default function GlobalMacroDashboard() {
     try {
       const response = await fetch(`/api/admin/macro/ingest?mode=${mode}&region=US`, {
         method: "POST",
+        headers: adminSecretInput.trim()
+          ? { "x-admin-secret": adminSecretInput.trim() }
+          : undefined,
       });
       const payload = await response.json();
-      setIngestRunResult({ status: response.status, ok: response.ok, payload, mode, timestamp: new Date().toISOString() });
+      setIngestRunResult({
+        status: response.status,
+        ok: response.ok,
+        payload,
+        mode,
+        timestamp: new Date().toISOString(),
+        authMethodUsed: adminSecretInput.trim() ? "x-admin-secret header (manual debug input)" : "none",
+        adminActionAuth: response.ok ? "OK" : "Failed",
+      });
       await loadGlobalMacro();
     } catch (error) {
       setIngestRunResult({
@@ -195,10 +220,46 @@ export default function GlobalMacroDashboard() {
         ok: false,
         mode,
         timestamp: new Date().toISOString(),
+        authMethodUsed: adminSecretInput.trim() ? "x-admin-secret header (manual debug input)" : "none",
+        adminActionAuth: "Failed",
         payload: { error: error instanceof Error ? error.message : "Unknown ingest error" },
       });
     } finally {
       setIngestRunningMode(null);
+    }
+  }
+
+  async function runEngine() {
+    setEngineRunning(true);
+    setEngineRunResult(null);
+    try {
+      const response = await fetch(`/api/admin/macro/run-engine?region=US`, {
+        method: "POST",
+        headers: adminSecretInput.trim()
+          ? { "x-admin-secret": adminSecretInput.trim() }
+          : undefined,
+      });
+      const payload = await response.json();
+      setEngineRunResult({
+        status: response.status,
+        ok: response.ok,
+        payload,
+        timestamp: new Date().toISOString(),
+        authMethodUsed: adminSecretInput.trim() ? "x-admin-secret header (manual debug input)" : "none",
+        adminActionAuth: response.ok ? "OK" : "Failed",
+      });
+      await loadGlobalMacro();
+    } catch (error) {
+      setEngineRunResult({
+        status: 0,
+        ok: false,
+        timestamp: new Date().toISOString(),
+        authMethodUsed: adminSecretInput.trim() ? "x-admin-secret header (manual debug input)" : "none",
+        adminActionAuth: "Failed",
+        payload: { error: error instanceof Error ? error.message : "Unknown engine-run error" },
+      });
+    } finally {
+      setEngineRunning(false);
     }
   }
 
@@ -403,6 +464,8 @@ export default function GlobalMacroDashboard() {
                 <li>admin ingest endpoint reachable: {String(pipelineDebug?.ingestionDebug.endpointReachable ?? false)}</li>
                 <li>FRED_API_KEY exists: {String(pipelineDebug?.ingestionDebug.fredApiKeyPresent ?? false)}</li>
                 <li>admin secret configured: {String(pipelineDebug?.ingestionDebug.adminSecretConfigured ?? false)}</li>
+                <li>Admin action auth: {String((ingestRunResult as { adminActionAuth?: string } | null)?.adminActionAuth ?? (engineRunResult as { adminActionAuth?: string } | null)?.adminActionAuth ?? "Unknown")}</li>
+                <li>Auth method used: {String((ingestRunResult as { authMethodUsed?: string } | null)?.authMethodUsed ?? (engineRunResult as { authMethodUsed?: string } | null)?.authMethodUsed ?? "none")}</li>
               </ul>
               {pipelineDebug?.ingestionDebug.latestAttempt ? (
                 <ul>
@@ -423,13 +486,27 @@ export default function GlobalMacroDashboard() {
               )}
 
               {debugEnabled && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                  <button type="button" disabled={ingestRunningMode !== null} onClick={() => void runIngest("backfill")}>
-                    {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}
-                  </button>
-                  <button type="button" disabled={ingestRunningMode !== null} onClick={() => void runIngest("latest")}>
-                    {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}
-                  </button>
+                <div style={{ marginBottom: 8 }}>
+                  <label htmlFor="macro-admin-secret-input" style={{ display: "block", marginBottom: 4 }}>Admin secret (for debug actions)</label>
+                  <input
+                    id="macro-admin-secret-input"
+                    type="password"
+                    value={adminSecretInput}
+                    onChange={(event) => setAdminSecretInput(event.target.value)}
+                    placeholder="Enter ADMIN_SECRET/CRON_SECRET"
+                    style={{ width: "100%", marginBottom: 8 }}
+                  />
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill")}>
+                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}
+                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest")}>
+                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}
+                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine()}>
+                      {engineRunning ? "Running engine..." : "Run engine (US)"}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -437,6 +514,12 @@ export default function GlobalMacroDashboard() {
                 <div>
                   <h4>Last manual ingest test result</h4>
                   <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(ingestRunResult, null, 2)}</pre>
+                </div>
+              )}
+              {engineRunResult && (
+                <div>
+                  <h4>Last manual engine run result</h4>
+                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(engineRunResult, null, 2)}</pre>
                 </div>
               )}
 
