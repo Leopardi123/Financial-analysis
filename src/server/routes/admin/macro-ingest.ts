@@ -18,6 +18,14 @@ export default async function handler(req: any, res: any) {
   const mode: "backfill" | "latest" = modeRaw === "backfill" ? "backfill" : "latest";
   const region = String(req.query?.region ?? "US").toUpperCase();
 
+  const seriesResults: Array<{
+    seriesId: string;
+    seriesKey: string;
+    fetchSuccess: boolean;
+    observationsFetched: number;
+    errorMessage: string | null;
+  }> = [];
+
   const debug = {
     endpointReachable: true,
     fredApiKeyPresent: String(process.env.FRED_API_KEY ?? "").trim().length > 0,
@@ -33,6 +41,7 @@ export default async function handler(req: any, res: any) {
     insertedRowCount: 0,
     failingStep: null as string | null,
     errorMessage: null as string | null,
+    seriesResults,
   };
 
   try {
@@ -72,12 +81,30 @@ export default async function handler(req: any, res: any) {
 
     const sourceSeriesMap: Record<string, Array<{ date: string; value: number | null }>> = {};
     for (const entry of US_FRED_SERIES) {
-      const observations = await fetchFredSeries({ fredSeriesId: entry.fredSeriesId, mode });
-      sourceSeriesMap[entry.seriesKey] = observations;
-      debug.fetchedSeries += 1;
-      debug.fetchedObservationCount += observations.length;
+      try {
+        const observations = await fetchFredSeries({ fredSeriesId: entry.fredSeriesId, mode });
+        sourceSeriesMap[entry.seriesKey] = observations;
+        debug.fetchedSeries += 1;
+        debug.fetchedObservationCount += observations.length;
+        seriesResults.push({
+          seriesId: entry.fredSeriesId,
+          seriesKey: entry.seriesKey,
+          fetchSuccess: true,
+          observationsFetched: observations.length,
+          errorMessage: null,
+        });
+      } catch (error) {
+        seriesResults.push({
+          seriesId: entry.fredSeriesId,
+          seriesKey: entry.seriesKey,
+          fetchSuccess: false,
+          observationsFetched: 0,
+          errorMessage: (error as Error).message,
+        });
+      }
     }
-    debug.fetchSucceeded = true;
+
+    debug.fetchSucceeded = debug.fetchedSeries > 0;
 
     const derivedSeriesMap = buildDerivedSeries(sourceSeriesMap);
 
@@ -117,7 +144,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    debug.insertAttempted = true;
+    debug.insertAttempted = statements.length > 0;
     debug.attemptedInserts = statements.length;
     const chunks = chunk(statements, 250);
     for (const part of chunks) {
@@ -128,33 +155,45 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    const allSeriesFailed = debug.fetchedSeries === 0;
+    if (allSeriesFailed) {
+      debug.failingStep = "fetch";
+      debug.errorMessage = "All configured FRED series failed";
+    }
+
     await batch([
       {
         sql: `INSERT INTO ${tables.macroIngestRuns}
               (attempted_at, region, mode, success, fred_api_key_present, admin_authorized,
                db_connected, fetch_started, fetch_succeeded, fetched_series, fetched_observation_count,
-               insert_attempted, attempted_inserts, inserted_row_count, failing_step, error_message)
-              VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+               insert_attempted, attempted_inserts, inserted_row_count, series_results_json, failing_step, error_message)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           attemptedAt,
           region,
           mode,
+          allSeriesFailed ? 0 : 1,
           debug.fredApiKeyPresent ? 1 : 0,
           1,
           debug.dbConnected ? 1 : 0,
           1,
-          1,
+          debug.fetchSucceeded ? 1 : 0,
           debug.fetchedSeries,
           debug.fetchedObservationCount,
-          1,
+          debug.insertAttempted ? 1 : 0,
           debug.attemptedInserts,
           debug.insertedRowCount,
+          JSON.stringify(seriesResults),
+          debug.failingStep,
+          debug.errorMessage,
         ],
       },
     ]);
 
-    res.status(200).json({
-      ok: true,
+    const statusCode = allSeriesFailed ? 502 : 200;
+    res.status(statusCode).json({
+      ok: !allSeriesFailed,
+      partialSuccess: !allSeriesFailed && debug.fetchedSeries < US_FRED_SERIES.length,
       mode,
       region,
       sourceSeries: US_FRED_SERIES.map((entry) => entry.seriesKey),
@@ -181,8 +220,8 @@ export default async function handler(req: any, res: any) {
             sql: `INSERT INTO ${tables.macroIngestRuns}
                   (attempted_at, region, mode, success, fred_api_key_present, admin_authorized,
                    db_connected, fetch_started, fetch_succeeded, fetched_series, fetched_observation_count,
-                   insert_attempted, attempted_inserts, inserted_row_count, failing_step, error_message)
-                  VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                   insert_attempted, attempted_inserts, inserted_row_count, series_results_json, failing_step, error_message)
+                  VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [
               attemptedAt,
               region,
@@ -197,6 +236,7 @@ export default async function handler(req: any, res: any) {
               debug.insertAttempted ? 1 : 0,
               debug.attemptedInserts,
               debug.insertedRowCount,
+              JSON.stringify(seriesResults),
               debug.failingStep,
               debug.errorMessage,
             ],

@@ -57,6 +57,7 @@ type IngestRunRow = {
   insert_attempted: number | string;
   attempted_inserts: number | string;
   inserted_row_count: number | string;
+  series_results_json: string | null;
   failing_step: string | null;
   error_message: string | null;
 };
@@ -108,7 +109,7 @@ async function getLatestIngestRun(region: string) {
   const rows = (await query(
     `SELECT attempted_at, region, mode, success, fred_api_key_present, admin_authorized,
             db_connected, fetch_started, fetch_succeeded, fetched_series, fetched_observation_count,
-            insert_attempted, attempted_inserts, inserted_row_count, failing_step, error_message
+            insert_attempted, attempted_inserts, inserted_row_count, series_results_json, failing_step, error_message
      FROM ${tables.macroIngestRuns}
      WHERE region = ?
      ORDER BY attempted_at DESC
@@ -133,6 +134,13 @@ async function getLatestIngestRun(region: string) {
     insertAttempted: Number(row.insert_attempted ?? 0) === 1,
     attemptedInserts: Number(row.attempted_inserts ?? 0),
     insertedRowCount: Number(row.inserted_row_count ?? 0),
+    seriesResults: safeJsonParse<Array<{
+      seriesId: string;
+      seriesKey: string;
+      fetchSuccess: boolean;
+      observationsFetched: number;
+      errorMessage: string | null;
+    }>>(row.series_results_json, []),
     failingStep: row.failing_step,
     errorMessage: row.error_message,
     insertSucceeded: Number(row.inserted_row_count ?? 0) > 0,

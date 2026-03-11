@@ -256,6 +256,7 @@ export async function ensureSchema() {
       insert_attempted INTEGER NOT NULL,
       attempted_inserts INTEGER NOT NULL,
       inserted_row_count INTEGER NOT NULL,
+      series_results_json TEXT,
       failing_step TEXT,
       error_message TEXT
     )`
@@ -397,6 +398,12 @@ export async function ensureSchema() {
 
   try {
     await execute(`ALTER TABLE ${TABLES.macroIndicatorSnapshots} ADD COLUMN driver_note TEXT`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.macroIngestRuns} ADD COLUMN series_results_json TEXT`);
   } catch {
     // Column already exists.
   }

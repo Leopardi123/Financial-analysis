@@ -100,6 +100,13 @@ type GlobalMacroPayload = {
         attemptedInserts: number;
         insertedRowCount: number;
         insertSucceeded: boolean;
+        seriesResults: Array<{
+          seriesId: string;
+          seriesKey: string;
+          fetchSuccess: boolean;
+          observationsFetched: number;
+          errorMessage: string | null;
+        }>;
         failingStep: string | null;
         errorMessage: string | null;
       } | null;
@@ -483,6 +490,36 @@ export default function GlobalMacroDashboard() {
                 </ul>
               ) : (
                 <div className="status empty">No ingest attempts logged yet.</div>
+              )}
+
+              {pipelineDebug?.ingestionDebug.latestAttempt && (
+                <>
+                  <h4>Per-series fetch results</h4>
+                  <div style={{ overflowX: "auto" }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>series id</th>
+                          <th>series key</th>
+                          <th>fetch success</th>
+                          <th>observations fetched</th>
+                          <th>error message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pipelineDebug.ingestionDebug.latestAttempt.seriesResults.map((row) => (
+                          <tr key={`${row.seriesId}-${row.seriesKey}`}>
+                            <td>{row.seriesId}</td>
+                            <td>{row.seriesKey}</td>
+                            <td>{row.fetchSuccess ? "yes" : "no"}</td>
+                            <td>{row.observationsFetched}</td>
+                            <td>{row.errorMessage ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
 
               {debugEnabled && (

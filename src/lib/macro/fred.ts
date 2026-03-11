@@ -10,7 +10,7 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "CPILFESL", seriesKey: "core_cpi_us" },
   { fredSeriesId: "T10YIE", seriesKey: "breakeven_10y_us" },
   { fredSeriesId: "BAMLH0A0HYM2", seriesKey: "hy_spread_us" },
-  { fredSeriesId: "GOLDAMGBD228NLBM", seriesKey: "gold_usd" },
+  { fredSeriesId: "GOLDPMGBD228NLBM", seriesKey: "gold_usd" },
   { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us" },
 ];
 
@@ -65,7 +65,8 @@ export async function fetchFredSeries(params: {
     headers: { Accept: "application/json" },
   });
   if (!response.ok) {
-    throw new Error(`FRED request failed (${params.fredSeriesId}): ${response.status}`);
+    const body = await response.text();
+    throw new Error(`FRED request failed (${params.fredSeriesId}): ${response.status} ${body.slice(0, 400)}`);
   }
 
   const payload = (await response.json()) as FredObservationsResponse;
