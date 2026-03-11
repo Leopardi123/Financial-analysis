@@ -189,6 +189,7 @@ export default function SectorDashboard() {
     };
   }, [sector, subsector]);
 
+
   useEffect(() => {
     let active = true;
     async function loadManualInputs() {
@@ -205,6 +206,7 @@ export default function SectorDashboard() {
       active = false;
     };
   }, [sector, subsector]);
+
 
   async function submitInput(inputType: string, value: string) {
     if (!value) {
