@@ -72,8 +72,22 @@ type GlobalMacroPayload = {
       foundInputs: string[];
       valueLatest: number | null;
       coverage10yPct: number;
+      score: number | null;
+      dataStatus: "scorable" | "found_not_scoreable_coverage" | "found_not_scoreable_latest_missing" | "missing_series" | "score_unavailable";
       nullReason: string | null;
     }>;
+    blockStatus?: Record<string, { status: "Scorable" | "Insufficient"; scored: number; total: number; reasons: string[] }>;
+    overlayDataStatus?: Record<string, { scoredInputs: string[]; missingInputs: string[]; usesFallback: boolean; fallbackReason: "none" | "source_missing" | "no_latest_value" | "insufficient_coverage" | "scoring_gate_blocked"; blockedIndicators: Array<{ indicatorId: string; reason: string }> }>;
+    confidenceDiagnostics?: {
+      macroConfidence: number;
+      formula: string;
+      clearSignalsScored: number;
+      clearSignalsTotal: number;
+      speculativeSignalsScored: number;
+      speculativeSignalsTotal: number;
+      overlayFallbackCount: number;
+      note: string;
+    };
     snapshotContent: {
       indicatorSnapshotCount: number;
       regimeSnapshotCount: number;
@@ -99,6 +113,9 @@ type GlobalMacroPayload = {
         insertAttempted: boolean;
         attemptedInserts: number;
         insertedRowCount: number;
+        duplicateOrUnchangedRows: number;
+        dedupeOnlyRun: boolean;
+        ingestOutcome: "nothing_to_write" | "inserted_new_rows" | "dedupe_or_unchanged_only";
         insertSucceeded: boolean;
         seriesResults: Array<{
           seriesId: string;
@@ -114,12 +131,30 @@ type GlobalMacroPayload = {
     goldSourceDiagnostics?: {
       macroSeriesKey: string;
       macroPipelineSource: string;
+      endpoint?: string;
+      symbol?: string;
       macroRawBySource: Array<{ source: string; pointCount: number; latestDate: string | null }>;
       fmpMapping: { provider: string; providerSymbol: string; providerKind: string } | null;
       fmpMonthlyHistory: { table: string; tablePresent: boolean; pointCount: number; minDate: string | null; maxDate: string | null };
       fmpEodMonthlyBlobs: { table: string; tablePresent: boolean; monthCount: number; minYyyymm: string | null; maxYyyymm: string | null };
     };
     rootCauseHints: string[];
+    goldBackfillDebug?: {
+      requestPattern: string;
+      endpoint: string;
+      symbol: string;
+      from: string | null;
+      to: string | null;
+      fetchedMinDate: string | null;
+      fetchedMaxDate: string | null;
+      fetchedRowCount: number;
+      storedRowCount: number;
+      mergedMinDate: string | null;
+      mergedMaxDate: string | null;
+      resultingCoverage10yPct: number | null;
+      resultingSpreadCoverage10yPct: number | null;
+    };
+
   };
 
 };
@@ -438,6 +473,7 @@ export default function GlobalMacroDashboard() {
                       <th>found input series</th>
                       <th>valueLatest</th>
                       <th>coverage10yPct</th>
+                      <th>dataStatus</th>
                       <th>nullReason</th>
                     </tr>
                   </thead>
@@ -452,12 +488,42 @@ export default function GlobalMacroDashboard() {
                         <td>{row.foundInputs.join(", ") || "—"}</td>
                         <td>{row.valueLatest ?? "null"}</td>
                         <td>{row.coverage10yPct.toFixed(1)}%</td>
+                        <td>{row.dataStatus}</td>
                         <td>{row.nullReason ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+
+              <h4>Block status</h4>
+              <ul>
+                {Object.entries(pipelineDebug?.blockStatus ?? {}).map(([block, status]) => (
+                  <li key={block}>
+                    {block}: {status.status} ({status.scored}/{status.total} scored)
+                    {status.reasons.length > 0 ? ` — ${status.reasons.join("; ")}` : ""}
+                  </li>
+                ))}
+              </ul>
+
+              <h4>Overlay data status</h4>
+              <ul>
+                {Object.entries(pipelineDebug?.overlayDataStatus ?? {}).map(([overlay, status]) => (
+                  <li key={overlay}>
+                    {overlay}: scored inputs [{status.scoredInputs.join(", ") || "none"}], missing [{status.missingInputs.join(", ") || "none"}], usesFallback={String(status.usesFallback)}, fallbackReason={status.fallbackReason}{status.blockedIndicators.length > 0 ? `, blocked=[${status.blockedIndicators.map((item) => `${item.indicatorId}:${item.reason}`).join("; ")}]` : ""}
+                  </li>
+                ))}
+              </ul>
+
+              <h4>Confidence diagnostics</h4>
+              <ul>
+                <li>macroConfidence: {pipelineDebug?.confidenceDiagnostics?.macroConfidence ?? "—"}%</li>
+                <li>formula: {pipelineDebug?.confidenceDiagnostics?.formula ?? "—"}</li>
+                <li>clear signals: {pipelineDebug?.confidenceDiagnostics ? `${pipelineDebug.confidenceDiagnostics.clearSignalsScored}/${pipelineDebug.confidenceDiagnostics.clearSignalsTotal}` : "—"}</li>
+                <li>speculative signals: {pipelineDebug?.confidenceDiagnostics ? `${pipelineDebug.confidenceDiagnostics.speculativeSignalsScored}/${pipelineDebug.confidenceDiagnostics.speculativeSignalsTotal}` : "—"}</li>
+                <li>overlay fallback count: {pipelineDebug?.confidenceDiagnostics?.overlayFallbackCount ?? "—"}</li>
+                <li>note: {pipelineDebug?.confidenceDiagnostics?.note ?? "—"}</li>
+              </ul>
 
               <h4>Snapshot content</h4>
               <ul>
@@ -488,9 +554,12 @@ export default function GlobalMacroDashboard() {
                   <li>region: {pipelineDebug.ingestionDebug.latestAttempt.region}</li>
                   <li>mode: {pipelineDebug.ingestionDebug.latestAttempt.mode}</li>
                   <li>success: {String(pipelineDebug.ingestionDebug.latestAttempt.success)}</li>
-                  <li>fetched observations: {pipelineDebug.ingestionDebug.latestAttempt.fetchedObservationCount}</li>
+                  <li>fetched rows: {pipelineDebug.ingestionDebug.latestAttempt.fetchedObservationCount}</li>
                   <li>attempted inserts: {pipelineDebug.ingestionDebug.latestAttempt.attemptedInserts}</li>
-                  <li>actual inserted rows: {pipelineDebug.ingestionDebug.latestAttempt.insertedRowCount}</li>
+                  <li>new rows inserted: {pipelineDebug.ingestionDebug.latestAttempt.insertedRowCount}</li>
+                  <li>duplicate/unchanged rows skipped: {pipelineDebug.ingestionDebug.latestAttempt.duplicateOrUnchangedRows}</li>
+                  <li>dedupe-only run: {String(pipelineDebug.ingestionDebug.latestAttempt.dedupeOnlyRun)}</li>
+                  <li>ingest outcome: {pipelineDebug.ingestionDebug.latestAttempt.ingestOutcome}</li>
                   <li>insert succeeded: {String(pipelineDebug.ingestionDebug.latestAttempt.insertSucceeded)}</li>
                   <li>admin authorized: {String(pipelineDebug.ingestionDebug.latestAttempt.adminAuthorized)}</li>
                   <li>failing step: {pipelineDebug.ingestionDebug.latestAttempt.failingStep ?? "none"}</li>
@@ -530,10 +599,26 @@ export default function GlobalMacroDashboard() {
                 </>
               )}
 
+              <h4>Gold backfill debug</h4>
+              <ul>
+                <li>request pattern: {pipelineDebug?.goldBackfillDebug?.requestPattern ?? "—"}</li>
+                <li>endpoint: {pipelineDebug?.goldBackfillDebug?.endpoint ?? "—"}</li>
+                <li>symbol: {pipelineDebug?.goldBackfillDebug?.symbol ?? "—"}</li>
+                <li>from/to used: {(pipelineDebug?.goldBackfillDebug?.from ?? "—")} → {(pipelineDebug?.goldBackfillDebug?.to ?? "—")}</li>
+                <li>fetched min/max date: {(pipelineDebug?.goldBackfillDebug?.fetchedMinDate ?? "—")} → {(pipelineDebug?.goldBackfillDebug?.fetchedMaxDate ?? "—")}</li>
+                <li>fetched row count: {pipelineDebug?.goldBackfillDebug?.fetchedRowCount ?? 0}</li>
+                <li>stored min/max date: {(pipelineDebug?.goldBackfillDebug?.mergedMinDate ?? "—")} → {(pipelineDebug?.goldBackfillDebug?.mergedMaxDate ?? "—")}</li>
+                <li>stored row count: {pipelineDebug?.goldBackfillDebug?.storedRowCount ?? 0}</li>
+                <li>gold_usd resulting coverage10yPct: {pipelineDebug?.goldBackfillDebug?.resultingCoverage10yPct?.toFixed?.(1) ?? "—"}%</li>
+                <li>gold_minus_real_yield_spread resulting coverage10yPct: {pipelineDebug?.goldBackfillDebug?.resultingSpreadCoverage10yPct?.toFixed?.(1) ?? "—"}%</li>
+              </ul>
+
               <h4>Gold source diagnostics</h4>
               <ul>
                 <li>macro series key: {pipelineDebug?.goldSourceDiagnostics?.macroSeriesKey ?? "gold_usd"}</li>
                 <li>macro pipeline source: {pipelineDebug?.goldSourceDiagnostics?.macroPipelineSource ?? "unknown"}</li>
+                <li>endpoint: {pipelineDebug?.goldSourceDiagnostics?.endpoint ?? "unknown"}</li>
+                <li>symbol: {pipelineDebug?.goldSourceDiagnostics?.symbol ?? "unknown"}</li>
                 <li>FMP mapping: {pipelineDebug?.goldSourceDiagnostics?.fmpMapping
                   ? `${pipelineDebug.goldSourceDiagnostics.fmpMapping.provider}/${pipelineDebug.goldSourceDiagnostics.fmpMapping.providerSymbol}`
                   : "not found"}</li>

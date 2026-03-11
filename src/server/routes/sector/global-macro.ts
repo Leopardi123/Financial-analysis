@@ -86,6 +86,99 @@ type GoldEodMonthlyStatsRow = {
   max_yyyymm: string | null;
 };
 
+
+function summarizeBlockStatus(catalog: Array<{ indicatorId: string; block: string; title: string }>, indicators: Array<{
+  indicatorId: string;
+  score: number | null;
+  valueLatest: number | null;
+  coverage10yPct: number;
+}>) {
+  const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
+  const byBlock = new Map<string, Array<{ indicatorId: string; title: string; score: number | null; valueLatest: number | null; coverage10yPct: number }>>();
+
+  for (const meta of catalog) {
+    const row = indicatorById.get(meta.indicatorId);
+    const bucket = byBlock.get(meta.block) ?? [];
+    bucket.push({
+      indicatorId: meta.indicatorId,
+      title: meta.title,
+      score: row?.score ?? null,
+      valueLatest: row?.valueLatest ?? null,
+      coverage10yPct: row?.coverage10yPct ?? 0,
+    });
+    byBlock.set(meta.block, bucket);
+  }
+
+  const output: Record<string, { status: "Scorable" | "Insufficient"; scored: number; total: number; reasons: string[] }> = {};
+  for (const [block, rows] of byBlock.entries()) {
+    const scored = rows.filter((item) => item.score !== null).length;
+    const reasons: string[] = [];
+    for (const item of rows) {
+      if (item.score !== null) continue;
+      if (item.valueLatest === null) reasons.push(`${item.indicatorId}: missing latest value`);
+      else if (item.coverage10yPct < 80) reasons.push(`${item.indicatorId}: coverage ${item.coverage10yPct.toFixed(1)}% (<80%)`);
+      else reasons.push(`${item.indicatorId}: score unavailable`);
+    }
+    output[block] = {
+      status: scored > 0 ? "Scorable" : "Insufficient",
+      scored,
+      total: rows.length,
+      reasons,
+    };
+  }
+  return output;
+}
+
+function summarizeOverlayData(
+  catalog: Array<{ indicatorId: string; overlay?: string; inputs?: string[] }>,
+  indicators: Array<{ indicatorId: string; score: number | null; valueLatest: number | null; coverage10yPct: number }>,
+  rawSeriesKeys: Set<string>,
+) {
+  const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
+  const overlayKeys = ["growth", "stress", "hard_asset"] as const;
+  const output: Record<string, {
+    scoredInputs: string[];
+    missingInputs: string[];
+    usesFallback: boolean;
+    fallbackReason: "none" | "source_missing" | "no_latest_value" | "insufficient_coverage" | "scoring_gate_blocked";
+    blockedIndicators: Array<{ indicatorId: string; reason: string }>;
+  }> = {};
+
+  for (const overlay of overlayKeys) {
+    const entries = catalog.filter((entry) => entry.overlay === overlay);
+    const ids = entries.map((entry) => entry.indicatorId);
+    const scoredInputs = ids.filter((id) => indicatorById.get(id)?.score !== null);
+    const missingInputs = ids.filter((id) => indicatorById.get(id)?.score === null);
+    const blockedIndicators = missingInputs.map((id) => {
+      const row = indicatorById.get(id);
+      const entry = entries.find((item) => item.indicatorId === id);
+      const hasAnySource = (entry?.inputs ?? []).some((input) => rawSeriesKeys.has(input));
+      if (!row || !hasAnySource) return { indicatorId: id, reason: "source_missing" };
+      if (row.valueLatest === null) return { indicatorId: id, reason: "no_latest_value" };
+      if (row.coverage10yPct < 80) return { indicatorId: id, reason: "insufficient_coverage" };
+      return { indicatorId: id, reason: "scoring_gate_blocked" };
+    });
+
+    let fallbackReason: "none" | "source_missing" | "no_latest_value" | "insufficient_coverage" | "scoring_gate_blocked" = "none";
+    if (scoredInputs.length === 0) {
+      if (blockedIndicators.some((item) => item.reason === "insufficient_coverage")) fallbackReason = "insufficient_coverage";
+      else if (blockedIndicators.some((item) => item.reason === "no_latest_value")) fallbackReason = "no_latest_value";
+      else if (blockedIndicators.some((item) => item.reason === "source_missing")) fallbackReason = "source_missing";
+      else if (blockedIndicators.length > 0) fallbackReason = "scoring_gate_blocked";
+    }
+
+    output[overlay] = {
+      scoredInputs,
+      missingInputs,
+      usesFallback: scoredInputs.length === 0,
+      fallbackReason,
+      blockedIndicators,
+    };
+  }
+
+  return output;
+}
+
 function safeJsonParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -143,6 +236,21 @@ async function getLatestIngestRun(region: string) {
 
   const row = rows[0];
   if (!row) return null;
+  const attemptedInserts = Number(row.attempted_inserts ?? 0);
+  const insertedRowCount = Number(row.inserted_row_count ?? 0);
+  const duplicateOrUnchangedRows = Math.max(0, attemptedInserts - insertedRowCount);
+  const fetchedObservationCount = Number(row.fetched_observation_count ?? 0);
+
+  const seriesResults = safeJsonParse<Array<{
+    seriesId: string;
+    seriesKey: string;
+    fetchSuccess: boolean;
+    observationsFetched: number;
+    errorMessage: string | null;
+    meta?: Record<string, unknown>;
+  }>>(row.series_results_json, []);
+  const goldFetch = summarizeGoldFetchFromSeriesResults(seriesResults);
+
   return {
     timestamp: row.attempted_at,
     region: row.region,
@@ -154,20 +262,43 @@ async function getLatestIngestRun(region: string) {
     fetchStarted: Number(row.fetch_started ?? 0) === 1,
     fetchSucceeded: Number(row.fetch_succeeded ?? 0) === 1,
     fetchedSeries: Number(row.fetched_series ?? 0),
-    fetchedObservationCount: Number(row.fetched_observation_count ?? 0),
+    fetchedObservationCount,
     insertAttempted: Number(row.insert_attempted ?? 0) === 1,
-    attemptedInserts: Number(row.attempted_inserts ?? 0),
-    insertedRowCount: Number(row.inserted_row_count ?? 0),
-    seriesResults: safeJsonParse<Array<{
-      seriesId: string;
-      seriesKey: string;
-      fetchSuccess: boolean;
-      observationsFetched: number;
-      errorMessage: string | null;
-    }>>(row.series_results_json, []),
+    attemptedInserts,
+    insertedRowCount,
+    duplicateOrUnchangedRows,
+    seriesResults,
+    goldFetch,
     failingStep: row.failing_step,
     errorMessage: row.error_message,
-    insertSucceeded: Number(row.inserted_row_count ?? 0) > 0,
+    insertSucceeded: insertedRowCount > 0,
+    dedupeOnlyRun: attemptedInserts > 0 && insertedRowCount === 0,
+    ingestOutcome: attemptedInserts === 0
+      ? "nothing_to_write"
+      : insertedRowCount > 0
+        ? "inserted_new_rows"
+        : "dedupe_or_unchanged_only",
+  };
+}
+
+
+
+function summarizeGoldFetchFromSeriesResults(
+  seriesResults: Array<{ seriesId: string; seriesKey: string; fetchSuccess: boolean; observationsFetched: number; meta?: Record<string, unknown> }>,
+) {
+  const goldRow = seriesResults.find((row) => row.seriesKey === "gold_usd");
+  const meta = (goldRow?.meta ?? {}) as Record<string, unknown>;
+  return {
+    requestPattern: typeof meta.requestPattern === "string" ? meta.requestPattern : "single_request_with_explicit_from_to",
+    endpoint: typeof meta.endpoint === "string" ? meta.endpoint : "historical-price-eod/full",
+    symbol: typeof meta.symbol === "string" ? meta.symbol : "GCUSD",
+    from: typeof meta.from === "string" ? meta.from : null,
+    to: typeof meta.to === "string" ? meta.to : null,
+    fetchedMinDate: typeof meta.fetchedMinDate === "string" ? meta.fetchedMinDate : null,
+    fetchedMaxDate: typeof meta.fetchedMaxDate === "string" ? meta.fetchedMaxDate : null,
+    fetchedRowCount: typeof meta.fetchedRowCount === "number"
+      ? meta.fetchedRowCount
+      : Number(goldRow?.observationsFetched ?? 0),
   };
 }
 
@@ -221,7 +352,9 @@ async function getGoldSourceDiagnostics(region: string) {
 
   return {
     macroSeriesKey: "gold_usd",
-    macroPipelineSource: "FRED",
+    macroPipelineSource: "FMP",
+    endpoint: "historical-price-eod/full",
+    symbol: "GCUSD",
     macroRawBySource: macroRawRows.map((row) => ({
       source: row.source,
       pointCount: Number(row.point_count ?? 0),
@@ -278,6 +411,16 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   const catalog = MACRO_INDICATOR_CATALOG.filter((entry) => entry.region === region);
   const catalogById = new Map(catalog.map((entry) => [entry.indicatorId, entry]));
   const rawStats = await getRawSeriesStats(region);
+  const goldRangeRows = (await query(
+    `SELECT MIN(date) AS min_date, MAX(date) AS max_date
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto' AND series_key = 'gold_usd'`,
+    [region],
+  )) as Array<{ min_date?: string | null; max_date?: string | null }>;
+  const goldDateRange = {
+    minDate: goldRangeRows[0]?.min_date ?? null,
+    maxDate: goldRangeRows[0]?.max_date ?? null,
+  };
   const latestIngestRun = await getLatestIngestRun(region);
   const goldSourceDiagnostics = await getGoldSourceDiagnostics(region);
 
@@ -310,6 +453,8 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   });
 
   const scoredCount = indicators.filter((item) => item.score !== null).length;
+  const goldUsdSnapshot = indicators.find((item) => item.indicatorId === "gold_usd");
+  const goldSpreadSnapshot = indicators.find((item) => item.indicatorId === "gold_minus_real_yield_spread");
   const expectedFromFred = US_FRED_SERIES.map((entry) => entry.seriesKey);
   const expectedFromIndicators = Array.from(new Set(catalog.flatMap((entry) => entry.inputs)));
   const expectedSeriesKeys = Array.from(new Set([...expectedFromFred, ...expectedFromIndicators])).sort();
@@ -325,10 +470,21 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   });
 
   const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
+  const blockStatus = summarizeBlockStatus(catalog, indicators);
+  const overlayDataStatus = summarizeOverlayData(catalog, indicators, new Set(rawStats.bySeries.keys()));
   const indicatorInputStatus = catalog.map((entry) => {
     const snapshot = indicatorById.get(entry.indicatorId);
     const expectedInputs = entry.inputs;
     const foundInputs = expectedInputs.filter((input) => rawStats.bySeries.has(input));
+    const valueLatest = snapshot?.valueLatest ?? null;
+    const coverage10yPct = snapshot?.coverage10yPct ?? 0;
+    const score = snapshot?.score ?? null;
+    let dataStatus: "scorable" | "found_not_scoreable_coverage" | "found_not_scoreable_latest_missing" | "missing_series" | "score_unavailable" = "score_unavailable";
+    if (score !== null) dataStatus = "scorable";
+    else if (foundInputs.length === 0) dataStatus = "missing_series";
+    else if (valueLatest === null) dataStatus = "found_not_scoreable_latest_missing";
+    else if (coverage10yPct < 80) dataStatus = "found_not_scoreable_coverage";
+
     return {
       indicatorId: entry.indicatorId,
       title: entry.title,
@@ -336,8 +492,10 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       signalClass: entry.signalClass,
       expectedInputs,
       foundInputs,
-      valueLatest: snapshot?.valueLatest ?? null,
-      coverage10yPct: snapshot?.coverage10yPct ?? 0,
+      valueLatest,
+      coverage10yPct,
+      score,
+      dataStatus,
       nullReason: snapshot ? snapshot.nullReason : "No snapshot row",
     };
   });
@@ -364,6 +522,28 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       : partialData
         ? "partial"
         : "healthy";
+
+  const clearCatalog = catalog.filter((entry) => entry.signalClass === "clear");
+  const clearScored = indicators.filter((item) => {
+    const meta = catalogById.get(item.indicatorId);
+    return meta?.signalClass === "clear" && item.score !== null;
+  }).length;
+  const speculativeCatalog = catalog.filter((entry) => entry.signalClass === "speculative");
+  const speculativeScored = indicators.filter((item) => {
+    const meta = catalogById.get(item.indicatorId);
+    return meta?.signalClass === "speculative" && item.score !== null;
+  }).length;
+  const overlayFallbackCount = Object.values(overlayDataStatus).filter((item) => item.usesFallback).length;
+  const confidenceDiagnostics = {
+    macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+    formula: "clear_signals_scored / clear_signals_total",
+    clearSignalsScored: clearScored,
+    clearSignalsTotal: clearCatalog.length,
+    speculativeSignalsScored: speculativeScored,
+    speculativeSignalsTotal: speculativeCatalog.length,
+    overlayFallbackCount,
+    note: "Current confidence model tracks clear-signal coverage only; overlay fallback does not directly penalize confidence.",
+  };
 
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
@@ -434,6 +614,9 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       },
       expectedVsFoundSeries,
       indicatorInputStatus,
+      blockStatus,
+      overlayDataStatus,
+      confidenceDiagnostics,
       snapshotContent: {
         indicatorSnapshotCount,
         regimeSnapshotCount,
@@ -447,6 +630,21 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
         latestAttempt: latestIngestRun,
       },
       goldSourceDiagnostics,
+      goldBackfillDebug: {
+        requestPattern: latestIngestRun?.goldFetch?.requestPattern ?? "single_request_with_explicit_from_to",
+        endpoint: latestIngestRun?.goldFetch?.endpoint ?? "historical-price-eod/full",
+        symbol: latestIngestRun?.goldFetch?.symbol ?? "GCUSD",
+        from: latestIngestRun?.goldFetch?.from ?? "2000-01-01",
+        to: latestIngestRun?.goldFetch?.to ?? null,
+        fetchedMinDate: latestIngestRun?.goldFetch?.fetchedMinDate ?? null,
+        fetchedMaxDate: latestIngestRun?.goldFetch?.fetchedMaxDate ?? null,
+        fetchedRowCount: latestIngestRun?.goldFetch?.fetchedRowCount ?? 0,
+        storedRowCount: rawStats.bySeries.get("gold_usd")?.rawCount ?? 0,
+        mergedMinDate: goldDateRange.minDate,
+        mergedMaxDate: goldDateRange.maxDate,
+        resultingCoverage10yPct: goldUsdSnapshot?.coverage10yPct ?? null,
+        resultingSpreadCoverage10yPct: goldSpreadSnapshot?.coverage10yPct ?? null,
+      },
       rootCauseHints,
     },
   };
