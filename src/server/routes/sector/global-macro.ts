@@ -1,5 +1,6 @@
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { query } from "../../../../api/_db.js";
+import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { runGlobalMacroEngine } from "../../../lib/macro/engine.js";
 import type { MacroSeriesInput } from "../../../lib/macro/types";
 
@@ -8,6 +9,13 @@ type RawPointRow = {
   date: string;
   value: number | null;
 };
+
+function getNullReason(indicator: { coverage10yPct: number; valueLatest: number | null; score: number | null }): string | null {
+  if (indicator.score !== null) return null;
+  if (indicator.valueLatest === null) return "Missing latest value";
+  if (indicator.coverage10yPct < 80) return "Coverage under 80% on 10y window";
+  return "Score unavailable";
+}
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {
@@ -42,13 +50,37 @@ export default async function handler(req: any, res: any) {
     series: Array.from(bySeries.values()),
   });
 
+  const catalogById = new Map(
+    MACRO_INDICATOR_CATALOG.filter((entry) => entry.region === region).map((entry) => [entry.indicatorId, entry]),
+  );
+
+  const enrichedIndicators = indicators.map((indicator) => {
+    const catalog = catalogById.get(indicator.indicatorId);
+    return {
+      ...indicator,
+      block: catalog?.block ?? "D_CREDIBILITY",
+      title: catalog?.title ?? indicator.indicatorId,
+      nullReason: getNullReason(indicator),
+    };
+  });
+
+  const scoredCount = enrichedIndicators.filter((item) => item.score !== null).length;
+  const partialData = enrichedIndicators.length > 0 && scoredCount < enrichedIndicators.length;
+
   res.status(200).json({
     ok: true,
     globalMacro: {
       regime,
-      indicators,
+      indicators: enrichedIndicators,
       dataStatus: rawPoints.length > 0 ? "automated" : "insufficient",
       writePolicy: "read_only",
+      stats: {
+        rawPointCount: rawPoints.length,
+        seriesCount: bySeries.size,
+        indicatorCount: enrichedIndicators.length,
+        scoredCount,
+        partialData,
+      },
     },
   });
 }
