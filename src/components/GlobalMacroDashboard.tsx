@@ -72,7 +72,7 @@ type GlobalMacroPayload = {
       foundInputs: string[];
       valueLatest: number | null;
       coverage10yPct: number;
-      nullReason: string;
+      nullReason: string | null;
     }>;
     snapshotContent: {
       indicatorSnapshotCount: number;
@@ -444,7 +444,7 @@ export default function GlobalMacroDashboard() {
                         <td>{row.foundInputs.join(", ") || "—"}</td>
                         <td>{row.valueLatest ?? "null"}</td>
                         <td>{row.coverage10yPct.toFixed(1)}%</td>
-                        <td>{row.nullReason}</td>
+                        <td>{row.nullReason ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>

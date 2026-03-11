@@ -1,6 +1,8 @@
 export type FredSeriesConfig = {
   fredSeriesId: string;
   seriesKey: string;
+  latestLookbackMonths?: number;
+  backfillLookbackYears?: number;
 };
 
 export const US_FRED_SERIES: FredSeriesConfig[] = [
@@ -10,8 +12,10 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "CPILFESL", seriesKey: "core_cpi_us" },
   { fredSeriesId: "T10YIE", seriesKey: "breakeven_10y_us" },
   { fredSeriesId: "BAMLH0A0HYM2", seriesKey: "hy_spread_us" },
-  { fredSeriesId: "GOLDPMGBD228NLBM", seriesKey: "gold_usd" },
+  { fredSeriesId: "GOLDAMGBD228NLBM", seriesKey: "gold_usd", latestLookbackMonths: 12 },
   { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us" },
+  { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 24, backfillLookbackYears: 20 },
+  { fredSeriesId: "NAPM", seriesKey: "pmi_momentum_us", latestLookbackMonths: 12 },
 ];
 
 type FredObservation = {
@@ -42,14 +46,16 @@ function buildFredUrl(params: Record<string, string>): string {
 export async function fetchFredSeries(params: {
   fredSeriesId: string;
   mode: "backfill" | "latest";
+  latestLookbackMonths?: number;
+  backfillLookbackYears?: number;
 }): Promise<Array<{ date: string; value: number | null }>> {
   const apiKey = validateFredApiKey();
   const end = new Date();
   const start = new Date(end);
   if (params.mode === "backfill") {
-    start.setFullYear(end.getFullYear() - 12);
+    start.setFullYear(end.getFullYear() - (params.backfillLookbackYears ?? 12));
   } else {
-    start.setMonth(end.getMonth() - 2);
+    start.setMonth(end.getMonth() - (params.latestLookbackMonths ?? 2));
   }
 
   const url = buildFredUrl({

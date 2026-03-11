@@ -82,7 +82,12 @@ export default async function handler(req: any, res: any) {
     const sourceSeriesMap: Record<string, Array<{ date: string; value: number | null }>> = {};
     for (const entry of US_FRED_SERIES) {
       try {
-        const observations = await fetchFredSeries({ fredSeriesId: entry.fredSeriesId, mode });
+        const observations = await fetchFredSeries({
+          fredSeriesId: entry.fredSeriesId,
+          mode,
+          latestLookbackMonths: entry.latestLookbackMonths,
+          backfillLookbackYears: entry.backfillLookbackYears,
+        });
         sourceSeriesMap[entry.seriesKey] = observations;
         debug.fetchedSeries += 1;
         debug.fetchedObservationCount += observations.length;

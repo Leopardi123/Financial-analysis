@@ -14,6 +14,27 @@ function monthKey(date: string): string {
   return date.slice(0, 7);
 }
 
+function monthIndex(month: string): number {
+  const [yearRaw, monthRaw] = month.split("-");
+  const year = Number(yearRaw);
+  const monthPart = Number(monthRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(monthPart)) return 0;
+  return year * 12 + (monthPart - 1);
+}
+
+function estimateCadenceMonths(monthly: Array<{ month: string; date: string; value: number | null }>): number {
+  if (monthly.length < 2) return 1;
+  const monthGaps: number[] = [];
+  for (let index = 1; index < monthly.length; index += 1) {
+    const gap = monthIndex(monthly[index].month) - monthIndex(monthly[index - 1].month);
+    if (gap > 0) monthGaps.push(gap);
+  }
+  if (monthGaps.length === 0) return 1;
+  monthGaps.sort((a, b) => a - b);
+  const median = monthGaps[Math.floor(monthGaps.length / 2)] ?? 1;
+  return Math.max(1, Math.min(12, median));
+}
+
 function lastDayOfMonth(month: string): string {
   return `${month}-28`;
 }
@@ -105,7 +126,9 @@ function computeIndicatorSnapshot(
 
   const trailing = monthly.slice(-TEN_YEAR_MONTHS);
   const validValues = trailing.map((p) => p.value).filter((v): v is number => typeof v === "number");
-  const coverage10yPct = trailing.length === 0 ? 0 : (validValues.length / TEN_YEAR_MONTHS) * 100;
+  const cadenceMonths = estimateCadenceMonths(trailing);
+  const expectedPointCount = Math.max(1, Math.round(TEN_YEAR_MONTHS / cadenceMonths));
+  const coverage10yPct = Math.max(0, Math.min(100, (validValues.length / expectedPointCount) * 100));
   const latest = trailing[trailing.length - 1];
   const valueLatest = latest?.value ?? null;
   const freshnessDays = latest ? Math.max(0, Math.round((Date.parse(asOfDate) - Date.parse(latest.date)) / 86400000)) : null;

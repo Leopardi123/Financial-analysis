@@ -233,7 +233,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       foundInputs,
       valueLatest: snapshot?.valueLatest ?? null,
       coverage10yPct: snapshot?.coverage10yPct ?? 0,
-      nullReason: snapshot?.nullReason ?? "No snapshot row",
+      nullReason: snapshot ? snapshot.nullReason : "No snapshot row",
     };
   });
 
