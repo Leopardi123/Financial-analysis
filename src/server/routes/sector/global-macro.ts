@@ -86,6 +86,68 @@ type GoldEodMonthlyStatsRow = {
   max_yyyymm: string | null;
 };
 
+
+function summarizeBlockStatus(catalog: Array<{ indicatorId: string; block: string; title: string }>, indicators: Array<{
+  indicatorId: string;
+  score: number | null;
+  valueLatest: number | null;
+  coverage10yPct: number;
+}>) {
+  const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
+  const byBlock = new Map<string, Array<{ indicatorId: string; title: string; score: number | null; valueLatest: number | null; coverage10yPct: number }>>();
+
+  for (const meta of catalog) {
+    const row = indicatorById.get(meta.indicatorId);
+    const bucket = byBlock.get(meta.block) ?? [];
+    bucket.push({
+      indicatorId: meta.indicatorId,
+      title: meta.title,
+      score: row?.score ?? null,
+      valueLatest: row?.valueLatest ?? null,
+      coverage10yPct: row?.coverage10yPct ?? 0,
+    });
+    byBlock.set(meta.block, bucket);
+  }
+
+  const output: Record<string, { status: "Scorable" | "Insufficient"; scored: number; total: number; reasons: string[] }> = {};
+  for (const [block, rows] of byBlock.entries()) {
+    const scored = rows.filter((item) => item.score !== null).length;
+    const reasons: string[] = [];
+    for (const item of rows) {
+      if (item.score !== null) continue;
+      if (item.valueLatest === null) reasons.push(`${item.indicatorId}: missing latest value`);
+      else if (item.coverage10yPct < 80) reasons.push(`${item.indicatorId}: coverage ${item.coverage10yPct.toFixed(1)}% (<80%)`);
+      else reasons.push(`${item.indicatorId}: score unavailable`);
+    }
+    output[block] = {
+      status: scored > 0 ? "Scorable" : "Insufficient",
+      scored,
+      total: rows.length,
+      reasons,
+    };
+  }
+  return output;
+}
+
+function summarizeOverlayData(catalog: Array<{ indicatorId: string; overlay?: string }>, indicators: Array<{ indicatorId: string; score: number | null }>) {
+  const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
+  const overlayKeys = ["growth", "stress", "hard_asset"] as const;
+  const output: Record<string, { scoredInputs: string[]; missingInputs: string[]; usesFallback: boolean }> = {};
+
+  for (const overlay of overlayKeys) {
+    const ids = catalog.filter((entry) => entry.overlay === overlay).map((entry) => entry.indicatorId);
+    const scoredInputs = ids.filter((id) => indicatorById.get(id)?.score !== null);
+    const missingInputs = ids.filter((id) => indicatorById.get(id)?.score === null);
+    output[overlay] = {
+      scoredInputs,
+      missingInputs,
+      usesFallback: scoredInputs.length === 0,
+    };
+  }
+
+  return output;
+}
+
 function safeJsonParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -325,6 +387,8 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   });
 
   const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
+  const blockStatus = summarizeBlockStatus(catalog, indicators);
+  const overlayDataStatus = summarizeOverlayData(catalog, indicators);
   const indicatorInputStatus = catalog.map((entry) => {
     const snapshot = indicatorById.get(entry.indicatorId);
     const expectedInputs = entry.inputs;
@@ -434,6 +498,8 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       },
       expectedVsFoundSeries,
       indicatorInputStatus,
+      blockStatus,
+      overlayDataStatus,
       snapshotContent: {
         indicatorSnapshotCount,
         regimeSnapshotCount,
@@ -447,6 +513,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
         latestAttempt: latestIngestRun,
       },
       goldSourceDiagnostics,
+      goldTodo: "TODO: gold_usd and gold_minus_real_yield_spread are intentionally unchanged in this step.",
       rootCauseHints,
     },
   };

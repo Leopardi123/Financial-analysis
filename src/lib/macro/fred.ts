@@ -13,9 +13,9 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "T10YIE", seriesKey: "breakeven_10y_us" },
   { fredSeriesId: "BAMLH0A0HYM2", seriesKey: "hy_spread_us" },
   { fredSeriesId: "GOLDAMGBD228NLBM", seriesKey: "gold_usd", latestLookbackMonths: 12 },
-  { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us" },
-  { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 24, backfillLookbackYears: 20 },
-  { fredSeriesId: "NAPM", seriesKey: "pmi_momentum_us", latestLookbackMonths: 12 },
+  { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us", latestLookbackMonths: 180, backfillLookbackYears: 25 },
+  { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 240, backfillLookbackYears: 25 },
+  { fredSeriesId: "NAPM", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
 ];
 
 type FredObservation = {
@@ -131,6 +131,21 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
           date: row.date,
           value: prev && prev.value !== null && row.value !== null && prev.value !== 0
             ? ((row.value / prev.value) - 1) * 100
+            : null,
+        };
+      })
+      .filter((row) => row.value !== null);
+  }
+
+  const pmi = inputs.pmi_us ?? [];
+  if (pmi.length >= 6) {
+    output.pmi_momentum_us = pmi
+      .map((row, index) => {
+        const prev = index >= 3 ? pmi[index - 3] : null;
+        return {
+          date: row.date,
+          value: row.value !== null && prev?.value !== null && prev?.value !== undefined
+            ? row.value - prev.value
             : null,
         };
       })
