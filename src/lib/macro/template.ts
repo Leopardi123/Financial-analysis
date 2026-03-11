@@ -50,7 +50,21 @@ export function classifyCoreRegimeFromTemplate(score: number | null, template: G
   return "FiscalDominanceRisk";
 }
 
-export function classifyOverlayFromTemplate(type: OverlayType, weightedAverageScore: number | null, template: GlobalMacroTemplate) {
+export function classifyOverlayFromTemplate(
+  type: "growth" | "hard_asset",
+  weightedAverageScore: number | null,
+  template: GlobalMacroTemplate,
+): "Weak" | "Neutral" | "Strong";
+export function classifyOverlayFromTemplate(
+  type: "stress",
+  weightedAverageScore: number | null,
+  template: GlobalMacroTemplate,
+): "Low" | "Medium" | "High";
+export function classifyOverlayFromTemplate(
+  type: OverlayType,
+  weightedAverageScore: number | null,
+  template: GlobalMacroTemplate,
+) {
   const { weakMax, neutralMax } = template.thresholds.overlay;
   if (type === "stress") {
     if (weightedAverageScore === null || weightedAverageScore <= weakMax) return "Low";
