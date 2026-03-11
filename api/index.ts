@@ -81,6 +81,8 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/companies": () => import("../src/server/routes/admin/companies.js"),
   "admin/init-db": () => import("../src/server/routes/admin/init-db.js"),
   "admin/refresh-companies": () => import("../src/server/routes/admin/refresh-companies.js"),
+  "admin/macro/ingest": () => import("../src/server/routes/admin/macro-ingest.js"),
+  "admin/macro/run-engine": () => import("../src/server/routes/admin/macro-run-engine.js"),
   companies: () => import("../src/server/routes/companies.js"),
   "companies/search": () => import("../src/server/routes/companies/search.js"),
   company: () => import("../src/server/routes/company/index.js"),
@@ -118,6 +120,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "sector/manual-input": () => import("../src/server/routes/sector/manual-input.js"),
   "sector/map-companies": () => import("../src/server/routes/sector/map-companies.js"),
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),
+  "sector/global-macro": () => import("../src/server/routes/sector/global-macro.js"),
 };
 
 export default async function handler(req: any, res: any) {
@@ -178,6 +181,14 @@ export default async function handler(req: any, res: any) {
       matched = "sector/manual-input";
       setDebugHeaders();
       const mod = await import("../src/server/routes/sector/manual-input.js");
+      await mod.default(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "sector" && segments[1] === "global-macro") {
+      matched = "sector/global-macro";
+      setDebugHeaders();
+      const mod = await import("../src/server/routes/sector/global-macro.js");
       await mod.default(req, res);
       return;
     }
