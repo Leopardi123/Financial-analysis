@@ -16,6 +16,27 @@ type OverviewPayload = {
   suggestedFmpEndpoints?: string[];
 };
 
+type GlobalMacroPayload = {
+  regime: {
+    asOfDate: string;
+    coreRegimeLabel: string;
+    macroScoreTotal: number | null;
+    macroConfidence: number;
+    growthOverlay: string;
+    stressOverlay: string;
+    hardAssetOverlay: string;
+  };
+  indicators: Array<{
+    indicatorId: string;
+    signalClass: "clear" | "speculative";
+    score: number | null;
+    percentile10y: number | null;
+    freshnessDays: number | null;
+    coverage10yPct: number;
+  }>;
+  dataStatus: string;
+};
+
 const SECTORS = [
   { name: "Råvaror", subsectors: ["Guld", "Olja"] },
   { name: "Industri", subsectors: ["Verkstad"] },
@@ -145,6 +166,7 @@ export default function SectorDashboard() {
   const [manualInputs, setManualInputs] = useState<ManualInput[]>([]);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
+  const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [inputSource, setInputSource] = useState("");
   const [inputNote, setInputNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -188,6 +210,21 @@ export default function SectorDashboard() {
       active = false;
     };
   }, [sector, subsector]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadGlobalMacro() {
+      const response = await fetch(`/api/sector/global-macro?region=US`);
+      const payload = await response.json();
+      if (active) {
+        setGlobalMacro(payload.globalMacro ?? null);
+      }
+    }
+    void loadGlobalMacro();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -323,6 +360,30 @@ export default function SectorDashboard() {
               </ul>
             </div>
           )}
+        </div>
+
+        <div className="sector-card">
+          <h3>Global Macro</h3>
+          <p className="bread">Read-only macro intelligence under Sector with a slow core regime and three overlays.</p>
+          <div className="metric-list">
+            <ul>
+              <li>Core Regime: <strong>{globalMacro?.regime.coreRegimeLabel ?? "DataInsufficient"}</strong></li>
+              <li>Growth Momentum: <strong>{globalMacro?.regime.growthOverlay ?? "Weak"}</strong></li>
+              <li>Market Stress: <strong>{globalMacro?.regime.stressOverlay ?? "Low"}</strong></li>
+              <li>Hard Asset Signal: <strong>{globalMacro?.regime.hardAssetOverlay ?? "Weak"}</strong></li>
+              <li>Macro Score: {typeof globalMacro?.regime.macroScoreTotal === "number" ? globalMacro.regime.macroScoreTotal.toFixed(1) : "—"}</li>
+              <li>Confidence: {globalMacro?.regime.macroConfidence ?? 0}%</li>
+              <li>Data Source: {globalMacro?.dataStatus ?? "insufficient"}</li>
+            </ul>
+          </div>
+          <h4>Indicator drilldown</h4>
+          <ul className="input-log">
+            {(globalMacro?.indicators ?? []).slice(0, 8).map((indicator) => (
+              <li key={indicator.indicatorId}>
+                <strong>{indicator.indicatorId}</strong> | score {indicator.score ?? "null"} | pct {typeof indicator.percentile10y === "number" ? indicator.percentile10y.toFixed(1) : "—"} | {indicator.signalClass} | freshness {indicator.freshnessDays ?? "—"}d | coverage {indicator.coverage10yPct.toFixed(1)}%
+              </li>
+            ))}
+          </ul>
         </div>
 
         <div className="sector-card">

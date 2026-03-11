@@ -118,6 +118,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "sector/manual-input": () => import("../src/server/routes/sector/manual-input.js"),
   "sector/map-companies": () => import("../src/server/routes/sector/map-companies.js"),
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),
+  "sector/global-macro": () => import("../src/server/routes/sector/global-macro.js"),
 };
 
 export default async function handler(req: any, res: any) {
@@ -178,6 +179,14 @@ export default async function handler(req: any, res: any) {
       matched = "sector/manual-input";
       setDebugHeaders();
       const mod = await import("../src/server/routes/sector/manual-input.js");
+      await mod.default(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "sector" && segments[1] === "global-macro") {
+      matched = "sector/global-macro";
+      setDebugHeaders();
+      const mod = await import("../src/server/routes/sector/global-macro.js");
       await mod.default(req, res);
       return;
     }

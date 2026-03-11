@@ -1,0 +1,54 @@
+import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { query } from "../../../../api/_db.js";
+import { runGlobalMacroEngine } from "../../../lib/macro/engine.js";
+import type { MacroSeriesInput } from "../../../lib/macro/types";
+
+type RawPointRow = {
+  series_key: string;
+  date: string;
+  value: number | null;
+};
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== "GET") {
+    res.status(405).json({ ok: false, error: "Method not allowed" });
+    return;
+  }
+
+  await ensureSchema();
+
+  const region = String(req.query?.region ?? "US").toUpperCase();
+  const asOfDate = String(req.query?.asOfDate ?? "").trim() || undefined;
+
+  const rawPoints = (await query(
+    `SELECT series_key, date, value
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto'
+     ORDER BY series_key ASC, date ASC`,
+    [region],
+  )) as unknown as RawPointRow[];
+
+  const bySeries = new Map<string, MacroSeriesInput>();
+  for (const row of rawPoints) {
+    const key = String(row.series_key);
+    const bucket = bySeries.get(key) ?? { seriesKey: key, points: [] };
+    bucket.points.push({ date: String(row.date), value: row.value === null ? null : Number(row.value) });
+    bySeries.set(key, bucket);
+  }
+
+  const { regime, indicators } = runGlobalMacroEngine({
+    region,
+    asOfDate,
+    series: Array.from(bySeries.values()),
+  });
+
+  res.status(200).json({
+    ok: true,
+    globalMacro: {
+      regime,
+      indicators,
+      dataStatus: rawPoints.length > 0 ? "automated" : "insufficient",
+      writePolicy: "read_only",
+    },
+  });
+}

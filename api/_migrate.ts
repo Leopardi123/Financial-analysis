@@ -16,6 +16,10 @@ const TABLES = {
   assumptionsLog: "assumptions_log",
   companySectorMap: "company_sector_map",
   companyProjects: "company_projects",
+  macroRawDatapoints: "macro_raw_datapoints",
+  macroIndicatorCatalog: "macro_indicator_catalog",
+  macroIndicatorSnapshots: "macro_indicator_snapshots",
+  macroRegimeSnapshots: "macro_regime_snapshots",
 };
 
 export async function ensureSchema() {
@@ -160,6 +164,74 @@ export async function ensureSchema() {
     )`
   );
 
+
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.macroRawDatapoints} (
+      source TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'auto',
+      region TEXT NOT NULL,
+      series_key TEXT NOT NULL,
+      date TEXT NOT NULL,
+      value REAL,
+      fetched_at TEXT NOT NULL,
+      UNIQUE(source, region, series_key, date)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.macroIndicatorCatalog} (
+      indicator_id TEXT NOT NULL,
+      region TEXT NOT NULL,
+      block TEXT NOT NULL,
+      signal_class TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      inputs_json TEXT NOT NULL,
+      transform TEXT NOT NULL,
+      scoring TEXT NOT NULL,
+      weight REAL NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (indicator_id, region)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.macroIndicatorSnapshots} (
+      as_of_date TEXT NOT NULL,
+      region TEXT NOT NULL,
+      indicator_id TEXT NOT NULL,
+      signal_class TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      value_latest REAL,
+      percentile_10y REAL,
+      score INTEGER,
+      freshness_days INTEGER,
+      coverage_10y_pct REAL NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (as_of_date, region, indicator_id)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.macroRegimeSnapshots} (
+      as_of_date TEXT NOT NULL,
+      region TEXT NOT NULL,
+      block_scores_json TEXT NOT NULL,
+      macro_score_total REAL,
+      macro_confidence REAL NOT NULL,
+      core_regime_label TEXT NOT NULL,
+      growth_overlay TEXT NOT NULL,
+      stress_overlay TEXT NOT NULL,
+      hard_asset_overlay TEXT NOT NULL,
+      clear_signal_strength REAL,
+      speculative_signal_strength REAL,
+      top_drivers_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (as_of_date, region)
+    )`
+  );
+
   await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companyProjects} (
       id TEXT PRIMARY KEY,
@@ -236,6 +308,19 @@ export async function ensureSchema() {
             ON ${TABLES.companySectorMap} (company_id)`,
     },
 
+
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_macro_raw_series_date
+            ON ${TABLES.macroRawDatapoints} (region, series_key, date)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_macro_indicator_snapshots_region_date
+            ON ${TABLES.macroIndicatorSnapshots} (region, as_of_date)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_macro_regime_snapshots_region_date
+            ON ${TABLES.macroRegimeSnapshots} (region, as_of_date)`,
+    },
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_company_projects_symbol
             ON ${TABLES.companyProjects} (symbol)`,
