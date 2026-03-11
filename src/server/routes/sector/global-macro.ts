@@ -662,7 +662,12 @@ export default async function handler(req: any, res: any) {
   const region = String(req.query?.region ?? "US").toUpperCase();
   const allowLiveFallback = String(req.query?.fallbackLive ?? "1") === "1";
   const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
-  const historyRangeYears = Number(req.query?.historyRangeYears ?? (historyResolution === "MONTHLY" ? 20 : 3));
+  const historyRangeRaw = String(req.query?.historyRangeYears ?? (historyResolution === "MONTHLY" ? "20" : "3")).toUpperCase();
+  const historyRangeYears = historyRangeRaw === "MAX"
+    ? "MAX"
+    : Number.isFinite(Number(historyRangeRaw))
+      ? Number(historyRangeRaw)
+      : (historyResolution === "MONTHLY" ? 20 : 3);
 
   const snapshot = await readLatestSnapshot(region, allowLiveFallback);
   if (snapshot) {

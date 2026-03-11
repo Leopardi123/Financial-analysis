@@ -12,6 +12,21 @@ type RawPointRow = {
 
 export type HistoryResolution = "WEEKLY" | "MONTHLY";
 
+type RegimeInterval = {
+  startDate: string;
+  endDate: string;
+  coreRegimeLabel: MacroRegimeSnapshot["coreRegimeLabel"];
+  pointCount: number;
+  topDriver: string | null;
+};
+
+type OverlayInterval<T extends string> = {
+  startDate: string;
+  endDate: string;
+  value: T;
+  pointCount: number;
+};
+
 export type MacroHistoryPoint = {
   asOfDate: string;
   macroScoreTotal: number | null;
@@ -35,17 +50,47 @@ export type MacroHistoryResult = {
   region: string;
   resolution: HistoryResolution;
   rangeYears: number;
+  requestedRangeYears: number | "MAX";
   earliestRawDate: string | null;
   latestRawDate: string | null;
+  replayEarliestDateUsed: string | null;
+  replayLatestDateUsed: string | null;
   generatedPoints: number;
   regimeChanges: number;
   overlayChanges: number;
   blockThresholdChanges: number;
   dataCoveragePct: number;
   missingHistoryIndicators: string[];
+  limitingIndicators: Array<{
+    seriesKey: string;
+    earliestDate: string | null;
+    latestDate: string | null;
+    pointCount: number;
+    reason: "starts_after_replay_start" | "ends_before_latest";
+  }>;
+  rangeDebug: {
+    requestedStartDate: string | null;
+    actualStartDate: string | null;
+    actualEndDate: string | null;
+    wasCappedByRawData: boolean;
+    unfilledReason: string | null;
+  };
+  intervals: {
+    regime: RegimeInterval[];
+    overlays: {
+      growth: OverlayInterval<MacroRegimeSnapshot["growthOverlay"]>[];
+      stress: OverlayInterval<MacroRegimeSnapshot["stressOverlay"]>[];
+      hardAsset: OverlayInterval<MacroRegimeSnapshot["hardAssetOverlay"]>[];
+    };
+  };
   template: {
     templateId: string;
     updatedAt: string;
+    thresholds: {
+      monetaryDominanceMax: number;
+      balancedMax: number;
+      fiscalPressureMax: number;
+    };
   };
   replay: {
     recomputedAt: string;
@@ -101,22 +146,80 @@ function enumerateReplayDates(start: Date, end: Date, resolution: HistoryResolut
   return replayDates;
 }
 
-function emptyResult(region: string, resolution: HistoryResolution, rangeYears: number): MacroHistoryResult {
+function mergeIntervals<T>(
+  points: MacroHistoryPoint[],
+  valueOf: (point: MacroHistoryPoint) => T,
+): Array<{ startDate: string; endDate: string; value: T; pointCount: number }> {
+  if (points.length === 0) return [];
+  const out: Array<{ startDate: string; endDate: string; value: T; pointCount: number }> = [];
+  let current = {
+    startDate: points[0].asOfDate,
+    endDate: points[0].asOfDate,
+    value: valueOf(points[0]),
+    pointCount: 1,
+  };
+
+  for (let index = 1; index < points.length; index += 1) {
+    const next = points[index];
+    const value = valueOf(next);
+    if (value === current.value) {
+      current.endDate = next.asOfDate;
+      current.pointCount += 1;
+      continue;
+    }
+    out.push(current);
+    current = {
+      startDate: next.asOfDate,
+      endDate: next.asOfDate,
+      value,
+      pointCount: 1,
+    };
+  }
+
+  out.push(current);
+  return out;
+}
+
+function emptyResult(region: string, resolution: HistoryResolution, requestedRangeYears: number | "MAX", rangeYears: number): MacroHistoryResult {
   return {
     region,
     resolution,
     rangeYears,
+    requestedRangeYears,
     earliestRawDate: null,
     latestRawDate: null,
+    replayEarliestDateUsed: null,
+    replayLatestDateUsed: null,
     generatedPoints: 0,
     regimeChanges: 0,
     overlayChanges: 0,
     blockThresholdChanges: 0,
     dataCoveragePct: 0,
     missingHistoryIndicators: [],
+    limitingIndicators: [],
+    rangeDebug: {
+      requestedStartDate: null,
+      actualStartDate: null,
+      actualEndDate: null,
+      wasCappedByRawData: false,
+      unfilledReason: "No raw datapoints found",
+    },
+    intervals: {
+      regime: [],
+      overlays: {
+        growth: [],
+        stress: [],
+        hardAsset: [],
+      },
+    },
     template: {
       templateId: GLOBAL_MACRO_TEMPLATE.templateId,
       updatedAt: GLOBAL_MACRO_TEMPLATE.updatedAt,
+      thresholds: {
+        monetaryDominanceMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.monetaryDominanceMax,
+        balancedMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.balancedMax,
+        fiscalPressureMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.fiscalPressureMax,
+      },
     },
     replay: {
       recomputedAt: new Date().toISOString(),
@@ -129,11 +232,11 @@ function emptyResult(region: string, resolution: HistoryResolution, rangeYears: 
 export async function computeMacroRegimeHistory(params: {
   region: string;
   resolution: HistoryResolution;
-  rangeYears: number;
+  rangeYears: number | "MAX";
 }): Promise<MacroHistoryResult> {
   const region = params.region.toUpperCase();
   const resolution = params.resolution;
-  const rangeYears = Math.max(1, Math.min(30, Math.floor(params.rangeYears)));
+  const requestedRangeYears = params.rangeYears;
 
   const rawPoints = (await query(
     `SELECT series_key, date, value
@@ -143,18 +246,40 @@ export async function computeMacroRegimeHistory(params: {
     [region],
   )) as unknown as RawPointRow[];
 
-  if (rawPoints.length === 0) return emptyResult(region, resolution, rangeYears);
+  if (rawPoints.length === 0) return emptyResult(region, resolution, requestedRangeYears, 1);
+
+  const series = bySeries(rawPoints);
+  const seriesCoverage = series.map((entry) => {
+    const dates = entry.points.map((point) => point.date).sort((a, b) => a.localeCompare(b));
+    return {
+      seriesKey: entry.seriesKey,
+      earliestDate: dates[0] ?? null,
+      latestDate: dates[dates.length - 1] ?? null,
+      pointCount: dates.length,
+    };
+  });
 
   const sortedDates = rawPoints.map((row) => row.date).sort((a, b) => a.localeCompare(b));
   const earliestRawDate = sortedDates[0] ?? null;
   const latestRawDate = sortedDates[sortedDates.length - 1] ?? null;
-  if (!latestRawDate) return emptyResult(region, resolution, rangeYears);
+  if (!earliestRawDate || !latestRawDate) return emptyResult(region, resolution, requestedRangeYears, 1);
 
-  const latest = new Date(`${latestRawDate}T00:00:00.000Z`);
-  const historyStart = new Date(Date.UTC(latest.getUTCFullYear() - rangeYears, latest.getUTCMonth(), latest.getUTCDate()));
+  const earliestRaw = new Date(`${earliestRawDate}T00:00:00.000Z`);
+  const latestRaw = new Date(`${latestRawDate}T00:00:00.000Z`);
 
-  const replayDates = enumerateReplayDates(historyStart, latest, resolution);
-  const series = bySeries(rawPoints);
+  const requestedRange = requestedRangeYears === "MAX"
+    ? Math.max(1, Math.ceil((latestRaw.getTime() - earliestRaw.getTime()) / (365.25 * 86400000)))
+    : Math.max(1, Math.min(30, Math.floor(requestedRangeYears)));
+
+  const requestedStartDate = requestedRangeYears === "MAX"
+    ? earliestRawDate
+    : toIsoDate(new Date(Date.UTC(latestRaw.getUTCFullYear() - requestedRange, latestRaw.getUTCMonth(), latestRaw.getUTCDate())));
+
+  const historyStart = requestedRangeYears === "MAX"
+    ? earliestRaw
+    : new Date(Date.UTC(latestRaw.getUTCFullYear() - requestedRange, latestRaw.getUTCMonth(), latestRaw.getUTCDate()));
+
+  const replayDates = enumerateReplayDates(historyStart, latestRaw, resolution);
 
   const points: MacroHistoryPoint[] = [];
   let regimeChanges = 0;
@@ -213,24 +338,99 @@ export async function computeMacroRegimeHistory(params: {
     });
   }
 
+  const replayEarliestDateUsed = points[0]?.asOfDate ?? null;
+  const replayLatestDateUsed = points[points.length - 1]?.asOfDate ?? null;
   const coverage = replayDates.length > 0 ? Math.round((points.length / replayDates.length) * 1000) / 10 : 0;
-  const missingHistoryIndicators = series.filter((entry) => entry.points.length < 24).map((entry) => entry.seriesKey);
+  const missingHistoryIndicators = seriesCoverage.filter((entry) => entry.pointCount < 24).map((entry) => entry.seriesKey);
+
+  const limitingIndicators = seriesCoverage
+    .flatMap((entry) => {
+      const reasons: Array<"starts_after_replay_start" | "ends_before_latest"> = [];
+      if (replayEarliestDateUsed && entry.earliestDate && entry.earliestDate > replayEarliestDateUsed) reasons.push("starts_after_replay_start");
+      if (replayLatestDateUsed && entry.latestDate && entry.latestDate < replayLatestDateUsed) reasons.push("ends_before_latest");
+      return reasons.map((reason) => ({ ...entry, reason }));
+    })
+    .sort((a, b) => a.seriesKey.localeCompare(b.seriesKey));
+
+  const regimeIntervalsRaw = mergeIntervals(points, (point) => point.coreRegimeLabel);
+  const regimeIntervals: RegimeInterval[] = regimeIntervalsRaw.map((entry) => {
+    const intervalPoints = points.filter((point) => point.asOfDate >= entry.startDate && point.asOfDate <= entry.endDate);
+    const topDriver = intervalPoints[intervalPoints.length - 1]?.topDriver ?? null;
+    return {
+      startDate: entry.startDate,
+      endDate: entry.endDate,
+      coreRegimeLabel: entry.value,
+      pointCount: entry.pointCount,
+      topDriver,
+    };
+  });
+
+  const growthOverlayIntervals = mergeIntervals(points, (point) => point.growthOverlay).map((entry) => ({
+    startDate: entry.startDate,
+    endDate: entry.endDate,
+    value: entry.value,
+    pointCount: entry.pointCount,
+  }));
+  const stressOverlayIntervals = mergeIntervals(points, (point) => point.stressOverlay).map((entry) => ({
+    startDate: entry.startDate,
+    endDate: entry.endDate,
+    value: entry.value,
+    pointCount: entry.pointCount,
+  }));
+  const hardAssetOverlayIntervals = mergeIntervals(points, (point) => point.hardAssetOverlay).map((entry) => ({
+    startDate: entry.startDate,
+    endDate: entry.endDate,
+    value: entry.value,
+    pointCount: entry.pointCount,
+  }));
+
+  const isMax = requestedRangeYears === "MAX";
+  const wasCappedByRawData = isMax ? false : (requestedStartDate ? requestedStartDate < earliestRawDate : false);
+  const unfilledReason = !isMax && wasCappedByRawData
+    ? "Requested range starts before earliest raw data"
+    : limitingIndicators.length > 0
+      ? "Some indicators have shorter coverage than full replay window"
+      : null;
 
   return {
     region,
     resolution,
-    rangeYears,
+    rangeYears: requestedRange,
+    requestedRangeYears,
     earliestRawDate,
     latestRawDate,
+    replayEarliestDateUsed,
+    replayLatestDateUsed,
     generatedPoints: points.length,
     regimeChanges,
     overlayChanges,
     blockThresholdChanges,
     dataCoveragePct: coverage,
     missingHistoryIndicators,
+    limitingIndicators,
+    rangeDebug: {
+      requestedStartDate,
+      actualStartDate: replayEarliestDateUsed,
+      actualEndDate: replayLatestDateUsed,
+      wasCappedByRawData,
+      unfilledReason,
+    },
+    intervals: {
+      regime: regimeIntervals,
+      overlays: {
+        growth: growthOverlayIntervals,
+        stress: stressOverlayIntervals,
+        hardAsset: hardAssetOverlayIntervals,
+      },
+    },
     template: {
       templateId: GLOBAL_MACRO_TEMPLATE.templateId,
       updatedAt: GLOBAL_MACRO_TEMPLATE.updatedAt,
+      thresholds: {
+        monetaryDominanceMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.monetaryDominanceMax,
+        balancedMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.balancedMax,
+        fiscalPressureMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.fiscalPressureMax,
+      },
     },
     replay: {
       recomputedAt: new Date().toISOString(),
