@@ -129,19 +129,50 @@ function summarizeBlockStatus(catalog: Array<{ indicatorId: string; block: strin
   return output;
 }
 
-function summarizeOverlayData(catalog: Array<{ indicatorId: string; overlay?: string }>, indicators: Array<{ indicatorId: string; score: number | null }>) {
+function summarizeOverlayData(
+  catalog: Array<{ indicatorId: string; overlay?: string; inputs?: string[] }>,
+  indicators: Array<{ indicatorId: string; score: number | null; valueLatest: number | null; coverage10yPct: number }>,
+  rawSeriesKeys: Set<string>,
+) {
   const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
   const overlayKeys = ["growth", "stress", "hard_asset"] as const;
-  const output: Record<string, { scoredInputs: string[]; missingInputs: string[]; usesFallback: boolean }> = {};
+  const output: Record<string, {
+    scoredInputs: string[];
+    missingInputs: string[];
+    usesFallback: boolean;
+    fallbackReason: "none" | "source_missing" | "no_latest_value" | "insufficient_coverage" | "scoring_gate_blocked";
+    blockedIndicators: Array<{ indicatorId: string; reason: string }>;
+  }> = {};
 
   for (const overlay of overlayKeys) {
-    const ids = catalog.filter((entry) => entry.overlay === overlay).map((entry) => entry.indicatorId);
+    const entries = catalog.filter((entry) => entry.overlay === overlay);
+    const ids = entries.map((entry) => entry.indicatorId);
     const scoredInputs = ids.filter((id) => indicatorById.get(id)?.score !== null);
     const missingInputs = ids.filter((id) => indicatorById.get(id)?.score === null);
+    const blockedIndicators = missingInputs.map((id) => {
+      const row = indicatorById.get(id);
+      const entry = entries.find((item) => item.indicatorId === id);
+      const hasAnySource = (entry?.inputs ?? []).some((input) => rawSeriesKeys.has(input));
+      if (!row || !hasAnySource) return { indicatorId: id, reason: "source_missing" };
+      if (row.valueLatest === null) return { indicatorId: id, reason: "no_latest_value" };
+      if (row.coverage10yPct < 80) return { indicatorId: id, reason: "insufficient_coverage" };
+      return { indicatorId: id, reason: "scoring_gate_blocked" };
+    });
+
+    let fallbackReason: "none" | "source_missing" | "no_latest_value" | "insufficient_coverage" | "scoring_gate_blocked" = "none";
+    if (scoredInputs.length === 0) {
+      if (blockedIndicators.some((item) => item.reason === "insufficient_coverage")) fallbackReason = "insufficient_coverage";
+      else if (blockedIndicators.some((item) => item.reason === "no_latest_value")) fallbackReason = "no_latest_value";
+      else if (blockedIndicators.some((item) => item.reason === "source_missing")) fallbackReason = "source_missing";
+      else if (blockedIndicators.length > 0) fallbackReason = "scoring_gate_blocked";
+    }
+
     output[overlay] = {
       scoredInputs,
       missingInputs,
       usesFallback: scoredInputs.length === 0,
+      fallbackReason,
+      blockedIndicators,
     };
   }
 
@@ -402,11 +433,20 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
 
   const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
   const blockStatus = summarizeBlockStatus(catalog, indicators);
-  const overlayDataStatus = summarizeOverlayData(catalog, indicators);
+  const overlayDataStatus = summarizeOverlayData(catalog, indicators, new Set(rawStats.bySeries.keys()));
   const indicatorInputStatus = catalog.map((entry) => {
     const snapshot = indicatorById.get(entry.indicatorId);
     const expectedInputs = entry.inputs;
     const foundInputs = expectedInputs.filter((input) => rawStats.bySeries.has(input));
+    const valueLatest = snapshot?.valueLatest ?? null;
+    const coverage10yPct = snapshot?.coverage10yPct ?? 0;
+    const score = snapshot?.score ?? null;
+    let dataStatus: "scorable" | "found_not_scoreable_coverage" | "found_not_scoreable_latest_missing" | "missing_series" | "score_unavailable" = "score_unavailable";
+    if (score !== null) dataStatus = "scorable";
+    else if (foundInputs.length === 0) dataStatus = "missing_series";
+    else if (valueLatest === null) dataStatus = "found_not_scoreable_latest_missing";
+    else if (coverage10yPct < 80) dataStatus = "found_not_scoreable_coverage";
+
     return {
       indicatorId: entry.indicatorId,
       title: entry.title,
@@ -414,8 +454,10 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       signalClass: entry.signalClass,
       expectedInputs,
       foundInputs,
-      valueLatest: snapshot?.valueLatest ?? null,
-      coverage10yPct: snapshot?.coverage10yPct ?? 0,
+      valueLatest,
+      coverage10yPct,
+      score,
+      dataStatus,
       nullReason: snapshot ? snapshot.nullReason : "No snapshot row",
     };
   });

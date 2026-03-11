@@ -7,7 +7,7 @@ import { buildDerivedSeries, fetchFredSeries, US_FRED_SERIES } from "../../../li
 
 
 
-const PMI_FRED_FALLBACK_IDS = ["USPMI", "NAPM"];
+const PMI_FRED_FALLBACK_IDS = ["INDPRO", "NAPM"];
 
 function normalizeFmpEodRows(payload: unknown): Array<{ date: string; value: number | null }> {
   const candidates = Array.isArray(payload)

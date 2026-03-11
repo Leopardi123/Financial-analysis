@@ -72,10 +72,12 @@ type GlobalMacroPayload = {
       foundInputs: string[];
       valueLatest: number | null;
       coverage10yPct: number;
+      score: number | null;
+      dataStatus: "scorable" | "found_not_scoreable_coverage" | "found_not_scoreable_latest_missing" | "missing_series" | "score_unavailable";
       nullReason: string | null;
     }>;
     blockStatus?: Record<string, { status: "Scorable" | "Insufficient"; scored: number; total: number; reasons: string[] }>;
-    overlayDataStatus?: Record<string, { scoredInputs: string[]; missingInputs: string[]; usesFallback: boolean }>;
+    overlayDataStatus?: Record<string, { scoredInputs: string[]; missingInputs: string[]; usesFallback: boolean; fallbackReason: "none" | "source_missing" | "no_latest_value" | "insufficient_coverage" | "scoring_gate_blocked"; blockedIndicators: Array<{ indicatorId: string; reason: string }> }>;
     confidenceDiagnostics?: {
       macroConfidence: number;
       formula: string;
@@ -455,6 +457,7 @@ export default function GlobalMacroDashboard() {
                       <th>found input series</th>
                       <th>valueLatest</th>
                       <th>coverage10yPct</th>
+                      <th>dataStatus</th>
                       <th>nullReason</th>
                     </tr>
                   </thead>
@@ -469,6 +472,7 @@ export default function GlobalMacroDashboard() {
                         <td>{row.foundInputs.join(", ") || "—"}</td>
                         <td>{row.valueLatest ?? "null"}</td>
                         <td>{row.coverage10yPct.toFixed(1)}%</td>
+                        <td>{row.dataStatus}</td>
                         <td>{row.nullReason ?? "—"}</td>
                       </tr>
                     ))}
@@ -490,7 +494,7 @@ export default function GlobalMacroDashboard() {
               <ul>
                 {Object.entries(pipelineDebug?.overlayDataStatus ?? {}).map(([overlay, status]) => (
                   <li key={overlay}>
-                    {overlay}: scored inputs [{status.scoredInputs.join(", ") || "none"}], missing [{status.missingInputs.join(", ") || "none"}], usesFallback={String(status.usesFallback)}
+                    {overlay}: scored inputs [{status.scoredInputs.join(", ") || "none"}], missing [{status.missingInputs.join(", ") || "none"}], usesFallback={String(status.usesFallback)}, fallbackReason={status.fallbackReason}{status.blockedIndicators.length > 0 ? `, blocked=[${status.blockedIndicators.map((item) => `${item.indicatorId}:${item.reason}`).join("; ")}]` : ""}
                   </li>
                 ))}
               </ul>

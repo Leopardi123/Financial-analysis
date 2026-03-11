@@ -14,7 +14,7 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "BAMLH0A0HYM2", seriesKey: "hy_spread_us" },
   { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us", latestLookbackMonths: 180, backfillLookbackYears: 25 },
   { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 240, backfillLookbackYears: 25 },
-  { fredSeriesId: "USPMI", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "INDPRO", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
 ];
 
 type FredObservation = {
