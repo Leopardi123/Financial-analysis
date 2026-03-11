@@ -203,11 +203,16 @@ export async function ensureSchema() {
       indicator_id TEXT NOT NULL,
       signal_class TEXT NOT NULL,
       source_type TEXT NOT NULL,
+      data_date_latest TEXT,
       value_latest REAL,
+      change_1m REAL,
+      change_3m REAL,
+      yoy REAL,
       percentile_10y REAL,
       score INTEGER,
       freshness_days INTEGER,
       coverage_10y_pct REAL NOT NULL,
+      driver_note TEXT,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (as_of_date, region, indicator_id)
     )`
@@ -333,6 +338,36 @@ export async function ensureSchema() {
 
   try {
     await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN fiscal_year_end TEXT`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.macroIndicatorSnapshots} ADD COLUMN data_date_latest TEXT`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.macroIndicatorSnapshots} ADD COLUMN change_1m REAL`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.macroIndicatorSnapshots} ADD COLUMN change_3m REAL`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.macroIndicatorSnapshots} ADD COLUMN yoy REAL`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.macroIndicatorSnapshots} ADD COLUMN driver_note TEXT`);
   } catch {
     // Column already exists.
   }
