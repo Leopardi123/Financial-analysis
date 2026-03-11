@@ -1,10 +1,12 @@
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { query } from "../../../../api/_db.js";
 import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
+import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
 import { runAndPersistMacroSnapshots } from "../../../lib/macro/pipeline.js";
 
 type RegimeSnapshotRow = {
   as_of_date: string;
+  updated_at: string | null;
   block_scores_json: string | null;
   macro_score_total: number | null;
   macro_confidence: number | null;
@@ -33,6 +35,12 @@ type IndicatorSnapshotRow = {
   driver_note: string | null;
 };
 
+type RawStatsRow = {
+  series_key: string;
+  raw_count: number | string;
+  latest_raw_date: string | null;
+};
+
 function safeJsonParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -49,9 +57,36 @@ function getNullReason(indicator: { coverage10yPct: number; valueLatest: number 
   return "Score unavailable";
 }
 
+async function getRawSeriesStats(region: string) {
+  const rows = (await query(
+    `SELECT series_key, COUNT(*) AS raw_count, MAX(date) AS latest_raw_date
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto'
+     GROUP BY series_key
+     ORDER BY series_key ASC`,
+    [region],
+  )) as unknown as RawStatsRow[];
+
+  const bySeries = new Map(
+    rows.map((row) => [
+      String(row.series_key),
+      {
+        rawCount: Number(row.raw_count ?? 0),
+        latestRawDate: row.latest_raw_date ?? null,
+      },
+    ]),
+  );
+
+  return {
+    totalRawPointCount: rows.reduce((sum, row) => sum + Number(row.raw_count ?? 0), 0),
+    seriesCount: rows.length,
+    bySeries,
+  };
+}
+
 async function readLatestSnapshot(region: string) {
   const regimeRows = (await query(
-    `SELECT as_of_date, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
+    `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
             clear_signal_strength, speculative_signal_strength, top_drivers_json
      FROM ${tables.macroRegimeSnapshots}
@@ -73,13 +108,13 @@ async function readLatestSnapshot(region: string) {
     [region, regimeRow.as_of_date],
   )) as unknown as IndicatorSnapshotRow[];
 
-  const catalogById = new Map(
-    MACRO_INDICATOR_CATALOG.filter((entry) => entry.region === region).map((entry) => [entry.indicatorId, entry]),
-  );
+  const catalog = MACRO_INDICATOR_CATALOG.filter((entry) => entry.region === region);
+  const catalogById = new Map(catalog.map((entry) => [entry.indicatorId, entry]));
+  const rawStats = await getRawSeriesStats(region);
 
   const indicators = indicatorRows.map((row) => {
     const indicatorId = String(row.indicator_id);
-    const catalog = catalogById.get(indicatorId);
+    const meta = catalogById.get(indicatorId);
     const signalClass = String(row.signal_class ?? "speculative") === "clear" ? "clear" : "speculative";
     const sourceType = String(row.source_type ?? "auto") === "manual" ? "manual" : "auto";
     const coverage10yPct = Number(row.coverage_10y_pct ?? 0);
@@ -87,8 +122,8 @@ async function readLatestSnapshot(region: string) {
     const score = row.score === null ? null : Number(row.score);
     return {
       indicatorId,
-      title: catalog?.title ?? indicatorId,
-      block: catalog?.block ?? "D_CREDIBILITY",
+      title: meta?.title ?? indicatorId,
+      block: meta?.block ?? "D_CREDIBILITY",
       signalClass,
       sourceType,
       dataDateLatest: row.data_date_latest ?? null,
@@ -106,6 +141,75 @@ async function readLatestSnapshot(region: string) {
   });
 
   const scoredCount = indicators.filter((item) => item.score !== null).length;
+  const expectedFromFred = US_FRED_SERIES.map((entry) => entry.seriesKey);
+  const expectedFromIndicators = Array.from(new Set(catalog.flatMap((entry) => entry.inputs)));
+  const expectedSeriesKeys = Array.from(new Set([...expectedFromFred, ...expectedFromIndicators])).sort();
+
+  const expectedVsFoundSeries = expectedSeriesKeys.map((seriesKey) => {
+    const stat = rawStats.bySeries.get(seriesKey);
+    return {
+      seriesKey,
+      found: Boolean(stat),
+      rawCount: stat?.rawCount ?? 0,
+      latestRawDate: stat?.latestRawDate ?? null,
+    };
+  });
+
+  const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
+  const indicatorInputStatus = catalog.map((entry) => {
+    const snapshot = indicatorById.get(entry.indicatorId);
+    const expectedInputs = entry.inputs;
+    const foundInputs = expectedInputs.filter((input) => rawStats.bySeries.has(input));
+    return {
+      indicatorId: entry.indicatorId,
+      title: entry.title,
+      block: entry.block,
+      signalClass: entry.signalClass,
+      expectedInputs,
+      foundInputs,
+      valueLatest: snapshot?.valueLatest ?? null,
+      coverage10yPct: snapshot?.coverage10yPct ?? 0,
+      nullReason: snapshot?.nullReason ?? "No snapshot row",
+    };
+  });
+
+  const regimeCountRows = (await query(
+    `SELECT COUNT(*) AS total FROM ${tables.macroRegimeSnapshots} WHERE region = ?`,
+    [region],
+  )) as Array<{ total?: number | string }>;
+  const indicatorCountRows = (await query(
+    `SELECT COUNT(*) AS total
+     FROM ${tables.macroIndicatorSnapshots}
+     WHERE region = ? AND as_of_date = ?`,
+    [region, regimeRow.as_of_date],
+  )) as Array<{ total?: number | string }>;
+
+  const indicatorSnapshotCount = Number(indicatorCountRows[0]?.total ?? 0);
+  const regimeSnapshotCount = Number(regimeCountRows[0]?.total ?? 0);
+  const snapshotIsEmpty = indicatorSnapshotCount === 0 || indicators.every((item) => item.valueLatest === null);
+  const partialData = indicators.length > 0 && scoredCount < indicators.length;
+  const snapshotHealth = snapshotIsEmpty
+    ? "empty"
+    : partialData
+      ? "partial"
+      : "healthy";
+
+  const rootCauseHints: string[] = [];
+  if (rawStats.totalRawPointCount === 0) {
+    rootCauseHints.push("No raw datapoints found");
+  }
+  if (rawStats.totalRawPointCount > 0 && expectedVsFoundSeries.some((item) => !item.found)) {
+    rootCauseHints.push("Raw datapoints exist but expected series keys are missing");
+  }
+  if (snapshotIsEmpty) {
+    rootCauseHints.push("Snapshot exists but empty");
+  }
+  if (indicatorInputStatus.some((item) => item.expectedInputs.length > 0 && item.foundInputs.length === 0)) {
+    rootCauseHints.push("Derived or required input series missing for one or more indicators");
+  }
+  if (rootCauseHints.length === 0) {
+    rootCauseHints.push("No obvious pipeline issue detected");
+  }
 
   return {
     regime: {
@@ -130,13 +234,39 @@ async function readLatestSnapshot(region: string) {
     dataStatus: indicators.length > 0 ? "snapshot" : "insufficient",
     writePolicy: "read_only",
     stats: {
-      rawPointCount: null,
-      seriesCount: null,
+      rawPointCount: rawStats.totalRawPointCount,
+      seriesCount: rawStats.seriesCount,
       indicatorCount: indicators.length,
       scoredCount,
-      partialData: indicators.length > 0 && scoredCount < indicators.length,
+      partialData,
       snapshotAsOfDate: regimeRow.as_of_date,
       readMode: "snapshot",
+    },
+    debug: {
+      snapshotStatus: {
+        readMode: "snapshot",
+        dataStatus: indicators.length > 0 ? "snapshot" : "insufficient",
+        snapshotAsOfDate: regimeRow.as_of_date,
+        snapshotHealth,
+        fallbackLive: false,
+        primaryPath: true,
+      },
+      rawDataStats: {
+        rawPointCount: rawStats.totalRawPointCount,
+        seriesCount: rawStats.seriesCount,
+        indicatorCount: indicators.length,
+        scoredCount,
+        partialData,
+      },
+      expectedVsFoundSeries,
+      indicatorInputStatus,
+      snapshotContent: {
+        indicatorSnapshotCount,
+        regimeSnapshotCount,
+        latestSnapshotTimestamp: regimeRow.updated_at ?? regimeRow.as_of_date,
+        snapshotIsEmpty,
+      },
+      rootCauseHints,
     },
   };
 }

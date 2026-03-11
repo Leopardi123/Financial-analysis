@@ -38,7 +38,51 @@ type GlobalMacroPayload = {
     indicatorCount: number;
     scoredCount: number;
     partialData: boolean;
+    snapshotAsOfDate?: string;
+    readMode?: string;
   };
+  debug?: {
+    snapshotStatus: {
+      readMode: string;
+      dataStatus: string;
+      snapshotAsOfDate: string | null;
+      snapshotHealth: "healthy" | "partial" | "empty" | "invalid";
+      fallbackLive: boolean;
+      primaryPath: boolean;
+    };
+    rawDataStats: {
+      rawPointCount: number | null;
+      seriesCount: number | null;
+      indicatorCount: number;
+      scoredCount: number;
+      partialData: boolean;
+    };
+    expectedVsFoundSeries: Array<{
+      seriesKey: string;
+      found: boolean;
+      rawCount: number;
+      latestRawDate: string | null;
+    }>;
+    indicatorInputStatus: Array<{
+      indicatorId: string;
+      title: string;
+      block: string;
+      signalClass: string;
+      expectedInputs: string[];
+      foundInputs: string[];
+      valueLatest: number | null;
+      coverage10yPct: number;
+      nullReason: string;
+    }>;
+    snapshotContent: {
+      indicatorSnapshotCount: number;
+      regimeSnapshotCount: number;
+      latestSnapshotTimestamp: string | null;
+      snapshotIsEmpty: boolean;
+    };
+    rootCauseHints: string[];
+  };
+
 };
 
 export default function GlobalMacroDashboard() {
@@ -115,6 +159,8 @@ export default function GlobalMacroDashboard() {
     if (score === null) return 0;
     return Math.max(0, Math.min(100, score));
   }
+
+  const pipelineDebug = globalMacro?.debug ?? null;
 
   return (
     <div className="sector-dashboard">
@@ -217,24 +263,109 @@ export default function GlobalMacroDashboard() {
               )}
             </>
           )}
+          <details style={{ marginTop: 14 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>🔧 Pipeline Debug</summary>
+            <div style={{ marginTop: 10 }}>
+              <h4>Snapshot status</h4>
+              <ul>
+                <li>readMode: {pipelineDebug?.snapshotStatus.readMode ?? "—"}</li>
+                <li>dataStatus: {pipelineDebug?.snapshotStatus.dataStatus ?? globalMacro?.dataStatus ?? "—"}</li>
+                <li>snapshotAsOfDate: {pipelineDebug?.snapshotStatus.snapshotAsOfDate ?? globalMacro?.stats?.snapshotAsOfDate ?? "null"}</li>
+                <li>snapshotHealth: {pipelineDebug?.snapshotStatus.snapshotHealth ?? "invalid"}</li>
+                <li>fallbackLive: {String(pipelineDebug?.snapshotStatus.fallbackLive ?? false)}</li>
+                <li>primaryPathSnapshot: {String(pipelineDebug?.snapshotStatus.primaryPath ?? false)}</li>
+              </ul>
 
-          {debugEnabled && (
-            <details style={{ marginTop: 10 }}>
-              <summary style={{ cursor: "pointer" }}>Global Macro debug (debug=1)</summary>
-              <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify({
-                rawPayload: globalMacroRaw,
-                coreRegime: globalMacro?.regime.coreRegimeLabel ?? null,
-                overlays: globalMacro ? {
-                  growth: globalMacro.regime.growthOverlay,
-                  stress: globalMacro.regime.stressOverlay,
-                  hardAsset: globalMacro.regime.hardAssetOverlay,
-                } : null,
-                blockScores: globalMacro?.regime.blockScores ?? null,
-                topDrivers: globalMacro?.regime.topDrivers ?? [],
-                nullIndicators: globalMacroIndicators.filter((item) => item.score === null).map((item) => ({ id: item.indicatorId, reason: item.nullReason ?? "n/a" })),
-              }, null, 2)}</pre>
-            </details>
-          )}
+              <h4>Raw data stats</h4>
+              <ul>
+                <li>rawPointCount: {String(pipelineDebug?.rawDataStats.rawPointCount ?? null)}</li>
+                <li>seriesCount: {String(pipelineDebug?.rawDataStats.seriesCount ?? null)}</li>
+                <li>indicatorCount: {String(pipelineDebug?.rawDataStats.indicatorCount ?? globalMacroIndicators.length)}</li>
+                <li>scoredCount: {String(pipelineDebug?.rawDataStats.scoredCount ?? scoredCount)}</li>
+                <li>partialData: {String(pipelineDebug?.rawDataStats.partialData ?? isPartialData)}</li>
+              </ul>
+
+              <h4>Expected vs found series</h4>
+              <div style={{ overflowX: "auto" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>expectedSeriesKey</th>
+                      <th>found</th>
+                      <th>rawCount</th>
+                      <th>latestRawDate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(pipelineDebug?.expectedVsFoundSeries ?? []).map((row) => (
+                      <tr key={row.seriesKey}>
+                        <td>{row.seriesKey}</td>
+                        <td>{row.found ? "yes" : "no"}</td>
+                        <td>{row.rawCount}</td>
+                        <td>{row.latestRawDate ?? "null"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <h4>Indicator input status</h4>
+              <div style={{ overflowX: "auto" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>indicatorId</th>
+                      <th>title</th>
+                      <th>block</th>
+                      <th>signalClass</th>
+                      <th>expected input series</th>
+                      <th>found input series</th>
+                      <th>valueLatest</th>
+                      <th>coverage10yPct</th>
+                      <th>nullReason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(pipelineDebug?.indicatorInputStatus ?? []).map((row) => (
+                      <tr key={row.indicatorId}>
+                        <td>{row.indicatorId}</td>
+                        <td>{row.title}</td>
+                        <td>{row.block}</td>
+                        <td>{row.signalClass}</td>
+                        <td>{row.expectedInputs.join(", ") || "—"}</td>
+                        <td>{row.foundInputs.join(", ") || "—"}</td>
+                        <td>{row.valueLatest ?? "null"}</td>
+                        <td>{row.coverage10yPct.toFixed(1)}%</td>
+                        <td>{row.nullReason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <h4>Snapshot content</h4>
+              <ul>
+                <li>indicator snapshots: {pipelineDebug?.snapshotContent.indicatorSnapshotCount ?? "—"}</li>
+                <li>regime snapshots: {pipelineDebug?.snapshotContent.regimeSnapshotCount ?? "—"}</li>
+                <li>latest snapshot timestamp: {pipelineDebug?.snapshotContent.latestSnapshotTimestamp ?? "null"}</li>
+                <li>snapshotIsEmpty: {String(pipelineDebug?.snapshotContent.snapshotIsEmpty ?? true)}</li>
+              </ul>
+
+              <h4>Root cause hints</h4>
+              <ul>
+                {(pipelineDebug?.rootCauseHints ?? ["No debug hints available"]).map((hint) => (
+                  <li key={hint}>{hint}</li>
+                ))}
+              </ul>
+
+              {debugEnabled && (
+                <>
+                  <h4>Raw payload (?debug=1)</h4>
+                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(globalMacroRaw, null, 2)}</pre>
+                </>
+              )}
+            </div>
+          </details>
         </div>
       </div>
     </div>
