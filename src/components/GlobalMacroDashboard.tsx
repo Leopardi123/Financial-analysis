@@ -74,6 +74,18 @@ type GlobalMacroPayload = {
       coverage10yPct: number;
       nullReason: string | null;
     }>;
+    blockStatus?: Record<string, { status: "Scorable" | "Insufficient"; scored: number; total: number; reasons: string[] }>;
+    overlayDataStatus?: Record<string, { scoredInputs: string[]; missingInputs: string[]; usesFallback: boolean }>;
+    confidenceDiagnostics?: {
+      macroConfidence: number;
+      formula: string;
+      clearSignalsScored: number;
+      clearSignalsTotal: number;
+      speculativeSignalsScored: number;
+      speculativeSignalsTotal: number;
+      overlayFallbackCount: number;
+      note: string;
+    };
     snapshotContent: {
       indicatorSnapshotCount: number;
       regimeSnapshotCount: number;
@@ -99,6 +111,9 @@ type GlobalMacroPayload = {
         insertAttempted: boolean;
         attemptedInserts: number;
         insertedRowCount: number;
+        duplicateOrUnchangedRows: number;
+        dedupeOnlyRun: boolean;
+        ingestOutcome: "nothing_to_write" | "inserted_new_rows" | "dedupe_or_unchanged_only";
         insertSucceeded: boolean;
         seriesResults: Array<{
           seriesId: string;
@@ -459,6 +474,35 @@ export default function GlobalMacroDashboard() {
                 </table>
               </div>
 
+              <h4>Block status</h4>
+              <ul>
+                {Object.entries(pipelineDebug?.blockStatus ?? {}).map(([block, status]) => (
+                  <li key={block}>
+                    {block}: {status.status} ({status.scored}/{status.total} scored)
+                    {status.reasons.length > 0 ? ` — ${status.reasons.join("; ")}` : ""}
+                  </li>
+                ))}
+              </ul>
+
+              <h4>Overlay data status</h4>
+              <ul>
+                {Object.entries(pipelineDebug?.overlayDataStatus ?? {}).map(([overlay, status]) => (
+                  <li key={overlay}>
+                    {overlay}: scored inputs [{status.scoredInputs.join(", ") || "none"}], missing [{status.missingInputs.join(", ") || "none"}], usesFallback={String(status.usesFallback)}
+                  </li>
+                ))}
+              </ul>
+
+              <h4>Confidence diagnostics</h4>
+              <ul>
+                <li>macroConfidence: {pipelineDebug?.confidenceDiagnostics?.macroConfidence ?? "—"}%</li>
+                <li>formula: {pipelineDebug?.confidenceDiagnostics?.formula ?? "—"}</li>
+                <li>clear signals: {pipelineDebug?.confidenceDiagnostics ? `${pipelineDebug.confidenceDiagnostics.clearSignalsScored}/${pipelineDebug.confidenceDiagnostics.clearSignalsTotal}` : "—"}</li>
+                <li>speculative signals: {pipelineDebug?.confidenceDiagnostics ? `${pipelineDebug.confidenceDiagnostics.speculativeSignalsScored}/${pipelineDebug.confidenceDiagnostics.speculativeSignalsTotal}` : "—"}</li>
+                <li>overlay fallback count: {pipelineDebug?.confidenceDiagnostics?.overlayFallbackCount ?? "—"}</li>
+                <li>note: {pipelineDebug?.confidenceDiagnostics?.note ?? "—"}</li>
+              </ul>
+
               <h4>Snapshot content</h4>
               <ul>
                 <li>indicator snapshots: {pipelineDebug?.snapshotContent.indicatorSnapshotCount ?? "—"}</li>
@@ -488,9 +532,12 @@ export default function GlobalMacroDashboard() {
                   <li>region: {pipelineDebug.ingestionDebug.latestAttempt.region}</li>
                   <li>mode: {pipelineDebug.ingestionDebug.latestAttempt.mode}</li>
                   <li>success: {String(pipelineDebug.ingestionDebug.latestAttempt.success)}</li>
-                  <li>fetched observations: {pipelineDebug.ingestionDebug.latestAttempt.fetchedObservationCount}</li>
+                  <li>fetched rows: {pipelineDebug.ingestionDebug.latestAttempt.fetchedObservationCount}</li>
                   <li>attempted inserts: {pipelineDebug.ingestionDebug.latestAttempt.attemptedInserts}</li>
-                  <li>actual inserted rows: {pipelineDebug.ingestionDebug.latestAttempt.insertedRowCount}</li>
+                  <li>new rows inserted: {pipelineDebug.ingestionDebug.latestAttempt.insertedRowCount}</li>
+                  <li>duplicate/unchanged rows skipped: {pipelineDebug.ingestionDebug.latestAttempt.duplicateOrUnchangedRows}</li>
+                  <li>dedupe-only run: {String(pipelineDebug.ingestionDebug.latestAttempt.dedupeOnlyRun)}</li>
+                  <li>ingest outcome: {pipelineDebug.ingestionDebug.latestAttempt.ingestOutcome}</li>
                   <li>insert succeeded: {String(pipelineDebug.ingestionDebug.latestAttempt.insertSucceeded)}</li>
                   <li>admin authorized: {String(pipelineDebug.ingestionDebug.latestAttempt.adminAuthorized)}</li>
                   <li>failing step: {pipelineDebug.ingestionDebug.latestAttempt.failingStep ?? "none"}</li>

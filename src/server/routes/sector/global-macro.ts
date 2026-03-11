@@ -205,6 +205,11 @@ async function getLatestIngestRun(region: string) {
 
   const row = rows[0];
   if (!row) return null;
+  const attemptedInserts = Number(row.attempted_inserts ?? 0);
+  const insertedRowCount = Number(row.inserted_row_count ?? 0);
+  const duplicateOrUnchangedRows = Math.max(0, attemptedInserts - insertedRowCount);
+  const fetchedObservationCount = Number(row.fetched_observation_count ?? 0);
+
   return {
     timestamp: row.attempted_at,
     region: row.region,
@@ -216,10 +221,11 @@ async function getLatestIngestRun(region: string) {
     fetchStarted: Number(row.fetch_started ?? 0) === 1,
     fetchSucceeded: Number(row.fetch_succeeded ?? 0) === 1,
     fetchedSeries: Number(row.fetched_series ?? 0),
-    fetchedObservationCount: Number(row.fetched_observation_count ?? 0),
+    fetchedObservationCount,
     insertAttempted: Number(row.insert_attempted ?? 0) === 1,
-    attemptedInserts: Number(row.attempted_inserts ?? 0),
-    insertedRowCount: Number(row.inserted_row_count ?? 0),
+    attemptedInserts,
+    insertedRowCount,
+    duplicateOrUnchangedRows,
     seriesResults: safeJsonParse<Array<{
       seriesId: string;
       seriesKey: string;
@@ -229,7 +235,13 @@ async function getLatestIngestRun(region: string) {
     }>>(row.series_results_json, []),
     failingStep: row.failing_step,
     errorMessage: row.error_message,
-    insertSucceeded: Number(row.inserted_row_count ?? 0) > 0,
+    insertSucceeded: insertedRowCount > 0,
+    dedupeOnlyRun: attemptedInserts > 0 && insertedRowCount === 0,
+    ingestOutcome: attemptedInserts === 0
+      ? "nothing_to_write"
+      : insertedRowCount > 0
+        ? "inserted_new_rows"
+        : "dedupe_or_unchanged_only",
   };
 }
 
@@ -429,6 +441,28 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
         ? "partial"
         : "healthy";
 
+  const clearCatalog = catalog.filter((entry) => entry.signalClass === "clear");
+  const clearScored = indicators.filter((item) => {
+    const meta = catalogById.get(item.indicatorId);
+    return meta?.signalClass === "clear" && item.score !== null;
+  }).length;
+  const speculativeCatalog = catalog.filter((entry) => entry.signalClass === "speculative");
+  const speculativeScored = indicators.filter((item) => {
+    const meta = catalogById.get(item.indicatorId);
+    return meta?.signalClass === "speculative" && item.score !== null;
+  }).length;
+  const overlayFallbackCount = Object.values(overlayDataStatus).filter((item) => item.usesFallback).length;
+  const confidenceDiagnostics = {
+    macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+    formula: "clear_signals_scored / clear_signals_total",
+    clearSignalsScored: clearScored,
+    clearSignalsTotal: clearCatalog.length,
+    speculativeSignalsScored: speculativeScored,
+    speculativeSignalsTotal: speculativeCatalog.length,
+    overlayFallbackCount,
+    note: "Current confidence model tracks clear-signal coverage only; overlay fallback does not directly penalize confidence.",
+  };
+
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
     rootCauseHints.push("No raw datapoints found");
@@ -500,6 +534,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       indicatorInputStatus,
       blockStatus,
       overlayDataStatus,
+      confidenceDiagnostics,
       snapshotContent: {
         indicatorSnapshotCount,
         regimeSnapshotCount,

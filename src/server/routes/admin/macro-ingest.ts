@@ -39,6 +39,9 @@ export default async function handler(req: any, res: any) {
     insertAttempted: false,
     attemptedInserts: 0,
     insertedRowCount: 0,
+    duplicateOrUnchangedRows: 0,
+    dedupeOnlyRun: false,
+    ingestOutcome: "not_started" as "not_started" | "nothing_to_write" | "inserted_new_rows" | "dedupe_or_unchanged_only",
     failingStep: null as string | null,
     errorMessage: null as string | null,
     seriesResults,
@@ -160,6 +163,14 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    debug.duplicateOrUnchangedRows = Math.max(0, debug.attemptedInserts - debug.insertedRowCount);
+    debug.dedupeOnlyRun = debug.attemptedInserts > 0 && debug.insertedRowCount === 0;
+    debug.ingestOutcome = debug.attemptedInserts === 0
+      ? "nothing_to_write"
+      : debug.insertedRowCount > 0
+        ? "inserted_new_rows"
+        : "dedupe_or_unchanged_only";
+
     const allSeriesFailed = debug.fetchedSeries === 0;
     if (allSeriesFailed) {
       debug.failingStep = "fetch";
@@ -207,6 +218,14 @@ export default async function handler(req: any, res: any) {
       derivedRowCount,
       writeStatements: statements.length,
       batchChunks: chunks.length,
+      ingestSummary: {
+        fetchedRows: debug.fetchedObservationCount,
+        attemptedInserts: debug.attemptedInserts,
+        newRowsInserted: debug.insertedRowCount,
+        duplicateOrUnchangedRows: debug.duplicateOrUnchangedRows,
+        dedupeOnlyRun: debug.dedupeOnlyRun,
+        ingestOutcome: debug.ingestOutcome,
+      },
       debug,
     });
   } catch (error) {
@@ -256,6 +275,14 @@ export default async function handler(req: any, res: any) {
     res.status(status).json({
       ok: false,
       error: (error as Error).message,
+      ingestSummary: {
+        fetchedRows: debug.fetchedObservationCount,
+        attemptedInserts: debug.attemptedInserts,
+        newRowsInserted: debug.insertedRowCount,
+        duplicateOrUnchangedRows: debug.duplicateOrUnchangedRows,
+        dedupeOnlyRun: debug.dedupeOnlyRun,
+        ingestOutcome: debug.ingestOutcome,
+      },
       debug,
     });
   }
