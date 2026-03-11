@@ -3,6 +3,7 @@ import Header from "../components/Header";
 import Section from "../components/Section";
 import SingleStockDashboard from "../components/SingleStockDashboard";
 import SectorDashboard from "../components/SectorDashboard";
+import GlobalMacroDashboard from "../components/GlobalMacroDashboard";
 import ScreeningDashboard from "../components/ScreeningDashboard";
 import ErrorBoundary from "../components/ErrorBoundary";
 import "../styles/dashboard.css";
@@ -52,6 +53,16 @@ export default function Dashboard() {
           background="#d7cee9"
         >
           <SectorDashboard />
+        </Section>
+
+
+        <Section
+          id="globalmacro"
+          title="GLOBAL MACRO DASHBOARD"
+          description="Read-only global macro regime och overlays på egen toppnivå."
+          background="#cedee9"
+        >
+          <GlobalMacroDashboard />
         </Section>
 
         <Section
