@@ -26,7 +26,7 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "M2SL", seriesKey: "m2sl" },
   { fredSeriesId: "DFII5", seriesKey: "real_yield_5y" },
   { fredSeriesId: "DGS3MO", seriesKey: "nominal_yield_3mo_us" },
-  { fredSeriesId: "GSCPIA", seriesKey: "supply_chain_pressure", fallbackFredSeriesIds: ["GSCPI"] },
+  { fredSeriesId: "GSCPIA", seriesKey: "supply_chain_pressure", fallbackFredSeriesIds: ["GSCPI"], latestLookbackMonths: 240, backfillLookbackYears: 25 },
   { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us", latestLookbackMonths: 180, backfillLookbackYears: 25 },
   { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 240, backfillLookbackYears: 25 },
   { fredSeriesId: "INDPRO", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
@@ -130,10 +130,10 @@ function alignBinaryOperation(
   right: Array<{ date: string; value: number | null }>,
   op: (leftValue: number, rightValue: number) => number | null,
 ): Array<{ date: string; value: number | null }> {
-  const rightByDate = new Map(right.map((row) => [row.date, row.value]));
+  const rightByMonth = new Map(right.map((row) => [row.date.slice(0, 7), row.value]));
   return left
     .map((row) => {
-      const rv = rightByDate.get(row.date);
+      const rv = rightByMonth.get(row.date.slice(0, 7));
       if (row.value === null || rv === null || rv === undefined) return { date: row.date, value: null };
       return { date: row.date, value: op(row.value, rv) };
     })
