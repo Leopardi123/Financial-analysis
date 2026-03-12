@@ -90,6 +90,15 @@ export default async function handler(req: any, res: any) {
       fetchedMaxDate: null as string | null,
       fetchedRowCount: 0,
     },
+    silverRequest: {
+      endpoint: "historical-price-eod/full",
+      symbol: "SIUSD",
+      from: "2000-01-01",
+      to: new Date().toISOString().slice(0, 10),
+      fetchedMinDate: null as string | null,
+      fetchedMaxDate: null as string | null,
+      fetchedRowCount: 0,
+    },
   };
 
   try {
@@ -130,8 +139,8 @@ export default async function handler(req: any, res: any) {
     const sourceSeriesMap: Record<string, Array<{ date: string; value: number | null }>> = {};
     for (const entry of US_FRED_SERIES) {
       const candidateSeriesIds = entry.seriesKey === "pmi_us"
-        ? Array.from(new Set([entry.fredSeriesId, ...PMI_FRED_FALLBACK_IDS]))
-        : [entry.fredSeriesId];
+        ? Array.from(new Set([entry.fredSeriesId, ...(entry.fallbackFredSeriesIds ?? []), ...PMI_FRED_FALLBACK_IDS]))
+        : Array.from(new Set([entry.fredSeriesId, ...(entry.fallbackFredSeriesIds ?? [])]));
 
       let fetched = false;
       const attemptErrors: string[] = [];
@@ -221,6 +230,57 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+
+    try {
+      const silverFrom = "2000-01-01";
+      const silverTo = new Date().toISOString().slice(0, 10);
+      debug.silverRequest.from = silverFrom;
+      debug.silverRequest.to = silverTo;
+
+      const silverPayload = await fetchStableJson<unknown>("historical-price-eod/full", { symbol: "SIUSD", from: silverFrom, to: silverTo });
+      const silverRows = normalizeFmpEodRows(silverPayload);
+      const silverRange = summarizeSeriesRange(silverRows);
+      debug.silverRequest.fetchedMinDate = silverRange.minDate;
+      debug.silverRequest.fetchedMaxDate = silverRange.maxDate;
+      debug.silverRequest.fetchedRowCount = silverRange.rowCount;
+
+      sourceSeriesMap.silver_usd = silverRows;
+      debug.fetchedSeries += silverRows.length > 0 ? 1 : 0;
+      debug.fetchedObservationCount += silverRows.length;
+      seriesResults.push({
+        seriesId: `historical-price-eod/full?symbol=SIUSD&from=${silverFrom}&to=${silverTo}`,
+        seriesKey: "silver_usd",
+        fetchSuccess: silverRows.length > 0,
+        observationsFetched: silverRows.length,
+        errorMessage: null,
+        meta: {
+          requestPattern: "single_request_with_explicit_from_to",
+          endpoint: "historical-price-eod/full",
+          symbol: "SIUSD",
+          from: silverFrom,
+          to: silverTo,
+          fetchedMinDate: silverRange.minDate,
+          fetchedMaxDate: silverRange.maxDate,
+          fetchedRowCount: silverRange.rowCount,
+        },
+      });
+    } catch (error) {
+      seriesResults.push({
+        seriesId: "historical-price-eod/full?symbol=SIUSD",
+        seriesKey: "silver_usd",
+        fetchSuccess: false,
+        observationsFetched: 0,
+        errorMessage: (error as Error).message,
+        meta: {
+          requestPattern: "single_request_with_explicit_from_to",
+          endpoint: "historical-price-eod/full",
+          symbol: "SIUSD",
+          from: debug.silverRequest.from,
+          to: debug.silverRequest.to,
+        },
+      });
+    }
+
     debug.fetchSucceeded = debug.fetchedSeries > 0;
 
     const derivedSeriesMap = buildDerivedSeries(sourceSeriesMap);
@@ -240,7 +300,7 @@ export default async function handler(req: any, res: any) {
                   value = excluded.value,
                   fetched_at = excluded.fetched_at
                 WHERE COALESCE(${tables.macroRawDatapoints}.value, -9.99999999e99) != COALESCE(excluded.value, -9.99999999e99)`,
-          args: [seriesKey === "gold_usd" ? "fmp" : "fred", region, seriesKey, point.date, point.value, now],
+          args: [["gold_usd", "silver_usd"].includes(seriesKey) ? "fmp" : "fred", region, seriesKey, point.date, point.value, now],
         });
       }
     }
