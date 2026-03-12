@@ -1,6 +1,7 @@
 export type FredSeriesConfig = {
   fredSeriesId: string;
   seriesKey: string;
+  fallbackFredSeriesIds?: string[];
   latestLookbackMonths?: number;
   backfillLookbackYears?: number;
 };
@@ -19,13 +20,13 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "DCOILBRENTEU", seriesKey: "oil_brent_usd" },
   { fredSeriesId: "DHHNGSP", seriesKey: "natgas_usd" },
   { fredSeriesId: "PCOPPUSDM", seriesKey: "copper_usd" },
-  { fredSeriesId: "PINDUUSDM", seriesKey: "industrial_metals_index" },
-  { fredSeriesId: "PALLFNFNFUSDM", seriesKey: "commodity_index" },
+  { fredSeriesId: "PMETAUSDM", seriesKey: "industrial_metals_index", fallbackFredSeriesIds: ["PINDUUSDM", "PINDUINDEXM"] },
+  { fredSeriesId: "PALLFNFUSDM", seriesKey: "commodity_index", fallbackFredSeriesIds: ["PALLFNFNFUSDM", "PALLFNFINDEXM"] },
   { fredSeriesId: "WALCL", seriesKey: "fed_balance_sheet_total" },
   { fredSeriesId: "M2SL", seriesKey: "m2sl" },
   { fredSeriesId: "DFII5", seriesKey: "real_yield_5y" },
   { fredSeriesId: "DGS3MO", seriesKey: "nominal_yield_3mo_us" },
-  { fredSeriesId: "GSCPI", seriesKey: "supply_chain_pressure" },
+  { fredSeriesId: "GSCPIA", seriesKey: "supply_chain_pressure", fallbackFredSeriesIds: ["GSCPI"] },
   { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us", latestLookbackMonths: 180, backfillLookbackYears: 25 },
   { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 240, backfillLookbackYears: 25 },
   { fredSeriesId: "INDPRO", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },

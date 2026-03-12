@@ -139,8 +139,8 @@ export default async function handler(req: any, res: any) {
     const sourceSeriesMap: Record<string, Array<{ date: string; value: number | null }>> = {};
     for (const entry of US_FRED_SERIES) {
       const candidateSeriesIds = entry.seriesKey === "pmi_us"
-        ? Array.from(new Set([entry.fredSeriesId, ...PMI_FRED_FALLBACK_IDS]))
-        : [entry.fredSeriesId];
+        ? Array.from(new Set([entry.fredSeriesId, ...(entry.fallbackFredSeriesIds ?? []), ...PMI_FRED_FALLBACK_IDS]))
+        : Array.from(new Set([entry.fredSeriesId, ...(entry.fallbackFredSeriesIds ?? [])]));
 
       let fetched = false;
       const attemptErrors: string[] = [];
