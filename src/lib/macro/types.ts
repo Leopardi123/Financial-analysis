@@ -10,7 +10,7 @@ export type MacroIndicatorCatalogEntry = {
   title: string;
   description: string;
   inputs: string[];
-  transform: "identity" | "spread" | "yoy" | "momentum";
+  transform: "identity" | "level" | "spread" | "ratio" | "yoy" | "yoy_change" | "momentum";
   scoring: "percentile_10y";
   blockWeight: number;
   overlay?: OverlayType;
