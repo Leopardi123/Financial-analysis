@@ -245,6 +245,14 @@ export default function GlobalMacroDashboard() {
   const [adminSecretInput, setAdminSecretInput] = useState("");
   const [ingestRunResult, setIngestRunResult] = useState<Record<string, unknown> | null>(null);
   const [engineRunResult, setEngineRunResult] = useState<Record<string, unknown> | null>(null);
+  const [selectedOverlaySegment, setSelectedOverlaySegment] = useState<{
+    overlay: "Growth" | "Stress" | "Hard Asset";
+    value: string;
+    startDate: string;
+    endDate: string;
+    pointCount: number;
+    explanation: string;
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -353,6 +361,17 @@ export default function GlobalMacroDashboard() {
   const overlayIntervals = macroHistory?.intervals.overlays ?? { growth: [], stress: [], hardAsset: [] };
   const latestHistoryPoint = historyPoints[historyPoints.length - 1] ?? null;
   const latestRegimeInterval = regimeIntervals[regimeIntervals.length - 1] ?? null;
+  const hasOverlayIntervals =
+    overlayIntervals.growth.length > 0 || overlayIntervals.stress.length > 0 || overlayIntervals.hardAsset.length > 0;
+  const timelineStartDate = macroHistory?.replayEarliestDateUsed ?? macroHistory?.rangeDebug.actualStartDate ?? null;
+  const timelineEndDate = macroHistory?.replayLatestDateUsed ?? macroHistory?.rangeDebug.actualEndDate ?? null;
+  const timelineWindow = useMemo(() => {
+    if (!timelineStartDate || !timelineEndDate) return null;
+    const start = new Date(`${timelineStartDate}T00:00:00.000Z`).getTime();
+    const end = new Date(`${timelineEndDate}T00:00:00.000Z`).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+    return { start, end };
+  }, [timelineStartDate, timelineEndDate]);
 
 
   function regimeColor(regime: string) {
@@ -372,6 +391,32 @@ export default function GlobalMacroDashboard() {
     if (value === "Weak") return "#fee2e2";
     if (value === "Neutral") return "#fde68a";
     return "#dcfce7";
+  }
+
+  function overlayDescription(name: "growth" | "stress" | "hard_asset", value: string): string {
+    if (name === "stress") {
+      if (value === "Low") return "Låg marknadsstress och bättre riskaptit.";
+      if (value === "Medium") return "Blandad stressbild med viss försiktighet.";
+      return "Hög stress i makromiljön och defensiv riskregim.";
+    }
+    if (value === "Weak") return "Svag tillväxt/real tillgångsdynamik relativt neutral nivå.";
+    if (value === "Neutral") return "Balansläge utan tydlig styrka eller svaghet.";
+    return "Stark tillväxt/real tillgångsdynamik relativt historik.";
+  }
+
+  function segmentPosition(startDate: string, endDate: string): { left: number; width: number } {
+    if (!timelineWindow) return { left: 0, width: 100 };
+    const total = Math.max(1, timelineWindow.end - timelineWindow.start);
+    const start = new Date(`${startDate}T00:00:00.000Z`).getTime();
+    const end = new Date(`${endDate}T00:00:00.000Z`).getTime();
+    const left = Math.max(0, ((start - timelineWindow.start) / total) * 100);
+    const rawWidth = ((Math.max(start, end) - start) / total) * 100;
+    const width = Math.max(1.5, rawWidth);
+    return { left, width: Math.min(100 - left, width) };
+  }
+
+  function latestOverlayDate(intervals: Array<{ endDate: string }>): string {
+    return intervals.length > 0 ? intervals[intervals.length - 1].endDate : "—";
   }
 
   async function runIngest(mode: "backfill" | "latest") {
@@ -599,37 +644,121 @@ export default function GlobalMacroDashboard() {
                   />
 
                   <h5>4) Overlay Timelines</h5>
-                  <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>Growth</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {overlayIntervals.growth.map((interval) => (
-                          <span key={`ov-growth-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("growth", interval.value) }}>
-                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                          </span>
-                        ))}
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 6, fontSize: 12, marginBottom: 8 }}>
+                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
+                        <strong>Growth</strong>: {overlayIntervals.growth[overlayIntervals.growth.length - 1]?.value ?? "—"}<br />
+                        Senast ändrad: {latestOverlayDate(overlayIntervals.growth)}
+                      </div>
+                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
+                        <strong>Stress</strong>: {overlayIntervals.stress[overlayIntervals.stress.length - 1]?.value ?? "—"}<br />
+                        Senast ändrad: {latestOverlayDate(overlayIntervals.stress)}
+                      </div>
+                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
+                        <strong>Hard Asset</strong>: {overlayIntervals.hardAsset[overlayIntervals.hardAsset.length - 1]?.value ?? "—"}<br />
+                        Senast ändrad: {latestOverlayDate(overlayIntervals.hardAsset)}
                       </div>
                     </div>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>Stress</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {overlayIntervals.stress.map((interval) => (
-                          <span key={`ov-stress-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("stress", interval.value) }}>
-                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                          </span>
-                        ))}
+
+                    {!hasOverlayIntervals ? (
+                      <div className="status empty">För lite overlay-historik för full tidslinje. Visar tillgängliga segment när data finns.</div>
+                    ) : (
+                      <div style={{ overflowX: "auto", paddingBottom: 6 }}>
+                        <div style={{ minWidth: 680, border: "1px solid #d1d5db", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8, color: "#475569" }}>
+                            <span>{timelineStartDate ?? "—"}</span>
+                            <span>{timelineEndDate ?? "—"}</span>
+                          </div>
+                          {[
+                            { key: "growth" as const, label: "Growth" as const, intervals: overlayIntervals.growth, palette: "growth" as const },
+                            { key: "stress" as const, label: "Stress" as const, intervals: overlayIntervals.stress, palette: "stress" as const },
+                            { key: "hardAsset" as const, label: "Hard Asset" as const, intervals: overlayIntervals.hardAsset, palette: "hard_asset" as const },
+                          ].map((row) => (
+                            <div key={row.key} style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>{row.label}</div>
+                              <div style={{ position: "relative", height: 26, borderRadius: 8, border: "1px solid #d1d5db", overflow: "hidden", background: "#fff" }}>
+                                {row.intervals.map((interval) => {
+                                  const { left, width } = segmentPosition(interval.startDate, interval.endDate);
+                                  const description = overlayDescription(row.palette, interval.value);
+                                  return (
+                                    <button
+                                      key={`${row.key}-${interval.startDate}-${interval.endDate}-${interval.value}`}
+                                      type="button"
+                                      onClick={() => setSelectedOverlaySegment({
+                                        overlay: row.label,
+                                        value: interval.value,
+                                        startDate: interval.startDate,
+                                        endDate: interval.endDate,
+                                        pointCount: interval.pointCount,
+                                        explanation: description,
+                                      })}
+                                      title={`${row.label}: ${interval.value}\n${interval.startDate} → ${interval.endDate}\nPunkter: ${interval.pointCount}\n${description}`}
+                                      style={{
+                                        position: "absolute",
+                                        left: `${left}%`,
+                                        width: `${width}%`,
+                                        top: 0,
+                                        bottom: 0,
+                                        border: "none",
+                                        borderRight: "1px solid rgba(15,23,42,0.18)",
+                                        background: overlayColor(row.palette, interval.value),
+                                        padding: 0,
+                                        margin: 0,
+                                        cursor: "pointer",
+                                      }}
+                                      aria-label={`${row.label} ${interval.value} ${interval.startDate} till ${interval.endDate}`}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>Hard Asset</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {overlayIntervals.hardAsset.map((interval) => (
-                          <span key={`ov-hard-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("hard_asset", interval.value) }}>
-                            {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                          </span>
-                        ))}
+                    )}
+
+                    {selectedOverlaySegment && (
+                      <div style={{ marginTop: 8, fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <strong>{selectedOverlaySegment.overlay}</strong> · <strong>{selectedOverlaySegment.value}</strong> · {selectedOverlaySegment.startDate} → {selectedOverlaySegment.endDate} · {selectedOverlaySegment.pointCount} punkter<br />
+                        {selectedOverlaySegment.explanation}
                       </div>
-                    </div>
+                    )}
+
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Debug: visa textintervall</summary>
+                      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>Growth</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {overlayIntervals.growth.map((interval) => (
+                              <span key={`ov-growth-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("growth", interval.value) }}>
+                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>Stress</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {overlayIntervals.stress.map((interval) => (
+                              <span key={`ov-stress-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("stress", interval.value) }}>
+                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>Hard Asset</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {overlayIntervals.hardAsset.map((interval) => (
+                              <span key={`ov-hard-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("hard_asset", interval.value) }}>
+                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </details>
                   </div>
 
                   <h5>5) Regime Change Log</h5>
