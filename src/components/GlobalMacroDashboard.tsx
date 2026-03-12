@@ -367,11 +367,11 @@ export default function GlobalMacroDashboard() {
   const pointByDate = useMemo(() => new Map(historyPoints.map((item) => [item.asOfDate, item])), [historyPoints]);
 
   function regimeColor(regime: string) {
-    if (regime === "MonetaryDominance") return "#dbeafe";
-    if (regime === "Balanced") return "#dcfce7";
-    if (regime === "FiscalPressureBuilding") return "#fef3c7";
-    if (regime === "FiscalDominanceRisk") return "#fee2e2";
-    return "#e5e7eb";
+    if (regime === "MonetaryDominance") return "#5a6a80";
+    if (regime === "Balanced") return "#6e7b64";
+    if (regime === "FiscalPressureBuilding") return "#8c7450";
+    if (regime === "FiscalDominanceRisk") return "#7a5851";
+    return "#5b5b58";
   }
 
   function regimeExplanation(regime: string) {
@@ -384,13 +384,13 @@ export default function GlobalMacroDashboard() {
 
   function overlayColor(name: "growth" | "stress" | "hard_asset", value: string) {
     if (name === "stress") {
-      if (value === "Low") return "#22c55e";
-      if (value === "Medium") return "#f59e0b";
-      return "#ef4444";
+      if (value === "Low") return "#5f7f63";
+      if (value === "Medium") return "#8e744d";
+      return "#865550";
     }
-    if (value === "Weak") return "#ef4444";
-    if (value === "Neutral") return "#f59e0b";
-    return "#22c55e";
+    if (value === "Weak") return "#865550";
+    if (value === "Neutral") return "#8c7450";
+    return "#5f7f63";
   }
 
   function overlayDescription(name: "growth" | "stress" | "hard_asset", value: string): string {
@@ -425,11 +425,37 @@ export default function GlobalMacroDashboard() {
   }
 
   const blockSeriesMeta = [
-    { key: "A_FISCAL" as const, label: "Fiscal", color: "#60a5fa", valueOf: (point: MacroHistoryPayload["points"][number]) => point.fiscalScore },
-    { key: "B_MONETARY" as const, label: "Monetary", color: "#34d399", valueOf: (point: MacroHistoryPayload["points"][number]) => point.monetaryScore },
-    { key: "C_INFLATION" as const, label: "Inflation", color: "#f59e0b", valueOf: (point: MacroHistoryPayload["points"][number]) => point.inflationScore },
-    { key: "D_CREDIBILITY" as const, label: "Credibility", color: "#f472b6", valueOf: (point: MacroHistoryPayload["points"][number]) => point.credibilityScore },
+    { key: "A_FISCAL" as const, label: "Fiscal", color: "#6f86a8", valueOf: (point: MacroHistoryPayload["points"][number]) => point.fiscalScore },
+    { key: "B_MONETARY" as const, label: "Monetary", color: "#5f7f63", valueOf: (point: MacroHistoryPayload["points"][number]) => point.monetaryScore },
+    { key: "C_INFLATION" as const, label: "Inflation", color: "#a27a4a", valueOf: (point: MacroHistoryPayload["points"][number]) => point.inflationScore },
+    { key: "D_CREDIBILITY" as const, label: "Credibility", color: "#7b6676", valueOf: (point: MacroHistoryPayload["points"][number]) => point.credibilityScore },
   ];
+
+  const axisTicks = useMemo(() => {
+    if (historyPoints.length === 0) return [] as Array<{ index: number; date: string; label: string }>;
+    const desired = historyResolution === "MONTHLY" ? 8 : 10;
+    const total = historyPoints.length;
+    const step = Math.max(1, Math.floor((total - 1) / Math.max(1, desired - 1)));
+    const idx = new Set<number>([0, total - 1]);
+    for (let i = step; i < total - 1; i += step) idx.add(i);
+    return Array.from(idx).sort((a, b) => a - b).map((index) => {
+      const date = historyPoints[index]?.asOfDate ?? "";
+      return { index, date, label: historyResolution === "MONTHLY" ? date.slice(0, 7) : date };
+    });
+  }, [historyPoints, historyResolution]);
+
+  function overlayIntensity(type: "growth" | "stress" | "hard_asset", value: string): number {
+    if (type === "stress") return value === "High" ? 3 : value === "Medium" ? 2 : 1;
+    return value === "Strong" ? 3 : value === "Neutral" ? 2 : 1;
+  }
+
+  function areaPath(top: Array<{ x: number; y: number }>, base: Array<{ x: number; y: number }>): string {
+    if (top.length === 0 || base.length === 0) return "";
+    const head = `M ${top[0].x} ${top[0].y}`;
+    const topLine = top.slice(1).map((point) => `L ${point.x} ${point.y}`).join(" ");
+    const back = base.slice().reverse().map((point) => `L ${point.x} ${point.y}`).join(" ");
+    return `${head} ${topLine} ${back} Z`;
+  }
 
   async function runIngest(mode: "backfill" | "latest") {
     setIngestRunningMode(mode);
@@ -504,7 +530,7 @@ export default function GlobalMacroDashboard() {
   return (
     <div className="sector-dashboard">
       <div className="sector-grid">
-        <div className="sector-card">
+        <div className="sector-card macro-premium-card">
           <h3>Global Macro Dashboard</h3>
           <p className="bread">Global Macro tolkar det makroekonomiska klimatet över tid genom att väga samman finansiering, räntor, inflation, trovärdighet och marknadsstress. Målet är att ge en lugn men skarp lägesbild av vilken regim marknaden befinner sig i – och på sikt knyta den till riskklimat, bull/bear-faser och den bredare kapitalmiljön.</p>
 
@@ -599,17 +625,17 @@ export default function GlobalMacroDashboard() {
                   <div style={{ fontSize: 12, marginBottom: 6 }}>
                     <strong>Score zones:</strong> ≤{macroHistory.template.thresholds.monetaryDominanceMax} MonetaryDominance, {macroHistory.template.thresholds.monetaryDominanceMax + 1}–{macroHistory.template.thresholds.balancedMax} Balanced, {macroHistory.template.thresholds.balancedMax + 1}–{macroHistory.template.thresholds.fiscalPressureMax} FiscalPressureBuilding, &gt;{macroHistory.template.thresholds.fiscalPressureMax} FiscalDominanceRisk.
                   </div>
-                  <div style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: 10, background: "#f8fafc", marginBottom: 8 }}>
-                    <svg viewBox="0 0 1000 260" style={{ width: "100%", height: "260px", display: "block" }} role="img" aria-label="Macro score history med regimebakgrund">
+                  <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27", marginBottom: 8 }}>
+                    <svg viewBox="0 0 1000 320" style={{ width: "100%", height: "360px", display: "block" }} role="img" aria-label="Macro score history med regimebakgrund">
                       {regimeIntervals.map((interval) => {
                         const pos = segmentPosition(interval.startDate, interval.endDate);
                         return (
                           <g key={`regime-bg-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`}>
                             <rect
-                              x={50 + (pos.left / 100) * 920}
-                              y={20}
-                              width={(pos.width / 100) * 920}
-                              height={200}
+                              x={72 + (pos.left / 100) * 900}
+                              y={28}
+                              width={(pos.width / 100) * 900}
+                              height={240}
                               fill={regimeColor(interval.coreRegimeLabel)}
                               fillOpacity={0.6}
                               stroke="#ffffff"
@@ -641,34 +667,41 @@ export default function GlobalMacroDashboard() {
 
                       {[0, 25, 50, 75, 100].map((tick) => (
                         <g key={`score-y-${tick}`}>
-                          <line x1={50} y1={20 + (1 - tick / 100) * 200} x2={970} y2={20 + (1 - tick / 100) * 200} stroke="#cbd5e1" strokeWidth={1} />
-                          <text x={44} y={24 + (1 - tick / 100) * 200} textAnchor="end" fontSize={11} fill="#475569">{tick}</text>
+                          <line x1={72} y1={28 + (1 - tick / 100) * 240} x2={972} y2={28 + (1 - tick / 100) * 240} stroke="#62584d" strokeWidth={1} />
+                          <text x={52} y={32 + (1 - tick / 100) * 240} textAnchor="end" fontSize={11} fill="#d6cfc4">{tick}</text>
                         </g>
                       ))}
 
                       <polyline
                         fill="none"
-                        stroke="#0f172a"
+                        stroke="#f0ede7"
                         strokeWidth={2.5}
                         points={historyPoints
                           .filter((point) => typeof point.macroScoreTotal === "number")
                           .map((point) => {
-                            const x = 50 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 920;
-                            const y = 20 + (1 - (point.macroScoreTotal ?? 0) / 100) * 200;
+                            const x = 72 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 900;
+                            const y = 28 + (1 - (point.macroScoreTotal ?? 0) / 100) * 240;
                             return `${x},${y}`;
                           })
                           .join(" ")}
                       />
 
                       {historyPoints.filter((point) => point.regimeChanged && typeof point.macroScoreTotal === "number").map((point) => {
-                        const x = 50 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 920;
-                        const y = 20 + (1 - (point.macroScoreTotal ?? 0) / 100) * 200;
-                        return <circle key={`score-change-${point.asOfDate}`} cx={x} cy={y} r={3.2} fill="#dc2626" />;
+                        const x = 72 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 900;
+                        const y = 28 + (1 - (point.macroScoreTotal ?? 0) / 100) * 240;
+                        return <circle key={`score-change-${point.asOfDate}`} cx={x} cy={y} r={3.2} fill="#8f5f55" />;
                       })}
 
-                      <line x1={50} y1={220} x2={970} y2={220} stroke="#64748b" strokeWidth={1} />
-                      <text x={50} y={240} fontSize={11} fill="#475569">{timelineStartDate ?? "—"}</text>
-                      <text x={970} y={240} textAnchor="end" fontSize={11} fill="#475569">{timelineEndDate ?? "—"}</text>
+                      <line x1={72} y1={268} x2={972} y2={268} stroke="#b8afa1" strokeWidth={1} />
+                      {axisTicks.map((tick) => {
+                        const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900);
+                        return (
+                          <g key={`score-x-${tick.index}`}>
+                            <line x1={x} y1={268} x2={x} y2={272} stroke="#b8afa1" strokeWidth={1} />
+                            <text x={x} y={289} textAnchor="middle" fontSize={11} fill="#d6cfc4">{tick.label}</text>
+                          </g>
+                        );
+                      })}
                     </svg>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8, fontSize: 12 }}>
@@ -688,7 +721,7 @@ export default function GlobalMacroDashboard() {
                   )}
 
                   <h5>2) Block History (Neon Focus)</h5>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                     {blockSeriesMeta.map((series) => {
                       const isFocused = focusedBlockSeries === series.key;
                       const isDimmed = focusedBlockSeries !== null && !isFocused;
@@ -699,11 +732,11 @@ export default function GlobalMacroDashboard() {
                           onClick={() => setFocusedBlockSeries((prev) => (prev === series.key ? null : series.key))}
                           style={{
                             border: `1px solid ${series.color}`,
-                            background: isFocused ? series.color : "#ffffff",
-                            color: isFocused ? "#0f172a" : "#1e293b",
-                            opacity: isDimmed ? 0.45 : 1,
+                            background: isFocused ? series.color : "#332f2a",
+                            color: isFocused ? "#f3eee5" : "#d8d0c3",
+                            opacity: isDimmed ? 0.42 : 1,
                             borderRadius: 999,
-                            padding: "3px 10px",
+                            padding: "5px 12px",
                             fontSize: 12,
                             cursor: "pointer",
                           }}
@@ -712,30 +745,30 @@ export default function GlobalMacroDashboard() {
                         </button>
                       );
                     })}
-                    <button type="button" onClick={() => setFocusedBlockSeries(null)} style={{ border: "1px solid #94a3b8", background: "#fff", borderRadius: 999, padding: "3px 10px", fontSize: 12, cursor: "pointer" }}>
+                    <button type="button" onClick={() => setFocusedBlockSeries(null)} style={{ border: "1px solid #8b8376", background: "#2f2b27", color: "#d8d0c3", borderRadius: 999, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>
                       Återställ fokus
                     </button>
                   </div>
-                  <div style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: 10, background: "#f8fafc", marginBottom: 8 }}>
+                  <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27", marginBottom: 8 }}>
                     <svg
-                      viewBox="0 0 1000 260"
-                      style={{ width: "100%", height: "260px", display: "block" }}
+                      viewBox="0 0 1000 320"
+                      style={{ width: "100%", height: "340px", display: "block" }}
                       onMouseMove={(event) => {
                         const rect = event.currentTarget.getBoundingClientRect();
-                        const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 50) / 920));
+                        const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 72) / 900));
                         setBlockHoverIndex(Math.round(ratio * Math.max(0, historyPoints.length - 1)));
                       }}
                       onMouseLeave={() => setBlockHoverIndex(null)}
                       onClick={(event) => {
                         const rect = event.currentTarget.getBoundingClientRect();
-                        const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 50) / 920));
+                        const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 72) / 900));
                         setBlockHoverIndex(Math.round(ratio * Math.max(0, historyPoints.length - 1)));
                       }}
                     >
                       {[0, 25, 50, 75, 100].map((tick) => (
                         <g key={`block-y-${tick}`}>
-                          <line x1={50} y1={20 + (1 - tick / 100) * 200} x2={970} y2={20 + (1 - tick / 100) * 200} stroke="#e2e8f0" strokeWidth={1} />
-                          <text x={44} y={24 + (1 - tick / 100) * 200} textAnchor="end" fontSize={11} fill="#475569">{tick}</text>
+                          <line x1={72} y1={28 + (1 - tick / 100) * 240} x2={972} y2={28 + (1 - tick / 100) * 240} stroke="#5f564a" strokeWidth={1} />
+                          <text x={62} y={32 + (1 - tick / 100) * 240} textAnchor="end" fontSize={11} fill="#d6cfc4">{tick}</text>
                         </g>
                       ))}
 
@@ -746,8 +779,8 @@ export default function GlobalMacroDashboard() {
                           .map((point, index) => {
                             const value = series.valueOf(point);
                             if (typeof value !== "number") return null;
-                            const x = 50 + ((historyPoints.length <= 1 ? 0 : index / (historyPoints.length - 1)) * 920);
-                            const y = 20 + (1 - value / 100) * 200;
+                            const x = 72 + ((historyPoints.length <= 1 ? 0 : index / (historyPoints.length - 1)) * 900);
+                            const y = 28 + (1 - value / 100) * 240;
                             return `${x},${y}`;
                           })
                           .filter((item): item is string => item !== null)
@@ -757,32 +790,41 @@ export default function GlobalMacroDashboard() {
                             key={`block-line-${series.key}`}
                             fill="none"
                             stroke={series.color}
-                            strokeWidth={focused ? 3.2 : 1.8}
-                            strokeOpacity={dimmed ? 0.16 : focused ? 1 : 0.55}
+                            strokeWidth={focused ? 3.8 : 1.8}
+                            strokeOpacity={dimmed ? 0.14 : focused ? 1 : 0.46}
                             points={points}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
                           />
                         );
                       })}
 
                       {blockHoverIndex !== null && historyPoints[blockHoverIndex] && (
                         <line
-                          x1={50 + ((historyPoints.length <= 1 ? 0 : blockHoverIndex / (historyPoints.length - 1)) * 920)}
-                          y1={20}
-                          x2={50 + ((historyPoints.length <= 1 ? 0 : blockHoverIndex / (historyPoints.length - 1)) * 920)}
-                          y2={220}
-                          stroke="#334155"
+                          x1={72 + ((historyPoints.length <= 1 ? 0 : blockHoverIndex / (historyPoints.length - 1)) * 900)}
+                          y1={28}
+                          x2={72 + ((historyPoints.length <= 1 ? 0 : blockHoverIndex / (historyPoints.length - 1)) * 900)}
+                          y2={268}
+                          stroke="#cfc5b3"
                           strokeWidth={1}
                           strokeDasharray="4 4"
                         />
                       )}
 
-                      <line x1={50} y1={220} x2={970} y2={220} stroke="#64748b" strokeWidth={1} />
-                      <text x={50} y={240} fontSize={11} fill="#475569">{timelineStartDate ?? "—"}</text>
-                      <text x={970} y={240} textAnchor="end" fontSize={11} fill="#475569">{timelineEndDate ?? "—"}</text>
+                      <line x1={72} y1={268} x2={972} y2={268} stroke="#b8afa1" strokeWidth={1} />
+                      {axisTicks.map((tick) => {
+                        const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900);
+                        return (
+                          <g key={`block-x-${tick.index}`}>
+                            <line x1={x} y1={268} x2={x} y2={272} stroke="#b8afa1" strokeWidth={1} />
+                            <text x={x} y={289} textAnchor="middle" fontSize={11} fill="#d6cfc4">{tick.label}</text>
+                          </g>
+                        );
+                      })}
                     </svg>
                   </div>
                   {blockHoverIndex !== null && historyPoints[blockHoverIndex] && (
-                    <div style={{ fontSize: 12, marginBottom: 12, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                    <div style={{ fontSize: 12, marginBottom: 12, border: "1px solid #8e8678", borderRadius: 8, padding: "8px 10px", background: "#2f2b27", color: "#ece4d7" }}>
                       <strong>{historyPoints[blockHoverIndex].asOfDate}</strong> · Fiscal {historyPoints[blockHoverIndex].fiscalScore ?? "—"} · Monetary {historyPoints[blockHoverIndex].monetaryScore ?? "—"} · Inflation {historyPoints[blockHoverIndex].inflationScore ?? "—"} · Credibility {historyPoints[blockHoverIndex].credibilityScore ?? "—"}
                     </div>
                   )}
@@ -807,53 +849,113 @@ export default function GlobalMacroDashboard() {
                     {!hasOverlayIntervals ? (
                       <div className="status empty">För lite overlay-historik för full tidslinje. Visar tillgängliga segment när data finns.</div>
                     ) : (
-                      <div style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
-                        <svg viewBox="0 0 1000 220" style={{ width: "100%", height: "220px", display: "block" }}>
-                          {([{ key: "growth" as const, label: "Growth" as const, y: 20 }, { key: "stress" as const, label: "Stress" as const, y: 86 }, { key: "hard_asset" as const, label: "Hard Asset" as const, y: 152 }] as const).map((row) => (
-                            <g key={`overlay-row-${row.key}`}>
-                              <text x={50} y={row.y - 4} fontSize={12} fontWeight={600} fill="#0f172a">{row.label}</text>
-                              <rect x={50} y={row.y} width={920} height={44} fill="#ffffff" stroke="#cbd5e1" />
-                              {(row.key === "growth" ? overlayIntervals.growth : row.key === "stress" ? overlayIntervals.stress : overlayIntervals.hardAsset).map((interval) => {
-                                const pos = segmentPosition(interval.startDate, interval.endDate);
-                                const x = 50 + (pos.left / 100) * 920;
-                                const w = (pos.width / 100) * 920;
-                                const rowKey = row.key;
-                                const description = overlayDescription(rowKey, interval.value);
-                                return (
-                                  <rect
-                                    key={`${row.key}-${interval.startDate}-${interval.endDate}-${interval.value}`}
-                                    x={x}
-                                    y={row.y + 1}
-                                    width={Math.max(1, w)}
-                                    height={42}
-                                    fill={overlayColor(rowKey, interval.value)}
-                                    stroke="#ffffff"
-                                    strokeWidth={0.7}
-                                    onClick={() => setSelectedOverlaySegment({
-                                      overlayKey: rowKey,
-                                      overlay: row.label as "Growth" | "Stress" | "Hard Asset",
-                                      value: interval.value,
-                                      startDate: interval.startDate,
-                                      endDate: interval.endDate,
-                                      pointCount: interval.pointCount,
-                                      explanation: description,
-                                      contributors: overlayContributors(rowKey),
-                                    })}
-                                    style={{ cursor: "pointer" }}
-                                  />
-                                );
-                              })}
-                            </g>
+                      <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27" }}>
+                        <svg
+                          viewBox="0 0 1000 340"
+                          style={{ width: "100%", height: "360px", display: "block" }}
+                          onClick={(event) => {
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            const clickX = Math.max(72, Math.min(972, event.clientX - rect.left));
+                            const clickY = Math.max(26, Math.min(286, event.clientY - rect.top));
+                            const ratio = (clickX - 72) / 900;
+                            const index = Math.round(ratio * Math.max(0, historyPoints.length - 1));
+                            const point = historyPoints[index];
+                            if (!point) return;
+
+                            const layers = [
+                              { key: "growth" as const, label: "Growth" as const, intensity: overlayIntensity("growth", point.growthOverlay) },
+                              { key: "stress" as const, label: "Stress" as const, intensity: overlayIntensity("stress", point.stressOverlay) },
+                              { key: "hard_asset" as const, label: "Hard Asset" as const, intensity: overlayIntensity("hard_asset", point.hardAssetOverlay) },
+                            ];
+                            const unit = 22;
+                            const total = layers.reduce((sum, layer) => sum + layer.intensity, 0) * unit;
+                            const valueFromBottom = ((286 - clickY) / 260) * total;
+                            let cumulative = 0;
+                            const clicked = layers.find((layer) => {
+                              const start = cumulative;
+                              cumulative += layer.intensity * unit;
+                              return valueFromBottom >= start && valueFromBottom <= cumulative;
+                            }) ?? layers[0];
+
+                            const intervals = clicked.key === "growth" ? overlayIntervals.growth : clicked.key === "stress" ? overlayIntervals.stress : overlayIntervals.hardAsset;
+                            const interval = intervals.find((item) => point.asOfDate >= item.startDate && point.asOfDate <= item.endDate);
+                            if (!interval) return;
+                            setSelectedOverlaySegment({
+                              overlayKey: clicked.key,
+                              overlay: clicked.label,
+                              value: interval.value,
+                              startDate: interval.startDate,
+                              endDate: interval.endDate,
+                              pointCount: interval.pointCount,
+                              explanation: overlayDescription(clicked.key, interval.value),
+                              contributors: overlayContributors(clicked.key),
+                            });
+                          }}
+                        >
+                          {[0, 1, 2, 3, 4].map((level) => (
+                            <line key={`overlay-grid-${level}`} x1={72} y1={286 - level * 65} x2={972} y2={286 - level * 65} stroke="#5f564a" strokeWidth={1} />
                           ))}
 
+                          {(() => {
+                            const unit = 22;
+                            const xOf = (index: number) => 72 + ((historyPoints.length <= 1 ? 0 : index / (historyPoints.length - 1)) * 900);
+                            const gTop: Array<{ x: number; y: number }> = [];
+                            const gBase: Array<{ x: number; y: number }> = [];
+                            const sTop: Array<{ x: number; y: number }> = [];
+                            const sBase: Array<{ x: number; y: number }> = [];
+                            const hTop: Array<{ x: number; y: number }> = [];
+                            const hBase: Array<{ x: number; y: number }> = [];
+
+                            historyPoints.forEach((point, index) => {
+                              const x = xOf(index);
+                              const g = overlayIntensity("growth", point.growthOverlay) * unit;
+                              const s = overlayIntensity("stress", point.stressOverlay) * unit;
+                              const h = overlayIntensity("hard_asset", point.hardAssetOverlay) * unit;
+                              const g0 = 0;
+                              const g1 = g;
+                              const s0 = g1;
+                              const s1 = s0 + s;
+                              const h0 = s1;
+                              const h1 = h0 + h;
+                              const y = (value: number) => 286 - value;
+                              gBase.push({ x, y: y(g0) });
+                              gTop.push({ x, y: y(g1) });
+                              sBase.push({ x, y: y(s0) });
+                              sTop.push({ x, y: y(s1) });
+                              hBase.push({ x, y: y(h0) });
+                              hTop.push({ x, y: y(h1) });
+                            });
+
+                            return (
+                              <>
+                                <path d={areaPath(gTop, gBase)} fill="#5f7f63" fillOpacity={0.62} stroke="#7c9b7f" strokeWidth={1.2} />
+                                <path d={areaPath(sTop, sBase)} fill="#8c7450" fillOpacity={0.62} stroke="#af9368" strokeWidth={1.2} />
+                                <path d={areaPath(hTop, hBase)} fill="#7b6676" fillOpacity={0.62} stroke="#9a8594" strokeWidth={1.2} />
+                              </>
+                            );
+                          })()}
+
                           {historyPoints.filter((point) => point.overlayChanged).map((point) => {
-                            const x = 50 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 920;
-                            return <line key={`overlay-change-${point.asOfDate}`} x1={x} y1={20} x2={x} y2={196} stroke="#334155" strokeWidth={1} strokeDasharray="2 3" opacity={0.35} />;
+                            const x = 72 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 900;
+                            return <line key={`overlay-change-${point.asOfDate}`} x1={x} y1={26} x2={x} y2={286} stroke="#d4ccbf" strokeWidth={1} strokeDasharray="2 4" opacity={0.4} />;
                           })}
 
-                          <text x={50} y={214} fontSize={11} fill="#475569">{timelineStartDate ?? "—"}</text>
-                          <text x={970} y={214} textAnchor="end" fontSize={11} fill="#475569">{timelineEndDate ?? "—"}</text>
+                          <line x1={72} y1={286} x2={972} y2={286} stroke="#b8afa1" strokeWidth={1} />
+                          {axisTicks.map((tick) => {
+                            const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900);
+                            return (
+                              <g key={`overlay-x-${tick.index}`}>
+                                <line x1={x} y1={286} x2={x} y2={290} stroke="#b8afa1" strokeWidth={1} />
+                                <text x={x} y={311} textAnchor="middle" fontSize={11} fill="#d6cfc4">{tick.label}</text>
+                              </g>
+                            );
+                          })}
                         </svg>
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#d6cfc4", marginTop: 4 }}>
+                          <span><strong style={{ color: "#9fc4a4" }}>Growth</strong> (Weak/Neutral/Strong)</span>
+                          <span><strong style={{ color: "#c6a87b" }}>Stress</strong> (Low/Medium/High)</span>
+                          <span><strong style={{ color: "#b59db0" }}>Hard Asset</strong> (Weak/Neutral/Strong)</span>
+                        </div>
                       </div>
                     )}
 

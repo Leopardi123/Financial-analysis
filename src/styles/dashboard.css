@@ -144,6 +144,42 @@
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
+
+.macro-premium-card {
+  background: #3a352f;
+  border-color: rgba(206, 193, 174, 0.32);
+  color: #eee7db;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.macro-premium-card .bread,
+.macro-premium-card li,
+.macro-premium-card td,
+.macro-premium-card th,
+.macro-premium-card label,
+.macro-premium-card p,
+.macro-premium-card span,
+.macro-premium-card div {
+  color: inherit;
+}
+
+.macro-premium-card h3,
+.macro-premium-card h4,
+.macro-premium-card h5,
+.macro-premium-card strong,
+.macro-premium-card code {
+  color: #f4ede2;
+}
+
+.macro-premium-card table {
+  background: rgba(29, 26, 23, 0.35);
+}
+
+.macro-premium-card select,
+.macro-premium-card input,
+.macro-premium-card button {
+  color: #f0e8dc;
+}
 .sector-card h3 {
   margin-top: 0;
   font-family: "Josefin Sans", sans-serif;
