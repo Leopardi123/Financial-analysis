@@ -26,7 +26,7 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "M2SL", seriesKey: "m2sl" },
   { fredSeriesId: "DFII5", seriesKey: "real_yield_5y" },
   { fredSeriesId: "DGS3MO", seriesKey: "nominal_yield_3mo_us" },
-  { fredSeriesId: "GSCPIA", seriesKey: "supply_chain_pressure", fallbackFredSeriesIds: ["GSCPI"], latestLookbackMonths: 240, backfillLookbackYears: 25 },
+  // backlog/unavailable: supply_chain_pressure removed from active US ingest until a verified FRED series is available.
   { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us", latestLookbackMonths: 180, backfillLookbackYears: 25 },
   { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 240, backfillLookbackYears: 25 },
   { fredSeriesId: "INDPRO", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
@@ -257,9 +257,6 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
 
   const usd = monthlyInputs.usd_broad_index ?? [];
   if (usd.length > 12) output.usd_yoy = computeYoY(usd);
-
-  const supplyChain = monthlyInputs.supply_chain_pressure ?? [];
-  if (supplyChain.length > 12) output.supply_chain_pressure_yoy = computeYoY(supplyChain);
 
   const silver = monthlyInputs.silver_usd ?? [];
   if (gold.length > 0 && silver.length > 0) {

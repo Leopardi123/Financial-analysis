@@ -423,30 +423,8 @@ export const MACRO_INDICATOR_CATALOG: MacroIndicatorCatalogEntry[] = [
     scoring: "percentile_10y",
     blockWeight: 0.7,
   },
-  {
-    indicatorId: "supply_chain_pressure",
-    region: "US",
-    block: "C_INFLATION",
-    signalClass: "clear",
-    title: "Supply Chain Pressure",
-    description: "Global supply chain pressure index.",
-    inputs: ["supply_chain_pressure"],
-    transform: "level",
-    scoring: "percentile_10y",
-    blockWeight: 0.7,
-  },
-  {
-    indicatorId: "supply_chain_pressure_yoy",
-    region: "US",
-    block: "C_INFLATION",
-    signalClass: "speculative",
-    title: "Supply Chain Pressure YoY",
-    description: "Supply chain pressure annual change.",
-    inputs: ["supply_chain_pressure_yoy"],
-    transform: "yoy",
-    scoring: "percentile_10y",
-    blockWeight: 0.6,
-  },
+  // backlog/unavailable: supply_chain_pressure and supply_chain_pressure_yoy are temporarily disabled for US
+  // until a verified, stable source-series mapping is available in the current ingest provider set.
   {
     indicatorId: "silver_usd",
     region: "US",
