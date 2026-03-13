@@ -483,7 +483,13 @@ export default function GlobalMacroDashboard() {
         return [new Date(`${point.asOfDate}T00:00:00.000Z`), point.goods, point.monetary, point.reference, tooltip] as (string | number | Date | null)[];
       });
     if (rows.length === 0) return null;
-    return [["Date", "Goods inflation composite", "Monetary inflation composite", "Actual inflation", { type: "string", role: "tooltip" }], ...rows] as (string | number | Date | null)[][];
+    return [[
+      { type: "date", label: "Date" },
+      { type: "number", label: "Goods inflation composite" },
+      { type: "number", label: "Monetary inflation composite" },
+      { type: "number", label: "Actual inflation" },
+      { type: "string", role: "tooltip" },
+    ], ...rows] as (string | number | Date | null)[][];
   }, [inflationSplitPoints]);
 
   const axisTicks = useMemo(() => {
