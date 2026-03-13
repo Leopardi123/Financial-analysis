@@ -60,7 +60,7 @@ global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 const debt = await fetchScbSeriesByMetadata({
   path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-  metricKeywords: ["debt", "gdp"],
+  metricKeywordGroups: [["debt", "gdp"]],
 });
 assert.equal(debt.length, 2);
 assert.equal(debt[0].date, "2022-12-28");
@@ -68,7 +68,7 @@ assert.equal(debt[0].value, 33.1);
 
 const deficit = await fetchScbSeriesByMetadata({
   path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-  metricKeywords: ["net lending", "gdp"],
+  metricKeywordGroups: [["net", "lending", "gdp"]],
 });
 assert.equal(deficit.length, 2);
 assert.equal(deficit[1].value, 0.4);

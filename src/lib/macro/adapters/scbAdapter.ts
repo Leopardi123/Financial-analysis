@@ -17,11 +17,6 @@ type ScbMetadata = {
   variables?: ScbVariable[];
 };
 
-export type ScbSeriesSelection = {
-  dimensionCode: string;
-  valueCode: string;
-};
-
 function parseScbTime(key: string): string | null {
   if (/^\d{4}M\d{2}$/.test(key)) return `${key.slice(0, 4)}-${key.slice(5, 7)}-28`;
   if (/^\d{4}$/.test(key)) return `${key}-12-28`;
@@ -51,68 +46,74 @@ function parseScbRows(payload: ScbResponse, timeIndex: number): Array<{ date: st
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+function pickValueCodeByKeywords(variable: ScbVariable, keywordGroups: string[][]): string | null {
+  const values = variable.values ?? [];
+  const texts = variable.valueTexts ?? values;
+
+  for (const group of keywordGroups) {
+    const normalizedGroup = group.map(norm);
+    const idx = values.findIndex((valueCode, i) => {
+      const hay = norm(`${valueCode} ${texts[i] ?? ""}`);
+      return normalizedGroup.every((kw) => hay.includes(kw));
+    });
+    if (idx >= 0) return values[idx] ?? null;
+  }
+
+  return null;
+}
+
+function buildDefaultSelection(variable: ScbVariable): string | null {
+  const values = variable.values ?? [];
+  const texts = variable.valueTexts ?? values;
+
+  const preferredIndex = texts.findIndex((text) => {
+    const t = norm(String(text));
+    return t.includes("sweden") || t.includes("riket") || t.includes("hela landet");
+  });
+  if (preferredIndex >= 0) return values[preferredIndex] ?? null;
+
+  return values[0] ?? null;
+}
+
 export async function fetchScbTableMetadata(path: string): Promise<ScbMetadata> {
   const url = `https://api.scb.se/OV0104/v1/doris/en/${path.replace(/^\/+/, "")}`;
   return fetchJsonWithPolicies<ScbMetadata>({ url });
 }
 
-export async function fetchScbSeries(params: {
-  path: string;
-  query: unknown;
-}): Promise<Array<{ date: string; value: number | null }>> {
-  const metadata = await fetchScbTableMetadata(params.path);
-  const variables = metadata.variables ?? [];
-  const timeIndex = Math.max(0, variables.findIndex((v) => String(v.code ?? "").toLowerCase() === "tid"));
-
-  const url = `https://api.scb.se/OV0104/v1/doris/en/${params.path.replace(/^\/+/, "")}`;
-  const payload = await fetchJsonWithPolicies<ScbResponse>({
-    url,
-    init: {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params.query),
-    },
-  });
-
-  return parseScbRows(payload, timeIndex);
-}
-
 export async function fetchScbSeriesByMetadata(params: {
   path: string;
-  metricKeywords: string[];
+  metricKeywordGroups: string[][];
 }): Promise<Array<{ date: string; value: number | null }>> {
   const metadata = await fetchScbTableMetadata(params.path);
   const variables = metadata.variables ?? [];
   if (variables.length === 0) return [];
 
-  const normalizedKeywords = params.metricKeywords.map(norm);
   const timeVar = variables.find((v) => String(v.code ?? "").toLowerCase() === "tid");
   const metricVar = variables.find((v) => {
     const code = norm(String(v.code ?? ""));
     const text = norm(String(v.text ?? ""));
     return code.includes("contents") || text.includes("contents") || text.includes("inneh");
   });
-  if (!timeVar || !metricVar) return [];
+  if (!timeVar || !metricVar || !metricVar.code) return [];
 
-  const metricValues = metricVar.values ?? [];
-  const metricTexts = metricVar.valueTexts ?? metricValues;
-  const pickedMetric = metricValues.find((valueCode, idx) => {
-    const label = norm(`${valueCode} ${metricTexts[idx] ?? ""}`);
-    return normalizedKeywords.every((kw) => label.includes(kw));
-  });
+  const pickedMetric = pickValueCodeByKeywords(metricVar, params.metricKeywordGroups);
   if (!pickedMetric) return [];
 
-  const query = variables.map((variable) => {
-    const code = String(variable.code ?? "");
-    if (code.toLowerCase() === "tid") {
-      return { code, selection: { filter: "all", values: ["*"] } };
-    }
-    if (code === metricVar.code) {
-      return { code, selection: { filter: "item", values: [pickedMetric] } };
-    }
-    const first = variable.values?.[0];
-    return { code, selection: { filter: "item", values: first ? [first] : [] } };
-  });
+  const query = variables
+    .map((variable) => {
+      const code = String(variable.code ?? "");
+      if (!code) return null;
+      if (code.toLowerCase() === "tid") {
+        return { code, selection: { filter: "all", values: ["*"] } };
+      }
+      if (code === metricVar.code) {
+        return { code, selection: { filter: "item", values: [pickedMetric] } };
+      }
+      const selected = buildDefaultSelection(variable);
+      if (!selected) return null;
+      return { code, selection: { filter: "item", values: [selected] } };
+    })
+    .filter((item): item is { code: string; selection: { filter: string; values: string[] } } => item !== null);
 
   const url = `https://api.scb.se/OV0104/v1/doris/en/${params.path.replace(/^\/+/, "")}`;
   const payload = await fetchJsonWithPolicies<ScbResponse>({

@@ -1,13 +1,87 @@
-import { fetchJsonWithPolicies } from "./httpClient.ts";
-
 type RiksbankResponse = {
   observations?: Array<{ date?: string; value?: number | string }>;
 };
 
 type GenericObject = Record<string, unknown>;
 
+type CacheEntry = { expiresAt: number; value: unknown };
+
+const riksbankCache = new Map<string, CacheEntry>();
+let riksbankQueue: Promise<unknown> = Promise.resolve();
+const riksbankRequestTimestamps: number[] = [];
+
+const RIKSBANK_MAX_REQUESTS_PER_MINUTE = 5;
+const RIKSBANK_WINDOW_MS = 60_000;
+const RIKSBANK_429_BACKOFF_MS = 60_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function norm(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9åäö]+/gi, " ").trim();
+}
+
+async function withRiksbankQueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = async () => {
+    while (true) {
+      const now = Date.now();
+      while (riksbankRequestTimestamps.length > 0 && now - riksbankRequestTimestamps[0] >= RIKSBANK_WINDOW_MS) {
+        riksbankRequestTimestamps.shift();
+      }
+
+      if (riksbankRequestTimestamps.length < RIKSBANK_MAX_REQUESTS_PER_MINUTE) {
+        riksbankRequestTimestamps.push(Date.now());
+        return task();
+      }
+
+      const earliest = riksbankRequestTimestamps[0] ?? now;
+      const waitMs = Math.max(10, RIKSBANK_WINDOW_MS - (now - earliest));
+      await sleep(waitMs);
+    }
+  };
+
+  const next = riksbankQueue.then(run, run);
+  riksbankQueue = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+async function fetchRiksbankJson<T>(url: string, cacheTtlMs = 300_000): Promise<T> {
+  const cached = riksbankCache.get(url);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return cached.value as T;
+  }
+
+  const execute = async (): Promise<T> => {
+    let attempted429 = false;
+
+    while (true) {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+      });
+
+      if (response.status === 429) {
+        if (attempted429) {
+          throw new Error(`Riksbank request failed (429): ${url}`);
+        }
+        attempted429 = true;
+        await sleep(RIKSBANK_429_BACKOFF_MS);
+        continue;
+      }
+
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Riksbank request failed (${response.status}): ${body.slice(0, 200)}`);
+      }
+
+      const json = (await response.json()) as T;
+      riksbankCache.set(url, { expiresAt: Date.now() + cacheTtlMs, value: json });
+      return json;
+    }
+  };
+
+  return withRiksbankQueue(execute);
 }
 
 function parseSeriesCatalog(payload: unknown): Array<{ id: string; title: string }> {
@@ -40,7 +114,7 @@ export async function fetchRiksbankSeriesCatalog(): Promise<Array<{ id: string; 
 
   for (const url of urls) {
     try {
-      const payload = await fetchJsonWithPolicies<unknown>({ url });
+      const payload = await fetchRiksbankJson<unknown>(url, 15 * 60_000);
       const parsed = parseSeriesCatalog(payload);
       if (parsed.length > 0) return parsed;
     } catch {
@@ -73,7 +147,7 @@ export async function resolveRiksbankSeriesIdByMetadata(params: {
 
 export async function fetchRiksbankSeries(seriesId: string): Promise<Array<{ date: string; value: number | null }>> {
   const url = `https://api.riksbank.se/swea/v1/Observations/${encodeURIComponent(seriesId)}`;
-  const payload = await fetchJsonWithPolicies<RiksbankResponse>({ url });
+  const payload = await fetchRiksbankJson<RiksbankResponse>(url, 5 * 60_000);
   return (payload.observations ?? [])
     .map((obs) => {
       const date = typeof obs.date === "string" ? obs.date.slice(0, 10) : null;

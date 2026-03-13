@@ -91,6 +91,20 @@ function alignSpread(
     .filter((x) => x.value !== null);
 }
 
+
+function alignRatio(
+  left: Array<{ date: string; value: number | null }>,
+  right: Array<{ date: string; value: number | null }>,
+): Array<{ date: string; value: number | null }> {
+  const rightByMonth = new Map(right.map((p) => [p.date.slice(0, 7), p.value]));
+  return left
+    .map((l) => {
+      const rv = rightByMonth.get(l.date.slice(0, 7));
+      if (l.value === null || rv === null || rv === undefined || rv === 0) return { date: l.date, value: null };
+      return { date: l.date, value: l.value / rv };
+    })
+    .filter((x) => x.value !== null);
+}
 function alignSubtract(
   left: TimeSeriesPoint[],
   right: TimeSeriesPoint[],
@@ -211,9 +225,13 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
   };
 
   const tasks: Array<Promise<void>> = [
-    fetchRiksbankFirstAvailable({
-      preferredIds: ["SE.KPIF.YOY", "SE.CPIF.YOY", "SE.KPIF.12M"],
-      includeTerms: ["kpif", "year"],
+    fetchScbSeriesByMetadata({
+      path: "ssd/PR/PR0101/PR0101A/KPIArM",
+      metricKeywordGroups: [
+        ["kpif", "annual", "rate"],
+        ["kpif", "year", "change"],
+        ["kpif", "12", "month"],
+      ],
     }).then((x) => { sourceSeries.kpif_yoy_se = x; }),
     fetchRiksbankFirstAvailable({
       preferredIds: ["SE.REPO.RATE", "SE.POLICY.RATE", "SE.POLICYRATE"],
@@ -225,11 +243,11 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     }).then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
     fetchScbSeriesByMetadata({
       path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-      metricKeywords: ["debt", "gdp"],
+      metricKeywordGroups: [["debt", "gdp"], ["gross", "debt", "gdp"]],
     }).then((x) => { sourceSeries.debt_gdp_se = x; }),
     fetchScbSeriesByMetadata({
       path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-      metricKeywords: ["net lending", "gdp"],
+      metricKeywordGroups: [["net", "lending", "gdp"], ["deficit", "gdp"], ["b9", "gdp"]],
     }).then((x) => { sourceSeries.deficit_gdp_se = x; }),
     fetchRiksbankFirstAvailable({
       preferredIds: ["SE.M3.YOY", "SE.MONEY.M3.YOY", "SE.MONAGG.M3"],
@@ -246,7 +264,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
   const derivedSeries: CanonicalSeriesMap = {
     inflation_momentum_se: computeMomentum(sourceSeries.kpif_yoy_se ?? [], 3),
     real_yield_10y_se: alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []),
-    gold_vs_real_yield_se: alignSpread(
+    gold_vs_real_yield_se: alignRatio(
       sourceSeries.gold_usd ?? [],
       alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []),
     ),
