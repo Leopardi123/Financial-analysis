@@ -27,6 +27,8 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "GDP", seriesKey: "us_nominal_gdp", latestLookbackMonths: 180, backfillLookbackYears: 25 },
   { fredSeriesId: "TOTBKCR", seriesKey: "total_bank_credit_us" },
   { fredSeriesId: "FEDFUNDS", seriesKey: "fed_funds_rate" },
+  { fredSeriesId: "CSUSHPINSA", seriesKey: "housing_price_index_us" },
+  { fredSeriesId: "SP500", seriesKey: "sp500_index_us" },
   { fredSeriesId: "DFII5", seriesKey: "real_yield_5y" },
   { fredSeriesId: "DGS3MO", seriesKey: "nominal_yield_3mo_us" },
   // backlog/unavailable: supply_chain_pressure removed from active US ingest until a verified FRED series is available.
@@ -253,6 +255,15 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
 
   const commodityIndex = monthlyInputs.commodity_index ?? [];
   if (commodityIndex.length > 12) output.commodity_index_yoy = computeYoY(commodityIndex);
+
+  const usHousing = monthlyInputs.housing_price_index_us ?? [];
+  if (usHousing.length > 12) output.housing_price_yoy_us = computeYoY(usHousing);
+
+  const usEquity = monthlyInputs.sp500_index_us ?? [];
+  if (usEquity.length > 12) output.sp500_yoy_us = computeYoY(usEquity);
+
+  const eaEquity = monthlyInputs.stoxx50_ea ?? [];
+  if (eaEquity.length > 12) output.stoxx50_yoy_ea = computeYoY(eaEquity);
 
   const fedBalanceSheet = monthlyInputs.fed_balance_sheet_total ?? [];
   if (fedBalanceSheet.length > 12) output.fed_balance_sheet_yoy = computeYoY(fedBalanceSheet);

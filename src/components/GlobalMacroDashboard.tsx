@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import ChartCard from "./ChartCard";
+import InfoPopover from "./InfoPopover";
 
 type GlobalMacroPayload = {
   regime: {
@@ -250,6 +251,17 @@ type MacroHistoryPayload = {
       dominanceSpread?: number | null;
       model?: Record<string, unknown>;
     } | null;
+    aldenPipeline: {
+      monetaryInflation: number | null;
+      assetInflation: number | null;
+      commodityInflation: number | null;
+      consumerInflation: number | null;
+      monetaryInflationSeries: string | null;
+      assetInflationSeries: string | null;
+      commodityInflationSeries: string | null;
+      consumerInflationSeries: string | null;
+      monetaryInflationGap: number | null;
+    } | null;
   }>;
 };
 export default function GlobalMacroDashboard() {
@@ -290,6 +302,7 @@ export default function GlobalMacroDashboard() {
   } | null>(null);
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
+  const [openInfoId, setOpenInfoId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -465,32 +478,153 @@ export default function GlobalMacroDashboard() {
       reference: point.inflationSplit?.actualInflationReference ?? null,
       dominance: point.inflationSplit?.dominance ?? "neutral",
       referenceLabel: point.inflationSplit?.referenceLabel ?? null,
+      alden: point.aldenPipeline ?? null,
     }));
   }, [historyPoints]);
 
-  const inflationDriverChartData = useMemo(() => {
-    const rows = inflationSplitPoints
-      .filter((point) => point.goods !== null || point.monetary !== null || point.reference !== null)
-      .map((point) => {
-        const spread = typeof point.monetary === "number" && typeof point.goods === "number" ? point.monetary - point.goods : null;
-        const tooltip = [
-          point.asOfDate,
-          `Goods inflation driver: ${typeof point.goods === "number" ? point.goods.toFixed(1) : "—"}`,
-          `Monetary inflation driver: ${typeof point.monetary === "number" ? point.monetary.toFixed(1) : "—"}`,
-          `Actual inflation: ${typeof point.reference === "number" ? point.reference.toFixed(1) : "—"}`,
-          `Dominance spread: ${typeof spread === "number" ? spread.toFixed(1) : "—"}`,
-        ].join("\n");
-        return [new Date(`${point.asOfDate}T00:00:00.000Z`), point.goods, point.monetary, point.reference, tooltip] as (string | number | Date | null)[];
-      });
-    if (rows.length === 0) return null;
-    return [[
+  function movingAverage(values: Array<number | null>, windowSize: number): Array<number | null> {
+    return values.map((_, index) => {
+      const from = Math.max(0, index - windowSize + 1);
+      const chunk = values.slice(from, index + 1).filter((value): value is number => typeof value === "number");
+      if (chunk.length === 0) return null;
+      return chunk.reduce((sum, value) => sum + value, 0) / chunk.length;
+    });
+  }
+
+  function aldenPhaseLabel(monetary: number | null, asset: number | null, commodity: number | null, consumer: number | null): string {
+    if (monetary === null || asset === null || commodity === null || consumer === null) return "Mixed pipeline";
+    if (monetary > asset && asset > commodity && consumer < commodity) return "Inflation early in pipeline";
+    if (asset >= monetary && asset > commodity) return "Asset-led inflation";
+    if (commodity >= asset && commodity > consumer) return "Commodity transmission phase";
+    if (consumer >= commodity && consumer >= asset) return "Consumer inflation manifestation";
+    return "Mixed pipeline";
+  }
+
+  type GoogleChartCell = string | number | Date | null | { type: string; role: string } | { type: string; label: string };
+
+  const aldenCharts = useMemo(() => {
+    if (!(selectedRegion === "US" || selectedRegion === "EA")) return null;
+    const windowSize = historyResolution === "MONTHLY" ? 12 : 26;
+    const raw = inflationSplitPoints
+      .map((point) => ({
+        date: point.asOfDate,
+        monetary: point.alden?.monetaryInflation ?? null,
+        asset: point.alden?.assetInflation ?? null,
+        commodity: point.alden?.commodityInflation ?? null,
+        consumer: point.alden?.consumerInflation ?? null,
+        gap: point.alden?.monetaryInflationGap ?? null,
+        series: point.alden,
+      }))
+      .filter((entry) => entry.monetary !== null || entry.asset !== null || entry.commodity !== null || entry.consumer !== null);
+
+    const startIndex = raw.findIndex((entry) => entry.monetary !== null && entry.asset !== null && entry.commodity !== null && entry.consumer !== null);
+    if (startIndex < 0) return null;
+    const aligned = raw.slice(startIndex);
+    if (aligned.length < 6) return null;
+
+    const base = aligned[0];
+    if (base.monetary === null || base.asset === null || base.commodity === null || base.consumer === null) return null;
+
+    const baseMonetary = base.monetary;
+    const baseAsset = base.asset;
+    const baseCommodity = base.commodity;
+    const baseConsumer = base.consumer;
+
+    const normalize = (value: number | null, start: number) => (value === null || start === 0 ? null : (value / start) * 100);
+
+    const monetaryIdx = aligned.map((entry) => normalize(entry.monetary, baseMonetary));
+    const assetIdx = aligned.map((entry) => normalize(entry.asset, baseAsset));
+    const commodityIdx = aligned.map((entry) => normalize(entry.commodity, baseCommodity));
+    const consumerIdx = aligned.map((entry) => normalize(entry.consumer, baseConsumer));
+
+    const monetarySmooth = movingAverage(monetaryIdx, windowSize);
+    const assetSmooth = movingAverage(assetIdx, windowSize);
+    const commoditySmooth = movingAverage(commodityIdx, windowSize);
+    const consumerSmooth = movingAverage(consumerIdx, windowSize);
+
+    const pipelineData: GoogleChartCell[][] = [[
       { type: "date", label: "Date" },
-      { type: "number", label: "Goods inflation composite" },
-      { type: "number", label: "Monetary inflation composite" },
-      { type: "number", label: "Actual inflation" },
+      { type: "number", label: "Monetary Inflation" },
+      { type: "number", label: "Asset Inflation" },
+      { type: "number", label: "Commodity Inflation" },
+      { type: "number", label: "Consumer Inflation" },
       { type: "string", role: "tooltip" },
-    ], ...rows] as (string | number | Date | null)[][];
-  }, [inflationSplitPoints]);
+    ]];
+
+    const gapData: GoogleChartCell[][] = [[
+      { type: "date", label: "Date" },
+      { type: "number", label: "Monetary Inflation Gap" },
+      { type: "number", label: "Zero" },
+      { type: "string", role: "tooltip" },
+    ]];
+
+    aligned.forEach((entry, index) => {
+      const phase = aldenPhaseLabel(entry.monetary, entry.asset, entry.commodity, entry.consumer);
+      const dateLabel = entry.date;
+      const pipelineTooltip = [
+        dateLabel,
+        `Monetary Inflation raw: ${entry.monetary?.toFixed(2) ?? "—"}`,
+        `Asset Inflation raw: ${entry.asset?.toFixed(2) ?? "—"}`,
+        `Commodity Inflation raw: ${entry.commodity?.toFixed(2) ?? "—"}`,
+        `Consumer Inflation raw: ${entry.consumer?.toFixed(2) ?? "—"}`,
+        `Monetary smooth index: ${monetarySmooth[index]?.toFixed(1) ?? "—"}`,
+        `Asset smooth index: ${assetSmooth[index]?.toFixed(1) ?? "—"}`,
+        `Commodity smooth index: ${commoditySmooth[index]?.toFixed(1) ?? "—"}`,
+        `Consumer smooth index: ${consumerSmooth[index]?.toFixed(1) ?? "—"}`,
+        phase,
+      ].join("\n");
+
+      pipelineData.push([
+        new Date(`${entry.date}T00:00:00.000Z`),
+        monetarySmooth[index],
+        assetSmooth[index],
+        commoditySmooth[index],
+        consumerSmooth[index],
+        pipelineTooltip,
+      ]);
+
+      const gapLabel = entry.gap === null
+        ? "Neutral gap"
+        : entry.gap > 5
+          ? "Asset inflation risk"
+          : entry.gap > 2
+            ? "Monetary pressure building"
+            : entry.gap < -5
+              ? "Inflation already manifest"
+              : entry.gap < -2
+                ? "CPI catching up"
+                : "Neutral gap";
+
+      const gapTooltip = [
+        dateLabel,
+        `Monetary inflation value: ${entry.monetary?.toFixed(2) ?? "—"}`,
+        `Consumer inflation value: ${entry.consumer?.toFixed(2) ?? "—"}`,
+        `Gap: ${entry.gap?.toFixed(2) ?? "—"}`,
+        gapLabel,
+      ].join("\n");
+
+      gapData.push([
+        new Date(`${entry.date}T00:00:00.000Z`),
+        entry.gap,
+        0,
+        gapTooltip,
+      ]);
+    });
+
+    return {
+      pipelineData,
+      gapData,
+      startDate: aligned[0]?.date ?? null,
+      endDate: aligned[aligned.length - 1]?.date ?? null,
+      smoothingMonths: windowSize,
+      seriesUsed: {
+        monetary: aligned.find((entry) => entry.series?.monetaryInflationSeries)?.series?.monetaryInflationSeries ?? null,
+        asset: aligned.find((entry) => entry.series?.assetInflationSeries)?.series?.assetInflationSeries ?? null,
+        commodity: aligned.find((entry) => entry.series?.commodityInflationSeries)?.series?.commodityInflationSeries ?? null,
+        consumer: aligned.find((entry) => entry.series?.consumerInflationSeries)?.series?.consumerInflationSeries ?? null,
+      },
+    };
+  }, [historyResolution, inflationSplitPoints, selectedRegion]);
 
   const axisTicks = useMemo(() => {
     if (historyPoints.length === 0) return [] as Array<{ index: number; date: string; label: string }>;
@@ -832,37 +966,75 @@ export default function GlobalMacroDashboard() {
                     </div>
                   )}
 
-                  {selectedRegion !== "GLOBAL" && (selectedRegion === "US" || selectedRegion === "EA") && inflationDriverChartData && (
+                  {selectedRegion !== "GLOBAL" && (selectedRegion === "US" || selectedRegion === "EA") && aldenCharts && (
                     <>
-                      <h5>2) Inflation Drivers vs Actual Inflation ({selectedRegion})</h5>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <h5>2) Alden Inflation Pipeline ({selectedRegion})</h5>
+                        <InfoPopover
+                          id="alden-pipeline-info"
+                          openId={openInfoId}
+                          onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                          onClose={() => setOpenInfoId(null)}
+                          title="Alden Inflation Pipeline"
+                          content={[
+                            "Inflation är inte en enda statistik. I Lyn Aldens ramverk rör sig monetär expansion ofta först in i pengar och kredit, därefter till tillgångar, sedan råvaror och till sist konsumentpriser. Denna graf visualiserar inflationskedjan.",
+                          ]}
+                        />
+                      </div>
                       <div style={{ fontSize: 12, marginBottom: 6 }}>
-                        <strong>Goods inflation:</strong> pristryck från energi, råvaror, varor och insatskostnader · <strong>Monetary inflation:</strong> monetärt pristryck från stockmått i systemet (CB-balans/GDP, money/GDP, private credit/GDP, real policy rate).
+                        Startperiod: <strong>{aldenCharts.startDate ?? "—"}</strong> · Smoothing: <strong>{aldenCharts.smoothingMonths} månader</strong> · Monetary: <code>{aldenCharts.seriesUsed.monetary ?? "missing"}</code> · Asset: <code>{aldenCharts.seriesUsed.asset ?? "missing"}</code> · Commodity: <code>{aldenCharts.seriesUsed.commodity ?? "missing"}</code> · Consumer: <code>{aldenCharts.seriesUsed.consumer ?? "missing"}</code>
                       </div>
                       <div className="macro-inflation-chart" style={{ marginBottom: 12 }}>
                         <ChartCard
-                          title="Inflation Drivers vs Actual Inflation"
+                          title="Alden Inflation Pipeline"
                           chartType="LineChart"
-                          height={360}
-                          unitLabel="Percentile (0–100)"
+                          height={380}
+                          unitLabel="Index (start=100)"
                           unitKind="index"
-                          data={inflationDriverChartData}
+                          data={aldenCharts.pipelineData}
                           options={{
                             backgroundColor: "#111827",
                             chartArea: { left: 64, top: 28, width: "82%", height: "70%" },
                             legend: { position: "bottom", textStyle: { color: "#e5e7eb" } },
-                            colors: ["#f59e0b", "#38bdf8", "#f3f4f6"],
+                            colors: ["#38bdf8", "#a3e635", "#f59e0b", "#f3f4f6"],
+                            lineWidth: 3.2,
+                            hAxis: { textStyle: { color: "#cbd5e1" }, gridlines: { color: "#1f2937", count: 4 } },
+                            vAxis: { title: "Index (start=100)", textStyle: { color: "#cbd5e1" }, titleTextStyle: { color: "#e5e7eb" }, gridlines: { color: "#1f2937", count: 5 } },
+                            tooltip: { isHtml: false, textStyle: { color: "#111827" } },
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <h5>3) Monetary Inflation Gap ({selectedRegion})</h5>
+                        <InfoPopover
+                          id="alden-gap-info"
+                          openId={openInfoId}
+                          onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                          onClose={() => setOpenInfoId(null)}
+                          title="Monetary Inflation Gap"
+                          content={[
+                            "Monetary Inflation Gap visar skillnaden mellan monetär expansion och konsumentprisinflation. Ett stort positivt gap kan tyda på att inflationen ännu inte fullt syns i CPI/HICP utan först går in i tillgångspriser eller andra delar av ekonomin.",
+                          ]}
+                        />
+                      </div>
+                      <div className="macro-inflation-chart" style={{ marginBottom: 12 }}>
+                        <ChartCard
+                          title="Monetary Inflation Gap"
+                          chartType="LineChart"
+                          height={340}
+                          unitLabel="Procentenheter"
+                          unitKind="index"
+                          data={aldenCharts.gapData}
+                          options={{
+                            backgroundColor: "#111827",
+                            chartArea: { left: 64, top: 28, width: "82%", height: "70%" },
+                            legend: { position: "bottom", textStyle: { color: "#e5e7eb" } },
+                            colors: ["#f97316", "#94a3b8"],
                             lineWidth: 3,
-                            hAxis: {
-                              textStyle: { color: "#cbd5e1" },
-                              gridlines: { color: "#1f2937", count: 4 },
-                            },
-                            vAxis: {
-                              title: "10Y percentile score",
-                              viewWindow: { min: 0, max: 100 },
-                              textStyle: { color: "#cbd5e1" },
-                              titleTextStyle: { color: "#e5e7eb" },
-                              gridlines: { color: "#1f2937", count: 5 },
-                            },
+                            series: { 1: { lineDashStyle: [4, 4], lineWidth: 1.5 } },
+                            hAxis: { textStyle: { color: "#cbd5e1" }, gridlines: { color: "#1f2937", count: 4 } },
+                            vAxis: { title: "Gap (monetary - consumer)", textStyle: { color: "#cbd5e1" }, titleTextStyle: { color: "#e5e7eb" }, gridlines: { color: "#1f2937", count: 5 }, baseline: 0, baselineColor: "#e5e7eb" },
                             tooltip: { isHtml: false, textStyle: { color: "#111827" } },
                           }}
                         />
@@ -870,7 +1042,8 @@ export default function GlobalMacroDashboard() {
                     </>
                   )}
 
-                  <h5>3) Block History (Neon Focus)</h5>
+                  <h5>4) Block History (Neon Focus)</h5>
+
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                     {blockSeriesMeta.map((series) => {
                       const isFocused = focusedBlockSeries === series.key;

@@ -1,12 +1,12 @@
 import { Chart } from "react-google-charts";
 import InfoPopover from "./InfoPopover";
 
-type ChartDataCell = string | number | Date | null | { type: string; role: string };
+type ChartDataCell = string | number | Date | null | { type: string; role: string } | { type: string; label: string };
 
 type ChartCardProps = {
   id?: string;
   title: string;
-  data: (string | number | Date | null)[][] | null;
+  data: ChartDataCell[][] | null;
   chartType: "ColumnChart" | "ComboChart" | "AreaChart" | "LineChart";
   height?: number;
   options?: Record<string, unknown>;
@@ -104,14 +104,14 @@ function buildTicks(dates: Date[], quarterly: boolean, fiscalYearEndMonth?: numb
 }
 
 function normalizeChartData(
-  data: (string | number | Date | null)[][],
+  data: ChartDataCell[][],
   fiscalYearEndMonth?: number | null,
 ) {
   const [headers, ...rows] = data;
   const hasTooltipColumn = headers.some(
     (header) => typeof header === "object" && header !== null && "role" in header && (header as { role?: string }).role === "tooltip",
   );
-  const normalizedRows = rows.filter((row) => row[0] instanceof Date) as (string | number | Date | null)[][];
+  const normalizedRows = rows.filter((row) => row[0] instanceof Date) as ChartDataCell[][];
   const dates = normalizedRows.map((row) => row[0] as Date);
   const quarterly = isQuarterlySeries(dates);
 

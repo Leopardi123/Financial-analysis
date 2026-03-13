@@ -50,6 +50,17 @@ export type MacroHistoryPoint = {
   topDrivers: MacroRegimeSnapshot["topDrivers"];
   regimeExplanation: MacroRegimeSnapshot["regimeExplanation"];
   inflationSplit: InflationSplitSnapshot | null;
+  aldenPipeline: {
+    monetaryInflation: number | null;
+    assetInflation: number | null;
+    commodityInflation: number | null;
+    consumerInflation: number | null;
+    monetaryInflationSeries: string | null;
+    assetInflationSeries: string | null;
+    commodityInflationSeries: string | null;
+    consumerInflationSeries: string | null;
+    monetaryInflationGap: number | null;
+  } | null;
 };
 
 export type MacroHistoryResult = {
@@ -152,6 +163,69 @@ function enumerateReplayDates(start: Date, end: Date, resolution: HistoryResolut
   return replayDates;
 }
 
+
+function latestSeriesValue(series: MacroSeriesInput | undefined, asOfDate: string): number | null {
+  if (!series) return null;
+  let latest: number | null = null;
+  for (const point of series.points) {
+    if (point.date > asOfDate) break;
+    if (typeof point.value === "number" && Number.isFinite(point.value)) latest = point.value;
+  }
+  return latest;
+}
+
+function pickSeriesValue(
+  seriesMap: Map<string, MacroSeriesInput>,
+  asOfDate: string,
+  candidates: string[],
+): { value: number | null; seriesKey: string | null } {
+  for (const key of candidates) {
+    const value = latestSeriesValue(seriesMap.get(key), asOfDate);
+    if (value !== null) return { value, seriesKey: key };
+  }
+  return { value: null, seriesKey: null };
+}
+
+function computeAldenPipeline(
+  region: string,
+  asOfDate: string,
+  seriesMap: Map<string, MacroSeriesInput>,
+) {
+  if (region !== "US" && region !== "EA") return null;
+
+  const monetary = region === "US"
+    ? pickSeriesValue(seriesMap, asOfDate, ["m2_yoy"])
+    : pickSeriesValue(seriesMap, asOfDate, ["m3_growth_ea"]);
+
+  const asset = region === "US"
+    ? pickSeriesValue(seriesMap, asOfDate, ["housing_price_yoy_us", "sp500_yoy_us"])
+    : pickSeriesValue(seriesMap, asOfDate, ["housing_price_yoy_ea", "stoxx50_yoy_ea"]);
+
+  const commodity = region === "US"
+    ? pickSeriesValue(seriesMap, asOfDate, ["commodity_index_yoy"])
+    : pickSeriesValue(seriesMap, asOfDate, ["commodity_index_yoy"]);
+
+  const consumer = region === "US"
+    ? pickSeriesValue(seriesMap, asOfDate, ["core_cpi_yoy_us"])
+    : pickSeriesValue(seriesMap, asOfDate, ["hicp_yoy_ea"]);
+
+  const gap = monetary.value !== null && consumer.value !== null
+    ? monetary.value - consumer.value
+    : null;
+
+  return {
+    monetaryInflation: monetary.value,
+    assetInflation: asset.value,
+    commodityInflation: commodity.value,
+    consumerInflation: consumer.value,
+    monetaryInflationSeries: monetary.seriesKey,
+    assetInflationSeries: asset.seriesKey,
+    commodityInflationSeries: commodity.seriesKey,
+    consumerInflationSeries: consumer.seriesKey,
+    monetaryInflationGap: gap,
+  };
+}
+
 function mergeIntervals<T>(
   points: MacroHistoryPoint[],
   valueOf: (point: MacroHistoryPoint) => T,
@@ -244,6 +318,7 @@ function globalHistoryFromRegional(
       topDriver: null, topDrivers: [],
       regimeExplanation: { title: "Global macro aggregation", summary: "Global timeline is aggregated from regional engines.", driverHighlights: [] },
       inflationSplit: null,
+      aldenPipeline: null,
     });
   }
 
@@ -347,6 +422,7 @@ export async function computeMacroRegimeHistory(params: {
   if (rawPoints.length === 0) return emptyResult(region, resolution, requestedRangeYears, 1);
 
   const series = bySeries(rawPoints);
+  const seriesMap = new Map(series.map((entry) => [entry.seriesKey, entry]));
   const seriesCoverage = series.map((entry) => {
     const dates = entry.points.map((point) => point.date).sort((a, b) => a.localeCompare(b));
     return {
@@ -436,6 +512,7 @@ export async function computeMacroRegimeHistory(params: {
       topDrivers: regime.topDrivers,
       regimeExplanation: regime.regimeExplanation,
       inflationSplit: regime.inflationSplit ?? null,
+      aldenPipeline: computeAldenPipeline(region, asOfDate, seriesMap),
     });
   }
 

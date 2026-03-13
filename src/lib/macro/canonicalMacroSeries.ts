@@ -151,6 +151,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       ea_nominal_gdp: [],
       loans_private_sector_ea: [],
       ecb_deposit_rate_ea: [],
+      stoxx50_ea: [],
       oil_brent_usd: [],
       natgas_usd: [],
       copper_usd: [],
@@ -177,6 +178,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       ]).then((x) => { sourceSeries.ea_nominal_gdp = x; }),
       fetchEcbSeries({ flowRef: "BSI", key: "M.U2.N.A.A20.A.1.U2.2250.Z01.E" }).then((x) => { sourceSeries.loans_private_sector_ea = x; }),
       fetchEcbSeries({ flowRef: "FM", key: "M.U2.EUR.4F.KR.DFR.LEV" }).then((x) => { sourceSeries.ecb_deposit_rate_ea = x; }),
+      fetchFredSeries({ fredSeriesId: "STOXX50E", mode }).then((x) => { sourceSeries.stoxx50_ea = x; }),
       fetchFredSeries({ fredSeriesId: "DCOILBRENTEU", mode }).then((x) => { sourceSeries.oil_brent_usd = x; }),
       fetchFredSeries({ fredSeriesId: "DHHNGSP", mode }).then((x) => { sourceSeries.natgas_usd = x; }),
       fetchFredSeries({ fredSeriesId: "PCOPPUSDM", mode }).then((x) => { sourceSeries.copper_usd = x; }),
@@ -213,6 +215,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       copper_yoy: marketDerived.copper_yoy ?? [],
       industrial_metals_yoy: marketDerived.industrial_metals_yoy ?? [],
       commodity_index_yoy: marketDerived.commodity_index_yoy ?? [],
+      stoxx50_yoy_ea: marketDerived.stoxx50_yoy_ea ?? [],
     };
     return { sourceSeries, derivedSeries };
   }
