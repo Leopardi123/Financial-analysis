@@ -5,6 +5,7 @@ import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
 import { runAndPersistMacroSnapshots } from "../../../lib/macro/pipeline.js";
 import { computeMacroRegimeHistory, type HistoryResolution } from "../../../lib/macro/history.js";
+import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 
 type RegimeSnapshotRow = {
   as_of_date: string;
@@ -601,6 +602,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       const percentile10y = typeof driver.percentile10y === "number" ? driver.percentile10y : (snapshot?.percentile10y ?? 50);
       const contribution = typeof driver.contribution === "number" ? driver.contribution : 0;
       return {
+        region,
         indicatorId,
         title: typeof driver.title === "string" && driver.title.trim().length > 0 ? driver.title : (meta?.title ?? indicatorId),
         block: meta?.block ?? "D_CREDIBILITY",
@@ -730,6 +732,57 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   };
 }
 
+
+async function readLatestGlobalSnapshot(allowLiveFallback: boolean) {
+  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback)] as const));
+  const regionalMap = Object.fromEntries(regionalSnapshots);
+  const asOfDate = MACRO_REGIONS
+    .map((region) => regionalMap[region]?.regime?.asOfDate ?? null)
+    .filter((x): x is string => Boolean(x))
+    .sort()
+    .slice(-1)[0] ?? null;
+
+  if (!asOfDate) return null;
+
+  const regime = aggregateGlobalRegimeFromRegional({
+    asOfDate,
+    regionalRegimes: Object.fromEntries(MACRO_REGIONS.map((r) => [r, regionalMap[r]?.regime])) as any,
+  });
+
+  const indicators = MACRO_REGIONS.flatMap((region) => (regionalMap[region]?.indicators ?? []).map((item: any) => ({ ...item, indicatorId: `${region}:${item.indicatorId}` })));
+  const globalDrivers = regime.topDrivers.map((driver: any) => ({
+    ...driver,
+    indicatorId: `${driver.region}:${driver.indicatorId}`,
+    title: `[${driver.region}] ${driver.title}`,
+  }));
+
+  return {
+    regime: { ...regime, topDrivers: globalDrivers },
+    indicators,
+    dataStatus: "snapshot",
+    writePolicy: "read_only",
+    stats: {
+      rawPointCount: regionalMap.US?.stats?.rawPointCount ?? 0,
+      seriesCount: indicators.length,
+      indicatorCount: indicators.length,
+      scoredCount: indicators.filter((i: any) => i.score !== null).length,
+      partialData: true,
+      snapshotAsOfDate: asOfDate,
+      readMode: "snapshot",
+    },
+    debug: {
+      snapshotStatus: { readMode: "snapshot", dataStatus: "snapshot", snapshotAsOfDate: asOfDate, snapshotHealth: "partial", fallbackLive: allowLiveFallback, primaryPath: true },
+      rawDataStats: { rawPointCount: null, seriesCount: null, indicatorCount: indicators.length, scoredCount: indicators.filter((i: any) => i.score !== null).length, partialData: true },
+      expectedVsFoundSeries: [],
+      indicatorInputStatus: [],
+      snapshotContent: { indicatorSnapshotCount: indicators.length, regimeSnapshotCount: 1, latestSnapshotTimestamp: asOfDate, snapshotIsEmpty: false },
+      ingestionDebug: { endpointReachable: true, fredApiKeyPresent: String(process.env.FRED_API_KEY ?? "").trim().length > 0, adminSecretConfigured: Boolean(getAdminSecret()), latestAttempt: null },
+      rootCauseHints: [],
+      regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
+    },
+  };
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {
     res.status(405).json({ ok: false, error: "Method not allowed" });
@@ -738,7 +791,7 @@ export default async function handler(req: any, res: any) {
 
   await ensureSchema();
 
-  const region = String(req.query?.region ?? "US").toUpperCase();
+  const region = String(req.query?.region ?? "GLOBAL").toUpperCase();
   const allowLiveFallback = String(req.query?.fallbackLive ?? "1") === "1";
   const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
   const historyRangeRaw = String(req.query?.historyRangeYears ?? (historyResolution === "MONTHLY" ? "20" : "3")).toUpperCase();
@@ -747,6 +800,17 @@ export default async function handler(req: any, res: any) {
     : Number.isFinite(Number(historyRangeRaw))
       ? Number(historyRangeRaw)
       : (historyResolution === "MONTHLY" ? 20 : 3);
+
+  if (region === "GLOBAL") {
+    const snapshot = await readLatestGlobalSnapshot(allowLiveFallback);
+    const history = await computeMacroRegimeHistory({
+      region: "GLOBAL",
+      resolution: historyResolution as HistoryResolution,
+      rangeYears: historyRangeYears,
+    });
+    res.status(200).json({ ok: true, globalMacro: snapshot, macroHistory: history });
+    return;
+  }
 
   const snapshot = await readLatestSnapshot(region, allowLiveFallback);
   if (snapshot) {
