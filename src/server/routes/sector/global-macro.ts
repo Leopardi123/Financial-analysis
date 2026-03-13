@@ -5,6 +5,8 @@ import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
 import { runAndPersistMacroSnapshots } from "../../../lib/macro/pipeline.js";
 import { computeMacroRegimeHistory, type HistoryResolution } from "../../../lib/macro/history.js";
+import { aggregateGlobalMacroRegime, MACRO_GLOBAL_REGION_WEIGHTS } from "../../../lib/macro/global.js";
+import type { MacroRegimeSnapshot } from "../../../lib/macro/types.ts";
 
 type RegimeSnapshotRow = {
   as_of_date: string;
@@ -601,6 +603,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       const percentile10y = typeof driver.percentile10y === "number" ? driver.percentile10y : (snapshot?.percentile10y ?? 50);
       const contribution = typeof driver.contribution === "number" ? driver.contribution : 0;
       return {
+        region: typeof driver.region === "string" ? driver.region : region,
         indicatorId,
         title: typeof driver.title === "string" && driver.title.trim().length > 0 ? driver.title : (meta?.title ?? indicatorId),
         block: meta?.block ?? "D_CREDIBILITY",
@@ -644,6 +647,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   return {
     regime: {
       asOfDate: regimeRow.as_of_date,
+      region,
       blockScores: safeJsonParse<Record<string, number | null>>(regimeRow.block_scores_json, {
         A_FISCAL: null,
         B_MONETARY: null,
@@ -730,6 +734,47 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   };
 }
 
+
+async function readGlobalSnapshot(allowLiveFallback: boolean) {
+  const regionalSnapshots = await Promise.all([
+    readLatestSnapshot("US", allowLiveFallback),
+    readLatestSnapshot("EA", false),
+    readLatestSnapshot("SE", false),
+  ]);
+  const available = regionalSnapshots.filter((item): item is NonNullable<typeof item> => item !== null);
+  if (available.length === 0) return null;
+
+  const regimes = available.map((item) => item.regime) as MacroRegimeSnapshot[];
+  const regime = aggregateGlobalMacroRegime(regimes);
+
+  const indicators = available.flatMap((item) =>
+    item.indicators.map((indicator) => ({ ...indicator, indicatorId: `${indicator.indicatorId}`, title: `${indicator.title}` })),
+  );
+
+  return {
+    regime,
+    indicators,
+    dataStatus: available.length < Object.keys(MACRO_GLOBAL_REGION_WEIGHTS).length ? "partial" : "snapshot",
+    writePolicy: "read_only",
+    stats: {
+      rawPointCount: available.reduce((acc, item) => acc + Number(item.stats?.rawPointCount ?? 0), 0),
+      seriesCount: available.reduce((acc, item) => acc + Number(item.stats?.seriesCount ?? 0), 0),
+      indicatorCount: indicators.length,
+      scoredCount: indicators.filter((item) => item.score !== null).length,
+      partialData: available.length < Object.keys(MACRO_GLOBAL_REGION_WEIGHTS).length,
+      snapshotAsOfDate: regime.asOfDate,
+      readMode: "aggregated_snapshot",
+      availableRegions: available.map((item) => item.regime.region),
+      missingRegions: Object.keys(MACRO_GLOBAL_REGION_WEIGHTS).filter((r) => !available.some((item) => item.regime.region === r)),
+    },
+    debug: {
+      regionalCount: available.length,
+      regionalRegions: available.map((item) => item.regime.region),
+      aggregationWeights: MACRO_GLOBAL_REGION_WEIGHTS,
+    },
+  };
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {
     res.status(405).json({ ok: false, error: "Method not allowed" });
@@ -738,7 +783,7 @@ export default async function handler(req: any, res: any) {
 
   await ensureSchema();
 
-  const region = String(req.query?.region ?? "US").toUpperCase();
+  const region = String(req.query?.region ?? "GLOBAL").toUpperCase();
   const allowLiveFallback = String(req.query?.fallbackLive ?? "1") === "1";
   const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
   const historyRangeRaw = String(req.query?.historyRangeYears ?? (historyResolution === "MONTHLY" ? "20" : "3")).toUpperCase();
@@ -748,7 +793,9 @@ export default async function handler(req: any, res: any) {
       ? Number(historyRangeRaw)
       : (historyResolution === "MONTHLY" ? 20 : 3);
 
-  const snapshot = await readLatestSnapshot(region, allowLiveFallback);
+  const snapshot = region === "GLOBAL"
+    ? await readGlobalSnapshot(allowLiveFallback)
+    : await readLatestSnapshot(region, allowLiveFallback);
   if (snapshot) {
     const history = await computeMacroRegimeHistory({
       region,
@@ -777,8 +824,12 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const live = await runAndPersistMacroSnapshots({ region });
-  const fallbackSnapshot = await readLatestSnapshot(region, allowLiveFallback);
+  const live = region === "GLOBAL"
+    ? await runAndPersistMacroSnapshots({ region: "US" })
+    : await runAndPersistMacroSnapshots({ region });
+  const fallbackSnapshot = region === "GLOBAL"
+    ? await readGlobalSnapshot(allowLiveFallback)
+    : await readLatestSnapshot(region, allowLiveFallback);
 
   if (!fallbackSnapshot) {
     const history = await computeMacroRegimeHistory({

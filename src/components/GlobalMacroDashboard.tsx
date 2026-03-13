@@ -17,7 +17,7 @@ type GlobalMacroPayload = {
     };
     clearSignalStrength: number | null;
     speculativeSignalStrength: number | null;
-    topDrivers: Array<{ indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
+    topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   };
   indicators: Array<{
@@ -229,15 +229,78 @@ type MacroHistoryPayload = {
     blockThresholdChanged: boolean;
     previousRegimeLabel: string | null;
     topDriver: string | null;
-    topDrivers: Array<{ indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: string; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
+    topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: string; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   }>;
 };
+
+function normalizeMacroPayload(payload: any): GlobalMacroPayload | null {
+  if (!payload || typeof payload !== "object") return null;
+  const regime = (payload as any).regime ?? {};
+  const blockScores = regime.blockScores ?? {};
+  return {
+    ...(payload as any),
+    regime: {
+      asOfDate: typeof regime.asOfDate === "string" ? regime.asOfDate : "",
+      coreRegimeLabel: typeof regime.coreRegimeLabel === "string" ? regime.coreRegimeLabel : "DataInsufficient",
+      macroScoreTotal: typeof regime.macroScoreTotal === "number" ? regime.macroScoreTotal : null,
+      macroConfidence: typeof regime.macroConfidence === "number" ? regime.macroConfidence : 0,
+      growthOverlay: typeof regime.growthOverlay === "string" ? regime.growthOverlay : "Neutral",
+      stressOverlay: typeof regime.stressOverlay === "string" ? regime.stressOverlay : "Medium",
+      hardAssetOverlay: typeof regime.hardAssetOverlay === "string" ? regime.hardAssetOverlay : "Neutral",
+      blockScores: {
+        A_FISCAL: typeof blockScores.A_FISCAL === "number" ? blockScores.A_FISCAL : null,
+        B_MONETARY: typeof blockScores.B_MONETARY === "number" ? blockScores.B_MONETARY : null,
+        C_INFLATION: typeof blockScores.C_INFLATION === "number" ? blockScores.C_INFLATION : null,
+        D_CREDIBILITY: typeof blockScores.D_CREDIBILITY === "number" ? blockScores.D_CREDIBILITY : null,
+      },
+      clearSignalStrength: typeof regime.clearSignalStrength === "number" ? regime.clearSignalStrength : null,
+      speculativeSignalStrength: typeof regime.speculativeSignalStrength === "number" ? regime.speculativeSignalStrength : null,
+      topDrivers: Array.isArray(regime.topDrivers) ? regime.topDrivers : [],
+      regimeExplanation: {
+        title: typeof regime?.regimeExplanation?.title === "string" ? regime.regimeExplanation.title : "Data insufficient",
+        summary: typeof regime?.regimeExplanation?.summary === "string" ? regime.regimeExplanation.summary : "",
+        driverHighlights: Array.isArray(regime?.regimeExplanation?.driverHighlights) ? regime.regimeExplanation.driverHighlights : [],
+      },
+    },
+    indicators: Array.isArray((payload as any).indicators) ? (payload as any).indicators : [],
+    dataStatus: typeof (payload as any).dataStatus === "string" ? (payload as any).dataStatus : "insufficient",
+  } as GlobalMacroPayload;
+}
+
+function normalizeMacroHistory(payload: any): MacroHistoryPayload | null {
+  if (!payload || typeof payload !== "object") return null;
+  const template = (payload as any).template ?? {};
+  const thresholds = template.thresholds ?? {};
+  return {
+    ...(payload as any),
+    intervals: {
+      regime: Array.isArray((payload as any)?.intervals?.regime) ? (payload as any).intervals.regime : [],
+      overlays: {
+        growth: Array.isArray((payload as any)?.intervals?.overlays?.growth) ? (payload as any).intervals.overlays.growth : [],
+        stress: Array.isArray((payload as any)?.intervals?.overlays?.stress) ? (payload as any).intervals.overlays.stress : [],
+        hardAsset: Array.isArray((payload as any)?.intervals?.overlays?.hardAsset) ? (payload as any).intervals.overlays.hardAsset : [],
+      },
+    },
+    template: {
+      templateId: typeof template.templateId === "string" ? template.templateId : "GLOBAL_MACRO_TEMPLATE",
+      updatedAt: typeof template.updatedAt === "string" ? template.updatedAt : "",
+      thresholds: {
+        monetaryDominanceMax: typeof thresholds.monetaryDominanceMax === "number" ? thresholds.monetaryDominanceMax : 35,
+        balancedMax: typeof thresholds.balancedMax === "number" ? thresholds.balancedMax : 55,
+        fiscalPressureMax: typeof thresholds.fiscalPressureMax === "number" ? thresholds.fiscalPressureMax : 75,
+      },
+    },
+    points: Array.isArray((payload as any).points) ? (payload as any).points : [],
+  } as MacroHistoryPayload;
+}
+
 export default function GlobalMacroDashboard() {
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
   const [macroHistory, setMacroHistory] = useState<MacroHistoryPayload | null>(null);
   const [historyResolution, setHistoryResolution] = useState<"WEEKLY" | "MONTHLY">("MONTHLY");
+  const [selectedRegion, setSelectedRegion] = useState<"GLOBAL" | "US" | "EA" | "SE">("GLOBAL");
   const [historyRangeYears, setHistoryRangeYears] = useState<number | "MAX">(10);
   const [globalMacroLoading, setGlobalMacroLoading] = useState(false);
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
@@ -296,18 +359,18 @@ export default function GlobalMacroDashboard() {
     if (historyResolution === "WEEKLY" && historyRangeYears !== 1 && historyRangeYears !== 3 && historyRangeYears !== 5) {
       setHistoryRangeYears(3);
     }
-  }, [historyResolution, historyRangeYears]);
+  }, [historyResolution, historyRangeYears, selectedRegion]);
 
   async function loadGlobalMacro() {    setGlobalMacroLoading(true);
     setGlobalMacroError(null);
     try {
-      const response = await fetch(`/api/sector/global-macro?region=US&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}`);
+      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}`);
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
       }
-      setGlobalMacro(payload.globalMacro ?? null);
-      setMacroHistory(payload.macroHistory ?? null);
+      setGlobalMacro(normalizeMacroPayload(payload.globalMacro));
+      setMacroHistory(normalizeMacroHistory(payload.macroHistory));
       setGlobalMacroRaw(payload);
     } catch (error) {
       setGlobalMacro(null);
@@ -321,7 +384,7 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     void loadGlobalMacro();
-  }, [historyResolution, historyRangeYears]);
+  }, [historyResolution, historyRangeYears, selectedRegion]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const scoredCount = globalMacroIndicators.filter((item) => item.score !== null).length;
@@ -502,7 +565,7 @@ export default function GlobalMacroDashboard() {
     setEngineRunning(true);
     setEngineRunResult(null);
     try {
-      const response = await fetch(`/api/admin/macro/run-engine?region=US`, {
+      const response = await fetch(`/api/admin/macro/run-engine?region=${selectedRegion}`, {
         method: "POST",
         headers: adminSecretInput.trim()
           ? { "x-admin-secret": adminSecretInput.trim() }
@@ -537,6 +600,27 @@ export default function GlobalMacroDashboard() {
       <div className="sector-grid">
         <div className="sector-card macro-premium-card">
           <h3>Global Macro Dashboard</h3>
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", scrollSnapType: "x mandatory", margin: "8px 0 12px" }}>
+            {(["GLOBAL", "US", "EA", "SE"] as const).map((region) => (
+              <button
+                key={region}
+                type="button"
+                onClick={() => setSelectedRegion(region)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  border: selectedRegion === region ? "1px solid #a8c2ff" : "1px solid #2f3b55",
+                  background: selectedRegion === region ? "#1b2740" : "#121926",
+                  color: "#d8deea",
+                  fontWeight: selectedRegion === region ? 700 : 500,
+                  cursor: "pointer",
+                  scrollSnapAlign: "start",
+                }}
+              >
+                {region}
+              </button>
+            ))}
+          </div>
           <p className="bread">Global Macro tolkar det makroekonomiska klimatet över tid genom att väga samman finansiering, räntor, inflation, trovärdighet och marknadsstress. Målet är att ge en lugn men skarp lägesbild av vilken regim marknaden befinner sig i – och på sikt knyta den till riskklimat, bull/bear-faser och den bredare kapitalmiljön.</p>
 
           {globalMacroLoading && <div className="status">Laddar Global Macro…</div>}
@@ -1221,7 +1305,7 @@ export default function GlobalMacroDashboard() {
               <ul>
                 <li>indicator snapshots: {pipelineDebug?.snapshotContent.indicatorSnapshotCount ?? "—"}</li>
                 <li>regime snapshots: {pipelineDebug?.snapshotContent.regimeSnapshotCount ?? "—"}</li>
-                <li>history region: {macroHistory?.region ?? "US"}</li>
+                <li>history region: {macroHistory?.region ?? selectedRegion}</li>
                 <li>history selected resolution: {macroHistory?.resolution ?? historyResolution}</li>
                 <li>history requested range: {String(macroHistory?.requestedRangeYears ?? historyRangeYears)}</li>
                 <li>history actual rendered range: {(macroHistory?.rangeDebug.actualStartDate ?? "—")} → {(macroHistory?.rangeDebug.actualEndDate ?? "—")}</li>

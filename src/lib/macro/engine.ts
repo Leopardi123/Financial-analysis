@@ -289,6 +289,7 @@ export function runGlobalMacroEngine({
     .map((item) => {
       const meta = catalogById.get(item.indicatorId)!;
       return {
+        region: meta.region,
         indicatorId: item.indicatorId,
         title: meta.title,
         block: meta.block,
