@@ -76,3 +76,33 @@ assert.ok(mixedCadenceRun.indicators.find((entry) => entry.indicatorId === "debt
 assert.ok(mixedCadenceRun.indicators.find((entry) => entry.indicatorId === "deficit_gdp_us")?.score !== null);
 
 console.log("macro engine tests passed");
+
+
+const eaSeries: MacroSeriesInput[] = [
+  makeSeries("hicp_yoy_ea", (i) => 2 + i * 0.01),
+  makeSeries("hicp_momentum_ea", (i) => Math.sin(i / 10)),
+  makeSeries("real_yield_10y_ea", (i) => 1 + i * 0.005),
+  makeSeries("ecb_balance_sheet_ea", (i) => 100 + i),
+  makeSeries("m3_growth_ea", (i) => 3 + i * 0.01),
+  makeSeries("debt_gdp_ea", (i) => 80 + i * 0.02),
+  makeSeries("deficit_gdp_ea", (i) => -5 + i * 0.01),
+  makeSeries("credit_spreads_ea", (i) => 1 + i * 0.002),
+  makeSeries("gold_vs_real_yield_ea", (i) => 50 + i * 0.1),
+];
+const eaRun = runGlobalMacroEngine({ region: "EA", series: eaSeries, asOfDate: "2024-12-28" });
+assert.ok(eaRun.regime.macroScoreTotal !== null);
+assert.ok(eaRun.indicators.some((item) => item.indicatorId === "hicp_inflation_ea"));
+
+const seSeries: MacroSeriesInput[] = [
+  makeSeries("cpi_se", (i) => 300 + i),
+  makeSeries("cpi_momentum_se", (i) => i % 6),
+  makeSeries("repo_rate_se", (i) => 1 + i * 0.01),
+  makeSeries("gov_bond_yield_10y_se", (i) => 2 + i * 0.005),
+  makeSeries("debt_gdp_se", (i) => 35 + i * 0.02),
+  makeSeries("deficit_gdp_se", (i) => -1 + i * 0.005),
+  makeSeries("infl_exp_se", (i) => 2 + i * 0.002),
+  makeSeries("credit_spreads_se", (i) => 0.5 + i * 0.001),
+];
+const seRun = runGlobalMacroEngine({ region: "SE", series: seSeries, asOfDate: "2024-12-28" });
+assert.ok(seRun.regime.macroScoreTotal !== null);
+assert.ok(seRun.indicators.some((item) => item.indicatorId === "cpi_sweden"));
