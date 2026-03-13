@@ -372,6 +372,7 @@ export const MACRO_INDICATOR_CATALOG: MacroIndicatorCatalogEntry[] = [
     transform: "momentum",
     scoring: "percentile_10y",
     blockWeight: 0.9,
+    overlay: "growth",
   },
   {
     indicatorId: "debt_gdp_ea",

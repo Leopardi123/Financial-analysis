@@ -22,6 +22,18 @@ const EUROSTAT_EA_DATASETS = {
   },
 } as const;
 
+async function fetchEurostatFirstAvailable(candidates: Array<{ dataset: string; filters: Record<string, string> }>) {
+  for (const candidate of candidates) {
+    try {
+      const rows = await fetchEurostatSeries(candidate);
+      if (rows.length > 0) return rows;
+    } catch {
+      // try next candidate
+    }
+  }
+  return [] as Array<{ date: string; value: number | null }>;
+}
+
 function computeMomentum(points: Array<{ date: string; value: number | null }>, months = 3) {
   if (points.length <= months) return [];
   return points
@@ -109,20 +121,32 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     };
 
     const tasks: Array<Promise<void>> = [
-      fetchEurostatSeries(EUROSTAT_EA_DATASETS.hicpBase).then((x) => { sourceSeries.hicp_ea = x; }),
+      fetchEurostatFirstAvailable([
+        EUROSTAT_EA_DATASETS.hicpBase,
+        { dataset: "prc_hicp_midx", filters: { geo: "EA20", coicop: "CP00", unit: "I15", freq: "M" } },
+      ]).then((x) => { sourceSeries.hicp_ea = x; }),
       fetchEcbSeries({ flowRef: "ICP", key: "M.U2.N.000000.4.ANR" }).then((x) => { sourceSeries.hicp_yoy_ea = x; }),
       fetchEcbSeries({ flowRef: "FM", key: "M.U2.EUR.4F.BB.U2_10Y.YLD" }).then((x) => { sourceSeries.real_yield_10y_ea = x; }),
       fetchEcbSeries({ flowRef: "BSI", key: "M.U2.Y.V.M30.X.1.U2.2300.Z01.E" }).then((x) => { sourceSeries.m3_ea = x; }),
       fetchEcbSeries({ flowRef: "BSI", key: "M.U2.N.A.A20.A.1.U2.2240.Z01.E" }).then((x) => { sourceSeries.ecb_balance_sheet_ea = x; }),
-      fetchEurostatSeries(EUROSTAT_EA_DATASETS.debtToGdp).then((x) => { sourceSeries.debt_gdp_ea = x; }),
-      fetchEurostatSeries(EUROSTAT_EA_DATASETS.deficitToGdp).then((x) => { sourceSeries.deficit_gdp_ea = x; }),
+      fetchEurostatFirstAvailable([
+        EUROSTAT_EA_DATASETS.debtToGdp,
+        { dataset: "gov_10dd_edpt1", filters: { geo: "EA20", unit: "PC_GDP", na_item: "GD" } },
+      ]).then((x) => { sourceSeries.debt_gdp_ea = x; }),
+      fetchEurostatFirstAvailable([
+        EUROSTAT_EA_DATASETS.deficitToGdp,
+        { dataset: "gov_10dd_edpt1", filters: { geo: "EA20", unit: "PC_GDP", na_item: "B9" } },
+      ]).then((x) => { sourceSeries.deficit_gdp_ea = x; }),
       fetchEcbSeries({ flowRef: "FM", key: "M.U2.EUR.4F.BB.U2_10Y.YLD" }).then((x) => { sourceSeries.credit_spreads_ea = x; }),
       fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
     ];
     await Promise.allSettled(tasks);
 
     const derivedSeries: CanonicalSeriesMap = {
-      hicp_momentum_ea: computeMomentum(sourceSeries.hicp_ea ?? [], 3),
+      hicp_momentum_ea: computeMomentum(
+        (sourceSeries.hicp_ea?.length ?? 0) > 0 ? (sourceSeries.hicp_ea ?? []) : (sourceSeries.hicp_yoy_ea ?? []),
+        3,
+      ),
       m3_growth_ea: computeMomentum(sourceSeries.m3_ea ?? [], 12),
       gold_vs_real_yield_ea: alignSpread(sourceSeries.gold_usd ?? [], sourceSeries.real_yield_10y_ea ?? []),
     };
