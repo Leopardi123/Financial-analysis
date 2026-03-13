@@ -2,8 +2,8 @@ import { fetchStableJson } from "../../../api/_fmp.js";
 import { buildDerivedSeries, fetchFredSeries, US_FRED_SERIES } from "./fred.ts";
 import { fetchEcbSeries } from "./adapters/ecbAdapter.ts";
 import { fetchEurostatSeries } from "./adapters/eurostatAdapter.ts";
-import { fetchRiksbankSeries } from "./adapters/riksbankAdapter.ts";
-import { fetchScbSeries } from "./adapters/scbAdapter.ts";
+import { fetchRiksbankSeries, resolveRiksbankSeriesIdByMetadata } from "./adapters/riksbankAdapter.ts";
+import { fetchScbSeriesByMetadata } from "./adapters/scbAdapter.ts";
 
 export type CanonicalSeriesMap = Record<string, Array<{ date: string; value: number | null }>>;
 
@@ -36,8 +36,21 @@ async function fetchEurostatFirstAvailable(candidates: Array<{ dataset: string; 
   return [] as Array<{ date: string; value: number | null }>;
 }
 
-async function fetchRiksbankFirstAvailable(seriesIds: string[]): Promise<TimeSeriesPoint[]> {
-  for (const seriesId of seriesIds) {
+async function fetchRiksbankFirstAvailable(params: { preferredIds?: string[]; includeTerms: string[] }): Promise<TimeSeriesPoint[]> {
+  try {
+    const resolved = await resolveRiksbankSeriesIdByMetadata({
+      includeTerms: params.includeTerms,
+      preferredIds: params.preferredIds,
+    });
+    if (resolved) {
+      const rows = await fetchRiksbankSeries(resolved);
+      if (rows.length > 0) return rows;
+    }
+  } catch {
+    // fallback to explicit IDs
+  }
+
+  for (const seriesId of params.preferredIds ?? []) {
     try {
       const rows = await fetchRiksbankSeries(seriesId);
       if (rows.length > 0) return rows;
@@ -45,18 +58,7 @@ async function fetchRiksbankFirstAvailable(seriesIds: string[]): Promise<TimeSer
       // try next candidate
     }
   }
-  return [];
-}
 
-async function fetchScbFirstAvailable(candidates: Array<{ path: string; query: unknown }>): Promise<TimeSeriesPoint[]> {
-  for (const candidate of candidates) {
-    try {
-      const rows = await fetchScbSeries(candidate);
-      if (rows.length > 0) return rows;
-    } catch {
-      // try next candidate
-    }
-  }
   return [];
 }
 
@@ -209,43 +211,34 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
   };
 
   const tasks: Array<Promise<void>> = [
-    fetchRiksbankFirstAvailable(["SE.KPIF.YOY", "SE.CPIF.YOY", "SE.KPIF.12M"]).then((x) => { sourceSeries.kpif_yoy_se = x; }),
-    fetchRiksbankFirstAvailable(["SE.REPO.RATE", "SE.POLICY.RATE", "SE.POLICYRATE"]).then((x) => { sourceSeries.policy_rate_se = x; }),
-    fetchRiksbankFirstAvailable(["SE.GOVBOND.10Y", "SE.SGB_10Y", "SE.BOND.10Y"]).then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
-    fetchScbFirstAvailable([
-      {
-        path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-        query: {
-          query: [
-            { code: "ContentsCode", selection: { filter: "item", values: ["B9", "GFDEBT"] } },
-            { code: "Tid", selection: { filter: "all", values: ["*"] } },
-          ],
-          response: { format: "json" },
-        },
-      },
-      {
-        path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-        query: { query: [], response: { format: "json" } },
-      },
-    ]).then((x) => { sourceSeries.debt_gdp_se = x; }),
-    fetchScbFirstAvailable([
-      {
-        path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-        query: {
-          query: [
-            { code: "ContentsCode", selection: { filter: "item", values: ["B9"] } },
-            { code: "Tid", selection: { filter: "all", values: ["*"] } },
-          ],
-          response: { format: "json" },
-        },
-      },
-      {
-        path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-        query: { query: [], response: { format: "json" } },
-      },
-    ]).then((x) => { sourceSeries.deficit_gdp_se = x; }),
-    fetchRiksbankFirstAvailable(["SE.M3.YOY", "SE.MONEY.M3.YOY", "SE.MONAGG.M3"]).then((x) => { sourceSeries.liquidity_growth_se = x; }),
-    fetchRiksbankFirstAvailable(["SE.CREDIT.SPREAD", "SE.MORTGAGE.SPREAD", "SE.COVERED.BOND.SPREAD"]).then((x) => { sourceSeries.credit_spreads_se = x; }),
+    fetchRiksbankFirstAvailable({
+      preferredIds: ["SE.KPIF.YOY", "SE.CPIF.YOY", "SE.KPIF.12M"],
+      includeTerms: ["kpif", "year"],
+    }).then((x) => { sourceSeries.kpif_yoy_se = x; }),
+    fetchRiksbankFirstAvailable({
+      preferredIds: ["SE.REPO.RATE", "SE.POLICY.RATE", "SE.POLICYRATE"],
+      includeTerms: ["policy", "rate", "sweden"],
+    }).then((x) => { sourceSeries.policy_rate_se = x; }),
+    fetchRiksbankFirstAvailable({
+      preferredIds: ["SE.GOVBOND.10Y", "SE.SGB_10Y", "SE.BOND.10Y"],
+      includeTerms: ["government", "bond", "10"],
+    }).then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
+    fetchScbSeriesByMetadata({
+      path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
+      metricKeywords: ["debt", "gdp"],
+    }).then((x) => { sourceSeries.debt_gdp_se = x; }),
+    fetchScbSeriesByMetadata({
+      path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
+      metricKeywords: ["net lending", "gdp"],
+    }).then((x) => { sourceSeries.deficit_gdp_se = x; }),
+    fetchRiksbankFirstAvailable({
+      preferredIds: ["SE.M3.YOY", "SE.MONEY.M3.YOY", "SE.MONAGG.M3"],
+      includeTerms: ["m3", "year"],
+    }).then((x) => { sourceSeries.liquidity_growth_se = x; }),
+    fetchRiksbankFirstAvailable({
+      preferredIds: ["SE.CREDIT.SPREAD", "SE.MORTGAGE.SPREAD", "SE.COVERED.BOND.SPREAD"],
+      includeTerms: ["spread", "sweden"],
+    }).then((x) => { sourceSeries.credit_spreads_se = x; }),
     fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
   ];
   await Promise.allSettled(tasks);
