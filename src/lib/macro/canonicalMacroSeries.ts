@@ -2,8 +2,15 @@ import { fetchStableJson } from "../../../api/_fmp.js";
 import { buildDerivedSeries, fetchFredSeries, US_FRED_SERIES } from "./fred.ts";
 import { fetchEcbSeries } from "./adapters/ecbAdapter.ts";
 import { fetchEurostatSeries } from "./adapters/eurostatAdapter.ts";
-import { fetchRiksbankSeriesVerified } from "./adapters/riksbankAdapter.ts";
-import { fetchScbPxTableSeries } from "./adapters/scbAdapter.ts";
+import {
+  fetchRiksbankSeriesVerified,
+  verifyRiksbankSeriesExists,
+} from "./adapters/riksbankAdapter.ts";
+import {
+  discoverScbTablePath,
+  fetchScbPxTableSeries,
+  fetchScbTableMetadata,
+} from "./adapters/scbAdapter.ts";
 
 export type CanonicalSeriesMap = Record<string, Array<{ date: string; value: number | null }>>;
 
@@ -118,7 +125,10 @@ async function fetchGoldSeries() {
   return normalizeFmpEodRows(payload);
 }
 
-export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode: "backfill" | "latest"): Promise<{ sourceSeries: CanonicalSeriesMap; derivedSeries: CanonicalSeriesMap; }> {
+export async function loadCanonicalMacroSeries(
+  region: "US" | "EA" | "SE",
+  mode: "backfill" | "latest",
+): Promise<{ sourceSeries: CanonicalSeriesMap; derivedSeries: CanonicalSeriesMap; partialSeries: string[] }> {
   if (region === "US") {
     const sourceSeries: CanonicalSeriesMap = {};
     for (const entry of US_FRED_SERIES) {
@@ -138,7 +148,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     } catch {
       sourceSeries.gold_usd = [];
     }
-    return { sourceSeries, derivedSeries: buildDerivedSeries(sourceSeries) };
+    return { sourceSeries, derivedSeries: buildDerivedSeries(sourceSeries), partialSeries: [] };
   }
 
   if (region === "EA") {
@@ -184,9 +194,10 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       m3_growth_ea: computeMomentum(sourceSeries.m3_ea ?? [], 12),
       gold_vs_real_yield_ea: alignSpread(sourceSeries.gold_usd ?? [], sourceSeries.real_yield_10y_ea ?? []),
     };
-    return { sourceSeries, derivedSeries };
+    return { sourceSeries, derivedSeries, partialSeries: [] };
   }
 
+  const partialSeries = new Set<string>();
   const sourceSeries: CanonicalSeriesMap = {
     kpif_yoy_se: [],
     inflation_momentum_se: [],
@@ -198,62 +209,115 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     gold_usd: [],
   };
 
+  let kpifTablePath = "START/PR/PR0101/PR0101A/KPIFMAnad";
+  try {
+    const discoveredPath = await discoverScbTablePath({
+      directoryPath: "START/PR/PR0101",
+      mustIncludeKeywords: ["kpif"],
+    });
+    if (discoveredPath) kpifTablePath = discoveredPath;
+  } catch {
+    partialSeries.add("kpif_yoy_se");
+    partialSeries.add("inflation_momentum_se");
+  }
+
+  const riksbankRepoExists = await verifyRiksbankSeriesExists("SECBREPOEFF").catch(() => false);
+  const riksbank10YExists = await verifyRiksbankSeriesExists("SEGVB10YC").catch(() => false);
+  if (!riksbankRepoExists) partialSeries.add("policy_rate_se");
+  if (!riksbank10YExists) partialSeries.add("government_bond_yield_10y_se");
+
   const tasks: Array<Promise<void>> = [
     fetchScbPxTableSeries({
-      path: "START__PR__PR0101__PR0101G/KPIF",
+      path: kpifTablePath,
       selectors: [
         {
           codeHint: "ContentsCode",
-          valueKeywordGroups: [["kpif", "12", "month"], ["kpif", "12-month"], ["kpif", "årsförändring"]],
+          valueKeywordGroups: [["kpif", "12", "month"], ["12", "month", "change"], ["year", "change"]],
         },
       ],
     }).then((x) => { sourceSeries.kpif_yoy_se = x; }),
     fetchScbPxTableSeries({
-      path: "START__PR__PR0101__PR0101G/KPIF",
+      path: kpifTablePath,
       selectors: [
         {
           codeHint: "ContentsCode",
-          valueKeywordGroups: [["kpif", "month", "change"], ["kpif", "månadsförändring"]],
+          valueKeywordGroups: [["kpif", "month", "change"], ["monthly", "change"]],
         },
       ],
     }).then((x) => { sourceSeries.inflation_momentum_se = x; }),
     fetchRiksbankSeriesVerified("SECBREPOEFF").then((x) => { sourceSeries.policy_rate_se = x; }),
     fetchRiksbankSeriesVerified("SEGVB10YC").then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
     fetchScbPxTableSeries({
-      path: "START__NR__NR0108/FirBruttoKonvAr",
+      path: "START/NR/NR0109/NR0109A/Offentligfinanser",
       selectors: [
-        { codeHint: "Sector", preferredValueCodes: ["S13"] },
-        { codeHint: "Account item", preferredValueCodes: ["FL01N"], valueKeywordGroups: [["maastricht", "debt"]] },
+        { codeHint: "ContentsCode", valueKeywordGroups: [["debt", "gdp"]] },
       ],
     }).then((x) => { sourceSeries.public_debt_nominal_se = x; }),
     fetchScbPxTableSeries({
-      path: "START__NR__NR0103__NR0103F/SektorENS2010Ar",
+      path: "START/NR/NR0109/NR0109A/Offentligfinanser",
       selectors: [
-        { codeHint: "Sector", preferredValueCodes: ["S13"] },
-        { codeHint: "Transaction", preferredValueCodes: ["B9", "B.9"], valueKeywordGroups: [["net", "lending"], ["net", "borrowing"]] },
+        { codeHint: "ContentsCode", valueKeywordGroups: [["net", "lending", "gdp"]] },
       ],
     }).then((x) => { sourceSeries.net_lending_borrowing_se = x; }),
-    fetchScbPxTableSeries({
-      path: "START__NR__NR0103__NR0103F/SektorENS2010Ar",
-      selectors: [
-        { codeHint: "Sector", preferredValueCodes: ["S1"] },
-        { codeHint: "Transaction", preferredValueCodes: ["B1GQ", "B1_GQ"], valueKeywordGroups: [["gross", "domestic", "product"]] },
-      ],
-    }).then((x) => { sourceSeries.gdp_nominal_se = x; }),
     fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
   ];
   await Promise.allSettled(tasks);
+
+  if ((sourceSeries.kpif_yoy_se ?? []).length === 0 || (sourceSeries.inflation_momentum_se ?? []).length === 0) {
+    try {
+      const metadata = await fetchScbTableMetadata(kpifTablePath);
+      const contents = (metadata.variables ?? []).find((v) => String(v.code ?? "").toLowerCase() === "contentscode");
+      if (contents) {
+        const kpifIndex = await fetchScbPxTableSeries({
+          path: kpifTablePath,
+          selectors: [{ codeHint: "ContentsCode", valueKeywordGroups: [["kpif", "index"], ["index"]] }],
+        });
+        if ((sourceSeries.kpif_yoy_se ?? []).length === 0) {
+          sourceSeries.kpif_yoy_se = kpifIndex
+            .map((p, i) => {
+              const prev = i >= 12 ? kpifIndex[i - 12] : null;
+              if (!prev || p.value === null || prev.value === null || prev.value === 0) return null;
+              return { date: p.date, value: p.value / prev.value - 1 };
+            })
+            .filter((p): p is { date: string; value: number } => p !== null);
+        }
+        if ((sourceSeries.inflation_momentum_se ?? []).length === 0) {
+          sourceSeries.inflation_momentum_se = kpifIndex
+            .map((p, i) => {
+              const prev = i >= 1 ? kpifIndex[i - 1] : null;
+              if (!prev || p.value === null || prev.value === null || prev.value === 0) return null;
+              return { date: p.date, value: p.value / prev.value - 1 };
+            })
+            .filter((p): p is { date: string; value: number } => p !== null);
+        }
+      }
+    } catch {
+      partialSeries.add("kpif_yoy_se");
+      partialSeries.add("inflation_momentum_se");
+    }
+  }
+
+  if ((sourceSeries.public_debt_nominal_se ?? []).length === 0) partialSeries.add("debt_gdp_se");
+  if ((sourceSeries.net_lending_borrowing_se ?? []).length === 0) partialSeries.add("deficit_gdp_se");
+  if ((sourceSeries.gdp_nominal_se ?? []).length === 0) partialSeries.add("debt_gdp_se");
+  if ((sourceSeries.gdp_nominal_se ?? []).length === 0) partialSeries.add("deficit_gdp_se");
 
   const debtGdp = alignRatio(sourceSeries.public_debt_nominal_se ?? [], sourceSeries.gdp_nominal_se ?? []).map((p) => ({ ...p, value: p.value === null ? null : p.value * 100 }));
   const deficitGdp = alignRatio(sourceSeries.net_lending_borrowing_se ?? [], sourceSeries.gdp_nominal_se ?? []).map((p) => ({ ...p, value: p.value === null ? null : p.value * 100 }));
   const realYield = alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []);
 
+  if (realYield.length === 0) partialSeries.add("real_yield_10y_se");
+
   const derivedSeries: CanonicalSeriesMap = {
-    inflation_momentum_se: sourceSeries.inflation_momentum_se ?? computeMomentum(sourceSeries.kpif_yoy_se ?? [], 1),
+    inflation_momentum_se:
+      (sourceSeries.inflation_momentum_se ?? []).length > 0
+        ? (sourceSeries.inflation_momentum_se ?? [])
+        : computeMomentum(sourceSeries.kpif_yoy_se ?? [], 1),
     real_yield_10y_se: realYield,
     debt_gdp_se: debtGdp,
     deficit_gdp_se: deficitGdp,
-    gold_vs_real_yield_se: alignSpread(sourceSeries.gold_usd ?? [], realYield),
+    gold_vs_real_yield_se: alignRatio(sourceSeries.gold_usd ?? [], realYield),
   };
-  return { sourceSeries, derivedSeries };
+  if ((derivedSeries.gold_vs_real_yield_se ?? []).length === 0) partialSeries.add("gold_vs_real_yield_se");
+  return { sourceSeries, derivedSeries, partialSeries: Array.from(partialSeries).sort() };
 }

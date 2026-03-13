@@ -91,7 +91,7 @@ export default async function handler(req: any, res: any) {
     debug.fetchStarted = true;
 
     const typedRegion = region as "US" | "EA" | "SE";
-    const { sourceSeries, derivedSeries } = await loadCanonicalMacroSeries(typedRegion, mode);
+    const { sourceSeries, derivedSeries, partialSeries } = await loadCanonicalMacroSeries(typedRegion, mode);
 
     for (const [seriesKey, rows] of Object.entries(sourceSeries)) {
       const source = sourceForRegionSeries(typedRegion, seriesKey);
@@ -224,6 +224,7 @@ export default async function handler(req: any, res: any) {
         ingestOutcome: debug.ingestOutcome,
       },
       debug,
+      partialSeries,
     });
   } catch (error) {
     debug.errorMessage = (error as Error).message;

@@ -7,6 +7,13 @@ const originalFetch = global.fetch;
 global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
 
+  if (url.includes("api.scb.se/OV0104/v1/doris/en/ssd/START/PR/PR0101") && !url.includes("KPIFMAnad") && !init?.method) {
+    return {
+      ok: true,
+      json: async () => ([{ id: "PR0101A/KPIFMAnad" }, { id: "PR0101B" }]),
+    } as Response;
+  }
+
   if (url.includes("api.riksbank.se/swea/v1/series") || url.includes("api.riksbank.se/swea/v1/Series")) {
     return {
       ok: true,
@@ -29,7 +36,7 @@ global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return { ok: true, json: async () => ({ observations: [] }) } as Response;
   }
 
-  if (url.includes("START__PR__PR0101__PR0101G/KPIF") && !init?.method) {
+  if (url.includes("START/PR/PR0101/PR0101A/KPIFMAnad") && !init?.method) {
     return {
       ok: true,
       json: async () => ({
@@ -41,33 +48,19 @@ global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     } as Response;
   }
 
-  if (url.includes("START__NR__NR0108/FirBruttoKonvAr") && !init?.method) {
+  if (url.includes("START/NR/NR0109/NR0109A/Offentligfinanser") && !init?.method) {
     return {
       ok: true,
       json: async () => ({
         variables: [
-          { code: "Sector", values: ["S13"], valueTexts: ["General government"] },
-          { code: "Account item", values: ["FL01N"], valueTexts: ["Total Maastricht debt"] },
+          { code: "ContentsCode", values: ["GGDebtPctGDP", "B9PctGDP"], valueTexts: ["Debt as % of GDP", "Net lending as % of GDP"] },
           { code: "Tid", values: ["2022", "2023"], valueTexts: ["2022", "2023"] },
         ],
       }),
     } as Response;
   }
 
-  if (url.includes("START__NR__NR0103__NR0103F/SektorENS2010Ar") && !init?.method) {
-    return {
-      ok: true,
-      json: async () => ({
-        variables: [
-          { code: "Sector", values: ["S13", "S1"], valueTexts: ["General government", "Total economy"] },
-          { code: "Transaction", values: ["B9", "B1GQ"], valueTexts: ["Net lending/net borrowing", "Gross domestic product"] },
-          { code: "Tid", values: ["2022", "2023"], valueTexts: ["2022", "2023"] },
-        ],
-      }),
-    } as Response;
-  }
-
-  if (init?.method === "POST" && url.includes("START__PR__PR0101__PR0101G/KPIF")) {
+  if (init?.method === "POST" && url.includes("START/PR/PR0101/PR0101A/KPIFMAnad")) {
     const body = JSON.parse(String(init.body ?? "{}"));
     const metric = body.query?.find((q: any) => q.code === "ContentsCode")?.selection?.values?.[0];
     const data = metric === "KPIF_12M"
@@ -76,18 +69,13 @@ global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return { ok: true, json: async () => ({ data }) } as Response;
   }
 
-  if (init?.method === "POST" && url.includes("START__NR__NR0108/FirBruttoKonvAr")) {
-    return { ok: true, json: async () => ({ data: [{ key: ["S13", "FL01N", "2022"], values: ["2200"] }, { key: ["S13", "FL01N", "2023"], values: ["2300"] }] }) } as Response;
-  }
-
-  if (init?.method === "POST" && url.includes("START__NR__NR0103__NR0103F/SektorENS2010Ar")) {
+  if (init?.method === "POST" && url.includes("START/NR/NR0109/NR0109A/Offentligfinanser")) {
     const body = JSON.parse(String(init.body ?? "{}"));
-    const sector = body.query?.find((q: any) => q.code === "Sector")?.selection?.values?.[0];
-    const trx = body.query?.find((q: any) => q.code === "Transaction")?.selection?.values?.[0];
-    if (sector === "S13" && trx === "B9") {
-      return { ok: true, json: async () => ({ data: [{ key: ["S13", "B9", "2022"], values: ["-40"] }, { key: ["S13", "B9", "2023"], values: ["10"] }] }) } as Response;
+    const metric = body.query?.find((q: any) => q.code === "ContentsCode")?.selection?.values?.[0];
+    if (metric === "GGDebtPctGDP") {
+      return { ok: true, json: async () => ({ data: [{ key: ["GGDebtPctGDP", "2022"], values: ["33.1"] }, { key: ["GGDebtPctGDP", "2023"], values: ["31.5"] }] }) } as Response;
     }
-    return { ok: true, json: async () => ({ data: [{ key: ["S1", "B1GQ", "2022"], values: ["6200"] }, { key: ["S1", "B1GQ", "2023"], values: ["6500"] }] }) } as Response;
+    return { ok: true, json: async () => ({ data: [{ key: ["B9PctGDP", "2022"], values: ["-0.8"] }, { key: ["B9PctGDP", "2023"], values: ["0.4"] }] }) } as Response;
   }
 
   if (url.includes("financialmodelingprep.com/stable/historical-price-eod/full")) {
@@ -104,6 +92,8 @@ assert.ok((out.sourceSeries.policy_rate_se ?? []).length > 0);
 assert.ok((out.sourceSeries.government_bond_yield_10y_se ?? []).length > 0);
 assert.ok((out.derivedSeries.real_yield_10y_se ?? []).length > 0);
 assert.ok((out.derivedSeries.gold_vs_real_yield_se ?? []).length > 0);
+assert.ok(out.partialSeries.includes("debt_gdp_se"));
+assert.ok(out.partialSeries.includes("deficit_gdp_se"));
 
 if (originalFetch) global.fetch = originalFetch;
 console.log("SE canonical macro mapping tests passed");

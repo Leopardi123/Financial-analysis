@@ -4,6 +4,7 @@ type ScbDataRow = { key?: string[]; values?: string[] };
 
 type ScbResponse = {
   data?: ScbDataRow[];
+  columns?: Array<{ code?: string }>;
 };
 
 type ScbVariable = {
@@ -16,6 +17,8 @@ type ScbVariable = {
 type ScbMetadata = {
   variables?: ScbVariable[];
 };
+
+type ScbDirectoryEntry = string | { id?: string; text?: string };
 
 type PxSelector = {
   codeHint: string;
@@ -94,8 +97,57 @@ function defaultSelection(variable: ScbVariable): string | null {
 }
 
 export async function fetchScbTableMetadata(path: string): Promise<ScbMetadata> {
-  const url = `https://api.scb.se/OV0104/v1/doris/en/${path.replace(/^\/+/, "")}`;
+  const normalizedPath = path.replace(/^\/+/, "").replace(/^ssd\//i, "");
+  const url = `https://api.scb.se/OV0104/v1/doris/en/ssd/${normalizedPath}`;
   return fetchJsonWithPolicies<ScbMetadata>({ url });
+}
+
+export async function listScbDirectory(path: string): Promise<string[]> {
+  const normalizedPath = path.replace(/^\/+/, "").replace(/^ssd\//i, "");
+  const url = `https://api.scb.se/OV0104/v1/doris/en/ssd/${normalizedPath}`;
+  const payload = await fetchJsonWithPolicies<ScbDirectoryEntry[]>({ url });
+  return (Array.isArray(payload) ? payload : [])
+    .map((entry) => {
+      if (typeof entry === "string") return entry;
+      if (typeof entry === "object" && entry !== null) {
+        return String(entry.id ?? entry.text ?? "").trim();
+      }
+      return "";
+    })
+    .filter((entry) => entry.length > 0);
+}
+
+export async function discoverScbTablePath(params: {
+  directoryPath: string;
+  mustIncludeKeywords: string[];
+}): Promise<string | null> {
+  const entries = await listScbDirectory(params.directoryPath);
+  const keywords = params.mustIncludeKeywords.map(norm);
+  const match = entries.find((entry) => {
+    const hay = norm(entry);
+    return keywords.every((keyword) => hay.includes(keyword));
+  });
+  if (!match) return null;
+  const dir = params.directoryPath.replace(/^\/+/, "").replace(/^ssd\//i, "").replace(/\/$/, "");
+  return `${dir}/${match}`;
+}
+
+export async function queryScbTable(path: string, queryBody: Record<string, unknown>): Promise<ScbResponse> {
+  const normalizedPath = path.replace(/^\/+/, "").replace(/^ssd\//i, "");
+  const url = `https://api.scb.se/OV0104/v1/doris/en/ssd/${normalizedPath}`;
+  return fetchJsonWithPolicies<ScbResponse>({
+    url,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(queryBody),
+    },
+    minIntervalMs: 1_100,
+  });
+}
+
+export function parsePxWebResponse(payload: ScbResponse, timeIndex: number): Array<{ date: string; value: number | null }> {
+  return parseScbRows(payload, timeIndex);
 }
 
 export async function fetchScbPxTableSeries(params: {
@@ -130,19 +182,10 @@ export async function fetchScbPxTableSeries(params: {
     })
     .filter((row): row is { code: string; selection: { filter: string; values: string[] } } => row !== null);
 
-  const url = `https://api.scb.se/OV0104/v1/doris/en/${params.path.replace(/^\/+/, "")}`;
-  const payload = await fetchJsonWithPolicies<ScbResponse>({
-    url,
-    init: {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, response: { format: "json" } }),
-    },
-    minIntervalMs: 1_100,
-  });
+  const payload = await queryScbTable(params.path, { query, response: { format: "json-stat2" } });
 
   const timeIndex = variables.findIndex((v) => String(v.code ?? "") === timeVar.code);
-  return parseScbRows(payload, timeIndex >= 0 ? timeIndex : variables.length - 1);
+  return parsePxWebResponse(payload, timeIndex >= 0 ? timeIndex : variables.length - 1);
 }
 
 export async function fetchScbSeriesByMetadata(params: {
