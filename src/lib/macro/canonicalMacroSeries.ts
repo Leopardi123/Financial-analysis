@@ -45,6 +45,10 @@ function computeMomentum(points: Array<{ date: string; value: number | null }>, 
     .filter((x) => x.value !== null);
 }
 
+function hasMinimumNumericPoints(points: Array<{ date: string; value: number | null }>, minimum = 4): boolean {
+  return points.filter((p) => typeof p.value === "number" && Number.isFinite(p.value)).length >= minimum;
+}
+
 function alignSpread(
   left: Array<{ date: string; value: number | null }>,
   right: Array<{ date: string; value: number | null }>,
@@ -144,7 +148,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
 
     const derivedSeries: CanonicalSeriesMap = {
       hicp_momentum_ea: computeMomentum(
-        (sourceSeries.hicp_ea?.length ?? 0) > 0 ? (sourceSeries.hicp_ea ?? []) : (sourceSeries.hicp_yoy_ea ?? []),
+        hasMinimumNumericPoints(sourceSeries.hicp_ea ?? []) ? (sourceSeries.hicp_ea ?? []) : (sourceSeries.hicp_yoy_ea ?? []),
         3,
       ),
       m3_growth_ea: computeMomentum(sourceSeries.m3_ea ?? [], 12),
