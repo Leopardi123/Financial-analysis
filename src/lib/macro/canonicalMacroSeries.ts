@@ -148,6 +148,11 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       real_yield_10y_ea: [],
       m3_ea: [],
       ecb_balance_sheet_ea: [],
+      oil_brent_usd: [],
+      natgas_usd: [],
+      copper_usd: [],
+      industrial_metals_index: [],
+      commodity_index: [],
       debt_gdp_ea: [],
       deficit_gdp_ea: [],
       credit_spreads_ea: [],
@@ -163,6 +168,11 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       fetchEcbSeries({ flowRef: "FM", key: "M.U2.EUR.4F.BB.U2_10Y.YLD" }).then((x) => { sourceSeries.real_yield_10y_ea = x; }),
       fetchEcbSeries({ flowRef: "BSI", key: "M.U2.Y.V.M30.X.1.U2.2300.Z01.E" }).then((x) => { sourceSeries.m3_ea = x; }),
       fetchEcbSeries({ flowRef: "BSI", key: "M.U2.N.A.A20.A.1.U2.2240.Z01.E" }).then((x) => { sourceSeries.ecb_balance_sheet_ea = x; }),
+      fetchFredSeries({ fredSeriesId: "DCOILBRENTEU", mode }).then((x) => { sourceSeries.oil_brent_usd = x; }),
+      fetchFredSeries({ fredSeriesId: "DHHNGSP", mode }).then((x) => { sourceSeries.natgas_usd = x; }),
+      fetchFredSeries({ fredSeriesId: "PCOPPUSDM", mode }).then((x) => { sourceSeries.copper_usd = x; }),
+      fetchFredSeries({ fredSeriesId: "PMETAUSDM", mode }).then((x) => { sourceSeries.industrial_metals_index = x; }),
+      fetchFredSeries({ fredSeriesId: "PALLFNFUSDM", mode }).then((x) => { sourceSeries.commodity_index = x; }),
       fetchEurostatFirstAvailable([
         EUROSTAT_EA_DATASETS.debtToGdp,
         { dataset: "gov_10dd_edpt1", filters: { geo: "EA20", unit: "PC_GDP", na_item: "GD" } },
@@ -176,6 +186,8 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     ];
     await Promise.allSettled(tasks);
 
+    const marketDerived = buildDerivedSeries(sourceSeries);
+
     const derivedSeries: CanonicalSeriesMap = {
       hicp_momentum_ea: computeMomentum(
         hasMinimumNumericPoints(sourceSeries.hicp_ea ?? []) ? (sourceSeries.hicp_ea ?? []) : (sourceSeries.hicp_yoy_ea ?? []),
@@ -183,6 +195,11 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       ),
       m3_growth_ea: computeMomentum(sourceSeries.m3_ea ?? [], 12),
       gold_vs_real_yield_ea: alignSpread(sourceSeries.gold_usd ?? [], sourceSeries.real_yield_10y_ea ?? []),
+      oil_yoy: marketDerived.oil_yoy ?? [],
+      natgas_yoy: marketDerived.natgas_yoy ?? [],
+      copper_yoy: marketDerived.copper_yoy ?? [],
+      industrial_metals_yoy: marketDerived.industrial_metals_yoy ?? [],
+      commodity_index_yoy: marketDerived.commodity_index_yoy ?? [],
     };
     return { sourceSeries, derivedSeries };
   }
