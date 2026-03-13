@@ -13,12 +13,19 @@ export default async function handler(req: any, res: any) {
     await ensureSchema();
 
     const region = String(req.query?.region ?? "US").toUpperCase();
-    if (region !== "US") {
-      res.status(400).json({ ok: false, error: "Only region=US is supported in this phase" });
+    const allowed = new Set(["US", "EA", "SE", "GLOBAL"]);
+    if (!allowed.has(region)) {
+      res.status(400).json({ ok: false, error: "Unsupported region" });
       return;
     }
 
     const asOfDate = String(req.query?.asOfDate ?? "").trim() || undefined;
+    if (region === "GLOBAL") {
+      const summaries = await Promise.all(["US", "EA", "SE"].map((r) => runAndPersistMacroSnapshots({ region: r, asOfDate })));
+      res.status(200).json({ ok: true, mode: "persisted_snapshots", region, summaries });
+      return;
+    }
+
     const summary = await runAndPersistMacroSnapshots({ region, asOfDate });
 
     res.status(200).json({

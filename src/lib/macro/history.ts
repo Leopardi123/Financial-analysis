@@ -1,6 +1,7 @@
 import { query } from "../../../api/_db.js";
 import { tables } from "../../../api/_migrate.js";
 import { runGlobalMacroEngine } from "./engine.js";
+import { aggregateGlobalMacroRegime, MACRO_GLOBAL_REGION_WEIGHTS } from "./global.js";
 import { classifyBlockBandFromTemplate, GLOBAL_MACRO_TEMPLATE } from "./template.js";
 import type { MacroRegimeSnapshot, MacroSeriesInput } from "./types.ts";
 
@@ -8,6 +9,21 @@ type RawPointRow = {
   series_key: string;
   date: string;
   value: number | null;
+};
+
+type RegimeSnapshotRow = {
+  as_of_date: string;
+  region: string;
+  block_scores_json: string | null;
+  macro_score_total: number | null;
+  macro_confidence: number | null;
+  core_regime_label: string;
+  growth_overlay: string;
+  stress_overlay: string;
+  hard_asset_overlay: string;
+  clear_signal_strength: number | null;
+  speculative_signal_strength: number | null;
+  top_drivers_json: string | null;
 };
 
 export type HistoryResolution = "WEEKLY" | "MONTHLY";
@@ -241,6 +257,103 @@ export async function computeMacroRegimeHistory(params: {
   const region = params.region.toUpperCase();
   const resolution = params.resolution;
   const requestedRangeYears = params.rangeYears;
+
+  if (region === "GLOBAL") {
+    const rows = (await query(
+      `SELECT as_of_date, region, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
+              growth_overlay, stress_overlay, hard_asset_overlay, clear_signal_strength, speculative_signal_strength, top_drivers_json
+       FROM ${tables.macroRegimeSnapshots}
+       WHERE region IN ('US','EA','SE')
+       ORDER BY as_of_date ASC`,
+    )) as unknown as RegimeSnapshotRow[];
+    if (rows.length === 0) return emptyResult(region, resolution, requestedRangeYears, 1);
+
+    const byDate = new Map<string, RegimeSnapshotRow[]>();
+    for (const row of rows) {
+      const bucket = byDate.get(row.as_of_date) ?? [];
+      bucket.push(row);
+      byDate.set(row.as_of_date, bucket);
+    }
+
+    const points: MacroHistoryPoint[] = [];
+    for (const [asOfDate, bucket] of Array.from(byDate.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+      const regional = bucket
+        .filter((item) => item.region in MACRO_GLOBAL_REGION_WEIGHTS)
+        .map((item) => ({
+          asOfDate,
+          region: item.region,
+          blockScores: JSON.parse(item.block_scores_json ?? "{}"),
+          macroScoreTotal: item.macro_score_total,
+          macroConfidence: Number(item.macro_confidence ?? 0),
+          coreRegimeLabel: item.core_regime_label as MacroRegimeSnapshot["coreRegimeLabel"],
+          growthOverlay: item.growth_overlay as MacroRegimeSnapshot["growthOverlay"],
+          stressOverlay: item.stress_overlay as MacroRegimeSnapshot["stressOverlay"],
+          hardAssetOverlay: item.hard_asset_overlay as MacroRegimeSnapshot["hardAssetOverlay"],
+          clearSignalStrength: item.clear_signal_strength,
+          speculativeSignalStrength: item.speculative_signal_strength,
+          topDrivers: JSON.parse(item.top_drivers_json ?? "[]"),
+          regimeExplanation: { title: item.core_regime_label, summary: item.core_regime_label, driverHighlights: [] },
+        }));
+      const regime = aggregateGlobalMacroRegime(regional as MacroRegimeSnapshot[]);
+      points.push({
+        asOfDate,
+        macroScoreTotal: regime.macroScoreTotal,
+        macroConfidence: regime.macroConfidence,
+        coreRegimeLabel: regime.coreRegimeLabel,
+        fiscalScore: regime.blockScores.A_FISCAL,
+        monetaryScore: regime.blockScores.B_MONETARY,
+        inflationScore: regime.blockScores.C_INFLATION,
+        credibilityScore: regime.blockScores.D_CREDIBILITY,
+        growthOverlay: regime.growthOverlay,
+        stressOverlay: regime.stressOverlay,
+        hardAssetOverlay: regime.hardAssetOverlay,
+        regimeChanged: false,
+        overlayChanged: false,
+        blockThresholdChanged: false,
+        previousRegimeLabel: null,
+        topDriver: regime.topDrivers[0]?.indicatorId ?? null,
+        topDrivers: regime.topDrivers,
+        regimeExplanation: regime.regimeExplanation,
+      });
+    }
+
+    for (let i = 1; i < points.length; i += 1) {
+      points[i].regimeChanged = points[i - 1].coreRegimeLabel !== points[i].coreRegimeLabel;
+      points[i].overlayChanged = points[i - 1].growthOverlay !== points[i].growthOverlay || points[i - 1].stressOverlay !== points[i].stressOverlay || points[i - 1].hardAssetOverlay !== points[i].hardAssetOverlay;
+      points[i].previousRegimeLabel = points[i - 1].coreRegimeLabel;
+    }
+
+    const earliestRawDate = points[0]?.asOfDate ?? null;
+    const latestRawDate = points[points.length - 1]?.asOfDate ?? null;
+    return {
+      ...emptyResult(region, resolution, requestedRangeYears, 1),
+      earliestRawDate,
+      latestRawDate,
+      replayEarliestDateUsed: earliestRawDate,
+      replayLatestDateUsed: latestRawDate,
+      generatedPoints: points.length,
+      dataCoveragePct: 100,
+      rangeDebug: {
+        requestedStartDate: earliestRawDate,
+        actualStartDate: earliestRawDate,
+        actualEndDate: latestRawDate,
+        wasCappedByRawData: false,
+        unfilledReason: null,
+      },
+      intervals: {
+        regime: mergeIntervals(points, (point) => point.coreRegimeLabel).map((it) => ({ startDate: it.startDate, endDate: it.endDate, coreRegimeLabel: it.value, pointCount: it.pointCount, topDriver: null, topDrivers: [], regimeExplanation: { title: String(it.value), summary: String(it.value), driverHighlights: [] } })),
+        overlays: {
+          growth: mergeIntervals(points, (point) => point.growthOverlay),
+          stress: mergeIntervals(points, (point) => point.stressOverlay),
+          hardAsset: mergeIntervals(points, (point) => point.hardAssetOverlay),
+        },
+      },
+      points,
+      regimeChanges: points.filter((pt) => pt.regimeChanged).length,
+      overlayChanges: points.filter((pt) => pt.overlayChanged).length,
+    };
+  }
+
 
   const rawPoints = (await query(
     `SELECT series_key, date, value

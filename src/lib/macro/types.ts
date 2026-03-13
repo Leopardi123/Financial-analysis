@@ -43,6 +43,7 @@ export type MacroIndicatorSnapshot = {
 export type MacroDriverDirection = "rising" | "falling" | "stable" | "accelerating" | "decelerating";
 
 export type MacroTopDriver = {
+  region?: string;
   indicatorId: string;
   title: string;
   block: MacroBlock;
