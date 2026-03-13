@@ -88,6 +88,46 @@ type GoldEodMonthlyStatsRow = {
 };
 
 
+
+function buildRegimeExplanation(label: string, topDrivers: Array<{ title?: string; indicatorId: string }>) {
+  const driverHighlights = topDrivers.slice(0, 3).map((driver) => driver.title ?? driver.indicatorId);
+  if (label === "MonetaryDominance") return {
+    title: "Monetary regime dominates",
+    summary: "Penningpolitiska signaler väger tyngst relativt fiskal och inflationsdriven press.",
+    driverHighlights,
+  };
+  if (label === "Balanced") return {
+    title: "Balanced regime",
+    summary: "Blocken är blandade och inga enskilda drivare dominerar tillräckligt för regimskifte.",
+    driverHighlights,
+  };
+  if (label === "FiscalPressureBuilding") return {
+    title: "Fiscal pressure is building",
+    summary: "Fiskal belastning tillsammans med realräntor och inflationssignaler driver ett mer spänt makroklimat.",
+    driverHighlights,
+  };
+  if (label === "FiscalDominanceRisk") return {
+    title: "Fiscal dominance risk",
+    summary: "Fiskal press och förtroendesignaler dominerar med högre systemstress i makrobilden.",
+    driverHighlights,
+  };
+  return {
+    title: "Data insufficient",
+    summary: "För få poängsatta signaler för en robust regimförklaring.",
+    driverHighlights,
+  };
+}
+
+function normalizeDriverDirection(change1m: number | null, change3m: number | null, input?: unknown) {
+  if (input === "rising" || input === "falling" || input === "stable" || input === "accelerating" || input === "decelerating") return input;
+  const c1 = typeof change1m === "number" ? change1m : 0;
+  const c3 = typeof change3m === "number" ? change3m : 0;
+  if (Math.abs(c1) < 1e-9 && Math.abs(c3) < 1e-9) return "stable";
+  if (c1 > 0 && c3 > 0) return Math.abs(c1) > Math.abs(c3 / 3) * 1.25 ? "accelerating" : "rising";
+  if (c1 < 0 && c3 < 0) return Math.abs(c1) > Math.abs(c3 / 3) * 1.25 ? "decelerating" : "falling";
+  return c1 > 0 ? "rising" : c1 < 0 ? "falling" : "stable";
+}
+
 function summarizeBlockStatus(catalog: Array<{ indicatorId: string; block: string; title: string }>, indicators: Array<{
   indicatorId: string;
   score: number | null;
@@ -546,6 +586,41 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
     note: "Current confidence model tracks clear-signal coverage only; overlay fallback does not directly penalize confidence.",
   };
 
+  const rawTopDrivers = safeJsonParse<Array<Record<string, unknown>>>(regimeRow.top_drivers_json, []);
+  const indicatorByIdForTopDrivers = new Map(indicators.map((item) => [item.indicatorId, item]));
+  const normalizedTopDrivers = rawTopDrivers
+    .map((driver) => {
+      const indicatorId = String(driver.indicatorId ?? "").trim();
+      if (!indicatorId) return null;
+      const meta = catalogById.get(indicatorId);
+      const snapshot = indicatorByIdForTopDrivers.get(indicatorId);
+      const change1m = typeof driver.change1m === "number" ? driver.change1m : (snapshot?.change1m ?? null);
+      const change3m = typeof driver.change3m === "number" ? driver.change3m : (snapshot?.change3m ?? null);
+      const yoy = typeof driver.yoy === "number" ? driver.yoy : (snapshot?.yoy ?? null);
+      const score = typeof driver.score === "number" ? driver.score : (snapshot?.score ?? 0);
+      const percentile10y = typeof driver.percentile10y === "number" ? driver.percentile10y : (snapshot?.percentile10y ?? 50);
+      const contribution = typeof driver.contribution === "number" ? driver.contribution : 0;
+      return {
+        indicatorId,
+        title: typeof driver.title === "string" && driver.title.trim().length > 0 ? driver.title : (meta?.title ?? indicatorId),
+        block: meta?.block ?? "D_CREDIBILITY",
+        score,
+        percentile10y,
+        contribution,
+        direction: normalizeDriverDirection(change1m, change3m, driver.direction),
+        change1m,
+        change3m,
+        yoy,
+        driverNote: typeof driver.driverNote === "string"
+          ? driver.driverNote
+          : typeof snapshot?.driverNote === "string"
+            ? snapshot.driverNote
+            : null,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .slice(0, 5);
+
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
     rootCauseHints.push("No raw datapoints found");
@@ -583,7 +658,11 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       hardAssetOverlay: regimeRow.hard_asset_overlay,
       clearSignalStrength: regimeRow.clear_signal_strength === null ? null : Number(regimeRow.clear_signal_strength),
       speculativeSignalStrength: regimeRow.speculative_signal_strength === null ? null : Number(regimeRow.speculative_signal_strength),
-      topDrivers: safeJsonParse<Array<{ indicatorId: string; contribution: number }>>(regimeRow.top_drivers_json, []),
+      topDrivers: normalizedTopDrivers,
+      regimeExplanation: buildRegimeExplanation(
+        regimeRow.core_regime_label,
+        normalizedTopDrivers.map((driver) => ({ indicatorId: driver.indicatorId, title: driver.title })),
+      ),
     },
     indicators,
     dataStatus: indicators.length > 0 ? "snapshot" : "insufficient",
