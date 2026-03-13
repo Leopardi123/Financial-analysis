@@ -35,6 +35,25 @@ export type MacroIndicatorSnapshot = {
   freshnessDays: number | null;
   coverage10yPct: number;
   contribution: number | null;
+  change1m?: number | null;
+  change3m?: number | null;
+  yoy?: number | null;
+};
+
+export type MacroDriverDirection = "rising" | "falling" | "stable" | "accelerating" | "decelerating";
+
+export type MacroTopDriver = {
+  indicatorId: string;
+  title: string;
+  block: MacroBlock;
+  score: -2 | -1 | 0 | 1 | 2;
+  percentile10y: number;
+  contribution: number;
+  direction: MacroDriverDirection;
+  change1m: number | null;
+  change3m: number | null;
+  yoy: number | null;
+  driverNote: string | null;
 };
 
 export type MacroRegimeSnapshot = {
@@ -54,5 +73,10 @@ export type MacroRegimeSnapshot = {
   hardAssetOverlay: "Weak" | "Neutral" | "Strong";
   clearSignalStrength: number | null;
   speculativeSignalStrength: number | null;
-  topDrivers: Array<{ indicatorId: string; contribution: number }>;
+  topDrivers: MacroTopDriver[];
+  regimeExplanation: {
+    title: string;
+    summary: string;
+    driverHighlights: string[];
+  };
 };

@@ -31,6 +31,7 @@ function makeAnnualSeries(seriesKey: string, fn: (index: number) => number): Mac
 const series: MacroSeriesInput[] = [
   makeSeries("debt_to_gdp_us", (i) => i),
   makeSeries("deficit_to_gdp_us", (i) => i * 0.5),
+  makeSeries("interest_cost_proxy_us", (i) => i * 0.3),
   makeSeries("real_yield_10y_us", (i) => 200 - i),
   makeSeries("nominal_yield_10y_us", (i) => 200 - i),
   makeSeries("yield_curve_10y_minus_2y_us", (i) => 80 - i),
@@ -58,6 +59,7 @@ assert.ok(Math.abs(speculative!.contribution!) < Math.abs(clear!.contribution!),
 const mixedCadenceSeries: MacroSeriesInput[] = [
   makeQuarterlySeries("debt_to_gdp_us", (i) => 80 + i),
   makeAnnualSeries("deficit_to_gdp_us", (i) => -6 + i * 0.2),
+  makeQuarterlySeries("interest_cost_proxy_us", (i) => 2 + i * 0.1),
   makeSeries("real_yield_10y_us", (i) => 200 - i),
   makeSeries("nominal_yield_10y_us", (i) => 200 - i),
   makeSeries("yield_curve_10y_minus_2y_us", (i) => 80 - i),

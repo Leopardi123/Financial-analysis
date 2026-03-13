@@ -88,6 +88,36 @@ type GoldEodMonthlyStatsRow = {
 };
 
 
+
+function buildRegimeExplanation(label: string, topDrivers: Array<{ title?: string; indicatorId: string }>) {
+  const driverHighlights = topDrivers.slice(0, 3).map((driver) => driver.title ?? driver.indicatorId);
+  if (label === "MonetaryDominance") return {
+    title: "Monetary regime dominates",
+    summary: "Penningpolitiska signaler väger tyngst relativt fiskal och inflationsdriven press.",
+    driverHighlights,
+  };
+  if (label === "Balanced") return {
+    title: "Balanced regime",
+    summary: "Blocken är blandade och inga enskilda drivare dominerar tillräckligt för regimskifte.",
+    driverHighlights,
+  };
+  if (label === "FiscalPressureBuilding") return {
+    title: "Fiscal pressure is building",
+    summary: "Fiskal belastning tillsammans med realräntor och inflationssignaler driver ett mer spänt makroklimat.",
+    driverHighlights,
+  };
+  if (label === "FiscalDominanceRisk") return {
+    title: "Fiscal dominance risk",
+    summary: "Fiskal press och förtroendesignaler dominerar med högre systemstress i makrobilden.",
+    driverHighlights,
+  };
+  return {
+    title: "Data insufficient",
+    summary: "För få poängsatta signaler för en robust regimförklaring.",
+    driverHighlights,
+  };
+}
+
 function summarizeBlockStatus(catalog: Array<{ indicatorId: string; block: string; title: string }>, indicators: Array<{
   indicatorId: string;
   score: number | null;
@@ -583,7 +613,11 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
       hardAssetOverlay: regimeRow.hard_asset_overlay,
       clearSignalStrength: regimeRow.clear_signal_strength === null ? null : Number(regimeRow.clear_signal_strength),
       speculativeSignalStrength: regimeRow.speculative_signal_strength === null ? null : Number(regimeRow.speculative_signal_strength),
-      topDrivers: safeJsonParse<Array<{ indicatorId: string; contribution: number }>>(regimeRow.top_drivers_json, []),
+      topDrivers: safeJsonParse<Array<{ indicatorId: string; title: string; block: string; score: number; percentile10y: number; contribution: number; direction: string; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>>(regimeRow.top_drivers_json, []),
+      regimeExplanation: buildRegimeExplanation(
+        regimeRow.core_regime_label,
+        safeJsonParse<Array<{ indicatorId: string; title?: string }>>(regimeRow.top_drivers_json, []),
+      ),
     },
     indicators,
     dataStatus: indicators.length > 0 ? "snapshot" : "insufficient",

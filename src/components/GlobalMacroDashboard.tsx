@@ -17,7 +17,8 @@ type GlobalMacroPayload = {
     };
     clearSignalStrength: number | null;
     speculativeSignalStrength: number | null;
-    topDrivers: Array<{ indicatorId: string; contribution: number }>;
+    topDrivers: Array<{ indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
+    regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   };
   indicators: Array<{
     indicatorId: string;
@@ -228,6 +229,8 @@ type MacroHistoryPayload = {
     blockThresholdChanged: boolean;
     previousRegimeLabel: string | null;
     topDriver: string | null;
+    topDrivers: Array<{ indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: string; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
+    regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   }>;
 };
 export default function GlobalMacroDashboard() {
@@ -262,6 +265,8 @@ export default function GlobalMacroDashboard() {
     topDriver: string | null;
     upFactors: string[];
     downFactors: string[];
+    topDrivers: Array<{ title: string; direction: string; block: string; contribution: number }>;
+    explanation: string;
   } | null>(null);
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
@@ -572,22 +577,34 @@ export default function GlobalMacroDashboard() {
                 </ul>
               </div>
 
-              <h4>Top drivers</h4>
-              {globalMacro.regime.topDrivers.length === 0 ? (
-                <div className="status empty">Inga top drivers tillgängliga ännu.</div>
-              ) : (
-                <ul>
-                  {globalMacro.regime.topDrivers.slice(0, 5).map((driver) => (
-                    <li key={driver.indicatorId}>{driver.indicatorId}: {driver.contribution.toFixed(2)}</li>
-                  ))}
-                </ul>
-              )}
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>▸ Top drivers + signal split</summary>
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, marginBottom: 8 }}>
+                    <strong>{globalMacro.regime.regimeExplanation.title}:</strong> {globalMacro.regime.regimeExplanation.summary}
+                  </div>
+                  {globalMacro.regime.topDrivers.length === 0 ? (
+                    <div className="status empty">Inga top drivers tillgängliga ännu.</div>
+                  ) : (
+                    <ul>
+                      {globalMacro.regime.topDrivers.slice(0, 5).map((driver) => (
+                        <li key={driver.indicatorId}>
+                          <strong>{driver.title}</strong> ({driver.block}) · contrib {driver.contribution.toFixed(2)} · pctl {driver.percentile10y.toFixed(1)} · {driver.direction}
+                          {driver.change1m !== null ? ` · 1m ${driver.change1m.toFixed(2)}` : ""}
+                          {driver.change3m !== null ? ` · 3m ${driver.change3m.toFixed(2)}` : ""}
+                          {driver.yoy !== null ? ` · YoY ${driver.yoy.toFixed(2)}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
 
-              <h4>Signal split</h4>
-              <ul>
-                <li>Clear signals: {globalMacroIndicators.filter((item) => item.signalClass === "clear").length} | strength {globalMacro.regime.clearSignalStrength ?? "—"}</li>
-                <li>Speculative signals: {globalMacroIndicators.filter((item) => item.signalClass === "speculative").length} | strength {globalMacro.regime.speculativeSignalStrength ?? "—"}</li>
-              </ul>
+                  <h4>Signal split</h4>
+                  <ul>
+                    <li>Clear signals: {globalMacroIndicators.filter((item) => item.signalClass === "clear").length} | strength {globalMacro.regime.clearSignalStrength ?? "—"}</li>
+                    <li>Speculative signals: {globalMacroIndicators.filter((item) => item.signalClass === "speculative").length} | strength {globalMacro.regime.speculativeSignalStrength ?? "—"}</li>
+                  </ul>
+                </div>
+              </details>
 
 
               <h4>Macro Regime History</h4>
@@ -649,6 +666,7 @@ export default function GlobalMacroDashboard() {
                                   { key: "Inflation", delta: (endPoint?.inflationScore ?? 0) - (startPoint?.inflationScore ?? 0) },
                                   { key: "Credibility", delta: (endPoint?.credibilityScore ?? 0) - (startPoint?.credibilityScore ?? 0) },
                                 ];
+                                const endTopDrivers = endPoint?.topDrivers ?? [];
                                 setSelectedRegimeInterval({
                                   coreRegimeLabel: interval.coreRegimeLabel,
                                   startDate: interval.startDate,
@@ -657,6 +675,8 @@ export default function GlobalMacroDashboard() {
                                   topDriver: interval.topDriver,
                                   upFactors: deltas.filter((item) => item.delta > 2).map((item) => `${item.key} ↑`).slice(0, 3),
                                   downFactors: deltas.filter((item) => item.delta < -2).map((item) => `${item.key} ↓`).slice(0, 3),
+                                  topDrivers: endTopDrivers.slice(0, 5).map((driver) => ({ title: driver.title, direction: driver.direction, block: driver.block, contribution: driver.contribution })),
+                                  explanation: endPoint?.regimeExplanation?.summary ?? regimeExplanation(interval.coreRegimeLabel),
                                 });
                               }}
                               style={{ cursor: "pointer" }}
@@ -715,8 +735,14 @@ export default function GlobalMacroDashboard() {
                   {selectedRegimeInterval && (
                     <div style={{ marginBottom: 12, fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
                       <strong>{selectedRegimeInterval.coreRegimeLabel}</strong> · {selectedRegimeInterval.startDate} → {selectedRegimeInterval.endDate} · {selectedRegimeInterval.pointCount} punkter<br />
-                      Top driver: <strong>{selectedRegimeInterval.topDriver ?? "—"}</strong> · {regimeExplanation(selectedRegimeInterval.coreRegimeLabel)}<br />
+                      Top driver: <strong>{selectedRegimeInterval.topDriver ?? "—"}</strong><br />
+                      Förklaring: {selectedRegimeInterval.explanation}<br />
                       Faktorer upp: {selectedRegimeInterval.upFactors.join(", ") || "Inga tydliga uppdrivare"} · Faktorer ned: {selectedRegimeInterval.downFactors.join(", ") || "Inga tydliga motrörelser"}
+                      <ul>
+                        {selectedRegimeInterval.topDrivers.map((driver) => (
+                          <li key={`${driver.title}-${driver.block}`}>{driver.title} ({driver.block}) · {driver.direction} · contrib {driver.contribution.toFixed(2)}</li>
+                        ))}
+                      </ul>
                     </div>
                   )}
 
@@ -1004,8 +1030,9 @@ export default function GlobalMacroDashboard() {
                     </details>
                   </div>
 
-                  <h5>4) Regime Change Log</h5>
-                  <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                  <details>
+                    <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 600 }}>▸ 4) Regime Change Log</summary>
+                    <div style={{ overflowX: "auto", marginBottom: 8, marginTop: 8 }}>
                     <table>
                       <thead>
                         <tr>
@@ -1028,14 +1055,16 @@ export default function GlobalMacroDashboard() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
+                  </details>
                 </>
               ) : (
                 <div className="status empty">Ingen historik kunde genereras för vald period/upplösning.</div>
               )}
 
-              <h4>Indicator drilldown</h4>
-              {globalMacroIndicators.length === 0 ? (
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>▸ Indicator drilldown</summary>
+                {globalMacroIndicators.length === 0 ? (
                 <div className="status empty">Inga indikatorer returnerades från endpointen.</div>
               ) : (
                 <div style={{ overflowX: "auto" }}>
@@ -1071,6 +1100,7 @@ export default function GlobalMacroDashboard() {
                   </table>
                 </div>
               )}
+              </details>
             </>
           )}
           <details style={{ marginTop: 14 }}>
@@ -1278,7 +1308,7 @@ export default function GlobalMacroDashboard() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
                 </>
               )}
 

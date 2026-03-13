@@ -210,6 +210,11 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
     output.core_cpi_yoy_us = computeYoY(coreCpi);
   }
 
+  const debtToGdp = monthlyInputs.debt_to_gdp_us ?? [];
+  if (debtToGdp.length > 0 && y10.length > 0) {
+    output.interest_cost_proxy_us = alignBinaryOperation(debtToGdp, y10, (debt, nominal) => (debt * nominal) / 100);
+  }
+
   const pmi = monthlyInputs.pmi_us ?? [];
   if (pmi.length >= 6) {
     output.pmi_momentum_us = pmi
