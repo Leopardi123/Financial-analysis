@@ -31,15 +31,14 @@ export default function Section({
             aria-controls={`launcher_${id}`}
             aria-expanded={open}
           >
-            ----&lt;&gt;----
+            {open ? "▾ Dölj" : "▸ Visa"}
           </button>
         </div>
-        <div
-          id={`launcher_${id}`}
-          className={open ? "visual" : "hidden"}
-        >
-          <div className="section-content">{children}</div>
-        </div>
+        {open && (
+          <div id={`launcher_${id}`} className="section-panel">
+            <div className="section-content">{children}</div>
+          </div>
+        )}
       </div>
     </section>
   );

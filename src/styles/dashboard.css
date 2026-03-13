@@ -73,16 +73,8 @@
   cursor: pointer;
 }
 
-.hidden {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.3s ease;
-}
-
-.visual {
-  max-height: 20000px;
-  overflow: hidden;
-  transition: max-height 0.3s ease;
+.section-panel {
+  overflow: visible;
 }
 
 .section-content {
