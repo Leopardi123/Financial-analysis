@@ -492,6 +492,11 @@ export default function GlobalMacroDashboard() {
     ], ...rows] as (string | number | Date | null)[][];
   }, [inflationSplitPoints]);
 
+  const hasInflationSplitValues = useMemo(
+    () => inflationSplitPoints.some((point) => point.goods !== null || point.monetary !== null || point.reference !== null),
+    [inflationSplitPoints],
+  );
+
   const inflationLegacyPaths = useMemo(() => {
     const mapSeries = (key: "goods" | "monetary" | "reference") => inflationSplitPoints
       .map((point, index) => {
@@ -851,40 +856,46 @@ export default function GlobalMacroDashboard() {
                     </div>
                   )}
 
-                  {selectedRegion !== "GLOBAL" && (selectedRegion === "US" || selectedRegion === "EA") && inflationDriverChartData && (
+                  {selectedRegion !== "GLOBAL" && (selectedRegion === "US" || selectedRegion === "EA") && hasInflationSplitValues && (
                     <>
                       <h5>2) Inflation Drivers vs Actual Inflation ({selectedRegion})</h5>
                       <div style={{ fontSize: 12, marginBottom: 6 }}>
                         <strong>Goods inflation:</strong> pristryck från energi, råvaror, varor och insatskostnader · <strong>Monetary inflation:</strong> monetärt pristryck från stockmått i systemet (CB-balans/GDP, money/GDP, private credit/GDP, real policy rate).
                       </div>
                       <div className="macro-inflation-chart" style={{ marginBottom: 12 }}>
-                        <ChartCard
-                          title="Inflation Drivers vs Actual Inflation"
-                          chartType="LineChart"
-                          height={360}
-                          unitLabel="Percentile (0–100)"
-                          unitKind="index"
-                          data={inflationDriverChartData}
-                          options={{
-                            backgroundColor: "#111827",
-                            chartArea: { left: 64, top: 28, width: "82%", height: "70%" },
-                            legend: { position: "bottom", textStyle: { color: "#e5e7eb" } },
-                            colors: ["#f59e0b", "#38bdf8", "#f3f4f6"],
-                            lineWidth: 3,
-                            hAxis: {
-                              textStyle: { color: "#cbd5e1" },
-                              gridlines: { color: "#1f2937", count: 4 },
-                            },
-                            vAxis: {
-                              title: "10Y percentile score",
-                              viewWindow: { min: 0, max: 100 },
-                              textStyle: { color: "#cbd5e1" },
-                              titleTextStyle: { color: "#e5e7eb" },
-                              gridlines: { color: "#1f2937", count: 5 },
-                            },
-                            tooltip: { isHtml: false, textStyle: { color: "#111827" } },
-                          }}
-                        />
+                        {inflationDriverChartData ? (
+                          <ChartCard
+                            title="Inflation Drivers vs Actual Inflation"
+                            chartType="LineChart"
+                            height={360}
+                            unitLabel="Percentile (0–100)"
+                            unitKind="index"
+                            data={inflationDriverChartData}
+                            options={{
+                              backgroundColor: "#111827",
+                              chartArea: { left: 64, top: 28, width: "82%", height: "70%" },
+                              legend: { position: "bottom", textStyle: { color: "#e5e7eb" } },
+                              colors: ["#f59e0b", "#38bdf8", "#f3f4f6"],
+                              lineWidth: 3,
+                              hAxis: {
+                                textStyle: { color: "#cbd5e1" },
+                                gridlines: { color: "#1f2937", count: 4 },
+                              },
+                              vAxis: {
+                                title: "10Y percentile score",
+                                viewWindow: { min: 0, max: 100 },
+                                textStyle: { color: "#cbd5e1" },
+                                titleTextStyle: { color: "#e5e7eb" },
+                                gridlines: { color: "#1f2937", count: 5 },
+                              },
+                              tooltip: { isHtml: false, textStyle: { color: "#111827" } },
+                            }}
+                          />
+                        ) : (
+                          <div style={{ border: "1px dashed #475569", borderRadius: 8, padding: 12, color: "#e2e8f0", fontSize: 12 }}>
+                            Ingen komplett data för den nya ChartCard-grafen ännu. Legacy-grafen visas fortfarande nedan.
+                          </div>
+                        )}
                       </div>
 
                       <h6 style={{ margin: "6px 0" }}>2b) Inflation split (ursprunglig graf)</h6>
