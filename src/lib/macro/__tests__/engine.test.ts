@@ -101,8 +101,6 @@ const seSeries: MacroSeriesInput[] = [
   makeSeries("real_yield_10y_se", (i) => -1 + i * 0.002),
   makeSeries("debt_gdp_se", (i) => 35 + i * 0.02),
   makeSeries("deficit_gdp_se", (i) => -1 + i * 0.005),
-  makeSeries("liquidity_growth_se", (i) => 4 + i * 0.01),
-  makeSeries("credit_spreads_se", (i) => 0.5 + i * 0.001),
   makeSeries("gold_vs_real_yield_se", (i) => 50 + i * 0.1),
 ];
 const seRun = runGlobalMacroEngine({ region: "SE", series: seSeries, asOfDate: "2024-12-28" });

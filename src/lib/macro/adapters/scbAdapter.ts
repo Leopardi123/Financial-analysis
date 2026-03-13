@@ -17,6 +17,16 @@ type ScbMetadata = {
   variables?: ScbVariable[];
 };
 
+type PxSelector = {
+  codeHint: string;
+  preferredValueCodes?: string[];
+  valueKeywordGroups?: string[][];
+};
+
+function norm(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9åäö.]+/gi, " ").trim();
+}
+
 function parseScbTime(key: string): string | null {
   if (/^\d{4}M\d{2}$/.test(key)) return `${key.slice(0, 4)}-${key.slice(5, 7)}-28`;
   if (/^\d{4}$/.test(key)) return `${key}-12-28`;
@@ -25,14 +35,6 @@ function parseScbTime(key: string): string | null {
     return `${key.slice(0, 4)}-${month}-28`;
   }
   return null;
-}
-
-function norm(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9åäö]+/gi, " ").trim();
-}
-
-function containsAny(hay: string, needles: string[]): boolean {
-  return needles.some((needle) => hay.includes(norm(needle)));
 }
 
 function parseScbRows(payload: ScbResponse, timeIndex: number): Array<{ date: string; value: number | null }> {
@@ -50,15 +52,29 @@ function parseScbRows(payload: ScbResponse, timeIndex: number): Array<{ date: st
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function pickValueCodeByKeywords(variable: ScbVariable, keywordGroups: string[][]): string | null {
-  const values = variable.values ?? [];
-  const texts = variable.valueTexts ?? values;
+function resolveVariableByHint(variables: ScbVariable[], codeHint: string): ScbVariable | null {
+  const hint = norm(codeHint);
+  return variables.find((v) => {
+    const code = norm(String(v.code ?? ""));
+    const text = norm(String(v.text ?? ""));
+    return code === hint || text.includes(hint) || code.includes(hint);
+  }) ?? null;
+}
 
-  for (const group of keywordGroups) {
-    const normalizedGroup = group.map(norm);
+function resolveValueCode(variable: ScbVariable, selector: PxSelector): string | null {
+  const values = variable.values ?? [];
+  const valueTexts = variable.valueTexts ?? values;
+
+  for (const code of selector.preferredValueCodes ?? []) {
+    const hit = values.find((v) => String(v).toLowerCase() === String(code).toLowerCase());
+    if (hit) return hit;
+  }
+
+  for (const group of selector.valueKeywordGroups ?? []) {
+    const keywords = group.map(norm);
     const idx = values.findIndex((valueCode, i) => {
-      const hay = norm(`${valueCode} ${texts[i] ?? ""}`);
-      return normalizedGroup.every((kw) => hay.includes(kw));
+      const hay = norm(`${valueCode} ${valueTexts[i] ?? ""}`);
+      return keywords.every((kw) => hay.includes(kw));
     });
     if (idx >= 0) return values[idx] ?? null;
   }
@@ -66,30 +82,14 @@ function pickValueCodeByKeywords(variable: ScbVariable, keywordGroups: string[][
   return null;
 }
 
-function buildDefaultSelection(variable: ScbVariable): string | null {
+function defaultSelection(variable: ScbVariable): string | null {
   const values = variable.values ?? [];
-  const texts = variable.valueTexts ?? values;
-
-  const scored = values
-    .map((value, index) => {
-      const label = norm(`${value} ${texts[index] ?? ""}`);
-      let score = 0;
-      if (containsAny(label, ["sweden", "riket", "hela landet", "total", "totalt"])) score += 6;
-      if (containsAny(label, ["s13", "general government", "offentlig sektor", "public sector"])) score += 5;
-      if (containsAny(label, ["all items", "total economy", "hela ekonomin"])) score += 4;
-      if (containsAny(label, ["seasonally adjusted", "working day adjusted"])) score += 1;
-      return { value, score, index };
-    })
-    .sort((a, b) => b.score - a.score || a.index - b.index);
-
-  if (scored.length > 0 && scored[0].score > 0) return scored[0].value;
-
-  const preferredIndex = texts.findIndex((text) => {
-    const t = norm(String(text));
-    return t.includes("sweden") || t.includes("riket") || t.includes("hela landet");
+  const valueTexts = variable.valueTexts ?? values;
+  const idx = values.findIndex((v, i) => {
+    const hay = norm(`${v} ${valueTexts[i] ?? ""}`);
+    return hay.includes("sweden") || hay.includes("riket") || hay.includes("hela landet") || hay.includes("total");
   });
-  if (preferredIndex >= 0) return values[preferredIndex] ?? null;
-
+  if (idx >= 0) return values[idx] ?? null;
   return values[0] ?? null;
 }
 
@@ -98,40 +98,37 @@ export async function fetchScbTableMetadata(path: string): Promise<ScbMetadata> 
   return fetchJsonWithPolicies<ScbMetadata>({ url });
 }
 
-export async function fetchScbSeriesByMetadata(params: {
+export async function fetchScbPxTableSeries(params: {
   path: string;
-  metricKeywordGroups: string[][];
+  selectors: PxSelector[];
 }): Promise<Array<{ date: string; value: number | null }>> {
   const metadata = await fetchScbTableMetadata(params.path);
   const variables = metadata.variables ?? [];
   if (variables.length === 0) return [];
 
-  const timeVar = variables.find((v) => String(v.code ?? "").toLowerCase() === "tid");
-  const metricVar = variables.find((v) => {
-    const code = norm(String(v.code ?? ""));
-    const text = norm(String(v.text ?? ""));
-    return code.includes("contents") || text.includes("contents") || text.includes("inneh") || code.includes("contentscode");
-  });
-  if (!timeVar || !metricVar || !metricVar.code) return [];
+  const timeVar = resolveVariableByHint(variables, "Tid");
+  if (!timeVar || !timeVar.code) return [];
 
-  const pickedMetric = pickValueCodeByKeywords(metricVar, params.metricKeywordGroups);
-  if (!pickedMetric) return [];
+  const selectorByCode = new Map<string, string>();
+  for (const selector of params.selectors) {
+    const variable = resolveVariableByHint(variables, selector.codeHint);
+    if (!variable || !variable.code) continue;
+    const selectedValue = resolveValueCode(variable, selector);
+    if (selectedValue) selectorByCode.set(variable.code, selectedValue);
+  }
 
   const query = variables
     .map((variable) => {
       const code = String(variable.code ?? "");
       if (!code) return null;
-      if (code.toLowerCase() === "tid") {
+      if (code === timeVar.code) {
         return { code, selection: { filter: "all", values: ["*"] } };
       }
-      if (code === metricVar.code) {
-        return { code, selection: { filter: "item", values: [pickedMetric] } };
-      }
-      const selected = buildDefaultSelection(variable);
+      const selected = selectorByCode.get(code) ?? defaultSelection(variable);
       if (!selected) return null;
       return { code, selection: { filter: "item", values: [selected] } };
     })
-    .filter((item): item is { code: string; selection: { filter: string; values: string[] } } => item !== null);
+    .filter((row): row is { code: string; selection: { filter: string; values: string[] } } => row !== null);
 
   const url = `https://api.scb.se/OV0104/v1/doris/en/${params.path.replace(/^\/+/, "")}`;
   const payload = await fetchJsonWithPolicies<ScbResponse>({
@@ -141,8 +138,24 @@ export async function fetchScbSeriesByMetadata(params: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, response: { format: "json" } }),
     },
+    minIntervalMs: 1_100,
   });
 
-  const timeIndex = variables.findIndex((v) => String(v.code ?? "").toLowerCase() === "tid");
+  const timeIndex = variables.findIndex((v) => String(v.code ?? "") === timeVar.code);
   return parseScbRows(payload, timeIndex >= 0 ? timeIndex : variables.length - 1);
+}
+
+export async function fetchScbSeriesByMetadata(params: {
+  path: string;
+  metricKeywordGroups: string[][];
+}): Promise<Array<{ date: string; value: number | null }>> {
+  return fetchScbPxTableSeries({
+    path: params.path,
+    selectors: [
+      {
+        codeHint: "ContentsCode",
+        valueKeywordGroups: params.metricKeywordGroups,
+      },
+    ],
+  });
 }

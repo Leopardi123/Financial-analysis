@@ -162,3 +162,14 @@ export async function fetchRiksbankSeries(seriesId: string): Promise<Array<{ dat
     .filter((row): row is { date: string; value: number | null } => row !== null)
     .sort((a, b) => a.date.localeCompare(b.date));
 }
+
+export async function verifyRiksbankSeriesExists(seriesId: string): Promise<boolean> {
+  const catalog = await fetchRiksbankSeriesCatalog();
+  return catalog.some((entry) => entry.id === seriesId);
+}
+
+export async function fetchRiksbankSeriesVerified(seriesId: string): Promise<Array<{ date: string; value: number | null }>> {
+  const exists = await verifyRiksbankSeriesExists(seriesId);
+  if (!exists) return [];
+  return fetchRiksbankSeries(seriesId);
+}

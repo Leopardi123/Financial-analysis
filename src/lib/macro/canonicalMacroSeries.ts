@@ -2,8 +2,8 @@ import { fetchStableJson } from "../../../api/_fmp.js";
 import { buildDerivedSeries, fetchFredSeries, US_FRED_SERIES } from "./fred.ts";
 import { fetchEcbSeries } from "./adapters/ecbAdapter.ts";
 import { fetchEurostatSeries } from "./adapters/eurostatAdapter.ts";
-import { fetchRiksbankSeries, resolveRiksbankSeriesIdByMetadata } from "./adapters/riksbankAdapter.ts";
-import { fetchScbSeriesByMetadata } from "./adapters/scbAdapter.ts";
+import { fetchRiksbankSeriesVerified } from "./adapters/riksbankAdapter.ts";
+import { fetchScbPxTableSeries } from "./adapters/scbAdapter.ts";
 
 export type CanonicalSeriesMap = Record<string, Array<{ date: string; value: number | null }>>;
 
@@ -34,33 +34,6 @@ async function fetchEurostatFirstAvailable(candidates: Array<{ dataset: string; 
     }
   }
   return [] as Array<{ date: string; value: number | null }>;
-}
-
-async function fetchRiksbankFirstAvailable(params: { preferredIds?: string[]; includeTerms: string[]; includeAnyGroups?: string[][] }): Promise<TimeSeriesPoint[]> {
-  try {
-    const resolved = await resolveRiksbankSeriesIdByMetadata({
-      includeTerms: params.includeTerms,
-      includeAnyGroups: params.includeAnyGroups,
-      preferredIds: params.preferredIds,
-    });
-    if (resolved) {
-      const rows = await fetchRiksbankSeries(resolved);
-      if (rows.length > 0) return rows;
-    }
-  } catch {
-    // fallback to explicit IDs
-  }
-
-  for (const seriesId of params.preferredIds ?? []) {
-    try {
-      const rows = await fetchRiksbankSeries(seriesId);
-      if (rows.length > 0) return rows;
-    } catch {
-      // try next candidate
-    }
-  }
-
-  return [];
 }
 
 function computeMomentum(points: Array<{ date: string; value: number | null }>, months = 3) {
@@ -216,65 +189,71 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
 
   const sourceSeries: CanonicalSeriesMap = {
     kpif_yoy_se: [],
+    inflation_momentum_se: [],
     policy_rate_se: [],
     government_bond_yield_10y_se: [],
-    debt_gdp_se: [],
-    deficit_gdp_se: [],
-    liquidity_growth_se: [],
-    credit_spreads_se: [],
+    public_debt_nominal_se: [],
+    net_lending_borrowing_se: [],
+    gdp_nominal_se: [],
     gold_usd: [],
   };
 
   const tasks: Array<Promise<void>> = [
-    fetchScbSeriesByMetadata({
-      path: "ssd/PR/PR0101/PR0101A/KPIArM",
-      metricKeywordGroups: [
-        ["kpif", "annual", "rate"],
-        ["kpif", "year", "change"],
-        ["kpif", "12", "month"],
-        ["kpif", "årstakt"],
-        ["kpif", "årsförändring"],
+    fetchScbPxTableSeries({
+      path: "START__PR__PR0101__PR0101G/KPIF",
+      selectors: [
+        {
+          codeHint: "ContentsCode",
+          valueKeywordGroups: [["kpif", "12", "month"], ["kpif", "12-month"], ["kpif", "årsförändring"]],
+        },
       ],
     }).then((x) => { sourceSeries.kpif_yoy_se = x; }),
-    fetchRiksbankFirstAvailable({
-      preferredIds: ["SE.REPO.RATE", "SE.POLICY.RATE", "SE.POLICYRATE"],
-      includeTerms: ["policy", "rate"],
-      includeAnyGroups: [["repo", "rate"], ["styrränta"], ["policy", "rate", "se"]],
-    }).then((x) => { sourceSeries.policy_rate_se = x; }),
-    fetchRiksbankFirstAvailable({
-      preferredIds: ["SE.GOVBOND.10Y", "SE.SGB_10Y", "SE.BOND.10Y"],
-      includeTerms: ["government", "bond", "10"],
-      includeAnyGroups: [["stats", "bond", "10"], ["government", "yield", "10"], ["statsobligation", "10"]],
-    }).then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
-    fetchScbSeriesByMetadata({
-      path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-      metricKeywordGroups: [["debt", "gdp"], ["gross", "debt", "gdp"]],
-    }).then((x) => { sourceSeries.debt_gdp_se = x; }),
-    fetchScbSeriesByMetadata({
-      path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
-      metricKeywordGroups: [["net", "lending", "gdp"], ["deficit", "gdp"], ["b9", "gdp"]],
-    }).then((x) => { sourceSeries.deficit_gdp_se = x; }),
-    fetchRiksbankFirstAvailable({
-      preferredIds: ["SE.M3.YOY", "SE.MONEY.M3.YOY", "SE.MONAGG.M3"],
-      includeTerms: ["m3", "year"],
-      includeAnyGroups: [["m3", "growth"], ["m3", "årsförändring"]],
-    }).then((x) => { sourceSeries.liquidity_growth_se = x; }),
-    fetchRiksbankFirstAvailable({
-      preferredIds: ["SE.CREDIT.SPREAD", "SE.MORTGAGE.SPREAD", "SE.COVERED.BOND.SPREAD"],
-      includeTerms: ["spread"],
-      includeAnyGroups: [["credit", "spread"], ["mortgage", "spread"], ["covered", "bond", "spread"]],
-    }).then((x) => { sourceSeries.credit_spreads_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__PR__PR0101__PR0101G/KPIF",
+      selectors: [
+        {
+          codeHint: "ContentsCode",
+          valueKeywordGroups: [["kpif", "month", "change"], ["kpif", "månadsförändring"]],
+        },
+      ],
+    }).then((x) => { sourceSeries.inflation_momentum_se = x; }),
+    fetchRiksbankSeriesVerified("SECBREPOEFF").then((x) => { sourceSeries.policy_rate_se = x; }),
+    fetchRiksbankSeriesVerified("SEGVB10YC").then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__NR__NR0108/FirBruttoKonvAr",
+      selectors: [
+        { codeHint: "Sector", preferredValueCodes: ["S13"] },
+        { codeHint: "Account item", preferredValueCodes: ["FL01N"], valueKeywordGroups: [["maastricht", "debt"]] },
+      ],
+    }).then((x) => { sourceSeries.public_debt_nominal_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__NR__NR0103__NR0103F/SektorENS2010Ar",
+      selectors: [
+        { codeHint: "Sector", preferredValueCodes: ["S13"] },
+        { codeHint: "Transaction", preferredValueCodes: ["B9", "B.9"], valueKeywordGroups: [["net", "lending"], ["net", "borrowing"]] },
+      ],
+    }).then((x) => { sourceSeries.net_lending_borrowing_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__NR__NR0103__NR0103F/SektorENS2010Ar",
+      selectors: [
+        { codeHint: "Sector", preferredValueCodes: ["S1"] },
+        { codeHint: "Transaction", preferredValueCodes: ["B1GQ", "B1_GQ"], valueKeywordGroups: [["gross", "domestic", "product"]] },
+      ],
+    }).then((x) => { sourceSeries.gdp_nominal_se = x; }),
     fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
   ];
   await Promise.allSettled(tasks);
 
+  const debtGdp = alignRatio(sourceSeries.public_debt_nominal_se ?? [], sourceSeries.gdp_nominal_se ?? []).map((p) => ({ ...p, value: p.value === null ? null : p.value * 100 }));
+  const deficitGdp = alignRatio(sourceSeries.net_lending_borrowing_se ?? [], sourceSeries.gdp_nominal_se ?? []).map((p) => ({ ...p, value: p.value === null ? null : p.value * 100 }));
+  const realYield = alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []);
+
   const derivedSeries: CanonicalSeriesMap = {
-    inflation_momentum_se: computeMomentum(sourceSeries.kpif_yoy_se ?? [], 3),
-    real_yield_10y_se: alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []),
-    gold_vs_real_yield_se: alignRatio(
-      sourceSeries.gold_usd ?? [],
-      alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []),
-    ),
+    inflation_momentum_se: sourceSeries.inflation_momentum_se ?? computeMomentum(sourceSeries.kpif_yoy_se ?? [], 1),
+    real_yield_10y_se: realYield,
+    debt_gdp_se: debtGdp,
+    deficit_gdp_se: deficitGdp,
+    gold_vs_real_yield_se: alignSpread(sourceSeries.gold_usd ?? [], realYield),
   };
   return { sourceSeries, derivedSeries };
 }
