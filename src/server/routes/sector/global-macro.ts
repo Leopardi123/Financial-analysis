@@ -497,7 +497,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
   const scoredCount = indicators.filter((item) => item.score !== null).length;
   const goldUsdSnapshot = indicators.find((item) => item.indicatorId === "gold_usd");
   const goldSpreadSnapshot = indicators.find((item) => item.indicatorId === "gold_minus_real_yield_spread");
-  const expectedFromFred = US_FRED_SERIES.map((entry) => entry.seriesKey);
+  const expectedFromFred = region === "US" ? US_FRED_SERIES.map((entry) => entry.seriesKey) : [];
   const expectedFromIndicators = Array.from(new Set(catalog.flatMap((entry) => entry.inputs)));
   const expectedSeriesKeys = Array.from(new Set([...expectedFromFred, ...expectedFromIndicators])).sort();
 

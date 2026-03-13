@@ -463,11 +463,11 @@ export default function GlobalMacroDashboard() {
     return `${head} ${topLine} ${back} Z`;
   }
 
-  async function runIngest(mode: "backfill" | "latest") {
+  async function runIngest(mode: "backfill" | "latest", region: "US" | "EA" | "SE") {
     setIngestRunningMode(mode);
     setIngestRunResult(null);
     try {
-      const response = await fetch(`/api/admin/macro/ingest?mode=${mode}&region=US`, {
+      const response = await fetch(`/api/admin/macro/ingest?mode=${mode}&region=${region}`, {
         method: "POST",
         headers: adminSecretInput.trim()
           ? { "x-admin-secret": adminSecretInput.trim() }
@@ -479,6 +479,7 @@ export default function GlobalMacroDashboard() {
         ok: response.ok,
         payload,
         mode,
+        region,
         timestamp: new Date().toISOString(),
         authMethodUsed: adminSecretInput.trim() ? "x-admin-secret header (manual debug input)" : "none",
         adminActionAuth: response.ok ? "OK" : "Failed",
@@ -489,6 +490,7 @@ export default function GlobalMacroDashboard() {
         status: 0,
         ok: false,
         mode,
+        region,
         timestamp: new Date().toISOString(),
         authMethodUsed: adminSecretInput.trim() ? "x-admin-secret header (manual debug input)" : "none",
         adminActionAuth: "Failed",
@@ -499,11 +501,11 @@ export default function GlobalMacroDashboard() {
     }
   }
 
-  async function runEngine() {
+  async function runEngine(region: "US" | "EA" | "SE") {
     setEngineRunning(true);
     setEngineRunResult(null);
     try {
-      const response = await fetch(`/api/admin/macro/run-engine?region=US`, {
+      const response = await fetch(`/api/admin/macro/run-engine?region=${region}`, {
         method: "POST",
         headers: adminSecretInput.trim()
           ? { "x-admin-secret": adminSecretInput.trim() }
@@ -514,6 +516,7 @@ export default function GlobalMacroDashboard() {
         status: response.status,
         ok: response.ok,
         payload,
+        region,
         timestamp: new Date().toISOString(),
         authMethodUsed: adminSecretInput.trim() ? "x-admin-secret header (manual debug input)" : "none",
         adminActionAuth: response.ok ? "OK" : "Failed",
@@ -523,6 +526,7 @@ export default function GlobalMacroDashboard() {
       setEngineRunResult({
         status: 0,
         ok: false,
+        region,
         timestamp: new Date().toISOString(),
         authMethodUsed: adminSecretInput.trim() ? "x-admin-secret header (manual debug input)" : "none",
         adminActionAuth: "Failed",
@@ -1398,14 +1402,32 @@ export default function GlobalMacroDashboard() {
                     style={{ width: "100%", marginBottom: 8 }}
                   />
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill")}>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "US")}> 
                       {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}
                     </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest")}>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "US")}> 
                       {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}
                     </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine()}>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("US")}>
                       {engineRunning ? "Running engine..." : "Run engine (US)"}
+                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "EA")}>
+                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (EA)"}
+                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "EA")}>
+                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (EA)"}
+                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("EA")}>
+                      {engineRunning ? "Running engine..." : "Run engine (EA)"}
+                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "SE")}>
+                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (SE)"}
+                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "SE")}>
+                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (SE)"}
+                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("SE")}>
+                      {engineRunning ? "Running engine..." : "Run engine (SE)"}
                     </button>
                   </div>
                 </div>

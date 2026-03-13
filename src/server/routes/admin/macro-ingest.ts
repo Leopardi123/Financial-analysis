@@ -2,42 +2,8 @@ import type { InStatement } from "@libsql/client";
 import { assertAdminSecret, getAdminSecret } from "../../../../api/_auth.js";
 import { batch } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
-import { fetchStableJson } from "../../../../api/_fmp.js";
-import { buildDerivedSeries, fetchFredSeries, US_FRED_SERIES } from "../../../lib/macro/fred.js";
+import { loadCanonicalMacroSeries } from "../../../lib/macro/canonicalMacroSeries.js";
 
-
-
-const PMI_FRED_FALLBACK_IDS = ["INDPRO", "NAPM"];
-
-function normalizeFmpEodRows(payload: unknown): Array<{ date: string; value: number | null }> {
-  const candidates = Array.isArray(payload)
-    ? payload
-    : (typeof payload === "object" && payload !== null && Array.isArray((payload as { historical?: unknown[] }).historical)
-      ? ((payload as { historical?: unknown[] }).historical as unknown[])
-      : []);
-
-  return candidates
-    .map((row) => {
-      if (typeof row !== "object" || row === null) return null;
-      const dateRaw = (row as { date?: unknown }).date;
-      const closeRaw = (row as { close?: unknown }).close;
-      const date = typeof dateRaw === "string" ? dateRaw.slice(0, 10) : null;
-      const close = typeof closeRaw === "number" && Number.isFinite(closeRaw) ? closeRaw : null;
-      if (!date) return null;
-      return { date, value: close };
-    })
-    .filter((row): row is { date: string; value: number | null } => row !== null)
-    .sort((a, b) => a.date.localeCompare(b.date));
-}
-
-
-function summarizeSeriesRange(rows: Array<{ date: string; value: number | null }>) {
-  return {
-    minDate: rows[0]?.date ?? null,
-    maxDate: rows[rows.length - 1]?.date ?? null,
-    rowCount: rows.length,
-  };
-}
 
 function chunk<T>(items: T[], size: number): T[][] {
   const output: T[][] = [];
@@ -45,6 +11,12 @@ function chunk<T>(items: T[], size: number): T[][] {
     output.push(items.slice(index, index + size));
   }
   return output;
+}
+
+function sourceForRegionSeries(region: "US" | "EA" | "SE", seriesKey: string): string {
+  if (region === "US") return ["gold_usd", "silver_usd"].includes(seriesKey) ? "fmp" : "fred";
+  if (region === "EA") return (seriesKey.includes("ea") || seriesKey.includes("hicp") || seriesKey.includes("debt") || seriesKey.includes("deficit")) ? "eurostat_ecb" : "fmp";
+  return "scb_riksbank";
 }
 
 export default async function handler(req: any, res: any) {
@@ -81,24 +53,6 @@ export default async function handler(req: any, res: any) {
     failingStep: null as string | null,
     errorMessage: null as string | null,
     seriesResults,
-    goldRequest: {
-      endpoint: "historical-price-eod/full",
-      symbol: "GCUSD",
-      from: "2000-01-01",
-      to: new Date().toISOString().slice(0, 10),
-      fetchedMinDate: null as string | null,
-      fetchedMaxDate: null as string | null,
-      fetchedRowCount: 0,
-    },
-    silverRequest: {
-      endpoint: "historical-price-eod/full",
-      symbol: "SIUSD",
-      from: "2000-01-01",
-      to: new Date().toISOString().slice(0, 10),
-      fetchedMinDate: null as string | null,
-      fetchedMaxDate: null as string | null,
-      fetchedRowCount: 0,
-    },
   };
 
   try {
@@ -107,8 +61,8 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    if (region !== "US") {
-      res.status(400).json({ ok: false, error: "Only region=US is supported in this phase" });
+    if (!["US", "EA", "SE"].includes(region)) {
+      res.status(400).json({ ok: false, error: "Supported regions: US, EA, SE" });
       return;
     }
 
@@ -136,154 +90,28 @@ export default async function handler(req: any, res: any) {
     const now = new Date().toISOString();
     debug.fetchStarted = true;
 
-    const sourceSeriesMap: Record<string, Array<{ date: string; value: number | null }>> = {};
-    for (const entry of US_FRED_SERIES) {
-      const candidateSeriesIds = entry.seriesKey === "pmi_us"
-        ? Array.from(new Set([entry.fredSeriesId, ...(entry.fallbackFredSeriesIds ?? []), ...PMI_FRED_FALLBACK_IDS]))
-        : Array.from(new Set([entry.fredSeriesId, ...(entry.fallbackFredSeriesIds ?? [])]));
+    const typedRegion = region as "US" | "EA" | "SE";
+    const { sourceSeries, derivedSeries } = await loadCanonicalMacroSeries(typedRegion, mode);
 
-      let fetched = false;
-      const attemptErrors: string[] = [];
-      for (const candidateSeriesId of candidateSeriesIds) {
-        try {
-          const observations = await fetchFredSeries({
-            fredSeriesId: candidateSeriesId,
-            mode,
-            latestLookbackMonths: entry.latestLookbackMonths,
-            backfillLookbackYears: entry.backfillLookbackYears,
-          });
-          sourceSeriesMap[entry.seriesKey] = observations;
-          debug.fetchedSeries += 1;
-          debug.fetchedObservationCount += observations.length;
-          seriesResults.push({
-            seriesId: candidateSeriesId,
-            seriesKey: entry.seriesKey,
-            fetchSuccess: true,
-            observationsFetched: observations.length,
-            errorMessage: null,
-          });
-          fetched = true;
-          break;
-        } catch (error) {
-          attemptErrors.push(`${candidateSeriesId}: ${(error as Error).message}`);
-        }
+    for (const [seriesKey, rows] of Object.entries(sourceSeries)) {
+      const source = sourceForRegionSeries(typedRegion, seriesKey);
+      seriesResults.push({
+        seriesId: `${source}:${seriesKey}`,
+        seriesKey,
+        fetchSuccess: rows.length > 0,
+        observationsFetched: rows.length,
+        errorMessage: rows.length > 0 ? null : "No observations",
+      });
+      if (rows.length > 0) {
+        debug.fetchedSeries += 1;
+        debug.fetchedObservationCount += rows.length;
       }
-
-      if (!fetched) {
-        seriesResults.push({
-          seriesId: candidateSeriesIds.join("|"),
-          seriesKey: entry.seriesKey,
-          fetchSuccess: false,
-          observationsFetched: 0,
-          errorMessage: attemptErrors.join("; ") || "All PMI candidates failed",
-        });
-      }
-    }
-
-    try {
-      const goldFrom = "2000-01-01";
-      const goldTo = new Date().toISOString().slice(0, 10);
-      debug.goldRequest.from = goldFrom;
-      debug.goldRequest.to = goldTo;
-
-      const goldPayload = await fetchStableJson<unknown>("historical-price-eod/full", { symbol: "GCUSD", from: goldFrom, to: goldTo });
-      const goldRows = normalizeFmpEodRows(goldPayload);
-      const goldRange = summarizeSeriesRange(goldRows);
-      debug.goldRequest.fetchedMinDate = goldRange.minDate;
-      debug.goldRequest.fetchedMaxDate = goldRange.maxDate;
-      debug.goldRequest.fetchedRowCount = goldRange.rowCount;
-
-      sourceSeriesMap.gold_usd = goldRows;
-      debug.fetchedSeries += goldRows.length > 0 ? 1 : 0;
-      debug.fetchedObservationCount += goldRows.length;
-      seriesResults.push({
-        seriesId: `historical-price-eod/full?symbol=GCUSD&from=${goldFrom}&to=${goldTo}`,
-        seriesKey: "gold_usd",
-        fetchSuccess: goldRows.length > 0,
-        observationsFetched: goldRows.length,
-        errorMessage: null,
-        meta: {
-          requestPattern: "single_request_with_explicit_from_to",
-          endpoint: "historical-price-eod/full",
-          symbol: "GCUSD",
-          from: goldFrom,
-          to: goldTo,
-          fetchedMinDate: goldRange.minDate,
-          fetchedMaxDate: goldRange.maxDate,
-          fetchedRowCount: goldRange.rowCount,
-        },
-      });
-    } catch (error) {
-      seriesResults.push({
-        seriesId: "historical-price-eod/full?symbol=GCUSD",
-        seriesKey: "gold_usd",
-        fetchSuccess: false,
-        observationsFetched: 0,
-        errorMessage: (error as Error).message,
-        meta: {
-          requestPattern: "single_request_with_explicit_from_to",
-          endpoint: "historical-price-eod/full",
-          symbol: "GCUSD",
-          from: debug.goldRequest.from,
-          to: debug.goldRequest.to,
-        },
-      });
-    }
-
-
-    try {
-      const silverFrom = "2000-01-01";
-      const silverTo = new Date().toISOString().slice(0, 10);
-      debug.silverRequest.from = silverFrom;
-      debug.silverRequest.to = silverTo;
-
-      const silverPayload = await fetchStableJson<unknown>("historical-price-eod/full", { symbol: "SIUSD", from: silverFrom, to: silverTo });
-      const silverRows = normalizeFmpEodRows(silverPayload);
-      const silverRange = summarizeSeriesRange(silverRows);
-      debug.silverRequest.fetchedMinDate = silverRange.minDate;
-      debug.silverRequest.fetchedMaxDate = silverRange.maxDate;
-      debug.silverRequest.fetchedRowCount = silverRange.rowCount;
-
-      sourceSeriesMap.silver_usd = silverRows;
-      debug.fetchedSeries += silverRows.length > 0 ? 1 : 0;
-      debug.fetchedObservationCount += silverRows.length;
-      seriesResults.push({
-        seriesId: `historical-price-eod/full?symbol=SIUSD&from=${silverFrom}&to=${silverTo}`,
-        seriesKey: "silver_usd",
-        fetchSuccess: silverRows.length > 0,
-        observationsFetched: silverRows.length,
-        errorMessage: null,
-        meta: {
-          requestPattern: "single_request_with_explicit_from_to",
-          endpoint: "historical-price-eod/full",
-          symbol: "SIUSD",
-          from: silverFrom,
-          to: silverTo,
-          fetchedMinDate: silverRange.minDate,
-          fetchedMaxDate: silverRange.maxDate,
-          fetchedRowCount: silverRange.rowCount,
-        },
-      });
-    } catch (error) {
-      seriesResults.push({
-        seriesId: "historical-price-eod/full?symbol=SIUSD",
-        seriesKey: "silver_usd",
-        fetchSuccess: false,
-        observationsFetched: 0,
-        errorMessage: (error as Error).message,
-        meta: {
-          requestPattern: "single_request_with_explicit_from_to",
-          endpoint: "historical-price-eod/full",
-          symbol: "SIUSD",
-          from: debug.silverRequest.from,
-          to: debug.silverRequest.to,
-        },
-      });
     }
 
     debug.fetchSucceeded = debug.fetchedSeries > 0;
 
-    const derivedSeriesMap = buildDerivedSeries(sourceSeriesMap);
+    const sourceSeriesMap = sourceSeries;
+    const derivedSeriesMap = derivedSeries;
 
     const statements: InStatement[] = [];
     let sourceRowCount = 0;
@@ -300,7 +128,7 @@ export default async function handler(req: any, res: any) {
                   value = excluded.value,
                   fetched_at = excluded.fetched_at
                 WHERE COALESCE(${tables.macroRawDatapoints}.value, -9.99999999e99) != COALESCE(excluded.value, -9.99999999e99)`,
-          args: [["gold_usd", "silver_usd"].includes(seriesKey) ? "fmp" : "fred", region, seriesKey, point.date, point.value, now],
+          args: [sourceForRegionSeries(typedRegion, seriesKey), region, seriesKey, point.date, point.value, now],
         });
       }
     }
@@ -316,7 +144,7 @@ export default async function handler(req: any, res: any) {
                   value = excluded.value,
                   fetched_at = excluded.fetched_at
                 WHERE COALESCE(${tables.macroRawDatapoints}.value, -9.99999999e99) != COALESCE(excluded.value, -9.99999999e99)`,
-          args: ["fred_derived", region, seriesKey, point.date, point.value, now],
+          args: [`${typedRegion.toLowerCase()}_derived`, region, seriesKey, point.date, point.value, now],
         });
       }
     }
@@ -343,7 +171,7 @@ export default async function handler(req: any, res: any) {
     const allSeriesFailed = debug.fetchedSeries === 0;
     if (allSeriesFailed) {
       debug.failingStep = "fetch";
-      debug.errorMessage = "All configured FRED series failed";
+      debug.errorMessage = `All configured source series failed for region ${region}`;
     }
 
     await batch([
@@ -378,10 +206,10 @@ export default async function handler(req: any, res: any) {
     const statusCode = allSeriesFailed ? 502 : 200;
     res.status(statusCode).json({
       ok: !allSeriesFailed,
-      partialSuccess: !allSeriesFailed && debug.fetchedSeries < (US_FRED_SERIES.length + 1),
+      partialSuccess: !allSeriesFailed && debug.fetchedSeries < Object.keys(sourceSeriesMap).length,
       mode,
       region,
-      sourceSeries: [...US_FRED_SERIES.map((entry) => entry.seriesKey), "gold_usd"],
+      sourceSeries: Object.keys(sourceSeriesMap),
       sourceRowCount,
       derivedSeries: Object.keys(derivedSeriesMap),
       derivedRowCount,
