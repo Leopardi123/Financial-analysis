@@ -30,6 +30,20 @@ export const MACRO_INDICATOR_CATALOG: MacroIndicatorCatalogEntry[] = [
     scoring: "percentile_10y",
     blockWeight: 1.1,
   },
+
+  // Added to strengthen A_FISCAL semantics: explicit debt-servicing pressure signal.
+  {
+    indicatorId: "interest_cost_proxy_us",
+    region: "US",
+    block: "A_FISCAL",
+    signalClass: "clear",
+    title: "Interest Cost Proxy (US)",
+    description: "Debt burden multiplied by long-end nominal yield as a proxy for debt servicing pressure.",
+    inputs: ["interest_cost_proxy_us"],
+    transform: "spread",
+    scoring: "percentile_10y",
+    blockWeight: 1.1,
+  },
   {
     indicatorId: "real_yield_10y_us",
     region: "US",

@@ -33,12 +33,27 @@ const industrialMonthly = [
   { date: "2024-04-01", value: 230 },
 ];
 
+
+const debtToGdp = [
+  { date: "2024-01-31", value: 100 },
+  { date: "2024-02-29", value: 101 },
+  { date: "2024-03-31", value: 102 },
+  { date: "2024-04-30", value: 103 },
+];
+
+const nominal10y = [
+  { date: "2024-01-31", value: 4 },
+  { date: "2024-02-29", value: 4.1 },
+  { date: "2024-03-31", value: 4.2 },
+  { date: "2024-04-30", value: 4.3 },
+];
+
 const m2 = Array.from({ length: 14 }, (_, idx) => ({
   date: `2023-${String(idx + 1).padStart(2, "0")}-28`.replace("-13-", "-01-").replace("-14-", "-02-"),
   value: 100 + idx,
 })).map((p, i) => ({ ...p, date: i < 12 ? `2023-${String(i + 1).padStart(2, "0")}-28` : `2024-${String(i - 11).padStart(2, "0")}-28` }));
 
-const derived = buildDerivedSeries({ pmi_us: pmi, gold_usd: gold, real_yield_10y_us: realYield, m2sl: m2, silver_usd: gold, industrial_metals_index: industrialMonthly });
+const derived = buildDerivedSeries({ pmi_us: pmi, gold_usd: gold, real_yield_10y_us: realYield, nominal_yield_10y_us: nominal10y, debt_to_gdp_us: debtToGdp, m2sl: m2, silver_usd: gold, industrial_metals_index: industrialMonthly });
 const momentum = derived.pmi_momentum_us ?? [];
 
 assert.equal(momentum.length, 3);
@@ -54,5 +69,6 @@ assert.ok((derived.m2_yoy ?? []).length >= 2);
 assert.ok((derived.m2_momentum ?? []).length >= 1);
 assert.deepEqual((derived.industrial_metals_vs_gold ?? []).map((p) => p.date), ["2024-01-01", "2024-02-01", "2024-03-01", "2024-04-01"]);
 assert.ok((derived.industrial_metals_vs_gold ?? []).every((p) => (p.value ?? 0) > 1));
+assert.equal((derived.interest_cost_proxy_us ?? [])[0]?.value, 4);
 
 console.log("macro fred derived series tests passed");

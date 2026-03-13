@@ -18,6 +18,8 @@ type RegimeInterval = {
   coreRegimeLabel: MacroRegimeSnapshot["coreRegimeLabel"];
   pointCount: number;
   topDriver: string | null;
+  topDrivers: MacroRegimeSnapshot["topDrivers"];
+  regimeExplanation: MacroRegimeSnapshot["regimeExplanation"];
 };
 
 type OverlayInterval<T extends string> = {
@@ -44,6 +46,8 @@ export type MacroHistoryPoint = {
   blockThresholdChanged: boolean;
   previousRegimeLabel: MacroRegimeSnapshot["coreRegimeLabel"] | null;
   topDriver: string | null;
+  topDrivers: MacroRegimeSnapshot["topDrivers"];
+  regimeExplanation: MacroRegimeSnapshot["regimeExplanation"];
 };
 
 export type MacroHistoryResult = {
@@ -335,6 +339,8 @@ export async function computeMacroRegimeHistory(params: {
       blockThresholdChanged,
       previousRegimeLabel: prev?.coreRegimeLabel ?? null,
       topDriver: regime.topDrivers[0]?.indicatorId ?? null,
+      topDrivers: regime.topDrivers,
+      regimeExplanation: regime.regimeExplanation,
     });
   }
 
@@ -362,6 +368,12 @@ export async function computeMacroRegimeHistory(params: {
       coreRegimeLabel: entry.value,
       pointCount: entry.pointCount,
       topDriver,
+      topDrivers: intervalPoints[intervalPoints.length - 1]?.topDrivers ?? [],
+      regimeExplanation: intervalPoints[intervalPoints.length - 1]?.regimeExplanation ?? {
+        title: "Data insufficient",
+        summary: "För få poängsatta signaler för en robust regimförklaring.",
+        driverHighlights: [],
+      },
     };
   });
 
