@@ -1,180 +1,185 @@
-import type { MacroIndicatorCatalogEntry, MacroIndicatorSnapshot } from "./types.ts";
-import { SIGNAL_CLASS_WEIGHT } from "./catalog.ts";
+import type { MacroIndicatorSnapshot, MacroSeriesInput } from "./types.ts";
 
 export type InflationSplitRegion = "US" | "EA";
 
-export type InflationCompositeConfig = {
-  id: string;
-  label: string;
-  indicators: string[];
-};
+const TEN_YEAR_MONTHS = 120;
 
-export type InflationSplitConfig = {
-  goods: InflationCompositeConfig;
-  monetary: InflationCompositeConfig;
-  referenceIndicatorId: string;
-  referenceLabel: string;
-};
-
-export const INFLATION_SPLIT_CONFIG: Record<InflationSplitRegion, InflationSplitConfig> = {
-  US: {
-    goods: {
-      id: "goods_inflation_composite_us",
-      label: "Inflation, varor",
-      indicators: [
-        "oil_brent_usd",
-        "natgas_usd",
-        "commodity_index",
-        "industrial_metals_index",
-        "copper_usd",
-        "oil_yoy",
-        "natgas_yoy",
-        "copper_yoy",
-        "commodity_index_yoy",
-        "industrial_metals_yoy",
-      ],
-    },
-    monetary: {
-      id: "monetary_inflation_composite_us",
-      label: "Inflation, monetär",
-      indicators: [
-        "core_cpi_us",
-        "core_cpi_yoy_us",
-        "breakeven_10y_us",
-        "fed_balance_sheet_total",
-        "fed_balance_sheet_yoy",
-        "m2_yoy",
-        "m2_momentum",
-      ],
-    },
-    referenceIndicatorId: "core_cpi_yoy_us",
-    referenceLabel: "Core CPI YoY",
-  },
-  EA: {
-    goods: {
-      id: "goods_inflation_composite_ea",
-      label: "Inflation, varor",
-      indicators: [
-        "oil_brent_usd_ea",
-        "natgas_usd_ea",
-        "commodity_index_ea",
-        "industrial_metals_index_ea",
-        "copper_usd_ea",
-        "oil_yoy_ea",
-        "natgas_yoy_ea",
-        "copper_yoy_ea",
-        "commodity_index_yoy_ea",
-        "industrial_metals_yoy_ea",
-      ],
-    },
-    monetary: {
-      id: "monetary_inflation_composite_ea",
-      label: "Inflation, monetär",
-      indicators: [
-        "hicp_inflation_ea",
-        "hicp_momentum_ea",
-        "ecb_balance_sheet_ea",
-        "m3_growth_ea",
-      ],
-    },
-    referenceIndicatorId: "hicp_inflation_ea",
-    referenceLabel: "HICP inflation",
-  },
-};
-
-function scoreToPercent(score: number): number {
-  return Math.max(0, Math.min(100, ((score + 2) / 4) * 100));
+function monthKey(date: string): string {
+  return date.slice(0, 7);
 }
 
-function compositeFromIndicators(
+function toCanonicalMonthly(points: Array<{ date: string; value: number | null }>) {
+  const map = new Map<string, { date: string; value: number | null }>();
+  for (const point of points) {
+    const key = monthKey(point.date);
+    const prev = map.get(key);
+    if (!prev || point.date > prev.date) map.set(key, point);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, point]) => point);
+}
+
+function percentileRank(series: number[], value: number): number {
+  if (series.length === 0) return 50;
+  const lessOrEqual = series.filter((entry) => entry <= value).length;
+  return (lessOrEqual / series.length) * 100;
+}
+
+function latestPercentile(
+  series: MacroSeriesInput | undefined,
+  asOfDate: string,
+  valueTransform?: (value: number) => number,
+): number | null {
+  if (!series) return null;
+  const monthly = toCanonicalMonthly(series.points).filter((point) => point.date <= asOfDate);
+  const trailing = monthly.slice(-TEN_YEAR_MONTHS);
+  const valid = trailing.map((point) => point.value).filter((value): value is number => typeof value === "number");
+  if (valid.length < 24) return null;
+  const latest = trailing[trailing.length - 1]?.value;
+  if (typeof latest !== "number") return null;
+  const transformedSeries = valueTransform ? valid.map(valueTransform) : valid;
+  const transformedLatest = valueTransform ? valueTransform(latest) : latest;
+  return percentileRank(transformedSeries, transformedLatest);
+}
+
+function weightedAverage(values: Array<{ value: number | null; weight: number }>): number | null {
+  const valid = values.filter((item): item is { value: number; weight: number } => typeof item.value === "number");
+  if (valid.length === 0) return null;
+  const totalWeight = valid.reduce((sum, item) => sum + item.weight, 0);
+  if (totalWeight <= 0) return null;
+  return valid.reduce((sum, item) => sum + item.value * item.weight, 0) / totalWeight;
+}
+
+function goodsCompositeFromIndicators(
   indicatorIds: string[],
   indicators: MacroIndicatorSnapshot[],
-  catalogById: Map<string, MacroIndicatorCatalogEntry>,
 ) {
-  const indicatorById = new Map(indicators.map((item) => [item.indicatorId, item]));
-  const contributions: Array<{ indicatorId: string; weight: number; score: number; normalizedScore: number }> = [];
+  const byId = new Map(indicators.map((entry) => [entry.indicatorId, entry]));
+  const used: Array<{ indicatorId: string; percentile10y: number }> = [];
   const missing: string[] = [];
-
-  for (const indicatorId of indicatorIds) {
-    const snapshot = indicatorById.get(indicatorId);
-    const meta = catalogById.get(indicatorId);
-    if (!snapshot || snapshot.score === null || !meta) {
-      missing.push(indicatorId);
+  for (const id of indicatorIds) {
+    const item = byId.get(id);
+    if (!item || item.percentile10y === null) {
+      missing.push(id);
       continue;
     }
-    const weight = meta.blockWeight * SIGNAL_CLASS_WEIGHT[meta.signalClass];
-    contributions.push({
-      indicatorId,
-      weight,
-      score: snapshot.score,
-      normalizedScore: scoreToPercent(snapshot.score),
-    });
+    used.push({ indicatorId: id, percentile10y: item.percentile10y });
   }
-
-  if (contributions.length === 0) {
-    return {
-      score: null,
-      contributions,
-      missing,
-    };
-  }
-
-  const weighted = contributions.reduce(
-    (acc, item) => ({ sum: acc.sum + item.score * item.weight, weight: acc.weight + item.weight }),
-    { sum: 0, weight: 0 },
-  );
-  const score = weighted.weight > 0 ? scoreToPercent(weighted.sum / weighted.weight) : null;
-  return {
-    score,
-    contributions,
-    missing,
-  };
+  const score = used.length > 0
+    ? used.reduce((sum, entry) => sum + entry.percentile10y, 0) / used.length
+    : null;
+  return { score, used, missing };
 }
 
-export function computeInflationSplit(
-  region: string,
-  indicators: MacroIndicatorSnapshot[],
-  catalog: MacroIndicatorCatalogEntry[],
-) {
-  const normalizedRegion = region.toUpperCase();
-  if (normalizedRegion !== "US" && normalizedRegion !== "EA") return null;
-  const config = INFLATION_SPLIT_CONFIG[normalizedRegion as InflationSplitRegion];
-  const catalogById = new Map(catalog.map((entry) => [entry.indicatorId, entry]));
-  const goods = compositeFromIndicators(config.goods.indicators, indicators, catalogById);
-  const monetary = compositeFromIndicators(config.monetary.indicators, indicators, catalogById);
-  const referenceSnapshot = indicators.find((entry) => entry.indicatorId === config.referenceIndicatorId);
+const GOODS_INDICATORS: Record<InflationSplitRegion, string[]> = {
+  US: [
+    "oil_brent_usd",
+    "natgas_usd",
+    "commodity_index",
+    "industrial_metals_index",
+    "copper_usd",
+    "oil_yoy",
+    "natgas_yoy",
+    "copper_yoy",
+    "commodity_index_yoy",
+    "industrial_metals_yoy",
+  ],
+  EA: [
+    "oil_brent_usd_ea",
+    "natgas_usd_ea",
+    "commodity_index_ea",
+    "industrial_metals_index_ea",
+    "copper_usd_ea",
+    "oil_yoy_ea",
+    "natgas_yoy_ea",
+    "copper_yoy_ea",
+    "commodity_index_yoy_ea",
+    "industrial_metals_yoy_ea",
+  ],
+};
+
+const REFERENCE_INDICATOR: Record<InflationSplitRegion, { id: string; label: string }> = {
+  US: { id: "core_cpi_yoy_us", label: "Core CPI YoY" },
+  EA: { id: "hicp_inflation_ea", label: "HICP inflation" },
+};
+
+export function computeInflationSplit(params: {
+  region: string;
+  asOfDate: string;
+  indicators: MacroIndicatorSnapshot[];
+  seriesMap: Map<string, MacroSeriesInput>;
+}) {
+  const region = params.region.toUpperCase();
+  if (region !== "US" && region !== "EA") return null;
+  const normalizedRegion = region as InflationSplitRegion;
+
+  const goods = goodsCompositeFromIndicators(GOODS_INDICATORS[normalizedRegion], params.indicators);
+
+  const monetaryComponents = normalizedRegion === "US"
+    ? [
+      { key: "central_bank_balance_sheet_score", weight: 0.30, seriesKey: "fed_balance_sheet_ratio_us" },
+      { key: "money_supply_score", weight: 0.30, seriesKey: "m2_ratio_us" },
+      { key: "private_credit_score", weight: 0.25, seriesKey: "private_credit_ratio_us" },
+      { key: "real_rate_score", weight: 0.15, seriesKey: "real_policy_rate_us", invert: true },
+    ]
+    : [
+      { key: "central_bank_balance_sheet_score", weight: 0.30, seriesKey: "ecb_balance_sheet_ratio_ea" },
+      { key: "money_supply_score", weight: 0.30, seriesKey: "m3_ratio_ea" },
+      { key: "private_credit_score", weight: 0.25, seriesKey: "private_credit_ratio_ea" },
+      { key: "real_rate_score", weight: 0.15, seriesKey: "real_policy_rate_ea", invert: true },
+    ];
+
+  const monetaryUsed = monetaryComponents.map((component) => {
+    const percentile10y = latestPercentile(
+      params.seriesMap.get(component.seriesKey),
+      params.asOfDate,
+      component.invert ? (value) => -value : undefined,
+    );
+    return {
+      component: component.key,
+      seriesKey: component.seriesKey,
+      weight: component.weight,
+      percentile10y,
+      inverted: Boolean(component.invert),
+    };
+  });
+
+  const monetaryComposite = weightedAverage(monetaryUsed.map((entry) => ({ value: entry.percentile10y, weight: entry.weight })));
+
+  const referenceMeta = REFERENCE_INDICATOR[normalizedRegion];
+  const reference = params.indicators.find((entry) => entry.indicatorId === referenceMeta.id)?.percentile10y ?? null;
 
   return {
     goodsInflationComposite: goods.score,
-    monetaryInflationComposite: monetary.score,
-    actualInflationReference: referenceSnapshot?.score === null || referenceSnapshot?.score === undefined
-      ? null
-      : scoreToPercent(referenceSnapshot.score),
-    referenceLabel: config.referenceLabel,
-    dominance: (goods.score === null || monetary.score === null
+    monetaryInflationComposite: monetaryComposite,
+    actualInflationReference: reference,
+    referenceLabel: referenceMeta.label,
+    dominanceSpread: monetaryComposite === null || goods.score === null ? null : monetaryComposite - goods.score,
+    dominance: (monetaryComposite === null || goods.score === null
       ? "neutral"
-      : goods.score > monetary.score
-        ? "goods"
-        : monetary.score > goods.score
-          ? "monetary"
+      : monetaryComposite > goods.score
+        ? "monetary"
+        : goods.score > monetaryComposite
+          ? "goods"
           : "neutral") as "goods" | "monetary" | "neutral",
     model: {
       goods: {
-        compositeId: config.goods.id,
-        indicators: config.goods.indicators,
-        used: goods.contributions,
+        compositeId: normalizedRegion === "US" ? "goods_inflation_composite_us" : "goods_inflation_composite_ea",
+        indicators: GOODS_INDICATORS[normalizedRegion],
+        used: goods.used,
         missing: goods.missing,
       },
       monetary: {
-        compositeId: config.monetary.id,
-        indicators: config.monetary.indicators,
-        used: monetary.contributions,
-        missing: monetary.missing,
+        compositeId: normalizedRegion === "US" ? "monetary_inflation_composite_us" : "monetary_inflation_composite_ea",
+        formula: "0.30*central_bank_balance_sheet_score + 0.30*money_supply_score + 0.25*private_credit_score + 0.15*real_rate_score",
+        components: monetaryUsed,
+        missing: monetaryUsed.filter((entry) => entry.percentile10y === null).map((entry) => entry.seriesKey),
       },
       reference: {
-        indicatorId: config.referenceIndicatorId,
-        label: config.referenceLabel,
-        missing: referenceSnapshot?.score === null || referenceSnapshot?.score === undefined,
+        indicatorId: referenceMeta.id,
+        label: referenceMeta.label,
+        missing: reference === null,
       },
     },
   };

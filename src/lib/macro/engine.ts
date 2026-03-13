@@ -317,7 +317,12 @@ export function runGlobalMacroEngine({
     return sum / items.length;
   }
 
-  const inflationSplit = computeInflationSplit(region, indicators, catalog);
+  const inflationSplit = computeInflationSplit({
+    region,
+    asOfDate: snapshotDate,
+    indicators,
+    seriesMap,
+  });
 
   const regime: MacroRegimeSnapshot = {
     asOfDate: snapshotDate,

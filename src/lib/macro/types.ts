@@ -46,7 +46,7 @@ export type MacroDriverDirection = "rising" | "falling" | "stable" | "accelerati
 export type InflationCompositeDetails = {
   compositeId: string;
   indicators: string[];
-  used: Array<{ indicatorId: string; weight: number; score: number; normalizedScore: number }>;
+  used: Array<{ indicatorId: string; percentile10y: number }>;
   missing: string[];
 };
 
@@ -56,9 +56,15 @@ export type InflationSplitSnapshot = {
   actualInflationReference: number | null;
   referenceLabel: string;
   dominance: "goods" | "monetary" | "neutral";
+  dominanceSpread: number | null;
   model: {
     goods: InflationCompositeDetails;
-    monetary: InflationCompositeDetails;
+    monetary: {
+      compositeId: string;
+      formula: string;
+      components: Array<{ component: string; seriesKey: string; weight: number; percentile10y: number | null; inverted: boolean }>;
+      missing: string[];
+    };
     reference: {
       indicatorId: string;
       label: string;

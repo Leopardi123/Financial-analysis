@@ -24,6 +24,9 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "PALLFNFUSDM", seriesKey: "commodity_index", fallbackFredSeriesIds: ["PALLFNFNFUSDM", "PALLFNFINDEXM"] },
   { fredSeriesId: "WALCL", seriesKey: "fed_balance_sheet_total" },
   { fredSeriesId: "M2SL", seriesKey: "m2sl" },
+  { fredSeriesId: "GDP", seriesKey: "us_nominal_gdp", latestLookbackMonths: 180, backfillLookbackYears: 25 },
+  { fredSeriesId: "TOTBKCR", seriesKey: "total_bank_credit_us" },
+  { fredSeriesId: "FEDFUNDS", seriesKey: "fed_funds_rate" },
   { fredSeriesId: "DFII5", seriesKey: "real_yield_5y" },
   { fredSeriesId: "DGS3MO", seriesKey: "nominal_yield_3mo_us" },
   // backlog/unavailable: supply_chain_pressure removed from active US ingest until a verified FRED series is available.
@@ -258,6 +261,25 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
   if (m2.length > 12) {
     output.m2_yoy = computeYoY(m2);
     output.m2_momentum = computeYoYChange(m2);
+  }
+
+  const nominalGdpUs = monthlyInputs.us_nominal_gdp ?? [];
+  if (fedBalanceSheet.length > 0 && nominalGdpUs.length > 0) {
+    output.fed_balance_sheet_ratio_us = alignBinaryOperation(fedBalanceSheet, nominalGdpUs, (assets, gdp) => (gdp === 0 ? null : assets / gdp));
+  }
+  if (m2.length > 0 && nominalGdpUs.length > 0) {
+    output.m2_ratio_us = alignBinaryOperation(m2, nominalGdpUs, (m2Value, gdp) => (gdp === 0 ? null : m2Value / gdp));
+  }
+
+  const bankCredit = monthlyInputs.total_bank_credit_us ?? [];
+  if (bankCredit.length > 0 && nominalGdpUs.length > 0) {
+    output.private_credit_ratio_us = alignBinaryOperation(bankCredit, nominalGdpUs, (credit, gdp) => (gdp === 0 ? null : credit / gdp));
+  }
+
+  const fedFundsRate = monthlyInputs.fed_funds_rate ?? [];
+  const coreCpiYoy = output.core_cpi_yoy_us ?? monthlyInputs.core_cpi_yoy_us ?? [];
+  if (fedFundsRate.length > 0 && coreCpiYoy.length > 0) {
+    output.real_policy_rate_us = alignBinaryOperation(fedFundsRate, coreCpiYoy, (policy, inflation) => policy - inflation);
   }
 
   const usd = monthlyInputs.usd_broad_index ?? [];
