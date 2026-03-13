@@ -36,10 +36,11 @@ async function fetchEurostatFirstAvailable(candidates: Array<{ dataset: string; 
   return [] as Array<{ date: string; value: number | null }>;
 }
 
-async function fetchRiksbankFirstAvailable(params: { preferredIds?: string[]; includeTerms: string[] }): Promise<TimeSeriesPoint[]> {
+async function fetchRiksbankFirstAvailable(params: { preferredIds?: string[]; includeTerms: string[]; includeAnyGroups?: string[][] }): Promise<TimeSeriesPoint[]> {
   try {
     const resolved = await resolveRiksbankSeriesIdByMetadata({
       includeTerms: params.includeTerms,
+      includeAnyGroups: params.includeAnyGroups,
       preferredIds: params.preferredIds,
     });
     if (resolved) {
@@ -231,15 +232,19 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
         ["kpif", "annual", "rate"],
         ["kpif", "year", "change"],
         ["kpif", "12", "month"],
+        ["kpif", "årstakt"],
+        ["kpif", "årsförändring"],
       ],
     }).then((x) => { sourceSeries.kpif_yoy_se = x; }),
     fetchRiksbankFirstAvailable({
       preferredIds: ["SE.REPO.RATE", "SE.POLICY.RATE", "SE.POLICYRATE"],
-      includeTerms: ["policy", "rate", "sweden"],
+      includeTerms: ["policy", "rate"],
+      includeAnyGroups: [["repo", "rate"], ["styrränta"], ["policy", "rate", "se"]],
     }).then((x) => { sourceSeries.policy_rate_se = x; }),
     fetchRiksbankFirstAvailable({
       preferredIds: ["SE.GOVBOND.10Y", "SE.SGB_10Y", "SE.BOND.10Y"],
       includeTerms: ["government", "bond", "10"],
+      includeAnyGroups: [["stats", "bond", "10"], ["government", "yield", "10"], ["statsobligation", "10"]],
     }).then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
     fetchScbSeriesByMetadata({
       path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
@@ -252,10 +257,12 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     fetchRiksbankFirstAvailable({
       preferredIds: ["SE.M3.YOY", "SE.MONEY.M3.YOY", "SE.MONAGG.M3"],
       includeTerms: ["m3", "year"],
+      includeAnyGroups: [["m3", "growth"], ["m3", "årsförändring"]],
     }).then((x) => { sourceSeries.liquidity_growth_se = x; }),
     fetchRiksbankFirstAvailable({
       preferredIds: ["SE.CREDIT.SPREAD", "SE.MORTGAGE.SPREAD", "SE.COVERED.BOND.SPREAD"],
-      includeTerms: ["spread", "sweden"],
+      includeTerms: ["spread"],
+      includeAnyGroups: [["credit", "spread"], ["mortgage", "spread"], ["covered", "bond", "spread"]],
     }).then((x) => { sourceSeries.credit_spreads_se = x; }),
     fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
   ];

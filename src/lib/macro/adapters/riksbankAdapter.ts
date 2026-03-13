@@ -126,6 +126,7 @@ export async function fetchRiksbankSeriesCatalog(): Promise<Array<{ id: string; 
 
 export async function resolveRiksbankSeriesIdByMetadata(params: {
   includeTerms: string[];
+  includeAnyGroups?: string[][];
   preferredIds?: string[];
 }): Promise<string | null> {
   const includeTerms = params.includeTerms.map(norm);
@@ -139,7 +140,10 @@ export async function resolveRiksbankSeriesIdByMetadata(params: {
 
   const hit = catalog.find((entry) => {
     const hay = norm(`${entry.id} ${entry.title}`);
-    return includeTerms.every((term) => hay.includes(term));
+    const strictHit = includeTerms.length > 0 && includeTerms.every((term) => hay.includes(term));
+    if (strictHit) return true;
+    const groups = params.includeAnyGroups ?? [];
+    return groups.some((group) => group.map(norm).every((term) => hay.includes(term)));
   });
 
   return hit?.id ?? params.preferredIds?.[0] ?? null;

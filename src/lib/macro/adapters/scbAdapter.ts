@@ -31,6 +31,10 @@ function norm(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9åäö]+/gi, " ").trim();
 }
 
+function containsAny(hay: string, needles: string[]): boolean {
+  return needles.some((needle) => hay.includes(norm(needle)));
+}
+
 function parseScbRows(payload: ScbResponse, timeIndex: number): Array<{ date: string; value: number | null }> {
   return (payload.data ?? [])
     .map((row) => {
@@ -66,6 +70,20 @@ function buildDefaultSelection(variable: ScbVariable): string | null {
   const values = variable.values ?? [];
   const texts = variable.valueTexts ?? values;
 
+  const scored = values
+    .map((value, index) => {
+      const label = norm(`${value} ${texts[index] ?? ""}`);
+      let score = 0;
+      if (containsAny(label, ["sweden", "riket", "hela landet", "total", "totalt"])) score += 6;
+      if (containsAny(label, ["s13", "general government", "offentlig sektor", "public sector"])) score += 5;
+      if (containsAny(label, ["all items", "total economy", "hela ekonomin"])) score += 4;
+      if (containsAny(label, ["seasonally adjusted", "working day adjusted"])) score += 1;
+      return { value, score, index };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  if (scored.length > 0 && scored[0].score > 0) return scored[0].value;
+
   const preferredIndex = texts.findIndex((text) => {
     const t = norm(String(text));
     return t.includes("sweden") || t.includes("riket") || t.includes("hela landet");
@@ -92,7 +110,7 @@ export async function fetchScbSeriesByMetadata(params: {
   const metricVar = variables.find((v) => {
     const code = norm(String(v.code ?? ""));
     const text = norm(String(v.text ?? ""));
-    return code.includes("contents") || text.includes("contents") || text.includes("inneh");
+    return code.includes("contents") || text.includes("contents") || text.includes("inneh") || code.includes("contentscode");
   });
   if (!timeVar || !metricVar || !metricVar.code) return [];
 
