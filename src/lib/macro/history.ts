@@ -38,6 +38,25 @@ type RegimeInterval = {
   regimeExplanation: MacroRegimeSnapshot["regimeExplanation"];
 };
 
+
+function safeJsonParse<T>(input: string | null, fallback: T): T {
+  if (!input) return fallback;
+  try {
+    return JSON.parse(input) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function weekKey(date: string): string {
+  const d = new Date(`${date}T00:00:00.000Z`);
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
 type OverlayInterval<T extends string> = {
   startDate: string;
   endDate: string;
@@ -268,6 +287,36 @@ export async function computeMacroRegimeHistory(params: {
     )) as unknown as RegimeSnapshotRow[];
     if (rows.length === 0) return emptyResult(region, resolution, requestedRangeYears, 1);
 
+    const allDates = Array.from(new Set(rows.map((row) => row.as_of_date))).sort((a, b) => a.localeCompare(b));
+    const earliestRawDate = allDates[0] ?? null;
+    const latestRawDate = allDates[allDates.length - 1] ?? null;
+    if (!earliestRawDate || !latestRawDate) return emptyResult(region, resolution, requestedRangeYears, 1);
+
+    const latestRaw = new Date(`${latestRawDate}T00:00:00.000Z`);
+    const earliestRaw = new Date(`${earliestRawDate}T00:00:00.000Z`);
+    const requestedRange = requestedRangeYears === "MAX"
+      ? Math.max(1, Math.ceil((latestRaw.getTime() - earliestRaw.getTime()) / (365.25 * 86400000)))
+      : Math.max(1, Math.min(30, Math.floor(requestedRangeYears)));
+    const requestedStartDate = requestedRangeYears === "MAX"
+      ? earliestRawDate
+      : toIsoDate(new Date(Date.UTC(latestRaw.getUTCFullYear() - requestedRange, latestRaw.getUTCMonth(), latestRaw.getUTCDate())));
+
+    const filteredDates = allDates.filter((date) => date >= requestedStartDate && date <= latestRawDate);
+
+    const canonicalDates = resolution === "MONTHLY"
+      ? Array.from(
+        filteredDates.reduce((acc, date) => {
+          acc.set(date.slice(0, 7), date);
+          return acc;
+        }, new Map<string, string>()).values(),
+      )
+      : Array.from(
+        filteredDates.reduce((acc, date) => {
+          acc.set(weekKey(date), date);
+          return acc;
+        }, new Map<string, string>()).values(),
+      );
+
     const byDate = new Map<string, RegimeSnapshotRow[]>();
     for (const row of rows) {
       const bucket = byDate.get(row.as_of_date) ?? [];
@@ -276,13 +325,19 @@ export async function computeMacroRegimeHistory(params: {
     }
 
     const points: MacroHistoryPoint[] = [];
-    for (const [asOfDate, bucket] of Array.from(byDate.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+    for (const asOfDate of canonicalDates) {
+      const bucket = byDate.get(asOfDate) ?? [];
       const regional = bucket
         .filter((item) => item.region in MACRO_GLOBAL_REGION_WEIGHTS)
         .map((item) => ({
           asOfDate,
           region: item.region,
-          blockScores: JSON.parse(item.block_scores_json ?? "{}"),
+          blockScores: safeJsonParse(item.block_scores_json, {
+            A_FISCAL: null,
+            B_MONETARY: null,
+            C_INFLATION: null,
+            D_CREDIBILITY: null,
+          }),
           macroScoreTotal: item.macro_score_total,
           macroConfidence: Number(item.macro_confidence ?? 0),
           coreRegimeLabel: item.core_regime_label as MacroRegimeSnapshot["coreRegimeLabel"],
@@ -291,9 +346,11 @@ export async function computeMacroRegimeHistory(params: {
           hardAssetOverlay: item.hard_asset_overlay as MacroRegimeSnapshot["hardAssetOverlay"],
           clearSignalStrength: item.clear_signal_strength,
           speculativeSignalStrength: item.speculative_signal_strength,
-          topDrivers: JSON.parse(item.top_drivers_json ?? "[]"),
+          topDrivers: safeJsonParse(item.top_drivers_json, []),
           regimeExplanation: { title: item.core_regime_label, summary: item.core_regime_label, driverHighlights: [] },
         }));
+
+      if (regional.length === 0) continue;
       const regime = aggregateGlobalMacroRegime(regional as MacroRegimeSnapshot[]);
       points.push({
         asOfDate,
@@ -317,28 +374,43 @@ export async function computeMacroRegimeHistory(params: {
       });
     }
 
+    if (points.length === 0) return emptyResult(region, resolution, requestedRangeYears, requestedRange);
+
     for (let i = 1; i < points.length; i += 1) {
       points[i].regimeChanged = points[i - 1].coreRegimeLabel !== points[i].coreRegimeLabel;
       points[i].overlayChanged = points[i - 1].growthOverlay !== points[i].growthOverlay || points[i - 1].stressOverlay !== points[i].stressOverlay || points[i - 1].hardAssetOverlay !== points[i].hardAssetOverlay;
       points[i].previousRegimeLabel = points[i - 1].coreRegimeLabel;
     }
 
-    const earliestRawDate = points[0]?.asOfDate ?? null;
-    const latestRawDate = points[points.length - 1]?.asOfDate ?? null;
+    const replayEarliestDateUsed = points[0]?.asOfDate ?? null;
+    const replayLatestDateUsed = points[points.length - 1]?.asOfDate ?? null;
+    const limitingIndicators = ["US", "EA", "SE"].flatMap((regional) => {
+      const dates = rows.filter((row) => row.region === regional).map((row) => row.as_of_date).sort((a, b) => a.localeCompare(b));
+      const start = dates[0] ?? null;
+      const end = dates[dates.length - 1] ?? null;
+      const out: Array<{ seriesKey: string; earliestDate: string | null; latestDate: string | null; pointCount: number; reason: "starts_after_replay_start" | "ends_before_latest" }> = [];
+      if (replayEarliestDateUsed && start && start > replayEarliestDateUsed) out.push({ seriesKey: `region:${regional}`, earliestDate: start, latestDate: end, pointCount: dates.length, reason: "starts_after_replay_start" });
+      if (replayLatestDateUsed && end && end < replayLatestDateUsed) out.push({ seriesKey: `region:${regional}`, earliestDate: start, latestDate: end, pointCount: dates.length, reason: "ends_before_latest" });
+      return out;
+    });
+
     return {
-      ...emptyResult(region, resolution, requestedRangeYears, 1),
+      ...emptyResult(region, resolution, requestedRangeYears, requestedRange),
       earliestRawDate,
       latestRawDate,
-      replayEarliestDateUsed: earliestRawDate,
-      replayLatestDateUsed: latestRawDate,
+      replayEarliestDateUsed,
+      replayLatestDateUsed,
       generatedPoints: points.length,
+      regimeChanges: points.filter((pt) => pt.regimeChanged).length,
+      overlayChanges: points.filter((pt) => pt.overlayChanged).length,
       dataCoveragePct: 100,
+      limitingIndicators,
       rangeDebug: {
-        requestedStartDate: earliestRawDate,
-        actualStartDate: earliestRawDate,
-        actualEndDate: latestRawDate,
-        wasCappedByRawData: false,
-        unfilledReason: null,
+        requestedStartDate,
+        actualStartDate: replayEarliestDateUsed,
+        actualEndDate: replayLatestDateUsed,
+        wasCappedByRawData: requestedStartDate < earliestRawDate,
+        unfilledReason: limitingIndicators.length > 0 ? "Some regions have shorter snapshot history than replay window" : null,
       },
       intervals: {
         regime: mergeIntervals(points, (point) => point.coreRegimeLabel).map((it) => ({ startDate: it.startDate, endDate: it.endDate, coreRegimeLabel: it.value, pointCount: it.pointCount, topDriver: null, topDrivers: [], regimeExplanation: { title: String(it.value), summary: String(it.value), driverHighlights: [] } })),
@@ -349,8 +421,6 @@ export async function computeMacroRegimeHistory(params: {
         },
       },
       points,
-      regimeChanges: points.filter((pt) => pt.regimeChanged).length,
-      overlayChanges: points.filter((pt) => pt.overlayChanged).length,
     };
   }
 
