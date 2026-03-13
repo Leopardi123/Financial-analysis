@@ -1,7 +1,8 @@
 import { query } from "../../../api/_db.js";
 import { tables } from "../../../api/_migrate.js";
 import { runGlobalMacroEngine } from "./engine.js";
-import { classifyBlockBandFromTemplate, GLOBAL_MACRO_TEMPLATE } from "./template.js";
+import { classifyBlockBandFromTemplate, classifyCoreRegimeFromTemplate, GLOBAL_MACRO_TEMPLATE } from "./template.js";
+import { MACRO_REGIONS, GLOBAL_REGION_WEIGHTS, aggregateGlobalBlockScores } from "./global.js";
 import type { MacroRegimeSnapshot, MacroSeriesInput } from "./types.ts";
 
 type RawPointRow = {
@@ -184,6 +185,92 @@ function mergeIntervals<T>(
   return out;
 }
 
+
+function weightedAverage(values: Array<{ value: number | null; weight: number }>): number | null {
+  const valid = values.filter((item) => typeof item.value === "number" && Number.isFinite(item.value));
+  if (valid.length === 0) return null;
+  const totalWeight = valid.reduce((sum, item) => sum + item.weight, 0);
+  if (totalWeight <= 0) return null;
+  return valid.reduce((sum, item) => sum + (item.value as number) * item.weight, 0) / totalWeight;
+}
+
+function globalHistoryFromRegional(
+  resolution: HistoryResolution,
+  requestedRangeYears: number | "MAX",
+  regional: Record<string, MacroHistoryResult>,
+): MacroHistoryResult {
+  const dateSet = new Set<string>();
+  for (const region of MACRO_REGIONS) {
+    for (const p of (regional[region]?.points ?? [])) dateSet.add(p.asOfDate);
+  }
+  const dates = Array.from(dateSet).sort((a,b)=>a.localeCompare(b));
+  const points: MacroHistoryPoint[] = [];
+  let regimeChanges = 0;
+  let overlayChanges = 0;
+  let blockThresholdChanges = 0;
+
+  for (const asOfDate of dates) {
+    const regionalPoints = Object.fromEntries(MACRO_REGIONS.map((region)=>[region, regional[region]?.points.find((p)=>p.asOfDate===asOfDate)]));
+    const blockScores = aggregateGlobalBlockScores({
+      US: regionalPoints.US ? { A_FISCAL: regionalPoints.US.fiscalScore, B_MONETARY: regionalPoints.US.monetaryScore, C_INFLATION: regionalPoints.US.inflationScore, D_CREDIBILITY: regionalPoints.US.credibilityScore } : undefined,
+      EA: regionalPoints.EA ? { A_FISCAL: regionalPoints.EA.fiscalScore, B_MONETARY: regionalPoints.EA.monetaryScore, C_INFLATION: regionalPoints.EA.inflationScore, D_CREDIBILITY: regionalPoints.EA.credibilityScore } : undefined,
+      SE: regionalPoints.SE ? { A_FISCAL: regionalPoints.SE.fiscalScore, B_MONETARY: regionalPoints.SE.monetaryScore, C_INFLATION: regionalPoints.SE.inflationScore, D_CREDIBILITY: regionalPoints.SE.credibilityScore } : undefined,
+    });
+    const validBlocks = Object.values(blockScores).filter((v): v is number => typeof v === "number");
+    const macroScoreTotal = validBlocks.length ? validBlocks.reduce((a,b)=>a+b,0)/validBlocks.length : null;
+    const macroConfidence = Math.round(weightedAverage(MACRO_REGIONS.map((region)=>({ value: regionalPoints[region]?.macroConfidence ?? null, weight: GLOBAL_REGION_WEIGHTS[region]}))) ?? 0);
+    const coreRegimeLabel = classifyCoreRegimeFromTemplate(macroScoreTotal, GLOBAL_MACRO_TEMPLATE);
+    const prev = points[points.length - 1] ?? null;
+    const growthOverlay = "Neutral" as const;
+    const stressOverlay = "Medium" as const;
+    const hardAssetOverlay = "Neutral" as const;
+    const regimeChanged = Boolean(prev && prev.coreRegimeLabel !== coreRegimeLabel);
+    const overlayChanged = false;
+    const blockThresholdChanged = Boolean(prev && (
+      classifyBlockBandFromTemplate(prev.fiscalScore, GLOBAL_MACRO_TEMPLATE) !== classifyBlockBandFromTemplate(blockScores.A_FISCAL, GLOBAL_MACRO_TEMPLATE)
+      || classifyBlockBandFromTemplate(prev.monetaryScore, GLOBAL_MACRO_TEMPLATE) !== classifyBlockBandFromTemplate(blockScores.B_MONETARY, GLOBAL_MACRO_TEMPLATE)
+      || classifyBlockBandFromTemplate(prev.inflationScore, GLOBAL_MACRO_TEMPLATE) !== classifyBlockBandFromTemplate(blockScores.C_INFLATION, GLOBAL_MACRO_TEMPLATE)
+      || classifyBlockBandFromTemplate(prev.credibilityScore, GLOBAL_MACRO_TEMPLATE) !== classifyBlockBandFromTemplate(blockScores.D_CREDIBILITY, GLOBAL_MACRO_TEMPLATE)
+    ));
+    if (regimeChanged) regimeChanges += 1;
+    if (overlayChanged) overlayChanges += 1;
+    if (blockThresholdChanged) blockThresholdChanges += 1;
+    points.push({
+      asOfDate, macroScoreTotal, macroConfidence, coreRegimeLabel,
+      fiscalScore: blockScores.A_FISCAL, monetaryScore: blockScores.B_MONETARY, inflationScore: blockScores.C_INFLATION, credibilityScore: blockScores.D_CREDIBILITY,
+      growthOverlay, stressOverlay, hardAssetOverlay,
+      regimeChanged, overlayChanged, blockThresholdChanged, previousRegimeLabel: prev?.coreRegimeLabel ?? null,
+      topDriver: null, topDrivers: [],
+      regimeExplanation: { title: "Global macro aggregation", summary: "Global timeline is aggregated from regional engines.", driverHighlights: [] },
+    });
+  }
+
+  return {
+    region: "GLOBAL",
+    resolution,
+    rangeYears: typeof requestedRangeYears === 'number' ? requestedRangeYears : (regional.US?.rangeYears ?? 1),
+    requestedRangeYears,
+    earliestRawDate: [regional.US?.earliestRawDate, regional.EA?.earliestRawDate, regional.SE?.earliestRawDate].filter(Boolean).sort()[0] ?? null,
+    latestRawDate: [regional.US?.latestRawDate, regional.EA?.latestRawDate, regional.SE?.latestRawDate].filter(Boolean).sort().slice(-1)[0] ?? null,
+    replayEarliestDateUsed: points[0]?.asOfDate ?? null,
+    replayLatestDateUsed: points[points.length-1]?.asOfDate ?? null,
+    generatedPoints: points.length, regimeChanges, overlayChanges, blockThresholdChanges,
+    dataCoveragePct: points.length > 0 ? 100 : 0,
+    missingHistoryIndicators: [], limitingIndicators: [],
+    rangeDebug: { requestedStartDate: null, actualStartDate: points[0]?.asOfDate ?? null, actualEndDate: points[points.length-1]?.asOfDate ?? null, wasCappedByRawData: false, unfilledReason: null },
+    intervals: {
+      regime: mergeIntervals(points, (p)=>p.coreRegimeLabel).map((i)=>({ startDate: i.startDate, endDate: i.endDate, coreRegimeLabel: i.value, pointCount: i.pointCount, topDriver: null, topDrivers: [], regimeExplanation: { title: "Global macro aggregation", summary: "Global timeline is aggregated from regional engines.", driverHighlights: [] } })),
+      overlays: {
+        growth: mergeIntervals(points, (p)=>p.growthOverlay).map((i)=>({ startDate: i.startDate, endDate: i.endDate, value: i.value, pointCount: i.pointCount })),
+        stress: mergeIntervals(points, (p)=>p.stressOverlay).map((i)=>({ startDate: i.startDate, endDate: i.endDate, value: i.value, pointCount: i.pointCount })),
+        hardAsset: mergeIntervals(points, (p)=>p.hardAssetOverlay).map((i)=>({ startDate: i.startDate, endDate: i.endDate, value: i.value, pointCount: i.pointCount })),
+      },
+    },
+    template: { templateId: GLOBAL_MACRO_TEMPLATE.templateId, updatedAt: GLOBAL_MACRO_TEMPLATE.updatedAt, thresholds: { monetaryDominanceMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.monetaryDominanceMax, balancedMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.balancedMax, fiscalPressureMax: GLOBAL_MACRO_TEMPLATE.thresholds.coreRegime.fiscalPressureMax } },
+    replay: { recomputedAt: new Date().toISOString(), source: "direct_compute" },
+    points,
+  };
+}
 function emptyResult(region: string, resolution: HistoryResolution, requestedRangeYears: number | "MAX", rangeYears: number): MacroHistoryResult {
   return {
     region,
@@ -241,6 +328,11 @@ export async function computeMacroRegimeHistory(params: {
   const region = params.region.toUpperCase();
   const resolution = params.resolution;
   const requestedRangeYears = params.rangeYears;
+
+  if (region === "GLOBAL") {
+    const regionalEntries = await Promise.all(MACRO_REGIONS.map(async (r) => [r, await computeMacroRegimeHistory({ region: r, resolution, rangeYears: requestedRangeYears })] as const));
+    return globalHistoryFromRegional(resolution, requestedRangeYears, Object.fromEntries(regionalEntries));
+  }
 
   const rawPoints = (await query(
     `SELECT series_key, date, value

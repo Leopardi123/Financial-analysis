@@ -17,7 +17,7 @@ type GlobalMacroPayload = {
     };
     clearSignalStrength: number | null;
     speculativeSignalStrength: number | null;
-    topDrivers: Array<{ indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
+    topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   };
   indicators: Array<{
@@ -229,7 +229,7 @@ type MacroHistoryPayload = {
     blockThresholdChanged: boolean;
     previousRegimeLabel: string | null;
     topDriver: string | null;
-    topDrivers: Array<{ indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: string; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
+    topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: string; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   }>;
 };
@@ -239,6 +239,7 @@ export default function GlobalMacroDashboard() {
   const [macroHistory, setMacroHistory] = useState<MacroHistoryPayload | null>(null);
   const [historyResolution, setHistoryResolution] = useState<"WEEKLY" | "MONTHLY">("MONTHLY");
   const [historyRangeYears, setHistoryRangeYears] = useState<number | "MAX">(10);
+  const [selectedRegion, setSelectedRegion] = useState<"GLOBAL" | "US" | "EA" | "SE">("GLOBAL");
   const [globalMacroLoading, setGlobalMacroLoading] = useState(false);
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -296,12 +297,12 @@ export default function GlobalMacroDashboard() {
     if (historyResolution === "WEEKLY" && historyRangeYears !== 1 && historyRangeYears !== 3 && historyRangeYears !== 5) {
       setHistoryRangeYears(3);
     }
-  }, [historyResolution, historyRangeYears]);
+  }, [historyResolution, historyRangeYears, selectedRegion]);
 
   async function loadGlobalMacro() {    setGlobalMacroLoading(true);
     setGlobalMacroError(null);
     try {
-      const response = await fetch(`/api/sector/global-macro?region=US&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}`);
+      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}`);
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
@@ -321,7 +322,7 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     void loadGlobalMacro();
-  }, [historyResolution, historyRangeYears]);
+  }, [historyResolution, historyRangeYears, selectedRegion]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const scoredCount = globalMacroIndicators.filter((item) => item.score !== null).length;
@@ -538,6 +539,29 @@ export default function GlobalMacroDashboard() {
         <div className="sector-card macro-premium-card">
           <h3>Global Macro Dashboard</h3>
           <p className="bread">Global Macro tolkar det makroekonomiska klimatet över tid genom att väga samman finansiering, räntor, inflation, trovärdighet och marknadsstress. Målet är att ge en lugn men skarp lägesbild av vilken regim marknaden befinner sig i – och på sikt knyta den till riskklimat, bull/bear-faser och den bredare kapitalmiljön.</p>
+
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", scrollSnapType: "x mandatory", paddingBottom: 8, marginBottom: 8 }}>
+            {["GLOBAL", "US", "EA", "SE"].map((region) => (
+              <button
+                key={region}
+                type="button"
+                onClick={() => setSelectedRegion(region as "GLOBAL" | "US" | "EA" | "SE")}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  border: selectedRegion === region ? "1px solid #111" : "1px solid #d0d7de",
+                  background: selectedRegion === region ? "#111" : "#fff",
+                  color: selectedRegion === region ? "#fff" : "#111",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  scrollSnapAlign: "start",
+                }}
+              >
+                {region}
+              </button>
+            ))}
+          </div>
 
           {globalMacroLoading && <div className="status">Laddar Global Macro…</div>}
           {globalMacroError && <div className="status">Kunde inte ladda Global Macro: {globalMacroError}</div>}
@@ -1221,7 +1245,7 @@ export default function GlobalMacroDashboard() {
               <ul>
                 <li>indicator snapshots: {pipelineDebug?.snapshotContent.indicatorSnapshotCount ?? "—"}</li>
                 <li>regime snapshots: {pipelineDebug?.snapshotContent.regimeSnapshotCount ?? "—"}</li>
-                <li>history region: {macroHistory?.region ?? "US"}</li>
+                <li>history region: {macroHistory?.region ?? selectedRegion}</li>
                 <li>history selected resolution: {macroHistory?.resolution ?? historyResolution}</li>
                 <li>history requested range: {String(macroHistory?.requestedRangeYears ?? historyRangeYears)}</li>
                 <li>history actual rendered range: {(macroHistory?.rangeDebug.actualStartDate ?? "—")} → {(macroHistory?.rangeDebug.actualEndDate ?? "—")}</li>
