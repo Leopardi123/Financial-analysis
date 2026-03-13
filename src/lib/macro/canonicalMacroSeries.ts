@@ -7,6 +7,8 @@ import { fetchScbSeries } from "./adapters/scbAdapter.ts";
 
 export type CanonicalSeriesMap = Record<string, Array<{ date: string; value: number | null }>>;
 
+type TimeSeriesPoint = { date: string; value: number | null };
+
 const EUROSTAT_EA_DATASETS = {
   hicpBase: {
     dataset: "prc_hicp_manr",
@@ -32,6 +34,30 @@ async function fetchEurostatFirstAvailable(candidates: Array<{ dataset: string; 
     }
   }
   return [] as Array<{ date: string; value: number | null }>;
+}
+
+async function fetchRiksbankFirstAvailable(seriesIds: string[]): Promise<TimeSeriesPoint[]> {
+  for (const seriesId of seriesIds) {
+    try {
+      const rows = await fetchRiksbankSeries(seriesId);
+      if (rows.length > 0) return rows;
+    } catch {
+      // try next candidate
+    }
+  }
+  return [];
+}
+
+async function fetchScbFirstAvailable(candidates: Array<{ path: string; query: unknown }>): Promise<TimeSeriesPoint[]> {
+  for (const candidate of candidates) {
+    try {
+      const rows = await fetchScbSeries(candidate);
+      if (rows.length > 0) return rows;
+    } catch {
+      // try next candidate
+    }
+  }
+  return [];
 }
 
 function computeMomentum(points: Array<{ date: string; value: number | null }>, months = 3) {
@@ -61,6 +87,20 @@ function alignSpread(
       return { date: l.date, value: l.value - rv };
     })
     .filter((x) => x.value !== null);
+}
+
+function alignSubtract(
+  left: TimeSeriesPoint[],
+  right: TimeSeriesPoint[],
+): TimeSeriesPoint[] {
+  const rightByMonth = new Map(right.map((point) => [point.date.slice(0, 7), point.value]));
+  const output: TimeSeriesPoint[] = [];
+  for (const point of left) {
+    const rightValue = rightByMonth.get(point.date.slice(0, 7));
+    if (point.value === null || rightValue === null || rightValue === undefined) continue;
+    output.push({ date: point.date, value: point.value - rightValue });
+  }
+  return output;
 }
 
 function normalizeFmpEodRows(payload: unknown): Array<{ date: string; value: number | null }> {
@@ -157,20 +197,66 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     return { sourceSeries, derivedSeries };
   }
 
-  const sourceSeries: CanonicalSeriesMap = {};
+  const sourceSeries: CanonicalSeriesMap = {
+    kpif_yoy_se: [],
+    policy_rate_se: [],
+    government_bond_yield_10y_se: [],
+    debt_gdp_se: [],
+    deficit_gdp_se: [],
+    liquidity_growth_se: [],
+    credit_spreads_se: [],
+    gold_usd: [],
+  };
+
   const tasks: Array<Promise<void>> = [
-    fetchScbSeries({ path: "ssd/PR/PR0101/PR0101A/KPIArM", query: { query: [], response: { format: "json" } } }).then((x) => { sourceSeries.cpi_se = x; }),
-    fetchRiksbankSeries("SE.REPO.RATE").then((x) => { sourceSeries.repo_rate_se = x; }),
-    fetchRiksbankSeries("SE.GOVBOND.10Y").then((x) => { sourceSeries.gov_bond_yield_10y_se = x; }),
-    fetchScbSeries({ path: "ssd/NR/NR0109/NR0109A/Offentligfinanser", query: { query: [], response: { format: "json" } } }).then((x) => { sourceSeries.debt_gdp_se = x; }),
-    fetchScbSeries({ path: "ssd/NR/NR0109/NR0109A/Offentligfinanser", query: { query: [], response: { format: "json" } } }).then((x) => { sourceSeries.deficit_gdp_se = x; }),
-    fetchRiksbankSeries("SE.INFL_EXP.2Y").then((x) => { sourceSeries.infl_exp_se = x; }),
-    fetchRiksbankSeries("SE.CREDIT.SPREAD").then((x) => { sourceSeries.credit_spreads_se = x; }),
+    fetchRiksbankFirstAvailable(["SE.KPIF.YOY", "SE.CPIF.YOY", "SE.KPIF.12M"]).then((x) => { sourceSeries.kpif_yoy_se = x; }),
+    fetchRiksbankFirstAvailable(["SE.REPO.RATE", "SE.POLICY.RATE", "SE.POLICYRATE"]).then((x) => { sourceSeries.policy_rate_se = x; }),
+    fetchRiksbankFirstAvailable(["SE.GOVBOND.10Y", "SE.SGB_10Y", "SE.BOND.10Y"]).then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
+    fetchScbFirstAvailable([
+      {
+        path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
+        query: {
+          query: [
+            { code: "ContentsCode", selection: { filter: "item", values: ["B9", "GFDEBT"] } },
+            { code: "Tid", selection: { filter: "all", values: ["*"] } },
+          ],
+          response: { format: "json" },
+        },
+      },
+      {
+        path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
+        query: { query: [], response: { format: "json" } },
+      },
+    ]).then((x) => { sourceSeries.debt_gdp_se = x; }),
+    fetchScbFirstAvailable([
+      {
+        path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
+        query: {
+          query: [
+            { code: "ContentsCode", selection: { filter: "item", values: ["B9"] } },
+            { code: "Tid", selection: { filter: "all", values: ["*"] } },
+          ],
+          response: { format: "json" },
+        },
+      },
+      {
+        path: "ssd/NR/NR0109/NR0109A/Offentligfinanser",
+        query: { query: [], response: { format: "json" } },
+      },
+    ]).then((x) => { sourceSeries.deficit_gdp_se = x; }),
+    fetchRiksbankFirstAvailable(["SE.M3.YOY", "SE.MONEY.M3.YOY", "SE.MONAGG.M3"]).then((x) => { sourceSeries.liquidity_growth_se = x; }),
+    fetchRiksbankFirstAvailable(["SE.CREDIT.SPREAD", "SE.MORTGAGE.SPREAD", "SE.COVERED.BOND.SPREAD"]).then((x) => { sourceSeries.credit_spreads_se = x; }),
+    fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
   ];
   await Promise.allSettled(tasks);
 
   const derivedSeries: CanonicalSeriesMap = {
-    cpi_momentum_se: computeMomentum(sourceSeries.cpi_se ?? [], 3),
+    inflation_momentum_se: computeMomentum(sourceSeries.kpif_yoy_se ?? [], 3),
+    real_yield_10y_se: alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []),
+    gold_vs_real_yield_se: alignSpread(
+      sourceSeries.gold_usd ?? [],
+      alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []),
+    ),
   };
   return { sourceSeries, derivedSeries };
 }
