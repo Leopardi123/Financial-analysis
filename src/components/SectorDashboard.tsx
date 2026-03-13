@@ -174,12 +174,22 @@ export default function SectorDashboard() {
   useEffect(() => {
     let active = true;
     async function loadOverview() {
-      const response = await fetch(
-        `/api/sector/overview?sector=${encodeURIComponent(sector)}&subsector=${encodeURIComponent(subsector)}`
-      );
-      const payload = await response.json();
-      if (active) {
-        setOverview(payload);
+      try {
+        const response = await fetch(
+          `/api/sector/overview?sector=${encodeURIComponent(sector)}&subsector=${encodeURIComponent(subsector)}`
+        );
+        const text = await response.text();
+        let payload: any = null;
+        try {
+          payload = text ? JSON.parse(text) : null;
+        } catch {
+          payload = null;
+        }
+        if (active) {
+          setOverview(payload && typeof payload === "object" ? payload : null);
+        }
+      } catch {
+        if (active) setOverview(null);
       }
     }
     void loadOverview();
@@ -193,12 +203,22 @@ export default function SectorDashboard() {
   useEffect(() => {
     let active = true;
     async function loadManualInputs() {
-      const response = await fetch(
-        `/api/sector/manual-input?sector=${encodeURIComponent(sector)}&subsector=${encodeURIComponent(subsector)}`
-      );
-      const payload = await response.json();
-      if (active) {
-        setManualInputs(payload.inputs ?? []);
+      try {
+        const response = await fetch(
+          `/api/sector/manual-input?sector=${encodeURIComponent(sector)}&subsector=${encodeURIComponent(subsector)}`
+        );
+        const text = await response.text();
+        let payload: any = null;
+        try {
+          payload = text ? JSON.parse(text) : null;
+        } catch {
+          payload = null;
+        }
+        if (active) {
+          setManualInputs(Array.isArray(payload?.inputs) ? payload.inputs : []);
+        }
+      } catch {
+        if (active) setManualInputs([]);
       }
     }
     void loadManualInputs();
