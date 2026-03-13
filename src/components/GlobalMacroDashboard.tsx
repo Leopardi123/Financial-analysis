@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import ChartCard from "./ChartCard";
 
 type GlobalMacroPayload = {
   regime: {
@@ -19,6 +20,15 @@ type GlobalMacroPayload = {
     speculativeSignalStrength: number | null;
     topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
+    inflationSplit?: {
+      goodsInflationComposite: number | null;
+      monetaryInflationComposite: number | null;
+      actualInflationReference: number | null;
+      referenceLabel: string;
+      dominance: "goods" | "monetary" | "neutral";
+      dominanceSpread?: number | null;
+      model?: Record<string, unknown>;
+    } | null;
   };
   indicators: Array<{
     indicatorId: string;
@@ -231,6 +241,15 @@ type MacroHistoryPayload = {
     topDriver: string | null;
     topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: string; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
+    inflationSplit: {
+      goodsInflationComposite: number | null;
+      monetaryInflationComposite: number | null;
+      actualInflationReference: number | null;
+      referenceLabel: string;
+      dominance: "goods" | "monetary" | "neutral";
+      dominanceSpread?: number | null;
+      model?: Record<string, unknown>;
+    } | null;
   }>;
 };
 export default function GlobalMacroDashboard() {
@@ -436,6 +455,61 @@ export default function GlobalMacroDashboard() {
     { key: "C_INFLATION" as const, label: "Inflation", color: "#a27a4a", valueOf: (point: MacroHistoryPayload["points"][number]) => point.inflationScore },
     { key: "D_CREDIBILITY" as const, label: "Credibility", color: "#7b6676", valueOf: (point: MacroHistoryPayload["points"][number]) => point.credibilityScore },
   ];
+
+  const inflationSplitPoints = useMemo(() => {
+    return historyPoints.map((point, index) => ({
+      index,
+      asOfDate: point.asOfDate,
+      goods: point.inflationSplit?.goodsInflationComposite ?? null,
+      monetary: point.inflationSplit?.monetaryInflationComposite ?? null,
+      reference: point.inflationSplit?.actualInflationReference ?? null,
+      dominance: point.inflationSplit?.dominance ?? "neutral",
+      referenceLabel: point.inflationSplit?.referenceLabel ?? null,
+    }));
+  }, [historyPoints]);
+
+  const inflationDriverChartData = useMemo(() => {
+    const rows = inflationSplitPoints
+      .filter((point) => point.goods !== null || point.monetary !== null || point.reference !== null)
+      .map((point) => {
+        const spread = typeof point.monetary === "number" && typeof point.goods === "number" ? point.monetary - point.goods : null;
+        const tooltip = [
+          point.asOfDate,
+          `Goods inflation driver: ${typeof point.goods === "number" ? point.goods.toFixed(1) : "—"}`,
+          `Monetary inflation driver: ${typeof point.monetary === "number" ? point.monetary.toFixed(1) : "—"}`,
+          `Actual inflation: ${typeof point.reference === "number" ? point.reference.toFixed(1) : "—"}`,
+          `Dominance spread: ${typeof spread === "number" ? spread.toFixed(1) : "—"}`,
+        ].join("\n");
+        return [new Date(`${point.asOfDate}T00:00:00.000Z`), point.goods, point.monetary, point.reference, tooltip] as (string | number | Date | null)[];
+      });
+    if (rows.length === 0) return null;
+    return [[
+      { type: "date", label: "Date" },
+      { type: "number", label: "Goods inflation composite" },
+      { type: "number", label: "Monetary inflation composite" },
+      { type: "number", label: "Actual inflation" },
+      { type: "string", role: "tooltip" },
+    ], ...rows] as (string | number | Date | null)[][];
+  }, [inflationSplitPoints]);
+
+  const inflationLegacyPaths = useMemo(() => {
+    const mapSeries = (key: "goods" | "monetary" | "reference") => inflationSplitPoints
+      .map((point, index) => {
+        const value = key === "goods" ? point.goods : key === "monetary" ? point.monetary : point.reference;
+        if (typeof value !== "number") return null;
+        const x = 72 + ((inflationSplitPoints.length <= 1 ? 0 : index / (inflationSplitPoints.length - 1)) * 900);
+        const y = 268 - (Math.max(0, Math.min(100, value)) / 100) * 240;
+        return `${x},${y}`;
+      })
+      .filter((item): item is string => item !== null)
+      .join(" ");
+
+    return {
+      goods: mapSeries("goods"),
+      monetary: mapSeries("monetary"),
+      reference: mapSeries("reference"),
+    };
+  }, [inflationSplitPoints]);
 
   const axisTicks = useMemo(() => {
     if (historyPoints.length === 0) return [] as Array<{ index: number; date: string; label: string }>;
@@ -777,7 +851,70 @@ export default function GlobalMacroDashboard() {
                     </div>
                   )}
 
-                  <h5>2) Block History (Neon Focus)</h5>
+                  {selectedRegion !== "GLOBAL" && (selectedRegion === "US" || selectedRegion === "EA") && inflationDriverChartData && (
+                    <>
+                      <h5>2) Inflation Drivers vs Actual Inflation ({selectedRegion})</h5>
+                      <div style={{ fontSize: 12, marginBottom: 6 }}>
+                        <strong>Goods inflation:</strong> pristryck från energi, råvaror, varor och insatskostnader · <strong>Monetary inflation:</strong> monetärt pristryck från stockmått i systemet (CB-balans/GDP, money/GDP, private credit/GDP, real policy rate).
+                      </div>
+                      <div className="macro-inflation-chart" style={{ marginBottom: 12 }}>
+                        <ChartCard
+                          title="Inflation Drivers vs Actual Inflation"
+                          chartType="LineChart"
+                          height={360}
+                          unitLabel="Percentile (0–100)"
+                          unitKind="index"
+                          data={inflationDriverChartData}
+                          options={{
+                            backgroundColor: "#111827",
+                            chartArea: { left: 64, top: 28, width: "82%", height: "70%" },
+                            legend: { position: "bottom", textStyle: { color: "#e5e7eb" } },
+                            colors: ["#f59e0b", "#38bdf8", "#f3f4f6"],
+                            lineWidth: 3,
+                            hAxis: {
+                              textStyle: { color: "#cbd5e1" },
+                              gridlines: { color: "#1f2937", count: 4 },
+                            },
+                            vAxis: {
+                              title: "10Y percentile score",
+                              viewWindow: { min: 0, max: 100 },
+                              textStyle: { color: "#cbd5e1" },
+                              titleTextStyle: { color: "#e5e7eb" },
+                              gridlines: { color: "#1f2937", count: 5 },
+                            },
+                            tooltip: { isHtml: false, textStyle: { color: "#111827" } },
+                          }}
+                        />
+                      </div>
+
+                      <h6 style={{ margin: "6px 0" }}>2b) Inflation split (ursprunglig graf)</h6>
+                      <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27", marginBottom: 12 }}>
+                        <svg viewBox="0 0 1000 320" style={{ width: "100%", height: "320px", display: "block" }} role="img" aria-label="Inflation split legacy graph">
+                          {inflationSplitPoints.map((point, index) => {
+                            if (index === 0 || point.dominance === "neutral") return null;
+                            const leftX = 72 + ((inflationSplitPoints.length <= 1 ? 0 : (index - 1) / (inflationSplitPoints.length - 1)) * 900);
+                            const rightX = 72 + ((inflationSplitPoints.length <= 1 ? 0 : index / (inflationSplitPoints.length - 1)) * 900);
+                            return <rect key={`infl-dom-legacy-${point.asOfDate}`} x={leftX} y={28} width={Math.max(1, rightX - leftX)} height={240} fill={point.dominance === "goods" ? "#7c5d2f" : "#355b7a"} fillOpacity={0.2} />;
+                          })}
+                          {[0, 20, 40, 60, 80, 100].map((tick) => (
+                            <g key={`infl-grid-legacy-${tick}`}>
+                              <line x1={72} y1={268 - (tick / 100) * 240} x2={972} y2={268 - (tick / 100) * 240} stroke="#5f564a" strokeWidth={1} />
+                              <text x={64} y={272 - (tick / 100) * 240} textAnchor="end" fill="#d7d0c6" fontSize={11}>{tick}</text>
+                            </g>
+                          ))}
+                          <polyline fill="none" stroke="#f59e0b" strokeWidth={3} points={inflationLegacyPaths.goods} />
+                          <polyline fill="none" stroke="#38bdf8" strokeWidth={3} points={inflationLegacyPaths.monetary} />
+                          <polyline fill="none" stroke="#e5e7eb" strokeWidth={2} strokeDasharray="4 4" points={inflationLegacyPaths.reference} />
+                          {axisTicks.map((tick) => {
+                            const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900);
+                            return <text key={`infl-x-legacy-${tick.index}`} x={x} y={288} textAnchor="middle" fill="#d7d0c6" fontSize={11}>{tick.label}</text>;
+                          })}
+                        </svg>
+                      </div>
+                    </>
+                  )}
+
+                  <h5>3) Block History (Neon Focus)</h5>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                     {blockSeriesMeta.map((series) => {
                       const isFocused = focusedBlockSeries === series.key;

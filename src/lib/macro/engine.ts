@@ -1,4 +1,5 @@
 import { MACRO_INDICATOR_CATALOG, SIGNAL_CLASS_WEIGHT } from "./catalog.ts";
+import { computeInflationSplit } from "./inflationSplit.ts";
 import {
   classifyCoreRegimeFromTemplate,
   classifyOverlayFromTemplate,
@@ -316,6 +317,13 @@ export function runGlobalMacroEngine({
     return sum / items.length;
   }
 
+  const inflationSplit = computeInflationSplit({
+    region,
+    asOfDate: snapshotDate,
+    indicators,
+    seriesMap,
+  });
+
   const regime: MacroRegimeSnapshot = {
     asOfDate: snapshotDate,
     region,
@@ -333,6 +341,7 @@ export function runGlobalMacroEngine({
       classifyCoreRegimeFromTemplate(macroScoreTotal, GLOBAL_MACRO_TEMPLATE),
       topDrivers,
     ),
+    inflationSplit,
   };
 
   return { regime, indicators };

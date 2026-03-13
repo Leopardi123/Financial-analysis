@@ -42,6 +42,37 @@ export type MacroIndicatorSnapshot = {
 
 export type MacroDriverDirection = "rising" | "falling" | "stable" | "accelerating" | "decelerating";
 
+
+export type InflationCompositeDetails = {
+  compositeId: string;
+  indicators: string[];
+  used: Array<{ indicatorId: string; percentile10y: number }>;
+  missing: string[];
+};
+
+export type InflationSplitSnapshot = {
+  goodsInflationComposite: number | null;
+  monetaryInflationComposite: number | null;
+  actualInflationReference: number | null;
+  referenceLabel: string;
+  dominance: "goods" | "monetary" | "neutral";
+  dominanceSpread: number | null;
+  model: {
+    goods: InflationCompositeDetails;
+    monetary: {
+      compositeId: string;
+      formula: string;
+      components: Array<{ component: string; seriesKey: string; weight: number; percentile10y: number | null; inverted: boolean }>;
+      missing: string[];
+    };
+    reference: {
+      indicatorId: string;
+      label: string;
+      missing: boolean;
+    };
+  };
+};
+
 export type MacroTopDriver = {
   region: string;
   indicatorId: string;
@@ -80,4 +111,5 @@ export type MacroRegimeSnapshot = {
     summary: string;
     driverHighlights: string[];
   };
+  inflationSplit?: InflationSplitSnapshot | null;
 };

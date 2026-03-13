@@ -1251,3 +1251,16 @@ td.sticky-col {
   background: #fee2e2;
   color: #7f1d1d;
 }
+
+
+.macro-inflation-chart .chart-card {
+  background: #0b1220;
+  border: 1px solid #1f2937;
+}
+
+.macro-inflation-chart .chart-title,
+.macro-inflation-chart .producer-core-title-row,
+.macro-inflation-chart .chart-card span,
+.macro-inflation-chart .chart-card div {
+  color: #e5e7eb;
+}

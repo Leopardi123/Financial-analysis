@@ -3,7 +3,7 @@ import { tables } from "../../../api/_migrate.js";
 import { runGlobalMacroEngine } from "./engine.js";
 import { classifyBlockBandFromTemplate, classifyCoreRegimeFromTemplate, GLOBAL_MACRO_TEMPLATE } from "./template.js";
 import { MACRO_REGIONS, GLOBAL_REGION_WEIGHTS, aggregateGlobalBlockScores } from "./global.js";
-import type { MacroRegimeSnapshot, MacroSeriesInput } from "./types.ts";
+import type { InflationSplitSnapshot, MacroRegimeSnapshot, MacroSeriesInput } from "./types.ts";
 
 type RawPointRow = {
   series_key: string;
@@ -49,6 +49,7 @@ export type MacroHistoryPoint = {
   topDriver: string | null;
   topDrivers: MacroRegimeSnapshot["topDrivers"];
   regimeExplanation: MacroRegimeSnapshot["regimeExplanation"];
+  inflationSplit: InflationSplitSnapshot | null;
 };
 
 export type MacroHistoryResult = {
@@ -242,6 +243,7 @@ function globalHistoryFromRegional(
       regimeChanged, overlayChanged, blockThresholdChanged, previousRegimeLabel: prev?.coreRegimeLabel ?? null,
       topDriver: null, topDrivers: [],
       regimeExplanation: { title: "Global macro aggregation", summary: "Global timeline is aggregated from regional engines.", driverHighlights: [] },
+      inflationSplit: null,
     });
   }
 
@@ -433,6 +435,7 @@ export async function computeMacroRegimeHistory(params: {
       topDriver: regime.topDrivers[0]?.indicatorId ?? null,
       topDrivers: regime.topDrivers,
       regimeExplanation: regime.regimeExplanation,
+      inflationSplit: regime.inflationSplit ?? null,
     });
   }
 

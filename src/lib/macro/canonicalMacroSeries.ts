@@ -148,6 +148,14 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       real_yield_10y_ea: [],
       m3_ea: [],
       ecb_balance_sheet_ea: [],
+      ea_nominal_gdp: [],
+      loans_private_sector_ea: [],
+      ecb_deposit_rate_ea: [],
+      oil_brent_usd: [],
+      natgas_usd: [],
+      copper_usd: [],
+      industrial_metals_index: [],
+      commodity_index: [],
       debt_gdp_ea: [],
       deficit_gdp_ea: [],
       credit_spreads_ea: [],
@@ -164,6 +172,17 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       fetchEcbSeries({ flowRef: "BSI", key: "M.U2.Y.V.M30.X.1.U2.2300.Z01.E" }).then((x) => { sourceSeries.m3_ea = x; }),
       fetchEcbSeries({ flowRef: "BSI", key: "M.U2.N.A.A20.A.1.U2.2240.Z01.E" }).then((x) => { sourceSeries.ecb_balance_sheet_ea = x; }),
       fetchEurostatFirstAvailable([
+        { dataset: "namq_10_gdp", filters: { geo: "EA20", na_item: "B1GQ", unit: "CP_MEUR", s_adj: "SCA", freq: "Q" } },
+        { dataset: "nama_10_gdp", filters: { geo: "EA20", na_item: "B1GQ", unit: "CP_MEUR", freq: "Q" } },
+      ]).then((x) => { sourceSeries.ea_nominal_gdp = x; }),
+      fetchEcbSeries({ flowRef: "BSI", key: "M.U2.N.A.A20.A.1.U2.2250.Z01.E" }).then((x) => { sourceSeries.loans_private_sector_ea = x; }),
+      fetchEcbSeries({ flowRef: "FM", key: "M.U2.EUR.4F.KR.DFR.LEV" }).then((x) => { sourceSeries.ecb_deposit_rate_ea = x; }),
+      fetchFredSeries({ fredSeriesId: "DCOILBRENTEU", mode }).then((x) => { sourceSeries.oil_brent_usd = x; }),
+      fetchFredSeries({ fredSeriesId: "DHHNGSP", mode }).then((x) => { sourceSeries.natgas_usd = x; }),
+      fetchFredSeries({ fredSeriesId: "PCOPPUSDM", mode }).then((x) => { sourceSeries.copper_usd = x; }),
+      fetchFredSeries({ fredSeriesId: "PMETAUSDM", mode }).then((x) => { sourceSeries.industrial_metals_index = x; }),
+      fetchFredSeries({ fredSeriesId: "PALLFNFUSDM", mode }).then((x) => { sourceSeries.commodity_index = x; }),
+      fetchEurostatFirstAvailable([
         EUROSTAT_EA_DATASETS.debtToGdp,
         { dataset: "gov_10dd_edpt1", filters: { geo: "EA20", unit: "PC_GDP", na_item: "GD" } },
       ]).then((x) => { sourceSeries.debt_gdp_ea = x; }),
@@ -176,6 +195,8 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     ];
     await Promise.allSettled(tasks);
 
+    const marketDerived = buildDerivedSeries(sourceSeries);
+
     const derivedSeries: CanonicalSeriesMap = {
       hicp_momentum_ea: computeMomentum(
         hasMinimumNumericPoints(sourceSeries.hicp_ea ?? []) ? (sourceSeries.hicp_ea ?? []) : (sourceSeries.hicp_yoy_ea ?? []),
@@ -183,6 +204,15 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       ),
       m3_growth_ea: computeMomentum(sourceSeries.m3_ea ?? [], 12),
       gold_vs_real_yield_ea: alignSpread(sourceSeries.gold_usd ?? [], sourceSeries.real_yield_10y_ea ?? []),
+      ecb_balance_sheet_ratio_ea: alignRatio(sourceSeries.ecb_balance_sheet_ea ?? [], sourceSeries.ea_nominal_gdp ?? []),
+      m3_ratio_ea: alignRatio(sourceSeries.m3_ea ?? [], sourceSeries.ea_nominal_gdp ?? []),
+      private_credit_ratio_ea: alignRatio(sourceSeries.loans_private_sector_ea ?? [], sourceSeries.ea_nominal_gdp ?? []),
+      real_policy_rate_ea: alignSpread(sourceSeries.ecb_deposit_rate_ea ?? [], sourceSeries.hicp_yoy_ea ?? []),
+      oil_yoy: marketDerived.oil_yoy ?? [],
+      natgas_yoy: marketDerived.natgas_yoy ?? [],
+      copper_yoy: marketDerived.copper_yoy ?? [],
+      industrial_metals_yoy: marketDerived.industrial_metals_yoy ?? [],
+      commodity_index_yoy: marketDerived.commodity_index_yoy ?? [],
     };
     return { sourceSeries, derivedSeries };
   }
