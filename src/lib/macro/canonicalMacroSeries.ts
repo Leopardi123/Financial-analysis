@@ -2,10 +2,12 @@ import { fetchStableJson } from "../../../api/_fmp.js";
 import { buildDerivedSeries, fetchFredSeries, US_FRED_SERIES } from "./fred.ts";
 import { fetchEcbSeries } from "./adapters/ecbAdapter.ts";
 import { fetchEurostatSeries } from "./adapters/eurostatAdapter.ts";
-import { fetchRiksbankSeries } from "./adapters/riksbankAdapter.ts";
-import { fetchScbSeries } from "./adapters/scbAdapter.ts";
+import { fetchRiksbankSeriesVerified } from "./adapters/riksbankAdapter.ts";
+import { fetchScbPxTableSeries } from "./adapters/scbAdapter.ts";
 
 export type CanonicalSeriesMap = Record<string, Array<{ date: string; value: number | null }>>;
+
+type TimeSeriesPoint = { date: string; value: number | null };
 
 const EUROSTAT_EA_DATASETS = {
   hicpBase: {
@@ -61,6 +63,34 @@ function alignSpread(
       return { date: l.date, value: l.value - rv };
     })
     .filter((x) => x.value !== null);
+}
+
+
+function alignRatio(
+  left: Array<{ date: string; value: number | null }>,
+  right: Array<{ date: string; value: number | null }>,
+): Array<{ date: string; value: number | null }> {
+  const rightByMonth = new Map(right.map((p) => [p.date.slice(0, 7), p.value]));
+  return left
+    .map((l) => {
+      const rv = rightByMonth.get(l.date.slice(0, 7));
+      if (l.value === null || rv === null || rv === undefined || rv === 0) return { date: l.date, value: null };
+      return { date: l.date, value: l.value / rv };
+    })
+    .filter((x) => x.value !== null);
+}
+function alignSubtract(
+  left: TimeSeriesPoint[],
+  right: TimeSeriesPoint[],
+): TimeSeriesPoint[] {
+  const rightByMonth = new Map(right.map((point) => [point.date.slice(0, 7), point.value]));
+  const output: TimeSeriesPoint[] = [];
+  for (const point of left) {
+    const rightValue = rightByMonth.get(point.date.slice(0, 7));
+    if (point.value === null || rightValue === null || rightValue === undefined) continue;
+    output.push({ date: point.date, value: point.value - rightValue });
+  }
+  return output;
 }
 
 function normalizeFmpEodRows(payload: unknown): Array<{ date: string; value: number | null }> {
@@ -157,20 +187,73 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     return { sourceSeries, derivedSeries };
   }
 
-  const sourceSeries: CanonicalSeriesMap = {};
+  const sourceSeries: CanonicalSeriesMap = {
+    kpif_yoy_se: [],
+    inflation_momentum_se: [],
+    policy_rate_se: [],
+    government_bond_yield_10y_se: [],
+    public_debt_nominal_se: [],
+    net_lending_borrowing_se: [],
+    gdp_nominal_se: [],
+    gold_usd: [],
+  };
+
   const tasks: Array<Promise<void>> = [
-    fetchScbSeries({ path: "ssd/PR/PR0101/PR0101A/KPIArM", query: { query: [], response: { format: "json" } } }).then((x) => { sourceSeries.cpi_se = x; }),
-    fetchRiksbankSeries("SE.REPO.RATE").then((x) => { sourceSeries.repo_rate_se = x; }),
-    fetchRiksbankSeries("SE.GOVBOND.10Y").then((x) => { sourceSeries.gov_bond_yield_10y_se = x; }),
-    fetchScbSeries({ path: "ssd/NR/NR0109/NR0109A/Offentligfinanser", query: { query: [], response: { format: "json" } } }).then((x) => { sourceSeries.debt_gdp_se = x; }),
-    fetchScbSeries({ path: "ssd/NR/NR0109/NR0109A/Offentligfinanser", query: { query: [], response: { format: "json" } } }).then((x) => { sourceSeries.deficit_gdp_se = x; }),
-    fetchRiksbankSeries("SE.INFL_EXP.2Y").then((x) => { sourceSeries.infl_exp_se = x; }),
-    fetchRiksbankSeries("SE.CREDIT.SPREAD").then((x) => { sourceSeries.credit_spreads_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__PR__PR0101__PR0101G/KPIF",
+      selectors: [
+        {
+          codeHint: "ContentsCode",
+          valueKeywordGroups: [["kpif", "12", "month"], ["kpif", "12-month"], ["kpif", "årsförändring"]],
+        },
+      ],
+    }).then((x) => { sourceSeries.kpif_yoy_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__PR__PR0101__PR0101G/KPIF",
+      selectors: [
+        {
+          codeHint: "ContentsCode",
+          valueKeywordGroups: [["kpif", "month", "change"], ["kpif", "månadsförändring"]],
+        },
+      ],
+    }).then((x) => { sourceSeries.inflation_momentum_se = x; }),
+    fetchRiksbankSeriesVerified("SECBREPOEFF").then((x) => { sourceSeries.policy_rate_se = x; }),
+    fetchRiksbankSeriesVerified("SEGVB10YC").then((x) => { sourceSeries.government_bond_yield_10y_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__NR__NR0108/FirBruttoKonvAr",
+      selectors: [
+        { codeHint: "Sector", preferredValueCodes: ["S13"] },
+        { codeHint: "Account item", preferredValueCodes: ["FL01N"], valueKeywordGroups: [["maastricht", "debt"]] },
+      ],
+    }).then((x) => { sourceSeries.public_debt_nominal_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__NR__NR0103__NR0103F/SektorENS2010Ar",
+      selectors: [
+        { codeHint: "Sector", preferredValueCodes: ["S13"] },
+        { codeHint: "Transaction", preferredValueCodes: ["B9", "B.9"], valueKeywordGroups: [["net", "lending"], ["net", "borrowing"]] },
+      ],
+    }).then((x) => { sourceSeries.net_lending_borrowing_se = x; }),
+    fetchScbPxTableSeries({
+      path: "START__NR__NR0103__NR0103F/SektorENS2010Ar",
+      selectors: [
+        { codeHint: "Sector", preferredValueCodes: ["S1"] },
+        { codeHint: "Transaction", preferredValueCodes: ["B1GQ", "B1_GQ"], valueKeywordGroups: [["gross", "domestic", "product"]] },
+      ],
+    }).then((x) => { sourceSeries.gdp_nominal_se = x; }),
+    fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
   ];
   await Promise.allSettled(tasks);
 
+  const debtGdp = alignRatio(sourceSeries.public_debt_nominal_se ?? [], sourceSeries.gdp_nominal_se ?? []).map((p) => ({ ...p, value: p.value === null ? null : p.value * 100 }));
+  const deficitGdp = alignRatio(sourceSeries.net_lending_borrowing_se ?? [], sourceSeries.gdp_nominal_se ?? []).map((p) => ({ ...p, value: p.value === null ? null : p.value * 100 }));
+  const realYield = alignSubtract(sourceSeries.government_bond_yield_10y_se ?? [], sourceSeries.kpif_yoy_se ?? []);
+
   const derivedSeries: CanonicalSeriesMap = {
-    cpi_momentum_se: computeMomentum(sourceSeries.cpi_se ?? [], 3),
+    inflation_momentum_se: sourceSeries.inflation_momentum_se ?? computeMomentum(sourceSeries.kpif_yoy_se ?? [], 1),
+    real_yield_10y_se: realYield,
+    debt_gdp_se: debtGdp,
+    deficit_gdp_se: deficitGdp,
+    gold_vs_real_yield_se: alignSpread(sourceSeries.gold_usd ?? [], realYield),
   };
   return { sourceSeries, derivedSeries };
 }

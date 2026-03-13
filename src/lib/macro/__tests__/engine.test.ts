@@ -94,15 +94,15 @@ assert.ok(eaRun.regime.macroScoreTotal !== null);
 assert.ok(eaRun.indicators.some((item) => item.indicatorId === "hicp_inflation_ea"));
 
 const seSeries: MacroSeriesInput[] = [
-  makeSeries("cpi_se", (i) => 300 + i),
-  makeSeries("cpi_momentum_se", (i) => i % 6),
-  makeSeries("repo_rate_se", (i) => 1 + i * 0.01),
-  makeSeries("gov_bond_yield_10y_se", (i) => 2 + i * 0.005),
+  makeSeries("kpif_yoy_se", (i) => 2 + i * 0.01),
+  makeSeries("inflation_momentum_se", (i) => (i % 6) - 2),
+  makeSeries("policy_rate_se", (i) => 1 + i * 0.01),
+  makeSeries("government_bond_yield_10y_se", (i) => 2 + i * 0.005),
+  makeSeries("real_yield_10y_se", (i) => -1 + i * 0.002),
   makeSeries("debt_gdp_se", (i) => 35 + i * 0.02),
   makeSeries("deficit_gdp_se", (i) => -1 + i * 0.005),
-  makeSeries("infl_exp_se", (i) => 2 + i * 0.002),
-  makeSeries("credit_spreads_se", (i) => 0.5 + i * 0.001),
+  makeSeries("gold_vs_real_yield_se", (i) => 50 + i * 0.1),
 ];
 const seRun = runGlobalMacroEngine({ region: "SE", series: seSeries, asOfDate: "2024-12-28" });
 assert.ok(seRun.regime.macroScoreTotal !== null);
-assert.ok(seRun.indicators.some((item) => item.indicatorId === "cpi_sweden"));
+assert.ok(seRun.indicators.some((item) => item.indicatorId === "kpif_yoy_se"));
