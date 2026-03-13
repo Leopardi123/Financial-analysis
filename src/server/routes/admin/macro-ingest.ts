@@ -13,6 +13,12 @@ function chunk<T>(items: T[], size: number): T[][] {
   return output;
 }
 
+function sourceForRegionSeries(region: "US" | "EA" | "SE", seriesKey: string): string {
+  if (region === "US") return ["gold_usd", "silver_usd"].includes(seriesKey) ? "fmp" : "fred";
+  if (region === "EA") return (seriesKey.includes("ea") || seriesKey.includes("hicp") || seriesKey.includes("debt") || seriesKey.includes("deficit")) ? "eurostat_ecb" : "fmp";
+  return "scb_riksbank";
+}
+
 export default async function handler(req: any, res: any) {
   const attemptedAt = new Date().toISOString();
   const modeRaw = String(req.query?.mode ?? "latest").toLowerCase();
@@ -84,14 +90,11 @@ export default async function handler(req: any, res: any) {
     const now = new Date().toISOString();
     debug.fetchStarted = true;
 
-    const { sourceSeries, derivedSeries } = await loadCanonicalMacroSeries(region as "US" | "EA" | "SE", mode);
+    const typedRegion = region as "US" | "EA" | "SE";
+    const { sourceSeries, derivedSeries } = await loadCanonicalMacroSeries(typedRegion, mode);
 
     for (const [seriesKey, rows] of Object.entries(sourceSeries)) {
-      const source = region === "US"
-        ? (["gold_usd", "silver_usd"].includes(seriesKey) ? "fmp" : "fred")
-        : (region === "EA"
-          ? (seriesKey.includes("ea") || seriesKey.includes("hicp") || seriesKey.includes("debt") || seriesKey.includes("deficit") ? "eurostat_ecb" : "fmp")
-          : "scb_riksbank");
+      const source = sourceForRegionSeries(typedRegion, seriesKey);
       seriesResults.push({
         seriesId: `${source}:${seriesKey}`,
         seriesKey,
@@ -125,11 +128,7 @@ export default async function handler(req: any, res: any) {
                   value = excluded.value,
                   fetched_at = excluded.fetched_at
                 WHERE COALESCE(${tables.macroRawDatapoints}.value, -9.99999999e99) != COALESCE(excluded.value, -9.99999999e99)`,
-          args: [region === "US"
-            ? (["gold_usd", "silver_usd"].includes(seriesKey) ? "fmp" : "fred")
-            : (region === "EA"
-              ? (seriesKey.includes("ea") || seriesKey.includes("hicp") || seriesKey.includes("debt") || seriesKey.includes("deficit") ? "eurostat_ecb" : "fmp")
-              : "scb_riksbank"), region, seriesKey, point.date, point.value, now],
+          args: [sourceForRegionSeries(typedRegion, seriesKey), region, seriesKey, point.date, point.value, now],
         });
       }
     }
@@ -145,7 +144,7 @@ export default async function handler(req: any, res: any) {
                   value = excluded.value,
                   fetched_at = excluded.fetched_at
                 WHERE COALESCE(${tables.macroRawDatapoints}.value, -9.99999999e99) != COALESCE(excluded.value, -9.99999999e99)`,
-          args: ["fred_derived", region, seriesKey, point.date, point.value, now],
+          args: [`${typedRegion.toLowerCase()}_derived`, region, seriesKey, point.date, point.value, now],
         });
       }
     }
