@@ -21,6 +21,11 @@ type GlobalMacroPayload = {
     topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   };
+  overlays?: {
+    region: string;
+    asOfDate: string;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; }>; }>;
+  };
   indicators: Array<{
     indicatorId: string;
     title: string;
@@ -660,6 +665,24 @@ Signal: ${gapLabel}`,
                 <li>Hard Asset overlay: {globalMacro.regime.hardAssetOverlay}</li>
                 <li>Data status: {globalMacro.dataStatus}</li>
               </ul>
+
+              {globalMacro.overlays && (
+                <>
+                  <h4>Macro Overlays</h4>
+                  <div className="metric-list">
+                    <ul>
+                      {Object.entries(globalMacro.overlays.overlays).map(([name, overlay]) => (
+                        <li key={name}>
+                          <strong>{name}</strong> — score: {typeof overlay.score === "number" ? overlay.score.toFixed(1) : "—"} · label: {overlay.label} · confidence: {overlay.confidence}%
+                          <div style={{ fontSize: 12, opacity: 0.85 }}>
+                            {Object.entries(overlay.blockScores).map(([block, score]) => `${block}: ${typeof score === "number" ? score.toFixed(1) : "—"}`).join(" | ")}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
 
               <h4>Blockrad</h4>
               <div className="metric-list">

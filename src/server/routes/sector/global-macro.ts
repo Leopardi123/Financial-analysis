@@ -6,6 +6,7 @@ import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
 import { runAndPersistMacroSnapshots } from "../../../lib/macro/pipeline.js";
 import { computeMacroRegimeHistory, type HistoryResolution } from "../../../lib/macro/history.js";
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
+import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
 
 type RegimeSnapshotRow = {
   as_of_date: string;
@@ -257,6 +258,18 @@ async function loadInflationAnalysis(region: "US" | "EA" | "SE"): Promise<Inflat
 }
 
 
+
+
+
+async function loadRawSeriesRows(region: string) {
+  return (await query(
+    `SELECT series_key, date, value
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto'
+     ORDER BY series_key ASC, date ASC`,
+    [region],
+  )) as unknown as RawSeriesPointRow[];
+}
 
 function buildRegimeExplanation(label: string, topDrivers: Array<{ title?: string; indicatorId: string }>) {
   const driverHighlights = topDrivers.slice(0, 3).map((driver) => driver.title ?? driver.indicatorId);
@@ -791,6 +804,8 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
     .filter((item): item is NonNullable<typeof item> => item !== null)
     .slice(0, 5);
 
+  const rawSeriesRows = await loadRawSeriesRows(region);
+
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
     rootCauseHints.push("No raw datapoints found");
@@ -834,6 +849,10 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
         normalizedTopDrivers.map((driver) => ({ indicatorId: driver.indicatorId, title: driver.title })),
       ),
     },
+    overlays: (() => {
+      const seriesMap = buildSeriesMap(rawSeriesRows);
+      return buildRegionalOverlays(region as "US" | "EA" | "SE", regimeRow.as_of_date, seriesMap);
+    })(),
     indicators,
     dataStatus: indicators.length > 0 ? "snapshot" : "insufficient",
     writePolicy: "read_only",
@@ -924,8 +943,17 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean) {
     title: `[${driver.region}] ${driver.title}`,
   }));
 
+  const globalOverlayBundle = {
+    region: "GLOBAL",
+    asOfDate,
+    overlays: {
+      globalUnrestOverlay: buildGlobalUnrestOverlay(asOfDate, regionalMap.US?.overlays ?? null, regionalMap.EA?.overlays ?? null),
+    },
+  };
+
   return {
     regime: { ...regime, topDrivers: globalDrivers },
+    overlays: globalOverlayBundle,
     indicators,
     dataStatus: "snapshot",
     writePolicy: "read_only",
