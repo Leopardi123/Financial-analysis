@@ -20,6 +20,11 @@ const REGIONAL_OVERLAY_KEYS = [
 
 const GLOBAL_OVERLAY_KEYS = ["globalUnrestOverlay"] as const;
 
+type OverlayHistoryPoint = {
+  asOfDate: string;
+  scores: Record<string, number | null>;
+};
+
 type RegimeSnapshotRow = {
   as_of_date: string;
   updated_at: string | null;
@@ -288,6 +293,64 @@ async function loadRawSeriesRows(region: string) {
      ORDER BY series_key ASC, date ASC`,
     [region],
   )) as unknown as RawSeriesPointRow[];
+}
+
+function buildRegionalOverlayHistory(params: {
+  region: "US" | "EA" | "SE";
+  rawSeriesRows: RawSeriesPointRow[];
+  maxPoints?: number;
+}): OverlayHistoryPoint[] {
+  const monthKeys = Array.from(new Set(params.rawSeriesRows.map((row) => String(row.date).slice(0, 7))))
+    .sort((a, b) => a.localeCompare(b));
+  const selectedMonths = monthKeys.slice(-Math.max(1, params.maxPoints ?? 24));
+  const out: OverlayHistoryPoint[] = [];
+
+  for (const month of selectedMonths) {
+    const asOfDate = `${month}-28`;
+    const filteredRows = params.rawSeriesRows.filter((row) => String(row.date).slice(0, 10) <= asOfDate);
+    const bundle = buildRegionalOverlays(params.region, asOfDate, buildSeriesMap(filteredRows));
+    const scores = Object.fromEntries(
+      Object.entries(bundle.overlays).map(([key, value]) => [key, value.score ?? null]),
+    );
+    out.push({ asOfDate, scores });
+  }
+
+  return out;
+}
+
+function buildGlobalUnrestOverlayHistoryFromRegional(params: {
+  usHistory: OverlayHistoryPoint[];
+  eaHistory: OverlayHistoryPoint[];
+}): OverlayHistoryPoint[] {
+  const eaByDate = new Map(params.eaHistory.map((point) => [point.asOfDate, point]));
+  const out: OverlayHistoryPoint[] = [];
+
+  for (const usPoint of params.usHistory) {
+    const eaPoint = eaByDate.get(usPoint.asOfDate);
+    if (!eaPoint) continue;
+    const pseudoUsBundle = {
+      region: "US",
+      asOfDate: usPoint.asOfDate,
+      overlays: {
+        localUnrestOverlay: { score: usPoint.scores.localUnrestOverlay ?? null },
+        safeHavenOverlay: { score: usPoint.scores.safeHavenOverlay ?? null },
+        energyShockOverlay: { score: usPoint.scores.energyShockOverlay ?? null },
+      },
+    } as any;
+    const pseudoEaBundle = {
+      region: "EA",
+      asOfDate: eaPoint.asOfDate,
+      overlays: {
+        localUnrestOverlay: { score: eaPoint.scores.localUnrestOverlay ?? null },
+        safeHavenOverlay: { score: eaPoint.scores.safeHavenOverlay ?? null },
+        energyShockOverlay: { score: eaPoint.scores.energyShockOverlay ?? null },
+      },
+    } as any;
+    const global = buildGlobalUnrestOverlay(usPoint.asOfDate, pseudoUsBundle, pseudoEaBundle);
+    out.push({ asOfDate: usPoint.asOfDate, scores: { globalUnrestOverlay: global.score ?? null } });
+  }
+
+  return out;
 }
 
 function buildRegimeExplanation(label: string, topDrivers: Array<{ title?: string; indicatorId: string }>) {
@@ -869,7 +932,20 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
         normalizedTopDrivers.map((driver) => ({ indicatorId: driver.indicatorId, title: driver.title })),
       ),
     },
+    overlayBundle,
     overlays: overlayBundle,
+    overlayHistory: buildRegionalOverlayHistory({
+      region: region as "US" | "EA" | "SE",
+      rawSeriesRows,
+      maxPoints: 24,
+    }),
+    overlayRuntimeProof: {
+      overlayEngineUsed: true,
+      bundlePresent: Boolean(overlayBundle && Object.keys(overlayBundle.overlays).length > 0),
+      bundleKeys: Object.keys(overlayBundle.overlays),
+      regionKeysPresent: Object.keys(overlayBundle.overlays),
+      globalKeysPresent: [],
+    },
     overlayRoutingDiagnostics: {
       overlayEngineUsed: true,
       overlayBundleKeys: Object.keys(overlayBundle.overlays),
@@ -977,7 +1053,19 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
 
   return {
     regime: { ...regime, topDrivers: globalDrivers },
+    overlayBundle: globalOverlayBundle,
     overlays: globalOverlayBundle,
+    overlayHistory: buildGlobalUnrestOverlayHistoryFromRegional({
+      usHistory: regionalMap.US?.overlayHistory ?? [],
+      eaHistory: regionalMap.EA?.overlayHistory ?? [],
+    }),
+    overlayRuntimeProof: {
+      overlayEngineUsed: true,
+      bundlePresent: Boolean(globalOverlayBundle && Object.keys(globalOverlayBundle.overlays).length > 0),
+      bundleKeys: Object.keys(globalOverlayBundle.overlays),
+      regionKeysPresent: [],
+      globalKeysPresent: Object.keys(globalOverlayBundle.overlays),
+    },
     overlayRoutingDiagnostics: {
       overlayEngineUsed: true,
       overlayBundleKeys: Object.keys(globalOverlayBundle.overlays),

@@ -21,10 +21,23 @@ type GlobalMacroPayload = {
     topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   };
+  overlayBundle?: {
+    region: string;
+    asOfDate: string;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; }>; }>;
+  };
   overlays?: {
     region: string;
     asOfDate: string;
     overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; }>; }>;
+  };
+  overlayHistory?: Array<{ asOfDate: string; scores: Record<string, number | null> }>;
+  overlayRuntimeProof?: {
+    overlayEngineUsed: boolean;
+    bundlePresent: boolean;
+    bundleKeys: string[];
+    regionKeysPresent: string[];
+    globalKeysPresent: string[];
   };
   indicators: Array<{
     indicatorId: string;
@@ -383,6 +396,29 @@ export default function GlobalMacroDashboard() {
     globalMacro?.stats?.partialData ??
     (globalMacroIndicators.length > 0 && scoredCount < globalMacroIndicators.length);
   const isNoData = !globalMacroLoading && !globalMacroError && (!globalMacro || globalMacroIndicators.length === 0);
+  const activeOverlayBundle = globalMacro?.overlayBundle ?? globalMacro?.overlays ?? null;
+  const overlayEntries = Object.entries(activeOverlayBundle?.overlays ?? {});
+  const overlayHistoryPoints = globalMacro?.overlayHistory ?? [];
+  const overlayKeysForCharts = selectedRegion === "GLOBAL"
+    ? ["globalUnrestOverlay"]
+    : [
+      "liquidityOverlay",
+      "creditFundingOverlay",
+      "energyShockOverlay",
+      "safeHavenOverlay",
+      "inflationCostShockOverlay",
+      "tradeSupplyChainStressOverlay",
+      "localUnrestOverlay",
+    ];
+  const uiOverlayKeysRendered = overlayEntries.map(([name]) => name);
+  const overlaysWithScores = overlayEntries.filter(([, overlay]) => typeof overlay.score === "number").length;
+  const overlaysMissing = Math.max(0, uiOverlayKeysRequested.length - overlayEntries.length);
+  const overlaysPartialOrProxy = overlayEntries.filter(([, overlay]) => {
+    const components = overlay.components ?? [];
+    const missingCount = components.filter((component) => component.missing).length;
+    const proxyCount = components.filter((component) => component.proxy).length;
+    return missingCount > 0 || proxyCount > 0;
+  }).length;
 
   const blockRows = useMemo(() => {
     return [
@@ -404,6 +440,40 @@ export default function GlobalMacroDashboard() {
   function blockLevelPercent(score: number | null): number {
     if (score === null) return 0;
     return Math.max(0, Math.min(100, score));
+  }
+
+  function renderOverlayHistoryChart(overlayKey: string) {
+    const valid = overlayHistoryPoints
+      .map((point) => ({ asOfDate: point.asOfDate, score: point.scores?.[overlayKey] ?? null }))
+      .filter((point) => typeof point.score === "number") as Array<{ asOfDate: string; score: number }>;
+    if (valid.length < 2) {
+      return <div className="status empty">No history available yet</div>;
+    }
+    const width = 560;
+    const height = 160;
+    const left = 38;
+    const right = 14;
+    const top = 12;
+    const bottom = 24;
+    const plotW = width - left - right;
+    const plotH = height - top - bottom;
+    const points = valid.map((point, index) => {
+      const x = left + (index / Math.max(1, valid.length - 1)) * plotW;
+      const y = top + (1 - Math.max(0, Math.min(100, point.score)) / 100) * plotH;
+      return `${x},${y}`;
+    }).join(" ");
+    return (
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: 580, height: 170, display: "block" }}>
+        {[0, 25, 50, 75, 100].map((tick) => {
+          const y = top + (1 - tick / 100) * plotH;
+          return <g key={`${overlayKey}-tick-${tick}`}><line x1={left} y1={y} x2={width - right} y2={y} stroke="#d1d5db" strokeWidth={1} /><text x={left - 6} y={y + 4} textAnchor="end" fontSize={10} fill="#64748b">{tick}</text></g>;
+        })}
+        <polyline fill="none" stroke="#0ea5e9" strokeWidth={2.2} points={points} strokeLinecap="round" strokeLinejoin="round" />
+        <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke="#475569" strokeWidth={1} />
+        <text x={left} y={height - 6} fontSize={10} fill="#64748b">{valid[0]?.asOfDate ?? ""}</text>
+        <text x={width - right} y={height - 6} fontSize={10} fill="#64748b" textAnchor="end">{valid[valid.length - 1]?.asOfDate ?? ""}</text>
+      </svg>
+    );
   }
 
   const pipelineDebug = globalMacro?.debug ?? null;
@@ -675,6 +745,77 @@ Signal: ${gapLabel}`,
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
               )}
 
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                <h4 style={{ marginTop: 0 }}>New Overlay Engine</h4>
+                <div style={{ fontSize: 13, marginBottom: 10 }}>
+                  <strong>Runtime proof</strong>
+                  <ul>
+                    <li>overlay engine used: {globalMacro.overlayRuntimeProof?.overlayEngineUsed ? "yes" : "no"}</li>
+                    <li>overlay bundle present: {globalMacro.overlayRuntimeProof?.bundlePresent ? "yes" : "no"}</li>
+                    <li>bundle keys: {(globalMacro.overlayRuntimeProof?.bundleKeys ?? []).join(", ") || "—"}</li>
+                    <li>selected region: {selectedRegion}</li>
+                  </ul>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <strong>Overlay cards</strong>
+                  {uiOverlayKeysRequested.length === 0 ? (
+                    <div className="status empty">No overlay keys requested.</div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10, marginTop: 8 }}>
+                      {uiOverlayKeysRequested.map((overlayKey) => {
+                        const overlay = activeOverlayBundle?.overlays?.[overlayKey];
+                        if (!overlay) {
+                          return <div key={overlayKey} className="status empty">{overlayKey}: overlay missing from payload</div>;
+                        }
+                        const components = overlay.components ?? [];
+                        const missingCount = components.filter((component) => component.missing).length;
+                        const proxyCount = components.filter((component) => component.proxy).length;
+                        return (
+                          <div key={overlayKey} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                            <div style={{ fontWeight: 700 }}>{overlayKey}</div>
+                            <div>score: {typeof overlay.score === "number" ? overlay.score.toFixed(1) : "—"}</div>
+                            <div>label: {overlay.label || "—"}</div>
+                            <div>confidence: {overlay.confidence}%</div>
+                            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 4 }}>
+                              block scores: {Object.entries(overlay.blockScores).map(([block, score]) => `${block}=${typeof score === "number" ? score.toFixed(1) : "—"}`).join(", ") || "—"}
+                            </div>
+                            <div style={{ fontSize: 12, marginTop: 4 }}>proxy/missing count: {proxyCount}/{missingCount}</div>
+                            {typeof overlay.score !== "number" && <div className="status empty" style={{ marginTop: 6 }}>Overlay present but missing score data.</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <strong>Overlay history graphs</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 8 }}>
+                    {overlayKeysForCharts.map((overlayKey) => (
+                      <div key={`chart-${overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{overlayKey}</div>
+                        {renderOverlayHistoryChart(overlayKey)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <details>
+                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>Overlay engine trace</summary>
+                  <ul style={{ marginTop: 8 }}>
+                    <li>requested region: {selectedRegion}</li>
+                    <li>overlayRuntimeProof: {JSON.stringify(globalMacro.overlayRuntimeProof ?? null)}</li>
+                    <li>ui overlay keys actually rendered: {uiOverlayKeysRendered.join(", ") || "—"}</li>
+                    <li>number of cards rendered: {overlayEntries.length}</li>
+                    <li>number of graphs rendered: {overlayKeysForCharts.length}</li>
+                    <li>number of overlays with scores: {overlaysWithScores}</li>
+                    <li>number of overlays missing: {overlaysMissing}</li>
+                    <li>number of overlays partial/proxy: {overlaysPartialOrProxy}</li>
+                  </ul>
+                </details>
+              </section>
+
               <h4>Summary</h4>
               <ul>
                 <li>Core Regime: <strong>{globalMacro.regime.coreRegimeLabel}</strong></li>
@@ -682,28 +823,7 @@ Signal: ${gapLabel}`,
                 <li>Confidence: {globalMacro.regime.macroConfidence}%</li>
                 <li>Legacy overlays (deprecated): growth={globalMacro.regime.growthOverlay}, stress={globalMacro.regime.stressOverlay}, hard_asset={globalMacro.regime.hardAssetOverlay}</li>
                 <li>Data status: {globalMacro.dataStatus}</li>
-                <li>Overlay engine used: {globalMacro.overlayRoutingDiagnostics?.overlayEngineUsed ? "yes" : "no"}</li>
-                <li>Overlay keys in payload: {(globalMacro.overlayRoutingDiagnostics?.overlayBundleKeys ?? []).join(", ") || "—"}</li>
-                <li>UI requested keys: {(globalMacro.overlayRoutingDiagnostics?.uiOverlayKeysRequested ?? []).join(", ") || "—"}</li>
               </ul>
-
-              {globalMacro.overlays && (
-                <>
-                  <h4>Macro Overlays</h4>
-                  <div className="metric-list">
-                    <ul>
-                      {Object.entries(globalMacro.overlays.overlays).map(([name, overlay]) => (
-                        <li key={name}>
-                          <strong>{name}</strong> — score: {typeof overlay.score === "number" ? overlay.score.toFixed(1) : "—"} · label: {overlay.label} · confidence: {overlay.confidence}%
-                          <div style={{ fontSize: 12, opacity: 0.85 }}>
-                            {Object.entries(overlay.blockScores).map(([block, score]) => `${block}: ${typeof score === "number" ? score.toFixed(1) : "—"}`).join(" | ")}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </>
-              )}
 
               <h4>Blockrad</h4>
               <div className="metric-list">
