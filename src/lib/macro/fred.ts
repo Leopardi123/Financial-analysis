@@ -67,7 +67,7 @@ export async function fetchFredSeries(params: {
   const end = new Date();
   const start = new Date(end);
   if (params.mode === "backfill") {
-    start.setFullYear(end.getFullYear() - (params.backfillLookbackYears ?? 12));
+    start.setFullYear(end.getFullYear() - (params.backfillLookbackYears ?? 25));
   } else {
     start.setMonth(end.getMonth() - (params.latestLookbackMonths ?? 2));
   }
