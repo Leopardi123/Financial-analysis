@@ -5,6 +5,7 @@ import SingleStockDashboard from "../components/SingleStockDashboard";
 import SectorDashboard from "../components/SectorDashboard";
 import GlobalMacroDashboard from "../components/GlobalMacroDashboard";
 import ScreeningDashboard from "../components/ScreeningDashboard";
+import MacroRegimeValidationLab from "../components/MacroRegimeValidationLab";
 import ErrorBoundary from "../components/ErrorBoundary";
 import "../styles/dashboard.css";
 
@@ -63,6 +64,15 @@ export default function Dashboard() {
           background="#cedee9"
         >
           <GlobalMacroDashboard />
+        </Section>
+
+        <Section
+          id="macro-lab"
+          title="MACRO LAB"
+          description="Frikopplad valideringsmiljö för makroregimer (sandbox)."
+          background="#dbeafe"
+        >
+          <MacroRegimeValidationLab />
         </Section>
 
         <Section

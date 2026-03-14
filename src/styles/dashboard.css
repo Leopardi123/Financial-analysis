@@ -1251,3 +1251,19 @@ td.sticky-col {
   background: #fee2e2;
   color: #7f1d1d;
 }
+
+.macro-lab { border: 1px solid #9ca3af; border-radius: 10px; padding: 10px; background: #f3f7fb; }
+.macro-lab-topbar { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.macro-lab-segmented button { border: 1px solid #64748b; background: #e2e8f0; padding: 6px 12px; margin-right: 6px; border-radius: 999px; cursor: pointer; }
+.macro-lab-segmented button.active { background: #0f172a; color: #fff; }
+.macro-lab-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+.macro-lab-controls label { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+.macro-lab-timeline { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.macro-lab-timeline button { border: 1px solid; border-radius: 999px; background: #fff; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.macro-lab-timeline button.active { box-shadow: 0 0 0 2px rgba(59,130,246,0.3); }
+.macro-lab-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.macro-lab-chart { border: 1px solid #94a3b8; border-radius: 8px; padding: 6px; background: #fff; }
+.macro-lab-chart-title { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+.macro-lab-layout { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 10px; margin-top: 10px; }
+.macro-lab-panel { border: 1px solid #94a3b8; border-radius: 8px; background: #fff; padding: 10px; }
+.macro-lab-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
