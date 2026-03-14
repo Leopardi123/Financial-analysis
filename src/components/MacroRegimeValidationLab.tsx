@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MACRO_LAB_EVENT_ZONES, MacroEventZone, MacroLabRegion } from "../data/macroLabEventZones";
+import { MACRO_TIMELINE_OVERLAYS, type TimelineOverlayEvent } from "../data/macroTimelineOverlays";
+import TimelineOverlayLayer from "./TimelineOverlayLayer";
 
 type BlockKey = "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY";
 type OverlayKey = "growth" | "stress" | "hardAsset";
@@ -230,6 +232,8 @@ function MiniSeries({
   onToggleExpand,
   showZeroLine = false,
   symmetricAroundZero = false,
+  timelineOverlayIds = [],
+  onTimelineOverlayEventClick,
 }: {
   id: ChartId;
   title: string;
@@ -241,6 +245,8 @@ function MiniSeries({
   onToggleExpand: (id: ChartId) => void;
   showZeroLine?: boolean;
   symmetricAroundZero?: boolean;
+  timelineOverlayIds?: string[];
+  onTimelineOverlayEventClick?: (payload: { overlayName: string; category: string; color: string; event: TimelineOverlayEvent }) => void;
 }) {
   const w = 980;
   const h = expanded ? 300 : 150;
@@ -275,6 +281,13 @@ function MiniSeries({
         onSelectRange(dates[idx], dates[i2]);
       }}>
         {selectRect && <rect x={Math.min(selectRect.x1, selectRect.x2)} y={topPad} width={Math.abs(selectRect.x2 - selectRect.x1)} height={h - topPad - bottomPad} fill="rgba(14,165,233,0.18)" />}
+        <TimelineOverlayLayer
+          dates={dates}
+          overlays={MACRO_TIMELINE_OVERLAYS}
+          activeOverlayIds={timelineOverlayIds}
+          plot={{ x: 35, y: topPad, width: w - 55, height: h - topPad - bottomPad }}
+          onEventClick={({ overlay, event }) => onTimelineOverlayEventClick?.({ overlayName: overlay.name, category: overlay.category, color: overlay.color, event })}
+        />
         {showZeroLine && typeof zeroY === "number" && zeroY > topPad && zeroY < h - bottomPad && <line x1={35} y1={zeroY} x2={w - 20} y2={zeroY} stroke="#64748b" strokeDasharray="3 3" />}
         <line x1={35} y1={h - bottomPad} x2={w - 20} y2={h - bottomPad} stroke="#475569" />
         {lines.map((line) => <path key={line.label} d={path(line.data)} fill="none" stroke={line.color} strokeWidth="2" strokeDasharray={line.dashed ? "6 4" : undefined} />)}
@@ -297,6 +310,8 @@ export default function MacroRegimeValidationLab() {
   const [expandedCharts, setExpandedCharts] = useState<Record<ChartId, boolean>>({ macro: false, blocks: false, overlay: false, inflationSplit: false, lyn: false, gap: false });
   const [openBlocks, setOpenBlocks] = useState<Record<BlockKey, boolean>>({ A_FISCAL: false, B_MONETARY: false, C_INFLATION: false, D_CREDIBILITY: false });
   const [inflationPanels, setInflationPanels] = useState({ split: false, lyn: false, gap: false });
+  const [activeTimelineOverlayIds, setActiveTimelineOverlayIds] = useState<string[]>([]);
+  const [selectedTimelineOverlayEvent, setSelectedTimelineOverlayEvent] = useState<{ overlayName: string; category: string; color: string; event: TimelineOverlayEvent } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -456,6 +471,7 @@ export default function MacroRegimeValidationLab() {
   }, [replay]);
 
   const toggleChart = (id: ChartId) => setExpandedCharts((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleTimelineOverlay = (overlayId: string) => setActiveTimelineOverlayIds((prev) => (prev.includes(overlayId) ? prev.filter((id) => id !== overlayId) : [...prev, overlayId]));
 
   const subComponentsVisible = inferBlockSubComponents(region, points);
 
@@ -485,6 +501,18 @@ export default function MacroRegimeValidationLab() {
             <select value={config.normalization} onChange={(e) => setConfig((p) => ({ ...p, normalization: e.target.value as SandboxConfig["normalization"] }))}><option value="none">None</option><option value="zscore-lite">zscore-lite</option></select>
           </label>
         </div>
+        <div className="macro-lab-controls">
+          <div style={{ fontSize: 12, fontWeight: 700 }}>Timeline overlays</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            {MACRO_TIMELINE_OVERLAYS.map((overlay) => (
+              <label key={`macro-lab-overlay-${overlay.id}`} style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                <input type="checkbox" checked={activeTimelineOverlayIds.includes(overlay.id)} onChange={() => toggleTimelineOverlay(overlay.id)} />
+                <span style={{ width: 10, height: 10, borderRadius: 999, background: overlay.color, display: "inline-block" }} />
+                {overlay.name}
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="macro-lab-timeline">
@@ -496,12 +524,12 @@ export default function MacroRegimeValidationLab() {
       </div>
 
       <div className="macro-lab-grid">
-        <MiniSeries id="macro" title="Macro score history (baseline vs modified)" dates={dates} lines={[{ label: "Baseline", color: "#1d4ed8", data: baselineMacro }, { label: "Modified", color: "#dc2626", data: modifiedMacro, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.macro} onToggleExpand={toggleChart} />
-        <MiniSeries id="blocks" title="Block history composite" dates={dates} lines={[{ label: "Block composite", color: "#2563eb", data: blockComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.blocks} onToggleExpand={toggleChart} />
-        <MiniSeries id="overlay" title="Overlay history" dates={dates} lines={[{ label: "Overlay composite", color: "#7c3aed", data: overlayComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.overlay} onToggleExpand={toggleChart} />
-        <MiniSeries id="inflationSplit" title="Inflation split (baseline vs modified)" dates={inflDates} lines={[{ label: "Baseline split", color: "#0f766e", data: inflationSplitBaseline }, { label: "Modified split", color: "#b91c1c", data: inflationSplitModified, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.inflationSplit} onToggleExpand={toggleChart} showZeroLine />
-        <MiniSeries id="lyn" title="LynAldenology: Inflation" dates={inflDates} lines={[{ label: "Monetary pressure", color: "#0ea5e9", data: lynSeries.monetaryPressure ?? [] }, { label: "Asset inflation", color: "#6366f1", data: lynSeries.assetInflation ?? [] }, { label: "Commodity inflation", color: "#f97316", data: lynSeries.commodityInflation ?? [] }, { label: "Consumer inflation", color: "#16a34a", data: lynSeries.consumerInflation ?? [] }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.lyn} onToggleExpand={toggleChart} showZeroLine />
-        <MiniSeries id="gap" title="Monetary Inflation Gap" dates={inflDates} lines={[{ label: "Gap", color: "#1d4ed8", data: gapSeries }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.gap} onToggleExpand={toggleChart} showZeroLine symmetricAroundZero />
+        <MiniSeries id="macro" title="Macro score history (baseline vs modified)" dates={dates} lines={[{ label: "Baseline", color: "#1d4ed8", data: baselineMacro }, { label: "Modified", color: "#dc2626", data: modifiedMacro, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.macro} onToggleExpand={toggleChart} timelineOverlayIds={activeTimelineOverlayIds} onTimelineOverlayEventClick={setSelectedTimelineOverlayEvent} />
+        <MiniSeries id="blocks" title="Block history composite" dates={dates} lines={[{ label: "Block composite", color: "#2563eb", data: blockComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.blocks} onToggleExpand={toggleChart} timelineOverlayIds={activeTimelineOverlayIds} onTimelineOverlayEventClick={setSelectedTimelineOverlayEvent} />
+        <MiniSeries id="overlay" title="Overlay history" dates={dates} lines={[{ label: "Overlay composite", color: "#7c3aed", data: overlayComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.overlay} onToggleExpand={toggleChart} timelineOverlayIds={activeTimelineOverlayIds} onTimelineOverlayEventClick={setSelectedTimelineOverlayEvent} />
+        <MiniSeries id="inflationSplit" title="Inflation split (baseline vs modified)" dates={inflDates} lines={[{ label: "Baseline split", color: "#0f766e", data: inflationSplitBaseline }, { label: "Modified split", color: "#b91c1c", data: inflationSplitModified, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.inflationSplit} onToggleExpand={toggleChart} showZeroLine timelineOverlayIds={activeTimelineOverlayIds} onTimelineOverlayEventClick={setSelectedTimelineOverlayEvent} />
+        <MiniSeries id="lyn" title="LynAldenology: Inflation" dates={inflDates} lines={[{ label: "Monetary pressure", color: "#0ea5e9", data: lynSeries.monetaryPressure ?? [] }, { label: "Asset inflation", color: "#6366f1", data: lynSeries.assetInflation ?? [] }, { label: "Commodity inflation", color: "#f97316", data: lynSeries.commodityInflation ?? [] }, { label: "Consumer inflation", color: "#16a34a", data: lynSeries.consumerInflation ?? [] }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.lyn} onToggleExpand={toggleChart} showZeroLine timelineOverlayIds={activeTimelineOverlayIds} onTimelineOverlayEventClick={setSelectedTimelineOverlayEvent} />
+        <MiniSeries id="gap" title="Monetary Inflation Gap" dates={inflDates} lines={[{ label: "Gap", color: "#1d4ed8", data: gapSeries }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.gap} onToggleExpand={toggleChart} showZeroLine symmetricAroundZero timelineOverlayIds={activeTimelineOverlayIds} onTimelineOverlayEventClick={setSelectedTimelineOverlayEvent} />
       </div>
 
       <div className="macro-lab-layout">
@@ -574,6 +602,13 @@ export default function MacroRegimeValidationLab() {
         <div className="macro-lab-panel">
           <h4>Event details + compare mode</h4>
           {selectedEvent ? <p><strong>{selectedEvent.name}</strong> ({selectedEvent.startDate} → {selectedEvent.endDate}) · {selectedEvent.category}<br />{selectedEvent.description}</p> : <p>Välj eventzon.</p>}
+          {selectedTimelineOverlayEvent && (
+            <p style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+              <strong style={{ color: selectedTimelineOverlayEvent.color }}>{selectedTimelineOverlayEvent.overlayName}</strong> · {selectedTimelineOverlayEvent.category}<br />
+              <strong>{selectedTimelineOverlayEvent.event.label}</strong> ({selectedTimelineOverlayEvent.event.start}{selectedTimelineOverlayEvent.event.end ? ` → ${selectedTimelineOverlayEvent.event.end}` : " → present"})<br />
+              {selectedTimelineOverlayEvent.event.description ?? "No description available."}
+            </p>
+          )}
           <ul>
             <li>Compare mode: blå = baseline, röd streckad = modified.</li>
             <li>Sensitivity: mean Δ {sensitivity.meanAbsDelta.toFixed(2)} · max Δ {sensitivity.maxDelta.toFixed(2)}</li>

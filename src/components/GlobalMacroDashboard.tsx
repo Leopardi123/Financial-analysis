@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ChartCard from "./ChartCard";
+import TimelineOverlayLayer from "./TimelineOverlayLayer";
+import { MACRO_TIMELINE_OVERLAYS, type TimelineOverlayEvent } from "../data/macroTimelineOverlays";
 
 type GlobalMacroPayload = {
   regime: {
@@ -297,6 +299,12 @@ export default function GlobalMacroDashboard() {
   } | null>(null);
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
+  const [activeTimelineOverlayIds, setActiveTimelineOverlayIds] = useState<string[]>([]);
+  const [selectedTimelineOverlayEvent, setSelectedTimelineOverlayEvent] = useState<{ overlayName: string; category: string; color: string; event: TimelineOverlayEvent } | null>(null);
+
+  function toggleTimelineOverlay(overlayId: string) {
+    setActiveTimelineOverlayIds((prev) => (prev.includes(overlayId) ? prev.filter((id) => id !== overlayId) : [...prev, overlayId]));
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -740,6 +748,19 @@ Signal: ${gapLabel}`,
                 </label>
               </div>
 
+              <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Macro overlays</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  {MACRO_TIMELINE_OVERLAYS.map((overlay) => (
+                    <label key={`timeline-overlay-toggle-${overlay.id}`} style={{ fontSize: 12, display: "inline-flex", gap: 6, alignItems: "center" }}>
+                      <input type="checkbox" checked={activeTimelineOverlayIds.includes(overlay.id)} onChange={() => toggleTimelineOverlay(overlay.id)} />
+                      <span style={{ width: 10, height: 10, borderRadius: 999, background: overlay.color, display: "inline-block" }} />
+                      {overlay.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               {macroHistory && historyPoints.length > 0 ? (
                 <>
                   <h5>1) Macro Score History</h5>
@@ -788,6 +809,14 @@ Signal: ${gapLabel}`,
                           </g>
                         );
                       })}
+
+                      <TimelineOverlayLayer
+                        dates={historyPoints.map((point) => point.asOfDate)}
+                        overlays={MACRO_TIMELINE_OVERLAYS}
+                        activeOverlayIds={activeTimelineOverlayIds}
+                        plot={{ x: 72, y: 28, width: 900, height: 240 }}
+                        onEventClick={({ overlay, event }) => setSelectedTimelineOverlayEvent({ overlayName: overlay.name, category: overlay.category, color: overlay.color, event })}
+                      />
 
                       {[0, 25, 50, 75, 100].map((tick) => (
                         <g key={`score-y-${tick}`}>
@@ -895,6 +924,14 @@ Signal: ${gapLabel}`,
                         setBlockHoverIndex(Math.round(ratio * Math.max(0, historyPoints.length - 1)));
                       }}
                     >
+                      <TimelineOverlayLayer
+                        dates={historyPoints.map((point) => point.asOfDate)}
+                        overlays={MACRO_TIMELINE_OVERLAYS}
+                        activeOverlayIds={activeTimelineOverlayIds}
+                        plot={{ x: 72, y: 28, width: 900, height: 240 }}
+                        onEventClick={({ overlay, event }) => setSelectedTimelineOverlayEvent({ overlayName: overlay.name, category: overlay.category, color: overlay.color, event })}
+                      />
+
                       {[0, 25, 50, 75, 100].map((tick) => (
                         <g key={`block-y-${tick}`}>
                           <line x1={72} y1={28 + (1 - tick / 100) * 240} x2={972} y2={28 + (1 - tick / 100) * 240} stroke="#5f564a" strokeWidth={1} />
@@ -1022,6 +1059,14 @@ Signal: ${gapLabel}`,
                             });
                           }}
                         >
+                          <TimelineOverlayLayer
+                            dates={historyPoints.map((point) => point.asOfDate)}
+                            overlays={MACRO_TIMELINE_OVERLAYS}
+                            activeOverlayIds={activeTimelineOverlayIds}
+                            plot={{ x: 72, y: 26, width: 900, height: 260 }}
+                            onEventClick={({ overlay, event }) => setSelectedTimelineOverlayEvent({ overlayName: overlay.name, category: overlay.category, color: overlay.color, event })}
+                          />
+
                           {[0, 1, 2, 3, 4].map((level) => (
                             <line key={`overlay-grid-${level}`} x1={72} y1={286 - level * 65} x2={972} y2={286 - level * 65} stroke="#5f564a" strokeWidth={1} />
                           ))}
@@ -1094,6 +1139,13 @@ Signal: ${gapLabel}`,
                         <strong>{selectedOverlaySegment.overlay}</strong>: <strong>{selectedOverlaySegment.value}</strong> · {selectedOverlaySegment.startDate} → {selectedOverlaySegment.endDate} · {selectedOverlaySegment.pointCount} punkter<br />
                         {selectedOverlaySegment.explanation}<br />
                         Drivare: {selectedOverlaySegment.contributors.join(", ") || "Ej tillgängligt"}
+                      </div>
+                    )}
+                    {selectedTimelineOverlayEvent && (
+                      <div style={{ marginTop: 8, fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <strong style={{ color: selectedTimelineOverlayEvent.color }}>{selectedTimelineOverlayEvent.overlayName}</strong> · {selectedTimelineOverlayEvent.category}<br />
+                        <strong>{selectedTimelineOverlayEvent.event.label}</strong> ({selectedTimelineOverlayEvent.event.start}{selectedTimelineOverlayEvent.event.end ? ` → ${selectedTimelineOverlayEvent.event.end}` : " → present"})<br />
+                        {selectedTimelineOverlayEvent.event.description ?? "No description available."}
                       </div>
                     )}
 
