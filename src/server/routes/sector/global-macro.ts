@@ -88,6 +88,174 @@ type GoldEodMonthlyStatsRow = {
   max_yyyymm: string | null;
 };
 
+type RawSeriesPointRow = {
+  series_key: string;
+  date: string;
+  value: number | null;
+};
+
+type InflationAnalysisPayload = {
+  metadata: {
+    actualInflationSeries: string;
+    monetaryInflationSeries: string;
+    goodsInflationSeries: string;
+    assetInflationSeries: string;
+    commodityInflationSeries: string;
+    proxyNotes: string[];
+  };
+  points: Array<{
+    date: string;
+    actualInflation: number | null;
+    monetaryInflation: number | null;
+    goodsInflation: number | null;
+    monetaryPressure: number | null;
+    assetInflation: number | null;
+    commodityInflation: number | null;
+    consumerInflation: number | null;
+    monetaryInflationGap: number | null;
+  }>;
+};
+
+function computeYoY(points: Array<{ date: string; value: number | null }>) {
+  if (points.length <= 12) return [] as Array<{ date: string; value: number | null }>;
+  return points
+    .map((row, index) => {
+      const prev = index >= 12 ? points[index - 12] : null;
+      if (!prev || row.value === null || prev.value === null || prev.value === 0) return { date: row.date, value: null };
+      return { date: row.date, value: ((row.value / prev.value) - 1) * 100 };
+    })
+    .filter((row) => row.value !== null);
+}
+
+function monthlyAverageSeries(left: Array<{ date: string; value: number | null }>, right: Array<{ date: string; value: number | null }>) {
+  const rightByMonth = new Map(right.map((row) => [row.date.slice(0, 7), row.value]));
+  return left
+    .map((row) => {
+      const rv = rightByMonth.get(row.date.slice(0, 7));
+      if (row.value === null || rv === null || rv === undefined) return null;
+      return { date: row.date, value: (row.value + rv) / 2 };
+    })
+    .filter((row): row is { date: string; value: number } => row !== null);
+}
+
+async function loadInflationAnalysis(region: "US" | "EA" | "SE"): Promise<InflationAnalysisPayload> {
+  const rows = (await query(
+    `SELECT series_key, date, value
+     FROM ${tables.macroRawDatapoints}
+     WHERE source_type = 'auto'
+       AND ((region = ?) OR (? = 'EA' AND region = 'US' AND series_key = 'commodity_index'))
+     ORDER BY date ASC`,
+    [region, region],
+  )) as unknown as RawSeriesPointRow[];
+
+  const seriesMap = new Map<string, Array<{ date: string; value: number | null }>>();
+  for (const row of rows) {
+    const key = `${String(row.series_key)}::${String(row.date).slice(0, 7)}`;
+    const bucketKey = String(row.series_key);
+    const bucket = seriesMap.get(bucketKey) ?? [];
+    if (!bucket.some((point) => `${bucketKey}::${point.date.slice(0, 7)}` === key)) {
+      bucket.push({ date: String(row.date), value: row.value === null ? null : Number(row.value) });
+    }
+    seriesMap.set(bucketKey, bucket);
+  }
+
+  const proxyNotes: string[] = [];
+  const coreCpiYoyUs = seriesMap.get("core_cpi_yoy_us") ?? [];
+  const hicpYoyEa = seriesMap.get("hicp_yoy_ea") ?? [];
+  const kpifYoySe = seriesMap.get("kpif_yoy_se") ?? [];
+  const m2Yoy = seriesMap.get("m2_yoy") ?? computeYoY(seriesMap.get("m2sl") ?? []);
+  const fedBalanceSheetYoy = seriesMap.get("fed_balance_sheet_yoy") ?? computeYoY(seriesMap.get("fed_balance_sheet_total") ?? []);
+  const m3Yoy = computeYoY(seriesMap.get("m3_ea") ?? []);
+  const ecbBalanceSheetYoy = computeYoY(seriesMap.get("ecb_balance_sheet_ea") ?? []);
+  const commodityIndexYoy = seriesMap.get("commodity_index_yoy") ?? computeYoY(seriesMap.get("commodity_index") ?? []);
+  const oilYoy = seriesMap.get("oil_yoy") ?? computeYoY(seriesMap.get("oil_brent_usd") ?? []);
+  const goldYoy = computeYoY(seriesMap.get("gold_usd") ?? []);
+
+  let actualInflation = coreCpiYoyUs;
+  let actualSeriesName = "Core CPI YoY (US)";
+  let monetaryInflation = monthlyAverageSeries(m2Yoy, fedBalanceSheetYoy);
+  let monetarySeriesName = "Average of M2 YoY and Fed balance sheet YoY";
+  let goodsInflation = commodityIndexYoy.length > 0 ? commodityIndexYoy : oilYoy;
+  let goodsSeriesName = commodityIndexYoy.length > 0 ? "Commodity index YoY" : "Oil YoY";
+  let monetaryPressure = monetaryInflation;
+  let assetInflation = goldYoy;
+  let assetSeriesName = "Gold YoY";
+  let commodityInflation = commodityIndexYoy;
+  let commoditySeriesName = "Commodity index YoY";
+
+  if (region === "EA") {
+    actualInflation = hicpYoyEa;
+    actualSeriesName = "HICP YoY (EA)";
+    monetaryInflation = monthlyAverageSeries(m3Yoy, ecbBalanceSheetYoy);
+    monetarySeriesName = "Average of M3 YoY and ECB balance sheet YoY";
+    goodsInflation = commodityIndexYoy.length > 0 ? commodityIndexYoy : actualInflation;
+    goodsSeriesName = commodityIndexYoy.length > 0 ? "Commodity index YoY (global proxy)" : "HICP YoY (fallback proxy)";
+    monetaryPressure = monetaryInflation;
+    assetInflation = goldYoy;
+    assetSeriesName = "Gold YoY";
+    commodityInflation = goodsInflation;
+    commoditySeriesName = goodsSeriesName;
+    if (commodityIndexYoy.length > 0) proxyNotes.push("EA commodity inflation uses global commodity index YoY sourced from US canonical ingest as a cross-region proxy.");
+    proxyNotes.push("Asset inflation uses Gold YoY as a liquid market asset proxy because a robust EA-wide housing/equity series is not currently in canonical macro ingest.");
+  }
+
+  if (region === "SE") {
+    actualInflation = kpifYoySe;
+    actualSeriesName = "KPIF YoY (SE)";
+    monetaryInflation = [];
+    monetarySeriesName = "Unavailable (insufficient canonical monetary levels for robust YoY pair)";
+    goodsInflation = [];
+    goodsSeriesName = "Unavailable";
+    monetaryPressure = monetaryInflation;
+    assetInflation = goldYoy;
+    assetSeriesName = "Gold YoY";
+    commodityInflation = goodsInflation;
+    commoditySeriesName = "Unavailable";
+    proxyNotes.push("SE inflation charts are scaffolded, but monetary/goods split remains unavailable until SE canonical series coverage improves.");
+  }
+
+  const dateSet = new Set<string>();
+  [actualInflation, monetaryInflation, goodsInflation, monetaryPressure, assetInflation, commodityInflation].forEach((series) => {
+    series.forEach((point) => dateSet.add(point.date.slice(0, 10)));
+  });
+  const dates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+  const mapByMonth = (series: Array<{ date: string; value: number | null }>) => new Map(series.map((point) => [point.date.slice(0, 7), point.value]));
+
+  const actualByMonth = mapByMonth(actualInflation);
+  const monetaryByMonth = mapByMonth(monetaryInflation);
+  const goodsByMonth = mapByMonth(goodsInflation);
+  const pressureByMonth = mapByMonth(monetaryPressure);
+  const assetByMonth = mapByMonth(assetInflation);
+  const commodityByMonth = mapByMonth(commodityInflation);
+
+  return {
+    metadata: {
+      actualInflationSeries: actualSeriesName,
+      monetaryInflationSeries: monetarySeriesName,
+      goodsInflationSeries: goodsSeriesName,
+      assetInflationSeries: assetSeriesName,
+      commodityInflationSeries: commoditySeriesName,
+      proxyNotes,
+    },
+    points: dates.map((date) => {
+      const month = date.slice(0, 7);
+      const actual = actualByMonth.get(month) ?? null;
+      const monetary = monetaryByMonth.get(month) ?? null;
+      return {
+        date,
+        actualInflation: actual,
+        monetaryInflation: monetary,
+        goodsInflation: goodsByMonth.get(month) ?? null,
+        monetaryPressure: pressureByMonth.get(month) ?? null,
+        assetInflation: assetByMonth.get(month) ?? null,
+        commodityInflation: commodityByMonth.get(month) ?? null,
+        consumerInflation: actual,
+        monetaryInflationGap: actual !== null && monetary !== null ? monetary - actual : null,
+      };
+    }),
+  };
+}
+
 
 
 function buildRegimeExplanation(label: string, topDrivers: Array<{ title?: string; indicatorId: string }>) {
@@ -808,9 +976,13 @@ export default async function handler(req: any, res: any) {
       resolution: historyResolution as HistoryResolution,
       rangeYears: historyRangeYears,
     });
-    res.status(200).json({ ok: true, globalMacro: snapshot, macroHistory: history });
+    res.status(200).json({ ok: true, globalMacro: snapshot, macroHistory: history, inflationAnalysis: null });
     return;
   }
+
+  const inflationAnalysis = region === "US" || region === "EA" || region === "SE"
+    ? await loadInflationAnalysis(region)
+    : null;
 
   const snapshot = await readLatestSnapshot(region, allowLiveFallback);
   if (snapshot) {
@@ -819,7 +991,7 @@ export default async function handler(req: any, res: any) {
       resolution: historyResolution as HistoryResolution,
       rangeYears: historyRangeYears,
     });
-    res.status(200).json({ ok: true, globalMacro: snapshot, macroHistory: history });
+    res.status(200).json({ ok: true, globalMacro: snapshot, macroHistory: history, inflationAnalysis });
     return;
   }
 
@@ -833,6 +1005,7 @@ export default async function handler(req: any, res: any) {
       ok: true,
       globalMacro: null,
       macroHistory: history,
+      inflationAnalysis,
       diagnostics: {
         readMode: "empty_no_snapshot",
         message: "No snapshots found. Run /api/admin/macro/run-engine first.",
@@ -854,6 +1027,7 @@ export default async function handler(req: any, res: any) {
       ok: true,
       globalMacro: null,
       macroHistory: history,
+      inflationAnalysis,
       diagnostics: {
         readMode: live.emptyInvalid ? "live_fallback_empty_invalid" : "live_fallback_no_snapshot",
         wroteAny: live.wroteAny,
@@ -873,6 +1047,7 @@ export default async function handler(req: any, res: any) {
     ok: true,
     globalMacro: fallbackSnapshot,
     macroHistory: history,
+    inflationAnalysis,
     diagnostics: {
       readMode: "live_fallback_then_snapshot",
       wroteAny: live.wroteAny,

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import ChartCard from "./ChartCard";
 
 type GlobalMacroPayload = {
   regime: {
@@ -233,10 +234,35 @@ type MacroHistoryPayload = {
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   }>;
 };
+
+
+type InflationAnalysisPayload = {
+  metadata: {
+    actualInflationSeries: string;
+    monetaryInflationSeries: string;
+    goodsInflationSeries: string;
+    assetInflationSeries: string;
+    commodityInflationSeries: string;
+    proxyNotes: string[];
+  };
+  points: Array<{
+    date: string;
+    actualInflation: number | null;
+    monetaryInflation: number | null;
+    goodsInflation: number | null;
+    monetaryPressure: number | null;
+    assetInflation: number | null;
+    commodityInflation: number | null;
+    consumerInflation: number | null;
+    monetaryInflationGap: number | null;
+  }>;
+};
+
 export default function GlobalMacroDashboard() {
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
   const [macroHistory, setMacroHistory] = useState<MacroHistoryPayload | null>(null);
+  const [inflationAnalysis, setInflationAnalysis] = useState<InflationAnalysisPayload | null>(null);
   const [historyResolution, setHistoryResolution] = useState<"WEEKLY" | "MONTHLY">("MONTHLY");
   const [historyRangeYears, setHistoryRangeYears] = useState<number | "MAX">(10);
   const [selectedRegion, setSelectedRegion] = useState<"GLOBAL" | "US" | "EA" | "SE">("GLOBAL");
@@ -309,11 +335,13 @@ export default function GlobalMacroDashboard() {
       }
       setGlobalMacro(payload.globalMacro ?? null);
       setMacroHistory(payload.macroHistory ?? null);
+      setInflationAnalysis(payload.inflationAnalysis ?? null);
       setGlobalMacroRaw(payload);
     } catch (error) {
       setGlobalMacro(null);
       setMacroHistory(null);
       setGlobalMacroRaw(null);
+      setInflationAnalysis(null);
       setGlobalMacroError(error instanceof Error ? error.message : "Okänt fel vid Global Macro-hämtning");
     } finally {
       setGlobalMacroLoading(false);
@@ -449,6 +477,51 @@ export default function GlobalMacroDashboard() {
       return { index, date, label: historyResolution === "MONTHLY" ? date.slice(0, 7) : date };
     });
   }, [historyPoints, historyResolution]);
+
+  const inflationRows = inflationAnalysis?.points ?? [];
+  const inflationSplitData = useMemo(() => {
+    if (inflationRows.length === 0) return null;
+    return [
+      ["Date", "Goods inflation", "Monetary inflation", "Actual inflation"],
+      ...inflationRows.map((row) => [new Date(`${row.date}T00:00:00.000Z`), row.goodsInflation, row.monetaryInflation, row.actualInflation]),
+    ] as (string | number | Date | null)[][];
+  }, [inflationRows]);
+
+  const lynAldenData = useMemo(() => {
+    if (inflationRows.length === 0) return null;
+    return [
+      ["Date", "Monetary pressure", "Asset inflation", "Commodity inflation", "Consumer inflation"],
+      ...inflationRows.map((row) => [new Date(`${row.date}T00:00:00.000Z`), row.monetaryPressure, row.assetInflation, row.commodityInflation, row.consumerInflation]),
+    ] as (string | number | Date | null)[][];
+  }, [inflationRows]);
+
+  const inflationGapData = useMemo(() => {
+    if (inflationRows.length === 0) return null;
+    return [
+      ["Date", "Monetary inflation gap", { type: "string", role: "tooltip" }],
+      ...inflationRows.map((row) => {
+        const gapLabel = typeof row.monetaryInflationGap === "number"
+          ? row.monetaryInflationGap > 2
+            ? "latent inflation pressure"
+            : row.monetaryInflationGap > 0
+              ? "broad inflation manifestation"
+              : row.monetaryInflationGap > -1
+                ? "CPI catching up"
+                : "disinflationary narrowing"
+          : "insufficient data";
+        return [
+          new Date(`${row.date}T00:00:00.000Z`),
+          row.monetaryInflationGap,
+          `Date: ${row.date}
+Monetary inflation: ${row.monetaryInflation ?? "—"}
+Actual inflation: ${row.actualInflation ?? "—"}
+Gap: ${row.monetaryInflationGap ?? "—"}
+Signal: ${gapLabel}`,
+        ];
+      }),
+    ] as (string | number | Date | null)[][];
+  }, [inflationRows]);
+
 
   function overlayIntensity(type: "growth" | "stress" | "hard_asset", value: string): number {
     if (type === "stress") return value === "High" ? 3 : value === "Medium" ? 2 : 1;
@@ -1134,6 +1207,129 @@ export default function GlobalMacroDashboard() {
               </details>
             </>
           )}
+          {selectedRegion !== "GLOBAL" && (
+            <details style={{ marginTop: 14 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 700 }}>Inflation</summary>
+              <div style={{ marginTop: 12, display: "grid", gap: 18 }}>
+                <ChartCard
+                  title="Inflation split"
+                  chartType="LineChart"
+                  height={360}
+                  data={inflationSplitData}
+                  unitLabel="YoY %"
+                  unitKind="percent"
+                  options={{
+                    colors: ["#6f86a8", "#5f7f63", "#a27a4a"],
+                    vAxis: { format: "#,##0.0'%'" },
+                  }}
+                  infoSections={[
+                    {
+                      heading: "Introduktion",
+                      lines: [
+                        "Varuinflation = pristryck från energi, råvaror, varor och insatskostnader.",
+                        "Monetär inflation = pristryck från likviditet, penningmängd, kredit och balansräkningsdynamik.",
+                        `Faktisk inflation följer regional referens: ${inflationAnalysis?.metadata.actualInflationSeries ?? "—"}.`,
+                      ],
+                    },
+                    {
+                      heading: "Tolkning",
+                      lines: [
+                        "Hög varuinflation + låg monetär inflation tyder på mer kostnadsdriven inflation.",
+                        "Låg varuinflation + hög monetär inflation tyder på uppbyggt monetärt tryck.",
+                        "När båda är höga är inflationsregimen bred; när båda är låga är inflationsklimatet svagt.",
+                        "Om faktisk inflation ligger under båda kan inflation vara latent; ligger den över kan en separat prischock vara i spel.",
+                      ],
+                    },
+                  ]}
+                />
+
+                <ChartCard
+                  title="LynAldenology: Inflation"
+                  chartType="LineChart"
+                  height={360}
+                  data={lynAldenData}
+                  unitLabel="YoY %"
+                  unitKind="percent"
+                  options={{
+                    colors: ["#5f7f63", "#7b6676", "#6f86a8", "#a27a4a"],
+                    vAxis: { format: "#,##0.0'%'" },
+                  }}
+                  infoSections={[
+                    {
+                      heading: "Money → Assets → Commodities → Consumer prices",
+                      lines: [
+                        "Monetary pressure visar uppbyggt monetärt tryck i systemet.",
+                        "Asset inflation visar om likviditet först går in i tillgångar.",
+                        "Commodity inflation visar om trycket spiller över i råvaror.",
+                        "Consumer inflation visar när trycket når konsumentpriser.",
+                      ],
+                    },
+                    {
+                      heading: "Så läser du kedjan",
+                      lines: [
+                        "Hög monetary pressure men låg consumer inflation betyder ofta tidig fas i kedjan.",
+                        "Hög asset inflation men låg CPI/HICP betyder att likviditet främst driver tillgångar.",
+                        "Hög commodity inflation efter monetärt uppsving signalerar transmission till real ekonomi.",
+                        "Hög consumer inflation efter asset/commodity-trend indikerar senare fas i inflationsprocessen.",
+                      ],
+                    },
+                  ]}
+                />
+
+                <ChartCard
+                  title="Monetary Inflation Gap"
+                  chartType="AreaChart"
+                  height={360}
+                  data={inflationGapData}
+                  unitLabel="pp"
+                  unitKind="percent"
+                  options={{
+                    colors: ["#6f86a8"],
+                    areaOpacity: 0.18,
+                    vAxis: { format: "#,##0.0' pp'" },
+                    hAxis: { gridlines: { color: "#d5dcc5" } },
+                    series: { 0: { lineWidth: 2.5 } },
+                    intervals: { style: "area" },
+                    baseline: 0,
+                    baselineColor: "#2f2b27",
+                  }}
+                  infoSections={[
+                    {
+                      heading: "Vad gapet visar",
+                      lines: [
+                        "Positivt gap = monetärt tryck större än observerad inflation.",
+                        "Negativt gap = prisinflationen är högre än det monetära tryckmåttet.",
+                        "Nära noll = monetärt tryck och faktisk inflation ligger nära varandra.",
+                      ],
+                    },
+                    {
+                      heading: "Signaler",
+                      lines: [
+                        "Högt positivt gap kan signalera latent inflation innan CPI/HICP fullt reagerar.",
+                        "Snabbt fallande gap kan betyda att CPI hinner ikapp eller att åtstramning biter.",
+                        "Snabbt stigande gap fungerar som tidig inflationssignal i makrolagret.",
+                      ],
+                    },
+                  ]}
+                />
+
+                {inflationAnalysis?.metadata.proxyNotes?.length ? (
+                  <div style={{ fontSize: 12, border: "1px solid #d0d7de", borderRadius: 8, padding: "10px 12px", background: "#f8fafc" }}>
+                    <strong>Proxy notes:</strong>
+                    <ul style={{ margin: "6px 0 0 18px" }}>
+                      {inflationAnalysis.metadata.proxyNotes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                    <div style={{ marginTop: 6 }}>
+                      <strong>Series:</strong> Actual: {inflationAnalysis.metadata.actualInflationSeries} · Monetary: {inflationAnalysis.metadata.monetaryInflationSeries} · Goods: {inflationAnalysis.metadata.goodsInflationSeries} · Asset: {inflationAnalysis.metadata.assetInflationSeries} · Commodity: {inflationAnalysis.metadata.commodityInflationSeries}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </details>
+          )}
+
           <details style={{ marginTop: 14 }}>
             <summary style={{ cursor: "pointer", fontWeight: 600 }}>🔧 Pipeline Debug</summary>
             <div style={{ marginTop: 10 }}>
