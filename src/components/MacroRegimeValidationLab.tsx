@@ -3,8 +3,6 @@ import { MACRO_LAB_EVENT_ZONES, MacroEventZone, MacroLabRegion } from "../data/m
 
 type BlockKey = "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY";
 type OverlayKey = "growth" | "stress" | "hardAsset";
-type ChartId = "macro" | "blocks" | "overlay" | "inflationSplit" | "lyn" | "gap";
-
 type MacroHistoryPoint = {
   asOfDate: string;
   macroScoreTotal: number | null;
@@ -220,28 +218,23 @@ function inferBlockSubComponents(region: MacroLabRegion, points: MacroHistoryPoi
 }
 
 function MiniSeries({
-  id,
   title,
   dates,
   lines,
   selectedRange,
   onSelectRange,
-  expanded,
-  onToggleExpand,
   showZeroLine = false,
   symmetricAroundZero = false,
 }: {
-  id: ChartId;
   title: string;
   dates: string[];
   lines: Array<{ label: string; color: string; data: Array<number | null>; dashed?: boolean }>;
   selectedRange: { startDate: string; endDate: string } | null;
   onSelectRange: (s: string, e: string) => void;
-  expanded: boolean;
-  onToggleExpand: (id: ChartId) => void;
   showZeroLine?: boolean;
   symmetricAroundZero?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const w = 980;
   const h = expanded ? 300 : 150;
   const domain = calculateAutoscale(lines.map((line) => line.data), { includeZero: showZeroLine, symmetricAroundZero });
@@ -260,12 +253,12 @@ function MiniSeries({
   const zeroY = y(0);
 
   return (
-    <div className={`macro-lab-chart ${expanded ? "is-expanded" : ""}`}>
+    <div className="macro-lab-chart">
       <div className="macro-lab-chart-head">
         <div className="macro-lab-chart-title">{title}</div>
-        <button className="macro-lab-expand" onClick={() => onToggleExpand(id)} title={expanded ? "Collapse" : "Expand"}>{expanded ? "⤢" : "⤡"}</button>
+        <button className="macro-lab-expand" onClick={(event) => { event.stopPropagation(); setExpanded((prev) => !prev); }} title={expanded ? "Collapse" : "Expand"}>{expanded ? "⤢" : "⤡"}</button>
       </div>
-      <svg viewBox={`0 0 ${w} ${h}`} onClick={(e) => {
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: `${h}px`, display: "block" }} onClick={(e) => {
         const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
         const ratio = (e.clientX - rect.left) / rect.width;
         const idx = Math.max(0, Math.min(dates.length - 1, Math.round(ratio * (dates.length - 1))));
@@ -292,7 +285,6 @@ export default function MacroRegimeValidationLab() {
   const [config, setConfig] = useState<SandboxConfig>(BASELINE);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedRange, setSelectedRange] = useState<{ startDate: string; endDate: string } | null>(null);
-  const [expandedCharts, setExpandedCharts] = useState<Record<ChartId, boolean>>({ macro: false, blocks: false, overlay: false, inflationSplit: false, lyn: false, gap: false });
   const [openBlocks, setOpenBlocks] = useState<Record<BlockKey, boolean>>({ A_FISCAL: false, B_MONETARY: false, C_INFLATION: false, D_CREDIBILITY: false });
   const [inflationPanels, setInflationPanels] = useState({ split: false, lyn: false, gap: false });
 
@@ -453,7 +445,6 @@ export default function MacroRegimeValidationLab() {
     return Math.round((checks.reduce((a, b) => a + b, 0) / total) * 100);
   }, [replay]);
 
-  const toggleChart = (id: ChartId) => setExpandedCharts((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const subComponentsVisible = inferBlockSubComponents(region, points);
 
@@ -494,12 +485,12 @@ export default function MacroRegimeValidationLab() {
       </div>
 
       <div className="macro-lab-grid">
-        <MiniSeries id="macro" title="Macro score history (baseline vs modified)" dates={dates} lines={[{ label: "Baseline", color: "#1d4ed8", data: baselineMacro }, { label: "Modified", color: "#dc2626", data: modifiedMacro, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.macro} onToggleExpand={toggleChart} />
-        <MiniSeries id="blocks" title="Block history composite" dates={dates} lines={[{ label: "Block composite", color: "#2563eb", data: blockComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.blocks} onToggleExpand={toggleChart} />
-        <MiniSeries id="overlay" title="Overlay history" dates={dates} lines={[{ label: "Overlay composite", color: "#7c3aed", data: overlayComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.overlay} onToggleExpand={toggleChart} />
-        <MiniSeries id="inflationSplit" title="Inflation split (baseline vs modified)" dates={inflDates} lines={[{ label: "Baseline split", color: "#0f766e", data: inflationSplitBaseline }, { label: "Modified split", color: "#b91c1c", data: inflationSplitModified, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.inflationSplit} onToggleExpand={toggleChart} showZeroLine />
-        <MiniSeries id="lyn" title="LynAldenology: Inflation" dates={inflDates} lines={[{ label: "Monetary pressure", color: "#0ea5e9", data: lynSeries.monetaryPressure ?? [] }, { label: "Asset inflation", color: "#6366f1", data: lynSeries.assetInflation ?? [] }, { label: "Commodity inflation", color: "#f97316", data: lynSeries.commodityInflation ?? [] }, { label: "Consumer inflation", color: "#16a34a", data: lynSeries.consumerInflation ?? [] }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.lyn} onToggleExpand={toggleChart} showZeroLine />
-        <MiniSeries id="gap" title="Monetary Inflation Gap" dates={inflDates} lines={[{ label: "Gap", color: "#1d4ed8", data: gapSeries }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.gap} onToggleExpand={toggleChart} showZeroLine symmetricAroundZero />
+        <MiniSeries title="Macro score history (baseline vs modified)" dates={dates} lines={[{ label: "Baseline", color: "#1d4ed8", data: baselineMacro }, { label: "Modified", color: "#dc2626", data: modifiedMacro, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} />
+        <MiniSeries title="Block history composite" dates={dates} lines={[{ label: "Block composite", color: "#2563eb", data: blockComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} />
+        <MiniSeries title="Overlay history" dates={dates} lines={[{ label: "Overlay composite", color: "#7c3aed", data: overlayComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} />
+        <MiniSeries title="Inflation split (baseline vs modified)" dates={inflDates} lines={[{ label: "Baseline split", color: "#0f766e", data: inflationSplitBaseline }, { label: "Modified split", color: "#b91c1c", data: inflationSplitModified, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} showZeroLine />
+        <MiniSeries title="LynAldenology: Inflation" dates={inflDates} lines={[{ label: "Monetary pressure", color: "#0ea5e9", data: lynSeries.monetaryPressure ?? [] }, { label: "Asset inflation", color: "#6366f1", data: lynSeries.assetInflation ?? [] }, { label: "Commodity inflation", color: "#f97316", data: lynSeries.commodityInflation ?? [] }, { label: "Consumer inflation", color: "#16a34a", data: lynSeries.consumerInflation ?? [] }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} showZeroLine />
+        <MiniSeries title="Monetary Inflation Gap" dates={inflDates} lines={[{ label: "Gap", color: "#1d4ed8", data: gapSeries }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} showZeroLine symmetricAroundZero />
       </div>
 
       <div className="macro-lab-layout">
