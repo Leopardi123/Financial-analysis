@@ -8,6 +8,18 @@ import { computeMacroRegimeHistory, type HistoryResolution } from "../../../lib/
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
 
+const REGIONAL_OVERLAY_KEYS = [
+  "liquidityOverlay",
+  "creditFundingOverlay",
+  "energyShockOverlay",
+  "localUnrestOverlay",
+  "safeHavenOverlay",
+  "inflationCostShockOverlay",
+  "tradeSupplyChainStressOverlay",
+] as const;
+
+const GLOBAL_OVERLAY_KEYS = ["globalUnrestOverlay"] as const;
+
 type RegimeSnapshotRow = {
   as_of_date: string;
   updated_at: string | null;
@@ -260,6 +272,13 @@ async function loadInflationAnalysis(region: "US" | "EA" | "SE"): Promise<Inflat
 
 
 
+
+
+function parseUiOverlayKeysRequested(raw: unknown) {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  if (!value) return [] as string[];
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
 
 async function loadRawSeriesRows(region: string) {
   return (await query(
@@ -607,7 +626,7 @@ async function getGoldSourceDiagnostics(region: string) {
   };
 }
 
-async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
+async function readLatestSnapshot(region: string, allowLiveFallback: boolean, uiOverlayKeysRequested: string[]) {
   const regimeRows = (await query(
     `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
@@ -805,6 +824,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
     .slice(0, 5);
 
   const rawSeriesRows = await loadRawSeriesRows(region);
+  const overlayBundle = buildRegionalOverlays(region as "US" | "EA" | "SE", regimeRow.as_of_date, buildSeriesMap(rawSeriesRows));
 
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
@@ -849,10 +869,14 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
         normalizedTopDrivers.map((driver) => ({ indicatorId: driver.indicatorId, title: driver.title })),
       ),
     },
-    overlays: (() => {
-      const seriesMap = buildSeriesMap(rawSeriesRows);
-      return buildRegionalOverlays(region as "US" | "EA" | "SE", regimeRow.as_of_date, seriesMap);
-    })(),
+    overlays: overlayBundle,
+    overlayRoutingDiagnostics: {
+      overlayEngineUsed: true,
+      overlayBundleKeys: Object.keys(overlayBundle.overlays),
+      expectedOverlayBundleKeys: [...REGIONAL_OVERLAY_KEYS],
+      legacyOverlayKeys: ["growthOverlay", "stressOverlay", "hardAssetOverlay"],
+      uiOverlayKeysRequested,
+    },
     indicators,
     dataStatus: indicators.length > 0 ? "snapshot" : "insufficient",
     writePolicy: "read_only",
@@ -920,8 +944,8 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
 }
 
 
-async function readLatestGlobalSnapshot(allowLiveFallback: boolean) {
-  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback)] as const));
+async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKeysRequested: string[]) {
+  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested)] as const));
   const regionalMap = Object.fromEntries(regionalSnapshots);
   const asOfDate = MACRO_REGIONS
     .map((region) => regionalMap[region]?.regime?.asOfDate ?? null)
@@ -954,6 +978,13 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean) {
   return {
     regime: { ...regime, topDrivers: globalDrivers },
     overlays: globalOverlayBundle,
+    overlayRoutingDiagnostics: {
+      overlayEngineUsed: true,
+      overlayBundleKeys: Object.keys(globalOverlayBundle.overlays),
+      expectedOverlayBundleKeys: [...GLOBAL_OVERLAY_KEYS],
+      legacyOverlayKeys: ["growthOverlay", "stressOverlay", "hardAssetOverlay"],
+      uiOverlayKeysRequested,
+    },
     indicators,
     dataStatus: "snapshot",
     writePolicy: "read_only",
@@ -990,6 +1021,7 @@ export default async function handler(req: any, res: any) {
   const region = String(req.query?.region ?? "GLOBAL").toUpperCase();
   const allowLiveFallback = String(req.query?.fallbackLive ?? "1") === "1";
   const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
+  const uiOverlayKeysRequested = parseUiOverlayKeysRequested(req.query?.uiOverlayKeysRequested);
   const historyRangeRaw = String(req.query?.historyRangeYears ?? (historyResolution === "MONTHLY" ? "20" : "3")).toUpperCase();
   const historyRangeYears = historyRangeRaw === "MAX"
     ? "MAX"
@@ -998,7 +1030,7 @@ export default async function handler(req: any, res: any) {
       : (historyResolution === "MONTHLY" ? 20 : 3);
 
   if (region === "GLOBAL") {
-    const snapshot = await readLatestGlobalSnapshot(allowLiveFallback);
+    const snapshot = await readLatestGlobalSnapshot(allowLiveFallback, uiOverlayKeysRequested);
     const history = await computeMacroRegimeHistory({
       region: "GLOBAL",
       resolution: historyResolution as HistoryResolution,
@@ -1012,7 +1044,7 @@ export default async function handler(req: any, res: any) {
     ? await loadInflationAnalysis(region)
     : null;
 
-  const snapshot = await readLatestSnapshot(region, allowLiveFallback);
+  const snapshot = await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested);
   if (snapshot) {
     const history = await computeMacroRegimeHistory({
       region,
@@ -1043,7 +1075,7 @@ export default async function handler(req: any, res: any) {
   }
 
   const live = await runAndPersistMacroSnapshots({ region });
-  const fallbackSnapshot = await readLatestSnapshot(region, allowLiveFallback);
+  const fallbackSnapshot = await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested);
 
   if (!fallbackSnapshot) {
     const history = await computeMacroRegimeHistory({

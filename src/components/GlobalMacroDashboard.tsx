@@ -39,6 +39,13 @@ type GlobalMacroPayload = {
     nullReason?: string | null;
   }>;
   dataStatus: string;
+  overlayRoutingDiagnostics?: {
+    overlayEngineUsed: boolean;
+    overlayBundleKeys: string[];
+    expectedOverlayBundleKeys?: string[];
+    legacyOverlayKeys: string[];
+    uiOverlayKeysRequested: string[];
+  };
   stats?: {
     rawPointCount: number;
     seriesCount: number;
@@ -303,6 +310,18 @@ export default function GlobalMacroDashboard() {
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
 
+  const uiOverlayKeysRequested = useMemo(() => (selectedRegion === "GLOBAL"
+    ? ["globalUnrestOverlay"]
+    : [
+      "liquidityOverlay",
+      "creditFundingOverlay",
+      "energyShockOverlay",
+      "localUnrestOverlay",
+      "safeHavenOverlay",
+      "inflationCostShockOverlay",
+      "tradeSupplyChainStressOverlay",
+    ]), [selectedRegion]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const query = new URLSearchParams(window.location.search);
@@ -328,12 +347,13 @@ export default function GlobalMacroDashboard() {
     if (historyResolution === "WEEKLY" && historyRangeYears !== 1 && historyRangeYears !== 3 && historyRangeYears !== 5) {
       setHistoryRangeYears(3);
     }
-  }, [historyResolution, historyRangeYears, selectedRegion]);
+  }, [historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
 
   async function loadGlobalMacro() {    setGlobalMacroLoading(true);
     setGlobalMacroError(null);
     try {
-      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}`);
+      const overlayKeysParam = encodeURIComponent(uiOverlayKeysRequested.join(","));
+      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}`);
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
@@ -355,7 +375,7 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     void loadGlobalMacro();
-  }, [historyResolution, historyRangeYears, selectedRegion]);
+  }, [historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const scoredCount = globalMacroIndicators.filter((item) => item.score !== null).length;
@@ -660,10 +680,11 @@ Signal: ${gapLabel}`,
                 <li>Core Regime: <strong>{globalMacro.regime.coreRegimeLabel}</strong></li>
                 <li>Macro score: {typeof globalMacro.regime.macroScoreTotal === "number" ? globalMacro.regime.macroScoreTotal.toFixed(1) : "—"}</li>
                 <li>Confidence: {globalMacro.regime.macroConfidence}%</li>
-                <li>Growth overlay: {globalMacro.regime.growthOverlay}</li>
-                <li>Stress overlay: {globalMacro.regime.stressOverlay}</li>
-                <li>Hard Asset overlay: {globalMacro.regime.hardAssetOverlay}</li>
+                <li>Legacy overlays (deprecated): growth={globalMacro.regime.growthOverlay}, stress={globalMacro.regime.stressOverlay}, hard_asset={globalMacro.regime.hardAssetOverlay}</li>
                 <li>Data status: {globalMacro.dataStatus}</li>
+                <li>Overlay engine used: {globalMacro.overlayRoutingDiagnostics?.overlayEngineUsed ? "yes" : "no"}</li>
+                <li>Overlay keys in payload: {(globalMacro.overlayRoutingDiagnostics?.overlayBundleKeys ?? []).join(", ") || "—"}</li>
+                <li>UI requested keys: {(globalMacro.overlayRoutingDiagnostics?.uiOverlayKeysRequested ?? []).join(", ") || "—"}</li>
               </ul>
 
               {globalMacro.overlays && (
