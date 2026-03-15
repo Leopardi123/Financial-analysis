@@ -509,10 +509,10 @@ export default function GlobalMacroDashboard() {
     localUnrestOverlay: {
       intendedPrimaryBlocks: ["signal", "transmission"],
       intendedSeries: [
-        { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty", "uncertainty_proxy"] },
-        { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["sovereign spread family"], aliasFamily: ["sovereign_risk", "sovereign_spread_proxy"] },
+        { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["USEPUINDXM"], aliasFamily: ["policy_uncertainty", "policy_uncertainty_us", "usepuindxm"] },
+        { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["US_SOVEREIGN_SPREAD (approved source id required)"], aliasFamily: ["sovereign_risk", "us_sovereign_spread", "sovereign_spread"] },
       ],
-      logicSummary: "Lokal oros-/förtroendebild; i vissa regioner mer proxy/inherited-driven.",
+      logicSummary: "Lokal oros-/förtroendebild via policy uncertainty + sovereign spread (source-faithful only).",
     },
     safeHavenRiskOffOverlay: {
       intendedPrimaryBlocks: ["gold_equity", "duration", "usd"],

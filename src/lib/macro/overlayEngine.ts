@@ -192,6 +192,13 @@ function finalizeOverlay(blocks: Record<string, { weight: number; components: Ov
   return { score, label: labelByScore(score), confidence, blockScores, components };
 }
 
+
+function requireSourceFaithfulBlocks(result: OverlayResult, requiredBlocks: string[]): OverlayResult {
+  const missingRequired = requiredBlocks.some((block) => result.blockScores[block] === null);
+  if (!missingRequired) return result;
+  return { ...result, score: null, label: labelByScore(null), confidence: 0 };
+}
+
 export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayBundle {
   const inflationSeries = region === "US" ? "core_cpi_us" : "HICP.M.U2.N.000000.4.ANR";
   const coreInflationSeries = region === "US" ? "CPILFESL" : "HICP.M.U2.N.XEF000.4D0.ANR";
@@ -246,12 +253,47 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       breadth: { weight: 0.25, components: [makeComponent({ asOfDate, id: "en_breadth", title: "Energy breadth", block: "breadth", weight: 1, source: "Proxy", exactSource: "Energy breadth proxy", series: getSeries(series, "ENERGY_BREADTH_PROXY").length ? getSeries(series, "ENERGY_BREADTH_PROXY") : (getSeries(series, "natgas_yoy").length ? getSeries(series, "natgas_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
       spillover: { weight: 0.35, components: [makeComponent({ asOfDate, id: "en_spill", title: "Macro spillover", block: "spillover", weight: 1, source: "FRED/ECB", exactSource: `${inflationSeries} / industrial spillover`, series: yoy(getSeries(series, inflationSeries)), invert: true, proxy: true })] },
     }),
-    localUnrestOverlay: finalizeOverlay({
-      energy: { weight: 0.3, components: [makeComponent({ asOfDate, id: "lu_energy", title: "Energy disruption", block: "energy", weight: 1, source: "Inherited", exactSource: "energy_shock_overlay_score", series: getSeries(series, "oil_yoy").length ? getSeries(series, "oil_yoy") : getSeries(series, "commodity_index_yoy"), invert: true, proxy: true, note: "Energy disruption proxy from oil/commodity YoY" })] },
-      financial: { weight: 0.3, components: [makeComponent({ asOfDate, id: "lu_fin", title: "Financial stress interaction", block: "financial", weight: 1, source: "Inherited+VIX", exactSource: "credit_funding_overlay_score + VIX", series: getSeries(series, region === "US" ? "VIXCLS" : "VSTOXX"), invert: true, proxy: true })] },
-      safehaven: { weight: 0.2, components: [makeComponent({ asOfDate, id: "lu_safe", title: "Safe-haven divergence", block: "safehaven", weight: 1, source: "FRED", exactSource: "GOLD/SP500 and duration flight", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
-      real: { weight: 0.2, components: [makeComponent({ asOfDate, id: "lu_real", title: "Real economy disruption", block: "real", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "INDPRO + ICSA" : "industrial production + business confidence", series: getSeries(series, region === "US" ? "INDPRO" : "EA_INDUSTRIAL_PRODUCTION"), invert: true, proxy: true })] },
-    }),
+    localUnrestOverlay: (() => {
+      const signalSeries = region === "US" ? getSeries(series, "POLICY_UNCERTAINTY_US") : [];
+      const transmissionSeries = region === "US" ? getSeries(series, "US_SOVEREIGN_SPREAD") : [];
+      const local = finalizeOverlay({
+        signal: {
+          weight: 0.5,
+          components: [makeComponent({
+            asOfDate,
+            id: "lu_signal",
+            title: "Policy uncertainty signal",
+            block: "signal",
+            weight: 1,
+            source: "FRED",
+            exactSource: region === "US" ? "USEPUINDXM" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+            series: signalSeries,
+            invert: true,
+            note: region === "US"
+              ? "Source-faithful policy uncertainty family input"
+              : "Missing by design: no source-faithful non-US policy uncertainty source wired",
+          })],
+        },
+        transmission: {
+          weight: 0.5,
+          components: [makeComponent({
+            asOfDate,
+            id: "lu_transmission",
+            title: "Sovereign spread transmission",
+            block: "transmission",
+            weight: 1,
+            source: "Approved sovereign spread source",
+            exactSource: region === "US" ? "US_SOVEREIGN_SPREAD (approved source id required)" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+            series: transmissionSeries,
+            invert: true,
+            note: region === "US"
+              ? "Blocked until approved sovereign spread primary source is ingested and wired"
+              : "Missing by design: no source-faithful non-US sovereign spread source wired",
+          })],
+        },
+      });
+      return requireSourceFaithfulBlocks(local, ["signal", "transmission"]);
+    })(),
     safeHavenRiskOffOverlay: finalizeOverlay({
       gold_equity: { weight: 0.65, components: [makeComponent({ asOfDate, id: "sh_gold_eq", title: "Gold-equity flight", block: "gold_equity", weight: 1, source: "FRED", exactSource: "GOLD/SP500 ratio", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
       duration: { weight: 0.35, components: [makeComponent({ asOfDate, id: "sh_duration", title: "Duration flight", block: "duration", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "US10Y yield" : "DE10Y yield", series: getSeries(series, region === "US" ? "DGS10" : "EA_10Y_CORE_YIELD"), invert: true })] },
@@ -365,6 +407,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     DCOILBRENTEU: ["oil_brent_usd"],
     INDPRO: ["pmi_us"],
     DGORDER: ["new_orders_us"],
+    POLICY_UNCERTAINTY_US: ["policy_uncertainty_us", "usepuindxm"],
     CPILFESL: ["core_cpi_us"],
     T10YIE: ["breakeven_10y_us"],
     CPIAUCSL: ["core_cpi_us"],
@@ -382,6 +425,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     "GOLD_EQUITY_RATIO": ["gold_minus_real_yield_spread", "gold_usd"],
     "ISRATIO": ["isratio_us"],
     "PPIACO": ["ppiaco_us"],
+    "US_SOVEREIGN_SPREAD": ["us_sovereign_spread"],
   };
 
   for (const [target, candidates] of Object.entries(aliasCandidates)) {

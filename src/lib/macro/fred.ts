@@ -33,6 +33,7 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "DGORDER", seriesKey: "new_orders_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
   { fredSeriesId: "ISRATIO", seriesKey: "isratio_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
   { fredSeriesId: "PPIACO", seriesKey: "ppiaco_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "USEPUINDXM", seriesKey: "policy_uncertainty_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
 ];
 
 type FredObservation = {
