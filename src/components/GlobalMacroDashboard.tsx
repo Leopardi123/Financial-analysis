@@ -509,8 +509,8 @@ export default function GlobalMacroDashboard() {
     localUnrestOverlay: {
       intendedPrimaryBlocks: ["signal", "transmission"],
       intendedSeries: [
-        { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["USEPUINDXM (US) / EA policy uncertainty family"], aliasFamily: ["policy_uncertainty", "policy_uncertainty_us", "usepuindxm", "ea_policy_uncertainty"] },
-        { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["IRLTLT01ITM156N", "IRLTLT01DEM156N"], aliasFamily: ["sovereign_risk", "lu_transmission_ea", "irl tlt01itm156n", "irl tlt01dem156n", "italy_10y_yield", "germany_10y_yield"] },
+        { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty"] },
+        { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["sovereign spread family"], aliasFamily: ["sovereign_risk"] },
       ],
       logicSummary: "Lokal oros-/förtroendebild via policy uncertainty + sovereign spread (source-faithful only).",
     },
@@ -554,6 +554,43 @@ export default function GlobalMacroDashboard() {
     },
   };
 
+  function regionScopedOverlaySpec(overlayKey: string): OverlayDesignSpec {
+    const base = overlayDesignSpec[overlayKey] ?? {
+      intendedPrimaryBlocks: [],
+      intendedSeries: [],
+      logicSummary: "No explicit design spec registered.",
+    };
+    if (overlayKey !== "localUnrestOverlay") return base;
+
+    if (selectedRegion === "US") {
+      return {
+        ...base,
+        intendedSeries: [
+          { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["USEPUINDXM"], aliasFamily: ["policy_uncertainty", "policy_uncertainty_us", "usepuindxm"] },
+          { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["—"], aliasFamily: [], note: "Not defined in v1 by design"},
+        ],
+      };
+    }
+
+    if (selectedRegion === "EA") {
+      return {
+        ...base,
+        intendedSeries: [
+          { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["EA policy uncertainty family"], aliasFamily: ["policy_uncertainty", "ea_policy_uncertainty"] },
+          { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["IRLTLT01ITM156N", "IRLTLT01DEM156N"], aliasFamily: ["sovereign_risk", "lu_transmission_ea", "irl tlt01itm156n", "irl tlt01dem156n", "italy_10y_yield", "germany_10y_yield"] },
+        ],
+      };
+    }
+
+    return {
+      ...base,
+      intendedSeries: [
+        { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty"] },
+        { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["—"], aliasFamily: [], note: "Region-specific source not defined in v1" },
+      ],
+    };
+  }
+
   function normalizeToken(value: string): string {
     return value.toLowerCase().replace(/[^a-z0-9]+/g, "_");
   }
@@ -575,7 +612,7 @@ export default function GlobalMacroDashboard() {
   }
 
   function inferBlockerType(args: {
-    availability: "available" | "partial" | "unavailable";
+    availability: "available" | "partial" | "unavailable" | "not_applicable";
     fallback: "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input";
     runtimeHasSeries: boolean;
     aliasMatched: boolean;
@@ -585,6 +622,7 @@ export default function GlobalMacroDashboard() {
     if (args.fallback === "inherited overlay input") return "inherited overlay used instead";
     if (args.fallback === "derived approximation") return "derived approximation used";
     if (args.fallback === "proxy source") return "proxy currently used";
+    if (args.availability === "not_applicable") return "not defined in v1 by design";
     if (text.includes("not defined in v1 by design") || text.includes("no true sovereign spread exists for usd issuer")) return "not defined in v1 by design";
     if (args.fallback === "alias mapping" && args.availability === "available") return "alias mapping only";
     if (args.availability === "unavailable" && (text.includes("ingest") || text.includes("not ingested") || text.includes("missing"))) return "intended source not ingested";
@@ -596,11 +634,7 @@ export default function GlobalMacroDashboard() {
 
   const overlayDebugRows = uiOverlayKeysRequested.map((overlayKey) => {
     const overlay = activeOverlayBundle?.overlays?.[overlayKey] ?? null;
-    const spec = overlayDesignSpec[overlayKey] ?? {
-      intendedPrimaryBlocks: [],
-      intendedSeries: [],
-      logicSummary: "No explicit design spec registered.",
-    };
+    const spec = regionScopedOverlaySpec(overlayKey);
     const runtimeBlockDiagnostics = globalMacro?.overlayBlockDiagnostics?.[overlayKey] ?? [];
     const actualComponents = overlay?.components ?? [];
 
@@ -681,7 +715,7 @@ export default function GlobalMacroDashboard() {
         partial: blockSeries.filter((row) => row.availability === "partial").length,
         unavailable: blockSeries.filter((row) => row.availability === "unavailable").length,
       };
-      const sourceAvailability: "available" | "partial" | "unavailable" = blockSeries.length === 0
+      const sourceAvailabilityBase: "available" | "partial" | "unavailable" = blockSeries.length === 0
         ? "unavailable"
         : availabilityCounts.available === blockSeries.length
           ? "available"
@@ -713,7 +747,12 @@ export default function GlobalMacroDashboard() {
       const fallbackUsedSet = Array.from(new Set(blockSeries.map((row) => row.fallbackUsage).filter((value) => value !== "none")));
       const fallbackUsed = fallbackUsedSet.length > 0 ? fallbackUsedSet.join(" + ") : "none";
       const intendedPrimarySources = blockSeries.flatMap((row) => row.intendedPrimarySources.split(",").map((item) => item.trim())).filter(Boolean);
-      const currentRuntimeSources = Array.from(new Set(blockSeries.map((row) => row.runtimeSourceUsed).filter((item) => item && item !== "—"))).join(", ") || diagnostics?.actualSourceUsed || "—";
+      const currentRuntimeSources = runtimeStatus === "not_defined_v1"
+        ? "—"
+        : (Array.from(new Set(blockSeries.map((row) => row.runtimeSourceUsed).filter((item) => item && item !== "—"))).join(", ") || diagnostics?.actualSourceUsed || "—");
+      const sourceAvailability: "available" | "partial" | "unavailable" | "not_applicable" = runtimeStatus === "not_defined_v1"
+        ? "not_applicable"
+        : sourceAvailabilityBase;
       const reason = diagnostics?.reason
         || blockSeries.map((row) => row.note).filter(Boolean).join(" | ")
         || (runtimeStatus === "pass" && sourceAvailability !== "available"
@@ -741,14 +780,17 @@ export default function GlobalMacroDashboard() {
       };
     });
 
+    const hasNotDefinedBlock = blockRows.some((row) => row.runtimeStatus === "not_defined_v1");
     const runnableBlocks = blockRows.filter((row) => row.runtimeStatus !== "missing").length;
-    const runtimeCompleteness: "full" | "partial" | "weak" = blockRows.length === 0
-      ? "weak"
-      : runnableBlocks === blockRows.length
-        ? "full"
-        : runnableBlocks >= Math.ceil(blockRows.length / 2)
-          ? "partial"
-          : "weak";
+    const runtimeCompleteness: "full" | "partial" | "weak" | "design_complete_missing_block" = hasNotDefinedBlock
+      ? "design_complete_missing_block"
+      : blockRows.length === 0
+        ? "weak"
+        : runnableBlocks === blockRows.length
+          ? "full"
+          : runnableBlocks >= Math.ceil(blockRows.length / 2)
+            ? "partial"
+            : "weak";
     const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
     const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
     const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy).length / actualComponents.length;
