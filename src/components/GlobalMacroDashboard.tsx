@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
 
 type GlobalMacroPayload = {
@@ -303,6 +303,24 @@ type InflationAnalysisPayload = {
   }>;
 };
 
+
+function ExpandablePanel({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
+  return (
+    <details open={defaultOpen}>
+      <summary style={{ cursor: "pointer", fontWeight: 600 }}>{title}</summary>
+      <div style={{ marginTop: 8 }}>{children}</div>
+    </details>
+  );
+}
+
+function AdminDebugSection({ children }: { children: ReactNode }) {
+  return (
+    <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 12px", marginTop: 12, background: "#f8fafc" }}>
+      <ExpandablePanel title="▶ Admin / Debug">{children}</ExpandablePanel>
+    </section>
+  );
+}
+
 export default function GlobalMacroDashboard() {
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
@@ -430,9 +448,6 @@ export default function GlobalMacroDashboard() {
       "tradeSupplyChainStressOverlay",
       "localUnrestOverlay",
     ];
-  const uiOverlayKeysRendered = overlayEntries.map(([name]) => name);
-  const overlaysWithScores = overlayEntries.filter(([, overlay]) => typeof overlay.score === "number").length;
-  const overlaysMissing = Math.max(0, uiOverlayKeysRequested.length - overlayEntries.length);
   const overlaySanity = overlayEntries.map(([overlayKey, overlay]) => {
     const blockRows = Object.entries(overlay.blockScores ?? {}).map(([block, score]) => ({
       block,
@@ -844,36 +859,6 @@ Signal: ${gapLabel}`,
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
-                  <strong>US/EA block population trace</strong>
-                  <div style={{ marginTop: 8, overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                      <thead>
-                        <tr>
-                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>overlay</th>
-                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>block</th>
-                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>status</th>
-                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>expected source</th>
-                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>actual source used</th>
-                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>reason</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(globalMacro.overlayBlockDiagnostics ?? {}).flatMap(([overlayName, blocks]) => blocks.map((row, idx) => (
-                          <tr key={`${overlayName}-${row.block}-${idx}`}>
-                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{overlayName}</td>
-                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.block}</td>
-                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.status}</td>
-                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.expectedSource || "—"}</td>
-                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.actualSourceUsed || "—"}</td>
-                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.reason || "—"}</td>
-                          </tr>
-                        )))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div style={{ marginBottom: 12 }}>
                   <strong>Sanity & calibration diagnostics</strong>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, marginTop: 8 }}>
                     {overlaySanity.map((item) => (
@@ -891,25 +876,6 @@ Signal: ${gapLabel}`,
                   </div>
                 </div>
 
-                <details>
-                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>Overlay engine trace</summary>
-                  <ul style={{ marginTop: 8 }}>
-                    <li>requested region: {selectedRegion}</li>
-                    <li>overlayRuntimeProof: {JSON.stringify(globalMacro.overlayRuntimeProof ?? null)}</li>
-                    <li>ui overlay keys actually rendered: {uiOverlayKeysRendered.join(", ") || "—"}</li>
-                    <li>number of cards rendered: {uiOverlayKeysRequested.length}</li>
-                    <li>number of graphs rendered: {overlayKeysForCharts.length}</li>
-                    <li>number of overlays with scores: {overlaysWithScores}</li>
-                    <li>number of overlays missing: {overlaysMissing}</li>
-                    <li>number of overlays partial/proxy: {overlaysPartialOrProxy}</li>
-                    <li>number of overlays low robustness: {lowRobustnessCount}</li>
-                    <li>overlays computed: {(globalMacro.overlayEngineDiagnostics?.overlaysReturned ?? []).join(", ") || "—"}</li>
-                    <li>overlays missing: {(globalMacro.overlayEngineDiagnostics?.overlaysMissing ?? []).join(", ") || "—"}</li>
-                    <li>history built count: {(globalMacro.overlayEngineDiagnostics?.historyBuiltFor ?? []).length}</li>
-                    <li>history missing for: {(globalMacro.overlayEngineDiagnostics?.historyMissingFor ?? []).join(", ") || "—"}</li>
-                    <li>diagnostic reasons: {(globalMacro.overlayEngineDiagnostics?.reasons ?? []).slice(0, 6).join(" | ") || "none"}</li>
-                  </ul>
-                </details>
               </section>
 
               <h4>Summary</h4>
@@ -1595,8 +1561,67 @@ Signal: ${gapLabel}`,
             </details>
           )}
 
-          <details style={{ marginTop: 14 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 600 }}>🔧 Pipeline Debug</summary>
+          <AdminDebugSection>
+            <h4>Overlay debug</h4>
+            <ul>
+              <li>overlayRuntimeProof: {JSON.stringify(globalMacro?.overlayRuntimeProof ?? null)}</li>
+              <li>overlaysComputed: {(globalMacro?.overlayEngineDiagnostics?.overlaysReturned ?? []).join(", ") || "—"}</li>
+              <li>overlaysMissing: {(globalMacro?.overlayEngineDiagnostics?.overlaysMissing ?? []).join(", ") || "—"}</li>
+              <li>overlaysPartial: {overlaysPartialOrProxy}</li>
+              <li>overlaysLowRobustness: {lowRobustnessCount}</li>
+              <li>rawSeriesCountUsed: {globalMacro?.overlayEngineDiagnostics?.rawSeriesCount ?? 0}</li>
+              <li>historyBuiltCount: {(globalMacro?.overlayEngineDiagnostics?.historyBuiltFor ?? []).length}</li>
+              <li>regionKeysPresent: {(globalMacro?.overlayRuntimeProof?.regionKeysPresent ?? []).join(", ") || "—"}</li>
+              <li>globalKeysPresent: {(globalMacro?.overlayRuntimeProof?.globalKeysPresent ?? []).join(", ") || "—"}</li>
+            </ul>
+
+            <h4>Overlay block debug</h4>
+            <div style={{ marginTop: 8, overflowX: "auto", marginBottom: 10 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>overlay</th>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>block</th>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>status</th>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>expected source</th>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>actual source used</th>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>proxy reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(globalMacro?.overlayBlockDiagnostics ?? {}).flatMap(([overlayName, blocks]) => blocks.map((row, idx) => (
+                    <tr key={`admin-${overlayName}-${row.block}-${idx}`}>
+                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{overlayName}</td>
+                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.block}</td>
+                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.status}</td>
+                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.expectedSource || "—"}</td>
+                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.actualSourceUsed || "—"}</td>
+                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.reason || "—"}</td>
+                    </tr>
+                  )))}
+                </tbody>
+              </table>
+            </div>
+
+            <h4>Overlay score debug</h4>
+            <ul>
+              {overlaySanity.map((item) => (
+                <li key={`score-debug-${item.overlayKey}`}>
+                  {item.overlayKey}: total={typeof activeOverlayBundle?.overlays?.[item.overlayKey]?.score === "number" ? activeOverlayBundle?.overlays?.[item.overlayKey]?.score?.toFixed(1) : "—"}, blockScores={item.normalizationInputs.join(" | ") || "—"}, dominantNegative={item.negative.join(", ") || "—"}, real={item.realBlocks}, proxy={item.proxyBlocks}, missing={item.missingBlocks}, robustness={item.lowRobustness ? "low robustness" : "ok"}
+                </li>
+              ))}
+            </ul>
+
+            <h4>Overlay history debug</h4>
+            <ul>
+              <li>historyBuilt: {String((globalMacro?.overlayEngineDiagnostics?.historyBuiltFor ?? []).length > 0)}</li>
+              <li>historyPoints: {overlayHistoryPoints.length}</li>
+              <li>earliestDate: {overlayHistoryPoints[0]?.asOfDate ?? "—"}</li>
+              <li>latestDate: {overlayHistoryPoints[overlayHistoryPoints.length - 1]?.asOfDate ?? "—"}</li>
+              <li>sourceUsed: macro_raw_datapoints(auto) + overlayEngine history builder</li>
+            </ul>
+
+            <ExpandablePanel title="Pipeline / Snapshot / Ingestion / Source debug" defaultOpen={false}>
             <div style={{ marginTop: 10 }}>
               <h4>Snapshot status</h4>
               <ul>
@@ -1914,7 +1939,8 @@ Signal: ${gapLabel}`,
                 </>
               )}
             </div>
-          </details>
+            </ExpandablePanel>
+          </AdminDebugSection>
         </div>
       </div>
     </div>
