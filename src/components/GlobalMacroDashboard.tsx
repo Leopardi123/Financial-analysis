@@ -739,12 +739,30 @@ export default function GlobalMacroDashboard() {
 
       const blockComponents = actualComponents.filter((component) => component.block === block);
       const hasRuntime = (typeof scoreValue === "number") || blockComponents.some((component) => !component.missing) || diagnostics?.status === "pass" || diagnostics?.status === "proxy";
-      const runtimeStatus: "pass" | "proxy" | "missing" = !hasRuntime
-        ? "missing"
-        : (blockComponents.some((component) => component.proxy) || blockSeries.some((row) => row.fallbackUsage !== "none" && row.fallbackUsage !== "alias mapping") || diagnostics?.status === "proxy")
-          ? "proxy"
-          : "pass";
 
+      const fallbackUsedSet = Array.from(new Set(blockSeries.map((row) => row.fallbackUsage).filter((value) => value !== "none")));
+      const fallbackUsed = fallbackUsedSet.length > 0 ? fallbackUsedSet.join(" + ") : "none";
+      const intendedPrimarySources = blockSeries.flatMap((row) => row.intendedPrimarySources.split(",").map((item) => item.trim())).filter(Boolean);
+      const currentRuntimeSources = Array.from(new Set(blockSeries.map((row) => row.runtimeSourceUsed).filter((item) => item && item !== "—"))).join(", ") || diagnostics?.actualSourceUsed || "—";
+      // Local Unrest repricing gating is region-specific by design.
+      // US uses ACMTP10 (sovereign duration repricing), while EA uses BTP-Bund spread IDs.
+      // If the region-correct source is present with no proxy/fallback, this block must not be marked missing.
+      const localUnrestRepricingBlockSourceFaithful = overlayKey === "localUnrestOverlay"
+        && block === "repricing"
+        && fallbackUsed === "none"
+        && !blockComponents.some((component) => component.proxy)
+        && ((selectedRegion === "US" && /ACMTP10/i.test(currentRuntimeSources))
+          || (selectedRegion === "EA" && /IRLTLT01ITM156N|IRLTLT01DEM156N/i.test(currentRuntimeSources)));
+      const sourceAvailability: "available" | "partial" | "unavailable" = localUnrestRepricingBlockSourceFaithful
+        ? "available"
+        : sourceAvailabilityBase;
+      const runtimeStatus: "pass" | "proxy" | "missing" = localUnrestRepricingBlockSourceFaithful
+        ? "pass"
+        : !hasRuntime
+          ? "missing"
+          : (blockComponents.some((component) => component.proxy) || blockSeries.some((row) => row.fallbackUsage !== "none" && row.fallbackUsage !== "alias mapping") || diagnostics?.status === "proxy")
+            ? "proxy"
+            : "pass";
       const availabilityRatio = blockSeries.length === 0 ? 0 : (availabilityCounts.available + availabilityCounts.partial * 0.5) / blockSeries.length;
       const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation" || row.fallbackUsage === "inherited overlay input").length / blockSeries.length;
       const specFidelity: "high" | "medium" | "low" = runtimeStatus === "missing"
@@ -754,12 +772,6 @@ export default function GlobalMacroDashboard() {
           : availabilityRatio >= 0.3
             ? "medium"
             : "low";
-
-      const fallbackUsedSet = Array.from(new Set(blockSeries.map((row) => row.fallbackUsage).filter((value) => value !== "none")));
-      const fallbackUsed = fallbackUsedSet.length > 0 ? fallbackUsedSet.join(" + ") : "none";
-      const intendedPrimarySources = blockSeries.flatMap((row) => row.intendedPrimarySources.split(",").map((item) => item.trim())).filter(Boolean);
-      const currentRuntimeSources = Array.from(new Set(blockSeries.map((row) => row.runtimeSourceUsed).filter((item) => item && item !== "—"))).join(", ") || diagnostics?.actualSourceUsed || "—";
-      const sourceAvailability: "available" | "partial" | "unavailable" = sourceAvailabilityBase;
       const reason = diagnostics?.reason
         || blockSeries.map((row) => row.note).filter(Boolean).join(" | ")
         || (runtimeStatus === "pass" && sourceAvailability !== "available"
@@ -767,8 +779,10 @@ export default function GlobalMacroDashboard() {
           : runtimeStatus === "proxy"
             ? "runtime works but at least one component uses proxy/derived/inherited input"
             : "block cannot be computed with meaningful runtime data");
-      const blockerPriority = blockSeries.map((row) => row.blockerType).find((type) => type !== "no blocker")
-        || inferBlockerType({ availability: sourceAvailability, fallback: fallbackUsedSet[0] as any || "none", runtimeHasSeries: currentRuntimeSources !== "—", aliasMatched: false, reasonText: reason });
+      const blockerPriority = localUnrestRepricingBlockSourceFaithful
+        ? "no blocker"
+        : (blockSeries.map((row) => row.blockerType).find((type) => type !== "no blocker")
+          || inferBlockerType({ availability: sourceAvailability, fallback: fallbackUsedSet[0] as any || "none", runtimeHasSeries: currentRuntimeSources !== "—", aliasMatched: false, reasonText: reason }));
 
       return {
         block,
@@ -828,7 +842,9 @@ export default function GlobalMacroDashboard() {
 
     const exactDifferences = blockRows
       .filter((row) => row.blockerType !== "no blocker" || row.sourceAvailability !== "available")
-      .map((row) => `${row.block}: ${row.blockerType}; availability=${row.sourceAvailability}; fallback=${row.fallbackUsed}`);
+      .map((row) => overlayKey === "localUnrestOverlay" && row.block === "repricing" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none"
+        ? "repricing: direct source-faithful match via ACMTP10"
+        : `${row.block}: ${row.blockerType}; availability=${row.sourceAvailability}; fallback=${row.fallbackUsed}`);
     const matchesSpec = blockRows
       .filter((row) => row.specFidelity === "high" || (row.specFidelity === "medium" && row.sourceAvailability === "available"))
       .map((row) => `${row.block}: runtime=${row.runtimeStatus}, primary sources present (${row.intendedPrimarySources})`);
