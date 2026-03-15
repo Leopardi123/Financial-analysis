@@ -90,6 +90,18 @@ function averageAlignedSeries(seriesList: Point[][]): Point[] {
   return out;
 }
 
+
+function subtractAlignedSeries(left: Point[], right: Point[]): Point[] {
+  const rightByDate = new Map(right.map((point) => [point.date, point.value]));
+  const out: Point[] = [];
+  for (const point of left) {
+    const rv = rightByDate.get(point.date);
+    if (point.value === null || rv === null || rv === undefined || !Number.isFinite(point.value) || !Number.isFinite(rv)) continue;
+    out.push({ date: point.date, value: point.value - rv });
+  }
+  return out;
+}
+
 function percentile10yLatest(points: Point[]): number | null {
   const series = canonicalMonthlyGrid(points);
   const latest = lastNumeric(series);
@@ -254,8 +266,15 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       spillover: { weight: 0.35, components: [makeComponent({ asOfDate, id: "en_spill", title: "Macro spillover", block: "spillover", weight: 1, source: "FRED/ECB", exactSource: `${inflationSeries} / industrial spillover`, series: yoy(getSeries(series, inflationSeries)), invert: true, proxy: true })] },
     }),
     localUnrestOverlay: (() => {
-      const signalSeries = region === "US" ? getSeries(series, "POLICY_UNCERTAINTY_US") : [];
-      const transmissionSeries = region === "US" ? getSeries(series, "US_SOVEREIGN_SPREAD") : [];
+      const usSignalSeries = region === "US" ? getSeries(series, "POLICY_UNCERTAINTY_US") : [];
+      const eaSignalSeries = region === "EA" ? getSeries(series, "EA_POLICY_UNCERTAINTY") : [];
+      const signalSeries = region === "US" ? usSignalSeries : eaSignalSeries;
+
+      const eaItaly10y = getSeries(series, "IRLTLT01ITM156N");
+      const eaGermany10y = getSeries(series, "IRLTLT01DEM156N");
+      const eaTransmissionSeries = subtractAlignedSeries(eaItaly10y, eaGermany10y);
+
+      const transmissionSeries = region === "EA" ? eaTransmissionSeries : [];
       const local = finalizeOverlay({
         signal: {
           weight: 0.5,
@@ -265,30 +284,34 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
             title: "Policy uncertainty signal",
             block: "signal",
             weight: 1,
-            source: "FRED",
-            exactSource: region === "US" ? "USEPUINDXM" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+            source: region === "US" ? "FRED" : "Policy uncertainty family",
+            exactSource: region === "US"
+              ? "USEPUINDXM"
+              : "EA policy uncertainty family source",
             series: signalSeries,
             invert: true,
             note: region === "US"
               ? "Source-faithful policy uncertainty family input"
-              : "Missing by design: no source-faithful non-US policy uncertainty source wired",
+              : "Missing by design unless source-faithful EA policy uncertainty series is ingested",
           })],
         },
         transmission: {
           weight: 0.5,
           components: [makeComponent({
             asOfDate,
-            id: "lu_transmission",
+            id: region === "EA" ? "lu_transmission_ea" : "lu_transmission",
             title: "Sovereign spread transmission",
             block: "transmission",
             weight: 1,
-            source: "Approved sovereign spread source",
-            exactSource: region === "US" ? "US_SOVEREIGN_SPREAD (approved source id required)" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+            source: region === "EA" ? "FRED" : "Not defined",
+            exactSource: region === "EA"
+              ? "IRLTLT01ITM156N - IRLTLT01DEM156N"
+              : "US transmission block not defined in v1: no true sovereign spread exists for USD issuer",
             series: transmissionSeries,
             invert: true,
-            note: region === "US"
-              ? "Blocked until approved sovereign spread primary source is ingested and wired"
-              : "Missing by design: no source-faithful non-US sovereign spread source wired",
+            note: region === "EA"
+              ? "Source-faithful BTP-Bund spread active"
+              : "Not defined in v1 by design",
           })],
         },
       });
@@ -426,6 +449,8 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     "ISRATIO": ["isratio_us"],
     "PPIACO": ["ppiaco_us"],
     "US_SOVEREIGN_SPREAD": ["us_sovereign_spread"],
+    "IRLTLT01ITM156N": ["italy_10y_yield"],
+    "IRLTLT01DEM156N": ["germany_10y_yield"],
   };
 
   for (const [target, candidates] of Object.entries(aliasCandidates)) {
