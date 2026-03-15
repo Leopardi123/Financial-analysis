@@ -457,112 +457,247 @@ export default function GlobalMacroDashboard() {
     return { overlayKey, realBlocks, proxyBlocks, missingBlocks, lowRobustness, negative, normalizationInputs };
   });
 
-  const overlayDesignSpec: Record<string, { intendedPrimaryBlocks: string[]; intendedPrimarySeries: string[]; intendedExactSources: string[]; logicSummary: string }> = {
+  type IntendedSeriesSpec = {
+    id: string;
+    aliases: string[];
+    intendedSources: string[];
+    block: string;
+  };
+
+  type OverlayDesignSpec = {
+    intendedPrimaryBlocks: string[];
+    intendedSeries: IntendedSeriesSpec[];
+    logicSummary: string;
+  };
+
+  const overlayDesignSpec: Record<string, OverlayDesignSpec> = {
     liquidityOverlay: {
       intendedPrimaryBlocks: ["B_MONETARY", "D_CREDIBILITY"],
-      intendedPrimarySeries: ["financial_conditions", "real_yield", "dollar_index"],
-      intendedExactSources: ["fred", "ecb", "scb"],
+      intendedSeries: [
+        { id: "real_yield_10y", aliases: ["real_yield_10y", "DFII10"], intendedSources: ["fred"], block: "B_MONETARY" },
+        { id: "financial_conditions", aliases: ["financial_conditions", "NFCI"], intendedSources: ["fred"], block: "B_MONETARY" },
+        { id: "dollar_index", aliases: ["dollar_index", "DTWEXBGS", "usd_broad_index"], intendedSources: ["fred"], block: "D_CREDIBILITY" },
+      ],
       logicSummary: "Likviditet och finansieringsvillkor vägs för att fånga lättnad/åtstramning i systemet.",
     },
     creditFundingOverlay: {
       intendedPrimaryBlocks: ["B_MONETARY", "D_CREDIBILITY"],
-      intendedPrimarySeries: ["credit_spread", "funding_stress", "policy_rate_gap"],
-      intendedExactSources: ["fred", "ecb", "riksbank"],
+      intendedSeries: [
+        { id: "hy_spread", aliases: ["hy_spread", "BAMLH0A0HYM2"], intendedSources: ["fred"], block: "B_MONETARY" },
+        { id: "ig_spread", aliases: ["ig_spread", "BAMLC0A0CM"], intendedSources: ["fred"], block: "B_MONETARY" },
+        { id: "ted_spread", aliases: ["ted_spread", "TEDRATE"], intendedSources: ["fred"], block: "D_CREDIBILITY" },
+        { id: "xccy_basis", aliases: ["xccy_basis", "DRTSCILM"], intendedSources: ["fred", "proxy"], block: "D_CREDIBILITY" },
+      ],
       logicSummary: "Kredit- och finansieringsstress från spreadar och finansieringsmått.",
     },
     energyShockOverlay: {
       intendedPrimaryBlocks: ["C_INFLATION", "D_CREDIBILITY"],
-      intendedPrimarySeries: ["energy_price_index", "oil_price", "gas_price"],
-      intendedExactSources: ["eia", "fred", "ecb"],
+      intendedSeries: [
+        { id: "oil_price", aliases: ["oil_price", "DCOILWTICO"], intendedSources: ["fred"], block: "C_INFLATION" },
+        { id: "gas_price", aliases: ["gas_price", "NATURAL_GAS"], intendedSources: ["fred", "proxy"], block: "C_INFLATION" },
+        { id: "energy_breadth", aliases: ["energy_breadth", "energy_ppi"], intendedSources: ["fred", "proxy"], block: "D_CREDIBILITY" },
+      ],
       logicSummary: "Energi- och inputchock som slår mot inflation och förtroende.",
     },
     localUnrestOverlay: {
       intendedPrimaryBlocks: ["A_FISCAL", "D_CREDIBILITY"],
-      intendedPrimarySeries: ["policy_uncertainty", "unrest_proxy", "sovereign_risk"],
-      intendedExactSources: ["fred", "worldbank", "regional_proxy"],
+      intendedSeries: [
+        { id: "policy_uncertainty", aliases: ["policy_uncertainty", "uncertainty_proxy"], intendedSources: ["fred", "proxy"], block: "D_CREDIBILITY" },
+        { id: "sovereign_risk", aliases: ["sovereign_risk", "sovereign_spread_proxy"], intendedSources: ["fred", "proxy"], block: "A_FISCAL" },
+      ],
       logicSummary: "Lokal instabilitet/förtroenderisk som påverkar riskpremier.",
     },
     safeHavenRiskOffOverlay: {
       intendedPrimaryBlocks: ["D_CREDIBILITY", "B_MONETARY"],
-      intendedPrimarySeries: ["vix_like", "safe_haven_flow", "usd_strength"],
-      intendedExactSources: ["fmp", "fred"],
+      intendedSeries: [
+        { id: "vix_like", aliases: ["vix_like", "VIXCLS", "spx_vol_proxy"], intendedSources: ["fred", "proxy"], block: "D_CREDIBILITY" },
+        { id: "safe_haven_flow", aliases: ["safe_haven_flow", "gold_price", "GOLD"], intendedSources: ["fmp", "fred"], block: "B_MONETARY" },
+        { id: "usd_strength", aliases: ["usd_strength", "DTWEXBGS", "dollar_index"], intendedSources: ["fred"], block: "D_CREDIBILITY" },
+      ],
       logicSummary: "Risk-off-flöden och safe-haven-efterfrågan.",
     },
     inflationCostShockOverlay: {
       intendedPrimaryBlocks: ["C_INFLATION", "A_FISCAL"],
-      intendedPrimarySeries: ["cpi", "ppi", "wage_pressure", "commodity_input_cost"],
-      intendedExactSources: ["fred", "ecb", "scb"],
+      intendedSeries: [
+        { id: "cpi", aliases: ["cpi", "CPIAUCSL", "CP0000EZ19M086NEST"], intendedSources: ["fred", "ecb"], block: "C_INFLATION" },
+        { id: "ppi", aliases: ["ppi", "PPIACO"], intendedSources: ["fred"], block: "C_INFLATION" },
+        { id: "inflation_expectations", aliases: ["inflation_expectations", "T10YIE"], intendedSources: ["fred"], block: "A_FISCAL" },
+      ],
       logicSummary: "Kostnadstryck som spiller över från input till konsumentled.",
     },
     tradeSupplyChainStressOverlay: {
       intendedPrimaryBlocks: ["C_INFLATION", "D_CREDIBILITY"],
-      intendedPrimarySeries: ["shipping_cost", "delivery_times", "trade_volume_gap"],
-      intendedExactSources: ["fred", "global_proxy"],
+      intendedSeries: [
+        { id: "industrial_production", aliases: ["industrial_production", "INDPRO"], intendedSources: ["fred"], block: "D_CREDIBILITY" },
+        { id: "inventories_orders", aliases: ["inventories_orders", "ISRATIO", "new_orders_proxy"], intendedSources: ["fred", "proxy"], block: "C_INFLATION" },
+        { id: "supply_chain_price_stress", aliases: ["supply_chain_price_stress", "PPIACO", "shipping_proxy"], intendedSources: ["fred", "proxy"], block: "C_INFLATION" },
+      ],
       logicSummary: "Handels- och logistikkedjestress som driver friktion i realekonomin.",
     },
     globalUnrestOverlay: {
       intendedPrimaryBlocks: ["A_FISCAL", "D_CREDIBILITY"],
-      intendedPrimarySeries: ["regional_unrest_us", "regional_unrest_ea", "regional_unrest_se"],
-      intendedExactSources: ["overlay_engine_regional_composite"],
+      intendedSeries: [
+        { id: "regional_unrest_us", aliases: ["regional_unrest_us", "localUnrestOverlay.US"], intendedSources: ["overlay_engine_regional_composite"], block: "D_CREDIBILITY" },
+        { id: "regional_unrest_ea", aliases: ["regional_unrest_ea", "localUnrestOverlay.EA"], intendedSources: ["overlay_engine_regional_composite"], block: "D_CREDIBILITY" },
+        { id: "regional_unrest_se", aliases: ["regional_unrest_se", "localUnrestOverlay.SE"], intendedSources: ["overlay_engine_regional_composite"], block: "A_FISCAL" },
+      ],
       logicSummary: "Globalt sammanslaget orosindex byggt från regionala unrest-signaler.",
     },
   };
 
+  function normalizeToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  }
+
+  function detectBlockerType(reasonText: string, proxyUsed: boolean, hasAvailabilityGap: boolean): "not ingested" | "alias mismatch" | "source not operational" | "proxy currently used" | "history unavailable" | "exact source not yet wired" | "no blocker" {
+    const text = reasonText.toLowerCase();
+    if (!text || text === "—") return proxyUsed ? "proxy currently used" : hasAvailabilityGap ? "exact source not yet wired" : "no blocker";
+    if (text.includes("ingest") || text.includes("missing from") || text.includes("not ingested")) return "not ingested";
+    if (text.includes("alias")) return "alias mismatch";
+    if (text.includes("operational") || text.includes("not available") || text.includes("source missing")) return "source not operational";
+    if (text.includes("history")) return "history unavailable";
+    if (text.includes("proxy") || proxyUsed) return "proxy currently used";
+    if (hasAvailabilityGap) return "exact source not yet wired";
+    return "no blocker";
+  }
+
   const overlayDebugRows = uiOverlayKeysRequested.map((overlayKey) => {
     const overlay = activeOverlayBundle?.overlays?.[overlayKey] ?? null;
     const spec = overlayDesignSpec[overlayKey] ?? {
-      intendedPrimaryBlocks: [], intendedPrimarySeries: [], intendedExactSources: [], logicSummary: "No explicit design spec registered.",
+      intendedPrimaryBlocks: [],
+      intendedSeries: [],
+      logicSummary: "No explicit design spec registered.",
     };
+    const runtimeBlockDiagnostics = globalMacro?.overlayBlockDiagnostics?.[overlayKey] ?? [];
     const actualComponents = overlay?.components ?? [];
-    const actualSeries = Array.from(new Set(actualComponents.map((component) => component.id)));
-    const proxyCount = actualComponents.filter((component) => component.proxy).length;
-    const missingCount = actualComponents.filter((component) => component.missing).length;
-    const proxyRatio = actualComponents.length > 0 ? proxyCount / actualComponents.length : 1;
-    const matchedSeries = spec.intendedPrimarySeries.filter((series) => actualSeries.includes(series)).length;
-    const fidelityRatio = spec.intendedPrimarySeries.length > 0 ? matchedSeries / spec.intendedPrimarySeries.length : 0;
-    const designFidelity = fidelityRatio >= 0.7 ? "high" : fidelityRatio >= 0.35 ? "medium" : "low";
-    const robustness = missingCount > 0 || proxyRatio > 0.6 ? "low" : proxyRatio > 0.25 ? "medium" : "high";
-    const proxyDependence = proxyRatio === 0 ? "none" : proxyRatio <= 0.25 ? "low" : proxyRatio <= 0.6 ? "medium" : "high";
-    const blockRows = Object.entries(overlay?.blockScores ?? {}).map(([block, score]) => {
-      const diagnostics = (globalMacro?.overlayBlockDiagnostics?.[overlayKey] ?? []).find((item) => item.block === block);
-      const blockComponents = actualComponents.filter((component) => component.block === block);
-      const actualSource = Array.from(new Set(blockComponents.map((component) => component.exactSource || component.source))).join(", ") || "—";
-      const confidenceContribution = blockComponents.filter((component) => component.includedInTotal).reduce((sum, component) => sum + (component.weight ?? 0), 0);
+    const seriesRows = spec.intendedSeries.map((seriesSpec) => {
+      const matchedComponents = actualComponents.filter((component) =>
+        seriesSpec.aliases.some((alias) => normalizeToken(component.id).includes(normalizeToken(alias)) || normalizeToken(component.source || "").includes(normalizeToken(alias)) || normalizeToken(component.exactSource || "").includes(normalizeToken(alias))),
+      );
+      const runtimeNames = Array.from(new Set(matchedComponents.map((component) => component.id)));
+      const runtimeSources = Array.from(new Set(matchedComponents.map((component) => component.exactSource || component.source)));
+      const availability: "available" | "partial" | "unavailable" = matchedComponents.length === 0 ? "unavailable" : matchedComponents.some((component) => component.missing) ? "partial" : "available";
+      const fallbackUsed = matchedComponents.some((component) => component.proxy)
+        ? Array.from(new Set(matchedComponents.filter((component) => component.proxy).map((component) => component.note || component.source || component.id))).join(" | ") || "proxy"
+        : "none";
+      const reason = matchedComponents.map((component) => component.note).filter((note): note is string => Boolean(note)).join(" | ")
+        || (availability === "unavailable" ? "intended source family unavailable in current pipeline" : "no blocker");
+      const blockerType = detectBlockerType(reason, fallbackUsed !== "none", availability !== "available");
+      return {
+        id: seriesSpec.id,
+        aliases: seriesSpec.aliases.join(", "),
+        intendedSources: seriesSpec.intendedSources.join(", "),
+        block: seriesSpec.block,
+        availability,
+        runtimeSeriesUsed: runtimeNames.join(", ") || "—",
+        runtimeSourceUsed: runtimeSources.join(", ") || "—",
+        fallbackUsed,
+        reason,
+        blockerType,
+        proxyUsed: matchedComponents.some((component) => component.proxy),
+      };
+    });
+
+    const blockKeys = Array.from(new Set([
+      ...Object.keys(overlay?.blockScores ?? {}),
+      ...runtimeBlockDiagnostics.map((row) => row.block),
+      ...spec.intendedPrimaryBlocks,
+    ]));
+
+    const blockRows = blockKeys.map((block) => {
+      const scoreValue = overlay?.blockScores?.[block] ?? null;
+      const diagnostics = runtimeBlockDiagnostics.find((item) => item.block === block);
+      const runtimeStatus: "pass" | "proxy" | "missing" = diagnostics?.status
+        ?? (scoreValue === null ? "missing" : "pass");
+      const blockSeries = seriesRows.filter((row) => row.block === block);
+      const availableCount = blockSeries.filter((row) => row.availability === "available").length;
+      const partialCount = blockSeries.filter((row) => row.availability === "partial").length;
+      const totalSeries = blockSeries.length;
+      const sourceAvailability: "available" | "partial" | "unavailable" = totalSeries === 0
+        ? "unavailable"
+        : availableCount === totalSeries
+          ? "available"
+          : (availableCount + partialCount) > 0
+            ? "partial"
+            : "unavailable";
+      const proxyUsed = blockSeries.some((row) => row.fallbackUsed !== "none")
+        ? blockSeries.filter((row) => row.fallbackUsed !== "none").map((row) => row.fallbackUsed).join(" | ")
+        : "none";
+      const fidelityScore = totalSeries === 0 ? 0 : (availableCount + partialCount * 0.5) / totalSeries;
+      const specFidelity: "high" | "medium" | "low" = runtimeStatus === "missing"
+        ? "low"
+        : fidelityScore >= 0.75 && proxyUsed === "none"
+          ? "high"
+          : fidelityScore >= 0.4
+            ? "medium"
+            : "low";
+      const reason = diagnostics?.reason
+        || blockSeries.map((row) => row.reason).filter((item) => item && item !== "no blocker").join(" | ")
+        || (runtimeStatus === "pass" && sourceAvailability !== "available"
+          ? "runtime pass via mapped alias/fallback, spec availability is not full"
+          : runtimeStatus === "missing"
+            ? "block not computable with current pipeline inputs"
+            : "no blocker");
+      const blockerType = detectBlockerType(reason, proxyUsed !== "none", sourceAvailability !== "available");
+      const currentRuntimeSources = Array.from(new Set(blockSeries.map((row) => row.runtimeSourceUsed).filter((item) => item && item !== "—"))).join(", ") || diagnostics?.actualSourceUsed || "—";
+      const intendedPrimarySources = blockSeries.flatMap((row) => row.intendedSources.split(", ").map((source) => source.trim())).filter(Boolean);
       return {
         block,
-        intendedSource: diagnostics?.expectedSource || spec.intendedExactSources.join(", ") || "—",
-        actualSource,
-        status: diagnostics?.status ?? (score === null ? "missing" : "pass"),
-        reason: diagnostics?.reason || blockComponents.map((component) => component.note).filter(Boolean).join(" | ") || "—",
-        score: typeof score === "number" ? score.toFixed(1) : "—",
-        confidenceContribution: confidenceContribution > 0 ? `${(confidenceContribution * 100).toFixed(1)}%` : "—",
+        runtimeStatus,
+        specFidelity,
+        intendedPrimarySources: intendedPrimarySources.length > 0 ? Array.from(new Set(intendedPrimarySources)).join(", ") : diagnostics?.expectedSource || "—",
+        currentRuntimeSources,
+        sourceAvailability,
+        fallbackUsed: proxyUsed,
+        reason,
+        blockerType,
+        score: typeof scoreValue === "number" ? scoreValue.toFixed(1) : "—",
       };
     });
-    const seriesRows = spec.intendedPrimarySeries.map((series) => {
-      const component = actualComponents.find((item) => item.id === series) ?? null;
-      return {
-        intendedSeries: series,
-        actualSeriesUsed: component?.id ?? "—",
-        source: component?.exactSource || component?.source || "—",
-        proxy: component?.proxy ? "yes" : "no",
-        missing: component?.missing ? "yes" : component ? "no" : "yes",
-        note: component?.note || (component ? "" : "series missing from current overlay execution"),
-      };
-    });
-    const gapNotes = [
-      ...seriesRows.filter((row) => row.actualSeriesUsed === "—").map((row) => `${row.intendedSeries}: series missing from ingest/alias pipeline`),
-      ...(globalMacro?.overlayBlockDiagnostics?.[overlayKey] ?? []).filter((row) => row.status !== "pass").map((row) => `${row.block}: ${row.reason || "fallback triggered"}`),
+
+    const runnableBlocks = blockRows.filter((row) => row.runtimeStatus !== "missing").length;
+    const runtimeCompleteness: "full" | "partial" | "weak" = blockRows.length === 0
+      ? "weak"
+      : runnableBlocks === blockRows.length
+        ? "full"
+        : runnableBlocks >= Math.ceil(blockRows.length / 2)
+          ? "partial"
+          : "weak";
+    const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
+    const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
+    const proxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed !== "none").length / blockRows.length;
+    const proxyDependence: "none" | "low" | "medium" | "high" = proxyRatio === 0 ? "none" : proxyRatio <= 0.25 ? "low" : proxyRatio <= 0.6 ? "medium" : "high";
+    const robustness: "high" | "medium" | "low" = runtimeCompleteness === "full" && proxyDependence !== "high" && specFidelity !== "low"
+      ? "high"
+      : runtimeCompleteness === "weak" || proxyDependence === "high"
+        ? "low"
+        : "medium";
+    const fidelityBadge = specFidelity === "high"
+      ? "Spec-faithful"
+      : runtimeCompleteness === "weak"
+        ? "Structurally incomplete"
+        : proxyDependence === "high"
+          ? "Proxy-heavy"
+          : "Near-spec";
+
+    const implementationDelta = [
+      `intended primary design: ${spec.logicSummary}`,
+      `current runtime implementation: ${(Array.from(new Set(actualComponents.map((component) => `${component.id}(${component.exactSource || component.source})`))).slice(0, 6).join(", ")) || "no runtime components"}`,
+      ...Array.from(new Set(blockRows.filter((row) => row.blockerType !== "no blocker").map((row) => `${row.block}: ${row.reason} [${row.blockerType}]`))),
     ];
+
     return {
       overlayKey,
       overlay,
       spec,
-      designFidelity,
-      robustness,
+      runtimeCompleteness,
+      specFidelity,
       proxyDependence,
+      robustness,
+      fidelityBadge,
       blockRows,
       seriesRows,
-      gapSummary: gapNotes.length > 0 ? gapNotes : ["No major design/implementation gap detected from current diagnostics."],
+      implementationDelta: implementationDelta.length > 0 ? implementationDelta : ["no blocker"],
     };
   });
 
@@ -928,16 +1063,18 @@ Signal: ${gapLabel}`,
                       <li>total score: {typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(1) : "—"}</li>
                       <li>label: {row.overlay?.label ?? "—"}</li>
                       <li>confidence: {row.overlay?.confidence ?? "—"}%</li>
-                      <li>design fidelity: {row.designFidelity}</li>
+                      <li>runtime completeness: {row.runtimeCompleteness}</li>
+                      <li>spec fidelity: {row.specFidelity}</li>
                       <li>robustness: {row.robustness}</li>
                       <li>proxy dependence: {row.proxyDependence}</li>
+                      <li>fidelity badge: <strong>{row.fidelityBadge}</strong></li>
                     </ul>
 
                     <div style={{ fontSize: 12, marginBottom: 8 }}>
                       <strong>Intended primary design</strong><br />
                       Blocks: {row.spec.intendedPrimaryBlocks.join(", ") || "—"}<br />
-                      Series: {row.spec.intendedPrimarySeries.join(", ") || "—"}<br />
-                      Exact sources: {row.spec.intendedExactSources.join(", ") || "—"}<br />
+                      Series: {row.spec.intendedSeries.map((series) => series.id).join(", ") || "—"}<br />
+                      Intended source families: {Array.from(new Set(row.spec.intendedSeries.flatMap((series) => series.intendedSources))).join(", ") || "—"}<br />
                       Logic: {row.spec.logicSummary}
                     </div>
 
@@ -945,25 +1082,33 @@ Signal: ${gapLabel}`,
                       <table>
                         <thead>
                           <tr>
+                            <th>overlay</th>
                             <th>block</th>
-                            <th>intended primary source</th>
-                            <th>actual source</th>
-                            <th>status</th>
+                            <th>runtime status</th>
+                            <th>spec fidelity</th>
+                            <th>intended primary sources</th>
+                            <th>current runtime sources</th>
+                            <th>source availability</th>
+                            <th>fallback used</th>
                             <th>reason</th>
+                            <th>blocker type</th>
                             <th>score</th>
-                            <th>confidence contribution</th>
                           </tr>
                         </thead>
                         <tbody>
                           {row.blockRows.map((block) => (
                             <tr key={`overlay-block-${row.overlayKey}-${block.block}`}>
+                              <td>{row.overlayKey}</td>
                               <td>{block.block}</td>
-                              <td>{block.intendedSource}</td>
-                              <td>{block.actualSource}</td>
-                              <td>{block.status}</td>
+                              <td>{block.runtimeStatus}</td>
+                              <td>{block.specFidelity}</td>
+                              <td>{block.intendedPrimarySources}</td>
+                              <td>{block.currentRuntimeSources}</td>
+                              <td>{block.sourceAvailability}</td>
+                              <td>{block.fallbackUsed}</td>
                               <td>{block.reason}</td>
+                              <td>{block.blockerType}</td>
                               <td>{block.score}</td>
-                              <td>{block.confidenceContribution}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -975,22 +1120,26 @@ Signal: ${gapLabel}`,
                         <thead>
                           <tr>
                             <th>intended series</th>
-                            <th>actual series used</th>
-                            <th>source</th>
-                            <th>proxy</th>
-                            <th>missing</th>
-                            <th>note</th>
+                            <th>aliases (intended family)</th>
+                            <th>availability in current pipeline</th>
+                            <th>current runtime source</th>
+                            <th>current runtime series</th>
+                            <th>fallback used</th>
+                            <th>reason</th>
+                            <th>blocker type</th>
                           </tr>
                         </thead>
                         <tbody>
                           {row.seriesRows.map((series) => (
-                            <tr key={`overlay-series-${row.overlayKey}-${series.intendedSeries}`}>
-                              <td>{series.intendedSeries}</td>
-                              <td>{series.actualSeriesUsed}</td>
-                              <td>{series.source}</td>
-                              <td>{series.proxy}</td>
-                              <td>{series.missing}</td>
-                              <td>{series.note || "—"}</td>
+                            <tr key={`overlay-series-${row.overlayKey}-${series.id}`}>
+                              <td>{series.id}</td>
+                              <td>{series.aliases}</td>
+                              <td>{series.availability}</td>
+                              <td>{series.runtimeSourceUsed}</td>
+                              <td>{series.runtimeSeriesUsed}</td>
+                              <td>{series.fallbackUsed}</td>
+                              <td>{series.reason || "—"}</td>
+                              <td>{series.blockerType}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -998,9 +1147,9 @@ Signal: ${gapLabel}`,
                     </div>
 
                     <div style={{ fontSize: 12 }}>
-                      <strong>Current implementation gap</strong>
+                      <strong>Implementation delta vs spec</strong>
                       <ul>
-                        {row.gapSummary.map((gap) => (
+                        {row.implementationDelta.map((gap) => (
                           <li key={`${row.overlayKey}-${gap}`}>{gap}</li>
                         ))}
                       </ul>
