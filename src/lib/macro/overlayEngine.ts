@@ -270,11 +270,17 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       const eaSignalSeries = region === "EA" ? getSeries(series, "EA_POLICY_UNCERTAINTY") : [];
       const signalSeries = region === "US" ? usSignalSeries : eaSignalSeries;
 
+      const usRepricingSeries = region === "US" ? getSeries(series, "ACMTP10") : [];
       const eaItaly10y = getSeries(series, "IRLTLT01ITM156N");
       const eaGermany10y = getSeries(series, "IRLTLT01DEM156N");
-      const eaTransmissionSeries = subtractAlignedSeries(eaItaly10y, eaGermany10y);
+      const eaRepricingSeries = subtractAlignedSeries(eaItaly10y, eaGermany10y);
+      const repricingSeries = region === "US" ? usRepricingSeries : (region === "EA" ? eaRepricingSeries : []);
 
-      const transmissionSeries = region === "EA" ? eaTransmissionSeries : [];
+      // Local Unrest repricing is region-specific by design.
+      // EA uses sovereign credit repricing (BTP-Bund).
+      // US uses sovereign duration repricing (ACM term premium).
+      // These are different mechanisms but conceptually equivalent expressions
+      // of market repricing of sovereign/state exposure.
       const local = finalizeOverlay({
         signal: {
           weight: 0.5,
@@ -295,27 +301,27 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
               : "Missing by design unless source-faithful EA policy uncertainty series is ingested",
           })],
         },
-        transmission: {
+        repricing: {
           weight: 0.5,
           components: [makeComponent({
             asOfDate,
-            id: region === "EA" ? "lu_transmission_ea" : "lu_transmission",
-            title: "Sovereign spread transmission",
-            block: "transmission",
+            id: region === "EA" ? "lu_repricing_ea" : "lu_repricing_us",
+            title: "Sovereign/state repricing",
+            block: "repricing",
             weight: 1,
-            source: region === "EA" ? "FRED" : "Not defined",
+            source: "FRED",
             exactSource: region === "EA"
               ? "IRLTLT01ITM156N - IRLTLT01DEM156N"
-              : "US transmission block not defined in v1: no true sovereign spread exists for USD issuer",
-            series: transmissionSeries,
+              : "ACMTP10",
+            series: repricingSeries,
             invert: true,
             note: region === "EA"
-              ? "Source-faithful BTP-Bund spread active"
-              : "Not defined in v1 by design",
+              ? "Source-faithful sovereign credit repricing via BTP-Bund spread (Italy10Y - Germany10Y)"
+              : "Source-faithful sovereign duration repricing via ACM term premium (ACMTP10); regional difference vs EA is intentional by design",
           })],
         },
       });
-      return requireSourceFaithfulBlocks(local, ["signal", "transmission"]);
+      return requireSourceFaithfulBlocks(local, ["signal", "repricing"]);
     })(),
     safeHavenRiskOffOverlay: finalizeOverlay({
       gold_equity: { weight: 0.65, components: [makeComponent({ asOfDate, id: "sh_gold_eq", title: "Gold-equity flight", block: "gold_equity", weight: 1, source: "FRED", exactSource: "GOLD/SP500 ratio", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
@@ -429,6 +435,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     DGS10: ["nominal_yield_10y_us"],
     DCOILBRENTEU: ["oil_brent_usd"],
     INDPRO: ["pmi_us"],
+    ACMTP10: ["acmtp10_us"],
     DGORDER: ["new_orders_us"],
     POLICY_UNCERTAINTY_US: ["policy_uncertainty_us", "usepuindxm"],
     CPILFESL: ["core_cpi_us"],

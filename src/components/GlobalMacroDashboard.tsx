@@ -507,12 +507,12 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Energiinput och genomslag till kostnads-/förtroendeblock.",
     },
     localUnrestOverlay: {
-      intendedPrimaryBlocks: ["signal", "transmission"],
+      intendedPrimaryBlocks: ["signal", "repricing"],
       intendedSeries: [
         { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty"] },
-        { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["sovereign spread family"], aliasFamily: ["sovereign_risk"] },
+        { id: "sovereign_repricing", block: "repricing", linkedMacroFamily: "A_FISCAL", primarySources: ["sovereign repricing family"], aliasFamily: ["repricing"] },
       ],
-      logicSummary: "Lokal oros-/förtroendebild via policy uncertainty + sovereign spread (source-faithful only).",
+      logicSummary: "Local Unrest uses policy uncertainty + sovereign/state repricing. EA repricing uses sovereign credit spread (BTP-Bund); US repricing uses sovereign duration term premium (ACMTP10).",
     },
     safeHavenRiskOffOverlay: {
       intendedPrimaryBlocks: ["gold_equity", "duration", "usd"],
@@ -567,7 +567,7 @@ export default function GlobalMacroDashboard() {
         ...base,
         intendedSeries: [
           { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["USEPUINDXM"], aliasFamily: ["policy_uncertainty", "policy_uncertainty_us", "usepuindxm"] },
-          { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["—"], aliasFamily: [], note: "Not defined in v1 by design" },
+          { id: "sovereign_repricing", block: "repricing", linkedMacroFamily: "A_FISCAL", primarySources: ["ACMTP10"], aliasFamily: ["repricing", "lu_repricing_us", "acmtp10", "acmtp10_us"], note: "US repricing is sovereign duration risk repricing via ACM term premium (intentional regional design difference vs EA)." },
         ],
       };
     }
@@ -577,7 +577,7 @@ export default function GlobalMacroDashboard() {
         ...base,
         intendedSeries: [
           { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["EA policy uncertainty family"], aliasFamily: ["policy_uncertainty", "ea_policy_uncertainty"] },
-          { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["IRLTLT01ITM156N", "IRLTLT01DEM156N"], aliasFamily: ["sovereign_risk", "lu_transmission_ea", "irl tlt01itm156n", "irl tlt01dem156n", "italy_10y_yield", "germany_10y_yield"] },
+          { id: "sovereign_repricing", block: "repricing", linkedMacroFamily: "A_FISCAL", primarySources: ["IRLTLT01ITM156N", "IRLTLT01DEM156N"], aliasFamily: ["repricing", "lu_repricing_ea", "irl tlt01itm156n", "irl tlt01dem156n", "italy_10y_yield", "germany_10y_yield"], note: "EA repricing is sovereign credit risk repricing via BTP-Bund spread (Italy10Y - Germany10Y)." },
         ],
       };
     }
@@ -586,7 +586,7 @@ export default function GlobalMacroDashboard() {
       ...base,
       intendedSeries: [
         { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty"] },
-        { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["—"], aliasFamily: [], note: "Region-specific source not defined in v1" },
+        { id: "sovereign_repricing", block: "repricing", linkedMacroFamily: "A_FISCAL", primarySources: ["region-specific sovereign repricing source"], aliasFamily: ["repricing"], note: "Region-specific repricing source not yet defined" },
       ],
     };
   }
@@ -617,13 +617,11 @@ export default function GlobalMacroDashboard() {
     runtimeHasSeries: boolean;
     aliasMatched: boolean;
     reasonText: string;
-  }): "no blocker" | "alias mapping only" | "exact source family differs" | "proxy currently used" | "intended source not ingested" | "intended source not wired to overlay" | "inherited overlay used instead" | "derived approximation used" | "not_defined_in_v1_by_design" {
+  }): "no blocker" | "alias mapping only" | "exact source family differs" | "proxy currently used" | "intended source not ingested" | "intended source not wired to overlay" | "inherited overlay used instead" | "derived approximation used" {
     const text = args.reasonText.toLowerCase();
     if (args.fallback === "inherited overlay input") return "inherited overlay used instead";
     if (args.fallback === "derived approximation") return "derived approximation used";
     if (args.fallback === "proxy source") return "proxy currently used";
-    if (args.availability === "not_applicable") return "not_defined_in_v1_by_design";
-    if (text.includes("not defined in v1 by design") || text.includes("no true sovereign spread exists for usd issuer")) return "not_defined_in_v1_by_design";
     if (args.fallback === "alias mapping" && args.availability === "available") return "alias mapping only";
     if (args.availability === "unavailable" && (text.includes("ingest") || text.includes("not ingested") || text.includes("missing"))) return "intended source not ingested";
     if (args.availability !== "available" && args.runtimeHasSeries) return "exact source family differs";
@@ -650,47 +648,36 @@ export default function GlobalMacroDashboard() {
       const aliasMatched = matched.length > 0;
       const anyStrictAvailable = matched.some((component) => !component.missing);
       const anyPartial = matched.some((component) => component.missing);
-      const localUnrestUsTransmissionSeriesByDesign = overlayKey === "localUnrestOverlay" && selectedRegion === "US" && seriesSpec.block === "transmission";
-      const availability: "available" | "partial" | "unavailable" | "not_applicable" = localUnrestUsTransmissionSeriesByDesign
-        ? "not_applicable"
-        : anyStrictAvailable
-          ? "available"
-          : anyPartial
-            ? "partial"
-            : "unavailable";
-      const fallbackUsage = localUnrestUsTransmissionSeriesByDesign
-        ? "none"
-        : inferFallbackUsage(runtimePool, aliasMatched && runtimeSeriesUsed !== "—" && !runtimePool.some((component) => component.proxy));
-      const reasonText = localUnrestUsTransmissionSeriesByDesign
-        ? "Not defined in v1 by design: no true sovereign spread exists for USD issuer"
-        : (runtimePool.map((component) => component.note).filter((note): note is string => Boolean(note)).join(" | ")
-          || (availability === "unavailable"
-            ? "intended primary source not present in current overlay runtime inputs"
-            : fallbackUsage === "alias mapping"
-              ? "intended source resolved through canonical alias mapping"
-              : "no blocker"));
-      const blockerType = localUnrestUsTransmissionSeriesByDesign
-        ? "not_defined_in_v1_by_design"
-        : inferBlockerType({
-          availability,
-          fallback: fallbackUsage,
-          runtimeHasSeries: runtimeSeriesUsed !== "—",
-          aliasMatched,
-          reasonText,
-        });
-      const mappingType = localUnrestUsTransmissionSeriesByDesign
-        ? "not_applicable"
-        : availability === "unavailable"
-          ? (runtimeSeriesUsed !== "—" ? "alternative family" : "not mapped")
+      const availability: "available" | "partial" | "unavailable" = anyStrictAvailable
+        ? "available"
+        : anyPartial
+          ? "partial"
+          : "unavailable";
+      const fallbackUsage = inferFallbackUsage(runtimePool, aliasMatched && runtimeSeriesUsed !== "—" && !runtimePool.some((component) => component.proxy));
+      const reasonText = runtimePool.map((component) => component.note).filter((note): note is string => Boolean(note)).join(" | ")
+        || (availability === "unavailable"
+          ? "intended primary source not present in current overlay runtime inputs"
           : fallbackUsage === "alias mapping"
-            ? "alias mapping"
-            : fallbackUsage === "proxy source"
-              ? "proxy"
-              : fallbackUsage === "derived approximation"
-                ? "derived"
-                : fallbackUsage === "inherited overlay input"
-                  ? "inherited"
-                  : "direct";
+            ? "intended source resolved through canonical alias mapping"
+            : "no blocker");
+      const blockerType = inferBlockerType({
+        availability,
+        fallback: fallbackUsage,
+        runtimeHasSeries: runtimeSeriesUsed !== "—",
+        aliasMatched,
+        reasonText,
+      });
+      const mappingType = availability === "unavailable"
+        ? (runtimeSeriesUsed !== "—" ? "alternative family" : "not mapped")
+        : fallbackUsage === "alias mapping"
+          ? "alias mapping"
+          : fallbackUsage === "proxy source"
+            ? "proxy"
+            : fallbackUsage === "derived approximation"
+              ? "derived"
+              : fallbackUsage === "inherited overlay input"
+                ? "inherited"
+                : "direct";
       return {
         id: seriesSpec.id,
         block: seriesSpec.block,
@@ -698,10 +685,10 @@ export default function GlobalMacroDashboard() {
         intendedPrimarySources: seriesSpec.primarySources.join(", "),
         aliasFamily: seriesSpec.aliasFamily.join(", ") || "—",
         availability,
-        runtimeSeriesUsed: localUnrestUsTransmissionSeriesByDesign ? "—" : runtimeSeriesUsed,
-        runtimeSourceUsed: localUnrestUsTransmissionSeriesByDesign ? "—" : runtimeSourceUsed,
+        runtimeSeriesUsed,
+        runtimeSourceUsed,
         mappingType,
-        proxy: localUnrestUsTransmissionSeriesByDesign ? "no" : (fallbackUsage === "proxy source" ? "yes" : "no"),
+        proxy: fallbackUsage === "proxy source" ? "yes" : "no",
         fallbackUsage,
         blockerType,
         note: [seriesSpec.note, reasonText].filter(Boolean).join(" | "),
@@ -736,14 +723,11 @@ export default function GlobalMacroDashboard() {
 
       const blockComponents = actualComponents.filter((component) => component.block === block);
       const hasRuntime = (typeof scoreValue === "number") || blockComponents.some((component) => !component.missing) || diagnostics?.status === "pass" || diagnostics?.status === "proxy";
-      const localUnrestUsTransmissionByDesign = overlayKey === "localUnrestOverlay" && selectedRegion === "US" && block === "transmission";
-      const runtimeStatus: "pass" | "proxy" | "missing" | "not_defined_v1" = localUnrestUsTransmissionByDesign
-        ? "not_defined_v1"
-        : !hasRuntime
-          ? "missing"
-          : (blockComponents.some((component) => component.proxy) || blockSeries.some((row) => row.fallbackUsage !== "none" && row.fallbackUsage !== "alias mapping") || diagnostics?.status === "proxy")
-            ? "proxy"
-            : "pass";
+      const runtimeStatus: "pass" | "proxy" | "missing" = !hasRuntime
+        ? "missing"
+        : (blockComponents.some((component) => component.proxy) || blockSeries.some((row) => row.fallbackUsage !== "none" && row.fallbackUsage !== "alias mapping") || diagnostics?.status === "proxy")
+          ? "proxy"
+          : "pass";
 
       const availabilityRatio = blockSeries.length === 0 ? 0 : (availabilityCounts.available + availabilityCounts.partial * 0.5) / blockSeries.length;
       const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation" || row.fallbackUsage === "inherited overlay input").length / blockSeries.length;
@@ -758,21 +742,15 @@ export default function GlobalMacroDashboard() {
       const fallbackUsedSet = Array.from(new Set(blockSeries.map((row) => row.fallbackUsage).filter((value) => value !== "none")));
       const fallbackUsed = fallbackUsedSet.length > 0 ? fallbackUsedSet.join(" + ") : "none";
       const intendedPrimarySources = blockSeries.flatMap((row) => row.intendedPrimarySources.split(",").map((item) => item.trim())).filter(Boolean);
-      const currentRuntimeSources = runtimeStatus === "not_defined_v1"
-        ? "—"
-        : (Array.from(new Set(blockSeries.map((row) => row.runtimeSourceUsed).filter((item) => item && item !== "—"))).join(", ") || diagnostics?.actualSourceUsed || "—");
-      const sourceAvailability: "available" | "partial" | "unavailable" | "not_applicable" = runtimeStatus === "not_defined_v1"
-        ? "not_applicable"
-        : sourceAvailabilityBase;
+      const currentRuntimeSources = Array.from(new Set(blockSeries.map((row) => row.runtimeSourceUsed).filter((item) => item && item !== "—"))).join(", ") || diagnostics?.actualSourceUsed || "—";
+      const sourceAvailability: "available" | "partial" | "unavailable" = sourceAvailabilityBase;
       const reason = diagnostics?.reason
         || blockSeries.map((row) => row.note).filter(Boolean).join(" | ")
         || (runtimeStatus === "pass" && sourceAvailability !== "available"
           ? "runtime pass with partial spec coverage via alias/alternative source family"
           : runtimeStatus === "proxy"
             ? "runtime works but at least one component uses proxy/derived/inherited input"
-            : runtimeStatus === "not_defined_v1"
-              ? "Not defined in v1 by design: no true sovereign spread exists for USD issuer"
-              : "block cannot be computed with meaningful runtime data");
+            : "block cannot be computed with meaningful runtime data");
       const blockerPriority = blockSeries.map((row) => row.blockerType).find((type) => type !== "no blocker")
         || inferBlockerType({ availability: sourceAvailability, fallback: fallbackUsedSet[0] as any || "none", runtimeHasSeries: currentRuntimeSources !== "—", aliasMatched: false, reasonText: reason });
 
@@ -791,23 +769,20 @@ export default function GlobalMacroDashboard() {
       };
     });
 
-    const hasNotDefinedBlock = blockRows.some((row) => row.runtimeStatus === "not_defined_v1");
     const runnableBlocks = blockRows.filter((row) => row.runtimeStatus !== "missing").length;
-    const runtimeCompleteness: "full" | "partial" | "weak" | "design_complete_missing_block" = hasNotDefinedBlock
-      ? "design_complete_missing_block"
-      : blockRows.length === 0
-        ? "weak"
-        : runnableBlocks === blockRows.length
-          ? "full"
-          : runnableBlocks >= Math.ceil(blockRows.length / 2)
-            ? "partial"
-            : "weak";
+    const runtimeCompleteness: "full" | "partial" | "weak" = blockRows.length === 0
+      ? "weak"
+      : runnableBlocks === blockRows.length
+        ? "full"
+        : runnableBlocks >= Math.ceil(blockRows.length / 2)
+          ? "partial"
+          : "weak";
     const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
     const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
     const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy).length / actualComponents.length;
     const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")).length / blockRows.length;
     const criticalBlocksByOverlay: Record<string, string[]> = {
-      localUnrestOverlay: ["signal", "transmission"],
+      localUnrestOverlay: ["signal", "repricing"],
       tradeSupplyChainStressOverlay: ["real_goods_flow", "pricing"],
       safeHavenRiskOffOverlay: ["gold_equity", "duration"],
       liquidityOverlay: ["bridge", "transmission"],
@@ -837,9 +812,7 @@ export default function GlobalMacroDashboard() {
 
     const exactDifferences = blockRows
       .filter((row) => row.blockerType !== "no blocker" || row.sourceAvailability !== "available")
-      .map((row) => row.blockerType === "not_defined_in_v1_by_design"
-        ? `${row.block}: not defined in v1 by design; availability=${row.sourceAvailability}; fallback=${row.fallbackUsed}`
-        : `${row.block}: ${row.blockerType}; availability=${row.sourceAvailability}; fallback=${row.fallbackUsed}`);
+      .map((row) => `${row.block}: ${row.blockerType}; availability=${row.sourceAvailability}; fallback=${row.fallbackUsed}`);
     const matchesSpec = blockRows
       .filter((row) => row.specFidelity === "high" || (row.specFidelity === "medium" && row.sourceAvailability === "available"))
       .map((row) => `${row.block}: runtime=${row.runtimeStatus}, primary sources present (${row.intendedPrimarySources})`);
@@ -852,16 +825,13 @@ export default function GlobalMacroDashboard() {
       if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
       if (row.blockerType === "exact source family differs") reasons.push(`${row.block} exact source family differs`);
       if (row.blockerType === "intended source not wired to overlay") reasons.push(`${row.block} source not yet wired`);
-      if (row.blockerType === "not_defined_in_v1_by_design") reasons.push(`${row.block} is intentionally undefined in US v1 because no true sovereign spread exists for a USD issuer`);
       return reasons;
     })));
-    const impact = blockRows.some((row) => row.blockerType === "not_defined_in_v1_by_design")
-      ? "Overlay remains correctly gated as Not implemented until/if design changes; this is a design constraint, not a pipeline defect."
-      : proxyDependence === "high"
-        ? "Interpret with caution: proxy-heavy signal can shift faster than intended design baseline."
-        : specFidelity === "low"
-          ? "Interpretation risk is elevated: runtime deviates materially from intended spec."
-          : "Interpretation remains broadly aligned with spec; monitor listed deltas.";
+    const impact = proxyDependence === "high"
+      ? "Interpret with caution: proxy-heavy signal can shift faster than intended design baseline."
+      : specFidelity === "low"
+        ? "Interpretation risk is elevated: runtime deviates materially from intended spec."
+        : "Interpretation remains broadly aligned with spec; monitor listed deltas.";
 
     return {
       overlayKey,
