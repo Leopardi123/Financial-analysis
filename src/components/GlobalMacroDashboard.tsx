@@ -749,6 +749,7 @@ export default function GlobalMacroDashboard() {
       // If the region-correct source is present with no proxy/fallback, this block must not be marked missing.
       const localUnrestRepricingBlockSourceFaithful = overlayKey === "localUnrestOverlay"
         && block === "repricing"
+        && typeof scoreValue === "number"
         && fallbackUsed === "none"
         && !blockComponents.some((component) => component.proxy)
         && ((selectedRegion === "US" && /ACMTP10/i.test(currentRuntimeSources))
