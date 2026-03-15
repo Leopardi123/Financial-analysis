@@ -315,7 +315,9 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
               ? "IRLTLT01ITM156N - IRLTLT01DEM156N"
               : "ACMTP10",
             series: repricingSeries,
-            minObservations: 12,
+            // Repricing can have shorter valid windows in runtime snapshots;
+            // allow score computation once a minimal source-faithful monthly history exists.
+            minObservations: 3,
             invert: true,
             note: region === "EA"
               ? "Source-faithful sovereign credit repricing via BTP-Bund spread (Italy10Y - Germany10Y)"
