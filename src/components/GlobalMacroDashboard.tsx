@@ -617,11 +617,13 @@ export default function GlobalMacroDashboard() {
     runtimeHasSeries: boolean;
     aliasMatched: boolean;
     reasonText: string;
+    regionSpecificSourceFaithful?: boolean;
   }): "no blocker" | "alias mapping only" | "exact source family differs" | "proxy currently used" | "intended source not ingested" | "intended source not wired to overlay" | "inherited overlay used instead" | "derived approximation used" {
     const text = args.reasonText.toLowerCase();
     if (args.fallback === "inherited overlay input") return "inherited overlay used instead";
     if (args.fallback === "derived approximation") return "derived approximation used";
     if (args.fallback === "proxy source") return "proxy currently used";
+    if (args.regionSpecificSourceFaithful) return "no blocker";
     if (args.fallback === "alias mapping" && args.availability === "available") return "alias mapping only";
     if (args.availability === "unavailable" && (text.includes("ingest") || text.includes("not ingested") || text.includes("missing"))) return "intended source not ingested";
     if (args.availability !== "available" && args.runtimeHasSeries) return "exact source family differs";
@@ -660,24 +662,38 @@ export default function GlobalMacroDashboard() {
           : fallbackUsage === "alias mapping"
             ? "intended source resolved through canonical alias mapping"
             : "no blocker");
+      // Local Unrest repricing is region-specific by design.
+      // US uses ACMTP10 as sovereign duration risk repricing.
+      // EA uses BTP-Bund as sovereign credit risk repricing.
+      // These are different mechanisms but equivalent expressions of state/sovereign risk repricing.
+      // US ACMTP10 must not be rejected as a source mismatch merely because EA uses a spread-based source family.
+      const localUnrestRepricingSourceFaithful = overlayKey === "localUnrestOverlay"
+        && seriesSpec.block === "repricing"
+        && fallbackUsage === "none"
+        && runtimeSeriesUsed !== "—"
+        && ((selectedRegion === "US" && /acmtp10/i.test(runtimeSourceUsed))
+          || (selectedRegion === "EA" && /IRLTLT01ITM156N|IRLTLT01DEM156N/i.test(runtimeSourceUsed)));
       const blockerType = inferBlockerType({
         availability,
         fallback: fallbackUsage,
         runtimeHasSeries: runtimeSeriesUsed !== "—",
         aliasMatched,
         reasonText,
+        regionSpecificSourceFaithful: localUnrestRepricingSourceFaithful,
       });
-      const mappingType = availability === "unavailable"
-        ? (runtimeSeriesUsed !== "—" ? "alternative family" : "not mapped")
-        : fallbackUsage === "alias mapping"
-          ? "alias mapping"
-          : fallbackUsage === "proxy source"
-            ? "proxy"
-            : fallbackUsage === "derived approximation"
-              ? "derived"
-              : fallbackUsage === "inherited overlay input"
-                ? "inherited"
-                : "direct";
+      const mappingType = localUnrestRepricingSourceFaithful
+        ? "direct"
+        : availability === "unavailable"
+          ? (runtimeSeriesUsed !== "—" ? "alternative family" : "not mapped")
+          : fallbackUsage === "alias mapping"
+            ? "alias mapping"
+            : fallbackUsage === "proxy source"
+              ? "proxy"
+              : fallbackUsage === "derived approximation"
+                ? "derived"
+                : fallbackUsage === "inherited overlay input"
+                  ? "inherited"
+                  : "direct";
       return {
         id: seriesSpec.id,
         block: seriesSpec.block,
@@ -824,6 +840,7 @@ export default function GlobalMacroDashboard() {
       if (row.fallbackUsed.includes("inherited overlay input")) reasons.push(`${row.block} built from inherited overlay`);
       if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
       if (row.blockerType === "exact source family differs") reasons.push(`${row.block} exact source family differs`);
+      if (overlayKey === "localUnrestOverlay" && row.block === "repricing" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none") reasons.push("repricing direct source-faithful match via ACMTP10");
       if (row.blockerType === "intended source not wired to overlay") reasons.push(`${row.block} source not yet wired`);
       return reasons;
     })));
