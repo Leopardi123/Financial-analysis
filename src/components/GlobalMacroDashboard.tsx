@@ -313,10 +313,10 @@ function ExpandablePanel({ title, children, defaultOpen = false }: { title: stri
   );
 }
 
-function AdminDebugSection({ children }: { children: ReactNode }) {
+function AdminSection({ children }: { children: ReactNode }) {
   return (
     <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 12px", marginTop: 12, background: "#f8fafc" }}>
-      <ExpandablePanel title="Admin / Debug">{children}</ExpandablePanel>
+      <ExpandablePanel title="Admin">{children}</ExpandablePanel>
     </section>
   );
 }
@@ -456,14 +456,115 @@ export default function GlobalMacroDashboard() {
     const normalizationInputs = blockRows.map((row) => `${row.block}=${row.score === null ? "null" : row.score.toFixed(1)}`);
     return { overlayKey, realBlocks, proxyBlocks, missingBlocks, lowRobustness, negative, normalizationInputs };
   });
-  const lowRobustnessCount = overlaySanity.filter((entry) => entry.lowRobustness).length;
 
-  const overlaysPartialOrProxy = overlayEntries.filter(([, overlay]) => {
-    const components = overlay.components ?? [];
-    const missingCount = components.filter((component) => component.missing).length;
-    const proxyCount = components.filter((component) => component.proxy).length;
-    return missingCount > 0 || proxyCount > 0;
-  }).length;
+  const overlayDesignSpec: Record<string, { intendedPrimaryBlocks: string[]; intendedPrimarySeries: string[]; intendedExactSources: string[]; logicSummary: string }> = {
+    liquidityOverlay: {
+      intendedPrimaryBlocks: ["B_MONETARY", "D_CREDIBILITY"],
+      intendedPrimarySeries: ["financial_conditions", "real_yield", "dollar_index"],
+      intendedExactSources: ["fred", "ecb", "scb"],
+      logicSummary: "Likviditet och finansieringsvillkor vägs för att fånga lättnad/åtstramning i systemet.",
+    },
+    creditFundingOverlay: {
+      intendedPrimaryBlocks: ["B_MONETARY", "D_CREDIBILITY"],
+      intendedPrimarySeries: ["credit_spread", "funding_stress", "policy_rate_gap"],
+      intendedExactSources: ["fred", "ecb", "riksbank"],
+      logicSummary: "Kredit- och finansieringsstress från spreadar och finansieringsmått.",
+    },
+    energyShockOverlay: {
+      intendedPrimaryBlocks: ["C_INFLATION", "D_CREDIBILITY"],
+      intendedPrimarySeries: ["energy_price_index", "oil_price", "gas_price"],
+      intendedExactSources: ["eia", "fred", "ecb"],
+      logicSummary: "Energi- och inputchock som slår mot inflation och förtroende.",
+    },
+    localUnrestOverlay: {
+      intendedPrimaryBlocks: ["A_FISCAL", "D_CREDIBILITY"],
+      intendedPrimarySeries: ["policy_uncertainty", "unrest_proxy", "sovereign_risk"],
+      intendedExactSources: ["fred", "worldbank", "regional_proxy"],
+      logicSummary: "Lokal instabilitet/förtroenderisk som påverkar riskpremier.",
+    },
+    safeHavenRiskOffOverlay: {
+      intendedPrimaryBlocks: ["D_CREDIBILITY", "B_MONETARY"],
+      intendedPrimarySeries: ["vix_like", "safe_haven_flow", "usd_strength"],
+      intendedExactSources: ["fmp", "fred"],
+      logicSummary: "Risk-off-flöden och safe-haven-efterfrågan.",
+    },
+    inflationCostShockOverlay: {
+      intendedPrimaryBlocks: ["C_INFLATION", "A_FISCAL"],
+      intendedPrimarySeries: ["cpi", "ppi", "wage_pressure", "commodity_input_cost"],
+      intendedExactSources: ["fred", "ecb", "scb"],
+      logicSummary: "Kostnadstryck som spiller över från input till konsumentled.",
+    },
+    tradeSupplyChainStressOverlay: {
+      intendedPrimaryBlocks: ["C_INFLATION", "D_CREDIBILITY"],
+      intendedPrimarySeries: ["shipping_cost", "delivery_times", "trade_volume_gap"],
+      intendedExactSources: ["fred", "global_proxy"],
+      logicSummary: "Handels- och logistikkedjestress som driver friktion i realekonomin.",
+    },
+    globalUnrestOverlay: {
+      intendedPrimaryBlocks: ["A_FISCAL", "D_CREDIBILITY"],
+      intendedPrimarySeries: ["regional_unrest_us", "regional_unrest_ea", "regional_unrest_se"],
+      intendedExactSources: ["overlay_engine_regional_composite"],
+      logicSummary: "Globalt sammanslaget orosindex byggt från regionala unrest-signaler.",
+    },
+  };
+
+  const overlayDebugRows = uiOverlayKeysRequested.map((overlayKey) => {
+    const overlay = activeOverlayBundle?.overlays?.[overlayKey] ?? null;
+    const spec = overlayDesignSpec[overlayKey] ?? {
+      intendedPrimaryBlocks: [], intendedPrimarySeries: [], intendedExactSources: [], logicSummary: "No explicit design spec registered.",
+    };
+    const actualComponents = overlay?.components ?? [];
+    const actualSeries = Array.from(new Set(actualComponents.map((component) => component.id)));
+    const proxyCount = actualComponents.filter((component) => component.proxy).length;
+    const missingCount = actualComponents.filter((component) => component.missing).length;
+    const proxyRatio = actualComponents.length > 0 ? proxyCount / actualComponents.length : 1;
+    const matchedSeries = spec.intendedPrimarySeries.filter((series) => actualSeries.includes(series)).length;
+    const fidelityRatio = spec.intendedPrimarySeries.length > 0 ? matchedSeries / spec.intendedPrimarySeries.length : 0;
+    const designFidelity = fidelityRatio >= 0.7 ? "high" : fidelityRatio >= 0.35 ? "medium" : "low";
+    const robustness = missingCount > 0 || proxyRatio > 0.6 ? "low" : proxyRatio > 0.25 ? "medium" : "high";
+    const proxyDependence = proxyRatio === 0 ? "none" : proxyRatio <= 0.25 ? "low" : proxyRatio <= 0.6 ? "medium" : "high";
+    const blockRows = Object.entries(overlay?.blockScores ?? {}).map(([block, score]) => {
+      const diagnostics = (globalMacro?.overlayBlockDiagnostics?.[overlayKey] ?? []).find((item) => item.block === block);
+      const blockComponents = actualComponents.filter((component) => component.block === block);
+      const actualSource = Array.from(new Set(blockComponents.map((component) => component.exactSource || component.source))).join(", ") || "—";
+      const confidenceContribution = blockComponents.filter((component) => component.includedInTotal).reduce((sum, component) => sum + (component.weight ?? 0), 0);
+      return {
+        block,
+        intendedSource: diagnostics?.expectedSource || spec.intendedExactSources.join(", ") || "—",
+        actualSource,
+        status: diagnostics?.status ?? (score === null ? "missing" : "pass"),
+        reason: diagnostics?.reason || blockComponents.map((component) => component.note).filter(Boolean).join(" | ") || "—",
+        score: typeof score === "number" ? score.toFixed(1) : "—",
+        confidenceContribution: confidenceContribution > 0 ? `${(confidenceContribution * 100).toFixed(1)}%` : "—",
+      };
+    });
+    const seriesRows = spec.intendedPrimarySeries.map((series) => {
+      const component = actualComponents.find((item) => item.id === series) ?? null;
+      return {
+        intendedSeries: series,
+        actualSeriesUsed: component?.id ?? "—",
+        source: component?.exactSource || component?.source || "—",
+        proxy: component?.proxy ? "yes" : "no",
+        missing: component?.missing ? "yes" : component ? "no" : "yes",
+        note: component?.note || (component ? "" : "series missing from current overlay execution"),
+      };
+    });
+    const gapNotes = [
+      ...seriesRows.filter((row) => row.actualSeriesUsed === "—").map((row) => `${row.intendedSeries}: series missing from ingest/alias pipeline`),
+      ...(globalMacro?.overlayBlockDiagnostics?.[overlayKey] ?? []).filter((row) => row.status !== "pass").map((row) => `${row.block}: ${row.reason || "fallback triggered"}`),
+    ];
+    return {
+      overlayKey,
+      overlay,
+      spec,
+      designFidelity,
+      robustness,
+      proxyDependence,
+      blockRows,
+      seriesRows,
+      gapSummary: gapNotes.length > 0 ? gapNotes : ["No major design/implementation gap detected from current diagnostics."],
+    };
+  });
 
   const blockRows = useMemo(() => {
     return [
@@ -751,7 +852,7 @@ Signal: ${gapLabel}`,
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
                 <h4 style={{ marginTop: 0 }}>New Overlay Engine</h4>
-                <div style={{ fontSize: 13, marginBottom: 10 }}>Teknisk overlay-debug finns i <strong>Admin / Debug</strong>.</div>
+                <div style={{ fontSize: 13, marginBottom: 10 }}>Teknisk admin/drift-debug finns i <strong>Admin</strong>.</div>
 
                 <div style={{ marginBottom: 12 }}>
                   <strong>Overlay cards</strong>
@@ -818,6 +919,96 @@ Signal: ${gapLabel}`,
 
               </section>
 
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                <h4 style={{ marginTop: 0 }}>Overlay Debug</h4>
+                {overlayDebugRows.map((row) => (
+                  <div key={`overlay-debug-${row.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", marginBottom: 12, background: "#fff" }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{row.overlayKey}</div>
+                    <ul style={{ marginTop: 4 }}>
+                      <li>total score: {typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(1) : "—"}</li>
+                      <li>label: {row.overlay?.label ?? "—"}</li>
+                      <li>confidence: {row.overlay?.confidence ?? "—"}%</li>
+                      <li>design fidelity: {row.designFidelity}</li>
+                      <li>robustness: {row.robustness}</li>
+                      <li>proxy dependence: {row.proxyDependence}</li>
+                    </ul>
+
+                    <div style={{ fontSize: 12, marginBottom: 8 }}>
+                      <strong>Intended primary design</strong><br />
+                      Blocks: {row.spec.intendedPrimaryBlocks.join(", ") || "—"}<br />
+                      Series: {row.spec.intendedPrimarySeries.join(", ") || "—"}<br />
+                      Exact sources: {row.spec.intendedExactSources.join(", ") || "—"}<br />
+                      Logic: {row.spec.logicSummary}
+                    </div>
+
+                    <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>block</th>
+                            <th>intended primary source</th>
+                            <th>actual source</th>
+                            <th>status</th>
+                            <th>reason</th>
+                            <th>score</th>
+                            <th>confidence contribution</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {row.blockRows.map((block) => (
+                            <tr key={`overlay-block-${row.overlayKey}-${block.block}`}>
+                              <td>{block.block}</td>
+                              <td>{block.intendedSource}</td>
+                              <td>{block.actualSource}</td>
+                              <td>{block.status}</td>
+                              <td>{block.reason}</td>
+                              <td>{block.score}</td>
+                              <td>{block.confidenceContribution}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>intended series</th>
+                            <th>actual series used</th>
+                            <th>source</th>
+                            <th>proxy</th>
+                            <th>missing</th>
+                            <th>note</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {row.seriesRows.map((series) => (
+                            <tr key={`overlay-series-${row.overlayKey}-${series.intendedSeries}`}>
+                              <td>{series.intendedSeries}</td>
+                              <td>{series.actualSeriesUsed}</td>
+                              <td>{series.source}</td>
+                              <td>{series.proxy}</td>
+                              <td>{series.missing}</td>
+                              <td>{series.note || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ fontSize: 12 }}>
+                      <strong>Current implementation gap</strong>
+                      <ul>
+                        {row.gapSummary.map((gap) => (
+                          <li key={`${row.overlayKey}-${gap}`}>{gap}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ))}
+              </section>
+
               <h4>Summary</h4>
               <ul>
                 <li>Core Regime: <strong>{globalMacro.regime.coreRegimeLabel}</strong></li>
@@ -827,7 +1018,7 @@ Signal: ${gapLabel}`,
                 <li>Data status: {globalMacro.dataStatus}</li>
               </ul>
 
-              <div style={{ fontSize: 12, marginBottom: 8 }}><strong>Legacy overlays finns kvar i Admin / Debug.</strong></div>
+              <div style={{ fontSize: 12, marginBottom: 8 }}><strong>Legacy overlays finns kvar i Admin.</strong></div>
 
               <h4>Blockrad</h4>
               <div className="metric-list">
@@ -1128,7 +1319,7 @@ Signal: ${gapLabel}`,
                   )}
 
                   <h5>3) Legacy Overlay Timelines</h5>
-                  <div className="status" style={{ marginBottom: 8 }}>Legacy overlay-tidslinjer och debug finns i Admin / Debug.</div>
+                  <div className="status" style={{ marginBottom: 8 }}>Legacy overlay-tidslinjer och debug finns i Admin.</div>
 
                   <details>
                     <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 600 }}>▸ 4) Regime Change Log</summary>
@@ -1326,78 +1517,8 @@ Signal: ${gapLabel}`,
             </details>
           )}
 
-          <AdminDebugSection>
-            <section style={{ border: "1px solid #dbe4ee", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
-            <h4>Overlay Debug</h4>
-            <h5 style={{ marginBottom: 4 }}>Overlay Runtime Proof</h5>
-            <ul>
-              <li>overlayEngineUsed: {globalMacro?.overlayRuntimeProof?.overlayEngineUsed ? "yes" : "no"}</li>
-              <li>bundlePresent: {globalMacro?.overlayRuntimeProof?.bundlePresent ? "yes" : "no"}</li>
-              <li>bundleKeys: {(globalMacro?.overlayRuntimeProof?.bundleKeys ?? []).join(", ") || "—"}</li>
-              <li>selectedRegion: {selectedRegion}</li>
-              <li>rawSeriesCountUsed: {globalMacro?.overlayEngineDiagnostics?.rawSeriesCount ?? 0}</li>
-              <li>overlaysComputed: {(globalMacro?.overlayEngineDiagnostics?.overlaysReturned ?? []).join(", ") || "—"}</li>
-              <li>overlaysMissing: {(globalMacro?.overlayEngineDiagnostics?.overlaysMissing ?? []).join(", ") || "—"}</li>
-              <li>overlaysPartial: {overlaysPartialOrProxy}</li>
-              <li>overlaysLowRobustness: {lowRobustnessCount}</li>
-            </ul>
-
-            <h5 style={{ marginBottom: 4 }}>Overlay Block Population Trace</h5>
-            <div style={{ marginTop: 8, overflowX: "auto", marginBottom: 10 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>overlay</th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>block</th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>status</th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>expected source</th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>actual source used</th>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>proxy reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(globalMacro?.overlayBlockDiagnostics ?? {}).flatMap(([overlayName, blocks]) => blocks.map((row, idx) => (
-                    <tr key={`admin-${overlayName}-${row.block}-${idx}`}>
-                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{overlayName}</td>
-                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.block}</td>
-                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.status}</td>
-                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.expectedSource || "—"}</td>
-                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.actualSourceUsed || "—"}</td>
-                      <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.reason || "—"}</td>
-                    </tr>
-                  )))}
-                </tbody>
-              </table>
-            </div>
-
-            <h5 style={{ marginBottom: 4 }}>Overlay Score Diagnostics</h5>
-            <ul>
-              {overlaySanity.map((item) => (
-                <li key={`score-debug-${item.overlayKey}`}>
-                  {item.overlayKey}: total={typeof activeOverlayBundle?.overlays?.[item.overlayKey]?.score === "number" ? activeOverlayBundle?.overlays?.[item.overlayKey]?.score?.toFixed(1) : "—"}, blockScores={item.normalizationInputs.join(" | ") || "—"}, dominantNegative={item.negative.join(", ") || "—"}, real={item.realBlocks}, proxy={item.proxyBlocks}, missing={item.missingBlocks}, robustness={item.lowRobustness ? "low robustness" : "ok"}
-                </li>
-              ))}
-            </ul>
-
-            <h5 style={{ marginBottom: 4 }}>Overlay History Diagnostics</h5>
-            <ul>
-              <li>historyBuilt: {String((globalMacro?.overlayEngineDiagnostics?.historyBuiltFor ?? []).length > 0)}</li>
-              {uiOverlayKeysRequested.map((overlayKey) => {
-                const hasHistory = (globalMacro?.overlayEngineDiagnostics?.historyBuiltFor ?? []).includes(overlayKey);
-                const missingReason = (globalMacro?.overlayEngineDiagnostics?.historyMissingFor ?? []).includes(overlayKey)
-                  ? (globalMacro?.overlayEngineDiagnostics?.reasons ?? []).find((reason) => reason.toLowerCase().includes(overlayKey.toLowerCase())) ?? "missing from overlay history builder"
-                  : "—";
-                return (
-                  <li key={`history-debug-${overlayKey}`}>
-                    {overlayKey}: built={hasHistory ? "yes" : "no"}, points={overlayHistoryPoints.filter((point) => typeof point.scores?.[overlayKey] === "number").length}, earliest={overlayHistoryPoints.find((point) => typeof point.scores?.[overlayKey] === "number")?.asOfDate ?? "—"}, latest={[...overlayHistoryPoints].reverse().find((point) => typeof point.scores?.[overlayKey] === "number")?.asOfDate ?? "—"}, missingReason={missingReason}
-                  </li>
-                );
-              })}
-            </ul>
-            </section>
-
-            <section style={{ border: "1px solid #dbe4ee", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
-            <h4>Legacy Debug</h4>
+          <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 12px", marginTop: 12, background: "#f8fafc" }}>
+            <h4 style={{ marginTop: 0 }}>Legacy Debug</h4>
             <ul>
               <li>growth={globalMacro?.regime.growthOverlay ?? "—"}, stress={globalMacro?.regime.stressOverlay ?? "—"}, hard_asset={globalMacro?.regime.hardAssetOverlay ?? "—"}</li>
               <li>Legacy overlay intervals — growth: {overlayIntervals.growth.length}, stress: {overlayIntervals.stress.length}, hard_asset: {overlayIntervals.hardAsset.length}</li>
@@ -1405,7 +1526,6 @@ Signal: ${gapLabel}`,
               <li>Latest stress interval end: {latestOverlayDate(overlayIntervals.stress)}</li>
               <li>Latest hard asset interval end: {latestOverlayDate(overlayIntervals.hardAsset)}</li>
             </ul>
-            </section>
 
             <ExpandablePanel title="Pipeline / Snapshot / Ingestion / Source Debug" defaultOpen={false}>
             <div style={{ marginTop: 10 }}>
@@ -1662,7 +1782,13 @@ Signal: ${gapLabel}`,
                 </table>
               </div>
 
-              {debugEnabled && (
+            </div>
+            </ExpandablePanel>
+          </section>
+
+          <AdminSection>
+            {debugEnabled ? (
+              <>
                 <div style={{ marginBottom: 8 }}>
                   <label htmlFor="macro-admin-secret-input" style={{ display: "block", marginBottom: 4 }}>Admin secret (for debug actions)</label>
                   <input
@@ -1674,59 +1800,38 @@ Signal: ${gapLabel}`,
                     style={{ width: "100%", marginBottom: 8 }}
                   />
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "US")}> 
-                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "US")}> 
-                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("US")}>
-                      {engineRunning ? "Running engine..." : "Run engine (US)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "EA")}>
-                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (EA)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "EA")}>
-                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (EA)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("EA")}>
-                      {engineRunning ? "Running engine..." : "Run engine (EA)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "SE")}>
-                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (SE)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "SE")}>
-                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (SE)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("SE")}>
-                      {engineRunning ? "Running engine..." : "Run engine (SE)"}
-                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "US")}>{ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "US")}>{ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("US")}>{engineRunning ? "Running engine..." : "Run engine (US)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "EA")}>{ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (EA)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "EA")}>{ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (EA)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("EA")}>{engineRunning ? "Running engine..." : "Run engine (EA)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "SE")}>{ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (SE)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "SE")}>{ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (SE)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("SE")}>{engineRunning ? "Running engine..." : "Run engine (SE)"}</button>
                   </div>
                 </div>
-              )}
 
-              {ingestRunResult && (
-                <div>
-                  <h4>Last manual ingest test result</h4>
-                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(ingestRunResult, null, 2)}</pre>
-                </div>
-              )}
-              {engineRunResult && (
-                <div>
-                  <h4>Last manual engine run result</h4>
-                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(engineRunResult, null, 2)}</pre>
-                </div>
-              )}
+                {ingestRunResult && (
+                  <div>
+                    <h4>Last manual ingest test result</h4>
+                    <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(ingestRunResult, null, 2)}</pre>
+                  </div>
+                )}
+                {engineRunResult && (
+                  <div>
+                    <h4>Last manual engine run result</h4>
+                    <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(engineRunResult, null, 2)}</pre>
+                  </div>
+                )}
 
-              {debugEnabled && (
-                <>
-                  <h4>Raw payload (?debug=1)</h4>
-                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(globalMacroRaw, null, 2)}</pre>
-                </>
-              )}
-            </div>
-            </ExpandablePanel>
-          </AdminDebugSection>
+                <h4>Raw payload (?debug=1)</h4>
+                <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(globalMacroRaw, null, 2)}</pre>
+              </>
+            ) : (
+              <div className="status">Admin actions kräver <code>?debug=1</code> i URL.</div>
+            )}
+          </AdminSection>
         </div>
       </div>
     </div>
