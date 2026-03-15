@@ -474,17 +474,21 @@ export default function GlobalMacroDashboard() {
 
   const overlayDesignSpec: Record<string, OverlayDesignSpec> = {
     liquidityOverlay: {
-      intendedPrimaryBlocks: ["B_MONETARY", "D_CREDIBILITY"],
+      intendedPrimaryBlocks: ["quantity", "price", "bridge", "transmission"],
       intendedSeries: [
+        { id: "balance_sheet_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["WALCL/GDP"], aliasFamily: ["walcl", "balance_sheet_gdp", "fed_balance_sheet"] },
+        { id: "m2_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["M2SL/GDP"], aliasFamily: ["m2sl", "m2_gdp", "money_supply_gdp"] },
+        { id: "bank_credit_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["TOTBKCR/GDP"], aliasFamily: ["totbkcr", "bank_credit_gdp"] },
         { id: "real_yield_10y", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["DFII10"], aliasFamily: ["real_yield_10y", "dfii10", "real_yield"] },
         { id: "financial_conditions", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["NFCI"], aliasFamily: ["financial_conditions", "nfci", "fci"] },
         { id: "hy_spread", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2", "high_yield_spread"] },
+        { id: "xccy_basis_bridge", block: "bridge", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DRTSCILM / xccy-basis family"], aliasFamily: ["xccy_basis", "drtscilm", "bridge"] },
         { id: "dollar_index", block: "transmission", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["dollar_index", "dtwexbgs", "usd_broad_index", "usd_strength"] },
       ],
       logicSummary: "Likviditet, realränta, spread och dollarvillkor driver overlayns kärna.",
     },
     creditFundingOverlay: {
-      intendedPrimaryBlocks: ["B_MONETARY", "D_CREDIBILITY"],
+      intendedPrimaryBlocks: ["pricing", "funding"],
       intendedSeries: [
         { id: "hy_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2"] },
         { id: "ig_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLC0A0CM"], aliasFamily: ["ig_spread", "bamlc0a0cm"] },
@@ -494,7 +498,7 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Kredit- och fundingstress via HY/IG-spreadar, TED och xccy-basis.",
     },
     energyShockOverlay: {
-      intendedPrimaryBlocks: ["C_INFLATION", "D_CREDIBILITY"],
+      intendedPrimaryBlocks: ["price", "spillover"],
       intendedSeries: [
         { id: "oil_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["DCOILBRENTEU"], aliasFamily: ["oil_price", "dcoilbrenteu", "dcoilwtico"] },
         { id: "gas_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["NG / regional gas source"], aliasFamily: ["gas_price", "natural_gas", "ttf", "ng"] },
@@ -503,24 +507,25 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Energiinput och genomslag till kostnads-/förtroendeblock.",
     },
     localUnrestOverlay: {
-      intendedPrimaryBlocks: ["A_FISCAL", "D_CREDIBILITY"],
+      intendedPrimaryBlocks: ["signal", "transmission"],
       intendedSeries: [
-        { id: "policy_uncertainty", block: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty", "uncertainty_proxy"] },
-        { id: "sovereign_risk", block: "A_FISCAL", primarySources: ["sovereign spread family"], aliasFamily: ["sovereign_risk", "sovereign_spread_proxy"] },
+        { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty", "uncertainty_proxy"] },
+        { id: "sovereign_risk", block: "transmission", linkedMacroFamily: "A_FISCAL", primarySources: ["sovereign spread family"], aliasFamily: ["sovereign_risk", "sovereign_spread_proxy"] },
       ],
       logicSummary: "Lokal oros-/förtroendebild; i vissa regioner mer proxy/inherited-driven.",
     },
     safeHavenRiskOffOverlay: {
-      intendedPrimaryBlocks: ["D_CREDIBILITY", "B_MONETARY"],
+      intendedPrimaryBlocks: ["gold_equity", "duration", "usd"],
       intendedSeries: [
-        { id: "safe_haven_flow", block: "B_MONETARY", primarySources: ["GOLD", "gold family"], aliasFamily: ["safe_haven_flow", "gold", "gold_price"] },
-        { id: "equity_risk", block: "D_CREDIBILITY", primarySources: ["SP500 / risk asset family"], aliasFamily: ["vix_like", "sp500", "spx_vol_proxy", "vixcls"] },
-        { id: "duration_bid", block: "D_CREDIBILITY", primarySources: ["duration / rates family"], aliasFamily: ["duration", "real_yield", "rates_proxy"] },
+        { id: "safe_haven_flow", block: "gold_equity", linkedMacroFamily: "B_MONETARY", primarySources: ["GOLD", "gold family"], aliasFamily: ["safe_haven_flow", "gold", "gold_price"] },
+        { id: "equity_risk", block: "gold_equity", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["SP500 / risk asset family"], aliasFamily: ["vix_like", "sp500", "spx_vol_proxy", "vixcls"] },
+        { id: "duration_bid", block: "duration", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["duration / rates family"], aliasFamily: ["duration", "real_yield", "rates_proxy"] },
+        { id: "usd_strength", block: "usd", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["usd_strength", "dtwexbgs", "usd_broad_index"] },
       ],
       logicSummary: "Risk-off-flöden via safe-haven, equities och durationdynamik.",
     },
     inflationCostShockOverlay: {
-      intendedPrimaryBlocks: ["C_INFLATION", "A_FISCAL"],
+      intendedPrimaryBlocks: ["upstream", "expectations"],
       intendedSeries: [
         { id: "cpi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["CPIAUCSL / regional CPI"], aliasFamily: ["cpi", "cpiaucsl", "cp0000ez19m086nest"] },
         { id: "ppi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["PPIACO"], aliasFamily: ["ppi", "ppiaco"] },
@@ -529,7 +534,7 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Kostnadschock via CPI/PPI och inflationsförväntningar.",
     },
     tradeSupplyChainStressOverlay: {
-      intendedPrimaryBlocks: ["C_INFLATION", "D_CREDIBILITY"],
+      intendedPrimaryBlocks: ["real_goods_flow", "inventory_pressure", "pricing"],
       intendedSeries: [
         { id: "industrial_production", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["INDPRO"], aliasFamily: ["industrial_production", "indpro"] },
         { id: "new_orders", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["new orders source"], aliasFamily: ["new_orders", "dgorder", "new_orders_proxy"] },
@@ -539,11 +544,11 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Real goods flow + orders/inventories + inputkostnadstryck.",
     },
     globalUnrestOverlay: {
-      intendedPrimaryBlocks: ["A_FISCAL", "D_CREDIBILITY"],
+      intendedPrimaryBlocks: ["regional_composite"],
       intendedSeries: [
-        { id: "regional_unrest_us", block: "D_CREDIBILITY", primarySources: ["US localUnrestOverlay"], aliasFamily: ["regional_unrest_us", "localunrestoverlay_us"] },
-        { id: "regional_unrest_ea", block: "D_CREDIBILITY", primarySources: ["EA localUnrestOverlay"], aliasFamily: ["regional_unrest_ea", "localunrestoverlay_ea"] },
-        { id: "regional_unrest_se", block: "A_FISCAL", primarySources: ["SE localUnrestOverlay"], aliasFamily: ["regional_unrest_se", "localunrestoverlay_se"] },
+        { id: "regional_unrest_us", block: "regional_composite", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["US localUnrestOverlay"], aliasFamily: ["regional_unrest_us", "localunrestoverlay_us"] },
+        { id: "regional_unrest_ea", block: "regional_composite", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["EA localUnrestOverlay"], aliasFamily: ["regional_unrest_ea", "localunrestoverlay_ea"] },
+        { id: "regional_unrest_se", block: "regional_composite", linkedMacroFamily: "A_FISCAL", primarySources: ["SE localUnrestOverlay"], aliasFamily: ["regional_unrest_se", "localunrestoverlay_se"] },
       ],
       logicSummary: "Sammanslagen global unrest från regionala overlay-inputs.",
     },
@@ -656,10 +661,12 @@ export default function GlobalMacroDashboard() {
       };
     });
 
+    const isMacroPseudoBlock = (value: string): boolean => ["A_FISCAL", "B_MONETARY", "C_INFLATION", "D_CREDIBILITY"].includes(value);
     const blockKeys = Array.from(new Set([
-      ...Object.keys(overlay?.blockScores ?? {}),
-      ...runtimeBlockDiagnostics.map((row) => row.block),
+      ...Object.keys(overlay?.blockScores ?? {}).filter((block) => !isMacroPseudoBlock(block)),
+      ...runtimeBlockDiagnostics.map((row) => row.block).filter((block) => !isMacroPseudoBlock(block)),
       ...spec.intendedPrimaryBlocks,
+      ...spec.intendedSeries.map((series) => series.block),
     ]));
 
     const blockRows = blockKeys.map((block) => {
@@ -739,8 +746,22 @@ export default function GlobalMacroDashboard() {
     const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
     const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy || component.missing).length / actualComponents.length;
     const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")).length / blockRows.length;
+    const criticalBlocksByOverlay: Record<string, string[]> = {
+      localUnrestOverlay: ["signal", "transmission"],
+      tradeSupplyChainStressOverlay: ["real_goods_flow", "pricing"],
+      safeHavenRiskOffOverlay: ["gold_equity", "duration"],
+      liquidityOverlay: ["bridge", "transmission"],
+    };
+    const criticalBlocks = criticalBlocksByOverlay[overlayKey] ?? [];
+    const criticalProxyHit = blockRows.some((row) => criticalBlocks.includes(row.block) && (row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")));
     const proxyRatio = Math.max(runtimeProxyComponentRatio, blockProxyRatio);
-    const proxyDependence: "none" | "low" | "medium" | "high" = proxyRatio === 0 ? "none" : proxyRatio <= 0.25 ? "low" : proxyRatio <= 0.6 ? "medium" : "high";
+    const proxyDependence: "none" | "low" | "medium" | "high" = proxyRatio === 0
+      ? "none"
+      : (proxyRatio > 0.6 || (criticalProxyHit && proxyRatio >= 0.34))
+        ? "high"
+        : proxyRatio <= 0.25
+          ? "low"
+          : "medium";
     const robustness: "high" | "medium" | "low" = runtimeCompleteness === "full" && proxyDependence !== "high" && specFidelity !== "low"
       ? "high"
       : runtimeCompleteness === "weak" || proxyDependence === "high"
@@ -760,9 +781,17 @@ export default function GlobalMacroDashboard() {
     const matchesSpec = blockRows
       .filter((row) => row.specFidelity === "high" || (row.specFidelity === "medium" && row.sourceAvailability === "available"))
       .map((row) => `${row.block}: runtime=${row.runtimeStatus}, primary sources present (${row.intendedPrimarySources})`);
-    const whyDiffExists = blockRows
-      .filter((row) => row.reason && row.reason !== "no blocker")
-      .map((row) => `${row.block}: ${row.reason}`);
+    const whyDiffExists = Array.from(new Set(blockRows.flatMap((row) => {
+      const reasons: string[] = [];
+      if (row.fallbackUsed.includes("alias mapping")) reasons.push("alias mapped source used");
+      if (row.fallbackUsed.includes("proxy source")) reasons.push(`${row.block} uses proxy source`);
+      if (row.fallbackUsed.includes("derived approximation")) reasons.push(`${row.block} uses derived approximation`);
+      if (row.fallbackUsed.includes("inherited overlay input")) reasons.push(`${row.block} built from inherited overlay`);
+      if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
+      if (row.blockerType === "exact source family differs") reasons.push(`${row.block} exact source family differs`);
+      if (row.blockerType === "intended source not wired to overlay") reasons.push(`${row.block} source not yet wired`);
+      return reasons;
+    })));
     const impact = proxyDependence === "high"
       ? "Interpret with caution: proxy-heavy signal can shift faster than intended design baseline."
       : specFidelity === "low"
