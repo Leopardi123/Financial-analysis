@@ -113,7 +113,7 @@ function blockConfidence(components: OverlayComponent[]): number {
 }
 
 function labelByScore(score: number | null): string {
-  if (score === null) return "Unknown";
+  if (score === null) return "Not implemented";
   if (score < 20) return "Severe stress";
   if (score < 40) return "Tight";
   if (score < 60) return "Neutral";
@@ -144,10 +144,12 @@ function makeComponent(params: {
     source: params.source,
     exactSource: params.exactSource,
     freshnessDays: freshnessDays(latest?.date ?? null, params.asOfDate),
-    includedInTotal: base !== null,
-    missing: base === null,
+    includedInTotal: base !== null && !Boolean(params.proxy),
+    missing: base === null || Boolean(params.proxy),
     proxy: Boolean(params.proxy),
-    note: params.note ?? "",
+    note: params.proxy
+      ? `${params.note ? `${params.note} | ` : ""}blocked: non source-faithful runtime path (proxy/derived/inherited)`
+      : (params.note ?? ""),
   };
 }
 
@@ -172,7 +174,7 @@ function finalizeOverlay(blocks: Record<string, { weight: number; components: Ov
   const w = validBlocks.reduce((a, b) => a + b.weight, 0);
   const score = w > 0 ? validBlocks.reduce((a, b) => a + b.score * (b.weight / w), 0) : null;
   const cw = blockConf.reduce((a, b) => a + b.weight, 0);
-  const confidence = cw > 0 ? Math.round(100 * blockConf.reduce((a, b) => a + b.conf * (b.weight / cw), 0)) : 0;
+  const confidence = score === null ? 0 : (cw > 0 ? Math.round(100 * blockConf.reduce((a, b) => a + b.conf * (b.weight / cw), 0)) : 0);
   return { score, label: labelByScore(score), confidence, blockScores, components };
 }
 
