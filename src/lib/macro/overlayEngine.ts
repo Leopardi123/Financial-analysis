@@ -102,13 +102,13 @@ function subtractAlignedSeries(left: Point[], right: Point[]): Point[] {
   return out;
 }
 
-function percentile10yLatest(points: Point[]): number | null {
+function percentile10yLatest(points: Point[], minObservations = 24): number | null {
   const series = canonicalMonthlyGrid(points);
   const latest = lastNumeric(series);
   if (!latest) return null;
   const latestMonth = monthKey(latest.date);
   const window = series.filter((p) => monthKey(p.date) <= latestMonth).slice(-120).map((p) => p.value).filter((v): v is number => typeof v === "number");
-  if (window.length < 24) return null;
+  if (window.length < minObservations) return null;
   const le = window.filter((v) => v <= latest.value).length;
   return (le / window.length) * 100;
 }
@@ -151,14 +151,14 @@ function getSeries(seriesMap: SeriesMap, key: string): Point[] { return seriesMa
 
 function makeComponent(params: {
   id: string; title: string; block: string; weight: number; source: string; exactSource: string; series: Point[];
-  invert?: boolean; proxy?: boolean; note?: string; useZ?: boolean; asOfDate: string;
+  invert?: boolean; proxy?: boolean; note?: string; useZ?: boolean; minObservations?: number; asOfDate: string;
 }): OverlayComponent {
   const latest = lastNumeric(params.series);
   const percentile = params.useZ ? (() => {
     const z = zscoreLatest(params.series);
     if (z === null) return null;
     return Math.max(0, Math.min(100, 50 + z * 15));
-  })() : percentile10yLatest(params.series);
+  })() : percentile10yLatest(params.series, params.minObservations ?? 24);
   const base = percentile === null ? null : (params.invert ? 100 - percentile : percentile);
   return {
     id: params.id,
@@ -295,6 +295,7 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
               ? "USEPUINDXM"
               : "EA policy uncertainty family source",
             series: signalSeries,
+            minObservations: 12,
             invert: true,
             note: region === "US"
               ? "Source-faithful policy uncertainty family input"
@@ -314,6 +315,7 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
               ? "IRLTLT01ITM156N - IRLTLT01DEM156N"
               : "ACMTP10",
             series: repricingSeries,
+            minObservations: 12,
             invert: true,
             note: region === "EA"
               ? "Source-faithful sovereign credit repricing via BTP-Bund spread (Italy10Y - Germany10Y)"
