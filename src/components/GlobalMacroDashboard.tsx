@@ -316,7 +316,7 @@ function ExpandablePanel({ title, children, defaultOpen = false }: { title: stri
 function AdminDebugSection({ children }: { children: ReactNode }) {
   return (
     <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 12px", marginTop: 12, background: "#f8fafc" }}>
-      <ExpandablePanel title="▶ Admin / Debug">{children}</ExpandablePanel>
+      <ExpandablePanel title="Admin / Debug">{children}</ExpandablePanel>
     </section>
   );
 }
@@ -337,16 +337,6 @@ export default function GlobalMacroDashboard() {
   const [adminSecretInput, setAdminSecretInput] = useState("");
   const [ingestRunResult, setIngestRunResult] = useState<Record<string, unknown> | null>(null);
   const [engineRunResult, setEngineRunResult] = useState<Record<string, unknown> | null>(null);
-  const [selectedOverlaySegment, setSelectedOverlaySegment] = useState<{
-    overlayKey: "growth" | "stress" | "hard_asset";
-    overlay: "Growth" | "Stress" | "Hard Asset";
-    value: string;
-    startDate: string;
-    endDate: string;
-    pointCount: number;
-    explanation: string;
-    contributors: string[];
-  } | null>(null);
   const [selectedRegimeInterval, setSelectedRegimeInterval] = useState<{
     coreRegimeLabel: string;
     startDate: string;
@@ -537,8 +527,6 @@ export default function GlobalMacroDashboard() {
   const overlayIntervals = macroHistory?.intervals.overlays ?? { growth: [], stress: [], hardAsset: [] };
   const latestHistoryPoint = historyPoints[historyPoints.length - 1] ?? null;
   const latestRegimeInterval = regimeIntervals[regimeIntervals.length - 1] ?? null;
-  const hasOverlayIntervals =
-    overlayIntervals.growth.length > 0 || overlayIntervals.stress.length > 0 || overlayIntervals.hardAsset.length > 0;
   const timelineStartDate = macroHistory?.replayEarliestDateUsed ?? macroHistory?.rangeDebug.actualStartDate ?? null;
   const timelineEndDate = macroHistory?.replayLatestDateUsed ?? macroHistory?.rangeDebug.actualEndDate ?? null;
   const timelineWindow = useMemo(() => {
@@ -566,27 +554,6 @@ export default function GlobalMacroDashboard() {
     return "Regimen indikerar ett övergångsläge i makrobilden.";
   }
 
-  function overlayColor(name: "growth" | "stress" | "hard_asset", value: string) {
-    if (name === "stress") {
-      if (value === "Low") return "#5f7f63";
-      if (value === "Medium") return "#8e744d";
-      return "#865550";
-    }
-    if (value === "Weak") return "#865550";
-    if (value === "Neutral") return "#8c7450";
-    return "#5f7f63";
-  }
-
-  function overlayDescription(name: "growth" | "stress" | "hard_asset", value: string): string {
-    if (name === "stress") {
-      if (value === "Low") return "Låg marknadsstress och bättre riskaptit.";
-      if (value === "Medium") return "Blandad stressbild med viss försiktighet.";
-      return "Hög stress i makromiljön och defensiv riskregim.";
-    }
-    if (value === "Weak") return "Svag tillväxt/real tillgångsdynamik relativt neutral nivå.";
-    if (value === "Neutral") return "Balansläge utan tydlig styrka eller svaghet.";
-    return "Stark tillväxt/real tillgångsdynamik relativt historik.";
-  }
 
   function segmentPosition(startDate: string, endDate: string): { left: number; width: number } {
     if (!timelineWindow) return { left: 0, width: 100 };
@@ -603,10 +570,6 @@ export default function GlobalMacroDashboard() {
     return intervals.length > 0 ? intervals[intervals.length - 1].endDate : "—";
   }
 
-  function overlayContributors(overlay: "growth" | "stress" | "hard_asset"): string[] {
-    const status = pipelineDebug?.overlayDataStatus?.[overlay];
-    return status?.scoredInputs?.slice(0, 4) ?? [];
-  }
 
   const blockSeriesMeta = [
     { key: "A_FISCAL" as const, label: "Fiscal", color: "#6f86a8", valueOf: (point: MacroHistoryPayload["points"][number]) => point.fiscalScore },
@@ -671,20 +634,6 @@ Signal: ${gapLabel}`,
       }),
     ] as (string | number | Date | null)[][];
   }, [inflationRows]);
-
-
-  function overlayIntensity(type: "growth" | "stress" | "hard_asset", value: string): number {
-    if (type === "stress") return value === "High" ? 3 : value === "Medium" ? 2 : 1;
-    return value === "Strong" ? 3 : value === "Neutral" ? 2 : 1;
-  }
-
-  function areaPath(top: Array<{ x: number; y: number }>, base: Array<{ x: number; y: number }>): string {
-    if (top.length === 0 || base.length === 0) return "";
-    const head = `M ${top[0].x} ${top[0].y}`;
-    const topLine = top.slice(1).map((point) => `L ${point.x} ${point.y}`).join(" ");
-    const back = base.slice().reverse().map((point) => `L ${point.x} ${point.y}`).join(" ");
-    return `${head} ${topLine} ${back} Z`;
-  }
 
   async function runIngest(mode: "backfill" | "latest", region: "US" | "EA" | "SE") {
     setIngestRunningMode(mode);
@@ -802,16 +751,7 @@ Signal: ${gapLabel}`,
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
                 <h4 style={{ marginTop: 0 }}>New Overlay Engine</h4>
-                <div style={{ fontSize: 13, marginBottom: 10 }}>
-                  <strong>Runtime proof</strong>
-                  <ul>
-                    <li>overlay engine used: {globalMacro.overlayRuntimeProof?.overlayEngineUsed ? "yes" : "no"}</li>
-                    <li>overlay bundle present: {globalMacro.overlayRuntimeProof?.bundlePresent ? "yes" : "no"}</li>
-                    <li>bundle keys: {(globalMacro.overlayRuntimeProof?.bundleKeys ?? []).join(", ") || "—"}</li>
-                    <li>selected region: {selectedRegion}</li>
-                    <li>raw series count used by overlay engine: {globalMacro.overlayEngineDiagnostics?.rawSeriesCount ?? 0}</li>
-                  </ul>
-                </div>
+                <div style={{ fontSize: 13, marginBottom: 10 }}>Teknisk overlay-debug finns i <strong>Admin / Debug</strong>.</div>
 
                 <div style={{ marginBottom: 12 }}>
                   <strong>Overlay cards</strong>
@@ -887,10 +827,7 @@ Signal: ${gapLabel}`,
                 <li>Data status: {globalMacro.dataStatus}</li>
               </ul>
 
-              <details>
-                <summary style={{ cursor: "pointer", fontWeight: 600 }}>Legacy overlays (deprecated)</summary>
-                <div style={{ marginTop: 8, fontSize: 12 }}>growth={globalMacro.regime.growthOverlay}, stress={globalMacro.regime.stressOverlay}, hard_asset={globalMacro.regime.hardAssetOverlay}</div>
-              </details>
+              <div style={{ fontSize: 12, marginBottom: 8 }}><strong>Legacy overlays finns kvar i Admin / Debug.</strong></div>
 
               <h4>Blockrad</h4>
               <div className="metric-list">
@@ -1190,180 +1127,8 @@ Signal: ${gapLabel}`,
                     </div>
                   )}
 
-                  <h5>3) Overlay Timelines</h5>
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 6, fontSize: 12, marginBottom: 8 }}>
-                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
-                        <strong>Growth</strong>: {overlayIntervals.growth[overlayIntervals.growth.length - 1]?.value ?? "—"}<br />
-                        Senast ändrad: {latestOverlayDate(overlayIntervals.growth)}
-                      </div>
-                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
-                        <strong>Stress</strong>: {overlayIntervals.stress[overlayIntervals.stress.length - 1]?.value ?? "—"}<br />
-                        Senast ändrad: {latestOverlayDate(overlayIntervals.stress)}
-                      </div>
-                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
-                        <strong>Hard Asset</strong>: {overlayIntervals.hardAsset[overlayIntervals.hardAsset.length - 1]?.value ?? "—"}<br />
-                        Senast ändrad: {latestOverlayDate(overlayIntervals.hardAsset)}
-                      </div>
-                    </div>
-
-                    {!hasOverlayIntervals ? (
-                      <div className="status empty">För lite overlay-historik för full tidslinje. Visar tillgängliga segment när data finns.</div>
-                    ) : (
-                      <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27" }}>
-                        <svg
-                          viewBox="0 0 1000 340"
-                          style={{ width: "100%", height: "360px", display: "block" }}
-                          onClick={(event) => {
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            const clickX = Math.max(72, Math.min(972, event.clientX - rect.left));
-                            const clickY = Math.max(26, Math.min(286, event.clientY - rect.top));
-                            const ratio = (clickX - 72) / 900;
-                            const index = Math.round(ratio * Math.max(0, historyPoints.length - 1));
-                            const point = historyPoints[index];
-                            if (!point) return;
-
-                            const layers = [
-                              { key: "growth" as const, label: "Growth" as const, intensity: overlayIntensity("growth", point.growthOverlay) },
-                              { key: "stress" as const, label: "Stress" as const, intensity: overlayIntensity("stress", point.stressOverlay) },
-                              { key: "hard_asset" as const, label: "Hard Asset" as const, intensity: overlayIntensity("hard_asset", point.hardAssetOverlay) },
-                            ];
-                            const unit = 22;
-                            const total = layers.reduce((sum, layer) => sum + layer.intensity, 0) * unit;
-                            const valueFromBottom = ((286 - clickY) / 260) * total;
-                            let cumulative = 0;
-                            const clicked = layers.find((layer) => {
-                              const start = cumulative;
-                              cumulative += layer.intensity * unit;
-                              return valueFromBottom >= start && valueFromBottom <= cumulative;
-                            }) ?? layers[0];
-
-                            const intervals = clicked.key === "growth" ? overlayIntervals.growth : clicked.key === "stress" ? overlayIntervals.stress : overlayIntervals.hardAsset;
-                            const interval = intervals.find((item) => point.asOfDate >= item.startDate && point.asOfDate <= item.endDate);
-                            if (!interval) return;
-                            setSelectedOverlaySegment({
-                              overlayKey: clicked.key,
-                              overlay: clicked.label,
-                              value: interval.value,
-                              startDate: interval.startDate,
-                              endDate: interval.endDate,
-                              pointCount: interval.pointCount,
-                              explanation: overlayDescription(clicked.key, interval.value),
-                              contributors: overlayContributors(clicked.key),
-                            });
-                          }}
-                        >
-                          {[0, 1, 2, 3, 4].map((level) => (
-                            <line key={`overlay-grid-${level}`} x1={72} y1={286 - level * 65} x2={972} y2={286 - level * 65} stroke="#5f564a" strokeWidth={1} />
-                          ))}
-
-                          {(() => {
-                            const unit = 22;
-                            const xOf = (index: number) => 72 + ((historyPoints.length <= 1 ? 0 : index / (historyPoints.length - 1)) * 900);
-                            const gTop: Array<{ x: number; y: number }> = [];
-                            const gBase: Array<{ x: number; y: number }> = [];
-                            const sTop: Array<{ x: number; y: number }> = [];
-                            const sBase: Array<{ x: number; y: number }> = [];
-                            const hTop: Array<{ x: number; y: number }> = [];
-                            const hBase: Array<{ x: number; y: number }> = [];
-
-                            historyPoints.forEach((point, index) => {
-                              const x = xOf(index);
-                              const g = overlayIntensity("growth", point.growthOverlay) * unit;
-                              const s = overlayIntensity("stress", point.stressOverlay) * unit;
-                              const h = overlayIntensity("hard_asset", point.hardAssetOverlay) * unit;
-                              const g0 = 0;
-                              const g1 = g;
-                              const s0 = g1;
-                              const s1 = s0 + s;
-                              const h0 = s1;
-                              const h1 = h0 + h;
-                              const y = (value: number) => 286 - value;
-                              gBase.push({ x, y: y(g0) });
-                              gTop.push({ x, y: y(g1) });
-                              sBase.push({ x, y: y(s0) });
-                              sTop.push({ x, y: y(s1) });
-                              hBase.push({ x, y: y(h0) });
-                              hTop.push({ x, y: y(h1) });
-                            });
-
-                            return (
-                              <>
-                                <path d={areaPath(gTop, gBase)} fill="#5f7f63" fillOpacity={0.62} stroke="#7c9b7f" strokeWidth={1.2} />
-                                <path d={areaPath(sTop, sBase)} fill="#8c7450" fillOpacity={0.62} stroke="#af9368" strokeWidth={1.2} />
-                                <path d={areaPath(hTop, hBase)} fill="#7b6676" fillOpacity={0.62} stroke="#9a8594" strokeWidth={1.2} />
-                              </>
-                            );
-                          })()}
-
-                          {historyPoints.filter((point) => point.overlayChanged).map((point) => {
-                            const x = 72 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 900;
-                            return <line key={`overlay-change-${point.asOfDate}`} x1={x} y1={26} x2={x} y2={286} stroke="#d4ccbf" strokeWidth={1} strokeDasharray="2 4" opacity={0.4} />;
-                          })}
-
-                          <line x1={72} y1={286} x2={972} y2={286} stroke="#b8afa1" strokeWidth={1} />
-                          {axisTicks.map((tick) => {
-                            const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900);
-                            return (
-                              <g key={`overlay-x-${tick.index}`}>
-                                <line x1={x} y1={286} x2={x} y2={290} stroke="#b8afa1" strokeWidth={1} />
-                                <text x={x} y={311} textAnchor="middle" fontSize={11} fill="#d6cfc4">{tick.label}</text>
-                              </g>
-                            );
-                          })}
-                        </svg>
-                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#d6cfc4", marginTop: 4 }}>
-                          <span><strong style={{ color: "#9fc4a4" }}>Growth</strong> (Weak/Neutral/Strong)</span>
-                          <span><strong style={{ color: "#c6a87b" }}>Stress</strong> (Low/Medium/High)</span>
-                          <span><strong style={{ color: "#b59db0" }}>Hard Asset</strong> (Weak/Neutral/Strong)</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedOverlaySegment && (
-                      <div style={{ marginTop: 8, fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
-                        <strong>{selectedOverlaySegment.overlay}</strong>: <strong>{selectedOverlaySegment.value}</strong> · {selectedOverlaySegment.startDate} → {selectedOverlaySegment.endDate} · {selectedOverlaySegment.pointCount} punkter<br />
-                        {selectedOverlaySegment.explanation}<br />
-                        Drivare: {selectedOverlaySegment.contributors.join(", ") || "Ej tillgängligt"}
-                      </div>
-                    )}
-
-                    <details style={{ marginTop: 8 }}>
-                      <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Debug: visa textintervall</summary>
-                      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>Growth</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {overlayIntervals.growth.map((interval) => (
-                              <span key={`ov-growth-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("growth", interval.value) }}>
-                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>Stress</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {overlayIntervals.stress.map((interval) => (
-                              <span key={`ov-stress-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("stress", interval.value) }}>
-                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>Hard Asset</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {overlayIntervals.hardAsset.map((interval) => (
-                              <span key={`ov-hard-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("hard_asset", interval.value) }}>
-                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </details>
-                  </div>
+                  <h5>3) Legacy Overlay Timelines</h5>
+                  <div className="status" style={{ marginBottom: 8 }}>Legacy overlay-tidslinjer och debug finns i Admin / Debug.</div>
 
                   <details>
                     <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 600 }}>▸ 4) Regime Change Log</summary>
@@ -1562,20 +1327,22 @@ Signal: ${gapLabel}`,
           )}
 
           <AdminDebugSection>
-            <h4>Overlay debug</h4>
+            <section style={{ border: "1px solid #dbe4ee", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
+            <h4>Overlay Debug</h4>
+            <h5 style={{ marginBottom: 4 }}>Overlay Runtime Proof</h5>
             <ul>
-              <li>overlayRuntimeProof: {JSON.stringify(globalMacro?.overlayRuntimeProof ?? null)}</li>
+              <li>overlayEngineUsed: {globalMacro?.overlayRuntimeProof?.overlayEngineUsed ? "yes" : "no"}</li>
+              <li>bundlePresent: {globalMacro?.overlayRuntimeProof?.bundlePresent ? "yes" : "no"}</li>
+              <li>bundleKeys: {(globalMacro?.overlayRuntimeProof?.bundleKeys ?? []).join(", ") || "—"}</li>
+              <li>selectedRegion: {selectedRegion}</li>
+              <li>rawSeriesCountUsed: {globalMacro?.overlayEngineDiagnostics?.rawSeriesCount ?? 0}</li>
               <li>overlaysComputed: {(globalMacro?.overlayEngineDiagnostics?.overlaysReturned ?? []).join(", ") || "—"}</li>
               <li>overlaysMissing: {(globalMacro?.overlayEngineDiagnostics?.overlaysMissing ?? []).join(", ") || "—"}</li>
               <li>overlaysPartial: {overlaysPartialOrProxy}</li>
               <li>overlaysLowRobustness: {lowRobustnessCount}</li>
-              <li>rawSeriesCountUsed: {globalMacro?.overlayEngineDiagnostics?.rawSeriesCount ?? 0}</li>
-              <li>historyBuiltCount: {(globalMacro?.overlayEngineDiagnostics?.historyBuiltFor ?? []).length}</li>
-              <li>regionKeysPresent: {(globalMacro?.overlayRuntimeProof?.regionKeysPresent ?? []).join(", ") || "—"}</li>
-              <li>globalKeysPresent: {(globalMacro?.overlayRuntimeProof?.globalKeysPresent ?? []).join(", ") || "—"}</li>
             </ul>
 
-            <h4>Overlay block debug</h4>
+            <h5 style={{ marginBottom: 4 }}>Overlay Block Population Trace</h5>
             <div style={{ marginTop: 8, overflowX: "auto", marginBottom: 10 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
@@ -1603,7 +1370,7 @@ Signal: ${gapLabel}`,
               </table>
             </div>
 
-            <h4>Overlay score debug</h4>
+            <h5 style={{ marginBottom: 4 }}>Overlay Score Diagnostics</h5>
             <ul>
               {overlaySanity.map((item) => (
                 <li key={`score-debug-${item.overlayKey}`}>
@@ -1612,16 +1379,35 @@ Signal: ${gapLabel}`,
               ))}
             </ul>
 
-            <h4>Overlay history debug</h4>
+            <h5 style={{ marginBottom: 4 }}>Overlay History Diagnostics</h5>
             <ul>
               <li>historyBuilt: {String((globalMacro?.overlayEngineDiagnostics?.historyBuiltFor ?? []).length > 0)}</li>
-              <li>historyPoints: {overlayHistoryPoints.length}</li>
-              <li>earliestDate: {overlayHistoryPoints[0]?.asOfDate ?? "—"}</li>
-              <li>latestDate: {overlayHistoryPoints[overlayHistoryPoints.length - 1]?.asOfDate ?? "—"}</li>
-              <li>sourceUsed: macro_raw_datapoints(auto) + overlayEngine history builder</li>
+              {uiOverlayKeysRequested.map((overlayKey) => {
+                const hasHistory = (globalMacro?.overlayEngineDiagnostics?.historyBuiltFor ?? []).includes(overlayKey);
+                const missingReason = (globalMacro?.overlayEngineDiagnostics?.historyMissingFor ?? []).includes(overlayKey)
+                  ? (globalMacro?.overlayEngineDiagnostics?.reasons ?? []).find((reason) => reason.toLowerCase().includes(overlayKey.toLowerCase())) ?? "missing from overlay history builder"
+                  : "—";
+                return (
+                  <li key={`history-debug-${overlayKey}`}>
+                    {overlayKey}: built={hasHistory ? "yes" : "no"}, points={overlayHistoryPoints.filter((point) => typeof point.scores?.[overlayKey] === "number").length}, earliest={overlayHistoryPoints.find((point) => typeof point.scores?.[overlayKey] === "number")?.asOfDate ?? "—"}, latest={[...overlayHistoryPoints].reverse().find((point) => typeof point.scores?.[overlayKey] === "number")?.asOfDate ?? "—"}, missingReason={missingReason}
+                  </li>
+                );
+              })}
             </ul>
+            </section>
 
-            <ExpandablePanel title="Pipeline / Snapshot / Ingestion / Source debug" defaultOpen={false}>
+            <section style={{ border: "1px solid #dbe4ee", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
+            <h4>Legacy Debug</h4>
+            <ul>
+              <li>growth={globalMacro?.regime.growthOverlay ?? "—"}, stress={globalMacro?.regime.stressOverlay ?? "—"}, hard_asset={globalMacro?.regime.hardAssetOverlay ?? "—"}</li>
+              <li>Legacy overlay intervals — growth: {overlayIntervals.growth.length}, stress: {overlayIntervals.stress.length}, hard_asset: {overlayIntervals.hardAsset.length}</li>
+              <li>Latest growth interval end: {latestOverlayDate(overlayIntervals.growth)}</li>
+              <li>Latest stress interval end: {latestOverlayDate(overlayIntervals.stress)}</li>
+              <li>Latest hard asset interval end: {latestOverlayDate(overlayIntervals.hardAsset)}</li>
+            </ul>
+            </section>
+
+            <ExpandablePanel title="Pipeline / Snapshot / Ingestion / Source Debug" defaultOpen={false}>
             <div style={{ marginTop: 10 }}>
               <h4>Snapshot status</h4>
               <ul>
