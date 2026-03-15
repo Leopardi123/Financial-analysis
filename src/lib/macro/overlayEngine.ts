@@ -76,6 +76,20 @@ function yoy(points: Point[]): Point[] {
   });
 }
 
+function averageAlignedSeries(seriesList: Point[][]): Point[] {
+  if (seriesList.length === 0) return [];
+  const byDateMaps = seriesList.map((series) => new Map(series.map((point) => [point.date, point.value])));
+  const baseDates = seriesList[0].map((point) => point.date);
+  const out: Point[] = [];
+  for (const date of baseDates) {
+    const values = byDateMaps.map((map) => map.get(date));
+    if (values.some((value) => value === null || value === undefined || !Number.isFinite(value))) continue;
+    const numeric = values as number[];
+    out.push({ date, value: numeric.reduce((a, b) => a + b, 0) / numeric.length });
+  }
+  return out;
+}
+
 function percentile10yLatest(points: Point[]): number | null {
   const series = canonicalMonthlyGrid(points);
   const latest = lastNumeric(series);
@@ -251,11 +265,66 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       upstream: { weight: 0.3, components: [makeComponent({ asOfDate, id: "ics_up", title: "Upstream cost pressure", block: "upstream", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "PPIACO" : "PPI.EA", series: yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")).length ? yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")) : (getSeries(series, "commodity_index_yoy").length ? getSeries(series, "commodity_index_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
       expectations: { weight: 0.25, components: [makeComponent({ asOfDate, id: "ics_exp", title: "Inflation expectations", block: "expectations", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "T10YIE + survey" : "ECB SPF", series: getSeries(series, region === "US" ? "T10YIE" : "EA_INFLATION_EXPECTATIONS"), invert: true, proxy: region !== "US" })] },
     }),
-    tradeSupplyChainStressOverlay: finalizeOverlay({
-      pipeline: { weight: 0.35, components: [makeComponent({ asOfDate, id: "tsc_pipeline", title: "Pipeline cost stress", block: "pipeline", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "PPI + freight" : "Inflation upstream inherited proxy", series: yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")).length ? yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")) : (getSeries(series, "commodity_index_yoy").length ? getSeries(series, "commodity_index_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
-      inventory_delivery: { weight: 0.35, components: [makeComponent({ asOfDate, id: "tsc_inv", title: "Inventory/delivery friction", block: "inventory_delivery", weight: 1, source: "FRED/PMI", exactSource: region === "US" ? "inventories support" : "business supply proxy", series: getSeries(series, region === "US" ? "ISRATIO" : "EA_BUSINESS_SUPPLY_PROXY"), invert: true, proxy: true })] },
-      real_goods_flow: { weight: 0.3, components: [makeComponent({ asOfDate, id: "tsc_flow", title: "Real goods flow", block: "real_goods_flow", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "INDPRO + new orders" : "industrial flow + survey flow", series: yoy(getSeries(series, region === "US" ? "INDPRO" : "EA_INDUSTRIAL_PRODUCTION")), invert: true, proxy: true })] },
-    }),
+    tradeSupplyChainStressOverlay: (() => {
+      const usIndustrialProduction = yoy(getSeries(series, "INDPRO"));
+      const usNewOrders = yoy(getSeries(series, "DGORDER"));
+      const usRealGoodsFlow = averageAlignedSeries([usIndustrialProduction, usNewOrders]);
+      const usInventoryPressure = yoy(getSeries(series, "ISRATIO"));
+      const usInputPrices = yoy(getSeries(series, "PPIACO"));
+      return finalizeOverlay({
+        real_goods_flow: {
+          weight: 0.4,
+          components: [makeComponent({
+            asOfDate,
+            id: "tsc_real_goods_flow",
+            title: "Real goods flow",
+            block: "real_goods_flow",
+            weight: 1,
+            source: "FRED",
+            exactSource: region === "US" ? "INDPRO + DGORDER" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+            series: region === "US" ? usRealGoodsFlow : [],
+            invert: true,
+            note: region === "US"
+              ? "Source-faithful composite built only when both INDPRO and DGORDER are available"
+              : "Missing by design: no source-faithful non-US mapping for this overlay block",
+          })],
+        },
+        inventory_pressure: {
+          weight: 0.3,
+          components: [makeComponent({
+            asOfDate,
+            id: "tsc_inventory_pressure",
+            title: "Inventory pressure",
+            block: "inventory_pressure",
+            weight: 1,
+            source: "FRED",
+            exactSource: region === "US" ? "ISRATIO" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+            series: region === "US" ? usInventoryPressure : [],
+            invert: true,
+            note: region === "US"
+              ? "Source-faithful inventory family input (ISRATIO)"
+              : "Missing by design: no source-faithful non-US inventory source wired",
+          })],
+        },
+        pricing: {
+          weight: 0.3,
+          components: [makeComponent({
+            asOfDate,
+            id: "tsc_pricing",
+            title: "Input pricing pressure",
+            block: "pricing",
+            weight: 1,
+            source: "FRED",
+            exactSource: region === "US" ? "PPIACO" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+            series: region === "US" ? usInputPrices : [],
+            invert: true,
+            note: region === "US"
+              ? "Source-faithful pricing uses PPIACO; no shipping proxy used"
+              : "Missing by design: no source-faithful non-US pricing source wired",
+          })],
+        },
+      });
+    })(),
   };
 
   return { region, asOfDate, overlays };
@@ -295,6 +364,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     DGS10: ["nominal_yield_10y_us"],
     DCOILBRENTEU: ["oil_brent_usd"],
     INDPRO: ["pmi_us"],
+    DGORDER: ["new_orders_us"],
     CPILFESL: ["core_cpi_us"],
     T10YIE: ["breakeven_10y_us"],
     CPIAUCSL: ["core_cpi_us"],
@@ -310,7 +380,8 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     "EUR_IG_OAS": ["credit_spreads_ea"],
     "EUR_HY_OAS": ["credit_spreads_ea"],
     "GOLD_EQUITY_RATIO": ["gold_minus_real_yield_spread", "gold_usd"],
-    "ISRATIO": ["pmi_us"],
+    "ISRATIO": ["isratio_us"],
+    "PPIACO": ["ppiaco_us"],
   };
 
   for (const [target, candidates] of Object.entries(aliasCandidates)) {

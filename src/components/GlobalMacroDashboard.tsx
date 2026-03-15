@@ -564,12 +564,11 @@ export default function GlobalMacroDashboard() {
     return v.includes(a) || a.includes(v);
   }
 
-  function inferFallbackUsage(items: Array<{ proxy?: boolean; note?: string; id?: string; source?: string; exactSource?: string }>, aliasMatched: boolean): "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input" {
+  function inferFallbackUsage(items: Array<{ proxy?: boolean; note?: string; id?: string; source?: string; exactSource?: string }>, _aliasMatched: boolean): "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input" {
     const text = items.map((item) => `${item.note ?? ""} ${item.id ?? ""} ${item.source ?? ""} ${item.exactSource ?? ""}`.toLowerCase()).join(" |");
     if (text.includes("inherited") || text.includes("regional_unrest") || text.includes("overlay input")) return "inherited overlay input";
     if (text.includes("derived") || text.includes("approx")) return "derived approximation";
     if (items.some((item) => item.proxy) || text.includes("proxy")) return "proxy source";
-    if (aliasMatched) return "alias mapping";
     return "none";
   }
 
