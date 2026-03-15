@@ -319,7 +319,7 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
             series: region === "US" ? usInputPrices : [],
             invert: true,
             note: region === "US"
-              ? "Source-faithful pricing uses PPIACO; no shipping proxy used"
+              ? "Source-faithful pricing uses PPIACO; shipping-cost fallback disabled"
               : "Missing by design: no source-faithful non-US pricing source wired",
           })],
         },

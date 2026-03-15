@@ -568,7 +568,9 @@ export default function GlobalMacroDashboard() {
     const text = items.map((item) => `${item.note ?? ""} ${item.id ?? ""} ${item.source ?? ""} ${item.exactSource ?? ""}`.toLowerCase()).join(" |");
     if (text.includes("inherited") || text.includes("regional_unrest") || text.includes("overlay input")) return "inherited overlay input";
     if (text.includes("derived") || text.includes("approx")) return "derived approximation";
-    if (items.some((item) => item.proxy) || text.includes("proxy")) return "proxy source";
+    const hasExplicitProxy = items.some((item) => item.proxy);
+    const mentionsProxy = text.includes("proxy") && !text.includes("no proxy") && !text.includes("without proxy");
+    if (hasExplicitProxy || mentionsProxy) return "proxy source";
     return "none";
   }
 
@@ -743,7 +745,7 @@ export default function GlobalMacroDashboard() {
           : "weak";
     const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
     const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
-    const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy || component.missing).length / actualComponents.length;
+    const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy).length / actualComponents.length;
     const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")).length / blockRows.length;
     const criticalBlocksByOverlay: Record<string, string[]> = {
       localUnrestOverlay: ["signal", "transmission"],
