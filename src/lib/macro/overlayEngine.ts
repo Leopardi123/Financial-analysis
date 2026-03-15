@@ -236,7 +236,7 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       safehaven: { weight: 0.2, components: [makeComponent({ asOfDate, id: "lu_safe", title: "Safe-haven divergence", block: "safehaven", weight: 1, source: "FRED", exactSource: "GOLD/SP500 and duration flight", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
       real: { weight: 0.2, components: [makeComponent({ asOfDate, id: "lu_real", title: "Real economy disruption", block: "real", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "INDPRO + ICSA" : "industrial production + business confidence", series: getSeries(series, region === "US" ? "INDPRO" : "EA_INDUSTRIAL_PRODUCTION"), invert: true, proxy: true })] },
     }),
-    safeHavenOverlay: finalizeOverlay({
+    safeHavenRiskOffOverlay: finalizeOverlay({
       gold_equity: { weight: 0.65, components: [makeComponent({ asOfDate, id: "sh_gold_eq", title: "Gold-equity flight", block: "gold_equity", weight: 1, source: "FRED", exactSource: "GOLD/SP500 ratio", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
       duration: { weight: 0.35, components: [makeComponent({ asOfDate, id: "sh_duration", title: "Duration flight", block: "duration", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "US10Y yield" : "DE10Y yield", series: getSeries(series, region === "US" ? "DGS10" : "EA_10Y_CORE_YIELD"), invert: true })] },
     }),
@@ -265,7 +265,7 @@ export function buildGlobalUnrestOverlay(asOfDate: string, us: OverlayBundle | n
   const breadthSeries: Point[] = [{ date: asOfDate, value: usLocal }, { date: asOfDate, value: eaLocal }];
   const syncVal = usLocal !== null && eaLocal !== null ? 100 - Math.min(100, Math.abs(usLocal - eaLocal)) : null;
   const syncSeries: Point[] = [{ date: asOfDate, value: syncVal }];
-  const bridgeSeries: Point[] = [{ date: asOfDate, value: ((us?.overlays.safeHavenOverlay?.score ?? 50) + (ea?.overlays.energyShockOverlay?.score ?? 50)) / 2 }];
+  const bridgeSeries: Point[] = [{ date: asOfDate, value: ((us?.overlays.safeHavenRiskOffOverlay?.score ?? 50) + (ea?.overlays.energyShockOverlay?.score ?? 50)) / 2 }];
   return finalizeOverlay({
     breadth: { weight: 0.45, components: [makeComponent({ asOfDate, id: "gu_breadth", title: "Regional breadth", block: "breadth", weight: 1, source: "Inherited", exactSource: "local_unrest_overlay_score_us/ea", series: breadthSeries, invert: true, proxy: true })] },
     sync: { weight: 0.35, components: [makeComponent({ asOfDate, id: "gu_sync", title: "Regional synchronization", block: "sync", weight: 1, source: "Inherited", exactSource: "local_unrest_sync", series: syncSeries, invert: true, proxy: true })] },
@@ -282,5 +282,41 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     map.set(key, bucket);
   }
   for (const [key, points] of map.entries()) map.set(key, canonicalMonthlyGrid(points));
+
+  const aliasCandidates: Record<string, string[]> = {
+    WALCL: ["fed_balance_sheet_total"],
+    M2SL: ["m2sl"],
+    DFII10: ["real_yield_10y_us"],
+    BAMLC0A0CM: ["ig_spread_us"],
+    BAMLH0A0HYM2: ["hy_spread_us"],
+    NFCI: ["financial_conditions_index"],
+    DGS10: ["nominal_yield_10y_us"],
+    DCOILBRENTEU: ["oil_brent_usd"],
+    INDPRO: ["pmi_us"],
+    CPILFESL: ["core_cpi_us"],
+    T10YIE: ["breakeven_10y_us"],
+    CPIAUCSL: ["core_cpi_us"],
+    VIXCLS: ["vix_index"],
+    "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E": ["m3_ea"],
+    "HICP.M.U2.N.000000.4.ANR": ["hicp_yoy_ea", "hicp_ea"],
+    "HICP.M.U2.N.XEF000.4D0.ANR": ["hicp_yoy_ea"],
+    "CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX": ["credit_spreads_ea"],
+    "EA_INDUSTRIAL_PRODUCTION": ["industrial_production_ea", "pmi_ea", "pmi_us"],
+    "EA_10Y_CORE_YIELD": ["real_yield_10y_ea"],
+    "EA_PPI": ["commodity_index", "industrial_metals_index"],
+    "EA_INFLATION_EXPECTATIONS": ["hicp_yoy_ea"],
+    "EUR_IG_OAS": ["credit_spreads_ea"],
+    "EUR_HY_OAS": ["credit_spreads_ea"],
+    "GOLD_EQUITY_RATIO": ["gold_minus_real_yield_spread", "gold_usd"],
+    "ISRATIO": ["pmi_us"],
+  };
+
+  for (const [target, candidates] of Object.entries(aliasCandidates)) {
+    if (map.has(target)) continue;
+    const foundKey = candidates.find((candidate) => map.has(candidate));
+    if (!foundKey) continue;
+    map.set(target, map.get(foundKey) ?? []);
+  }
+
   return map;
 }

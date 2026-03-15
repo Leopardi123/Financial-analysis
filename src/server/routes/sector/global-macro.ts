@@ -13,7 +13,7 @@ const REGIONAL_OVERLAY_KEYS = [
   "creditFundingOverlay",
   "energyShockOverlay",
   "localUnrestOverlay",
-  "safeHavenOverlay",
+  "safeHavenRiskOffOverlay",
   "inflationCostShockOverlay",
   "tradeSupplyChainStressOverlay",
 ] as const;
@@ -333,7 +333,7 @@ function buildGlobalUnrestOverlayHistoryFromRegional(params: {
       asOfDate: usPoint.asOfDate,
       overlays: {
         localUnrestOverlay: { score: usPoint.scores.localUnrestOverlay ?? null },
-        safeHavenOverlay: { score: usPoint.scores.safeHavenOverlay ?? null },
+        safeHavenRiskOffOverlay: { score: usPoint.scores.safeHavenRiskOffOverlay ?? null },
         energyShockOverlay: { score: usPoint.scores.energyShockOverlay ?? null },
       },
     } as any;
@@ -342,7 +342,7 @@ function buildGlobalUnrestOverlayHistoryFromRegional(params: {
       asOfDate: eaPoint.asOfDate,
       overlays: {
         localUnrestOverlay: { score: eaPoint.scores.localUnrestOverlay ?? null },
-        safeHavenOverlay: { score: eaPoint.scores.safeHavenOverlay ?? null },
+        safeHavenRiskOffOverlay: { score: eaPoint.scores.safeHavenRiskOffOverlay ?? null },
         energyShockOverlay: { score: eaPoint.scores.energyShockOverlay ?? null },
       },
     } as any;
@@ -887,7 +887,8 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
     .slice(0, 5);
 
   const rawSeriesRows = await loadRawSeriesRows(region);
-  const overlayBundle = buildRegionalOverlays(region as "US" | "EA" | "SE", regimeRow.as_of_date, buildSeriesMap(rawSeriesRows));
+  const seriesMap = buildSeriesMap(rawSeriesRows);
+  const overlayBundle = buildRegionalOverlays(region as "US" | "EA" | "SE", regimeRow.as_of_date, seriesMap);
 
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
@@ -939,6 +940,29 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       rawSeriesRows,
       maxPoints: 24,
     }),
+    overlayEngineDiagnostics: (() => {
+      const overlaysReturned = Object.keys(overlayBundle.overlays);
+      const overlaysMissing = [...REGIONAL_OVERLAY_KEYS].filter((key) => !overlaysReturned.includes(key));
+      const history = buildRegionalOverlayHistory({ region: region as "US" | "EA" | "SE", rawSeriesRows, maxPoints: 24 });
+      const historyBuiltFor = overlaysReturned.filter((overlayKey) => history.some((point) => typeof point.scores[overlayKey] === "number"));
+      const historyMissingFor = overlaysReturned.filter((overlayKey) => !historyBuiltFor.includes(overlayKey));
+      const reasons: string[] = [];
+      if (rawSeriesRows.length === 0) reasons.push("No raw series rows available for region");
+      for (const [overlayKey, overlay] of Object.entries(overlayBundle.overlays)) {
+        if (typeof overlay.score !== "number") reasons.push(`${overlayKey}: score is null; all included components missing/proxy or insufficient history`);
+      }
+      return {
+        region,
+        rawSeriesCount: new Set(rawSeriesRows.map((row) => row.series_key)).size,
+        rawSeriesKeysSample: Array.from(new Set(rawSeriesRows.map((row) => row.series_key))).sort().slice(0, 25),
+        buildersRun: [...REGIONAL_OVERLAY_KEYS],
+        overlaysReturned,
+        overlaysMissing,
+        historyBuiltFor,
+        historyMissingFor,
+        reasons,
+      };
+    })(),
     overlayRuntimeProof: {
       overlayEngineUsed: true,
       bundlePresent: Boolean(overlayBundle && Object.keys(overlayBundle.overlays).length > 0),
@@ -1072,6 +1096,29 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       expectedOverlayBundleKeys: [...GLOBAL_OVERLAY_KEYS],
       legacyOverlayKeys: ["growthOverlay", "stressOverlay", "hardAssetOverlay"],
       uiOverlayKeysRequested,
+    },
+    overlayEngineDiagnostics: {
+      region: "GLOBAL",
+      rawSeriesCount: (regionalMap.US?.overlayEngineDiagnostics?.rawSeriesCount ?? 0) + (regionalMap.EA?.overlayEngineDiagnostics?.rawSeriesCount ?? 0),
+      rawSeriesKeysSample: [
+        ...((regionalMap.US?.overlayEngineDiagnostics?.rawSeriesKeysSample ?? []) as string[]),
+        ...((regionalMap.EA?.overlayEngineDiagnostics?.rawSeriesKeysSample ?? []) as string[]),
+      ].slice(0, 25),
+      buildersRun: [...GLOBAL_OVERLAY_KEYS],
+      overlaysReturned: Object.keys(globalOverlayBundle.overlays),
+      overlaysMissing: [],
+      historyBuiltFor: buildGlobalUnrestOverlayHistoryFromRegional({
+        usHistory: regionalMap.US?.overlayHistory ?? [],
+        eaHistory: regionalMap.EA?.overlayHistory ?? [],
+      }).length > 0 ? ["globalUnrestOverlay"] : [],
+      historyMissingFor: buildGlobalUnrestOverlayHistoryFromRegional({
+        usHistory: regionalMap.US?.overlayHistory ?? [],
+        eaHistory: regionalMap.EA?.overlayHistory ?? [],
+      }).length > 0 ? [] : ["globalUnrestOverlay"],
+      reasons: [
+        ...(regionalMap.US?.overlayEngineDiagnostics?.reasons ?? []),
+        ...(regionalMap.EA?.overlayEngineDiagnostics?.reasons ?? []),
+      ],
     },
     indicators,
     dataStatus: "snapshot",

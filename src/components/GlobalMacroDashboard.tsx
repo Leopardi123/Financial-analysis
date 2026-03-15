@@ -39,6 +39,17 @@ type GlobalMacroPayload = {
     regionKeysPresent: string[];
     globalKeysPresent: string[];
   };
+  overlayEngineDiagnostics?: {
+    region: string;
+    rawSeriesCount: number;
+    rawSeriesKeysSample: string[];
+    buildersRun: string[];
+    overlaysReturned: string[];
+    overlaysMissing: string[];
+    historyBuiltFor: string[];
+    historyMissingFor: string[];
+    reasons: string[];
+  };
   indicators: Array<{
     indicatorId: string;
     title: string;
@@ -330,7 +341,7 @@ export default function GlobalMacroDashboard() {
       "creditFundingOverlay",
       "energyShockOverlay",
       "localUnrestOverlay",
-      "safeHavenOverlay",
+      "safeHavenRiskOffOverlay",
       "inflationCostShockOverlay",
       "tradeSupplyChainStressOverlay",
     ]), [selectedRegion]);
@@ -405,7 +416,7 @@ export default function GlobalMacroDashboard() {
       "liquidityOverlay",
       "creditFundingOverlay",
       "energyShockOverlay",
-      "safeHavenOverlay",
+      "safeHavenRiskOffOverlay",
       "inflationCostShockOverlay",
       "tradeSupplyChainStressOverlay",
       "localUnrestOverlay",
@@ -754,6 +765,7 @@ Signal: ${gapLabel}`,
                     <li>overlay bundle present: {globalMacro.overlayRuntimeProof?.bundlePresent ? "yes" : "no"}</li>
                     <li>bundle keys: {(globalMacro.overlayRuntimeProof?.bundleKeys ?? []).join(", ") || "—"}</li>
                     <li>selected region: {selectedRegion}</li>
+                    <li>raw series count used by overlay engine: {globalMacro.overlayEngineDiagnostics?.rawSeriesCount ?? 0}</li>
                   </ul>
                 </div>
 
@@ -807,11 +819,16 @@ Signal: ${gapLabel}`,
                     <li>requested region: {selectedRegion}</li>
                     <li>overlayRuntimeProof: {JSON.stringify(globalMacro.overlayRuntimeProof ?? null)}</li>
                     <li>ui overlay keys actually rendered: {uiOverlayKeysRendered.join(", ") || "—"}</li>
-                    <li>number of cards rendered: {overlayEntries.length}</li>
+                    <li>number of cards rendered: {uiOverlayKeysRequested.length}</li>
                     <li>number of graphs rendered: {overlayKeysForCharts.length}</li>
                     <li>number of overlays with scores: {overlaysWithScores}</li>
                     <li>number of overlays missing: {overlaysMissing}</li>
                     <li>number of overlays partial/proxy: {overlaysPartialOrProxy}</li>
+                    <li>overlays computed: {(globalMacro.overlayEngineDiagnostics?.overlaysReturned ?? []).join(", ") || "—"}</li>
+                    <li>overlays missing: {(globalMacro.overlayEngineDiagnostics?.overlaysMissing ?? []).join(", ") || "—"}</li>
+                    <li>history built count: {(globalMacro.overlayEngineDiagnostics?.historyBuiltFor ?? []).length}</li>
+                    <li>history missing for: {(globalMacro.overlayEngineDiagnostics?.historyMissingFor ?? []).join(", ") || "—"}</li>
+                    <li>diagnostic reasons: {(globalMacro.overlayEngineDiagnostics?.reasons ?? []).slice(0, 6).join(" | ") || "none"}</li>
                   </ul>
                 </details>
               </section>
