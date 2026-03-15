@@ -460,6 +460,7 @@ export default function GlobalMacroDashboard() {
   type IntendedSeriesSpec = {
     id: string;
     block: string;
+    linkedMacroFamily?: string;
     primarySources: string[];
     aliasFamily: string[];
     note?: string;
@@ -475,29 +476,29 @@ export default function GlobalMacroDashboard() {
     liquidityOverlay: {
       intendedPrimaryBlocks: ["B_MONETARY", "D_CREDIBILITY"],
       intendedSeries: [
-        { id: "real_yield_10y", block: "B_MONETARY", primarySources: ["DFII10"], aliasFamily: ["real_yield_10y", "dfii10", "real_yield"] },
-        { id: "financial_conditions", block: "B_MONETARY", primarySources: ["NFCI"], aliasFamily: ["financial_conditions", "nfci", "fci"] },
-        { id: "hy_spread", block: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2", "high_yield_spread"] },
-        { id: "dollar_index", block: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["dollar_index", "dtwexbgs", "usd_broad_index", "usd_strength"] },
+        { id: "real_yield_10y", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["DFII10"], aliasFamily: ["real_yield_10y", "dfii10", "real_yield"] },
+        { id: "financial_conditions", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["NFCI"], aliasFamily: ["financial_conditions", "nfci", "fci"] },
+        { id: "hy_spread", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2", "high_yield_spread"] },
+        { id: "dollar_index", block: "transmission", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["dollar_index", "dtwexbgs", "usd_broad_index", "usd_strength"] },
       ],
       logicSummary: "Likviditet, realränta, spread och dollarvillkor driver overlayns kärna.",
     },
     creditFundingOverlay: {
       intendedPrimaryBlocks: ["B_MONETARY", "D_CREDIBILITY"],
       intendedSeries: [
-        { id: "hy_spread", block: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2"] },
-        { id: "ig_spread", block: "B_MONETARY", primarySources: ["BAMLC0A0CM"], aliasFamily: ["ig_spread", "bamlc0a0cm"] },
-        { id: "ted_spread", block: "D_CREDIBILITY", primarySources: ["TEDRATE"], aliasFamily: ["ted_spread", "tedrate"] },
-        { id: "xccy_basis", block: "D_CREDIBILITY", primarySources: ["DRTSCILM"], aliasFamily: ["xccy_basis", "drtscilm", "cross_currency_basis"], note: "Kan köras via proxy om xccy ej komplett." },
+        { id: "hy_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2"] },
+        { id: "ig_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLC0A0CM"], aliasFamily: ["ig_spread", "bamlc0a0cm"] },
+        { id: "ted_spread", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["TEDRATE"], aliasFamily: ["ted_spread", "tedrate"] },
+        { id: "xccy_basis", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DRTSCILM"], aliasFamily: ["xccy_basis", "drtscilm", "cross_currency_basis"], note: "Kan köras via proxy om xccy ej komplett." },
       ],
       logicSummary: "Kredit- och fundingstress via HY/IG-spreadar, TED och xccy-basis.",
     },
     energyShockOverlay: {
       intendedPrimaryBlocks: ["C_INFLATION", "D_CREDIBILITY"],
       intendedSeries: [
-        { id: "oil_price", block: "C_INFLATION", primarySources: ["DCOILBRENTEU"], aliasFamily: ["oil_price", "dcoilbrenteu", "dcoilwtico"] },
-        { id: "gas_price", block: "C_INFLATION", primarySources: ["NG / regional gas source"], aliasFamily: ["gas_price", "natural_gas", "ttf", "ng"] },
-        { id: "energy_cost_pass", block: "D_CREDIBILITY", primarySources: ["PPIACO (energy pass-through family)"], aliasFamily: ["energy_breadth", "energy_ppi", "ppiaco"] },
+        { id: "oil_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["DCOILBRENTEU"], aliasFamily: ["oil_price", "dcoilbrenteu", "dcoilwtico"] },
+        { id: "gas_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["NG / regional gas source"], aliasFamily: ["gas_price", "natural_gas", "ttf", "ng"] },
+        { id: "energy_cost_pass", block: "spillover", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["PPIACO (energy pass-through family)"], aliasFamily: ["energy_breadth", "energy_ppi", "ppiaco"] },
       ],
       logicSummary: "Energiinput och genomslag till kostnads-/förtroendeblock.",
     },
@@ -521,19 +522,19 @@ export default function GlobalMacroDashboard() {
     inflationCostShockOverlay: {
       intendedPrimaryBlocks: ["C_INFLATION", "A_FISCAL"],
       intendedSeries: [
-        { id: "cpi", block: "C_INFLATION", primarySources: ["CPIAUCSL / regional CPI"], aliasFamily: ["cpi", "cpiaucsl", "cp0000ez19m086nest"] },
-        { id: "ppi", block: "C_INFLATION", primarySources: ["PPIACO"], aliasFamily: ["ppi", "ppiaco"] },
-        { id: "inflation_expectations", block: "A_FISCAL", primarySources: ["T10YIE"], aliasFamily: ["inflation_expectations", "t10yie", "breakeven"] },
+        { id: "cpi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["CPIAUCSL / regional CPI"], aliasFamily: ["cpi", "cpiaucsl", "cp0000ez19m086nest"] },
+        { id: "ppi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["PPIACO"], aliasFamily: ["ppi", "ppiaco"] },
+        { id: "inflation_expectations", block: "expectations", linkedMacroFamily: "A_FISCAL", primarySources: ["T10YIE", "survey expectations source"], aliasFamily: ["inflation_expectations", "t10yie", "breakeven"] },
       ],
       logicSummary: "Kostnadschock via CPI/PPI och inflationsförväntningar.",
     },
     tradeSupplyChainStressOverlay: {
       intendedPrimaryBlocks: ["C_INFLATION", "D_CREDIBILITY"],
       intendedSeries: [
-        { id: "industrial_production", block: "D_CREDIBILITY", primarySources: ["INDPRO"], aliasFamily: ["industrial_production", "indpro"] },
-        { id: "new_orders", block: "D_CREDIBILITY", primarySources: ["new orders family"], aliasFamily: ["new_orders", "dgorder", "new_orders_proxy"] },
-        { id: "inventories", block: "C_INFLATION", primarySources: ["ISRATIO / inventory family"], aliasFamily: ["inventories", "isratio", "inventories_orders"] },
-        { id: "input_prices", block: "C_INFLATION", primarySources: ["PPIACO / shipping-cost family"], aliasFamily: ["supply_chain_price_stress", "ppiaco", "shipping_proxy"] },
+        { id: "industrial_production", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["INDPRO"], aliasFamily: ["industrial_production", "indpro"] },
+        { id: "new_orders", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["new orders source"], aliasFamily: ["new_orders", "dgorder", "new_orders_proxy"] },
+        { id: "inventories", block: "inventory_pressure", linkedMacroFamily: "C_INFLATION", primarySources: ["ISRATIO / inventory family"], aliasFamily: ["inventories", "isratio", "inventories_orders"] },
+        { id: "input_prices", block: "pricing", linkedMacroFamily: "C_INFLATION", primarySources: ["PPIACO / shipping-cost family"], aliasFamily: ["supply_chain_price_stress", "ppiaco", "shipping_proxy"] },
       ],
       logicSummary: "Real goods flow + orders/inventories + inputkostnadstryck.",
     },
@@ -641,6 +642,7 @@ export default function GlobalMacroDashboard() {
       return {
         id: seriesSpec.id,
         block: seriesSpec.block,
+        linkedMacroFamily: seriesSpec.linkedMacroFamily ?? "—",
         intendedPrimarySources: seriesSpec.primarySources.join(", "),
         aliasFamily: seriesSpec.aliasFamily.join(", "),
         availability,
@@ -663,7 +665,8 @@ export default function GlobalMacroDashboard() {
     const blockRows = blockKeys.map((block) => {
       const scoreValue = overlay?.blockScores?.[block] ?? null;
       const diagnostics = runtimeBlockDiagnostics.find((item) => item.block === block);
-      const blockSeries = seriesRows.filter((row) => row.block === block);
+      const exactSeries = seriesRows.filter((row) => row.block === block);
+      const blockSeries = exactSeries.length > 0 ? exactSeries : seriesRows;
       const availabilityCounts = {
         available: blockSeries.filter((row) => row.availability === "available").length,
         partial: blockSeries.filter((row) => row.availability === "partial").length,
@@ -686,12 +689,12 @@ export default function GlobalMacroDashboard() {
           : "pass";
 
       const availabilityRatio = blockSeries.length === 0 ? 0 : (availabilityCounts.available + availabilityCounts.partial * 0.5) / blockSeries.length;
-      const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage !== "none" && row.fallbackUsage !== "alias mapping").length / blockSeries.length;
+      const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation" || row.fallbackUsage === "inherited overlay input").length / blockSeries.length;
       const specFidelity: "high" | "medium" | "low" = runtimeStatus === "missing"
         ? "low"
-        : availabilityRatio >= 0.67 && proxyShare <= 0.25
+        : availabilityRatio >= 0.6 && proxyShare <= 0.34
           ? "high"
-          : availabilityRatio >= 0.34
+          : availabilityRatio >= 0.3
             ? "medium"
             : "low";
 
@@ -711,6 +714,7 @@ export default function GlobalMacroDashboard() {
 
       return {
         block,
+        linkedMacroFamily: Array.from(new Set(blockSeries.map((row) => row.linkedMacroFamily).filter((item) => item && item !== "—"))).join(", ") || "—",
         runtimeStatus,
         specFidelity,
         intendedPrimarySources: intendedPrimarySources.length > 0 ? Array.from(new Set(intendedPrimarySources)).join(", ") : (diagnostics?.expectedSource || "—"),
@@ -733,7 +737,9 @@ export default function GlobalMacroDashboard() {
           : "weak";
     const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
     const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
-    const proxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed !== "none" && row.fallbackUsed !== "alias mapping").length / blockRows.length;
+    const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy || component.missing).length / actualComponents.length;
+    const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")).length / blockRows.length;
+    const proxyRatio = Math.max(runtimeProxyComponentRatio, blockProxyRatio);
     const proxyDependence: "none" | "low" | "medium" | "high" = proxyRatio === 0 ? "none" : proxyRatio <= 0.25 ? "low" : proxyRatio <= 0.6 ? "medium" : "high";
     const robustness: "high" | "medium" | "low" = runtimeCompleteness === "full" && proxyDependence !== "high" && specFidelity !== "low"
       ? "high"
@@ -751,6 +757,9 @@ export default function GlobalMacroDashboard() {
     const exactDifferences = blockRows
       .filter((row) => row.blockerType !== "no blocker" || row.sourceAvailability !== "available")
       .map((row) => `${row.block}: ${row.blockerType}; availability=${row.sourceAvailability}; fallback=${row.fallbackUsed}`);
+    const matchesSpec = blockRows
+      .filter((row) => row.specFidelity === "high" || (row.specFidelity === "medium" && row.sourceAvailability === "available"))
+      .map((row) => `${row.block}: runtime=${row.runtimeStatus}, primary sources present (${row.intendedPrimarySources})`);
     const whyDiffExists = blockRows
       .filter((row) => row.reason && row.reason !== "no blocker")
       .map((row) => `${row.block}: ${row.reason}`);
@@ -772,8 +781,9 @@ export default function GlobalMacroDashboard() {
       blockRows,
       seriesRows,
       implementationDelta: [
-        `intended primary design: ${spec.logicSummary}`,
+        `intended design: ${spec.logicSummary}`,
         `current runtime implementation: ${Array.from(new Set(actualComponents.map((component) => `${component.id} (${component.exactSource || component.source})`))).slice(0, 8).join(", ") || "no runtime components"}`,
+        `what matches spec: ${matchesSpec.join(" | ") || "no clear high-fidelity block match"}`,
         `exact differences: ${exactDifferences.join(" | ") || "none"}`,
         `why differences exist: ${whyDiffExists.join(" | ") || "no blocker"}`,
         `impact on interpretation: ${impact}`,
@@ -1166,6 +1176,7 @@ Signal: ${gapLabel}`,
                             <th>block</th>
                             <th>runtime status</th>
                             <th>spec fidelity</th>
+                            <th>linked macro family</th>
                             <th>intended primary sources</th>
                             <th>current runtime sources</th>
                             <th>source availability</th>
@@ -1182,6 +1193,7 @@ Signal: ${gapLabel}`,
                               <td>{block.block}</td>
                               <td>{block.runtimeStatus}</td>
                               <td>{block.specFidelity}</td>
+                              <td>{block.linkedMacroFamily}</td>
                               <td>{block.intendedPrimarySources}</td>
                               <td>{block.runtimeSources}</td>
                               <td>{block.sourceAvailability}</td>
@@ -1204,6 +1216,8 @@ Signal: ${gapLabel}`,
                             <th>availability in current pipeline</th>
                             <th>current runtime source</th>
                             <th>current runtime series</th>
+                            <th>mapping type</th>
+                            <th>proxy</th>
                             <th>fallback used</th>
                             <th>reason</th>
                             <th>blocker type</th>
@@ -1217,6 +1231,8 @@ Signal: ${gapLabel}`,
                               <td>{series.availability}</td>
                               <td>{series.runtimeSourceUsed}</td>
                               <td>{series.runtimeSeriesUsed}</td>
+                              <td>{series.mappingType}</td>
+                              <td>{series.proxy}</td>
                               <td>{series.fallbackUsage}</td>
                               <td>{series.note || "—"}</td>
                               <td>{series.blockerType}</td>
