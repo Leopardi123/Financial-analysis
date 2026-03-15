@@ -39,6 +39,15 @@ type GlobalMacroPayload = {
     regionKeysPresent: string[];
     globalKeysPresent: string[];
   };
+  overlayBlockDiagnostics?: Record<string, Array<{
+    overlay: string;
+    block: string;
+    status: "pass" | "proxy" | "missing";
+    expectedSource: string;
+    actualSourceUsed: string;
+    reason: string;
+    failedAt: string | null;
+  }>>;
   overlayEngineDiagnostics?: {
     region: string;
     rawSeriesCount: number;
@@ -424,6 +433,26 @@ export default function GlobalMacroDashboard() {
   const uiOverlayKeysRendered = overlayEntries.map(([name]) => name);
   const overlaysWithScores = overlayEntries.filter(([, overlay]) => typeof overlay.score === "number").length;
   const overlaysMissing = Math.max(0, uiOverlayKeysRequested.length - overlayEntries.length);
+  const overlaySanity = overlayEntries.map(([overlayKey, overlay]) => {
+    const blockRows = Object.entries(overlay.blockScores ?? {}).map(([block, score]) => ({
+      block,
+      score: typeof score === "number" ? score : null,
+      components: (overlay.components ?? []).filter((component) => component.block === block),
+    }));
+    const realBlocks = blockRows.filter((row) => row.score !== null && row.components.some((component) => !component.proxy && !component.missing)).length;
+    const proxyBlocks = blockRows.filter((row) => row.score !== null && row.components.every((component) => component.proxy || component.missing)).length;
+    const missingBlocks = blockRows.filter((row) => row.score === null).length;
+    const lowRobustness = realBlocks < 2 || (proxyBlocks / Math.max(1, blockRows.length)) > 0.6;
+    const negative = (overlay.components ?? [])
+      .filter((component) => typeof component.score === "number")
+      .sort((a, b) => (a.score as number) - (b.score as number))
+      .slice(0, 3)
+      .map((component) => `${component.id}:${(component.score as number).toFixed(1)}`);
+    const normalizationInputs = blockRows.map((row) => `${row.block}=${row.score === null ? "null" : row.score.toFixed(1)}`);
+    return { overlayKey, realBlocks, proxyBlocks, missingBlocks, lowRobustness, negative, normalizationInputs };
+  });
+  const lowRobustnessCount = overlaySanity.filter((entry) => entry.lowRobustness).length;
+
   const overlaysPartialOrProxy = overlayEntries.filter(([, overlay]) => {
     const components = overlay.components ?? [];
     const missingCount = components.filter((component) => component.missing).length;
@@ -793,6 +822,7 @@ Signal: ${gapLabel}`,
                               block scores: {Object.entries(overlay.blockScores).map(([block, score]) => `${block}=${typeof score === "number" ? score.toFixed(1) : "—"}`).join(", ") || "—"}
                             </div>
                             <div style={{ fontSize: 12, marginTop: 4 }}>proxy/missing count: {proxyCount}/{missingCount}</div>
+                            {overlaySanity.find((entry) => entry.overlayKey === overlayKey)?.lowRobustness && <div className="status" style={{ marginTop: 6 }}>low robustness</div>}
                             {typeof overlay.score !== "number" && <div className="status empty" style={{ marginTop: 6 }}>Overlay present but missing score data.</div>}
                           </div>
                         );
@@ -813,6 +843,54 @@ Signal: ${gapLabel}`,
                   </div>
                 </div>
 
+                <div style={{ marginBottom: 12 }}>
+                  <strong>US/EA block population trace</strong>
+                  <div style={{ marginTop: 8, overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>overlay</th>
+                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>block</th>
+                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>status</th>
+                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>expected source</th>
+                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>actual source used</th>
+                          <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(globalMacro.overlayBlockDiagnostics ?? {}).flatMap(([overlayName, blocks]) => blocks.map((row, idx) => (
+                          <tr key={`${overlayName}-${row.block}-${idx}`}>
+                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{overlayName}</td>
+                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.block}</td>
+                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.status}</td>
+                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.expectedSource || "—"}</td>
+                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.actualSourceUsed || "—"}</td>
+                            <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", verticalAlign: "top" }}>{row.reason || "—"}</td>
+                          </tr>
+                        )))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <strong>Sanity & calibration diagnostics</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, marginTop: 8 }}>
+                    {overlaySanity.map((item) => (
+                      <div key={`sanity-${item.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <div style={{ fontWeight: 700 }}>{item.overlayKey}</div>
+                        <div>total score: {typeof activeOverlayBundle?.overlays?.[item.overlayKey]?.score === "number" ? activeOverlayBundle?.overlays?.[item.overlayKey]?.score?.toFixed(1) : "—"}</div>
+                        <div>active real blocks: {item.realBlocks}</div>
+                        <div>proxy blocks: {item.proxyBlocks}</div>
+                        <div>missing blocks: {item.missingBlocks}</div>
+                        <div>dominant negative contributors: {item.negative.join(", ") || "—"}</div>
+                        <div>normalization inputs: {item.normalizationInputs.join(" | ") || "—"}</div>
+                        {item.lowRobustness && <div className="status" style={{ marginTop: 6 }}>low robustness</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <details>
                   <summary style={{ cursor: "pointer", fontWeight: 600 }}>Overlay engine trace</summary>
                   <ul style={{ marginTop: 8 }}>
@@ -824,6 +902,7 @@ Signal: ${gapLabel}`,
                     <li>number of overlays with scores: {overlaysWithScores}</li>
                     <li>number of overlays missing: {overlaysMissing}</li>
                     <li>number of overlays partial/proxy: {overlaysPartialOrProxy}</li>
+                    <li>number of overlays low robustness: {lowRobustnessCount}</li>
                     <li>overlays computed: {(globalMacro.overlayEngineDiagnostics?.overlaysReturned ?? []).join(", ") || "—"}</li>
                     <li>overlays missing: {(globalMacro.overlayEngineDiagnostics?.overlaysMissing ?? []).join(", ") || "—"}</li>
                     <li>history built count: {(globalMacro.overlayEngineDiagnostics?.historyBuiltFor ?? []).length}</li>
@@ -838,9 +917,14 @@ Signal: ${gapLabel}`,
                 <li>Core Regime: <strong>{globalMacro.regime.coreRegimeLabel}</strong></li>
                 <li>Macro score: {typeof globalMacro.regime.macroScoreTotal === "number" ? globalMacro.regime.macroScoreTotal.toFixed(1) : "—"}</li>
                 <li>Confidence: {globalMacro.regime.macroConfidence}%</li>
-                <li>Legacy overlays (deprecated): growth={globalMacro.regime.growthOverlay}, stress={globalMacro.regime.stressOverlay}, hard_asset={globalMacro.regime.hardAssetOverlay}</li>
+                
                 <li>Data status: {globalMacro.dataStatus}</li>
               </ul>
+
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>Legacy overlays (deprecated)</summary>
+                <div style={{ marginTop: 8, fontSize: 12 }}>growth={globalMacro.regime.growthOverlay}, stress={globalMacro.regime.stressOverlay}, hard_asset={globalMacro.regime.hardAssetOverlay}</div>
+              </details>
 
               <h4>Blockrad</h4>
               <div className="metric-list">

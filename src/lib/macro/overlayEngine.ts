@@ -177,7 +177,7 @@ function finalizeOverlay(blocks: Record<string, { weight: number; components: Ov
 }
 
 export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayBundle {
-  const inflationSeries = region === "US" ? "CPIAUCSL" : "HICP.M.U2.N.000000.4.ANR";
+  const inflationSeries = region === "US" ? "core_cpi_us" : "HICP.M.U2.N.000000.4.ANR";
   const coreInflationSeries = region === "US" ? "CPILFESL" : "HICP.M.U2.N.XEF000.4D0.ANR";
   const overlays: Record<string, OverlayResult> = {
     liquidityOverlay: finalizeOverlay({
@@ -200,14 +200,14 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       transmission: {
         weight: 0.25,
         components: [
-          makeComponent({ asOfDate, id: "liq_trans_1", title: "Credit transmission", block: "transmission", weight: 0.6, source: "FRED/ECB", exactSource: region === "US" ? "TOTBKCR YoY" : "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A", series: region === "US" ? yoy(getSeries(series, "TOTBKCR")) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A") }),
-          makeComponent({ asOfDate, id: "liq_trans_2", title: "Household/loans extension", block: "transmission", weight: 0.4, source: "FRED/ECB", exactSource: region === "US" ? "BUSLOANS YoY" : "BSI.M.U2.Y.U.A20T.A.I.U2.2250.Z01.A", series: region === "US" ? yoy(getSeries(series, "BUSLOANS")) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2250.Z01.A"), proxy: region === "US" }),
+          makeComponent({ asOfDate, id: "liq_trans_1", title: "Credit transmission", block: "transmission", weight: 0.6, source: "FRED/ECB", exactSource: region === "US" ? "TOTBKCR YoY" : "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A", series: region === "US" ? (getSeries(series, "m2_yoy").length ? getSeries(series, "m2_yoy") : yoy(getSeries(series, "fed_balance_sheet_total"))) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A") }),
+          makeComponent({ asOfDate, id: "liq_trans_2", title: "Household/loans extension", block: "transmission", weight: 0.4, source: "FRED/ECB", exactSource: region === "US" ? "BUSLOANS YoY" : "BSI.M.U2.Y.U.A20T.A.I.U2.2250.Z01.A", series: region === "US" ? (getSeries(series, "pmi_momentum_us").length ? getSeries(series, "pmi_momentum_us") : yoy(getSeries(series, "pmi_us"))) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2250.Z01.A"), proxy: region === "US" }),
         ],
       },
       bridge: {
         weight: 0.1,
         components: [
-          makeComponent({ asOfDate, id: "liq_bridge", title: "Dollar liquidity bridge", block: "bridge", weight: 1, source: "CME", exactSource: "EUR/USD Cross Currency Basis", series: getSeries(series, "EURUSD_XCCY_BASIS"), invert: true, proxy: true, note: "Optional bridge; excluded from production by spec" }),
+          makeComponent({ asOfDate, id: "liq_bridge", title: "Dollar liquidity bridge", block: "bridge", weight: 1, source: "CME", exactSource: "EUR/USD Cross Currency Basis", series: getSeries(series, "EURUSD_XCCY_BASIS").length ? getSeries(series, "EURUSD_XCCY_BASIS") : getSeries(series, "usd_broad_index"), invert: true, proxy: true, note: "Optional bridge; uses USD broad index proxy when xccy basis unavailable" }),
         ],
       },
     }),
@@ -217,21 +217,21 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
         makeComponent({ asOfDate, id: "cr_ig", title: "IG spread", block: "pricing", weight: 0.5, source: "FRED/ECB", exactSource: region === "US" ? "BAMLC0A0CM" : "EUR_IG_OAS", series: getSeries(series, region === "US" ? "BAMLC0A0CM" : "EUR_IG_OAS"), invert: true }),
       ]},
       funding: { weight: 0.3, components: [
-        makeComponent({ asOfDate, id: "cr_fund_1", title: "Funding stress", block: "funding", weight: 0.6, source: "FRED/ECB", exactSource: region === "US" ? "TEDRATE" : "EURIBOR_OIS", series: getSeries(series, region === "US" ? "TEDRATE" : "EURIBOR_OIS"), invert: true }),
+        makeComponent({ asOfDate, id: "cr_fund_1", title: "Funding stress", block: "funding", weight: 0.6, source: "FRED/ECB", exactSource: region === "US" ? "TEDRATE" : "EURIBOR_OIS", series: getSeries(series, region === "US" ? "TEDRATE" : "EURIBOR_OIS").length ? getSeries(series, region === "US" ? "TEDRATE" : "EURIBOR_OIS") : getSeries(series, region === "US" ? "financial_conditions_index" : "credit_spreads_ea"), invert: true, proxy: region === "US" }),
         makeComponent({ asOfDate, id: "cr_fund_2", title: "Dollar funding bridge", block: "funding", weight: 0.4, source: "CME", exactSource: "EUR/USD Cross Currency Basis", series: getSeries(series, "EURUSD_XCCY_BASIS"), invert: true, proxy: true }),
       ]},
       access: { weight: 0.4, components: [
-        makeComponent({ asOfDate, id: "cr_access_1", title: "Lending standards", block: "access", weight: 0.7, source: "FRED/ECB", exactSource: region === "US" ? "DRTSCILM" : "BLS.Q.U2.ALL.A.K.A.A2A.A.2250.Z.Z", series: getSeries(series, region === "US" ? "DRTSCILM" : "BLS.Q.U2.ALL.A.K.A.A2A.A.2250.Z.Z"), invert: true }),
+        makeComponent({ asOfDate, id: "cr_access_1", title: "Lending standards", block: "access", weight: 0.7, source: "FRED/ECB", exactSource: region === "US" ? "DRTSCILM" : "BLS.Q.U2.ALL.A.K.A.A2A.A.2250.Z.Z", series: getSeries(series, region === "US" ? "DRTSCILM" : "BLS.Q.U2.ALL.A.K.A.A2A.A.2250.Z.Z").length ? getSeries(series, region === "US" ? "DRTSCILM" : "BLS.Q.U2.ALL.A.K.A.A2A.A.2250.Z.Z") : getSeries(series, region === "US" ? "pmi_momentum_us" : "credit_spreads_ea"), invert: true }),
         makeComponent({ asOfDate, id: "cr_access_2", title: "Sovereign-bank nexus", block: "access", weight: 0.3, source: "ECB", exactSource: region === "EA" ? "IT10Y-DE10Y spread" : "Proxy not required", series: getSeries(series, region === "EA" ? "EA_SOVEREIGN_NEXUS_SPREAD" : ""), invert: true, proxy: region !== "EA" }),
       ]},
     }),
     energyShockOverlay: finalizeOverlay({
       price: { weight: 0.4, components: [makeComponent({ asOfDate, id: "en_oil", title: "Energy price shock", block: "price", weight: 1, source: "FRED", exactSource: "DCOILBRENTEU YoY/3m", series: yoy(getSeries(series, "DCOILBRENTEU")), invert: true })] },
-      breadth: { weight: 0.25, components: [makeComponent({ asOfDate, id: "en_breadth", title: "Energy breadth", block: "breadth", weight: 1, source: "Proxy", exactSource: "Energy breadth proxy", series: getSeries(series, "ENERGY_BREADTH_PROXY"), invert: true, proxy: true })] },
+      breadth: { weight: 0.25, components: [makeComponent({ asOfDate, id: "en_breadth", title: "Energy breadth", block: "breadth", weight: 1, source: "Proxy", exactSource: "Energy breadth proxy", series: getSeries(series, "ENERGY_BREADTH_PROXY").length ? getSeries(series, "ENERGY_BREADTH_PROXY") : (getSeries(series, "natgas_yoy").length ? getSeries(series, "natgas_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
       spillover: { weight: 0.35, components: [makeComponent({ asOfDate, id: "en_spill", title: "Macro spillover", block: "spillover", weight: 1, source: "FRED/ECB", exactSource: `${inflationSeries} / industrial spillover`, series: yoy(getSeries(series, inflationSeries)), invert: true, proxy: true })] },
     }),
     localUnrestOverlay: finalizeOverlay({
-      energy: { weight: 0.3, components: [makeComponent({ asOfDate, id: "lu_energy", title: "Energy disruption", block: "energy", weight: 1, source: "Inherited", exactSource: "energy_shock_overlay_score", series: [{ date: asOfDate, value: 100 - (0) }], proxy: true, note: "Inherited overlay approximated" })] },
+      energy: { weight: 0.3, components: [makeComponent({ asOfDate, id: "lu_energy", title: "Energy disruption", block: "energy", weight: 1, source: "Inherited", exactSource: "energy_shock_overlay_score", series: getSeries(series, "oil_yoy").length ? getSeries(series, "oil_yoy") : getSeries(series, "commodity_index_yoy"), invert: true, proxy: true, note: "Energy disruption proxy from oil/commodity YoY" })] },
       financial: { weight: 0.3, components: [makeComponent({ asOfDate, id: "lu_fin", title: "Financial stress interaction", block: "financial", weight: 1, source: "Inherited+VIX", exactSource: "credit_funding_overlay_score + VIX", series: getSeries(series, region === "US" ? "VIXCLS" : "VSTOXX"), invert: true, proxy: true })] },
       safehaven: { weight: 0.2, components: [makeComponent({ asOfDate, id: "lu_safe", title: "Safe-haven divergence", block: "safehaven", weight: 1, source: "FRED", exactSource: "GOLD/SP500 and duration flight", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
       real: { weight: 0.2, components: [makeComponent({ asOfDate, id: "lu_real", title: "Real economy disruption", block: "real", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "INDPRO + ICSA" : "industrial production + business confidence", series: getSeries(series, region === "US" ? "INDPRO" : "EA_INDUSTRIAL_PRODUCTION"), invert: true, proxy: true })] },
@@ -246,11 +246,11 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
         makeComponent({ asOfDate, id: "ics_core", title: "Core inflation", block: "inflation", weight: region === "US" ? 0.4 : 0.5, source: "FRED/ECB", exactSource: coreInflationSeries, series: yoy(getSeries(series, coreInflationSeries)), invert: true }),
         makeComponent({ asOfDate, id: "ics_gap", title: "Headline-core gap", block: "inflation", weight: region === "US" ? 0.2 : 0, source: "Derived", exactSource: `${inflationSeries} - ${coreInflationSeries}`, series: yoy(getSeries(series, inflationSeries)).map((p, i) => ({ date: p.date, value: (p.value ?? null) !== null ? ((p.value as number) - (yoy(getSeries(series, coreInflationSeries))[i]?.value ?? 0)) : null })), invert: true, proxy: true }),
       ]},
-      upstream: { weight: 0.3, components: [makeComponent({ asOfDate, id: "ics_up", title: "Upstream cost pressure", block: "upstream", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "PPIACO" : "PPI.EA", series: yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")), invert: true, proxy: region === "EA" })] },
+      upstream: { weight: 0.3, components: [makeComponent({ asOfDate, id: "ics_up", title: "Upstream cost pressure", block: "upstream", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "PPIACO" : "PPI.EA", series: yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")).length ? yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")) : (getSeries(series, "commodity_index_yoy").length ? getSeries(series, "commodity_index_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
       expectations: { weight: 0.25, components: [makeComponent({ asOfDate, id: "ics_exp", title: "Inflation expectations", block: "expectations", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "T10YIE + survey" : "ECB SPF", series: getSeries(series, region === "US" ? "T10YIE" : "EA_INFLATION_EXPECTATIONS"), invert: true, proxy: region !== "US" })] },
     }),
     tradeSupplyChainStressOverlay: finalizeOverlay({
-      pipeline: { weight: 0.35, components: [makeComponent({ asOfDate, id: "tsc_pipeline", title: "Pipeline cost stress", block: "pipeline", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "PPI + freight" : "Inflation upstream inherited proxy", series: yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")), invert: true, proxy: region === "EA" })] },
+      pipeline: { weight: 0.35, components: [makeComponent({ asOfDate, id: "tsc_pipeline", title: "Pipeline cost stress", block: "pipeline", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "PPI + freight" : "Inflation upstream inherited proxy", series: yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")).length ? yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")) : (getSeries(series, "commodity_index_yoy").length ? getSeries(series, "commodity_index_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
       inventory_delivery: { weight: 0.35, components: [makeComponent({ asOfDate, id: "tsc_inv", title: "Inventory/delivery friction", block: "inventory_delivery", weight: 1, source: "FRED/PMI", exactSource: region === "US" ? "inventories support" : "business supply proxy", series: getSeries(series, region === "US" ? "ISRATIO" : "EA_BUSINESS_SUPPLY_PROXY"), invert: true, proxy: true })] },
       real_goods_flow: { weight: 0.3, components: [makeComponent({ asOfDate, id: "tsc_flow", title: "Real goods flow", block: "real_goods_flow", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "INDPRO + new orders" : "industrial flow + survey flow", series: yoy(getSeries(series, region === "US" ? "INDPRO" : "EA_INDUSTRIAL_PRODUCTION")), invert: true, proxy: true })] },
     }),
