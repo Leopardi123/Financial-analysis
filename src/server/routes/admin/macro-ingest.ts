@@ -1,9 +1,65 @@
 import type { InStatement } from "@libsql/client";
 import { assertAdminSecret, getAdminSecret } from "../../../../api/_auth.js";
-import { batch } from "../../../../api/_db.js";
+import { batch, query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { loadCanonicalMacroSeries } from "../../../lib/macro/canonicalMacroSeries.js";
 
+
+
+
+type SeriesPoint = { date: string; value: number | null };
+
+function canonicalMonthly(points: SeriesPoint[]): SeriesPoint[] {
+  const byMonth = new Map<string, SeriesPoint>();
+  for (const point of points) {
+    const month = String(point.date).slice(0, 7);
+    const prev = byMonth.get(month);
+    if (!prev || String(point.date) > String(prev.date)) byMonth.set(month, point);
+  }
+  return Array.from(byMonth.values()).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function subtractAligned(left: SeriesPoint[], right: SeriesPoint[]): SeriesPoint[] {
+  const rightByMonth = new Map(canonicalMonthly(right).map((point) => [String(point.date).slice(0, 7), point.value]));
+  return canonicalMonthly(left)
+    .map((point) => {
+      const rv = rightByMonth.get(String(point.date).slice(0, 7));
+      if (point.value === null || rv === null || rv === undefined) return { date: point.date, value: null };
+      return { date: point.date, value: point.value - rv };
+    })
+    .filter((point) => point.value !== null);
+}
+
+function expandQuarterlyToMonthly(points: SeriesPoint[], startMonth: string, endMonth: string): SeriesPoint[] {
+  const monthly = canonicalMonthly(points);
+  const byMonth = new Map(monthly.map((point) => [String(point.date).slice(0, 7), point.value]));
+  let cursor = new Date(`${startMonth}-01T00:00:00Z`);
+  const end = new Date(`${endMonth}-01T00:00:00Z`);
+  let latest: number | null = null;
+  const out: SeriesPoint[] = [];
+  while (cursor <= end) {
+    const month = cursor.toISOString().slice(0, 7);
+    if (byMonth.has(month)) latest = byMonth.get(month) ?? latest;
+    out.push({ date: `${month}-01`, value: latest });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return out;
+}
+
+function divideAlignedWithCarryForward(numerator: SeriesPoint[], denominator: SeriesPoint[]): SeriesPoint[] {
+  const num = canonicalMonthly(numerator);
+  if (num.length === 0 || denominator.length === 0) return [];
+  const months = num.map((point) => String(point.date).slice(0, 7));
+  const denMonthly = expandQuarterlyToMonthly(denominator, months[0], months[months.length - 1]);
+  const denByMonth = new Map(denMonthly.map((point) => [String(point.date).slice(0, 7), point.value]));
+  return num
+    .map((point) => {
+      const den = denByMonth.get(String(point.date).slice(0, 7));
+      if (point.value === null || den === null || den === undefined || den === 0) return { date: point.date, value: null };
+      return { date: point.date, value: point.value / den };
+    })
+    .filter((point) => point.value !== null);
+}
 
 function chunk<T>(items: T[], size: number): T[][] {
   const output: T[][] = [];
@@ -148,6 +204,66 @@ export default async function handler(req: any, res: any) {
           args: [`${typedRegion.toLowerCase()}_derived`, region, seriesKey, point.date, point.value, now],
         });
       }
+    }
+
+    if (typedRegion === "US") {
+      const fullRows = (await query(
+        `SELECT series_key, date, value
+         FROM ${tables.macroRawDatapoints}
+         WHERE region = ? AND source_type = 'auto' AND series_key IN ('WALCL', 'WDTGAL', 'RRPONTSYD', 'GDP')
+         ORDER BY date ASC`,
+        [region],
+      )) as unknown as Array<{ series_key: string; date: string; value: number | null }>;
+      const series = (key: string): SeriesPoint[] => fullRows.filter((row) => String(row.series_key) === key).map((row) => ({ date: String(row.date), value: row.value === null ? null : Number(row.value) }));
+      const walcl = series('WALCL');
+      const wdtgal = series('WDTGAL');
+      const rrpontsyd = series('RRPONTSYD');
+      const gdp = series('GDP');
+      const effectiveFedLiquidity = subtractAligned(subtractAligned(walcl, wdtgal), rrpontsyd);
+      const effectiveFedLiquidityRatio = divideAlignedWithCarryForward(effectiveFedLiquidity, gdp);
+      for (const point of effectiveFedLiquidity) {
+        statements.push({
+          sql: `INSERT INTO ${tables.macroRawDatapoints}
+                (source, source_type, region, series_key, date, value, fetched_at)
+                VALUES (?, 'auto', ?, ?, ?, ?, ?)
+                ON CONFLICT(source, region, series_key, date) DO UPDATE SET
+                  value = excluded.value,
+                  fetched_at = excluded.fetched_at
+                WHERE COALESCE(${tables.macroRawDatapoints}.value, -9.99999999e99) != COALESCE(excluded.value, -9.99999999e99)`,
+          args: ['us_derived', region, 'effective_fed_liquidity', point.date, point.value, now],
+        });
+      }
+      for (const point of effectiveFedLiquidityRatio) {
+        statements.push({
+          sql: `INSERT INTO ${tables.macroRawDatapoints}
+                (source, source_type, region, series_key, date, value, fetched_at)
+                VALUES (?, 'auto', ?, ?, ?, ?, ?)
+                ON CONFLICT(source, region, series_key, date) DO UPDATE SET
+                  value = excluded.value,
+                  fetched_at = excluded.fetched_at
+                WHERE COALESCE(${tables.macroRawDatapoints}.value, -9.99999999e99) != COALESCE(excluded.value, -9.99999999e99)`,
+          args: ['us_derived', region, 'effective_fed_liquidity_ratio', point.date, point.value, now],
+        });
+      }
+      const ratioCount = effectiveFedLiquidityRatio.length;
+      seriesResults.push({
+        seriesId: 'us_derived:effective_fed_liquidity_ratio',
+        seriesKey: 'effective_fed_liquidity_ratio',
+        fetchSuccess: ratioCount > 0,
+        observationsFetched: ratioCount,
+        errorMessage: ratioCount > 0 ? null : 'No derived observations',
+        meta: {
+          rebuild: 'historical_from_macro_raw_datapoints',
+          monthlyAlignedInputObservationCounts: {
+            WALCL: canonicalMonthly(walcl).length,
+            WDTGAL: canonicalMonthly(wdtgal).length,
+            RRPONTSYD: canonicalMonthly(rrpontsyd).length,
+            GDP: canonicalMonthly(gdp).length,
+          },
+          derivedObservationCount: ratioCount,
+          percentileReadiness: ratioCount >= 120 ? 'ready' : 'insufficient_history',
+        },
+      });
     }
 
     debug.insertAttempted = statements.length > 0;

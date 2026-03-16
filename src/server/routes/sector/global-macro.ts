@@ -323,8 +323,8 @@ function buildSeriesVerification(params: {
   scoringFunction: string;
   invert: boolean;
   sourceValidationStatus: "pass" | "fail";
-  blockStatusBeforeFinalGuard: "pass" | "missing";
-  finalBlockStatus: "pass" | "missing";
+  blockStatusBeforeFinalGuard: "pass" | "partial" | "missing";
+  finalBlockStatus: "pass" | "partial" | "missing";
   finalGuardTriggered: boolean;
   finalGuardReason: string;
 }) {
@@ -413,8 +413,8 @@ function buildSeriesVerification(params: {
       finalBlockStatus: params.finalBlockStatus,
     },
     sourceValidationStatus: params.sourceValidationStatus,
-    computeValidationStatus: (typeof rawValue === "number" && Number.isFinite(rawValue) && typeof finalSupportScore === "number" && Number.isFinite(finalSupportScore)) ? "pass" : "fail",
-    aggregationValidationStatus: params.finalBlockStatus === "pass" ? "pass" : "fail",
+    computeValidationStatus: (typeof rawValue === "number" && Number.isFinite(rawValue) && typeof finalSupportScore === "number" && Number.isFinite(finalSupportScore)) ? "pass" : ((typeof rawValue === "number" && Number.isFinite(rawValue)) ? "incomplete" : "fail"),
+    aggregationValidationStatus: params.finalBlockStatus === "pass" ? "pass" : (params.finalBlockStatus === "partial" ? "partial" : "fail"),
     dataPresentInDatabase: rows.length > 0 ? "yes" : "no",
     dataFormatUsable: (rows.length > 0 && invalidDateCount === 0 && afterNumericFilter.length > 0) ? "yes" : "no",
     monthlySeriesBuilt: monthlyBuilt.length > 0 ? "yes" : "no",
@@ -527,6 +527,20 @@ function buildOverlayVerificationDiagnostics(params: {
     latestIngestRun: params.latestIngestRun,
   });
 
+  const liquidity = overlays.liquidityOverlay;
+  const liqEffectiveComp = liquidity?.components.find((component) => component.id === "effective_fed_liquidity_ratio");
+  const liqQuantityScore = liquidity?.blockScores?.quantity ?? null;
+  const liqOverlayScore = liquidity?.score ?? null;
+  const liqBlockStatus: "pass" | "partial" | "missing" = typeof liqQuantityScore === "number"
+    ? ((liquidity?.runtime?.status === "partial" || (liquidity?.runtime?.blockAggregationInputs?.quantity ?? []).some((entry) => entry.signalStatus !== "ok")) ? "partial" : "pass")
+    : "missing";
+  const liqSeriesKeys = ["WALCL", "WDTGAL", "RRPONTSYD", "GDP"];
+  const liqRawRows = params.rawSeriesRows.filter((row) => liqSeriesKeys.includes(String(row.series_key)));
+  const liqMonthlyCounts = Object.fromEntries(liqSeriesKeys.map((key) => [key, canonicalMonthlyFromRows(liqRawRows.filter((row) => String(row.series_key) === key)).length]));
+  const derivedRatioSeries = params.seriesMap.get("effective_fed_liquidity_ratio") ?? [];
+  const derivedRatioNumeric = derivedRatioSeries.filter((point) => point.value !== null && Number.isFinite(point.value as number));
+  const derivedLatest = derivedRatioNumeric.slice(-1)[0] ?? null;
+
   return {
     localUnrestOverlay: {
       repricing: {
@@ -534,6 +548,31 @@ function buildOverlayVerificationDiagnostics(params: {
         ingestVerification: acmIngestVerification,
         historicalIngestVerification: params.acmtp10IngestHistory,
         finalClassification: classifyAcmTp10Failure(repricingVerification, acmIngestVerification),
+      },
+    },
+    liquidityOverlay: {
+      quantityAggregation: {
+        blockScore: liqQuantityScore,
+        runtimeStatus: liqBlockStatus,
+        aggregationValidationStatus: liqBlockStatus === "pass" ? "pass" : (liqBlockStatus === "partial" ? "partial" : "fail"),
+        blockAggregationInputs: liquidity?.runtime?.blockAggregationInputs?.quantity ?? [],
+      },
+      overlayScoreCalculation: {
+        overlayScore: liqOverlayScore,
+        aggregationValidationStatus: typeof liqOverlayScore === "number" ? "pass" : "fail",
+        scoreFormula: liquidity?.runtime?.scoreFormula ?? null,
+        aggregationWeights: liquidity?.runtime?.aggregationWeights ?? null,
+      },
+      effectiveFedLiquidityRatioTrace: {
+        rawInputSeriesUsed: liqSeriesKeys,
+        monthlyAlignedObservationCountsPerSource: liqMonthlyCounts,
+        derivedSeriesObservationCount: derivedRatioNumeric.length,
+        earliestDate: derivedRatioNumeric[0]?.date ?? null,
+        latestDate: derivedLatest?.date ?? null,
+        latestValue: derivedLatest?.value ?? null,
+        observationsInPercentileWindow: liqEffectiveComp?.debug?.observationsAvailableInScoringWindow ?? 0,
+        percentileComputed: typeof liqEffectiveComp?.debug?.percentile10yLatest === "number" ? "yes" : "no",
+        supportScoreComputed: typeof liqEffectiveComp?.score === "number" ? "yes" : "no",
       },
     },
     creditFundingOverlay: {

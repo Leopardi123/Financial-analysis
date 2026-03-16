@@ -221,6 +221,38 @@ function alignTernaryOperation(
     })
     .filter((row) => row.value !== null);
 }
+
+function expandMonthlyByCarryForward(
+  points: Array<{ date: string; value: number | null }>,
+  startMonth: string,
+  endMonth: string,
+): Array<{ date: string; value: number | null }> {
+  const byMonth = new Map(points.map((point) => [point.date.slice(0, 7), point.value]));
+  const out: Array<{ date: string; value: number | null }> = [];
+  let cursor = new Date(`${startMonth}-01T00:00:00Z`);
+  const end = new Date(`${endMonth}-01T00:00:00Z`);
+  let latest: number | null = null;
+  while (cursor <= end) {
+    const month = cursor.toISOString().slice(0, 7);
+    if (byMonth.has(month)) latest = byMonth.get(month) ?? latest;
+    out.push({ date: `${month}-01`, value: latest });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return out;
+}
+
+function alignBinaryOperationWithCarryForwardRight(
+  left: Array<{ date: string; value: number | null }>,
+  right: Array<{ date: string; value: number | null }>,
+  op: (leftValue: number, rightValue: number) => number | null,
+): Array<{ date: string; value: number | null }> {
+  if (left.length === 0 || right.length === 0) return [];
+  const leftMonths = left.map((row) => row.date.slice(0, 7)).sort((a, b) => a.localeCompare(b));
+  const startMonth = leftMonths[0];
+  const endMonth = leftMonths[leftMonths.length - 1];
+  const rightExpanded = expandMonthlyByCarryForward(right, startMonth, endMonth);
+  return alignBinaryOperation(left, rightExpanded, op);
+}
 function computeYoY(points: Array<{ date: string; value: number | null }>): Array<{ date: string; value: number | null }> {
   if (points.length <= 12) return [];
   return points
@@ -344,7 +376,7 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
   }
   const effectiveFedLiquidity = output.effective_fed_liquidity ?? [];
   if (effectiveFedLiquidity.length > 0 && gdp.length > 0) {
-    output.effective_fed_liquidity_ratio = alignBinaryOperation(effectiveFedLiquidity, gdp, (liq, gdpValue) => (gdpValue === 0 ? null : liq / gdpValue));
+    output.effective_fed_liquidity_ratio = alignBinaryOperationWithCarryForwardRight(effectiveFedLiquidity, gdp, (liq, gdpValue) => (gdpValue === 0 ? null : liq / gdpValue));
   }
 
   const m2 = monthlyInputs.m2sl ?? [];
