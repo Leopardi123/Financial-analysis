@@ -295,6 +295,224 @@ async function loadRawSeriesRows(region: string) {
   )) as unknown as RawSeriesPointRow[];
 }
 
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function canonicalMonthlyFromRows(rows: RawSeriesPointRow[]): Array<{ date: string; value: number | null }> {
+  const byMonth = new Map<string, { date: string; value: number | null }>();
+  for (const row of rows) {
+    const date = String(row.date);
+    if (!isIsoDate(date)) continue;
+    const month = date.slice(0, 7);
+    const prev = byMonth.get(month);
+    if (!prev || date > prev.date) byMonth.set(month, { date, value: row.value === null ? null : Number(row.value) });
+  }
+  return Array.from(byMonth.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function buildSeriesVerification(params: {
+  rawSeriesRows: RawSeriesPointRow[];
+  candidateSeriesKeys: string[];
+  selectedSeriesKey: string;
+  selectedSeries: Array<{ date: string; value: number | null }>;
+  componentRawValue: number | null;
+  componentScore: number | null;
+  minObservations: number;
+  scoringFunction: string;
+  invert: boolean;
+  sourceValidationStatus: "pass" | "fail";
+  blockStatusBeforeFinalGuard: "pass" | "missing";
+  finalBlockStatus: "pass" | "missing";
+  finalGuardTriggered: boolean;
+  finalGuardReason: string;
+}) {
+  const keySet = new Set(params.candidateSeriesKeys);
+  const rows = params.rawSeriesRows.filter((row) => keySet.has(String(row.series_key)));
+  const databaseSeriesKeyResolved = params.candidateSeriesKeys.find((key) => rows.some((row) => String(row.series_key) === key)) ?? params.selectedSeriesKey;
+  const invalidDateCount = rows.filter((row) => !isIsoDate(String(row.date))).length;
+  const validDateRows = rows.filter((row) => isIsoDate(String(row.date)));
+  const nullValueRowCount = validDateRows.filter((row) => row.value === null).length;
+  const nonNumericRowCount = validDateRows.filter((row) => row.value !== null && !Number.isFinite(Number(row.value))).length;
+  const numericRows = validDateRows.filter((row) => row.value !== null && Number.isFinite(Number(row.value)));
+  const duplicateDateCount = validDateRows.length - new Set(validDateRows.map((row) => String(row.date))).size;
+  const sortedNumeric = [...numericRows].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const latestRaw = sortedNumeric[sortedNumeric.length - 1] ?? null;
+
+  const afterDateParse = validDateRows;
+  const afterNumericFilter = numericRows;
+  const dedupeMap = new Map<string, RawSeriesPointRow>();
+  for (const row of afterNumericFilter) {
+    const d = String(row.date);
+    const prev = dedupeMap.get(d);
+    if (!prev || d > String(prev.date)) dedupeMap.set(d, row);
+  }
+  const afterDedupe = Array.from(dedupeMap.values()).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const monthlyBuilt = canonicalMonthlyFromRows(afterDedupe);
+  const latestMonthly = monthlyBuilt.filter((row) => row.value !== null).slice(-1)[0] ?? null;
+  const window = params.selectedSeries
+    .filter((row) => row.value !== null && Number.isFinite(row.value as number))
+    .slice(-120)
+    .map((row) => row.value as number);
+  const rawValue = params.componentRawValue;
+  const computedPercentile = (rawValue === null || window.length < params.minObservations)
+    ? null
+    : (window.filter((value) => value <= rawValue).length / window.length) * 100;
+  const finalSupportScore = params.componentScore;
+
+  return {
+    databaseSeriesKeyResolved,
+    rawDbRowCount: rows.length,
+    monthlyDbRowCount: monthlyBuilt.length,
+    earliestRawDate: sortedNumeric[0]?.date ?? null,
+    latestRawDate: latestRaw?.date ?? null,
+    latestRawValue: latestRaw?.value ?? null,
+    distinctSeriesKeys: Array.from(new Set(rows.map((row) => String(row.series_key)))),
+    nullValueRowCount,
+    nonNumericRowCount,
+    duplicateDateCount,
+    invalidDateCount,
+    latest10RowsPreview: sortedNumeric.slice(-10).map((row) => ({ date: row.date, value: row.value })),
+    formatShapeCheck: {
+      hasDateField: rows.every((row) => typeof row.date === "string"),
+      hasValueField: rows.every((row) => Object.prototype.hasOwnProperty.call(row, "value")),
+      valueTypeDetected: rows.length === 0 ? "none" : typeof rows.find((row) => row.value !== null)?.value,
+      parseableAsNumber: rows.some((row) => row.value !== null && Number.isFinite(Number(row.value))),
+      canonicalDateParseOk: invalidDateCount === 0,
+      monthlyBucketAssignable: afterDateParse.length > 0,
+      latestObservationSelectable: latestMonthly !== null,
+    },
+    monthlyReducerTrace: {
+      rawRowsIn: rows.length,
+      rowsAfterDateParse: afterDateParse.length,
+      rowsAfterNumericFilter: afterNumericFilter.length,
+      rowsAfterDedupe: afterDedupe.length,
+      rowsAfterMonthlyBucketing: monthlyBuilt.length,
+      latestMonthlyPointChosen: Boolean(latestMonthly),
+      chosenMonthlyDate: latestMonthly?.date ?? null,
+      chosenMonthlyRawValue: latestMonthly?.value ?? null,
+    },
+    scorePipelineTrace: {
+      rawValuePassedIntoScorer: rawValue,
+      scoringFunctionUsed: params.scoringFunction,
+      percentileWindowSize: 120,
+      observationsAvailableInScoringWindow: window.length,
+      enoughHistoryForPercentile: window.length >= params.minObservations,
+      computedPercentile,
+      finalSupportScore,
+      scoreNullReason: finalSupportScore === null ? (rawValue === null ? "rawValue missing" : (window.length < params.minObservations ? "insufficient history" : "unknown")) : null,
+    },
+    gatingTrace: {
+      sourceMatchPass: params.sourceValidationStatus === "pass",
+      rawValuePass: typeof rawValue === "number" && Number.isFinite(rawValue),
+      scorePass: typeof finalSupportScore === "number" && Number.isFinite(finalSupportScore),
+      blockStatusBeforeFinalGuard: params.blockStatusBeforeFinalGuard,
+      finalGuardTriggered: params.finalGuardTriggered,
+      finalGuardReason: params.finalGuardReason,
+      finalBlockStatus: params.finalBlockStatus,
+    },
+    sourceValidationStatus: params.sourceValidationStatus,
+    computeValidationStatus: (typeof rawValue === "number" && Number.isFinite(rawValue) && typeof finalSupportScore === "number" && Number.isFinite(finalSupportScore)) ? "pass" : "fail",
+    aggregationValidationStatus: params.finalBlockStatus === "pass" ? "pass" : "fail",
+    dataPresentInDatabase: rows.length > 0 ? "yes" : "no",
+    dataFormatUsable: (rows.length > 0 && invalidDateCount === 0 && afterNumericFilter.length > 0) ? "yes" : "no",
+    monthlySeriesBuilt: monthlyBuilt.length > 0 ? "yes" : "no",
+    rawValueExtracted: (typeof rawValue === "number" && Number.isFinite(rawValue)) ? "yes" : "no",
+    scoreComputed: (typeof finalSupportScore === "number" && Number.isFinite(finalSupportScore)) ? "yes" : "no",
+    blockedByFinalGuard: params.finalGuardTriggered ? "yes" : "no",
+    blockedByWhat: params.finalGuardTriggered ? params.finalGuardReason : "none",
+  };
+}
+
+function buildOverlayVerificationDiagnostics(params: {
+  region: string;
+  rawSeriesRows: RawSeriesPointRow[];
+  seriesMap: Map<string, Array<{ date: string; value: number | null }>>;
+  overlayBundle: ReturnType<typeof buildRegionalOverlays>;
+}) {
+  const overlays = params.overlayBundle.overlays;
+  const local = overlays.localUnrestOverlay;
+  const credit = overlays.creditFundingOverlay;
+  const localRepricingComp = local?.components.find((component) => component.id === "lu_repricing_us");
+  const creditFundingComp = credit?.components.find((component) => component.id === "cr_fund_1");
+  const creditAccessComp = credit?.components.find((component) => component.id === "cr_access_1");
+  const creditXccyComp = credit?.components.find((component) => component.id === "cr_fund_2");
+
+  const localGuard = local?.score === null && ((local?.blockScores?.signal ?? null) === null || (local?.blockScores?.repricing ?? null) === null);
+
+  return {
+    localUnrestOverlay: {
+      repricing: buildSeriesVerification({
+        rawSeriesRows: params.rawSeriesRows,
+        candidateSeriesKeys: ["ACMTP10", "acmtp10_us", "acmtp10", "lu_repricing_us"],
+        selectedSeriesKey: "ACMTP10",
+        selectedSeries: params.seriesMap.get("ACMTP10") ?? [],
+        componentRawValue: localRepricingComp?.rawValue ?? null,
+        componentScore: localRepricingComp?.score ?? null,
+        minObservations: 1,
+        scoringFunction: "percentile10yLatest",
+        invert: true,
+        sourceValidationStatus: params.region === "US" && localRepricingComp?.exactSource === "ACMTP10" ? "pass" : "fail",
+        blockStatusBeforeFinalGuard: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
+        finalBlockStatus: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
+        finalGuardTriggered: Boolean(localGuard),
+        finalGuardReason: localGuard ? "required local unrest block score missing" : "none",
+      }),
+    },
+    creditFundingOverlay: {
+      funding: buildSeriesVerification({
+        rawSeriesRows: params.rawSeriesRows,
+        candidateSeriesKeys: ["TEDRATE", "financial_conditions_index"],
+        selectedSeriesKey: "TEDRATE",
+        selectedSeries: params.seriesMap.get("TEDRATE") ?? [],
+        componentRawValue: creditFundingComp?.rawValue ?? null,
+        componentScore: creditFundingComp?.score ?? null,
+        minObservations: 24,
+        scoringFunction: "percentile10yLatest",
+        invert: true,
+        sourceValidationStatus: creditFundingComp?.exactSource?.includes("TEDRATE") ? "pass" : "fail",
+        blockStatusBeforeFinalGuard: typeof credit?.blockScores?.funding === "number" ? "pass" : "missing",
+        finalBlockStatus: typeof credit?.blockScores?.funding === "number" ? "pass" : "missing",
+        finalGuardTriggered: false,
+        finalGuardReason: "none",
+      }),
+      access: buildSeriesVerification({
+        rawSeriesRows: params.rawSeriesRows,
+        candidateSeriesKeys: ["DRTSCILM", "pmi_momentum_us"],
+        selectedSeriesKey: "DRTSCILM",
+        selectedSeries: params.seriesMap.get("DRTSCILM") ?? [],
+        componentRawValue: creditAccessComp?.rawValue ?? null,
+        componentScore: creditAccessComp?.score ?? null,
+        minObservations: 24,
+        scoringFunction: "percentile10yLatest",
+        invert: true,
+        sourceValidationStatus: creditAccessComp?.exactSource?.includes("DRTSCILM") ? "pass" : "fail",
+        blockStatusBeforeFinalGuard: typeof credit?.blockScores?.access === "number" ? "pass" : "missing",
+        finalBlockStatus: typeof credit?.blockScores?.access === "number" ? "pass" : "missing",
+        finalGuardTriggered: false,
+        finalGuardReason: "none",
+      }),
+      xccyBasis: buildSeriesVerification({
+        rawSeriesRows: params.rawSeriesRows,
+        candidateSeriesKeys: ["EURUSD_XCCY_BASIS"],
+        selectedSeriesKey: "EURUSD_XCCY_BASIS",
+        selectedSeries: params.seriesMap.get("EURUSD_XCCY_BASIS") ?? [],
+        componentRawValue: creditXccyComp?.rawValue ?? null,
+        componentScore: creditXccyComp?.score ?? null,
+        minObservations: 24,
+        scoringFunction: "percentile10yLatest",
+        invert: true,
+        sourceValidationStatus: creditXccyComp?.exactSource?.includes("Cross Currency Basis") ? "pass" : "fail",
+        blockStatusBeforeFinalGuard: typeof credit?.blockScores?.funding === "number" ? "pass" : "missing",
+        finalBlockStatus: typeof credit?.blockScores?.funding === "number" ? "pass" : "missing",
+        finalGuardTriggered: false,
+        finalGuardReason: "none",
+      }),
+    },
+  };
+}
+
 function buildRegionalOverlayHistory(params: {
   region: "US" | "EA" | "SE";
   rawSeriesRows: RawSeriesPointRow[];
@@ -961,6 +1179,12 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
         historyBuiltFor,
         historyMissingFor,
         reasons,
+        verification: buildOverlayVerificationDiagnostics({
+          region,
+          rawSeriesRows,
+          seriesMap,
+          overlayBundle,
+        }),
       };
     })(),
     overlayRuntimeProof: {

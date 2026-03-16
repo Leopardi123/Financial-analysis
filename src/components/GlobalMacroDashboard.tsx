@@ -58,6 +58,7 @@ type GlobalMacroPayload = {
     historyBuiltFor: string[];
     historyMissingFor: string[];
     reasons: string[];
+    verification?: Record<string, any>;
   };
   indicators: Array<{
     indicatorId: string;
@@ -747,8 +748,10 @@ export default function GlobalMacroDashboard() {
       // Local Unrest repricing gating is region-specific by design.
       // US uses ACMTP10 (sovereign duration repricing), while EA uses BTP-Bund spread IDs.
       // If the region-correct source is present with no proxy/fallback, this block must not be marked missing.
+      const blockHasNumericScore = typeof scoreValue === "number";
       const localUnrestRepricingBlockSourceFaithful = overlayKey === "localUnrestOverlay"
         && block === "repricing"
+        && blockHasNumericScore
         && fallbackUsed === "none"
         && !blockComponents.some((component) => component.proxy)
         && ((selectedRegion === "US" && /ACMTP10/i.test(currentRuntimeSources))
@@ -1243,10 +1246,13 @@ Signal: ${gapLabel}`,
               </section>
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
-                <h4 style={{ marginTop: 0 }}>Overlay Debug</h4>
-                {overlayDebugRows.map((row) => (
-                  <div key={`overlay-debug-${row.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", marginBottom: 12, background: "#fff" }}>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{row.overlayKey}</div>
+                <details>
+                  <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Overlay Debug</summary>
+                  <div style={{ marginTop: 10 }}>
+                  {overlayDebugRows.map((row) => (
+                    <details key={`overlay-debug-${row.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, marginBottom: 12, background: "#fff" }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700, padding: "8px 10px" }}>▸ {row.overlayKey}</summary>
+                      <div style={{ padding: "8px 10px" }}>
                     <ul style={{ marginTop: 4 }}>
                       <li>total score: {typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(1) : "—"}</li>
                       <li>label: {row.overlay?.label ?? "—"}</li>
@@ -1340,6 +1346,15 @@ Signal: ${gapLabel}`,
                       </table>
                     </div>
 
+                    <div style={{ fontSize: 12, marginTop: 8 }}>
+                      <strong>Verification trace</strong>
+                      {(() => {
+                        const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey];
+                        if (!verification) return <div className="status empty" style={{ marginTop: 6 }}>No deep verification trace for this overlay.</div>;
+                        return <pre style={{ whiteSpace: "pre-wrap", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6 }}>{JSON.stringify(verification, null, 2)}</pre>;
+                      })()}
+                    </div>
+
                     <div style={{ fontSize: 12 }}>
                       <strong>Implementation delta vs spec</strong>
                       <ul>
@@ -1348,8 +1363,11 @@ Signal: ${gapLabel}`,
                         ))}
                       </ul>
                     </div>
-                  </div>
-                ))}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+                </details>
               </section>
 
               <h4>Summary</h4>
