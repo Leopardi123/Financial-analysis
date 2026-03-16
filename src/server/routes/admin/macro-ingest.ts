@@ -95,12 +95,25 @@ export default async function handler(req: any, res: any) {
 
     for (const [seriesKey, rows] of Object.entries(sourceSeries)) {
       const source = sourceForRegionSeries(typedRegion, seriesKey);
+      const numericRows = rows.filter((row) => row.value !== null && Number.isFinite(row.value));
+      const sortedNumericRows = [...numericRows].sort((a, b) => a.date.localeCompare(b.date));
       seriesResults.push({
         seriesId: `${source}:${seriesKey}`,
         seriesKey,
         fetchSuccess: rows.length > 0,
         observationsFetched: rows.length,
         errorMessage: rows.length > 0 ? null : "No observations",
+        meta: {
+          source,
+          fetchAttempted: true,
+          fetchedMinDate: sortedNumericRows[0]?.date ?? null,
+          fetchedMaxDate: sortedNumericRows[sortedNumericRows.length - 1]?.date ?? null,
+          fetchedRowCount: rows.length,
+          numericRowCount: numericRows.length,
+          nullRowCount: rows.filter((row) => row.value === null).length,
+          sampleFirstValue: sortedNumericRows[0]?.value ?? null,
+          sampleLastValue: sortedNumericRows[sortedNumericRows.length - 1]?.value ?? null,
+        },
       });
       if (rows.length > 0) {
         debug.fetchedSeries += 1;

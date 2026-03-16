@@ -430,6 +430,7 @@ function buildOverlayVerificationDiagnostics(params: {
   rawSeriesRows: RawSeriesPointRow[];
   seriesMap: Map<string, Array<{ date: string; value: number | null }>>;
   overlayBundle: ReturnType<typeof buildRegionalOverlays>;
+  latestIngestRun: Awaited<ReturnType<typeof getLatestIngestRun>>;
 }) {
   const overlays = params.overlayBundle.overlays;
   const local = overlays.localUnrestOverlay;
@@ -440,25 +441,70 @@ function buildOverlayVerificationDiagnostics(params: {
   const creditXccyComp = credit?.components.find((component) => component.id === "cr_fund_2");
 
   const localGuard = local?.score === null && ((local?.blockScores?.signal ?? null) === null || (local?.blockScores?.repricing ?? null) === null);
+  const acmtp10Ingest = summarizeAcmtp10IngestFromSeriesResults(params.latestIngestRun?.seriesResults ?? []);
+  const acmtp10DbRows = params.rawSeriesRows.filter((row) => ["ACMTP10", "acmtp10_us", "acmtp10", "lu_repricing_us"].includes(String(row.series_key)));
+  const acmtp10NumericRows = acmtp10DbRows.filter((row) => row.value !== null && Number.isFinite(Number(row.value))).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const acmtp10LatestDb = acmtp10NumericRows[acmtp10NumericRows.length - 1] ?? null;
+  const acmtp10Monthly = canonicalMonthlyFromRows(acmtp10DbRows).filter((row) => row.value !== null);
+  const acmtp10MonthlyLatest = acmtp10Monthly[acmtp10Monthly.length - 1] ?? null;
+
+  const repricingVerification = buildSeriesVerification({
+    rawSeriesRows: params.rawSeriesRows,
+    candidateSeriesKeys: ["ACMTP10", "acmtp10_us", "acmtp10", "lu_repricing_us"],
+    selectedSeriesKey: "ACMTP10",
+    selectedSeries: params.seriesMap.get("ACMTP10") ?? [],
+    componentRawValue: localRepricingComp?.rawValue ?? null,
+    componentScore: localRepricingComp?.score ?? null,
+    minObservations: 1,
+    scoringFunction: "percentile10yLatest",
+    invert: true,
+    sourceValidationStatus: params.region === "US" && localRepricingComp?.exactSource === "ACMTP10" ? "pass" : "fail",
+    blockStatusBeforeFinalGuard: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
+    finalBlockStatus: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
+    finalGuardTriggered: Boolean(localGuard),
+    finalGuardReason: localGuard ? "required local unrest block score missing" : "none",
+  });
+
+  const acmtp10FailureStage = (() => {
+    if (!acmtp10Ingest.fetchAttempted || !acmtp10Ingest.fetchSucceeded) return "fetch";
+    if ((acmtp10Ingest.transformedRows ?? 0) === 0) return "transform";
+    if (!params.latestIngestRun?.insertAttempted) return "insert";
+    if (acmtp10DbRows.length === 0) return "db_lookup";
+    if (!acmtp10MonthlyLatest) return "monthly_reduce";
+    if (!(typeof localRepricingComp?.score === "number")) return "score_compute";
+    return "none";
+  })();
 
   return {
     localUnrestOverlay: {
-      repricing: buildSeriesVerification({
-        rawSeriesRows: params.rawSeriesRows,
-        candidateSeriesKeys: ["ACMTP10", "acmtp10_us", "acmtp10", "lu_repricing_us"],
-        selectedSeriesKey: "ACMTP10",
-        selectedSeries: params.seriesMap.get("ACMTP10") ?? [],
-        componentRawValue: localRepricingComp?.rawValue ?? null,
-        componentScore: localRepricingComp?.score ?? null,
-        minObservations: 1,
-        scoringFunction: "percentile10yLatest",
-        invert: true,
-        sourceValidationStatus: params.region === "US" && localRepricingComp?.exactSource === "ACMTP10" ? "pass" : "fail",
-        blockStatusBeforeFinalGuard: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
-        finalBlockStatus: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
-        finalGuardTriggered: Boolean(localGuard),
-        finalGuardReason: localGuard ? "required local unrest block score missing" : "none",
-      }),
+      repricing: {
+        acmtp10IngestVerification: {
+          fetchAttempted: acmtp10Ingest.fetchAttempted,
+          fetchSucceeded: acmtp10Ingest.fetchSucceeded,
+          observationsFetched: acmtp10Ingest.observationsFetched,
+          transformedRows: acmtp10Ingest.transformedRows,
+          insertAttempted: Boolean(params.latestIngestRun?.insertAttempted),
+          insertedRows: Number(params.latestIngestRun?.insertedRowCount ?? 0),
+          dbRowsAfterInsert: acmtp10DbRows.length,
+          dbSeriesKeysFound: Array.from(new Set(acmtp10DbRows.map((row) => String(row.series_key)))),
+          dbLatestDate: acmtp10LatestDb?.date ?? null,
+          dbLatestValue: acmtp10LatestDb?.value ?? null,
+          fetchEndpointOrSeriesId: acmtp10Ingest.endpointOrSeriesId,
+          sourceFamily: acmtp10Ingest.sourceFamily,
+          fetchErrorMessage: acmtp10Ingest.fetchErrorMessage,
+        },
+        acmtp10LookupVerification: {
+          lookupRequestedKey: "ACMTP10",
+          lookupResolvedKey: (params.seriesMap.get("ACMTP10") ?? []).length > 0 ? "ACMTP10" : ((params.seriesMap.get("acmtp10_us") ?? []).length > 0 ? "acmtp10_us" : null),
+          dbRowsReturnedToOverlay: acmtp10DbRows.length,
+          latestRawObservationFound: acmtp10LatestDb ? { date: acmtp10LatestDb.date, value: acmtp10LatestDb.value } : null,
+          monthlyObservationFound: acmtp10MonthlyLatest ? { date: acmtp10MonthlyLatest.date, value: acmtp10MonthlyLatest.value } : null,
+          rawValuePassedToScorer: localRepricingComp?.rawValue ?? null,
+          scoreComputed: typeof localRepricingComp?.score === "number",
+          failureStage: acmtp10FailureStage,
+        },
+        ...repricingVerification,
+      },
     },
     creditFundingOverlay: {
       funding: buildSeriesVerification({
@@ -805,6 +851,29 @@ async function getLatestIngestRun(region: string) {
 }
 
 
+
+
+function summarizeAcmtp10IngestFromSeriesResults(
+  seriesResults: Array<{ seriesId: string; seriesKey: string; fetchSuccess: boolean; observationsFetched: number; errorMessage?: string | null; meta?: Record<string, unknown> }>,
+) {
+  const match = seriesResults.find((row) => row.seriesKey === "acmtp10_us" || row.seriesKey === "ACMTP10");
+  const meta = (match?.meta ?? {}) as Record<string, unknown>;
+  return {
+    fetchAttempted: Boolean(match),
+    fetchSucceeded: Boolean(match?.fetchSuccess),
+    sourceFamily: "FRED",
+    endpointOrSeriesId: match?.seriesId ?? "fred:ACMTP10",
+    observationsFetched: Number(match?.observationsFetched ?? 0),
+    fetchedMinDate: typeof meta.fetchedMinDate === "string" ? meta.fetchedMinDate : null,
+    fetchedMaxDate: typeof meta.fetchedMaxDate === "string" ? meta.fetchedMaxDate : null,
+    sampleFirstValue: typeof meta.sampleFirstValue === "number" ? meta.sampleFirstValue : null,
+    sampleLastValue: typeof meta.sampleLastValue === "number" ? meta.sampleLastValue : null,
+    transformedRows: typeof meta.numericRowCount === "number" ? meta.numericRowCount : Number(match?.observationsFetched ?? 0),
+    transformedSeriesKey: match?.seriesKey ?? "acmtp10_us",
+    transformedSourceId: match?.seriesId ?? "fred:acmtp10_us",
+    fetchErrorMessage: typeof match?.errorMessage === "string" ? match.errorMessage : null,
+  };
+}
 
 function summarizeGoldFetchFromSeriesResults(
   seriesResults: Array<{ seriesId: string; seriesKey: string; fetchSuccess: boolean; observationsFetched: number; meta?: Record<string, unknown> }>,
@@ -1184,6 +1253,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
           rawSeriesRows,
           seriesMap,
           overlayBundle,
+          latestIngestRun,
         }),
       };
     })(),
