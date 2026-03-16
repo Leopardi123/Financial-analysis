@@ -769,6 +769,12 @@ function buildOverlayVerificationDiagnostics(params: {
         overlayLabel: credit?.label ?? "Not implemented",
         scoreFormula: credit?.runtime?.scoreFormula ?? "overlay_score = weighted_average(available block scores)",
         blockScores: credit?.blockScores ?? {},
+        excludedBlocks: Object.entries(credit?.blockScores ?? {}).filter(([, score]) => score === null).map(([block]) => block),
+        fundingIncludedInScore: typeof credit?.blockScores?.funding === "number",
+        interpretationMode: typeof credit?.blockScores?.funding === "number"
+          ? "full_or_partial_funding_included"
+          : "pricing_and_access_only_until_funding_available",
+        aggregationValidationStatus: typeof credit?.score === "number" ? "pass" : "fail",
         fundingMode: [creditFundingComp?.signalStatus === "ok", creditXccyComp?.signalStatus === "ok"].filter(Boolean).length === 2
           ? "TED + XCCY"
           : (creditFundingComp?.signalStatus === "ok" && creditXccyComp?.signalStatus !== "ok")

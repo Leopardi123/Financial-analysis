@@ -746,6 +746,8 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     "GOLD_EQUITY_RATIO": ["gold_minus_real_yield_spread", "gold_usd"],
     "ISRATIO": ["isratio_us"],
     "PPIACO": ["ppiaco_us"],
+    "EURUSD_XCCY_BASIS": ["EURUSD3MD156NWSG", "EURUSDBS3M"],
+    "TEDRATE": ["tedrate"],
     "US_SOVEREIGN_SPREAD": ["us_sovereign_spread"],
     "IRLTLT01ITM156N": ["italy_10y_yield"],
     "IRLTLT01DEM156N": ["germany_10y_yield"],
