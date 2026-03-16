@@ -747,8 +747,10 @@ export default function GlobalMacroDashboard() {
       // Local Unrest repricing gating is region-specific by design.
       // US uses ACMTP10 (sovereign duration repricing), while EA uses BTP-Bund spread IDs.
       // If the region-correct source is present with no proxy/fallback, this block must not be marked missing.
+      const blockHasNumericScore = typeof scoreValue === "number";
       const localUnrestRepricingBlockSourceFaithful = overlayKey === "localUnrestOverlay"
         && block === "repricing"
+        && blockHasNumericScore
         && fallbackUsed === "none"
         && !blockComponents.some((component) => component.proxy)
         && ((selectedRegion === "US" && /ACMTP10/i.test(currentRuntimeSources))
