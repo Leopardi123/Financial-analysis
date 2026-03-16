@@ -7,7 +7,7 @@ for (let i = 0; i < 24; i += 1) {
   const year = 2023 + Math.floor(i / 12);
   const date = `${year}-${month}-28`;
   rows.push({ series_key: "policy_uncertainty_us", date, value: 100 + i });
-  rows.push({ series_key: "lu_repricing_us", date, value: 0.1 + i * 0.01 });
+  rows.push({ series_key: "acmtp10_us", date, value: 0.1 + i * 0.01 });
   // Simulate runtime where canonical key exists but is null/empty.
   rows.push({ series_key: "ACMTP10", date, value: null });
 }

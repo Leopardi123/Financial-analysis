@@ -149,6 +149,20 @@ function labelByScore(score: number | null): string {
 
 function getSeries(seriesMap: SeriesMap, key: string): Point[] { return seriesMap.get(key) ?? []; }
 
+
+function latestNumericValue(points: Point[]): number | null {
+  const latest = lastNumeric(points);
+  return latest?.value ?? null;
+}
+
+function pickSeriesWithNumericData(seriesMap: SeriesMap, keys: string[]): Point[] {
+  for (const key of keys) {
+    const candidate = getSeries(seriesMap, key);
+    if (latestNumericValue(candidate) !== null) return candidate;
+  }
+  return getSeries(seriesMap, keys[0] ?? "");
+}
+
 function makeComponent(params: {
   id: string; title: string; block: string; weight: number; source: string; exactSource: string; series: Point[];
   invert?: boolean; proxy?: boolean; note?: string; useZ?: boolean; minObservations?: number; asOfDate: string;
@@ -313,7 +327,9 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       const eaSignalSeries = region === "EA" ? getSeries(series, "EA_POLICY_UNCERTAINTY") : [];
       const signalSeries = region === "US" ? usSignalSeries : eaSignalSeries;
 
-      const usRepricingSeries = region === "US" ? getSeries(series, "ACMTP10") : [];
+      const usRepricingSeries = region === "US"
+        ? pickSeriesWithNumericData(series, ["ACMTP10", "acmtp10_us", "acmtp10", "lu_repricing_us"])
+        : [];
       const eaItaly10y = getSeries(series, "IRLTLT01ITM156N");
       const eaGermany10y = getSeries(series, "IRLTLT01DEM156N");
       const eaRepricingSeries = subtractAlignedSeries(eaItaly10y, eaGermany10y);
