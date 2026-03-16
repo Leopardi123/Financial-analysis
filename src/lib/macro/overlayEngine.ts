@@ -17,6 +17,21 @@ type OverlayComponent = {
   missing: boolean;
   proxy: boolean;
   note: string;
+  debug?: {
+    latestDate: string | null;
+    monthlyChosenDate: string | null;
+    minObservations: number;
+    observationsAvailableInScoringWindow: number;
+    scoringWindowSize: number;
+    enoughHistory: boolean;
+    percentile10yLatest: number | null;
+    normalizationMethod: "percentile10y" | "zscore_to_percentile";
+    inversionApplied: boolean;
+    rawToScoreFormula: string;
+    directionRulePlainText: string;
+    supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress";
+    last5MonthlyPointsInWindow: Array<{ date: string; value: number }>;
+  };
 };
 
 type OverlayResult = {
@@ -167,13 +182,26 @@ function makeComponent(params: {
   id: string; title: string; block: string; weight: number; source: string; exactSource: string; series: Point[];
   invert?: boolean; proxy?: boolean; note?: string; useZ?: boolean; minObservations?: number; asOfDate: string;
 }): OverlayComponent {
-  const latest = lastNumeric(params.series);
+  const monthly = canonicalMonthlyGrid(params.series);
+  const latest = lastNumeric(monthly);
+  const latestMonth = latest ? monthKey(latest.date) : null;
+  const windowPoints = latestMonth
+    ? monthly.filter((p) => monthKey(p.date) <= latestMonth).slice(-120)
+    : [];
+  const windowNumericPoints = windowPoints.filter((p): p is { date: string; value: number } => typeof p.value === "number" && Number.isFinite(p.value));
+  const observations = windowNumericPoints.length;
+  const minObservations = params.minObservations ?? (params.useZ ? 24 : 24);
+  const enoughHistory = observations >= minObservations;
   const percentile = params.useZ ? (() => {
     const z = zscoreLatest(params.series);
     if (z === null) return null;
     return Math.max(0, Math.min(100, 50 + z * 15));
-  })() : percentile10yLatest(params.series, params.minObservations ?? 24);
+  })() : percentile10yLatest(params.series, minObservations);
   const base = percentile === null ? null : (params.invert ? 100 - percentile : percentile);
+  const inversionPhrase = params.invert ? "score = 100 - percentile" : "score = percentile";
+  const directionRulePlainText = params.invert
+    ? "Higher normalized percentile maps to lower support score (stress-convention inversion enabled)."
+    : "Higher normalized percentile maps to higher support score (no inversion).";
   return {
     id: params.id,
     title: params.title,
@@ -190,6 +218,21 @@ function makeComponent(params: {
     note: params.proxy
       ? `${params.note ? `${params.note} | ` : ""}blocked: non source-faithful runtime path (proxy/derived/inherited)`
       : (params.note ?? ""),
+    debug: {
+      latestDate: latest?.date ?? null,
+      monthlyChosenDate: latest?.date ?? null,
+      minObservations,
+      observationsAvailableInScoringWindow: observations,
+      scoringWindowSize: 120,
+      enoughHistory,
+      percentile10yLatest: percentile,
+      normalizationMethod: params.useZ ? "zscore_to_percentile" : "percentile10y",
+      inversionApplied: Boolean(params.invert),
+      rawToScoreFormula: `${params.useZ ? "percentile = clamp(50 + zscoreLatest*15, 0, 100)" : "percentile = percentile10yLatest(window<=120, latest)"}; ${inversionPhrase}; clamp=[0,100] implicit via percentile construction`,
+      directionRulePlainText,
+      supportInterpretation: params.invert ? "higher raw value means more stress" : "higher raw value means less stress",
+      last5MonthlyPointsInWindow: windowNumericPoints.slice(-5),
+    },
   };
 }
 
