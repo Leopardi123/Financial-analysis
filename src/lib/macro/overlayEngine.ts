@@ -335,14 +335,26 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       transmission: {
         weight: 0.25,
         components: [
-          makeComponent({ asOfDate, id: "liq_trans_1", title: "Credit transmission", block: "transmission", weight: 0.6, source: "FRED/ECB", exactSource: region === "US" ? "TOTBKCR YoY" : "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A", series: region === "US" ? (getSeries(series, "m2_yoy").length ? getSeries(series, "m2_yoy") : yoy(getSeries(series, "fed_balance_sheet_total"))) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A") }),
-          makeComponent({ asOfDate, id: "liq_trans_2", title: "Household/loans extension", block: "transmission", weight: 0.4, source: "FRED/ECB", exactSource: region === "US" ? "BUSLOANS YoY" : "BSI.M.U2.Y.U.A20T.A.I.U2.2250.Z01.A", series: region === "US" ? (getSeries(series, "pmi_momentum_us").length ? getSeries(series, "pmi_momentum_us") : yoy(getSeries(series, "pmi_us"))) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2250.Z01.A"), proxy: region === "US" }),
+          makeComponent({ asOfDate, id: "liq_trans_dollar", title: "Dollar transmission pressure", block: "transmission", weight: 1, source: "FRED", exactSource: "DTWEXBGS", series: getSeries(series, "DTWEXBGS"), invert: true, note: "Primary transmission source only; no proxy substitution." }),
         ],
       },
       bridge: {
         weight: 0.1,
         components: [
-          makeComponent({ asOfDate, id: "liq_bridge", title: "Dollar liquidity bridge", block: "bridge", weight: 1, source: "CME", exactSource: "EUR/USD Cross Currency Basis", series: getSeries(series, "EURUSD_XCCY_BASIS").length ? getSeries(series, "EURUSD_XCCY_BASIS") : getSeries(series, "usd_broad_index"), invert: true, proxy: true, note: "Optional bridge; uses USD broad index proxy when xccy basis unavailable" }),
+          makeComponent({
+            asOfDate,
+            id: "liq_bridge_xccy",
+            title: "Cross-currency funding bridge",
+            block: "bridge",
+            weight: 1,
+            source: "FRED/CME",
+            exactSource: "DRTSCILM / cross-currency basis family",
+            series: getSeries(series, "DRTSCILM").length
+              ? getSeries(series, "DRTSCILM")
+              : getSeries(series, "EURUSD_XCCY_BASIS"),
+            invert: true,
+            note: "Primary bridge source family only; missing if no xccy primary source exists.",
+          }),
         ],
       },
     }),

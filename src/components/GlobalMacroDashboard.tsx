@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
+import InfoPopover from "./InfoPopover";
 
 type GlobalMacroPayload = {
   regime: {
@@ -352,6 +353,7 @@ export default function GlobalMacroDashboard() {
   } | null>(null);
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
+  const [openOverlayInfoId, setOpenOverlayInfoId] = useState<string | null>(null);
 
   const uiOverlayKeysRequested = useMemo(() => (selectedRegion === "GLOBAL"
     ? ["globalUnrestOverlay"]
@@ -924,6 +926,87 @@ export default function GlobalMacroDashboard() {
     return "Very supportive";
   }
 
+  function normalizeOverlayLabel(overlayKey: string): string {
+    return overlayKey
+      .replace(/Overlay$/, "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/^./, (value) => value.toUpperCase());
+  }
+
+  function signalEconomicMeaning(signalId: string): string {
+    const key = signalId.toLowerCase();
+    if (key.includes("walcl") || key.includes("balance")) return "Central bank balance sheet depth versus macro base.";
+    if (key.includes("m2") || key.includes("money")) return "Broad money availability and monetary impulse.";
+    if (key.includes("credit") || key.includes("loan") || key.includes("totbkcr")) return "Private credit creation and liquidity transmission capacity.";
+    if (key.includes("dfii") || key.includes("real") || key.includes("yield")) return "Real-rate pressure affecting financing conditions.";
+    if (key.includes("nfci") || key.includes("fci") || key.includes("conditions")) return "Aggregate financial conditions tightness.";
+    if (key.includes("hym2") || key.includes("hy") || key.includes("spread")) return "Credit spread stress and risk premium repricing.";
+    if (key.includes("dtwex") || key.includes("dollar") || key.includes("usd")) return "Dollar strength and global funding transmission pressure.";
+    if (key.includes("drtscilm") || key.includes("xccy") || key.includes("basis") || key.includes("bridge")) return "Cross-currency basis stress in global funding markets.";
+    if (key.includes("usepu") || key.includes("policy")) return "Policy uncertainty and local governance stress.";
+    return "Macro stress/support signal used in the overlay architecture.";
+  }
+
+  function buildOverlayInfoSections(row: any) {
+    const channels = Array.from(new Set((row.blockRows ?? []).map((block: any) => block.block)));
+    const blockLines = channels.map((block) => `• ${block}`);
+    const signalLines = (row.overlay?.components ?? []).map((component: any) => {
+      const meaning = signalEconomicMeaning(component.id ?? component.title ?? "");
+      return `${component.id} | Block: ${component.block} | Measures: ${meaning} | Source: ${component.exactSource || component.source || "—"} | Role: ${component.title || "overlay input"}`;
+    });
+    const blockScores = Object.entries(row.overlay?.blockScores ?? {}).map(([block, score]) => `${block}: ${typeof score === "number" ? score.toFixed(2) : "missing"}`);
+    const totalScore = typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(2) : "missing";
+
+    const liquidityLines = row.overlayKey === "liquidityOverlay"
+      ? [
+        "This overlay measures global liquidity conditions.",
+        "It combines four transmission channels:",
+        "Quantity — expansion or contraction of money and credit.",
+        "Price — cost of liquidity in financial markets.",
+        "Transmission — dollar strength and cross-border funding pressure.",
+        "Bridge — cross-currency funding conditions.",
+      ]
+      : [
+        `This overlay measures ${normalizeOverlayLabel(row.overlayKey)} conditions.`,
+        "It combines several macro transmission channels:",
+        ...blockLines,
+      ];
+
+    return [
+      { heading: "What this overlay measures", lines: liquidityLines },
+      { heading: "Signals used", lines: signalLines.length ? signalLines : ["No runtime signals available."] },
+      {
+        heading: "How the score is computed",
+        lines: [
+          "Each signal is converted into a historical percentile.",
+          "support_score = 100 − percentile",
+          "high percentile → stress signal; low percentile → supportive signal",
+          "block_score = average(signal_scores)",
+          "overlay_score = average(block_scores)",
+        ],
+      },
+      {
+        heading: "How to interpret the result",
+        lines: [
+          "0–20 Severe stress",
+          "20–40 Tight conditions",
+          "40–60 Neutral",
+          "60–80 Supportive",
+          "80–100 Very supportive",
+        ],
+      },
+      {
+        heading: "Current reading",
+        lines: [
+          "Signal block scores:",
+          ...blockScores,
+          `Overlay score: ${totalScore}`,
+          `Interpretation: ${row.overlay?.label || "Not implemented"}`,
+        ],
+      },
+    ];
+  }
+
   function renderOverlayHistoryChart(overlayKey: string) {
     const valid = overlayHistoryPoints
       .map((point) => ({ asOfDate: point.asOfDate, score: point.scores?.[overlayKey] ?? null }))
@@ -1228,7 +1311,23 @@ Signal: ${gapLabel}`,
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 8 }}>
                     {overlayKeysForCharts.map((overlayKey) => (
                       <div key={`chart-${overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
-                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{overlayKey}</div>
+                        <div style={{ fontWeight: 700, marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span>{overlayKey}</span>
+                          {(() => {
+                            const row = overlayDebugRows.find((item) => item.overlayKey === overlayKey);
+                            if (!row) return null;
+                            return (
+                              <InfoPopover
+                                id={`overlay-info-${overlayKey}`}
+                                openId={openOverlayInfoId}
+                                onToggle={(id) => setOpenOverlayInfoId((current) => (current === id ? null : id))}
+                                onClose={() => setOpenOverlayInfoId(null)}
+                                title={`${normalizeOverlayLabel(overlayKey)} info`}
+                                sections={buildOverlayInfoSections(row)}
+                              />
+                            );
+                          })()}
+                        </div>
                         {renderOverlayHistoryChart(overlayKey)}
                       </div>
                     ))}
@@ -1356,130 +1455,44 @@ Signal: ${gapLabel}`,
                       </table>
                     </div>
 
-                    {row.overlayKey === "localUnrestOverlay" && (() => {
-                      const blocks = ["signal", "repricing"].map((blockId) => {
-                        const component = (row.overlay?.components ?? []).find((c) => c.block === blockId);
-                        return { blockId, component };
-                      });
-                      const signalScore = row.overlay?.blockScores?.signal ?? null;
-                      const repricingScore = row.overlay?.blockScores?.repricing ?? null;
-                      const scoreParts = [
-                        { id: "signal", score: signalScore, weight: 0.5 },
-                        { id: "repricing", score: repricingScore, weight: 0.5 },
-                      ].filter((x) => typeof x.score === "number") as Array<{ id: string; score: number; weight: number }>;
-                      const totalWeight = scoreParts.reduce((acc, x) => acc + x.weight, 0);
-                      const recomputedTotal = totalWeight > 0 ? scoreParts.reduce((acc, x) => acc + x.score * (x.weight / totalWeight), 0) : null;
-                      const totalScore = typeof row.overlay?.score === "number" ? row.overlay.score : recomputedTotal;
-                      const severeByMath = typeof totalScore === "number" && totalScore < 20;
-                      const severeByThreshold = row.overlay?.label === "Severe stress";
-                      const severeByConvention = severeByMath;
-                      const severeLabelOppositeDirection = typeof totalScore === "number" ? labelByOverlayScore(100 - totalScore) : "Not implemented";
-                      const invertedBlockDirectionScore = ((): number | null => {
-                        const invertSignal = typeof signalScore === "number" ? 100 - signalScore : null;
-                        const invertRepricing = typeof repricingScore === "number" ? 100 - repricingScore : null;
-                        const parts = [
-                          { score: invertSignal, weight: 0.5 },
-                          { score: invertRepricing, weight: 0.5 },
-                        ].filter((x) => typeof x.score === "number") as Array<{ score: number; weight: number }>;
-                        if (!parts.length) return null;
-                        const w = parts.reduce((a, b) => a + b.weight, 0);
-                        return parts.reduce((a, b) => a + b.score * (b.weight / w), 0);
-                      })();
-                      const onlySignalScore = typeof signalScore === "number" ? signalScore : null;
-                      const onlyRepricingScore = typeof repricingScore === "number" ? repricingScore : null;
-                      const possibleMisclassificationReason = !severeByThreshold && severeByMath
-                        ? "wrong threshold mapping"
-                        : (severeByThreshold && !severeByMath)
-                          ? "stale label derived from wrong field"
-                          : "none";
-
+                    {(() => {
+                      const overlayComponents = row.overlay?.components ?? [];
+                      const overlayBlocks = Object.keys(row.overlay?.blockScores ?? {});
+                      const validBlockScores = overlayBlocks
+                        .map((block) => ({ block, score: row.overlay?.blockScores?.[block] ?? null }))
+                        .filter((item) => typeof item.score === "number") as Array<{ block: string; score: number }>;
+                      const blockWeight = validBlockScores.length > 0 ? 1 / validBlockScores.length : 0;
+                      const recomputedOverlay = validBlockScores.length > 0
+                        ? validBlockScores.reduce((acc, item) => acc + item.score * blockWeight, 0)
+                        : null;
+                      const finalScore = typeof row.overlay?.score === "number" ? row.overlay.score : recomputedOverlay;
                       return (
                         <div style={{ fontSize: 12, marginBottom: 8, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
-                          <strong>Computation walkthrough</strong>
-                          {blocks.map(({ blockId, component }) => (
-                            <div key={`walkthrough-${blockId}`} style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
-                              <div style={{ fontWeight: 700 }}>{blockId}</div>
-                              <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                <li>exact source id: {component?.exactSource ?? component?.source ?? "—"}</li>
-                                <li>latest raw value: {typeof component?.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}</li>
-                                <li>monthly chosen date: {component?.debug?.monthlyChosenDate ?? component?.debug?.latestDate ?? "—"}</li>
-                                <li>observations in scoring window: {component?.debug?.observationsAvailableInScoringWindow ?? "—"} / {component?.debug?.scoringWindowSize ?? "—"}</li>
-                                <li>computed percentile: {typeof component?.debug?.percentile10yLatest === "number" ? component.debug.percentile10yLatest.toFixed(2) : "—"}</li>
-                                <li>direction rule: {component?.debug?.directionRulePlainText ?? "—"}</li>
-                                <li>formula: {component?.debug?.rawToScoreFormula ?? "—"}</li>
-                                <li>final block score: {typeof component?.score === "number" ? component.score.toFixed(2) : "—"}</li>
-                                <li>human interpretation: {component?.debug?.supportInterpretation ?? "—"}</li>
-                                <li>enoughHistory: {String(component?.debug?.enoughHistory ?? false)} (min={component?.debug?.minObservations ?? "—"})</li>
-                                <li>last 5 monthly points used: {(component?.debug?.last5MonthlyPointsInWindow ?? []).map((p) => `${p.date}:${p.value.toFixed(3)}`).join(" | ") || "—"}</li>
-                              </ul>
-                            </div>
-                          ))}
-
-                          <details style={{ marginTop: 8 }}>
-                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Score direction audit</summary>
-                            <div style={{ marginTop: 6 }}>overlay stress convention: low score = high local stress; high score = low local stress</div>
+                          <strong>Computation Walkthrough</strong>
+                          {overlayComponents.map((component) => {
+                            const percentile = component.debug?.percentile10yLatest ?? null;
+                            const supportScore = typeof component.score === "number" ? component.score : null;
+                            return (
+                              <div key={`walkthrough-${row.overlayKey}-${component.id}`} style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
+                                <div style={{ fontWeight: 700 }}>{component.id} ({component.block})</div>
+                                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                  <li>Step 1 — Fetch source series: series={component.exactSource || component.source || "—"}, latest value={typeof component.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}, observations used={component.debug?.observationsAvailableInScoringWindow ?? 0}</li>
+                                  <li>Step 2 — Compute percentile: historical window={component.debug?.scoringWindowSize ?? 0} obs, percentile={typeof percentile === "number" ? percentile.toFixed(2) : "—"}</li>
+                                  <li>Step 3 — Convert to support score: support_score = 100 − percentile → {typeof supportScore === "number" ? supportScore.toFixed(2) : "—"}</li>
+                                </ul>
+                              </div>
+                            );
+                          })}
+                          <div style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              {blocks.map(({ blockId, component }) => {
-                                const p = component?.debug?.percentile10yLatest;
-                                const s = component?.score;
-                                const directionConsistent = typeof p === "number" && typeof s === "number"
-                                  ? ((p >= 50 && s <= 50) || (p <= 50 && s >= 50))
-                                  : null;
-                                return (
-                                  <li key={`audit-${blockId}`}>
-                                    {blockId}: raw latest={typeof component?.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}, percentile={typeof p === "number" ? p.toFixed(2) : "—"}, mapped score={typeof s === "number" ? s.toFixed(2) : "—"}, expected interpretation={component?.debug?.supportInterpretation ?? "—"}, status={directionConsistent === null ? "direction_suspect" : directionConsistent ? "direction_consistent" : "direction_suspect"}
-                                  </li>
-                                );
-                              })}
+                              <li>Step 4 — Block aggregation: block score = average(signal scores)</li>
+                              {overlayBlocks.map((block) => (
+                                <li key={`block-score-${row.overlayKey}-${block}`}>{block}: {typeof row.overlay?.blockScores?.[block] === "number" ? row.overlay?.blockScores?.[block]?.toFixed(2) : "missing"}</li>
+                              ))}
+                              <li>Step 5 — Overlay aggregation: overlay score = weighted average(block scores) → {typeof finalScore === "number" ? finalScore.toFixed(2) : "—"}</li>
+                              <li>Step 6 — Label mapping: score → regime label → {row.overlay?.label ?? labelByOverlayScore(finalScore)}</li>
                             </ul>
-                          </details>
-
-                          <details style={{ marginTop: 8 }}>
-                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Label derivation</summary>
-                            <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              <li>label source function: labelByOverlayScore(score)</li>
-                              <li>total score before label mapping: {typeof totalScore === "number" ? totalScore.toFixed(2) : "—"}</li>
-                              <li>thresholds: severe&lt;20, tight&lt;40, neutral&lt;60, supportive&lt;80, very_supportive&gt;=80</li>
-                              <li>matched band: {typeof totalScore === "number" ? (totalScore < 20 ? "severe" : totalScore < 40 ? "tight" : totalScore < 60 ? "neutral" : totalScore < 80 ? "supportive" : "very_supportive") : "not_implemented"}</li>
-                              <li>final label: {row.overlay?.label ?? "—"}</li>
-                              <li>confidence: {row.overlay?.confidence ?? "—"}</li>
-                              <li>if/else branch: {typeof totalScore === "number" ? `score ${totalScore.toFixed(2)} => ${labelByOverlayScore(totalScore)}` : "score null => Not implemented"}</li>
-                            </ul>
-                          </details>
-
-                          <details style={{ marginTop: 8 }}>
-                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Why this is severe</summary>
-                            <div style={{ marginTop: 6 }}>
-                              {typeof totalScore === "number"
-                                ? `Overlay klassas som ${labelByOverlayScore(totalScore)} eftersom totalscore ${totalScore.toFixed(2)} ligger i ${totalScore < 20 ? "severe" : totalScore < 40 ? "tight" : totalScore < 60 ? "neutral" : totalScore < 80 ? "supportive" : "very supportive"}-intervallet.`
-                                : "Overlay saknar totalscore; severity kan inte klassas."}
-                            </div>
-                            <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              <li>block som drar ned score mest: {[{ id: "signal", score: signalScore }, { id: "repricing", score: repricingScore }].filter((x) => typeof x.score === "number").sort((a, b) => (a.score as number) - (b.score as number)).map((x) => `${x.id}=${(x.score as number).toFixed(2)}`).join(", ") || "—"}</li>
-                              <li>driver attribution: {typeof signalScore === "number" && typeof repricingScore === "number" ? (signalScore < 20 && repricingScore < 20 ? "båda" : signalScore < 20 ? "extrem policy uncertainty" : repricingScore < 20 ? "extrem repricing" : "ingen extrem; label kommer från kombinerad nivå") : "otillräcklig data"}</li>
-                            </ul>
-                          </details>
-
-                          <details style={{ marginTop: 8 }}>
-                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Counterfactual label check</summary>
-                            <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              <li>label if score interpreted with opposite direction: {severeLabelOppositeDirection}</li>
-                              <li>label if block direction inverted: {labelByOverlayScore(invertedBlockDirectionScore)}</li>
-                              <li>label if percentile mapping were non-inverted: {labelByOverlayScore(invertedBlockDirectionScore)}</li>
-                              <li>label if only signal counted: {labelByOverlayScore(onlySignalScore)}</li>
-                              <li>label if only repricing counted: {labelByOverlayScore(onlyRepricingScore)}</li>
-                            </ul>
-                          </details>
-
-                          <details style={{ marginTop: 8 }}>
-                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Severe stress sanity check</summary>
-                            <pre style={{ whiteSpace: "pre-wrap", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6 }}>{JSON.stringify({
-                              isSevereByMath: severeByMath,
-                              isSevereByThreshold: severeByThreshold,
-                              isSevereByDirectionConvention: severeByConvention,
-                              possibleMisclassificationReason,
-                            }, null, 2)}</pre>
-                          </details>
+                          </div>
                         </div>
                       );
                     })()}
