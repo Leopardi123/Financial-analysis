@@ -41,6 +41,23 @@ type OverlayResult = {
   confidence: number;
   blockScores: Record<string, number | null>;
   components: OverlayComponent[];
+  runtime?: {
+    status: "complete" | "partial";
+    includedBlocksInTotal: string[];
+    excludedBlocks: string[];
+    aggregationWeights: Record<string, number>;
+    scoreFormula: string;
+  };
+  bridgeDiagnostic?: {
+    status: "available" | "missing";
+    sourceFamily: string;
+    exactSource: string;
+    rawValue: number | null;
+    score?: number | null;
+    includedInTotal: false;
+    missing: boolean;
+    reason: string;
+  };
 };
 
 export type OverlayBundle = {
@@ -116,6 +133,36 @@ function subtractAlignedSeries(left: Point[], right: Point[]): Point[] {
     out.push({ date: point.date, value: point.value - rv });
   }
   return out;
+}
+
+function expandQuarterlyToMonthly(points: Point[]): Point[] {
+  const quarterly = canonicalMonthlyGrid(points).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value));
+  if (quarterly.length === 0) return [];
+  const quarterlyByMonth = new Map(quarterly.map((point) => [monthKey(point.date), point.value]));
+  let cursor = new Date(`${monthKey(quarterly[0].date)}-01T00:00:00Z`);
+  const end = new Date(`${monthKey(quarterly[quarterly.length - 1].date)}-01T00:00:00Z`);
+  let latest: number | null = null;
+  const expanded: Point[] = [];
+  while (cursor <= end) {
+    const key = cursor.toISOString().slice(0, 7);
+    if (quarterlyByMonth.has(key)) latest = quarterlyByMonth.get(key) ?? latest;
+    if (latest !== null) expanded.push({ date: `${key}-01`, value: latest });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return expanded;
+}
+
+function divideAlignedSeries(numerator: Point[], denominator: Point[]): Point[] {
+  const denominatorMonthly = expandQuarterlyToMonthly(denominator);
+  const denominatorByMonth = new Map(denominatorMonthly.map((point) => [monthKey(point.date), point.value]));
+  const output: Point[] = [];
+  for (const point of canonicalMonthlyGrid(numerator)) {
+    if (point.value === null || !Number.isFinite(point.value)) continue;
+    const den = denominatorByMonth.get(monthKey(point.date));
+    if (den === null || den === undefined || !Number.isFinite(den) || den === 0) continue;
+    output.push({ date: point.date, value: point.value / den });
+  }
+  return output;
 }
 
 function percentile10yLatest(points: Point[], minObservations = 24): number | null {
@@ -320,49 +367,80 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
   const inflationSeries = region === "US" ? "core_cpi_us" : "HICP.M.U2.N.000000.4.ANR";
   const coreInflationSeries = region === "US" ? "CPILFESL" : "HICP.M.U2.N.XEF000.4D0.ANR";
   const overlays: Record<string, OverlayResult> = {
-    liquidityOverlay: finalizeOverlay({
-      quantity: {
-        weight: 0.4,
-        components: [
-          makeComponent({ asOfDate, id: "liq_balance", title: "Central bank balance ratio", block: "quantity", weight: 0.45, source: "FRED/ECB", exactSource: region === "US" ? "WALCL/GDP" : "ILM.W.U2.C.T000000.Z5.Z01 + NAQ_10_GDP", series: getSeries(series, region === "US" ? "WALCL" : "ILM.W.U2.C.T000000.Z5.Z01") }),
-          makeComponent({ asOfDate, id: "liq_m3", title: "Broad money ratio", block: "quantity", weight: 0.3, source: "FRED/ECB", exactSource: region === "US" ? "M2SL/GDP" : "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E / NAQ_10_GDP", series: getSeries(series, region === "US" ? "M2SL" : "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E") }),
-          makeComponent({ asOfDate, id: "liq_credit", title: "Bank credit/loan support", block: "quantity", weight: 0.25, source: "FRED/ECB", exactSource: region === "US" ? "TOTBKCR/GDP" : "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A", series: region === "US" ? getSeries(series, "TOTBKCR") : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A"), proxy: region !== "US", note: region === "EA" ? "Growth proxy per spec" : "" }),
-        ],
-      },
-      price: {
-        weight: 0.35,
-        components: [
-          makeComponent({ asOfDate, id: "liq_real_rate", title: "Real rate support", block: "price", weight: region === "US" ? 0.4 : 0.55, source: "FRED/ECB", exactSource: region === "US" ? "DFII10" : "ECBDFR - HICP.M.U2.N.XEF000.4D0.ANR", series: getSeries(series, region === "US" ? "DFII10" : "ECBDFR"), invert: true, proxy: region === "EA" }),
-          makeComponent({ asOfDate, id: "liq_spread", title: region === "US" ? "HY spread support" : "CISS support", block: "price", weight: region === "US" ? 0.3 : 0.45, source: "FRED/ECB", exactSource: region === "US" ? "BAMLH0A0HYM2" : "CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX", series: getSeries(series, region === "US" ? "BAMLH0A0HYM2" : "CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX"), invert: true }),
-          makeComponent({ asOfDate, id: "liq_fci", title: "Financial conditions", block: "price", weight: region === "US" ? 0.3 : 0, source: "FRED", exactSource: "NFCI", series: getSeries(series, "NFCI"), invert: true, proxy: region !== "US" }),
-        ],
-      },
-      transmission: {
-        weight: 0.25,
-        components: [
-          makeComponent({ asOfDate, id: "liq_trans_dollar", title: "Dollar transmission pressure", block: "transmission", weight: 1, source: "FRED", exactSource: "DTWEXBGS", series: getSeries(series, "DTWEXBGS"), invert: true, note: "Primary transmission source only; no proxy substitution." }),
-        ],
-      },
-      bridge: {
-        weight: 0.1,
-        components: [
-          makeComponent({
-            asOfDate,
-            id: "liq_bridge_xccy",
-            title: "Cross-currency funding bridge",
-            block: "bridge",
-            weight: 1,
-            source: "FRED/CME",
-            exactSource: "DRTSCILM / cross-currency basis family",
-            series: getSeries(series, "DRTSCILM").length
-              ? getSeries(series, "DRTSCILM")
-              : getSeries(series, "EURUSD_XCCY_BASIS"),
-            invert: true,
-            note: "Primary bridge source family only; missing if no xccy primary source exists.",
-          }),
-        ],
-      },
-    }),
+    liquidityOverlay: (() => {
+      const usEffectiveFedLiquidity = subtractAlignedSeries(
+        subtractAlignedSeries(getSeries(series, "WALCL"), getSeries(series, "WDTGAL")),
+        getSeries(series, "RRPONTSYD"),
+      );
+      const usGdp = getSeries(series, "GDP");
+      const quantityComponents = [
+        makeComponent({ asOfDate, id: "effective_fed_liquidity_ratio", title: "Effective Fed liquidity ratio", block: "quantity", weight: 0.45, source: "FRED", exactSource: "(WALCL - WDTGAL - RRPONTSYD) / GDP", series: region === "US" ? divideAlignedSeries(usEffectiveFedLiquidity, usGdp) : getSeries(series, "ILM.W.U2.C.T000000.Z5.Z01") }),
+        makeComponent({ asOfDate, id: "m2_ratio", title: "M2 ratio", block: "quantity", weight: 0.3, source: "FRED/ECB", exactSource: region === "US" ? "M2SL/GDP" : "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E / NAQ_10_GDP", series: region === "US" ? divideAlignedSeries(getSeries(series, "M2SL"), usGdp) : getSeries(series, "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E") }),
+        makeComponent({ asOfDate, id: "bank_credit_ratio", title: "Bank credit ratio", block: "quantity", weight: 0.25, source: "FRED/ECB", exactSource: region === "US" ? "TOTBKCR/GDP" : "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A", series: region === "US" ? divideAlignedSeries(getSeries(series, "TOTBKCR"), usGdp) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A"), proxy: region !== "US", note: region === "EA" ? "Growth proxy per spec" : "" }),
+      ];
+      const bridgeComponent = makeComponent({
+        asOfDate,
+        id: "liq_bridge_xccy",
+        title: "Cross-currency funding bridge",
+        block: "bridge",
+        weight: 1,
+        source: "FRED/CME",
+        exactSource: "DRTSCILM / cross-currency basis family",
+        series: getSeries(series, "DRTSCILM").length
+          ? getSeries(series, "DRTSCILM")
+          : getSeries(series, "EURUSD_XCCY_BASIS"),
+        invert: true,
+        note: "Primary bridge source family only; missing if no xccy primary source exists.",
+      });
+      const result = finalizeOverlay({
+        quantity: {
+          weight: 0.4,
+          components: quantityComponents,
+        },
+        price: {
+          weight: 0.35,
+          components: [
+            makeComponent({ asOfDate, id: "liq_real_rate", title: "Real rate support", block: "price", weight: region === "US" ? 0.4 : 0.55, source: "FRED/ECB", exactSource: region === "US" ? "DFII10" : "ECBDFR - HICP.M.U2.N.XEF000.4D0.ANR", series: getSeries(series, region === "US" ? "DFII10" : "ECBDFR"), invert: true, proxy: region === "EA" }),
+            makeComponent({ asOfDate, id: "liq_spread", title: region === "US" ? "HY spread support" : "CISS support", block: "price", weight: region === "US" ? 0.3 : 0.45, source: "FRED/ECB", exactSource: region === "US" ? "BAMLH0A0HYM2" : "CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX", series: getSeries(series, region === "US" ? "BAMLH0A0HYM2" : "CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX"), invert: true }),
+            makeComponent({ asOfDate, id: "liq_fci", title: "Financial conditions", block: "price", weight: region === "US" ? 0.3 : 0, source: "FRED", exactSource: "NFCI", series: getSeries(series, "NFCI"), invert: true, proxy: region !== "US" }),
+          ],
+        },
+        transmission: {
+          weight: 0.25,
+          components: [
+            makeComponent({ asOfDate, id: "liq_trans_credit", title: "Credit transmission tightness", block: "transmission", weight: 1, source: "FRED", exactSource: "DRTSCILM", series: getSeries(series, "DRTSCILM"), invert: true, note: "Canonical transmission source only; no proxy substitution." }),
+          ],
+        },
+        bridge: {
+          weight: 0,
+          components: [
+            { ...bridgeComponent, includedInTotal: false },
+          ],
+        },
+      });
+      const quantityMissing = quantityComponents.some((component) => component.missing);
+      const transmissionMissing = result.blockScores.transmission === null;
+      return {
+        ...result,
+        runtime: {
+          status: quantityMissing || transmissionMissing ? "partial" : "complete",
+          includedBlocksInTotal: ["quantity", "price", "transmission"],
+          excludedBlocks: ["bridge"],
+          aggregationWeights: { quantity: 0.4, price: 0.35, transmission: 0.25 },
+          scoreFormula: "score = 0.40 × quantity + 0.35 × price + 0.25 × transmission",
+        },
+        bridgeDiagnostic: {
+          status: bridgeComponent.missing ? "missing" : "available",
+          sourceFamily: "global dollar funding stress",
+          exactSource: bridgeComponent.exactSource,
+          rawValue: bridgeComponent.rawValue,
+          score: bridgeComponent.score,
+          includedInTotal: false,
+          missing: bridgeComponent.missing,
+          reason: bridgeComponent.missing ? "Canonical bridge source unavailable; no proxy used." : "Diagnostic-only bridge signal.",
+        },
+      };
+    })(),
     creditFundingOverlay: finalizeOverlay({
       pricing: { weight: 0.3, components: [
         makeComponent({ asOfDate, id: "cr_hy", title: "HY spread", block: "pricing", weight: 0.5, source: "FRED/ECB", exactSource: region === "US" ? "BAMLH0A0HYM2" : "EUR HY OAS", series: getSeries(series, region === "US" ? "BAMLH0A0HYM2" : "EUR_HY_OAS"), invert: true }),

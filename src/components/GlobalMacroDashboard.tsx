@@ -478,18 +478,18 @@ export default function GlobalMacroDashboard() {
 
   const overlayDesignSpec: Record<string, OverlayDesignSpec> = {
     liquidityOverlay: {
-      intendedPrimaryBlocks: ["quantity", "price", "bridge", "transmission"],
+      intendedPrimaryBlocks: ["quantity", "price", "transmission"],
       intendedSeries: [
-        { id: "balance_sheet_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["WALCL/GDP"], aliasFamily: ["walcl", "balance_sheet_gdp", "fed_balance_sheet"] },
+        { id: "balance_sheet_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["(WALCL-WDTGAL-RRPONTSYD)/GDP"], aliasFamily: ["walcl", "wdtgal", "rrpontsyd", "effective_fed_liquidity_ratio", "fed_balance_sheet"] },
         { id: "m2_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["M2SL/GDP"], aliasFamily: ["m2sl", "m2_gdp", "money_supply_gdp"] },
         { id: "bank_credit_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["TOTBKCR/GDP"], aliasFamily: ["totbkcr", "bank_credit_gdp"] },
         { id: "real_yield_10y", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["DFII10"], aliasFamily: ["real_yield_10y", "dfii10", "real_yield"] },
         { id: "financial_conditions", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["NFCI"], aliasFamily: ["financial_conditions", "nfci", "fci"] },
         { id: "hy_spread", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2", "high_yield_spread"] },
+        { id: "credit_transmission", block: "transmission", linkedMacroFamily: "B_MONETARY", primarySources: ["DRTSCILM"], aliasFamily: ["credit_transmission", "drtscilm", "loan_standards"] },
         { id: "xccy_basis_bridge", block: "bridge", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DRTSCILM / xccy-basis family"], aliasFamily: ["xccy_basis", "drtscilm", "bridge"] },
-        { id: "dollar_index", block: "transmission", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["dollar_index", "dtwexbgs", "usd_broad_index", "usd_strength"] },
       ],
-      logicSummary: "Likviditet, realränta, spread och dollarvillkor driver overlayns kärna.",
+      logicSummary: "Likviditet, realränta, spread och kredittransmission driver overlayns kärna.",
     },
     creditFundingOverlay: {
       intendedPrimaryBlocks: ["pricing", "funding"],
