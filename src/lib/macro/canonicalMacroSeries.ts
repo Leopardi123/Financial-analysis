@@ -1,5 +1,5 @@
 import { fetchStableJson } from "../../../api/_fmp.js";
-import { buildDerivedSeries, fetchFredSeries, US_FRED_SERIES } from "./fred.ts";
+import { buildDerivedSeries, fetchFredSeries, fetchFredSeriesWithDebug, US_FRED_SERIES } from "./fred.ts";
 import { fetchEcbSeries } from "./adapters/ecbAdapter.ts";
 import { fetchEurostatSeries } from "./adapters/eurostatAdapter.ts";
 import { fetchRiksbankSeriesVerified } from "./adapters/riksbankAdapter.ts";
@@ -118,19 +118,40 @@ async function fetchGoldSeries() {
   return normalizeFmpEodRows(payload);
 }
 
-export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode: "backfill" | "latest"): Promise<{ sourceSeries: CanonicalSeriesMap; derivedSeries: CanonicalSeriesMap; }> {
+export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode: "backfill" | "latest"): Promise<{ sourceSeries: CanonicalSeriesMap; derivedSeries: CanonicalSeriesMap; sourceDiagnostics?: Record<string, Record<string, unknown>>; }> {
   if (region === "US") {
     const sourceSeries: CanonicalSeriesMap = {};
+    const sourceDiagnostics: Record<string, Record<string, unknown>> = {};
     for (const entry of US_FRED_SERIES) {
       try {
-        sourceSeries[entry.seriesKey] = await fetchFredSeries({
+        const fetched = await fetchFredSeriesWithDebug({
           fredSeriesId: entry.fredSeriesId,
           mode,
           latestLookbackMonths: entry.latestLookbackMonths,
           backfillLookbackYears: entry.backfillLookbackYears,
         });
-      } catch {
+        sourceSeries[entry.seriesKey] = fetched.rows;
+        sourceDiagnostics[entry.seriesKey] = {
+          provider: "fred",
+          providerSeriesId: entry.fredSeriesId,
+          ...fetched.debug,
+        };
+      } catch (error) {
         sourceSeries[entry.seriesKey] = [];
+        sourceDiagnostics[entry.seriesKey] = {
+          provider: "fred",
+          providerSeriesId: entry.fredSeriesId,
+          requestTarget: null,
+          httpStatus: null,
+          observationsBeforeFiltering: 0,
+          observationsAfterFiltering: 0,
+          first3RawObservations: [],
+          last3RawObservations: [],
+          zeroRowsReason: error instanceof Error ? error.message : "fetch failed",
+          skippedByDateParsing: 0,
+          skippedByNumericParsing: 0,
+          skippedByDuplicateLogic: 0,
+        };
       }
     }
     try {
@@ -138,7 +159,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
     } catch {
       sourceSeries.gold_usd = [];
     }
-    return { sourceSeries, derivedSeries: buildDerivedSeries(sourceSeries) };
+    return { sourceSeries, derivedSeries: buildDerivedSeries(sourceSeries), sourceDiagnostics };
   }
 
   if (region === "EA") {

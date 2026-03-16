@@ -58,6 +58,7 @@ type GlobalMacroPayload = {
     historyBuiltFor: string[];
     historyMissingFor: string[];
     reasons: string[];
+    verification?: Record<string, any>;
   };
   indicators: Array<{
     indicatorId: string;
@@ -170,6 +171,7 @@ type GlobalMacroPayload = {
           fetchSuccess: boolean;
           observationsFetched: number;
           errorMessage: string | null;
+          meta?: Record<string, unknown>;
         }>;
         failingStep: string | null;
         errorMessage: string | null;
@@ -747,8 +749,10 @@ export default function GlobalMacroDashboard() {
       // Local Unrest repricing gating is region-specific by design.
       // US uses ACMTP10 (sovereign duration repricing), while EA uses BTP-Bund spread IDs.
       // If the region-correct source is present with no proxy/fallback, this block must not be marked missing.
+      const blockHasNumericScore = typeof scoreValue === "number";
       const localUnrestRepricingBlockSourceFaithful = overlayKey === "localUnrestOverlay"
         && block === "repricing"
+        && blockHasNumericScore
         && fallbackUsed === "none"
         && !blockComponents.some((component) => component.proxy)
         && ((selectedRegion === "US" && /ACMTP10/i.test(currentRuntimeSources))
@@ -1136,7 +1140,7 @@ Signal: ${gapLabel}`,
   return (
     <div className="sector-dashboard">
       <div className="sector-grid">
-        <div className="sector-card macro-premium-card">
+        <div className="sector-card macro-premium-card" style={{ overflow: "visible" }}>
           <h3>Global Macro Dashboard</h3>
           <p className="bread">Global Macro tolkar det makroekonomiska klimatet över tid genom att väga samman finansiering, räntor, inflation, trovärdighet och marknadsstress. Målet är att ge en lugn men skarp lägesbild av vilken regim marknaden befinner sig i – och på sikt knyta den till riskklimat, bull/bear-faser och den bredare kapitalmiljön.</p>
 
@@ -1243,10 +1247,13 @@ Signal: ${gapLabel}`,
               </section>
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
-                <h4 style={{ marginTop: 0 }}>Overlay Debug</h4>
-                {overlayDebugRows.map((row) => (
-                  <div key={`overlay-debug-${row.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", marginBottom: 12, background: "#fff" }}>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{row.overlayKey}</div>
+                <details>
+                  <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Overlay Debug</summary>
+                  <div style={{ marginTop: 10 }}>
+                  {overlayDebugRows.map((row) => (
+                    <details key={`overlay-debug-${row.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, marginBottom: 12, background: "#fff" }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700, padding: "8px 10px" }}>▸ {row.overlayKey}</summary>
+                      <div style={{ padding: "8px 10px" }}>
                     <ul style={{ marginTop: 4 }}>
                       <li>total score: {typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(1) : "—"}</li>
                       <li>label: {row.overlay?.label ?? "—"}</li>
@@ -1340,6 +1347,57 @@ Signal: ${gapLabel}`,
                       </table>
                     </div>
 
+                    <div style={{ fontSize: 12, marginTop: 8 }}>
+                      <strong>Verification trace</strong>
+                      {(() => {
+                        const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey];
+                        if (!verification) return <div className="status empty" style={{ marginTop: 6 }}>No deep verification trace for this overlay.</div>;
+                        const localRepricing = row.overlayKey === "localUnrestOverlay" ? verification?.repricing : null;
+                        const ingestVerification = localRepricing?.ingestVerification ?? null;
+                        return (
+                          <>
+                            {row.overlayKey === "localUnrestOverlay" && localRepricing && (
+                              <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc", marginTop: 6, marginBottom: 6 }}>
+                                <div style={{ fontWeight: 700, marginBottom: 4 }}>US repricing (ACMTP10) explicit verification</div>
+                                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                  <li>requested exact source id: ACMTP10</li>
+                                  <li>resolved db key: {localRepricing.databaseSeriesKeyResolved ?? "—"}</li>
+                                  <li>raw db row count: {localRepricing.rawDbRowCount ?? 0}</li>
+                                  <li>monthly row count: {localRepricing.monthlyDbRowCount ?? 0}</li>
+                                  <li>earliest date: {localRepricing.earliestRawDate ?? "—"}</li>
+                                  <li>latest date: {localRepricing.latestRawDate ?? "—"}</li>
+                                  <li>latest value: {localRepricing.latestRawValue ?? "—"}</li>
+                                  <li>null rows: {localRepricing.nullValueRowCount ?? 0}</li>
+                                  <li>invalid date rows: {localRepricing.invalidDateCount ?? 0}</li>
+                                  <li>non-numeric rows: {localRepricing.nonNumericRowCount ?? 0}</li>
+                                  <li>duplicate date rows: {localRepricing.duplicateDateCount ?? 0}</li>
+                                  <li>final gating reason: {localRepricing.gatingTrace?.finalGuardReason ?? localRepricing.blockedByWhat ?? "none"}</li>
+                                </ul>
+                                {ingestVerification && (
+                                  <div style={{ marginTop: 6 }}>
+                                    <div style={{ fontWeight: 700 }}>Ingest verification</div>
+                                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                      <li>{ingestVerification.configMessage}</li>
+                                      <li>fetch attempted: {String(ingestVerification.fetchAttempted)}</li>
+                                      <li>observations fetched: {ingestVerification.observationsFetched ?? "—"}</li>
+                                      <li>series_key saved from run: {ingestVerification.seriesKeyFromIngestRun ?? "—"}</li>
+                                      <li>db keys observed: {(ingestVerification.savedDbKeysObserved ?? []).join(", ") || "none"}</li>
+                                      <li>mismatch: {ingestVerification.mismatchReason ?? "none"}</li>
+                                      <li>state classification: {ingestVerification.explicitState ?? ingestVerification.ingestionStateClass ?? "—"}</li>
+                                      <li>ever successfully fetched historically: {String(localRepricing.historicalIngestVerification?.everSuccessfulFetch ?? false)}</li>
+                                      <li>latest successful ingest run for ACMTP10: {localRepricing.historicalIngestVerification?.latestSuccessfulIngestRunForAcmTp10 ?? "—"}</li>
+                                      <li>final classification: {localRepricing.finalClassification ?? "—"}</li>
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            <pre style={{ whiteSpace: "pre-wrap", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6 }}>{JSON.stringify(verification, null, 2)}</pre>
+                          </>
+                        );
+                      })()}
+                    </div>
+
                     <div style={{ fontSize: 12 }}>
                       <strong>Implementation delta vs spec</strong>
                       <ul>
@@ -1348,8 +1406,11 @@ Signal: ${gapLabel}`,
                         ))}
                       </ul>
                     </div>
-                  </div>
-                ))}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+                </details>
               </section>
 
               <h4>Summary</h4>
@@ -2075,6 +2136,35 @@ Signal: ${gapLabel}`,
                       </tbody>
                     </table>
                     </div>
+                  {(() => {
+                    const acm = pipelineDebug.ingestionDebug.latestAttempt?.seriesResults?.find((row) => row.seriesId === "fred:acmtp10_us" || row.seriesKey === "acmtp10_us");
+                    if (!acm) return <div className="status empty" style={{ marginTop: 8 }}>ACMTP10 not present in latest per-series ingest result.</div>;
+                    const meta = (acm.meta ?? {}) as Record<string, unknown>;
+                    const toJson = (value: unknown) => JSON.stringify(value ?? null, null, 2);
+                    return (
+                      <div style={{ marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
+                        <div style={{ fontWeight: 700 }}>ACMTP10 ingest strict debug</div>
+                        <ul>
+                          <li>requested provider series id: {String(meta.requestedProviderSeriesId ?? meta.providerSeriesId ?? "—")}</li>
+                          <li>actual HTTP request target/resolved provider id: {String(meta.requestTarget ?? "—")}</li>
+                          <li>HTTP status: {String(meta.httpStatus ?? "—")}</li>
+                          <li>provider response shape summary: {String(meta.providerResponseShapeSummary ?? "—")}</li>
+                          <li>returned observation count before filtering: {String(meta.observationsBeforeFiltering ?? 0)}</li>
+                          <li>returned observation count after filtering: {String(meta.observationsAfterFiltering ?? 0)}</li>
+                          <li>reason if zero rows: {String(meta.zeroRowsReason ?? acm.errorMessage ?? "—")}</li>
+                          <li>skipped due to date parsing: {String(meta.skippedByDateParsing ?? 0)}</li>
+                          <li>skipped due to numeric parsing: {String(meta.skippedByNumericParsing ?? 0)}</li>
+                          <li>skipped due to duplicate logic: {String(meta.skippedByDuplicateLogic ?? 0)}</li>
+                          <li>final DB writes for acmtp10_us: {toJson(meta.finalDbWrites)}</li>
+                        </ul>
+                        <details>
+                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Raw observations preview</summary>
+                          <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11, marginTop: 6 }}>first 3: {toJson(meta.first3RawObservations)}
+last 3: {toJson(meta.last3RawObservations)}</pre>
+                        </details>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
 
@@ -2168,8 +2258,14 @@ Signal: ${gapLabel}`,
                   </div>
                 )}
 
-                <h4>Raw payload (?debug=1)</h4>
-                <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(globalMacroRaw, null, 2)}</pre>
+                <section style={{ border: "1px dashed #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginTop: 10 }}>
+                  <details>
+                    <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Raw payload (?debug=1)</summary>
+                    <div style={{ marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc", maxHeight: 420, overflowY: "auto", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                      <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", margin: 0, fontSize: 11 }}>{JSON.stringify(globalMacroRaw, null, 2)}</pre>
+                    </div>
+                  </details>
+                </section>
               </>
             ) : (
               <div className="status">Admin actions kräver <code>?debug=1</code> i URL.</div>
