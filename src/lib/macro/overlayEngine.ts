@@ -129,10 +129,11 @@ function averageAlignedSeries(seriesList: Point[][]): Point[] {
 
 
 function subtractAlignedSeries(left: Point[], right: Point[]): Point[] {
-  const rightByDate = new Map(right.map((point) => [point.date, point.value]));
+  const leftMonthly = canonicalMonthlyGrid(left);
+  const rightMonthlyByMonth = new Map(canonicalMonthlyGrid(right).map((point) => [monthKey(point.date), point.value]));
   const out: Point[] = [];
-  for (const point of left) {
-    const rv = rightByDate.get(point.date);
+  for (const point of leftMonthly) {
+    const rv = rightMonthlyByMonth.get(monthKey(point.date));
     if (point.value === null || rv === null || rv === undefined || !Number.isFinite(point.value) || !Number.isFinite(rv)) continue;
     out.push({ date: point.date, value: point.value - rv });
   }
@@ -386,8 +387,13 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
         getSeries(series, "RRPONTSYD"),
       );
       const usGdp = getSeries(series, "GDP");
+      const reconstructedEffectiveFedLiquidityRatio = divideAlignedSeries(usEffectiveFedLiquidity, usGdp);
+      const persistedEffectiveFedLiquidityRatio = getSeries(series, "effective_fed_liquidity_ratio");
+      const effectiveFedLiquidityRatioSeries = persistedEffectiveFedLiquidityRatio.length > 0
+        ? persistedEffectiveFedLiquidityRatio
+        : reconstructedEffectiveFedLiquidityRatio;
       const quantityComponents = [
-        makeComponent({ asOfDate, id: "effective_fed_liquidity_ratio", title: "Effective Fed liquidity ratio", block: "quantity", weight: 0.45, source: "FRED", exactSource: "(WALCL - WDTGAL - RRPONTSYD) / GDP", series: region === "US" ? divideAlignedSeries(usEffectiveFedLiquidity, usGdp) : getSeries(series, "ILM.W.U2.C.T000000.Z5.Z01"), minObservations: 120, note: "Constructed internally from WALCL, WDTGAL, RRPONTSYD, then divided by GDP." }),
+        makeComponent({ asOfDate, id: "effective_fed_liquidity_ratio", title: "Effective Fed liquidity ratio", block: "quantity", weight: 0.45, source: "FRED", exactSource: "(WALCL - WDTGAL - RRPONTSYD) / GDP", series: region === "US" ? effectiveFedLiquidityRatioSeries : getSeries(series, "ILM.W.U2.C.T000000.Z5.Z01"), minObservations: 120, note: "Constructed internally from WALCL, WDTGAL, RRPONTSYD, then divided by GDP on canonical monthly grid." }),
         makeComponent({ asOfDate, id: "m2_ratio", title: "M2 ratio", block: "quantity", weight: 0.3, source: "FRED/ECB", exactSource: region === "US" ? "M2SL/GDP" : "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E / NAQ_10_GDP", series: region === "US" ? divideAlignedSeries(getSeries(series, "M2SL"), usGdp) : getSeries(series, "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E"), minObservations: 120 }),
         makeComponent({ asOfDate, id: "bank_credit_ratio", title: "Bank credit ratio", block: "quantity", weight: 0.25, source: "FRED/ECB", exactSource: region === "US" ? "TOTBKCR/GDP" : "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A", series: region === "US" ? divideAlignedSeries(getSeries(series, "TOTBKCR"), usGdp) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A"), minObservations: 120, proxy: region !== "US", note: region === "EA" ? "Growth proxy per spec" : "" }),
       ];

@@ -475,6 +475,98 @@ function buildAcmTp10IngestVerification(params: {
   };
 }
 
+
+function buildEffectiveFedLiquidityRatioTrace(params: {
+  rawSeriesRows: RawSeriesPointRow[];
+  seriesMap: Map<string, Array<{ date: string; value: number | null }>>;
+}) {
+  const sourceKeys = ["WALCL", "WDTGAL", "RRPONTSYD", "GDP"];
+  const sourceRows = Object.fromEntries(sourceKeys.map((key) => [key, params.rawSeriesRows.filter((row) => String(row.series_key) === key)]));
+  const rawStage = Object.fromEntries(sourceKeys.map((key) => {
+    const rows = sourceRows[key] ?? [];
+    const sorted = [...rows].filter((row) => isIsoDate(String(row.date))).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    return [key, {
+      rawRowCount: rows.length,
+      earliestDate: sorted[0]?.date ?? null,
+      latestDate: sorted[sorted.length - 1]?.date ?? null,
+    }];
+  }));
+  const monthlyStage = Object.fromEntries(sourceKeys.map((key) => {
+    const monthly = canonicalMonthlyFromRows(sourceRows[key] ?? []);
+    return [key, {
+      monthlyRowCount: monthly.length,
+      monthlyNormalizationRule: key === "GDP" ? "quarterly_to_monthly_carry_forward" : "canonical_monthly_last_observation_per_month",
+    }];
+  }));
+
+  const monthlyW = canonicalMonthlyFromRows(sourceRows.WALCL ?? []);
+  const monthlyT = canonicalMonthlyFromRows(sourceRows.WDTGAL ?? []);
+  const monthlyR = canonicalMonthlyFromRows(sourceRows.RRPONTSYD ?? []);
+  const monthlyG = canonicalMonthlyFromRows(sourceRows.GDP ?? []);
+
+  const monthSet = (rows: Array<{ date: string; value: number | null }>) => new Set(rows.filter((row) => row.value !== null && Number.isFinite(Number(row.value))).map((row) => String(row.date).slice(0, 7)));
+  const setW = monthSet(monthlyW);
+  const setT = monthSet(monthlyT);
+  const setR = monthSet(monthlyR);
+  const setG = monthSet(monthlyG);
+
+  const triple = [...setW].filter((m) => setT.has(m) && setR.has(m)).sort((a, b) => a.localeCompare(b));
+  const strictAll = triple.filter((m) => setG.has(m));
+
+  const gdpExpanded = (() => {
+    if (triple.length === 0 || monthlyG.length === 0) return [] as Array<{ date: string; value: number | null }>;
+    const byMonth = new Map(monthlyG.map((row) => [String(row.date).slice(0, 7), row.value]));
+    let cursor = new Date(`${triple[0]}-01T00:00:00Z`);
+    const end = new Date(`${triple[triple.length - 1]}-01T00:00:00Z`);
+    let latest: number | null = null;
+    const out: Array<{ date: string; value: number | null }> = [];
+    while (cursor <= end) {
+      const month = cursor.toISOString().slice(0, 7);
+      if (byMonth.has(month)) latest = byMonth.get(month) ?? latest;
+      out.push({ date: `${month}-01`, value: latest });
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+    return out;
+  })();
+  const setGExpanded = new Set(gdpExpanded.filter((row) => row.value !== null && Number.isFinite(Number(row.value))).map((row) => String(row.date).slice(0, 7)));
+  const alignedAll = triple.filter((m) => setGExpanded.has(m));
+
+  const derivedSeries = params.seriesMap.get("effective_fed_liquidity_ratio") ?? [];
+  const derivedNumeric = derivedSeries.filter((row) => row.value !== null && Number.isFinite(row.value as number));
+
+  return {
+    rawSourceStage: rawStage,
+    monthlyNormalizationStage: monthlyStage,
+    joinOverlapStage: {
+      rowCountAfterJoiningWalclWdtgalRrp: triple.length,
+      rowCountAfterAddingGdpMonthly: alignedAll.length,
+      strictQuarterlyDateOverlapCount: strictAll.length,
+      firstSurvivingMonthlyDate: alignedAll[0] ? `${alignedAll[0]}-01` : null,
+      lastSurvivingMonthlyDate: alignedAll[alignedAll.length - 1] ? `${alignedAll[alignedAll.length - 1]}-01` : null,
+      rowsDroppedAtEachStep: {
+        droppedWhenJoiningWdtgal: Math.max(0, setW.size - [...setW].filter((m) => setT.has(m)).length),
+        droppedWhenJoiningRrpontsyd: Math.max(0, [...setW].filter((m) => setT.has(m)).length - triple.length),
+        droppedByStrictGdpQuarterlyOverlap: Math.max(0, triple.length - strictAll.length),
+        droppedAfterGdpMonthlyCarryForward: Math.max(0, triple.length - alignedAll.length),
+      },
+      dropReasonNotes: {
+        strictQuarterlyJoin: "requires exact month overlap with quarterly GDP; can collapse history",
+        monthlyCarryForwardJoin: "uses canonical monthly grid + GDP carry-forward to preserve history",
+      },
+    },
+    derivedConstructionStage: {
+      rowCountEffectiveFedLiquidityBeforeGdpDivision: triple.length,
+      rowCountEffectiveFedLiquidityRatioAfterGdpDivision: alignedAll.length,
+      nullCountEffectiveFedLiquidityRatio: Math.max(0, alignedAll.length - derivedNumeric.length),
+      finalPersistedDerivedObservationCount: derivedNumeric.length,
+      beforeAfterComparison: {
+        beforeStrictOverlapCount: strictAll.length,
+        afterMonthlyAlignedCount: alignedAll.length,
+      },
+    },
+  };
+}
+
 function buildOverlayVerificationDiagnostics(params: {
   region: string;
   rawSeriesRows: RawSeriesPointRow[];
@@ -534,9 +626,6 @@ function buildOverlayVerificationDiagnostics(params: {
   const liqBlockStatus: "pass" | "partial" | "missing" = typeof liqQuantityScore === "number"
     ? ((liquidity?.runtime?.status === "partial" || (liquidity?.runtime?.blockAggregationInputs?.quantity ?? []).some((entry) => entry.signalStatus !== "ok")) ? "partial" : "pass")
     : "missing";
-  const liqSeriesKeys = ["WALCL", "WDTGAL", "RRPONTSYD", "GDP"];
-  const liqRawRows = params.rawSeriesRows.filter((row) => liqSeriesKeys.includes(String(row.series_key)));
-  const liqMonthlyCounts = Object.fromEntries(liqSeriesKeys.map((key) => [key, canonicalMonthlyFromRows(liqRawRows.filter((row) => String(row.series_key) === key)).length]));
   const derivedRatioSeries = params.seriesMap.get("effective_fed_liquidity_ratio") ?? [];
   const derivedRatioNumeric = derivedRatioSeries.filter((point) => point.value !== null && Number.isFinite(point.value as number));
   const derivedLatest = derivedRatioNumeric.slice(-1)[0] ?? null;
@@ -564,15 +653,21 @@ function buildOverlayVerificationDiagnostics(params: {
         aggregationWeights: liquidity?.runtime?.aggregationWeights ?? null,
       },
       effectiveFedLiquidityRatioTrace: {
-        rawInputSeriesUsed: liqSeriesKeys,
-        monthlyAlignedObservationCountsPerSource: liqMonthlyCounts,
-        derivedSeriesObservationCount: derivedRatioNumeric.length,
-        earliestDate: derivedRatioNumeric[0]?.date ?? null,
-        latestDate: derivedLatest?.date ?? null,
-        latestValue: derivedLatest?.value ?? null,
-        observationsInPercentileWindow: liqEffectiveComp?.debug?.observationsAvailableInScoringWindow ?? 0,
-        percentileComputed: typeof liqEffectiveComp?.debug?.percentile10yLatest === "number" ? "yes" : "no",
-        supportScoreComputed: typeof liqEffectiveComp?.score === "number" ? "yes" : "no",
+        ...buildEffectiveFedLiquidityRatioTrace({ rawSeriesRows: params.rawSeriesRows, seriesMap: params.seriesMap }),
+        scoringStage: {
+          observationsAvailableInPercentileWindow: liqEffectiveComp?.debug?.observationsAvailableInScoringWindow ?? 0,
+          enoughHistoryForPercentile: Boolean(liqEffectiveComp?.debug?.enoughHistory),
+          percentileComputed: typeof liqEffectiveComp?.debug?.percentile10yLatest === "number" ? "yes" : "no",
+          supportScoreComputed: typeof liqEffectiveComp?.score === "number" ? "yes" : "no",
+          noPercentileReason: typeof liqEffectiveComp?.debug?.percentile10yLatest === "number"
+            ? "none"
+            : ((liqEffectiveComp?.debug?.observationsAvailableInScoringWindow ?? 0) < (liqEffectiveComp?.debug?.minObservations ?? 120)
+              ? "insufficient_history"
+              : "missing_raw_value_or_alignment"),
+          earliestDate: derivedRatioNumeric[0]?.date ?? null,
+          latestDate: derivedLatest?.date ?? null,
+          latestValue: derivedLatest?.value ?? null,
+        },
       },
     },
     creditFundingOverlay: {
