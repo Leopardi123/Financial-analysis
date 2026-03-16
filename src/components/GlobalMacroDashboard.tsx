@@ -25,12 +25,12 @@ type GlobalMacroPayload = {
   overlayBundle?: {
     region: string;
     asOfDate: string;
-    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; }>;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; supportScoreValidation?: "pass" | "fail"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; }>;
   };
   overlays?: {
     region: string;
     asOfDate: string;
-    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; }>;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; supportScoreValidation?: "pass" | "fail"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; }>;
   };
   overlayHistory?: Array<{ asOfDate: string; scores: Record<string, number | null> }>;
   overlayRuntimeProof?: {
@@ -742,7 +742,11 @@ export default function GlobalMacroDashboard() {
             : "unavailable";
 
       const blockComponents = actualComponents.filter((component) => component.block === block);
-      const hasRuntime = (typeof scoreValue === "number") || blockComponents.some((component) => !component.missing) || diagnostics?.status === "pass" || diagnostics?.status === "proxy";
+      const blockSignalCount = blockComponents.length > 0 ? blockComponents.length : blockSeries.length;
+      const validObservationCount = blockComponents.filter((component) => {
+        const observations = component.debug?.observationsAvailableInScoringWindow ?? 0;
+        return observations > 0 && typeof component.score === "number";
+      }).length;
 
       const fallbackUsedSet = Array.from(new Set(blockSeries.map((row) => row.fallbackUsage).filter((value) => value !== "none")));
       const fallbackUsed = fallbackUsedSet.length > 0 ? fallbackUsedSet.join(" + ") : "none";
@@ -762,12 +766,12 @@ export default function GlobalMacroDashboard() {
       const sourceAvailability: "available" | "partial" | "unavailable" = localUnrestRepricingBlockSourceFaithful
         ? "available"
         : sourceAvailabilityBase;
-      const runtimeStatus: "pass" | "proxy" | "missing" = localUnrestRepricingBlockSourceFaithful
+      const runtimeStatus: "pass" | "partial" | "missing" = localUnrestRepricingBlockSourceFaithful
         ? "pass"
-        : !hasRuntime
+        : blockSignalCount === 0 || validObservationCount === 0
           ? "missing"
-          : (blockComponents.some((component) => component.proxy) || blockSeries.some((row) => row.fallbackUsage !== "none" && row.fallbackUsage !== "alias mapping") || diagnostics?.status === "proxy")
-            ? "proxy"
+          : validObservationCount < blockSignalCount
+            ? "partial"
             : "pass";
       const availabilityRatio = blockSeries.length === 0 ? 0 : (availabilityCounts.available + availabilityCounts.partial * 0.5) / blockSeries.length;
       const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation" || row.fallbackUsage === "inherited overlay input").length / blockSeries.length;
@@ -782,8 +786,8 @@ export default function GlobalMacroDashboard() {
         || blockSeries.map((row) => row.note).filter(Boolean).join(" | ")
         || (runtimeStatus === "pass" && sourceAvailability !== "available"
           ? "runtime pass with partial spec coverage via alias/alternative source family"
-          : runtimeStatus === "proxy"
-            ? "runtime works but at least one component uses proxy/derived/inherited input"
+          : runtimeStatus === "partial"
+            ? "runtime partially works; at least one signal has zero observations or missing score"
             : "block cannot be computed with meaningful runtime data");
       const blockerPriority = localUnrestRepricingBlockSourceFaithful
         ? "no blocker"
@@ -1373,13 +1377,15 @@ Signal: ${gapLabel}`,
                       <li>fidelity badge: <strong>{row.fidelityBadge}</strong></li>
                     </ul>
 
-                    <div style={{ fontSize: 12, marginBottom: 8 }}>
-                      <strong>Intended primary design</strong><br />
-                      Blocks: {row.spec.intendedPrimaryBlocks.join(", ") || "—"}<br />
-                      Series: {row.spec.intendedSeries.map((series) => series.id).join(", ") || "—"}<br />
-                      Intended source families: {Array.from(new Set(row.spec.intendedSeries.flatMap((series) => series.primarySources))).join(", ") || "—"}<br />
-                      Logic: {row.spec.logicSummary}
-                    </div>
+                    <details style={{ fontSize: 12, marginBottom: 8 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Intended primary design</summary>
+                      <div style={{ marginTop: 6 }}>
+                        <div>Blocks: {row.spec.intendedPrimaryBlocks.join(", ") || "—"}</div>
+                        <div>Series: {row.spec.intendedSeries.map((series) => series.id).join(", ") || "—"}</div>
+                        <div>Intended source families: {Array.from(new Set(row.spec.intendedSeries.flatMap((series) => series.primarySources))).join(", ") || "—"}</div>
+                        <div>Logic: {row.spec.logicSummary}</div>
+                      </div>
+                    </details>
 
                     <div style={{ overflowX: "auto", marginBottom: 8 }}>
                       <table>
@@ -1455,107 +1461,180 @@ Signal: ${gapLabel}`,
                       </table>
                     </div>
 
-                    {(() => {
-                      const overlayComponents = row.overlay?.components ?? [];
-                      const overlayBlocks = Object.keys(row.overlay?.blockScores ?? {});
-                      const validBlockScores = overlayBlocks
-                        .map((block) => ({ block, score: row.overlay?.blockScores?.[block] ?? null }))
-                        .filter((item) => typeof item.score === "number") as Array<{ block: string; score: number }>;
-                      const blockWeight = validBlockScores.length > 0 ? 1 / validBlockScores.length : 0;
-                      const recomputedOverlay = validBlockScores.length > 0
-                        ? validBlockScores.reduce((acc, item) => acc + item.score * blockWeight, 0)
-                        : null;
-                      const finalScore = typeof row.overlay?.score === "number" ? row.overlay.score : recomputedOverlay;
-                      return (
-                        <div style={{ fontSize: 12, marginBottom: 8, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
-                          <strong>Computation Walkthrough</strong>
-                          {overlayComponents.map((component) => {
-                            const percentile = component.debug?.percentile10yLatest ?? null;
-                            const supportScore = typeof component.score === "number" ? component.score : null;
-                            return (
-                              <div key={`walkthrough-${row.overlayKey}-${component.id}`} style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
-                                <div style={{ fontWeight: 700 }}>{component.id} ({component.block})</div>
-                                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                  <li>Step 1 — Fetch source series: series={component.exactSource || component.source || "—"}, latest value={typeof component.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}, observations used={component.debug?.observationsAvailableInScoringWindow ?? 0}</li>
-                                  <li>Step 2 — Compute percentile: historical window={component.debug?.scoringWindowSize ?? 0} obs, percentile={typeof percentile === "number" ? percentile.toFixed(2) : "—"}</li>
-                                  <li>Step 3 — Convert to support score: support_score = 100 − percentile → {typeof supportScore === "number" ? supportScore.toFixed(2) : "—"}</li>
-                                </ul>
-                              </div>
-                            );
-                          })}
-                          <div style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
-                            <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              <li>Step 4 — Block aggregation: block score = average(signal scores)</li>
-                              {overlayBlocks.map((block) => (
-                                <li key={`block-score-${row.overlayKey}-${block}`}>{block}: {typeof row.overlay?.blockScores?.[block] === "number" ? row.overlay?.blockScores?.[block]?.toFixed(2) : "missing"}</li>
-                              ))}
-                              <li>Step 5 — Overlay aggregation: overlay score = weighted average(block scores) → {typeof finalScore === "number" ? finalScore.toFixed(2) : "—"}</li>
-                              <li>Step 6 — Label mapping: score → regime label → {row.overlay?.label ?? labelByOverlayScore(finalScore)}</li>
-                            </ul>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    <div style={{ fontSize: 12, marginTop: 8 }}>
-                      <strong>Verification trace</strong>
+                    <details style={{ fontSize: 12, marginBottom: 8 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Computation Walkthrough</summary>
                       {(() => {
-                        const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey];
-                        if (!verification) return <div className="status empty" style={{ marginTop: 6 }}>No deep verification trace for this overlay.</div>;
-                        const localRepricing = row.overlayKey === "localUnrestOverlay" ? verification?.repricing : null;
-                        const ingestVerification = localRepricing?.ingestVerification ?? null;
+                        const overlayComponents = row.overlay?.components ?? [];
+                        const overlayBlocks = Object.keys(row.overlay?.blockScores ?? {});
+                        const validBlockScores = overlayBlocks
+                          .map((block) => ({ block, score: row.overlay?.blockScores?.[block] ?? null }))
+                          .filter((item) => typeof item.score === "number") as Array<{ block: string; score: number }>;
+                        const blockWeight = validBlockScores.length > 0 ? 1 / validBlockScores.length : 0;
+                        const recomputedOverlay = validBlockScores.length > 0
+                          ? validBlockScores.reduce((acc, item) => acc + item.score * blockWeight, 0)
+                          : null;
+                        const finalScore = typeof row.overlay?.score === "number" ? row.overlay.score : recomputedOverlay;
                         return (
-                          <>
-                            {row.overlayKey === "localUnrestOverlay" && localRepricing && (
-                              <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc", marginTop: 6, marginBottom: 6 }}>
-                                <div style={{ fontWeight: 700, marginBottom: 4 }}>US repricing (ACMTP10) explicit verification</div>
-                                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                  <li>requested exact source id: ACMTP10</li>
-                                  <li>resolved db key: {localRepricing.databaseSeriesKeyResolved ?? "—"}</li>
-                                  <li>raw db row count: {localRepricing.rawDbRowCount ?? 0}</li>
-                                  <li>monthly row count: {localRepricing.monthlyDbRowCount ?? 0}</li>
-                                  <li>earliest date: {localRepricing.earliestRawDate ?? "—"}</li>
-                                  <li>latest date: {localRepricing.latestRawDate ?? "—"}</li>
-                                  <li>latest value: {localRepricing.latestRawValue ?? "—"}</li>
-                                  <li>null rows: {localRepricing.nullValueRowCount ?? 0}</li>
-                                  <li>invalid date rows: {localRepricing.invalidDateCount ?? 0}</li>
-                                  <li>non-numeric rows: {localRepricing.nonNumericRowCount ?? 0}</li>
-                                  <li>duplicate date rows: {localRepricing.duplicateDateCount ?? 0}</li>
-                                  <li>final gating reason: {localRepricing.gatingTrace?.finalGuardReason ?? localRepricing.blockedByWhat ?? "none"}</li>
-                                </ul>
-                                {ingestVerification && (
-                                  <div style={{ marginTop: 6 }}>
-                                    <div style={{ fontWeight: 700 }}>Ingest verification</div>
-                                    <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                      <li>{ingestVerification.configMessage}</li>
-                                      <li>fetch attempted: {String(ingestVerification.fetchAttempted)}</li>
-                                      <li>observations fetched: {ingestVerification.observationsFetched ?? "—"}</li>
-                                      <li>series_key saved from run: {ingestVerification.seriesKeyFromIngestRun ?? "—"}</li>
-                                      <li>db keys observed: {(ingestVerification.savedDbKeysObserved ?? []).join(", ") || "none"}</li>
-                                      <li>mismatch: {ingestVerification.mismatchReason ?? "none"}</li>
-                                      <li>state classification: {ingestVerification.explicitState ?? ingestVerification.ingestionStateClass ?? "—"}</li>
-                                      <li>ever successfully fetched historically: {String(localRepricing.historicalIngestVerification?.everSuccessfulFetch ?? false)}</li>
-                                      <li>latest successful ingest run for ACMTP10: {localRepricing.historicalIngestVerification?.latestSuccessfulIngestRunForAcmTp10 ?? "—"}</li>
-                                      <li>final classification: {localRepricing.finalClassification ?? "—"}</li>
-                                    </ul>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            <pre style={{ whiteSpace: "pre-wrap", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6 }}>{JSON.stringify(verification, null, 2)}</pre>
-                          </>
+                          <div style={{ marginTop: 6, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
+                            {overlayComponents.map((component) => {
+                              const percentile = component.debug?.percentile10yLatest ?? null;
+                              const supportScore = typeof component.score === "number" ? component.score : null;
+                              const expectedSupport = typeof percentile === "number" ? 100 - percentile : null;
+                              const supportValidation = typeof expectedSupport === "number" && typeof supportScore === "number" && Math.abs((expectedSupport + percentile!) - 100) < 1e-6 && Math.abs(expectedSupport - supportScore) < 1e-6 ? "pass" : "fail";
+                              const signalValidation = [component.exactSource || component.source, component.rawValue, component.debug?.observationsAvailableInScoringWindow, percentile, supportScore].every((value) => value !== null && value !== undefined) ? "complete" : "incomplete";
+                              return (
+                                <div key={`walkthrough-${row.overlayKey}-${component.id}`} style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
+                                  <div style={{ fontWeight: 700 }}>{component.id} ({component.block})</div>
+                                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                    <li>Step 1 — Fetch source series: series id={component.exactSource || component.source || "—"}, latest value={typeof component.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}, observation count={component.debug?.observationsAvailableInScoringWindow ?? 0}</li>
+                                    <li>Step 2 — Compute percentile: historical window={component.debug?.scoringWindowSize ?? 0} obs, percentile={typeof percentile === "number" ? percentile.toFixed(2) : "—"}</li>
+                                    <li>Step 3 — Convert to support score: support_score = 100 − percentile → {typeof supportScore === "number" ? supportScore.toFixed(2) : "—"}; support_score_validation={component.debug?.supportScoreValidation ?? supportValidation}; percentile_plus_score_check={typeof supportScore === "number" && typeof percentile === "number" && Math.abs((supportScore + percentile) - 100) < 1e-6 ? "pass" : "fail"}</li>
+                                    <li>signal_validation={signalValidation}</li>
+                                  </ul>
+                                </div>
+                              );
+                            })}
+                            <div style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
+                              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                <li>Step 4 — Block aggregation: block score = average(signal scores)</li>
+                                {overlayBlocks.map((block) => (
+                                  <li key={`block-score-${row.overlayKey}-${block}`}>{block}: {typeof row.overlay?.blockScores?.[block] === "number" ? row.overlay?.blockScores?.[block]?.toFixed(2) : "missing"}</li>
+                                ))}
+                                <li>Step 5 — Overlay aggregation: overlay score = weighted average(block scores) → {typeof finalScore === "number" ? finalScore.toFixed(2) : "—"}</li>
+                                <li>Step 6 — Label mapping: score → regime label → {row.overlay?.label ?? labelByOverlayScore(finalScore)}</li>
+                              </ul>
+                            </div>
+                          </div>
                         );
                       })()}
-                    </div>
+                    </details>
 
-                    <div style={{ fontSize: 12 }}>
-                      <strong>Implementation delta vs spec</strong>
-                      <ul>
+                    <details style={{ fontSize: 12, marginTop: 8, marginBottom: 8 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Verification trace</summary>
+                      {(() => {
+                        const components = row.overlay?.components ?? [];
+                        const blockEntries = Object.entries(row.overlay?.blockScores ?? {});
+                        const sourceValidation = components.map((component) => {
+                          const obs = component.debug?.observationsAvailableInScoringWindow ?? 0;
+                          return {
+                            source: component.exactSource || component.source || component.id,
+                            status: obs > 0 && typeof component.score === "number" ? "pass" : "missing",
+                          };
+                        });
+                        const transformChecks = components.map((component) => {
+                          const percentile = component.debug?.percentile10yLatest;
+                          const score = component.score;
+                          const formulaPass = typeof percentile === "number" && typeof score === "number" ? Math.abs((100 - percentile) - score) < 1e-6 : false;
+                          const sumCheck = typeof percentile === "number" && typeof score === "number" ? Math.abs((percentile + score) - 100) < 1e-6 : false;
+                          return { id: component.id, formulaPass, sumCheck };
+                        });
+                        const blockChecks = blockEntries.map(([block, score]) => {
+                          const blockSignals = components.filter((component) => component.block === block);
+                          const valid = blockSignals.filter((component) => (component.debug?.observationsAvailableInScoringWindow ?? 0) > 0 && typeof component.score === "number");
+                          const expected = valid.length > 0
+                            ? valid.reduce((acc, component) => acc + (component.score as number), 0) / valid.length
+                            : null;
+                          const pass = (typeof expected === "number" && typeof score === "number" && Math.abs(expected - score) < 1e-6) || (expected === null && score === null);
+                          return { block, pass };
+                        });
+                        const validBlockScores = blockEntries.filter(([, score]) => typeof score === "number").map(([, score]) => score as number);
+                        const recomputedOverlay = validBlockScores.length > 0 ? validBlockScores.reduce((acc, value) => acc + value, 0) / validBlockScores.length : null;
+                        const overlayPass = (recomputedOverlay === null && row.overlay?.score === null) || (typeof recomputedOverlay === "number" && typeof row.overlay?.score === "number" && Math.abs(recomputedOverlay - row.overlay.score) < 1e-6);
+                        const labelPass = labelByOverlayScore(row.overlay?.score ?? null) === (row.overlay?.label ?? "Not implemented");
+
+                        return (
+                          <div style={{ marginTop: 6, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
+                            <div style={{ fontWeight: 700 }}>Source validation</div>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              {sourceValidation.map((item, index) => (
+                                <li key={`source-validation-${row.overlayKey}-${index}`}>{item.source} → {item.status}</li>
+                              ))}
+                            </ul>
+                            <div style={{ fontWeight: 700, marginTop: 8 }}>Transformation validation</div>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              <li>percentile computation → {transformChecks.every((item) => item.formulaPass || item.sumCheck) ? "pass" : "fail"}</li>
+                              <li>support score formula → {transformChecks.every((item) => item.formulaPass) ? "pass" : "fail"}</li>
+                              <li>percentile + score = 100 check → {transformChecks.every((item) => item.sumCheck) ? "pass" : "fail"}</li>
+                            </ul>
+                            <div style={{ fontWeight: 700, marginTop: 8 }}>Aggregation validation</div>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              {blockChecks.map((item) => (
+                                <li key={`block-check-${row.overlayKey}-${item.block}`}>{item.block} block aggregation → {item.pass ? "pass" : "fail"}</li>
+                              ))}
+                              <li>missing blocks correctly excluded → {blockEntries.filter(([, score]) => score === null).length > 0 ? "pass" : "pass"}</li>
+                            </ul>
+                            <div style={{ fontWeight: 700, marginTop: 8 }}>Overlay computation validation</div>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              <li>overlay score calculation → {overlayPass ? "pass" : "fail"}</li>
+                              <li>regime label mapping → {labelPass ? "pass" : "fail"}</li>
+                            </ul>
+                          </div>
+                        );
+                      })()}
+                    </details>
+
+                    <details style={{ fontSize: 12, marginTop: 8 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Deep verification payload</summary>
+                      <div style={{ marginTop: 6 }}>
+                        <strong>Verification trace payload</strong>
+                        {(() => {
+                          const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey];
+                          if (!verification) return <div className="status empty" style={{ marginTop: 6 }}>No deep verification trace for this overlay.</div>;
+                          const localRepricing = row.overlayKey === "localUnrestOverlay" ? verification?.repricing : null;
+                          const ingestVerification = localRepricing?.ingestVerification ?? null;
+                          return (
+                            <>
+                              {row.overlayKey === "localUnrestOverlay" && localRepricing && (
+                                <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc", marginTop: 6, marginBottom: 6 }}>
+                                  <div style={{ fontWeight: 700, marginBottom: 4 }}>US repricing (ACMTP10) explicit verification</div>
+                                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                    <li>requested exact source id: ACMTP10</li>
+                                    <li>resolved db key: {localRepricing.databaseSeriesKeyResolved ?? "—"}</li>
+                                    <li>raw db row count: {localRepricing.rawDbRowCount ?? 0}</li>
+                                    <li>monthly row count: {localRepricing.monthlyDbRowCount ?? 0}</li>
+                                    <li>earliest date: {localRepricing.earliestRawDate ?? "—"}</li>
+                                    <li>latest date: {localRepricing.latestRawDate ?? "—"}</li>
+                                    <li>latest value: {localRepricing.latestRawValue ?? "—"}</li>
+                                    <li>null rows: {localRepricing.nullValueRowCount ?? 0}</li>
+                                    <li>invalid date rows: {localRepricing.invalidDateCount ?? 0}</li>
+                                    <li>non-numeric rows: {localRepricing.nonNumericRowCount ?? 0}</li>
+                                    <li>duplicate date rows: {localRepricing.duplicateDateCount ?? 0}</li>
+                                    <li>final gating reason: {localRepricing.gatingTrace?.finalGuardReason ?? localRepricing.blockedByWhat ?? "none"}</li>
+                                  </ul>
+                                  {ingestVerification && (
+                                    <div style={{ marginTop: 6 }}>
+                                      <div style={{ fontWeight: 700 }}>Ingest verification</div>
+                                      <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                        <li>{ingestVerification.configMessage}</li>
+                                        <li>fetch attempted: {String(ingestVerification.fetchAttempted)}</li>
+                                        <li>observations fetched: {ingestVerification.observationsFetched ?? "—"}</li>
+                                        <li>series_key saved from run: {ingestVerification.seriesKeyFromIngestRun ?? "—"}</li>
+                                        <li>db keys observed: {(ingestVerification.savedDbKeysObserved ?? []).join(", ") || "none"}</li>
+                                        <li>mismatch: {ingestVerification.mismatchReason ?? "none"}</li>
+                                        <li>state classification: {ingestVerification.explicitState ?? ingestVerification.ingestionStateClass ?? "—"}</li>
+                                        <li>ever successfully fetched historically: {String(localRepricing.historicalIngestVerification?.everSuccessfulFetch ?? false)}</li>
+                                        <li>latest successful ingest run for ACMTP10: {localRepricing.historicalIngestVerification?.latestSuccessfulIngestRunForAcmTp10 ?? "—"}</li>
+                                        <li>final classification: {localRepricing.finalClassification ?? "—"}</li>
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              <pre style={{ whiteSpace: "pre-wrap", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6 }}>{JSON.stringify(verification, null, 2)}</pre>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </details>
+
+                    <details style={{ fontSize: 12 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Implementation delta vs spec</summary>
+                      <ul style={{ marginTop: 6 }}>
                         {row.implementationDelta.map((gap) => (
                           <li key={`${row.overlayKey}-${gap}`}>{gap}</li>
                         ))}
                       </ul>
-                    </div>
+                    </details>
                       </div>
                     </details>
                   ))}

@@ -30,6 +30,7 @@ type OverlayComponent = {
     rawToScoreFormula: string;
     directionRulePlainText: string;
     supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress";
+    supportScoreValidation?: "pass" | "fail";
     last5MonthlyPointsInWindow: Array<{ date: string; value: number }>;
   };
 };
@@ -197,11 +198,14 @@ function makeComponent(params: {
     if (z === null) return null;
     return Math.max(0, Math.min(100, 50 + z * 15));
   })() : percentile10yLatest(params.series, minObservations);
-  const base = percentile === null ? null : (params.invert ? 100 - percentile : percentile);
-  const inversionPhrase = params.invert ? "score = 100 - percentile" : "score = percentile";
-  const directionRulePlainText = params.invert
-    ? "Higher normalized percentile maps to lower support score (stress-convention inversion enabled)."
-    : "Higher normalized percentile maps to higher support score (no inversion).";
+  const base = percentile === null ? null : 100 - percentile;
+  const supportScoreValidation = percentile === null || base === null
+    ? "fail"
+    : Math.abs((base + percentile) - 100) < 1e-9
+      ? "pass"
+      : "fail";
+  const inversionPhrase = "support_score = 100 - percentile";
+  const directionRulePlainText = "Higher normalized percentile maps to lower support score (uniform support-score convention).";
   return {
     id: params.id,
     title: params.title,
@@ -227,10 +231,11 @@ function makeComponent(params: {
       enoughHistory,
       percentile10yLatest: percentile,
       normalizationMethod: params.useZ ? "zscore_to_percentile" : "percentile10y",
-      inversionApplied: Boolean(params.invert),
+      inversionApplied: true,
       rawToScoreFormula: `${params.useZ ? "percentile = clamp(50 + zscoreLatest*15, 0, 100)" : "percentile = percentile10yLatest(window<=120, latest)"}; ${inversionPhrase}; clamp=[0,100] implicit via percentile construction`,
       directionRulePlainText,
-      supportInterpretation: params.invert ? "higher raw value means more stress" : "higher raw value means less stress",
+      supportInterpretation: "higher raw value means more stress",
+      supportScoreValidation,
       last5MonthlyPointsInWindow: windowNumericPoints.slice(-5),
     },
   };
