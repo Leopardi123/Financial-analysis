@@ -24,12 +24,12 @@ type GlobalMacroPayload = {
   overlayBundle?: {
     region: string;
     asOfDate: string;
-    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; }>; }>;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; }>;
   };
   overlays?: {
     region: string;
     asOfDate: string;
-    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; }>; }>;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; }>;
   };
   overlayHistory?: Array<{ asOfDate: string; scores: Record<string, number | null> }>;
   overlayRuntimeProof?: {
@@ -915,6 +915,15 @@ export default function GlobalMacroDashboard() {
     return Math.max(0, Math.min(100, score));
   }
 
+  function labelByOverlayScore(score: number | null): string {
+    if (score === null) return "Not implemented";
+    if (score < 20) return "Severe stress";
+    if (score < 40) return "Tight";
+    if (score < 60) return "Neutral";
+    if (score < 80) return "Supportive";
+    return "Very supportive";
+  }
+
   function renderOverlayHistoryChart(overlayKey: string) {
     const valid = overlayHistoryPoints
       .map((point) => ({ asOfDate: point.asOfDate, score: point.scores?.[overlayKey] ?? null }))
@@ -1346,6 +1355,134 @@ Signal: ${gapLabel}`,
                         </tbody>
                       </table>
                     </div>
+
+                    {row.overlayKey === "localUnrestOverlay" && (() => {
+                      const blocks = ["signal", "repricing"].map((blockId) => {
+                        const component = (row.overlay?.components ?? []).find((c) => c.block === blockId);
+                        return { blockId, component };
+                      });
+                      const signalScore = row.overlay?.blockScores?.signal ?? null;
+                      const repricingScore = row.overlay?.blockScores?.repricing ?? null;
+                      const scoreParts = [
+                        { id: "signal", score: signalScore, weight: 0.5 },
+                        { id: "repricing", score: repricingScore, weight: 0.5 },
+                      ].filter((x) => typeof x.score === "number") as Array<{ id: string; score: number; weight: number }>;
+                      const totalWeight = scoreParts.reduce((acc, x) => acc + x.weight, 0);
+                      const recomputedTotal = totalWeight > 0 ? scoreParts.reduce((acc, x) => acc + x.score * (x.weight / totalWeight), 0) : null;
+                      const totalScore = typeof row.overlay?.score === "number" ? row.overlay.score : recomputedTotal;
+                      const severeByMath = typeof totalScore === "number" && totalScore < 20;
+                      const severeByThreshold = row.overlay?.label === "Severe stress";
+                      const severeByConvention = severeByMath;
+                      const severeLabelOppositeDirection = typeof totalScore === "number" ? labelByOverlayScore(100 - totalScore) : "Not implemented";
+                      const invertedBlockDirectionScore = ((): number | null => {
+                        const invertSignal = typeof signalScore === "number" ? 100 - signalScore : null;
+                        const invertRepricing = typeof repricingScore === "number" ? 100 - repricingScore : null;
+                        const parts = [
+                          { score: invertSignal, weight: 0.5 },
+                          { score: invertRepricing, weight: 0.5 },
+                        ].filter((x) => typeof x.score === "number") as Array<{ score: number; weight: number }>;
+                        if (!parts.length) return null;
+                        const w = parts.reduce((a, b) => a + b.weight, 0);
+                        return parts.reduce((a, b) => a + b.score * (b.weight / w), 0);
+                      })();
+                      const onlySignalScore = typeof signalScore === "number" ? signalScore : null;
+                      const onlyRepricingScore = typeof repricingScore === "number" ? repricingScore : null;
+                      const possibleMisclassificationReason = !severeByThreshold && severeByMath
+                        ? "wrong threshold mapping"
+                        : (severeByThreshold && !severeByMath)
+                          ? "stale label derived from wrong field"
+                          : "none";
+
+                      return (
+                        <div style={{ fontSize: 12, marginBottom: 8, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
+                          <strong>Computation walkthrough</strong>
+                          {blocks.map(({ blockId, component }) => (
+                            <div key={`walkthrough-${blockId}`} style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
+                              <div style={{ fontWeight: 700 }}>{blockId}</div>
+                              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                <li>exact source id: {component?.exactSource ?? component?.source ?? "—"}</li>
+                                <li>latest raw value: {typeof component?.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}</li>
+                                <li>monthly chosen date: {component?.debug?.monthlyChosenDate ?? component?.debug?.latestDate ?? "—"}</li>
+                                <li>observations in scoring window: {component?.debug?.observationsAvailableInScoringWindow ?? "—"} / {component?.debug?.scoringWindowSize ?? "—"}</li>
+                                <li>computed percentile: {typeof component?.debug?.percentile10yLatest === "number" ? component.debug.percentile10yLatest.toFixed(2) : "—"}</li>
+                                <li>direction rule: {component?.debug?.directionRulePlainText ?? "—"}</li>
+                                <li>formula: {component?.debug?.rawToScoreFormula ?? "—"}</li>
+                                <li>final block score: {typeof component?.score === "number" ? component.score.toFixed(2) : "—"}</li>
+                                <li>human interpretation: {component?.debug?.supportInterpretation ?? "—"}</li>
+                                <li>enoughHistory: {String(component?.debug?.enoughHistory ?? false)} (min={component?.debug?.minObservations ?? "—"})</li>
+                                <li>last 5 monthly points used: {(component?.debug?.last5MonthlyPointsInWindow ?? []).map((p) => `${p.date}:${p.value.toFixed(3)}`).join(" | ") || "—"}</li>
+                              </ul>
+                            </div>
+                          ))}
+
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Score direction audit</summary>
+                            <div style={{ marginTop: 6 }}>overlay stress convention: low score = high local stress; high score = low local stress</div>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              {blocks.map(({ blockId, component }) => {
+                                const p = component?.debug?.percentile10yLatest;
+                                const s = component?.score;
+                                const directionConsistent = typeof p === "number" && typeof s === "number"
+                                  ? ((p >= 50 && s <= 50) || (p <= 50 && s >= 50))
+                                  : null;
+                                return (
+                                  <li key={`audit-${blockId}`}>
+                                    {blockId}: raw latest={typeof component?.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}, percentile={typeof p === "number" ? p.toFixed(2) : "—"}, mapped score={typeof s === "number" ? s.toFixed(2) : "—"}, expected interpretation={component?.debug?.supportInterpretation ?? "—"}, status={directionConsistent === null ? "direction_suspect" : directionConsistent ? "direction_consistent" : "direction_suspect"}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </details>
+
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Label derivation</summary>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              <li>label source function: labelByOverlayScore(score)</li>
+                              <li>total score before label mapping: {typeof totalScore === "number" ? totalScore.toFixed(2) : "—"}</li>
+                              <li>thresholds: severe&lt;20, tight&lt;40, neutral&lt;60, supportive&lt;80, very_supportive&gt;=80</li>
+                              <li>matched band: {typeof totalScore === "number" ? (totalScore < 20 ? "severe" : totalScore < 40 ? "tight" : totalScore < 60 ? "neutral" : totalScore < 80 ? "supportive" : "very_supportive") : "not_implemented"}</li>
+                              <li>final label: {row.overlay?.label ?? "—"}</li>
+                              <li>confidence: {row.overlay?.confidence ?? "—"}</li>
+                              <li>if/else branch: {typeof totalScore === "number" ? `score ${totalScore.toFixed(2)} => ${labelByOverlayScore(totalScore)}` : "score null => Not implemented"}</li>
+                            </ul>
+                          </details>
+
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Why this is severe</summary>
+                            <div style={{ marginTop: 6 }}>
+                              {typeof totalScore === "number"
+                                ? `Overlay klassas som ${labelByOverlayScore(totalScore)} eftersom totalscore ${totalScore.toFixed(2)} ligger i ${totalScore < 20 ? "severe" : totalScore < 40 ? "tight" : totalScore < 60 ? "neutral" : totalScore < 80 ? "supportive" : "very supportive"}-intervallet.`
+                                : "Overlay saknar totalscore; severity kan inte klassas."}
+                            </div>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              <li>block som drar ned score mest: {[{ id: "signal", score: signalScore }, { id: "repricing", score: repricingScore }].filter((x) => typeof x.score === "number").sort((a, b) => (a.score as number) - (b.score as number)).map((x) => `${x.id}=${(x.score as number).toFixed(2)}`).join(", ") || "—"}</li>
+                              <li>driver attribution: {typeof signalScore === "number" && typeof repricingScore === "number" ? (signalScore < 20 && repricingScore < 20 ? "båda" : signalScore < 20 ? "extrem policy uncertainty" : repricingScore < 20 ? "extrem repricing" : "ingen extrem; label kommer från kombinerad nivå") : "otillräcklig data"}</li>
+                            </ul>
+                          </details>
+
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Counterfactual label check</summary>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              <li>label if score interpreted with opposite direction: {severeLabelOppositeDirection}</li>
+                              <li>label if block direction inverted: {labelByOverlayScore(invertedBlockDirectionScore)}</li>
+                              <li>label if percentile mapping were non-inverted: {labelByOverlayScore(invertedBlockDirectionScore)}</li>
+                              <li>label if only signal counted: {labelByOverlayScore(onlySignalScore)}</li>
+                              <li>label if only repricing counted: {labelByOverlayScore(onlyRepricingScore)}</li>
+                            </ul>
+                          </details>
+
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Severe stress sanity check</summary>
+                            <pre style={{ whiteSpace: "pre-wrap", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6 }}>{JSON.stringify({
+                              isSevereByMath: severeByMath,
+                              isSevereByThreshold: severeByThreshold,
+                              isSevereByDirectionConvention: severeByConvention,
+                              possibleMisclassificationReason,
+                            }, null, 2)}</pre>
+                          </details>
+                        </div>
+                      );
+                    })()}
 
                     <div style={{ fontSize: 12, marginTop: 8 }}>
                       <strong>Verification trace</strong>
