@@ -749,7 +749,6 @@ export default function GlobalMacroDashboard() {
       // If the region-correct source is present with no proxy/fallback, this block must not be marked missing.
       const localUnrestRepricingBlockSourceFaithful = overlayKey === "localUnrestOverlay"
         && block === "repricing"
-        && typeof scoreValue === "number"
         && fallbackUsed === "none"
         && !blockComponents.some((component) => component.proxy)
         && ((selectedRegion === "US" && /ACMTP10/i.test(currentRuntimeSources))
@@ -843,7 +842,7 @@ export default function GlobalMacroDashboard() {
 
     const exactDifferences = blockRows
       .filter((row) => row.blockerType !== "no blocker" || row.sourceAvailability !== "available")
-      .map((row) => overlayKey === "localUnrestOverlay" && row.block === "repricing" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none"
+      .map((row) => overlayKey === "localUnrestOverlay" && row.block === "repricing" && row.runtimeStatus === "pass" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none"
         ? "repricing: direct source-faithful match via ACMTP10"
         : `${row.block}: ${row.blockerType}; availability=${row.sourceAvailability}; fallback=${row.fallbackUsed}`);
     const matchesSpec = blockRows
@@ -856,8 +855,9 @@ export default function GlobalMacroDashboard() {
       if (row.fallbackUsed.includes("derived approximation")) reasons.push(`${row.block} uses derived approximation`);
       if (row.fallbackUsed.includes("inherited overlay input")) reasons.push(`${row.block} built from inherited overlay`);
       if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
-      if (row.blockerType === "exact source family differs") reasons.push(`${row.block} exact source family differs`);
-      if (overlayKey === "localUnrestOverlay" && row.block === "repricing" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none") reasons.push("repricing direct source-faithful match via ACMTP10");
+      const localUnrestRepricingDirect = overlayKey === "localUnrestOverlay" && row.block === "repricing" && row.runtimeStatus === "pass" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none";
+      if (row.blockerType === "exact source family differs" && !localUnrestRepricingDirect) reasons.push(`${row.block} exact source family differs`);
+      if (localUnrestRepricingDirect) reasons.push("repricing direct source-faithful match via ACMTP10");
       if (row.blockerType === "intended source not wired to overlay") reasons.push(`${row.block} source not yet wired`);
       return reasons;
     })));
