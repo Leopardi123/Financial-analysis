@@ -219,6 +219,18 @@ function labelByScore(score: number | null): string {
 
 function getSeries(seriesMap: SeriesMap, key: string): Point[] { return seriesMap.get(key) ?? []; }
 
+function resolveApprovedXccyBasisSeries(seriesMap: SeriesMap): { exactSource: "EURUSD3MD156NWSG" | "EURUSDBS3M" | "unavailable"; series: Point[]; fidelityBadge: "high (derived market measure)" | "spec-faithful" | "unavailable" } {
+  const bisSeries = getSeries(seriesMap, "EURUSD3MD156NWSG");
+  if (bisSeries.length > 0) {
+    return { exactSource: "EURUSD3MD156NWSG", series: bisSeries, fidelityBadge: "high (derived market measure)" };
+  }
+  const bloombergSeries = getSeries(seriesMap, "EURUSDBS3M");
+  if (bloombergSeries.length > 0) {
+    return { exactSource: "EURUSDBS3M", series: bloombergSeries, fidelityBadge: "spec-faithful" };
+  }
+  return { exactSource: "unavailable", series: [], fidelityBadge: "unavailable" };
+}
+
 
 function latestNumericValue(points: Point[]): number | null {
   const latest = lastNumeric(points);
@@ -468,20 +480,71 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
         },
       };
     })(),
-    creditFundingOverlay: finalizeOverlay({
-      pricing: { weight: 0.3, components: [
-        makeComponent({ asOfDate, id: "cr_hy", title: "HY spread", block: "pricing", weight: 0.5, source: "FRED/ECB", exactSource: region === "US" ? "BAMLH0A0HYM2" : "EUR HY OAS", series: getSeries(series, region === "US" ? "BAMLH0A0HYM2" : "EUR_HY_OAS"), invert: true }),
-        makeComponent({ asOfDate, id: "cr_ig", title: "IG spread", block: "pricing", weight: 0.5, source: "FRED/ECB", exactSource: region === "US" ? "BAMLC0A0CM" : "EUR_IG_OAS", series: getSeries(series, region === "US" ? "BAMLC0A0CM" : "EUR_IG_OAS"), invert: true }),
-      ]},
-      funding: { weight: 0.3, components: [
-        makeComponent({ asOfDate, id: "cr_fund_1", title: "Funding stress", block: "funding", weight: 0.6, source: "FRED/ECB", exactSource: region === "US" ? "TEDRATE" : "EURIBOR_OIS", series: getSeries(series, region === "US" ? "TEDRATE" : "EURIBOR_OIS").length ? getSeries(series, region === "US" ? "TEDRATE" : "EURIBOR_OIS") : getSeries(series, region === "US" ? "financial_conditions_index" : "credit_spreads_ea"), invert: true, proxy: region === "US" }),
-        makeComponent({ asOfDate, id: "cr_fund_2", title: "Dollar funding bridge", block: "funding", weight: 0.4, source: "CME", exactSource: "EUR/USD Cross Currency Basis", series: getSeries(series, "EURUSD_XCCY_BASIS"), invert: true, proxy: true }),
-      ]},
-      access: { weight: 0.4, components: [
-        makeComponent({ asOfDate, id: "cr_access_1", title: "Lending standards", block: "access", weight: 0.7, source: "FRED/ECB", exactSource: region === "US" ? "DRTSCILM" : "BLS.Q.U2.ALL.A.K.A.A2A.A.2250.Z.Z", series: getSeries(series, region === "US" ? "DRTSCILM" : "BLS.Q.U2.ALL.A.K.A.A2A.A.2250.Z.Z").length ? getSeries(series, region === "US" ? "DRTSCILM" : "BLS.Q.U2.ALL.A.K.A.A2A.A.2250.Z.Z") : getSeries(series, region === "US" ? "pmi_momentum_us" : "credit_spreads_ea"), invert: true }),
-        makeComponent({ asOfDate, id: "cr_access_2", title: "Sovereign-bank nexus", block: "access", weight: 0.3, source: "ECB", exactSource: region === "EA" ? "IT10Y-DE10Y spread" : "Proxy not required", series: getSeries(series, region === "EA" ? "EA_SOVEREIGN_NEXUS_SPREAD" : ""), invert: true, proxy: region !== "EA" }),
-      ]},
-    }),
+    creditFundingOverlay: (() => {
+      const xccyBasis = resolveApprovedXccyBasisSeries(series);
+      const tedComponent = makeComponent({
+        asOfDate,
+        id: "cr_fund_ted",
+        title: "TED spread",
+        block: "funding",
+        weight: 0.5,
+        source: "FRED",
+        exactSource: "TEDRATE",
+        series: getSeries(series, "TEDRATE"),
+        invert: true,
+      });
+      const xccyComponent = makeComponent({
+        asOfDate,
+        id: "cr_fund_xccy",
+        title: "Cross-currency basis",
+        block: "funding",
+        weight: 0.5,
+        source: xccyBasis.exactSource === "EURUSDBS3M" ? "Bloomberg" : (xccyBasis.exactSource === "EURUSD3MD156NWSG" ? "FRED (BIS-derived)" : "Unavailable"),
+        exactSource: xccyBasis.exactSource,
+        series: xccyBasis.series,
+        invert: true,
+        note: xccyBasis.exactSource === "unavailable"
+          ? "approved xccy basis source unavailable"
+          : `bridge fidelity=${xccyBasis.fidelityBadge}`,
+      });
+
+      const result = finalizeOverlay({
+        pricing: {
+          weight: 0.4,
+          components: [
+            makeComponent({ asOfDate, id: "cr_hy", title: "HY spread", block: "pricing", weight: 0.5, source: "FRED", exactSource: "BAMLH0A0HYM2", series: getSeries(series, "BAMLH0A0HYM2"), invert: true }),
+            makeComponent({ asOfDate, id: "cr_ig", title: "IG spread", block: "pricing", weight: 0.5, source: "FRED", exactSource: "BAMLC0A0CM", series: getSeries(series, "BAMLC0A0CM"), invert: true }),
+          ],
+        },
+        funding: { weight: 0.35, components: [tedComponent, xccyComponent] },
+        access: {
+          weight: 0.25,
+          components: [
+            makeComponent({ asOfDate, id: "cr_access_1", title: "Credit access", block: "access", weight: 1, source: "FRED", exactSource: "DRTSCILM", series: getSeries(series, "DRTSCILM"), invert: true }),
+          ],
+        },
+      });
+
+      const fundingSignalsAvailable = [tedComponent, xccyComponent].filter((component) => component.signalStatus === "ok").length;
+      const runtimeStatus: "complete" | "partial" = ["pricing", "funding", "access"].every((block) => typeof result.blockScores[block] === "number") && fundingSignalsAvailable === 2
+        ? "complete"
+        : "partial";
+
+      return {
+        ...result,
+        runtime: {
+          status: runtimeStatus,
+          includedBlocksInTotal: ["pricing", "funding", "access"].filter((block) => typeof result.blockScores[block] === "number"),
+          excludedBlocks: ["pricing", "funding", "access"].filter((block) => result.blockScores[block] === null),
+          aggregationWeights: { pricing: 0.4, funding: 0.35, access: 0.25 },
+          scoreFormula: "overlay_score = weighted_average(pricing, funding, access; exclude null block scores)",
+          blockAggregationInputs: result.components.reduce<Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>>((acc, component) => {
+            (acc[component.block] ??= []).push({ signalId: component.id, signalStatus: component.signalStatus, score: component.score });
+            return acc;
+          }, {}),
+        },
+      };
+    })(),
     energyShockOverlay: finalizeOverlay({
       price: { weight: 0.4, components: [makeComponent({ asOfDate, id: "en_oil", title: "Energy price shock", block: "price", weight: 1, source: "FRED", exactSource: "DCOILBRENTEU YoY/3m", series: yoy(getSeries(series, "DCOILBRENTEU")), invert: true })] },
       breadth: { weight: 0.25, components: [makeComponent({ asOfDate, id: "en_breadth", title: "Energy breadth", block: "breadth", weight: 1, source: "Proxy", exactSource: "Energy breadth proxy", series: getSeries(series, "ENERGY_BREADTH_PROXY").length ? getSeries(series, "ENERGY_BREADTH_PROXY") : (getSeries(series, "natgas_yoy").length ? getSeries(series, "natgas_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
@@ -683,6 +746,8 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     "GOLD_EQUITY_RATIO": ["gold_minus_real_yield_spread", "gold_usd"],
     "ISRATIO": ["isratio_us"],
     "PPIACO": ["ppiaco_us"],
+    "EURUSD_XCCY_BASIS": ["EURUSD3MD156NWSG", "EURUSDBS3M"],
+    "TEDRATE": ["tedrate"],
     "US_SOVEREIGN_SPREAD": ["us_sovereign_spread"],
     "IRLTLT01ITM156N": ["italy_10y_yield"],
     "IRLTLT01DEM156N": ["germany_10y_yield"],

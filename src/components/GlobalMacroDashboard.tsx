@@ -492,14 +492,15 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Likviditet, realränta, spread och kredittransmission driver overlayns kärna.",
     },
     creditFundingOverlay: {
-      intendedPrimaryBlocks: ["pricing", "funding"],
+      intendedPrimaryBlocks: ["pricing", "funding", "access"],
       intendedSeries: [
         { id: "hy_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2"] },
         { id: "ig_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLC0A0CM"], aliasFamily: ["ig_spread", "bamlc0a0cm"] },
         { id: "ted_spread", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["TEDRATE"], aliasFamily: ["ted_spread", "tedrate"] },
-        { id: "xccy_basis", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DRTSCILM"], aliasFamily: ["xccy_basis", "drtscilm", "cross_currency_basis"], note: "Kan köras via proxy om xccy ej komplett." },
+        { id: "xccy_basis", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["EURUSD3MD156NWSG", "EURUSDBS3M"], aliasFamily: ["xccy_basis", "eurusd3md156nwsg", "eurusdbs3m"] },
+        { id: "credit_access", block: "access", linkedMacroFamily: "B_MONETARY", primarySources: ["DRTSCILM"], aliasFamily: ["credit_access", "drtscilm"] },
       ],
-      logicSummary: "Kredit- och fundingstress via HY/IG-spreadar, TED och xccy-basis.",
+      logicSummary: "Credit and funding stress via HY/IG spreads, TED, xccy basis, and DRTSCILM-only access conditions.",
     },
     energyShockOverlay: {
       intendedPrimaryBlocks: ["price", "spillover"],
@@ -605,10 +606,9 @@ export default function GlobalMacroDashboard() {
     return v.includes(a) || a.includes(v);
   }
 
-  function inferFallbackUsage(items: Array<{ proxy?: boolean; note?: string; id?: string; source?: string; exactSource?: string }>, _aliasMatched: boolean): "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input" {
+  function inferFallbackUsage(items: Array<{ proxy?: boolean; note?: string; id?: string; source?: string; exactSource?: string }>, _aliasMatched: boolean): "none" | "alias mapping" | "proxy source" | "derived approximation" {
     const text = items.map((item) => `${item.note ?? ""} ${item.id ?? ""} ${item.source ?? ""} ${item.exactSource ?? ""}`.toLowerCase()).join(" |");
-    if (text.includes("inherited") || text.includes("regional_unrest") || text.includes("overlay input")) return "inherited overlay input";
-    if (text.includes("derived") || text.includes("approx")) return "derived approximation";
+        if (text.includes("derived") || text.includes("approx")) return "derived approximation";
     const hasExplicitProxy = items.some((item) => item.proxy);
     const mentionsProxy = text.includes("proxy") && !text.includes("no proxy") && !text.includes("without proxy");
     if (hasExplicitProxy || mentionsProxy) return "proxy source";
@@ -617,19 +617,19 @@ export default function GlobalMacroDashboard() {
 
   function inferBlockerType(args: {
     availability: "available" | "partial" | "unavailable" | "not_applicable";
-    fallback: "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input";
+    fallback: "none" | "alias mapping" | "proxy source" | "derived approximation";
     runtimeHasSeries: boolean;
     aliasMatched: boolean;
     reasonText: string;
     regionSpecificSourceFaithful?: boolean;
-  }): "no blocker" | "alias mapping only" | "exact source family differs" | "proxy currently used" | "intended source not ingested" | "intended source not wired to overlay" | "inherited overlay used instead" | "derived approximation used" {
+  }): "no blocker" | "alias mapping only" | "exact source family differs" | "proxy currently used" | "intended source not ingested" | "intended source not wired to overlay" | "derived approximation used" {
     const text = args.reasonText.toLowerCase();
-    if (args.fallback === "inherited overlay input") return "inherited overlay used instead";
-    if (args.fallback === "derived approximation") return "derived approximation used";
+        if (args.fallback === "derived approximation") return "derived approximation used";
     if (args.fallback === "proxy source") return "proxy currently used";
     if (args.regionSpecificSourceFaithful) return "no blocker";
     if (args.fallback === "alias mapping" && args.availability === "available") return "alias mapping only";
-    if (args.availability === "unavailable" && (text.includes("ingest") || text.includes("not ingested") || text.includes("missing"))) return "intended source not ingested";
+    if (args.availability === "unavailable" && (text.includes("approved ted source unavailable") || text.includes("approved xccy basis source unavailable"))) return "intended source not ingested";
+    if (args.availability === "unavailable" && (text.includes("ingest") || text.includes("not ingested") || text.includes("missing") || text.includes("unavailable"))) return "intended source not ingested";
     if (args.availability !== "available" && args.runtimeHasSeries) return "exact source family differs";
     if (args.availability !== "available") return "intended source not wired to overlay";
     if (args.aliasMatched) return "alias mapping only";
@@ -647,8 +647,7 @@ export default function GlobalMacroDashboard() {
         const hay = [component.id, component.source, component.exactSource, component.note].filter(Boolean).map(String);
         return seriesSpec.aliasFamily.some((alias) => hay.some((value) => valueContainsAlias(value, alias)));
       });
-      const blockRuntimePool = actualComponents.filter((component) => component.block === seriesSpec.block && !component.missing);
-      const runtimePool = matched.length > 0 ? matched : blockRuntimePool;
+      const runtimePool = matched;
       const runtimeSeriesUsed = Array.from(new Set(runtimePool.map((component) => component.id))).join(", ") || "—";
       const runtimeSourceUsed = Array.from(new Set(runtimePool.map((component) => component.exactSource || component.source))).join(", ") || "—";
       const aliasMatched = matched.length > 0;
@@ -660,9 +659,18 @@ export default function GlobalMacroDashboard() {
           ? "partial"
           : "unavailable";
       const fallbackUsage = inferFallbackUsage(runtimePool, aliasMatched && runtimeSeriesUsed !== "—" && !runtimePool.some((component) => component.proxy));
+      const unavailableReason = overlayKey === "creditFundingOverlay"
+        ? (seriesSpec.id === "ted_spread"
+          ? "approved TED source unavailable"
+          : seriesSpec.id === "xccy_basis"
+            ? "approved xccy basis source unavailable"
+            : seriesSpec.id === "credit_access"
+              ? "approved credit access source unavailable"
+              : "intended primary source unavailable")
+        : "intended primary source not present in current overlay runtime inputs";
       const reasonText = runtimePool.map((component) => component.note).filter((note): note is string => Boolean(note)).join(" | ")
         || (availability === "unavailable"
-          ? "intended primary source not present in current overlay runtime inputs"
+          ? unavailableReason
           : fallbackUsage === "alias mapping"
             ? "intended source resolved through canonical alias mapping"
             : "no blocker");
@@ -695,9 +703,7 @@ export default function GlobalMacroDashboard() {
               ? "proxy"
               : fallbackUsage === "derived approximation"
                 ? "derived"
-                : fallbackUsage === "inherited overlay input"
-                  ? "inherited"
-                  : "direct";
+                : "direct";
       return {
         id: seriesSpec.id,
         block: seriesSpec.block,
@@ -774,7 +780,7 @@ export default function GlobalMacroDashboard() {
             ? "partial"
             : "pass";
       const availabilityRatio = blockSeries.length === 0 ? 0 : (availabilityCounts.available + availabilityCounts.partial * 0.5) / blockSeries.length;
-      const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation" || row.fallbackUsage === "inherited overlay input").length / blockSeries.length;
+      const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation").length / blockSeries.length;
       const specFidelity: "high" | "medium" | "low" = runtimeStatus === "missing"
         ? "low"
         : availabilityRatio >= 0.6 && proxyShare <= 0.34
@@ -820,7 +826,7 @@ export default function GlobalMacroDashboard() {
     const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
     const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
     const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy).length / actualComponents.length;
-    const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")).length / blockRows.length;
+    const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation")).length / blockRows.length;
     const criticalBlocksByOverlay: Record<string, string[]> = {
       localUnrestOverlay: ["signal", "repricing"],
       tradeSupplyChainStressOverlay: ["real_goods_flow", "pricing"],
@@ -828,7 +834,7 @@ export default function GlobalMacroDashboard() {
       liquidityOverlay: ["bridge", "transmission"],
     };
     const criticalBlocks = criticalBlocksByOverlay[overlayKey] ?? [];
-    const criticalProxyHit = blockRows.some((row) => criticalBlocks.includes(row.block) && (row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")));
+    const criticalProxyHit = blockRows.some((row) => criticalBlocks.includes(row.block) && (row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation")));
     const proxyRatio = Math.max(runtimeProxyComponentRatio, blockProxyRatio);
     const proxyDependence: "none" | "low" | "medium" | "high" = proxyRatio === 0
       ? "none"
@@ -863,8 +869,7 @@ export default function GlobalMacroDashboard() {
       if (row.fallbackUsed.includes("alias mapping")) reasons.push("alias mapped source used");
       if (row.fallbackUsed.includes("proxy source")) reasons.push(`${row.block} uses proxy source`);
       if (row.fallbackUsed.includes("derived approximation")) reasons.push(`${row.block} uses derived approximation`);
-      if (row.fallbackUsed.includes("inherited overlay input")) reasons.push(`${row.block} built from inherited overlay`);
-      if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
+            if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
       const localUnrestRepricingDirect = overlayKey === "localUnrestOverlay" && row.block === "repricing" && row.runtimeStatus === "pass" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none";
       if (row.blockerType === "exact source family differs" && !localUnrestRepricingDirect) reasons.push(`${row.block} exact source family differs`);
       if (localUnrestRepricingDirect) reasons.push("repricing direct source-faithful match via ACMTP10");
@@ -876,6 +881,14 @@ export default function GlobalMacroDashboard() {
       : specFidelity === "low"
         ? "Interpretation risk is elevated: runtime deviates materially from intended spec."
         : "Interpretation remains broadly aligned with spec; monitor listed deltas.";
+
+    const creditFundingExplicitDelta = overlayKey === "creditFundingOverlay"
+      ? [
+        `funding block availability: ${blockRows.find((row) => row.block === "funding")?.sourceAvailability ?? "unavailable"} (TEDRATE and xccy basis are required)`,
+        `current computation mode: ${((overlay as any)?.runtime?.status === "complete") ? "full" : "partial"}; score currently computed from pricing + access when funding is unavailable`,
+        `funding contribution to score: ${typeof overlay?.blockScores?.funding === "number" ? "included" : "excluded"}`,
+      ]
+      : [];
 
     return {
       overlayKey,
@@ -895,6 +908,7 @@ export default function GlobalMacroDashboard() {
         `exact differences: ${exactDifferences.join(" | ") || "none"}`,
         `why differences exist: ${whyDiffExists.join(" | ") || "no blocker"}`,
         `impact on interpretation: ${impact}`,
+        ...creditFundingExplicitDelta,
       ],
     };
   });
@@ -960,6 +974,9 @@ export default function GlobalMacroDashboard() {
     });
     const blockScores = Object.entries(row.overlay?.blockScores ?? {}).map(([block, score]) => `${block}: ${typeof score === "number" ? score.toFixed(2) : "missing"}`);
     const totalScore = typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(2) : "missing";
+    const includedBlocks = Object.entries(row.overlay?.blockScores ?? {}).filter(([, score]) => typeof score === "number").map(([block]) => block);
+    const excludedBlocks = Object.entries(row.overlay?.blockScores ?? {}).filter(([, score]) => score === null).map(([block]) => block);
+    const fundingMissing = row.overlayKey === "creditFundingOverlay" && excludedBlocks.includes("funding");
 
     const liquidityLines = row.overlayKey === "liquidityOverlay"
       ? [
@@ -985,8 +1002,8 @@ export default function GlobalMacroDashboard() {
           "Each signal is converted into a historical percentile.",
           "support_score = 100 − percentile",
           "high percentile → stress signal; low percentile → supportive signal",
-          "block_score = average(signal_scores)",
-          "overlay_score = average(block_scores)",
+          "block_score = weighted_average(valid signal_scores)",
+          "overlay_score = weighted_average(available non-null block_scores)",
         ],
       },
       {
@@ -1004,6 +1021,15 @@ export default function GlobalMacroDashboard() {
         lines: [
           "Signal block scores:",
           ...blockScores,
+          `Included blocks in score: ${includedBlocks.join(", ") || "none"}`,
+          `Excluded blocks from score: ${excludedBlocks.join(", ") || "none"}`,
+          ...(fundingMissing
+            ? [
+              "Funding block is currently unavailable and excluded from score.",
+              "Current creditFundingOverlay reading is driven by pricing + access only.",
+              "Interpret as partial, not a full funding assessment, until TED and/or xccy basis are available.",
+            ]
+            : []),
           `Overlay score: ${totalScore}`,
           `Interpretation: ${row.overlay?.label || "Not implemented"}`,
         ],
@@ -1376,6 +1402,11 @@ Signal: ${gapLabel}`,
                       <li>proxy dependence: {row.proxyDependence}</li>
                       <li>fidelity badge: <strong>{row.fidelityBadge}</strong></li>
                     </ul>
+                    {row.overlayKey === "creditFundingOverlay" && typeof row.overlay?.blockScores?.funding !== "number" && (
+                      <div className="status" style={{ marginTop: 6 }}>
+                        Funding block unavailable and excluded from score. Current result reflects pricing + access only; interpret as partial until TED and/or xccy basis are available.
+                      </div>
+                    )}
 
                     <details style={{ fontSize: 12, marginBottom: 8 }}>
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Intended primary design</summary>
@@ -1469,11 +1500,21 @@ Signal: ${gapLabel}`,
                         const validBlockScores = overlayBlocks
                           .map((block) => ({ block, score: row.overlay?.blockScores?.[block] ?? null }))
                           .filter((item) => typeof item.score === "number") as Array<{ block: string; score: number }>;
-                        const blockWeight = validBlockScores.length > 0 ? 1 / validBlockScores.length : 0;
-                        const recomputedOverlay = validBlockScores.length > 0
-                          ? validBlockScores.reduce((acc, item) => acc + item.score * blockWeight, 0)
-                          : null;
+                        const runtimeWeights = ((row.overlay as any)?.runtime?.aggregationWeights ?? {}) as Record<string, number>;
+                        const weightedScores = validBlockScores
+                          .filter((item) => typeof runtimeWeights[item.block] === "number")
+                          .map((item) => ({ ...item, weight: runtimeWeights[item.block] as number }));
+                        const recomputedOverlay = weightedScores.length > 0
+                          ? (() => {
+                            const w = weightedScores.reduce((acc, item) => acc + item.weight, 0);
+                            if (w <= 0) return null;
+                            return weightedScores.reduce((acc, item) => acc + item.score * (item.weight / w), 0);
+                          })()
+                          : (validBlockScores.length > 0
+                            ? validBlockScores.reduce((acc, item) => acc + item.score, 0) / validBlockScores.length
+                            : null);
                         const finalScore = typeof row.overlay?.score === "number" ? row.overlay.score : recomputedOverlay;
+                        const excludedBlocks = overlayBlocks.filter((block) => row.overlay?.blockScores?.[block] === null);
                         return (
                           <div style={{ marginTop: 6, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
                             {overlayComponents.map((component) => {
@@ -1500,7 +1541,12 @@ Signal: ${gapLabel}`,
                                 {overlayBlocks.map((block) => (
                                   <li key={`block-score-${row.overlayKey}-${block}`}>{block}: {typeof row.overlay?.blockScores?.[block] === "number" ? row.overlay?.blockScores?.[block]?.toFixed(2) : "missing"}</li>
                                 ))}
-                                <li>Step 5 — Overlay aggregation: overlay score = weighted average(block scores) → {typeof finalScore === "number" ? finalScore.toFixed(2) : "—"}</li>
+                                <li>Step 5 — Overlay aggregation: {((row.overlay as any)?.runtime?.scoreFormula ?? "overlay_score = weighted_average(available block scores)")} → {typeof finalScore === "number" ? finalScore.toFixed(2) : "—"}</li>
+                                <li>included blocks in score: {validBlockScores.map((item) => item.block).join(", ") || "none"}</li>
+                                <li>excluded blocks from score: {excludedBlocks.join(", ") || "none"}</li>
+                                {row.overlayKey === "creditFundingOverlay" && excludedBlocks.includes("funding") && (
+                                  <li>interpretation note: funding is unavailable; current score reflects pricing + access only.</li>
+                                )}
                                 <li>Step 6 — Label mapping: score → regime label → {row.overlay?.label ?? labelByOverlayScore(finalScore)}</li>
                               </ul>
                             </div>
@@ -1543,15 +1589,33 @@ Signal: ${gapLabel}`,
                             ? valid.reduce((acc, component) => acc + (component.score as number), 0) / valid.length
                             : null;
                           const pass = (typeof expected === "number" && typeof score === "number" && Math.abs(expected - score) < 1e-6) || (expected === null && score === null);
-                          return { block, pass, status: pass ? "pass" : "fail" };
+                          const status = typeof score === "number" ? (pass ? "pass" : "fail") : "missing";
+                          return { block, pass, status };
                         });
 
                         const overlayPass = row.overlayKey === "liquidityOverlay"
                           ? (verification?.overlayScoreCalculation?.aggregationValidationStatus ?? (typeof row.overlay?.score === "number" ? "pass" : "fail")) === "pass"
                           : (() => {
-                            const validBlockScores = blockEntries.filter(([, score]) => typeof score === "number").map(([, score]) => score as number);
-                            const recomputedOverlay = validBlockScores.length > 0 ? validBlockScores.reduce((acc, value) => acc + value, 0) / validBlockScores.length : null;
-                            return (recomputedOverlay === null && row.overlay?.score === null) || (typeof recomputedOverlay === "number" && typeof row.overlay?.score === "number" && Math.abs(recomputedOverlay - row.overlay.score) < 1e-6);
+                            const verificationStatus = verification?.overlayComputation?.aggregationValidationStatus;
+                            if (verificationStatus === "pass") return true;
+                            if (typeof row.overlay?.score !== "number") return false;
+                            const runtimeWeights = (row.overlay as any)?.runtime?.aggregationWeights ?? {};
+                            const weighted = blockEntries
+                              .filter(([block, score]) => typeof score === "number" && typeof runtimeWeights?.[block] === "number")
+                              .map(([block, score]) => ({ block, score: score as number, weight: runtimeWeights[block] as number }));
+                            const useWeighted = weighted.length > 0;
+                            const recomputedOverlay = useWeighted
+                              ? (() => {
+                                const w = weighted.reduce((acc, item) => acc + item.weight, 0);
+                                if (w <= 0) return null;
+                                return weighted.reduce((acc, item) => acc + item.score * (item.weight / w), 0);
+                              })()
+                              : (() => {
+                                const validBlockScores = blockEntries.filter(([, score]) => typeof score === "number").map(([, score]) => score as number);
+                                return validBlockScores.length > 0 ? validBlockScores.reduce((acc, value) => acc + value, 0) / validBlockScores.length : null;
+                              })();
+                            return (recomputedOverlay === null && row.overlay?.score === null)
+                              || (typeof recomputedOverlay === "number" && typeof row.overlay?.score === "number" && Math.abs(recomputedOverlay - row.overlay.score) < 1e-6);
                           })();
                         const labelPass = labelByOverlayScore(row.overlay?.score ?? null) === (row.overlay?.label ?? "Not implemented");
 
