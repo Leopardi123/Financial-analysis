@@ -492,14 +492,15 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Likviditet, realränta, spread och kredittransmission driver overlayns kärna.",
     },
     creditFundingOverlay: {
-      intendedPrimaryBlocks: ["pricing", "funding"],
+      intendedPrimaryBlocks: ["pricing", "funding", "access"],
       intendedSeries: [
         { id: "hy_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2"] },
         { id: "ig_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLC0A0CM"], aliasFamily: ["ig_spread", "bamlc0a0cm"] },
         { id: "ted_spread", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["TEDRATE"], aliasFamily: ["ted_spread", "tedrate"] },
-        { id: "xccy_basis", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DRTSCILM"], aliasFamily: ["xccy_basis", "drtscilm", "cross_currency_basis"], note: "Kan köras via proxy om xccy ej komplett." },
+        { id: "xccy_basis", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["EURUSD3MD156NWSG", "EURUSDBS3M"], aliasFamily: ["xccy_basis", "eurusd3md156nwsg", "eurusdbs3m"] },
+        { id: "credit_access", block: "access", linkedMacroFamily: "B_MONETARY", primarySources: ["DRTSCILM"], aliasFamily: ["credit_access", "drtscilm"] },
       ],
-      logicSummary: "Kredit- och fundingstress via HY/IG-spreadar, TED och xccy-basis.",
+      logicSummary: "Credit and funding stress via HY/IG spreads, TED, xccy basis, and DRTSCILM-only access conditions.",
     },
     energyShockOverlay: {
       intendedPrimaryBlocks: ["price", "spillover"],
@@ -605,10 +606,9 @@ export default function GlobalMacroDashboard() {
     return v.includes(a) || a.includes(v);
   }
 
-  function inferFallbackUsage(items: Array<{ proxy?: boolean; note?: string; id?: string; source?: string; exactSource?: string }>, _aliasMatched: boolean): "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input" {
+  function inferFallbackUsage(items: Array<{ proxy?: boolean; note?: string; id?: string; source?: string; exactSource?: string }>, _aliasMatched: boolean): "none" | "alias mapping" | "proxy source" | "derived approximation" {
     const text = items.map((item) => `${item.note ?? ""} ${item.id ?? ""} ${item.source ?? ""} ${item.exactSource ?? ""}`.toLowerCase()).join(" |");
-    if (text.includes("inherited") || text.includes("regional_unrest") || text.includes("overlay input")) return "inherited overlay input";
-    if (text.includes("derived") || text.includes("approx")) return "derived approximation";
+        if (text.includes("derived") || text.includes("approx")) return "derived approximation";
     const hasExplicitProxy = items.some((item) => item.proxy);
     const mentionsProxy = text.includes("proxy") && !text.includes("no proxy") && !text.includes("without proxy");
     if (hasExplicitProxy || mentionsProxy) return "proxy source";
@@ -617,15 +617,14 @@ export default function GlobalMacroDashboard() {
 
   function inferBlockerType(args: {
     availability: "available" | "partial" | "unavailable" | "not_applicable";
-    fallback: "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input";
+    fallback: "none" | "alias mapping" | "proxy source" | "derived approximation";
     runtimeHasSeries: boolean;
     aliasMatched: boolean;
     reasonText: string;
     regionSpecificSourceFaithful?: boolean;
-  }): "no blocker" | "alias mapping only" | "exact source family differs" | "proxy currently used" | "intended source not ingested" | "intended source not wired to overlay" | "inherited overlay used instead" | "derived approximation used" {
+  }): "no blocker" | "alias mapping only" | "exact source family differs" | "proxy currently used" | "intended source not ingested" | "intended source not wired to overlay" | "derived approximation used" {
     const text = args.reasonText.toLowerCase();
-    if (args.fallback === "inherited overlay input") return "inherited overlay used instead";
-    if (args.fallback === "derived approximation") return "derived approximation used";
+        if (args.fallback === "derived approximation") return "derived approximation used";
     if (args.fallback === "proxy source") return "proxy currently used";
     if (args.regionSpecificSourceFaithful) return "no blocker";
     if (args.fallback === "alias mapping" && args.availability === "available") return "alias mapping only";
@@ -695,9 +694,7 @@ export default function GlobalMacroDashboard() {
               ? "proxy"
               : fallbackUsage === "derived approximation"
                 ? "derived"
-                : fallbackUsage === "inherited overlay input"
-                  ? "inherited"
-                  : "direct";
+                : "direct";
       return {
         id: seriesSpec.id,
         block: seriesSpec.block,
@@ -774,7 +771,7 @@ export default function GlobalMacroDashboard() {
             ? "partial"
             : "pass";
       const availabilityRatio = blockSeries.length === 0 ? 0 : (availabilityCounts.available + availabilityCounts.partial * 0.5) / blockSeries.length;
-      const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation" || row.fallbackUsage === "inherited overlay input").length / blockSeries.length;
+      const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation").length / blockSeries.length;
       const specFidelity: "high" | "medium" | "low" = runtimeStatus === "missing"
         ? "low"
         : availabilityRatio >= 0.6 && proxyShare <= 0.34
@@ -820,7 +817,7 @@ export default function GlobalMacroDashboard() {
     const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
     const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
     const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy).length / actualComponents.length;
-    const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")).length / blockRows.length;
+    const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation")).length / blockRows.length;
     const criticalBlocksByOverlay: Record<string, string[]> = {
       localUnrestOverlay: ["signal", "repricing"],
       tradeSupplyChainStressOverlay: ["real_goods_flow", "pricing"],
@@ -828,7 +825,7 @@ export default function GlobalMacroDashboard() {
       liquidityOverlay: ["bridge", "transmission"],
     };
     const criticalBlocks = criticalBlocksByOverlay[overlayKey] ?? [];
-    const criticalProxyHit = blockRows.some((row) => criticalBlocks.includes(row.block) && (row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")));
+    const criticalProxyHit = blockRows.some((row) => criticalBlocks.includes(row.block) && (row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation")));
     const proxyRatio = Math.max(runtimeProxyComponentRatio, blockProxyRatio);
     const proxyDependence: "none" | "low" | "medium" | "high" = proxyRatio === 0
       ? "none"
@@ -863,8 +860,7 @@ export default function GlobalMacroDashboard() {
       if (row.fallbackUsed.includes("alias mapping")) reasons.push("alias mapped source used");
       if (row.fallbackUsed.includes("proxy source")) reasons.push(`${row.block} uses proxy source`);
       if (row.fallbackUsed.includes("derived approximation")) reasons.push(`${row.block} uses derived approximation`);
-      if (row.fallbackUsed.includes("inherited overlay input")) reasons.push(`${row.block} built from inherited overlay`);
-      if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
+            if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
       const localUnrestRepricingDirect = overlayKey === "localUnrestOverlay" && row.block === "repricing" && row.runtimeStatus === "pass" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none";
       if (row.blockerType === "exact source family differs" && !localUnrestRepricingDirect) reasons.push(`${row.block} exact source family differs`);
       if (localUnrestRepricingDirect) reasons.push("repricing direct source-faithful match via ACMTP10");

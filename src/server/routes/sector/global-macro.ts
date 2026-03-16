@@ -582,9 +582,14 @@ function buildOverlayVerificationDiagnostics(params: {
   const local = overlays.localUnrestOverlay;
   const credit = overlays.creditFundingOverlay;
   const localRepricingComp = local?.components.find((component) => component.id === "lu_repricing_us");
-  const creditFundingComp = credit?.components.find((component) => component.id === "cr_fund_1");
+  const creditFundingComp = credit?.components.find((component) => component.id === "cr_fund_ted");
   const creditAccessComp = credit?.components.find((component) => component.id === "cr_access_1");
-  const creditXccyComp = credit?.components.find((component) => component.id === "cr_fund_2");
+  const creditXccyComp = credit?.components.find((component) => component.id === "cr_fund_xccy");
+  const creditPricingHyComp = credit?.components.find((component) => component.id === "cr_hy");
+  const creditPricingIgComp = credit?.components.find((component) => component.id === "cr_ig");
+  const creditFundingStatus: "pass" | "partial" | "missing" = typeof credit?.blockScores?.funding === "number"
+    ? ([creditFundingComp?.signalStatus, creditXccyComp?.signalStatus].every((status) => status === "ok") ? "pass" : "partial")
+    : "missing";
 
   const localGuard = local?.score === null && ((local?.blockScores?.signal ?? null) === null || (local?.blockScores?.repricing ?? null) === null);
 
@@ -674,9 +679,43 @@ function buildOverlayVerificationDiagnostics(params: {
       },
     },
     creditFundingOverlay: {
+      pricing: {
+        hy: buildSeriesVerification({
+          rawSeriesRows: params.rawSeriesRows,
+          candidateSeriesKeys: ["BAMLH0A0HYM2"],
+          selectedSeriesKey: "BAMLH0A0HYM2",
+          selectedSeries: params.seriesMap.get("BAMLH0A0HYM2") ?? [],
+          componentRawValue: creditPricingHyComp?.rawValue ?? null,
+          componentScore: creditPricingHyComp?.score ?? null,
+          minObservations: 24,
+          scoringFunction: "percentile10yLatest",
+          invert: true,
+          sourceValidationStatus: creditPricingHyComp?.exactSource === "BAMLH0A0HYM2" ? "pass" : "fail",
+          blockStatusBeforeFinalGuard: typeof credit?.blockScores?.pricing === "number" ? "pass" : "missing",
+          finalBlockStatus: typeof credit?.blockScores?.pricing === "number" ? "pass" : "missing",
+          finalGuardTriggered: false,
+          finalGuardReason: "none",
+        }),
+        ig: buildSeriesVerification({
+          rawSeriesRows: params.rawSeriesRows,
+          candidateSeriesKeys: ["BAMLC0A0CM"],
+          selectedSeriesKey: "BAMLC0A0CM",
+          selectedSeries: params.seriesMap.get("BAMLC0A0CM") ?? [],
+          componentRawValue: creditPricingIgComp?.rawValue ?? null,
+          componentScore: creditPricingIgComp?.score ?? null,
+          minObservations: 24,
+          scoringFunction: "percentile10yLatest",
+          invert: true,
+          sourceValidationStatus: creditPricingIgComp?.exactSource === "BAMLC0A0CM" ? "pass" : "fail",
+          blockStatusBeforeFinalGuard: typeof credit?.blockScores?.pricing === "number" ? "pass" : "missing",
+          finalBlockStatus: typeof credit?.blockScores?.pricing === "number" ? "pass" : "missing",
+          finalGuardTriggered: false,
+          finalGuardReason: "none",
+        }),
+      },
       funding: buildSeriesVerification({
         rawSeriesRows: params.rawSeriesRows,
-        candidateSeriesKeys: ["TEDRATE", "financial_conditions_index"],
+        candidateSeriesKeys: ["TEDRATE"],
         selectedSeriesKey: "TEDRATE",
         selectedSeries: params.seriesMap.get("TEDRATE") ?? [],
         componentRawValue: creditFundingComp?.rawValue ?? null,
@@ -685,14 +724,14 @@ function buildOverlayVerificationDiagnostics(params: {
         scoringFunction: "percentile10yLatest",
         invert: true,
         sourceValidationStatus: creditFundingComp?.exactSource?.includes("TEDRATE") ? "pass" : "fail",
-        blockStatusBeforeFinalGuard: typeof credit?.blockScores?.funding === "number" ? "pass" : "missing",
-        finalBlockStatus: typeof credit?.blockScores?.funding === "number" ? "pass" : "missing",
+        blockStatusBeforeFinalGuard: creditFundingStatus,
+        finalBlockStatus: creditFundingStatus,
         finalGuardTriggered: false,
         finalGuardReason: "none",
       }),
       access: buildSeriesVerification({
         rawSeriesRows: params.rawSeriesRows,
-        candidateSeriesKeys: ["DRTSCILM", "pmi_momentum_us"],
+        candidateSeriesKeys: ["DRTSCILM"],
         selectedSeriesKey: "DRTSCILM",
         selectedSeries: params.seriesMap.get("DRTSCILM") ?? [],
         componentRawValue: creditAccessComp?.rawValue ?? null,
@@ -708,20 +747,37 @@ function buildOverlayVerificationDiagnostics(params: {
       }),
       xccyBasis: buildSeriesVerification({
         rawSeriesRows: params.rawSeriesRows,
-        candidateSeriesKeys: ["EURUSD_XCCY_BASIS"],
-        selectedSeriesKey: "EURUSD_XCCY_BASIS",
-        selectedSeries: params.seriesMap.get("EURUSD_XCCY_BASIS") ?? [],
+        candidateSeriesKeys: ["EURUSD3MD156NWSG", "EURUSDBS3M"],
+        selectedSeriesKey: creditXccyComp?.exactSource === "EURUSDBS3M" ? "EURUSDBS3M" : "EURUSD3MD156NWSG",
+        selectedSeries: creditXccyComp?.exactSource === "EURUSDBS3M"
+          ? (params.seriesMap.get("EURUSDBS3M") ?? [])
+          : (params.seriesMap.get("EURUSD3MD156NWSG") ?? []),
         componentRawValue: creditXccyComp?.rawValue ?? null,
         componentScore: creditXccyComp?.score ?? null,
         minObservations: 24,
         scoringFunction: "percentile10yLatest",
         invert: true,
-        sourceValidationStatus: creditXccyComp?.exactSource?.includes("Cross Currency Basis") ? "pass" : "fail",
-        blockStatusBeforeFinalGuard: typeof credit?.blockScores?.funding === "number" ? "pass" : "missing",
-        finalBlockStatus: typeof credit?.blockScores?.funding === "number" ? "pass" : "missing",
+        sourceValidationStatus: creditXccyComp?.exactSource === "EURUSD3MD156NWSG" || creditXccyComp?.exactSource === "EURUSDBS3M" ? "pass" : "fail",
+        blockStatusBeforeFinalGuard: creditFundingStatus,
+        finalBlockStatus: creditFundingStatus,
         finalGuardTriggered: false,
         finalGuardReason: "none",
       }),
+      overlayComputation: {
+        runtimeCompleteness: credit?.runtime?.status === "complete" ? "full" : "partial",
+        overlayScore: credit?.score ?? null,
+        overlayLabel: credit?.label ?? "Not implemented",
+        scoreFormula: credit?.runtime?.scoreFormula ?? "overlay_score = weighted_average(available block scores)",
+        blockScores: credit?.blockScores ?? {},
+        fundingMode: [creditFundingComp?.signalStatus === "ok", creditXccyComp?.signalStatus === "ok"].filter(Boolean).length === 2
+          ? "TED + XCCY"
+          : (creditFundingComp?.signalStatus === "ok" && creditXccyComp?.signalStatus !== "ok")
+            ? "TED-only partial mode"
+            : (creditFundingComp?.signalStatus !== "ok" && creditXccyComp?.signalStatus === "ok")
+              ? "XCCY-only partial mode"
+              : "unavailable",
+        xccySourceSelected: creditXccyComp?.exactSource ?? "unavailable",
+      },
     },
   };
 }
