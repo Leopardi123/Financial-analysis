@@ -202,6 +202,25 @@ function alignBinaryOperation(
     .filter((row) => row.value !== null);
 }
 
+
+
+function alignTernaryOperation(
+  first: Array<{ date: string; value: number | null }>,
+  second: Array<{ date: string; value: number | null }>,
+  third: Array<{ date: string; value: number | null }>,
+  op: (a: number, b: number, c: number) => number | null,
+): Array<{ date: string; value: number | null }> {
+  const secondByMonth = new Map(second.map((row) => [row.date.slice(0, 7), row.value]));
+  const thirdByMonth = new Map(third.map((row) => [row.date.slice(0, 7), row.value]));
+  return first
+    .map((row) => {
+      const b = secondByMonth.get(row.date.slice(0, 7));
+      const c = thirdByMonth.get(row.date.slice(0, 7));
+      if (row.value === null || b === null || b === undefined || c === null || c === undefined) return { date: row.date, value: null };
+      return { date: row.date, value: op(row.value, b, c) };
+    })
+    .filter((row) => row.value !== null);
+}
 function computeYoY(points: Array<{ date: string; value: number | null }>): Array<{ date: string; value: number | null }> {
   if (points.length <= 12) return [];
   return points
@@ -315,6 +334,18 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
 
   const fedBalanceSheet = monthlyInputs.fed_balance_sheet_total ?? [];
   if (fedBalanceSheet.length > 12) output.fed_balance_sheet_yoy = computeYoY(fedBalanceSheet);
+
+  const walcl = monthlyInputs.WALCL ?? [];
+  const wdtgal = monthlyInputs.WDTGAL ?? [];
+  const rrpontsyd = monthlyInputs.RRPONTSYD ?? [];
+  const gdp = monthlyInputs.GDP ?? [];
+  if (walcl.length > 0 && wdtgal.length > 0 && rrpontsyd.length > 0) {
+    output.effective_fed_liquidity = alignTernaryOperation(walcl, wdtgal, rrpontsyd, (a, b, c) => a - b - c);
+  }
+  const effectiveFedLiquidity = output.effective_fed_liquidity ?? [];
+  if (effectiveFedLiquidity.length > 0 && gdp.length > 0) {
+    output.effective_fed_liquidity_ratio = alignBinaryOperation(effectiveFedLiquidity, gdp, (liq, gdpValue) => (gdpValue === 0 ? null : liq / gdpValue));
+  }
 
   const m2 = monthlyInputs.m2sl ?? [];
   if (m2.length > 12) {
