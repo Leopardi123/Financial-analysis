@@ -151,6 +151,8 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       debt_gdp_ea: [],
       deficit_gdp_ea: [],
       credit_spreads_ea: [],
+      italy_10y_yield: [],
+      germany_10y_yield: [],
       gold_usd: [],
     };
 
@@ -172,6 +174,8 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
         { dataset: "gov_10dd_edpt1", filters: { geo: "EA20", unit: "PC_GDP", na_item: "B9" } },
       ]).then((x) => { sourceSeries.deficit_gdp_ea = x; }),
       fetchEcbSeries({ flowRef: "FM", key: "M.U2.EUR.4F.BB.U2_10Y.YLD" }).then((x) => { sourceSeries.credit_spreads_ea = x; }),
+      fetchFredSeries({ fredSeriesId: "IRLTLT01ITM156N", mode }).then((x) => { sourceSeries.italy_10y_yield = x; }),
+      fetchFredSeries({ fredSeriesId: "IRLTLT01DEM156N", mode }).then((x) => { sourceSeries.germany_10y_yield = x; }),
       fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
     ];
     await Promise.allSettled(tasks);

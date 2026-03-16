@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
 
 type GlobalMacroPayload = {
@@ -21,6 +21,44 @@ type GlobalMacroPayload = {
     topDrivers: Array<{ region?: string; indicatorId: string; title: string; block: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY"; score: number; percentile10y: number; contribution: number; direction: "rising" | "falling" | "stable" | "accelerating" | "decelerating"; change1m: number | null; change3m: number | null; yoy: number | null; driverNote: string | null }>;
     regimeExplanation: { title: string; summary: string; driverHighlights: string[] };
   };
+  overlayBundle?: {
+    region: string;
+    asOfDate: string;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; }>; }>;
+  };
+  overlays?: {
+    region: string;
+    asOfDate: string;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; }>; }>;
+  };
+  overlayHistory?: Array<{ asOfDate: string; scores: Record<string, number | null> }>;
+  overlayRuntimeProof?: {
+    overlayEngineUsed: boolean;
+    bundlePresent: boolean;
+    bundleKeys: string[];
+    regionKeysPresent: string[];
+    globalKeysPresent: string[];
+  };
+  overlayBlockDiagnostics?: Record<string, Array<{
+    overlay: string;
+    block: string;
+    status: "pass" | "proxy" | "missing";
+    expectedSource: string;
+    actualSourceUsed: string;
+    reason: string;
+    failedAt: string | null;
+  }>>;
+  overlayEngineDiagnostics?: {
+    region: string;
+    rawSeriesCount: number;
+    rawSeriesKeysSample: string[];
+    buildersRun: string[];
+    overlaysReturned: string[];
+    overlaysMissing: string[];
+    historyBuiltFor: string[];
+    historyMissingFor: string[];
+    reasons: string[];
+  };
   indicators: Array<{
     indicatorId: string;
     title: string;
@@ -34,6 +72,13 @@ type GlobalMacroPayload = {
     nullReason?: string | null;
   }>;
   dataStatus: string;
+  overlayRoutingDiagnostics?: {
+    overlayEngineUsed: boolean;
+    overlayBundleKeys: string[];
+    expectedOverlayBundleKeys?: string[];
+    legacyOverlayKeys: string[];
+    uiOverlayKeysRequested: string[];
+  };
   stats?: {
     rawPointCount: number;
     seriesCount: number;
@@ -258,6 +303,24 @@ type InflationAnalysisPayload = {
   }>;
 };
 
+
+function ExpandablePanel({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
+  return (
+    <details open={defaultOpen}>
+      <summary style={{ cursor: "pointer", fontWeight: 600 }}>{title}</summary>
+      <div style={{ marginTop: 8 }}>{children}</div>
+    </details>
+  );
+}
+
+function AdminSection({ children }: { children: ReactNode }) {
+  return (
+    <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 12px", marginTop: 12, background: "#f8fafc" }}>
+      <ExpandablePanel title="Admin">{children}</ExpandablePanel>
+    </section>
+  );
+}
+
 export default function GlobalMacroDashboard() {
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
@@ -274,16 +337,6 @@ export default function GlobalMacroDashboard() {
   const [adminSecretInput, setAdminSecretInput] = useState("");
   const [ingestRunResult, setIngestRunResult] = useState<Record<string, unknown> | null>(null);
   const [engineRunResult, setEngineRunResult] = useState<Record<string, unknown> | null>(null);
-  const [selectedOverlaySegment, setSelectedOverlaySegment] = useState<{
-    overlayKey: "growth" | "stress" | "hard_asset";
-    overlay: "Growth" | "Stress" | "Hard Asset";
-    value: string;
-    startDate: string;
-    endDate: string;
-    pointCount: number;
-    explanation: string;
-    contributors: string[];
-  } | null>(null);
   const [selectedRegimeInterval, setSelectedRegimeInterval] = useState<{
     coreRegimeLabel: string;
     startDate: string;
@@ -297,6 +350,18 @@ export default function GlobalMacroDashboard() {
   } | null>(null);
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
+
+  const uiOverlayKeysRequested = useMemo(() => (selectedRegion === "GLOBAL"
+    ? ["globalUnrestOverlay"]
+    : [
+      "liquidityOverlay",
+      "creditFundingOverlay",
+      "energyShockOverlay",
+      "localUnrestOverlay",
+      "safeHavenRiskOffOverlay",
+      "inflationCostShockOverlay",
+      "tradeSupplyChainStressOverlay",
+    ]), [selectedRegion]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -323,12 +388,13 @@ export default function GlobalMacroDashboard() {
     if (historyResolution === "WEEKLY" && historyRangeYears !== 1 && historyRangeYears !== 3 && historyRangeYears !== 5) {
       setHistoryRangeYears(3);
     }
-  }, [historyResolution, historyRangeYears, selectedRegion]);
+  }, [historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
 
   async function loadGlobalMacro() {    setGlobalMacroLoading(true);
     setGlobalMacroError(null);
     try {
-      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}`);
+      const overlayKeysParam = encodeURIComponent(uiOverlayKeysRequested.join(","));
+      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}`);
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
@@ -350,7 +416,7 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     void loadGlobalMacro();
-  }, [historyResolution, historyRangeYears, selectedRegion]);
+  }, [historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const scoredCount = globalMacroIndicators.filter((item) => item.score !== null).length;
@@ -358,6 +424,470 @@ export default function GlobalMacroDashboard() {
     globalMacro?.stats?.partialData ??
     (globalMacroIndicators.length > 0 && scoredCount < globalMacroIndicators.length);
   const isNoData = !globalMacroLoading && !globalMacroError && (!globalMacro || globalMacroIndicators.length === 0);
+  const activeOverlayBundle = globalMacro?.overlayBundle ?? globalMacro?.overlays ?? null;
+  const overlayEntries = Object.entries(activeOverlayBundle?.overlays ?? {});
+  const overlayHistoryPoints = globalMacro?.overlayHistory ?? [];
+  const overlayKeysForCharts = selectedRegion === "GLOBAL"
+    ? ["globalUnrestOverlay"]
+    : [
+      "liquidityOverlay",
+      "creditFundingOverlay",
+      "energyShockOverlay",
+      "safeHavenRiskOffOverlay",
+      "inflationCostShockOverlay",
+      "tradeSupplyChainStressOverlay",
+      "localUnrestOverlay",
+    ];
+  const overlaySanity = overlayEntries.map(([overlayKey, overlay]) => {
+    const blockRows = Object.entries(overlay.blockScores ?? {}).map(([block, score]) => ({
+      block,
+      score: typeof score === "number" ? score : null,
+      components: (overlay.components ?? []).filter((component) => component.block === block),
+    }));
+    const realBlocks = blockRows.filter((row) => row.score !== null && row.components.some((component) => !component.proxy && !component.missing)).length;
+    const proxyBlocks = blockRows.filter((row) => row.score !== null && row.components.every((component) => component.proxy || component.missing)).length;
+    const missingBlocks = blockRows.filter((row) => row.score === null).length;
+    const lowRobustness = realBlocks < 2 || (proxyBlocks / Math.max(1, blockRows.length)) > 0.6;
+    const negative = (overlay.components ?? [])
+      .filter((component) => typeof component.score === "number")
+      .sort((a, b) => (a.score as number) - (b.score as number))
+      .slice(0, 3)
+      .map((component) => `${component.id}:${(component.score as number).toFixed(1)}`);
+    const normalizationInputs = blockRows.map((row) => `${row.block}=${row.score === null ? "null" : row.score.toFixed(1)}`);
+    return { overlayKey, realBlocks, proxyBlocks, missingBlocks, lowRobustness, negative, normalizationInputs };
+  });
+
+  type IntendedSeriesSpec = {
+    id: string;
+    block: string;
+    linkedMacroFamily?: string;
+    primarySources: string[];
+    aliasFamily: string[];
+    note?: string;
+  };
+
+  type OverlayDesignSpec = {
+    intendedPrimaryBlocks: string[];
+    intendedSeries: IntendedSeriesSpec[];
+    logicSummary: string;
+  };
+
+  const overlayDesignSpec: Record<string, OverlayDesignSpec> = {
+    liquidityOverlay: {
+      intendedPrimaryBlocks: ["quantity", "price", "bridge", "transmission"],
+      intendedSeries: [
+        { id: "balance_sheet_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["WALCL/GDP"], aliasFamily: ["walcl", "balance_sheet_gdp", "fed_balance_sheet"] },
+        { id: "m2_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["M2SL/GDP"], aliasFamily: ["m2sl", "m2_gdp", "money_supply_gdp"] },
+        { id: "bank_credit_gdp", block: "quantity", linkedMacroFamily: "B_MONETARY", primarySources: ["TOTBKCR/GDP"], aliasFamily: ["totbkcr", "bank_credit_gdp"] },
+        { id: "real_yield_10y", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["DFII10"], aliasFamily: ["real_yield_10y", "dfii10", "real_yield"] },
+        { id: "financial_conditions", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["NFCI"], aliasFamily: ["financial_conditions", "nfci", "fci"] },
+        { id: "hy_spread", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2", "high_yield_spread"] },
+        { id: "xccy_basis_bridge", block: "bridge", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DRTSCILM / xccy-basis family"], aliasFamily: ["xccy_basis", "drtscilm", "bridge"] },
+        { id: "dollar_index", block: "transmission", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["dollar_index", "dtwexbgs", "usd_broad_index", "usd_strength"] },
+      ],
+      logicSummary: "Likviditet, realränta, spread och dollarvillkor driver overlayns kärna.",
+    },
+    creditFundingOverlay: {
+      intendedPrimaryBlocks: ["pricing", "funding"],
+      intendedSeries: [
+        { id: "hy_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2"] },
+        { id: "ig_spread", block: "pricing", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLC0A0CM"], aliasFamily: ["ig_spread", "bamlc0a0cm"] },
+        { id: "ted_spread", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["TEDRATE"], aliasFamily: ["ted_spread", "tedrate"] },
+        { id: "xccy_basis", block: "funding", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DRTSCILM"], aliasFamily: ["xccy_basis", "drtscilm", "cross_currency_basis"], note: "Kan köras via proxy om xccy ej komplett." },
+      ],
+      logicSummary: "Kredit- och fundingstress via HY/IG-spreadar, TED och xccy-basis.",
+    },
+    energyShockOverlay: {
+      intendedPrimaryBlocks: ["price", "spillover"],
+      intendedSeries: [
+        { id: "oil_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["DCOILBRENTEU"], aliasFamily: ["oil_price", "dcoilbrenteu", "dcoilwtico"] },
+        { id: "gas_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["NG / regional gas source"], aliasFamily: ["gas_price", "natural_gas", "ttf", "ng"] },
+        { id: "energy_cost_pass", block: "spillover", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["PPIACO (energy pass-through family)"], aliasFamily: ["energy_breadth", "energy_ppi", "ppiaco"] },
+      ],
+      logicSummary: "Energiinput och genomslag till kostnads-/förtroendeblock.",
+    },
+    localUnrestOverlay: {
+      intendedPrimaryBlocks: ["signal", "repricing"],
+      intendedSeries: [
+        { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty"] },
+        { id: "sovereign_repricing", block: "repricing", linkedMacroFamily: "A_FISCAL", primarySources: ["sovereign repricing family"], aliasFamily: ["repricing"] },
+      ],
+      logicSummary: "Local Unrest uses policy uncertainty + sovereign/state repricing. EA repricing uses sovereign credit spread (BTP-Bund); US repricing uses sovereign duration term premium (ACMTP10).",
+    },
+    safeHavenRiskOffOverlay: {
+      intendedPrimaryBlocks: ["gold_equity", "duration", "usd"],
+      intendedSeries: [
+        { id: "safe_haven_flow", block: "gold_equity", linkedMacroFamily: "B_MONETARY", primarySources: ["GOLD", "gold family"], aliasFamily: ["safe_haven_flow", "gold", "gold_price"] },
+        { id: "equity_risk", block: "gold_equity", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["SP500 / risk asset family"], aliasFamily: ["vix_like", "sp500", "spx_vol_proxy", "vixcls"] },
+        { id: "duration_bid", block: "duration", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["duration / rates family"], aliasFamily: ["duration", "real_yield", "rates_proxy"] },
+        { id: "usd_strength", block: "usd", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["usd_strength", "dtwexbgs", "usd_broad_index"] },
+      ],
+      logicSummary: "Risk-off-flöden via safe-haven, equities och durationdynamik.",
+    },
+    inflationCostShockOverlay: {
+      intendedPrimaryBlocks: ["upstream", "expectations"],
+      intendedSeries: [
+        { id: "cpi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["CPIAUCSL / regional CPI"], aliasFamily: ["cpi", "cpiaucsl", "cp0000ez19m086nest"] },
+        { id: "ppi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["PPIACO"], aliasFamily: ["ppi", "ppiaco"] },
+        { id: "inflation_expectations", block: "expectations", linkedMacroFamily: "A_FISCAL", primarySources: ["T10YIE", "survey expectations source"], aliasFamily: ["inflation_expectations", "t10yie", "breakeven"] },
+      ],
+      logicSummary: "Kostnadschock via CPI/PPI och inflationsförväntningar.",
+    },
+    tradeSupplyChainStressOverlay: {
+      intendedPrimaryBlocks: ["real_goods_flow", "inventory_pressure", "pricing"],
+      intendedSeries: [
+        { id: "industrial_production", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["INDPRO"], aliasFamily: ["industrial_production", "indpro"] },
+        { id: "new_orders", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["new orders source"], aliasFamily: ["new_orders", "dgorder", "new_orders_proxy"] },
+        { id: "inventories", block: "inventory_pressure", linkedMacroFamily: "C_INFLATION", primarySources: ["ISRATIO / inventory family"], aliasFamily: ["inventories", "isratio", "inventories_orders"] },
+        { id: "input_prices", block: "pricing", linkedMacroFamily: "C_INFLATION", primarySources: ["PPIACO / shipping-cost family"], aliasFamily: ["supply_chain_price_stress", "ppiaco", "shipping_proxy"] },
+      ],
+      logicSummary: "Real goods flow + orders/inventories + inputkostnadstryck.",
+    },
+    globalUnrestOverlay: {
+      intendedPrimaryBlocks: ["regional_composite"],
+      intendedSeries: [
+        { id: "regional_unrest_us", block: "regional_composite", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["US localUnrestOverlay"], aliasFamily: ["regional_unrest_us", "localunrestoverlay_us"] },
+        { id: "regional_unrest_ea", block: "regional_composite", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["EA localUnrestOverlay"], aliasFamily: ["regional_unrest_ea", "localunrestoverlay_ea"] },
+        { id: "regional_unrest_se", block: "regional_composite", linkedMacroFamily: "A_FISCAL", primarySources: ["SE localUnrestOverlay"], aliasFamily: ["regional_unrest_se", "localunrestoverlay_se"] },
+      ],
+      logicSummary: "Sammanslagen global unrest från regionala overlay-inputs.",
+    },
+  };
+
+  function regionScopedOverlaySpec(overlayKey: string): OverlayDesignSpec {
+    const base = overlayDesignSpec[overlayKey] ?? {
+      intendedPrimaryBlocks: [],
+      intendedSeries: [],
+      logicSummary: "No explicit design spec registered.",
+    };
+    if (overlayKey !== "localUnrestOverlay") return base;
+
+    if (selectedRegion === "US") {
+      return {
+        ...base,
+        intendedSeries: [
+          { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["USEPUINDXM"], aliasFamily: ["policy_uncertainty", "policy_uncertainty_us", "usepuindxm"] },
+          { id: "sovereign_repricing", block: "repricing", linkedMacroFamily: "A_FISCAL", primarySources: ["ACMTP10"], aliasFamily: ["repricing", "lu_repricing_us", "acmtp10", "acmtp10_us"], note: "US repricing is sovereign duration risk repricing via ACM term premium (intentional regional design difference vs EA)." },
+        ],
+      };
+    }
+
+    if (selectedRegion === "EA") {
+      return {
+        ...base,
+        intendedSeries: [
+          { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["EA policy uncertainty family"], aliasFamily: ["policy_uncertainty", "ea_policy_uncertainty"] },
+          { id: "sovereign_repricing", block: "repricing", linkedMacroFamily: "A_FISCAL", primarySources: ["IRLTLT01ITM156N", "IRLTLT01DEM156N"], aliasFamily: ["repricing", "lu_repricing_ea", "irl tlt01itm156n", "irl tlt01dem156n", "italy_10y_yield", "germany_10y_yield"], note: "EA repricing is sovereign credit risk repricing via BTP-Bund spread (Italy10Y - Germany10Y)." },
+        ],
+      };
+    }
+
+    return {
+      ...base,
+      intendedSeries: [
+        { id: "policy_uncertainty", block: "signal", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["policy uncertainty family"], aliasFamily: ["policy_uncertainty"] },
+        { id: "sovereign_repricing", block: "repricing", linkedMacroFamily: "A_FISCAL", primarySources: ["region-specific sovereign repricing source"], aliasFamily: ["repricing"], note: "Region-specific repricing source not yet defined" },
+      ],
+    };
+  }
+
+  function normalizeToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  }
+
+  function valueContainsAlias(value: string, alias: string): boolean {
+    const v = normalizeToken(value);
+    const a = normalizeToken(alias);
+    return v.includes(a) || a.includes(v);
+  }
+
+  function inferFallbackUsage(items: Array<{ proxy?: boolean; note?: string; id?: string; source?: string; exactSource?: string }>, _aliasMatched: boolean): "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input" {
+    const text = items.map((item) => `${item.note ?? ""} ${item.id ?? ""} ${item.source ?? ""} ${item.exactSource ?? ""}`.toLowerCase()).join(" |");
+    if (text.includes("inherited") || text.includes("regional_unrest") || text.includes("overlay input")) return "inherited overlay input";
+    if (text.includes("derived") || text.includes("approx")) return "derived approximation";
+    const hasExplicitProxy = items.some((item) => item.proxy);
+    const mentionsProxy = text.includes("proxy") && !text.includes("no proxy") && !text.includes("without proxy");
+    if (hasExplicitProxy || mentionsProxy) return "proxy source";
+    return "none";
+  }
+
+  function inferBlockerType(args: {
+    availability: "available" | "partial" | "unavailable" | "not_applicable";
+    fallback: "none" | "alias mapping" | "proxy source" | "derived approximation" | "inherited overlay input";
+    runtimeHasSeries: boolean;
+    aliasMatched: boolean;
+    reasonText: string;
+    regionSpecificSourceFaithful?: boolean;
+  }): "no blocker" | "alias mapping only" | "exact source family differs" | "proxy currently used" | "intended source not ingested" | "intended source not wired to overlay" | "inherited overlay used instead" | "derived approximation used" {
+    const text = args.reasonText.toLowerCase();
+    if (args.fallback === "inherited overlay input") return "inherited overlay used instead";
+    if (args.fallback === "derived approximation") return "derived approximation used";
+    if (args.fallback === "proxy source") return "proxy currently used";
+    if (args.regionSpecificSourceFaithful) return "no blocker";
+    if (args.fallback === "alias mapping" && args.availability === "available") return "alias mapping only";
+    if (args.availability === "unavailable" && (text.includes("ingest") || text.includes("not ingested") || text.includes("missing"))) return "intended source not ingested";
+    if (args.availability !== "available" && args.runtimeHasSeries) return "exact source family differs";
+    if (args.availability !== "available") return "intended source not wired to overlay";
+    if (args.aliasMatched) return "alias mapping only";
+    return "no blocker";
+  }
+
+  const overlayDebugRows = uiOverlayKeysRequested.map((overlayKey) => {
+    const overlay = activeOverlayBundle?.overlays?.[overlayKey] ?? null;
+    const spec = regionScopedOverlaySpec(overlayKey);
+    const runtimeBlockDiagnostics = globalMacro?.overlayBlockDiagnostics?.[overlayKey] ?? [];
+    const actualComponents = overlay?.components ?? [];
+
+    const seriesRows = spec.intendedSeries.map((seriesSpec) => {
+      const matched = actualComponents.filter((component) => {
+        const hay = [component.id, component.source, component.exactSource, component.note].filter(Boolean).map(String);
+        return seriesSpec.aliasFamily.some((alias) => hay.some((value) => valueContainsAlias(value, alias)));
+      });
+      const blockRuntimePool = actualComponents.filter((component) => component.block === seriesSpec.block && !component.missing);
+      const runtimePool = matched.length > 0 ? matched : blockRuntimePool;
+      const runtimeSeriesUsed = Array.from(new Set(runtimePool.map((component) => component.id))).join(", ") || "—";
+      const runtimeSourceUsed = Array.from(new Set(runtimePool.map((component) => component.exactSource || component.source))).join(", ") || "—";
+      const aliasMatched = matched.length > 0;
+      const anyStrictAvailable = matched.some((component) => !component.missing);
+      const anyPartial = matched.some((component) => component.missing);
+      const availability: "available" | "partial" | "unavailable" = anyStrictAvailable
+        ? "available"
+        : anyPartial
+          ? "partial"
+          : "unavailable";
+      const fallbackUsage = inferFallbackUsage(runtimePool, aliasMatched && runtimeSeriesUsed !== "—" && !runtimePool.some((component) => component.proxy));
+      const reasonText = runtimePool.map((component) => component.note).filter((note): note is string => Boolean(note)).join(" | ")
+        || (availability === "unavailable"
+          ? "intended primary source not present in current overlay runtime inputs"
+          : fallbackUsage === "alias mapping"
+            ? "intended source resolved through canonical alias mapping"
+            : "no blocker");
+      // Local Unrest repricing is region-specific by design.
+      // US uses ACMTP10 as sovereign duration risk repricing.
+      // EA uses BTP-Bund as sovereign credit risk repricing.
+      // These are different mechanisms but equivalent expressions of state/sovereign risk repricing.
+      // US ACMTP10 must not be rejected as a source mismatch merely because EA uses a spread-based source family.
+      const localUnrestRepricingSourceFaithful = overlayKey === "localUnrestOverlay"
+        && seriesSpec.block === "repricing"
+        && fallbackUsage === "none"
+        && runtimeSeriesUsed !== "—"
+        && ((selectedRegion === "US" && /acmtp10/i.test(runtimeSourceUsed))
+          || (selectedRegion === "EA" && /IRLTLT01ITM156N|IRLTLT01DEM156N/i.test(runtimeSourceUsed)));
+      const blockerType = inferBlockerType({
+        availability,
+        fallback: fallbackUsage,
+        runtimeHasSeries: runtimeSeriesUsed !== "—",
+        aliasMatched,
+        reasonText,
+        regionSpecificSourceFaithful: localUnrestRepricingSourceFaithful,
+      });
+      const mappingType = localUnrestRepricingSourceFaithful
+        ? "direct"
+        : availability === "unavailable"
+          ? (runtimeSeriesUsed !== "—" ? "alternative family" : "not mapped")
+          : fallbackUsage === "alias mapping"
+            ? "alias mapping"
+            : fallbackUsage === "proxy source"
+              ? "proxy"
+              : fallbackUsage === "derived approximation"
+                ? "derived"
+                : fallbackUsage === "inherited overlay input"
+                  ? "inherited"
+                  : "direct";
+      return {
+        id: seriesSpec.id,
+        block: seriesSpec.block,
+        linkedMacroFamily: seriesSpec.linkedMacroFamily ?? "—",
+        intendedPrimarySources: seriesSpec.primarySources.join(", "),
+        aliasFamily: seriesSpec.aliasFamily.join(", ") || "—",
+        availability,
+        runtimeSeriesUsed,
+        runtimeSourceUsed,
+        mappingType,
+        proxy: fallbackUsage === "proxy source" ? "yes" : "no",
+        fallbackUsage,
+        blockerType,
+        note: [seriesSpec.note, reasonText].filter(Boolean).join(" | "),
+      };
+    });
+
+    const isMacroPseudoBlock = (value: string): boolean => ["A_FISCAL", "B_MONETARY", "C_INFLATION", "D_CREDIBILITY"].includes(value);
+    const blockKeys = Array.from(new Set([
+      ...Object.keys(overlay?.blockScores ?? {}).filter((block) => !isMacroPseudoBlock(block)),
+      ...runtimeBlockDiagnostics.map((row) => row.block).filter((block) => !isMacroPseudoBlock(block)),
+      ...spec.intendedPrimaryBlocks,
+      ...spec.intendedSeries.map((series) => series.block),
+    ]));
+
+    const blockRows = blockKeys.map((block) => {
+      const scoreValue = overlay?.blockScores?.[block] ?? null;
+      const diagnostics = runtimeBlockDiagnostics.find((item) => item.block === block);
+      const exactSeries = seriesRows.filter((row) => row.block === block);
+      const blockSeries = exactSeries.length > 0 ? exactSeries : seriesRows;
+      const availabilityCounts = {
+        available: blockSeries.filter((row) => row.availability === "available").length,
+        partial: blockSeries.filter((row) => row.availability === "partial").length,
+        unavailable: blockSeries.filter((row) => row.availability === "unavailable").length,
+      };
+      const sourceAvailabilityBase: "available" | "partial" | "unavailable" = blockSeries.length === 0
+        ? "unavailable"
+        : availabilityCounts.available === blockSeries.length
+          ? "available"
+          : (availabilityCounts.available + availabilityCounts.partial) > 0
+            ? "partial"
+            : "unavailable";
+
+      const blockComponents = actualComponents.filter((component) => component.block === block);
+      const hasRuntime = (typeof scoreValue === "number") || blockComponents.some((component) => !component.missing) || diagnostics?.status === "pass" || diagnostics?.status === "proxy";
+
+      const fallbackUsedSet = Array.from(new Set(blockSeries.map((row) => row.fallbackUsage).filter((value) => value !== "none")));
+      const fallbackUsed = fallbackUsedSet.length > 0 ? fallbackUsedSet.join(" + ") : "none";
+      const intendedPrimarySources = blockSeries.flatMap((row) => row.intendedPrimarySources.split(",").map((item) => item.trim())).filter(Boolean);
+      const currentRuntimeSources = Array.from(new Set(blockSeries.map((row) => row.runtimeSourceUsed).filter((item) => item && item !== "—"))).join(", ") || diagnostics?.actualSourceUsed || "—";
+      // Local Unrest repricing gating is region-specific by design.
+      // US uses ACMTP10 (sovereign duration repricing), while EA uses BTP-Bund spread IDs.
+      // If the region-correct source is present with no proxy/fallback, this block must not be marked missing.
+      const localUnrestRepricingBlockSourceFaithful = overlayKey === "localUnrestOverlay"
+        && block === "repricing"
+        && fallbackUsed === "none"
+        && !blockComponents.some((component) => component.proxy)
+        && ((selectedRegion === "US" && /ACMTP10/i.test(currentRuntimeSources))
+          || (selectedRegion === "EA" && /IRLTLT01ITM156N|IRLTLT01DEM156N/i.test(currentRuntimeSources)));
+      const sourceAvailability: "available" | "partial" | "unavailable" = localUnrestRepricingBlockSourceFaithful
+        ? "available"
+        : sourceAvailabilityBase;
+      const runtimeStatus: "pass" | "proxy" | "missing" = localUnrestRepricingBlockSourceFaithful
+        ? "pass"
+        : !hasRuntime
+          ? "missing"
+          : (blockComponents.some((component) => component.proxy) || blockSeries.some((row) => row.fallbackUsage !== "none" && row.fallbackUsage !== "alias mapping") || diagnostics?.status === "proxy")
+            ? "proxy"
+            : "pass";
+      const availabilityRatio = blockSeries.length === 0 ? 0 : (availabilityCounts.available + availabilityCounts.partial * 0.5) / blockSeries.length;
+      const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation" || row.fallbackUsage === "inherited overlay input").length / blockSeries.length;
+      const specFidelity: "high" | "medium" | "low" = runtimeStatus === "missing"
+        ? "low"
+        : availabilityRatio >= 0.6 && proxyShare <= 0.34
+          ? "high"
+          : availabilityRatio >= 0.3
+            ? "medium"
+            : "low";
+      const reason = diagnostics?.reason
+        || blockSeries.map((row) => row.note).filter(Boolean).join(" | ")
+        || (runtimeStatus === "pass" && sourceAvailability !== "available"
+          ? "runtime pass with partial spec coverage via alias/alternative source family"
+          : runtimeStatus === "proxy"
+            ? "runtime works but at least one component uses proxy/derived/inherited input"
+            : "block cannot be computed with meaningful runtime data");
+      const blockerPriority = localUnrestRepricingBlockSourceFaithful
+        ? "no blocker"
+        : (blockSeries.map((row) => row.blockerType).find((type) => type !== "no blocker")
+          || inferBlockerType({ availability: sourceAvailability, fallback: fallbackUsedSet[0] as any || "none", runtimeHasSeries: currentRuntimeSources !== "—", aliasMatched: false, reasonText: reason }));
+
+      return {
+        block,
+        linkedMacroFamily: Array.from(new Set(blockSeries.map((row) => row.linkedMacroFamily).filter((item) => item && item !== "—"))).join(", ") || "—",
+        runtimeStatus,
+        specFidelity,
+        intendedPrimarySources: intendedPrimarySources.length > 0 ? Array.from(new Set(intendedPrimarySources)).join(", ") : (diagnostics?.expectedSource || "—"),
+        runtimeSources: currentRuntimeSources,
+        sourceAvailability,
+        fallbackUsed,
+        blockerType: blockerPriority,
+        reason,
+        score: typeof scoreValue === "number" ? scoreValue.toFixed(1) : "—",
+      };
+    });
+
+    const runnableBlocks = blockRows.filter((row) => row.runtimeStatus !== "missing").length;
+    const runtimeCompleteness: "full" | "partial" | "weak" = blockRows.length === 0
+      ? "weak"
+      : runnableBlocks === blockRows.length
+        ? "full"
+        : runnableBlocks >= Math.ceil(blockRows.length / 2)
+          ? "partial"
+          : "weak";
+    const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
+    const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
+    const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy).length / actualComponents.length;
+    const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")).length / blockRows.length;
+    const criticalBlocksByOverlay: Record<string, string[]> = {
+      localUnrestOverlay: ["signal", "repricing"],
+      tradeSupplyChainStressOverlay: ["real_goods_flow", "pricing"],
+      safeHavenRiskOffOverlay: ["gold_equity", "duration"],
+      liquidityOverlay: ["bridge", "transmission"],
+    };
+    const criticalBlocks = criticalBlocksByOverlay[overlayKey] ?? [];
+    const criticalProxyHit = blockRows.some((row) => criticalBlocks.includes(row.block) && (row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation") || row.fallbackUsed.includes("inherited overlay input")));
+    const proxyRatio = Math.max(runtimeProxyComponentRatio, blockProxyRatio);
+    const proxyDependence: "none" | "low" | "medium" | "high" = proxyRatio === 0
+      ? "none"
+      : (proxyRatio > 0.6 || (criticalProxyHit && proxyRatio >= 0.34))
+        ? "high"
+        : proxyRatio <= 0.25
+          ? "low"
+          : "medium";
+    const robustness: "high" | "medium" | "low" = runtimeCompleteness === "full" && proxyDependence !== "high" && specFidelity !== "low"
+      ? "high"
+      : runtimeCompleteness === "weak" || proxyDependence === "high"
+        ? "low"
+        : "medium";
+    const fidelityBadge = specFidelity === "high"
+      ? "Spec-faithful"
+      : runtimeCompleteness === "weak"
+        ? "Structurally incomplete"
+        : proxyDependence === "high"
+          ? "Proxy-heavy"
+          : "Near-spec";
+
+    const exactDifferences = blockRows
+      .filter((row) => row.blockerType !== "no blocker" || row.sourceAvailability !== "available")
+      .map((row) => overlayKey === "localUnrestOverlay" && row.block === "repricing" && row.runtimeStatus === "pass" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none"
+        ? "repricing: direct source-faithful match via ACMTP10"
+        : `${row.block}: ${row.blockerType}; availability=${row.sourceAvailability}; fallback=${row.fallbackUsed}`);
+    const matchesSpec = blockRows
+      .filter((row) => row.specFidelity === "high" || (row.specFidelity === "medium" && row.sourceAvailability === "available"))
+      .map((row) => `${row.block}: runtime=${row.runtimeStatus}, primary sources present (${row.intendedPrimarySources})`);
+    const whyDiffExists = Array.from(new Set(blockRows.flatMap((row) => {
+      const reasons: string[] = [];
+      if (row.fallbackUsed.includes("alias mapping")) reasons.push("alias mapped source used");
+      if (row.fallbackUsed.includes("proxy source")) reasons.push(`${row.block} uses proxy source`);
+      if (row.fallbackUsed.includes("derived approximation")) reasons.push(`${row.block} uses derived approximation`);
+      if (row.fallbackUsed.includes("inherited overlay input")) reasons.push(`${row.block} built from inherited overlay`);
+      if (row.blockerType === "intended source not ingested") reasons.push(`${row.block} source not ingested`);
+      const localUnrestRepricingDirect = overlayKey === "localUnrestOverlay" && row.block === "repricing" && row.runtimeStatus === "pass" && /ACMTP10/i.test(row.runtimeSources) && row.fallbackUsed === "none";
+      if (row.blockerType === "exact source family differs" && !localUnrestRepricingDirect) reasons.push(`${row.block} exact source family differs`);
+      if (localUnrestRepricingDirect) reasons.push("repricing direct source-faithful match via ACMTP10");
+      if (row.blockerType === "intended source not wired to overlay") reasons.push(`${row.block} source not yet wired`);
+      return reasons;
+    })));
+    const impact = proxyDependence === "high"
+      ? "Interpret with caution: proxy-heavy signal can shift faster than intended design baseline."
+      : specFidelity === "low"
+        ? "Interpretation risk is elevated: runtime deviates materially from intended spec."
+        : "Interpretation remains broadly aligned with spec; monitor listed deltas.";
+
+    return {
+      overlayKey,
+      overlay,
+      spec,
+      runtimeCompleteness,
+      specFidelity,
+      proxyDependence,
+      robustness,
+      fidelityBadge,
+      blockRows,
+      seriesRows,
+      implementationDelta: [
+        `intended design: ${spec.logicSummary}`,
+        `current runtime implementation: ${Array.from(new Set(actualComponents.map((component) => `${component.id} (${component.exactSource || component.source})`))).slice(0, 8).join(", ") || "no runtime components"}`,
+        `what matches spec: ${matchesSpec.join(" | ") || "no clear high-fidelity block match"}`,
+        `exact differences: ${exactDifferences.join(" | ") || "none"}`,
+        `why differences exist: ${whyDiffExists.join(" | ") || "no blocker"}`,
+        `impact on interpretation: ${impact}`,
+      ],
+    };
+  });
 
   const blockRows = useMemo(() => {
     return [
@@ -381,14 +911,46 @@ export default function GlobalMacroDashboard() {
     return Math.max(0, Math.min(100, score));
   }
 
+  function renderOverlayHistoryChart(overlayKey: string) {
+    const valid = overlayHistoryPoints
+      .map((point) => ({ asOfDate: point.asOfDate, score: point.scores?.[overlayKey] ?? null }))
+      .filter((point) => typeof point.score === "number") as Array<{ asOfDate: string; score: number }>;
+    if (valid.length < 2) {
+      return <div className="status empty">No history available yet</div>;
+    }
+    const width = 560;
+    const height = 160;
+    const left = 38;
+    const right = 14;
+    const top = 12;
+    const bottom = 24;
+    const plotW = width - left - right;
+    const plotH = height - top - bottom;
+    const points = valid.map((point, index) => {
+      const x = left + (index / Math.max(1, valid.length - 1)) * plotW;
+      const y = top + (1 - Math.max(0, Math.min(100, point.score)) / 100) * plotH;
+      return `${x},${y}`;
+    }).join(" ");
+    return (
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: 580, height: 170, display: "block" }}>
+        {[0, 25, 50, 75, 100].map((tick) => {
+          const y = top + (1 - tick / 100) * plotH;
+          return <g key={`${overlayKey}-tick-${tick}`}><line x1={left} y1={y} x2={width - right} y2={y} stroke="#d1d5db" strokeWidth={1} /><text x={left - 6} y={y + 4} textAnchor="end" fontSize={10} fill="#64748b">{tick}</text></g>;
+        })}
+        <polyline fill="none" stroke="#0ea5e9" strokeWidth={2.2} points={points} strokeLinecap="round" strokeLinejoin="round" />
+        <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke="#475569" strokeWidth={1} />
+        <text x={left} y={height - 6} fontSize={10} fill="#64748b">{valid[0]?.asOfDate ?? ""}</text>
+        <text x={width - right} y={height - 6} fontSize={10} fill="#64748b" textAnchor="end">{valid[valid.length - 1]?.asOfDate ?? ""}</text>
+      </svg>
+    );
+  }
+
   const pipelineDebug = globalMacro?.debug ?? null;
   const historyPoints = macroHistory?.points ?? [];
   const regimeIntervals = macroHistory?.intervals.regime ?? [];
   const overlayIntervals = macroHistory?.intervals.overlays ?? { growth: [], stress: [], hardAsset: [] };
   const latestHistoryPoint = historyPoints[historyPoints.length - 1] ?? null;
   const latestRegimeInterval = regimeIntervals[regimeIntervals.length - 1] ?? null;
-  const hasOverlayIntervals =
-    overlayIntervals.growth.length > 0 || overlayIntervals.stress.length > 0 || overlayIntervals.hardAsset.length > 0;
   const timelineStartDate = macroHistory?.replayEarliestDateUsed ?? macroHistory?.rangeDebug.actualStartDate ?? null;
   const timelineEndDate = macroHistory?.replayLatestDateUsed ?? macroHistory?.rangeDebug.actualEndDate ?? null;
   const timelineWindow = useMemo(() => {
@@ -416,27 +978,6 @@ export default function GlobalMacroDashboard() {
     return "Regimen indikerar ett övergångsläge i makrobilden.";
   }
 
-  function overlayColor(name: "growth" | "stress" | "hard_asset", value: string) {
-    if (name === "stress") {
-      if (value === "Low") return "#5f7f63";
-      if (value === "Medium") return "#8e744d";
-      return "#865550";
-    }
-    if (value === "Weak") return "#865550";
-    if (value === "Neutral") return "#8c7450";
-    return "#5f7f63";
-  }
-
-  function overlayDescription(name: "growth" | "stress" | "hard_asset", value: string): string {
-    if (name === "stress") {
-      if (value === "Low") return "Låg marknadsstress och bättre riskaptit.";
-      if (value === "Medium") return "Blandad stressbild med viss försiktighet.";
-      return "Hög stress i makromiljön och defensiv riskregim.";
-    }
-    if (value === "Weak") return "Svag tillväxt/real tillgångsdynamik relativt neutral nivå.";
-    if (value === "Neutral") return "Balansläge utan tydlig styrka eller svaghet.";
-    return "Stark tillväxt/real tillgångsdynamik relativt historik.";
-  }
 
   function segmentPosition(startDate: string, endDate: string): { left: number; width: number } {
     if (!timelineWindow) return { left: 0, width: 100 };
@@ -453,10 +994,6 @@ export default function GlobalMacroDashboard() {
     return intervals.length > 0 ? intervals[intervals.length - 1].endDate : "—";
   }
 
-  function overlayContributors(overlay: "growth" | "stress" | "hard_asset"): string[] {
-    const status = pipelineDebug?.overlayDataStatus?.[overlay];
-    return status?.scoredInputs?.slice(0, 4) ?? [];
-  }
 
   const blockSeriesMeta = [
     { key: "A_FISCAL" as const, label: "Fiscal", color: "#6f86a8", valueOf: (point: MacroHistoryPayload["points"][number]) => point.fiscalScore },
@@ -521,20 +1058,6 @@ Signal: ${gapLabel}`,
       }),
     ] as (string | number | Date | null)[][];
   }, [inflationRows]);
-
-
-  function overlayIntensity(type: "growth" | "stress" | "hard_asset", value: string): number {
-    if (type === "stress") return value === "High" ? 3 : value === "Medium" ? 2 : 1;
-    return value === "Strong" ? 3 : value === "Neutral" ? 2 : 1;
-  }
-
-  function areaPath(top: Array<{ x: number; y: number }>, base: Array<{ x: number; y: number }>): string {
-    if (top.length === 0 || base.length === 0) return "";
-    const head = `M ${top[0].x} ${top[0].y}`;
-    const topLine = top.slice(1).map((point) => `L ${point.x} ${point.y}`).join(" ");
-    const back = base.slice().reverse().map((point) => `L ${point.x} ${point.y}`).join(" ");
-    return `${head} ${topLine} ${back} Z`;
-  }
 
   async function runIngest(mode: "backfill" | "latest", region: "US" | "EA" | "SE") {
     setIngestRunningMode(mode);
@@ -650,16 +1173,195 @@ Signal: ${gapLabel}`,
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
               )}
 
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                <h4 style={{ marginTop: 0 }}>New Overlay Engine</h4>
+                <div style={{ fontSize: 13, marginBottom: 10 }}>Teknisk admin/drift-debug finns i <strong>Admin</strong>.</div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <strong>Overlay cards</strong>
+                  {uiOverlayKeysRequested.length === 0 ? (
+                    <div className="status empty">No overlay keys requested.</div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10, marginTop: 8 }}>
+                      {uiOverlayKeysRequested.map((overlayKey) => {
+                        const overlay = activeOverlayBundle?.overlays?.[overlayKey];
+                        if (!overlay) {
+                          return <div key={overlayKey} className="status empty">{overlayKey}: overlay missing from payload</div>;
+                        }
+                        const components = overlay.components ?? [];
+                        const missingCount = components.filter((component) => component.missing).length;
+                        const proxyCount = components.filter((component) => component.proxy).length;
+                        return (
+                          <div key={overlayKey} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                            <div style={{ fontWeight: 700 }}>{overlayKey}</div>
+                            <div>score: {typeof overlay.score === "number" ? overlay.score.toFixed(1) : "—"}</div>
+                            <div>label: {overlay.label || "—"}</div>
+                            <div>confidence: {overlay.confidence}%</div>
+                            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 4 }}>
+                              block scores: {Object.entries(overlay.blockScores).map(([block, score]) => `${block}=${typeof score === "number" ? score.toFixed(1) : "—"}`).join(", ") || "—"}
+                            </div>
+                            <div style={{ fontSize: 12, marginTop: 4 }}>proxy/missing count: {proxyCount}/{missingCount}</div>
+                            {overlaySanity.find((entry) => entry.overlayKey === overlayKey)?.lowRobustness && <div className="status" style={{ marginTop: 6 }}>low robustness</div>}
+                            {typeof overlay.score !== "number" && <div className="status empty" style={{ marginTop: 6 }}>Overlay present but missing score data.</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <strong>Overlay history graphs</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 8 }}>
+                    {overlayKeysForCharts.map((overlayKey) => (
+                      <div key={`chart-${overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{overlayKey}</div>
+                        {renderOverlayHistoryChart(overlayKey)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <strong>Sanity & calibration diagnostics</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, marginTop: 8 }}>
+                    {overlaySanity.map((item) => (
+                      <div key={`sanity-${item.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <div style={{ fontWeight: 700 }}>{item.overlayKey}</div>
+                        <div>total score: {typeof activeOverlayBundle?.overlays?.[item.overlayKey]?.score === "number" ? activeOverlayBundle?.overlays?.[item.overlayKey]?.score?.toFixed(1) : "—"}</div>
+                        <div>active real blocks: {item.realBlocks}</div>
+                        <div>proxy blocks: {item.proxyBlocks}</div>
+                        <div>missing blocks: {item.missingBlocks}</div>
+                        <div>dominant negative contributors: {item.negative.join(", ") || "—"}</div>
+                        <div>normalization inputs: {item.normalizationInputs.join(" | ") || "—"}</div>
+                        {item.lowRobustness && <div className="status" style={{ marginTop: 6 }}>low robustness</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </section>
+
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                <h4 style={{ marginTop: 0 }}>Overlay Debug</h4>
+                {overlayDebugRows.map((row) => (
+                  <div key={`overlay-debug-${row.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", marginBottom: 12, background: "#fff" }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{row.overlayKey}</div>
+                    <ul style={{ marginTop: 4 }}>
+                      <li>total score: {typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(1) : "—"}</li>
+                      <li>label: {row.overlay?.label ?? "—"}</li>
+                      <li>confidence: {row.overlay?.confidence ?? "—"}%</li>
+                      <li>runtime completeness: {row.runtimeCompleteness}</li>
+                      <li>spec fidelity: {row.specFidelity}</li>
+                      <li>robustness: {row.robustness}</li>
+                      <li>proxy dependence: {row.proxyDependence}</li>
+                      <li>fidelity badge: <strong>{row.fidelityBadge}</strong></li>
+                    </ul>
+
+                    <div style={{ fontSize: 12, marginBottom: 8 }}>
+                      <strong>Intended primary design</strong><br />
+                      Blocks: {row.spec.intendedPrimaryBlocks.join(", ") || "—"}<br />
+                      Series: {row.spec.intendedSeries.map((series) => series.id).join(", ") || "—"}<br />
+                      Intended source families: {Array.from(new Set(row.spec.intendedSeries.flatMap((series) => series.primarySources))).join(", ") || "—"}<br />
+                      Logic: {row.spec.logicSummary}
+                    </div>
+
+                    <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>overlay</th>
+                            <th>block</th>
+                            <th>runtime status</th>
+                            <th>spec fidelity</th>
+                            <th>linked macro family</th>
+                            <th>intended primary sources</th>
+                            <th>current runtime sources</th>
+                            <th>source availability</th>
+                            <th>fallback used</th>
+                            <th>reason</th>
+                            <th>blocker type</th>
+                            <th>score</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {row.blockRows.map((block) => (
+                            <tr key={`overlay-block-${row.overlayKey}-${block.block}`}>
+                              <td>{row.overlayKey}</td>
+                              <td>{block.block}</td>
+                              <td>{block.runtimeStatus}</td>
+                              <td>{block.specFidelity}</td>
+                              <td>{block.linkedMacroFamily}</td>
+                              <td>{block.intendedPrimarySources}</td>
+                              <td>{block.runtimeSources}</td>
+                              <td>{block.sourceAvailability}</td>
+                              <td>{block.fallbackUsed}</td>
+                              <td>{block.reason}</td>
+                              <td>{block.blockerType}</td>
+                              <td>{block.score}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>intended series</th>
+                            <th>aliases (intended family)</th>
+                            <th>availability in current pipeline</th>
+                            <th>current runtime source</th>
+                            <th>current runtime series</th>
+                            <th>mapping type</th>
+                            <th>proxy</th>
+                            <th>fallback used</th>
+                            <th>reason</th>
+                            <th>blocker type</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {row.seriesRows.map((series) => (
+                            <tr key={`overlay-series-${row.overlayKey}-${series.id}`}>
+                              <td>{series.id}</td>
+                              <td>{series.aliasFamily}</td>
+                              <td>{series.availability}</td>
+                              <td>{series.runtimeSourceUsed}</td>
+                              <td>{series.runtimeSeriesUsed}</td>
+                              <td>{series.mappingType}</td>
+                              <td>{series.proxy}</td>
+                              <td>{series.fallbackUsage}</td>
+                              <td>{series.note || "—"}</td>
+                              <td>{series.blockerType}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ fontSize: 12 }}>
+                      <strong>Implementation delta vs spec</strong>
+                      <ul>
+                        {row.implementationDelta.map((gap) => (
+                          <li key={`${row.overlayKey}-${gap}`}>{gap}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ))}
+              </section>
+
               <h4>Summary</h4>
               <ul>
                 <li>Core Regime: <strong>{globalMacro.regime.coreRegimeLabel}</strong></li>
                 <li>Macro score: {typeof globalMacro.regime.macroScoreTotal === "number" ? globalMacro.regime.macroScoreTotal.toFixed(1) : "—"}</li>
                 <li>Confidence: {globalMacro.regime.macroConfidence}%</li>
-                <li>Growth overlay: {globalMacro.regime.growthOverlay}</li>
-                <li>Stress overlay: {globalMacro.regime.stressOverlay}</li>
-                <li>Hard Asset overlay: {globalMacro.regime.hardAssetOverlay}</li>
+                
                 <li>Data status: {globalMacro.dataStatus}</li>
               </ul>
+
+              <div style={{ fontSize: 12, marginBottom: 8 }}><strong>Legacy overlays finns kvar i Admin.</strong></div>
 
               <h4>Blockrad</h4>
               <div className="metric-list">
@@ -959,180 +1661,8 @@ Signal: ${gapLabel}`,
                     </div>
                   )}
 
-                  <h5>3) Overlay Timelines</h5>
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 6, fontSize: 12, marginBottom: 8 }}>
-                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
-                        <strong>Growth</strong>: {overlayIntervals.growth[overlayIntervals.growth.length - 1]?.value ?? "—"}<br />
-                        Senast ändrad: {latestOverlayDate(overlayIntervals.growth)}
-                      </div>
-                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
-                        <strong>Stress</strong>: {overlayIntervals.stress[overlayIntervals.stress.length - 1]?.value ?? "—"}<br />
-                        Senast ändrad: {latestOverlayDate(overlayIntervals.stress)}
-                      </div>
-                      <div style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 8px", background: "#f8fafc" }}>
-                        <strong>Hard Asset</strong>: {overlayIntervals.hardAsset[overlayIntervals.hardAsset.length - 1]?.value ?? "—"}<br />
-                        Senast ändrad: {latestOverlayDate(overlayIntervals.hardAsset)}
-                      </div>
-                    </div>
-
-                    {!hasOverlayIntervals ? (
-                      <div className="status empty">För lite overlay-historik för full tidslinje. Visar tillgängliga segment när data finns.</div>
-                    ) : (
-                      <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27" }}>
-                        <svg
-                          viewBox="0 0 1000 340"
-                          style={{ width: "100%", height: "360px", display: "block" }}
-                          onClick={(event) => {
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            const clickX = Math.max(72, Math.min(972, event.clientX - rect.left));
-                            const clickY = Math.max(26, Math.min(286, event.clientY - rect.top));
-                            const ratio = (clickX - 72) / 900;
-                            const index = Math.round(ratio * Math.max(0, historyPoints.length - 1));
-                            const point = historyPoints[index];
-                            if (!point) return;
-
-                            const layers = [
-                              { key: "growth" as const, label: "Growth" as const, intensity: overlayIntensity("growth", point.growthOverlay) },
-                              { key: "stress" as const, label: "Stress" as const, intensity: overlayIntensity("stress", point.stressOverlay) },
-                              { key: "hard_asset" as const, label: "Hard Asset" as const, intensity: overlayIntensity("hard_asset", point.hardAssetOverlay) },
-                            ];
-                            const unit = 22;
-                            const total = layers.reduce((sum, layer) => sum + layer.intensity, 0) * unit;
-                            const valueFromBottom = ((286 - clickY) / 260) * total;
-                            let cumulative = 0;
-                            const clicked = layers.find((layer) => {
-                              const start = cumulative;
-                              cumulative += layer.intensity * unit;
-                              return valueFromBottom >= start && valueFromBottom <= cumulative;
-                            }) ?? layers[0];
-
-                            const intervals = clicked.key === "growth" ? overlayIntervals.growth : clicked.key === "stress" ? overlayIntervals.stress : overlayIntervals.hardAsset;
-                            const interval = intervals.find((item) => point.asOfDate >= item.startDate && point.asOfDate <= item.endDate);
-                            if (!interval) return;
-                            setSelectedOverlaySegment({
-                              overlayKey: clicked.key,
-                              overlay: clicked.label,
-                              value: interval.value,
-                              startDate: interval.startDate,
-                              endDate: interval.endDate,
-                              pointCount: interval.pointCount,
-                              explanation: overlayDescription(clicked.key, interval.value),
-                              contributors: overlayContributors(clicked.key),
-                            });
-                          }}
-                        >
-                          {[0, 1, 2, 3, 4].map((level) => (
-                            <line key={`overlay-grid-${level}`} x1={72} y1={286 - level * 65} x2={972} y2={286 - level * 65} stroke="#5f564a" strokeWidth={1} />
-                          ))}
-
-                          {(() => {
-                            const unit = 22;
-                            const xOf = (index: number) => 72 + ((historyPoints.length <= 1 ? 0 : index / (historyPoints.length - 1)) * 900);
-                            const gTop: Array<{ x: number; y: number }> = [];
-                            const gBase: Array<{ x: number; y: number }> = [];
-                            const sTop: Array<{ x: number; y: number }> = [];
-                            const sBase: Array<{ x: number; y: number }> = [];
-                            const hTop: Array<{ x: number; y: number }> = [];
-                            const hBase: Array<{ x: number; y: number }> = [];
-
-                            historyPoints.forEach((point, index) => {
-                              const x = xOf(index);
-                              const g = overlayIntensity("growth", point.growthOverlay) * unit;
-                              const s = overlayIntensity("stress", point.stressOverlay) * unit;
-                              const h = overlayIntensity("hard_asset", point.hardAssetOverlay) * unit;
-                              const g0 = 0;
-                              const g1 = g;
-                              const s0 = g1;
-                              const s1 = s0 + s;
-                              const h0 = s1;
-                              const h1 = h0 + h;
-                              const y = (value: number) => 286 - value;
-                              gBase.push({ x, y: y(g0) });
-                              gTop.push({ x, y: y(g1) });
-                              sBase.push({ x, y: y(s0) });
-                              sTop.push({ x, y: y(s1) });
-                              hBase.push({ x, y: y(h0) });
-                              hTop.push({ x, y: y(h1) });
-                            });
-
-                            return (
-                              <>
-                                <path d={areaPath(gTop, gBase)} fill="#5f7f63" fillOpacity={0.62} stroke="#7c9b7f" strokeWidth={1.2} />
-                                <path d={areaPath(sTop, sBase)} fill="#8c7450" fillOpacity={0.62} stroke="#af9368" strokeWidth={1.2} />
-                                <path d={areaPath(hTop, hBase)} fill="#7b6676" fillOpacity={0.62} stroke="#9a8594" strokeWidth={1.2} />
-                              </>
-                            );
-                          })()}
-
-                          {historyPoints.filter((point) => point.overlayChanged).map((point) => {
-                            const x = 72 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 900;
-                            return <line key={`overlay-change-${point.asOfDate}`} x1={x} y1={26} x2={x} y2={286} stroke="#d4ccbf" strokeWidth={1} strokeDasharray="2 4" opacity={0.4} />;
-                          })}
-
-                          <line x1={72} y1={286} x2={972} y2={286} stroke="#b8afa1" strokeWidth={1} />
-                          {axisTicks.map((tick) => {
-                            const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900);
-                            return (
-                              <g key={`overlay-x-${tick.index}`}>
-                                <line x1={x} y1={286} x2={x} y2={290} stroke="#b8afa1" strokeWidth={1} />
-                                <text x={x} y={311} textAnchor="middle" fontSize={11} fill="#d6cfc4">{tick.label}</text>
-                              </g>
-                            );
-                          })}
-                        </svg>
-                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#d6cfc4", marginTop: 4 }}>
-                          <span><strong style={{ color: "#9fc4a4" }}>Growth</strong> (Weak/Neutral/Strong)</span>
-                          <span><strong style={{ color: "#c6a87b" }}>Stress</strong> (Low/Medium/High)</span>
-                          <span><strong style={{ color: "#b59db0" }}>Hard Asset</strong> (Weak/Neutral/Strong)</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedOverlaySegment && (
-                      <div style={{ marginTop: 8, fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
-                        <strong>{selectedOverlaySegment.overlay}</strong>: <strong>{selectedOverlaySegment.value}</strong> · {selectedOverlaySegment.startDate} → {selectedOverlaySegment.endDate} · {selectedOverlaySegment.pointCount} punkter<br />
-                        {selectedOverlaySegment.explanation}<br />
-                        Drivare: {selectedOverlaySegment.contributors.join(", ") || "Ej tillgängligt"}
-                      </div>
-                    )}
-
-                    <details style={{ marginTop: 8 }}>
-                      <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Debug: visa textintervall</summary>
-                      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>Growth</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {overlayIntervals.growth.map((interval) => (
-                              <span key={`ov-growth-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("growth", interval.value) }}>
-                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>Stress</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {overlayIntervals.stress.map((interval) => (
-                              <span key={`ov-stress-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("stress", interval.value) }}>
-                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>Hard Asset</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {overlayIntervals.hardAsset.map((interval) => (
-                              <span key={`ov-hard-debug-${interval.startDate}-${interval.endDate}-${interval.value}`} style={{ fontSize: 12, padding: "4px 8px", borderRadius: 999, background: overlayColor("hard_asset", interval.value) }}>
-                                {interval.startDate} → {interval.endDate}: {interval.value} ({interval.pointCount})
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </details>
-                  </div>
+                  <h5>3) Legacy Overlay Timelines</h5>
+                  <div className="status" style={{ marginBottom: 8 }}>Legacy overlay-tidslinjer och debug finns i Admin.</div>
 
                   <details>
                     <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 600 }}>▸ 4) Regime Change Log</summary>
@@ -1330,8 +1860,17 @@ Signal: ${gapLabel}`,
             </details>
           )}
 
-          <details style={{ marginTop: 14 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 600 }}>🔧 Pipeline Debug</summary>
+          <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 12px", marginTop: 12, background: "#f8fafc" }}>
+            <h4 style={{ marginTop: 0 }}>Legacy Debug</h4>
+            <ul>
+              <li>growth={globalMacro?.regime.growthOverlay ?? "—"}, stress={globalMacro?.regime.stressOverlay ?? "—"}, hard_asset={globalMacro?.regime.hardAssetOverlay ?? "—"}</li>
+              <li>Legacy overlay intervals — growth: {overlayIntervals.growth.length}, stress: {overlayIntervals.stress.length}, hard_asset: {overlayIntervals.hardAsset.length}</li>
+              <li>Latest growth interval end: {latestOverlayDate(overlayIntervals.growth)}</li>
+              <li>Latest stress interval end: {latestOverlayDate(overlayIntervals.stress)}</li>
+              <li>Latest hard asset interval end: {latestOverlayDate(overlayIntervals.hardAsset)}</li>
+            </ul>
+
+            <ExpandablePanel title="Pipeline / Snapshot / Ingestion / Source Debug" defaultOpen={false}>
             <div style={{ marginTop: 10 }}>
               <h4>Snapshot status</h4>
               <ul>
@@ -1586,7 +2125,13 @@ Signal: ${gapLabel}`,
                 </table>
               </div>
 
-              {debugEnabled && (
+            </div>
+            </ExpandablePanel>
+          </section>
+
+          <AdminSection>
+            {debugEnabled ? (
+              <>
                 <div style={{ marginBottom: 8 }}>
                   <label htmlFor="macro-admin-secret-input" style={{ display: "block", marginBottom: 4 }}>Admin secret (for debug actions)</label>
                   <input
@@ -1598,58 +2143,38 @@ Signal: ${gapLabel}`,
                     style={{ width: "100%", marginBottom: 8 }}
                   />
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "US")}> 
-                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "US")}> 
-                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("US")}>
-                      {engineRunning ? "Running engine..." : "Run engine (US)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "EA")}>
-                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (EA)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "EA")}>
-                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (EA)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("EA")}>
-                      {engineRunning ? "Running engine..." : "Run engine (EA)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "SE")}>
-                      {ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (SE)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "SE")}>
-                      {ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (SE)"}
-                    </button>
-                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("SE")}>
-                      {engineRunning ? "Running engine..." : "Run engine (SE)"}
-                    </button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "US")}>{ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "US")}>{ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("US")}>{engineRunning ? "Running engine..." : "Run engine (US)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "EA")}>{ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (EA)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "EA")}>{ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (EA)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("EA")}>{engineRunning ? "Running engine..." : "Run engine (EA)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("backfill", "SE")}>{ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (SE)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runIngest("latest", "SE")}>{ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (SE)"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning} onClick={() => void runEngine("SE")}>{engineRunning ? "Running engine..." : "Run engine (SE)"}</button>
                   </div>
                 </div>
-              )}
 
-              {ingestRunResult && (
-                <div>
-                  <h4>Last manual ingest test result</h4>
-                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(ingestRunResult, null, 2)}</pre>
-                </div>
-              )}
-              {engineRunResult && (
-                <div>
-                  <h4>Last manual engine run result</h4>
-                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(engineRunResult, null, 2)}</pre>
-                </div>
-              )}
+                {ingestRunResult && (
+                  <div>
+                    <h4>Last manual ingest test result</h4>
+                    <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(ingestRunResult, null, 2)}</pre>
+                  </div>
+                )}
+                {engineRunResult && (
+                  <div>
+                    <h4>Last manual engine run result</h4>
+                    <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(engineRunResult, null, 2)}</pre>
+                  </div>
+                )}
 
-              {debugEnabled && (
-                <>
-                  <h4>Raw payload (?debug=1)</h4>
-                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(globalMacroRaw, null, 2)}</pre>
-                </>
-              )}
-            </div>
-          </details>
+                <h4>Raw payload (?debug=1)</h4>
+                <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(globalMacroRaw, null, 2)}</pre>
+              </>
+            ) : (
+              <div className="status">Admin actions kräver <code>?debug=1</code> i URL.</div>
+            )}
+          </AdminSection>
         </div>
       </div>
     </div>

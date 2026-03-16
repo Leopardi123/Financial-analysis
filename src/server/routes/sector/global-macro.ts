@@ -6,6 +6,24 @@ import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
 import { runAndPersistMacroSnapshots } from "../../../lib/macro/pipeline.js";
 import { computeMacroRegimeHistory, type HistoryResolution } from "../../../lib/macro/history.js";
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
+import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
+
+const REGIONAL_OVERLAY_KEYS = [
+  "liquidityOverlay",
+  "creditFundingOverlay",
+  "energyShockOverlay",
+  "localUnrestOverlay",
+  "safeHavenRiskOffOverlay",
+  "inflationCostShockOverlay",
+  "tradeSupplyChainStressOverlay",
+] as const;
+
+const GLOBAL_OVERLAY_KEYS = ["globalUnrestOverlay"] as const;
+
+type OverlayHistoryPoint = {
+  asOfDate: string;
+  scores: Record<string, number | null>;
+};
 
 type RegimeSnapshotRow = {
   as_of_date: string;
@@ -257,6 +275,83 @@ async function loadInflationAnalysis(region: "US" | "EA" | "SE"): Promise<Inflat
 }
 
 
+
+
+
+
+function parseUiOverlayKeysRequested(raw: unknown) {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  if (!value) return [] as string[];
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+async function loadRawSeriesRows(region: string) {
+  return (await query(
+    `SELECT series_key, date, value
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto'
+     ORDER BY series_key ASC, date ASC`,
+    [region],
+  )) as unknown as RawSeriesPointRow[];
+}
+
+function buildRegionalOverlayHistory(params: {
+  region: "US" | "EA" | "SE";
+  rawSeriesRows: RawSeriesPointRow[];
+  maxPoints?: number;
+}): OverlayHistoryPoint[] {
+  const monthKeys = Array.from(new Set(params.rawSeriesRows.map((row) => String(row.date).slice(0, 7))))
+    .sort((a, b) => a.localeCompare(b));
+  const selectedMonths = monthKeys.slice(-Math.max(1, params.maxPoints ?? 24));
+  const out: OverlayHistoryPoint[] = [];
+
+  for (const month of selectedMonths) {
+    const asOfDate = `${month}-28`;
+    const filteredRows = params.rawSeriesRows.filter((row) => String(row.date).slice(0, 10) <= asOfDate);
+    const bundle = buildRegionalOverlays(params.region, asOfDate, buildSeriesMap(filteredRows));
+    const scores = Object.fromEntries(
+      Object.entries(bundle.overlays).map(([key, value]) => [key, value.score ?? null]),
+    );
+    out.push({ asOfDate, scores });
+  }
+
+  return out;
+}
+
+function buildGlobalUnrestOverlayHistoryFromRegional(params: {
+  usHistory: OverlayHistoryPoint[];
+  eaHistory: OverlayHistoryPoint[];
+}): OverlayHistoryPoint[] {
+  const eaByDate = new Map(params.eaHistory.map((point) => [point.asOfDate, point]));
+  const out: OverlayHistoryPoint[] = [];
+
+  for (const usPoint of params.usHistory) {
+    const eaPoint = eaByDate.get(usPoint.asOfDate);
+    if (!eaPoint) continue;
+    const pseudoUsBundle = {
+      region: "US",
+      asOfDate: usPoint.asOfDate,
+      overlays: {
+        localUnrestOverlay: { score: usPoint.scores.localUnrestOverlay ?? null },
+        safeHavenRiskOffOverlay: { score: usPoint.scores.safeHavenRiskOffOverlay ?? null },
+        energyShockOverlay: { score: usPoint.scores.energyShockOverlay ?? null },
+      },
+    } as any;
+    const pseudoEaBundle = {
+      region: "EA",
+      asOfDate: eaPoint.asOfDate,
+      overlays: {
+        localUnrestOverlay: { score: eaPoint.scores.localUnrestOverlay ?? null },
+        safeHavenRiskOffOverlay: { score: eaPoint.scores.safeHavenRiskOffOverlay ?? null },
+        energyShockOverlay: { score: eaPoint.scores.energyShockOverlay ?? null },
+      },
+    } as any;
+    const global = buildGlobalUnrestOverlay(usPoint.asOfDate, pseudoUsBundle, pseudoEaBundle);
+    out.push({ asOfDate: usPoint.asOfDate, scores: { globalUnrestOverlay: global.score ?? null } });
+  }
+
+  return out;
+}
 
 function buildRegimeExplanation(label: string, topDrivers: Array<{ title?: string; indicatorId: string }>) {
   const driverHighlights = topDrivers.slice(0, 3).map((driver) => driver.title ?? driver.indicatorId);
@@ -594,7 +689,7 @@ async function getGoldSourceDiagnostics(region: string) {
   };
 }
 
-async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
+async function readLatestSnapshot(region: string, allowLiveFallback: boolean, uiOverlayKeysRequested: string[]) {
   const regimeRows = (await query(
     `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
@@ -791,6 +886,10 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
     .filter((item): item is NonNullable<typeof item> => item !== null)
     .slice(0, 5);
 
+  const rawSeriesRows = await loadRawSeriesRows(region);
+  const seriesMap = buildSeriesMap(rawSeriesRows);
+  const overlayBundle = buildRegionalOverlays(region as "US" | "EA" | "SE", regimeRow.as_of_date, seriesMap);
+
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
     rootCauseHints.push("No raw datapoints found");
@@ -833,6 +932,50 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
         regimeRow.core_regime_label,
         normalizedTopDrivers.map((driver) => ({ indicatorId: driver.indicatorId, title: driver.title })),
       ),
+    },
+    overlayBundle,
+    overlays: overlayBundle,
+    overlayHistory: buildRegionalOverlayHistory({
+      region: region as "US" | "EA" | "SE",
+      rawSeriesRows,
+      maxPoints: 24,
+    }),
+    overlayEngineDiagnostics: (() => {
+      const overlaysReturned = Object.keys(overlayBundle.overlays);
+      const overlaysMissing = [...REGIONAL_OVERLAY_KEYS].filter((key) => !overlaysReturned.includes(key));
+      const history = buildRegionalOverlayHistory({ region: region as "US" | "EA" | "SE", rawSeriesRows, maxPoints: 24 });
+      const historyBuiltFor = overlaysReturned.filter((overlayKey) => history.some((point) => typeof point.scores[overlayKey] === "number"));
+      const historyMissingFor = overlaysReturned.filter((overlayKey) => !historyBuiltFor.includes(overlayKey));
+      const reasons: string[] = [];
+      if (rawSeriesRows.length === 0) reasons.push("No raw series rows available for region");
+      for (const [overlayKey, overlay] of Object.entries(overlayBundle.overlays)) {
+        if (typeof overlay.score !== "number") reasons.push(`${overlayKey}: score is null; all included components missing/proxy or insufficient history`);
+      }
+      return {
+        region,
+        rawSeriesCount: new Set(rawSeriesRows.map((row) => row.series_key)).size,
+        rawSeriesKeysSample: Array.from(new Set(rawSeriesRows.map((row) => row.series_key))).sort().slice(0, 25),
+        buildersRun: [...REGIONAL_OVERLAY_KEYS],
+        overlaysReturned,
+        overlaysMissing,
+        historyBuiltFor,
+        historyMissingFor,
+        reasons,
+      };
+    })(),
+    overlayRuntimeProof: {
+      overlayEngineUsed: true,
+      bundlePresent: Boolean(overlayBundle && Object.keys(overlayBundle.overlays).length > 0),
+      bundleKeys: Object.keys(overlayBundle.overlays),
+      regionKeysPresent: Object.keys(overlayBundle.overlays),
+      globalKeysPresent: [],
+    },
+    overlayRoutingDiagnostics: {
+      overlayEngineUsed: true,
+      overlayBundleKeys: Object.keys(overlayBundle.overlays),
+      expectedOverlayBundleKeys: [...REGIONAL_OVERLAY_KEYS],
+      legacyOverlayKeys: ["growthOverlay", "stressOverlay", "hardAssetOverlay"],
+      uiOverlayKeysRequested,
     },
     indicators,
     dataStatus: indicators.length > 0 ? "snapshot" : "insufficient",
@@ -901,8 +1044,8 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean) {
 }
 
 
-async function readLatestGlobalSnapshot(allowLiveFallback: boolean) {
-  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback)] as const));
+async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKeysRequested: string[]) {
+  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested)] as const));
   const regionalMap = Object.fromEntries(regionalSnapshots);
   const asOfDate = MACRO_REGIONS
     .map((region) => regionalMap[region]?.regime?.asOfDate ?? null)
@@ -924,8 +1067,59 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean) {
     title: `[${driver.region}] ${driver.title}`,
   }));
 
+  const globalOverlayBundle = {
+    region: "GLOBAL",
+    asOfDate,
+    overlays: {
+      globalUnrestOverlay: buildGlobalUnrestOverlay(asOfDate, regionalMap.US?.overlays ?? null, regionalMap.EA?.overlays ?? null),
+    },
+  };
+
   return {
     regime: { ...regime, topDrivers: globalDrivers },
+    overlayBundle: globalOverlayBundle,
+    overlays: globalOverlayBundle,
+    overlayHistory: buildGlobalUnrestOverlayHistoryFromRegional({
+      usHistory: regionalMap.US?.overlayHistory ?? [],
+      eaHistory: regionalMap.EA?.overlayHistory ?? [],
+    }),
+    overlayRuntimeProof: {
+      overlayEngineUsed: true,
+      bundlePresent: Boolean(globalOverlayBundle && Object.keys(globalOverlayBundle.overlays).length > 0),
+      bundleKeys: Object.keys(globalOverlayBundle.overlays),
+      regionKeysPresent: [],
+      globalKeysPresent: Object.keys(globalOverlayBundle.overlays),
+    },
+    overlayRoutingDiagnostics: {
+      overlayEngineUsed: true,
+      overlayBundleKeys: Object.keys(globalOverlayBundle.overlays),
+      expectedOverlayBundleKeys: [...GLOBAL_OVERLAY_KEYS],
+      legacyOverlayKeys: ["growthOverlay", "stressOverlay", "hardAssetOverlay"],
+      uiOverlayKeysRequested,
+    },
+    overlayEngineDiagnostics: {
+      region: "GLOBAL",
+      rawSeriesCount: (regionalMap.US?.overlayEngineDiagnostics?.rawSeriesCount ?? 0) + (regionalMap.EA?.overlayEngineDiagnostics?.rawSeriesCount ?? 0),
+      rawSeriesKeysSample: [
+        ...((regionalMap.US?.overlayEngineDiagnostics?.rawSeriesKeysSample ?? []) as string[]),
+        ...((regionalMap.EA?.overlayEngineDiagnostics?.rawSeriesKeysSample ?? []) as string[]),
+      ].slice(0, 25),
+      buildersRun: [...GLOBAL_OVERLAY_KEYS],
+      overlaysReturned: Object.keys(globalOverlayBundle.overlays),
+      overlaysMissing: [],
+      historyBuiltFor: buildGlobalUnrestOverlayHistoryFromRegional({
+        usHistory: regionalMap.US?.overlayHistory ?? [],
+        eaHistory: regionalMap.EA?.overlayHistory ?? [],
+      }).length > 0 ? ["globalUnrestOverlay"] : [],
+      historyMissingFor: buildGlobalUnrestOverlayHistoryFromRegional({
+        usHistory: regionalMap.US?.overlayHistory ?? [],
+        eaHistory: regionalMap.EA?.overlayHistory ?? [],
+      }).length > 0 ? [] : ["globalUnrestOverlay"],
+      reasons: [
+        ...(regionalMap.US?.overlayEngineDiagnostics?.reasons ?? []),
+        ...(regionalMap.EA?.overlayEngineDiagnostics?.reasons ?? []),
+      ],
+    },
     indicators,
     dataStatus: "snapshot",
     writePolicy: "read_only",
@@ -962,6 +1156,7 @@ export default async function handler(req: any, res: any) {
   const region = String(req.query?.region ?? "GLOBAL").toUpperCase();
   const allowLiveFallback = String(req.query?.fallbackLive ?? "1") === "1";
   const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
+  const uiOverlayKeysRequested = parseUiOverlayKeysRequested(req.query?.uiOverlayKeysRequested);
   const historyRangeRaw = String(req.query?.historyRangeYears ?? (historyResolution === "MONTHLY" ? "20" : "3")).toUpperCase();
   const historyRangeYears = historyRangeRaw === "MAX"
     ? "MAX"
@@ -970,7 +1165,7 @@ export default async function handler(req: any, res: any) {
       : (historyResolution === "MONTHLY" ? 20 : 3);
 
   if (region === "GLOBAL") {
-    const snapshot = await readLatestGlobalSnapshot(allowLiveFallback);
+    const snapshot = await readLatestGlobalSnapshot(allowLiveFallback, uiOverlayKeysRequested);
     const history = await computeMacroRegimeHistory({
       region: "GLOBAL",
       resolution: historyResolution as HistoryResolution,
@@ -984,7 +1179,7 @@ export default async function handler(req: any, res: any) {
     ? await loadInflationAnalysis(region)
     : null;
 
-  const snapshot = await readLatestSnapshot(region, allowLiveFallback);
+  const snapshot = await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested);
   if (snapshot) {
     const history = await computeMacroRegimeHistory({
       region,
@@ -1015,7 +1210,7 @@ export default async function handler(req: any, res: any) {
   }
 
   const live = await runAndPersistMacroSnapshots({ region });
-  const fallbackSnapshot = await readLatestSnapshot(region, allowLiveFallback);
+  const fallbackSnapshot = await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested);
 
   if (!fallbackSnapshot) {
     const history = await computeMacroRegimeHistory({
