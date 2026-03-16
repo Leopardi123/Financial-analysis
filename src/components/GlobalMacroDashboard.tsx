@@ -1529,9 +1529,13 @@ Signal: ${gapLabel}`,
                         });
 
                         const blockChecks = blockEntries.map(([block, score]) => {
-                          if (row.overlayKey === "liquidityOverlay" && block === "quantity") {
-                            const status = verification?.quantityAggregation?.aggregationValidationStatus ?? (typeof score === "number" ? "pass" : "fail");
-                            return { block, pass: status === "pass" || status === "partial", status };
+                          if (row.overlayKey === "liquidityOverlay") {
+                            const runtimeInputs = ((row.overlay as any)?.runtime?.blockAggregationInputs?.[block] ?? []) as Array<{ signalStatus?: string }>;
+                            const hasIncompleteSignals = runtimeInputs.some((item: { signalStatus?: string }) => item.signalStatus !== "ok");
+                            if (typeof score === "number") {
+                              return { block, pass: true, status: hasIncompleteSignals ? "partial" : "pass" };
+                            }
+                            return { block, pass: false, status: hasIncompleteSignals ? "partial" : "fail" };
                           }
                           const blockSignals = components.filter((component) => component.block === block);
                           const valid = blockSignals.filter((component) => !component.missing && typeof component.score === "number");
