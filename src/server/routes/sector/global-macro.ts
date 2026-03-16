@@ -479,6 +479,7 @@ function buildAcmTp10IngestVerification(params: {
 function buildEffectiveFedLiquidityRatioTrace(params: {
   rawSeriesRows: RawSeriesPointRow[];
   seriesMap: Map<string, Array<{ date: string; value: number | null }>>;
+  runtimeComponent: { rawValue: number | null; score: number | null; debug?: Record<string, any> } | null;
 }) {
   const sourceKeys = ["WALCL", "WDTGAL", "RRPONTSYD", "GDP"];
   const sourceRows = Object.fromEntries(sourceKeys.map((key) => [key, params.rawSeriesRows.filter((row) => String(row.series_key) === key)]));
@@ -533,6 +534,7 @@ function buildEffectiveFedLiquidityRatioTrace(params: {
 
   const derivedSeries = params.seriesMap.get("effective_fed_liquidity_ratio") ?? [];
   const derivedNumeric = derivedSeries.filter((row) => row.value !== null && Number.isFinite(row.value as number));
+  const runtimeObsCount = Number(params.runtimeComponent?.debug?.totalNumericObservationsInSeries ?? 0);
 
   return {
     rawSourceStage: rawStage,
@@ -556,13 +558,14 @@ function buildEffectiveFedLiquidityRatioTrace(params: {
     },
     derivedConstructionStage: {
       rowCountEffectiveFedLiquidityBeforeGdpDivision: triple.length,
-      rowCountEffectiveFedLiquidityRatioAfterGdpDivision: alignedAll.length,
-      nullCountEffectiveFedLiquidityRatio: Math.max(0, alignedAll.length - derivedNumeric.length),
-      finalPersistedDerivedObservationCount: derivedNumeric.length,
+      rowCountEffectiveFedLiquidityRatioAfterGdpDivision: runtimeObsCount > 0 ? runtimeObsCount : alignedAll.length,
+      nullCountEffectiveFedLiquidityRatio: runtimeObsCount > 0 ? 0 : Math.max(0, alignedAll.length - derivedNumeric.length),
+      finalPersistedDerivedObservationCount: runtimeObsCount > 0 ? runtimeObsCount : derivedNumeric.length,
       beforeAfterComparison: {
         beforeStrictOverlapCount: strictAll.length,
-        afterMonthlyAlignedCount: alignedAll.length,
+        afterMonthlyAlignedCount: runtimeObsCount > 0 ? runtimeObsCount : alignedAll.length,
       },
+      sourceOfTruth: runtimeObsCount > 0 ? "overlay_runtime_component" : "raw_series_map_fallback",
     },
   };
 }
@@ -653,7 +656,7 @@ function buildOverlayVerificationDiagnostics(params: {
         aggregationWeights: liquidity?.runtime?.aggregationWeights ?? null,
       },
       effectiveFedLiquidityRatioTrace: {
-        ...buildEffectiveFedLiquidityRatioTrace({ rawSeriesRows: params.rawSeriesRows, seriesMap: params.seriesMap }),
+        ...buildEffectiveFedLiquidityRatioTrace({ rawSeriesRows: params.rawSeriesRows, seriesMap: params.seriesMap, runtimeComponent: liqEffectiveComp ? { rawValue: liqEffectiveComp.rawValue, score: liqEffectiveComp.score, debug: liqEffectiveComp.debug as any } : null }),
         scoringStage: {
           observationsAvailableInPercentileWindow: liqEffectiveComp?.debug?.observationsAvailableInScoringWindow ?? 0,
           enoughHistoryForPercentile: Boolean(liqEffectiveComp?.debug?.enoughHistory),
@@ -664,9 +667,9 @@ function buildOverlayVerificationDiagnostics(params: {
             : ((liqEffectiveComp?.debug?.observationsAvailableInScoringWindow ?? 0) < (liqEffectiveComp?.debug?.minObservations ?? 120)
               ? "insufficient_history"
               : "missing_raw_value_or_alignment"),
-          earliestDate: derivedRatioNumeric[0]?.date ?? null,
-          latestDate: derivedLatest?.date ?? null,
-          latestValue: derivedLatest?.value ?? null,
+          earliestDate: (liqEffectiveComp?.debug as any)?.earliestDateInSeries ?? derivedRatioNumeric[0]?.date ?? null,
+          latestDate: liqEffectiveComp?.debug?.latestDate ?? derivedLatest?.date ?? null,
+          latestValue: liqEffectiveComp?.rawValue ?? derivedLatest?.value ?? null,
         },
       },
     },

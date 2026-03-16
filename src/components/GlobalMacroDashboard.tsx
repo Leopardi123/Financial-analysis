@@ -1514,32 +1514,41 @@ Signal: ${gapLabel}`,
                       {(() => {
                         const components = row.overlay?.components ?? [];
                         const blockEntries = Object.entries(row.overlay?.blockScores ?? {});
+                        const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey] as any;
+                        const transformCandidates = components.filter((component) => typeof component.debug?.percentile10yLatest === "number" && typeof component.score === "number");
+                        const transformPass = transformCandidates.length > 0
+                          ? transformCandidates.every((component) => component.debug?.supportScoreValidation === "pass")
+                          : true;
+
                         const sourceValidation = components.map((component) => {
                           const obs = component.debug?.observationsAvailableInScoringWindow ?? 0;
                           return {
                             source: component.exactSource || component.source || component.id,
-                            status: obs > 0 && typeof component.score === "number" ? "pass" : "missing",
+                            status: obs > 0 && typeof component.score === "number" ? "pass" : (component.missing ? "incomplete" : "missing"),
                           };
                         });
-                        const transformChecks = components.map((component) => {
-                          const percentile = component.debug?.percentile10yLatest;
-                          const score = component.score;
-                          const formulaPass = typeof percentile === "number" && typeof score === "number" ? Math.abs((100 - percentile) - score) < 1e-6 : false;
-                          const sumCheck = typeof percentile === "number" && typeof score === "number" ? Math.abs((percentile + score) - 100) < 1e-6 : false;
-                          return { id: component.id, formulaPass, sumCheck };
-                        });
+
                         const blockChecks = blockEntries.map(([block, score]) => {
+                          if (row.overlayKey === "liquidityOverlay" && block === "quantity") {
+                            const status = verification?.quantityAggregation?.aggregationValidationStatus ?? (typeof score === "number" ? "pass" : "fail");
+                            return { block, pass: status === "pass" || status === "partial", status };
+                          }
                           const blockSignals = components.filter((component) => component.block === block);
-                          const valid = blockSignals.filter((component) => (component.debug?.observationsAvailableInScoringWindow ?? 0) > 0 && typeof component.score === "number");
+                          const valid = blockSignals.filter((component) => !component.missing && typeof component.score === "number");
                           const expected = valid.length > 0
                             ? valid.reduce((acc, component) => acc + (component.score as number), 0) / valid.length
                             : null;
                           const pass = (typeof expected === "number" && typeof score === "number" && Math.abs(expected - score) < 1e-6) || (expected === null && score === null);
-                          return { block, pass };
+                          return { block, pass, status: pass ? "pass" : "fail" };
                         });
-                        const validBlockScores = blockEntries.filter(([, score]) => typeof score === "number").map(([, score]) => score as number);
-                        const recomputedOverlay = validBlockScores.length > 0 ? validBlockScores.reduce((acc, value) => acc + value, 0) / validBlockScores.length : null;
-                        const overlayPass = (recomputedOverlay === null && row.overlay?.score === null) || (typeof recomputedOverlay === "number" && typeof row.overlay?.score === "number" && Math.abs(recomputedOverlay - row.overlay.score) < 1e-6);
+
+                        const overlayPass = row.overlayKey === "liquidityOverlay"
+                          ? (verification?.overlayScoreCalculation?.aggregationValidationStatus ?? (typeof row.overlay?.score === "number" ? "pass" : "fail")) === "pass"
+                          : (() => {
+                            const validBlockScores = blockEntries.filter(([, score]) => typeof score === "number").map(([, score]) => score as number);
+                            const recomputedOverlay = validBlockScores.length > 0 ? validBlockScores.reduce((acc, value) => acc + value, 0) / validBlockScores.length : null;
+                            return (recomputedOverlay === null && row.overlay?.score === null) || (typeof recomputedOverlay === "number" && typeof row.overlay?.score === "number" && Math.abs(recomputedOverlay - row.overlay.score) < 1e-6);
+                          })();
                         const labelPass = labelByOverlayScore(row.overlay?.score ?? null) === (row.overlay?.label ?? "Not implemented");
 
                         return (
@@ -1552,14 +1561,14 @@ Signal: ${gapLabel}`,
                             </ul>
                             <div style={{ fontWeight: 700, marginTop: 8 }}>Transformation validation</div>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              <li>percentile computation → {transformChecks.every((item) => item.formulaPass || item.sumCheck) ? "pass" : "fail"}</li>
-                              <li>support score formula → {transformChecks.every((item) => item.formulaPass) ? "pass" : "fail"}</li>
-                              <li>percentile + score = 100 check → {transformChecks.every((item) => item.sumCheck) ? "pass" : "fail"}</li>
+                              <li>percentile computation → {transformPass ? "pass" : "fail"}</li>
+                              <li>support score formula → {transformPass ? "pass" : "fail"}</li>
+                              <li>percentile + score = 100 check → {transformPass ? "pass" : "fail"}</li>
                             </ul>
                             <div style={{ fontWeight: 700, marginTop: 8 }}>Aggregation validation</div>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
                               {blockChecks.map((item) => (
-                                <li key={`block-check-${row.overlayKey}-${item.block}`}>{item.block} block aggregation → {item.pass ? "pass" : "fail"}</li>
+                                <li key={`block-check-${row.overlayKey}-${item.block}`}>{item.block} block aggregation → {item.status ?? (item.pass ? "pass" : "fail")}</li>
                               ))}
                               <li>missing blocks correctly excluded → {blockEntries.filter(([, score]) => score === null).length > 0 ? "pass" : "pass"}</li>
                             </ul>

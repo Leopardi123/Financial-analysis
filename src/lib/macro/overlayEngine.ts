@@ -34,6 +34,8 @@ type OverlayComponent = {
     supportScoreValidation?: "pass" | "fail";
     supportScore: number | null;
     signalStatus: "ok" | "missing" | "incomplete";
+    totalNumericObservationsInSeries: number;
+    earliestDateInSeries: string | null;
     last5MonthlyPointsInWindow: Array<{ date: string; value: number }>;
   };
 };
@@ -241,6 +243,7 @@ function makeComponent(params: {
   const windowPoints = latestMonth
     ? monthly.filter((p) => monthKey(p.date) <= latestMonth).slice(-120)
     : [];
+  const numericSeriesPoints = monthly.filter((p): p is { date: string; value: number } => typeof p.value === "number" && Number.isFinite(p.value));
   const windowNumericPoints = windowPoints.filter((p): p is { date: string; value: number } => typeof p.value === "number" && Number.isFinite(p.value));
   const observations = windowNumericPoints.length;
   const minObservations = params.minObservations ?? (params.useZ ? 24 : 24);
@@ -296,6 +299,8 @@ function makeComponent(params: {
       supportScoreValidation,
       supportScore,
       signalStatus,
+      totalNumericObservationsInSeries: numericSeriesPoints.length,
+      earliestDateInSeries: numericSeriesPoints[0]?.date ?? null,
       last5MonthlyPointsInWindow: windowNumericPoints.slice(-5),
     },
   };
