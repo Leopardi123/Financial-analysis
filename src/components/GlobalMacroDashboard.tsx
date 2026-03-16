@@ -25,12 +25,12 @@ type GlobalMacroPayload = {
   overlayBundle?: {
     region: string;
     asOfDate: string;
-    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; supportScoreValidation?: "pass" | "fail"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; }>;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; productionScore?: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; supportScoreValidation?: "pass" | "fail"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; runtime?: any; }>;
   };
   overlays?: {
     region: string;
     asOfDate: string;
-    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; supportScoreValidation?: "pass" | "fail"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; }>;
+    overlays: Record<string, { score: number | null; label: string; confidence: number; blockScores: Record<string, number | null>; components: Array<{ id: string; title: string; block: string; rawValue: number | null; score: number | null; productionScore?: number | null; weight: number; source: string; exactSource: string; freshnessDays: number | null; includedInTotal: boolean; missing: boolean; proxy: boolean; note: string; debug?: { latestDate: string | null; monthlyChosenDate: string | null; minObservations: number; observationsAvailableInScoringWindow: number; scoringWindowSize: number; enoughHistory: boolean; percentile10yLatest: number | null; normalizationMethod: "percentile10y" | "zscore_to_percentile"; inversionApplied: boolean; rawToScoreFormula: string; directionRulePlainText: string; supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress"; supportScoreValidation?: "pass" | "fail"; last5MonthlyPointsInWindow: Array<{ date: string; value: number }>; }; }>; runtime?: any; }>;
   };
   overlayHistory?: Array<{ asOfDate: string; scores: Record<string, number | null> }>;
   overlayRuntimeProof?: {
@@ -443,22 +443,30 @@ export default function GlobalMacroDashboard() {
       "localUnrestOverlay",
     ];
   const overlaySanity = overlayEntries.map(([overlayKey, overlay]) => {
-    const blockRows = Object.entries(overlay.blockScores ?? {}).map(([block, score]) => ({
+    const runtimeAny = overlay.runtime as any;
+    const productionValidBlockScores = runtimeAny?.productionValidBlockScores ?? overlay.blockScores ?? {};
+    const diagnosticBlockScores = runtimeAny?.diagnosticBlockScores ?? {};
+    const blockRows = Object.entries(productionValidBlockScores).map(([block, score]) => ({
       block,
       score: typeof score === "number" ? score : null,
+      diagnosticScore: typeof diagnosticBlockScores?.[block] === "number" ? diagnosticBlockScores[block] : null,
       components: (overlay.components ?? []).filter((component) => component.block === block),
     }));
-    const realBlocks = blockRows.filter((row) => row.score !== null && row.components.some((component) => !component.proxy && !component.missing)).length;
-    const proxyBlocks = blockRows.filter((row) => row.score !== null && row.components.every((component) => component.proxy || component.missing)).length;
-    const missingBlocks = blockRows.filter((row) => row.score === null).length;
-    const lowRobustness = realBlocks < 2 || (proxyBlocks / Math.max(1, blockRows.length)) > 0.6;
+    const activeProductionBlocks = typeof runtimeAny?.activeProductionBlockCount === "number"
+      ? runtimeAny.activeProductionBlockCount
+      : blockRows.filter((row) => row.score !== null).length;
+    const diagnosticOnlyBlocks = typeof runtimeAny?.diagnosticOnlyBlockCount === "number"
+      ? runtimeAny.diagnosticOnlyBlockCount
+      : blockRows.filter((row) => row.score === null && row.diagnosticScore !== null).length;
+    const missingBlocks = blockRows.filter((row) => row.score === null && row.diagnosticScore === null).length;
+    const lowRobustness = activeProductionBlocks < 2;
     const negative = (overlay.components ?? [])
-      .filter((component) => typeof component.score === "number")
-      .sort((a, b) => (a.score as number) - (b.score as number))
+      .filter((component) => typeof (component.productionScore ?? component.score) === "number")
+      .sort((a, b) => ((a.productionScore ?? a.score) as number) - ((b.productionScore ?? b.score) as number))
       .slice(0, 3)
-      .map((component) => `${component.id}:${(component.score as number).toFixed(1)}`);
-    const normalizationInputs = blockRows.map((row) => `${row.block}=${row.score === null ? "null" : row.score.toFixed(1)}`);
-    return { overlayKey, realBlocks, proxyBlocks, missingBlocks, lowRobustness, negative, normalizationInputs };
+      .map((component) => `${component.id}:${((component.productionScore ?? component.score) as number).toFixed(1)}`);
+    const normalizationInputs = blockRows.map((row) => `${row.block}=${row.score === null ? "null" : row.score.toFixed(1)} (diag:${row.diagnosticScore === null ? "null" : row.diagnosticScore.toFixed(1)})`);
+    return { overlayKey, activeProductionBlocks, diagnosticOnlyBlocks, missingBlocks, lowRobustness, negative, normalizationInputs };
   });
 
   type IntendedSeriesSpec = {
@@ -503,7 +511,7 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Credit and funding stress via HY/IG spreads, TED, xccy basis, and DRTSCILM-only access conditions.",
     },
     energyShockOverlay: {
-      intendedPrimaryBlocks: ["price", "spillover"],
+      intendedPrimaryBlocks: ["price", "breadth", "spillover"],
       intendedSeries: [
         { id: "oil_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["DCOILBRENTEU"], aliasFamily: ["oil_price", "dcoilbrenteu", "dcoilwtico"] },
         { id: "gas_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["NG / regional gas source"], aliasFamily: ["gas_price", "natural_gas", "ttf", "ng"] },
@@ -1371,8 +1379,8 @@ Signal: ${gapLabel}`,
                       <div key={`sanity-${item.overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
                         <div style={{ fontWeight: 700 }}>{item.overlayKey}</div>
                         <div>total score: {typeof activeOverlayBundle?.overlays?.[item.overlayKey]?.score === "number" ? activeOverlayBundle?.overlays?.[item.overlayKey]?.score?.toFixed(1) : "—"}</div>
-                        <div>active real blocks: {item.realBlocks}</div>
-                        <div>proxy blocks: {item.proxyBlocks}</div>
+                        <div>active production blocks: {item.activeProductionBlocks}</div>
+                        <div>diagnostic-only blocks: {item.diagnosticOnlyBlocks}</div>
                         <div>missing blocks: {item.missingBlocks}</div>
                         <div>dominant negative contributors: {item.negative.join(", ") || "—"}</div>
                         <div>normalization inputs: {item.normalizationInputs.join(" | ") || "—"}</div>
