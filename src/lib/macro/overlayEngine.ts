@@ -15,6 +15,7 @@ type OverlayComponent = {
   freshnessDays: number | null;
   includedInTotal: boolean;
   missing: boolean;
+  signalStatus: "ok" | "missing" | "incomplete";
   proxy: boolean;
   note: string;
   debug?: {
@@ -31,6 +32,8 @@ type OverlayComponent = {
     directionRulePlainText: string;
     supportInterpretation: "higher raw value means more stress" | "higher raw value means less stress";
     supportScoreValidation?: "pass" | "fail";
+    supportScore: number | null;
+    signalStatus: "ok" | "missing" | "incomplete";
     last5MonthlyPointsInWindow: Array<{ date: string; value: number }>;
   };
 };
@@ -47,6 +50,7 @@ type OverlayResult = {
     excludedBlocks: string[];
     aggregationWeights: Record<string, number>;
     scoreFormula: string;
+    blockAggregationInputs?: Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>;
   };
   bridgeDiagnostic?: {
     status: "available" | "missing";
@@ -245,12 +249,17 @@ function makeComponent(params: {
     if (z === null) return null;
     return Math.max(0, Math.min(100, 50 + z * 15));
   })() : percentile10yLatest(params.series, minObservations);
-  const base = percentile === null ? null : 100 - percentile;
-  const supportScoreValidation = percentile === null || base === null
+  const supportScore = percentile === null ? null : 100 - percentile;
+  const supportScoreValidation = percentile === null || supportScore === null
     ? "fail"
-    : Math.abs((base + percentile) - 100) < 1e-9
+    : Math.abs((supportScore + percentile) - 100) < 1e-9
       ? "pass"
       : "fail";
+  const signalStatus: "ok" | "missing" | "incomplete" = latest === null
+    ? "missing"
+    : percentile === null
+      ? "incomplete"
+      : "ok";
   const inversionPhrase = "support_score = 100 - percentile";
   const directionRulePlainText = "Higher normalized percentile maps to lower support score (uniform support-score convention).";
   return {
@@ -258,13 +267,14 @@ function makeComponent(params: {
     title: params.title,
     block: params.block,
     rawValue: latest?.value ?? null,
-    score: base,
+    score: supportScore,
     weight: params.weight,
     source: params.source,
     exactSource: params.exactSource,
     freshnessDays: freshnessDays(latest?.date ?? null, params.asOfDate),
-    includedInTotal: base !== null && !Boolean(params.proxy),
-    missing: base === null || Boolean(params.proxy),
+    includedInTotal: signalStatus === "ok" && !Boolean(params.proxy),
+    missing: signalStatus !== "ok" || Boolean(params.proxy),
+    signalStatus,
     proxy: Boolean(params.proxy),
     note: params.proxy
       ? `${params.note ? `${params.note} | ` : ""}blocked: non source-faithful runtime path (proxy/derived/inherited)`
@@ -283,6 +293,8 @@ function makeComponent(params: {
       directionRulePlainText,
       supportInterpretation: "higher raw value means more stress",
       supportScoreValidation,
+      supportScore,
+      signalStatus,
       last5MonthlyPointsInWindow: windowNumericPoints.slice(-5),
     },
   };
@@ -303,6 +315,7 @@ function enforceNumericComponentInvariant(component: OverlayComponent): OverlayC
     score: null,
     includedInTotal: false,
     missing: true,
+    signalStatus: hasNumericRaw ? "incomplete" : "missing",
     note: [component.note, `compute failure: ${reasons.join(", ")}`].filter(Boolean).join(" | "),
   };
 }
@@ -374,9 +387,9 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       );
       const usGdp = getSeries(series, "GDP");
       const quantityComponents = [
-        makeComponent({ asOfDate, id: "effective_fed_liquidity_ratio", title: "Effective Fed liquidity ratio", block: "quantity", weight: 0.45, source: "FRED", exactSource: "(WALCL - WDTGAL - RRPONTSYD) / GDP", series: region === "US" ? divideAlignedSeries(usEffectiveFedLiquidity, usGdp) : getSeries(series, "ILM.W.U2.C.T000000.Z5.Z01") }),
-        makeComponent({ asOfDate, id: "m2_ratio", title: "M2 ratio", block: "quantity", weight: 0.3, source: "FRED/ECB", exactSource: region === "US" ? "M2SL/GDP" : "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E / NAQ_10_GDP", series: region === "US" ? divideAlignedSeries(getSeries(series, "M2SL"), usGdp) : getSeries(series, "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E") }),
-        makeComponent({ asOfDate, id: "bank_credit_ratio", title: "Bank credit ratio", block: "quantity", weight: 0.25, source: "FRED/ECB", exactSource: region === "US" ? "TOTBKCR/GDP" : "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A", series: region === "US" ? divideAlignedSeries(getSeries(series, "TOTBKCR"), usGdp) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A"), proxy: region !== "US", note: region === "EA" ? "Growth proxy per spec" : "" }),
+        makeComponent({ asOfDate, id: "effective_fed_liquidity_ratio", title: "Effective Fed liquidity ratio", block: "quantity", weight: 0.45, source: "FRED", exactSource: "(WALCL - WDTGAL - RRPONTSYD) / GDP", series: region === "US" ? divideAlignedSeries(usEffectiveFedLiquidity, usGdp) : getSeries(series, "ILM.W.U2.C.T000000.Z5.Z01"), minObservations: 120, note: "Constructed internally from WALCL, WDTGAL, RRPONTSYD, then divided by GDP." }),
+        makeComponent({ asOfDate, id: "m2_ratio", title: "M2 ratio", block: "quantity", weight: 0.3, source: "FRED/ECB", exactSource: region === "US" ? "M2SL/GDP" : "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E / NAQ_10_GDP", series: region === "US" ? divideAlignedSeries(getSeries(series, "M2SL"), usGdp) : getSeries(series, "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E"), minObservations: 120 }),
+        makeComponent({ asOfDate, id: "bank_credit_ratio", title: "Bank credit ratio", block: "quantity", weight: 0.25, source: "FRED/ECB", exactSource: region === "US" ? "TOTBKCR/GDP" : "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A", series: region === "US" ? divideAlignedSeries(getSeries(series, "TOTBKCR"), usGdp) : getSeries(series, "BSI.M.U2.Y.U.A20T.A.I.U2.2240.Z01.A"), minObservations: 120, proxy: region !== "US", note: region === "EA" ? "Growth proxy per spec" : "" }),
       ];
       const bridgeComponent = makeComponent({
         asOfDate,
@@ -385,10 +398,8 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
         block: "bridge",
         weight: 1,
         source: "FRED/CME",
-        exactSource: "DRTSCILM / cross-currency basis family",
-        series: getSeries(series, "DRTSCILM").length
-          ? getSeries(series, "DRTSCILM")
-          : getSeries(series, "EURUSD_XCCY_BASIS"),
+        exactSource: "EURUSD_XCCY_BASIS (cross-currency basis family)",
+        series: getSeries(series, "EURUSD_XCCY_BASIS"),
         invert: true,
         note: "Primary bridge source family only; missing if no xccy primary source exists.",
       });
@@ -418,8 +429,12 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
           ],
         },
       });
-      const quantityMissing = quantityComponents.some((component) => component.missing);
-      const transmissionMissing = result.blockScores.transmission === null;
+      const quantityMissing = quantityComponents.some((component) => component.signalStatus !== "ok");
+      const transmissionMissing = result.components.some((component) => component.block === "transmission" && component.signalStatus !== "ok");
+      const blockAggregationInputs = result.components.reduce<Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>>((acc, component) => {
+        (acc[component.block] ??= []).push({ signalId: component.id, signalStatus: component.signalStatus, score: component.score });
+        return acc;
+      }, {});
       return {
         ...result,
         runtime: {
@@ -428,6 +443,7 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
           excludedBlocks: ["bridge"],
           aggregationWeights: { quantity: 0.4, price: 0.35, transmission: 0.25 },
           scoreFormula: "score = 0.40 × quantity + 0.35 × price + 0.25 × transmission",
+          blockAggregationInputs,
         },
         bridgeDiagnostic: {
           status: bridgeComponent.missing ? "missing" : "available",

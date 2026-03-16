@@ -487,7 +487,7 @@ export default function GlobalMacroDashboard() {
         { id: "financial_conditions", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["NFCI"], aliasFamily: ["financial_conditions", "nfci", "fci"] },
         { id: "hy_spread", block: "price", linkedMacroFamily: "B_MONETARY", primarySources: ["BAMLH0A0HYM2"], aliasFamily: ["hy_spread", "bamlh0a0hym2", "high_yield_spread"] },
         { id: "credit_transmission", block: "transmission", linkedMacroFamily: "B_MONETARY", primarySources: ["DRTSCILM"], aliasFamily: ["credit_transmission", "drtscilm", "loan_standards"] },
-        { id: "xccy_basis_bridge", block: "bridge", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DRTSCILM / xccy-basis family"], aliasFamily: ["xccy_basis", "drtscilm", "bridge"] },
+        { id: "xccy_basis_bridge", block: "bridge", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["EURUSD_XCCY_BASIS"], aliasFamily: ["xccy_basis", "eurusd_xccy_basis", "bridge"] },
       ],
       logicSummary: "Likviditet, realränta, spread och kredittransmission driver overlayns kärna.",
     },
