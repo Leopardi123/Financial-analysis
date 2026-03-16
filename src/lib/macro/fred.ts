@@ -23,7 +23,15 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "PMETAUSDM", seriesKey: "industrial_metals_index", fallbackFredSeriesIds: ["PINDUUSDM", "PINDUINDEXM"] },
   { fredSeriesId: "PALLFNFUSDM", seriesKey: "commodity_index", fallbackFredSeriesIds: ["PALLFNFNFUSDM", "PALLFNFINDEXM"] },
   { fredSeriesId: "WALCL", seriesKey: "fed_balance_sheet_total" },
+  { fredSeriesId: "WALCL", seriesKey: "WALCL", latestLookbackMonths: 360, backfillLookbackYears: 80 },
+  { fredSeriesId: "WDTGAL", seriesKey: "WDTGAL", latestLookbackMonths: 360, backfillLookbackYears: 80 },
+  { fredSeriesId: "RRPONTSYD", seriesKey: "RRPONTSYD", latestLookbackMonths: 360, backfillLookbackYears: 80 },
+  { fredSeriesId: "TOTBKCR", seriesKey: "TOTBKCR" },
+  { fredSeriesId: "GDP", seriesKey: "GDP", latestLookbackMonths: 360, backfillLookbackYears: 80 },
+  { fredSeriesId: "DRTSCILM", seriesKey: "DRTSCILM", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "CCUSSP01USM650N", seriesKey: "EURUSD_XCCY_BASIS", latestLookbackMonths: 240, backfillLookbackYears: 30 },
   { fredSeriesId: "M2SL", seriesKey: "m2sl" },
+  { fredSeriesId: "M2SL", seriesKey: "M2SL" },
   { fredSeriesId: "DFII5", seriesKey: "real_yield_5y" },
   { fredSeriesId: "DGS3MO", seriesKey: "nominal_yield_3mo_us" },
   // backlog/unavailable: supply_chain_pressure removed from active US ingest until a verified FRED series is available.
@@ -194,6 +202,57 @@ function alignBinaryOperation(
     .filter((row) => row.value !== null);
 }
 
+
+
+function alignTernaryOperation(
+  first: Array<{ date: string; value: number | null }>,
+  second: Array<{ date: string; value: number | null }>,
+  third: Array<{ date: string; value: number | null }>,
+  op: (a: number, b: number, c: number) => number | null,
+): Array<{ date: string; value: number | null }> {
+  const secondByMonth = new Map(second.map((row) => [row.date.slice(0, 7), row.value]));
+  const thirdByMonth = new Map(third.map((row) => [row.date.slice(0, 7), row.value]));
+  return first
+    .map((row) => {
+      const b = secondByMonth.get(row.date.slice(0, 7));
+      const c = thirdByMonth.get(row.date.slice(0, 7));
+      if (row.value === null || b === null || b === undefined || c === null || c === undefined) return { date: row.date, value: null };
+      return { date: row.date, value: op(row.value, b, c) };
+    })
+    .filter((row) => row.value !== null);
+}
+
+function expandMonthlyByCarryForward(
+  points: Array<{ date: string; value: number | null }>,
+  startMonth: string,
+  endMonth: string,
+): Array<{ date: string; value: number | null }> {
+  const byMonth = new Map(points.map((point) => [point.date.slice(0, 7), point.value]));
+  const out: Array<{ date: string; value: number | null }> = [];
+  let cursor = new Date(`${startMonth}-01T00:00:00Z`);
+  const end = new Date(`${endMonth}-01T00:00:00Z`);
+  let latest: number | null = null;
+  while (cursor <= end) {
+    const month = cursor.toISOString().slice(0, 7);
+    if (byMonth.has(month)) latest = byMonth.get(month) ?? latest;
+    out.push({ date: `${month}-01`, value: latest });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return out;
+}
+
+function alignBinaryOperationWithCarryForwardRight(
+  left: Array<{ date: string; value: number | null }>,
+  right: Array<{ date: string; value: number | null }>,
+  op: (leftValue: number, rightValue: number) => number | null,
+): Array<{ date: string; value: number | null }> {
+  if (left.length === 0 || right.length === 0) return [];
+  const leftMonths = left.map((row) => row.date.slice(0, 7)).sort((a, b) => a.localeCompare(b));
+  const startMonth = leftMonths[0];
+  const endMonth = leftMonths[leftMonths.length - 1];
+  const rightExpanded = expandMonthlyByCarryForward(right, startMonth, endMonth);
+  return alignBinaryOperation(left, rightExpanded, op);
+}
 function computeYoY(points: Array<{ date: string; value: number | null }>): Array<{ date: string; value: number | null }> {
   if (points.length <= 12) return [];
   return points
@@ -307,6 +366,18 @@ export function buildDerivedSeries(inputs: Record<string, Array<{ date: string; 
 
   const fedBalanceSheet = monthlyInputs.fed_balance_sheet_total ?? [];
   if (fedBalanceSheet.length > 12) output.fed_balance_sheet_yoy = computeYoY(fedBalanceSheet);
+
+  const walcl = monthlyInputs.WALCL ?? [];
+  const wdtgal = monthlyInputs.WDTGAL ?? [];
+  const rrpontsyd = monthlyInputs.RRPONTSYD ?? [];
+  const gdp = monthlyInputs.GDP ?? [];
+  if (walcl.length > 0 && wdtgal.length > 0 && rrpontsyd.length > 0) {
+    output.effective_fed_liquidity = alignTernaryOperation(walcl, wdtgal, rrpontsyd, (a, b, c) => a - b - c);
+  }
+  const effectiveFedLiquidity = output.effective_fed_liquidity ?? [];
+  if (effectiveFedLiquidity.length > 0 && gdp.length > 0) {
+    output.effective_fed_liquidity_ratio = alignBinaryOperationWithCarryForwardRight(effectiveFedLiquidity, gdp, (liq, gdpValue) => (gdpValue === 0 ? null : liq / gdpValue));
+  }
 
   const m2 = monthlyInputs.m2sl ?? [];
   if (m2.length > 12) {
