@@ -149,6 +149,11 @@ function labelByScore(score: number | null): string {
 
 function getSeries(seriesMap: SeriesMap, key: string): Point[] { return seriesMap.get(key) ?? []; }
 
+
+function hasFiniteNumericValue(points: Point[]): boolean {
+  return points.some((point) => typeof point.value === "number" && Number.isFinite(point.value));
+}
+
 function makeComponent(params: {
   id: string; title: string; block: string; weight: number; source: string; exactSource: string; series: Point[];
   invert?: boolean; proxy?: boolean; note?: string; useZ?: boolean; minObservations?: number; asOfDate: string;
@@ -508,8 +513,14 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
   };
 
   for (const [target, candidates] of Object.entries(aliasCandidates)) {
-    if (map.has(target)) continue;
-    const foundKey = candidates.find((candidate) => map.has(candidate));
+    const targetPoints = map.get(target) ?? [];
+    const targetHasUsableNumeric = hasFiniteNumericValue(targetPoints);
+    if (targetHasUsableNumeric) continue;
+
+    const foundKey = candidates.find((candidate) => {
+      const candidatePoints = map.get(candidate) ?? [];
+      return hasFiniteNumericValue(candidatePoints);
+    });
     if (!foundKey) continue;
     map.set(target, map.get(foundKey) ?? []);
   }
