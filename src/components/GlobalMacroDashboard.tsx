@@ -171,6 +171,7 @@ type GlobalMacroPayload = {
           fetchSuccess: boolean;
           observationsFetched: number;
           errorMessage: string | null;
+          meta?: Record<string, unknown>;
         }>;
         failingStep: string | null;
         errorMessage: string | null;
@@ -1383,6 +1384,9 @@ Signal: ${gapLabel}`,
                                       <li>db keys observed: {(ingestVerification.savedDbKeysObserved ?? []).join(", ") || "none"}</li>
                                       <li>mismatch: {ingestVerification.mismatchReason ?? "none"}</li>
                                       <li>state classification: {ingestVerification.explicitState ?? ingestVerification.ingestionStateClass ?? "—"}</li>
+                                      <li>ever successfully fetched historically: {String(localRepricing.historicalIngestVerification?.everSuccessfulFetch ?? false)}</li>
+                                      <li>latest successful ingest run for ACMTP10: {localRepricing.historicalIngestVerification?.latestSuccessfulIngestRunForAcmTp10 ?? "—"}</li>
+                                      <li>final classification: {localRepricing.finalClassification ?? "—"}</li>
                                     </ul>
                                   </div>
                                 )}
@@ -2132,6 +2136,35 @@ Signal: ${gapLabel}`,
                       </tbody>
                     </table>
                     </div>
+                  {(() => {
+                    const acm = pipelineDebug.ingestionDebug.latestAttempt?.seriesResults?.find((row) => row.seriesId === "fred:acmtp10_us" || row.seriesKey === "acmtp10_us");
+                    if (!acm) return <div className="status empty" style={{ marginTop: 8 }}>ACMTP10 not present in latest per-series ingest result.</div>;
+                    const meta = (acm.meta ?? {}) as Record<string, unknown>;
+                    const toJson = (value: unknown) => JSON.stringify(value ?? null, null, 2);
+                    return (
+                      <div style={{ marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
+                        <div style={{ fontWeight: 700 }}>ACMTP10 ingest strict debug</div>
+                        <ul>
+                          <li>requested provider series id: {String(meta.requestedProviderSeriesId ?? meta.providerSeriesId ?? "—")}</li>
+                          <li>actual HTTP request target/resolved provider id: {String(meta.requestTarget ?? "—")}</li>
+                          <li>HTTP status: {String(meta.httpStatus ?? "—")}</li>
+                          <li>provider response shape summary: {String(meta.providerResponseShapeSummary ?? "—")}</li>
+                          <li>returned observation count before filtering: {String(meta.observationsBeforeFiltering ?? 0)}</li>
+                          <li>returned observation count after filtering: {String(meta.observationsAfterFiltering ?? 0)}</li>
+                          <li>reason if zero rows: {String(meta.zeroRowsReason ?? acm.errorMessage ?? "—")}</li>
+                          <li>skipped due to date parsing: {String(meta.skippedByDateParsing ?? 0)}</li>
+                          <li>skipped due to numeric parsing: {String(meta.skippedByNumericParsing ?? 0)}</li>
+                          <li>skipped due to duplicate logic: {String(meta.skippedByDuplicateLogic ?? 0)}</li>
+                          <li>final DB writes for acmtp10_us: {toJson(meta.finalDbWrites)}</li>
+                        </ul>
+                        <details>
+                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Raw observations preview</summary>
+                          <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11, marginTop: 6 }}>first 3: {toJson(meta.first3RawObservations)}
+last 3: {toJson(meta.last3RawObservations)}</pre>
+                        </details>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
 

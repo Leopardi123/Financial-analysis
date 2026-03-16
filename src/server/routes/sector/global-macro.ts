@@ -433,7 +433,7 @@ function buildAcmTp10IngestVerification(params: {
 }) {
   const inUsIngestPlan = params.region === "US" && US_FRED_SERIES.some((entry) => entry.fredSeriesId === "ACMTP10");
   const run = params.latestIngestRun;
-  const acmRun = run?.seriesResults?.find((item) => item.seriesId === "ACMTP10" || item.seriesKey === "acmtp10_us") ?? null;
+  const acmRun = run?.seriesResults?.find((item) => item.seriesId === "fred:acmtp10_us" || item.seriesId === "ACMTP10" || item.seriesKey === "acmtp10_us") ?? null;
   const candidateDbKeys = ["ACMTP10", "acmtp10_us", "acmtp10", "lu_repricing_us"];
   const byKey = Object.fromEntries(candidateDbKeys.map((key) => [key, params.rawSeriesRows.filter((row) => String(row.series_key) == key).length]));
   const savedKeys = Object.entries(byKey).filter(([,count]) => Number(count) > 0).map(([k]) => k);
@@ -481,6 +481,7 @@ function buildOverlayVerificationDiagnostics(params: {
   seriesMap: Map<string, Array<{ date: string; value: number | null }>>;
   overlayBundle: ReturnType<typeof buildRegionalOverlays>;
   latestIngestRun: Awaited<ReturnType<typeof getLatestIngestRun>>;
+  acmtp10IngestHistory: Awaited<ReturnType<typeof getAcmTp10IngestHistory>>;
 }) {
   const overlays = params.overlayBundle.overlays;
   const local = overlays.localUnrestOverlay;
@@ -492,30 +493,47 @@ function buildOverlayVerificationDiagnostics(params: {
 
   const localGuard = local?.score === null && ((local?.blockScores?.signal ?? null) === null || (local?.blockScores?.repricing ?? null) === null);
 
+  const classifyAcmTp10Failure = (repricing: any, ingest: any): string => {
+    if (!ingest?.acmtp10InActiveIngestConfig) return "config_missing";
+    if (ingest?.fetchAttempted && ingest?.fetchSuccess === false) return "fetch_failed";
+    if (ingest?.fetchAttempted && Number(ingest?.observationsFetched ?? 0) === 0) return "zero_observations_from_provider";
+    if ((repricing?.invalidDateCount ?? 0) > 0 || (repricing?.nonNumericRowCount ?? 0) > 0) return "parse_failed";
+    const totalRows = Object.values(ingest?.rawDbRowCountByCandidateKey ?? {}).reduce((sum: number, item: any) => sum + Number(item ?? 0), 0);
+    if (ingest?.fetchSuccess && Number(ingest?.observationsFetched ?? 0) > 0 && totalRows === 0) return "insert_failed";
+    if (repricing?.dataPresentInDatabase === "yes" && repricing?.monthlySeriesBuilt === "no") return "alias_resolution_failed";
+    if (repricing?.rawValueExtracted === "no" || repricing?.scoreComputed === "no") return "scorer_failed";
+    return "scorer_failed";
+  };
+
+  const repricingVerification = buildSeriesVerification({
+    rawSeriesRows: params.rawSeriesRows,
+    candidateSeriesKeys: ["ACMTP10", "acmtp10_us", "acmtp10", "lu_repricing_us"],
+    selectedSeriesKey: "ACMTP10",
+    selectedSeries: params.seriesMap.get("ACMTP10") ?? [],
+    componentRawValue: localRepricingComp?.rawValue ?? null,
+    componentScore: localRepricingComp?.score ?? null,
+    minObservations: 1,
+    scoringFunction: "percentile10yLatest",
+    invert: true,
+    sourceValidationStatus: params.region === "US" && localRepricingComp?.exactSource === "ACMTP10" ? "pass" : "fail",
+    blockStatusBeforeFinalGuard: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
+    finalBlockStatus: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
+    finalGuardTriggered: Boolean(localGuard),
+    finalGuardReason: localGuard ? "required local unrest block score missing" : "none",
+  });
+  const acmIngestVerification = buildAcmTp10IngestVerification({
+    region: params.region,
+    rawSeriesRows: params.rawSeriesRows,
+    latestIngestRun: params.latestIngestRun,
+  });
+
   return {
     localUnrestOverlay: {
       repricing: {
-        ...buildSeriesVerification({
-        rawSeriesRows: params.rawSeriesRows,
-        candidateSeriesKeys: ["ACMTP10", "acmtp10_us", "acmtp10", "lu_repricing_us"],
-        selectedSeriesKey: "ACMTP10",
-        selectedSeries: params.seriesMap.get("ACMTP10") ?? [],
-        componentRawValue: localRepricingComp?.rawValue ?? null,
-        componentScore: localRepricingComp?.score ?? null,
-        minObservations: 1,
-        scoringFunction: "percentile10yLatest",
-        invert: true,
-        sourceValidationStatus: params.region === "US" && localRepricingComp?.exactSource === "ACMTP10" ? "pass" : "fail",
-        blockStatusBeforeFinalGuard: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
-        finalBlockStatus: typeof local?.blockScores?.repricing === "number" ? "pass" : "missing",
-        finalGuardTriggered: Boolean(localGuard),
-        finalGuardReason: localGuard ? "required local unrest block score missing" : "none",
-        }),
-        ingestVerification: buildAcmTp10IngestVerification({
-          region: params.region,
-          rawSeriesRows: params.rawSeriesRows,
-          latestIngestRun: params.latestIngestRun,
-        }),
+        ...repricingVerification,
+        ingestVerification: acmIngestVerification,
+        historicalIngestVerification: params.acmtp10IngestHistory,
+        finalClassification: classifyAcmTp10Failure(repricingVerification, acmIngestVerification),
       },
     },
     creditFundingOverlay: {
@@ -864,6 +882,42 @@ async function getLatestIngestRun(region: string) {
 
 
 
+
+async function getAcmTp10IngestHistory(region: string) {
+  if (region !== "US") {
+    return {
+      everSuccessfulFetch: false,
+      latestSuccessfulIngestRunForAcmTp10: null as string | null,
+    };
+  }
+  const rows = (await query(
+    `SELECT attempted_at, series_results_json
+     FROM ${tables.macroIngestRuns}
+     WHERE region = ?
+     ORDER BY attempted_at DESC
+     LIMIT 200`,
+    [region],
+  )) as Array<{ attempted_at?: string; series_results_json?: string | null }>;
+
+  let latestSuccessfulIngestRunForAcmTp10: string | null = null;
+  let everSuccessfulFetch = false;
+  for (const row of rows) {
+    const seriesResults = safeJsonParse<Array<{ seriesId?: string; seriesKey?: string; fetchSuccess?: boolean; observationsFetched?: number }>>(row.series_results_json ?? null, []);
+    const acm = seriesResults.find((item) => item.seriesId === "fred:acmtp10_us" || item.seriesId === "ACMTP10" || item.seriesKey === "acmtp10_us");
+    const ok = Boolean(acm?.fetchSuccess) && Number(acm?.observationsFetched ?? 0) > 0;
+    if (ok) {
+      everSuccessfulFetch = true;
+      latestSuccessfulIngestRunForAcmTp10 = row.attempted_at ?? null;
+      break;
+    }
+  }
+
+  return {
+    everSuccessfulFetch,
+    latestSuccessfulIngestRunForAcmTp10,
+  };
+}
+
 function summarizeGoldFetchFromSeriesResults(
   seriesResults: Array<{ seriesId: string; seriesKey: string; fetchSuccess: boolean; observationsFetched: number; meta?: Record<string, unknown> }>,
 ) {
@@ -1003,6 +1057,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
     maxDate: goldRangeRows[0]?.max_date ?? null,
   };
   const latestIngestRun = await getLatestIngestRun(region);
+  const acmtp10IngestHistory = await getAcmTp10IngestHistory(region);
   const goldSourceDiagnostics = await getGoldSourceDiagnostics(region);
 
   const indicators = indicatorRows.map((row) => {
@@ -1243,6 +1298,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
           seriesMap,
           overlayBundle,
           latestIngestRun,
+          acmtp10IngestHistory,
         }),
       };
     })(),

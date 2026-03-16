@@ -46,6 +46,21 @@ type FredObservationsResponse = {
   observations?: FredObservation[];
 };
 
+export type FredFetchDebug = {
+  requestedProviderSeriesId: string;
+  requestTarget: string;
+  httpStatus: number | null;
+  providerResponseShapeSummary: string;
+  observationsBeforeFiltering: number;
+  observationsAfterFiltering: number;
+  first3RawObservations: FredObservation[];
+  last3RawObservations: FredObservation[];
+  zeroRowsReason: string | null;
+  skippedByDateParsing: number;
+  skippedByNumericParsing: number;
+  skippedByDuplicateLogic: number;
+};
+
 function validateFredApiKey(): string {
   const key = String(process.env.FRED_API_KEY ?? "").trim();
   if (!key) {
@@ -62,12 +77,12 @@ function buildFredUrl(params: Record<string, string>): string {
   return url.toString();
 }
 
-export async function fetchFredSeries(params: {
+export async function fetchFredSeriesWithDebug(params: {
   fredSeriesId: string;
   mode: "backfill" | "latest";
   latestLookbackMonths?: number;
   backfillLookbackYears?: number;
-}): Promise<Array<{ date: string; value: number | null }>> {
+}): Promise<{ rows: Array<{ date: string; value: number | null }>; debug: FredFetchDebug }> {
   const apiKey = validateFredApiKey();
   const end = new Date();
   const start = new Date(end);
@@ -97,16 +112,50 @@ export async function fetchFredSeries(params: {
   const payload = (await response.json()) as FredObservationsResponse;
   const observations = Array.isArray(payload.observations) ? payload.observations : [];
 
-  return observations
-    .map((obs) => {
-      const raw = String(obs.value ?? "").trim();
-      const numeric = raw === "." ? null : Number(raw);
-      return {
-        date: String(obs.date),
-        value: Number.isFinite(numeric) ? numeric : null,
-      };
-    })
-    .filter((obs) => /^\d{4}-\d{2}-\d{2}$/.test(obs.date));
+  const normalized = observations.map((obs) => {
+    const raw = String(obs.value ?? "").trim();
+    const numeric = raw === "." ? null : Number(raw);
+    return {
+      date: String(obs.date),
+      value: Number.isFinite(numeric) ? numeric : null,
+      dateOk: /^\d{4}-\d{2}-\d{2}$/.test(String(obs.date)),
+      numericOk: raw === "." || Number.isFinite(numeric),
+    };
+  });
+
+  const dateFiltered = normalized.filter((obs) => obs.dateOk);
+  const skippedByDateParsing = normalized.length - dateFiltered.length;
+  const skippedByNumericParsing = dateFiltered.filter((obs) => !obs.numericOk).length;
+  const rows = dateFiltered.map((obs) => ({ date: obs.date, value: obs.value }));
+  const monthlyRows = toCanonicalMonthly(rows);
+  const skippedByDuplicateLogic = Math.max(0, rows.length - monthlyRows.length);
+
+  const debug: FredFetchDebug = {
+    requestedProviderSeriesId: params.fredSeriesId,
+    requestTarget: url,
+    httpStatus: response.status,
+    providerResponseShapeSummary: Array.isArray((payload as any).observations) ? "observations[]" : typeof payload,
+    observationsBeforeFiltering: observations.length,
+    observationsAfterFiltering: rows.length,
+    first3RawObservations: observations.slice(0, 3),
+    last3RawObservations: observations.slice(-3),
+    zeroRowsReason: rows.length > 0 ? null : (observations.length === 0 ? "No observations from provider" : (skippedByDateParsing === observations.length ? "All rows failed date parsing" : "No usable observations after filtering")),
+    skippedByDateParsing,
+    skippedByNumericParsing,
+    skippedByDuplicateLogic,
+  };
+
+  return { rows, debug };
+}
+
+export async function fetchFredSeries(params: {
+  fredSeriesId: string;
+  mode: "backfill" | "latest";
+  latestLookbackMonths?: number;
+  backfillLookbackYears?: number;
+}): Promise<Array<{ date: string; value: number | null }>> {
+  const { rows } = await fetchFredSeriesWithDebug(params);
+  return rows;
 }
 
 

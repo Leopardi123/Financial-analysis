@@ -91,7 +91,7 @@ export default async function handler(req: any, res: any) {
     debug.fetchStarted = true;
 
     const typedRegion = region as "US" | "EA" | "SE";
-    const { sourceSeries, derivedSeries } = await loadCanonicalMacroSeries(typedRegion, mode);
+    const { sourceSeries, derivedSeries, sourceDiagnostics = {} } = await loadCanonicalMacroSeries(typedRegion, mode);
 
     for (const [seriesKey, rows] of Object.entries(sourceSeries)) {
       const source = sourceForRegionSeries(typedRegion, seriesKey);
@@ -101,6 +101,7 @@ export default async function handler(req: any, res: any) {
         fetchSuccess: rows.length > 0,
         observationsFetched: rows.length,
         errorMessage: rows.length > 0 ? null : "No observations",
+        meta: sourceDiagnostics[seriesKey] ?? {},
       });
       if (rows.length > 0) {
         debug.fetchedSeries += 1;
@@ -162,6 +163,26 @@ export default async function handler(req: any, res: any) {
 
     debug.duplicateOrUnchangedRows = Math.max(0, debug.attemptedInserts - debug.insertedRowCount);
     debug.dedupeOnlyRun = debug.attemptedInserts > 0 && debug.insertedRowCount === 0;
+
+    const acmtp10DbCounts = typedRegion === "US"
+      ? (await batch([
+        {
+          sql: `SELECT series_key, COUNT(*) AS total
+                FROM ${tables.macroRawDatapoints}
+                WHERE region = ? AND source_type = 'auto' AND series_key IN ('acmtp10_us', 'ACMTP10', 'acmtp10', 'lu_repricing_us')
+                GROUP BY series_key`,
+          args: [region],
+        },
+      ]))[0]?.rows ?? []
+      : [];
+    const acmtp10WriteSummary = Object.fromEntries((acmtp10DbCounts as Array<{ series_key?: string; total?: number | string }>).map((row) => [String(row.series_key ?? ""), Number(row.total ?? 0)]));
+    const acmResult = seriesResults.find((item) => item.seriesKey === "acmtp10_us");
+    if (acmResult) {
+      acmResult.meta = {
+        ...(acmResult.meta ?? {}),
+        finalDbWrites: acmtp10WriteSummary,
+      };
+    }
     debug.ingestOutcome = debug.attemptedInserts === 0
       ? "nothing_to_write"
       : debug.insertedRowCount > 0
