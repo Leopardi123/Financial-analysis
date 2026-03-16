@@ -58,6 +58,7 @@ type GlobalMacroPayload = {
     historyBuiltFor: string[];
     historyMissingFor: string[];
     reasons: string[];
+    verification?: Record<string, any>;
   };
   indicators: Array<{
     indicatorId: string;
@@ -1340,6 +1341,15 @@ Signal: ${gapLabel}`,
                           ))}
                         </tbody>
                       </table>
+                    </div>
+
+                    <div style={{ fontSize: 12, marginTop: 8 }}>
+                      <strong>Verification trace</strong>
+                      {(() => {
+                        const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey];
+                        if (!verification) return <div className="status empty" style={{ marginTop: 6 }}>No deep verification trace for this overlay.</div>;
+                        return <pre style={{ whiteSpace: "pre-wrap", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6 }}>{JSON.stringify(verification, null, 2)}</pre>;
+                      })()}
                     </div>
 
                     <div style={{ fontSize: 12 }}>
