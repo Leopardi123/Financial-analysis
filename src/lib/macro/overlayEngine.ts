@@ -179,6 +179,25 @@ function makeComponent(params: {
   };
 }
 
+function enforceNumericComponentInvariant(component: OverlayComponent): OverlayComponent {
+  // Hard invariant for source-faithful runtime: a non-proxy component cannot be marked
+  // operational without a numeric compute path.
+  if (component.proxy) return component;
+  const hasNumericRaw = typeof component.rawValue === "number" && Number.isFinite(component.rawValue);
+  const hasNumericScore = typeof component.score === "number" && Number.isFinite(component.score);
+  if (hasNumericRaw && hasNumericScore) return component;
+  const reasons: string[] = [];
+  if (!hasNumericRaw) reasons.push("rawValue missing");
+  if (!hasNumericScore) reasons.push("score missing");
+  return {
+    ...component,
+    score: null,
+    includedInTotal: false,
+    missing: true,
+    note: [component.note, `compute failure: ${reasons.join(", ")}`].filter(Boolean).join(" | "),
+  };
+}
+
 function scoreBlock(components: OverlayComponent[]): number | null {
   const valid = components.filter((c) => c.includedInTotal && c.score !== null && c.weight > 0);
   if (valid.length === 0) return null;
@@ -202,6 +221,30 @@ function finalizeOverlay(blocks: Record<string, { weight: number; components: Ov
   const cw = blockConf.reduce((a, b) => a + b.weight, 0);
   const confidence = score === null ? 0 : (cw > 0 ? Math.round(100 * blockConf.reduce((a, b) => a + b.conf * (b.weight / cw), 0)) : 0);
   return { score, label: labelByScore(score), confidence, blockScores, components };
+}
+
+function enforceSourceFaithfulInvariant(result: OverlayResult, requiredBlocks: string[]): OverlayResult {
+  const normalized = result.components.map((component) => {
+    if (!requiredBlocks.includes(component.block)) return component;
+    return enforceNumericComponentInvariant(component);
+  });
+  const grouped = normalized.reduce<Record<string, OverlayComponent[]>>((acc, component) => {
+    (acc[component.block] ??= []).push(component);
+    return acc;
+  }, {});
+  const normalizedBlockScores: Record<string, number | null> = { ...result.blockScores };
+  for (const block of requiredBlocks) {
+    if (!grouped[block]?.length) continue;
+    normalizedBlockScores[block] = scoreBlock(grouped[block]);
+  }
+  return {
+    ...result,
+    score: requiredBlocks.some((block) => normalizedBlockScores[block] === null) ? null : result.score,
+    label: labelByScore(requiredBlocks.some((block) => normalizedBlockScores[block] === null) ? null : result.score),
+    confidence: requiredBlocks.some((block) => normalizedBlockScores[block] === null) ? 0 : result.confidence,
+    blockScores: normalizedBlockScores,
+    components: normalized,
+  };
 }
 
 
@@ -325,7 +368,7 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
           })],
         },
       });
-      return requireSourceFaithfulBlocks(local, ["signal", "repricing"]);
+      return requireSourceFaithfulBlocks(enforceSourceFaithfulInvariant(local, ["signal", "repricing"]), ["signal", "repricing"]);
     })(),
     safeHavenRiskOffOverlay: finalizeOverlay({
       gold_equity: { weight: 0.65, components: [makeComponent({ asOfDate, id: "sh_gold_eq", title: "Gold-equity flight", block: "gold_equity", weight: 1, source: "FRED", exactSource: "GOLD/SP500 ratio", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
@@ -439,7 +482,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     DGS10: ["nominal_yield_10y_us"],
     DCOILBRENTEU: ["oil_brent_usd"],
     INDPRO: ["pmi_us"],
-    ACMTP10: ["acmtp10_us"],
+    ACMTP10: ["acmtp10_us", "lu_repricing_us", "acmtp10"],
     DGORDER: ["new_orders_us"],
     POLICY_UNCERTAINTY_US: ["policy_uncertainty_us", "usepuindxm"],
     CPILFESL: ["core_cpi_us"],
@@ -464,11 +507,19 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     "IRLTLT01DEM156N": ["germany_10y_yield"],
   };
 
+  const hasNumericPoints = (points: Point[]): boolean => points.some((point) => typeof point.value === "number" && Number.isFinite(point.value));
+
   for (const [target, candidates] of Object.entries(aliasCandidates)) {
-    if (map.has(target)) continue;
-    const foundKey = candidates.find((candidate) => map.has(candidate));
+    const targetSeries = map.get(target) ?? [];
+    const targetHasNumeric = hasNumericPoints(targetSeries);
+    const foundKey = candidates.find((candidate) => {
+      const candidateSeries = map.get(candidate) ?? [];
+      return candidateSeries.length > 0 && hasNumericPoints(candidateSeries);
+    });
     if (!foundKey) continue;
-    map.set(target, map.get(foundKey) ?? []);
+    if (!targetHasNumeric) {
+      map.set(target, map.get(foundKey) ?? []);
+    }
   }
 
   return map;
