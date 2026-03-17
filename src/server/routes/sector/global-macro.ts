@@ -1677,6 +1677,71 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
   };
 }
 
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeGlobalMacroPayload(value: unknown) {
+  if (!isRecord(value)) return null;
+  if (!isRecord(value.regime)) return null;
+  const regime = value.regime as Record<string, unknown>;
+  if (typeof regime.asOfDate !== "string" || typeof regime.coreRegimeLabel !== "string") return null;
+  return value;
+}
+
+function normalizeMacroHistoryPayload(value: unknown, region: string, resolution: "WEEKLY" | "MONTHLY", rangeYears: number | "MAX") {
+  if (!isRecord(value)) {
+    return {
+      region,
+      resolution,
+      requestedRangeYears: rangeYears,
+      points: [],
+      intervals: { regime: [], overlays: { growth: [], stress: [], hardAsset: [] } },
+      rangeDebug: { actualStartDate: null, actualEndDate: null, unfilledReason: "cache_missing_or_invalid" },
+      replay: { source: "cache_miss", recomputedAt: null },
+    };
+  }
+  const points = Array.isArray(value.points) ? value.points : [];
+  const intervalsObj = isRecord(value.intervals) ? value.intervals : {};
+  const overlaysObj = isRecord((intervalsObj as any).overlays) ? (intervalsObj as any).overlays : {};
+  const templateObj = isRecord(value.template) ? value.template : null;
+  const templateThresholds = templateObj && isRecord((templateObj as any).thresholds) ? (templateObj as any).thresholds : {};
+  const replayObj = isRecord(value.replay) ? value.replay : {};
+  const rangeDebug = isRecord(value.rangeDebug) ? value.rangeDebug : {};
+  return {
+    ...value,
+    region: typeof value.region === "string" ? value.region : region,
+    resolution: value.resolution === "WEEKLY" || value.resolution === "MONTHLY" ? value.resolution : resolution,
+    requestedRangeYears: (typeof value.requestedRangeYears === "number" || value.requestedRangeYears === "MAX") ? value.requestedRangeYears : rangeYears,
+    points,
+    intervals: {
+      regime: Array.isArray((intervalsObj as any).regime) ? (intervalsObj as any).regime : [],
+      overlays: {
+        growth: Array.isArray((overlaysObj as any).growth) ? (overlaysObj as any).growth : [],
+        stress: Array.isArray((overlaysObj as any).stress) ? (overlaysObj as any).stress : [],
+        hardAsset: Array.isArray((overlaysObj as any).hardAsset) ? (overlaysObj as any).hardAsset : [],
+      },
+    },
+    template: {
+      ...(templateObj ?? {}),
+      thresholds: {
+        monetaryDominanceMax: typeof (templateThresholds as any).monetaryDominanceMax === "number" ? (templateThresholds as any).monetaryDominanceMax : null,
+        balancedMax: typeof (templateThresholds as any).balancedMax === "number" ? (templateThresholds as any).balancedMax : null,
+        fiscalPressureMax: typeof (templateThresholds as any).fiscalPressureMax === "number" ? (templateThresholds as any).fiscalPressureMax : null,
+      },
+    },
+    replay: {
+      source: typeof (replayObj as any).source === "string" ? (replayObj as any).source : "cache_miss",
+      recomputedAt: typeof (replayObj as any).recomputedAt === "string" ? (replayObj as any).recomputedAt : null,
+    },
+    rangeDebug: {
+      actualStartDate: typeof (rangeDebug as any).actualStartDate === "string" ? (rangeDebug as any).actualStartDate : null,
+      actualEndDate: typeof (rangeDebug as any).actualEndDate === "string" ? (rangeDebug as any).actualEndDate : null,
+      unfilledReason: typeof (rangeDebug as any).unfilledReason === "string" ? (rangeDebug as any).unfilledReason : "cache_missing_or_invalid",
+    },
+  };
+}
 function trimSnapshotForNormalRead(snapshot: any, debugEnabled: boolean) {
   if (!snapshot || typeof snapshot !== "object" || debugEnabled) return snapshot;
   const clone: any = { ...snapshot };
@@ -1761,19 +1826,18 @@ export default async function handler(req: any, res: any) {
   const globalMacroRaw = snapshotPayload && "globalMacro" in snapshotPayload
     ? snapshotPayload.globalMacro
     : snapshotPayloadRaw ?? null;
-  const globalMacro = trimSnapshotForNormalRead(globalMacroRaw, debugEnabled);
+  const normalizedGlobalMacro = normalizeGlobalMacroPayload(globalMacroRaw);
+  const globalMacro = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
 
   const inflationAnalysis = snapshotPayload && "inflationAnalysis" in snapshotPayload
     ? snapshotPayload.inflationAnalysis
     : null;
-  const macroHistory = historyCache?.payload ?? {
+  const macroHistory = normalizeMacroHistoryPayload(
+    historyCache?.payload ?? null,
     region,
-    resolution: historyResolution,
-    requestedRangeYears: historyRangeYears,
-    points: [],
-    intervals: { regime: [], overlays: { growth: [], stress: [], hardAsset: [] } },
-    replay: { source: "cache_miss", recomputedAt: null },
-  };
+    historyResolution as HistoryResolution,
+    historyRangeYears,
+  );
 
   const diagnostics = {
     readMode: "snapshot_cache_only",
@@ -1785,9 +1849,11 @@ export default async function handler(req: any, res: any) {
     payloadBytes: Buffer.byteLength(JSON.stringify({ globalMacro, macroHistory })),
     snapshotUpdatedAt: snapshotCache?.updatedAt ?? null,
     historyUpdatedAt: historyCache?.updatedAt ?? null,
+    snapshotPayloadValid: Boolean(normalizedGlobalMacro),
+    historyPayloadValid: Boolean(historyCache?.payload && Array.isArray((historyCache.payload as any)?.points)),
   };
 
-  if (!snapshotCache || !historyCache) {
+  if (!snapshotCache || !historyCache || !normalizedGlobalMacro) {
     res.status(200).json({
       ok: true,
       globalMacro,

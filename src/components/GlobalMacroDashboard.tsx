@@ -423,11 +423,12 @@ export default function GlobalMacroDashboard() {
   }, [historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
+  const hasRegime = Boolean(globalMacro && typeof globalMacro === "object" && (globalMacro as any).regime && typeof (globalMacro as any).regime === "object");
   const scoredCount = globalMacroIndicators.filter((item) => item.score !== null).length;
   const isPartialData =
     globalMacro?.stats?.partialData ??
     (globalMacroIndicators.length > 0 && scoredCount < globalMacroIndicators.length);
-  const isNoData = !globalMacroLoading && !globalMacroError && (!globalMacro || globalMacroIndicators.length === 0);
+  const isNoData = !globalMacroLoading && !globalMacroError && (!globalMacro || !hasRegime || globalMacroIndicators.length === 0);
   const activeOverlayBundle = globalMacro?.overlayBundle ?? globalMacro?.overlays ?? null;
   const overlayEntries = Object.entries(activeOverlayBundle?.overlays ?? {});
   const overlayHistoryPoints = globalMacro?.overlayHistory ?? [];
@@ -1131,12 +1132,12 @@ export default function GlobalMacroDashboard() {
 
   const pipelineDebug = globalMacro?.debug ?? null;
   const historyPoints = macroHistory?.points ?? [];
-  const regimeIntervals = macroHistory?.intervals.regime ?? [];
-  const overlayIntervals = macroHistory?.intervals.overlays ?? { growth: [], stress: [], hardAsset: [] };
+  const regimeIntervals = macroHistory?.intervals?.regime ?? [];
+  const overlayIntervals = macroHistory?.intervals?.overlays ?? { growth: [], stress: [], hardAsset: [] };
   const latestHistoryPoint = historyPoints[historyPoints.length - 1] ?? null;
   const latestRegimeInterval = regimeIntervals[regimeIntervals.length - 1] ?? null;
-  const timelineStartDate = macroHistory?.replayEarliestDateUsed ?? macroHistory?.rangeDebug.actualStartDate ?? null;
-  const timelineEndDate = macroHistory?.replayLatestDateUsed ?? macroHistory?.rangeDebug.actualEndDate ?? null;
+  const timelineStartDate = macroHistory?.replayEarliestDateUsed ?? macroHistory?.rangeDebug?.actualStartDate ?? null;
+  const timelineEndDate = macroHistory?.replayLatestDateUsed ?? macroHistory?.rangeDebug?.actualEndDate ?? null;
   const timelineWindow = useMemo(() => {
     if (!timelineStartDate || !timelineEndDate) return null;
     const start = new Date(`${timelineStartDate}T00:00:00.000Z`).getTime();
@@ -1351,7 +1352,7 @@ Signal: ${gapLabel}`,
           {globalMacroError && <div className="status">Kunde inte ladda Global Macro: {globalMacroError}</div>}
           {isNoData && <div className="status empty">Ingen macrodata hittades ännu. Sektionen är aktiv men endpointen returnerade tomt.</div>}
 
-          {!globalMacroLoading && !globalMacroError && globalMacro && (
+          {!globalMacroLoading && !globalMacroError && globalMacro && hasRegime && (
             <>
               {isPartialData && (
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
@@ -2433,20 +2434,20 @@ Signal: ${gapLabel}`,
                 <li>history region: {macroHistory?.region ?? selectedRegion}</li>
                 <li>history selected resolution: {macroHistory?.resolution ?? historyResolution}</li>
                 <li>history requested range: {String(macroHistory?.requestedRangeYears ?? historyRangeYears)}</li>
-                <li>history actual rendered range: {(macroHistory?.rangeDebug.actualStartDate ?? "—")} → {(macroHistory?.rangeDebug.actualEndDate ?? "—")}</li>
+                <li>history actual rendered range: {(macroHistory?.rangeDebug?.actualStartDate ?? "—")} → {(macroHistory?.rangeDebug?.actualEndDate ?? "—")}</li>
                 <li>history earliest raw date used: {macroHistory?.replayEarliestDateUsed ?? "—"}</li>
                 <li>history latest raw date used: {macroHistory?.replayLatestDateUsed ?? "—"}</li>
                 <li>history earliest raw available: {macroHistory?.earliestRawDate ?? "—"}</li>
                 <li>history latest raw available: {macroHistory?.latestRawDate ?? "—"}</li>
-                <li>history unfilled reason: {macroHistory?.rangeDebug.unfilledReason ?? "none"}</li>
+                <li>history unfilled reason: {macroHistory?.rangeDebug?.unfilledReason ?? "none"}</li>
                 <li>history limiting indicators: {(macroHistory?.limitingIndicators ?? []).map((item) => `${item.seriesKey}:${item.reason}`).join(", ") || "none"}</li>
                 <li>history raw regime points: {macroHistory?.generatedPoints ?? 0}</li>
-                <li>history merged regime intervals: {macroHistory?.intervals.regime.length ?? 0}</li>
+                <li>history merged regime intervals: {macroHistory?.intervals?.regime.length ?? 0}</li>
                 <li>history true regime changes: {macroHistory?.regimeChanges ?? 0}</li>
                 <li>history raw overlay points: {macroHistory?.generatedPoints ?? 0}</li>
-                <li>history merged overlay intervals: {(macroHistory?.intervals.overlays.growth.length ?? 0) + (macroHistory?.intervals.overlays.stress.length ?? 0) + (macroHistory?.intervals.overlays.hardAsset.length ?? 0)}</li>
+                <li>history merged overlay intervals: {(macroHistory?.intervals?.overlays?.growth.length ?? 0) + (macroHistory?.intervals?.overlays?.stress.length ?? 0) + (macroHistory?.intervals?.overlays?.hardAsset.length ?? 0)}</li>
                 <li>history overlay rendering mode: timeline_intervals</li>
-                <li>history score thresholds: ≤{macroHistory?.template.thresholds.monetaryDominanceMax ?? "—"} / ≤{macroHistory?.template.thresholds.balancedMax ?? "—"} / ≤{macroHistory?.template.thresholds.fiscalPressureMax ?? "—"}</li>
+                <li>history score thresholds: ≤{macroHistory?.template?.thresholds?.monetaryDominanceMax ?? "—"} / ≤{macroHistory?.template?.thresholds?.balancedMax ?? "—"} / ≤{macroHistory?.template?.thresholds?.fiscalPressureMax ?? "—"}</li>
                 <li>history latest interval regime: {latestRegimeInterval?.coreRegimeLabel ?? "—"}</li>
                 <li>history latest interval top driver: {latestRegimeInterval?.topDriver ?? "—"}</li>
                 <li>history data coverage: {macroHistory?.dataCoveragePct ?? 0}%</li>
