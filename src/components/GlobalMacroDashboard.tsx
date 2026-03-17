@@ -528,14 +528,15 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Local Unrest uses policy uncertainty + sovereign/state repricing. EA repricing uses sovereign credit spread (BTP-Bund); US repricing uses sovereign duration term premium (ACMTP10).",
     },
     safeHavenRiskOffOverlay: {
-      intendedPrimaryBlocks: ["gold_equity", "duration", "usd"],
+      intendedPrimaryBlocks: ["gold_equity", "duration"],
       intendedSeries: [
-        { id: "safe_haven_flow", block: "gold_equity", linkedMacroFamily: "B_MONETARY", primarySources: ["GOLD", "gold family"], aliasFamily: ["safe_haven_flow", "gold", "gold_price"] },
-        { id: "equity_risk", block: "gold_equity", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["SP500 / risk asset family"], aliasFamily: ["vix_like", "sp500", "spx_vol_proxy", "vixcls"] },
-        { id: "duration_bid", block: "duration", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["duration / rates family"], aliasFamily: ["duration", "real_yield", "rates_proxy"] },
-        { id: "usd_strength", block: "usd", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["usd_strength", "dtwexbgs", "usd_broad_index"] },
+        { id: "gold_flight_anchor", block: "gold_equity", linkedMacroFamily: "B_MONETARY", primarySources: ["FMP stable/historical-price-eod/full?symbol=GCUSD"], aliasFamily: ["gold_usd", "gcusd"] },
+        { id: "equity_benchmark_us", block: "gold_equity", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["FRED SP500"], aliasFamily: ["sp500"] },
+        { id: "equity_benchmark_ea", block: "gold_equity", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["STOXX SX5E"], aliasFamily: ["sx5e", "stoxx_sx5e", "ea_equity_benchmark"] },
+        { id: "duration_us", block: "duration", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["FRED DGS10"], aliasFamily: ["dgs10"] },
+        { id: "duration_ea", block: "duration", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["ECB YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y"], aliasFamily: ["YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y"] },
       ],
-      logicSummary: "Risk-off-flöden via safe-haven, equities och durationdynamik.",
+      logicSummary: "Locked v1: 0.65*(gold_z12m - equity_z12m capped [-3,+3]) percentile-inverted + 0.35*(-Δ3m 10Y yield) percentile-inverted.",
     },
     inflationCostShockOverlay: {
       intendedPrimaryBlocks: ["upstream", "expectations"],
@@ -1650,7 +1651,9 @@ Signal: ${gapLabel}`,
                           })();
                         const labelPass = row.overlayKey === "energyShockOverlay"
                           ? (((runtimeAny?.activeProductionBlockCount ?? 0) >= 2) ? ((runtimeAny?.energyDebug?.productionLabel ?? row.overlay?.label ?? "Not implemented") === (row.overlay?.label ?? "Not implemented")) : ((row.overlay?.label ?? "Not implemented") === "Not implemented"))
-                          : (labelByOverlayScore(row.overlay?.score ?? null) === (row.overlay?.label ?? "Not implemented"));
+                          : row.overlayKey === "safeHavenRiskOffOverlay"
+                            ? ((runtimeAny?.safeHavenDebug?.labelMappingResult ?? row.overlay?.label ?? "Not implemented") === (row.overlay?.label ?? "Not implemented"))
+                            : (labelByOverlayScore(row.overlay?.score ?? null) === (row.overlay?.label ?? "Not implemented"));
 
                         return (
                           <div style={{ marginTop: 6, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
