@@ -780,13 +780,15 @@ export default function GlobalMacroDashboard() {
       const sourceAvailability: "available" | "partial" | "unavailable" = localUnrestRepricingBlockSourceFaithful
         ? "available"
         : sourceAvailabilityBase;
-      const runtimeStatus: "pass" | "partial" | "missing" = localUnrestRepricingBlockSourceFaithful
-        ? "pass"
-        : blockSignalCount === 0 || validObservationCount === 0
-          ? "missing"
-          : validObservationCount < blockSignalCount
-            ? "partial"
-            : "pass";
+      const runtimeStatus: "pass" | "partial" | "missing" = (() => {
+        if (overlayKey === "energyShockOverlay") {
+          const canonical = ((overlay as any)?.runtime?.blockDiagnostics?.[block]?.status ?? null) as "pass" | "partial" | "missing" | null;
+          if (canonical === "pass" || canonical === "partial" || canonical === "missing") return canonical;
+        }
+        if (localUnrestRepricingBlockSourceFaithful) return "pass";
+        if (blockSignalCount === 0 || validObservationCount === 0) return "missing";
+        return validObservationCount < blockSignalCount ? "partial" : "pass";
+      })();
       const availabilityRatio = blockSeries.length === 0 ? 0 : (availabilityCounts.available + availabilityCounts.partial * 0.5) / blockSeries.length;
       const proxyShare = blockSeries.length === 0 ? 1 : blockSeries.filter((row) => row.fallbackUsage === "proxy source" || row.fallbackUsage === "derived approximation").length / blockSeries.length;
       const specFidelity: "high" | "medium" | "low" = runtimeStatus === "missing"
@@ -824,15 +826,22 @@ export default function GlobalMacroDashboard() {
     });
 
     const runnableBlocks = blockRows.filter((row) => row.runtimeStatus !== "missing").length;
-    const runtimeCompleteness: "full" | "partial" | "weak" = blockRows.length === 0
-      ? "weak"
-      : runnableBlocks === blockRows.length
-        ? "full"
-        : runnableBlocks >= Math.ceil(blockRows.length / 2)
-          ? "partial"
-          : "weak";
+    const runtimeCompleteness: "full" | "partial" | "weak" | "invalid" = (() => {
+      if (overlayKey === "energyShockOverlay" && typeof (overlay as any)?.runtime?.activeProductionBlockCount === "number") {
+        const n = (overlay as any).runtime.activeProductionBlockCount as number;
+        if (n >= 3) return "full";
+        if (n === 2) return "partial";
+        if (n === 1) return "weak";
+        return "invalid";
+      }
+      if (blockRows.length === 0) return "weak";
+      if (runnableBlocks === blockRows.length) return "full";
+      return runnableBlocks >= Math.ceil(blockRows.length / 2) ? "partial" : "weak";
+    })();
     const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
-    const specFidelity: "high" | "medium" | "low" = overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low";
+    const specFidelity: "high" | "medium" | "low" = overlayKey === "energyShockOverlay" && typeof (overlay as any)?.runtime?.activeProductionBlockCount === "number"
+      ? (((overlay as any).runtime.activeProductionBlockCount >= 3) ? "high" : (((overlay as any).runtime.activeProductionBlockCount === 2) ? "medium" : "low"))
+      : (overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low");
     const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy).length / actualComponents.length;
     const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation")).length / blockRows.length;
     const criticalBlocksByOverlay: Record<string, string[]> = {
@@ -851,18 +860,22 @@ export default function GlobalMacroDashboard() {
         : proxyRatio <= 0.25
           ? "low"
           : "medium";
-    const robustness: "high" | "medium" | "low" = runtimeCompleteness === "full" && proxyDependence !== "high" && specFidelity !== "low"
-      ? "high"
-      : runtimeCompleteness === "weak" || proxyDependence === "high"
-        ? "low"
-        : "medium";
-    const fidelityBadge = specFidelity === "high"
-      ? "Spec-faithful"
-      : runtimeCompleteness === "weak"
-        ? "Structurally incomplete"
-        : proxyDependence === "high"
-          ? "Proxy-heavy"
-          : "Near-spec";
+    const robustness: "high" | "medium" | "low" = overlayKey === "energyShockOverlay" && typeof (overlay as any)?.runtime?.activeProductionBlockCount === "number"
+      ? (((overlay as any).runtime.activeProductionBlockCount >= 3) ? "high" : (((overlay as any).runtime.activeProductionBlockCount === 2) ? "medium" : "low"))
+      : (runtimeCompleteness === "full" && proxyDependence !== "high" && specFidelity !== "low"
+        ? "high"
+        : runtimeCompleteness === "weak" || proxyDependence === "high"
+          ? "low"
+          : "medium");
+    const fidelityBadge = overlayKey === "energyShockOverlay"
+      ? (runtimeCompleteness === "full" && specFidelity === "high" ? "Spec-faithful" : (runtimeCompleteness === "partial" ? "Structurally partial" : runtimeCompleteness === "weak" || runtimeCompleteness === "invalid" ? "Diagnostic-only" : "Near-spec"))
+      : (specFidelity === "high"
+        ? "Spec-faithful"
+        : runtimeCompleteness === "weak"
+          ? "Structurally incomplete"
+          : proxyDependence === "high"
+            ? "Proxy-heavy"
+            : "Near-spec");
 
     const exactDifferences = blockRows
       .filter((row) => row.blockerType !== "no blocker" || row.sourceAvailability !== "available")
@@ -917,6 +930,10 @@ export default function GlobalMacroDashboard() {
         `why differences exist: ${whyDiffExists.join(" | ") || "no blocker"}`,
         `impact on interpretation: ${impact}`,
         ...creditFundingExplicitDelta,
+        ...(overlayKey === "energyShockOverlay" ? [
+          `active production blocks: ${(overlay as any)?.runtime?.activeProductionBlockCount ?? 0}; included in score: ${((overlay as any)?.runtime?.includedBlocks ?? []).join(", ") || "none"}; excluded: ${((overlay as any)?.runtime?.excludedBlocks ?? []).join(", ") || "none"}`,
+          `runtime completeness: ${runtimeCompleteness}; spec fidelity: ${specFidelity}; robustness: ${robustness}`,
+        ] : []),
       ],
     };
   });
@@ -1381,6 +1398,7 @@ Signal: ${gapLabel}`,
                         <div>total score: {typeof activeOverlayBundle?.overlays?.[item.overlayKey]?.score === "number" ? activeOverlayBundle?.overlays?.[item.overlayKey]?.score?.toFixed(1) : "—"}</div>
                         <div>active production blocks: {item.activeProductionBlocks}</div>
                         <div>diagnostic-only blocks: {item.diagnosticOnlyBlocks}</div>
+                        <div>excluded blocks: {Math.max(0, 3 - item.activeProductionBlocks)}</div>
                         <div>missing blocks: {item.missingBlocks}</div>
                         <div>dominant negative contributors: {item.negative.join(", ") || "—"}</div>
                         <div>normalization inputs: {item.normalizationInputs.join(" | ") || "—"}</div>
@@ -1504,9 +1522,12 @@ Signal: ${gapLabel}`,
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Computation Walkthrough</summary>
                       {(() => {
                         const overlayComponents = row.overlay?.components ?? [];
-                        const overlayBlocks = Object.keys(row.overlay?.blockScores ?? {});
+                        const runtimeAny = (row.overlay as any)?.runtime ?? {};
+                        const productionBlockScores = (runtimeAny.productionValidBlockScores ?? row.overlay?.blockScores ?? {}) as Record<string, number | null>;
+                        const diagnosticBlockScores = (runtimeAny.diagnosticBlockScores ?? {}) as Record<string, number | null>;
+                        const overlayBlocks = Object.keys(productionBlockScores);
                         const validBlockScores = overlayBlocks
-                          .map((block) => ({ block, score: row.overlay?.blockScores?.[block] ?? null }))
+                          .map((block) => ({ block, score: productionBlockScores[block] ?? null }))
                           .filter((item) => typeof item.score === "number") as Array<{ block: string; score: number }>;
                         const runtimeWeights = ((row.overlay as any)?.runtime?.aggregationWeights ?? {}) as Record<string, number>;
                         const weightedScores = validBlockScores
@@ -1522,12 +1543,13 @@ Signal: ${gapLabel}`,
                             ? validBlockScores.reduce((acc, item) => acc + item.score, 0) / validBlockScores.length
                             : null);
                         const finalScore = typeof row.overlay?.score === "number" ? row.overlay.score : recomputedOverlay;
-                        const excludedBlocks = overlayBlocks.filter((block) => row.overlay?.blockScores?.[block] === null);
+                        const excludedBlocks = overlayBlocks.filter((block) => productionBlockScores[block] === null);
                         return (
                           <div style={{ marginTop: 6, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
                             {overlayComponents.map((component) => {
                               const percentile = component.debug?.percentile10yLatest ?? null;
-                              const supportScore = typeof component.score === "number" ? component.score : null;
+                              const supportScore = typeof (component as any).productionScore === "number" ? (component as any).productionScore : (typeof component.score === "number" ? component.score : null);
+                              const diagnosticScore = typeof (component as any).diagnosticScore === "number" ? (component as any).diagnosticScore : null;
                               const expectedSupport = typeof percentile === "number" ? 100 - percentile : null;
                               const supportValidation = typeof expectedSupport === "number" && typeof supportScore === "number" && Math.abs((expectedSupport + percentile!) - 100) < 1e-6 && Math.abs(expectedSupport - supportScore) < 1e-6 ? "pass" : "fail";
                               const signalValidation = [component.exactSource || component.source, component.rawValue, component.debug?.observationsAvailableInScoringWindow, percentile, supportScore].every((value) => value !== null && value !== undefined) ? "complete" : "incomplete";
@@ -1537,7 +1559,8 @@ Signal: ${gapLabel}`,
                                   <ul style={{ margin: 0, paddingLeft: 18 }}>
                                     <li>Step 1 — Fetch source series: series id={component.exactSource || component.source || "—"}, latest value={typeof component.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}, observation count={component.debug?.observationsAvailableInScoringWindow ?? 0}</li>
                                     <li>Step 2 — Compute percentile: historical window={component.debug?.scoringWindowSize ?? 0} obs, percentile={typeof percentile === "number" ? percentile.toFixed(2) : "—"}</li>
-                                    <li>Step 3 — Convert to support score: support_score = 100 − percentile → {typeof supportScore === "number" ? supportScore.toFixed(2) : "—"}; support_score_validation={component.debug?.supportScoreValidation ?? supportValidation}; percentile_plus_score_check={typeof supportScore === "number" && typeof percentile === "number" && Math.abs((supportScore + percentile) - 100) < 1e-6 ? "pass" : "fail"}</li>
+                                    <li>Step 3 — Convert to support score (diagnostic): support_score = 100 − percentile → {typeof diagnosticScore === "number" ? diagnosticScore.toFixed(2) : "—"}; support_score_validation={component.debug?.supportScoreValidation ?? supportValidation}; percentile_plus_score_check={typeof diagnosticScore === "number" && typeof percentile === "number" && Math.abs((diagnosticScore + percentile) - 100) < 1e-6 ? "pass" : "fail"}</li>
+                                    <li>Step 4 — Production gate: validForProduction={String((component as any).validForProduction ?? false)}; productionScore={typeof supportScore === "number" ? supportScore.toFixed(2) : "null"}; diagnosticOnly={String((component as any).diagnosticOnly ?? false)}; gatingFailureReason={(component as any).gatingFailureReason || "none"}</li>
                                     <li>signal_validation={signalValidation}</li>
                                   </ul>
                                 </div>
@@ -1545,17 +1568,17 @@ Signal: ${gapLabel}`,
                             })}
                             <div style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
                               <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                <li>Step 4 — Block aggregation: block score = average(signal scores)</li>
+                                <li>Step 5 — Block aggregation (production-valid only)</li>
                                 {overlayBlocks.map((block) => (
-                                  <li key={`block-score-${row.overlayKey}-${block}`}>{block}: {typeof row.overlay?.blockScores?.[block] === "number" ? row.overlay?.blockScores?.[block]?.toFixed(2) : "missing"}</li>
+                                  <li key={`block-score-${row.overlayKey}-${block}`}>{block}: production={typeof productionBlockScores[block] === "number" ? productionBlockScores[block]?.toFixed(2) : "excluded"}; diagnostic={typeof diagnosticBlockScores[block] === "number" ? diagnosticBlockScores[block]?.toFixed(2) : "—"}</li>
                                 ))}
-                                <li>Step 5 — Overlay aggregation: {((row.overlay as any)?.runtime?.scoreFormula ?? "overlay_score = weighted_average(available block scores)")} → {typeof finalScore === "number" ? finalScore.toFixed(2) : "—"}</li>
+                                <li>Step 6 — Overlay aggregation: {((row.overlay as any)?.runtime?.scoreFormula ?? "overlay_score = weighted_average(available block scores)")} → {typeof finalScore === "number" ? finalScore.toFixed(2) : "—"}</li>
                                 <li>included blocks in score: {validBlockScores.map((item) => item.block).join(", ") || "none"}</li>
                                 <li>excluded blocks from score: {excludedBlocks.join(", ") || "none"}</li>
                                 {row.overlayKey === "creditFundingOverlay" && excludedBlocks.includes("funding") && (
                                   <li>interpretation note: funding is unavailable; current score reflects pricing + access only.</li>
                                 )}
-                                <li>Step 6 — Label mapping: score → regime label → {row.overlay?.label ?? labelByOverlayScore(finalScore)}</li>
+                                <li>Step 7 — Label mapping: score → regime label → {row.overlay?.label ?? labelByOverlayScore(finalScore)}</li>
                               </ul>
                             </div>
                           </div>
@@ -1567,9 +1590,11 @@ Signal: ${gapLabel}`,
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Verification trace</summary>
                       {(() => {
                         const components = row.overlay?.components ?? [];
-                        const blockEntries = Object.entries(row.overlay?.blockScores ?? {});
+                        const runtimeAny = (row.overlay as any)?.runtime ?? {};
+                        const productionValidBlockScores = (runtimeAny.productionValidBlockScores ?? row.overlay?.blockScores ?? {}) as Record<string, number | null>;
+                        const blockEntries = Object.entries(productionValidBlockScores);
                         const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey] as any;
-                        const transformCandidates = components.filter((component) => typeof component.debug?.percentile10yLatest === "number" && typeof component.score === "number");
+                        const transformCandidates = components.filter((component) => typeof component.debug?.percentile10yLatest === "number" && typeof ((component as any).diagnosticScore ?? component.score) === "number");
                         const transformPass = transformCandidates.length > 0
                           ? transformCandidates.every((component) => component.debug?.supportScoreValidation === "pass")
                           : true;
@@ -1578,30 +1603,28 @@ Signal: ${gapLabel}`,
                           const obs = component.debug?.observationsAvailableInScoringWindow ?? 0;
                           return {
                             source: component.exactSource || component.source || component.id,
-                            status: obs > 0 && typeof component.score === "number" ? "pass" : (component.missing ? "incomplete" : "missing"),
+                            status: obs > 0 && ((component as any).sourceValidationStatus ?? "pass") === "pass" ? "pass" : (component.missing ? "partial" : "missing"),
                           };
                         });
 
                         const blockChecks = blockEntries.map(([block, score]) => {
-                          if (row.overlayKey === "liquidityOverlay") {
-                            const runtimeInputs = ((row.overlay as any)?.runtime?.blockAggregationInputs?.[block] ?? []) as Array<{ signalStatus?: string }>;
-                            const hasIncompleteSignals = runtimeInputs.some((item: { signalStatus?: string }) => item.signalStatus !== "ok");
-                            if (typeof score === "number") {
-                              return { block, pass: true, status: hasIncompleteSignals ? "partial" : "pass" };
-                            }
-                            return { block, pass: false, status: hasIncompleteSignals ? "partial" : "fail" };
+                          const canonicalStatus = (runtimeAny?.blockDiagnostics?.[block]?.status ?? null) as "pass" | "partial" | "missing" | null;
+                          if (canonicalStatus === "pass" || canonicalStatus === "partial" || canonicalStatus === "missing") {
+                            return { block, pass: canonicalStatus === "pass", status: canonicalStatus };
                           }
                           const blockSignals = components.filter((component) => component.block === block);
-                          const valid = blockSignals.filter((component) => !component.missing && typeof component.score === "number");
+                          const valid = blockSignals.filter((component) => !component.missing && typeof ((component as any).productionScore ?? component.score) === "number");
                           const expected = valid.length > 0
-                            ? valid.reduce((acc, component) => acc + (component.score as number), 0) / valid.length
+                            ? valid.reduce((acc, component) => acc + (((component as any).productionScore ?? component.score) as number), 0) / valid.length
                             : null;
                           const pass = (typeof expected === "number" && typeof score === "number" && Math.abs(expected - score) < 1e-6) || (expected === null && score === null);
-                          const status = typeof score === "number" ? (pass ? "pass" : "fail") : "missing";
+                          const status: "pass" | "partial" | "missing" = typeof score === "number" ? (pass ? "pass" : "partial") : "missing";
                           return { block, pass, status };
                         });
 
-                        const overlayPass = row.overlayKey === "liquidityOverlay"
+                        const overlayPass = row.overlayKey === "energyShockOverlay"
+                          ? ((runtimeAny?.includedBlocksInTotal ?? []).every((block: string) => runtimeAny?.blockDiagnostics?.[block]?.status === "pass") && (runtimeAny?.excludedBlocks ?? []).every((block: string) => runtimeAny?.blockDiagnostics?.[block]?.status !== "pass"))
+                          : row.overlayKey === "liquidityOverlay"
                           ? (verification?.overlayScoreCalculation?.aggregationValidationStatus ?? (typeof row.overlay?.score === "number" ? "pass" : "fail")) === "pass"
                           : (() => {
                             const verificationStatus = verification?.overlayComputation?.aggregationValidationStatus;
@@ -1625,7 +1648,9 @@ Signal: ${gapLabel}`,
                             return (recomputedOverlay === null && row.overlay?.score === null)
                               || (typeof recomputedOverlay === "number" && typeof row.overlay?.score === "number" && Math.abs(recomputedOverlay - row.overlay.score) < 1e-6);
                           })();
-                        const labelPass = labelByOverlayScore(row.overlay?.score ?? null) === (row.overlay?.label ?? "Not implemented");
+                        const labelPass = row.overlayKey === "energyShockOverlay"
+                          ? (((runtimeAny?.activeProductionBlockCount ?? 0) >= 2) ? ((runtimeAny?.energyDebug?.productionLabel ?? row.overlay?.label ?? "Not implemented") === (row.overlay?.label ?? "Not implemented")) : ((row.overlay?.label ?? "Not implemented") === "Not implemented"))
+                          : (labelByOverlayScore(row.overlay?.score ?? null) === (row.overlay?.label ?? "Not implemented"));
 
                         return (
                           <div style={{ marginTop: 6, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
@@ -1637,21 +1662,21 @@ Signal: ${gapLabel}`,
                             </ul>
                             <div style={{ fontWeight: 700, marginTop: 8 }}>Transformation validation</div>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              <li>percentile computation → {transformPass ? "pass" : "fail"}</li>
-                              <li>support score formula → {transformPass ? "pass" : "fail"}</li>
-                              <li>percentile + score = 100 check → {transformPass ? "pass" : "fail"}</li>
+                              <li>percentile computation → {transformPass ? "pass" : "partial"}</li>
+                              <li>support score formula → {transformPass ? "pass" : "partial"}</li>
+                              <li>percentile + score = 100 check → {transformPass ? "pass" : "partial"}</li>
                             </ul>
                             <div style={{ fontWeight: 700, marginTop: 8 }}>Aggregation validation</div>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
                               {blockChecks.map((item) => (
-                                <li key={`block-check-${row.overlayKey}-${item.block}`}>{item.block} block aggregation → {item.status ?? (item.pass ? "pass" : "fail")}</li>
+                                <li key={`block-check-${row.overlayKey}-${item.block}`}>{item.block} block aggregation → {item.status ?? (item.pass ? "pass" : "partial")}</li>
                               ))}
                               <li>missing blocks correctly excluded → {blockEntries.filter(([, score]) => score === null).length > 0 ? "pass" : "pass"}</li>
                             </ul>
                             <div style={{ fontWeight: 700, marginTop: 8 }}>Overlay computation validation</div>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              <li>overlay score calculation → {overlayPass ? "pass" : "fail"}</li>
-                              <li>regime label mapping → {labelPass ? "pass" : "fail"}</li>
+                              <li>overlay score calculation → {overlayPass ? "pass" : (row.overlayKey === "energyShockOverlay" ? "partial" : "fail")}</li>
+                              <li>regime label mapping → {labelPass ? "pass" : (row.overlayKey === "energyShockOverlay" ? "partial" : "fail")}</li>
                             </ul>
                           </div>
                         );

@@ -57,7 +57,7 @@ type OverlayResult = {
   blockScores: Record<string, number | null>;
   components: OverlayComponent[];
   runtime?: {
-    status: "complete" | "partial" | "weak";
+    status: "complete" | "partial" | "weak" | "invalid";
     minimumRequiredBlocks?: number;
     productionValidBlockScores?: Record<string, number | null>;
     diagnosticBlockScores?: Record<string, number | null>;
@@ -75,7 +75,7 @@ type OverlayResult = {
       diagnosticBlockScore: number | null;
       productionBlockScore: number | null;
       includedInTotal: boolean;
-      status: "production-valid" | "partial" | "missing" | "diagnostic-only";
+      status: "pass" | "partial" | "missing";
     }>;
     includedBlocksInTotal: string[];
     excludedBlocks: string[];
@@ -859,7 +859,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       diagnosticBlockScore: priceDiagnosticScore,
       productionBlockScore: priceShockScoreProduction,
       includedInTotal: priceShockScoreProduction !== null,
-      status: (priceShockScoreProduction !== null ? "production-valid" : (priceDiagnosticScore !== null ? "diagnostic-only" : "missing")) as "production-valid" | "partial" | "missing" | "diagnostic-only",
+      status: (priceShockScoreProduction !== null ? "pass" : (priceDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
     },
     breadth: {
       minimumRequiredComponents: region === "US" ? ["en_breadth_brent", "en_breadth_henry_hub", "en_breadth_us_third"] : ["en_breadth_brent", "en_breadth_hicp_energy"],
@@ -869,7 +869,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       diagnosticBlockScore: breadthDiagnosticScore,
       productionBlockScore: breadthScoreProduction,
       includedInTotal: breadthScoreProduction !== null,
-      status: (breadthScoreProduction !== null ? "production-valid" : (breadthDiagnosticScore !== null ? "diagnostic-only" : "missing")) as "production-valid" | "partial" | "missing" | "diagnostic-only",
+      status: (breadthScoreProduction !== null ? "pass" : (breadthDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
     },
     spillover: {
       minimumRequiredComponents: region === "US" ? ["en_spill_infl_us", "en_spill_growth_us"] : ["en_spill_infl_ea", "en_spill_growth_ea"],
@@ -879,7 +879,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       diagnosticBlockScore: spillDiagnosticScore,
       productionBlockScore: macroSpilloverScoreProduction,
       includedInTotal: macroSpilloverScoreProduction !== null,
-      status: (macroSpilloverScoreProduction !== null ? "production-valid" : (spillDiagnosticScore !== null ? "diagnostic-only" : "missing")) as "production-valid" | "partial" | "missing" | "diagnostic-only",
+      status: (macroSpilloverScoreProduction !== null ? "pass" : (spillDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
     },
   };
 
@@ -910,12 +910,14 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
   let confidenceRaw = confWeight > 0 ? Math.round(100 * includedProductionComponents.reduce((a, c) => a + (energyFreshnessPenalty(c.freshnessDays) * (c.weight / confWeight)), 0)) : 0;
   let confidenceCap = 100;
   let confidenceCapReason = "none";
-  const runtimeStatus: "complete" | "partial" | "weak" = activeProductionBlockCount >= 3 ? "complete" : (activeProductionBlockCount >= 2 ? "partial" : "weak");
+  const runtimeStatus: "complete" | "partial" | "weak" | "invalid" = activeProductionBlockCount >= 3 ? "complete" : (activeProductionBlockCount === 2 ? "partial" : (activeProductionBlockCount === 1 ? "weak" : "invalid"));
+  const specFidelity = activeProductionBlockCount >= 3 ? "high" : (activeProductionBlockCount === 2 ? "medium" : (activeProductionBlockCount === 1 ? "low" : "low"));
+  const robustness = activeProductionBlockCount >= 3 ? "high" : (activeProductionBlockCount === 2 ? "medium" : "low");
+  if (runtimeStatus === "partial") { confidenceCap = Math.min(confidenceCap, 70); confidenceCapReason = "runtimeCompleteness=partial"; }
   if (runtimeStatus === "weak") { confidenceCap = Math.min(confidenceCap, 40); confidenceCapReason = "runtimeCompleteness=weak"; }
-  const specFidelity = activeProductionBlockCount >= 2 ? "medium" : "low";
+  if (runtimeStatus === "invalid") { confidenceCap = Math.min(confidenceCap, 0); confidenceCapReason = "runtimeCompleteness=invalid"; }
+  if (specFidelity === "medium") { confidenceCap = Math.min(confidenceCap, 70); confidenceCapReason = confidenceCapReason === "none" ? "spec fidelity medium" : confidenceCapReason; }
   if (specFidelity === "low") { confidenceCap = Math.min(confidenceCap, 50); confidenceCapReason = confidenceCapReason === "none" ? "spec fidelity low" : confidenceCapReason; }
-  const robustness = diagnosticOnlyBlockCount > 0 ? "low" : "medium";
-  if (robustness === "low") { confidenceCap = Math.min(confidenceCap, 60); confidenceCapReason = confidenceCapReason === "none" ? "robustness low" : confidenceCapReason; }
   if (activeProductionBlockCount < 2) { confidenceCap = Math.min(confidenceCap, 20); confidenceCapReason = "fewer than 2 production-valid blocks"; }
   if (includedBlocks.some((b) => !blockDiagnostics[b.name as keyof typeof blockDiagnostics].validForProduction)) { confidenceCap = Math.min(confidenceCap, 25); confidenceCapReason = "included block not production-valid"; }
   if (productionScore === null && diagnosticScore !== null) { confidenceCap = 0; confidenceCapReason = "overlay computed from diagnostic-only blocks"; }
@@ -923,12 +925,13 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
 
   debug.computationWalkthrough.push(`Step 1 fetch series -> Step 2 diagnostic signals -> Step 3 production validation -> Step 4 production score/null -> Step 5 block aggregation over production-valid components only -> Step 6 overlay aggregation over included production-valid blocks only.`);
   debug.computationWalkthrough.push(`Price diagnostic=${priceDiagnosticScore ?? "null"}, production=${priceShockScoreProduction ?? "null"}; breadth diagnostic=${breadthDiagnosticScore ?? "null"}, production=${breadthScoreProduction ?? "null"}; spillover diagnostic=${spillDiagnosticScore ?? "null"}, production=${macroSpilloverScoreProduction ?? "null"}.`);
+  debug.implementationDeltaVsSpec.push(`price block: ${priceShockScoreProduction !== null ? "pass" : "partial/missing"}; spillover block: ${macroSpilloverScoreProduction !== null ? "pass" : "partial/missing"}; breadth block: ${breadthScoreProduction !== null ? "pass" : "excluded"}.`);
   debug.verificationTrace.push("Component validity gate enforced: invalid inputs cannot produce production scores and are diagnostic_only.");
   debug.verificationTrace.push(`Included blocks in total: ${includedBlocks.map((b) => b.name).join(", ") || "none"}; excluded=${excludedBlocks.join(", ") || "none"}; diagnosticOnlyBlocks=${diagnosticOnlyBlocks.join(", ") || "none"}.`);
   if (region === "US") {
-    debug.implementationDeltaVsSpec.push("US breadth remains diagnostic-only because third source-locked breadth component is unavailable.");
+    debug.implementationDeltaVsSpec.push("breadth block: partial and excluded from production score because third source-locked US breadth component is unavailable.");
   } else {
-    debug.implementationDeltaVsSpec.push("EA remains partial; EA power not source-locked so full-status is not granted.");
+    debug.implementationDeltaVsSpec.push("EA remains structurally partial; EA power is not source-locked so breadth stays excluded from production score.");
   }
 
   const productionLabel = activeProductionBlockCount >= 2 && productionScore !== null ? energyLabelByScore(productionScore) : "Not implemented";
@@ -962,7 +965,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
         (acc[component.block] ??= []).push({ signalId: component.id, signalStatus: component.signalStatus, score: component.productionScore ?? null });
         return acc;
       }, {}),
-      ...( { energyDebug: { ...debug, diagnosticLabel: energyLabelByScore(diagnosticScore), productionLabel, productionValidBlockScores: { price: priceShockScoreProduction, breadth: breadthScoreProduction, spillover: macroSpilloverScoreProduction }, diagnosticBlockScores: diagnosticBlocks } } as any),
+      ...( { energyDebug: { ...debug, diagnosticLabel: energyLabelByScore(diagnosticScore), productionLabel, productionValidBlockScores: { price: priceShockScoreProduction, breadth: breadthScoreProduction, spillover: macroSpilloverScoreProduction }, diagnosticBlockScores: diagnosticBlocks, runtimeCompleteness: runtimeStatus, specFidelity, robustness, blockStatus: { price: blockDiagnostics.price.status, breadth: blockDiagnostics.breadth.status, spillover: blockDiagnostics.spillover.status } } } as any),
     },
   };
 }
