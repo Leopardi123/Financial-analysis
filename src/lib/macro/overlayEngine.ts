@@ -95,6 +95,7 @@ type OverlayResult = {
     aggregationWeights: Record<string, number>;
     scoreFormula: string;
     blockAggregationInputs?: Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>;
+    implementationDeltaVsSpec?: string[];
   };
   bridgeDiagnostic?: {
     status: "available" | "missing";
@@ -1146,7 +1147,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
 }
 
 export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayBundle {
-  const inflationSeries = region === "US" ? "core_cpi_us" : "HICP.M.U2.N.000000.4.ANR";
+  const inflationSeries = region === "US" ? "CPIAUCSL" : "HICP.M.U2.N.000000.4.ANR";
   const coreInflationSeries = region === "US" ? "CPILFESL" : "HICP.M.U2.N.XEF000.4D0.ANR";
   const overlays: Record<string, OverlayResult> = {
     liquidityOverlay: (() => {
@@ -1452,15 +1453,153 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
         duration: { weight: 0.35, components: [durationComponent] },
       });
     })(),
-    inflationCostShockOverlay: finalizeOverlay({
-      inflation: { weight: 0.45, components: [
-        makeComponent({ asOfDate, id: "ics_headline", title: "Headline inflation", block: "inflation", weight: region === "US" ? 0.4 : 0.5, source: "FRED/ECB", exactSource: inflationSeries, series: yoy(getSeries(series, inflationSeries)), invert: true }),
-        makeComponent({ asOfDate, id: "ics_core", title: "Core inflation", block: "inflation", weight: region === "US" ? 0.4 : 0.5, source: "FRED/ECB", exactSource: coreInflationSeries, series: yoy(getSeries(series, coreInflationSeries)), invert: true }),
-        makeComponent({ asOfDate, id: "ics_gap", title: "Headline-core gap", block: "inflation", weight: region === "US" ? 0.2 : 0, source: "Derived", exactSource: `${inflationSeries} - ${coreInflationSeries}`, series: yoy(getSeries(series, inflationSeries)).map((p, i) => ({ date: p.date, value: (p.value ?? null) !== null ? ((p.value as number) - (yoy(getSeries(series, coreInflationSeries))[i]?.value ?? 0)) : null })), invert: true, proxy: true }),
-      ]},
-      upstream: { weight: 0.3, components: [makeComponent({ asOfDate, id: "ics_up", title: "Upstream cost pressure", block: "upstream", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "PPIACO" : "PPI.EA", series: yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")).length ? yoy(getSeries(series, region === "US" ? "PPIACO" : "EA_PPI")) : (getSeries(series, "commodity_index_yoy").length ? getSeries(series, "commodity_index_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
-      expectations: { weight: 0.25, components: [makeComponent({ asOfDate, id: "ics_exp", title: "Inflation expectations", block: "expectations", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "T10YIE + survey" : "ECB SPF", series: getSeries(series, region === "US" ? "T10YIE" : "EA_INFLATION_EXPECTATIONS"), invert: true, proxy: region !== "US" })] },
-    }),
+    inflationCostShockOverlay: (() => {
+      const headlineCpiYoyUs = yoy(getSeries(series, "CPIAUCSL"));
+      const coreCpiYoyUs = yoy(getSeries(series, "CPILFESL"));
+      const headlineCoreGapUs = headlineCpiYoyUs.map((point, index) => {
+        const corePoint = coreCpiYoyUs[index];
+        const headline = point?.value;
+        const core = corePoint?.value;
+        if (typeof headline !== "number" || !Number.isFinite(headline) || typeof core !== "number" || !Number.isFinite(core)) {
+          return { date: point.date, value: null };
+        }
+        return { date: point.date, value: headline - core };
+      });
+      const headlineCoreGapClippedUs = headlineCoreGapUs.map((point) => ({
+        date: point.date,
+        value: typeof point.value === "number" && Number.isFinite(point.value) ? Math.max(point.value, 0) : null,
+      }));
+      const ppiYoyUs = yoy(getSeries(series, "PPIACO"));
+      const marketBreakevenUs = getSeries(series, "T10YIE");
+      const surveyExpectationsUs = getSeries(series, "MICH");
+
+      const inflationComponents = [
+        makeComponent({
+          asOfDate,
+          id: "ics_headline",
+          title: "Headline inflation",
+          block: region === "US" ? "inflation_pressure" : "inflation",
+          weight: region === "US" ? 0.4 : 0.5,
+          source: "FRED/ECB",
+          exactSource: region === "US" ? "CPIAUCSL" : inflationSeries,
+          series: region === "US" ? headlineCpiYoyUs : yoy(getSeries(series, inflationSeries)),
+          invert: true,
+        }),
+        makeComponent({
+          asOfDate,
+          id: "ics_core",
+          title: "Core inflation",
+          block: region === "US" ? "inflation_pressure" : "inflation",
+          weight: region === "US" ? 0.4 : 0.5,
+          source: "FRED/ECB",
+          exactSource: coreInflationSeries,
+          series: yoy(getSeries(series, coreInflationSeries)),
+          invert: true,
+        }),
+        makeComponent({
+          asOfDate,
+          id: "ics_gap",
+          title: "Headline-core gap",
+          block: region === "US" ? "inflation_pressure" : "inflation",
+          weight: region === "US" ? 0.2 : 0,
+          source: region === "US" ? "FRED" : "Derived",
+          exactSource: region === "US" ? "max(YoY(CPIAUCSL) - YoY(CPILFESL), 0)" : `${inflationSeries} - ${coreInflationSeries}`,
+          series: region === "US"
+            ? headlineCoreGapClippedUs
+            : yoy(getSeries(series, inflationSeries)).map((p, i) => ({ date: p.date, value: (p.value ?? null) !== null ? ((p.value as number) - (yoy(getSeries(series, coreInflationSeries))[i]?.value ?? 0)) : null })),
+          invert: true,
+          proxy: region !== "US",
+        }),
+      ];
+
+      if (region === "US") {
+        const inflationGapComponent = inflationComponents[2];
+        inflationGapComponent.debug = {
+          ...(inflationGapComponent.debug ?? {}),
+          exactSourceHeadline: "CPIAUCSL",
+          exactSourceCore: "CPILFESL",
+          exactSourceGapInputs: ["CPIAUCSL", "CPILFESL"],
+          headline_cpi_yoy_us: inflationComponents[0].rawValue,
+          core_cpi_yoy_us: inflationComponents[1].rawValue,
+          headline_core_gap_us: lastNumeric(headlineCoreGapUs)?.value ?? null,
+          headline_core_gap_clipped: inflationGapComponent.rawValue,
+          subscoreWeights: { headline: 0.4, core: 0.4, gap: 0.2 },
+        } as OverlayComponent["debug"] & Record<string, unknown>;
+      }
+
+      const upstreamComponent = makeComponent({
+        asOfDate,
+        id: "ics_up",
+        title: "Upstream cost pressure",
+        block: region === "US" ? "upstream_cost_pressure" : "upstream",
+        weight: 1,
+        source: "FRED/ECB",
+        exactSource: region === "US" ? "PPIACO" : "PPI.EA",
+        series: region === "US"
+          ? ppiYoyUs
+          : (yoy(getSeries(series, "EA_PPI")).length ? yoy(getSeries(series, "EA_PPI")) : (getSeries(series, "commodity_index_yoy").length ? getSeries(series, "commodity_index_yoy") : getSeries(series, "industrial_metals_yoy"))),
+        invert: true,
+        proxy: region !== "US",
+        note: region === "US" ? "Source-faithful transformed direct input: YoY(PPIACO)." : "",
+      });
+
+      const expectationsComponents = region === "US"
+        ? [
+          makeComponent({ asOfDate, id: "ics_exp_market", title: "Inflation expectations (market)", block: "expectations_pressure", weight: 0.6, source: "FRED", exactSource: "T10YIE", series: marketBreakevenUs, invert: true }),
+          makeComponent({ asOfDate, id: "ics_exp_survey", title: "Inflation expectations (survey)", block: "expectations_pressure", weight: 0.4, source: "FRED", exactSource: "MICH", series: surveyExpectationsUs, invert: true }),
+        ]
+        : [
+          makeComponent({ asOfDate, id: "ics_exp", title: "Inflation expectations", block: "expectations", weight: 1, source: "FRED/ECB", exactSource: "ECB SPF", series: getSeries(series, "EA_INFLATION_EXPECTATIONS"), invert: true, proxy: true }),
+        ];
+
+      const result = finalizeOverlay({
+        inflation: { weight: 0.45, components: inflationComponents },
+        upstream: { weight: 0.3, components: [upstreamComponent] },
+        expectations: { weight: 0.25, components: expectationsComponents },
+      });
+
+      if (region === "US") {
+        result.components.forEach((component) => {
+          const production = Boolean(component.includedInTotal && typeof component.score === "number" && !component.missing);
+          component.validForProduction = production;
+          component.productionScore = production ? component.score : null;
+          component.diagnosticScore = typeof component.score === "number" ? component.score : null;
+          component.diagnosticOnly = !production && component.diagnosticScore !== null;
+        });
+        const blockAggregationInputs = result.components.reduce<Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>>((acc, component) => {
+          (acc[component.block] ??= []).push({ signalId: component.id, signalStatus: component.signalStatus, score: component.score });
+          return acc;
+        }, {});
+        return {
+          ...result,
+          runtime: {
+            status: result.runtime?.status ?? "complete",
+            minimumRequiredBlocks: result.runtime?.minimumRequiredBlocks,
+            productionValidBlockScores: result.runtime?.productionValidBlockScores,
+            diagnosticBlockScores: result.runtime?.diagnosticBlockScores,
+            includedBlocks: result.runtime?.includedBlocks,
+            diagnosticOnlyBlocks: result.runtime?.diagnosticOnlyBlocks,
+            activeProductionBlockCount: result.runtime?.activeProductionBlockCount,
+            diagnosticOnlyBlockCount: result.runtime?.diagnosticOnlyBlockCount,
+            confidenceCapApplied: result.runtime?.confidenceCapApplied,
+            confidenceCapReason: result.runtime?.confidenceCapReason,
+            blockDiagnostics: result.runtime?.blockDiagnostics,
+            includedBlocksInTotal: ["inflation_pressure", "upstream_cost_pressure", "expectations_pressure"],
+            excludedBlocks: result.runtime?.excludedBlocks ?? [],
+            aggregationWeights: { inflation_pressure: 0.45, upstream_cost_pressure: 0.30, expectations_pressure: 0.25 },
+            scoreFormula: "inflation_cost_shock_overlay_score = 0.45*inflation_pressure + 0.30*upstream_cost_pressure + 0.25*expectations_pressure",
+            blockAggregationInputs,
+            implementationDeltaVsSpec: [
+              "inflation block: source-faithful with CPIAUCSL + CPILFESL YoY and clipped max(headline-core,0) gap.",
+              "upstream block: source-faithful transformed direct input YoY(PPIACO).",
+              "expectations block: source-faithful with T10YIE (0.60) + MICH (0.40).",
+            ],
+          },
+        };
+      }
+
+      return result;
+    })(),
     tradeSupplyChainStressOverlay: (() => {
       const usIndustrialProduction = yoy(getSeries(series, "INDPRO"));
       const usNewOrders = yoy(getSeries(series, "DGORDER"));
@@ -1574,7 +1713,8 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     CPILFESL: ["core_cpi_us"],
     CPIENGSL: ["cpi_energy_us"],
     T10YIE: ["breakeven_10y_us"],
-    CPIAUCSL: ["core_cpi_us"],
+    MICH: ["mich_inflation_expectations_us"],
+    CPIAUCSL: ["headline_cpi_us"],
     VIXCLS: ["vix_index"],
     "BSI.M.U2.Y.V.M30.X.1.U2.2300.Z01.E": ["m3_ea"],
     "HICP.M.U2.N.000000.4.ANR": ["hicp_yoy_ea", "hicp_ea"],
