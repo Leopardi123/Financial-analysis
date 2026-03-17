@@ -1559,6 +1559,13 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       });
 
       if (region === "US") {
+        result.components.forEach((component) => {
+          const production = Boolean(component.includedInTotal && typeof component.score === "number" && !component.missing);
+          component.validForProduction = production;
+          component.productionScore = production ? component.score : null;
+          component.diagnosticScore = typeof component.score === "number" ? component.score : null;
+          component.diagnosticOnly = !production && component.diagnosticScore !== null;
+        });
         const blockAggregationInputs = result.components.reduce<Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>>((acc, component) => {
           (acc[component.block] ??= []).push({ signalId: component.id, signalStatus: component.signalStatus, score: component.score });
           return acc;

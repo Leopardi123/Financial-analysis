@@ -540,9 +540,9 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Risk-off-flöden via safe-haven, equities och durationdynamik.",
     },
     inflationCostShockOverlay: {
-      intendedPrimaryBlocks: ["upstream", "expectations"],
+      intendedPrimaryBlocks: ["inflation", "upstream", "expectations"],
       intendedSeries: [
-        { id: "cpi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["CPIAUCSL / regional CPI"], aliasFamily: ["cpi", "cpiaucsl", "cp0000ez19m086nest"] },
+        { id: "cpi", block: "inflation", linkedMacroFamily: "C_INFLATION", primarySources: ["CPIAUCSL / regional CPI"], aliasFamily: ["cpi", "cpiaucsl", "cp0000ez19m086nest"] },
         { id: "ppi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["PPIACO"], aliasFamily: ["ppi", "ppiaco"] },
         { id: "inflation_expectations", block: "expectations", linkedMacroFamily: "A_FISCAL", primarySources: ["T10YIE", "MICH"], aliasFamily: ["inflation_expectations", "t10yie", "breakeven", "mich"] },
       ],
@@ -738,15 +738,15 @@ export default function GlobalMacroDashboard() {
 
     const isMacroPseudoBlock = (value: string): boolean => ["A_FISCAL", "B_MONETARY", "C_INFLATION", "D_CREDIBILITY"].includes(value);
     const blockKeys = Array.from(new Set([
-      ...Object.keys(overlay?.blockScores ?? {}).filter((block) => !isMacroPseudoBlock(block)),
-      ...runtimeBlockDiagnostics.map((row) => row.block).filter((block) => !isMacroPseudoBlock(block)),
-      ...spec.intendedPrimaryBlocks,
-      ...spec.intendedSeries.map((series) => series.block),
+      ...Object.keys(overlay?.blockScores ?? {}).map((block) => normalizeOverlayRuntimeBlockName(overlayKey, block)).filter((block) => !isMacroPseudoBlock(block)),
+      ...runtimeBlockDiagnostics.map((row) => normalizeOverlayRuntimeBlockName(overlayKey, row.block)).filter((block) => !isMacroPseudoBlock(block)),
+      ...spec.intendedPrimaryBlocks.map((block) => normalizeOverlayRuntimeBlockName(overlayKey, block)),
+      ...spec.intendedSeries.map((series) => normalizeOverlayRuntimeBlockName(overlayKey, series.block)),
     ]));
 
     const blockRows = blockKeys.map((block) => {
       const scoreValue = overlay?.blockScores?.[block] ?? null;
-      const diagnostics = runtimeBlockDiagnostics.find((item) => item.block === block);
+      const diagnostics = runtimeBlockDiagnostics.find((item) => normalizeOverlayRuntimeBlockName(overlayKey, item.block) === block);
       const exactSeries = seriesRows.filter((row) => row.block === block);
       const blockSeries = exactSeries;
       const availabilityCounts = {
@@ -762,7 +762,7 @@ export default function GlobalMacroDashboard() {
             ? "partial"
             : "unavailable";
 
-      const blockComponents = actualComponents.filter((component) => component.block === block);
+      const blockComponents = actualComponents.filter((component) => normalizeOverlayRuntimeBlockName(overlayKey, component.block) === block);
       const blockSignalCount = blockComponents.length > 0 ? blockComponents.length : blockSeries.length;
       const validObservationCount = blockComponents.filter((component) => {
         const observations = component.debug?.observationsAvailableInScoringWindow ?? 0;
@@ -789,7 +789,7 @@ export default function GlobalMacroDashboard() {
         : sourceAvailabilityBase;
       const runtimeStatus: "pass" | "partial" | "missing" = (() => {
         if (overlayKey === "energyShockOverlay") {
-          const canonical = ((overlay as any)?.runtime?.blockDiagnostics?.[block]?.status ?? null) as "pass" | "partial" | "missing" | null;
+          const canonical = ((overlay as any)?.runtime?.blockDiagnostics?.[block]?.status ?? ((overlay as any)?.runtime?.blockDiagnostics?.[`${block}_pressure`]?.status ?? null)) as "pass" | "partial" | "missing" | null;
           if (canonical === "pass" || canonical === "partial" || canonical === "missing") return canonical;
         }
         if (localUnrestRepricingBlockSourceFaithful) return "pass";
@@ -976,6 +976,14 @@ export default function GlobalMacroDashboard() {
     if (score < 60) return "Neutral";
     if (score < 80) return "Supportive";
     return "Very supportive";
+  }
+
+  function normalizeOverlayRuntimeBlockName(overlayKey: string, rawBlock: string): string {
+    if (overlayKey !== "inflationCostShockOverlay") return rawBlock;
+    if (rawBlock === "inflation_pressure") return "inflation";
+    if (rawBlock === "upstream_cost_pressure") return "upstream";
+    if (rawBlock === "expectations_pressure") return "expectations";
+    return rawBlock;
   }
 
   function normalizeOverlayLabel(overlayKey: string): string {
@@ -1609,7 +1617,7 @@ Signal: ${gapLabel}`,
                         const components = row.overlay?.components ?? [];
                         const runtimeAny = (row.overlay as any)?.runtime ?? {};
                         const productionValidBlockScores = (runtimeAny.productionValidBlockScores ?? row.overlay?.blockScores ?? {}) as Record<string, number | null>;
-                        const blockEntries = Object.entries(productionValidBlockScores);
+                        const blockEntries = Object.entries(productionValidBlockScores).map(([block, score]) => [normalizeOverlayRuntimeBlockName(row.overlayKey, block), score] as const);
                         const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey] as any;
                         const transformCandidates = components.filter((component) => typeof component.debug?.percentile10yLatest === "number" && (typeof ((component as any).productionScore) === "number" || typeof component.score === "number"));
                         const transformPass = transformCandidates.length > 0
@@ -1628,12 +1636,13 @@ Signal: ${gapLabel}`,
                           };
                         });
 
-                        const blockChecks = blockEntries.map(([block, score]) => {
-                          const canonicalStatus = (runtimeAny?.blockDiagnostics?.[block]?.status ?? null) as "pass" | "partial" | "missing" | null;
+                        const dedupedBlockEntries = Array.from(new Map(blockEntries).entries());
+                        const blockChecks = dedupedBlockEntries.map(([block, score]) => {
+                          const canonicalStatus = (runtimeAny?.blockDiagnostics?.[block]?.status ?? runtimeAny?.blockDiagnostics?.[`${block}_pressure`]?.status ?? null) as "pass" | "partial" | "missing" | null;
                           if (canonicalStatus === "pass" || canonicalStatus === "partial" || canonicalStatus === "missing") {
                             return { block, pass: canonicalStatus === "pass", status: canonicalStatus };
                           }
-                          const blockSignals = components.filter((component) => component.block === block);
+                          const blockSignals = components.filter((component) => normalizeOverlayRuntimeBlockName(row.overlayKey, component.block) === block);
                           const valid = blockSignals.filter((component) => !component.missing && typeof ((component as any).productionScore ?? component.score) === "number");
                           const expected = valid.length > 0
                             ? valid.reduce((acc, component) => acc + (((component as any).productionScore ?? component.score) as number), 0) / valid.length
@@ -1652,7 +1661,7 @@ Signal: ${gapLabel}`,
                             if (verificationStatus === "pass") return true;
                             if (typeof row.overlay?.score !== "number") return false;
                             const runtimeWeights = (row.overlay as any)?.runtime?.aggregationWeights ?? {};
-                            const weighted = blockEntries
+                            const weighted = dedupedBlockEntries
                               .filter(([block, score]) => typeof score === "number" && typeof runtimeWeights?.[block] === "number")
                               .map(([block, score]) => ({ block, score: score as number, weight: runtimeWeights[block] as number }));
                             const useWeighted = weighted.length > 0;
@@ -1663,7 +1672,7 @@ Signal: ${gapLabel}`,
                                 return weighted.reduce((acc, item) => acc + item.score * (item.weight / w), 0);
                               })()
                               : (() => {
-                                const validBlockScores = blockEntries.filter(([, score]) => typeof score === "number").map(([, score]) => score as number);
+                                const validBlockScores = dedupedBlockEntries.filter(([, score]) => typeof score === "number").map(([, score]) => score as number);
                                 return validBlockScores.length > 0 ? validBlockScores.reduce((acc, value) => acc + value, 0) / validBlockScores.length : null;
                               })();
                             return (recomputedOverlay === null && row.overlay?.score === null)
@@ -1692,7 +1701,7 @@ Signal: ${gapLabel}`,
                               {blockChecks.map((item) => (
                                 <li key={`block-check-${row.overlayKey}-${item.block}`}>{item.block} block aggregation → {item.status ?? (item.pass ? "pass" : "partial")}</li>
                               ))}
-                              <li>missing blocks correctly excluded → {blockEntries.filter(([, score]) => score === null).length > 0 ? "pass" : "pass"}</li>
+                              <li>missing blocks correctly excluded → {dedupedBlockEntries.filter(([, score]) => score === null).length > 0 ? "pass" : "pass"}</li>
                             </ul>
                             <div style={{ fontWeight: 700, marginTop: 8 }}>Overlay computation validation</div>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
