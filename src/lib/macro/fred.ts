@@ -16,6 +16,7 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "BAMLH0A0HYM2", seriesKey: "hy_spread_us" },
   { fredSeriesId: "VIXCLS", seriesKey: "vix_index" },
   { fredSeriesId: "NFCI", seriesKey: "financial_conditions_index" },
+  { fredSeriesId: "SP500", seriesKey: "SP500" },
   { fredSeriesId: "DTWEXBGS", seriesKey: "usd_broad_index" },
   { fredSeriesId: "DCOILBRENTEU", seriesKey: "oil_brent_usd" },
   { fredSeriesId: "DHHNGSP", seriesKey: "natgas_usd" },

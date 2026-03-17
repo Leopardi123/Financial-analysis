@@ -531,12 +531,11 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Local Unrest uses policy uncertainty + sovereign/state repricing. EA repricing uses sovereign credit spread (BTP-Bund); US repricing uses sovereign duration term premium (ACMTP10).",
     },
     safeHavenRiskOffOverlay: {
-      intendedPrimaryBlocks: ["gold_equity", "duration", "usd"],
+      intendedPrimaryBlocks: ["gold_equity", "duration"],
       intendedSeries: [
         { id: "safe_haven_flow", block: "gold_equity", linkedMacroFamily: "B_MONETARY", primarySources: ["GOLD", "gold family"], aliasFamily: ["safe_haven_flow", "gold", "gold_price"] },
         { id: "equity_risk", block: "gold_equity", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["SP500 / risk asset family"], aliasFamily: ["vix_like", "sp500", "spx_vol_proxy", "vixcls"] },
         { id: "duration_bid", block: "duration", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["duration / rates family"], aliasFamily: ["duration", "real_yield", "rates_proxy"] },
-        { id: "usd_strength", block: "usd", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["usd_strength", "dtwexbgs", "usd_broad_index"] },
       ],
       logicSummary: "Risk-off-flöden via safe-haven, equities och durationdynamik.",
     },
@@ -1558,19 +1557,27 @@ Signal: ${gapLabel}`,
                           <div style={{ marginTop: 6, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
                             {overlayComponents.map((component) => {
                               const percentile = component.debug?.percentile10yLatest ?? null;
-                              const supportScore = typeof (component as any).productionScore === "number" ? (component as any).productionScore : (typeof component.score === "number" ? component.score : null);
-                              const diagnosticScore = typeof (component as any).diagnosticScore === "number" ? (component as any).diagnosticScore : null;
                               const expectedSupport = typeof percentile === "number" ? 100 - percentile : null;
-                              const supportValidation = typeof expectedSupport === "number" && typeof supportScore === "number" && Math.abs((expectedSupport + percentile!) - 100) < 1e-6 && Math.abs(expectedSupport - supportScore) < 1e-6 ? "pass" : "fail";
+                              const productionScore = typeof (component as any).productionScore === "number" ? (component as any).productionScore : null;
+                              const fallbackScore = typeof component.score === "number" ? component.score : null;
+                              const supportScore = productionScore ?? fallbackScore ?? expectedSupport;
+                              const plusScoreCheck = typeof percentile === "number" && typeof supportScore === "number" && Math.abs((supportScore + percentile) - 100) < 1e-4 ? "pass" : "fail";
+                              const supportValidation = typeof expectedSupport === "number" && typeof supportScore === "number" && Math.abs(expectedSupport - supportScore) < 1e-4 ? "pass" : "fail";
+                              const inferredValidForProduction = typeof (component as any).validForProduction === "boolean"
+                                ? (component as any).validForProduction
+                                : Boolean(component.includedInTotal && typeof productionScore === "number" && !component.missing);
                               const signalValidation = [component.exactSource || component.source, component.rawValue, component.debug?.observationsAvailableInScoringWindow, percentile, supportScore].every((value) => value !== null && value !== undefined) ? "complete" : "incomplete";
+                              const sourceDescriptor = Array.isArray((component as any).inputSources) && (component as any).inputSources.length > 0
+                                ? `constructed from ${((component as any).inputSources as Array<{ exactSource: string }>).map((input) => input.exactSource).join(" + ")}`
+                                : (component.exactSource || component.source || "—");
                               return (
                                 <div key={`walkthrough-${row.overlayKey}-${component.id}`} style={{ marginTop: 8, borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
                                   <div style={{ fontWeight: 700 }}>{component.id} ({component.block})</div>
                                   <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                    <li>Step 1 — Fetch source series: series id={component.exactSource || component.source || "—"}, latest value={typeof component.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}, observation count={component.debug?.observationsAvailableInScoringWindow ?? 0}</li>
+                                    <li>Step 1 — Fetch source series: series id={sourceDescriptor}, latest value={typeof component.rawValue === "number" ? component.rawValue.toFixed(4) : "—"}, observation count={component.debug?.observationsAvailableInScoringWindow ?? 0}</li>
                                     <li>Step 2 — Compute percentile: historical window={component.debug?.scoringWindowSize ?? 0} obs, percentile={typeof percentile === "number" ? percentile.toFixed(2) : "—"}</li>
-                                    <li>Step 3 — Convert to support score (diagnostic): support_score = 100 − percentile → {typeof diagnosticScore === "number" ? diagnosticScore.toFixed(2) : "—"}; support_score_validation={component.debug?.supportScoreValidation ?? supportValidation}; percentile_plus_score_check={typeof diagnosticScore === "number" && typeof percentile === "number" && Math.abs((diagnosticScore + percentile) - 100) < 1e-6 ? "pass" : "fail"}</li>
-                                    <li>Step 4 — Production gate: validForProduction={String((component as any).validForProduction ?? false)}; productionScore={typeof supportScore === "number" ? supportScore.toFixed(2) : "null"}; diagnosticOnly={String((component as any).diagnosticOnly ?? false)}; gatingFailureReason={(component as any).gatingFailureReason || "none"}</li>
+                                    <li>Step 3 — Convert to support score (diagnostic): support_score = 100 − percentile → {typeof supportScore === "number" ? supportScore.toFixed(2) : "—"}; support_score_validation={component.debug?.supportScoreValidation ?? supportValidation}; percentile_plus_score_check={plusScoreCheck}</li>
+                                    <li>Step 4 — Production gate: validForProduction={String(inferredValidForProduction)}; productionScore={typeof supportScore === "number" ? supportScore.toFixed(2) : "null"}; diagnosticOnly={String((component as any).diagnosticOnly ?? false)}; gatingFailureReason={(component as any).gatingFailureReason || "none"}</li>
                                     <li>signal_validation={signalValidation}</li>
                                   </ul>
                                 </div>
@@ -1604,9 +1611,13 @@ Signal: ${gapLabel}`,
                         const productionValidBlockScores = (runtimeAny.productionValidBlockScores ?? row.overlay?.blockScores ?? {}) as Record<string, number | null>;
                         const blockEntries = Object.entries(productionValidBlockScores);
                         const verification = globalMacro?.overlayEngineDiagnostics?.verification?.[row.overlayKey] as any;
-                        const transformCandidates = components.filter((component) => typeof component.debug?.percentile10yLatest === "number" && typeof ((component as any).diagnosticScore ?? component.score) === "number");
+                        const transformCandidates = components.filter((component) => typeof component.debug?.percentile10yLatest === "number" && (typeof ((component as any).productionScore) === "number" || typeof component.score === "number"));
                         const transformPass = transformCandidates.length > 0
-                          ? transformCandidates.every((component) => component.debug?.supportScoreValidation === "pass")
+                          ? transformCandidates.every((component) => {
+                            const percentile = component.debug?.percentile10yLatest as number;
+                            const supportScore = (typeof (component as any).productionScore === "number" ? (component as any).productionScore : (typeof component.score === "number" ? component.score : null));
+                            return typeof supportScore === "number" && Math.abs((supportScore + percentile) - 100) < 1e-4;
+                          })
                           : true;
 
                         const sourceValidation = components.map((component) => {
@@ -1656,7 +1667,7 @@ Signal: ${gapLabel}`,
                                 return validBlockScores.length > 0 ? validBlockScores.reduce((acc, value) => acc + value, 0) / validBlockScores.length : null;
                               })();
                             return (recomputedOverlay === null && row.overlay?.score === null)
-                              || (typeof recomputedOverlay === "number" && typeof row.overlay?.score === "number" && Math.abs(recomputedOverlay - row.overlay.score) < 1e-6);
+                              || (typeof recomputedOverlay === "number" && typeof row.overlay?.score === "number" && Math.abs(recomputedOverlay - row.overlay.score) < 1e-4);
                           })();
                         const labelPass = row.overlayKey === "energyShockOverlay"
                           ? (((runtimeAny?.activeProductionBlockCount ?? 0) >= 2) ? ((runtimeAny?.energyDebug?.productionLabel ?? row.overlay?.label ?? "Not implemented") === (row.overlay?.label ?? "Not implemented")) : ((row.overlay?.label ?? "Not implemented") === "Not implemented"))

@@ -317,6 +317,48 @@ function zscoreLatest(points: Point[]): number | null {
   return (latest - mean) / sd;
 }
 
+function rollingZScore(points: Point[], windowMonths: number): Point[] {
+  const monthly = canonicalMonthlyGrid(points).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value));
+  if (monthly.length < windowMonths) return [];
+  const out: Point[] = [];
+  for (let index = windowMonths - 1; index < monthly.length; index += 1) {
+    const window = monthly.slice(index - (windowMonths - 1), index + 1).map((point) => point.value);
+    const avg = window.reduce((acc, value) => acc + value, 0) / window.length;
+    const variance = window.reduce((acc, value) => acc + ((value - avg) ** 2), 0) / window.length;
+    const sd = Math.sqrt(variance);
+    const latest = monthly[index].value;
+    out.push({ date: monthly[index].date, value: sd === 0 ? 0 : (latest - avg) / sd });
+  }
+  return out;
+}
+
+function seriesDifference(left: Point[], right: Point[]): Point[] {
+  const rightByMonth = new Map(canonicalMonthlyGrid(right).map((point) => [monthKey(point.date), point.value]));
+  const out: Point[] = [];
+  for (const point of canonicalMonthlyGrid(left)) {
+    const rightValue = rightByMonth.get(monthKey(point.date));
+    if (point.value === null || rightValue === null || rightValue === undefined || !Number.isFinite(point.value) || !Number.isFinite(rightValue)) continue;
+    out.push({ date: point.date, value: point.value - rightValue });
+  }
+  return out;
+}
+
+function clampSeries(points: Point[], min: number, max: number): Point[] {
+  return canonicalMonthlyGrid(points).map((point) => {
+    if (point.value === null || !Number.isFinite(point.value)) return { date: point.date, value: null };
+    return { date: point.date, value: Math.max(min, Math.min(max, point.value)) };
+  });
+}
+
+function negativeChangeWithLag(points: Point[], lagMonths: number): Point[] {
+  const monthly = canonicalMonthlyGrid(points);
+  return monthly.map((point, index) => {
+    const lagged = index >= lagMonths ? monthly[index - lagMonths] : null;
+    if (!lagged || point.value === null || lagged.value === null || !Number.isFinite(point.value) || !Number.isFinite(lagged.value)) return { date: point.date, value: null };
+    return { date: point.date, value: -1 * (point.value - lagged.value) };
+  });
+}
+
 function componentCoverageRatio(components: OverlayComponent[]): number {
   if (components.length === 0) return 0;
   return components.filter((c) => !c.missing).length / components.length;
@@ -1319,10 +1361,97 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       });
       return requireSourceFaithfulBlocks(enforceSourceFaithfulInvariant(local, ["signal", "repricing"]), ["signal", "repricing"]);
     })(),
-    safeHavenRiskOffOverlay: finalizeOverlay({
-      gold_equity: { weight: 0.65, components: [makeComponent({ asOfDate, id: "sh_gold_eq", title: "Gold-equity flight", block: "gold_equity", weight: 1, source: "FRED", exactSource: "GOLD/SP500 ratio", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
-      duration: { weight: 0.35, components: [makeComponent({ asOfDate, id: "sh_duration", title: "Duration flight", block: "duration", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "US10Y yield" : "DE10Y yield", series: getSeries(series, region === "US" ? "DGS10" : "EA_10Y_CORE_YIELD"), invert: true })] },
-    }),
+    safeHavenRiskOffOverlay: (() => {
+      const goldSourceSeries = getSeries(series, "gold_usd");
+      const equitySourceSeries = region === "US" ? getSeries(series, "SP500") : getSeries(series, "SX5E");
+      const goldZ12m = rollingZScore(goldSourceSeries, 12);
+      const equityZ12m = rollingZScore(equitySourceSeries, 12);
+      const goldEquityRaw = seriesDifference(goldZ12m, equityZ12m);
+      const goldEquityRawCapped = clampSeries(goldEquityRaw, -3, 3);
+      const goldEquityRawLatest = lastNumeric(goldEquityRaw)?.value ?? null;
+
+      const goldEquityComponent = makeComponent({
+        asOfDate,
+        id: "sh_gold_eq",
+        title: "Gold-equity flight",
+        block: "gold_equity",
+        weight: 1,
+        source: region === "US" ? "FMP/FRED" : "FMP/STOXX",
+        exactSource: region === "US"
+          ? "FMP stable/historical-price-eod/full?symbol=GCUSD + FRED SP500"
+          : "FMP stable/historical-price-eod/full?symbol=GCUSD + STOXX SX5E",
+        series: goldEquityRawCapped,
+        invert: true,
+        proxy: region === "EA" ? true : false,
+        note: region === "EA" ? "Missing by design unless STOXX SX5E series is ingested for runtime" : "source-faithful: separate gold/equity series with rolling 12m z-score spread",
+      });
+      goldEquityComponent.inputSources = [
+        {
+          id: "gold",
+          sourceFamily: "FMP",
+          exactSource: "FMP stable/historical-price-eod/full?symbol=GCUSD",
+          fetchAttempted: true,
+          fetchSucceeded: goldSourceSeries.length > 0,
+          observationCount: canonicalMonthlyGrid(goldSourceSeries).filter((point) => typeof point.value === "number" && Number.isFinite(point.value)).length,
+          latestObservationDate: lastNumeric(goldSourceSeries)?.date ?? null,
+        },
+        {
+          id: "equity",
+          sourceFamily: region === "US" ? "FRED" : "STOXX",
+          exactSource: region === "US" ? "SP500" : "SX5E",
+          fetchAttempted: true,
+          fetchSucceeded: equitySourceSeries.length > 0,
+          observationCount: canonicalMonthlyGrid(equitySourceSeries).filter((point) => typeof point.value === "number" && Number.isFinite(point.value)).length,
+          latestObservationDate: lastNumeric(equitySourceSeries)?.date ?? null,
+        },
+      ];
+      goldEquityComponent.debug = {
+        ...goldEquityComponent.debug,
+        rawToScoreFormula: "gold_equity_flight_raw = rolling_zscore_12m(gold) - rolling_zscore_12m(equity); capped=min(max(raw,-3),3); support_score = 100 - percentile_10y(capped)",
+        rolling_zscore_12m_used: true,
+        capped_to_range: [-3, 3],
+        raw_value_before_cap: goldEquityRawLatest,
+        raw_value_after_cap: goldEquityComponent.rawValue,
+      } as OverlayComponent["debug"] & Record<string, unknown>;
+
+      const durationInputSeries = region === "US" ? getSeries(series, "DGS10") : getSeries(series, "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y");
+      const durationRawSeries = negativeChangeWithLag(durationInputSeries, 3);
+      const durationLagged = (() => {
+        const monthly = canonicalMonthlyGrid(durationInputSeries);
+        for (let idx = monthly.length - 1; idx >= 3; idx -= 1) {
+          const point = monthly[idx];
+          const lagged = monthly[idx - 3];
+          if (point?.value === null || lagged?.value === null || point?.value === undefined || lagged?.value === undefined) continue;
+          if (!Number.isFinite(point.value) || !Number.isFinite(lagged.value)) continue;
+          return { current: point.value, lagged: lagged.value };
+        }
+        return { current: null, lagged: null };
+      })();
+      const durationComponent = makeComponent({
+        asOfDate,
+        id: "sh_duration",
+        title: "Duration flight",
+        block: "duration",
+        weight: 1,
+        source: region === "US" ? "FRED" : "ECB",
+        exactSource: region === "US" ? "DGS10" : "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y",
+        series: durationRawSeries,
+        invert: true,
+        note: "source-faithful: duration_flight_raw = -1 * (current_10y_yield - yield_3m_ago)",
+      });
+      durationComponent.debug = {
+        ...durationComponent.debug,
+        rawToScoreFormula: "duration_flight_raw = -1 * (yield_t - yield_t_minus_3m); support_score = 100 - percentile_10y(duration_flight_raw)",
+        current_value: durationLagged.current,
+        value_3m_ago: durationLagged.lagged,
+        duration_flight_raw: durationComponent.rawValue,
+      } as OverlayComponent["debug"] & Record<string, unknown>;
+
+      return finalizeOverlay({
+        gold_equity: { weight: 0.65, components: [goldEquityComponent] },
+        duration: { weight: 0.35, components: [durationComponent] },
+      });
+    })(),
     inflationCostShockOverlay: finalizeOverlay({
       inflation: { weight: 0.45, components: [
         makeComponent({ asOfDate, id: "ics_headline", title: "Headline inflation", block: "inflation", weight: region === "US" ? 0.4 : 0.5, source: "FRED/ECB", exactSource: inflationSeries, series: yoy(getSeries(series, inflationSeries)), invert: true }),
