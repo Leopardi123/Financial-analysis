@@ -4,6 +4,7 @@ import { fetchEcbSeries } from "./adapters/ecbAdapter.ts";
 import { fetchEurostatSeries } from "./adapters/eurostatAdapter.ts";
 import { fetchRiksbankSeriesVerified } from "./adapters/riksbankAdapter.ts";
 import { fetchScbPxTableSeries } from "./adapters/scbAdapter.ts";
+import { fetchStoxxSeries } from "./adapters/stoxxAdapter.ts";
 
 export type CanonicalSeriesMap = Record<string, Array<{ date: string; value: number | null }>>;
 
@@ -183,6 +184,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       "STS.M.I9.Y.PROD.NS0020.4.000": [],
       "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y": [],
       "FM.M.U2.EUR.4F.BB.U2_10Y.YLD": [],
+      sx5e: [],
     };
 
     const tasks: Array<Promise<void>> = [
@@ -206,6 +208,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       fetchFredSeries({ fredSeriesId: "IRLTLT01ITM156N", mode }).then((x) => { sourceSeries.italy_10y_yield = x; }),
       fetchFredSeries({ fredSeriesId: "IRLTLT01DEM156N", mode }).then((x) => { sourceSeries.germany_10y_yield = x; }),
       fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
+      fetchStoxxSeries({ symbol: "SX5E", from: "2000-01-01", to: new Date().toISOString().slice(0, 10) }).then((x) => { sourceSeries.sx5e = x; }),
       fetchFredSeries({ fredSeriesId: "DCOILBRENTEU", mode }).then((x) => { sourceSeries.DCOILBRENTEU = x; }),
       fetchFredSeries({ fredSeriesId: "PNGASEUUSDM", mode }).then((x) => { sourceSeries.PNGASEUUSDM = x; }),
       fetchEcbSeries({ flowRef: "ICP", key: "M.U2.N.000000.4D0.ANR" }).then((x) => { sourceSeries["HICP.M.U2.N.000000.4D0.ANR"] = x; }),
