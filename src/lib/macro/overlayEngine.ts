@@ -1028,6 +1028,36 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
   };
 }
 
+function finalizeSafeHavenComponent(component: OverlayComponent): OverlayComponent {
+  const hasScore = typeof component.score === "number" && Number.isFinite(component.score);
+  const percentile = component.debug?.percentile10yLatest ?? null;
+  const percentilePlusScoreCheck: "pass" | "fail" = hasScore && typeof percentile === "number" && Math.abs(((component.score as number) + percentile) - 100) < 1e-9
+    ? "pass"
+    : "fail";
+  const validForProduction = Boolean(component.includedInTotal && hasScore && percentilePlusScoreCheck === "pass");
+  const gatingFailureReason = validForProduction
+    ? ""
+    : [
+      !component.includedInTotal ? "excluded from total" : "",
+      !hasScore ? "score missing" : "",
+      percentilePlusScoreCheck !== "pass" ? "percentile_plus_score_check fail" : "",
+    ].filter(Boolean).join("; ");
+
+  return {
+    ...component,
+    validForProduction,
+    diagnosticOnly: !validForProduction && hasScore,
+    diagnosticScore: hasScore ? component.score : null,
+    productionScore: validForProduction ? component.score : null,
+    gatingFailureReason,
+    sourceValidationStatus: component.missing ? "missing" : "pass",
+    percentilePlusScoreCheck,
+    includedInTotal: validForProduction,
+    missing: !validForProduction,
+    signalStatus: validForProduction ? "ok" : component.signalStatus,
+  };
+}
+
 function buildSafeHavenRiskOffOverlay(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayResult {
   if (region !== "US" && region !== "EA") {
     return finalizeOverlay({
@@ -1050,7 +1080,7 @@ function buildSafeHavenRiskOffOverlay(region: "US" | "EA" | "SE", asOfDate: stri
     value: point.value === null || !Number.isFinite(point.value) ? null : -1 * point.value,
   }));
 
-  const goldEquityComponent = makeComponent({
+  const goldEquityBase = makeComponent({
     asOfDate,
     id: "sh_gold_eq",
     title: "Gold vs equity flight",
@@ -1065,7 +1095,7 @@ function buildSafeHavenRiskOffOverlay(region: "US" | "EA" | "SE", asOfDate: stri
     note: "gold_equity_flight_raw = rolling_zscore_12m(gold) - rolling_zscore_12m(equity); capped to [-3,+3] before percentile",
   });
 
-  const durationComponent = makeComponent({
+  const durationBase = makeComponent({
     asOfDate,
     id: "sh_duration",
     title: "Duration flight",
@@ -1078,10 +1108,36 @@ function buildSafeHavenRiskOffOverlay(region: "US" | "EA" | "SE", asOfDate: stri
     note: "duration_flight_raw = -1 * (10Y_t - 10Y_t_minus_3m)",
   });
 
+  const goldEquityComponent = finalizeSafeHavenComponent(goldEquityBase);
+  const durationComponent = finalizeSafeHavenComponent(durationBase);
+
   const base = finalizeOverlay({
     gold_equity: { weight: 0.65, components: [goldEquityComponent] },
     duration: { weight: 0.35, components: [durationComponent] },
   });
+
+  const includedProductionBlocks = ["gold_equity", "duration"].filter((block) => typeof base.blockScores[block] === "number");
+  const runtimeStatus: "complete" | "partial" | "invalid" = includedProductionBlocks.length === 2 ? "complete" : (includedProductionBlocks.length === 1 ? "partial" : "invalid");
+  const runtimeCompleteness: "full" | "partial" | "invalid" = includedProductionBlocks.length === 2 ? "full" : (includedProductionBlocks.length === 1 ? "partial" : "invalid");
+  const specFidelity: "high" | "low" = includedProductionBlocks.length === 2 ? "high" : "low";
+  const robustness: "medium" | "low" = includedProductionBlocks.length === 2 ? "medium" : "low";
+  const fidelityBadge = includedProductionBlocks.length === 2 ? "Spec-faithful" : (includedProductionBlocks.length === 1 ? "Structurally partial" : "Diagnostic-only");
+
+  const goldLatest = lastNumeric(canonicalMonthlyGrid(goldSeries));
+  const equityLatest = lastNumeric(canonicalMonthlyGrid(equitySeries));
+  const goldZLatest = lastNumeric(goldZ12m);
+  const equityZLatest = lastNumeric(equityZ12m);
+  const goldEqRawLatest = lastNumeric(goldEquityFlightRaw);
+  const goldEqRawCappedLatest = lastNumeric(goldEquityFlightRawCapped);
+  const goldEqPercentile = percentileRankLatestInWindow(goldEquityFlightRawCapped, 24).percentile;
+  const durationRawLatest = lastNumeric(durationFlightRaw);
+  const durationPercentile = percentileRankLatestInWindow(durationFlightRaw, 24).percentile;
+
+  const totalScoreFormula = includedProductionBlocks.length === 2
+    ? "safe_haven_overlay_score = 0.65*gold_equity_flight_score + 0.35*duration_flight_score"
+    : (includedProductionBlocks.length === 1
+      ? `safe_haven_overlay_score = weighted_average(available production-valid block scores); current run uses ${includedProductionBlocks[0]} only; excluded=${["gold_equity", "duration"].filter((block) => !includedProductionBlocks.includes(block)).join(",")}`
+      : "safe_haven_overlay_score unavailable: no production-valid blocks");
 
   const goldConf = blockConfidence([goldEquityComponent]);
   const durationConf = blockConfidence([durationComponent]);
@@ -1094,44 +1150,58 @@ function buildSafeHavenRiskOffOverlay(region: "US" | "EA" | "SE", asOfDate: stri
     goldEquityFlightScore: base.blockScores.gold_equity,
     durationFlightScore: base.blockScores.duration,
     runtime: {
-      status: base.score === null ? "partial" : "complete",
-      includedBlocksInTotal: ["gold_equity", "duration"].filter((block) => typeof base.blockScores[block] === "number"),
+      status: runtimeStatus,
+      includedBlocksInTotal: includedProductionBlocks,
       excludedBlocks: ["gold_equity", "duration"].filter((block) => base.blockScores[block] === null),
       aggregationWeights: { gold_equity: 0.65, duration: 0.35 },
-      scoreFormula: "safe_haven_overlay_score = 0.65*gold_equity_flight_score + 0.35*duration_flight_score",
+      scoreFormula: totalScoreFormula,
       blockAggregationInputs: {
-        gold_equity: [{ signalId: goldEquityComponent.id, signalStatus: goldEquityComponent.signalStatus, score: goldEquityComponent.score }],
-        duration: [{ signalId: durationComponent.id, signalStatus: durationComponent.signalStatus, score: durationComponent.score }],
+        gold_equity: [{ signalId: goldEquityComponent.id, signalStatus: goldEquityComponent.signalStatus, score: goldEquityComponent.productionScore ?? null }],
+        duration: [{ signalId: durationComponent.id, signalStatus: durationComponent.signalStatus, score: durationComponent.productionScore ?? null }],
       },
       ...( {
         safeHavenDebug: {
           intendedPrimaryDesign: "safe_haven_overlay_score = 0.65*gold_equity_flight_score + 0.35*duration_flight_score. Two blocks only: Gold vs Equity Flight and Duration Flight.",
           labelMappingResult: safeHavenLabelByScore(base.score),
+          runtimeCompleteness,
+          specFidelity,
+          robustness,
+          fidelityBadge,
+          includedProductionBlocks,
           computationWalkthrough: [
-            `gold_equity sources: gold=FMP stable/historical-price-eod/full?symbol=GCUSD, equity=${region === "US" ? "FRED SP500" : "STOXX SX5E"}`,
-            "gold_z_12m = rolling_zscore_12m(gold_price_series); equity_z_12m = rolling_zscore_12m(equity_benchmark_series)",
-            "gold_equity_flight_raw = gold_z_12m - equity_z_12m; gold_equity_flight_raw_capped = min(max(raw,-3),3)",
-            `gold_equity_flight_score = 100 - percentile_10y(gold_equity_flight_raw_capped) => ${goldEquityComponent.score ?? "null"}`,
-            `duration source: ${region === "US" ? "FRED DGS10" : "ECB YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y"}`,
-            "duration_flight_raw = -1 * (10Y_t - 10Y_t_minus_3m)",
-            `duration_flight_score = 100 - percentile_10y(duration_flight_raw) => ${durationComponent.score ?? "null"}`,
-            `block aggregation: gold_equity=${base.blockScores.gold_equity ?? "null"}, duration=${base.blockScores.duration ?? "null"}`,
-            `total aggregation: 0.65*gold_equity + 0.35*duration = ${base.score ?? "null"}`,
-            `label mapping result: ${safeHavenLabelByScore(base.score)}`,
+            `Step 1 — Fetch gold source: exactSource=FMP stable/historical-price-eod/full?symbol=GCUSD; latest=${goldLatest?.value ?? "null"}; observation_count=${canonicalMonthlyGrid(goldSeries).filter((p) => typeof p.value === "number").length}`,
+            `Step 2 — Fetch equity source: exactSource=${region === "US" ? "SP500" : "SX5E"}; latest=${equityLatest?.value ?? "null"}; observation_count=${canonicalMonthlyGrid(equitySeries).filter((p) => typeof p.value === "number").length}`,
+            `Step 3 — rolling_zscore_12m: gold_z_12m=${goldZLatest?.value ?? "null"}; equity_z_12m=${equityZLatest?.value ?? "null"}`,
+            `Step 4 — gold_equity_flight_raw = gold_z_12m - equity_z_12m => ${goldEqRawLatest?.value ?? "null"}`,
+            `Step 5 — gold_equity_flight_raw_capped in [-3,+3] => ${goldEqRawCappedLatest?.value ?? "null"}`,
+            `Step 6 — percentile_10y(gold_equity_flight_raw_capped) => ${goldEqPercentile ?? "null"}`,
+            `Step 7 — gold_equity_flight_score = 100 - percentile => ${goldEquityComponent.productionScore ?? goldEquityComponent.diagnosticScore ?? "null"}`,
+            `Step 8 — Production gate: validForProduction=${goldEquityComponent.validForProduction}; productionScore=${goldEquityComponent.productionScore ?? "null"}; diagnosticOnly=${goldEquityComponent.diagnosticOnly}; gatingFailureReason=${goldEquityComponent.gatingFailureReason || "none"}`,
+            `Duration chain: source=${region === "US" ? "DGS10" : "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y"}; raw=-1*(10Y_t-10Y_t_minus_3m) => ${durationRawLatest?.value ?? "null"}; percentile_10y=${durationPercentile ?? "null"}; score=${durationComponent.productionScore ?? durationComponent.diagnosticScore ?? "null"}`,
+            `Block aggregation: gold_equity=${base.blockScores.gold_equity ?? "null"}; duration=${base.blockScores.duration ?? "null"}`,
+            `Overlay aggregation: ${totalScoreFormula}; score=${base.score ?? "null"}`,
+            `Label mapping result: ${safeHavenLabelByScore(base.score)}`,
           ],
           verificationTrace: [
             `exact sources used: gold=FMP stable/historical-price-eod/full?symbol=GCUSD; equity=${region === "US" ? "SP500" : "SX5E"}; duration=${region === "US" ? "DGS10" : "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y"}`,
             "12m rolling z-score logic applied on gold and equity before subtraction",
             "gold/equity raw cap to [-3,+3] applied before percentile",
             "duration block uses 3m change in 10Y yield, not yield level",
-            "percentile math uses 10-year rolling window and final score = 100 - percentile",
-            `includedInTotal flags: gold_equity=${goldEquityComponent.includedInTotal}, duration=${durationComponent.includedInTotal}`,
+            `percentile_plus_score_check: gold_equity=${goldEquityComponent.percentilePlusScoreCheck}; duration=${durationComponent.percentilePlusScoreCheck}`,
+            `includedInTotal consistency: gold_equity=${goldEquityComponent.includedInTotal}; duration=${durationComponent.includedInTotal}`,
           ],
-          implementationDeltaVsSpec: [
-            "US implementation status: fully source-locked for GCUSD, SP500, and DGS10.",
-            "EA implementation status: source-locked for GCUSD, SX5E, and ECB 10Y yield key.",
-            "Legacy usd/usd_strength block removed from production runtime and production debug for safe-haven overlay.",
-          ],
+          implementationDeltaVsSpec: includedProductionBlocks.length === 2
+            ? [
+              region === "US"
+                ? "US now matches locked spec for both gold_equity and duration."
+                : "EA now matches locked spec for both gold_equity and duration.",
+              "Legacy usd/usd_strength block removed from production runtime and production debug for safe-haven overlay.",
+            ]
+            : [
+              `gold_equity production-valid=${goldEquityComponent.validForProduction}; duration production-valid=${durationComponent.validForProduction}`,
+              `Overlay currently running in ${includedProductionBlocks.length === 1 ? `${includedProductionBlocks[0]}-only partial mode` : "no-block diagnostic mode"}.`,
+              "Legacy usd/usd_strength block removed from production runtime and production debug for safe-haven overlay.",
+            ],
         },
       } as any),
     },
@@ -1461,6 +1531,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     BAMLH0A0HYM2: ["hy_spread_us"],
     NFCI: ["financial_conditions_index"],
     DGS10: ["nominal_yield_10y_us"],
+    SP500: ["sp500", "sp500_index"],
     DCOILBRENTEU: ["oil_brent_usd"],
     DHHNGSP: ["natgas_usd"],
     DCOILWTICO: ["oil_wti_usd"],

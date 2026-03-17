@@ -827,7 +827,11 @@ export default function GlobalMacroDashboard() {
     });
 
     const runnableBlocks = blockRows.filter((row) => row.runtimeStatus !== "missing").length;
+    const safeHavenRuntimeDebug = overlayKey === "safeHavenRiskOffOverlay" ? ((overlay as any)?.runtime?.safeHavenDebug ?? null) : null;
     const runtimeCompleteness: "full" | "partial" | "weak" | "invalid" = (() => {
+      if (overlayKey === "safeHavenRiskOffOverlay" && safeHavenRuntimeDebug?.runtimeCompleteness) {
+        return safeHavenRuntimeDebug.runtimeCompleteness;
+      }
       if (overlayKey === "energyShockOverlay" && typeof (overlay as any)?.runtime?.activeProductionBlockCount === "number") {
         const n = (overlay as any).runtime.activeProductionBlockCount as number;
         if (n >= 3) return "full";
@@ -840,7 +844,9 @@ export default function GlobalMacroDashboard() {
       return runnableBlocks >= Math.ceil(blockRows.length / 2) ? "partial" : "weak";
     })();
     const overlayFidelityScore = blockRows.length === 0 ? 0 : blockRows.reduce((sum, row) => sum + (row.specFidelity === "high" ? 1 : row.specFidelity === "medium" ? 0.5 : 0), 0) / blockRows.length;
-    const specFidelity: "high" | "medium" | "low" = overlayKey === "energyShockOverlay" && typeof (overlay as any)?.runtime?.activeProductionBlockCount === "number"
+    const specFidelity: "high" | "medium" | "low" = overlayKey === "safeHavenRiskOffOverlay" && safeHavenRuntimeDebug?.specFidelity
+      ? safeHavenRuntimeDebug.specFidelity
+      : overlayKey === "energyShockOverlay" && typeof (overlay as any)?.runtime?.activeProductionBlockCount === "number"
       ? (((overlay as any).runtime.activeProductionBlockCount >= 3) ? "high" : (((overlay as any).runtime.activeProductionBlockCount === 2) ? "medium" : "low"))
       : (overlayFidelityScore >= 0.75 ? "high" : overlayFidelityScore >= 0.4 ? "medium" : "low");
     const runtimeProxyComponentRatio = actualComponents.length === 0 ? 1 : actualComponents.filter((component) => component.proxy).length / actualComponents.length;
@@ -861,14 +867,18 @@ export default function GlobalMacroDashboard() {
         : proxyRatio <= 0.25
           ? "low"
           : "medium";
-    const robustness: "high" | "medium" | "low" = overlayKey === "energyShockOverlay" && typeof (overlay as any)?.runtime?.activeProductionBlockCount === "number"
+    const robustness: "high" | "medium" | "low" = overlayKey === "safeHavenRiskOffOverlay" && safeHavenRuntimeDebug?.robustness
+      ? safeHavenRuntimeDebug.robustness
+      : overlayKey === "energyShockOverlay" && typeof (overlay as any)?.runtime?.activeProductionBlockCount === "number"
       ? (((overlay as any).runtime.activeProductionBlockCount >= 3) ? "high" : (((overlay as any).runtime.activeProductionBlockCount === 2) ? "medium" : "low"))
       : (runtimeCompleteness === "full" && proxyDependence !== "high" && specFidelity !== "low"
         ? "high"
         : runtimeCompleteness === "weak" || proxyDependence === "high"
           ? "low"
           : "medium");
-    const fidelityBadge = overlayKey === "energyShockOverlay"
+    const fidelityBadge = overlayKey === "safeHavenRiskOffOverlay" && safeHavenRuntimeDebug?.fidelityBadge
+      ? safeHavenRuntimeDebug.fidelityBadge
+      : overlayKey === "energyShockOverlay"
       ? (runtimeCompleteness === "full" && specFidelity === "high" ? "Spec-faithful" : (runtimeCompleteness === "partial" ? "Structurally partial" : runtimeCompleteness === "weak" || runtimeCompleteness === "invalid" ? "Diagnostic-only" : "Near-spec"))
       : (specFidelity === "high"
         ? "Spec-faithful"
@@ -923,19 +933,21 @@ export default function GlobalMacroDashboard() {
       fidelityBadge,
       blockRows,
       seriesRows,
-      implementationDelta: [
-        `intended design: ${spec.logicSummary}`,
-        `current runtime implementation: ${Array.from(new Set(actualComponents.map((component) => `${component.id} (${component.exactSource || component.source})`))).slice(0, 8).join(", ") || "no runtime components"}`,
-        `what matches spec: ${matchesSpec.join(" | ") || "no clear high-fidelity block match"}`,
-        `exact differences: ${exactDifferences.join(" | ") || "none"}`,
-        `why differences exist: ${whyDiffExists.join(" | ") || "no blocker"}`,
-        `impact on interpretation: ${impact}`,
-        ...creditFundingExplicitDelta,
-        ...(overlayKey === "energyShockOverlay" ? [
-          `active production blocks: ${(overlay as any)?.runtime?.activeProductionBlockCount ?? 0}; included in score: ${((overlay as any)?.runtime?.includedBlocks ?? []).join(", ") || "none"}; excluded: ${((overlay as any)?.runtime?.excludedBlocks ?? []).join(", ") || "none"}`,
-          `runtime completeness: ${runtimeCompleteness}; spec fidelity: ${specFidelity}; robustness: ${robustness}`,
-        ] : []),
-      ],
+      implementationDelta: overlayKey === "safeHavenRiskOffOverlay" && Array.isArray((overlay as any)?.runtime?.safeHavenDebug?.implementationDeltaVsSpec)
+        ? (overlay as any).runtime.safeHavenDebug.implementationDeltaVsSpec
+        : [
+          `intended design: ${spec.logicSummary}`,
+          `current runtime implementation: ${Array.from(new Set(actualComponents.map((component) => `${component.id} (${component.exactSource || component.source})`))).slice(0, 8).join(", ") || "no runtime components"}`,
+          `what matches spec: ${matchesSpec.join(" | ") || "no clear high-fidelity block match"}`,
+          `exact differences: ${exactDifferences.join(" | ") || "none"}`,
+          `why differences exist: ${whyDiffExists.join(" | ") || "no blocker"}`,
+          `impact on interpretation: ${impact}`,
+          ...creditFundingExplicitDelta,
+          ...(overlayKey === "energyShockOverlay" ? [
+            `active production blocks: ${(overlay as any)?.runtime?.activeProductionBlockCount ?? 0}; included in score: ${((overlay as any)?.runtime?.includedBlocks ?? []).join(", ") || "none"}; excluded: ${((overlay as any)?.runtime?.excludedBlocks ?? []).join(", ") || "none"}`,
+            `runtime completeness: ${runtimeCompleteness}; spec fidelity: ${specFidelity}; robustness: ${robustness}`,
+          ] : []),
+        ],
     };
   });
 
@@ -1524,6 +1536,18 @@ Signal: ${gapLabel}`,
                       {(() => {
                         const overlayComponents = row.overlay?.components ?? [];
                         const runtimeAny = (row.overlay as any)?.runtime ?? {};
+                        if (row.overlayKey === "safeHavenRiskOffOverlay" && runtimeAny?.safeHavenDebug) {
+                          const safeWalkthrough = Array.isArray(runtimeAny.safeHavenDebug.computationWalkthrough) ? runtimeAny.safeHavenDebug.computationWalkthrough : [];
+                          return (
+                            <div style={{ marginTop: 6, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
+                              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                {safeWalkthrough.map((line: string, idx: number) => (
+                                  <li key={`safe-haven-walkthrough-${idx}`}>{line}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          );
+                        }
                         const productionBlockScores = (runtimeAny.productionValidBlockScores ?? row.overlay?.blockScores ?? {}) as Record<string, number | null>;
                         const diagnosticBlockScores = (runtimeAny.diagnosticBlockScores ?? {}) as Record<string, number | null>;
                         const overlayBlocks = Object.keys(productionBlockScores);
@@ -1743,7 +1767,7 @@ Signal: ${gapLabel}`,
                     <details style={{ fontSize: 12 }}>
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>▸ Implementation delta vs spec</summary>
                       <ul style={{ marginTop: 6 }}>
-                        {row.implementationDelta.map((gap) => (
+                        {row.implementationDelta.map((gap: string) => (
                           <li key={`${row.overlayKey}-${gap}`}>{gap}</li>
                         ))}
                       </ul>

@@ -8,6 +8,7 @@ export type FredSeriesConfig = {
 
 export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "DGS10", seriesKey: "nominal_yield_10y_us" },
+  { fredSeriesId: "SP500", seriesKey: "SP500", latestLookbackMonths: 360, backfillLookbackYears: 20 },
   { fredSeriesId: "DGS2", seriesKey: "nominal_yield_2y_us" },
   { fredSeriesId: "DFII10", seriesKey: "real_yield_10y_us" },
   { fredSeriesId: "CPILFESL", seriesKey: "core_cpi_us" },

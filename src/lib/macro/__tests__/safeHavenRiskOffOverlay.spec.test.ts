@@ -46,11 +46,29 @@ assert.equal(typeof us.goldEquityFlightScore, "number");
 assert.equal(typeof us.durationFlightScore, "number");
 assert.equal(typeof ea.goldEquityFlightScore, "number");
 assert.equal(typeof ea.durationFlightScore, "number");
+assert.equal((usGold as any)?.validForProduction, true);
+assert.equal((usDur as any)?.validForProduction, true);
+assert.equal((usGold as any)?.diagnosticOnly, false);
+assert.equal((usDur as any)?.diagnosticOnly, false);
+assert.equal((usGold as any)?.gatingFailureReason || "none", "none");
+assert.equal((usDur as any)?.gatingFailureReason || "none", "none");
+assert.equal((usGold as any)?.percentilePlusScoreCheck, "pass");
+assert.equal((usDur as any)?.percentilePlusScoreCheck, "pass");
 
 const usRuntime = (us as any).runtime;
 assert.deepEqual(Object.keys(usRuntime.aggregationWeights).sort(), ["duration", "gold_equity"]);
 assert.ok(!("usd" in usRuntime.aggregationWeights));
 assert.equal(usRuntime.scoreFormula, "safe_haven_overlay_score = 0.65*gold_equity_flight_score + 0.35*duration_flight_score");
 assert.equal(usRuntime.safeHavenDebug.verificationTrace.some((line: string) => line.includes("cap to [-3,+3]")), true);
+
+const partialRows = rows.filter((r) => r.series_key !== "SP500");
+const partial = buildRegionalOverlays("US", "2025-12-28", buildSeriesMap(partialRows)).overlays.safeHavenRiskOffOverlay;
+const partialRuntime = (partial as any).runtime;
+assert.deepEqual(partialRuntime.includedBlocksInTotal, ["duration"]);
+assert.equal(partialRuntime.status, "partial");
+assert.equal(partialRuntime.safeHavenDebug.runtimeCompleteness, "partial");
+assert.equal(partialRuntime.safeHavenDebug.fidelityBadge, "Structurally partial");
+assert.equal(partialRuntime.scoreFormula.includes("weighted_average(available production-valid block scores)"), true);
+assert.equal(partialRuntime.scoreFormula.includes("uses duration only"), true);
 
 console.log("safe haven risk-off overlay v1 tests passed");
