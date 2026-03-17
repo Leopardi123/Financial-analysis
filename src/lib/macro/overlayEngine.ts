@@ -1706,19 +1706,92 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
         },
       });
       if (region === "US") {
+        const canonicalBlock = (block: string): string => {
+          if (block === "inventory_pressure") return "inventory_delivery_friction";
+          if (block === "pricing") return "pipeline_cost_stress";
+          return block;
+        };
+
+        result.components.forEach((component) => {
+          const production = Boolean(component.includedInTotal && typeof component.score === "number" && !component.missing);
+          component.validForProduction = production;
+          component.productionScore = production ? component.score : null;
+          component.diagnosticScore = typeof component.score === "number" ? component.score : null;
+          component.diagnosticOnly = !production && component.diagnosticScore !== null;
+        });
+
+        const groupedByCanonicalBlock = result.components.reduce<Record<string, OverlayComponent[]>>((acc, component) => {
+          const block = canonicalBlock(component.block);
+          (acc[block] ??= []).push(component);
+          return acc;
+        }, {});
+        const productionValidBlockScores = Object.fromEntries(
+          Object.entries(groupedByCanonicalBlock).map(([block, components]) => [block, scoreBlock(components.map((component) => ({ ...component, includedInTotal: Boolean(component.validForProduction) })))]),
+        ) as Record<string, number | null>;
+        const diagnosticBlockScores = Object.fromEntries(
+          Object.entries(groupedByCanonicalBlock).map(([block, components]) => [block, scoreBlock(components.map((component) => ({ ...component, includedInTotal: typeof component.score === "number" && component.weight > 0 })))]),
+        ) as Record<string, number | null>;
+        const blockAggregationInputs = Object.fromEntries(
+          Object.entries(groupedByCanonicalBlock).map(([block, components]) => [
+            block,
+            components.map((component) => ({ signalId: component.id, signalStatus: component.signalStatus, score: component.score })),
+          ]),
+        ) as Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>;
+        const blockDiagnostics = Object.fromEntries(
+          Object.entries(groupedByCanonicalBlock).map(([block, components]) => {
+            const validCount = components.filter((component) => component.validForProduction).length;
+            const minRequired = Math.min(1, components.length);
+            const validForProduction = validCount >= minRequired && typeof productionValidBlockScores[block] === "number";
+            const status: "pass" | "partial" | "missing" = validForProduction ? "pass" : (validCount > 0 ? "partial" : "missing");
+            return [
+              block,
+              {
+                minimumRequiredComponents: components.map((component) => component.id),
+                validComponentCount: validCount,
+                validForProduction,
+                diagnosticOnly: !validForProduction && typeof diagnosticBlockScores[block] === "number",
+                diagnosticBlockScore: diagnosticBlockScores[block] ?? null,
+                productionBlockScore: productionValidBlockScores[block] ?? null,
+                includedInTotal: validForProduction,
+                status,
+              },
+            ];
+          }),
+        ) as Record<string, {
+          minimumRequiredComponents: string[];
+          validComponentCount: number;
+          validForProduction: boolean;
+          diagnosticOnly: boolean;
+          diagnosticBlockScore: number | null;
+          productionBlockScore: number | null;
+          includedInTotal: boolean;
+          status: "pass" | "partial" | "missing";
+        }>;
+
+        const includedBlocksInTotal = ["pipeline_cost_stress", "inventory_delivery_friction", "real_goods_flow"];
+        const excludedBlocks = includedBlocksInTotal.filter((block) => productionValidBlockScores[block] === null);
+        const activeProductionBlockCount = includedBlocksInTotal.length - excludedBlocks.length;
         return {
           ...result,
           runtime: {
-            ...(result.runtime ?? {
-              status: "complete",
-              includedBlocksInTotal: ["real_goods_flow", "inventory_pressure", "pricing"],
-              excludedBlocks: [],
-              aggregationWeights: { real_goods_flow: 0.4, inventory_pressure: 0.3, pricing: 0.3 },
-              scoreFormula: "trade_supply_chain_stress_overlay_score = 0.40*real_goods_flow + 0.30*inventory_pressure + 0.30*pricing",
-            }),
+            status: activeProductionBlockCount === includedBlocksInTotal.length ? "complete" : (activeProductionBlockCount > 0 ? "partial" : "invalid"),
+            productionValidBlockScores,
+            diagnosticBlockScores,
+            includedBlocks: includedBlocksInTotal,
+            diagnosticOnlyBlocks: Object.entries(blockDiagnostics).filter(([, value]) => value.diagnosticOnly).map(([block]) => block),
+            activeProductionBlockCount,
+            diagnosticOnlyBlockCount: Object.values(blockDiagnostics).filter((value) => value.diagnosticOnly).length,
+            confidenceCapApplied: null,
+            confidenceCapReason: "none",
+            blockDiagnostics,
+            includedBlocksInTotal,
+            excludedBlocks,
+            aggregationWeights: { pipeline_cost_stress: 0.35, inventory_delivery_friction: 0.35, real_goods_flow: 0.30 },
+            scoreFormula: "trade_supply_chain_stress_overlay_score = 0.35*pipeline_cost_stress + 0.35*inventory_delivery_friction + 0.30*real_goods_flow",
+            blockAggregationInputs,
             implementationDeltaVsSpec: [
-              "pipeline_cost_stress (internal: pricing): source-faithful transformed direct input YoY(WPU10).",
-              "inventory_delivery_friction (internal: inventory_pressure): source-faithful with abs(MNFCTRIRSA - rolling_mean_60m) (0.60) + abs(ISRATIO - rolling_mean_60m) (0.40), each scored as 100 - percentile_10y.",
+              "pipeline_cost_stress: source-faithful transformed direct input YoY(WPU10).",
+              "inventory_delivery_friction: source-faithful with abs(MNFCTRIRSA - rolling_mean_60m) (0.60) + abs(ISRATIO - rolling_mean_60m) (0.40), each scored as 100 - percentile_10y.",
               "real_goods_flow: source-faithful with support_score_of(IPMAN) (0.60) + support_score_of(AMTMNO) (0.40).",
             ],
           },

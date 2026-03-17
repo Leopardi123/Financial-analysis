@@ -746,7 +746,7 @@ export default function GlobalMacroDashboard() {
     ]));
 
     const blockRows = blockKeys.map((block) => {
-      const scoreValue = overlay?.blockScores?.[block] ?? null;
+      const scoreValue = getCanonicalBlockScore(overlayKey, overlay, block);
       const diagnostics = runtimeBlockDiagnostics.find((item) => normalizeOverlayRuntimeBlockName(overlayKey, item.block) === block);
       const exactSeries = seriesRows.filter((row) => row.block === block);
       const blockSeries = exactSeries;
@@ -854,7 +854,7 @@ export default function GlobalMacroDashboard() {
     const blockProxyRatio = blockRows.length === 0 ? 1 : blockRows.filter((row) => row.fallbackUsed.includes("proxy source") || row.fallbackUsed.includes("derived approximation")).length / blockRows.length;
     const criticalBlocksByOverlay: Record<string, string[]> = {
       localUnrestOverlay: ["signal", "repricing"],
-      tradeSupplyChainStressOverlay: ["real_goods_flow", "pricing"],
+      tradeSupplyChainStressOverlay: ["real_goods_flow", "inventory_delivery_friction", "pipeline_cost_stress"],
       safeHavenRiskOffOverlay: ["gold_equity", "duration"],
       liquidityOverlay: ["bridge", "transmission"],
     };
@@ -980,11 +980,26 @@ export default function GlobalMacroDashboard() {
   }
 
   function normalizeOverlayRuntimeBlockName(overlayKey: string, rawBlock: string): string {
-    if (overlayKey !== "inflationCostShockOverlay") return rawBlock;
-    if (rawBlock === "inflation_pressure") return "inflation";
-    if (rawBlock === "upstream_cost_pressure") return "upstream";
-    if (rawBlock === "expectations_pressure") return "expectations";
+    if (overlayKey === "inflationCostShockOverlay") {
+      if (rawBlock === "inflation_pressure") return "inflation";
+      if (rawBlock === "upstream_cost_pressure") return "upstream";
+      if (rawBlock === "expectations_pressure") return "expectations";
+      return rawBlock;
+    }
+    if (overlayKey === "tradeSupplyChainStressOverlay") {
+      if (rawBlock === "inventory_pressure") return "inventory_delivery_friction";
+      if (rawBlock === "pricing") return "pipeline_cost_stress";
+      return rawBlock;
+    }
     return rawBlock;
+  }
+
+
+  function getCanonicalBlockScore(overlayKey: string, overlay: any, block: string): number | null {
+    const blockScores = (overlay?.blockScores ?? {}) as Record<string, number | null>;
+    if (Object.prototype.hasOwnProperty.call(blockScores, block)) return blockScores[block] ?? null;
+    const entry = Object.entries(blockScores).find(([rawBlock]) => normalizeOverlayRuntimeBlockName(overlayKey, rawBlock) === block);
+    return entry ? (entry[1] ?? null) : null;
   }
 
   function normalizeOverlayLabel(overlayKey: string): string {
@@ -1013,12 +1028,12 @@ export default function GlobalMacroDashboard() {
     const blockLines = channels.map((block) => `• ${block}`);
     const signalLines = (row.overlay?.components ?? []).map((component: any) => {
       const meaning = signalEconomicMeaning(component.id ?? component.title ?? "");
-      return `${component.id} | Block: ${component.block} | Measures: ${meaning} | Source: ${component.exactSource || component.source || "—"} | Role: ${component.title || "overlay input"}`;
+      return `${component.id} | Block: ${normalizeOverlayRuntimeBlockName(row.overlayKey, component.block)} | Measures: ${meaning} | Source: ${component.exactSource || component.source || "—"} | Role: ${component.title || "overlay input"}`;
     });
-    const blockScores = Object.entries(row.overlay?.blockScores ?? {}).map(([block, score]) => `${block}: ${typeof score === "number" ? score.toFixed(2) : "missing"}`);
+    const blockScores = Object.entries(row.overlay?.blockScores ?? {}).map(([block, score]) => `${normalizeOverlayRuntimeBlockName(row.overlayKey, block)}: ${typeof score === "number" ? score.toFixed(2) : "missing"}`);
     const totalScore = typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(2) : "missing";
-    const includedBlocks = Object.entries(row.overlay?.blockScores ?? {}).filter(([, score]) => typeof score === "number").map(([block]) => block);
-    const excludedBlocks = Object.entries(row.overlay?.blockScores ?? {}).filter(([, score]) => score === null).map(([block]) => block);
+    const includedBlocks = Array.from(new Set(Object.entries(row.overlay?.blockScores ?? {}).filter(([, score]) => typeof score === "number").map(([block]) => normalizeOverlayRuntimeBlockName(row.overlayKey, block))));
+    const excludedBlocks = Array.from(new Set(Object.entries(row.overlay?.blockScores ?? {}).filter(([, score]) => score === null).map(([block]) => normalizeOverlayRuntimeBlockName(row.overlayKey, block))));
     const fundingMissing = row.overlayKey === "creditFundingOverlay" && excludedBlocks.includes("funding");
 
     const liquidityLines = row.overlayKey === "liquidityOverlay"
@@ -1543,7 +1558,7 @@ Signal: ${gapLabel}`,
                         const runtimeAny = (row.overlay as any)?.runtime ?? {};
                         const productionBlockScores = (runtimeAny.productionValidBlockScores ?? row.overlay?.blockScores ?? {}) as Record<string, number | null>;
                         const diagnosticBlockScores = (runtimeAny.diagnosticBlockScores ?? {}) as Record<string, number | null>;
-                        const overlayBlocks = Object.keys(productionBlockScores);
+                        const overlayBlocks = Array.from(new Set(Object.keys(productionBlockScores).map((block) => normalizeOverlayRuntimeBlockName(row.overlayKey, block))));
                         const validBlockScores = overlayBlocks
                           .map((block) => ({ block, score: productionBlockScores[block] ?? null }))
                           .filter((item) => typeof item.score === "number") as Array<{ block: string; score: number }>;
