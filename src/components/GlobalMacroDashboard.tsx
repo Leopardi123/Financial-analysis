@@ -549,14 +549,15 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Kostnadschock via CPI/PPI och inflationsförväntningar.",
     },
     tradeSupplyChainStressOverlay: {
-      intendedPrimaryBlocks: ["real_goods_flow", "inventory_pressure", "pricing"],
+      intendedPrimaryBlocks: ["real_goods_flow", "inventory_delivery_friction", "pipeline_cost_stress"],
       intendedSeries: [
-        { id: "industrial_production", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["INDPRO"], aliasFamily: ["industrial_production", "indpro"] },
-        { id: "new_orders", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["new orders source"], aliasFamily: ["new_orders", "dgorder", "new_orders_proxy"] },
-        { id: "inventories", block: "inventory_pressure", linkedMacroFamily: "C_INFLATION", primarySources: ["ISRATIO / inventory family"], aliasFamily: ["inventories", "isratio", "inventories_orders"] },
-        { id: "input_prices", block: "pricing", linkedMacroFamily: "C_INFLATION", primarySources: ["PPIACO / shipping-cost family"], aliasFamily: ["supply_chain_price_stress", "ppiaco", "shipping_proxy"] },
+        { id: "industrial_production_manufacturing", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["IPMAN"], aliasFamily: ["industrial_production_manufacturing", "ipman"] },
+        { id: "new_orders_nondefense_manufacturing", block: "real_goods_flow", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["AMTMNO"], aliasFamily: ["new_orders_nondefense_manufacturing", "amtmno"] },
+        { id: "manufacturing_inventory_imbalance", block: "inventory_delivery_friction", linkedMacroFamily: "C_INFLATION", primarySources: ["MNFCTRIRSA"], aliasFamily: ["manufacturing_inventory_imbalance", "mnfctrirsa"] },
+        { id: "total_inventory_imbalance", block: "inventory_delivery_friction", linkedMacroFamily: "C_INFLATION", primarySources: ["ISRATIO"], aliasFamily: ["total_inventory_imbalance", "isratio"] },
+        { id: "pipeline_cost_stress", block: "pipeline_cost_stress", linkedMacroFamily: "C_INFLATION", primarySources: ["WPU10"], aliasFamily: ["pipeline_cost_stress", "wpu10"] },
       ],
-      logicSummary: "Real goods flow + orders/inventories + inputkostnadstryck.",
+      logicSummary: "Real goods flow (IPMAN/AMTMNO) + inventory delivery friction (MNFCTRIRSA/ISRATIO imbalances) + pipeline cost stress (WPU10 YoY).",
     },
     globalUnrestOverlay: {
       intendedPrimaryBlocks: ["regional_composite"],
