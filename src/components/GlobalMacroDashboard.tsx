@@ -611,6 +611,11 @@ export default function GlobalMacroDashboard() {
   function valueContainsAlias(value: string, alias: string): boolean {
     const v = normalizeToken(value);
     const a = normalizeToken(alias);
+    if (!a) return false;
+    if (a.length <= 2) {
+      const tokens = v.split("_").filter(Boolean);
+      return tokens.includes(a);
+    }
     return v.includes(a) || a.includes(v);
   }
 
@@ -652,7 +657,7 @@ export default function GlobalMacroDashboard() {
 
     const seriesRows = spec.intendedSeries.map((seriesSpec) => {
       const matched = actualComponents.filter((component) => {
-        const hay = [component.id, component.source, component.exactSource, component.note].filter(Boolean).map(String);
+        const hay = [component.id, component.source, component.exactSource].filter(Boolean).map(String);
         return seriesSpec.aliasFamily.some((alias) => hay.some((value) => valueContainsAlias(value, alias)));
       });
       const runtimePool = matched;
@@ -741,14 +746,14 @@ export default function GlobalMacroDashboard() {
       const scoreValue = overlay?.blockScores?.[block] ?? null;
       const diagnostics = runtimeBlockDiagnostics.find((item) => item.block === block);
       const exactSeries = seriesRows.filter((row) => row.block === block);
-      const blockSeries = exactSeries.length > 0 ? exactSeries : seriesRows;
+      const blockSeries = exactSeries;
       const availabilityCounts = {
         available: blockSeries.filter((row) => row.availability === "available").length,
         partial: blockSeries.filter((row) => row.availability === "partial").length,
         unavailable: blockSeries.filter((row) => row.availability === "unavailable").length,
       };
       const sourceAvailabilityBase: "available" | "partial" | "unavailable" = blockSeries.length === 0
-        ? "unavailable"
+        ? ((overlayKey === "energyShockOverlay" && block === "breadth" && diagnostics?.status === "pass") ? "available" : "unavailable")
         : availabilityCounts.available === blockSeries.length
           ? "available"
           : (availabilityCounts.available + availabilityCounts.partial) > 0

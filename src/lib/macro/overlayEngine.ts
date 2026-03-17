@@ -689,14 +689,28 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
 
   const breadthInputs: Array<{ comp: OverlayComponent; threshold: number | null; active: 0 | 1 | null }> = [];
   const brentBreadthThr = rollingWindowPercentileThreshold(brentRaw.rawSeries, 80, 120, 24);
-  const brentBreadth = { ...brentPrice, id: "en_breadth_brent", title: "Brent breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(brentPrice.validForProduction && brentBreadthThr.active !== null), productionScore: brentBreadthThr.active, diagnosticScore: brentBreadthThr.active, includedInTotal: false, missing: brentBreadthThr.active === null, signalStatus: (brentBreadthThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${brentBreadthThr.active ?? "n/a"}` };
+  const brentBreadthPct = percentile10yLatest(brentRaw.rawSeries, 24);
+  const brentBreadthSupport = brentBreadthPct === null ? null : 100 - brentBreadthPct;
+  const brentBreadth = { ...brentPrice, id: "en_breadth_brent", title: "Brent breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(brentPrice.validForProduction && brentBreadthThr.active !== null), productionScore: brentBreadthSupport, diagnosticScore: brentBreadthSupport, includedInTotal: false, missing: brentBreadthThr.active === null, signalStatus: (brentBreadthThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${brentBreadthThr.active ?? "n/a"}`, rawValue: brentBreadthThr.latestRaw, active_energy_stress: brentBreadthThr.active, rolling10y80thPercentile: brentBreadthThr.latestThreshold };
+  if (brentBreadth.debug) {
+    brentBreadth.debug.percentile10yLatest = brentBreadthPct;
+    brentBreadth.debug.supportScore = brentBreadthSupport;
+    brentBreadth.debug.supportScoreValidation = brentBreadthSupport === null ? "fail" : "pass";
+  }
   breadthInputs.push({ comp: brentBreadth, threshold: brentBreadthThr.latestThreshold, active: brentBreadthThr.active });
   components.push(brentBreadth);
 
   if (region === "US") {
     const usGasRaw = buildEnergyShockRawSeries(getSeries(series, "DHHNGSP"));
     const gasThr = rollingWindowPercentileThreshold(usGasRaw.rawSeries, 80, 120, 24);
-    const gasBreadth = { ...gasPrice, id: "en_breadth_henry_hub", title: "Henry Hub breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(gasPrice.validForProduction && gasThr.active !== null), productionScore: gasThr.active, diagnosticScore: gasThr.active, includedInTotal: false, missing: gasThr.active === null, signalStatus: (gasThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${gasThr.active ?? "n/a"}` };
+    const gasBreadthPct = percentile10yLatest(usGasRaw.rawSeries, 24);
+    const gasBreadthSupport = gasBreadthPct === null ? null : 100 - gasBreadthPct;
+    const gasBreadth = { ...gasPrice, id: "en_breadth_henry_hub", title: "Henry Hub breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(gasPrice.validForProduction && gasThr.active !== null), productionScore: gasBreadthSupport, diagnosticScore: gasBreadthSupport, includedInTotal: false, missing: gasThr.active === null, signalStatus: (gasThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${gasThr.active ?? "n/a"}`, rawValue: gasThr.latestRaw, active_energy_stress: gasThr.active, rolling10y80thPercentile: gasThr.latestThreshold };
+    if (gasBreadth.debug) {
+      gasBreadth.debug.percentile10yLatest = gasBreadthPct;
+      gasBreadth.debug.supportScore = gasBreadthSupport;
+      gasBreadth.debug.supportScoreValidation = gasBreadthSupport === null ? "fail" : "pass";
+    }
     breadthInputs.push({ comp: gasBreadth, threshold: gasThr.latestThreshold, active: gasThr.active });
     components.push(gasBreadth);
 
@@ -708,6 +722,8 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     const cpiCoreYoy = yoy(cpiCoreSeries);
     const energyVsCoreGap = subtractAlignedSeries(cpiEnergyYoy, cpiCoreYoy);
     const gapThr = rollingWindowPercentileThreshold(energyVsCoreGap, 80, 120, 24);
+    const gapPct = percentile10yLatest(energyVsCoreGap, 24);
+    const gapSupport = gapPct === null ? null : 100 - gapPct;
     const gapLatest = lastNumeric(energyVsCoreGap);
     const gapObsCount = canonicalMonthlyGrid(energyVsCoreGap).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
     const cpiEnergyNumeric = canonicalMonthlyGrid(cpiEnergySeries).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value));
@@ -731,9 +747,9 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       title: "US energy vs core inflation gap breadth activation",
       block: "breadth",
       rawValue: gapLatest?.value ?? null,
-      score: gapComponentValid ? gapThr.active : null,
-      diagnosticScore: gapThr.active,
-      productionScore: gapComponentValid ? gapThr.active : null,
+      score: null,
+      diagnosticScore: null,
+      productionScore: null,
       validForProduction: gapComponentValid,
       diagnosticOnly: !gapComponentValid && gapThr.active !== null,
       gatingFailureReason: gapFailureReason,
@@ -755,14 +771,14 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
         observationsAvailableInScoringWindow: Math.min(gapObsCount, 120),
         scoringWindowSize: 120,
         enoughHistory: gapThr.active !== null,
-        percentile10yLatest: null,
+        percentile10yLatest: gapPct,
         normalizationMethod: "percentile10y",
         inversionApplied: false,
         rawToScoreFormula: "active_energy_stress = 1 if energy_vs_core_inflation_gap > rolling_10y_80th_percentile(gap), else 0",
         directionRulePlainText: "Higher positive gap means stronger energy pass-through stress.",
         supportInterpretation: "higher raw value means more stress",
-        supportScoreValidation: gapThr.active === null ? "fail" : "pass",
-        supportScore: gapThr.active,
+        supportScoreValidation: gapSupport === null ? "fail" : "pass",
+        supportScore: gapSupport,
         signalStatus: gapThr.active === null ? (gapObsCount > 0 ? "incomplete" : "missing") : "ok",
         totalNumericObservationsInSeries: gapObsCount,
         earliestDateInSeries: canonicalMonthlyGrid(energyVsCoreGap).find((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value))?.date ?? null,
@@ -779,10 +795,13 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     usThirdBreadth.constructedSeriesObservationCount = gapObsCount;
     usThirdBreadth.latestGapValue = gapLatest?.value ?? null;
     usThirdBreadth.rolling10y80thPercentile = gapThr.latestThreshold;
+    usThirdBreadth.score = gapComponentValid ? gapSupport : null;
+    usThirdBreadth.diagnosticScore = gapSupport;
+    usThirdBreadth.productionScore = gapComponentValid ? gapSupport : null;
     usThirdBreadth.observationCount = gapObsCount;
     usThirdBreadth.latestObservationDate = gapLatest?.date ?? null;
     usThirdBreadth.yoyInputsUsed = ["CPIENGSL", "CPILFESL"];
-    usThirdBreadth.constructedFrom = ["YoY(CPIENGSL)", "YoY(CPILFESL)"];
+    usThirdBreadth.constructedFrom = ["YoY(CPIENGSL) - YoY(CPILFESL)"];
     usThirdBreadth.rollingPercentileThreshold = gapThr.latestThreshold;
     usThirdBreadth.active_energy_stress = gapThr.active;
     breadthInputs.push({ comp: usThirdBreadth, threshold: gapThr.latestThreshold, active: gapThr.active });
