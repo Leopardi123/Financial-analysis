@@ -531,12 +531,11 @@ export default function GlobalMacroDashboard() {
       logicSummary: "Local Unrest uses policy uncertainty + sovereign/state repricing. EA repricing uses sovereign credit spread (BTP-Bund); US repricing uses sovereign duration term premium (ACMTP10).",
     },
     safeHavenRiskOffOverlay: {
-      intendedPrimaryBlocks: ["gold_equity", "duration", "usd"],
+      intendedPrimaryBlocks: ["gold_equity", "duration"],
       intendedSeries: [
         { id: "safe_haven_flow", block: "gold_equity", linkedMacroFamily: "B_MONETARY", primarySources: ["GOLD", "gold family"], aliasFamily: ["safe_haven_flow", "gold", "gold_price"] },
         { id: "equity_risk", block: "gold_equity", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["SP500 / risk asset family"], aliasFamily: ["vix_like", "sp500", "spx_vol_proxy", "vixcls"] },
         { id: "duration_bid", block: "duration", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["duration / rates family"], aliasFamily: ["duration", "real_yield", "rates_proxy"] },
-        { id: "usd_strength", block: "usd", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["DTWEXBGS"], aliasFamily: ["usd_strength", "dtwexbgs", "usd_broad_index"] },
       ],
       logicSummary: "Risk-off-flöden via safe-haven, equities och durationdynamik.",
     },
