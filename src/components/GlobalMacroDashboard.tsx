@@ -544,7 +544,7 @@ export default function GlobalMacroDashboard() {
       intendedSeries: [
         { id: "cpi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["CPIAUCSL / regional CPI"], aliasFamily: ["cpi", "cpiaucsl", "cp0000ez19m086nest"] },
         { id: "ppi", block: "upstream", linkedMacroFamily: "C_INFLATION", primarySources: ["PPIACO"], aliasFamily: ["ppi", "ppiaco"] },
-        { id: "inflation_expectations", block: "expectations", linkedMacroFamily: "A_FISCAL", primarySources: ["T10YIE", "survey expectations source"], aliasFamily: ["inflation_expectations", "t10yie", "breakeven"] },
+        { id: "inflation_expectations", block: "expectations", linkedMacroFamily: "A_FISCAL", primarySources: ["T10YIE", "MICH"], aliasFamily: ["inflation_expectations", "t10yie", "breakeven", "mich"] },
       ],
       logicSummary: "Kostnadschock via CPI/PPI och inflationsförväntningar.",
     },
