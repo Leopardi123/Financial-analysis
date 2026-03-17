@@ -25,6 +25,19 @@ type OverlayComponent = {
   signalStatus: "ok" | "missing" | "incomplete";
   proxy: boolean;
   note: string;
+  sourceFamily?: string;
+  observationCount?: number;
+  latestObservationDate?: string | null;
+  yoyInputsUsed?: string[];
+  constructedFrom?: string[];
+  rollingPercentileThreshold?: number | null;
+  active_energy_stress?: 0 | 1 | null;
+  inputSources?: Array<{ id: string; sourceFamily: string; exactSource: string; fetchAttempted: boolean; fetchSucceeded: boolean; observationCount: number; latestObservationDate: string | null }>;
+  transformedObservationCount?: { CPIENGSL_YoY: number; CPILFESL_YoY: number };
+  constructedSeriesObservationCount?: number;
+  latestGapValue?: number | null;
+  rolling10y80thPercentile?: number | null;
+  componentSeriesType?: "constructed-gap";
   debug?: {
     latestDate: string | null;
     monthlyChosenDate: string | null;
@@ -676,17 +689,124 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
 
   const breadthInputs: Array<{ comp: OverlayComponent; threshold: number | null; active: 0 | 1 | null }> = [];
   const brentBreadthThr = rollingWindowPercentileThreshold(brentRaw.rawSeries, 80, 120, 24);
-  const brentBreadth = { ...brentPrice, id: "en_breadth_brent", title: "Brent breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(brentPrice.validForProduction && brentBreadthThr.active !== null), productionScore: brentBreadthThr.active, diagnosticScore: brentBreadthThr.active, includedInTotal: false, missing: brentBreadthThr.active === null, signalStatus: (brentBreadthThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${brentBreadthThr.active ?? "n/a"}` };
+  const brentBreadthPct = percentile10yLatest(brentRaw.rawSeries, 24);
+  const brentBreadthSupport = brentBreadthPct === null ? null : 100 - brentBreadthPct;
+  const brentBreadth = { ...brentPrice, id: "en_breadth_brent", title: "Brent breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(brentPrice.validForProduction && brentBreadthThr.active !== null), productionScore: brentBreadthSupport, diagnosticScore: brentBreadthSupport, includedInTotal: false, missing: brentBreadthThr.active === null, signalStatus: (brentBreadthThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${brentBreadthThr.active ?? "n/a"}`, rawValue: brentBreadthThr.latestRaw, active_energy_stress: brentBreadthThr.active, rolling10y80thPercentile: brentBreadthThr.latestThreshold };
+  if (brentBreadth.debug) {
+    brentBreadth.debug.percentile10yLatest = brentBreadthPct;
+    brentBreadth.debug.supportScore = brentBreadthSupport;
+    brentBreadth.debug.supportScoreValidation = brentBreadthSupport === null ? "fail" : "pass";
+  }
   breadthInputs.push({ comp: brentBreadth, threshold: brentBreadthThr.latestThreshold, active: brentBreadthThr.active });
   components.push(brentBreadth);
 
   if (region === "US") {
     const usGasRaw = buildEnergyShockRawSeries(getSeries(series, "DHHNGSP"));
     const gasThr = rollingWindowPercentileThreshold(usGasRaw.rawSeries, 80, 120, 24);
-    const gasBreadth = { ...gasPrice, id: "en_breadth_henry_hub", title: "Henry Hub breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(gasPrice.validForProduction && gasThr.active !== null), productionScore: gasThr.active, diagnosticScore: gasThr.active, includedInTotal: false, missing: gasThr.active === null, signalStatus: (gasThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${gasThr.active ?? "n/a"}` };
+    const gasBreadthPct = percentile10yLatest(usGasRaw.rawSeries, 24);
+    const gasBreadthSupport = gasBreadthPct === null ? null : 100 - gasBreadthPct;
+    const gasBreadth = { ...gasPrice, id: "en_breadth_henry_hub", title: "Henry Hub breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(gasPrice.validForProduction && gasThr.active !== null), productionScore: gasBreadthSupport, diagnosticScore: gasBreadthSupport, includedInTotal: false, missing: gasThr.active === null, signalStatus: (gasThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${gasThr.active ?? "n/a"}`, rawValue: gasThr.latestRaw, active_energy_stress: gasThr.active, rolling10y80thPercentile: gasThr.latestThreshold };
+    if (gasBreadth.debug) {
+      gasBreadth.debug.percentile10yLatest = gasBreadthPct;
+      gasBreadth.debug.supportScore = gasBreadthSupport;
+      gasBreadth.debug.supportScoreValidation = gasBreadthSupport === null ? "fail" : "pass";
+    }
     breadthInputs.push({ comp: gasBreadth, threshold: gasThr.latestThreshold, active: gasThr.active });
     components.push(gasBreadth);
-    components.push(makeUnavailableEnergyComponent({ id: "en_breadth_us_third", title: "US third breadth component", block: "breadth", weight: 0, source: "Unavailable", exactSource: "unavailable (third breadth source not locked)", note: "Breadth underbuilt: no third source-locked breadth component available." }));
+
+    const cpiEnergyFetchAttempted = series.has("CPIENGSL") || series.has("cpi_energy_us");
+    const cpiCoreFetchAttempted = series.has("CPILFESL") || series.has("core_cpi_us");
+    const cpiEnergySeries = getSeries(series, "CPIENGSL");
+    const cpiCoreSeries = getSeries(series, "CPILFESL");
+    const cpiEnergyYoy = yoy(cpiEnergySeries);
+    const cpiCoreYoy = yoy(cpiCoreSeries);
+    const energyVsCoreGap = subtractAlignedSeries(cpiEnergyYoy, cpiCoreYoy);
+    const gapThr = rollingWindowPercentileThreshold(energyVsCoreGap, 80, 120, 24);
+    const gapPct = percentile10yLatest(energyVsCoreGap, 24);
+    const gapSupport = gapPct === null ? null : 100 - gapPct;
+    const gapLatest = lastNumeric(energyVsCoreGap);
+    const gapObsCount = canonicalMonthlyGrid(energyVsCoreGap).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
+    const cpiEnergyNumeric = canonicalMonthlyGrid(cpiEnergySeries).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value));
+    const cpiCoreNumeric = canonicalMonthlyGrid(cpiCoreSeries).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value));
+    const cpiEnergyObsCount = cpiEnergyNumeric.length;
+    const cpiCoreObsCount = cpiCoreNumeric.length;
+    const cpiEnergyLatestObsDate = cpiEnergyNumeric[cpiEnergyNumeric.length - 1]?.date ?? null;
+    const cpiCoreLatestObsDate = cpiCoreNumeric[cpiCoreNumeric.length - 1]?.date ?? null;
+    const cpiEnergyYoyObsCount = canonicalMonthlyGrid(cpiEnergyYoy).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
+    const cpiCoreYoyObsCount = canonicalMonthlyGrid(cpiCoreYoy).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
+    const gapComponentValid = cpiEnergyObsCount > 0 && cpiCoreObsCount > 0 && gapThr.active !== null;
+    const gapFailureReason = cpiEnergyObsCount <= 0
+      ? "Missing source CPIENGSL from FRED/BLS"
+      : cpiCoreObsCount <= 0
+        ? "Missing source CPILFESL from FRED"
+        : gapThr.active === null
+          ? "Insufficient history for rolling_10y_80th_percentile(energy_vs_core_inflation_gap)"
+          : "";
+    const usThirdBreadth: OverlayComponent = {
+      id: "energy_vs_core_inflation_gap",
+      title: "US energy vs core inflation gap breadth activation",
+      block: "breadth",
+      rawValue: gapLatest?.value ?? null,
+      score: null,
+      diagnosticScore: null,
+      productionScore: null,
+      validForProduction: gapComponentValid,
+      diagnosticOnly: !gapComponentValid && gapThr.active !== null,
+      gatingFailureReason: gapFailureReason,
+      sourceValidationStatus: gapComponentValid ? "pass" : (cpiEnergyObsCount <= 0 || cpiCoreObsCount <= 0 ? "missing" : "fail"),
+      percentilePlusScoreCheck: gapThr.active === null ? "fail" : "pass",
+      weight: 0,
+      source: "Constructed/FRED-BLS",
+      exactSource: "constructed_gap_from_inputs",
+      freshnessDays: freshnessDays(gapLatest?.date ?? null, asOfDate),
+      includedInTotal: false,
+      missing: !gapComponentValid,
+      signalStatus: gapThr.active === null ? (gapObsCount > 0 ? "incomplete" : "missing") : "ok",
+      proxy: false,
+      note: "Constructed gap measure: CPIENGSL YoY minus CPILFESL YoY; not an official BLS contribution series",
+      debug: {
+        latestDate: gapLatest?.date ?? null,
+        monthlyChosenDate: gapLatest?.date ?? null,
+        minObservations: 24,
+        observationsAvailableInScoringWindow: Math.min(gapObsCount, 120),
+        scoringWindowSize: 120,
+        enoughHistory: gapThr.active !== null,
+        percentile10yLatest: gapPct,
+        normalizationMethod: "percentile10y",
+        inversionApplied: false,
+        rawToScoreFormula: "active_energy_stress = 1 if energy_vs_core_inflation_gap > rolling_10y_80th_percentile(gap), else 0",
+        directionRulePlainText: "Higher positive gap means stronger energy pass-through stress.",
+        supportInterpretation: "higher raw value means more stress",
+        supportScoreValidation: gapSupport === null ? "fail" : "pass",
+        supportScore: gapSupport,
+        signalStatus: gapThr.active === null ? (gapObsCount > 0 ? "incomplete" : "missing") : "ok",
+        totalNumericObservationsInSeries: gapObsCount,
+        earliestDateInSeries: canonicalMonthlyGrid(energyVsCoreGap).find((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value))?.date ?? null,
+        last5MonthlyPointsInWindow: canonicalMonthlyGrid(energyVsCoreGap).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).slice(-5),
+      },
+    };
+    usThirdBreadth.sourceFamily = "FRED/BLS + FRED";
+    usThirdBreadth.componentSeriesType = "constructed-gap";
+    usThirdBreadth.inputSources = [
+      { id: "CPIENGSL", sourceFamily: "FRED/BLS", exactSource: "CPIENGSL", fetchAttempted: cpiEnergyFetchAttempted, fetchSucceeded: cpiEnergyObsCount > 0, observationCount: cpiEnergyObsCount, latestObservationDate: cpiEnergyLatestObsDate },
+      { id: "CPILFESL", sourceFamily: "FRED", exactSource: "CPILFESL", fetchAttempted: cpiCoreFetchAttempted, fetchSucceeded: cpiCoreObsCount > 0, observationCount: cpiCoreObsCount, latestObservationDate: cpiCoreLatestObsDate },
+    ];
+    usThirdBreadth.transformedObservationCount = { CPIENGSL_YoY: cpiEnergyYoyObsCount, CPILFESL_YoY: cpiCoreYoyObsCount };
+    usThirdBreadth.constructedSeriesObservationCount = gapObsCount;
+    usThirdBreadth.latestGapValue = gapLatest?.value ?? null;
+    usThirdBreadth.rolling10y80thPercentile = gapThr.latestThreshold;
+    usThirdBreadth.score = gapComponentValid ? gapSupport : null;
+    usThirdBreadth.diagnosticScore = gapSupport;
+    usThirdBreadth.productionScore = gapComponentValid ? gapSupport : null;
+    usThirdBreadth.observationCount = gapObsCount;
+    usThirdBreadth.latestObservationDate = gapLatest?.date ?? null;
+    usThirdBreadth.yoyInputsUsed = ["CPIENGSL", "CPILFESL"];
+    usThirdBreadth.constructedFrom = ["YoY(CPIENGSL) - YoY(CPILFESL)"];
+    usThirdBreadth.rollingPercentileThreshold = gapThr.latestThreshold;
+    usThirdBreadth.active_energy_stress = gapThr.active;
+    breadthInputs.push({ comp: usThirdBreadth, threshold: gapThr.latestThreshold, active: gapThr.active });
+    components.push(usThirdBreadth);
+    debug.verificationTrace.push(`US breadth third component energy_vs_core_inflation_gap source status: CPIENGSL=${cpiEnergyObsCount > 0 ? "ok" : "missing"}, CPILFESL=${cpiCoreObsCount > 0 ? "ok" : "missing"}.`);
   } else {
     if (gasPrice.signalStatus === "ok") {
       const eaGasRaw = buildEnergyShockRawSeries(getSeries(series, "PNGASEUUSDM"));
@@ -813,7 +933,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
 
   if (breadthComponent) {
     const breadthValid = region === "US"
-      ? (isValid("en_breadth_brent") && isValid("en_breadth_henry_hub") && isValid("en_breadth_us_third"))
+      ? (isValid("en_breadth_brent") && isValid("en_breadth_henry_hub") && isValid("energy_vs_core_inflation_gap"))
       : (isValid("en_breadth_brent") && isValid("en_breadth_hicp_energy") && (isValid("en_breadth_ea_gas") || byId.get("en_price_ea_gas")?.signalStatus !== "ok"));
     breadthComponent.validForProduction = breadthValid;
     breadthComponent.productionScore = breadthValid ? breadthComponent.diagnosticScore ?? null : null;
@@ -821,7 +941,20 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     breadthComponent.includedInTotal = Boolean(breadthValid && breadthComponent.productionScore !== null);
     breadthComponent.diagnosticOnly = !breadthValid && (breadthComponent.diagnosticScore !== null);
     breadthComponent.missing = !breadthValid;
-    breadthComponent.gatingFailureReason = breadthValid ? "" : (region === "US" ? "US breadth minimum set failed: third source-locked component missing" : "EA breadth minimum set failed");
+    if (breadthValid) {
+      breadthComponent.gatingFailureReason = "";
+    } else if (region === "US") {
+      const missing: string[] = [];
+      if (!isValid("en_breadth_brent")) missing.push("Brent breadth unavailable");
+      if (!isValid("en_breadth_henry_hub")) missing.push("Henry Hub breadth unavailable");
+      const third = byId.get("energy_vs_core_inflation_gap");
+      if (!isValid("energy_vs_core_inflation_gap")) {
+        missing.push(`energy_vs_core_inflation_gap unavailable${third?.gatingFailureReason ? ` because ${third.gatingFailureReason}` : ""}`);
+      }
+      breadthComponent.gatingFailureReason = `US breadth minimum set failed: ${missing.join("; ") || "unknown component failure"}`;
+    } else {
+      breadthComponent.gatingFailureReason = "EA breadth minimum set failed";
+    }
   }
 
   const breadthValidForProduction = Boolean(breadthComponent?.validForProduction && breadthComponent?.productionScore !== null);
@@ -862,8 +995,8 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       status: (priceShockScoreProduction !== null ? "pass" : (priceDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
     },
     breadth: {
-      minimumRequiredComponents: region === "US" ? ["en_breadth_brent", "en_breadth_henry_hub", "en_breadth_us_third"] : ["en_breadth_brent", "en_breadth_hicp_energy"],
-      validComponentCount: ["en_breadth_brent", "en_breadth_henry_hub", "en_breadth_us_third", "en_breadth_ea_gas", "en_breadth_hicp_energy"].filter((id) => isValid(id)).length,
+      minimumRequiredComponents: region === "US" ? ["en_breadth_brent", "en_breadth_henry_hub", "energy_vs_core_inflation_gap"] : ["en_breadth_brent", "en_breadth_hicp_energy"],
+      validComponentCount: ["en_breadth_brent", "en_breadth_henry_hub", "energy_vs_core_inflation_gap", "en_breadth_ea_gas", "en_breadth_hicp_energy"].filter((id) => isValid(id)).length,
       validForProduction: breadthValidForProduction,
       diagnosticOnly: !breadthValidForProduction && breadthDiagnosticScore !== null,
       diagnosticBlockScore: breadthDiagnosticScore,
@@ -929,7 +1062,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
   debug.verificationTrace.push("Component validity gate enforced: invalid inputs cannot produce production scores and are diagnostic_only.");
   debug.verificationTrace.push(`Included blocks in total: ${includedBlocks.map((b) => b.name).join(", ") || "none"}; excluded=${excludedBlocks.join(", ") || "none"}; diagnosticOnlyBlocks=${diagnosticOnlyBlocks.join(", ") || "none"}.`);
   if (region === "US") {
-    debug.implementationDeltaVsSpec.push("breadth block: partial and excluded from production score because third source-locked US breadth component is unavailable.");
+    debug.implementationDeltaVsSpec.push("breadth block: partial/excluded only when Brent, Henry Hub, or energy_vs_core_inflation_gap are unavailable.");
   } else {
     debug.implementationDeltaVsSpec.push("EA remains structurally partial; EA power is not source-locked so breadth stays excluded from production score.");
   }
@@ -1310,6 +1443,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     DGORDER: ["new_orders_us"],
     POLICY_UNCERTAINTY_US: ["policy_uncertainty_us", "usepuindxm"],
     CPILFESL: ["core_cpi_us"],
+    CPIENGSL: ["cpi_energy_us"],
     T10YIE: ["breakeven_10y_us"],
     CPIAUCSL: ["core_cpi_us"],
     VIXCLS: ["vix_index"],
