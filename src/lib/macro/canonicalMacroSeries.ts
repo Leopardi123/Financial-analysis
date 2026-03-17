@@ -175,6 +175,14 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       italy_10y_yield: [],
       germany_10y_yield: [],
       gold_usd: [],
+      DCOILBRENTEU: [],
+      PNGASEUUSDM: [],
+      "HICP.M.U2.N.000000.4D0.ANR": [],
+      "HICP.M.U2.N.NRGY00.4D0.ANR": [],
+      "HICP.M.U2.N.XEF000.4D0.ANR": [],
+      "STS.M.I9.Y.PROD.NS0020.4.000": [],
+      "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y": [],
+      "FM.M.U2.EUR.4F.BB.U2_10Y.YLD": [],
     };
 
     const tasks: Array<Promise<void>> = [
@@ -198,6 +206,14 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       fetchFredSeries({ fredSeriesId: "IRLTLT01ITM156N", mode }).then((x) => { sourceSeries.italy_10y_yield = x; }),
       fetchFredSeries({ fredSeriesId: "IRLTLT01DEM156N", mode }).then((x) => { sourceSeries.germany_10y_yield = x; }),
       fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
+      fetchFredSeries({ fredSeriesId: "DCOILBRENTEU", mode }).then((x) => { sourceSeries.DCOILBRENTEU = x; }),
+      fetchFredSeries({ fredSeriesId: "PNGASEUUSDM", mode }).then((x) => { sourceSeries.PNGASEUUSDM = x; }),
+      fetchEcbSeries({ flowRef: "ICP", key: "M.U2.N.000000.4D0.ANR" }).then((x) => { sourceSeries["HICP.M.U2.N.000000.4D0.ANR"] = x; }),
+      fetchEcbSeries({ flowRef: "ICP", key: "M.U2.N.NRGY00.4D0.ANR" }).then((x) => { sourceSeries["HICP.M.U2.N.NRGY00.4D0.ANR"] = x; }),
+      fetchEcbSeries({ flowRef: "ICP", key: "M.U2.N.XEF000.4D0.ANR" }).then((x) => { sourceSeries["HICP.M.U2.N.XEF000.4D0.ANR"] = x; }),
+      fetchEcbSeries({ flowRef: "STS", key: "M.I9.Y.PROD.NS0020.4.000" }).then((x) => { sourceSeries["STS.M.I9.Y.PROD.NS0020.4.000"] = x; }),
+      fetchEcbSeries({ flowRef: "YC", key: "B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y" }).then((x) => { sourceSeries["YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y"] = x; }),
+      fetchEcbSeries({ flowRef: "FM", key: "M.U2.EUR.4F.BB.U2_10Y.YLD" }).then((x) => { sourceSeries["FM.M.U2.EUR.4F.BB.U2_10Y.YLD"] = x; }),
     ];
     await Promise.allSettled(tasks);
 

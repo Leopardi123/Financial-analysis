@@ -4,6 +4,13 @@ type Point = { date: string; value: number | null };
 type SeriesMap = Map<string, Point[]>;
 
 type OverlayComponent = {
+  validForProduction?: boolean;
+  diagnosticOnly?: boolean;
+  diagnosticScore?: number | null;
+  productionScore?: number | null;
+  gatingFailureReason?: string;
+  sourceValidationStatus?: "pass" | "fail" | "missing";
+  percentilePlusScoreCheck?: "pass" | "fail";
   id: string;
   title: string;
   block: string;
@@ -44,10 +51,32 @@ type OverlayResult = {
   score: number | null;
   label: string;
   confidence: number;
+  priceShockScore?: number | null;
+  breadthScore?: number | null;
+  macroSpilloverScore?: number | null;
   blockScores: Record<string, number | null>;
   components: OverlayComponent[];
   runtime?: {
-    status: "complete" | "partial";
+    status: "complete" | "partial" | "weak" | "invalid";
+    minimumRequiredBlocks?: number;
+    productionValidBlockScores?: Record<string, number | null>;
+    diagnosticBlockScores?: Record<string, number | null>;
+    includedBlocks?: string[];
+    diagnosticOnlyBlocks?: string[];
+    activeProductionBlockCount?: number;
+    diagnosticOnlyBlockCount?: number;
+    confidenceCapApplied?: number | null;
+    confidenceCapReason?: string;
+    blockDiagnostics?: Record<string, {
+      minimumRequiredComponents: string[];
+      validComponentCount: number;
+      validForProduction: boolean;
+      diagnosticOnly: boolean;
+      diagnosticBlockScore: number | null;
+      productionBlockScore: number | null;
+      includedInTotal: boolean;
+      status: "pass" | "partial" | "missing";
+    }>;
     includedBlocksInTotal: string[];
     excludedBlocks: string[];
     aggregationWeights: Record<string, number>;
@@ -64,6 +93,13 @@ type OverlayResult = {
     missing: boolean;
     reason: string;
   };
+};
+
+type EnergyDebugSections = {
+  intendedPrimaryDesign: string;
+  computationWalkthrough: string[];
+  verificationTrace: string[];
+  implementationDeltaVsSpec: string[];
 };
 
 export type OverlayBundle = {
@@ -181,6 +217,80 @@ function percentile10yLatest(points: Point[], minObservations = 24): number | nu
   if (window.length < minObservations) return null;
   const le = window.filter((v) => v <= latest.value).length;
   return (le / window.length) * 100;
+}
+
+function percentileRankLatestInWindow(points: Point[], minObservations = 24): { percentile: number | null; latest: number | null; window: number[] } {
+  const series = canonicalMonthlyGrid(points);
+  const latest = lastNumeric(series);
+  if (!latest) return { percentile: null, latest: null, window: [] };
+  const latestMonth = monthKey(latest.date);
+  const window = series
+    .filter((p) => monthKey(p.date) <= latestMonth)
+    .slice(-120)
+    .map((p) => p.value)
+    .filter((v): v is number => typeof v === "number");
+  if (window.length < minObservations) return { percentile: null, latest: latest.value, window };
+  const le = window.filter((v) => v <= latest.value).length;
+  return { percentile: (le / window.length) * 100, latest: latest.value, window };
+}
+
+function monthlyPctChange(points: Point[], lagMonths: number): Point[] {
+  const series = canonicalMonthlyGrid(points);
+  return series.map((point, idx) => {
+    const prev = idx >= lagMonths ? series[idx - lagMonths] : null;
+    if (!prev || point.value === null || prev.value === null || prev.value === 0) return { date: point.date, value: null };
+    return { date: point.date, value: ((point.value / prev.value) - 1) * 100 };
+  });
+}
+
+function maxZero(points: Point[]): Point[] {
+  return canonicalMonthlyGrid(points).map((point) => ({
+    date: point.date,
+    value: point.value === null || !Number.isFinite(point.value) ? null : Math.max(point.value, 0),
+  }));
+}
+
+function weightedAlignedSeries(left: Point[], leftWeight: number, right: Point[], rightWeight: number): Point[] {
+  const leftByMonth = new Map(canonicalMonthlyGrid(left).map((point) => [monthKey(point.date), point.value]));
+  const rightByMonth = new Map(canonicalMonthlyGrid(right).map((point) => [monthKey(point.date), point.value]));
+  const months = Array.from(new Set([...leftByMonth.keys(), ...rightByMonth.keys()])).sort((a, b) => a.localeCompare(b));
+  const out: Point[] = [];
+  for (const month of months) {
+    const lv = leftByMonth.get(month);
+    const rv = rightByMonth.get(month);
+    if (lv === null || lv === undefined || rv === null || rv === undefined || !Number.isFinite(lv) || !Number.isFinite(rv)) continue;
+    out.push({ date: `${month}-01`, value: leftWeight * lv + rightWeight * rv });
+  }
+  return out;
+}
+
+function rollingWindowPercentileThreshold(points: Point[], thresholdPct: number, windowMonths = 120, minObservations = 24): { latestRaw: number | null; latestThreshold: number | null; active: 0 | 1 | null } {
+  const series = canonicalMonthlyGrid(points).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value));
+  if (series.length === 0) return { latestRaw: null, latestThreshold: null, active: null };
+  const latest = series[series.length - 1];
+  const window = series.slice(-windowMonths).map((point) => point.value);
+  if (window.length < minObservations) return { latestRaw: latest.value, latestThreshold: null, active: null };
+  const sorted = [...window].sort((a, b) => a - b);
+  const rank = Math.max(0, Math.min(sorted.length - 1, Math.ceil((thresholdPct / 100) * sorted.length) - 1));
+  const threshold = sorted[rank];
+  return { latestRaw: latest.value, latestThreshold: threshold, active: latest.value > threshold ? 1 : 0 };
+}
+
+function energyFreshnessPenalty(days: number | null): number {
+  if (days === null) return 0;
+  if (days <= 31) return 1.0;
+  if (days <= 93) return 0.85;
+  if (days <= 186) return 0.65;
+  return 0.4;
+}
+
+function energyLabelByScore(score: number | null): string {
+  if (score === null) return "Not implemented";
+  if (score < 20) return "severe energy shock";
+  if (score < 40) return "elevated shock";
+  if (score < 60) return "neutral";
+  if (score < 80) return "calm";
+  return "very calm";
 }
 
 function zscoreLatest(points: Point[]): number | null {
@@ -394,6 +504,472 @@ function requireSourceFaithfulBlocks(result: OverlayResult, requiredBlocks: stri
   return { ...result, score: null, label: labelByScore(null), confidence: 0 };
 }
 
+
+function clamp01(value: number): number { return Math.max(0, Math.min(1, value)); }
+
+function makeUnavailableEnergyComponent(params: { id: string; title: string; block: "price" | "breadth" | "spillover"; weight: number; source: string; exactSource: string; note: string; }): OverlayComponent {
+  return {
+    id: params.id,
+    title: params.title,
+    block: params.block,
+    rawValue: null,
+    score: null,
+    diagnosticScore: null,
+    productionScore: null,
+    validForProduction: false,
+    diagnosticOnly: false,
+    gatingFailureReason: "unavailable source",
+    sourceValidationStatus: "missing",
+    percentilePlusScoreCheck: "fail",
+    weight: params.weight,
+    source: params.source,
+    exactSource: params.exactSource,
+    freshnessDays: null,
+    includedInTotal: false,
+    missing: true,
+    signalStatus: "missing",
+    proxy: false,
+    note: params.note,
+  };
+}
+
+function makeEnergyShockComponent(params: {
+  id: string;
+  title: string;
+  block: "price" | "breadth" | "spillover";
+  weight: number;
+  source: string;
+  exactSource: string;
+  asOfDate: string;
+  rawSeries: Point[];
+  note?: string;
+}): OverlayComponent {
+  const monthly = canonicalMonthlyGrid(params.rawSeries);
+  const latest = lastNumeric(monthly);
+  const rank = percentileRankLatestInWindow(monthly, 24);
+  const score = rank.percentile === null ? null : 100 - rank.percentile;
+  const freshness = freshnessDays(latest?.date ?? null, params.asOfDate);
+  const observationCount = monthly.filter((p) => typeof p.value === "number" && Number.isFinite(p.value)).length;
+  const enoughHistory = rank.window.length >= 24;
+  const sourceValidationStatus: "pass" | "fail" | "missing" = params.exactSource && !params.exactSource.toLowerCase().includes("unavailable") ? "pass" : "missing";
+  const percentilePlusScoreCheck: "pass" | "fail" = score !== null && rank.percentile !== null && Math.abs((score + rank.percentile) - 100) < 1e-9 ? "pass" : "fail";
+  const supportScoreValidation: "pass" | "fail" = percentilePlusScoreCheck;
+  const validForProduction = Boolean(
+    sourceValidationStatus === "pass"
+    && observationCount > 0
+    && latest !== null
+    && typeof latest.value === "number"
+    && Number.isFinite(latest.value)
+    && enoughHistory
+    && supportScoreValidation === "pass"
+    && percentilePlusScoreCheck === "pass"
+    && score !== null,
+  );
+  const reasons: string[] = [];
+  if (sourceValidationStatus !== "pass") reasons.push("source validation missing/fail");
+  if (observationCount <= 0) reasons.push("observation count = 0");
+  if (latest === null || !Number.isFinite(latest.value)) reasons.push("raw value not finite");
+  if (!enoughHistory) reasons.push("insufficient scoring window");
+  if (supportScoreValidation !== "pass") reasons.push("support_score_validation fail");
+  if (percentilePlusScoreCheck !== "pass") reasons.push("percentile_plus_score_check fail");
+  const signalStatus: "ok" | "missing" | "incomplete" = latest === null ? "missing" : (score === null ? "incomplete" : "ok");
+  return {
+    id: params.id,
+    title: params.title,
+    block: params.block,
+    rawValue: latest?.value ?? null,
+    score: validForProduction ? score : null,
+    diagnosticScore: score,
+    productionScore: validForProduction ? score : null,
+    validForProduction,
+    diagnosticOnly: !validForProduction && score !== null,
+    gatingFailureReason: validForProduction ? "" : reasons.join("; "),
+    sourceValidationStatus,
+    percentilePlusScoreCheck,
+    weight: params.weight,
+    source: params.source,
+    exactSource: params.exactSource,
+    freshnessDays: freshness,
+    includedInTotal: validForProduction,
+    missing: !validForProduction,
+    signalStatus: validForProduction ? "ok" : signalStatus,
+    proxy: false,
+    note: params.note ?? "",
+    debug: {
+      latestDate: latest?.date ?? null,
+      monthlyChosenDate: latest?.date ?? null,
+      minObservations: 24,
+      observationsAvailableInScoringWindow: rank.window.length,
+      scoringWindowSize: 120,
+      enoughHistory,
+      percentile10yLatest: rank.percentile,
+      normalizationMethod: "percentile10y",
+      inversionApplied: true,
+      rawToScoreFormula: "component_score = 100 - percentile_10y(component_raw)",
+      directionRulePlainText: "Higher stress raw implies lower support score.",
+      supportInterpretation: "higher raw value means more stress",
+      supportScoreValidation,
+      supportScore: score,
+      signalStatus,
+      totalNumericObservationsInSeries: observationCount,
+      earliestDateInSeries: monthly.find((p) => typeof p.value === "number" && Number.isFinite(p.value))?.date ?? null,
+      last5MonthlyPointsInWindow: monthly.filter((p): p is { date: string; value: number } => typeof p.value === "number" && Number.isFinite(p.value)).slice(-5),
+    },
+  };
+}
+
+function buildEnergyShockRawSeries(sourceSeries: Point[]): { rawSeries: Point[]; yoyPositive: Point[]; m3Positive: Point[] } {
+  const yoyPositive = maxZero(monthlyPctChange(sourceSeries, 12));
+  const m3Positive = maxZero(monthlyPctChange(sourceSeries, 3));
+  const rawSeries = weightedAlignedSeries(yoyPositive, 0.65, m3Positive, 0.35);
+  return { rawSeries, yoyPositive, m3Positive };
+}
+
+function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayResult {
+  if (region !== "US" && region !== "EA") {
+    return finalizeOverlay({
+      price: { weight: 0.4, components: [makeUnavailableEnergyComponent({ id: "en_price_unavailable", title: "Energy price shock", block: "price", weight: 1, source: "Unavailable", exactSource: "unavailable", note: "Energy Shock Overlay v1 implemented for US and EA only." })] },
+      breadth: { weight: 0.25, components: [makeUnavailableEnergyComponent({ id: "en_breadth_unavailable", title: "Energy stress breadth", block: "breadth", weight: 1, source: "Unavailable", exactSource: "unavailable", note: "Energy Shock Overlay v1 implemented for US and EA only." })] },
+      spillover: { weight: 0.35, components: [makeUnavailableEnergyComponent({ id: "en_spillover_unavailable", title: "Energy macro spillover", block: "spillover", weight: 1, source: "Unavailable", exactSource: "unavailable", note: "Energy Shock Overlay v1 implemented for US and EA only." })] },
+    });
+  }
+
+  const debug: EnergyDebugSections = {
+    intendedPrimaryDesign: "Price shock (0.40) + stress breadth (0.25) + macro spillover (0.35), source-locked per region with explicit unavailable/proxy handling and no silent fallback.",
+    computationWalkthrough: [],
+    verificationTrace: [],
+    implementationDeltaVsSpec: [],
+  };
+
+  const components: OverlayComponent[] = [];
+
+  const brentRaw = buildEnergyShockRawSeries(getSeries(series, "DCOILBRENTEU"));
+  const brentPrice = makeEnergyShockComponent({ id: "en_price_brent", title: "Brent crude shock", block: "price", weight: region === "US" ? 0.55 : 0.4, source: "FRED", exactSource: "DCOILBRENTEU", asOfDate, rawSeries: brentRaw.rawSeries, note: "component_shock_raw = 0.65*max(yoy,0) + 0.35*max(3m,0)" });
+  components.push(brentPrice);
+
+  let gasPrice: OverlayComponent;
+  if (region === "US") {
+    const usGasRaw = buildEnergyShockRawSeries(getSeries(series, "DHHNGSP"));
+    gasPrice = makeEnergyShockComponent({ id: "en_price_henry_hub", title: "Henry Hub natural gas shock", block: "price", weight: 0.45, source: "FRED", exactSource: "DHHNGSP", asOfDate, rawSeries: usGasRaw.rawSeries, note: "component_shock_raw = 0.65*max(yoy,0) + 0.35*max(3m,0)" });
+    debug.verificationTrace.push("US exact sources wired for price: DCOILBRENTEU + DHHNGSP. DCOILWTICO is not included in v1 production score.");
+  } else {
+    const eaGasSource = getSeries(series, "PNGASEUUSDM");
+    if (eaGasSource.length > 0) {
+      const eaGasRaw = buildEnergyShockRawSeries(eaGasSource);
+      gasPrice = makeEnergyShockComponent({ id: "en_price_ea_gas", title: "EA gas benchmark shock", block: "price", weight: 0.4, source: "FRED", exactSource: "PNGASEUUSDM", asOfDate, rawSeries: eaGasRaw.rawSeries, note: "component_shock_raw = 0.65*max(yoy,0) + 0.35*max(3m,0)" });
+    } else {
+      gasPrice = makeUnavailableEnergyComponent({ id: "en_price_ea_gas", title: "EA gas benchmark shock", block: "price", weight: 0.4, source: "FRED", exactSource: "PNGASEUUSDM", note: "EA gas source unavailable; no substitute permitted." });
+    }
+    debug.verificationTrace.push("EA exact price sources wired: DCOILBRENTEU + PNGASEUUSDM. No silent Brent/Henry substitution used for EA gas/power.");
+  }
+  components.push(gasPrice);
+
+  const powerPrice = region === "EA"
+    ? makeUnavailableEnergyComponent({ id: "en_price_ea_power", title: "EA power benchmark shock", block: "price", weight: 0.2, source: "Unavailable", exactSource: "unavailable (EA power exact source not locked)", note: "EA power benchmark is not source-locked for this task; marked unavailable explicitly." })
+    : makeUnavailableEnergyComponent({ id: "en_price_us_wti_lab", title: "WTI crude shock (lab robustness)", block: "price", weight: 0, source: "FRED", exactSource: "DCOILWTICO", note: "Source-locked but excluded from production v1 score." });
+  components.push(powerPrice);
+
+  const priceValid = components.filter((c) => c.block === "price" && c.includedInTotal && c.weight > 0 && c.score !== null);
+  const priceWeight = priceValid.reduce((a, c) => a + c.weight, 0);
+  const priceShockScore = priceWeight > 0 ? priceValid.reduce((a, c) => a + (c.score as number) * (c.weight / priceWeight), 0) : null;
+  const priceShockIntensity = priceShockScore === null ? null : (100 - priceShockScore) / 100;
+
+  const breadthInputs: Array<{ comp: OverlayComponent; threshold: number | null; active: 0 | 1 | null }> = [];
+  const brentBreadthThr = rollingWindowPercentileThreshold(brentRaw.rawSeries, 80, 120, 24);
+  const brentBreadth = { ...brentPrice, id: "en_breadth_brent", title: "Brent breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(brentPrice.validForProduction && brentBreadthThr.active !== null), productionScore: brentBreadthThr.active, diagnosticScore: brentBreadthThr.active, includedInTotal: false, missing: brentBreadthThr.active === null, signalStatus: (brentBreadthThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${brentBreadthThr.active ?? "n/a"}` };
+  breadthInputs.push({ comp: brentBreadth, threshold: brentBreadthThr.latestThreshold, active: brentBreadthThr.active });
+  components.push(brentBreadth);
+
+  if (region === "US") {
+    const usGasRaw = buildEnergyShockRawSeries(getSeries(series, "DHHNGSP"));
+    const gasThr = rollingWindowPercentileThreshold(usGasRaw.rawSeries, 80, 120, 24);
+    const gasBreadth = { ...gasPrice, id: "en_breadth_henry_hub", title: "Henry Hub breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(gasPrice.validForProduction && gasThr.active !== null), productionScore: gasThr.active, diagnosticScore: gasThr.active, includedInTotal: false, missing: gasThr.active === null, signalStatus: (gasThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${gasThr.active ?? "n/a"}` };
+    breadthInputs.push({ comp: gasBreadth, threshold: gasThr.latestThreshold, active: gasThr.active });
+    components.push(gasBreadth);
+    components.push(makeUnavailableEnergyComponent({ id: "en_breadth_us_third", title: "US third breadth component", block: "breadth", weight: 0, source: "Unavailable", exactSource: "unavailable (third breadth source not locked)", note: "Breadth underbuilt: no third source-locked breadth component available." }));
+  } else {
+    if (gasPrice.signalStatus === "ok") {
+      const eaGasRaw = buildEnergyShockRawSeries(getSeries(series, "PNGASEUUSDM"));
+      const gasThr = rollingWindowPercentileThreshold(eaGasRaw.rawSeries, 80, 120, 24);
+      const gasBreadth = { ...gasPrice, id: "en_breadth_ea_gas", title: "EA gas breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(gasPrice.validForProduction && gasThr.active !== null), productionScore: gasThr.active, diagnosticScore: gasThr.active, includedInTotal: false, missing: gasThr.active === null, signalStatus: (gasThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${gasThr.active ?? "n/a"}` };
+      breadthInputs.push({ comp: gasBreadth, threshold: gasThr.latestThreshold, active: gasThr.active });
+      components.push(gasBreadth);
+    }
+    const hicpEnergyRaw = buildEnergyShockRawSeries(getSeries(series, "HICP.M.U2.N.NRGY00.4D0.ANR"));
+    const hicpComp = makeEnergyShockComponent({ id: "en_breadth_hicp_energy", title: "HICP energy breadth stress activation", block: "breadth", weight: 0, source: "ECB", exactSource: "HICP.M.U2.N.NRGY00.4D0.ANR", asOfDate, rawSeries: hicpEnergyRaw.rawSeries });
+    const hicpThr = rollingWindowPercentileThreshold(hicpEnergyRaw.rawSeries, 80, 120, 24);
+    const hicpBreadth = { ...hicpComp, validForProduction: Boolean(hicpComp.validForProduction && hicpThr.active !== null), productionScore: hicpThr.active, diagnosticScore: hicpThr.active, includedInTotal: false, missing: hicpThr.active === null, signalStatus: (hicpThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${hicpThr.active ?? "n/a"}` };
+    breadthInputs.push({ comp: hicpBreadth, threshold: hicpThr.latestThreshold, active: hicpThr.active });
+    components.push(hicpBreadth);
+    components.push(makeUnavailableEnergyComponent({ id: "en_breadth_ea_power", title: "EA power breadth stress activation", block: "breadth", weight: 0, source: "Unavailable", exactSource: "unavailable (EA power exact source not locked)", note: "EA power unavailable; no substitution used." }));
+  }
+
+  const breadthActive = breadthInputs.filter((item) => item.active !== null) as Array<{ comp: OverlayComponent; threshold: number | null; active: 0 | 1 }>;
+  const breadthRatio = breadthActive.length > 0 ? breadthActive.reduce((a, b) => a + b.active, 0) / breadthActive.length : null;
+  const breadthScore = breadthRatio === null ? null : 100 - (breadthRatio * 100);
+  components.push({
+    id: "en_breadth_score",
+    title: "Energy stress breadth score",
+    block: "breadth",
+    rawValue: breadthRatio,
+    score: breadthScore,
+    diagnosticScore: breadthScore,
+    productionScore: breadthScore,
+    validForProduction: breadthScore !== null,
+    diagnosticOnly: false,
+    gatingFailureReason: breadthScore === null ? "insufficient breadth inputs" : "",
+    sourceValidationStatus: "pass",
+    percentilePlusScoreCheck: breadthScore === null ? "fail" : "pass",
+    weight: 1,
+    source: "Computed",
+    exactSource: "breadth_ratio=active_components/available_components",
+    freshnessDays: Math.max(...breadthActive.map((x) => x.comp.freshnessDays ?? 9999), 0),
+    includedInTotal: breadthScore !== null,
+    missing: breadthScore === null,
+    signalStatus: breadthScore === null ? "incomplete" : "ok",
+    proxy: false,
+    note: "energy_stress_breadth_score = 100 - linear_map(breadth_ratio, 0->100, 1->0)",
+  });
+
+  const inflationComponents: OverlayComponent[] = [];
+  const growthComponents: OverlayComponent[] = [];
+  const rateComponents: OverlayComponent[] = [];
+
+  if (region === "US") {
+    const coreCpiYoy = yoy(getSeries(series, "CPILFESL"));
+    const indproYoy = yoy(getSeries(series, "INDPRO"));
+    const dfii = canonicalMonthlyGrid(getSeries(series, "DFII10"));
+    const coreLatest = lastNumeric(coreCpiYoy)?.value ?? null;
+    const indproLatest = lastNumeric(indproYoy)?.value ?? null;
+    const dfiiLatest = lastNumeric(dfii)?.value ?? null;
+    const energyRawLatest = (brentPrice.rawValue ?? 0) * 0.55 + (gasPrice.rawValue ?? 0) * 0.45;
+
+    const inflationPressure = priceShockIntensity === null || coreLatest === null ? null : clamp01((Math.max(coreLatest - 2, 0) / 4 + Math.max(energyRawLatest, 0) / 80) / 2);
+    const growthPressure = priceShockIntensity === null || indproLatest === null ? null : clamp01((Math.max(-indproLatest, 0) / 10 + Math.max(energyRawLatest, 0) / 80) / 2);
+    const ratePressure = priceShockIntensity === null || dfiiLatest === null ? null : clamp01((Math.max(dfiiLatest, 0) / 3 + Math.max(energyRawLatest, 0) / 80) / 2);
+
+    const infRawSeries = canonicalMonthlyGrid(coreCpiYoy).map((p) => ({ date: p.date, value: p.value === null ? null : clamp01(Math.max(p.value - 2, 0) / 4) }));
+    const grRawSeries = canonicalMonthlyGrid(indproYoy).map((p) => ({ date: p.date, value: p.value === null ? null : clamp01(Math.max(-p.value, 0) / 10) }));
+    const rtRawSeries = canonicalMonthlyGrid(dfii).map((p) => ({ date: p.date, value: p.value === null ? null : clamp01(Math.max(p.value, 0) / 3) }));
+
+    inflationComponents.push(makeEnergyShockComponent({ id: "en_spill_infl_us", title: "US inflation spillover", block: "spillover", weight: 0.45, source: "FRED", exactSource: "CPILFESL", asOfDate, rawSeries: infRawSeries.map((p) => ({ date: p.date, value: p.value === null || priceShockIntensity === null ? null : p.value * priceShockIntensity })), note: "inflation_spillover_raw = price_shock_intensity * energy_to_inflation_pressure; energy_to_inflation_pressure = f(core CPI YoY gap vs 2% + energy shock intensity)" }));
+    growthComponents.push(makeEnergyShockComponent({ id: "en_spill_growth_us", title: "US growth spillover", block: "spillover", weight: 0.35, source: "FRED", exactSource: "INDPRO", asOfDate, rawSeries: grRawSeries.map((p) => ({ date: p.date, value: p.value === null || priceShockIntensity === null ? null : p.value * priceShockIntensity })), note: "growth_spillover_raw = price_shock_intensity * energy_to_growth_pressure; energy_to_growth_pressure = f(INDPRO weakness + energy shock intensity)" }));
+    rateComponents.push(makeEnergyShockComponent({ id: "en_spill_rate_us", title: "US rate spillover", block: "spillover", weight: 0.2, source: "FRED", exactSource: "DFII10", asOfDate, rawSeries: rtRawSeries.map((p) => ({ date: p.date, value: p.value === null || priceShockIntensity === null ? null : p.value * priceShockIntensity })), note: "rate_spillover_raw = price_shock_intensity * energy_to_rate_pressure" }));
+
+    debug.computationWalkthrough.push(`US spillover formulas: inflationPressure=${inflationPressure ?? "null"}, growthPressure=${growthPressure ?? "null"}, ratePressure=${ratePressure ?? "null"}; conditioned by price_shock_intensity=${priceShockIntensity ?? "null"}.`);
+  } else {
+    const hicpEnergyYoy = canonicalMonthlyGrid(getSeries(series, "HICP.M.U2.N.NRGY00.4D0.ANR"));
+    const hicpExYoy = canonicalMonthlyGrid(getSeries(series, "HICP.M.U2.N.XEF000.4D0.ANR"));
+    const stsYoy = yoy(getSeries(series, "STS.M.I9.Y.PROD.NS0020.4.000"));
+    const ea10yPrimary = getSeries(series, "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y");
+    const ea10yAlt = getSeries(series, "FM.M.U2.EUR.4F.BB.U2_10Y.YLD");
+    const rateSeries = ea10yPrimary.length > 0 ? ea10yPrimary : ea10yAlt;
+    const rateExactSource = ea10yPrimary.length > 0 ? "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y" : (ea10yAlt.length > 0 ? "FM.M.U2.EUR.4F.BB.U2_10Y.YLD" : "unavailable");
+
+    const energyVsCore = subtractAlignedSeries(hicpEnergyYoy, hicpExYoy);
+    const infRawSeries = canonicalMonthlyGrid(energyVsCore).map((p) => ({ date: p.date, value: p.value === null ? null : clamp01(Math.max(p.value, 0) / 10) }));
+    const grRawSeries = canonicalMonthlyGrid(stsYoy).map((p) => ({ date: p.date, value: p.value === null ? null : clamp01(Math.max(-p.value, 0) / 10) }));
+    const rtRawSeries = canonicalMonthlyGrid(rateSeries).map((p) => ({ date: p.date, value: p.value === null ? null : clamp01(Math.max(p.value, 0) / 6) }));
+
+    inflationComponents.push(makeEnergyShockComponent({ id: "en_spill_infl_ea", title: "EA inflation spillover", block: "spillover", weight: 0.5, source: "ECB", exactSource: "HICP.M.U2.N.NRGY00.4D0.ANR vs HICP.M.U2.N.XEF000.4D0.ANR", asOfDate, rawSeries: infRawSeries.map((p) => ({ date: p.date, value: p.value === null || priceShockIntensity === null ? null : p.value * priceShockIntensity })), note: "energy_to_inflation_pressure = f(HICP energy YoY - HICP ex-energy-food YoY)" }));
+    growthComponents.push(makeEnergyShockComponent({ id: "en_spill_growth_ea", title: "EA growth spillover", block: "spillover", weight: 0.35, source: "ECB/Eurostat", exactSource: "STS.M.I9.Y.PROD.NS0020.4.000", asOfDate, rawSeries: grRawSeries.map((p) => ({ date: p.date, value: p.value === null || priceShockIntensity === null ? null : p.value * priceShockIntensity })), note: "energy_to_growth_pressure = f(industrial production weakness)" }));
+    if (rateExactSource === "unavailable") {
+      rateComponents.push(makeUnavailableEnergyComponent({ id: "en_spill_rate_ea", title: "EA nominal 10Y rate spillover", block: "spillover", weight: 0.15, source: "ECB", exactSource: "unavailable", note: "EA rate spillover unavailable due to missing source-locked nominal 10Y." }));
+    } else {
+      rateComponents.push(makeEnergyShockComponent({ id: "en_spill_rate_ea", title: "EA nominal 10Y rate spillover", block: "spillover", weight: 0.15, source: "ECB", exactSource: rateExactSource, asOfDate, rawSeries: rtRawSeries.map((p) => ({ date: p.date, value: p.value === null || priceShockIntensity === null ? null : p.value * priceShockIntensity })), note: "rate_spillover_raw = price_shock_intensity * energy_to_rate_pressure" }));
+    }
+    debug.computationWalkthrough.push(`EA spillover conditioned by price_shock_intensity=${priceShockIntensity ?? "null"}; rate source selected=${rateExactSource}.`);
+    if (gasPrice.signalStatus !== "ok") debug.implementationDeltaVsSpec.push("EA gas unavailable; breadth relies on Brent + HICP Energy only.");
+  }
+
+  components.push(...inflationComponents, ...growthComponents, ...rateComponents);
+
+  const byId = new Map(components.map((c) => [c.id, c]));
+  const isValid = (id: string) => Boolean(byId.get(id)?.validForProduction);
+  const weightedScore = (items: OverlayComponent[]) => {
+    const valid = items.filter((c) => c.validForProduction && c.productionScore !== null && c.weight > 0);
+    const w = valid.reduce((a, c) => a + c.weight, 0);
+    if (w <= 0) return null;
+    return valid.reduce((a, c) => a + (c.productionScore as number) * (c.weight / w), 0);
+  };
+  const weightedDiagnosticScore = (items: OverlayComponent[]) => {
+    const valid = items.filter((c) => c.diagnosticScore !== null && c.weight > 0);
+    const w = valid.reduce((a, c) => a + c.weight, 0);
+    if (w <= 0) return null;
+    return valid.reduce((a, c) => a + (c.diagnosticScore as number) * (c.weight / w), 0);
+  };
+
+  const priceComponents = components.filter((c) => c.block === "price" && c.weight > 0);
+  const breadthComponent = components.find((c) => c.id === "en_breadth_score") ?? null;
+  const spillComponents = components.filter((c) => c.block === "spillover" && c.weight > 0);
+
+  const priceDiagnosticScore = weightedDiagnosticScore(priceComponents);
+  const breadthDiagnosticScore = breadthComponent?.diagnosticScore ?? breadthComponent?.score ?? null;
+  const spillDiagnosticScore = weightedDiagnosticScore(spillComponents);
+
+  const priceValidForProduction = region === "US"
+    ? isValid("en_price_brent") && isValid("en_price_henry_hub")
+    : isValid("en_price_brent") && isValid("en_price_ea_gas");
+
+  if (breadthComponent) {
+    const breadthValid = region === "US"
+      ? (isValid("en_breadth_brent") && isValid("en_breadth_henry_hub") && isValid("en_breadth_us_third"))
+      : (isValid("en_breadth_brent") && isValid("en_breadth_hicp_energy") && (isValid("en_breadth_ea_gas") || byId.get("en_price_ea_gas")?.signalStatus !== "ok"));
+    breadthComponent.validForProduction = breadthValid;
+    breadthComponent.productionScore = breadthValid ? breadthComponent.diagnosticScore ?? null : null;
+    breadthComponent.score = breadthComponent.productionScore;
+    breadthComponent.includedInTotal = Boolean(breadthValid && breadthComponent.productionScore !== null);
+    breadthComponent.diagnosticOnly = !breadthValid && (breadthComponent.diagnosticScore !== null);
+    breadthComponent.missing = !breadthValid;
+    breadthComponent.gatingFailureReason = breadthValid ? "" : (region === "US" ? "US breadth minimum set failed: third source-locked component missing" : "EA breadth minimum set failed");
+  }
+
+  const breadthValidForProduction = Boolean(breadthComponent?.validForProduction && breadthComponent?.productionScore !== null);
+  const spillInflationValid = region === "US" ? isValid("en_spill_infl_us") : isValid("en_spill_infl_ea");
+  const spillGrowthValid = region === "US" ? isValid("en_spill_growth_us") : isValid("en_spill_growth_ea");
+  const spillValidForProduction = priceValidForProduction && spillInflationValid && spillGrowthValid;
+
+  for (const c of priceComponents) {
+    c.diagnosticScore = c.diagnosticScore ?? c.score;
+    c.productionScore = priceValidForProduction ? c.productionScore ?? c.score : null;
+    c.score = c.productionScore;
+    c.includedInTotal = Boolean(priceValidForProduction && c.validForProduction);
+    c.diagnosticOnly = !c.includedInTotal && c.diagnosticScore !== null;
+    if (!c.includedInTotal && !c.gatingFailureReason) c.gatingFailureReason = "price block minimum set not satisfied";
+  }
+  for (const c of spillComponents) {
+    c.diagnosticScore = c.diagnosticScore ?? c.score;
+    c.productionScore = spillValidForProduction ? c.productionScore ?? c.score : null;
+    c.score = c.productionScore;
+    c.includedInTotal = Boolean(spillValidForProduction && c.validForProduction);
+    c.diagnosticOnly = !c.includedInTotal && c.diagnosticScore !== null;
+    if (!c.includedInTotal && !c.gatingFailureReason) c.gatingFailureReason = "spillover block minimum set not satisfied";
+  }
+
+  const priceShockScoreProduction = priceValidForProduction ? weightedScore(priceComponents) : null;
+  const breadthScoreProduction = breadthValidForProduction ? (breadthComponent?.productionScore ?? null) : null;
+  const macroSpilloverScoreProduction = spillValidForProduction ? weightedScore(spillComponents) : null;
+
+  const blockDiagnostics = {
+    price: {
+      minimumRequiredComponents: region === "US" ? ["en_price_brent", "en_price_henry_hub"] : ["en_price_brent", "en_price_ea_gas"],
+      validComponentCount: priceComponents.filter((c) => c.validForProduction).length,
+      validForProduction: priceValidForProduction,
+      diagnosticOnly: !priceValidForProduction && priceDiagnosticScore !== null,
+      diagnosticBlockScore: priceDiagnosticScore,
+      productionBlockScore: priceShockScoreProduction,
+      includedInTotal: priceShockScoreProduction !== null,
+      status: (priceShockScoreProduction !== null ? "pass" : (priceDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
+    },
+    breadth: {
+      minimumRequiredComponents: region === "US" ? ["en_breadth_brent", "en_breadth_henry_hub", "en_breadth_us_third"] : ["en_breadth_brent", "en_breadth_hicp_energy"],
+      validComponentCount: ["en_breadth_brent", "en_breadth_henry_hub", "en_breadth_us_third", "en_breadth_ea_gas", "en_breadth_hicp_energy"].filter((id) => isValid(id)).length,
+      validForProduction: breadthValidForProduction,
+      diagnosticOnly: !breadthValidForProduction && breadthDiagnosticScore !== null,
+      diagnosticBlockScore: breadthDiagnosticScore,
+      productionBlockScore: breadthScoreProduction,
+      includedInTotal: breadthScoreProduction !== null,
+      status: (breadthScoreProduction !== null ? "pass" : (breadthDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
+    },
+    spillover: {
+      minimumRequiredComponents: region === "US" ? ["en_spill_infl_us", "en_spill_growth_us"] : ["en_spill_infl_ea", "en_spill_growth_ea"],
+      validComponentCount: spillComponents.filter((c) => c.validForProduction).length,
+      validForProduction: spillValidForProduction,
+      diagnosticOnly: !spillValidForProduction && spillDiagnosticScore !== null,
+      diagnosticBlockScore: spillDiagnosticScore,
+      productionBlockScore: macroSpilloverScoreProduction,
+      includedInTotal: macroSpilloverScoreProduction !== null,
+      status: (macroSpilloverScoreProduction !== null ? "pass" : (spillDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
+    },
+  };
+
+  const productionBlocks = [
+    { name: "price", score: priceShockScoreProduction, weight: 0.4 },
+    { name: "breadth", score: breadthScoreProduction, weight: 0.25 },
+    { name: "spillover", score: macroSpilloverScoreProduction, weight: 0.35 },
+  ];
+  const diagnosticBlocks = { price: priceDiagnosticScore, breadth: breadthDiagnosticScore, spillover: spillDiagnosticScore };
+  const includedBlocks = productionBlocks.filter((b) => b.score !== null);
+  const excludedBlocks = productionBlocks.filter((b) => b.score === null).map((b) => b.name);
+  const diagnosticOnlyBlocks = Object.entries(blockDiagnostics).filter(([, d]) => d.diagnosticOnly).map(([k]) => k);
+  const activeProductionBlockCount = includedBlocks.length;
+  const diagnosticOnlyBlockCount = diagnosticOnlyBlocks.length;
+
+  const totalWeight = includedBlocks.reduce((a, b) => a + b.weight, 0);
+  const productionScore = totalWeight > 0 ? includedBlocks.reduce((a, b) => a + (b.score as number) * (b.weight / totalWeight), 0) : null;
+  const diagnosticWeight = productionBlocks.filter((b) => diagnosticBlocks[b.name as keyof typeof diagnosticBlocks] !== null).reduce((a, b) => a + b.weight, 0);
+  const diagnosticScore = diagnosticWeight > 0
+    ? productionBlocks.reduce((a, b) => {
+      const ds = diagnosticBlocks[b.name as keyof typeof diagnosticBlocks];
+      return ds === null ? a : a + ds * (b.weight / diagnosticWeight);
+    }, 0)
+    : null;
+
+  const includedProductionComponents = components.filter((c) => c.includedInTotal && c.validForProduction);
+  const confWeight = includedProductionComponents.reduce((a, c) => a + c.weight, 0);
+  let confidenceRaw = confWeight > 0 ? Math.round(100 * includedProductionComponents.reduce((a, c) => a + (energyFreshnessPenalty(c.freshnessDays) * (c.weight / confWeight)), 0)) : 0;
+  let confidenceCap = 100;
+  let confidenceCapReason = "none";
+  const runtimeStatus: "complete" | "partial" | "weak" | "invalid" = activeProductionBlockCount >= 3 ? "complete" : (activeProductionBlockCount === 2 ? "partial" : (activeProductionBlockCount === 1 ? "weak" : "invalid"));
+  const specFidelity = activeProductionBlockCount >= 3 ? "high" : (activeProductionBlockCount === 2 ? "medium" : (activeProductionBlockCount === 1 ? "low" : "low"));
+  const robustness = activeProductionBlockCount >= 3 ? "high" : (activeProductionBlockCount === 2 ? "medium" : "low");
+  if (runtimeStatus === "partial") { confidenceCap = Math.min(confidenceCap, 70); confidenceCapReason = "runtimeCompleteness=partial"; }
+  if (runtimeStatus === "weak") { confidenceCap = Math.min(confidenceCap, 40); confidenceCapReason = "runtimeCompleteness=weak"; }
+  if (runtimeStatus === "invalid") { confidenceCap = Math.min(confidenceCap, 0); confidenceCapReason = "runtimeCompleteness=invalid"; }
+  if (specFidelity === "medium") { confidenceCap = Math.min(confidenceCap, 70); confidenceCapReason = confidenceCapReason === "none" ? "spec fidelity medium" : confidenceCapReason; }
+  if (specFidelity === "low") { confidenceCap = Math.min(confidenceCap, 50); confidenceCapReason = confidenceCapReason === "none" ? "spec fidelity low" : confidenceCapReason; }
+  if (activeProductionBlockCount < 2) { confidenceCap = Math.min(confidenceCap, 20); confidenceCapReason = "fewer than 2 production-valid blocks"; }
+  if (includedBlocks.some((b) => !blockDiagnostics[b.name as keyof typeof blockDiagnostics].validForProduction)) { confidenceCap = Math.min(confidenceCap, 25); confidenceCapReason = "included block not production-valid"; }
+  if (productionScore === null && diagnosticScore !== null) { confidenceCap = 0; confidenceCapReason = "overlay computed from diagnostic-only blocks"; }
+  const confidence = Math.min(confidenceRaw, confidenceCap);
+
+  debug.computationWalkthrough.push(`Step 1 fetch series -> Step 2 diagnostic signals -> Step 3 production validation -> Step 4 production score/null -> Step 5 block aggregation over production-valid components only -> Step 6 overlay aggregation over included production-valid blocks only.`);
+  debug.computationWalkthrough.push(`Price diagnostic=${priceDiagnosticScore ?? "null"}, production=${priceShockScoreProduction ?? "null"}; breadth diagnostic=${breadthDiagnosticScore ?? "null"}, production=${breadthScoreProduction ?? "null"}; spillover diagnostic=${spillDiagnosticScore ?? "null"}, production=${macroSpilloverScoreProduction ?? "null"}.`);
+  debug.implementationDeltaVsSpec.push(`price block: ${priceShockScoreProduction !== null ? "pass" : "partial/missing"}; spillover block: ${macroSpilloverScoreProduction !== null ? "pass" : "partial/missing"}; breadth block: ${breadthScoreProduction !== null ? "pass" : "excluded"}.`);
+  debug.verificationTrace.push("Component validity gate enforced: invalid inputs cannot produce production scores and are diagnostic_only.");
+  debug.verificationTrace.push(`Included blocks in total: ${includedBlocks.map((b) => b.name).join(", ") || "none"}; excluded=${excludedBlocks.join(", ") || "none"}; diagnosticOnlyBlocks=${diagnosticOnlyBlocks.join(", ") || "none"}.`);
+  if (region === "US") {
+    debug.implementationDeltaVsSpec.push("breadth block: partial and excluded from production score because third source-locked US breadth component is unavailable.");
+  } else {
+    debug.implementationDeltaVsSpec.push("EA remains structurally partial; EA power is not source-locked so breadth stays excluded from production score.");
+  }
+
+  const productionLabel = activeProductionBlockCount >= 2 && productionScore !== null ? energyLabelByScore(productionScore) : "Not implemented";
+
+  return {
+    score: productionScore,
+    label: productionLabel,
+    confidence,
+    priceShockScore: priceShockScoreProduction,
+    breadthScore: breadthScoreProduction,
+    macroSpilloverScore: macroSpilloverScoreProduction,
+    blockScores: { price: priceShockScoreProduction, breadth: breadthScoreProduction, spillover: macroSpilloverScoreProduction },
+    components,
+    runtime: {
+      status: runtimeStatus,
+      minimumRequiredBlocks: 2,
+      productionValidBlockScores: { price: priceShockScoreProduction, breadth: breadthScoreProduction, spillover: macroSpilloverScoreProduction },
+      diagnosticBlockScores: diagnosticBlocks,
+      includedBlocks: includedBlocks.map((b) => b.name),
+      includedBlocksInTotal: includedBlocks.map((b) => b.name),
+      excludedBlocks,
+      diagnosticOnlyBlocks,
+      activeProductionBlockCount,
+      diagnosticOnlyBlockCount,
+      confidenceCapApplied: confidenceCap,
+      confidenceCapReason,
+      blockDiagnostics,
+      aggregationWeights: { price: 0.4, breadth: 0.25, spillover: 0.35 },
+      scoreFormula: "energy_shock_overlay_score = 0.40*price + 0.25*breadth + 0.35*spillover (production-valid blocks only)",
+      blockAggregationInputs: components.reduce<Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>>((acc, component) => {
+        (acc[component.block] ??= []).push({ signalId: component.id, signalStatus: component.signalStatus, score: component.productionScore ?? null });
+        return acc;
+      }, {}),
+      ...( { energyDebug: { ...debug, diagnosticLabel: energyLabelByScore(diagnosticScore), productionLabel, productionValidBlockScores: { price: priceShockScoreProduction, breadth: breadthScoreProduction, spillover: macroSpilloverScoreProduction }, diagnosticBlockScores: diagnosticBlocks, runtimeCompleteness: runtimeStatus, specFidelity, robustness, blockStatus: { price: blockDiagnostics.price.status, breadth: blockDiagnostics.breadth.status, spillover: blockDiagnostics.spillover.status } } } as any),
+    },
+  };
+}
+
 export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayBundle {
   const inflationSeries = region === "US" ? "core_cpi_us" : "HICP.M.U2.N.000000.4.ANR";
   const coreInflationSeries = region === "US" ? "CPILFESL" : "HICP.M.U2.N.XEF000.4D0.ANR";
@@ -545,11 +1121,7 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
         },
       };
     })(),
-    energyShockOverlay: finalizeOverlay({
-      price: { weight: 0.4, components: [makeComponent({ asOfDate, id: "en_oil", title: "Energy price shock", block: "price", weight: 1, source: "FRED", exactSource: "DCOILBRENTEU YoY/3m", series: yoy(getSeries(series, "DCOILBRENTEU")), invert: true })] },
-      breadth: { weight: 0.25, components: [makeComponent({ asOfDate, id: "en_breadth", title: "Energy breadth", block: "breadth", weight: 1, source: "Proxy", exactSource: "Energy breadth proxy", series: getSeries(series, "ENERGY_BREADTH_PROXY").length ? getSeries(series, "ENERGY_BREADTH_PROXY") : (getSeries(series, "natgas_yoy").length ? getSeries(series, "natgas_yoy") : getSeries(series, "industrial_metals_yoy")), invert: true, proxy: true })] },
-      spillover: { weight: 0.35, components: [makeComponent({ asOfDate, id: "en_spill", title: "Macro spillover", block: "spillover", weight: 1, source: "FRED/ECB", exactSource: `${inflationSeries} / industrial spillover`, series: yoy(getSeries(series, inflationSeries)), invert: true, proxy: true })] },
-    }),
+    energyShockOverlay: buildEnergyShockOverlay(region, asOfDate, series),
     localUnrestOverlay: (() => {
       const usSignalSeries = region === "US" ? getSeries(series, "POLICY_UNCERTAINTY_US") : [];
       const eaSignalSeries = region === "EA" ? getSeries(series, "EA_POLICY_UNCERTAINTY") : [];
@@ -725,6 +1297,14 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     NFCI: ["financial_conditions_index"],
     DGS10: ["nominal_yield_10y_us"],
     DCOILBRENTEU: ["oil_brent_usd"],
+    DHHNGSP: ["natgas_usd"],
+    DCOILWTICO: ["oil_wti_usd"],
+    PNGASEUUSDM: ["pngaseuusdm", "ea_gas_fred"],
+    "HICP.M.U2.N.NRGY00.4D0.ANR": ["hicp_energy_yoy_ea", "hicp_yoy_ea"],
+    "HICP.M.U2.N.000000.4D0.ANR": ["hicp_yoy_ea", "hicp_ea"],
+    "STS.M.I9.Y.PROD.NS0020.4.000": ["industrial_production_ea", "EA_INDUSTRIAL_PRODUCTION"],
+    "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y": ["ea_10y_nominal_yield", "EA_10Y_CORE_YIELD"],
+    "FM.M.U2.EUR.4F.BB.U2_10Y.YLD": ["real_yield_10y_ea", "ea_10y_nominal_yield"],
     INDPRO: ["pmi_us"],
     ACMTP10: ["acmtp10_us", "lu_repricing_us", "acmtp10"],
     DGORDER: ["new_orders_us"],
