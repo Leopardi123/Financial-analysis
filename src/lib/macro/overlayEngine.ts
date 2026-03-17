@@ -32,6 +32,12 @@ type OverlayComponent = {
   constructedFrom?: string[];
   rollingPercentileThreshold?: number | null;
   active_energy_stress?: 0 | 1 | null;
+  inputSources?: Array<{ id: string; sourceFamily: string; exactSource: string; fetchAttempted: boolean; fetchSucceeded: boolean; observationCount: number; latestObservationDate: string | null }>;
+  transformedObservationCount?: { CPIENGSL_YoY: number; CPILFESL_YoY: number };
+  constructedSeriesObservationCount?: number;
+  latestGapValue?: number | null;
+  rolling10y80thPercentile?: number | null;
+  componentSeriesType?: "constructed-gap";
   debug?: {
     latestDate: string | null;
     monthlyChosenDate: string | null;
@@ -694,6 +700,8 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     breadthInputs.push({ comp: gasBreadth, threshold: gasThr.latestThreshold, active: gasThr.active });
     components.push(gasBreadth);
 
+    const cpiEnergyFetchAttempted = series.has("CPIENGSL") || series.has("cpi_energy_us");
+    const cpiCoreFetchAttempted = series.has("CPILFESL") || series.has("core_cpi_us");
     const cpiEnergySeries = getSeries(series, "CPIENGSL");
     const cpiCoreSeries = getSeries(series, "CPILFESL");
     const cpiEnergyYoy = yoy(cpiEnergySeries);
@@ -702,8 +710,14 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     const gapThr = rollingWindowPercentileThreshold(energyVsCoreGap, 80, 120, 24);
     const gapLatest = lastNumeric(energyVsCoreGap);
     const gapObsCount = canonicalMonthlyGrid(energyVsCoreGap).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
-    const cpiEnergyObsCount = canonicalMonthlyGrid(cpiEnergySeries).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
-    const cpiCoreObsCount = canonicalMonthlyGrid(cpiCoreSeries).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
+    const cpiEnergyNumeric = canonicalMonthlyGrid(cpiEnergySeries).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value));
+    const cpiCoreNumeric = canonicalMonthlyGrid(cpiCoreSeries).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value));
+    const cpiEnergyObsCount = cpiEnergyNumeric.length;
+    const cpiCoreObsCount = cpiCoreNumeric.length;
+    const cpiEnergyLatestObsDate = cpiEnergyNumeric[cpiEnergyNumeric.length - 1]?.date ?? null;
+    const cpiCoreLatestObsDate = cpiCoreNumeric[cpiCoreNumeric.length - 1]?.date ?? null;
+    const cpiEnergyYoyObsCount = canonicalMonthlyGrid(cpiEnergyYoy).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
+    const cpiCoreYoyObsCount = canonicalMonthlyGrid(cpiCoreYoy).filter((point): point is { date: string; value: number } => typeof point.value === "number" && Number.isFinite(point.value)).length;
     const gapComponentValid = cpiEnergyObsCount > 0 && cpiCoreObsCount > 0 && gapThr.active !== null;
     const gapFailureReason = cpiEnergyObsCount <= 0
       ? "Missing source CPIENGSL from FRED/BLS"
@@ -727,7 +741,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       percentilePlusScoreCheck: gapThr.active === null ? "fail" : "pass",
       weight: 0,
       source: "Constructed/FRED-BLS",
-      exactSource: "CPIENGSL YoY - CPILFESL YoY",
+      exactSource: "constructed_gap_from_inputs",
       freshnessDays: freshnessDays(gapLatest?.date ?? null, asOfDate),
       includedInTotal: false,
       missing: !gapComponentValid,
@@ -756,10 +770,19 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       },
     };
     usThirdBreadth.sourceFamily = "FRED/BLS + FRED";
+    usThirdBreadth.componentSeriesType = "constructed-gap";
+    usThirdBreadth.inputSources = [
+      { id: "CPIENGSL", sourceFamily: "FRED/BLS", exactSource: "CPIENGSL", fetchAttempted: cpiEnergyFetchAttempted, fetchSucceeded: cpiEnergyObsCount > 0, observationCount: cpiEnergyObsCount, latestObservationDate: cpiEnergyLatestObsDate },
+      { id: "CPILFESL", sourceFamily: "FRED", exactSource: "CPILFESL", fetchAttempted: cpiCoreFetchAttempted, fetchSucceeded: cpiCoreObsCount > 0, observationCount: cpiCoreObsCount, latestObservationDate: cpiCoreLatestObsDate },
+    ];
+    usThirdBreadth.transformedObservationCount = { CPIENGSL_YoY: cpiEnergyYoyObsCount, CPILFESL_YoY: cpiCoreYoyObsCount };
+    usThirdBreadth.constructedSeriesObservationCount = gapObsCount;
+    usThirdBreadth.latestGapValue = gapLatest?.value ?? null;
+    usThirdBreadth.rolling10y80thPercentile = gapThr.latestThreshold;
     usThirdBreadth.observationCount = gapObsCount;
     usThirdBreadth.latestObservationDate = gapLatest?.date ?? null;
     usThirdBreadth.yoyInputsUsed = ["CPIENGSL", "CPILFESL"];
-    usThirdBreadth.constructedFrom = ["CPIENGSL", "CPILFESL"];
+    usThirdBreadth.constructedFrom = ["YoY(CPIENGSL)", "YoY(CPILFESL)"];
     usThirdBreadth.rollingPercentileThreshold = gapThr.latestThreshold;
     usThirdBreadth.active_energy_stress = gapThr.active;
     breadthInputs.push({ comp: usThirdBreadth, threshold: gapThr.latestThreshold, active: gapThr.active });
@@ -899,7 +922,20 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     breadthComponent.includedInTotal = Boolean(breadthValid && breadthComponent.productionScore !== null);
     breadthComponent.diagnosticOnly = !breadthValid && (breadthComponent.diagnosticScore !== null);
     breadthComponent.missing = !breadthValid;
-    breadthComponent.gatingFailureReason = breadthValid ? "" : (region === "US" ? "US breadth minimum set failed: missing Brent, Henry Hub, or energy_vs_core_inflation_gap" : "EA breadth minimum set failed");
+    if (breadthValid) {
+      breadthComponent.gatingFailureReason = "";
+    } else if (region === "US") {
+      const missing: string[] = [];
+      if (!isValid("en_breadth_brent")) missing.push("Brent breadth unavailable");
+      if (!isValid("en_breadth_henry_hub")) missing.push("Henry Hub breadth unavailable");
+      const third = byId.get("energy_vs_core_inflation_gap");
+      if (!isValid("energy_vs_core_inflation_gap")) {
+        missing.push(`energy_vs_core_inflation_gap unavailable${third?.gatingFailureReason ? ` because ${third.gatingFailureReason}` : ""}`);
+      }
+      breadthComponent.gatingFailureReason = `US breadth minimum set failed: ${missing.join("; ") || "unknown component failure"}`;
+    } else {
+      breadthComponent.gatingFailureReason = "EA breadth minimum set failed";
+    }
   }
 
   const breadthValidForProduction = Boolean(breadthComponent?.validForProduction && breadthComponent?.productionScore !== null);
@@ -1388,6 +1424,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     DGORDER: ["new_orders_us"],
     POLICY_UNCERTAINTY_US: ["policy_uncertainty_us", "usepuindxm"],
     CPILFESL: ["core_cpi_us"],
+    CPIENGSL: ["cpi_energy_us"],
     T10YIE: ["breakeven_10y_us"],
     CPIAUCSL: ["core_cpi_us"],
     VIXCLS: ["vix_index"],
