@@ -513,9 +513,9 @@ export default function GlobalMacroDashboard() {
     energyShockOverlay: {
       intendedPrimaryBlocks: ["price", "breadth", "spillover"],
       intendedSeries: [
-        { id: "oil_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["DCOILBRENTEU"], aliasFamily: ["oil_price", "dcoilbrenteu", "dcoilwtico"] },
-        { id: "gas_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["NG / regional gas source"], aliasFamily: ["gas_price", "natural_gas", "ttf", "ng"] },
-        { id: "energy_cost_pass", block: "spillover", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["PPIACO (energy pass-through family)"], aliasFamily: ["energy_breadth", "energy_ppi", "ppiaco"] },
+        { id: "oil_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["DCOILBRENTEU"], aliasFamily: ["dcoilbrenteu"] },
+        { id: "gas_price", block: "price", linkedMacroFamily: "C_INFLATION", primarySources: ["US: DHHNGSP", "EA: PNGASEUUSDM"], aliasFamily: ["dhhngsp", "pngaseuusdm"] },
+        { id: "energy_cost_pass", block: "spillover", linkedMacroFamily: "D_CREDIBILITY", primarySources: ["US: CPILFESL + INDPRO + DFII10", "EA: HICP energy/ex-energy + STS + ECB 10Y"], aliasFamily: ["source_locked_only"] },
       ],
       logicSummary: "Energiinput och genomslag till kostnads-/förtroendeblock.",
     },
