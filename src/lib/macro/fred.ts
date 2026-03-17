@@ -19,6 +19,7 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "DTWEXBGS", seriesKey: "usd_broad_index" },
   { fredSeriesId: "DCOILBRENTEU", seriesKey: "oil_brent_usd" },
   { fredSeriesId: "DHHNGSP", seriesKey: "natgas_usd" },
+  { fredSeriesId: "CPIENGSL", seriesKey: "cpi_energy_us" },
   { fredSeriesId: "PCOPPUSDM", seriesKey: "copper_usd" },
   { fredSeriesId: "PMETAUSDM", seriesKey: "industrial_metals_index", fallbackFredSeriesIds: ["PINDUUSDM", "PINDUINDEXM"] },
   { fredSeriesId: "PALLFNFUSDM", seriesKey: "commodity_index", fallbackFredSeriesIds: ["PALLFNFNFUSDM", "PALLFNFINDEXM"] },
