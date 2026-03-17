@@ -7,6 +7,10 @@
     {
       "path": "/api/companies",
       "schedule": "0 3 1 * *"
+    },
+    {
+      "path": "/api/cron/macro-refresh",
+      "schedule": "30 2 * * *"
     }
   ],
   "rewrites": [

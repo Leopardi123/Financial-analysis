@@ -3,8 +3,8 @@ import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { query } from "../../../../api/_db.js";
 import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
-import { runAndPersistMacroSnapshots } from "../../../lib/macro/pipeline.js";
-import { computeMacroRegimeHistory, type HistoryResolution } from "../../../lib/macro/history.js";
+import { type HistoryResolution } from "../../../lib/macro/history.js";
+import { readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../lib/macro/readCache.js";
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
 
@@ -278,12 +278,6 @@ async function loadInflationAnalysis(region: "US" | "EA" | "SE"): Promise<Inflat
 
 
 
-
-function parseUiOverlayKeysRequested(raw: unknown) {
-  const value = typeof raw === "string" ? raw.trim() : "";
-  if (!value) return [] as string[];
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
-}
 
 async function loadRawSeriesRows(region: string) {
   return (await query(
@@ -1683,6 +1677,52 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
   };
 }
 
+function trimSnapshotForNormalRead(snapshot: any, debugEnabled: boolean) {
+  if (!snapshot || typeof snapshot !== "object" || debugEnabled) return snapshot;
+  const clone: any = { ...snapshot };
+  delete clone.debug;
+  delete clone.overlayEngineDiagnostics;
+  delete clone.overlayRuntimeProof;
+  delete clone.overlayRoutingDiagnostics;
+  if (clone.overlays && typeof clone.overlays === "object" && clone.overlays.overlays && typeof clone.overlays.overlays === "object") {
+    const nextOverlays: Record<string, unknown> = {};
+    for (const [overlayKey, overlayValue] of Object.entries(clone.overlays.overlays as Record<string, any>)) {
+      if (!overlayValue || typeof overlayValue !== "object") {
+        nextOverlays[overlayKey] = overlayValue;
+        continue;
+      }
+      const overlayClone: any = { ...overlayValue };
+      if (Array.isArray(overlayClone.components)) {
+        overlayClone.components = overlayClone.components.map((component: any) => {
+          if (!component || typeof component !== "object") return component;
+          const componentClone = { ...component };
+          delete (componentClone as any).debug;
+          return componentClone;
+        });
+      }
+      nextOverlays[overlayKey] = overlayClone;
+    }
+    clone.overlays = { ...clone.overlays, overlays: nextOverlays };
+  }
+  return clone;
+}
+
+export async function buildMacroLatestReadPayload(region: string) {
+  if (region === "GLOBAL") {
+    return {
+      globalMacro: await readLatestGlobalSnapshot(false, []),
+      inflationAnalysis: null,
+      cachedAt: new Date().toISOString(),
+    };
+  }
+  if (!["US", "EA", "SE"].includes(region)) return null;
+  return {
+    globalMacro: await readLatestSnapshot(region, false, []),
+    inflationAnalysis: await loadInflationAnalysis(region as "US" | "EA" | "SE"),
+    cachedAt: new Date().toISOString(),
+  };
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {
     res.status(405).json({ ok: false, error: "Method not allowed" });
@@ -1692,9 +1732,8 @@ export default async function handler(req: any, res: any) {
   await ensureSchema();
 
   const region = String(req.query?.region ?? "GLOBAL").toUpperCase();
-  const allowLiveFallback = String(req.query?.fallbackLive ?? "1") === "1";
+  const debugEnabled = String(req.query?.debug ?? "0") === "1";
   const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
-  const uiOverlayKeysRequested = parseUiOverlayKeysRequested(req.query?.uiOverlayKeysRequested);
   const historyRangeRaw = String(req.query?.historyRangeYears ?? (historyResolution === "MONTHLY" ? "20" : "3")).toUpperCase();
   const historyRangeYears = historyRangeRaw === "MAX"
     ? "MAX"
@@ -1702,92 +1741,72 @@ export default async function handler(req: any, res: any) {
       ? Number(historyRangeRaw)
       : (historyResolution === "MONTHLY" ? 20 : 3);
 
-  if (region === "GLOBAL") {
-    const snapshot = await readLatestGlobalSnapshot(allowLiveFallback, uiOverlayKeysRequested);
-    const history = await computeMacroRegimeHistory({
-      region: "GLOBAL",
-      resolution: historyResolution as HistoryResolution,
-      rangeYears: historyRangeYears,
-    });
-    res.status(200).json({ ok: true, globalMacro: snapshot, macroHistory: history, inflationAnalysis: null });
-    return;
-  }
+  const t0 = Date.now();
+  const snapshotCache = await readLatestMacroReadCache(region);
+  const snapshotReadMs = Date.now() - t0;
 
-  const inflationAnalysis = region === "US" || region === "EA" || region === "SE"
-    ? await loadInflationAnalysis(region)
-    : null;
-
-  const snapshot = await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested);
-  if (snapshot) {
-    const history = await computeMacroRegimeHistory({
-      region,
-      resolution: historyResolution as HistoryResolution,
-      rangeYears: historyRangeYears,
-    });
-    res.status(200).json({ ok: true, globalMacro: snapshot, macroHistory: history, inflationAnalysis });
-    return;
-  }
-
-  if (!allowLiveFallback) {
-    const history = await computeMacroRegimeHistory({
-      region,
-      resolution: historyResolution as HistoryResolution,
-      rangeYears: historyRangeYears,
-    });
-    res.status(200).json({
-      ok: true,
-      globalMacro: null,
-      macroHistory: history,
-      inflationAnalysis,
-      diagnostics: {
-        readMode: "empty_no_snapshot",
-        message: "No snapshots found. Run /api/admin/macro/run-engine first.",
-      },
-    });
-    return;
-  }
-
-  const live = await runAndPersistMacroSnapshots({ region });
-  const fallbackSnapshot = await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested);
-
-  if (!fallbackSnapshot) {
-    const history = await computeMacroRegimeHistory({
-      region,
-      resolution: historyResolution as HistoryResolution,
-      rangeYears: historyRangeYears,
-    });
-    res.status(200).json({
-      ok: true,
-      globalMacro: null,
-      macroHistory: history,
-      inflationAnalysis,
-      diagnostics: {
-        readMode: live.emptyInvalid ? "live_fallback_empty_invalid" : "live_fallback_no_snapshot",
-        wroteAny: live.wroteAny,
-        rawPointCount: live.rawPointCount,
-      },
-    });
-    return;
-  }
-
-  const history = await computeMacroRegimeHistory({
+  const t1 = Date.now();
+  const historyCache = await readMacroHistoryReadCache({
     region,
     resolution: historyResolution as HistoryResolution,
     rangeYears: historyRangeYears,
   });
+  const historyReadMs = Date.now() - t1;
+
+  const snapshotPayloadRaw = snapshotCache?.payload;
+  const snapshotPayload = snapshotPayloadRaw && typeof snapshotPayloadRaw === "object"
+    ? snapshotPayloadRaw as Record<string, unknown>
+    : null;
+
+  const globalMacroRaw = snapshotPayload && "globalMacro" in snapshotPayload
+    ? snapshotPayload.globalMacro
+    : snapshotPayloadRaw ?? null;
+  const globalMacro = trimSnapshotForNormalRead(globalMacroRaw, debugEnabled);
+
+  const inflationAnalysis = snapshotPayload && "inflationAnalysis" in snapshotPayload
+    ? snapshotPayload.inflationAnalysis
+    : null;
+  const macroHistory = historyCache?.payload ?? {
+    region,
+    resolution: historyResolution,
+    requestedRangeYears: historyRangeYears,
+    points: [],
+    intervals: { regime: [], overlays: { growth: [], stress: [], hardAsset: [] } },
+    replay: { source: "cache_miss", recomputedAt: null },
+  };
+
+  const diagnostics = {
+    readMode: "snapshot_cache_only",
+    snapshotCacheHit: Boolean(snapshotCache),
+    historyCacheHit: Boolean(historyCache),
+    liveFallbackAttempted: false,
+    snapshotReadMs,
+    historyCacheReadMs: historyReadMs,
+    payloadBytes: Buffer.byteLength(JSON.stringify({ globalMacro, macroHistory })),
+    snapshotUpdatedAt: snapshotCache?.updatedAt ?? null,
+    historyUpdatedAt: historyCache?.updatedAt ?? null,
+  };
+
+  if (!snapshotCache || !historyCache) {
+    res.status(200).json({
+      ok: true,
+      globalMacro,
+      macroHistory,
+      inflationAnalysis,
+      diagnostics: {
+        ...diagnostics,
+        stale: true,
+        message: "Macro snapshot/history cache missing. Run /api/cron/macro-refresh or admin macro ingest + run-engine.",
+      },
+    });
+    return;
+  }
 
   res.status(200).json({
     ok: true,
-    globalMacro: fallbackSnapshot,
-    macroHistory: history,
+    globalMacro,
+    macroHistory,
     inflationAnalysis,
-    diagnostics: {
-      readMode: "live_fallback_then_snapshot",
-      wroteAny: live.wroteAny,
-      asOfDate: live.asOfDate,
-      rawPointCount: live.rawPointCount,
-      indicatorWrites: live.indicatorWrites,
-      regimeWrites: live.regimeWrites,
-    },
+    diagnostics,
   });
 }

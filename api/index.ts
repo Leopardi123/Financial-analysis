@@ -93,6 +93,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "company/profile": () => import("../src/server/routes/company/profile.js"),
   "company/refresh": () => import("../src/server/routes/company/refresh.js"),
   "cron/refresh": () => import("../src/server/routes/cron/refresh.js"),
+  "cron/macro-refresh": () => import("../src/server/routes/cron/macro-refresh.js"),
   "cron/refresh-companies": () => import("../src/server/routes/cron/refresh-companies.js"),
   "debug/info": async () => ({
     default: async (req: any, res: any) => {
