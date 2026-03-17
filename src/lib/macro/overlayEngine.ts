@@ -51,6 +51,8 @@ type OverlayResult = {
   score: number | null;
   label: string;
   confidence: number;
+  goldEquityFlightScore?: number | null;
+  durationFlightScore?: number | null;
   priceShockScore?: number | null;
   breadthScore?: number | null;
   macroSpilloverScore?: number | null;
@@ -243,6 +245,53 @@ function monthlyPctChange(points: Point[], lagMonths: number): Point[] {
   });
 }
 
+function rollingZScore(points: Point[], windowSize: number): Point[] {
+  const series = canonicalMonthlyGrid(points);
+  const out: Point[] = [];
+  for (let i = 0; i < series.length; i += 1) {
+    const window = series.slice(Math.max(0, i - windowSize + 1), i + 1);
+    const values = window.map((point) => point.value).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (values.length < windowSize || series[i]?.value === null || !Number.isFinite(series[i]?.value)) {
+      out.push({ date: series[i].date, value: null });
+      continue;
+    }
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((a, b) => a + ((b - mean) ** 2), 0) / values.length;
+    const sd = Math.sqrt(variance);
+    out.push({ date: series[i].date, value: sd === 0 ? 0 : ((series[i].value as number) - mean) / sd });
+  }
+  return out;
+}
+
+function subtractAlignedByMonth(left: Point[], right: Point[]): Point[] {
+  const rightByMonth = new Map(canonicalMonthlyGrid(right).map((point) => [monthKey(point.date), point.value]));
+  return canonicalMonthlyGrid(left).map((point) => {
+    const rightValue = rightByMonth.get(monthKey(point.date));
+    if (point.value === null || rightValue === null || rightValue === undefined || !Number.isFinite(point.value) || !Number.isFinite(rightValue)) {
+      return { date: point.date, value: null };
+    }
+    return { date: point.date, value: point.value - rightValue };
+  });
+}
+
+function capSeries(points: Point[], min: number, max: number): Point[] {
+  return canonicalMonthlyGrid(points).map((point) => ({
+    date: point.date,
+    value: point.value === null || !Number.isFinite(point.value) ? null : Math.min(max, Math.max(min, point.value)),
+  }));
+}
+
+function lagDifference(points: Point[], lagMonths: number): Point[] {
+  const series = canonicalMonthlyGrid(points);
+  return series.map((point, idx) => {
+    const prev = idx >= lagMonths ? series[idx - lagMonths] : null;
+    if (!prev || point.value === null || prev.value === null || !Number.isFinite(point.value) || !Number.isFinite(prev.value)) {
+      return { date: point.date, value: null };
+    }
+    return { date: point.date, value: point.value - prev.value };
+  });
+}
+
 function maxZero(points: Point[]): Point[] {
   return canonicalMonthlyGrid(points).map((point) => ({
     date: point.date,
@@ -325,6 +374,15 @@ function labelByScore(score: number | null): string {
   if (score < 60) return "Neutral";
   if (score < 80) return "Supportive";
   return "Very supportive";
+}
+
+function safeHavenLabelByScore(score: number | null): string {
+  if (score === null) return "Not implemented";
+  if (score < 20) return "severe risk-off / safe-haven flight";
+  if (score < 40) return "elevated defensive flight";
+  if (score < 60) return "neutral";
+  if (score < 80) return "calm risk backdrop";
+  return "very calm / low safe-haven demand";
 }
 
 function getSeries(seriesMap: SeriesMap, key: string): Point[] { return seriesMap.get(key) ?? []; }
@@ -970,6 +1028,116 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
   };
 }
 
+function buildSafeHavenRiskOffOverlay(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayResult {
+  if (region !== "US" && region !== "EA") {
+    return finalizeOverlay({
+      gold_equity: { weight: 0.65, components: [makeComponent({ asOfDate, id: "sh_gold_eq", title: "Gold vs equity flight", block: "gold_equity", weight: 1, source: "Unavailable", exactSource: "unavailable", series: [], note: "Safe Haven / Risk-Off Overlay v1 implemented for US and EA only." })] },
+      duration: { weight: 0.35, components: [makeComponent({ asOfDate, id: "sh_duration", title: "Duration flight", block: "duration", weight: 1, source: "Unavailable", exactSource: "unavailable", series: [], note: "Safe Haven / Risk-Off Overlay v1 implemented for US and EA only." })] },
+    });
+  }
+
+  const goldSeries = getSeries(series, "gold_usd");
+  const equitySeries = region === "US" ? getSeries(series, "SP500") : getSeries(series, "SX5E");
+  const durationYieldSeries = region === "US" ? getSeries(series, "DGS10") : getSeries(series, "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y");
+
+  const goldZ12m = rollingZScore(goldSeries, 12);
+  const equityZ12m = rollingZScore(equitySeries, 12);
+  const goldEquityFlightRaw = subtractAlignedByMonth(goldZ12m, equityZ12m);
+  const goldEquityFlightRawCapped = capSeries(goldEquityFlightRaw, -3, 3);
+
+  const durationFlightRaw = lagDifference(durationYieldSeries, 3).map((point) => ({
+    date: point.date,
+    value: point.value === null || !Number.isFinite(point.value) ? null : -1 * point.value,
+  }));
+
+  const goldEquityComponent = makeComponent({
+    asOfDate,
+    id: "sh_gold_eq",
+    title: "Gold vs equity flight",
+    block: "gold_equity",
+    weight: 1,
+    source: region === "US" ? "FMP/FRED" : "FMP/STOXX",
+    exactSource: region === "US"
+      ? "FMP stable/historical-price-eod/full?symbol=GCUSD :: FRED SP500"
+      : "FMP stable/historical-price-eod/full?symbol=GCUSD :: STOXX SX5E",
+    series: goldEquityFlightRawCapped,
+    minObservations: 24,
+    note: "gold_equity_flight_raw = rolling_zscore_12m(gold) - rolling_zscore_12m(equity); capped to [-3,+3] before percentile",
+  });
+
+  const durationComponent = makeComponent({
+    asOfDate,
+    id: "sh_duration",
+    title: "Duration flight",
+    block: "duration",
+    weight: 1,
+    source: region === "US" ? "FRED" : "ECB Data Portal",
+    exactSource: region === "US" ? "DGS10" : "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y",
+    series: durationFlightRaw,
+    minObservations: 24,
+    note: "duration_flight_raw = -1 * (10Y_t - 10Y_t_minus_3m)",
+  });
+
+  const base = finalizeOverlay({
+    gold_equity: { weight: 0.65, components: [goldEquityComponent] },
+    duration: { weight: 0.35, components: [durationComponent] },
+  });
+
+  const goldConf = blockConfidence([goldEquityComponent]);
+  const durationConf = blockConfidence([durationComponent]);
+  const confidence = base.score === null ? 0 : Math.round(100 * ((0.65 * goldConf) + (0.35 * durationConf)));
+
+  return {
+    ...base,
+    label: safeHavenLabelByScore(base.score),
+    confidence,
+    goldEquityFlightScore: base.blockScores.gold_equity,
+    durationFlightScore: base.blockScores.duration,
+    runtime: {
+      status: base.score === null ? "partial" : "complete",
+      includedBlocksInTotal: ["gold_equity", "duration"].filter((block) => typeof base.blockScores[block] === "number"),
+      excludedBlocks: ["gold_equity", "duration"].filter((block) => base.blockScores[block] === null),
+      aggregationWeights: { gold_equity: 0.65, duration: 0.35 },
+      scoreFormula: "safe_haven_overlay_score = 0.65*gold_equity_flight_score + 0.35*duration_flight_score",
+      blockAggregationInputs: {
+        gold_equity: [{ signalId: goldEquityComponent.id, signalStatus: goldEquityComponent.signalStatus, score: goldEquityComponent.score }],
+        duration: [{ signalId: durationComponent.id, signalStatus: durationComponent.signalStatus, score: durationComponent.score }],
+      },
+      ...( {
+        safeHavenDebug: {
+          intendedPrimaryDesign: "safe_haven_overlay_score = 0.65*gold_equity_flight_score + 0.35*duration_flight_score. Two blocks only: Gold vs Equity Flight and Duration Flight.",
+          labelMappingResult: safeHavenLabelByScore(base.score),
+          computationWalkthrough: [
+            `gold_equity sources: gold=FMP stable/historical-price-eod/full?symbol=GCUSD, equity=${region === "US" ? "FRED SP500" : "STOXX SX5E"}`,
+            "gold_z_12m = rolling_zscore_12m(gold_price_series); equity_z_12m = rolling_zscore_12m(equity_benchmark_series)",
+            "gold_equity_flight_raw = gold_z_12m - equity_z_12m; gold_equity_flight_raw_capped = min(max(raw,-3),3)",
+            `gold_equity_flight_score = 100 - percentile_10y(gold_equity_flight_raw_capped) => ${goldEquityComponent.score ?? "null"}`,
+            `duration source: ${region === "US" ? "FRED DGS10" : "ECB YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y"}`,
+            "duration_flight_raw = -1 * (10Y_t - 10Y_t_minus_3m)",
+            `duration_flight_score = 100 - percentile_10y(duration_flight_raw) => ${durationComponent.score ?? "null"}`,
+            `block aggregation: gold_equity=${base.blockScores.gold_equity ?? "null"}, duration=${base.blockScores.duration ?? "null"}`,
+            `total aggregation: 0.65*gold_equity + 0.35*duration = ${base.score ?? "null"}`,
+            `label mapping result: ${safeHavenLabelByScore(base.score)}`,
+          ],
+          verificationTrace: [
+            `exact sources used: gold=FMP stable/historical-price-eod/full?symbol=GCUSD; equity=${region === "US" ? "SP500" : "SX5E"}; duration=${region === "US" ? "DGS10" : "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y"}`,
+            "12m rolling z-score logic applied on gold and equity before subtraction",
+            "gold/equity raw cap to [-3,+3] applied before percentile",
+            "duration block uses 3m change in 10Y yield, not yield level",
+            "percentile math uses 10-year rolling window and final score = 100 - percentile",
+            `includedInTotal flags: gold_equity=${goldEquityComponent.includedInTotal}, duration=${durationComponent.includedInTotal}`,
+          ],
+          implementationDeltaVsSpec: [
+            "US implementation status: fully source-locked for GCUSD, SP500, and DGS10.",
+            "EA implementation status: source-locked for GCUSD, SX5E, and ECB 10Y yield key.",
+            "Legacy usd/usd_strength block removed from production runtime and production debug for safe-haven overlay.",
+          ],
+        },
+      } as any),
+    },
+  };
+}
+
 export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayBundle {
   const inflationSeries = region === "US" ? "core_cpi_us" : "HICP.M.U2.N.000000.4.ANR";
   const coreInflationSeries = region === "US" ? "CPILFESL" : "HICP.M.U2.N.XEF000.4D0.ANR";
@@ -1186,10 +1354,7 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       });
       return requireSourceFaithfulBlocks(enforceSourceFaithfulInvariant(local, ["signal", "repricing"]), ["signal", "repricing"]);
     })(),
-    safeHavenRiskOffOverlay: finalizeOverlay({
-      gold_equity: { weight: 0.65, components: [makeComponent({ asOfDate, id: "sh_gold_eq", title: "Gold-equity flight", block: "gold_equity", weight: 1, source: "FRED", exactSource: "GOLD/SP500 ratio", series: getSeries(series, "GOLD_EQUITY_RATIO"), invert: true, proxy: true })] },
-      duration: { weight: 0.35, components: [makeComponent({ asOfDate, id: "sh_duration", title: "Duration flight", block: "duration", weight: 1, source: "FRED/ECB", exactSource: region === "US" ? "US10Y yield" : "DE10Y yield", series: getSeries(series, region === "US" ? "DGS10" : "EA_10Y_CORE_YIELD"), invert: true })] },
-    }),
+    safeHavenRiskOffOverlay: buildSafeHavenRiskOffOverlay(region, asOfDate, series),
     inflationCostShockOverlay: finalizeOverlay({
       inflation: { weight: 0.45, components: [
         makeComponent({ asOfDate, id: "ics_headline", title: "Headline inflation", block: "inflation", weight: region === "US" ? 0.4 : 0.5, source: "FRED/ECB", exactSource: inflationSeries, series: yoy(getSeries(series, inflationSeries)), invert: true }),
@@ -1320,6 +1485,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     "EA_INDUSTRIAL_PRODUCTION": ["industrial_production_ea", "pmi_ea", "pmi_us"],
     "EA_10Y_CORE_YIELD": ["real_yield_10y_ea"],
     "EA_PPI": ["commodity_index", "industrial_metals_index"],
+    SX5E: ["sx5e", "stoxx_sx5e", "ea_equity_benchmark"],
     "EA_INFLATION_EXPECTATIONS": ["hicp_yoy_ea"],
     "EUR_IG_OAS": ["credit_spreads_ea"],
     "EUR_HY_OAS": ["credit_spreads_ea"],

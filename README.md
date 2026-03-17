@@ -8,6 +8,8 @@ These must be configured in Vercel (or your local environment):
 - `TURSO_AUTH_TOKEN`
 - `FMP_API_KEY`
 - `CRON_SECRET`
+- `STOXX_HISTORICAL_ENDPOINT` (required for EA SX5E ingestion used by Safe Haven / Risk-Off overlay)
+- `STOXX_HISTORICAL_API_KEY` (optional, if your STOXX endpoint requires auth)
 
 ## Setup Workflow
 
