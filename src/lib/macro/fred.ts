@@ -47,6 +47,10 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "DGORDER", seriesKey: "new_orders_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
   { fredSeriesId: "ISRATIO", seriesKey: "isratio_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
   { fredSeriesId: "PPIACO", seriesKey: "ppiaco_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "WPU10", seriesKey: "WPU10", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "MNFCTRIRSA", seriesKey: "MNFCTRIRSA", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "IPMAN", seriesKey: "IPMAN", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "AMTMNO", seriesKey: "AMTMNO", latestLookbackMonths: 180, backfillLookbackYears: 20 },
   { fredSeriesId: "USEPUINDXM", seriesKey: "policy_uncertainty_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
 ];
 

@@ -165,20 +165,34 @@ function yoy(points: Point[]): Point[] {
   });
 }
 
-function averageAlignedSeries(seriesList: Point[][]): Point[] {
-  if (seriesList.length === 0) return [];
-  const byDateMaps = seriesList.map((series) => new Map(series.map((point) => [point.date, point.value])));
-  const baseDates = seriesList[0].map((point) => point.date);
+
+function rollingMean(points: Point[], windowMonths: number): Point[] {
+  const series = canonicalMonthlyGrid(points);
   const out: Point[] = [];
-  for (const date of baseDates) {
-    const values = byDateMaps.map((map) => map.get(date));
-    if (values.some((value) => value === null || value === undefined || !Number.isFinite(value))) continue;
-    const numeric = values as number[];
-    out.push({ date, value: numeric.reduce((a, b) => a + b, 0) / numeric.length });
+  for (let idx = 0; idx < series.length; idx += 1) {
+    const window = series.slice(Math.max(0, idx - windowMonths + 1), idx + 1);
+    const numeric = window.map((point) => point.value).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (numeric.length === 0) {
+      out.push({ date: series[idx].date, value: null });
+      continue;
+    }
+    out.push({ date: series[idx].date, value: numeric.reduce((a, b) => a + b, 0) / numeric.length });
   }
   return out;
 }
 
+function absDeviationFromRollingMean(points: Point[], windowMonths: number): Point[] {
+  const base = canonicalMonthlyGrid(points);
+  const meanByMonth = new Map(rollingMean(points, windowMonths).map((point) => [monthKey(point.date), point.value]));
+  const out: Point[] = [];
+  for (const point of base) {
+    if (point.value === null || !Number.isFinite(point.value)) continue;
+    const rollingValue = meanByMonth.get(monthKey(point.date));
+    if (rollingValue === null || rollingValue === undefined || !Number.isFinite(rollingValue)) continue;
+    out.push({ date: point.date, value: Math.abs(point.value - rollingValue) });
+  }
+  return out;
+}
 
 function subtractAlignedSeries(left: Point[], right: Point[]): Point[] {
   const leftMonthly = canonicalMonthlyGrid(left);
@@ -1601,64 +1615,189 @@ export function buildRegionalOverlays(region: "US" | "EA" | "SE", asOfDate: stri
       return result;
     })(),
     tradeSupplyChainStressOverlay: (() => {
-      const usIndustrialProduction = yoy(getSeries(series, "INDPRO"));
-      const usNewOrders = yoy(getSeries(series, "DGORDER"));
-      const usRealGoodsFlow = averageAlignedSeries([usIndustrialProduction, usNewOrders]);
-      const usInventoryPressure = yoy(getSeries(series, "ISRATIO"));
-      const usInputPrices = yoy(getSeries(series, "PPIACO"));
-      return finalizeOverlay({
+      const usPipelineCostStress = yoy(getSeries(series, "WPU10"));
+      const usMnfctrInventoryImbalance = absDeviationFromRollingMean(getSeries(series, "MNFCTRIRSA"), 60);
+      const usTotalInventoryImbalance = absDeviationFromRollingMean(getSeries(series, "ISRATIO"), 60);
+      const usIndustrialFlowSupport = getSeries(series, "IPMAN");
+      const usNewOrdersSupport = getSeries(series, "AMTMNO");
+      const result = finalizeOverlay({
         real_goods_flow: {
           weight: 0.4,
-          components: [makeComponent({
-            asOfDate,
-            id: "tsc_real_goods_flow",
-            title: "Real goods flow",
-            block: "real_goods_flow",
-            weight: 1,
-            source: "FRED",
-            exactSource: region === "US" ? "INDPRO + DGORDER" : "UNAVAILABLE: non-US source-faithful mapping not wired",
-            series: region === "US" ? usRealGoodsFlow : [],
-            invert: true,
-            note: region === "US"
-              ? "Source-faithful composite built only when both INDPRO and DGORDER are available"
-              : "Missing by design: no source-faithful non-US mapping for this overlay block",
-          })],
+          components: [
+            makeComponent({
+              asOfDate,
+              id: "tsc_real_goods_flow_industrial",
+              title: "Industrial flow support",
+              block: "real_goods_flow",
+              weight: 0.6,
+              source: "FRED",
+              exactSource: region === "US" ? "IPMAN" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+              series: region === "US" ? usIndustrialFlowSupport : [],
+              invert: true,
+              note: region === "US"
+                ? "real_goods_flow_score_us = 0.60*support_score_of(IPMAN) + 0.40*support_score_of(AMTMNO)"
+                : "Missing by design: no source-faithful non-US mapping for this overlay block",
+            }),
+            makeComponent({
+              asOfDate,
+              id: "tsc_real_goods_flow_orders",
+              title: "New orders support",
+              block: "real_goods_flow",
+              weight: 0.4,
+              source: "FRED",
+              exactSource: region === "US" ? "AMTMNO" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+              series: region === "US" ? usNewOrdersSupport : [],
+              invert: true,
+              note: region === "US"
+                ? "real_goods_flow_score_us = 0.60*support_score_of(IPMAN) + 0.40*support_score_of(AMTMNO)"
+                : "Missing by design: no source-faithful non-US mapping for this overlay block",
+            }),
+          ],
         },
         inventory_pressure: {
           weight: 0.3,
-          components: [makeComponent({
-            asOfDate,
-            id: "tsc_inventory_pressure",
-            title: "Inventory pressure",
-            block: "inventory_pressure",
-            weight: 1,
-            source: "FRED",
-            exactSource: region === "US" ? "ISRATIO" : "UNAVAILABLE: non-US source-faithful mapping not wired",
-            series: region === "US" ? usInventoryPressure : [],
-            invert: true,
-            note: region === "US"
-              ? "Source-faithful inventory family input (ISRATIO)"
-              : "Missing by design: no source-faithful non-US inventory source wired",
-          })],
+          components: [
+            makeComponent({
+              asOfDate,
+              id: "tsc_inventory_delivery_friction_mnfctr",
+              title: "Manufacturing inventory support",
+              block: "inventory_pressure",
+              weight: 0.6,
+              source: "FRED",
+              exactSource: region === "US" ? "abs(MNFCTRIRSA - rolling_mean_60m(MNFCTRIRSA))" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+              series: region === "US" ? usMnfctrInventoryImbalance : [],
+              invert: true,
+              note: region === "US"
+                ? "inventory_delivery_friction_score_us = 0.60*(100 - percentile_10y(abs(MNFCTRIRSA - rolling_mean_60m(MNFCTRIRSA)))) + 0.40*(100 - percentile_10y(abs(ISRATIO - rolling_mean_60m(ISRATIO))))"
+                : "Missing by design: no source-faithful non-US inventory source wired",
+            }),
+            makeComponent({
+              asOfDate,
+              id: "tsc_inventory_delivery_friction_total",
+              title: "Total inventory support",
+              block: "inventory_pressure",
+              weight: 0.4,
+              source: "FRED",
+              exactSource: region === "US" ? "abs(ISRATIO - rolling_mean_60m(ISRATIO))" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+              series: region === "US" ? usTotalInventoryImbalance : [],
+              invert: true,
+              note: region === "US"
+                ? "inventory_delivery_friction_score_us = 0.60*(100 - percentile_10y(abs(MNFCTRIRSA - rolling_mean_60m(MNFCTRIRSA)))) + 0.40*(100 - percentile_10y(abs(ISRATIO - rolling_mean_60m(ISRATIO))))"
+                : "Missing by design: no source-faithful non-US inventory source wired",
+            }),
+          ],
         },
         pricing: {
           weight: 0.3,
           components: [makeComponent({
             asOfDate,
-            id: "tsc_pricing",
-            title: "Input pricing pressure",
+            id: "tsc_pipeline_cost_stress",
+            title: "Pipeline cost stress",
             block: "pricing",
             weight: 1,
             source: "FRED",
-            exactSource: region === "US" ? "PPIACO" : "UNAVAILABLE: non-US source-faithful mapping not wired",
-            series: region === "US" ? usInputPrices : [],
+            exactSource: region === "US" ? "YoY(WPU10)" : "UNAVAILABLE: non-US source-faithful mapping not wired",
+            series: region === "US" ? usPipelineCostStress : [],
             invert: true,
             note: region === "US"
-              ? "Source-faithful pricing uses PPIACO; shipping-cost fallback disabled"
+              ? "pipeline_cost_stress_score_us = 100 - percentile_10y(YoY(WPU10)); internal block key 'pricing' maps to pipeline_cost_stress"
               : "Missing by design: no source-faithful non-US pricing source wired",
           })],
         },
       });
+      if (region === "US") {
+        const canonicalBlock = (block: string): string => {
+          if (block === "inventory_pressure") return "inventory_delivery_friction";
+          if (block === "pricing") return "pipeline_cost_stress";
+          return block;
+        };
+
+        result.components.forEach((component) => {
+          const production = Boolean(component.includedInTotal && typeof component.score === "number" && !component.missing);
+          component.validForProduction = production;
+          component.productionScore = production ? component.score : null;
+          component.diagnosticScore = typeof component.score === "number" ? component.score : null;
+          component.diagnosticOnly = !production && component.diagnosticScore !== null;
+        });
+
+        const groupedByCanonicalBlock = result.components.reduce<Record<string, OverlayComponent[]>>((acc, component) => {
+          const block = canonicalBlock(component.block);
+          (acc[block] ??= []).push(component);
+          return acc;
+        }, {});
+        const productionValidBlockScores = Object.fromEntries(
+          Object.entries(groupedByCanonicalBlock).map(([block, components]) => [block, scoreBlock(components.map((component) => ({ ...component, includedInTotal: Boolean(component.validForProduction) })))]),
+        ) as Record<string, number | null>;
+        const diagnosticBlockScores = Object.fromEntries(
+          Object.entries(groupedByCanonicalBlock).map(([block, components]) => [block, scoreBlock(components.map((component) => ({ ...component, includedInTotal: typeof component.score === "number" && component.weight > 0 })))]),
+        ) as Record<string, number | null>;
+        const blockAggregationInputs = Object.fromEntries(
+          Object.entries(groupedByCanonicalBlock).map(([block, components]) => [
+            block,
+            components.map((component) => ({ signalId: component.id, signalStatus: component.signalStatus, score: component.score })),
+          ]),
+        ) as Record<string, { signalId: string; signalStatus: "ok" | "missing" | "incomplete"; score: number | null }[]>;
+        const blockDiagnostics = Object.fromEntries(
+          Object.entries(groupedByCanonicalBlock).map(([block, components]) => {
+            const validCount = components.filter((component) => component.validForProduction).length;
+            const minRequired = Math.min(1, components.length);
+            const validForProduction = validCount >= minRequired && typeof productionValidBlockScores[block] === "number";
+            const status: "pass" | "partial" | "missing" = validForProduction ? "pass" : (validCount > 0 ? "partial" : "missing");
+            return [
+              block,
+              {
+                minimumRequiredComponents: components.map((component) => component.id),
+                validComponentCount: validCount,
+                validForProduction,
+                diagnosticOnly: !validForProduction && typeof diagnosticBlockScores[block] === "number",
+                diagnosticBlockScore: diagnosticBlockScores[block] ?? null,
+                productionBlockScore: productionValidBlockScores[block] ?? null,
+                includedInTotal: validForProduction,
+                status,
+              },
+            ];
+          }),
+        ) as Record<string, {
+          minimumRequiredComponents: string[];
+          validComponentCount: number;
+          validForProduction: boolean;
+          diagnosticOnly: boolean;
+          diagnosticBlockScore: number | null;
+          productionBlockScore: number | null;
+          includedInTotal: boolean;
+          status: "pass" | "partial" | "missing";
+        }>;
+
+        const includedBlocksInTotal = ["pipeline_cost_stress", "inventory_delivery_friction", "real_goods_flow"];
+        const excludedBlocks = includedBlocksInTotal.filter((block) => productionValidBlockScores[block] === null);
+        const activeProductionBlockCount = includedBlocksInTotal.length - excludedBlocks.length;
+        return {
+          ...result,
+          runtime: {
+            status: activeProductionBlockCount === includedBlocksInTotal.length ? "complete" : (activeProductionBlockCount > 0 ? "partial" : "invalid"),
+            productionValidBlockScores,
+            diagnosticBlockScores,
+            includedBlocks: includedBlocksInTotal,
+            diagnosticOnlyBlocks: Object.entries(blockDiagnostics).filter(([, value]) => value.diagnosticOnly).map(([block]) => block),
+            activeProductionBlockCount,
+            diagnosticOnlyBlockCount: Object.values(blockDiagnostics).filter((value) => value.diagnosticOnly).length,
+            confidenceCapApplied: null,
+            confidenceCapReason: "none",
+            blockDiagnostics,
+            includedBlocksInTotal,
+            excludedBlocks,
+            aggregationWeights: { pipeline_cost_stress: 0.35, inventory_delivery_friction: 0.35, real_goods_flow: 0.30 },
+            scoreFormula: "trade_supply_chain_stress_overlay_score = 0.35*pipeline_cost_stress + 0.35*inventory_delivery_friction + 0.30*real_goods_flow",
+            blockAggregationInputs,
+            implementationDeltaVsSpec: [
+              "pipeline_cost_stress: source-faithful transformed direct input YoY(WPU10).",
+              "inventory_delivery_friction: source-faithful with abs(MNFCTRIRSA - rolling_mean_60m) (0.60) + abs(ISRATIO - rolling_mean_60m) (0.40), each scored as 100 - percentile_10y.",
+              "real_goods_flow: source-faithful with support_score_of(IPMAN) (0.60) + support_score_of(AMTMNO) (0.40).",
+            ],
+          },
+        };
+      }
+      return result;
     })(),
   };
 
@@ -1707,6 +1846,10 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y": ["ea_10y_nominal_yield", "EA_10Y_CORE_YIELD"],
     "FM.M.U2.EUR.4F.BB.U2_10Y.YLD": ["real_yield_10y_ea", "ea_10y_nominal_yield"],
     INDPRO: ["pmi_us"],
+    WPU10: ["WPU10"],
+    MNFCTRIRSA: ["MNFCTRIRSA"],
+    IPMAN: ["IPMAN"],
+    AMTMNO: ["AMTMNO"],
     ACMTP10: ["acmtp10_us", "lu_repricing_us", "acmtp10"],
     DGORDER: ["new_orders_us"],
     POLICY_UNCERTAINTY_US: ["policy_uncertainty_us", "usepuindxm"],
