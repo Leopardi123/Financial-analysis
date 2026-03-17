@@ -625,6 +625,21 @@ function buildEnergyShockRawSeries(sourceSeries: Point[]): { rawSeries: Point[];
   return { rawSeries, yoyPositive, m3Positive };
 }
 
+function appendEnergyComponentDebug(debug: EnergyDebugSections, component: OverlayComponent, metrics: {
+  yoyChange: number | null;
+  threeMonthChange: number | null;
+  componentShockRaw: number | null;
+  rolling10yPercentile: number | null;
+  rolling10y80thThreshold: number | null;
+  active: 0 | 1 | null;
+  reasonIfExcluded?: string;
+}): void {
+  const freshnessPenalty = energyFreshnessPenalty(component.freshnessDays);
+  debug.verificationTrace.push(
+    `${component.id} | exactSource=${component.exactSource} | asOf=${component.debug?.latestDate ?? "null"} | latestMonthlyObservation=${component.rawValue ?? "null"} | yoy_change=${metrics.yoyChange ?? "null"} | three_month_change=${metrics.threeMonthChange ?? "null"} | component_shock_raw=${metrics.componentShockRaw ?? "null"} | rolling_10y_percentile=${metrics.rolling10yPercentile ?? "null"} | rolling_10y_80th_threshold=${metrics.rolling10y80thThreshold ?? "null"} | active=${metrics.active ?? "null"} | freshness_penalty=${freshnessPenalty.toFixed(2)} | production_valid=${component.validForProduction ? "true" : "false"} | reason_if_excluded=${metrics.reasonIfExcluded ?? component.gatingFailureReason ?? ""}`,
+  );
+}
+
 function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, series: SeriesMap): OverlayResult {
   if (region !== "US" && region !== "EA") {
     return finalizeOverlay({
@@ -646,19 +661,48 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
   const brentRaw = buildEnergyShockRawSeries(getSeries(series, "DCOILBRENTEU"));
   const brentPrice = makeEnergyShockComponent({ id: "en_price_brent", title: "Brent crude shock", block: "price", weight: region === "US" ? 0.55 : 0.4, source: "FRED", exactSource: "DCOILBRENTEU", asOfDate, rawSeries: brentRaw.rawSeries, note: "component_shock_raw = 0.65*max(yoy,0) + 0.35*max(3m,0)" });
   components.push(brentPrice);
+  const brentPct = percentileRankLatestInWindow(brentRaw.rawSeries, 24);
+  appendEnergyComponentDebug(debug, brentPrice, {
+    yoyChange: lastNumeric(brentRaw.yoyPositive)?.value ?? null,
+    threeMonthChange: lastNumeric(brentRaw.m3Positive)?.value ?? null,
+    componentShockRaw: lastNumeric(brentRaw.rawSeries)?.value ?? null,
+    rolling10yPercentile: brentPct.percentile,
+    rolling10y80thThreshold: rollingWindowPercentileThreshold(brentRaw.rawSeries, 80, 120, 24).latestThreshold,
+    active: null,
+  });
 
   let gasPrice: OverlayComponent;
   if (region === "US") {
     const usGasRaw = buildEnergyShockRawSeries(getSeries(series, "DHHNGSP"));
     gasPrice = makeEnergyShockComponent({ id: "en_price_henry_hub", title: "Henry Hub natural gas shock", block: "price", weight: 0.45, source: "FRED", exactSource: "DHHNGSP", asOfDate, rawSeries: usGasRaw.rawSeries, note: "component_shock_raw = 0.65*max(yoy,0) + 0.35*max(3m,0)" });
+    const usGasPct = percentileRankLatestInWindow(usGasRaw.rawSeries, 24);
+    appendEnergyComponentDebug(debug, gasPrice, {
+      yoyChange: lastNumeric(usGasRaw.yoyPositive)?.value ?? null,
+      threeMonthChange: lastNumeric(usGasRaw.m3Positive)?.value ?? null,
+      componentShockRaw: lastNumeric(usGasRaw.rawSeries)?.value ?? null,
+      rolling10yPercentile: usGasPct.percentile,
+      rolling10y80thThreshold: rollingWindowPercentileThreshold(usGasRaw.rawSeries, 80, 120, 24).latestThreshold,
+      active: null,
+      reasonIfExcluded: (gasPrice.rawValue === 0 ? "latest monthly component_shock_raw is 0.0000; verify source values/resampling/diff pipeline" : ""),
+    });
     debug.verificationTrace.push("US exact sources wired for price: DCOILBRENTEU + DHHNGSP. DCOILWTICO is not included in v1 production score.");
   } else {
     const eaGasSource = getSeries(series, "PNGASEUUSDM");
     if (eaGasSource.length > 0) {
       const eaGasRaw = buildEnergyShockRawSeries(eaGasSource);
       gasPrice = makeEnergyShockComponent({ id: "en_price_ea_gas", title: "EA gas benchmark shock", block: "price", weight: 0.4, source: "FRED", exactSource: "PNGASEUUSDM", asOfDate, rawSeries: eaGasRaw.rawSeries, note: "component_shock_raw = 0.65*max(yoy,0) + 0.35*max(3m,0)" });
+      const eaGasPct = percentileRankLatestInWindow(eaGasRaw.rawSeries, 24);
+      appendEnergyComponentDebug(debug, gasPrice, {
+        yoyChange: lastNumeric(eaGasRaw.yoyPositive)?.value ?? null,
+        threeMonthChange: lastNumeric(eaGasRaw.m3Positive)?.value ?? null,
+        componentShockRaw: lastNumeric(eaGasRaw.rawSeries)?.value ?? null,
+        rolling10yPercentile: eaGasPct.percentile,
+        rolling10y80thThreshold: rollingWindowPercentileThreshold(eaGasRaw.rawSeries, 80, 120, 24).latestThreshold,
+        active: null,
+      });
     } else {
       gasPrice = makeUnavailableEnergyComponent({ id: "en_price_ea_gas", title: "EA gas benchmark shock", block: "price", weight: 0.4, source: "FRED", exactSource: "PNGASEUUSDM", note: "EA gas source unavailable; no substitute permitted." });
+      appendEnergyComponentDebug(debug, gasPrice, { yoyChange: null, threeMonthChange: null, componentShockRaw: null, rolling10yPercentile: null, rolling10y80thThreshold: null, active: null, reasonIfExcluded: "EA gas source missing" });
     }
     debug.verificationTrace.push("EA exact price sources wired: DCOILBRENTEU + PNGASEUUSDM. No silent Brent/Henry substitution used for EA gas/power.");
   }
@@ -679,6 +723,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
   const brentBreadth = { ...brentPrice, id: "en_breadth_brent", title: "Brent breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(brentPrice.validForProduction && brentBreadthThr.active !== null), productionScore: brentBreadthThr.active, diagnosticScore: brentBreadthThr.active, includedInTotal: false, missing: brentBreadthThr.active === null, signalStatus: (brentBreadthThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${brentBreadthThr.active ?? "n/a"}` };
   breadthInputs.push({ comp: brentBreadth, threshold: brentBreadthThr.latestThreshold, active: brentBreadthThr.active });
   components.push(brentBreadth);
+  appendEnergyComponentDebug(debug, brentBreadth, { yoyChange: lastNumeric(brentRaw.yoyPositive)?.value ?? null, threeMonthChange: lastNumeric(brentRaw.m3Positive)?.value ?? null, componentShockRaw: brentBreadthThr.latestRaw, rolling10yPercentile: percentileRankLatestInWindow(brentRaw.rawSeries, 24).percentile, rolling10y80thThreshold: brentBreadthThr.latestThreshold, active: brentBreadthThr.active });
 
   if (region === "US") {
     const usGasRaw = buildEnergyShockRawSeries(getSeries(series, "DHHNGSP"));
@@ -686,6 +731,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     const gasBreadth = { ...gasPrice, id: "en_breadth_henry_hub", title: "Henry Hub breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(gasPrice.validForProduction && gasThr.active !== null), productionScore: gasThr.active, diagnosticScore: gasThr.active, includedInTotal: false, missing: gasThr.active === null, signalStatus: (gasThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${gasThr.active ?? "n/a"}` };
     breadthInputs.push({ comp: gasBreadth, threshold: gasThr.latestThreshold, active: gasThr.active });
     components.push(gasBreadth);
+    appendEnergyComponentDebug(debug, gasBreadth, { yoyChange: lastNumeric(usGasRaw.yoyPositive)?.value ?? null, threeMonthChange: lastNumeric(usGasRaw.m3Positive)?.value ?? null, componentShockRaw: gasThr.latestRaw, rolling10yPercentile: percentileRankLatestInWindow(usGasRaw.rawSeries, 24).percentile, rolling10y80thThreshold: gasThr.latestThreshold, active: gasThr.active });
     components.push(makeUnavailableEnergyComponent({ id: "en_breadth_us_third", title: "US third breadth component", block: "breadth", weight: 0, source: "Unavailable", exactSource: "unavailable (third breadth source not locked)", note: "Breadth underbuilt: no third source-locked breadth component available." }));
   } else {
     if (gasPrice.signalStatus === "ok") {
@@ -694,6 +740,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       const gasBreadth = { ...gasPrice, id: "en_breadth_ea_gas", title: "EA gas breadth stress activation", block: "breadth" as const, weight: 0, validForProduction: Boolean(gasPrice.validForProduction && gasThr.active !== null), productionScore: gasThr.active, diagnosticScore: gasThr.active, includedInTotal: false, missing: gasThr.active === null, signalStatus: (gasThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${gasThr.active ?? "n/a"}` };
       breadthInputs.push({ comp: gasBreadth, threshold: gasThr.latestThreshold, active: gasThr.active });
       components.push(gasBreadth);
+      appendEnergyComponentDebug(debug, gasBreadth, { yoyChange: lastNumeric(eaGasRaw.yoyPositive)?.value ?? null, threeMonthChange: lastNumeric(eaGasRaw.m3Positive)?.value ?? null, componentShockRaw: gasThr.latestRaw, rolling10yPercentile: percentileRankLatestInWindow(eaGasRaw.rawSeries, 24).percentile, rolling10y80thThreshold: gasThr.latestThreshold, active: gasThr.active });
     }
     const hicpEnergyRaw = buildEnergyShockRawSeries(getSeries(series, "HICP.M.U2.N.NRGY00.4D0.ANR"));
     const hicpComp = makeEnergyShockComponent({ id: "en_breadth_hicp_energy", title: "HICP energy breadth stress activation", block: "breadth", weight: 0, source: "ECB", exactSource: "HICP.M.U2.N.NRGY00.4D0.ANR", asOfDate, rawSeries: hicpEnergyRaw.rawSeries });
@@ -701,6 +748,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     const hicpBreadth = { ...hicpComp, validForProduction: Boolean(hicpComp.validForProduction && hicpThr.active !== null), productionScore: hicpThr.active, diagnosticScore: hicpThr.active, includedInTotal: false, missing: hicpThr.active === null, signalStatus: (hicpThr.active === null ? "incomplete" : "ok") as "incomplete" | "ok", note: `component_shock_raw > rolling_10y_80th_percentile => active=${hicpThr.active ?? "n/a"}` };
     breadthInputs.push({ comp: hicpBreadth, threshold: hicpThr.latestThreshold, active: hicpThr.active });
     components.push(hicpBreadth);
+    appendEnergyComponentDebug(debug, hicpBreadth, { yoyChange: lastNumeric(hicpEnergyRaw.yoyPositive)?.value ?? null, threeMonthChange: lastNumeric(hicpEnergyRaw.m3Positive)?.value ?? null, componentShockRaw: hicpThr.latestRaw, rolling10yPercentile: percentileRankLatestInWindow(hicpEnergyRaw.rawSeries, 24).percentile, rolling10y80thThreshold: hicpThr.latestThreshold, active: hicpThr.active });
     components.push(makeUnavailableEnergyComponent({ id: "en_breadth_ea_power", title: "EA power breadth stress activation", block: "breadth", weight: 0, source: "Unavailable", exactSource: "unavailable (EA power exact source not locked)", note: "EA power unavailable; no substitution used." }));
   }
 
@@ -762,9 +810,8 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
     const hicpExYoy = canonicalMonthlyGrid(getSeries(series, "HICP.M.U2.N.XEF000.4D0.ANR"));
     const stsYoy = yoy(getSeries(series, "STS.M.I9.Y.PROD.NS0020.4.000"));
     const ea10yPrimary = getSeries(series, "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y");
-    const ea10yAlt = getSeries(series, "FM.M.U2.EUR.4F.BB.U2_10Y.YLD");
-    const rateSeries = ea10yPrimary.length > 0 ? ea10yPrimary : ea10yAlt;
-    const rateExactSource = ea10yPrimary.length > 0 ? "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y" : (ea10yAlt.length > 0 ? "FM.M.U2.EUR.4F.BB.U2_10Y.YLD" : "unavailable");
+    const rateSeries = ea10yPrimary;
+    const rateExactSource = ea10yPrimary.length > 0 ? "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y" : "unavailable";
 
     const energyVsCore = subtractAlignedSeries(hicpEnergyYoy, hicpExYoy);
     const infRawSeries = canonicalMonthlyGrid(energyVsCore).map((p) => ({ date: p.date, value: p.value === null ? null : clamp01(Math.max(p.value, 0) / 10) }));
@@ -779,7 +826,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       rateComponents.push(makeEnergyShockComponent({ id: "en_spill_rate_ea", title: "EA nominal 10Y rate spillover", block: "spillover", weight: 0.15, source: "ECB", exactSource: rateExactSource, asOfDate, rawSeries: rtRawSeries.map((p) => ({ date: p.date, value: p.value === null || priceShockIntensity === null ? null : p.value * priceShockIntensity })), note: "rate_spillover_raw = price_shock_intensity * energy_to_rate_pressure" }));
     }
     debug.computationWalkthrough.push(`EA spillover conditioned by price_shock_intensity=${priceShockIntensity ?? "null"}; rate source selected=${rateExactSource}.`);
-    if (gasPrice.signalStatus !== "ok") debug.implementationDeltaVsSpec.push("EA gas unavailable; breadth relies on Brent + HICP Energy only.");
+    if (gasPrice.signalStatus !== "ok") debug.implementationDeltaVsSpec.push("EA gas and/or EA power unavailable; breadth relies on source-locked partial local energy set");
   }
 
   components.push(...inflationComponents, ...growthComponents, ...rateComponents);
@@ -810,6 +857,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
   const priceValidForProduction = region === "US"
     ? isValid("en_price_brent") && isValid("en_price_henry_hub")
     : isValid("en_price_brent") && isValid("en_price_ea_gas");
+  const eaPriceStructurallyPartial = region === "EA" && !isValid("en_price_ea_power");
 
   if (breadthComponent) {
     const breadthValid = region === "US"
@@ -859,7 +907,7 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
       diagnosticBlockScore: priceDiagnosticScore,
       productionBlockScore: priceShockScoreProduction,
       includedInTotal: priceShockScoreProduction !== null,
-      status: (priceShockScoreProduction !== null ? "pass" : (priceDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
+      status: ((priceShockScoreProduction !== null && !eaPriceStructurallyPartial) ? "pass" : (priceDiagnosticScore !== null ? "partial" : "missing")) as "pass" | "partial" | "missing",
     },
     breadth: {
       minimumRequiredComponents: region === "US" ? ["en_breadth_brent", "en_breadth_henry_hub", "en_breadth_us_third"] : ["en_breadth_brent", "en_breadth_hicp_energy"],
@@ -910,14 +958,17 @@ function buildEnergyShockOverlay(region: "US" | "EA" | "SE", asOfDate: string, s
   let confidenceRaw = confWeight > 0 ? Math.round(100 * includedProductionComponents.reduce((a, c) => a + (energyFreshnessPenalty(c.freshnessDays) * (c.weight / confWeight)), 0)) : 0;
   let confidenceCap = 100;
   let confidenceCapReason = "none";
-  const runtimeStatus: "complete" | "partial" | "weak" | "invalid" = activeProductionBlockCount >= 3 ? "complete" : (activeProductionBlockCount === 2 ? "partial" : (activeProductionBlockCount === 1 ? "weak" : "invalid"));
-  const specFidelity = activeProductionBlockCount >= 3 ? "high" : (activeProductionBlockCount === 2 ? "medium" : (activeProductionBlockCount === 1 ? "low" : "low"));
-  const robustness = activeProductionBlockCount >= 3 ? "high" : (activeProductionBlockCount === 2 ? "medium" : "low");
+  const runtimeStatus: "complete" | "partial" | "weak" | "invalid" = (activeProductionBlockCount >= 3 && !eaPriceStructurallyPartial)
+    ? "complete"
+    : (activeProductionBlockCount >= 2 ? "partial" : (activeProductionBlockCount === 1 ? "weak" : "invalid"));
+  const specFidelity = (activeProductionBlockCount >= 3 && !eaPriceStructurallyPartial) ? "high" : (activeProductionBlockCount >= 2 ? "medium" : "low");
+  const robustness = (activeProductionBlockCount >= 3 && !eaPriceStructurallyPartial) ? "high" : (activeProductionBlockCount >= 2 ? "medium" : "low");
   if (runtimeStatus === "partial") { confidenceCap = Math.min(confidenceCap, 70); confidenceCapReason = "runtimeCompleteness=partial"; }
   if (runtimeStatus === "weak") { confidenceCap = Math.min(confidenceCap, 40); confidenceCapReason = "runtimeCompleteness=weak"; }
   if (runtimeStatus === "invalid") { confidenceCap = Math.min(confidenceCap, 0); confidenceCapReason = "runtimeCompleteness=invalid"; }
   if (specFidelity === "medium") { confidenceCap = Math.min(confidenceCap, 70); confidenceCapReason = confidenceCapReason === "none" ? "spec fidelity medium" : confidenceCapReason; }
   if (specFidelity === "low") { confidenceCap = Math.min(confidenceCap, 50); confidenceCapReason = confidenceCapReason === "none" ? "spec fidelity low" : confidenceCapReason; }
+  if (eaPriceStructurallyPartial) { confidenceCap = Math.min(confidenceCap, 70); confidenceCapReason = "EA power not source-locked"; }
   if (activeProductionBlockCount < 2) { confidenceCap = Math.min(confidenceCap, 20); confidenceCapReason = "fewer than 2 production-valid blocks"; }
   if (includedBlocks.some((b) => !blockDiagnostics[b.name as keyof typeof blockDiagnostics].validForProduction)) { confidenceCap = Math.min(confidenceCap, 25); confidenceCapReason = "included block not production-valid"; }
   if (productionScore === null && diagnosticScore !== null) { confidenceCap = 0; confidenceCapReason = "overlay computed from diagnostic-only blocks"; }
@@ -1296,10 +1347,7 @@ export function buildSeriesMap(rows: Array<{ series_key: string; date: string; v
     BAMLH0A0HYM2: ["hy_spread_us"],
     NFCI: ["financial_conditions_index"],
     DGS10: ["nominal_yield_10y_us"],
-    DCOILBRENTEU: ["oil_brent_usd"],
-    DHHNGSP: ["natgas_usd"],
     DCOILWTICO: ["oil_wti_usd"],
-    PNGASEUUSDM: ["pngaseuusdm", "ea_gas_fred"],
     "HICP.M.U2.N.NRGY00.4D0.ANR": ["hicp_energy_yoy_ea", "hicp_yoy_ea"],
     "HICP.M.U2.N.000000.4D0.ANR": ["hicp_yoy_ea", "hicp_ea"],
     "STS.M.I9.Y.PROD.NS0020.4.000": ["industrial_production_ea", "EA_INDUSTRIAL_PRODUCTION"],
