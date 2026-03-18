@@ -94,6 +94,29 @@ function buildFredUrl(params: Record<string, string>): string {
   return url.toString();
 }
 
+
+function formatDateOnlyUtc(date: Date): string {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    throw new Error("Invalid Date supplied for FRED observation window");
+  }
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function toSafeFredRequestTarget(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has("api_key")) {
+      parsed.searchParams.set("api_key", "***");
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export async function fetchFredSeriesWithDebug(params: {
   fredSeriesId: string;
   mode: "backfill" | "latest";
@@ -109,21 +132,40 @@ export async function fetchFredSeriesWithDebug(params: {
     start.setMonth(end.getMonth() - (params.latestLookbackMonths ?? 2));
   }
 
+  const observationStart = formatDateOnlyUtc(start);
+  const observationEnd = formatDateOnlyUtc(end);
   const url = buildFredUrl({
     api_key: apiKey,
     file_type: "json",
     series_id: params.fredSeriesId,
-    observation_start: start.toISOString().slice(0, 10),
-    observation_end: end.toISOString().slice(0, 10),
+    observation_start: observationStart,
+    observation_end: observationEnd,
     sort_order: "asc",
   });
+  const safeRequestTarget = toSafeFredRequestTarget(url);
+  const fredDebugEnabled = process.env.MACRO_INGEST_DEBUG === "1" || process.env.MACRO_INGEST_DEBUG === "true";
+  if (fredDebugEnabled) {
+    console.info("[macro-ingest:fred-request]", {
+      seriesId: params.fredSeriesId,
+      mode: params.mode,
+      requestTarget: safeRequestTarget,
+      observationStart,
+      observationEnd,
+      fredApiKeyPresent: Boolean(String(process.env.FRED_API_KEY ?? "").trim()),
+    });
+  }
 
-  const response = await fetch(url, {
-    headers: { Accept: "application/json" },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { Accept: "application/json" },
+    });
+  } catch (error) {
+    throw new Error(`FRED request failed (${params.fredSeriesId}): fetch_error=${error instanceof Error ? error.message : String(error)} request=${safeRequestTarget} observation_start=${observationStart} observation_end=${observationEnd}`);
+  }
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`FRED request failed (${params.fredSeriesId}): ${response.status} ${body.slice(0, 400)}`);
+    throw new Error(`FRED request failed (${params.fredSeriesId}): ${response.status} ${body.slice(0, 400)} request=${safeRequestTarget} observation_start=${observationStart} observation_end=${observationEnd}`);
   }
 
   const payload = (await response.json()) as FredObservationsResponse;
@@ -149,7 +191,7 @@ export async function fetchFredSeriesWithDebug(params: {
 
   const debug: FredFetchDebug = {
     requestedProviderSeriesId: params.fredSeriesId,
-    requestTarget: url,
+    requestTarget: safeRequestTarget,
     httpStatus: response.status,
     providerResponseShapeSummary: Array.isArray((payload as any).observations) ? "observations[]" : typeof payload,
     observationsBeforeFiltering: observations.length,
