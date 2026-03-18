@@ -90,6 +90,55 @@ type GlobalMacroPayload = {
     snapshotAsOfDate?: string;
     readMode?: string;
   };
+
+  macroExplanation?: {
+    summary: {
+      macroScore: number | null;
+      regimeLabel: string;
+      confidence: number;
+      runtimeCompleteness: number;
+      structuralQualityLabel: "robust" | "usable_with_caveats" | "fragile";
+      shortNarrative: string;
+    };
+    blockBreakdown: Array<{
+      blockId: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY";
+      blockScore: number | null;
+      direction: "up" | "down" | "neutral";
+      confidence: number;
+      status: "pass" | "partial" | "missing" | "proxy-heavy" | "structurally-incomplete";
+      topPositiveDrivers: Array<{ id: string; title: string; contributionHint: number; direction: string }>;
+      topNegativeDrivers: Array<{ id: string; title: string; contributionHint: number; direction: string }>;
+      missingComponents: string[];
+      proxyComponents: string[];
+      fallbackComponents: string[];
+      narrative: string;
+    }>;
+    overlayBreakdown: Array<{
+      overlayId: string;
+      score: number | null;
+      label: string;
+      confidence: number;
+      runtimeCompleteness: number;
+      specFidelity: "high" | "medium" | "low";
+      robustness: "high" | "medium" | "low";
+      proxyDependence: "low" | "medium" | "high";
+      includedBlocks: string[];
+      excludedBlocks: string[];
+      missingComponents: string[];
+      narrative: string;
+    }>;
+    topDrivers: Array<{ id: string; title: string; type: string; blockId?: string; overlayId?: string; direction: string; contributionHint: number; source?: string; exactSource?: string; note?: string }>;
+    structuralQuality: {
+      activeCoreBlocks: number;
+      partialCoreBlocks: number;
+      activeOverlays: number;
+      partialOverlays: number;
+      proxyHeavyOverlays: number;
+      missingCriticalInputs: string[];
+      notes: string[];
+    };
+    narrative: { short: string; medium: string; long: string };
+  };
   debug?: {
     snapshotStatus: {
       readMode: string;
@@ -1411,6 +1460,89 @@ Signal: ${gapLabel}`,
               {isPartialData && (
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
               )}
+
+              {globalMacro.macroExplanation && (() => {
+                const qualityLabelMap: Record<string, string> = {
+                  robust: "Robust",
+                  usable_with_caveats: "Användbar med förbehåll",
+                  fragile: "Skör",
+                };
+                const blockStatusMap: Record<string, string> = {
+                  pass: "Pass",
+                  partial: "Partial",
+                  missing: "Missing",
+                  "proxy-heavy": "Proxy-heavy",
+                  "structurally-incomplete": "Strukturellt ofullständig",
+                };
+                return (
+                  <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                    <h4 style={{ marginTop: 0 }}>Driver breakdown / Förklaringslager</h4>
+                    <div style={{ fontSize: 13, marginBottom: 8 }}>
+                      <strong>As-of:</strong> {globalMacro.regime?.asOfDate ?? "—"} ·
+                      <strong> Region:</strong> {selectedRegion} ·
+                      <strong> Macro score:</strong> {typeof globalMacro.macroExplanation.summary.macroScore === "number" ? globalMacro.macroExplanation.summary.macroScore.toFixed(1) : "—"} ·
+                      <strong> Regim:</strong> {globalMacro.macroExplanation.summary.regimeLabel} ·
+                      <strong> Confidence:</strong> {globalMacro.macroExplanation.summary.confidence}% ·
+                      <strong> Strukturell kvalitet:</strong> {qualityLabelMap[globalMacro.macroExplanation.summary.structuralQualityLabel] ?? globalMacro.macroExplanation.summary.structuralQualityLabel}
+                    </div>
+                    <p className="bread" style={{ marginTop: 0, marginBottom: 6 }}>{globalMacro.macroExplanation.narrative.short}</p>
+                    <p className="bread" style={{ marginTop: 0 }}>{globalMacro.macroExplanation.narrative.medium}</p>
+
+                    <details style={{ marginBottom: 10 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>Varför denna regim?</summary>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginTop: 8 }}>
+                        {globalMacro.macroExplanation.blockBreakdown.map((block) => (
+                          <div id={`explain-block-${block.blockId}`} key={`exp-block-${block.blockId}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                            <div style={{ fontWeight: 700 }}>{block.blockId}</div>
+                            <div>score: {typeof block.blockScore === "number" ? block.blockScore.toFixed(1) : "—"} · riktning: {block.direction}</div>
+                            <div>status: {blockStatusMap[block.status] ?? block.status} · confidence {block.confidence}%</div>
+                            <div style={{ fontSize: 12, marginTop: 4 }}>+ drivare: {block.topPositiveDrivers.map((d) => d.title).join(", ") || "—"}</div>
+                            <div style={{ fontSize: 12 }}>− drivare: {block.topNegativeDrivers.map((d) => d.title).join(", ") || "—"}</div>
+                            <div style={{ fontSize: 12 }}>missing/proxy/fallback: {block.missingComponents.length}/{block.proxyComponents.length}/{block.fallbackComponents.length}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+
+                    <details style={{ marginBottom: 10 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>Overlay-förklaring</summary>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginTop: 8 }}>
+                        {globalMacro.macroExplanation.overlayBreakdown.map((overlay) => (
+                          <div id={`explain-overlay-${overlay.overlayId}`} key={`exp-overlay-${overlay.overlayId}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                            <div style={{ fontWeight: 700 }}>{overlay.overlayId}</div>
+                            <div>score: {typeof overlay.score === "number" ? overlay.score.toFixed(1) : "—"} · {overlay.label}</div>
+                            <div>confidence: {overlay.confidence}% · runtime completeness: {overlay.runtimeCompleteness}%</div>
+                            <div>fidelity/robustness/proxy: {overlay.specFidelity}/{overlay.robustness}/{overlay.proxyDependence}</div>
+                            <div style={{ fontSize: 12 }}>included: {overlay.includedBlocks.join(", ") || "—"}</div>
+                            <div style={{ fontSize: 12 }}>excluded/missing: {overlay.excludedBlocks.join(", ") || "—"} / {overlay.missingComponents.join(", ") || "—"}</div>
+                            <div style={{ fontSize: 12, marginTop: 4 }}>{overlay.narrative}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+
+                    <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
+                      <strong>Top drivers (klickbara)</strong>
+                      <ol style={{ marginTop: 6 }}>
+                        {globalMacro.macroExplanation.topDrivers.slice(0, 8).map((driver) => {
+                          const href = driver.blockId ? `#explain-block-${driver.blockId}` : (driver.overlayId ? `#explain-overlay-${driver.overlayId}` : undefined);
+                          return (
+                            <li key={`exp-driver-${driver.id}`}>
+                              {href ? <a href={href}>{driver.title}</a> : driver.title}
+                              {` · ${driver.type} · dir ${driver.direction} · contrib ${driver.contributionHint.toFixed(2)}`}
+                              {driver.blockId ? ` · block ${driver.blockId}` : ""}
+                              {driver.overlayId ? ` · overlay ${driver.overlayId}` : ""}
+                            </li>
+                          );
+                        })}
+                      </ol>
+                      <div style={{ fontSize: 12, opacity: 0.85 }}>
+                        Model health: core full/partial {globalMacro.macroExplanation.structuralQuality.activeCoreBlocks}/{globalMacro.macroExplanation.structuralQuality.partialCoreBlocks}, overlays full/partial {globalMacro.macroExplanation.structuralQuality.activeOverlays}/{globalMacro.macroExplanation.structuralQuality.partialOverlays}, proxy-heavy overlays {globalMacro.macroExplanation.structuralQuality.proxyHeavyOverlays}.
+                      </div>
+                    </div>
+                  </section>
+                );
+              })()}
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
                 <h4 style={{ marginTop: 0 }}>New Overlay Engine</h4>
