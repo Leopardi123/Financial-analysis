@@ -616,6 +616,13 @@ export default function MacroRegimeValidationLab() {
               <details style={{ marginTop: 6 }}>
                 <summary style={{ cursor: "pointer" }}>Visa block/overlay breakdown</summary>
                 <div style={{ fontSize: 12, marginTop: 6 }}>
+                  {labExplanation.overlayInterpretation && (
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Dominant overlay pattern:</strong> {labExplanation.overlayInterpretation.dominantPattern}<br />
+                      <strong>Overlay narrative:</strong> {labExplanation.overlayInterpretation.narrative}<br />
+                      <strong>Regime interaction:</strong> confirm {labExplanation.overlayInterpretation.regimeProbabilityImpact.confirming.join(", ") || "—"}, modulate {labExplanation.overlayInterpretation.regimeProbabilityImpact.modulating.join(", ") || "—"}, contradict {labExplanation.overlayInterpretation.regimeProbabilityImpact.contradicting.join(", ") || "—"}.
+                    </div>
+                  )}
                   <strong>Core blocks</strong>
                   <ul>
                     {labBlocks.map((block) => (

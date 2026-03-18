@@ -127,6 +127,27 @@ type GlobalMacroPayload = {
       missingComponents: string[];
       narrative: string;
     }>;
+    overlayInterpretation?: {
+      dominantPattern: string;
+      secondaryPatterns: string[];
+      narrative: string;
+      overlayStates: Array<{
+        overlayId: string;
+        semanticType: string;
+        score: number | null;
+        label: string;
+        qualitativeState: string;
+        role: "confirming" | "modulating" | "contradicting" | "neutral";
+      }>;
+      regimeProbabilityImpact: {
+        confirming: string[];
+        modulating: string[];
+        contradicting: string[];
+        adjustments: Array<{ regime: string; adjustmentBp: number; reason: string }>;
+        note: string;
+      };
+      trace: string[];
+    };
     topDrivers: Array<{ id: string; title: string; type: string; blockId?: string; overlayId?: string; direction: string; contributionHint: number; source?: string; exactSource?: string; note?: string }>;
     structuralQuality: {
       activeCoreBlocks: number;
@@ -513,6 +534,11 @@ export default function GlobalMacroDashboard() {
   const explanationOverlays = Array.isArray(explanationAny?.overlayBreakdown) ? explanationAny.overlayBreakdown : [];
   const explanationTopDrivers = Array.isArray(explanationAny?.topDrivers) ? explanationAny.topDrivers : [];
   const explanationStructural = explanationAny && typeof explanationAny.structuralQuality === "object" ? explanationAny.structuralQuality : null;
+  const overlayInterpretationAny = explanationAny && typeof explanationAny.overlayInterpretation === "object" ? explanationAny.overlayInterpretation : null;
+  const overlayStates = Array.isArray(overlayInterpretationAny?.overlayStates) ? overlayInterpretationAny.overlayStates : [];
+  const overlayProbabilityImpact = overlayInterpretationAny && typeof overlayInterpretationAny.regimeProbabilityImpact === "object"
+    ? overlayInterpretationAny.regimeProbabilityImpact
+    : null;
 
   const safeNumber = (value: unknown, digits = 1) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
   const safePct = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? `${value}%` : "—";
@@ -1556,6 +1582,15 @@ Signal: ${gapLabel}`,
                     </div>
                     <p className="bread" style={{ marginTop: 0, marginBottom: 6 }}>{String(explanationNarrative?.short ?? "") }</p>
                     <p className="bread" style={{ marginTop: 0 }}>{String(explanationNarrative?.medium ?? "") }</p>
+                    {overlayInterpretationAny && (
+                      <div style={{ marginTop: 6, marginBottom: 10, padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
+                        <strong>Overlay interpretation:</strong> {String(overlayInterpretationAny?.narrative ?? "Overlay picture is mixed")}
+                        <div style={{ fontSize: 12, marginTop: 4 }}>
+                          pattern: {String(overlayInterpretationAny?.dominantPattern ?? "mixed_overlay_picture")}
+                          {Array.isArray(overlayInterpretationAny?.secondaryPatterns) && overlayInterpretationAny.secondaryPatterns.length > 0 ? ` · secondary: ${overlayInterpretationAny.secondaryPatterns.join(", ")}` : ""}
+                        </div>
+                      </div>
+                    )}
 
                     <details style={{ marginBottom: 10 }}>
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>Varför denna regim?</summary>
@@ -1575,6 +1610,12 @@ Signal: ${gapLabel}`,
 
                     <details style={{ marginBottom: 10 }}>
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>Overlay-förklaring</summary>
+                      {overlayStates.length > 0 && (
+                        <div style={{ fontSize: 12, margin: "8px 0" }}>
+                          {overlayStates.map((state: any) => `${state.overlayId}: ${state.qualitativeState} (${state.role})`).join(" | ")}
+                          {overlayProbabilityImpact?.note ? ` · ${overlayProbabilityImpact.note}` : ""}
+                        </div>
+                      )}
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginTop: 8 }}>
                         {explanationOverlays.map((overlay: any) => (
                           <div id={`explain-overlay-${overlay.overlayId}`} key={`exp-overlay-${overlay.overlayId}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
