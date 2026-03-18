@@ -139,6 +139,31 @@ type GlobalMacroPayload = {
     };
     narrative: { short: string; medium: string; long: string };
   };
+  macroRegimeProbability?: {
+    primaryRegime: "MonetaryDominance" | "Balanced" | "FiscalPressureBuilding" | "FiscalDominanceRisk";
+    primaryWeight: number;
+    decisiveness: number;
+    transitionLike: boolean;
+    distribution: Array<{
+      regimeId: "MonetaryDominance" | "Balanced" | "FiscalPressureBuilding" | "FiscalDominanceRisk";
+      weight: number;
+      rank: number;
+      supportingBlocks: string[];
+      supportingOverlays: string[];
+      contradictingOverlays: string[];
+      modulatingOverlays: string[];
+      opposingFactors: string[];
+      narrative: string;
+    }>;
+    structuralAdjustment: {
+      baseConfidence: number;
+      adjustedConfidence: number;
+      flatteningFactor: number;
+      notes: string[];
+    };
+    narrative: { short: string; medium: string; long: string };
+  };
+
   debug?: {
     snapshotStatus: {
       readMode: string;
@@ -1459,6 +1484,25 @@ Signal: ${gapLabel}`,
             <>
               {isPartialData && (
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
+              )}
+
+              {globalMacro.macroRegimeProbability && (
+                <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                  <h4 style={{ marginTop: 0 }}>Regime Probability (heuristic)</h4>
+                  <div style={{ fontSize: 13, marginBottom: 8 }}>
+                    <strong>Primary:</strong> {globalMacro.macroRegimeProbability.primaryRegime} ({(globalMacro.macroRegimeProbability.primaryWeight * 100).toFixed(1)}%) ·
+                    <strong> Decisiveness:</strong> {(globalMacro.macroRegimeProbability.decisiveness * 100).toFixed(1)}% ·
+                    <strong> Transition-like:</strong> {globalMacro.macroRegimeProbability.transitionLike ? "Yes" : "No"}
+                  </div>
+                  <ol style={{ marginTop: 6 }}>
+                    {globalMacro.macroRegimeProbability.distribution.slice(0, 3).map((row) => (
+                      <li key={`prob-${row.regimeId}`}>
+                        {row.regimeId}: {(row.weight * 100).toFixed(1)}% · overlays +[{row.supportingOverlays.join(", ") || "—"}] / −[{row.contradictingOverlays.join(", ") || "—"}]
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="bread" style={{ marginTop: 6 }}>{globalMacro.macroRegimeProbability.narrative.short}</p>
+                </section>
               )}
 
               {globalMacro.macroExplanation && (

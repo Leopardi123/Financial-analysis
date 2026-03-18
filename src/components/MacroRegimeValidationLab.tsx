@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MACRO_LAB_EVENT_ZONES, MacroEventZone, MacroLabRegion } from "../data/macroLabEventZones";
 import { buildMacroCompareExplanation, type MacroExplanation } from "../lib/macro/explanationLayer";
+import { buildMacroRegimeProbability, buildMacroRegimeProbabilityCompare, type MacroRegimeProbability } from "../lib/macro/regimeProbability";
 
 type BlockKey = "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY";
 type OverlayKey = "growth" | "stress" | "hardAsset";
@@ -32,7 +33,7 @@ type InflationPoint = {
   consumerInflation?: number | null;
 };
 
-type MacroLabPayload = { macroHistory?: { points?: MacroHistoryPoint[] }; inflationAnalysis?: { points?: InflationPoint[] }; globalMacro?: { macroExplanation?: MacroExplanation } };
+type MacroLabPayload = { macroHistory?: { points?: MacroHistoryPoint[] }; inflationAnalysis?: { points?: InflationPoint[] }; globalMacro?: { macroExplanation?: MacroExplanation; macroRegimeProbability?: MacroRegimeProbability; regime?: { macroScoreTotal?: number | null; coreRegimeLabel?: string; asOfDate?: string } } };
 
 type SubComponentControl = { weight: number; off: boolean; baselineWeight: number };
 
@@ -441,6 +442,24 @@ export default function MacroRegimeValidationLab() {
     return buildMacroCompareExplanation({ baselineScore: baseline, modifiedScore: modified, blockDeltas, overlayDeltas, largestComponentDelta });
   }, [selectedPointIdx, baselineMacro, modifiedMacro, filtered, config, blockSubMultipliers]);
 
+  const regimeProbabilityCompare = useMemo(() => {
+    const baseProb = payload?.globalMacro?.macroRegimeProbability;
+    if (!baseProb || selectedPointIdx < 0) return null;
+    const asOfDate = filtered[selectedPointIdx]?.asOfDate ?? payload?.globalMacro?.regime?.asOfDate ?? "n/a";
+    const modifiedScore = modifiedMacro[selectedPointIdx] ?? (payload?.globalMacro?.regime?.macroScoreTotal ?? 50);
+    const modified = buildMacroRegimeProbability({
+      region,
+      asOfDate,
+      macroScore: modifiedScore,
+      macroRegimeLabel: String(payload?.globalMacro?.regime?.coreRegimeLabel ?? baseProb.primaryRegime),
+      macroExplanation: payload?.globalMacro?.macroExplanation ?? null,
+    });
+    return {
+      modified,
+      compare: buildMacroRegimeProbabilityCompare({ baseline: baseProb, modified }),
+    };
+  }, [payload, selectedPointIdx, filtered, modifiedMacro, region]);
+
   const replay = useMemo(() => {
     const scenarios = ["global-gfc", "ea-euro-crisis", "global-covid-shock", "global-inflation-spike"];
     return scenarios.map((id) => {
@@ -615,6 +634,25 @@ export default function MacroRegimeValidationLab() {
             <div className="macro-lab-note" style={{ marginBottom: 8 }}>
               <strong>Compare delta explanation:</strong><br />
               {compareExplanation.narrative} (Δ {compareExplanation.delta.toFixed(2)}, block leader {compareExplanation.blockDeltaLeader}, overlay leader {compareExplanation.overlayDeltaLeader}, component {compareExplanation.largestComponentDelta}).
+            </div>
+          )}
+          {payload?.globalMacro?.macroRegimeProbability && (
+            <div className="macro-lab-note" style={{ marginBottom: 8 }}>
+              <strong>Regime probability distribution (baseline):</strong>
+              <ol style={{ marginTop: 4 }}>
+                {payload.globalMacro.macroRegimeProbability.distribution.map((row) => (
+                  <li key={`base-prob-${row.regimeId}`}>
+                    {row.regimeId}: {(row.weight * 100).toFixed(1)}% · support overlays [{row.supportingOverlays.join(", ") || "—"}] · contradict [{row.contradictingOverlays.join(", ") || "—"}] · modulating [{row.modulatingOverlays.join(", ") || "—"}]
+                  </li>
+                ))}
+              </ol>
+              <div style={{ fontSize: 12 }}>{payload.globalMacro.macroRegimeProbability.narrative.medium}</div>
+            </div>
+          )}
+          {regimeProbabilityCompare && (
+            <div className="macro-lab-note" style={{ marginBottom: 8 }}>
+              <strong>Compare mode regime-probability:</strong><br />
+              {regimeProbabilityCompare.compare.narrative}
             </div>
           )}
           <ul>

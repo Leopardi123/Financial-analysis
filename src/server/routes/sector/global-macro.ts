@@ -8,6 +8,7 @@ import { readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../li
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
 import { buildMacroExplanation } from "../../../lib/macro/explanationLayer.js";
+import { buildMacroRegimeProbability } from "../../../lib/macro/regimeProbability.js";
 
 const REGIONAL_OVERLAY_KEYS = [
   "liquidityOverlay",
@@ -1458,6 +1459,14 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
     },
   });
 
+  const macroRegimeProbability = buildMacroRegimeProbability({
+    region,
+    asOfDate: regimeRow.as_of_date,
+    macroScore: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
+    macroRegimeLabel: regimeRow.core_regime_label,
+    macroExplanation,
+  });
+
   return {
     regime: {
       asOfDate: regimeRow.as_of_date,
@@ -1597,6 +1606,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       rootCauseHints,
     },
     macroExplanation,
+    macroRegimeProbability,
   };
 }
 
@@ -1644,6 +1654,14 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
     },
     indicators,
     overlayBundle: globalOverlayBundle,
+  });
+
+  const macroRegimeProbability = buildMacroRegimeProbability({
+    region: "GLOBAL",
+    asOfDate,
+    macroScore: regime.macroScoreTotal,
+    macroRegimeLabel: regime.coreRegimeLabel,
+    macroExplanation,
   });
 
   return {
@@ -1714,6 +1732,7 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
     },
     macroExplanation,
+    macroRegimeProbability,
   };
 }
 
@@ -1721,7 +1740,7 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
 
 function hydrateMacroExplanationFromSnapshot(snapshot: any, regionFallback: string) {
   if (!snapshot || typeof snapshot !== "object") return snapshot;
-  if (snapshot.macroExplanation && typeof snapshot.macroExplanation === "object") return snapshot;
+  if (snapshot.macroExplanation && typeof snapshot.macroExplanation === "object" && snapshot.macroRegimeProbability && typeof snapshot.macroRegimeProbability === "object") return snapshot;
   const regime = snapshot.regime;
   if (!regime || typeof regime !== "object") return snapshot;
   const asOfDate = typeof regime.asOfDate === "string" ? regime.asOfDate : null;
@@ -1743,22 +1762,33 @@ function hydrateMacroExplanationFromSnapshot(snapshot: any, regionFallback: stri
     }))
     : [];
 
-  const built = buildMacroExplanation({
+  const built = (snapshot.macroExplanation && typeof snapshot.macroExplanation === "object")
+    ? snapshot.macroExplanation
+    : buildMacroExplanation({
+      region: typeof snapshot.region === "string" ? snapshot.region : regionFallback,
+      asOfDate,
+      regime: {
+        macroScoreTotal: typeof regime.macroScoreTotal === "number" ? regime.macroScoreTotal : null,
+        coreRegimeLabel,
+        macroConfidence: typeof regime.macroConfidence === "number" ? regime.macroConfidence : 0,
+        blockScores: blockScores as any,
+        topDrivers: safeDrivers,
+      },
+      indicators: Array.isArray(snapshot.indicators) ? snapshot.indicators : [],
+      overlayBundle: snapshot.overlayBundle ?? snapshot.overlays,
+      debug: snapshot.debug,
+    });
+  const probability = (snapshot.macroRegimeProbability && typeof snapshot.macroRegimeProbability === "object")
+    ? snapshot.macroRegimeProbability
+    : buildMacroRegimeProbability({
     region: typeof snapshot.region === "string" ? snapshot.region : regionFallback,
     asOfDate,
-    regime: {
-      macroScoreTotal: typeof regime.macroScoreTotal === "number" ? regime.macroScoreTotal : null,
-      coreRegimeLabel,
-      macroConfidence: typeof regime.macroConfidence === "number" ? regime.macroConfidence : 0,
-      blockScores: blockScores as any,
-      topDrivers: safeDrivers,
-    },
-    indicators: Array.isArray(snapshot.indicators) ? snapshot.indicators : [],
-    overlayBundle: snapshot.overlayBundle ?? snapshot.overlays,
-    debug: snapshot.debug,
+    macroScore: typeof regime.macroScoreTotal === "number" ? regime.macroScoreTotal : null,
+    macroRegimeLabel: coreRegimeLabel,
+    macroExplanation: built,
   });
 
-  return { ...snapshot, macroExplanation: built };
+  return { ...snapshot, macroExplanation: built, macroRegimeProbability: probability };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
