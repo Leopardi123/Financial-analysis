@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { MACRO_LAB_EVENT_ZONES, MacroEventZone, MacroLabRegion } from "../data/macroLabEventZones";
+import { buildMacroCompareExplanation, type MacroExplanation } from "../lib/macro/explanationLayer";
 
 type BlockKey = "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY";
 type OverlayKey = "growth" | "stress" | "hardAsset";
@@ -31,7 +32,7 @@ type InflationPoint = {
   consumerInflation?: number | null;
 };
 
-type MacroLabPayload = { macroHistory?: { points?: MacroHistoryPoint[] }; inflationAnalysis?: { points?: InflationPoint[] } };
+type MacroLabPayload = { macroHistory?: { points?: MacroHistoryPoint[] }; inflationAnalysis?: { points?: InflationPoint[] }; globalMacro?: { macroExplanation?: MacroExplanation } };
 
 type SubComponentControl = { weight: number; off: boolean; baselineWeight: number };
 
@@ -322,6 +323,10 @@ export default function MacroRegimeValidationLab() {
   const allEvents = useMemo(() => MACRO_LAB_EVENT_ZONES.filter((z) => z.region === region || z.region === "GLOBAL"), [region]);
   const points = payload?.macroHistory?.points ?? [];
   const inflation = payload?.inflationAnalysis?.points ?? [];
+  const labExplanation = payload?.globalMacro?.macroExplanation;
+  const labBlocks = Array.isArray(labExplanation?.blockBreakdown) ? labExplanation.blockBreakdown : [];
+  const labOverlays = Array.isArray(labExplanation?.overlayBreakdown) ? labExplanation.overlayBreakdown : [];
+
 
   const lookbackStart = useMemo(() => {
     const latest = points[points.length - 1]?.asOfDate;
@@ -409,6 +414,36 @@ export default function MacroRegimeValidationLab() {
   const gapSeries = movingAvg(normalizeLite(gapMonSeries.map((v, i) => (v ?? 0) - (gapActualSeries[i] ?? 0)), config.inflation.gap.normalization), config.inflation.gap.smoothing);
 
   const selectedEvent: MacroEventZone | null = allEvents.find((e) => e.id === selectedEventId) ?? null;
+
+  const selectedPointIdx = useMemo(() => {
+    if (!filtered.length) return -1;
+    if (!selectedRange) return filtered.length - 1;
+    let idx = -1;
+    for (let i = filtered.length - 1; i >= 0; i -= 1) {
+      if (filtered[i].asOfDate <= selectedRange.endDate) { idx = i; break; }
+    }
+    return idx >= 0 ? idx : filtered.length - 1;
+  }, [filtered, selectedRange]);
+
+  const compareExplanation = useMemo(() => {
+    if (selectedPointIdx < 0) return null;
+    const baseline = baselineMacro[selectedPointIdx] ?? 0;
+    const modified = modifiedMacro[selectedPointIdx] ?? 0;
+    const point = filtered[selectedPointIdx];
+    const blockDeltas: Record<string, number> = {
+      A_FISCAL: (config.disabledBlocks.A_FISCAL ? 0 : (point?.fiscalScore ?? 0) * config.blockWeights.A_FISCAL * blockSubMultipliers.A_FISCAL) - (point?.fiscalScore ?? 0),
+      B_MONETARY: (config.disabledBlocks.B_MONETARY ? 0 : (point?.monetaryScore ?? 0) * config.blockWeights.B_MONETARY * blockSubMultipliers.B_MONETARY) - (point?.monetaryScore ?? 0),
+      C_INFLATION: (config.disabledBlocks.C_INFLATION ? 0 : (point?.inflationScore ?? 0) * config.blockWeights.C_INFLATION * blockSubMultipliers.C_INFLATION) - (point?.inflationScore ?? 0),
+      D_CREDIBILITY: (config.disabledBlocks.D_CREDIBILITY ? 0 : (point?.credibilityScore ?? 0) * config.blockWeights.D_CREDIBILITY * blockSubMultipliers.D_CREDIBILITY) - (point?.credibilityScore ?? 0),
+    };
+    const overlayDeltas: Record<string, number> = {
+      stress: (config.disabledOverlays.stress ? 0 : ((point?.stressOverlay === "High" ? 10 : point?.stressOverlay === "Medium" ? 3 : 0) * config.thresholds.stress)) - (point?.stressOverlay === "High" ? 10 : point?.stressOverlay === "Medium" ? 3 : 0),
+      growth: 0,
+      hardAsset: 0,
+    };
+    const largestComponentDelta = Object.entries({ ...blockDeltas, ...overlayDeltas }).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0]?.[0] ?? "n/a";
+    return buildMacroCompareExplanation({ baselineScore: baseline, modifiedScore: modified, blockDeltas, overlayDeltas, largestComponentDelta });
+  }, [selectedPointIdx, baselineMacro, modifiedMacro, filtered, config, blockSubMultipliers]);
 
   const replay = useMemo(() => {
     const scenarios = ["global-gfc", "ea-euro-crisis", "global-covid-shock", "global-inflation-spike"];
@@ -574,6 +609,47 @@ export default function MacroRegimeValidationLab() {
         <div className="macro-lab-panel">
           <h4>Event details + compare mode</h4>
           {selectedEvent ? <p><strong>{selectedEvent.name}</strong> ({selectedEvent.startDate} → {selectedEvent.endDate}) · {selectedEvent.category}<br />{selectedEvent.description}</p> : <p>Välj eventzon.</p>}
+          {labExplanation && (
+            <div className="macro-lab-note" style={{ marginBottom: 8 }}>
+              <strong>Driver breakdown (selected date/runtime):</strong><br />
+              {String(labExplanation.narrative?.medium ?? "")}
+              <details style={{ marginTop: 6 }}>
+                <summary style={{ cursor: "pointer" }}>Visa block/overlay breakdown</summary>
+                <div style={{ fontSize: 12, marginTop: 6 }}>
+                  {labExplanation.overlayInterpretation && (
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Dominant overlay pattern:</strong> {labExplanation.overlayInterpretation.dominantPattern}<br />
+                      <strong>Overlay narrative:</strong> {labExplanation.overlayInterpretation.narrative}<br />
+                      <strong>Regime interaction:</strong> confirm {labExplanation.overlayInterpretation.regimeProbabilityImpact.confirming.join(", ") || "—"}, modulate {labExplanation.overlayInterpretation.regimeProbabilityImpact.modulating.join(", ") || "—"}, contradict {labExplanation.overlayInterpretation.regimeProbabilityImpact.contradicting.join(", ") || "—"}.
+                    </div>
+                  )}
+                  <strong>Core blocks</strong>
+                  <ul>
+                    {labBlocks.map((block) => (
+                      <li key={`lab-block-${block.blockId}`}>
+                        {block.blockId}: score {typeof block.blockScore === "number" ? block.blockScore.toFixed(1) : "—"}, {block.status}, confidence {block.confidence}%.
+                        + {block.topPositiveDrivers.map((d) => d.title).join(", ") || "—"} / − {block.topNegativeDrivers.map((d) => d.title).join(", ") || "—"}.
+                      </li>
+                    ))}
+                  </ul>
+                  <strong>Overlays</strong>
+                  <ul>
+                    {labOverlays.map((overlay) => (
+                      <li key={`lab-overlay-${overlay.overlayId}`}>
+                        {overlay.overlayId}: score {typeof overlay.score === "number" ? overlay.score.toFixed(1) : "—"}, completeness {overlay.runtimeCompleteness}%, proxy {overlay.proxyDependence}, missing {overlay.missingComponents.join(", ") || "—"}.
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            </div>
+          )}
+          {compareExplanation && (
+            <div className="macro-lab-note" style={{ marginBottom: 8 }}>
+              <strong>Compare delta explanation:</strong><br />
+              {compareExplanation.narrative} (Δ {compareExplanation.delta.toFixed(2)}, block leader {compareExplanation.blockDeltaLeader}, overlay leader {compareExplanation.overlayDeltaLeader}, component {compareExplanation.largestComponentDelta}).
+            </div>
+          )}
           <ul>
             <li>Compare mode: blå = baseline, röd streckad = modified.</li>
             <li>Sensitivity: mean Δ {sensitivity.meanAbsDelta.toFixed(2)} · max Δ {sensitivity.maxDelta.toFixed(2)}</li>
