@@ -21,6 +21,8 @@ const TABLES = {
   macroIndicatorSnapshots: "macro_indicator_snapshots",
   macroRegimeSnapshots: "macro_regime_snapshots",
   macroIngestRuns: "macro_ingest_runs",
+  macroLatestReadCache: "macro_latest_read_cache",
+  macroHistoryReadCache: "macro_history_read_cache",
 };
 
 export async function ensureSchema() {
@@ -263,6 +265,26 @@ export async function ensureSchema() {
   );
 
   await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.macroLatestReadCache} (
+      region TEXT PRIMARY KEY,
+      as_of_date TEXT,
+      payload_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.macroHistoryReadCache} (
+      region TEXT NOT NULL,
+      resolution TEXT NOT NULL,
+      range_key TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (region, resolution, range_key)
+    )`
+  );
+
+  await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companyProjects} (
       id TEXT PRIMARY KEY,
       symbol TEXT NOT NULL,
@@ -355,6 +377,14 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_macro_ingest_runs_region_attempted
             ON ${TABLES.macroIngestRuns} (region, attempted_at DESC)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_macro_latest_read_cache_asof
+            ON ${TABLES.macroLatestReadCache} (as_of_date)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_macro_history_read_cache_updated
+            ON ${TABLES.macroHistoryReadCache} (updated_at DESC)`,
     },
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_company_projects_symbol

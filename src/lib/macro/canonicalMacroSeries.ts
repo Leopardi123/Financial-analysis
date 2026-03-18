@@ -109,11 +109,22 @@ function normalizeFmpEodRows(payload: unknown): Array<{ date: string; value: num
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-async function fetchGoldSeries() {
+const GOLD_LATEST_LOOKBACK_MONTHS = 24;
+
+function isoDateMonthsAgo(months: number) {
+  const d = new Date();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - months);
+  return d.toISOString().slice(0, 10);
+}
+
+async function fetchGoldSeries(mode: "backfill" | "latest") {
+  const to = new Date().toISOString().slice(0, 10);
+  const from = mode === "backfill" ? "2000-01-01" : isoDateMonthsAgo(GOLD_LATEST_LOOKBACK_MONTHS);
   const payload = await fetchStableJson<unknown>("historical-price-eod/full", {
     symbol: "GCUSD",
-    from: "2000-01-01",
-    to: new Date().toISOString().slice(0, 10),
+    from,
+    to,
   });
   return normalizeFmpEodRows(payload);
 }
@@ -155,7 +166,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       }
     }
     try {
-      sourceSeries.gold_usd = await fetchGoldSeries();
+      sourceSeries.gold_usd = await fetchGoldSeries(mode);
     } catch {
       sourceSeries.gold_usd = [];
     }
@@ -205,7 +216,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
       fetchEcbSeries({ flowRef: "FM", key: "M.U2.EUR.4F.BB.U2_10Y.YLD" }).then((x) => { sourceSeries.credit_spreads_ea = x; }),
       fetchFredSeries({ fredSeriesId: "IRLTLT01ITM156N", mode }).then((x) => { sourceSeries.italy_10y_yield = x; }),
       fetchFredSeries({ fredSeriesId: "IRLTLT01DEM156N", mode }).then((x) => { sourceSeries.germany_10y_yield = x; }),
-      fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
+      fetchGoldSeries(mode).then((x) => { sourceSeries.gold_usd = x; }),
       fetchFredSeries({ fredSeriesId: "DCOILBRENTEU", mode }).then((x) => { sourceSeries.DCOILBRENTEU = x; }),
       fetchFredSeries({ fredSeriesId: "PNGASEUUSDM", mode }).then((x) => { sourceSeries.PNGASEUUSDM = x; }),
       fetchEcbSeries({ flowRef: "ICP", key: "M.U2.N.000000.4D0.ANR" }).then((x) => { sourceSeries["HICP.M.U2.N.000000.4D0.ANR"] = x; }),
@@ -281,7 +292,7 @@ export async function loadCanonicalMacroSeries(region: "US" | "EA" | "SE", mode:
         { codeHint: "Transaction", preferredValueCodes: ["B1GQ", "B1_GQ"], valueKeywordGroups: [["gross", "domestic", "product"]] },
       ],
     }).then((x) => { sourceSeries.gdp_nominal_se = x; }),
-    fetchGoldSeries().then((x) => { sourceSeries.gold_usd = x; }),
+    fetchGoldSeries(mode).then((x) => { sourceSeries.gold_usd = x; }),
   ];
   await Promise.allSettled(tasks);
 
