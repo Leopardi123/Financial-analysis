@@ -90,6 +90,55 @@ type GlobalMacroPayload = {
     snapshotAsOfDate?: string;
     readMode?: string;
   };
+
+  macroExplanation?: {
+    summary: {
+      macroScore: number | null;
+      regimeLabel: string;
+      confidence: number;
+      runtimeCompleteness: number;
+      structuralQualityLabel: "robust" | "usable_with_caveats" | "fragile";
+      shortNarrative: string;
+    };
+    blockBreakdown: Array<{
+      blockId: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY";
+      blockScore: number | null;
+      direction: "up" | "down" | "neutral";
+      confidence: number;
+      status: "pass" | "partial" | "missing" | "proxy-heavy" | "structurally-incomplete";
+      topPositiveDrivers: Array<{ id: string; title: string; contributionHint: number; direction: string }>;
+      topNegativeDrivers: Array<{ id: string; title: string; contributionHint: number; direction: string }>;
+      missingComponents: string[];
+      proxyComponents: string[];
+      fallbackComponents: string[];
+      narrative: string;
+    }>;
+    overlayBreakdown: Array<{
+      overlayId: string;
+      score: number | null;
+      label: string;
+      confidence: number;
+      runtimeCompleteness: number;
+      specFidelity: "high" | "medium" | "low";
+      robustness: "high" | "medium" | "low";
+      proxyDependence: "low" | "medium" | "high";
+      includedBlocks: string[];
+      excludedBlocks: string[];
+      missingComponents: string[];
+      narrative: string;
+    }>;
+    topDrivers: Array<{ id: string; title: string; type: string; blockId?: string; overlayId?: string; direction: string; contributionHint: number; source?: string; exactSource?: string; note?: string }>;
+    structuralQuality: {
+      activeCoreBlocks: number;
+      partialCoreBlocks: number;
+      activeOverlays: number;
+      partialOverlays: number;
+      proxyHeavyOverlays: number;
+      missingCriticalInputs: string[];
+      notes: string[];
+    };
+    narrative: { short: string; medium: string; long: string };
+  };
   debug?: {
     snapshotStatus: {
       readMode: string;
@@ -1342,20 +1391,33 @@ Signal: ${gapLabel}`,
   async function runMacroCronRefresh() {
     setCronRefreshRunning(true);
     setCronRefreshResult(null);
+    const secret = cronSecretInput.trim();
     try {
-      const response = await fetch(`/api/cron/macro-refresh`, {
-        method: "POST",
-        headers: cronSecretInput.trim()
-          ? { "x-cron-secret": cronSecretInput.trim() }
-          : undefined,
-      });
+      let response: Response;
+      let authMethodUsed = secret ? "x-cron-secret header (manual debug input)" : "none";
+
+      try {
+        response = await fetch(`/api/cron/macro-refresh`, {
+          method: "POST",
+          headers: secret ? { "x-cron-secret": secret } : undefined,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error ?? "");
+        const shouldFallback = secret.length > 0 && /expected pattern/i.test(message);
+        if (!shouldFallback) throw error;
+        response = await fetch(`/api/cron/macro-refresh?cronSecret=${encodeURIComponent(secret)}`, {
+          method: "POST",
+        });
+        authMethodUsed = "cronSecret query fallback (header pattern error)";
+      }
+
       const payload = await response.json();
       setCronRefreshResult({
         status: response.status,
         ok: response.ok,
         payload,
         timestamp: new Date().toISOString(),
-        authMethodUsed: cronSecretInput.trim() ? "x-cron-secret header (manual debug input)" : "none",
+        authMethodUsed,
       });
       await loadGlobalMacro();
     } catch (error) {
@@ -1363,7 +1425,7 @@ Signal: ${gapLabel}`,
         status: 0,
         ok: false,
         timestamp: new Date().toISOString(),
-        authMethodUsed: cronSecretInput.trim() ? "x-cron-secret header (manual debug input)" : "none",
+        authMethodUsed: secret ? "x-cron-secret header (manual debug input)" : "none",
         payload: { error: error instanceof Error ? error.message : "Unknown cron-refresh error" },
       });
     } finally {
@@ -1410,6 +1472,59 @@ Signal: ${gapLabel}`,
             <>
               {isPartialData && (
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
+              )}
+
+              {globalMacro.macroExplanation && (
+                <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                  <h4 style={{ marginTop: 0 }}>Driver breakdown / Förklaringslager</h4>
+                  <div style={{ fontSize: 13, marginBottom: 8 }}>
+                    <strong>Macro score:</strong> {typeof globalMacro.macroExplanation.summary.macroScore === "number" ? globalMacro.macroExplanation.summary.macroScore.toFixed(1) : "—"} ·
+                    <strong> Regime:</strong> {globalMacro.macroExplanation.summary.regimeLabel} ·
+                    <strong> Confidence:</strong> {globalMacro.macroExplanation.summary.confidence}% ·
+                    <strong> Structural quality:</strong> {globalMacro.macroExplanation.summary.structuralQualityLabel}
+                  </div>
+                  <p className="bread" style={{ marginTop: 0 }}>{globalMacro.macroExplanation.narrative.short}</p>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 10 }}>
+                    {globalMacro.macroExplanation.blockBreakdown.map((block) => (
+                      <div key={`exp-block-${block.blockId}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <div style={{ fontWeight: 700 }}>{block.blockId}</div>
+                        <div>score: {typeof block.blockScore === "number" ? block.blockScore.toFixed(2) : "—"} · {block.direction}</div>
+                        <div>status: {block.status} · confidence {block.confidence}%</div>
+                        <div style={{ fontSize: 12, marginTop: 4 }}>+ drivers: {block.topPositiveDrivers.map((d) => d.title).join(", ") || "—"}</div>
+                        <div style={{ fontSize: 12 }}>− drivers: {block.topNegativeDrivers.map((d) => d.title).join(", ") || "—"}</div>
+                        <div style={{ fontSize: 12 }}>missing/proxy/fallback: {block.missingComponents.length}/{block.proxyComponents.length}/{block.fallbackComponents.length}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 10 }}>
+                    {globalMacro.macroExplanation.overlayBreakdown.map((overlay) => (
+                      <div key={`exp-overlay-${overlay.overlayId}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <div style={{ fontWeight: 700 }}>{overlay.overlayId}</div>
+                        <div>score: {typeof overlay.score === "number" ? overlay.score.toFixed(2) : "—"} · {overlay.label}</div>
+                        <div>confidence: {overlay.confidence}% · completeness: {overlay.runtimeCompleteness}%</div>
+                        <div>fidelity/robustness/proxy: {overlay.specFidelity}/{overlay.robustness}/{overlay.proxyDependence}</div>
+                        <div style={{ fontSize: 12 }}>included: {overlay.includedBlocks.join(", ") || "—"}</div>
+                        <div style={{ fontSize: 12 }}>excluded/missing: {overlay.excludedBlocks.join(", ") || "—"} / {overlay.missingComponents.join(", ") || "—"}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
+                    <strong>Top drivers (normalized)</strong>
+                    <ol style={{ marginTop: 6 }}>
+                      {globalMacro.macroExplanation.topDrivers.slice(0, 8).map((driver) => (
+                        <li key={`exp-driver-${driver.id}`}>
+                          {driver.title} · {driver.type} · dir {driver.direction} · contrib {driver.contributionHint.toFixed(2)}
+                          {driver.blockId ? ` · block ${driver.blockId}` : ""}
+                          {driver.overlayId ? ` · overlay ${driver.overlayId}` : ""}
+                        </li>
+                      ))}
+                    </ol>
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>Model health: core full/partial {globalMacro.macroExplanation.structuralQuality.activeCoreBlocks}/{globalMacro.macroExplanation.structuralQuality.partialCoreBlocks}, overlays full/partial {globalMacro.macroExplanation.structuralQuality.activeOverlays}/{globalMacro.macroExplanation.structuralQuality.partialOverlays}.</div>
+                  </div>
+                </section>
               )}
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
