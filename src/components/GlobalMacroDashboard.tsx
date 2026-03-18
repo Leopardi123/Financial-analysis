@@ -259,7 +259,7 @@ type MacroHistoryPayload = {
   };
   replay: {
     recomputedAt: string;
-    source: "direct_compute" | "cache";
+    source: "direct_compute" | "cache" | "cache_miss" | "cache_fallback_trimmed";
   };
   points: Array<{
     asOfDate: string;
@@ -1209,6 +1209,18 @@ export default function GlobalMacroDashboard() {
       return { index, date, label: historyResolution === "MONTHLY" ? date.slice(0, 7) : date };
     });
   }, [historyPoints, historyResolution]);
+
+  const historyEmptyMessage = useMemo(() => {
+    if (!macroHistory || historyPoints.length > 0) return null;
+    const source = macroHistory.replay?.source ?? "cache_miss";
+    const range = String(macroHistory.requestedRangeYears ?? historyRangeYears);
+    const resolution = macroHistory.resolution ?? historyResolution;
+    const unfilledReason = macroHistory.rangeDebug?.unfilledReason ?? "okänd anledning";
+    if (source === "cache_miss") {
+      return `Historik finns ännu inte i snapshot/cache för ${resolution} (${range}). Kör macro-refresh för att generera historiken.`;
+    }
+    return `Historik saknas för vald period/upplösning. Orsak: ${unfilledReason}.`;
+  }, [macroHistory, historyPoints.length, historyRangeYears, historyResolution]);
 
   const inflationRows = inflationAnalysis?.points ?? [];
   const inflationSplitData = useMemo(() => {
@@ -2182,7 +2194,7 @@ Signal: ${gapLabel}`,
                   </details>
                 </>
               ) : (
-                <div className="status empty">Ingen historik kunde genereras för vald period/upplösning.</div>
+                <div className="status empty">{historyEmptyMessage ?? "Ingen historik kunde genereras för vald period/upplösning."}</div>
               )}
 
               <details>

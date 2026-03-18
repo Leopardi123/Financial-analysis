@@ -1742,6 +1742,152 @@ function normalizeMacroHistoryPayload(value: unknown, region: string, resolution
     },
   };
 }
+
+function mergeHistoryIntervals<T extends string>(
+  points: Array<{ asOfDate: string; value: T }>,
+) {
+  if (points.length === 0) return [] as Array<{ startDate: string; endDate: string; value: T; pointCount: number }>;
+  const out: Array<{ startDate: string; endDate: string; value: T; pointCount: number }> = [];
+  let current = {
+    startDate: points[0].asOfDate,
+    endDate: points[0].asOfDate,
+    value: points[0].value,
+    pointCount: 1,
+  };
+  for (let i = 1; i < points.length; i += 1) {
+    const point = points[i];
+    if (point.value === current.value) {
+      current.endDate = point.asOfDate;
+      current.pointCount += 1;
+      continue;
+    }
+    out.push(current);
+    current = {
+      startDate: point.asOfDate,
+      endDate: point.asOfDate,
+      value: point.value,
+      pointCount: 1,
+    };
+  }
+  out.push(current);
+  return out;
+}
+
+function trimHistoryPayloadToRequestedRange(payload: any, requestedRangeYears: number | "MAX") {
+  if (!payload || requestedRangeYears === "MAX") return payload;
+  const allPoints = Array.isArray(payload.points) ? payload.points : [];
+  if (allPoints.length === 0) return payload;
+  const latestDate = String(allPoints[allPoints.length - 1]?.asOfDate ?? "");
+  const latestTime = new Date(`${latestDate}T00:00:00.000Z`).getTime();
+  if (!Number.isFinite(latestTime)) return payload;
+  const cutoff = new Date(latestTime);
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - requestedRangeYears);
+  const cutoffTime = cutoff.getTime();
+  const trimmedPoints = allPoints.filter((point: any) => {
+    const time = new Date(`${String(point?.asOfDate ?? "")}T00:00:00.000Z`).getTime();
+    return Number.isFinite(time) && time >= cutoffTime;
+  });
+  if (trimmedPoints.length === allPoints.length || trimmedPoints.length === 0) return payload;
+
+  const regimeIntervals = mergeHistoryIntervals(
+    trimmedPoints
+      .filter((point: any) => typeof point?.coreRegimeLabel === "string")
+      .map((point: any) => ({ asOfDate: String(point.asOfDate), value: String(point.coreRegimeLabel) })),
+  ).map((interval) => ({
+    startDate: interval.startDate,
+    endDate: interval.endDate,
+    coreRegimeLabel: interval.value,
+    pointCount: interval.pointCount,
+    topDriver: null,
+    topDrivers: [],
+    regimeExplanation: { title: "Range-trimmed interval", summary: "Interval rebuilt from cached history points.", driverHighlights: [] },
+  }));
+
+  const overlayGrowthIntervals = mergeHistoryIntervals(
+    trimmedPoints
+      .filter((point: any) => typeof point?.growthOverlay === "string")
+      .map((point: any) => ({ asOfDate: String(point.asOfDate), value: String(point.growthOverlay) })),
+  );
+  const overlayStressIntervals = mergeHistoryIntervals(
+    trimmedPoints
+      .filter((point: any) => typeof point?.stressOverlay === "string")
+      .map((point: any) => ({ asOfDate: String(point.asOfDate), value: String(point.stressOverlay) })),
+  );
+  const overlayHardAssetIntervals = mergeHistoryIntervals(
+    trimmedPoints
+      .filter((point: any) => typeof point?.hardAssetOverlay === "string")
+      .map((point: any) => ({ asOfDate: String(point.asOfDate), value: String(point.hardAssetOverlay) })),
+  );
+
+  const nextRangeDebug = {
+    ...(payload.rangeDebug ?? {}),
+    actualStartDate: trimmedPoints[0]?.asOfDate ?? payload?.rangeDebug?.actualStartDate ?? null,
+    actualEndDate: trimmedPoints[trimmedPoints.length - 1]?.asOfDate ?? payload?.rangeDebug?.actualEndDate ?? null,
+  };
+
+  return {
+    ...payload,
+    requestedRangeYears,
+    generatedPoints: trimmedPoints.length,
+    replayEarliestDateUsed: trimmedPoints[0]?.asOfDate ?? payload?.replayEarliestDateUsed ?? null,
+    replayLatestDateUsed: trimmedPoints[trimmedPoints.length - 1]?.asOfDate ?? payload?.replayLatestDateUsed ?? null,
+    points: trimmedPoints,
+    intervals: {
+      ...(payload.intervals ?? {}),
+      regime: regimeIntervals,
+      overlays: {
+        growth: overlayGrowthIntervals,
+        stress: overlayStressIntervals,
+        hardAsset: overlayHardAssetIntervals,
+      },
+    },
+    rangeDebug: nextRangeDebug,
+    replay: {
+      ...(payload.replay ?? {}),
+      source: "cache_fallback_trimmed",
+    },
+  };
+}
+
+async function readMacroHistoryWithCompatibleFallback(params: {
+  region: string;
+  resolution: HistoryResolution;
+  rangeYears: number | "MAX";
+}) {
+  const exact = await readMacroHistoryReadCache(params);
+  if (exact) {
+    return {
+      cache: exact,
+      matchedRequestedRange: true,
+      fallbackFromRangeYears: null as number | "MAX" | null,
+    };
+  }
+
+  const fallbackRanges: Array<number | "MAX"> = params.resolution === "MONTHLY"
+    ? [20, "MAX"]
+    : [5, 3, "MAX"];
+
+  for (const fallbackRange of fallbackRanges) {
+    if (fallbackRange === params.rangeYears) continue;
+    const candidate = await readMacroHistoryReadCache({ ...params, rangeYears: fallbackRange });
+    if (!candidate) continue;
+    return {
+      cache: {
+        ...candidate,
+        payload: trimHistoryPayloadToRequestedRange(candidate.payload, params.rangeYears),
+      },
+      matchedRequestedRange: false,
+      fallbackFromRangeYears: fallbackRange,
+    };
+  }
+
+  return {
+    cache: null,
+    matchedRequestedRange: false,
+    fallbackFromRangeYears: null as number | "MAX" | null,
+  };
+}
+
 function trimSnapshotForNormalRead(snapshot: any, debugEnabled: boolean) {
   if (!snapshot || typeof snapshot !== "object" || debugEnabled) return snapshot;
   const clone: any = { ...snapshot };
@@ -1811,11 +1957,12 @@ export default async function handler(req: any, res: any) {
   const snapshotReadMs = Date.now() - t0;
 
   const t1 = Date.now();
-  const historyCache = await readMacroHistoryReadCache({
+  const historyRead = await readMacroHistoryWithCompatibleFallback({
     region,
     resolution: historyResolution as HistoryResolution,
     rangeYears: historyRangeYears,
   });
+  const historyCache = historyRead.cache;
   const historyReadMs = Date.now() - t1;
 
   const snapshotPayloadRaw = snapshotCache?.payload;
@@ -1843,6 +1990,8 @@ export default async function handler(req: any, res: any) {
     readMode: "snapshot_cache_only",
     snapshotCacheHit: Boolean(snapshotCache),
     historyCacheHit: Boolean(historyCache),
+    historyCacheExactRangeHit: historyRead.matchedRequestedRange,
+    historyCacheFallbackFromRange: historyRead.fallbackFromRangeYears,
     liveFallbackAttempted: false,
     snapshotReadMs,
     historyCacheReadMs: historyReadMs,
@@ -1854,6 +2003,9 @@ export default async function handler(req: any, res: any) {
   };
 
   if (!snapshotCache || !historyCache || !normalizedGlobalMacro) {
+    const historyMissingMessage = !historyCache
+      ? "Historik finns ännu inte i snapshot/cache för vald upplösning/intervall. Kör /api/cron/macro-refresh för att generera den."
+      : null;
     res.status(200).json({
       ok: true,
       globalMacro,
@@ -1862,7 +2014,7 @@ export default async function handler(req: any, res: any) {
       diagnostics: {
         ...diagnostics,
         stale: true,
-        message: "Macro snapshot/history cache missing. Run /api/cron/macro-refresh or admin macro ingest + run-engine.",
+        message: historyMissingMessage ?? "Macro snapshot/history cache missing. Run /api/cron/macro-refresh or admin macro ingest + run-engine.",
       },
     });
     return;
