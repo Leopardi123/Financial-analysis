@@ -7,6 +7,7 @@ import { type HistoryResolution } from "../../../lib/macro/history.js";
 import { readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../lib/macro/readCache.js";
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
+import { buildMacroExplanation } from "../../../lib/macro/explanationLayer.js";
 
 const REGIONAL_OVERLAY_KEYS = [
   "liquidityOverlay",
@@ -1434,6 +1435,29 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
     rootCauseHints.push("No obvious pipeline issue detected");
   }
 
+  const macroExplanation = buildMacroExplanation({
+    region,
+    asOfDate: regimeRow.as_of_date,
+    regime: {
+      macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
+      coreRegimeLabel: regimeRow.core_regime_label,
+      macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+      blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
+        A_FISCAL: null,
+        B_MONETARY: null,
+        C_INFLATION: null,
+        D_CREDIBILITY: null,
+      }),
+      topDrivers: normalizedTopDrivers,
+    },
+    indicators,
+    overlayBundle,
+    debug: {
+      blockStatus,
+      overlayDataStatus,
+    },
+  });
+
   return {
     regime: {
       asOfDate: regimeRow.as_of_date,
@@ -1572,6 +1596,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       },
       rootCauseHints,
     },
+    macroExplanation,
   };
 }
 
@@ -1606,6 +1631,20 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       globalUnrestOverlay: buildGlobalUnrestOverlay(asOfDate, regionalMap.US?.overlays ?? null, regionalMap.EA?.overlays ?? null),
     },
   };
+
+  const macroExplanation = buildMacroExplanation({
+    region: "GLOBAL",
+    asOfDate,
+    regime: {
+      macroScoreTotal: regime.macroScoreTotal,
+      coreRegimeLabel: regime.coreRegimeLabel,
+      macroConfidence: regime.macroConfidence,
+      blockScores: regime.blockScores as any,
+      topDrivers: globalDrivers,
+    },
+    indicators,
+    overlayBundle: globalOverlayBundle,
+  });
 
   return {
     regime: { ...regime, topDrivers: globalDrivers },
@@ -1674,9 +1713,53 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       rootCauseHints: [],
       regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
     },
+    macroExplanation,
   };
 }
 
+
+
+function hydrateMacroExplanationFromSnapshot(snapshot: any, regionFallback: string) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  if (snapshot.macroExplanation && typeof snapshot.macroExplanation === "object") return snapshot;
+  const regime = snapshot.regime;
+  if (!regime || typeof regime !== "object") return snapshot;
+  const asOfDate = typeof regime.asOfDate === "string" ? regime.asOfDate : null;
+  const coreRegimeLabel = typeof regime.coreRegimeLabel === "string" ? regime.coreRegimeLabel : null;
+  if (!asOfDate || !coreRegimeLabel) return snapshot;
+
+  const blockScores = (regime.blockScores && typeof regime.blockScores === "object")
+    ? regime.blockScores
+    : { A_FISCAL: null, B_MONETARY: null, C_INFLATION: null, D_CREDIBILITY: null };
+
+  const safeDrivers = Array.isArray(regime.topDrivers)
+    ? regime.topDrivers.map((driver: any) => ({
+      indicatorId: String(driver?.indicatorId ?? "unknown"),
+      title: String(driver?.title ?? driver?.indicatorId ?? "unknown"),
+      block: (driver?.block === "A_FISCAL" || driver?.block === "B_MONETARY" || driver?.block === "C_INFLATION" || driver?.block === "D_CREDIBILITY") ? driver.block : "D_CREDIBILITY",
+      contribution: typeof driver?.contribution === "number" ? driver.contribution : 0,
+      direction: typeof driver?.direction === "string" ? driver.direction : "stable",
+      driverNote: typeof driver?.driverNote === "string" ? driver.driverNote : null,
+    }))
+    : [];
+
+  const built = buildMacroExplanation({
+    region: typeof snapshot.region === "string" ? snapshot.region : regionFallback,
+    asOfDate,
+    regime: {
+      macroScoreTotal: typeof regime.macroScoreTotal === "number" ? regime.macroScoreTotal : null,
+      coreRegimeLabel,
+      macroConfidence: typeof regime.macroConfidence === "number" ? regime.macroConfidence : 0,
+      blockScores: blockScores as any,
+      topDrivers: safeDrivers,
+    },
+    indicators: Array.isArray(snapshot.indicators) ? snapshot.indicators : [],
+    overlayBundle: snapshot.overlayBundle ?? snapshot.overlays,
+    debug: snapshot.debug,
+  });
+
+  return { ...snapshot, macroExplanation: built };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -1974,7 +2057,8 @@ export default async function handler(req: any, res: any) {
     ? snapshotPayload.globalMacro
     : snapshotPayloadRaw ?? null;
   const normalizedGlobalMacro = normalizeGlobalMacroPayload(globalMacroRaw);
-  const globalMacro = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
+  const globalMacroTrimmed = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
+  const globalMacro = hydrateMacroExplanationFromSnapshot(globalMacroTrimmed, region);
 
   const inflationAnalysis = snapshotPayload && "inflationAnalysis" in snapshotPayload
     ? snapshotPayload.inflationAnalysis
