@@ -90,6 +90,76 @@ type GlobalMacroPayload = {
     snapshotAsOfDate?: string;
     readMode?: string;
   };
+
+  macroExplanation?: {
+    summary: {
+      macroScore: number | null;
+      regimeLabel: string;
+      confidence: number;
+      runtimeCompleteness: number;
+      structuralQualityLabel: "robust" | "usable_with_caveats" | "fragile";
+      shortNarrative: string;
+    };
+    blockBreakdown: Array<{
+      blockId: "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY";
+      blockScore: number | null;
+      direction: "up" | "down" | "neutral";
+      confidence: number;
+      status: "pass" | "partial" | "missing" | "proxy-heavy" | "structurally-incomplete";
+      topPositiveDrivers: Array<{ id: string; title: string; contributionHint: number; direction: string }>;
+      topNegativeDrivers: Array<{ id: string; title: string; contributionHint: number; direction: string }>;
+      missingComponents: string[];
+      proxyComponents: string[];
+      fallbackComponents: string[];
+      narrative: string;
+    }>;
+    overlayBreakdown: Array<{
+      overlayId: string;
+      score: number | null;
+      label: string;
+      confidence: number;
+      runtimeCompleteness: number;
+      specFidelity: "high" | "medium" | "low";
+      robustness: "high" | "medium" | "low";
+      proxyDependence: "low" | "medium" | "high";
+      includedBlocks: string[];
+      excludedBlocks: string[];
+      missingComponents: string[];
+      narrative: string;
+    }>;
+    overlayInterpretation?: {
+      dominantPattern: string;
+      secondaryPatterns: string[];
+      narrative: string;
+      overlayStates: Array<{
+        overlayId: string;
+        semanticType: string;
+        score: number | null;
+        label: string;
+        qualitativeState: string;
+        role: "confirming" | "modulating" | "contradicting" | "neutral";
+      }>;
+      regimeProbabilityImpact: {
+        confirming: string[];
+        modulating: string[];
+        contradicting: string[];
+        adjustments: Array<{ regime: string; adjustmentBp: number; reason: string }>;
+        note: string;
+      };
+      trace: string[];
+    };
+    topDrivers: Array<{ id: string; title: string; type: string; blockId?: string; overlayId?: string; direction: string; contributionHint: number; source?: string; exactSource?: string; note?: string }>;
+    structuralQuality: {
+      activeCoreBlocks: number;
+      partialCoreBlocks: number;
+      activeOverlays: number;
+      partialOverlays: number;
+      proxyHeavyOverlays: number;
+      missingCriticalInputs: string[];
+      notes: string[];
+    };
+    narrative: { short: string; medium: string; long: string };
+  };
   debug?: {
     snapshotStatus: {
       readMode: string;
@@ -453,6 +523,26 @@ export default function GlobalMacroDashboard() {
       "tradeSupplyChainStressOverlay",
       "localUnrestOverlay",
     ];
+  const explanationAny = (globalMacro as any)?.macroExplanation as any;
+  const explanationSummary = explanationAny && typeof explanationAny === "object" && explanationAny.summary && typeof explanationAny.summary === "object"
+    ? explanationAny.summary
+    : null;
+  const explanationNarrative = explanationAny && typeof explanationAny === "object" && explanationAny.narrative && typeof explanationAny.narrative === "object"
+    ? explanationAny.narrative
+    : null;
+  const explanationBlocks = Array.isArray(explanationAny?.blockBreakdown) ? explanationAny.blockBreakdown : [];
+  const explanationOverlays = Array.isArray(explanationAny?.overlayBreakdown) ? explanationAny.overlayBreakdown : [];
+  const explanationTopDrivers = Array.isArray(explanationAny?.topDrivers) ? explanationAny.topDrivers : [];
+  const explanationStructural = explanationAny && typeof explanationAny.structuralQuality === "object" ? explanationAny.structuralQuality : null;
+  const overlayInterpretationAny = explanationAny && typeof explanationAny.overlayInterpretation === "object" ? explanationAny.overlayInterpretation : null;
+  const overlayStates = Array.isArray(overlayInterpretationAny?.overlayStates) ? overlayInterpretationAny.overlayStates : [];
+  const overlayProbabilityImpact = overlayInterpretationAny && typeof overlayInterpretationAny.regimeProbabilityImpact === "object"
+    ? overlayInterpretationAny.regimeProbabilityImpact
+    : null;
+
+  const safeNumber = (value: unknown, digits = 1) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
+  const safePct = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? `${value}%` : "—";
+
   const overlaySanity = overlayEntries.map(([overlayKey, overlay]) => {
     const runtimeAny = overlay.runtime as any;
     const productionValidBlockScores = runtimeAny?.productionValidBlockScores ?? overlay.blockScores ?? {};
@@ -1342,7 +1432,50 @@ Signal: ${gapLabel}`,
   async function runMacroCronRefresh() {
     setCronRefreshRunning(true);
     setCronRefreshResult(null);
+
+    const runClientFallback = async () => {
+      const adminHeaderValue = adminSecretInput.trim() || cronSecretInput.trim();
+      const headers = adminHeaderValue ? { "x-admin-secret": adminHeaderValue } : undefined;
+      const regions: Array<"US" | "EA" | "SE"> = ["US", "EA", "SE"];
+      const perRegion: Array<Record<string, unknown>> = [];
+
+      for (const region of regions) {
+        const row: Record<string, unknown> = { region, ingestOk: false, engineOk: false };
+        try {
+          const ingestResp = await fetch(`/api/admin/macro/ingest?mode=latest&region=${region}`, { method: "POST", headers });
+          const ingestPayload = await ingestResp.json().catch(() => ({}));
+          row.ingestStatus = ingestResp.status;
+          row.ingestOk = ingestResp.ok;
+          row.ingestError = ingestResp.ok ? null : (ingestPayload?.error ?? "ingest failed");
+          if (!ingestResp.ok) {
+            perRegion.push(row);
+            continue;
+          }
+
+          const engineResp = await fetch(`/api/admin/macro/run-engine?region=${region}`, { method: "POST", headers });
+          const enginePayload = await engineResp.json().catch(() => ({}));
+          row.engineStatus = engineResp.status;
+          row.engineOk = engineResp.ok;
+          row.engineError = engineResp.ok ? null : (enginePayload?.error ?? "engine failed");
+        } catch (fallbackError) {
+          row.error = fallbackError instanceof Error ? fallbackError.message : "fallback request failed";
+        }
+        perRegion.push(row);
+      }
+
+      const okRegions = perRegion.filter((r) => r.ingestOk && r.engineOk).length;
+      return {
+        ok: okRegions > 0,
+        mode: "client_fallback_ingest_plus_engine",
+        usedAdminSecretHeader: Boolean(adminHeaderValue),
+        successRegions: okRegions,
+        failedRegions: perRegion.length - okRegions,
+        perRegion,
+      };
+    };
+
     try {
+      const attemptedUrl = `/api/cron/macro-refresh?quick=1&region=US`;
       const response = await fetch(`/api/cron/macro-refresh`, {
         method: "POST",
         headers: cronSecretInput.trim()
@@ -1353,18 +1486,29 @@ Signal: ${gapLabel}`,
       setCronRefreshResult({
         status: response.status,
         ok: response.ok,
+        requestedMode: "cron",
         payload,
+        attemptedUrl,
         timestamp: new Date().toISOString(),
         authMethodUsed: cronSecretInput.trim() ? "x-cron-secret header (manual debug input)" : "none",
       });
       await loadGlobalMacro();
     } catch (error) {
+      const fallback = await runClientFallback();
+      await loadGlobalMacro();
       setCronRefreshResult({
         status: 0,
         ok: false,
+        requestedMode: "quick_with_full_fallback",
         timestamp: new Date().toISOString(),
         authMethodUsed: cronSecretInput.trim() ? "x-cron-secret header (manual debug input)" : "none",
-        payload: { error: error instanceof Error ? error.message : "Unknown cron-refresh error" },
+        payload: {
+          error: "Load failed",
+          note: "Network/load failure on /api/cron/macro-refresh. Ran ingest+engine fallback per region.",
+          attemptedUrl: "/api/cron/macro-refresh?quick=1&region=US",
+          fallback,
+          originalError: error instanceof Error ? error.message : "Unknown cron-refresh error",
+        },
       });
     } finally {
       setCronRefreshRunning(false);
@@ -1412,6 +1556,104 @@ Signal: ${gapLabel}`,
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
               )}
 
+              {explanationAny && (() => {
+                const qualityLabelMap: Record<string, string> = {
+                  robust: "Robust",
+                  usable_with_caveats: "Användbar med förbehåll",
+                  fragile: "Skör",
+                };
+                const blockStatusMap: Record<string, string> = {
+                  pass: "Pass",
+                  partial: "Partial",
+                  missing: "Missing",
+                  "proxy-heavy": "Proxy-heavy",
+                  "structurally-incomplete": "Strukturellt ofullständig",
+                };
+                return (
+                  <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                    <h4 style={{ marginTop: 0 }}>Driver breakdown / Förklaringslager</h4>
+                    <div style={{ fontSize: 13, marginBottom: 8 }}>
+                      <strong>As-of:</strong> {globalMacro.regime?.asOfDate ?? "—"} ·
+                      <strong> Region:</strong> {selectedRegion} ·
+                      <strong> Macro score:</strong> {safeNumber(explanationSummary?.macroScore, 1)} ·
+                      <strong> Regim:</strong> {String(explanationSummary?.regimeLabel ?? "—")} ·
+                      <strong> Confidence:</strong> {safePct(explanationSummary?.confidence)} ·
+                      <strong> Strukturell kvalitet:</strong> {qualityLabelMap[String(explanationSummary?.structuralQualityLabel ?? "")] ?? String(explanationSummary?.structuralQualityLabel ?? "—")}
+                    </div>
+                    <p className="bread" style={{ marginTop: 0, marginBottom: 6 }}>{String(explanationNarrative?.short ?? "") }</p>
+                    <p className="bread" style={{ marginTop: 0 }}>{String(explanationNarrative?.medium ?? "") }</p>
+                    {overlayInterpretationAny && (
+                      <div style={{ marginTop: 6, marginBottom: 10, padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
+                        <strong>Overlay interpretation:</strong> {String(overlayInterpretationAny?.narrative ?? "Overlay picture is mixed")}
+                        <div style={{ fontSize: 12, marginTop: 4 }}>
+                          pattern: {String(overlayInterpretationAny?.dominantPattern ?? "mixed_overlay_picture")}
+                          {Array.isArray(overlayInterpretationAny?.secondaryPatterns) && overlayInterpretationAny.secondaryPatterns.length > 0 ? ` · secondary: ${overlayInterpretationAny.secondaryPatterns.join(", ")}` : ""}
+                        </div>
+                      </div>
+                    )}
+
+                    <details style={{ marginBottom: 10 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>Varför denna regim?</summary>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginTop: 8 }}>
+                        {explanationBlocks.map((block: any) => (
+                          <div id={`explain-block-${block.blockId}`} key={`exp-block-${block.blockId}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                            <div style={{ fontWeight: 700 }}>{block.blockId}</div>
+                            <div>score: {typeof block.blockScore === "number" ? safeNumber(block?.blockScore, 1) : "—"} · riktning: {block.direction}</div>
+                            <div>status: {blockStatusMap[String(block?.status ?? "")] ?? String(block?.status ?? "—")} · confidence {safePct(block?.confidence)}</div>
+                            <div style={{ fontSize: 12, marginTop: 4 }}>+ drivare: {(Array.isArray(block?.topPositiveDrivers) ? block.topPositiveDrivers : []).map((d: any) => d?.title).filter(Boolean).join(", ") || "—"}</div>
+                            <div style={{ fontSize: 12 }}>− drivare: {(Array.isArray(block?.topNegativeDrivers) ? block.topNegativeDrivers : []).map((d: any) => d?.title).filter(Boolean).join(", ") || "—"}</div>
+                            <div style={{ fontSize: 12 }}>missing/proxy/fallback: {(Array.isArray(block?.missingComponents) ? block.missingComponents.length : 0)}/{(Array.isArray(block?.proxyComponents) ? block.proxyComponents.length : 0)}/{(Array.isArray(block?.fallbackComponents) ? block.fallbackComponents.length : 0)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+
+                    <details style={{ marginBottom: 10 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>Overlay-förklaring</summary>
+                      {overlayStates.length > 0 && (
+                        <div style={{ fontSize: 12, margin: "8px 0" }}>
+                          {overlayStates.map((state: any) => `${state.overlayId}: ${state.qualitativeState} (${state.role})`).join(" | ")}
+                          {overlayProbabilityImpact?.note ? ` · ${overlayProbabilityImpact.note}` : ""}
+                        </div>
+                      )}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginTop: 8 }}>
+                        {explanationOverlays.map((overlay: any) => (
+                          <div id={`explain-overlay-${overlay.overlayId}`} key={`exp-overlay-${overlay.overlayId}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                            <div style={{ fontWeight: 700 }}>{overlay.overlayId}</div>
+                            <div>score: {typeof overlay.score === "number" ? safeNumber(overlay?.score, 1) : "—"} · {overlay.label}</div>
+                            <div>confidence: {safePct(overlay?.confidence)} · runtime completeness: {safePct(overlay?.runtimeCompleteness)}</div>
+                            <div>fidelity/robustness/proxy: {overlay.specFidelity}/{overlay.robustness}/{overlay.proxyDependence}</div>
+                            <div style={{ fontSize: 12 }}>included: {(Array.isArray(overlay?.includedBlocks) ? overlay.includedBlocks : []).join(", ") || "—"}</div>
+                            <div style={{ fontSize: 12 }}>excluded/missing: {(Array.isArray(overlay?.excludedBlocks) ? overlay.excludedBlocks : []).join(", ") || "—"} / {(Array.isArray(overlay?.missingComponents) ? overlay.missingComponents : []).join(", ") || "—"}</div>
+                            <div style={{ fontSize: 12, marginTop: 4 }}>{String(overlay?.narrative ?? "") }</div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+
+                    <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 8 }}>
+                      <strong>Top drivers (klickbara)</strong>
+                      <ol style={{ marginTop: 6 }}>
+                        {explanationTopDrivers.slice(0, 8).map((driver: any) => {
+                          const href = driver.blockId ? `#explain-block-${driver.blockId}` : (driver.overlayId ? `#explain-overlay-${driver.overlayId}` : undefined);
+                          return (
+                            <li key={`exp-driver-${driver.id}`}>
+                              {href ? <a href={href}>{driver.title}</a> : driver.title}
+                              {` · ${driver.type} · dir ${driver.direction} · contrib ${safeNumber(driver?.contributionHint, 2)}`}
+                              {driver.blockId ? ` · block ${driver.blockId}` : ""}
+                              {driver.overlayId ? ` · overlay ${driver.overlayId}` : ""}
+                            </li>
+                          );
+                        })}
+                      </ol>
+                      <div style={{ fontSize: 12, opacity: 0.85 }}>
+                        Model health: core full/partial {(typeof explanationStructural?.activeCoreBlocks === "number" ? explanationStructural.activeCoreBlocks : "—")}/{(typeof explanationStructural?.partialCoreBlocks === "number" ? explanationStructural.partialCoreBlocks : "—")}, overlays full/partial {(typeof explanationStructural?.activeOverlays === "number" ? explanationStructural.activeOverlays : "—")}/{(typeof explanationStructural?.partialOverlays === "number" ? explanationStructural.partialOverlays : "—")}, proxy-heavy overlays {(typeof explanationStructural?.proxyHeavyOverlays === "number" ? explanationStructural.proxyHeavyOverlays : "—")}.
+                      </div>
+                    </div>
+                  </section>
+                );
+              })()}
+
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
                 <h4 style={{ marginTop: 0 }}>New Overlay Engine</h4>
                 <div style={{ fontSize: 13, marginBottom: 10 }}>Teknisk admin/drift-debug finns i <strong>Admin</strong>.</div>
@@ -1433,9 +1675,9 @@ Signal: ${gapLabel}`,
                         return (
                           <div key={overlayKey} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
                             <div style={{ fontWeight: 700 }}>{overlayKey}</div>
-                            <div>score: {typeof overlay.score === "number" ? overlay.score.toFixed(1) : "—"}</div>
+                            <div>score: {typeof overlay.score === "number" ? safeNumber(overlay?.score, 1) : "—"}</div>
                             <div>label: {overlay.label || "—"}</div>
-                            <div>confidence: {overlay.confidence}%</div>
+                            <div>confidence: {safePct(overlay?.confidence)}</div>
                             <div style={{ fontSize: 12, opacity: 0.85, marginTop: 4 }}>
                               block scores: {Object.entries(overlay.blockScores).map(([block, score]) => `${block}=${typeof score === "number" ? score.toFixed(1) : "—"}`).join(", ") || "—"}
                             </div>
@@ -1507,7 +1749,7 @@ Signal: ${gapLabel}`,
                       <summary style={{ cursor: "pointer", fontWeight: 700, padding: "8px 10px" }}>▸ {row.overlayKey}</summary>
                       <div style={{ padding: "8px 10px" }}>
                     <ul style={{ marginTop: 4 }}>
-                      <li>total score: {typeof row.overlay?.score === "number" ? row.overlay.score.toFixed(1) : "—"}</li>
+                      <li>total score: {typeof row.overlay?.score === "number" ? safeNumber(row.overlay?.score, 1) : "—"}</li>
                       <li>label: {row.overlay?.label ?? "—"}</li>
                       <li>confidence: {row.overlay?.confidence ?? "—"}%</li>
                       <li>runtime completeness: {row.runtimeCompleteness}</li>
