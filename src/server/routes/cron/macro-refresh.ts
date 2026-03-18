@@ -90,6 +90,10 @@ export default async function handler(req: any, res: any) {
   }
 
   const startedAt = Date.now();
+  const quickMode = String(req.query?.quick ?? "0") === "1";
+  const requestedRegionRaw = String(req.query?.region ?? "ALL").toUpperCase();
+  const requestedRegion = requestedRegionRaw === "GLOBAL" ? "ALL" : requestedRegionRaw;
+  const regionsToRun = (requestedRegion === "ALL" ? [...REGIONS] : REGIONS.filter((r) => r === requestedRegion)) as Array<(typeof REGIONS)[number]>;
   const perRegion: Array<Record<string, unknown>> = [];
   const forwardedHeaders = internalAdminHeaders(req.headers ?? {});
 
@@ -104,7 +108,7 @@ export default async function handler(req: any, res: any) {
       },
     });
 
-    for (const region of REGIONS) {
+    for (const region of regionsToRun) {
       const regionStart = Date.now();
       const regionSummary: Record<string, unknown> = {
         region,
@@ -166,21 +170,28 @@ export default async function handler(req: any, res: any) {
         await upsertLatestMacroReadCache(region, snapshotAsOf, snapshotPayload);
         const snapshotWriteMs = Date.now() - snapshotStart;
 
-        const historyStart = Date.now();
-        const monthly20 = await computeMacroRegimeHistory({ region, resolution: "MONTHLY", rangeYears: 20 });
-        const weekly3 = await computeMacroRegimeHistory({ region, resolution: "WEEKLY", rangeYears: 3 });
-        await upsertMacroHistoryReadCache({ region, resolution: "MONTHLY", rangeYears: 20, payload: monthly20 });
-        await upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears: 3, payload: weekly3 });
-        const historyWriteMs = Date.now() - historyStart;
+        let historyWriteMs = 0;
+        let historyPointsMonthly20: number | null = null;
+        let historyPointsWeekly3: number | null = null;
+        if (!quickMode) {
+          const historyStart = Date.now();
+          const monthly20 = await computeMacroRegimeHistory({ region, resolution: "MONTHLY", rangeYears: 20 });
+          const weekly3 = await computeMacroRegimeHistory({ region, resolution: "WEEKLY", rangeYears: 3 });
+          await upsertMacroHistoryReadCache({ region, resolution: "MONTHLY", rangeYears: 20, payload: monthly20 });
+          await upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears: 3, payload: weekly3 });
+          historyWriteMs = Date.now() - historyStart;
+          historyPointsMonthly20 = monthly20.points.length;
+          historyPointsWeekly3 = weekly3.points.length;
+        }
 
         Object.assign(regionSummary, {
           snapshotAsOf,
           snapshotCacheWritten: true,
-          historyCacheWritten: true,
+          historyCacheWritten: quickMode ? "skipped_quick_mode" : true,
           snapshotWriteMs,
           historyWriteMs,
-          historyPointsMonthly20: monthly20.points.length,
-          historyPointsWeekly3: weekly3.points.length,
+          historyPointsMonthly20,
+          historyPointsWeekly3,
           totalRegionMs: Date.now() - regionStart,
         });
         perRegion.push(regionSummary);
@@ -199,18 +210,23 @@ export default async function handler(req: any, res: any) {
       const globalPayload = await buildMacroLatestReadPayload("GLOBAL");
       const globalAsOf = (globalPayload as any)?.globalMacro?.regime?.asOfDate ?? null;
       await upsertLatestMacroReadCache("GLOBAL", globalAsOf, globalPayload);
-      const globalMonthly = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "MONTHLY", rangeYears: 20 });
-      const globalWeekly = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "WEEKLY", rangeYears: 3 });
-      await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "MONTHLY", rangeYears: 20, payload: globalMonthly });
-      await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears: 3, payload: globalWeekly });
-      global = {
-        attempted: true,
-        ok: true,
-        asOfDate: globalAsOf,
-        durationMs: Date.now() - globalStart,
-        monthlyPoints: globalMonthly.points.length,
-        weeklyPoints: globalWeekly.points.length,
-      };
+      if (!quickMode) {
+        const globalMonthly = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "MONTHLY", rangeYears: 20 });
+        const globalWeekly = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "WEEKLY", rangeYears: 3 });
+        await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "MONTHLY", rangeYears: 20, payload: globalMonthly });
+        await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears: 3, payload: globalWeekly });
+        global = {
+          attempted: true,
+          ok: true,
+          asOfDate: globalAsOf,
+          durationMs: Date.now() - globalStart,
+          monthlyPoints: globalMonthly.points.length,
+          weeklyPoints: globalWeekly.points.length,
+          mode: "full",
+        };
+      } else {
+        global = { attempted: true, ok: true, asOfDate: globalAsOf, durationMs: Date.now() - globalStart, mode: "quick" };
+      }
     } catch (error) {
       global = { attempted: true, ok: false, error: (error as Error).message };
     }
@@ -219,6 +235,9 @@ export default async function handler(req: any, res: any) {
     const summary = {
       ok: successRegions > 0,
       runId,
+      mode: quickMode ? "quick" : "full",
+      requestedRegion,
+      regionsAttempted: regionsToRun,
       durationMs: Date.now() - startedAt,
       successRegions,
       failedRegions: perRegion.length - successRegions,

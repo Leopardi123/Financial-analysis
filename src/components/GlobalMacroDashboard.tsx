@@ -1406,20 +1406,38 @@ Signal: ${gapLabel}`,
   async function runMacroCronRefresh() {
     setCronRefreshRunning(true);
     setCronRefreshResult(null);
+    const regionParam = selectedRegion === "GLOBAL" ? "ALL" : selectedRegion;
+    const quickUrl = `/api/cron/macro-refresh?quick=1&region=${encodeURIComponent(regionParam)}`;
+    const fullUrl = `/api/cron/macro-refresh?region=${encodeURIComponent(regionParam)}`;
+    const headers = cronSecretInput.trim()
+      ? { "x-cron-secret": cronSecretInput.trim() }
+      : undefined;
+
     try {
-      const response = await fetch(`/api/cron/macro-refresh`, {
-        method: "POST",
-        headers: cronSecretInput.trim()
-          ? { "x-cron-secret": cronSecretInput.trim() }
-          : undefined,
-      });
-      const payload = await response.json();
+      let response = await fetch(quickUrl, { method: "POST", headers });
+      let payload: any = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = { error: "Non-JSON response" };
+      }
+
+      if (!response.ok && response.status >= 500) {
+        response = await fetch(fullUrl, { method: "POST", headers });
+        try {
+          payload = await response.json();
+        } catch {
+          payload = { error: "Non-JSON response" };
+        }
+      }
+
       setCronRefreshResult({
         status: response.status,
         ok: response.ok,
         payload,
         timestamp: new Date().toISOString(),
         authMethodUsed: cronSecretInput.trim() ? "x-cron-secret header (manual debug input)" : "none",
+        requestedMode: "quick_with_full_fallback",
       });
       await loadGlobalMacro();
     } catch (error) {
@@ -1428,7 +1446,12 @@ Signal: ${gapLabel}`,
         ok: false,
         timestamp: new Date().toISOString(),
         authMethodUsed: cronSecretInput.trim() ? "x-cron-secret header (manual debug input)" : "none",
-        payload: { error: error instanceof Error ? error.message : "Unknown cron-refresh error" },
+        requestedMode: "quick_with_full_fallback",
+        payload: {
+          error: error instanceof Error ? error.message : "Unknown cron-refresh error",
+          note: "Network/load failure. Try running ingest + engine buttons per region as fallback.",
+          attemptedUrl: quickUrl,
+        },
       });
     } finally {
       setCronRefreshRunning(false);
