@@ -7,6 +7,7 @@ import { type HistoryResolution } from "../../../lib/macro/history.js";
 import { readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../lib/macro/readCache.js";
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
+import { buildMacroExplanation } from "../../../lib/macro/explanationLayer.js";
 
 const REGIONAL_OVERLAY_KEYS = [
   "liquidityOverlay",
@@ -1434,6 +1435,29 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
     rootCauseHints.push("No obvious pipeline issue detected");
   }
 
+  const macroExplanation = buildMacroExplanation({
+    region,
+    asOfDate: regimeRow.as_of_date,
+    regime: {
+      macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
+      coreRegimeLabel: regimeRow.core_regime_label,
+      macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+      blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
+        A_FISCAL: null,
+        B_MONETARY: null,
+        C_INFLATION: null,
+        D_CREDIBILITY: null,
+      }),
+      topDrivers: normalizedTopDrivers,
+    },
+    indicators,
+    overlayBundle,
+    debug: {
+      blockStatus,
+      overlayDataStatus,
+    },
+  });
+
   return {
     regime: {
       asOfDate: regimeRow.as_of_date,
@@ -1572,6 +1596,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       },
       rootCauseHints,
     },
+    macroExplanation,
   };
 }
 
@@ -1606,6 +1631,20 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       globalUnrestOverlay: buildGlobalUnrestOverlay(asOfDate, regionalMap.US?.overlays ?? null, regionalMap.EA?.overlays ?? null),
     },
   };
+
+  const macroExplanation = buildMacroExplanation({
+    region: "GLOBAL",
+    asOfDate,
+    regime: {
+      macroScoreTotal: regime.macroScoreTotal,
+      coreRegimeLabel: regime.coreRegimeLabel,
+      macroConfidence: regime.macroConfidence,
+      blockScores: regime.blockScores as any,
+      topDrivers: globalDrivers,
+    },
+    indicators,
+    overlayBundle: globalOverlayBundle,
+  });
 
   return {
     regime: { ...regime, topDrivers: globalDrivers },
@@ -1674,6 +1713,7 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       rootCauseHints: [],
       regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
     },
+    macroExplanation,
   };
 }
 
