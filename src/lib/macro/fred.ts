@@ -161,7 +161,10 @@ export async function fetchFredSeriesWithDebug(params: {
       headers: { Accept: "application/json" },
     });
   } catch (error) {
-    throw new Error(`FRED request failed (${params.fredSeriesId}): fetch_error=${error instanceof Error ? error.message : String(error)} request=${safeRequestTarget} observation_start=${observationStart} observation_end=${observationEnd}`);
+    const cause = (error as any)?.cause;
+    const causeText = cause && typeof cause === "object" && "message" in cause ? String((cause as any).message) : null;
+    const stackText = error instanceof Error && error.stack ? error.stack.split("\n").slice(0, 3).join(" | ") : null;
+    throw new Error(`FRED request failed (${params.fredSeriesId}): fetch_error=${error instanceof Error ? error.message : String(error)}${causeText ? ` cause=${causeText}` : ""}${stackText ? ` stack=${stackText}` : ""} request=${safeRequestTarget} observation_start=${observationStart} observation_end=${observationEnd}`);
   }
   if (!response.ok) {
     const body = await response.text();

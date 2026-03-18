@@ -80,6 +80,19 @@ function buildStableUrl(path: string, query: Record<string, string | number | nu
   return `${FMP_STABLE_BASE_URL}/${path.replace(/^\/+/, "")}?${search.toString()}`;
 }
 
+
+function toSafeFmpUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has("apikey")) {
+      parsed.searchParams.set("apikey", "***");
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 function parseRetryAfterMs(value: string | null): number | null {
   if (!value) {
     return null;
@@ -116,23 +129,39 @@ type FmpRequestOptions = {
 
 export async function fmpFetchJson<T>(url: string, options: FmpRequestOptions = {}): Promise<T> {
   const endpointForLogs = options.endpointForLogs ?? new URL(url).pathname;
-  const debugEnabled = process.env.FMP_DEBUG === "1" || process.env.FMP_DEBUG === "true";
+  const safeUrl = toSafeFmpUrl(url);
+  const debugEnabled = process.env.FMP_DEBUG === "1" || process.env.FMP_DEBUG === "true" || process.env.MACRO_INGEST_DEBUG === "1" || process.env.MACRO_INGEST_DEBUG === "true";
 
   for (let attempt = 1; attempt <= FMP_MAX_RETRIES + 1; attempt += 1) {
-    const response = await withFmpLimiter(async (waitMs) => {
-      const resp = await fetch(url);
-      if (debugEnabled) {
-        console.info("[fmp]", { endpoint: endpointForLogs, waitMs, attempt, status: resp.status });
-      }
-      return resp;
-    });
+    let response: Response;
+    try {
+      response = await withFmpLimiter(async (waitMs) => {
+        if (debugEnabled) {
+          console.info("[fmp:request]", { endpoint: endpointForLogs, waitMs, attempt, url: safeUrl, apiKeyPresent: Boolean(process.env.FMP_API_KEY) });
+        }
+        const resp = await fetch(url);
+        if (debugEnabled) {
+          console.info("[fmp:response]", { endpoint: endpointForLogs, attempt, status: resp.status, url: safeUrl });
+        }
+        return resp;
+      });
+    } catch (error) {
+      const cause = (error as any)?.cause;
+      const causeText = cause && typeof cause === "object" && "message" in cause ? String((cause as any).message) : null;
+      throw new Error(`FMP request fetch failed (${endpointForLogs}): ${error instanceof Error ? error.message : String(error)}${causeText ? ` | cause=${causeText}` : ""} | url=${safeUrl}`);
+    }
 
     if (response.ok) {
       return (await response.json()) as T;
     }
 
+    const body = await response.text();
+    if (debugEnabled) {
+      console.info("[fmp:response-body]", { endpoint: endpointForLogs, attempt, status: response.status, bodyPreview: body.slice(0, 400), url: safeUrl });
+    }
+
     if (response.status !== 429 || attempt > FMP_MAX_RETRIES) {
-      throw new Error(`FMP request failed (${endpointForLogs}): ${response.status}`);
+      throw new Error(`FMP request failed (${endpointForLogs}): ${response.status} body=${body.slice(0, 400)} | url=${safeUrl}`);
     }
 
     const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
@@ -141,7 +170,7 @@ export async function fmpFetchJson<T>(url: string, options: FmpRequestOptions = 
     await new Promise((resolve) => setTimeout(resolve, backoffMs + jitterMs));
   }
 
-  throw new Error(`FMP request failed (${endpointForLogs}): 429`);
+  throw new Error(`FMP request failed (${endpointForLogs}): 429 | url=${safeUrl}`);
 }
 
 export async function fetchStatement(
