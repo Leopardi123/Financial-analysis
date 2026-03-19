@@ -23,6 +23,25 @@ type RebuildStageMetric = {
   notes?: string;
 };
 
+function summarizeStageDiagnostics(stages: RebuildStageMetric[]) {
+  const completed = stages.filter((row) => row.status === "end");
+  const errored = stages.filter((row) => row.status === "error");
+  const lastCompletedStage = completed.length > 0 ? completed[completed.length - 1].stage : null;
+  const failingStage = errored.length > 0 ? errored[errored.length - 1].stage : null;
+  const stageTimings = stages
+    .filter((row) => row.status === "end" || row.status === "error")
+    .map((row) => ({ stage: row.stage, ms: row.ms ?? null, ok: row.status === "end" }));
+  const stageSizes = stages
+    .filter((row) => typeof row.bytes === "number")
+    .map((row) => ({ stage: row.stage, approxBytes: row.bytes ?? null }));
+  return {
+    lastCompletedStage,
+    failingStage,
+    stageTimings,
+    stageSizes,
+  };
+}
+
 function jsonBytes(value: unknown) {
   try { return Buffer.byteLength(JSON.stringify(value ?? null)); } catch { return null; }
 }
@@ -169,297 +188,332 @@ async function getRegionalSnapshotInputDebug() {
 async function rebuildRegion(region: typeof REGIONS[number]) {
   const startedAt = new Date().toISOString();
   const stageMetrics: RebuildStageMetric[] = [];
-  const rawDebug = await getRawDataDebug(region);
   const attemptedOutputKey = `macro_latest_read_cache:${region}`;
-  console.info("[admin-rebuild-macro-snapshot:data-source]", rawDebug);
-  if (!rawDebug.dataFound) {
-    const error = new Error(`Load failed: no stored raw datapoints for ${region}.`);
-    (error as Error & { status?: number; debug?: unknown }).status = 409;
-    (error as Error & { status?: number; debug?: unknown }).debug = {
-      region,
-      attemptedInputKey: rawDebug.attemptedKey,
-      attemptedOutputKey,
-      inputFound: false,
-      inputShape: "macro_raw_datapoints rows",
-      recordCount: rawDebug.recordCount,
-      dataTimestamp: rawDebug.dataTimestamp,
-      failedStage: "load_input",
-    };
-    throw error;
-  }
-
-  let summary: Awaited<ReturnType<typeof runAndPersistMacroSnapshots>>;
   try {
-    summary = await runStage(stageMetrics, "persist_snapshot_inputs", () => runAndPersistMacroSnapshots({ region }));
-  } catch (cause) {
-    const error = new Error(`Load failed: could not build snapshot inputs for ${region}.`);
-    (error as Error & { status?: number; debug?: unknown; cause?: unknown }).status = 500;
-    (error as Error & { status?: number; debug?: unknown; cause?: unknown }).cause = cause;
-    (error as Error & { status?: number; debug?: unknown; cause?: unknown }).debug = {
-      region,
-      attemptedInputKey: rawDebug.attemptedKey,
-      attemptedOutputKey,
-      inputFound: true,
-      inputShape: "macro_raw_datapoints rows",
-      recordCount: rawDebug.recordCount,
-      dataTimestamp: rawDebug.dataTimestamp,
-      failedStage: "build_snapshot",
+    const rawDebug = await runStage(stageMetrics, "load_latest_source_snapshot_input", () => getRawDataDebug(region), (value) => jsonBytes(value));
+    console.info("[admin-rebuild-macro-snapshot:data-source]", rawDebug);
+    if (!rawDebug.dataFound) {
+      const error = new Error(`Load failed: no stored raw datapoints for ${region}.`);
+      (error as Error & { status?: number; debug?: unknown }).status = 409;
+      (error as Error & { status?: number; debug?: unknown }).debug = {
+        region,
+        attemptedInputKey: rawDebug.attemptedKey,
+        attemptedOutputKey,
+        inputFound: false,
+        inputShape: "macro_raw_datapoints rows",
+        recordCount: rawDebug.recordCount,
+        dataTimestamp: rawDebug.dataTimestamp,
+        failedStage: "load_input",
+      };
+      throw error;
+    }
+
+    let summary: Awaited<ReturnType<typeof runAndPersistMacroSnapshots>>;
+    try {
+      summary = await runStage(stageMetrics, "load_history_cache_input_and_persist_snapshot", () => runAndPersistMacroSnapshots({ region }));
+    } catch (cause) {
+      const error = new Error(`Load failed: could not build snapshot inputs for ${region}.`);
+      (error as Error & { status?: number; debug?: unknown; cause?: unknown }).status = 500;
+      (error as Error & { status?: number; debug?: unknown; cause?: unknown }).cause = cause;
+      (error as Error & { status?: number; debug?: unknown; cause?: unknown }).debug = {
+        region,
+        attemptedInputKey: rawDebug.attemptedKey,
+        attemptedOutputKey,
+        inputFound: true,
+        inputShape: "macro_raw_datapoints rows",
+        recordCount: rawDebug.recordCount,
+        dataTimestamp: rawDebug.dataTimestamp,
+        failedStage: "build_snapshot",
+      };
+      throw error;
+    }
+
+    if (summary.rawPointCount === 0 || !summary.asOfDate) {
+      const error = new Error(`Load failed: engine snapshot write had no scorable rows for ${region}.`);
+      (error as Error & { status?: number; debug?: unknown }).status = 409;
+      (error as Error & { status?: number; debug?: unknown }).debug = {
+        region,
+        attemptedInputKey: rawDebug.attemptedKey,
+        attemptedOutputKey,
+        inputFound: true,
+        inputShape: "macro_raw_datapoints rows",
+        recordCount: rawDebug.recordCount,
+        dataTimestamp: rawDebug.dataTimestamp,
+        failedStage: "build_snapshot",
+        engineRawPointCount: summary.rawPointCount,
+        engineAsOfDate: summary.asOfDate ?? null,
+      };
+      throw error;
+    }
+
+    const snapshotBuildSubStages: RebuildStageMetric[] = [];
+    let snapshotPayload = await runStage(
       stageMetrics,
-    };
-    throw error;
-  }
+      "build_globalMacro_payload",
+      () => buildMacroLatestReadPayload(region, {
+        reportStage: (event) => {
+          snapshotBuildSubStages.push({
+            stage: `${event.stage}`,
+            status: event.status,
+            startedAt: new Date().toISOString(),
+            ms: event.ms,
+            bytes: event.bytes,
+          });
+        },
+      }),
+      (value) => jsonBytes(value),
+    );
+    const snapshotAsOf = (snapshotPayload as any)?.globalMacro?.regime?.asOfDate ?? summary.asOfDate ?? null;
+    let cacheUpdatedAt: string;
+    try {
+      cacheUpdatedAt = await runStage(
+        stageMetrics,
+        "serialize_write_snapshot",
+        () => upsertLatestMacroReadCache(region, snapshotAsOf, snapshotPayload),
+        (value) => Buffer.byteLength(String(value ?? "")),
+      );
+      snapshotPayload = null;
+    } catch (cause) {
+      const error = new Error(`Load failed: could not write latest snapshot cache for ${region}.`);
+      (error as Error & { status?: number; debug?: unknown; cause?: unknown }).status = 500;
+      (error as Error & { status?: number; debug?: unknown; cause?: unknown }).cause = cause;
+      (error as Error & { status?: number; debug?: unknown; cause?: unknown }).debug = {
+        region,
+        attemptedInputKey: rawDebug.attemptedKey,
+        attemptedOutputKey,
+        inputFound: true,
+        inputShape: "macro_raw_datapoints rows",
+        recordCount: rawDebug.recordCount,
+        dataTimestamp: rawDebug.dataTimestamp,
+        failedStage: "write_snapshot",
+        snapshotBuildSubStages,
+      };
+      throw error;
+    }
 
-  if (summary.rawPointCount === 0 || !summary.asOfDate) {
-    const error = new Error(`Load failed: engine snapshot write had no scorable rows for ${region}.`);
-    (error as Error & { status?: number; debug?: unknown }).status = 409;
-    (error as Error & { status?: number; debug?: unknown }).debug = {
+    const monthlyWrites: Array<{ rangeYears: 10 | 20 | "MAX"; points: number }> = [];
+    for (const rangeYears of MONTHLY_HISTORY_RANGES) {
+      let historyPayload: any = await runStage(
+        stageMetrics,
+        `build_macroHistory_payload:MONTHLY:${String(rangeYears)}`,
+        () => computeMacroRegimeHistory({ region, resolution: "MONTHLY", rangeYears }),
+        (value) => jsonBytes(value),
+      );
+      const compacted = compactHistoryPayloadForCache(historyPayload);
+      historyPayload = null;
+      await runStage(
+        stageMetrics,
+        `serialize_write_macroHistory:MONTHLY:${String(rangeYears)}`,
+        () => upsertMacroHistoryReadCache({ region, resolution: "MONTHLY", rangeYears, payload: compacted }),
+        () => jsonBytes(compacted),
+      );
+      monthlyWrites.push({ rangeYears, points: compacted.points?.length ?? 0 });
+    }
+
+    const weeklyWrites: Array<{ rangeYears: 1 | 3 | 5; points: number }> = [];
+    for (const rangeYears of WEEKLY_HISTORY_RANGES) {
+      let historyPayload: any = await runStage(
+        stageMetrics,
+        `build_macroHistory_payload:WEEKLY:${String(rangeYears)}`,
+        () => computeMacroRegimeHistory({ region, resolution: "WEEKLY", rangeYears }),
+        (value) => jsonBytes(value),
+      );
+      const compacted = compactHistoryPayloadForCache(historyPayload);
+      historyPayload = null;
+      await runStage(
+        stageMetrics,
+        `serialize_write_macroHistory:WEEKLY:${String(rangeYears)}`,
+        () => upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears, payload: compacted }),
+        () => jsonBytes(compacted),
+      );
+      weeklyWrites.push({ rangeYears, points: compacted.points?.length ?? 0 });
+    }
+
+    return {
+      ok: true,
       region,
-      attemptedInputKey: rawDebug.attemptedKey,
-      attemptedOutputKey,
-      inputFound: true,
-      inputShape: "macro_raw_datapoints rows",
-      recordCount: rawDebug.recordCount,
-      dataTimestamp: rawDebug.dataTimestamp,
-      failedStage: "build_snapshot",
-      engineRawPointCount: summary.rawPointCount,
-      engineAsOfDate: summary.asOfDate ?? null,
-    };
-    throw error;
-  }
-
-  const snapshotBuildSubStages: RebuildStageMetric[] = [];
-  const snapshotPayload = await runStage(
-    stageMetrics,
-    "buildMacroLatestReadPayload",
-    () => buildMacroLatestReadPayload(region, {
-      reportStage: (event) => {
-        snapshotBuildSubStages.push({
-          stage: `${event.stage}`,
-          status: event.status,
-          startedAt: new Date().toISOString(),
-          ms: event.ms,
-          bytes: event.bytes,
-        });
+      startedAt,
+      endedAt: new Date().toISOString(),
+      mode: "rebuild_snapshot_no_ingest",
+      dataTimestamp: rawDebug.dataTimestamp ?? await getLatestRawDate(region),
+      snapshotAsOfDate: snapshotAsOf,
+      snapshotUpdatedAt: cacheUpdatedAt,
+      outputKey: attemptedOutputKey,
+      cacheWritten: true,
+      snapshotVersion: GLOBAL_MACRO_TEMPLATE.templateId,
+      note: "This does NOT fetch new data.",
+      writes: {
+        indicatorWrites: summary.indicatorWrites,
+        regimeWrites: summary.regimeWrites,
+        latestCacheKey: `macro_latest_read_cache:${region}`,
+        historyCacheKeys: [
+          ...monthlyWrites.map((row) => `macro_history_read_cache:${region}:MONTHLY:${String(row.rangeYears)}`),
+          ...weeklyWrites.map((row) => `macro_history_read_cache:${region}:WEEKLY:${String(row.rangeYears)}`),
+        ],
+        historyMonthly: monthlyWrites,
+        historyWeekly: weeklyWrites,
       },
-    }),
-    (value) => jsonBytes(value),
-  );
-  const snapshotAsOf = (snapshotPayload as any)?.globalMacro?.regime?.asOfDate ?? summary.asOfDate ?? null;
-  let cacheUpdatedAt: string;
-  try {
-    cacheUpdatedAt = await runStage(
-      stageMetrics,
-      "write_latest_snapshot_cache",
-      () => upsertLatestMacroReadCache(region, snapshotAsOf, snapshotPayload),
-      (value) => Buffer.byteLength(String(value ?? "")),
-    );
-  } catch (cause) {
-    const error = new Error(`Load failed: could not write latest snapshot cache for ${region}.`);
-    (error as Error & { status?: number; debug?: unknown; cause?: unknown }).status = 500;
-    (error as Error & { status?: number; debug?: unknown; cause?: unknown }).cause = cause;
-    (error as Error & { status?: number; debug?: unknown; cause?: unknown }).debug = {
+      diagnostics: {
+        snapshotBuildSubStages,
+        stageMetrics,
+        ...summarizeStageDiagnostics(stageMetrics),
+      },
+    };
+  } catch (error) {
+    const existingDebug = (error as Error & { debug?: Record<string, unknown> }).debug ?? {};
+    (error as Error & { debug?: unknown }).debug = {
+      ...existingDebug,
       region,
-      attemptedInputKey: rawDebug.attemptedKey,
-      attemptedOutputKey,
-      inputFound: true,
-      inputShape: "macro_raw_datapoints rows",
-      recordCount: rawDebug.recordCount,
-      dataTimestamp: rawDebug.dataTimestamp,
-      failedStage: "write_snapshot",
-      snapshotBuildSubStages,
+      outputKey: attemptedOutputKey,
       stageMetrics,
+      ...summarizeStageDiagnostics(stageMetrics),
     };
     throw error;
   }
-
-  const monthlyWrites: Array<{ rangeYears: 10 | 20 | "MAX"; points: number }> = [];
-  for (const rangeYears of MONTHLY_HISTORY_RANGES) {
-    const historyPayload = await runStage(
-      stageMetrics,
-      `macroHistory_build:MONTHLY:${String(rangeYears)}`,
-      () => computeMacroRegimeHistory({ region, resolution: "MONTHLY", rangeYears }),
-      (value) => jsonBytes(value),
-    );
-    const compacted = compactHistoryPayloadForCache(historyPayload);
-    await runStage(
-      stageMetrics,
-      `macroHistory_write:MONTHLY:${String(rangeYears)}`,
-      () => upsertMacroHistoryReadCache({ region, resolution: "MONTHLY", rangeYears, payload: compacted }),
-      () => jsonBytes(compacted),
-    );
-    monthlyWrites.push({ rangeYears, points: historyPayload.points.length });
-  }
-
-  const weeklyWrites: Array<{ rangeYears: 1 | 3 | 5; points: number }> = [];
-  for (const rangeYears of WEEKLY_HISTORY_RANGES) {
-    const historyPayload = await runStage(
-      stageMetrics,
-      `macroHistory_build:WEEKLY:${String(rangeYears)}`,
-      () => computeMacroRegimeHistory({ region, resolution: "WEEKLY", rangeYears }),
-      (value) => jsonBytes(value),
-    );
-    const compacted = compactHistoryPayloadForCache(historyPayload);
-    await runStage(
-      stageMetrics,
-      `macroHistory_write:WEEKLY:${String(rangeYears)}`,
-      () => upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears, payload: compacted }),
-      () => jsonBytes(compacted),
-    );
-    weeklyWrites.push({ rangeYears, points: historyPayload.points.length });
-  }
-
-  return {
-    ok: true,
-    region,
-    startedAt,
-    endedAt: new Date().toISOString(),
-    mode: "rebuild_snapshot_no_ingest",
-    dataTimestamp: rawDebug.dataTimestamp ?? await getLatestRawDate(region),
-    snapshotAsOfDate: snapshotAsOf,
-    snapshotUpdatedAt: cacheUpdatedAt,
-    outputKey: attemptedOutputKey,
-    cacheWritten: true,
-    snapshotVersion: GLOBAL_MACRO_TEMPLATE.templateId,
-    note: "This does NOT fetch new data.",
-    writes: {
-      indicatorWrites: summary.indicatorWrites,
-      regimeWrites: summary.regimeWrites,
-      latestCacheKey: `macro_latest_read_cache:${region}`,
-      historyCacheKeys: [
-        ...monthlyWrites.map((row) => `macro_history_read_cache:${region}:MONTHLY:${String(row.rangeYears)}`),
-        ...weeklyWrites.map((row) => `macro_history_read_cache:${region}:WEEKLY:${String(row.rangeYears)}`),
-      ],
-      historyMonthly: monthlyWrites,
-      historyWeekly: weeklyWrites,
-    },
-    diagnostics: {
-      snapshotBuildSubStages,
-      stageMetrics,
-    },
-  };
 }
 
 async function rebuildGlobal() {
   const startedAt = new Date().toISOString();
   const stageMetrics: RebuildStageMetric[] = [];
-  const snapshotInputDebug = await getRegionalSnapshotInputDebug();
   const attemptedOutputKey = "macro_latest_read_cache:GLOBAL";
-  if (!snapshotInputDebug.anyFound) {
-    const error = new Error("Load failed: no regional regime snapshots available for GLOBAL rebuild.");
-    (error as Error & { status?: number; debug?: unknown }).status = 409;
-    (error as Error & { status?: number; debug?: unknown }).debug = {
-      region: "GLOBAL",
-      attemptedInputKey: snapshotInputDebug.attemptedInputKey,
-      attemptedOutputKey,
-      inputFound: false,
-      inputShape: "macro_regime_snapshots rows by region",
-      perRegion: snapshotInputDebug.byRegion,
-      failedStage: "load_input",
-    };
-    throw error;
-  }
+  try {
+    const snapshotInputDebug = await runStage(
+      stageMetrics,
+      "load_latest_source_snapshot_input",
+      () => getRegionalSnapshotInputDebug(),
+      (value) => jsonBytes(value),
+    );
+    if (!snapshotInputDebug.anyFound) {
+      const error = new Error("Load failed: no regional regime snapshots available for GLOBAL rebuild.");
+      (error as Error & { status?: number; debug?: unknown }).status = 409;
+      (error as Error & { status?: number; debug?: unknown }).debug = {
+        region: "GLOBAL",
+        attemptedInputKey: snapshotInputDebug.attemptedInputKey,
+        attemptedOutputKey,
+        inputFound: false,
+        inputShape: "macro_regime_snapshots rows by region",
+        perRegion: snapshotInputDebug.byRegion,
+        failedStage: "load_input",
+      };
+      throw error;
+    }
 
-  const snapshotBuildSubStages: RebuildStageMetric[] = [];
-  const payload = await runStage(
-    stageMetrics,
-    "buildMacroLatestReadPayload",
-    () => buildMacroLatestReadPayload("GLOBAL", {
-      reportStage: (event) => {
-        snapshotBuildSubStages.push({
-          stage: `${event.stage}`,
-          status: event.status,
-          startedAt: new Date().toISOString(),
-          ms: event.ms,
-          bytes: event.bytes,
-        });
+    const snapshotBuildSubStages: RebuildStageMetric[] = [];
+    let payload = await runStage(
+      stageMetrics,
+      "build_globalMacro_payload",
+      () => buildMacroLatestReadPayload("GLOBAL", {
+        reportStage: (event) => {
+          snapshotBuildSubStages.push({
+            stage: `${event.stage}`,
+            status: event.status,
+            startedAt: new Date().toISOString(),
+            ms: event.ms,
+            bytes: event.bytes,
+          });
+        },
+      }),
+      (value) => jsonBytes(value),
+    );
+    const asOfDate = (payload as any)?.globalMacro?.regime?.asOfDate ?? null;
+    if (!asOfDate) {
+      const error = new Error("GLOBAL snapshot could not be rebuilt because regional snapshots are missing or stale.");
+      (error as Error & { status?: number; debug?: unknown }).status = 409;
+      (error as Error & { status?: number; debug?: unknown }).debug = {
+        region: "GLOBAL",
+        attemptedInputKey: snapshotInputDebug.attemptedInputKey,
+        attemptedOutputKey,
+        inputFound: true,
+        inputShape: "macro_regime_snapshots rows by region",
+        perRegion: snapshotInputDebug.byRegion,
+        failedStage: "build_snapshot",
+      };
+      throw error;
+    }
+    const snapshotUpdatedAt = await runStage(
+      stageMetrics,
+      "serialize_write_snapshot",
+      () => upsertLatestMacroReadCache("GLOBAL", asOfDate, payload),
+      (value) => Buffer.byteLength(String(value ?? "")),
+    );
+    payload = null;
+    const monthlyWrites: Array<{ rangeYears: 10 | 20 | "MAX"; points: number }> = [];
+    for (const rangeYears of MONTHLY_HISTORY_RANGES) {
+      let historyPayload: any = await runStage(
+        stageMetrics,
+        `build_macroHistory_payload:MONTHLY:${String(rangeYears)}`,
+        () => computeMacroRegimeHistory({ region: "GLOBAL", resolution: "MONTHLY", rangeYears }),
+        (value) => jsonBytes(value),
+      );
+      const compacted = compactHistoryPayloadForCache(historyPayload);
+      historyPayload = null;
+      await runStage(
+        stageMetrics,
+        `serialize_write_macroHistory:MONTHLY:${String(rangeYears)}`,
+        () => upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "MONTHLY", rangeYears, payload: compacted }),
+        () => jsonBytes(compacted),
+      );
+      monthlyWrites.push({ rangeYears, points: compacted.points?.length ?? 0 });
+    }
+
+    const weeklyWrites: Array<{ rangeYears: 1 | 3 | 5; points: number }> = [];
+    for (const rangeYears of WEEKLY_HISTORY_RANGES) {
+      let historyPayload: any = await runStage(
+        stageMetrics,
+        `build_macroHistory_payload:WEEKLY:${String(rangeYears)}`,
+        () => computeMacroRegimeHistory({ region: "GLOBAL", resolution: "WEEKLY", rangeYears }),
+        (value) => jsonBytes(value),
+      );
+      const compacted = compactHistoryPayloadForCache(historyPayload);
+      historyPayload = null;
+      await runStage(
+        stageMetrics,
+        `serialize_write_macroHistory:WEEKLY:${String(rangeYears)}`,
+        () => upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears, payload: compacted }),
+        () => jsonBytes(compacted),
+      );
+      weeklyWrites.push({ rangeYears, points: compacted.points?.length ?? 0 });
+    }
+
+    return {
+      ok: true,
+      region: "GLOBAL",
+      startedAt,
+      endedAt: new Date().toISOString(),
+      mode: "rebuild_snapshot_no_ingest",
+      dataTimestamp: asOfDate,
+      snapshotAsOfDate: asOfDate,
+      snapshotUpdatedAt,
+      outputKey: attemptedOutputKey,
+      cacheWritten: true,
+      snapshotVersion: GLOBAL_MACRO_TEMPLATE.templateId,
+      note: "This does NOT fetch new data.",
+      writes: {
+        latestCacheKey: "macro_latest_read_cache:GLOBAL",
+        historyCacheKeys: [
+          ...monthlyWrites.map((row) => `macro_history_read_cache:GLOBAL:MONTHLY:${String(row.rangeYears)}`),
+          ...weeklyWrites.map((row) => `macro_history_read_cache:GLOBAL:WEEKLY:${String(row.rangeYears)}`),
+        ],
+        historyMonthly: monthlyWrites,
+        historyWeekly: weeklyWrites,
       },
-    }),
-    (value) => jsonBytes(value),
-  );
-  const asOfDate = (payload as any)?.globalMacro?.regime?.asOfDate ?? null;
-  if (!asOfDate) {
-    const error = new Error("GLOBAL snapshot could not be rebuilt because regional snapshots are missing or stale.");
-    (error as Error & { status?: number; debug?: unknown }).status = 409;
-    (error as Error & { status?: number; debug?: unknown }).debug = {
+      diagnostics: {
+        snapshotBuildSubStages,
+        stageMetrics,
+        ...summarizeStageDiagnostics(stageMetrics),
+      },
+    };
+  } catch (error) {
+    const existingDebug = (error as Error & { debug?: Record<string, unknown> }).debug ?? {};
+    (error as Error & { debug?: unknown }).debug = {
+      ...existingDebug,
       region: "GLOBAL",
-      attemptedInputKey: snapshotInputDebug.attemptedInputKey,
-      attemptedOutputKey,
-      inputFound: true,
-      inputShape: "macro_regime_snapshots rows by region",
-      perRegion: snapshotInputDebug.byRegion,
-      failedStage: "build_snapshot",
+      outputKey: attemptedOutputKey,
+      stageMetrics,
+      ...summarizeStageDiagnostics(stageMetrics),
     };
     throw error;
   }
-  const snapshotUpdatedAt = await runStage(
-    stageMetrics,
-    "write_latest_snapshot_cache",
-    () => upsertLatestMacroReadCache("GLOBAL", asOfDate, payload),
-    (value) => Buffer.byteLength(String(value ?? "")),
-  );
-  const monthlyWrites: Array<{ rangeYears: 10 | 20 | "MAX"; points: number }> = [];
-  for (const rangeYears of MONTHLY_HISTORY_RANGES) {
-    const historyPayload = await runStage(
-      stageMetrics,
-      `macroHistory_build:MONTHLY:${String(rangeYears)}`,
-      () => computeMacroRegimeHistory({ region: "GLOBAL", resolution: "MONTHLY", rangeYears }),
-      (value) => jsonBytes(value),
-    );
-    const compacted = compactHistoryPayloadForCache(historyPayload);
-    await runStage(
-      stageMetrics,
-      `macroHistory_write:MONTHLY:${String(rangeYears)}`,
-      () => upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "MONTHLY", rangeYears, payload: compacted }),
-      () => jsonBytes(compacted),
-    );
-    monthlyWrites.push({ rangeYears, points: historyPayload.points.length });
-  }
-
-  const weeklyWrites: Array<{ rangeYears: 1 | 3 | 5; points: number }> = [];
-  for (const rangeYears of WEEKLY_HISTORY_RANGES) {
-    const historyPayload = await runStage(
-      stageMetrics,
-      `macroHistory_build:WEEKLY:${String(rangeYears)}`,
-      () => computeMacroRegimeHistory({ region: "GLOBAL", resolution: "WEEKLY", rangeYears }),
-      (value) => jsonBytes(value),
-    );
-    const compacted = compactHistoryPayloadForCache(historyPayload);
-    await runStage(
-      stageMetrics,
-      `macroHistory_write:WEEKLY:${String(rangeYears)}`,
-      () => upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears, payload: compacted }),
-      () => jsonBytes(compacted),
-    );
-    weeklyWrites.push({ rangeYears, points: historyPayload.points.length });
-  }
-
-  return {
-    ok: true,
-    region: "GLOBAL",
-    startedAt,
-    endedAt: new Date().toISOString(),
-    mode: "rebuild_snapshot_no_ingest",
-    dataTimestamp: asOfDate,
-    snapshotAsOfDate: asOfDate,
-    snapshotUpdatedAt,
-    outputKey: attemptedOutputKey,
-    cacheWritten: true,
-    snapshotVersion: GLOBAL_MACRO_TEMPLATE.templateId,
-    note: "This does NOT fetch new data.",
-    writes: {
-      latestCacheKey: "macro_latest_read_cache:GLOBAL",
-      historyCacheKeys: [
-        ...monthlyWrites.map((row) => `macro_history_read_cache:GLOBAL:MONTHLY:${String(row.rangeYears)}`),
-        ...weeklyWrites.map((row) => `macro_history_read_cache:GLOBAL:WEEKLY:${String(row.rangeYears)}`),
-      ],
-      historyMonthly: monthlyWrites,
-      historyWeekly: weeklyWrites,
-    },
-    diagnostics: {
-      snapshotBuildSubStages,
-      stageMetrics,
-    },
-  };
 }
 
 export default async function handler(req: any, res: any) {
