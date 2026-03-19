@@ -57,6 +57,32 @@ export type MacroTopDriver = {
   driverNote: string | null;
 };
 
+export type MacroRegimeProbability = {
+  primaryRegime: string;
+  primaryWeight: number;
+  decisiveness: number;
+  transitionLike: boolean;
+  distribution: Array<{ regime: string; weight: number }>;
+  narrative: { short: string; medium: string; long: string };
+  structuralAdjustment: { summary: string; multiplier: number; penalty: number };
+  supportingBlocks: string[];
+  supportingOverlays: string[];
+  contradictingOverlays: string[];
+  regimeMomentum: {
+    direction: "strengthening" | "weakening" | "stable" | "transitioning";
+    momentumScore: number;
+    primaryRegimeChange: "improving" | "deteriorating" | "stable";
+    driftTowardRegime: string | null;
+    changeDrivers: string[];
+    narrative: string;
+  };
+  overlayInfluence: {
+    primarySignal: "confirming" | "modulating" | "contradicting";
+    candidateSignals: Array<{ regime: string; signal: "confirming" | "modulating" | "contradicting" }>;
+    summary: string;
+  };
+};
+
 export type MacroRegimeSnapshot = {
   asOfDate: string;
   region: string;
@@ -75,6 +101,7 @@ export type MacroRegimeSnapshot = {
   clearSignalStrength: number | null;
   speculativeSignalStrength: number | null;
   topDrivers: MacroTopDriver[];
+  macroRegimeProbability?: MacroRegimeProbability | null;
   regimeExplanation: {
     title: string;
     summary: string;
