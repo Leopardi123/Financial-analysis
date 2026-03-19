@@ -1215,7 +1215,15 @@ async function getGoldSourceDiagnostics(region: string) {
   };
 }
 
-async function readLatestSnapshot(region: string, allowLiveFallback: boolean, uiOverlayKeysRequested: string[]) {
+type SnapshotBuildStageReporter = (event: {
+  region: string;
+  stage: "overlay_build" | "regime_probability_build" | "payload_assembly";
+  status: "start" | "end";
+  ms?: number;
+  bytes?: number;
+}) => void;
+
+async function readLatestSnapshot(region: string, allowLiveFallback: boolean, uiOverlayKeysRequested: string[], reportStage?: SnapshotBuildStageReporter) {
   const regimeRows = (await query(
     `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
@@ -1415,7 +1423,16 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
 
   const rawSeriesRows = await loadRawSeriesRows(region);
   const seriesMap = buildSeriesMap(rawSeriesRows);
+  const overlayStageStarted = Date.now();
+  reportStage?.({ region, stage: "overlay_build", status: "start" });
   const overlayBundle = buildRegionalOverlays(region as "US" | "EA" | "SE", regimeRow.as_of_date, seriesMap);
+  reportStage?.({
+    region,
+    stage: "overlay_build",
+    status: "end",
+    ms: Date.now() - overlayStageStarted,
+    bytes: Buffer.byteLength(JSON.stringify(overlayBundle ?? null)),
+  });
 
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
@@ -1460,7 +1477,36 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
     },
   });
 
-  return {
+  const regimeProbabilityStarted = Date.now();
+  reportStage?.({ region, stage: "regime_probability_build", status: "start" });
+  const macroRegimeProbability = (() => {
+    const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability;
+    if (persisted) return persisted;
+    return buildMacroRegimeProbabilityFromSnapshot({
+      macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
+      macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+      coreRegimeLabel: regimeRow.core_regime_label,
+      growthOverlay: regimeRow.growth_overlay,
+      stressOverlay: regimeRow.stress_overlay,
+      hardAssetOverlay: regimeRow.hard_asset_overlay,
+      blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
+        A_FISCAL: null,
+        B_MONETARY: null,
+        C_INFLATION: null,
+        D_CREDIBILITY: null,
+      }) as any,
+    });
+  })();
+  reportStage?.({
+    region,
+    stage: "regime_probability_build",
+    status: "end",
+    ms: Date.now() - regimeProbabilityStarted,
+    bytes: Buffer.byteLength(JSON.stringify(macroRegimeProbability ?? null)),
+  });
+
+  reportStage?.({ region, stage: "payload_assembly", status: "start" });
+  const assembledPayload = {
     regime: {
       asOfDate: regimeRow.as_of_date,
       blockScores: safeJsonParse<Record<string, number | null>>(regimeRow.block_scores_json, {
@@ -1599,30 +1645,20 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       rootCauseHints,
     },
     macroExplanation,
-    macroRegimeProbability: (() => {
-      const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability;
-      if (persisted) return persisted;
-      return buildMacroRegimeProbabilityFromSnapshot({
-        macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
-        macroConfidence: Number(regimeRow.macro_confidence ?? 0),
-        coreRegimeLabel: regimeRow.core_regime_label,
-        growthOverlay: regimeRow.growth_overlay,
-        stressOverlay: regimeRow.stress_overlay,
-        hardAssetOverlay: regimeRow.hard_asset_overlay,
-        blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
-          A_FISCAL: null,
-          B_MONETARY: null,
-          C_INFLATION: null,
-          D_CREDIBILITY: null,
-        }) as any,
-      });
-    })(),
+    macroRegimeProbability,
   };
+  reportStage?.({
+    region,
+    stage: "payload_assembly",
+    status: "end",
+    bytes: Buffer.byteLength(JSON.stringify(assembledPayload ?? null)),
+  });
+  return assembledPayload;
 }
 
 
-async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKeysRequested: string[]) {
-  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested)] as const));
+async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKeysRequested: string[], reportStage?: SnapshotBuildStageReporter) {
+  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested, reportStage)] as const));
   const regionalMap = Object.fromEntries(regionalSnapshots);
   const asOfDate = MACRO_REGIONS
     .map((region) => regionalMap[region]?.regime?.asOfDate ?? null)
@@ -1993,10 +2029,10 @@ function inspectRegimeProbabilityRichness(probability: any) {
   };
 }
 
-export async function buildMacroLatestReadPayload(region: string) {
+export async function buildMacroLatestReadPayload(region: string, options?: { reportStage?: SnapshotBuildStageReporter }) {
   if (region === "GLOBAL") {
     return {
-      globalMacro: await readLatestGlobalSnapshot(false, []),
+      globalMacro: await readLatestGlobalSnapshot(false, [], options?.reportStage),
       inflationAnalysis: null,
       metadata: {
         dataTimestamp: null,
@@ -2014,7 +2050,7 @@ export async function buildMacroLatestReadPayload(region: string) {
   ) as unknown as Array<{ latest_date: string | null }>;
   const dataTimestamp = latestRawRows[0]?.latest_date ?? null;
   return {
-    globalMacro: await readLatestSnapshot(region, false, []),
+    globalMacro: await readLatestSnapshot(region, false, [], options?.reportStage),
     inflationAnalysis: await loadInflationAnalysis(region as "US" | "EA" | "SE"),
     metadata: {
       dataTimestamp,

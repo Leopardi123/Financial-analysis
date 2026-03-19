@@ -13,6 +13,98 @@ const WEEKLY_HISTORY_RANGES: Array<1 | 3 | 5> = [1, 3, 5];
 
 type Region = typeof REGIONS[number] | "GLOBAL";
 
+type RebuildStageMetric = {
+  stage: string;
+  status: "start" | "end" | "error";
+  startedAt: string;
+  endedAt?: string;
+  ms?: number;
+  bytes?: number;
+  notes?: string;
+};
+
+function jsonBytes(value: unknown) {
+  try { return Buffer.byteLength(JSON.stringify(value ?? null)); } catch { return null; }
+}
+
+function trimDriverForHistory(driver: any) {
+  if (!driver || typeof driver !== "object") return driver;
+  return {
+    indicatorId: typeof driver.indicatorId === "string" ? driver.indicatorId : null,
+    title: typeof driver.title === "string" ? driver.title : null,
+    block: typeof driver.block === "string" ? driver.block : null,
+    direction: typeof driver.direction === "string" ? driver.direction : null,
+    contribution: typeof driver.contribution === "number" ? driver.contribution : null,
+  };
+}
+
+function compactHistoryPayloadForCache(payload: any) {
+  if (!payload || typeof payload !== "object") return payload;
+  const points = Array.isArray(payload.points)
+    ? payload.points.map((point: any) => ({
+      ...point,
+      topDrivers: Array.isArray(point?.topDrivers) ? point.topDrivers.slice(0, 3).map(trimDriverForHistory) : [],
+      regimeExplanation: point?.regimeExplanation && typeof point.regimeExplanation === "object"
+        ? {
+          title: typeof point.regimeExplanation.title === "string" ? point.regimeExplanation.title : "",
+          summary: typeof point.regimeExplanation.summary === "string" ? point.regimeExplanation.summary : "",
+          driverHighlights: Array.isArray(point.regimeExplanation.driverHighlights) ? point.regimeExplanation.driverHighlights.slice(0, 3) : [],
+        }
+        : point?.regimeExplanation ?? null,
+    }))
+    : [];
+  const regimeIntervals = Array.isArray(payload?.intervals?.regime)
+    ? payload.intervals.regime.map((interval: any) => ({
+      ...interval,
+      topDrivers: Array.isArray(interval?.topDrivers) ? interval.topDrivers.slice(0, 3).map(trimDriverForHistory) : [],
+      regimeExplanation: interval?.regimeExplanation && typeof interval.regimeExplanation === "object"
+        ? {
+          title: typeof interval.regimeExplanation.title === "string" ? interval.regimeExplanation.title : "",
+          summary: typeof interval.regimeExplanation.summary === "string" ? interval.regimeExplanation.summary : "",
+          driverHighlights: Array.isArray(interval.regimeExplanation.driverHighlights) ? interval.regimeExplanation.driverHighlights.slice(0, 3) : [],
+        }
+        : interval?.regimeExplanation ?? null,
+    }))
+    : [];
+  return {
+    ...payload,
+    points,
+    intervals: {
+      ...(payload.intervals ?? {}),
+      regime: regimeIntervals,
+      overlays: payload?.intervals?.overlays ?? { growth: [], stress: [], hardAsset: [] },
+    },
+  };
+}
+
+async function runStage<T>(stages: RebuildStageMetric[], stage: string, task: () => Promise<T> | T, bytesOf?: (value: T) => number | null) {
+  const startedAt = new Date().toISOString();
+  stages.push({ stage, status: "start", startedAt });
+  const startMs = Date.now();
+  try {
+    const out = await task();
+    stages.push({
+      stage,
+      status: "end",
+      startedAt,
+      endedAt: new Date().toISOString(),
+      ms: Date.now() - startMs,
+      bytes: bytesOf ? bytesOf(out) ?? undefined : undefined,
+    });
+    return out;
+  } catch (error) {
+    stages.push({
+      stage,
+      status: "error",
+      startedAt,
+      endedAt: new Date().toISOString(),
+      ms: Date.now() - startMs,
+      notes: (error as Error)?.message ?? "unknown_error",
+    });
+    throw error;
+  }
+}
+
 function parseRegion(input: unknown): Region | "ALL" {
   const value = String(input ?? "US").toUpperCase();
   if (value === "ALL") return "ALL";
@@ -76,6 +168,7 @@ async function getRegionalSnapshotInputDebug() {
 
 async function rebuildRegion(region: typeof REGIONS[number]) {
   const startedAt = new Date().toISOString();
+  const stageMetrics: RebuildStageMetric[] = [];
   const rawDebug = await getRawDataDebug(region);
   const attemptedOutputKey = `macro_latest_read_cache:${region}`;
   console.info("[admin-rebuild-macro-snapshot:data-source]", rawDebug);
@@ -97,7 +190,7 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
 
   let summary: Awaited<ReturnType<typeof runAndPersistMacroSnapshots>>;
   try {
-    summary = await runAndPersistMacroSnapshots({ region });
+    summary = await runStage(stageMetrics, "persist_snapshot_inputs", () => runAndPersistMacroSnapshots({ region }));
   } catch (cause) {
     const error = new Error(`Load failed: could not build snapshot inputs for ${region}.`);
     (error as Error & { status?: number; debug?: unknown; cause?: unknown }).status = 500;
@@ -111,6 +204,7 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
       recordCount: rawDebug.recordCount,
       dataTimestamp: rawDebug.dataTimestamp,
       failedStage: "build_snapshot",
+      stageMetrics,
     };
     throw error;
   }
@@ -133,11 +227,32 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
     throw error;
   }
 
-  const snapshotPayload = await buildMacroLatestReadPayload(region);
+  const snapshotBuildSubStages: RebuildStageMetric[] = [];
+  const snapshotPayload = await runStage(
+    stageMetrics,
+    "buildMacroLatestReadPayload",
+    () => buildMacroLatestReadPayload(region, {
+      reportStage: (event) => {
+        snapshotBuildSubStages.push({
+          stage: `${event.stage}`,
+          status: event.status,
+          startedAt: new Date().toISOString(),
+          ms: event.ms,
+          bytes: event.bytes,
+        });
+      },
+    }),
+    (value) => jsonBytes(value),
+  );
   const snapshotAsOf = (snapshotPayload as any)?.globalMacro?.regime?.asOfDate ?? summary.asOfDate ?? null;
   let cacheUpdatedAt: string;
   try {
-    cacheUpdatedAt = await upsertLatestMacroReadCache(region, snapshotAsOf, snapshotPayload);
+    cacheUpdatedAt = await runStage(
+      stageMetrics,
+      "write_latest_snapshot_cache",
+      () => upsertLatestMacroReadCache(region, snapshotAsOf, snapshotPayload),
+      (value) => Buffer.byteLength(String(value ?? "")),
+    );
   } catch (cause) {
     const error = new Error(`Load failed: could not write latest snapshot cache for ${region}.`);
     (error as Error & { status?: number; debug?: unknown; cause?: unknown }).status = 500;
@@ -151,22 +266,46 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
       recordCount: rawDebug.recordCount,
       dataTimestamp: rawDebug.dataTimestamp,
       failedStage: "write_snapshot",
+      snapshotBuildSubStages,
+      stageMetrics,
     };
     throw error;
   }
 
   const monthlyWrites: Array<{ rangeYears: 10 | 20 | "MAX"; points: number }> = [];
   for (const rangeYears of MONTHLY_HISTORY_RANGES) {
-    const payload = await computeMacroRegimeHistory({ region, resolution: "MONTHLY", rangeYears });
-    await upsertMacroHistoryReadCache({ region, resolution: "MONTHLY", rangeYears, payload });
-    monthlyWrites.push({ rangeYears, points: payload.points.length });
+    const historyPayload = await runStage(
+      stageMetrics,
+      `macroHistory_build:MONTHLY:${String(rangeYears)}`,
+      () => computeMacroRegimeHistory({ region, resolution: "MONTHLY", rangeYears }),
+      (value) => jsonBytes(value),
+    );
+    const compacted = compactHistoryPayloadForCache(historyPayload);
+    await runStage(
+      stageMetrics,
+      `macroHistory_write:MONTHLY:${String(rangeYears)}`,
+      () => upsertMacroHistoryReadCache({ region, resolution: "MONTHLY", rangeYears, payload: compacted }),
+      () => jsonBytes(compacted),
+    );
+    monthlyWrites.push({ rangeYears, points: historyPayload.points.length });
   }
 
   const weeklyWrites: Array<{ rangeYears: 1 | 3 | 5; points: number }> = [];
   for (const rangeYears of WEEKLY_HISTORY_RANGES) {
-    const payload = await computeMacroRegimeHistory({ region, resolution: "WEEKLY", rangeYears });
-    await upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears, payload });
-    weeklyWrites.push({ rangeYears, points: payload.points.length });
+    const historyPayload = await runStage(
+      stageMetrics,
+      `macroHistory_build:WEEKLY:${String(rangeYears)}`,
+      () => computeMacroRegimeHistory({ region, resolution: "WEEKLY", rangeYears }),
+      (value) => jsonBytes(value),
+    );
+    const compacted = compactHistoryPayloadForCache(historyPayload);
+    await runStage(
+      stageMetrics,
+      `macroHistory_write:WEEKLY:${String(rangeYears)}`,
+      () => upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears, payload: compacted }),
+      () => jsonBytes(compacted),
+    );
+    weeklyWrites.push({ rangeYears, points: historyPayload.points.length });
   }
 
   return {
@@ -193,11 +332,16 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
       historyMonthly: monthlyWrites,
       historyWeekly: weeklyWrites,
     },
+    diagnostics: {
+      snapshotBuildSubStages,
+      stageMetrics,
+    },
   };
 }
 
 async function rebuildGlobal() {
   const startedAt = new Date().toISOString();
+  const stageMetrics: RebuildStageMetric[] = [];
   const snapshotInputDebug = await getRegionalSnapshotInputDebug();
   const attemptedOutputKey = "macro_latest_read_cache:GLOBAL";
   if (!snapshotInputDebug.anyFound) {
@@ -215,7 +359,23 @@ async function rebuildGlobal() {
     throw error;
   }
 
-  const payload = await buildMacroLatestReadPayload("GLOBAL");
+  const snapshotBuildSubStages: RebuildStageMetric[] = [];
+  const payload = await runStage(
+    stageMetrics,
+    "buildMacroLatestReadPayload",
+    () => buildMacroLatestReadPayload("GLOBAL", {
+      reportStage: (event) => {
+        snapshotBuildSubStages.push({
+          stage: `${event.stage}`,
+          status: event.status,
+          startedAt: new Date().toISOString(),
+          ms: event.ms,
+          bytes: event.bytes,
+        });
+      },
+    }),
+    (value) => jsonBytes(value),
+  );
   const asOfDate = (payload as any)?.globalMacro?.regime?.asOfDate ?? null;
   if (!asOfDate) {
     const error = new Error("GLOBAL snapshot could not be rebuilt because regional snapshots are missing or stale.");
@@ -231,19 +391,46 @@ async function rebuildGlobal() {
     };
     throw error;
   }
-  const snapshotUpdatedAt = await upsertLatestMacroReadCache("GLOBAL", asOfDate, payload);
+  const snapshotUpdatedAt = await runStage(
+    stageMetrics,
+    "write_latest_snapshot_cache",
+    () => upsertLatestMacroReadCache("GLOBAL", asOfDate, payload),
+    (value) => Buffer.byteLength(String(value ?? "")),
+  );
   const monthlyWrites: Array<{ rangeYears: 10 | 20 | "MAX"; points: number }> = [];
   for (const rangeYears of MONTHLY_HISTORY_RANGES) {
-    const payload = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "MONTHLY", rangeYears });
-    await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "MONTHLY", rangeYears, payload });
-    monthlyWrites.push({ rangeYears, points: payload.points.length });
+    const historyPayload = await runStage(
+      stageMetrics,
+      `macroHistory_build:MONTHLY:${String(rangeYears)}`,
+      () => computeMacroRegimeHistory({ region: "GLOBAL", resolution: "MONTHLY", rangeYears }),
+      (value) => jsonBytes(value),
+    );
+    const compacted = compactHistoryPayloadForCache(historyPayload);
+    await runStage(
+      stageMetrics,
+      `macroHistory_write:MONTHLY:${String(rangeYears)}`,
+      () => upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "MONTHLY", rangeYears, payload: compacted }),
+      () => jsonBytes(compacted),
+    );
+    monthlyWrites.push({ rangeYears, points: historyPayload.points.length });
   }
 
   const weeklyWrites: Array<{ rangeYears: 1 | 3 | 5; points: number }> = [];
   for (const rangeYears of WEEKLY_HISTORY_RANGES) {
-    const payload = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "WEEKLY", rangeYears });
-    await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears, payload });
-    weeklyWrites.push({ rangeYears, points: payload.points.length });
+    const historyPayload = await runStage(
+      stageMetrics,
+      `macroHistory_build:WEEKLY:${String(rangeYears)}`,
+      () => computeMacroRegimeHistory({ region: "GLOBAL", resolution: "WEEKLY", rangeYears }),
+      (value) => jsonBytes(value),
+    );
+    const compacted = compactHistoryPayloadForCache(historyPayload);
+    await runStage(
+      stageMetrics,
+      `macroHistory_write:WEEKLY:${String(rangeYears)}`,
+      () => upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears, payload: compacted }),
+      () => jsonBytes(compacted),
+    );
+    weeklyWrites.push({ rangeYears, points: historyPayload.points.length });
   }
 
   return {
@@ -267,6 +454,10 @@ async function rebuildGlobal() {
       ],
       historyMonthly: monthlyWrites,
       historyWeekly: weeklyWrites,
+    },
+    diagnostics: {
+      snapshotBuildSubStages,
+      stageMetrics,
     },
   };
 }
