@@ -8,6 +8,7 @@ import { readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../li
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
 import { buildMacroExplanation } from "../../../lib/macro/explanationLayer.js";
+import { buildMacroRegimeProbabilityFromSnapshot } from "../../../lib/macro/regimeProbability.js";
 
 const REGIONAL_OVERLAY_KEYS = [
   "liquidityOverlay",
@@ -1598,7 +1599,24 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       rootCauseHints,
     },
     macroExplanation,
-    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability,
+    macroRegimeProbability: (() => {
+      const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability;
+      if (persisted) return persisted;
+      return buildMacroRegimeProbabilityFromSnapshot({
+        macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
+        macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+        coreRegimeLabel: regimeRow.core_regime_label,
+        growthOverlay: regimeRow.growth_overlay,
+        stressOverlay: regimeRow.stress_overlay,
+        hardAssetOverlay: regimeRow.hard_asset_overlay,
+        blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
+          A_FISCAL: null,
+          B_MONETARY: null,
+          C_INFLATION: null,
+          D_CREDIBILITY: null,
+        }) as any,
+      });
+    })(),
   };
 }
 
@@ -1716,7 +1734,15 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
     },
     macroExplanation,
-    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regime as any)?.macroRegimeProbability ?? null } }).macroRegimeProbability,
+    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regime as any)?.macroRegimeProbability ?? buildMacroRegimeProbabilityFromSnapshot({
+      macroScoreTotal: regime.macroScoreTotal,
+      macroConfidence: regime.macroConfidence,
+      coreRegimeLabel: regime.coreRegimeLabel,
+      growthOverlay: regime.growthOverlay,
+      stressOverlay: regime.stressOverlay,
+      hardAssetOverlay: regime.hardAssetOverlay,
+      blockScores: regime.blockScores as any,
+    }) } }).macroRegimeProbability,
   };
 }
 
@@ -2129,7 +2155,25 @@ export default async function handler(req: any, res: any) {
   const normalizedGlobalMacro = normalizeGlobalMacroPayload(globalMacroRaw);
   const globalMacroTrimmed = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
   const globalMacroHydrated = hydrateMacroExplanationFromSnapshot(globalMacroTrimmed, region);
-  const globalMacro = attachMacroRegimeProbability(globalMacroHydrated);
+  const globalMacroWithProbability = attachMacroRegimeProbability(globalMacroHydrated);
+  const globalMacro = globalMacroWithProbability?.macroRegimeProbability
+    ? globalMacroWithProbability
+    : (() => {
+      const regimeAny = (globalMacroWithProbability as any)?.regime;
+      if (!regimeAny || typeof regimeAny !== "object") return globalMacroWithProbability;
+      return {
+        ...globalMacroWithProbability,
+        macroRegimeProbability: buildMacroRegimeProbabilityFromSnapshot({
+          macroScoreTotal: typeof regimeAny.macroScoreTotal === "number" ? regimeAny.macroScoreTotal : null,
+          macroConfidence: typeof regimeAny.macroConfidence === "number" ? regimeAny.macroConfidence : 0,
+          coreRegimeLabel: typeof regimeAny.coreRegimeLabel === "string" ? regimeAny.coreRegimeLabel : "DataInsufficient",
+          growthOverlay: typeof regimeAny.growthOverlay === "string" ? regimeAny.growthOverlay : "Neutral",
+          stressOverlay: typeof regimeAny.stressOverlay === "string" ? regimeAny.stressOverlay : "Low",
+          hardAssetOverlay: typeof regimeAny.hardAssetOverlay === "string" ? regimeAny.hardAssetOverlay : "Neutral",
+          blockScores: (regimeAny.blockScores ?? {}) as any,
+        }),
+      };
+    })();
 
   const inflationAnalysis = snapshotPayload && "inflationAnalysis" in snapshotPayload
     ? snapshotPayload.inflationAnalysis
