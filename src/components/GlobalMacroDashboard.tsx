@@ -1538,7 +1538,7 @@ Signal: ${gapLabel}`,
         payload,
       });
       if (!response.ok) {
-        throw new Error(String((payload as any)?.error ?? "Snapshot rebuild failed"));
+        return;
       }
       await loadGlobalMacro();
     } catch (error) {
@@ -1611,8 +1611,11 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12, marginBottom: 6, background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 6, padding: "6px 8px" }}>
                     <strong>Snapshot diagnostics:</strong> asOf {String(readDiagnostics?.snapshotAsOfDate ?? (globalMacro as any)?.regime?.asOfDate ?? "—")} ·
                     updatedAt {String(readDiagnostics?.snapshotUpdatedAt ?? "—")} ·
+                    cacheOnlyRead {String(readDiagnostics?.cacheOnlyRead ?? "—")} ·
+                    cache hit {String(readDiagnostics?.snapshotCacheHit ?? "—")} ·
                     source {String(readDiagnostics?.snapshotSource ?? readDiagnostics?.readMode ?? "—")} ·
                     cache key {String(readDiagnostics?.snapshotCacheKey ?? "—")} ·
+                    routeMs {String(readDiagnostics?.routeDurationMs ?? "—")} ·
                     stale-vs-data {String(readDiagnostics?.snapshotStaleVsUnderlyingData ?? "unknown")} ·
                     dataTimestamp {String(readDiagnostics?.dataTimestamp ?? "—")} ·
                     richness {(typeof readDiagnostics?.regimeProbabilityRichness?.presentFieldCount === "number" ? readDiagnostics.regimeProbabilityRichness.presentFieldCount : 0)}/{(typeof readDiagnostics?.regimeProbabilityRichness?.expectedFieldCount === "number" ? readDiagnostics.regimeProbabilityRichness.expectedFieldCount : expectedRegimeFields.length)}
@@ -1621,6 +1624,7 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12 }}>Structural adjustment: {String(regimeProbabilityAny?.structuralAdjustment?.summary ?? "none")} · multiplier {typeof regimeProbabilityAny?.structuralAdjustment?.multiplier === "number" ? regimeProbabilityAny.structuralAdjustment.multiplier.toFixed(2) : "—"} · penalty {typeof regimeProbabilityAny?.structuralAdjustment?.penalty === "number" ? regimeProbabilityAny.structuralAdjustment.penalty.toFixed(2) : "—"}</div>
                   <div style={{ fontSize: 12 }}>Supporting blocks: {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Supporting overlays: {Array.isArray(regimeProbabilityAny?.supportingOverlays) && regimeProbabilityAny.supportingOverlays.length ? regimeProbabilityAny.supportingOverlays.join(", ") : "—"}</div>
+                  <div style={{ fontSize: 12 }}>Modulating overlays: {Array.isArray(regimeProbabilityAny?.modulatingOverlays) && regimeProbabilityAny.modulatingOverlays.length ? regimeProbabilityAny.modulatingOverlays.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Contradicting overlays: {Array.isArray(regimeProbabilityAny?.contradictingOverlays) && regimeProbabilityAny.contradictingOverlays.length ? regimeProbabilityAny.contradictingOverlays.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Momentum: {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} {regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ? `→ ${regimeProbabilityAny.regimeMomentum.driftTowardRegime}` : ""} · score {typeof regimeProbabilityAny?.regimeMomentum?.momentumScore === "number" ? regimeProbabilityAny.regimeMomentum.momentumScore.toFixed(1) : "—"} · primary change {String(regimeProbabilityAny?.regimeMomentum?.primaryRegimeChange ?? "—")}</div>
                   <div style={{ fontSize: 12 }}>Momentum drivers: {Array.isArray(regimeProbabilityAny?.regimeMomentum?.changeDrivers) && regimeProbabilityAny.regimeMomentum.changeDrivers.length ? regimeProbabilityAny.regimeMomentum.changeDrivers.join(", ") : "—"}</div>

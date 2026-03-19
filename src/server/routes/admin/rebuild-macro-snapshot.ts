@@ -29,12 +29,46 @@ async function getLatestRawDate(region: string) {
   return rows[0]?.latest_date ?? null;
 }
 
+async function getRawDataDebug(region: string) {
+  const attemptedKey = `macro_raw_datapoints:${region}:source_type=auto`;
+  const rows = await query(
+    `SELECT COUNT(*) AS record_count, MAX(date) AS latest_date
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto'`,
+    [region],
+  ) as unknown as Array<{ record_count: number | string; latest_date: string | null }>;
+  const row = rows[0] ?? { record_count: 0, latest_date: null };
+  const recordCount = Number(row.record_count ?? 0);
+  const dataTimestamp = row.latest_date ?? null;
+  return {
+    region,
+    attemptedKey,
+    dataFound: recordCount > 0,
+    recordCount,
+    dataTimestamp,
+  };
+}
+
 async function rebuildRegion(region: typeof REGIONS[number]) {
   const startedAt = new Date().toISOString();
+  const rawDebug = await getRawDataDebug(region);
+  console.info("[admin-rebuild-macro-snapshot:data-source]", rawDebug);
+  if (!rawDebug.dataFound) {
+    const error = new Error(`Load failed: no stored raw datapoints for ${region}.`);
+    (error as Error & { status?: number; debug?: unknown }).status = 409;
+    (error as Error & { status?: number; debug?: unknown }).debug = rawDebug;
+    throw error;
+  }
+
   const summary = await runAndPersistMacroSnapshots({ region });
   if (summary.rawPointCount === 0 || !summary.asOfDate) {
-    const error = new Error(`No stored macro raw data available for ${region}. Rebuild requires existing data and does NOT fetch ingest.`);
-    (error as Error & { status?: number }).status = 409;
+    const error = new Error(`Load failed: engine snapshot write had no scorable rows for ${region}.`);
+    (error as Error & { status?: number; debug?: unknown }).status = 409;
+    (error as Error & { status?: number; debug?: unknown }).debug = {
+      ...rawDebug,
+      engineRawPointCount: summary.rawPointCount,
+      engineAsOfDate: summary.asOfDate ?? null,
+    };
     throw error;
   }
 
@@ -48,11 +82,12 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
   await upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears: 3, payload: weekly3 });
 
   return {
+    ok: true,
     region,
     startedAt,
     endedAt: new Date().toISOString(),
     mode: "rebuild_snapshot_no_ingest",
-    dataTimestamp: await getLatestRawDate(region),
+    dataTimestamp: rawDebug.dataTimestamp ?? await getLatestRawDate(region),
     snapshotAsOfDate: snapshotAsOf,
     snapshotUpdatedAt: cacheUpdatedAt,
     snapshotVersion: GLOBAL_MACRO_TEMPLATE.templateId,
@@ -82,6 +117,7 @@ async function rebuildGlobal() {
   await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears: 3, payload: weekly3 });
 
   return {
+    ok: true,
     region: "GLOBAL",
     startedAt,
     endedAt: new Date().toISOString(),
@@ -139,6 +175,12 @@ export default async function handler(req: any, res: any) {
     });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;
-    res.status(status).json({ ok: false, error: (error as Error).message, note: "No ingest fallback was attempted." });
+    const debug = (error as Error & { debug?: unknown }).debug ?? null;
+    res.status(status).json({
+      ok: false,
+      error: (error as Error).message,
+      note: "No ingest fallback was attempted.",
+      debug,
+    });
   }
 }
