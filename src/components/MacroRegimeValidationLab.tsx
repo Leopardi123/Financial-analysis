@@ -622,6 +622,13 @@ export default function MacroRegimeValidationLab() {
                 <ul>
                   {labRegimeDistribution.map((row) => <li key={`lab-regime-${row.regime}`}>{row.regime}: {typeof row.weight === "number" ? `${row.weight}%` : "—"}</li>)}
                 </ul>
+                <div style={{ fontSize: 12, marginBottom: 4 }}><strong>Candidate breakdown + overlay influence</strong></div>
+                <ul>
+                  {labRegimeDistribution.map((row) => {
+                    const signal = (labRegimeProbability.overlayInfluence?.candidateSignals ?? []).find((candidate) => candidate.regime === row.regime)?.signal ?? "—";
+                    return <li key={`lab-regime-candidate-signal-${row.regime}`}>{row.regime}: weight {typeof row.weight === "number" ? `${row.weight}%` : "—"} · overlay signal {signal}</li>;
+                  })}
+                </ul>
                 <div style={{ fontSize: 12 }}>Supporting blocks: {(labRegimeProbability.supportingBlocks ?? []).join(", ") || "—"}</div>
                 <div style={{ fontSize: 12 }}>Supporting overlays: {(labRegimeProbability.supportingOverlays ?? []).join(", ") || "—"}</div>
                 <div style={{ fontSize: 12 }}>Contradicting overlays: {(labRegimeProbability.contradictingOverlays ?? []).join(", ") || "—"}</div>
@@ -634,6 +641,7 @@ export default function MacroRegimeValidationLab() {
                 <div style={{ fontSize: 12, marginTop: 4 }}>Narrative short: {labRegimeProbability.narrative?.short ?? "—"}</div>
                 <div style={{ fontSize: 12 }}>Narrative medium: {labRegimeProbability.narrative?.medium ?? "—"}</div>
                 <div style={{ fontSize: 12 }}>Narrative long: {labRegimeProbability.narrative?.long ?? "—"}</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Rendered in Macro Lab: primary regime/weights, full distribution, per-candidate overlay signal, supporting/contradicting overlays, structural adjustment details, momentum breakdown, change drivers, overlay influence summary, medium + long narratives.</div>
               </details>
             </div>
           ) : (

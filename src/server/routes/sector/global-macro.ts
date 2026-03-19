@@ -2124,6 +2124,60 @@ function trimSnapshotForNormalRead(snapshot: any, debugEnabled: boolean) {
   return clone;
 }
 
+function inspectRegimeProbabilityRichness(probability: any) {
+  const expectedFieldPaths = [
+    "primaryRegime",
+    "primaryWeight",
+    "decisiveness",
+    "transitionLike",
+    "distribution",
+    "narrative.short",
+    "narrative.medium",
+    "narrative.long",
+    "structuralAdjustment.summary",
+    "structuralAdjustment.multiplier",
+    "structuralAdjustment.penalty",
+    "supportingBlocks",
+    "supportingOverlays",
+    "contradictingOverlays",
+    "regimeMomentum.direction",
+    "regimeMomentum.momentumScore",
+    "regimeMomentum.primaryRegimeChange",
+    "regimeMomentum.driftTowardRegime",
+    "regimeMomentum.changeDrivers",
+    "regimeMomentum.narrative",
+    "overlayInfluence.primarySignal",
+    "overlayInfluence.candidateSignals",
+    "overlayInfluence.summary",
+  ] as const;
+
+  const hasPath = (path: string) => {
+    const parts = path.split(".");
+    let current: any = probability;
+    for (const part of parts) {
+      if (!current || typeof current !== "object" || !(part in current)) return false;
+      current = current[part];
+    }
+    if (Array.isArray(current)) return current.length > 0;
+    if (typeof current === "string") return current.trim().length > 0;
+    if (typeof current === "number") return Number.isFinite(current);
+    if (typeof current === "boolean") return true;
+    return current !== null && current !== undefined;
+  };
+
+  const presentFieldPaths = expectedFieldPaths.filter((path) => hasPath(path));
+  const missingFieldPaths = expectedFieldPaths.filter((path) => !hasPath(path));
+  return {
+    expectedFieldCount: expectedFieldPaths.length,
+    presentFieldCount: presentFieldPaths.length,
+    presentFieldPaths,
+    missingFieldPaths,
+    richnessPct: expectedFieldPaths.length > 0
+      ? Math.round((presentFieldPaths.length / expectedFieldPaths.length) * 100)
+      : 0,
+  };
+}
+
 export async function buildMacroLatestReadPayload(region: string) {
   if (region === "GLOBAL") {
     return {
@@ -2220,6 +2274,8 @@ export default async function handler(req: any, res: any) {
 
   const diagnostics = {
     readMode: "snapshot_cache_only",
+    snapshotSource: snapshotCache ? "macro_latest_read_cache" : "cache_missing",
+    snapshotCacheKey: `macro_latest_read_cache:${region}`,
     snapshotCacheHit: Boolean(snapshotCache),
     historyCacheHit: Boolean(historyCache),
     historyCacheExactRangeHit: historyRead.matchedRequestedRange,
@@ -2228,11 +2284,52 @@ export default async function handler(req: any, res: any) {
     snapshotReadMs,
     historyCacheReadMs: historyReadMs,
     payloadBytes: Buffer.byteLength(JSON.stringify({ globalMacro, macroHistory })),
+    snapshotAsOfDate: ((globalMacro as any)?.regime?.asOfDate ?? (snapshotCache?.asOfDate ?? null)) as string | null,
     snapshotUpdatedAt: snapshotCache?.updatedAt ?? null,
     historyUpdatedAt: historyCache?.updatedAt ?? null,
     snapshotPayloadValid: Boolean(normalizedGlobalMacro),
     historyPayloadValid: Boolean(historyCache?.payload && Array.isArray((historyCache.payload as any)?.points)),
+    regimeProbabilityRichness: inspectRegimeProbabilityRichness((globalMacro as any)?.macroRegimeProbability),
+    trimReport: {
+      trimSnapshotForNormalReadRemoves: ["debug", "overlayEngineDiagnostics", "overlayRuntimeProof", "overlayRoutingDiagnostics", "overlays[*].components[*].debug"],
+      normalizeMacroRegimeProbabilityCaps: {
+        supportingBlocks: 8,
+        supportingOverlays: 8,
+        contradictingOverlays: 8,
+        regimeMomentumChangeDrivers: 6,
+        overlayInfluenceCandidateSignals: 6,
+      },
+      notes: [
+        "No explicit trimming for narrative.medium / narrative.long.",
+        "No explicit trimming for structuralAdjustment.multiplier / structuralAdjustment.penalty.",
+        "modulatingOverlays is not a persisted payload field; modulation is represented under overlayInfluence.",
+      ],
+    },
   };
+
+  if (region !== "GLOBAL") {
+    try {
+      const latestRawRows = await query(
+        `SELECT MAX(date) AS latest_date
+         FROM ${tables.macroRawDatapoints}
+         WHERE region = ? AND source_type = 'auto'`,
+        [region],
+      ) as unknown as Array<{ latest_date: string | null }>;
+      const latestRawDate = latestRawRows[0]?.latest_date ?? null;
+      (diagnostics as any).dataTimestamp = latestRawDate;
+      (diagnostics as any).snapshotStaleVsUnderlyingData = Boolean(
+        latestRawDate
+        && (diagnostics as any).snapshotAsOfDate
+        && String((diagnostics as any).snapshotAsOfDate) < String(latestRawDate),
+      );
+    } catch {
+      (diagnostics as any).dataTimestamp = null;
+      (diagnostics as any).snapshotStaleVsUnderlyingData = null;
+    }
+  } else {
+    (diagnostics as any).dataTimestamp = null;
+    (diagnostics as any).snapshotStaleVsUnderlyingData = null;
+  }
 
   if (!snapshotCache || !historyCache || !normalizedGlobalMacro) {
     const historyMissingMessage = !historyCache

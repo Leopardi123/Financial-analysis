@@ -403,9 +403,11 @@ export default function GlobalMacroDashboard() {
   const [adminSecretInput, setAdminSecretInput] = useState("");
   const [cronSecretInput, setCronSecretInput] = useState("");
   const [cronRefreshRunning, setCronRefreshRunning] = useState(false);
+  const [rebuildSnapshotRunning, setRebuildSnapshotRunning] = useState(false);
   const [ingestRunResult, setIngestRunResult] = useState<Record<string, unknown> | null>(null);
   const [engineRunResult, setEngineRunResult] = useState<Record<string, unknown> | null>(null);
   const [cronRefreshResult, setCronRefreshResult] = useState<Record<string, unknown> | null>(null);
+  const [rebuildSnapshotResult, setRebuildSnapshotResult] = useState<Record<string, unknown> | null>(null);
   const [selectedRegimeInterval, setSelectedRegimeInterval] = useState<{
     coreRegimeLabel: string;
     startDate: string;
@@ -521,6 +523,46 @@ export default function GlobalMacroDashboard() {
     ];
   const regimeProbabilityAny = (globalMacro as any)?.macroRegimeProbability as any;
   const regimeProbabilityDistribution = Array.isArray(regimeProbabilityAny?.distribution) ? regimeProbabilityAny.distribution : [];
+  const readDiagnostics = ((globalMacroRaw as any)?.diagnostics ?? null) as any;
+  const expectedRegimeFields = [
+    "primaryRegime",
+    "primaryWeight",
+    "decisiveness",
+    "transitionLike",
+    "distribution",
+    "narrative.short",
+    "narrative.medium",
+    "narrative.long",
+    "structuralAdjustment.summary",
+    "structuralAdjustment.multiplier",
+    "structuralAdjustment.penalty",
+    "supportingBlocks",
+    "supportingOverlays",
+    "contradictingOverlays",
+    "regimeMomentum.direction",
+    "regimeMomentum.momentumScore",
+    "regimeMomentum.primaryRegimeChange",
+    "regimeMomentum.driftTowardRegime",
+    "regimeMomentum.changeDrivers",
+    "regimeMomentum.narrative",
+    "overlayInfluence.primarySignal",
+    "overlayInfluence.candidateSignals",
+    "overlayInfluence.summary",
+  ];
+  const compactRenderedRegimeFields = [
+    "primaryRegime",
+    "primaryWeight",
+    "decisiveness",
+    "transitionLike",
+    "distribution(top+full)",
+    "narrative.short/medium/long",
+    "structuralAdjustment.summary/multiplier/penalty",
+    "supportingBlocks",
+    "supportingOverlays",
+    "contradictingOverlays",
+    "regimeMomentum.direction/momentumScore/primaryRegimeChange/driftTowardRegime/changeDrivers/narrative",
+    "overlayInfluence.primarySignal/candidateSignals/summary",
+  ];
 
   const explanationAny = (globalMacro as any)?.macroExplanation as any;
   const explanationSummary = explanationAny && typeof explanationAny === "object" && explanationAny.summary && typeof explanationAny.summary === "object"
@@ -1469,6 +1511,50 @@ Signal: ${gapLabel}`,
     }
   }
 
+  async function rebuildSnapshotNoIngest() {
+    if (!adminSecretInput.trim()) {
+      setRebuildSnapshotResult({ ok: false, error: "Missing admin secret (x-admin-secret)." });
+      return;
+    }
+    setRebuildSnapshotRunning(true);
+    setRebuildSnapshotResult(null);
+    try {
+      const response = await fetch(`/api/admin/rebuild-macro-snapshot?region=${selectedRegion}`, {
+        cache: "no-store",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-secret": adminSecretInput.trim(),
+        },
+        body: JSON.stringify({ region: selectedRegion }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      setRebuildSnapshotResult({
+        status: response.status,
+        ok: response.ok,
+        region: selectedRegion,
+        timestamp: new Date().toISOString(),
+        note: "This does NOT fetch new data.",
+        payload,
+      });
+      if (!response.ok) {
+        throw new Error(String((payload as any)?.error ?? "Snapshot rebuild failed"));
+      }
+      await loadGlobalMacro();
+    } catch (error) {
+      setRebuildSnapshotResult({
+        status: 0,
+        ok: false,
+        region: selectedRegion,
+        timestamp: new Date().toISOString(),
+        note: "No ingest fallback was attempted.",
+        payload: { error: error instanceof Error ? error.message : "Unknown snapshot rebuild error" },
+      });
+    } finally {
+      setRebuildSnapshotRunning(false);
+    }
+  }
+
 
 
   return (
@@ -1522,6 +1608,15 @@ Signal: ${gapLabel}`,
                   </div>
                   <div style={{ fontSize: 12, marginBottom: 6 }}>Heuristic relative regime weights (not calibrated probabilities).</div>
                   <div style={{ fontSize: 12, marginBottom: 6 }}>Top candidates: {regimeProbabilityDistribution.slice(0, 3).map((row: any) => `${row?.regime ?? "?"} (${safePct(row?.weight)})`).join(" · ") || "—"}</div>
+                  <div style={{ fontSize: 12, marginBottom: 6, background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 6, padding: "6px 8px" }}>
+                    <strong>Snapshot diagnostics:</strong> asOf {String(readDiagnostics?.snapshotAsOfDate ?? (globalMacro as any)?.regime?.asOfDate ?? "—")} ·
+                    updatedAt {String(readDiagnostics?.snapshotUpdatedAt ?? "—")} ·
+                    source {String(readDiagnostics?.snapshotSource ?? readDiagnostics?.readMode ?? "—")} ·
+                    cache key {String(readDiagnostics?.snapshotCacheKey ?? "—")} ·
+                    stale-vs-data {String(readDiagnostics?.snapshotStaleVsUnderlyingData ?? "unknown")} ·
+                    dataTimestamp {String(readDiagnostics?.dataTimestamp ?? "—")} ·
+                    richness {(typeof readDiagnostics?.regimeProbabilityRichness?.presentFieldCount === "number" ? readDiagnostics.regimeProbabilityRichness.presentFieldCount : 0)}/{(typeof readDiagnostics?.regimeProbabilityRichness?.expectedFieldCount === "number" ? readDiagnostics.regimeProbabilityRichness.expectedFieldCount : expectedRegimeFields.length)}
+                  </div>
                   <p className="bread" style={{ marginTop: 0 }}>{String(regimeProbabilityAny?.narrative?.short ?? "") || "Regime probability narrative missing."}</p>
                   <div style={{ fontSize: 12 }}>Structural adjustment: {String(regimeProbabilityAny?.structuralAdjustment?.summary ?? "none")} · multiplier {typeof regimeProbabilityAny?.structuralAdjustment?.multiplier === "number" ? regimeProbabilityAny.structuralAdjustment.multiplier.toFixed(2) : "—"} · penalty {typeof regimeProbabilityAny?.structuralAdjustment?.penalty === "number" ? regimeProbabilityAny.structuralAdjustment.penalty.toFixed(2) : "—"}</div>
                   <div style={{ fontSize: 12 }}>Supporting blocks: {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.join(", ") : "—"}</div>
@@ -1538,6 +1633,11 @@ Signal: ${gapLabel}`,
                       <div><strong>Narrative (long):</strong> {String(regimeProbabilityAny?.narrative?.long ?? "—")}</div>
                       <div><strong>Overlay summary:</strong> {String(regimeProbabilityAny?.overlayInfluence?.summary ?? "—")}</div>
                       <div><strong>Distribution (full):</strong> {regimeProbabilityDistribution.map((row: any) => `${row?.regime ?? "?"} ${safePct(row?.weight)}`).join(" · ") || "—"}</div>
+                      <div><strong>Expected payload fields:</strong> {expectedRegimeFields.join(", ")}</div>
+                      <div><strong>Fields rendered (Global Macro compact):</strong> {compactRenderedRegimeFields.join(", ")}</div>
+                      <div><strong>Present payload fields (runtime):</strong> {Array.isArray(readDiagnostics?.regimeProbabilityRichness?.presentFieldPaths) ? readDiagnostics.regimeProbabilityRichness.presentFieldPaths.join(", ") : "—"}</div>
+                      <div><strong>Missing payload fields (runtime):</strong> {Array.isArray(readDiagnostics?.regimeProbabilityRichness?.missingFieldPaths) && readDiagnostics.regimeProbabilityRichness.missingFieldPaths.length ? readDiagnostics.regimeProbabilityRichness.missingFieldPaths.join(", ") : "none"}</div>
+                      <div><strong>Trim report:</strong> {Array.isArray(readDiagnostics?.trimReport?.trimSnapshotForNormalReadRemoves) ? readDiagnostics.trimReport.trimSnapshotForNormalReadRemoves.join(", ") : "—"}</div>
                     </div>
                   </details>
                 </section>
@@ -2902,6 +3002,7 @@ last 3: {toJson(meta.last3RawObservations)}</pre>
                   />
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button type="button" disabled={ingestRunningMode !== null || engineRunning || cronRefreshRunning} onClick={() => void runMacroCronRefresh()}>{cronRefreshRunning ? "Running cron refresh..." : "Run macro cron refresh"}</button>
+                    <button type="button" disabled={ingestRunningMode !== null || engineRunning || cronRefreshRunning || rebuildSnapshotRunning} onClick={() => void rebuildSnapshotNoIngest()}>{rebuildSnapshotRunning ? "Rebuilding snapshot..." : "Rebuild snapshot (no ingest)"}</button>
                     <button type="button" disabled={ingestRunningMode !== null || engineRunning || cronRefreshRunning} onClick={() => void runIngest("backfill", "US")}>{ingestRunningMode === "backfill" ? "Running backfill..." : "Run ingest backfill (US)"}</button>
                     <button type="button" disabled={ingestRunningMode !== null || engineRunning || cronRefreshRunning} onClick={() => void runIngest("latest", "US")}>{ingestRunningMode === "latest" ? "Running latest..." : "Run ingest latest (US)"}</button>
                     <button type="button" disabled={ingestRunningMode !== null || engineRunning || cronRefreshRunning} onClick={() => void runEngine("US")}>{engineRunning ? "Running engine..." : "Run engine (US)"}</button>
@@ -2930,6 +3031,15 @@ last 3: {toJson(meta.last3RawObservations)}</pre>
                   <div>
                     <h4>Last manual macro cron refresh result</h4>
                     <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(cronRefreshResult, null, 2)}</pre>
+                  </div>
+                )}
+                {rebuildSnapshotResult && (
+                  <div>
+                    <h4>Last manual rebuild snapshot (no ingest) result</h4>
+                    <div style={{ fontSize: 12, marginBottom: 4 }}>
+                      Latest snapshot updatedAt: {String((globalMacroRaw as any)?.diagnostics?.snapshotUpdatedAt ?? "—")}
+                    </div>
+                    <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 11 }}>{JSON.stringify(rebuildSnapshotResult, null, 2)}</pre>
                   </div>
                 )}
 
