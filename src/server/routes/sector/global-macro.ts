@@ -1,5 +1,5 @@
 import { getAdminSecret } from "../../../../api/_auth.js";
-import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { tables } from "../../../../api/_migrate.js";
 import { query } from "../../../../api/_db.js";
 import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
@@ -1998,13 +1998,28 @@ export async function buildMacroLatestReadPayload(region: string) {
     return {
       globalMacro: await readLatestGlobalSnapshot(false, []),
       inflationAnalysis: null,
+      metadata: {
+        dataTimestamp: null,
+        staleVsUnderlyingData: null,
+      },
       cachedAt: new Date().toISOString(),
     };
   }
   if (!["US", "EA", "SE"].includes(region)) return null;
+  const latestRawRows = await query(
+    `SELECT MAX(date) AS latest_date
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto'`,
+    [region],
+  ) as unknown as Array<{ latest_date: string | null }>;
+  const dataTimestamp = latestRawRows[0]?.latest_date ?? null;
   return {
     globalMacro: await readLatestSnapshot(region, false, []),
     inflationAnalysis: await loadInflationAnalysis(region as "US" | "EA" | "SE"),
+    metadata: {
+      dataTimestamp,
+      staleVsUnderlyingData: null,
+    },
     cachedAt: new Date().toISOString(),
   };
 }
@@ -2037,9 +2052,7 @@ export default async function handler(req: any, res: any) {
     if (!debugEnabled) return;
     timingBreakdown.push({ step, ms: Number(ms.toFixed(3)) });
   };
-  const ensureSchemaStart = Date.now();
-  await ensureSchema();
-  pushTiming("ensure_schema", Date.now() - ensureSchemaStart);
+  const ensureSchemaExecuted = false;
   pushTiming("request_received", 0);
   const t0 = Date.now();
   const snapshotCache = await readLatestMacroReadCache(region, { onTiming: pushTiming });
@@ -2234,32 +2247,17 @@ export default async function handler(req: any, res: any) {
     };
   };
 
-  if (region !== "GLOBAL") {
-    try {
-      const tRawTimestamp = Date.now();
-      const latestRawRows = await query(
-        `SELECT MAX(date) AS latest_date
-         FROM ${tables.macroRawDatapoints}
-         WHERE region = ? AND source_type = 'auto'`,
-        [region],
-      ) as unknown as Array<{ latest_date: string | null }>;
-      pushTiming("query_latest_raw_timestamp", Date.now() - tRawTimestamp);
-      const latestRawDate = latestRawRows[0]?.latest_date ?? null;
-      (diagnostics as any).dataTimestamp = latestRawDate;
-      (diagnostics as any).snapshotStaleVsUnderlyingData = Boolean(
-        latestRawDate
-        && (diagnostics as any).snapshotAsOfDate
-        && String((diagnostics as any).snapshotAsOfDate) < String(latestRawDate),
-      );
-    } catch {
-      pushTiming("query_latest_raw_timestamp", 0);
-      (diagnostics as any).dataTimestamp = null;
-      (diagnostics as any).snapshotStaleVsUnderlyingData = null;
-    }
-  } else {
-    (diagnostics as any).dataTimestamp = null;
-    (diagnostics as any).snapshotStaleVsUnderlyingData = null;
-  }
+  const cachedMetadata = snapshotPayload && "metadata" in snapshotPayload && typeof snapshotPayload.metadata === "object"
+    ? snapshotPayload.metadata as Record<string, unknown>
+    : null;
+  (diagnostics as any).dataTimestamp = cachedMetadata && typeof cachedMetadata.dataTimestamp === "string"
+    ? cachedMetadata.dataTimestamp
+    : null;
+  (diagnostics as any).snapshotStaleVsUnderlyingData = cachedMetadata && typeof cachedMetadata.staleVsUnderlyingData === "boolean"
+    ? cachedMetadata.staleVsUnderlyingData
+    : null;
+  (diagnostics as any).rawTimestampQueryExecuted = false;
+  (diagnostics as any).ensureSchemaExecuted = ensureSchemaExecuted;
 
   if (!snapshotCache || !historyCache || !normalizedGlobalMacro) {
     const payloadPrepareStart = Date.now();
