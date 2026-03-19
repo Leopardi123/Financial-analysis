@@ -474,7 +474,8 @@ export default function GlobalMacroDashboard() {
     try {
       const overlayKeysParam = encodeURIComponent(uiOverlayKeysRequested.join(","));
       const cacheBust = Date.now();
-      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}&_ts=${cacheBust}`, {
+      const debugParam = debugEnabled ? "&debug=1" : "";
+      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}${debugParam}&_ts=${cacheBust}`, {
         cache: "no-store",
       });
       const payload = await response.json();
@@ -498,7 +499,7 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     void loadGlobalMacro();
-  }, [historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
+  }, [debugEnabled, historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const hasRegime = Boolean(globalMacro && typeof globalMacro === "object" && (globalMacro as any).regime && typeof (globalMacro as any).regime === "object");
@@ -1590,6 +1591,27 @@ Signal: ${gapLabel}`,
           {globalMacroLoading && <div className="status">Laddar Global Macro…</div>}
           {globalMacroError && <div className="status">Kunde inte ladda Global Macro: {globalMacroError}</div>}
           {isNoData && <div className="status empty">Ingen macrodata hittades ännu. Sektionen är aktiv men endpointen returnerade tomt.</div>}
+          {debugEnabled && readDiagnostics?.debugTiming && (
+            <section style={{ border: "1px dashed #94a3b8", borderRadius: 8, padding: "8px 10px", marginBottom: 10, background: "#f8fafc" }}>
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Debug: tidsåtgång global macro</summary>
+                <div style={{ fontSize: 12, marginTop: 8 }}>
+                  <div><strong>Total:</strong> {String(readDiagnostics?.debugTiming?.totalMs ?? "—")} ms</div>
+                  <ul style={{ marginTop: 6 }}>
+                    {(Array.isArray(readDiagnostics?.debugTiming?.breakdown) ? readDiagnostics.debugTiming.breakdown : []).map((row: any) => (
+                      <li key={`debug-timing-${row?.step}`}>{String(row?.step ?? "unknown")}: {String(row?.ms ?? "—")} ms</li>
+                    ))}
+                  </ul>
+                  <div style={{ fontWeight: 700, marginTop: 6 }}>Slowest:</div>
+                  <ol style={{ marginTop: 4 }}>
+                    {(Array.isArray(readDiagnostics?.debugTiming?.slowestSteps) ? readDiagnostics.debugTiming.slowestSteps : []).map((row: any) => (
+                      <li key={`debug-slowest-${row?.step}`}>{String(row?.step ?? "unknown")} ({String(row?.ms ?? "—")} ms)</li>
+                    ))}
+                  </ol>
+                </div>
+              </details>
+            </section>
+          )}
 
           {!globalMacroLoading && !globalMacroError && globalMacro && hasRegime && (
             <>

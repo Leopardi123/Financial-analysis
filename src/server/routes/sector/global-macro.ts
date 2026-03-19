@@ -2034,9 +2034,15 @@ export default async function handler(req: any, res: any) {
       : (historyResolution === "MONTHLY" ? 20 : 3);
 
   const routeStartedAtMs = Date.now();
+  const timingBreakdown: Array<{ step: string; ms: number }> = [];
+  const pushTiming = (step: string, ms: number) => {
+    if (!debugEnabled) return;
+    timingBreakdown.push({ step, ms: Number(ms.toFixed(3)) });
+  };
   const t0 = Date.now();
   const snapshotCache = await readLatestMacroReadCache(region);
   const snapshotReadMs = Date.now() - t0;
+  pushTiming("cache_lookup_snapshot", snapshotReadMs);
 
   const t1 = Date.now();
   const historyCache = await readMacroHistoryReadCache({
@@ -2045,29 +2051,43 @@ export default async function handler(req: any, res: any) {
     rangeYears: historyRangeYears,
   });
   const historyReadMs = Date.now() - t1;
+  pushTiming("cache_lookup_history", historyReadMs);
 
+  const t2 = Date.now();
   const snapshotPayloadRaw = snapshotCache?.payload;
   const snapshotPayload = snapshotPayloadRaw && typeof snapshotPayloadRaw === "object"
     ? snapshotPayloadRaw as Record<string, unknown>
     : null;
+  pushTiming("cache_deserialize_and_payload_cast", Date.now() - t2);
 
+  const t3 = Date.now();
   const globalMacroRaw = snapshotPayload && "globalMacro" in snapshotPayload
     ? snapshotPayload.globalMacro
     : snapshotPayloadRaw ?? null;
   const normalizedGlobalMacro = normalizeGlobalMacroPayload(globalMacroRaw);
+  pushTiming("snapshot_parse_and_validate", Date.now() - t3);
+
+  const t4 = Date.now();
   const globalMacroTrimmed = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
+  pushTiming("overlay_processing_trim", Date.now() - t4);
+
+  const t5 = Date.now();
   const globalMacro = attachMacroRegimeProbability(globalMacroTrimmed);
+  pushTiming("regime_probability_build_or_normalize", Date.now() - t5);
 
   const inflationAnalysis = snapshotPayload && "inflationAnalysis" in snapshotPayload
     ? snapshotPayload.inflationAnalysis
     : null;
+  const t6 = Date.now();
   const macroHistory = normalizeMacroHistoryPayload(
     historyCache?.payload ?? null,
     region,
     historyResolution as HistoryResolution,
     historyRangeYears,
   );
+  pushTiming("history_payload_prepare", Date.now() - t6);
 
+  const t7 = Date.now();
   const diagnostics = {
     readMode: "snapshot_cache_only",
     snapshotSource: snapshotCache ? "macro_latest_read_cache" : "cache_missing",
@@ -2160,6 +2180,7 @@ export default async function handler(req: any, res: any) {
       ],
     },
   };
+  pushTiming("diagnostics_prepare", Date.now() - t7);
   (diagnostics as any).renderCoverage.missingInPayload = (diagnostics as any).regimeProbabilityRichness?.missingFieldPaths ?? [];
 
   if (region !== "GLOBAL") {
@@ -2187,6 +2208,10 @@ export default async function handler(req: any, res: any) {
   }
 
   if (!snapshotCache || !historyCache || !normalizedGlobalMacro) {
+    const payloadPrepareStart = Date.now();
+    const totalMs = Date.now() - routeStartedAtMs;
+    const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
+    pushTiming("payload_prepare_error", Date.now() - payloadPrepareStart);
     const missing = [
       !snapshotCache ? "latest_snapshot_cache" : null,
       !historyCache ? "history_cache" : null,
@@ -2200,6 +2225,13 @@ export default async function handler(req: any, res: any) {
       inflationAnalysis: null,
       diagnostics: {
         ...diagnostics,
+        ...(debugEnabled ? {
+          debugTiming: {
+            totalMs: Number(totalMs.toFixed(3)),
+            breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
+            slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
+          },
+        } : {}),
         cacheMiss: true,
         missing,
         rootCause: missing.includes("history_cache")
@@ -2218,6 +2250,19 @@ export default async function handler(req: any, res: any) {
     globalMacro,
     macroHistory,
     inflationAnalysis,
-    diagnostics,
+    diagnostics: {
+      ...diagnostics,
+      ...(debugEnabled ? (() => {
+        const totalMs = Date.now() - routeStartedAtMs;
+        const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
+        return {
+          debugTiming: {
+            totalMs: Number(totalMs.toFixed(3)),
+            breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
+            slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
+          },
+        };
+      })() : {}),
+    },
   });
 }
