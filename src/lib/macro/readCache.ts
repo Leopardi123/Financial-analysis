@@ -7,6 +7,10 @@ export type CachedMacroReadPayload = {
   updatedAt: string;
 };
 
+type ReadCacheTimingOptions = {
+  onTiming?: (step: string, ms: number) => void;
+};
+
 function historyRangeKey(rangeYears: number | "MAX") {
   return typeof rangeYears === "number" ? String(rangeYears) : "MAX";
 }
@@ -25,7 +29,8 @@ export async function upsertLatestMacroReadCache(region: string, asOfDate: strin
   return updatedAt;
 }
 
-export async function readLatestMacroReadCache(region: string): Promise<CachedMacroReadPayload | null> {
+export async function readLatestMacroReadCache(region: string, options?: ReadCacheTimingOptions): Promise<CachedMacroReadPayload | null> {
+  const tQuery = Date.now();
   const rows = await query(
     `SELECT as_of_date, payload_json, updated_at
      FROM ${tables.macroLatestReadCache}
@@ -33,12 +38,16 @@ export async function readLatestMacroReadCache(region: string): Promise<CachedMa
      LIMIT 1`,
     [region],
   ) as unknown as Array<{ as_of_date: string | null; payload_json: string; updated_at: string }>;
+  options?.onTiming?.("read_cache.latest.query", Date.now() - tQuery);
 
   const row = rows[0];
   if (!row) return null;
+  const tParse = Date.now();
+  const parsed = JSON.parse(String(row.payload_json ?? "null"));
+  options?.onTiming?.("read_cache.latest.parse", Date.now() - tParse);
   return {
     asOfDate: row.as_of_date ?? null,
-    payload: JSON.parse(String(row.payload_json ?? "null")),
+    payload: parsed,
     updatedAt: String(row.updated_at),
   };
 }
@@ -65,7 +74,8 @@ export async function readMacroHistoryReadCache(params: {
   region: string;
   resolution: "WEEKLY" | "MONTHLY";
   rangeYears: number | "MAX";
-}) {
+}, options?: ReadCacheTimingOptions) {
+  const tQuery = Date.now();
   const rows = await query(
     `SELECT payload_json, updated_at
      FROM ${tables.macroHistoryReadCache}
@@ -73,11 +83,15 @@ export async function readMacroHistoryReadCache(params: {
      LIMIT 1`,
     [params.region, params.resolution, historyRangeKey(params.rangeYears)],
   ) as unknown as Array<{ payload_json: string; updated_at: string }>;
+  options?.onTiming?.("read_cache.history.query", Date.now() - tQuery);
 
   const row = rows[0];
   if (!row) return null;
+  const tParse = Date.now();
+  const parsed = JSON.parse(String(row.payload_json ?? "null"));
+  options?.onTiming?.("read_cache.history.parse", Date.now() - tParse);
   return {
-    payload: JSON.parse(String(row.payload_json ?? "null")),
+    payload: parsed,
     updatedAt: String(row.updated_at),
   };
 }

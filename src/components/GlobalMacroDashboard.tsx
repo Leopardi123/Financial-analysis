@@ -1863,6 +1863,8 @@ Signal: ${gapLabel}`,
                 <div style={{ fontSize: 12, marginTop: 8 }}>
                   <div>server_total_ms: {frontendDebugTiming.usRequestChain.serverMeasuredMs === null ? "—" : frontendDebugTiming.usRequestChain.serverMeasuredMs.toFixed(1)}</div>
                   <div>payload_size_bytes: {frontendDebugTiming.usRequestChain.payloadSizeBytes === null ? "—" : String(frontendDebugTiming.usRequestChain.payloadSizeBytes)}</div>
+                  <div>measured_substeps_sum_ms: {typeof (globalMacroRaw as any)?.diagnostics?.usRequestChain?.measuredSubstepsSumMs === "number" ? (globalMacroRaw as any).diagnostics.usRequestChain.measuredSubstepsSumMs.toFixed(1) : "—"}</div>
+                  <div>server_unmeasured_gap_ms: {typeof (globalMacroRaw as any)?.diagnostics?.usRequestChain?.unmeasuredGapMs === "number" ? (globalMacroRaw as any).diagnostics.usRequestChain.unmeasuredGapMs.toFixed(1) : "—"}</div>
                   <div>client_fetch_duration_ms: {frontendDebugTiming.usRequestChain.clientFetchDurationMs === null ? "—" : frontendDebugTiming.usRequestChain.clientFetchDurationMs.toFixed(1)}</div>
                   <div>client_parse_ms: {frontendDebugTiming.usRequestChain.clientParseMs === null ? "—" : frontendDebugTiming.usRequestChain.clientParseMs.toFixed(1)}</div>
                   <div>client_bind_ms: {frontendDebugTiming.usRequestChain.clientBindMs === null ? "—" : frontendDebugTiming.usRequestChain.clientBindMs.toFixed(1)}</div>

@@ -2021,8 +2021,6 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  await ensureSchema();
-
   const region = String(req.query?.region ?? "GLOBAL").toUpperCase();
   const debugEnabled = String(req.query?.debug ?? "0") === "1";
   const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
@@ -2039,9 +2037,12 @@ export default async function handler(req: any, res: any) {
     if (!debugEnabled) return;
     timingBreakdown.push({ step, ms: Number(ms.toFixed(3)) });
   };
+  const ensureSchemaStart = Date.now();
+  await ensureSchema();
+  pushTiming("ensure_schema", Date.now() - ensureSchemaStart);
   pushTiming("request_received", 0);
   const t0 = Date.now();
-  const snapshotCache = await readLatestMacroReadCache(region);
+  const snapshotCache = await readLatestMacroReadCache(region, { onTiming: pushTiming });
   const snapshotReadMs = Date.now() - t0;
   pushTiming("cache_lookup_snapshot", snapshotReadMs);
 
@@ -2050,7 +2051,7 @@ export default async function handler(req: any, res: any) {
     region,
     resolution: historyResolution as HistoryResolution,
     rangeYears: historyRangeYears,
-  });
+  }, { onTiming: pushTiming });
   const historyReadMs = Date.now() - t1;
   pushTiming("cache_lookup_history", historyReadMs);
 
@@ -2213,6 +2214,8 @@ export default async function handler(req: any, res: any) {
     const preDispatchAt = Date.now();
     pushTiming("response_write_dispatch", 0);
     const serverTotalRequestMs = preDispatchAt - routeStartedAtMs;
+    const measuredSubstepsSumMs = timingBreakdown.reduce((sum, row) => sum + (typeof row.ms === "number" ? row.ms : 0), 0);
+    const unmeasuredGapMs = serverTotalRequestMs - measuredSubstepsSumMs;
     return {
       ...baseResponse,
       diagnostics: {
@@ -2220,6 +2223,8 @@ export default async function handler(req: any, res: any) {
         usRequestChain: {
           serverMeasuredMs: serverTotalRequestMs,
           serverBreakdown: timingBreakdown,
+          measuredSubstepsSumMs: Number(measuredSubstepsSumMs.toFixed(3)),
+          unmeasuredGapMs: Number(unmeasuredGapMs.toFixed(3)),
           payloadSizeBytes: totalBytes,
           payloadSectionSizes: sectionSizes,
           serializationMs,
@@ -2231,12 +2236,14 @@ export default async function handler(req: any, res: any) {
 
   if (region !== "GLOBAL") {
     try {
+      const tRawTimestamp = Date.now();
       const latestRawRows = await query(
         `SELECT MAX(date) AS latest_date
          FROM ${tables.macroRawDatapoints}
          WHERE region = ? AND source_type = 'auto'`,
         [region],
       ) as unknown as Array<{ latest_date: string | null }>;
+      pushTiming("query_latest_raw_timestamp", Date.now() - tRawTimestamp);
       const latestRawDate = latestRawRows[0]?.latest_date ?? null;
       (diagnostics as any).dataTimestamp = latestRawDate;
       (diagnostics as any).snapshotStaleVsUnderlyingData = Boolean(
@@ -2245,6 +2252,7 @@ export default async function handler(req: any, res: any) {
         && String((diagnostics as any).snapshotAsOfDate) < String(latestRawDate),
       );
     } catch {
+      pushTiming("query_latest_raw_timestamp", 0);
       (diagnostics as any).dataTimestamp = null;
       (diagnostics as any).snapshotStaleVsUnderlyingData = null;
     }
