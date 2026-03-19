@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
 import InfoPopover from "./InfoPopover";
 
@@ -390,6 +390,24 @@ function AdminSection({ children }: { children: ReactNode }) {
 export default function GlobalMacroDashboard() {
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
+  const [frontendDebugTiming, setFrontendDebugTiming] = useState<{
+    navigationToMountMs: number | null;
+    mountToFetchStartMs: number | null;
+    fetchDurationMs: number | null;
+    fetchToDataBoundMs: number | null;
+    dataToRenderCompleteMs: number | null;
+    totalUserPerceivedMs: number | null;
+    requestCount: number;
+    maxConcurrent: number;
+    requestMode: "sequential" | "parallel_or_overlapping";
+    repeatedUrls: string[];
+    requests: Array<{ url: string; startMs: number; endMs: number | null; durationMs: number | null }>;
+    sectionTimings: {
+      regimeProbabilityRenderedMs: number | null;
+      driverBreakdownRenderedMs: number | null;
+      overlaysRenderedMs: number | null;
+    };
+  } | null>(null);
   const [macroHistory, setMacroHistory] = useState<MacroHistoryPayload | null>(null);
   const [inflationAnalysis, setInflationAnalysis] = useState<InflationAnalysisPayload | null>(null);
   const [historyResolution, setHistoryResolution] = useState<"WEEKLY" | "MONTHLY">("MONTHLY");
@@ -398,6 +416,19 @@ export default function GlobalMacroDashboard() {
   const [globalMacroLoading, setGlobalMacroLoading] = useState(false);
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
+  const frontendTimingRef = useRef({
+    mountMs: (typeof performance !== "undefined" ? performance.now() : Date.now()),
+    firstFetchStartMs: null as number | null,
+    firstFetchEndMs: null as number | null,
+    dataBoundMs: null as number | null,
+    renderCompleteMs: null as number | null,
+    regimeProbabilityRenderedMs: null as number | null,
+    driverBreakdownRenderedMs: null as number | null,
+    overlaysRenderedMs: null as number | null,
+    requests: [] as Array<{ url: string; startMs: number; endMs: number | null; durationMs: number | null }>,
+    inFlight: 0,
+    maxConcurrent: 0,
+  });
   const [ingestRunningMode, setIngestRunningMode] = useState<"backfill" | "latest" | null>(null);
   const [engineRunning, setEngineRunning] = useState(false);
   const [adminSecretInput, setAdminSecretInput] = useState("");
@@ -475,9 +506,20 @@ export default function GlobalMacroDashboard() {
       const overlayKeysParam = encodeURIComponent(uiOverlayKeysRequested.join(","));
       const cacheBust = Date.now();
       const debugParam = debugEnabled ? "&debug=1" : "";
-      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}${debugParam}&_ts=${cacheBust}`, {
+      const url = `/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}${debugParam}&_ts=${cacheBust}`;
+      const requestStartMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (frontendTimingRef.current.firstFetchStartMs === null) frontendTimingRef.current.firstFetchStartMs = requestStartMs;
+      frontendTimingRef.current.inFlight += 1;
+      frontendTimingRef.current.maxConcurrent = Math.max(frontendTimingRef.current.maxConcurrent, frontendTimingRef.current.inFlight);
+      const requestRow = { url, startMs: requestStartMs, endMs: null as number | null, durationMs: null as number | null };
+      frontendTimingRef.current.requests.push(requestRow);
+      const response = await fetch(url, {
         cache: "no-store",
       });
+      const requestEndMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      requestRow.endMs = requestEndMs;
+      requestRow.durationMs = requestEndMs - requestStartMs;
+      if (frontendTimingRef.current.firstFetchEndMs === null) frontendTimingRef.current.firstFetchEndMs = requestEndMs;
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
@@ -486,6 +528,7 @@ export default function GlobalMacroDashboard() {
       setMacroHistory(payload.macroHistory ?? null);
       setInflationAnalysis(payload.inflationAnalysis ?? null);
       setGlobalMacroRaw(payload);
+      frontendTimingRef.current.dataBoundMs = typeof performance !== "undefined" ? performance.now() : Date.now();
     } catch (error) {
       setGlobalMacro(null);
       setMacroHistory(null);
@@ -493,6 +536,7 @@ export default function GlobalMacroDashboard() {
       setInflationAnalysis(null);
       setGlobalMacroError(error instanceof Error ? error.message : "Okänt fel vid Global Macro-hämtning");
     } finally {
+      frontendTimingRef.current.inFlight = Math.max(0, frontendTimingRef.current.inFlight - 1);
       setGlobalMacroLoading(false);
     }
   }
@@ -500,6 +544,50 @@ export default function GlobalMacroDashboard() {
   useEffect(() => {
     void loadGlobalMacro();
   }, [debugEnabled, historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
+
+  useEffect(() => {
+    if (!debugEnabled || !globalMacro) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if ((globalMacro as any)?.macroRegimeProbability && frontendTimingRef.current.regimeProbabilityRenderedMs === null) {
+      frontendTimingRef.current.regimeProbabilityRenderedMs = now;
+    }
+    if ((globalMacro as any)?.macroExplanation && frontendTimingRef.current.driverBreakdownRenderedMs === null) {
+      frontendTimingRef.current.driverBreakdownRenderedMs = now;
+    }
+    if (Array.isArray((globalMacro as any)?.overlayHistory) && (globalMacro as any).overlayHistory.length > 0 && frontendTimingRef.current.overlaysRenderedMs === null) {
+      frontendTimingRef.current.overlaysRenderedMs = now;
+    }
+
+    const raf = requestAnimationFrame(() => {
+      const renderNow = typeof performance !== "undefined" ? performance.now() : Date.now();
+      frontendTimingRef.current.renderCompleteMs = renderNow;
+      const requestUrlsNormalized = frontendTimingRef.current.requests.map((row) => row.url.replace(/&_ts=\d+/, ""));
+      const repeatedUrls = Array.from(new Set(requestUrlsNormalized.filter((url, idx, arr) => arr.indexOf(url) !== idx)));
+      setFrontendDebugTiming({
+        navigationToMountMs: frontendTimingRef.current.mountMs,
+        mountToFetchStartMs: frontendTimingRef.current.firstFetchStartMs === null ? null : frontendTimingRef.current.firstFetchStartMs - frontendTimingRef.current.mountMs,
+        fetchDurationMs: frontendTimingRef.current.firstFetchStartMs === null || frontendTimingRef.current.firstFetchEndMs === null
+          ? null
+          : frontendTimingRef.current.firstFetchEndMs - frontendTimingRef.current.firstFetchStartMs,
+        fetchToDataBoundMs: frontendTimingRef.current.firstFetchEndMs === null || frontendTimingRef.current.dataBoundMs === null
+          ? null
+          : frontendTimingRef.current.dataBoundMs - frontendTimingRef.current.firstFetchEndMs,
+        dataToRenderCompleteMs: frontendTimingRef.current.dataBoundMs === null ? null : renderNow - frontendTimingRef.current.dataBoundMs,
+        totalUserPerceivedMs: renderNow - frontendTimingRef.current.mountMs,
+        requestCount: frontendTimingRef.current.requests.length,
+        maxConcurrent: frontendTimingRef.current.maxConcurrent,
+        requestMode: frontendTimingRef.current.maxConcurrent > 1 ? "parallel_or_overlapping" : "sequential",
+        repeatedUrls,
+        requests: frontendTimingRef.current.requests.map((row) => ({ ...row })),
+        sectionTimings: {
+          regimeProbabilityRenderedMs: frontendTimingRef.current.regimeProbabilityRenderedMs === null ? null : frontendTimingRef.current.regimeProbabilityRenderedMs - frontendTimingRef.current.mountMs,
+          driverBreakdownRenderedMs: frontendTimingRef.current.driverBreakdownRenderedMs === null ? null : frontendTimingRef.current.driverBreakdownRenderedMs - frontendTimingRef.current.mountMs,
+          overlaysRenderedMs: frontendTimingRef.current.overlaysRenderedMs === null ? null : frontendTimingRef.current.overlaysRenderedMs - frontendTimingRef.current.mountMs,
+        },
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [debugEnabled, globalMacro]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const hasRegime = Boolean(globalMacro && typeof globalMacro === "object" && (globalMacro as any).regime && typeof (globalMacro as any).regime === "object");
@@ -1608,6 +1696,37 @@ Signal: ${gapLabel}`,
                       <li key={`debug-slowest-${row?.step}`}>{String(row?.step ?? "unknown")} ({String(row?.ms ?? "—")} ms)</li>
                     ))}
                   </ol>
+                </div>
+              </details>
+            </section>
+          )}
+          {debugEnabled && frontendDebugTiming && (
+            <section style={{ border: "1px dashed #94a3b8", borderRadius: 8, padding: "8px 10px", marginBottom: 10, background: "#f8fafc" }}>
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Debug: laddkedja frontend global macro</summary>
+                <div style={{ fontSize: 12, marginTop: 8 }}>
+                  <div>navigation_to_mount_ms: {frontendDebugTiming.navigationToMountMs === null ? "—" : frontendDebugTiming.navigationToMountMs.toFixed(1)}</div>
+                  <div>mount_to_fetch_start_ms: {frontendDebugTiming.mountToFetchStartMs === null ? "—" : frontendDebugTiming.mountToFetchStartMs.toFixed(1)}</div>
+                  <div>fetch_duration_ms: {frontendDebugTiming.fetchDurationMs === null ? "—" : frontendDebugTiming.fetchDurationMs.toFixed(1)}</div>
+                  <div>fetch_to_data_bound_ms: {frontendDebugTiming.fetchToDataBoundMs === null ? "—" : frontendDebugTiming.fetchToDataBoundMs.toFixed(1)}</div>
+                  <div>data_to_render_complete_ms: {frontendDebugTiming.dataToRenderCompleteMs === null ? "—" : frontendDebugTiming.dataToRenderCompleteMs.toFixed(1)}</div>
+                  <div><strong>total_user_perceived_ms: {frontendDebugTiming.totalUserPerceivedMs === null ? "—" : frontendDebugTiming.totalUserPerceivedMs.toFixed(1)}</strong></div>
+                  <div style={{ marginTop: 6 }}>request_count: {frontendDebugTiming.requestCount}</div>
+                  <div>request_mode: {frontendDebugTiming.requestMode}</div>
+                  <div>max_concurrent_requests: {frontendDebugTiming.maxConcurrent}</div>
+                  <div>repeated_urls: {frontendDebugTiming.repeatedUrls.length > 0 ? frontendDebugTiming.repeatedUrls.join(" | ") : "none"}</div>
+                  <div style={{ marginTop: 6 }}>
+                    section timings (ms from mount): regimeProbability={frontendDebugTiming.sectionTimings.regimeProbabilityRenderedMs === null ? "—" : frontendDebugTiming.sectionTimings.regimeProbabilityRenderedMs.toFixed(1)},
+                    driverBreakdown={frontendDebugTiming.sectionTimings.driverBreakdownRenderedMs === null ? "—" : frontendDebugTiming.sectionTimings.driverBreakdownRenderedMs.toFixed(1)},
+                    overlays={frontendDebugTiming.sectionTimings.overlaysRenderedMs === null ? "—" : frontendDebugTiming.sectionTimings.overlaysRenderedMs.toFixed(1)}
+                  </div>
+                  <ul style={{ marginTop: 6 }}>
+                    {frontendDebugTiming.requests.map((req, idx) => (
+                      <li key={`frontend-req-${idx}`}>
+                        {req.url} · start={req.startMs.toFixed(1)} · end={req.endMs === null ? "—" : req.endMs.toFixed(1)} · duration={req.durationMs === null ? "—" : req.durationMs.toFixed(1)} ms
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </details>
             </section>
