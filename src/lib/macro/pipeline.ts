@@ -3,6 +3,7 @@ import { batch, query } from "../../../api/_db.js";
 import { tables } from "../../../api/_migrate.js";
 import { MACRO_INDICATOR_CATALOG } from "./catalog.js";
 import { runGlobalMacroEngine } from "./engine.js";
+import { buildMacroRegimeProbabilityFromSnapshot } from "./regimeProbability.js";
 import type { MacroSeriesInput } from "./types";
 
 type RawPointRow = {
@@ -38,6 +39,7 @@ type ExistingRegimeRow = {
   clear_signal_strength: number | null;
   speculative_signal_strength: number | null;
   top_drivers_json: string | null;
+  macro_regime_probability_json: string | null;
 };
 
 function roundOrNull(value: number | null): number | null {
@@ -145,6 +147,7 @@ function changedRegime(existing: ExistingRegimeRow | undefined, next: {
   clear_signal_strength: number | null;
   speculative_signal_strength: number | null;
   top_drivers_json: string;
+  macro_regime_probability_json: string | null;
 }): boolean {
   if (!existing) return true;
   return (
@@ -158,6 +161,7 @@ function changedRegime(existing: ExistingRegimeRow | undefined, next: {
     || roundOrNull(existing.clear_signal_strength) !== roundOrNull(next.clear_signal_strength)
     || roundOrNull(existing.speculative_signal_strength) !== roundOrNull(next.speculative_signal_strength)
     || String(existing.top_drivers_json ?? "") !== next.top_drivers_json
+    || String(existing.macro_regime_probability_json ?? "") !== String(next.macro_regime_probability_json ?? "")
   );
 }
 
@@ -277,10 +281,20 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
 
   const blockScoresJson = JSON.stringify(regime.blockScores);
   const topDriversJson = JSON.stringify(regime.topDrivers);
+  const macroRegimeProbability = regime.macroRegimeProbability ?? buildMacroRegimeProbabilityFromSnapshot({
+    macroScoreTotal: regime.macroScoreTotal,
+    macroConfidence: regime.macroConfidence,
+    coreRegimeLabel: regime.coreRegimeLabel,
+    growthOverlay: regime.growthOverlay,
+    stressOverlay: regime.stressOverlay,
+    hardAssetOverlay: regime.hardAssetOverlay,
+    blockScores: regime.blockScores,
+  });
+  const macroRegimeProbabilityJson = macroRegimeProbability ? JSON.stringify(macroRegimeProbability) : null;
   const existingRegimeRows = (await query(
     `SELECT block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
-            clear_signal_strength, speculative_signal_strength, top_drivers_json
+            clear_signal_strength, speculative_signal_strength, top_drivers_json, macro_regime_probability_json
      FROM ${tables.macroRegimeSnapshots}
      WHERE region = ? AND as_of_date = ?
      LIMIT 1`,
@@ -298,6 +312,7 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
     clear_signal_strength: roundOrNull(regime.clearSignalStrength),
     speculative_signal_strength: roundOrNull(regime.speculativeSignalStrength),
     top_drivers_json: topDriversJson,
+    macro_regime_probability_json: macroRegimeProbabilityJson,
   };
 
   const regimeStatements: InStatement[] = [];
@@ -306,8 +321,8 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
       sql: `INSERT INTO ${tables.macroRegimeSnapshots}
             (as_of_date, region, block_scores_json, macro_score_total, macro_confidence,
              core_regime_label, growth_overlay, stress_overlay, hard_asset_overlay,
-             clear_signal_strength, speculative_signal_strength, top_drivers_json, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             clear_signal_strength, speculative_signal_strength, top_drivers_json, macro_regime_probability_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(as_of_date, region) DO UPDATE SET
               block_scores_json = excluded.block_scores_json,
               macro_score_total = excluded.macro_score_total,
@@ -319,6 +334,7 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
               clear_signal_strength = excluded.clear_signal_strength,
               speculative_signal_strength = excluded.speculative_signal_strength,
               top_drivers_json = excluded.top_drivers_json,
+              macro_regime_probability_json = excluded.macro_regime_probability_json,
               updated_at = excluded.updated_at`,
       args: [
         regime.asOfDate,
@@ -333,6 +349,7 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
         nextRegime.clear_signal_strength,
         nextRegime.speculative_signal_strength,
         nextRegime.top_drivers_json,
+        nextRegime.macro_regime_probability_json,
         now,
       ],
     });

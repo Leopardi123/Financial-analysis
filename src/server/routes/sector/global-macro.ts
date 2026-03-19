@@ -39,6 +39,7 @@ type RegimeSnapshotRow = {
   clear_signal_strength: number | null;
   speculative_signal_strength: number | null;
   top_drivers_json: string | null;
+  macro_regime_probability_json: string | null;
 };
 
 type IndicatorSnapshotRow = {
@@ -1217,7 +1218,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
   const regimeRows = (await query(
     `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
-            clear_signal_strength, speculative_signal_strength, top_drivers_json
+            clear_signal_strength, speculative_signal_strength, top_drivers_json, macro_regime_probability_json
      FROM ${tables.macroRegimeSnapshots}
      WHERE region = ?
      ORDER BY as_of_date DESC
@@ -1597,7 +1598,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       rootCauseHints,
     },
     macroExplanation,
-    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regimeRow as any)?.macroRegimeProbability ?? null } }).macroRegimeProbability,
+    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability,
   };
 }
 
