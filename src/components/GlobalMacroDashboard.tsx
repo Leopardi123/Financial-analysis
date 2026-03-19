@@ -388,6 +388,15 @@ function AdminSection({ children }: { children: ReactNode }) {
 }
 
 export default function GlobalMacroDashboard() {
+  const initialRegionFromLocation = (() => {
+    if (typeof window === "undefined") return "GLOBAL" as const;
+    const query = new URLSearchParams(window.location.search);
+    const queryRegion = String(query.get("region") ?? "").toUpperCase();
+    if (queryRegion === "US" || queryRegion === "EA" || queryRegion === "SE" || queryRegion === "GLOBAL") return queryRegion;
+    const saved = String(window.localStorage.getItem("globalMacro.selectedRegion") ?? "").toUpperCase();
+    if (saved === "US" || saved === "EA" || saved === "SE" || saved === "GLOBAL") return saved;
+    return "GLOBAL" as const;
+  })();
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
   const [frontendDebugTiming, setFrontendDebugTiming] = useState<{
@@ -402,6 +411,12 @@ export default function GlobalMacroDashboard() {
     requestMode: "sequential" | "parallel_or_overlapping";
     repeatedUrls: string[];
     requests: Array<{ url: string; startMs: number; endMs: number | null; durationMs: number | null }>;
+    requestSummary: {
+      requestedRegions: string[];
+      initialRequestMatchedActiveTab: boolean;
+      firstRequestedRegion: string | null;
+      activeRegionAtMount: "GLOBAL" | "US" | "EA" | "SE";
+    };
     sectionTimings: {
       regimeProbabilityRenderedMs: number | null;
       driverBreakdownRenderedMs: number | null;
@@ -412,10 +427,15 @@ export default function GlobalMacroDashboard() {
   const [inflationAnalysis, setInflationAnalysis] = useState<InflationAnalysisPayload | null>(null);
   const [historyResolution, setHistoryResolution] = useState<"WEEKLY" | "MONTHLY">("MONTHLY");
   const [historyRangeYears, setHistoryRangeYears] = useState<number | "MAX">(10);
-  const [selectedRegion, setSelectedRegion] = useState<"GLOBAL" | "US" | "EA" | "SE">("GLOBAL");
+  const [selectedRegion, setSelectedRegion] = useState<"GLOBAL" | "US" | "EA" | "SE">(initialRegionFromLocation as "GLOBAL" | "US" | "EA" | "SE");
   const [globalMacroLoading, setGlobalMacroLoading] = useState(false);
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
-  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugEnabled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  });
+  const initialSelectedRegionRef = useRef<"GLOBAL" | "US" | "EA" | "SE">(initialRegionFromLocation as "GLOBAL" | "US" | "EA" | "SE");
+  const lastRequestKeyRef = useRef<string | null>(null);
   const frontendTimingRef = useRef({
     mountMs: (typeof performance !== "undefined" ? performance.now() : Date.now()),
     firstFetchStartMs: null as number | null,
@@ -468,9 +488,8 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const query = new URLSearchParams(window.location.search);
-    setDebugEnabled(query.get("debug") === "1");
-  }, []);
+    window.localStorage.setItem("globalMacro.selectedRegion", selectedRegion);
+  }, [selectedRegion]);
 
 
   useEffect(() => {
@@ -506,6 +525,11 @@ export default function GlobalMacroDashboard() {
       const overlayKeysParam = encodeURIComponent(uiOverlayKeysRequested.join(","));
       const cacheBust = Date.now();
       const debugParam = debugEnabled ? "&debug=1" : "";
+      const requestKey = `${selectedRegion}|${historyResolution}|${String(historyRangeYears)}|${uiOverlayKeysRequested.join(",")}|debug:${debugEnabled ? 1 : 0}`;
+      if (lastRequestKeyRef.current === requestKey && frontendTimingRef.current.inFlight > 0) {
+        return;
+      }
+      lastRequestKeyRef.current = requestKey;
       const url = `/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}${debugParam}&_ts=${cacheBust}`;
       const requestStartMs = typeof performance !== "undefined" ? performance.now() : Date.now();
       if (frontendTimingRef.current.firstFetchStartMs === null) frontendTimingRef.current.firstFetchStartMs = requestStartMs;
@@ -562,7 +586,13 @@ export default function GlobalMacroDashboard() {
       const renderNow = typeof performance !== "undefined" ? performance.now() : Date.now();
       frontendTimingRef.current.renderCompleteMs = renderNow;
       const requestUrlsNormalized = frontendTimingRef.current.requests.map((row) => row.url.replace(/&_ts=\d+/, ""));
+      const requestedRegions = Array.from(new Set(frontendTimingRef.current.requests.map((row) => {
+        const match = row.url.match(/[?&]region=([^&]+)/);
+        return match ? decodeURIComponent(match[1]).toUpperCase() : "UNKNOWN";
+      })));
       const repeatedUrls = Array.from(new Set(requestUrlsNormalized.filter((url, idx, arr) => arr.indexOf(url) !== idx)));
+      const firstRegionMatch = frontendTimingRef.current.requests[0]?.url.match(/[?&]region=([^&]+)/);
+      const firstRequestedRegion = firstRegionMatch ? decodeURIComponent(firstRegionMatch[1]).toUpperCase() : null;
       setFrontendDebugTiming({
         navigationToMountMs: frontendTimingRef.current.mountMs,
         mountToFetchStartMs: frontendTimingRef.current.firstFetchStartMs === null ? null : frontendTimingRef.current.firstFetchStartMs - frontendTimingRef.current.mountMs,
@@ -579,6 +609,12 @@ export default function GlobalMacroDashboard() {
         requestMode: frontendTimingRef.current.maxConcurrent > 1 ? "parallel_or_overlapping" : "sequential",
         repeatedUrls,
         requests: frontendTimingRef.current.requests.map((row) => ({ ...row })),
+        requestSummary: {
+          requestedRegions,
+          initialRequestMatchedActiveTab: firstRequestedRegion === initialSelectedRegionRef.current,
+          firstRequestedRegion,
+          activeRegionAtMount: initialSelectedRegionRef.current,
+        },
         sectionTimings: {
           regimeProbabilityRenderedMs: frontendTimingRef.current.regimeProbabilityRenderedMs === null ? null : frontendTimingRef.current.regimeProbabilityRenderedMs - frontendTimingRef.current.mountMs,
           driverBreakdownRenderedMs: frontendTimingRef.current.driverBreakdownRenderedMs === null ? null : frontendTimingRef.current.driverBreakdownRenderedMs - frontendTimingRef.current.mountMs,
@@ -1715,6 +1751,10 @@ Signal: ${gapLabel}`,
                   <div>request_mode: {frontendDebugTiming.requestMode}</div>
                   <div>max_concurrent_requests: {frontendDebugTiming.maxConcurrent}</div>
                   <div>repeated_urls: {frontendDebugTiming.repeatedUrls.length > 0 ? frontendDebugTiming.repeatedUrls.join(" | ") : "none"}</div>
+                  <div>requested_regions: {frontendDebugTiming.requestSummary.requestedRegions.join(", ") || "none"}</div>
+                  <div>first_requested_region: {frontendDebugTiming.requestSummary.firstRequestedRegion ?? "—"}</div>
+                  <div>active_region_at_mount: {frontendDebugTiming.requestSummary.activeRegionAtMount}</div>
+                  <div>initial_request_matched_active_tab: {String(frontendDebugTiming.requestSummary.initialRequestMatchedActiveTab)}</div>
                   <div style={{ marginTop: 6 }}>
                     section timings (ms from mount): regimeProbability={frontendDebugTiming.sectionTimings.regimeProbabilityRenderedMs === null ? "—" : frontendDebugTiming.sectionTimings.regimeProbabilityRenderedMs.toFixed(1)},
                     driverBreakdown={frontendDebugTiming.sectionTimings.driverBreakdownRenderedMs === null ? "—" : frontendDebugTiming.sectionTimings.driverBreakdownRenderedMs.toFixed(1)},
