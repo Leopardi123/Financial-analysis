@@ -235,11 +235,19 @@ export async function ensureSchema() {
       clear_signal_strength REAL,
       speculative_signal_strength REAL,
       top_drivers_json TEXT NOT NULL,
+      macro_regime_probability_json TEXT,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (as_of_date, region)
     )`
   );
 
+
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.macroRegimeSnapshots} ADD COLUMN macro_regime_probability_json TEXT`);
+  } catch {
+    // column already exists
+  }
 
   await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.macroIngestRuns} (

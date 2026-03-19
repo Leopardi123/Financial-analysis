@@ -90,6 +90,8 @@ export default async function handler(req: any, res: any) {
   }
 
   const startedAt = Date.now();
+  const requestedModeRaw = String(req.query?.mode ?? req.body?.mode ?? "full").toLowerCase();
+  const requestedMode = requestedModeRaw === "quick" ? "quick" : "full";
   const perRegion: Array<Record<string, unknown>> = [];
   const forwardedHeaders = internalAdminHeaders(req.headers ?? {});
 
@@ -97,12 +99,54 @@ export default async function handler(req: any, res: any) {
     console.info("[macro-refresh-cron]", {
       runId,
       endpoint: "/api/cron/macro-refresh",
+      requestedMode,
       authContext: {
         cronSecretPresent: Boolean(process.env.CRON_SECRET),
         adminSecretPresent: Boolean(process.env.ADMIN_SECRET),
         fredApiKeyPresent: Boolean(process.env.FRED_API_KEY),
       },
     });
+
+    if (requestedMode === "quick") {
+      const quickRows: Array<Record<string, unknown>> = [];
+      for (const region of REGIONS) {
+        const row: Record<string, unknown> = { region, mode: "quick", snapshotCacheWritten: false };
+        try {
+          const snapshotPayload = await buildMacroLatestReadPayload(region);
+          const snapshotAsOf = (snapshotPayload as any)?.globalMacro?.regime?.asOfDate ?? null;
+          await upsertLatestMacroReadCache(region, snapshotAsOf, snapshotPayload);
+          Object.assign(row, { ok: true, snapshotAsOf, snapshotCacheWritten: true });
+        } catch (error) {
+          Object.assign(row, { ok: false, error: (error as Error).message });
+        }
+        quickRows.push(row);
+      }
+
+      let globalQuick: Record<string, unknown> = { attempted: true, ok: false };
+      try {
+        const globalPayload = await buildMacroLatestReadPayload("GLOBAL");
+        const globalAsOf = (globalPayload as any)?.globalMacro?.regime?.asOfDate ?? null;
+        await upsertLatestMacroReadCache("GLOBAL", globalAsOf, globalPayload);
+        globalQuick = { attempted: true, ok: true, asOfDate: globalAsOf };
+      } catch (error) {
+        globalQuick = { attempted: true, ok: false, error: (error as Error).message };
+      }
+
+      const successRegions = quickRows.filter((row) => row.snapshotCacheWritten === true).length;
+      const quickSummary = {
+        ok: successRegions > 0,
+        runId,
+        requestedMode,
+        durationMs: Date.now() - startedAt,
+        successRegions,
+        failedRegions: quickRows.length - successRegions,
+        perRegion: quickRows,
+        global: globalQuick,
+      };
+      console.info("[macro-refresh-cron]", quickSummary);
+      res.status(200).json(quickSummary);
+      return;
+    }
 
     for (const region of REGIONS) {
       const regionStart = Date.now();
@@ -219,6 +263,7 @@ export default async function handler(req: any, res: any) {
     const summary = {
       ok: successRegions > 0,
       runId,
+      requestedMode,
       durationMs: Date.now() - startedAt,
       successRegions,
       failedRegions: perRegion.length - successRegions,
