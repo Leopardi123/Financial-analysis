@@ -2039,6 +2039,7 @@ export default async function handler(req: any, res: any) {
     if (!debugEnabled) return;
     timingBreakdown.push({ step, ms: Number(ms.toFixed(3)) });
   };
+  pushTiming("request_received", 0);
   const t0 = Date.now();
   const snapshotCache = await readLatestMacroReadCache(region);
   const snapshotReadMs = Date.now() - t0;
@@ -2182,6 +2183,51 @@ export default async function handler(req: any, res: any) {
   };
   pushTiming("diagnostics_prepare", Date.now() - t7);
   (diagnostics as any).renderCoverage.missingInPayload = (diagnostics as any).regimeProbabilityRichness?.missingFieldPaths ?? [];
+  pushTiming("payload_assembly", Date.now() - routeStartedAtMs);
+
+  const buildDebugTiming = () => {
+    const totalMs = Date.now() - routeStartedAtMs;
+    const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
+    return {
+      totalMs: Number(totalMs.toFixed(3)),
+      breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
+      slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
+    };
+  };
+
+  const appendUsRequestChain = (baseResponse: Record<string, unknown>) => {
+    if (!debugEnabled || region !== "US") return baseResponse;
+    const serializationStart = Date.now();
+    const serialized = JSON.stringify(baseResponse);
+    const serializationMs = Date.now() - serializationStart;
+    pushTiming("json_serialization", serializationMs);
+    const totalBytes = Buffer.byteLength(serialized);
+    const sectionSizes = {
+      snapshotMetaBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.regime ?? null)),
+      historyBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.macroHistory ?? null)),
+      regimeProbabilityBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroRegimeProbability ?? null)),
+      driverBreakdownBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroExplanation ?? null)),
+      overlaysBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.overlays ?? (baseResponse as any)?.globalMacro?.overlayBundle ?? null)),
+      diagnosticsBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.diagnostics ?? null)),
+    };
+    const preDispatchAt = Date.now();
+    pushTiming("response_write_dispatch", 0);
+    const serverTotalRequestMs = preDispatchAt - routeStartedAtMs;
+    return {
+      ...baseResponse,
+      diagnostics: {
+        ...((baseResponse as any).diagnostics ?? {}),
+        usRequestChain: {
+          serverMeasuredMs: serverTotalRequestMs,
+          serverBreakdown: timingBreakdown,
+          payloadSizeBytes: totalBytes,
+          payloadSectionSizes: sectionSizes,
+          serializationMs,
+          responseWriteDispatchMs: 0,
+        },
+      },
+    };
+  };
 
   if (region !== "GLOBAL") {
     try {
@@ -2209,15 +2255,13 @@ export default async function handler(req: any, res: any) {
 
   if (!snapshotCache || !historyCache || !normalizedGlobalMacro) {
     const payloadPrepareStart = Date.now();
-    const totalMs = Date.now() - routeStartedAtMs;
-    const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
     pushTiming("payload_prepare_error", Date.now() - payloadPrepareStart);
     const missing = [
       !snapshotCache ? "latest_snapshot_cache" : null,
       !historyCache ? "history_cache" : null,
       !normalizedGlobalMacro ? "snapshot_payload_invalid" : null,
     ].filter((x): x is string => Boolean(x));
-    res.status(503).json({
+    const responsePayload = {
       ok: false,
       error: "CACHE_MISS",
       globalMacro: null,
@@ -2226,11 +2270,7 @@ export default async function handler(req: any, res: any) {
       diagnostics: {
         ...diagnostics,
         ...(debugEnabled ? {
-          debugTiming: {
-            totalMs: Number(totalMs.toFixed(3)),
-            breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
-            slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
-          },
+          debugTiming: buildDebugTiming(),
         } : {}),
         cacheMiss: true,
         missing,
@@ -2241,11 +2281,12 @@ export default async function handler(req: any, res: any) {
             : "Snapshot payload did not satisfy cache contract",
         message: "Macro read path is cache-only. Missing cache entries must be rebuilt by write paths.",
       },
-    });
+    } as Record<string, unknown>;
+    res.status(503).json(appendUsRequestChain(responsePayload));
     return;
   }
 
-  res.status(200).json({
+  const responsePayload = {
     ok: true,
     globalMacro,
     macroHistory,
@@ -2253,16 +2294,11 @@ export default async function handler(req: any, res: any) {
     diagnostics: {
       ...diagnostics,
       ...(debugEnabled ? (() => {
-        const totalMs = Date.now() - routeStartedAtMs;
-        const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
         return {
-          debugTiming: {
-            totalMs: Number(totalMs.toFixed(3)),
-            breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
-            slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
-          },
+          debugTiming: buildDebugTiming(),
         };
       })() : {}),
     },
-  });
+  } as Record<string, unknown>;
+  res.status(200).json(appendUsRequestChain(responsePayload));
 }

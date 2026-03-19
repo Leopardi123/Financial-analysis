@@ -417,6 +417,23 @@ export default function GlobalMacroDashboard() {
       firstRequestedRegion: string | null;
       activeRegionAtMount: "GLOBAL" | "US" | "EA" | "SE";
     };
+    usRequestChain?: {
+      fetchStartMs: number;
+      responseHeadersReceivedMs: number | null;
+      responseBodyReceivedMs: number | null;
+      jsonParseCompleteMs: number | null;
+      dataBoundMs: number | null;
+      sectionRenderCompleteMs: number | null;
+      clientFetchDurationMs: number | null;
+      clientParseMs: number | null;
+      clientBindMs: number | null;
+      estimatedTransferWaitMs: number | null;
+      serverMeasuredMs: number | null;
+      payloadSizeBytes: number | null;
+      estimatedUnaccountedMs: number | null;
+      slowestStage: string | null;
+      serverBreakdown: Array<{ step: string; ms: number }>;
+    };
     sectionTimings: {
       regimeProbabilityRenderedMs: number | null;
       driverBreakdownRenderedMs: number | null;
@@ -448,6 +465,13 @@ export default function GlobalMacroDashboard() {
     requests: [] as Array<{ url: string; startMs: number; endMs: number | null; durationMs: number | null }>,
     inFlight: 0,
     maxConcurrent: 0,
+    usRequestChain: {
+      fetchStartMs: null as number | null,
+      responseHeadersReceivedMs: null as number | null,
+      responseBodyReceivedMs: null as number | null,
+      jsonParseCompleteMs: null as number | null,
+      dataBoundMs: null as number | null,
+    },
   });
   const [ingestRunningMode, setIngestRunningMode] = useState<"backfill" | "latest" | null>(null);
   const [engineRunning, setEngineRunning] = useState(false);
@@ -537,14 +561,30 @@ export default function GlobalMacroDashboard() {
       frontendTimingRef.current.maxConcurrent = Math.max(frontendTimingRef.current.maxConcurrent, frontendTimingRef.current.inFlight);
       const requestRow = { url, startMs: requestStartMs, endMs: null as number | null, durationMs: null as number | null };
       frontendTimingRef.current.requests.push(requestRow);
+      const shouldTraceUsChain = debugEnabled && selectedRegion === "US";
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.fetchStartMs = requestStartMs;
+      }
       const response = await fetch(url, {
         cache: "no-store",
       });
       const requestEndMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.responseHeadersReceivedMs = requestEndMs;
+      }
       requestRow.endMs = requestEndMs;
       requestRow.durationMs = requestEndMs - requestStartMs;
       if (frontendTimingRef.current.firstFetchEndMs === null) frontendTimingRef.current.firstFetchEndMs = requestEndMs;
-      const payload = await response.json();
+      const payloadText = await response.text();
+      const bodyReceivedMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.responseBodyReceivedMs = bodyReceivedMs;
+      }
+      const payload = JSON.parse(payloadText);
+      const parseCompleteMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.jsonParseCompleteMs = parseCompleteMs;
+      }
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
       }
@@ -553,6 +593,9 @@ export default function GlobalMacroDashboard() {
       setInflationAnalysis(payload.inflationAnalysis ?? null);
       setGlobalMacroRaw(payload);
       frontendTimingRef.current.dataBoundMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.dataBoundMs = frontendTimingRef.current.dataBoundMs;
+      }
     } catch (error) {
       setGlobalMacro(null);
       setMacroHistory(null);
@@ -593,6 +636,31 @@ export default function GlobalMacroDashboard() {
       const repeatedUrls = Array.from(new Set(requestUrlsNormalized.filter((url, idx, arr) => arr.indexOf(url) !== idx)));
       const firstRegionMatch = frontendTimingRef.current.requests[0]?.url.match(/[?&]region=([^&]+)/);
       const firstRequestedRegion = firstRegionMatch ? decodeURIComponent(firstRegionMatch[1]).toUpperCase() : null;
+      const usServerChain = (((globalMacroRaw as any)?.diagnostics ?? {}) as any)?.usRequestChain ?? null;
+      const usClientFetchDuration = frontendTimingRef.current.usRequestChain.fetchStartMs !== null && frontendTimingRef.current.usRequestChain.responseBodyReceivedMs !== null
+        ? frontendTimingRef.current.usRequestChain.responseBodyReceivedMs - frontendTimingRef.current.usRequestChain.fetchStartMs
+        : null;
+      const usClientParseMs = frontendTimingRef.current.usRequestChain.responseBodyReceivedMs !== null && frontendTimingRef.current.usRequestChain.jsonParseCompleteMs !== null
+        ? frontendTimingRef.current.usRequestChain.jsonParseCompleteMs - frontendTimingRef.current.usRequestChain.responseBodyReceivedMs
+        : null;
+      const usClientBindMs = frontendTimingRef.current.usRequestChain.jsonParseCompleteMs !== null && frontendTimingRef.current.usRequestChain.dataBoundMs !== null
+        ? frontendTimingRef.current.usRequestChain.dataBoundMs - frontendTimingRef.current.usRequestChain.jsonParseCompleteMs
+        : null;
+      const usSectionRenderCompleteMs = frontendTimingRef.current.dataBoundMs === null ? null : renderNow;
+      const usTransferWait = frontendTimingRef.current.usRequestChain.fetchStartMs !== null && frontendTimingRef.current.usRequestChain.responseHeadersReceivedMs !== null
+        ? frontendTimingRef.current.usRequestChain.responseHeadersReceivedMs - frontendTimingRef.current.usRequestChain.fetchStartMs
+        : null;
+      const usServerMeasuredMs = typeof usServerChain?.serverMeasuredMs === "number" ? usServerChain.serverMeasuredMs : null;
+      const usUnaccounted = usClientFetchDuration !== null && usServerMeasuredMs !== null
+        ? usClientFetchDuration - usServerMeasuredMs
+        : null;
+      const usStageRows: Array<{ stage: string; ms: number }> = [
+        ...(usServerMeasuredMs !== null ? [{ stage: "server_total", ms: usServerMeasuredMs }] : []),
+        ...(usTransferWait !== null ? [{ stage: "transfer_or_wait", ms: usTransferWait }] : []),
+        ...(usClientParseMs !== null ? [{ stage: "client_parse", ms: usClientParseMs }] : []),
+        ...(usClientBindMs !== null ? [{ stage: "client_bind", ms: usClientBindMs }] : []),
+      ];
+      const usSlowestStage = usStageRows.sort((a, b) => b.ms - a.ms)[0]?.stage ?? null;
       setFrontendDebugTiming({
         navigationToMountMs: frontendTimingRef.current.mountMs,
         mountToFetchStartMs: frontendTimingRef.current.firstFetchStartMs === null ? null : frontendTimingRef.current.firstFetchStartMs - frontendTimingRef.current.mountMs,
@@ -615,6 +683,23 @@ export default function GlobalMacroDashboard() {
           firstRequestedRegion,
           activeRegionAtMount: initialSelectedRegionRef.current,
         },
+        usRequestChain: selectedRegion === "US" ? {
+          fetchStartMs: frontendTimingRef.current.usRequestChain.fetchStartMs ?? 0,
+          responseHeadersReceivedMs: frontendTimingRef.current.usRequestChain.responseHeadersReceivedMs,
+          responseBodyReceivedMs: frontendTimingRef.current.usRequestChain.responseBodyReceivedMs,
+          jsonParseCompleteMs: frontendTimingRef.current.usRequestChain.jsonParseCompleteMs,
+          dataBoundMs: frontendTimingRef.current.usRequestChain.dataBoundMs,
+          sectionRenderCompleteMs: usSectionRenderCompleteMs,
+          clientFetchDurationMs: usClientFetchDuration,
+          clientParseMs: usClientParseMs,
+          clientBindMs: usClientBindMs,
+          estimatedTransferWaitMs: usTransferWait,
+          serverMeasuredMs: usServerMeasuredMs,
+          payloadSizeBytes: typeof usServerChain?.payloadSizeBytes === "number" ? usServerChain.payloadSizeBytes : null,
+          estimatedUnaccountedMs: usUnaccounted,
+          slowestStage: usSlowestStage,
+          serverBreakdown: Array.isArray(usServerChain?.serverBreakdown) ? usServerChain.serverBreakdown : [],
+        } : undefined,
         sectionTimings: {
           regimeProbabilityRenderedMs: frontendTimingRef.current.regimeProbabilityRenderedMs === null ? null : frontendTimingRef.current.regimeProbabilityRenderedMs - frontendTimingRef.current.mountMs,
           driverBreakdownRenderedMs: frontendTimingRef.current.driverBreakdownRenderedMs === null ? null : frontendTimingRef.current.driverBreakdownRenderedMs - frontendTimingRef.current.mountMs,
@@ -623,7 +708,7 @@ export default function GlobalMacroDashboard() {
       });
     });
     return () => cancelAnimationFrame(raf);
-  }, [debugEnabled, globalMacro]);
+  }, [debugEnabled, globalMacro, globalMacroRaw, selectedRegion]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const hasRegime = Boolean(globalMacro && typeof globalMacro === "object" && (globalMacro as any).regime && typeof (globalMacro as any).regime === "object");
@@ -1765,6 +1850,28 @@ Signal: ${gapLabel}`,
                       <li key={`frontend-req-${idx}`}>
                         {req.url} · start={req.startMs.toFixed(1)} · end={req.endMs === null ? "—" : req.endMs.toFixed(1)} · duration={req.durationMs === null ? "—" : req.durationMs.toFixed(1)} ms
                       </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            </section>
+          )}
+          {debugEnabled && selectedRegion === "US" && frontendDebugTiming?.usRequestChain && (
+            <section style={{ border: "1px dashed #94a3b8", borderRadius: 8, padding: "8px 10px", marginBottom: 10, background: "#f8fafc" }}>
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Debug: US request chain</summary>
+                <div style={{ fontSize: 12, marginTop: 8 }}>
+                  <div>server_total_ms: {frontendDebugTiming.usRequestChain.serverMeasuredMs === null ? "—" : frontendDebugTiming.usRequestChain.serverMeasuredMs.toFixed(1)}</div>
+                  <div>payload_size_bytes: {frontendDebugTiming.usRequestChain.payloadSizeBytes === null ? "—" : String(frontendDebugTiming.usRequestChain.payloadSizeBytes)}</div>
+                  <div>client_fetch_duration_ms: {frontendDebugTiming.usRequestChain.clientFetchDurationMs === null ? "—" : frontendDebugTiming.usRequestChain.clientFetchDurationMs.toFixed(1)}</div>
+                  <div>client_parse_ms: {frontendDebugTiming.usRequestChain.clientParseMs === null ? "—" : frontendDebugTiming.usRequestChain.clientParseMs.toFixed(1)}</div>
+                  <div>client_bind_ms: {frontendDebugTiming.usRequestChain.clientBindMs === null ? "—" : frontendDebugTiming.usRequestChain.clientBindMs.toFixed(1)}</div>
+                  <div>estimated_transfer_wait_ms: {frontendDebugTiming.usRequestChain.estimatedTransferWaitMs === null ? "—" : frontendDebugTiming.usRequestChain.estimatedTransferWaitMs.toFixed(1)}</div>
+                  <div>estimated_unaccounted_ms: {frontendDebugTiming.usRequestChain.estimatedUnaccountedMs === null ? "—" : frontendDebugTiming.usRequestChain.estimatedUnaccountedMs.toFixed(1)}</div>
+                  <div><strong>slowest_stage: {frontendDebugTiming.usRequestChain.slowestStage ?? "—"}</strong></div>
+                  <ul style={{ marginTop: 6 }}>
+                    {frontendDebugTiming.usRequestChain.serverBreakdown.map((row, idx) => (
+                      <li key={`us-server-breakdown-${idx}`}>{row.step}: {row.ms} ms</li>
                     ))}
                   </ul>
                 </div>
