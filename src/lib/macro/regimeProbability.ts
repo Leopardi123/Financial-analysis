@@ -14,10 +14,11 @@ type OverlaySnapshot = {
 };
 
 type OverlayEffect = "supporting" | "modulating" | "contradicting";
+type OverlaySignal = "confirming" | "modulating" | "contradicting";
 
 function clamp(n: number, min: number, max: number) { return Math.max(min, Math.min(max, n)); }
 
-function overlaySignalForRegime(regime: string, overlay: OverlaySnapshot): "confirming" | "modulating" | "contradicting" {
+function overlaySignalForRegime(regime: string, overlay: OverlaySnapshot): OverlaySignal {
   const growthStrong = overlay.growthOverlay === "Strong" || overlay.growthOverlay === "High";
   const growthWeak = overlay.growthOverlay === "Weak" || overlay.growthOverlay === "Low";
   const stressHigh = overlay.stressOverlay === "High";
@@ -91,6 +92,15 @@ function overlayLabel(overlayName: "growthOverlay" | "stressOverlay" | "hardAsse
   return `${overlayName}:${value}`;
 }
 
+const OVERLAY_KEYS = ["growthOverlay", "stressOverlay", "hardAssetOverlay"] as const;
+type OverlayKey = typeof OVERLAY_KEYS[number];
+
+function effectForOverlay(regime: string, overlayKey: OverlayKey, overlay: OverlaySnapshot): OverlayEffect {
+  if (overlayKey === "growthOverlay") return classifyGrowthEffect(regime, overlay.growthOverlay);
+  if (overlayKey === "stressOverlay") return classifyStressEffect(regime, overlay.stressOverlay);
+  return classifyHardAssetEffect(regime, overlay.hardAssetOverlay);
+}
+
 function overlayEffectForRegime(regime: string, overlay: OverlaySnapshot) {
   const effects = [
     { key: "growthOverlay" as const, value: overlay.growthOverlay, effect: classifyGrowthEffect(regime, overlay.growthOverlay) },
@@ -105,31 +115,47 @@ function overlayEffectForRegime(regime: string, overlay: OverlaySnapshot) {
 }
 
 function topAlternativeRegime(
-  normalized: Array<{ regime: string; weight: number; signal: "confirming" | "modulating" | "contradicting" }>,
+  normalized: Array<{ regime: string; weight: number; signal: OverlaySignal }>,
   primaryRegime: string,
   momentumDirection: "strengthening" | "weakening" | "stable" | "transitioning",
   overlay: OverlaySnapshot,
   gapToSecond: number,
+  blockDelta: Array<{ block: string; delta: number }>,
 ) {
   const alternatives = normalized.filter((row) => row.regime !== primaryRegime).slice(0, 3);
   if (alternatives.length === 0) return null;
   const primaryOverlay = overlayEffectForRegime(primaryRegime, overlay);
+  const blockTiltForRegime = (regime: string) => {
+    const map = Object.fromEntries(blockDelta.map((d) => [d.block, d.delta]));
+    const a = map.A_FISCAL ?? 0;
+    const b = map.B_LIQUIDITY ?? 0;
+    const c = map.C_INFLATION ?? 0;
+    const d = map.D_REAL_ECON ?? 0;
+    if (regime === "MonetaryDominance") return (b * 0.9) + (d * 0.6) - (a * 0.5) - (c * 0.9);
+    if (regime === "Balanced") return -Math.abs(a) * 0.2 - Math.abs(c) * 0.2 - Math.abs(b) * 0.1;
+    if (regime === "FiscalPressureBuilding") return (a * 0.9) + (c * 0.8) - (b * 0.5) - (d * 0.2);
+    if (regime === "FiscalDominanceRisk") return (a * 1.0) + (c * 1.0) - (b * 0.7) - (d * 0.6);
+    return 0;
+  };
   const ranked = alternatives
     .map((candidate) => {
       const candidateOverlay = overlayEffectForRegime(candidate.regime, overlay);
       const overlayTilt = candidateOverlay.score - primaryOverlay.score;
       const closeness = clamp(12 - (normalized[0].weight - candidate.weight), -12, 12);
-      const momentumBias = momentumDirection === "weakening" || momentumDirection === "transitioning" ? 4 : -1;
-      const score = (candidate.weight * 0.35) + closeness + (overlayTilt * 2.2) + momentumBias;
-      return { regime: candidate.regime, score, overlayTilt, weight: candidate.weight };
+      const momentumBias = momentumDirection === "weakening" || momentumDirection === "transitioning" ? 3 : -1;
+      const blockTilt = blockTiltForRegime(candidate.regime);
+      const score = (candidate.weight * 0.45) + closeness + (overlayTilt * 2.2) + (blockTilt * 1.6) + momentumBias;
+      return { regime: candidate.regime, score, overlayTilt, blockTilt, weight: candidate.weight };
     })
     .sort((a, b) => b.score - a.score);
   const top = ranked[0];
   if (!top) return null;
-  const closeEnough = gapToSecond <= 10;
-  const overlaySuggests = top.overlayTilt >= 1;
+  const closeEnough = gapToSecond <= 14;
+  const overlaySuggests = top.overlayTilt >= 1.2;
+  const blockSuggests = top.blockTilt >= 0.8;
   const momentumSuggests = momentumDirection === "weakening" || momentumDirection === "transitioning";
-  return closeEnough || overlaySuggests || momentumSuggests ? top.regime : null;
+  const scoreSuggests = top.score >= 24 && top.weight >= 20;
+  return closeEnough || overlaySuggests || blockSuggests || momentumSuggests || scoreSuggests ? top.regime : null;
 }
 
 export function buildMacroRegimeProbabilityFromSnapshot(input: {
@@ -213,9 +239,19 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
 
   const supportingBlocks = blockEntries.sort((a, b) => (b[1] as number) - (a[1] as number)).map(([k]) => k).slice(0, 2);
   const overlayForPrimary = overlayEffectForRegime(top1.regime, overlayState);
-  const supportingOverlays = overlayForPrimary.supporting;
-  const modulatingOverlays = overlayForPrimary.modulating;
-  const contradictingOverlays = overlayForPrimary.contradicting;
+  const topAlternatives = normalized.filter((row) => row.regime !== top1.regime).slice(0, 2).map((row) => row.regime);
+  const supportingOverlays: string[] = [];
+  const modulatingOverlays: string[] = [];
+  const contradictingOverlays: string[] = [];
+  OVERLAY_KEYS.forEach((overlayKey) => {
+    const primaryEffect = effectForOverlay(top1.regime, overlayKey, overlayState);
+    const alternativeEffects = topAlternatives.map((regime) => effectForOverlay(regime, overlayKey, overlayState));
+    const altSupports = alternativeEffects.filter((effect) => effect === "supporting").length;
+    const altContradicts = alternativeEffects.filter((effect) => effect === "contradicting").length;
+    if (primaryEffect === "supporting" && altSupports === 0) supportingOverlays.push(overlayKey);
+    else if (primaryEffect === "contradicting" || (altSupports > 0 && primaryEffect !== "supporting" && altSupports > altContradicts)) contradictingOverlays.push(overlayKey);
+    else modulatingOverlays.push(overlayKey);
+  });
 
   let structuralSummary = "partial_confirmation";
   if (top1.signal === "confirming" && contradictingOverlays.length === 0) structuralSummary = "overlay_supportive";
@@ -230,35 +266,44 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
     direction,
     overlayState,
     top1.weight - top2.weight,
+    blockDelta,
   );
   const overlayPressure = overlayForPrimary.supporting.length - overlayForPrimary.contradicting.length;
   const momentumScore = clamp((primaryWeightDelta * 2.2) + (scoreDelta * 0.7) + (gapDelta * 1.4) + (overlayPressure * 3), -100, 100);
   const primaryRegimeChange = direction === "strengthening" ? "improving" : direction === "weakening" ? "deteriorating" : "stable";
 
   const overlayNarrative = (() => {
-    const supportText = supportingOverlays.length > 0 ? `Support from ${supportingOverlays.join(", ")}` : "No strong supportive overlay confirmation";
-    const modText = modulatingOverlays.length > 0 ? `modulated by ${modulatingOverlays.join(", ")}` : "limited modulation";
-    const contraText = contradictingOverlays.length > 0 ? `while ${contradictingOverlays.join(", ")} contradicts the primary read` : "and no major overlay contradiction";
-    return `${supportText}, ${modText}, ${contraText}.`;
+    const leadAlternative = normalized.find((row) => row.regime !== top1.regime)?.regime ?? null;
+    const supportText = supportingOverlays.length > 0
+      ? `${supportingOverlays.join(", ")} reinforce ${top1.regime}`
+      : `No overlay gives clean one-way reinforcement to ${top1.regime}`;
+    const modulationText = modulatingOverlays.length > 0
+      ? `${modulatingOverlays.join(", ")} are mixed and keep conviction moderate`
+      : "little mixed-signal modulation is present";
+    const contradictionText = contradictingOverlays.length > 0
+      ? `${contradictingOverlays.join(", ")} lean against the primary regime${leadAlternative ? ` and keep ${leadAlternative} in play` : ""}`
+      : "no overlay contradiction is broad enough to overturn the primary read";
+    return `${supportText}; ${modulationText}; ${contradictionText}.`;
   })();
 
   const momentumNarrative = direction === "strengthening"
-    ? "Regimen stärks med ökande försprång mot nästa kandidat."
+    ? `Primary regime is strengthening with a wider lead${driftTowardRegime ? `, though residual drift still points to ${driftTowardRegime}` : ""}.`
     : direction === "weakening"
-      ? `Regimen försvagas${driftTowardRegime ? ` och glider mot ${driftTowardRegime}` : ""}.`
+      ? `Primary regime is weakening${driftTowardRegime ? ` with drift pressure toward ${driftTowardRegime}` : ""}.`
       : direction === "transitioning"
-        ? `Makroläget är i övergång${driftTowardRegime ? ` mot ${driftTowardRegime}` : ""} med minskande gap i toppfördelningen.`
-        : "Makroläget är relativt stabilt med begränsad riktningsdrift.";
+        ? `Macro state is transitioning${driftTowardRegime ? ` toward ${driftTowardRegime}` : ""} as the top-gap compresses.`
+        : "Macro state is stable with limited directional drift.";
 
+  const strongestPositiveBlock = blockDelta.find((row) => row.delta > 0);
+  const strongestNegativeBlock = blockDelta.find((row) => row.delta < 0);
   const changeDrivers = [
-    ...blockDelta.slice(0, 2).map((row) => {
-      const sign = row.delta >= 0 ? "strengthening" : "cooling";
-      return `${row.block} ${sign} (${row.delta >= 0 ? "+" : ""}${row.delta.toFixed(1)})`;
-    }),
-    supportingOverlays[0] ? `${supportingOverlays[0]} supports primary` : null,
-    contradictingOverlays[0] ? `${contradictingOverlays[0]} challenges primary` : null,
-    driftTowardRegime ? `distribution drift pressure toward ${driftTowardRegime}` : null,
-  ].filter((item): item is string => Boolean(item)).slice(0, 5);
+    strongestPositiveBlock ? `${strongestPositiveBlock.block} strengthening (${strongestPositiveBlock.delta >= 0 ? "+" : ""}${strongestPositiveBlock.delta.toFixed(1)})` : null,
+    strongestNegativeBlock ? `${strongestNegativeBlock.block} fading (${strongestNegativeBlock.delta >= 0 ? "+" : ""}${strongestNegativeBlock.delta.toFixed(1)})` : null,
+    supportingOverlays[0] ? `${supportingOverlays[0]} reinforcing ${top1.regime}` : null,
+    modulatingOverlays[0] ? `${modulatingOverlays[0]} mixed, limiting conviction` : null,
+    contradictingOverlays[0] ? `${contradictingOverlays[0]} leaning against ${top1.regime}` : null,
+    driftTowardRegime ? `drift pressure building toward ${driftTowardRegime}` : null,
+  ].filter((item): item is string => Boolean(item)).slice(0, 6);
 
   return {
     primaryRegime: top1.regime,
@@ -268,8 +313,8 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
     distribution: normalized.slice(0, 4).map((row) => ({ regime: row.regime, weight: row.weight })),
     narrative: {
       short: `${top1.regime} remains primary (${top1.weight.toFixed(1)}%). ${overlayNarrative}`,
-      medium: `Primary ${top1.regime}; alternatives ${normalized.slice(1, 3).map((d) => `${d.regime} ${d.weight.toFixed(1)}%`).join(" · ") || "insufficient alternatives"}. Blocks supporting: ${supportingBlocks.join(", ") || "none"}. ${overlayNarrative} ${momentumNarrative}`,
-      long: `Primary regime ${top1.regime} leads with ${top1.weight.toFixed(1)}% vs ${top2.regime} ${top2.weight.toFixed(1)}% (gap ${(top1.weight - top2.weight).toFixed(1)}). Blocks supporting baseline: ${supportingBlocks.join(", ") || "none"}. Overlay classification => supporting: ${supportingOverlays.join(", ") || "none"}; modulating: ${modulatingOverlays.join(", ") || "none"}; contradicting: ${contradictingOverlays.join(", ") || "none"}. Momentum: ${direction} (score ${momentumScore.toFixed(1)}). ${driftTowardRegime ? `Drift points toward ${driftTowardRegime}.` : "No material drift candidate."} Structural state: ${structuralSummary}.`,
+      medium: `Primary regime is ${top1.regime} (${top1.weight.toFixed(1)}%), with alternatives ${normalized.slice(1, 3).map((d) => `${d.regime} ${d.weight.toFixed(1)}%`).join(" · ") || "not meaningful"}. It leads on block mix (${supportingBlocks.join(", ") || "none"}) and current overlay structure: supporting ${supportingOverlays.join(", ") || "none"}, modulating ${modulatingOverlays.join(", ") || "none"}, contradicting ${contradictingOverlays.join(", ") || "none"}. Momentum is ${direction} (score ${momentumScore.toFixed(1)}). ${driftTowardRegime ? `Drift risk is currently toward ${driftTowardRegime}.` : "No meaningful drift candidate is active."} Structural caveat: ${structuralSummary}.`,
+      long: `Primary regime ${top1.regime} leads at ${top1.weight.toFixed(1)}% versus ${top2.regime} at ${top2.weight.toFixed(1)}% (gap ${(top1.weight - top2.weight).toFixed(1)}), with next alternatives ${normalized.slice(1, 4).map((d) => `${d.regime} ${d.weight.toFixed(1)}%`).join(", ")}. The lead is sustained mainly by block ranking (${supportingBlocks.join(", ") || "none"}) and recent block-direction shifts (${blockDelta.slice(0, 3).map((b) => `${b.block} ${b.delta >= 0 ? "+" : ""}${b.delta.toFixed(1)}`).join(", ") || "none"}). Overlay decomposition is explicit: supporting ${supportingOverlays.join(", ") || "none"}; modulating ${modulatingOverlays.join(", ") || "none"}; contradicting ${contradictingOverlays.join(", ") || "none"}. ${overlayNarrative} Momentum state is ${direction} with score ${momentumScore.toFixed(1)} and primary change ${primaryRegimeChange}. ${driftTowardRegime ? `Current drift points to ${driftTowardRegime}.` : "No meaningful drift toward an alternative regime is detected."} Structural caveat remains ${structuralSummary}.`,
     },
     structuralAdjustment: {
       summary: structuralSummary,
