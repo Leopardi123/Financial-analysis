@@ -1,5 +1,5 @@
 import { getAdminSecret } from "../../../../api/_auth.js";
-import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { tables } from "../../../../api/_migrate.js";
 import { query } from "../../../../api/_db.js";
 import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
@@ -1748,48 +1748,6 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
 
 
 
-function hydrateMacroExplanationFromSnapshot(snapshot: any, regionFallback: string) {
-  if (!snapshot || typeof snapshot !== "object") return snapshot;
-  if (snapshot.macroExplanation && typeof snapshot.macroExplanation === "object") return snapshot;
-  const regime = snapshot.regime;
-  if (!regime || typeof regime !== "object") return snapshot;
-  const asOfDate = typeof regime.asOfDate === "string" ? regime.asOfDate : null;
-  const coreRegimeLabel = typeof regime.coreRegimeLabel === "string" ? regime.coreRegimeLabel : null;
-  if (!asOfDate || !coreRegimeLabel) return snapshot;
-
-  const blockScores = (regime.blockScores && typeof regime.blockScores === "object")
-    ? regime.blockScores
-    : { A_FISCAL: null, B_MONETARY: null, C_INFLATION: null, D_CREDIBILITY: null };
-
-  const safeDrivers = Array.isArray(regime.topDrivers)
-    ? regime.topDrivers.map((driver: any) => ({
-      indicatorId: String(driver?.indicatorId ?? "unknown"),
-      title: String(driver?.title ?? driver?.indicatorId ?? "unknown"),
-      block: (driver?.block === "A_FISCAL" || driver?.block === "B_MONETARY" || driver?.block === "C_INFLATION" || driver?.block === "D_CREDIBILITY") ? driver.block : "D_CREDIBILITY",
-      contribution: typeof driver?.contribution === "number" ? driver.contribution : 0,
-      direction: typeof driver?.direction === "string" ? driver.direction : "stable",
-      driverNote: typeof driver?.driverNote === "string" ? driver.driverNote : null,
-    }))
-    : [];
-
-  const built = buildMacroExplanation({
-    region: typeof snapshot.region === "string" ? snapshot.region : regionFallback,
-    asOfDate,
-    regime: {
-      macroScoreTotal: typeof regime.macroScoreTotal === "number" ? regime.macroScoreTotal : null,
-      coreRegimeLabel,
-      macroConfidence: typeof regime.macroConfidence === "number" ? regime.macroConfidence : 0,
-      blockScores: blockScores as any,
-      topDrivers: safeDrivers,
-    },
-    indicators: Array.isArray(snapshot.indicators) ? snapshot.indicators : [],
-    overlayBundle: snapshot.overlayBundle ?? snapshot.overlays,
-    debug: snapshot.debug,
-  });
-
-  return { ...snapshot, macroExplanation: built };
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -1855,152 +1813,6 @@ function normalizeMacroHistoryPayload(value: unknown, region: string, resolution
   };
 }
 
-function mergeHistoryIntervals<T extends string>(
-  points: Array<{ asOfDate: string; value: T }>,
-) {
-  if (points.length === 0) return [] as Array<{ startDate: string; endDate: string; value: T; pointCount: number }>;
-  const out: Array<{ startDate: string; endDate: string; value: T; pointCount: number }> = [];
-  let current = {
-    startDate: points[0].asOfDate,
-    endDate: points[0].asOfDate,
-    value: points[0].value,
-    pointCount: 1,
-  };
-  for (let i = 1; i < points.length; i += 1) {
-    const point = points[i];
-    if (point.value === current.value) {
-      current.endDate = point.asOfDate;
-      current.pointCount += 1;
-      continue;
-    }
-    out.push(current);
-    current = {
-      startDate: point.asOfDate,
-      endDate: point.asOfDate,
-      value: point.value,
-      pointCount: 1,
-    };
-  }
-  out.push(current);
-  return out;
-}
-
-function trimHistoryPayloadToRequestedRange(payload: any, requestedRangeYears: number | "MAX") {
-  if (!payload || requestedRangeYears === "MAX") return payload;
-  const allPoints = Array.isArray(payload.points) ? payload.points : [];
-  if (allPoints.length === 0) return payload;
-  const latestDate = String(allPoints[allPoints.length - 1]?.asOfDate ?? "");
-  const latestTime = new Date(`${latestDate}T00:00:00.000Z`).getTime();
-  if (!Number.isFinite(latestTime)) return payload;
-  const cutoff = new Date(latestTime);
-  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - requestedRangeYears);
-  const cutoffTime = cutoff.getTime();
-  const trimmedPoints = allPoints.filter((point: any) => {
-    const time = new Date(`${String(point?.asOfDate ?? "")}T00:00:00.000Z`).getTime();
-    return Number.isFinite(time) && time >= cutoffTime;
-  });
-  if (trimmedPoints.length === allPoints.length || trimmedPoints.length === 0) return payload;
-
-  const regimeIntervals = mergeHistoryIntervals(
-    trimmedPoints
-      .filter((point: any) => typeof point?.coreRegimeLabel === "string")
-      .map((point: any) => ({ asOfDate: String(point.asOfDate), value: String(point.coreRegimeLabel) })),
-  ).map((interval) => ({
-    startDate: interval.startDate,
-    endDate: interval.endDate,
-    coreRegimeLabel: interval.value,
-    pointCount: interval.pointCount,
-    topDriver: null,
-    topDrivers: [],
-    regimeExplanation: { title: "Range-trimmed interval", summary: "Interval rebuilt from cached history points.", driverHighlights: [] },
-  }));
-
-  const overlayGrowthIntervals = mergeHistoryIntervals(
-    trimmedPoints
-      .filter((point: any) => typeof point?.growthOverlay === "string")
-      .map((point: any) => ({ asOfDate: String(point.asOfDate), value: String(point.growthOverlay) })),
-  );
-  const overlayStressIntervals = mergeHistoryIntervals(
-    trimmedPoints
-      .filter((point: any) => typeof point?.stressOverlay === "string")
-      .map((point: any) => ({ asOfDate: String(point.asOfDate), value: String(point.stressOverlay) })),
-  );
-  const overlayHardAssetIntervals = mergeHistoryIntervals(
-    trimmedPoints
-      .filter((point: any) => typeof point?.hardAssetOverlay === "string")
-      .map((point: any) => ({ asOfDate: String(point.asOfDate), value: String(point.hardAssetOverlay) })),
-  );
-
-  const nextRangeDebug = {
-    ...(payload.rangeDebug ?? {}),
-    actualStartDate: trimmedPoints[0]?.asOfDate ?? payload?.rangeDebug?.actualStartDate ?? null,
-    actualEndDate: trimmedPoints[trimmedPoints.length - 1]?.asOfDate ?? payload?.rangeDebug?.actualEndDate ?? null,
-  };
-
-  return {
-    ...payload,
-    requestedRangeYears,
-    generatedPoints: trimmedPoints.length,
-    replayEarliestDateUsed: trimmedPoints[0]?.asOfDate ?? payload?.replayEarliestDateUsed ?? null,
-    replayLatestDateUsed: trimmedPoints[trimmedPoints.length - 1]?.asOfDate ?? payload?.replayLatestDateUsed ?? null,
-    points: trimmedPoints,
-    intervals: {
-      ...(payload.intervals ?? {}),
-      regime: regimeIntervals,
-      overlays: {
-        growth: overlayGrowthIntervals,
-        stress: overlayStressIntervals,
-        hardAsset: overlayHardAssetIntervals,
-      },
-    },
-    rangeDebug: nextRangeDebug,
-    replay: {
-      ...(payload.replay ?? {}),
-      source: "cache_fallback_trimmed",
-    },
-  };
-}
-
-async function readMacroHistoryWithCompatibleFallback(params: {
-  region: string;
-  resolution: HistoryResolution;
-  rangeYears: number | "MAX";
-}) {
-  const exact = await readMacroHistoryReadCache(params);
-  if (exact) {
-    return {
-      cache: exact,
-      matchedRequestedRange: true,
-      fallbackFromRangeYears: null as number | "MAX" | null,
-    };
-  }
-
-  const fallbackRanges: Array<number | "MAX"> = params.resolution === "MONTHLY"
-    ? [20, "MAX"]
-    : [5, 3, "MAX"];
-
-  for (const fallbackRange of fallbackRanges) {
-    if (fallbackRange === params.rangeYears) continue;
-    const candidate = await readMacroHistoryReadCache({ ...params, rangeYears: fallbackRange });
-    if (!candidate) continue;
-    return {
-      cache: {
-        ...candidate,
-        payload: trimHistoryPayloadToRequestedRange(candidate.payload, params.rangeYears),
-      },
-      matchedRequestedRange: false,
-      fallbackFromRangeYears: fallbackRange,
-    };
-  }
-
-  return {
-    cache: null,
-    matchedRequestedRange: false,
-    fallbackFromRangeYears: null as number | "MAX" | null,
-  };
-}
-
-
 function normalizeMacroRegimeProbability(value: unknown) {
   const parseMaybeJson = (input: unknown) => {
     if (typeof input !== "string") return input;
@@ -2046,6 +1858,7 @@ function normalizeMacroRegimeProbability(value: unknown) {
     structuralAdjustment,
     supportingBlocks: Array.isArray(parsed.supportingBlocks) ? parsed.supportingBlocks.slice(0, 8) : [],
     supportingOverlays: Array.isArray(parsed.supportingOverlays) ? parsed.supportingOverlays.slice(0, 8) : [],
+    modulatingOverlays: Array.isArray(parsed.modulatingOverlays) ? parsed.modulatingOverlays.slice(0, 8) : [],
     contradictingOverlays: Array.isArray(parsed.contradictingOverlays) ? parsed.contradictingOverlays.slice(0, 8) : [],
     regimeMomentum: parsed.regimeMomentum && typeof parsed.regimeMomentum === "object"
       ? {
@@ -2139,6 +1952,7 @@ function inspectRegimeProbabilityRichness(probability: any) {
     "structuralAdjustment.penalty",
     "supportingBlocks",
     "supportingOverlays",
+    "modulatingOverlays",
     "contradictingOverlays",
     "regimeMomentum.direction",
     "regimeMomentum.momentumScore",
@@ -2168,6 +1982,7 @@ function inspectRegimeProbabilityRichness(probability: any) {
   const presentFieldPaths = expectedFieldPaths.filter((path) => hasPath(path));
   const missingFieldPaths = expectedFieldPaths.filter((path) => !hasPath(path));
   return {
+    expectedFieldPaths,
     expectedFieldCount: expectedFieldPaths.length,
     presentFieldCount: presentFieldPaths.length,
     presentFieldPaths,
@@ -2183,13 +1998,28 @@ export async function buildMacroLatestReadPayload(region: string) {
     return {
       globalMacro: await readLatestGlobalSnapshot(false, []),
       inflationAnalysis: null,
+      metadata: {
+        dataTimestamp: null,
+        staleVsUnderlyingData: null,
+      },
       cachedAt: new Date().toISOString(),
     };
   }
   if (!["US", "EA", "SE"].includes(region)) return null;
+  const latestRawRows = await query(
+    `SELECT MAX(date) AS latest_date
+     FROM ${tables.macroRawDatapoints}
+     WHERE region = ? AND source_type = 'auto'`,
+    [region],
+  ) as unknown as Array<{ latest_date: string | null }>;
+  const dataTimestamp = latestRawRows[0]?.latest_date ?? null;
   return {
     globalMacro: await readLatestSnapshot(region, false, []),
     inflationAnalysis: await loadInflationAnalysis(region as "US" | "EA" | "SE"),
+    metadata: {
+      dataTimestamp,
+      staleVsUnderlyingData: null,
+    },
     cachedAt: new Date().toISOString(),
   };
 }
@@ -2206,8 +2036,6 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  await ensureSchema();
-
   const region = String(req.query?.region ?? "GLOBAL").toUpperCase();
   const debugEnabled = String(req.query?.debug ?? "0") === "1";
   const historyResolution = String(req.query?.historyResolution ?? "MONTHLY").toUpperCase() === "WEEKLY" ? "WEEKLY" : "MONTHLY";
@@ -2218,69 +2046,76 @@ export default async function handler(req: any, res: any) {
       ? Number(historyRangeRaw)
       : (historyResolution === "MONTHLY" ? 20 : 3);
 
+  const routeStartedAtMs = Date.now();
+  const timingBreakdown: Array<{ step: string; ms: number }> = [];
+  const pushTiming = (step: string, ms: number) => {
+    if (!debugEnabled) return;
+    timingBreakdown.push({ step, ms: Number(ms.toFixed(3)) });
+  };
+  const ensureSchemaExecuted = false;
+  pushTiming("request_received", 0);
   const t0 = Date.now();
-  const snapshotCache = await readLatestMacroReadCache(region);
+  const snapshotCache = await readLatestMacroReadCache(region, { onTiming: pushTiming });
   const snapshotReadMs = Date.now() - t0;
+  pushTiming("cache_lookup_snapshot", snapshotReadMs);
 
   const t1 = Date.now();
-  const historyRead = await readMacroHistoryWithCompatibleFallback({
+  const historyCache = await readMacroHistoryReadCache({
     region,
     resolution: historyResolution as HistoryResolution,
     rangeYears: historyRangeYears,
-  });
-  const historyCache = historyRead.cache;
+  }, { onTiming: pushTiming });
   const historyReadMs = Date.now() - t1;
+  pushTiming("cache_lookup_history", historyReadMs);
 
+  const t2 = Date.now();
   const snapshotPayloadRaw = snapshotCache?.payload;
   const snapshotPayload = snapshotPayloadRaw && typeof snapshotPayloadRaw === "object"
     ? snapshotPayloadRaw as Record<string, unknown>
     : null;
+  pushTiming("cache_deserialize_and_payload_cast", Date.now() - t2);
 
+  const t3 = Date.now();
   const globalMacroRaw = snapshotPayload && "globalMacro" in snapshotPayload
     ? snapshotPayload.globalMacro
     : snapshotPayloadRaw ?? null;
   const normalizedGlobalMacro = normalizeGlobalMacroPayload(globalMacroRaw);
+  pushTiming("snapshot_parse_and_validate", Date.now() - t3);
+
+  const t4 = Date.now();
   const globalMacroTrimmed = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
-  const globalMacroHydrated = hydrateMacroExplanationFromSnapshot(globalMacroTrimmed, region);
-  const globalMacroWithProbability = attachMacroRegimeProbability(globalMacroHydrated);
-  const globalMacro = globalMacroWithProbability?.macroRegimeProbability
-    ? globalMacroWithProbability
-    : (() => {
-      const regimeAny = (globalMacroWithProbability as any)?.regime;
-      if (!regimeAny || typeof regimeAny !== "object") return globalMacroWithProbability;
-      return {
-        ...globalMacroWithProbability,
-        macroRegimeProbability: buildMacroRegimeProbabilityFromSnapshot({
-          macroScoreTotal: typeof regimeAny.macroScoreTotal === "number" ? regimeAny.macroScoreTotal : null,
-          macroConfidence: typeof regimeAny.macroConfidence === "number" ? regimeAny.macroConfidence : 0,
-          coreRegimeLabel: typeof regimeAny.coreRegimeLabel === "string" ? regimeAny.coreRegimeLabel : "DataInsufficient",
-          growthOverlay: typeof regimeAny.growthOverlay === "string" ? regimeAny.growthOverlay : "Neutral",
-          stressOverlay: typeof regimeAny.stressOverlay === "string" ? regimeAny.stressOverlay : "Low",
-          hardAssetOverlay: typeof regimeAny.hardAssetOverlay === "string" ? regimeAny.hardAssetOverlay : "Neutral",
-          blockScores: (regimeAny.blockScores ?? {}) as any,
-        }),
-      };
-    })();
+  pushTiming("overlay_processing_trim", Date.now() - t4);
+
+  const t5 = Date.now();
+  const globalMacro = attachMacroRegimeProbability(globalMacroTrimmed);
+  pushTiming("regime_probability_build_or_normalize", Date.now() - t5);
 
   const inflationAnalysis = snapshotPayload && "inflationAnalysis" in snapshotPayload
     ? snapshotPayload.inflationAnalysis
     : null;
+  const t6 = Date.now();
   const macroHistory = normalizeMacroHistoryPayload(
     historyCache?.payload ?? null,
     region,
     historyResolution as HistoryResolution,
     historyRangeYears,
   );
+  pushTiming("history_payload_prepare", Date.now() - t6);
 
+  const t7 = Date.now();
   const diagnostics = {
     readMode: "snapshot_cache_only",
     snapshotSource: snapshotCache ? "macro_latest_read_cache" : "cache_missing",
     snapshotCacheKey: `macro_latest_read_cache:${region}`,
+    historyCacheKey: `macro_history_read_cache:${region}:${historyResolution}:${String(historyRangeYears)}`,
     snapshotCacheHit: Boolean(snapshotCache),
     historyCacheHit: Boolean(historyCache),
-    historyCacheExactRangeHit: historyRead.matchedRequestedRange,
-    historyCacheFallbackFromRange: historyRead.fallbackFromRangeYears,
+    historyCacheExactRangeHit: Boolean(historyCache),
+    historyCacheFallbackFromRange: null,
     liveFallbackAttempted: false,
+    cacheOnlyRead: true,
+    routeDurationMs: Date.now() - routeStartedAtMs,
+    source: `macro_latest_read_cache:${region}`,
     snapshotReadMs,
     historyCacheReadMs: historyReadMs,
     payloadBytes: Buffer.byteLength(JSON.stringify({ globalMacro, macroHistory })),
@@ -2290,6 +2125,60 @@ export default async function handler(req: any, res: any) {
     snapshotPayloadValid: Boolean(normalizedGlobalMacro),
     historyPayloadValid: Boolean(historyCache?.payload && Array.isArray((historyCache.payload as any)?.points)),
     regimeProbabilityRichness: inspectRegimeProbabilityRichness((globalMacro as any)?.macroRegimeProbability),
+    renderCoverage: {
+      dashboardFieldPaths: [
+        "primaryRegime",
+        "primaryWeight",
+        "decisiveness",
+        "transitionLike",
+        "distribution",
+        "narrative.short",
+        "narrative.medium",
+        "narrative.long",
+        "structuralAdjustment.summary",
+        "structuralAdjustment.multiplier",
+        "structuralAdjustment.penalty",
+        "supportingBlocks",
+        "supportingOverlays",
+        "modulatingOverlays",
+        "contradictingOverlays",
+        "regimeMomentum.direction",
+        "regimeMomentum.momentumScore",
+        "regimeMomentum.primaryRegimeChange",
+        "regimeMomentum.driftTowardRegime",
+        "regimeMomentum.changeDrivers",
+        "regimeMomentum.narrative",
+        "overlayInfluence.primarySignal",
+        "overlayInfluence.candidateSignals",
+        "overlayInfluence.summary",
+      ],
+      macroLabFieldPaths: [
+        "primaryRegime",
+        "primaryWeight",
+        "decisiveness",
+        "transitionLike",
+        "distribution",
+        "narrative.short",
+        "narrative.medium",
+        "narrative.long",
+        "structuralAdjustment.summary",
+        "structuralAdjustment.multiplier",
+        "structuralAdjustment.penalty",
+        "supportingBlocks",
+        "supportingOverlays",
+        "modulatingOverlays",
+        "contradictingOverlays",
+        "regimeMomentum.direction",
+        "regimeMomentum.momentumScore",
+        "regimeMomentum.primaryRegimeChange",
+        "regimeMomentum.driftTowardRegime",
+        "regimeMomentum.changeDrivers",
+        "regimeMomentum.narrative",
+        "overlayInfluence.primarySignal",
+        "overlayInfluence.candidateSignals",
+        "overlayInfluence.summary",
+      ],
+    },
     trimReport: {
       trimSnapshotForNormalReadRemoves: ["debug", "overlayEngineDiagnostics", "overlayRuntimeProof", "overlayRoutingDiagnostics", "overlays[*].components[*].debug"],
       normalizeMacroRegimeProbabilityCaps: {
@@ -2302,58 +2191,120 @@ export default async function handler(req: any, res: any) {
       notes: [
         "No explicit trimming for narrative.medium / narrative.long.",
         "No explicit trimming for structuralAdjustment.multiplier / structuralAdjustment.penalty.",
-        "modulatingOverlays is not a persisted payload field; modulation is represented under overlayInfluence.",
+        "modulatingOverlays is optional; if absent, use overlayInfluence as modulation context.",
       ],
     },
   };
+  pushTiming("diagnostics_prepare", Date.now() - t7);
+  (diagnostics as any).renderCoverage.missingInPayload = (diagnostics as any).regimeProbabilityRichness?.missingFieldPaths ?? [];
+  pushTiming("payload_assembly", Date.now() - routeStartedAtMs);
 
-  if (region !== "GLOBAL") {
-    try {
-      const latestRawRows = await query(
-        `SELECT MAX(date) AS latest_date
-         FROM ${tables.macroRawDatapoints}
-         WHERE region = ? AND source_type = 'auto'`,
-        [region],
-      ) as unknown as Array<{ latest_date: string | null }>;
-      const latestRawDate = latestRawRows[0]?.latest_date ?? null;
-      (diagnostics as any).dataTimestamp = latestRawDate;
-      (diagnostics as any).snapshotStaleVsUnderlyingData = Boolean(
-        latestRawDate
-        && (diagnostics as any).snapshotAsOfDate
-        && String((diagnostics as any).snapshotAsOfDate) < String(latestRawDate),
-      );
-    } catch {
-      (diagnostics as any).dataTimestamp = null;
-      (diagnostics as any).snapshotStaleVsUnderlyingData = null;
-    }
-  } else {
-    (diagnostics as any).dataTimestamp = null;
-    (diagnostics as any).snapshotStaleVsUnderlyingData = null;
-  }
+  const buildDebugTiming = () => {
+    const totalMs = Date.now() - routeStartedAtMs;
+    const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
+    return {
+      totalMs: Number(totalMs.toFixed(3)),
+      breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
+      slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
+    };
+  };
+
+  const appendUsRequestChain = (baseResponse: Record<string, unknown>) => {
+    if (!debugEnabled || region !== "US") return baseResponse;
+    const serializationStart = Date.now();
+    const serialized = JSON.stringify(baseResponse);
+    const serializationMs = Date.now() - serializationStart;
+    pushTiming("json_serialization", serializationMs);
+    const totalBytes = Buffer.byteLength(serialized);
+    const sectionSizes = {
+      snapshotMetaBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.regime ?? null)),
+      historyBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.macroHistory ?? null)),
+      regimeProbabilityBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroRegimeProbability ?? null)),
+      driverBreakdownBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroExplanation ?? null)),
+      overlaysBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.overlays ?? (baseResponse as any)?.globalMacro?.overlayBundle ?? null)),
+      diagnosticsBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.diagnostics ?? null)),
+    };
+    const preDispatchAt = Date.now();
+    pushTiming("response_write_dispatch", 0);
+    const serverTotalRequestMs = preDispatchAt - routeStartedAtMs;
+    const measuredSubstepsSumMs = timingBreakdown.reduce((sum, row) => sum + (typeof row.ms === "number" ? row.ms : 0), 0);
+    const unmeasuredGapMs = serverTotalRequestMs - measuredSubstepsSumMs;
+    return {
+      ...baseResponse,
+      diagnostics: {
+        ...((baseResponse as any).diagnostics ?? {}),
+        usRequestChain: {
+          serverMeasuredMs: serverTotalRequestMs,
+          serverBreakdown: timingBreakdown,
+          measuredSubstepsSumMs: Number(measuredSubstepsSumMs.toFixed(3)),
+          unmeasuredGapMs: Number(unmeasuredGapMs.toFixed(3)),
+          payloadSizeBytes: totalBytes,
+          payloadSectionSizes: sectionSizes,
+          serializationMs,
+          responseWriteDispatchMs: 0,
+        },
+      },
+    };
+  };
+
+  const cachedMetadata = snapshotPayload && "metadata" in snapshotPayload && typeof snapshotPayload.metadata === "object"
+    ? snapshotPayload.metadata as Record<string, unknown>
+    : null;
+  (diagnostics as any).dataTimestamp = cachedMetadata && typeof cachedMetadata.dataTimestamp === "string"
+    ? cachedMetadata.dataTimestamp
+    : null;
+  (diagnostics as any).snapshotStaleVsUnderlyingData = cachedMetadata && typeof cachedMetadata.staleVsUnderlyingData === "boolean"
+    ? cachedMetadata.staleVsUnderlyingData
+    : null;
+  (diagnostics as any).rawTimestampQueryExecuted = false;
+  (diagnostics as any).ensureSchemaExecuted = ensureSchemaExecuted;
 
   if (!snapshotCache || !historyCache || !normalizedGlobalMacro) {
-    const historyMissingMessage = !historyCache
-      ? "Historik finns ännu inte i snapshot/cache för vald upplösning/intervall. Kör /api/cron/macro-refresh för att generera den."
-      : null;
-    res.status(200).json({
-      ok: true,
-      globalMacro,
-      macroHistory,
-      inflationAnalysis,
+    const payloadPrepareStart = Date.now();
+    pushTiming("payload_prepare_error", Date.now() - payloadPrepareStart);
+    const missing = [
+      !snapshotCache ? "latest_snapshot_cache" : null,
+      !historyCache ? "history_cache" : null,
+      !normalizedGlobalMacro ? "snapshot_payload_invalid" : null,
+    ].filter((x): x is string => Boolean(x));
+    const responsePayload = {
+      ok: false,
+      error: "CACHE_MISS",
+      globalMacro: null,
+      macroHistory: null,
+      inflationAnalysis: null,
       diagnostics: {
         ...diagnostics,
-        stale: true,
-        message: historyMissingMessage ?? "Macro snapshot/history cache missing. Run /api/cron/macro-refresh or admin macro ingest + run-engine.",
+        ...(debugEnabled ? {
+          debugTiming: buildDebugTiming(),
+        } : {}),
+        cacheMiss: true,
+        missing,
+        rootCause: missing.includes("history_cache")
+          ? `Missing exact history cache key ${`macro_history_read_cache:${region}:${historyResolution}:${String(historyRangeYears)}`}`
+          : missing.includes("latest_snapshot_cache")
+            ? `Missing latest snapshot cache key macro_latest_read_cache:${region}`
+            : "Snapshot payload did not satisfy cache contract",
+        message: "Macro read path is cache-only. Missing cache entries must be rebuilt by write paths.",
       },
-    });
+    } as Record<string, unknown>;
+    res.status(503).json(appendUsRequestChain(responsePayload));
     return;
   }
 
-  res.status(200).json({
+  const responsePayload = {
     ok: true,
     globalMacro,
     macroHistory,
     inflationAnalysis,
-    diagnostics,
-  });
+    diagnostics: {
+      ...diagnostics,
+      ...(debugEnabled ? (() => {
+        return {
+          debugTiming: buildDebugTiming(),
+        };
+      })() : {}),
+    },
+  } as Record<string, unknown>;
+  res.status(200).json(appendUsRequestChain(responsePayload));
 }

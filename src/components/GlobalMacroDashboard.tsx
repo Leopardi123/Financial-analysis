@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
 import InfoPopover from "./InfoPopover";
 
@@ -388,16 +388,91 @@ function AdminSection({ children }: { children: ReactNode }) {
 }
 
 export default function GlobalMacroDashboard() {
+  const initialRegionFromLocation = (() => {
+    if (typeof window === "undefined") return "GLOBAL" as const;
+    const query = new URLSearchParams(window.location.search);
+    const queryRegion = String(query.get("region") ?? "").toUpperCase();
+    if (queryRegion === "US" || queryRegion === "EA" || queryRegion === "SE" || queryRegion === "GLOBAL") return queryRegion;
+    const saved = String(window.localStorage.getItem("globalMacro.selectedRegion") ?? "").toUpperCase();
+    if (saved === "US" || saved === "EA" || saved === "SE" || saved === "GLOBAL") return saved;
+    return "GLOBAL" as const;
+  })();
   const [globalMacro, setGlobalMacro] = useState<GlobalMacroPayload | null>(null);
   const [globalMacroRaw, setGlobalMacroRaw] = useState<Record<string, unknown> | null>(null);
+  const [frontendDebugTiming, setFrontendDebugTiming] = useState<{
+    navigationToMountMs: number | null;
+    mountToFetchStartMs: number | null;
+    fetchDurationMs: number | null;
+    fetchToDataBoundMs: number | null;
+    dataToRenderCompleteMs: number | null;
+    totalUserPerceivedMs: number | null;
+    requestCount: number;
+    maxConcurrent: number;
+    requestMode: "sequential" | "parallel_or_overlapping";
+    repeatedUrls: string[];
+    requests: Array<{ url: string; startMs: number; endMs: number | null; durationMs: number | null }>;
+    requestSummary: {
+      requestedRegions: string[];
+      initialRequestMatchedActiveTab: boolean;
+      firstRequestedRegion: string | null;
+      activeRegionAtMount: "GLOBAL" | "US" | "EA" | "SE";
+    };
+    usRequestChain?: {
+      fetchStartMs: number;
+      responseHeadersReceivedMs: number | null;
+      responseBodyReceivedMs: number | null;
+      jsonParseCompleteMs: number | null;
+      dataBoundMs: number | null;
+      sectionRenderCompleteMs: number | null;
+      clientFetchDurationMs: number | null;
+      clientParseMs: number | null;
+      clientBindMs: number | null;
+      estimatedTransferWaitMs: number | null;
+      serverMeasuredMs: number | null;
+      payloadSizeBytes: number | null;
+      estimatedUnaccountedMs: number | null;
+      slowestStage: string | null;
+      serverBreakdown: Array<{ step: string; ms: number }>;
+    };
+    sectionTimings: {
+      regimeProbabilityRenderedMs: number | null;
+      driverBreakdownRenderedMs: number | null;
+      overlaysRenderedMs: number | null;
+    };
+  } | null>(null);
   const [macroHistory, setMacroHistory] = useState<MacroHistoryPayload | null>(null);
   const [inflationAnalysis, setInflationAnalysis] = useState<InflationAnalysisPayload | null>(null);
   const [historyResolution, setHistoryResolution] = useState<"WEEKLY" | "MONTHLY">("MONTHLY");
   const [historyRangeYears, setHistoryRangeYears] = useState<number | "MAX">(10);
-  const [selectedRegion, setSelectedRegion] = useState<"GLOBAL" | "US" | "EA" | "SE">("GLOBAL");
+  const [selectedRegion, setSelectedRegion] = useState<"GLOBAL" | "US" | "EA" | "SE">(initialRegionFromLocation as "GLOBAL" | "US" | "EA" | "SE");
   const [globalMacroLoading, setGlobalMacroLoading] = useState(false);
   const [globalMacroError, setGlobalMacroError] = useState<string | null>(null);
-  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugEnabled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  });
+  const initialSelectedRegionRef = useRef<"GLOBAL" | "US" | "EA" | "SE">(initialRegionFromLocation as "GLOBAL" | "US" | "EA" | "SE");
+  const lastRequestKeyRef = useRef<string | null>(null);
+  const frontendTimingRef = useRef({
+    mountMs: (typeof performance !== "undefined" ? performance.now() : Date.now()),
+    firstFetchStartMs: null as number | null,
+    firstFetchEndMs: null as number | null,
+    dataBoundMs: null as number | null,
+    renderCompleteMs: null as number | null,
+    regimeProbabilityRenderedMs: null as number | null,
+    driverBreakdownRenderedMs: null as number | null,
+    overlaysRenderedMs: null as number | null,
+    requests: [] as Array<{ url: string; startMs: number; endMs: number | null; durationMs: number | null }>,
+    inFlight: 0,
+    maxConcurrent: 0,
+    usRequestChain: {
+      fetchStartMs: null as number | null,
+      responseHeadersReceivedMs: null as number | null,
+      responseBodyReceivedMs: null as number | null,
+      jsonParseCompleteMs: null as number | null,
+      dataBoundMs: null as number | null,
+    },
+  });
   const [ingestRunningMode, setIngestRunningMode] = useState<"backfill" | "latest" | null>(null);
   const [engineRunning, setEngineRunning] = useState(false);
   const [adminSecretInput, setAdminSecretInput] = useState("");
@@ -437,9 +512,8 @@ export default function GlobalMacroDashboard() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const query = new URLSearchParams(window.location.search);
-    setDebugEnabled(query.get("debug") === "1");
-  }, []);
+    window.localStorage.setItem("globalMacro.selectedRegion", selectedRegion);
+  }, [selectedRegion]);
 
 
   useEffect(() => {
@@ -474,10 +548,43 @@ export default function GlobalMacroDashboard() {
     try {
       const overlayKeysParam = encodeURIComponent(uiOverlayKeysRequested.join(","));
       const cacheBust = Date.now();
-      const response = await fetch(`/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}&_ts=${cacheBust}`, {
+      const debugParam = debugEnabled ? "&debug=1" : "";
+      const requestKey = `${selectedRegion}|${historyResolution}|${String(historyRangeYears)}|${uiOverlayKeysRequested.join(",")}|debug:${debugEnabled ? 1 : 0}`;
+      if (lastRequestKeyRef.current === requestKey && frontendTimingRef.current.inFlight > 0) {
+        return;
+      }
+      lastRequestKeyRef.current = requestKey;
+      const url = `/api/sector/global-macro?region=${selectedRegion}&historyResolution=${historyResolution}&historyRangeYears=${String(historyRangeYears)}&uiOverlayKeysRequested=${overlayKeysParam}${debugParam}&_ts=${cacheBust}`;
+      const requestStartMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (frontendTimingRef.current.firstFetchStartMs === null) frontendTimingRef.current.firstFetchStartMs = requestStartMs;
+      frontendTimingRef.current.inFlight += 1;
+      frontendTimingRef.current.maxConcurrent = Math.max(frontendTimingRef.current.maxConcurrent, frontendTimingRef.current.inFlight);
+      const requestRow = { url, startMs: requestStartMs, endMs: null as number | null, durationMs: null as number | null };
+      frontendTimingRef.current.requests.push(requestRow);
+      const shouldTraceUsChain = debugEnabled && selectedRegion === "US";
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.fetchStartMs = requestStartMs;
+      }
+      const response = await fetch(url, {
         cache: "no-store",
       });
-      const payload = await response.json();
+      const requestEndMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.responseHeadersReceivedMs = requestEndMs;
+      }
+      requestRow.endMs = requestEndMs;
+      requestRow.durationMs = requestEndMs - requestStartMs;
+      if (frontendTimingRef.current.firstFetchEndMs === null) frontendTimingRef.current.firstFetchEndMs = requestEndMs;
+      const payloadText = await response.text();
+      const bodyReceivedMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.responseBodyReceivedMs = bodyReceivedMs;
+      }
+      const payload = JSON.parse(payloadText);
+      const parseCompleteMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.jsonParseCompleteMs = parseCompleteMs;
+      }
       if (!response.ok) {
         throw new Error(String(payload?.error ?? "Kunde inte ladda Global Macro"));
       }
@@ -485,6 +592,10 @@ export default function GlobalMacroDashboard() {
       setMacroHistory(payload.macroHistory ?? null);
       setInflationAnalysis(payload.inflationAnalysis ?? null);
       setGlobalMacroRaw(payload);
+      frontendTimingRef.current.dataBoundMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (shouldTraceUsChain) {
+        frontendTimingRef.current.usRequestChain.dataBoundMs = frontendTimingRef.current.dataBoundMs;
+      }
     } catch (error) {
       setGlobalMacro(null);
       setMacroHistory(null);
@@ -492,13 +603,112 @@ export default function GlobalMacroDashboard() {
       setInflationAnalysis(null);
       setGlobalMacroError(error instanceof Error ? error.message : "Okänt fel vid Global Macro-hämtning");
     } finally {
+      frontendTimingRef.current.inFlight = Math.max(0, frontendTimingRef.current.inFlight - 1);
       setGlobalMacroLoading(false);
     }
   }
 
   useEffect(() => {
     void loadGlobalMacro();
-  }, [historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
+  }, [debugEnabled, historyResolution, historyRangeYears, selectedRegion, uiOverlayKeysRequested]);
+
+  useEffect(() => {
+    if (!debugEnabled || !globalMacro) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if ((globalMacro as any)?.macroRegimeProbability && frontendTimingRef.current.regimeProbabilityRenderedMs === null) {
+      frontendTimingRef.current.regimeProbabilityRenderedMs = now;
+    }
+    if ((globalMacro as any)?.macroExplanation && frontendTimingRef.current.driverBreakdownRenderedMs === null) {
+      frontendTimingRef.current.driverBreakdownRenderedMs = now;
+    }
+    if (Array.isArray((globalMacro as any)?.overlayHistory) && (globalMacro as any).overlayHistory.length > 0 && frontendTimingRef.current.overlaysRenderedMs === null) {
+      frontendTimingRef.current.overlaysRenderedMs = now;
+    }
+
+    const raf = requestAnimationFrame(() => {
+      const renderNow = typeof performance !== "undefined" ? performance.now() : Date.now();
+      frontendTimingRef.current.renderCompleteMs = renderNow;
+      const requestUrlsNormalized = frontendTimingRef.current.requests.map((row) => row.url.replace(/&_ts=\d+/, ""));
+      const requestedRegions = Array.from(new Set(frontendTimingRef.current.requests.map((row) => {
+        const match = row.url.match(/[?&]region=([^&]+)/);
+        return match ? decodeURIComponent(match[1]).toUpperCase() : "UNKNOWN";
+      })));
+      const repeatedUrls = Array.from(new Set(requestUrlsNormalized.filter((url, idx, arr) => arr.indexOf(url) !== idx)));
+      const firstRegionMatch = frontendTimingRef.current.requests[0]?.url.match(/[?&]region=([^&]+)/);
+      const firstRequestedRegion = firstRegionMatch ? decodeURIComponent(firstRegionMatch[1]).toUpperCase() : null;
+      const usServerChain = (((globalMacroRaw as any)?.diagnostics ?? {}) as any)?.usRequestChain ?? null;
+      const usClientFetchDuration = frontendTimingRef.current.usRequestChain.fetchStartMs !== null && frontendTimingRef.current.usRequestChain.responseBodyReceivedMs !== null
+        ? frontendTimingRef.current.usRequestChain.responseBodyReceivedMs - frontendTimingRef.current.usRequestChain.fetchStartMs
+        : null;
+      const usClientParseMs = frontendTimingRef.current.usRequestChain.responseBodyReceivedMs !== null && frontendTimingRef.current.usRequestChain.jsonParseCompleteMs !== null
+        ? frontendTimingRef.current.usRequestChain.jsonParseCompleteMs - frontendTimingRef.current.usRequestChain.responseBodyReceivedMs
+        : null;
+      const usClientBindMs = frontendTimingRef.current.usRequestChain.jsonParseCompleteMs !== null && frontendTimingRef.current.usRequestChain.dataBoundMs !== null
+        ? frontendTimingRef.current.usRequestChain.dataBoundMs - frontendTimingRef.current.usRequestChain.jsonParseCompleteMs
+        : null;
+      const usSectionRenderCompleteMs = frontendTimingRef.current.dataBoundMs === null ? null : renderNow;
+      const usTransferWait = frontendTimingRef.current.usRequestChain.fetchStartMs !== null && frontendTimingRef.current.usRequestChain.responseHeadersReceivedMs !== null
+        ? frontendTimingRef.current.usRequestChain.responseHeadersReceivedMs - frontendTimingRef.current.usRequestChain.fetchStartMs
+        : null;
+      const usServerMeasuredMs = typeof usServerChain?.serverMeasuredMs === "number" ? usServerChain.serverMeasuredMs : null;
+      const usUnaccounted = usClientFetchDuration !== null && usServerMeasuredMs !== null
+        ? usClientFetchDuration - usServerMeasuredMs
+        : null;
+      const usStageRows: Array<{ stage: string; ms: number }> = [
+        ...(usServerMeasuredMs !== null ? [{ stage: "server_total", ms: usServerMeasuredMs }] : []),
+        ...(usTransferWait !== null ? [{ stage: "transfer_or_wait", ms: usTransferWait }] : []),
+        ...(usClientParseMs !== null ? [{ stage: "client_parse", ms: usClientParseMs }] : []),
+        ...(usClientBindMs !== null ? [{ stage: "client_bind", ms: usClientBindMs }] : []),
+      ];
+      const usSlowestStage = usStageRows.sort((a, b) => b.ms - a.ms)[0]?.stage ?? null;
+      setFrontendDebugTiming({
+        navigationToMountMs: frontendTimingRef.current.mountMs,
+        mountToFetchStartMs: frontendTimingRef.current.firstFetchStartMs === null ? null : frontendTimingRef.current.firstFetchStartMs - frontendTimingRef.current.mountMs,
+        fetchDurationMs: frontendTimingRef.current.firstFetchStartMs === null || frontendTimingRef.current.firstFetchEndMs === null
+          ? null
+          : frontendTimingRef.current.firstFetchEndMs - frontendTimingRef.current.firstFetchStartMs,
+        fetchToDataBoundMs: frontendTimingRef.current.firstFetchEndMs === null || frontendTimingRef.current.dataBoundMs === null
+          ? null
+          : frontendTimingRef.current.dataBoundMs - frontendTimingRef.current.firstFetchEndMs,
+        dataToRenderCompleteMs: frontendTimingRef.current.dataBoundMs === null ? null : renderNow - frontendTimingRef.current.dataBoundMs,
+        totalUserPerceivedMs: renderNow - frontendTimingRef.current.mountMs,
+        requestCount: frontendTimingRef.current.requests.length,
+        maxConcurrent: frontendTimingRef.current.maxConcurrent,
+        requestMode: frontendTimingRef.current.maxConcurrent > 1 ? "parallel_or_overlapping" : "sequential",
+        repeatedUrls,
+        requests: frontendTimingRef.current.requests.map((row) => ({ ...row })),
+        requestSummary: {
+          requestedRegions,
+          initialRequestMatchedActiveTab: firstRequestedRegion === initialSelectedRegionRef.current,
+          firstRequestedRegion,
+          activeRegionAtMount: initialSelectedRegionRef.current,
+        },
+        usRequestChain: selectedRegion === "US" ? {
+          fetchStartMs: frontendTimingRef.current.usRequestChain.fetchStartMs ?? 0,
+          responseHeadersReceivedMs: frontendTimingRef.current.usRequestChain.responseHeadersReceivedMs,
+          responseBodyReceivedMs: frontendTimingRef.current.usRequestChain.responseBodyReceivedMs,
+          jsonParseCompleteMs: frontendTimingRef.current.usRequestChain.jsonParseCompleteMs,
+          dataBoundMs: frontendTimingRef.current.usRequestChain.dataBoundMs,
+          sectionRenderCompleteMs: usSectionRenderCompleteMs,
+          clientFetchDurationMs: usClientFetchDuration,
+          clientParseMs: usClientParseMs,
+          clientBindMs: usClientBindMs,
+          estimatedTransferWaitMs: usTransferWait,
+          serverMeasuredMs: usServerMeasuredMs,
+          payloadSizeBytes: typeof usServerChain?.payloadSizeBytes === "number" ? usServerChain.payloadSizeBytes : null,
+          estimatedUnaccountedMs: usUnaccounted,
+          slowestStage: usSlowestStage,
+          serverBreakdown: Array.isArray(usServerChain?.serverBreakdown) ? usServerChain.serverBreakdown : [],
+        } : undefined,
+        sectionTimings: {
+          regimeProbabilityRenderedMs: frontendTimingRef.current.regimeProbabilityRenderedMs === null ? null : frontendTimingRef.current.regimeProbabilityRenderedMs - frontendTimingRef.current.mountMs,
+          driverBreakdownRenderedMs: frontendTimingRef.current.driverBreakdownRenderedMs === null ? null : frontendTimingRef.current.driverBreakdownRenderedMs - frontendTimingRef.current.mountMs,
+          overlaysRenderedMs: frontendTimingRef.current.overlaysRenderedMs === null ? null : frontendTimingRef.current.overlaysRenderedMs - frontendTimingRef.current.mountMs,
+        },
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [debugEnabled, globalMacro, globalMacroRaw, selectedRegion]);
 
   const globalMacroIndicators = globalMacro?.indicators ?? [];
   const hasRegime = Boolean(globalMacro && typeof globalMacro === "object" && (globalMacro as any).regime && typeof (globalMacro as any).regime === "object");
@@ -1538,7 +1748,7 @@ Signal: ${gapLabel}`,
         payload,
       });
       if (!response.ok) {
-        throw new Error(String((payload as any)?.error ?? "Snapshot rebuild failed"));
+        return;
       }
       await loadGlobalMacro();
     } catch (error) {
@@ -1590,6 +1800,86 @@ Signal: ${gapLabel}`,
           {globalMacroLoading && <div className="status">Laddar Global Macro…</div>}
           {globalMacroError && <div className="status">Kunde inte ladda Global Macro: {globalMacroError}</div>}
           {isNoData && <div className="status empty">Ingen macrodata hittades ännu. Sektionen är aktiv men endpointen returnerade tomt.</div>}
+          {debugEnabled && readDiagnostics?.debugTiming && (
+            <section style={{ border: "1px dashed #94a3b8", borderRadius: 8, padding: "8px 10px", marginBottom: 10, background: "#f8fafc" }}>
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Debug: tidsåtgång global macro</summary>
+                <div style={{ fontSize: 12, marginTop: 8 }}>
+                  <div><strong>Total:</strong> {String(readDiagnostics?.debugTiming?.totalMs ?? "—")} ms</div>
+                  <ul style={{ marginTop: 6 }}>
+                    {(Array.isArray(readDiagnostics?.debugTiming?.breakdown) ? readDiagnostics.debugTiming.breakdown : []).map((row: any) => (
+                      <li key={`debug-timing-${row?.step}`}>{String(row?.step ?? "unknown")}: {String(row?.ms ?? "—")} ms</li>
+                    ))}
+                  </ul>
+                  <div style={{ fontWeight: 700, marginTop: 6 }}>Slowest:</div>
+                  <ol style={{ marginTop: 4 }}>
+                    {(Array.isArray(readDiagnostics?.debugTiming?.slowestSteps) ? readDiagnostics.debugTiming.slowestSteps : []).map((row: any) => (
+                      <li key={`debug-slowest-${row?.step}`}>{String(row?.step ?? "unknown")} ({String(row?.ms ?? "—")} ms)</li>
+                    ))}
+                  </ol>
+                </div>
+              </details>
+            </section>
+          )}
+          {debugEnabled && frontendDebugTiming && (
+            <section style={{ border: "1px dashed #94a3b8", borderRadius: 8, padding: "8px 10px", marginBottom: 10, background: "#f8fafc" }}>
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Debug: laddkedja frontend global macro</summary>
+                <div style={{ fontSize: 12, marginTop: 8 }}>
+                  <div>navigation_to_mount_ms: {frontendDebugTiming.navigationToMountMs === null ? "—" : frontendDebugTiming.navigationToMountMs.toFixed(1)}</div>
+                  <div>mount_to_fetch_start_ms: {frontendDebugTiming.mountToFetchStartMs === null ? "—" : frontendDebugTiming.mountToFetchStartMs.toFixed(1)}</div>
+                  <div>fetch_duration_ms: {frontendDebugTiming.fetchDurationMs === null ? "—" : frontendDebugTiming.fetchDurationMs.toFixed(1)}</div>
+                  <div>fetch_to_data_bound_ms: {frontendDebugTiming.fetchToDataBoundMs === null ? "—" : frontendDebugTiming.fetchToDataBoundMs.toFixed(1)}</div>
+                  <div>data_to_render_complete_ms: {frontendDebugTiming.dataToRenderCompleteMs === null ? "—" : frontendDebugTiming.dataToRenderCompleteMs.toFixed(1)}</div>
+                  <div><strong>total_user_perceived_ms: {frontendDebugTiming.totalUserPerceivedMs === null ? "—" : frontendDebugTiming.totalUserPerceivedMs.toFixed(1)}</strong></div>
+                  <div style={{ marginTop: 6 }}>request_count: {frontendDebugTiming.requestCount}</div>
+                  <div>request_mode: {frontendDebugTiming.requestMode}</div>
+                  <div>max_concurrent_requests: {frontendDebugTiming.maxConcurrent}</div>
+                  <div>repeated_urls: {frontendDebugTiming.repeatedUrls.length > 0 ? frontendDebugTiming.repeatedUrls.join(" | ") : "none"}</div>
+                  <div>requested_regions: {frontendDebugTiming.requestSummary.requestedRegions.join(", ") || "none"}</div>
+                  <div>first_requested_region: {frontendDebugTiming.requestSummary.firstRequestedRegion ?? "—"}</div>
+                  <div>active_region_at_mount: {frontendDebugTiming.requestSummary.activeRegionAtMount}</div>
+                  <div>initial_request_matched_active_tab: {String(frontendDebugTiming.requestSummary.initialRequestMatchedActiveTab)}</div>
+                  <div style={{ marginTop: 6 }}>
+                    section timings (ms from mount): regimeProbability={frontendDebugTiming.sectionTimings.regimeProbabilityRenderedMs === null ? "—" : frontendDebugTiming.sectionTimings.regimeProbabilityRenderedMs.toFixed(1)},
+                    driverBreakdown={frontendDebugTiming.sectionTimings.driverBreakdownRenderedMs === null ? "—" : frontendDebugTiming.sectionTimings.driverBreakdownRenderedMs.toFixed(1)},
+                    overlays={frontendDebugTiming.sectionTimings.overlaysRenderedMs === null ? "—" : frontendDebugTiming.sectionTimings.overlaysRenderedMs.toFixed(1)}
+                  </div>
+                  <ul style={{ marginTop: 6 }}>
+                    {frontendDebugTiming.requests.map((req, idx) => (
+                      <li key={`frontend-req-${idx}`}>
+                        {req.url} · start={req.startMs.toFixed(1)} · end={req.endMs === null ? "—" : req.endMs.toFixed(1)} · duration={req.durationMs === null ? "—" : req.durationMs.toFixed(1)} ms
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            </section>
+          )}
+          {debugEnabled && selectedRegion === "US" && frontendDebugTiming?.usRequestChain && (
+            <section style={{ border: "1px dashed #94a3b8", borderRadius: 8, padding: "8px 10px", marginBottom: 10, background: "#f8fafc" }}>
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Debug: US request chain</summary>
+                <div style={{ fontSize: 12, marginTop: 8 }}>
+                  <div>server_total_ms: {frontendDebugTiming.usRequestChain.serverMeasuredMs === null ? "—" : frontendDebugTiming.usRequestChain.serverMeasuredMs.toFixed(1)}</div>
+                  <div>payload_size_bytes: {frontendDebugTiming.usRequestChain.payloadSizeBytes === null ? "—" : String(frontendDebugTiming.usRequestChain.payloadSizeBytes)}</div>
+                  <div>measured_substeps_sum_ms: {typeof (globalMacroRaw as any)?.diagnostics?.usRequestChain?.measuredSubstepsSumMs === "number" ? (globalMacroRaw as any).diagnostics.usRequestChain.measuredSubstepsSumMs.toFixed(1) : "—"}</div>
+                  <div>server_unmeasured_gap_ms: {typeof (globalMacroRaw as any)?.diagnostics?.usRequestChain?.unmeasuredGapMs === "number" ? (globalMacroRaw as any).diagnostics.usRequestChain.unmeasuredGapMs.toFixed(1) : "—"}</div>
+                  <div>client_fetch_duration_ms: {frontendDebugTiming.usRequestChain.clientFetchDurationMs === null ? "—" : frontendDebugTiming.usRequestChain.clientFetchDurationMs.toFixed(1)}</div>
+                  <div>client_parse_ms: {frontendDebugTiming.usRequestChain.clientParseMs === null ? "—" : frontendDebugTiming.usRequestChain.clientParseMs.toFixed(1)}</div>
+                  <div>client_bind_ms: {frontendDebugTiming.usRequestChain.clientBindMs === null ? "—" : frontendDebugTiming.usRequestChain.clientBindMs.toFixed(1)}</div>
+                  <div>estimated_transfer_wait_ms: {frontendDebugTiming.usRequestChain.estimatedTransferWaitMs === null ? "—" : frontendDebugTiming.usRequestChain.estimatedTransferWaitMs.toFixed(1)}</div>
+                  <div>estimated_unaccounted_ms: {frontendDebugTiming.usRequestChain.estimatedUnaccountedMs === null ? "—" : frontendDebugTiming.usRequestChain.estimatedUnaccountedMs.toFixed(1)}</div>
+                  <div><strong>slowest_stage: {frontendDebugTiming.usRequestChain.slowestStage ?? "—"}</strong></div>
+                  <ul style={{ marginTop: 6 }}>
+                    {frontendDebugTiming.usRequestChain.serverBreakdown.map((row, idx) => (
+                      <li key={`us-server-breakdown-${idx}`}>{row.step}: {row.ms} ms</li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            </section>
+          )}
 
           {!globalMacroLoading && !globalMacroError && globalMacro && hasRegime && (
             <>
@@ -1611,8 +1901,11 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12, marginBottom: 6, background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 6, padding: "6px 8px" }}>
                     <strong>Snapshot diagnostics:</strong> asOf {String(readDiagnostics?.snapshotAsOfDate ?? (globalMacro as any)?.regime?.asOfDate ?? "—")} ·
                     updatedAt {String(readDiagnostics?.snapshotUpdatedAt ?? "—")} ·
+                    cacheOnlyRead {String(readDiagnostics?.cacheOnlyRead ?? "—")} ·
+                    cache hit {String(readDiagnostics?.snapshotCacheHit ?? "—")} ·
                     source {String(readDiagnostics?.snapshotSource ?? readDiagnostics?.readMode ?? "—")} ·
                     cache key {String(readDiagnostics?.snapshotCacheKey ?? "—")} ·
+                    routeMs {String(readDiagnostics?.routeDurationMs ?? "—")} ·
                     stale-vs-data {String(readDiagnostics?.snapshotStaleVsUnderlyingData ?? "unknown")} ·
                     dataTimestamp {String(readDiagnostics?.dataTimestamp ?? "—")} ·
                     richness {(typeof readDiagnostics?.regimeProbabilityRichness?.presentFieldCount === "number" ? readDiagnostics.regimeProbabilityRichness.presentFieldCount : 0)}/{(typeof readDiagnostics?.regimeProbabilityRichness?.expectedFieldCount === "number" ? readDiagnostics.regimeProbabilityRichness.expectedFieldCount : expectedRegimeFields.length)}
@@ -1621,6 +1914,7 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12 }}>Structural adjustment: {String(regimeProbabilityAny?.structuralAdjustment?.summary ?? "none")} · multiplier {typeof regimeProbabilityAny?.structuralAdjustment?.multiplier === "number" ? regimeProbabilityAny.structuralAdjustment.multiplier.toFixed(2) : "—"} · penalty {typeof regimeProbabilityAny?.structuralAdjustment?.penalty === "number" ? regimeProbabilityAny.structuralAdjustment.penalty.toFixed(2) : "—"}</div>
                   <div style={{ fontSize: 12 }}>Supporting blocks: {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Supporting overlays: {Array.isArray(regimeProbabilityAny?.supportingOverlays) && regimeProbabilityAny.supportingOverlays.length ? regimeProbabilityAny.supportingOverlays.join(", ") : "—"}</div>
+                  <div style={{ fontSize: 12 }}>Modulating overlays: {Array.isArray(regimeProbabilityAny?.modulatingOverlays) && regimeProbabilityAny.modulatingOverlays.length ? regimeProbabilityAny.modulatingOverlays.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Contradicting overlays: {Array.isArray(regimeProbabilityAny?.contradictingOverlays) && regimeProbabilityAny.contradictingOverlays.length ? regimeProbabilityAny.contradictingOverlays.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Momentum: {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} {regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ? `→ ${regimeProbabilityAny.regimeMomentum.driftTowardRegime}` : ""} · score {typeof regimeProbabilityAny?.regimeMomentum?.momentumScore === "number" ? regimeProbabilityAny.regimeMomentum.momentumScore.toFixed(1) : "—"} · primary change {String(regimeProbabilityAny?.regimeMomentum?.primaryRegimeChange ?? "—")}</div>
                   <div style={{ fontSize: 12 }}>Momentum drivers: {Array.isArray(regimeProbabilityAny?.regimeMomentum?.changeDrivers) && regimeProbabilityAny.regimeMomentum.changeDrivers.length ? regimeProbabilityAny.regimeMomentum.changeDrivers.join(", ") : "—"}</div>
