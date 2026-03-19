@@ -101,6 +101,12 @@ function effectForOverlay(regime: string, overlayKey: OverlayKey, overlay: Overl
   return classifyHardAssetEffect(regime, overlay.hardAssetOverlay);
 }
 
+function effectScore(effect: OverlayEffect): number {
+  if (effect === "supporting") return 1;
+  if (effect === "contradicting") return -1;
+  return 0;
+}
+
 function overlayEffectForRegime(regime: string, overlay: OverlaySnapshot) {
   const effects = [
     { key: "growthOverlay" as const, value: overlay.growthOverlay, effect: classifyGrowthEffect(regime, overlay.growthOverlay) },
@@ -150,12 +156,13 @@ function topAlternativeRegime(
     .sort((a, b) => b.score - a.score);
   const top = ranked[0];
   if (!top) return null;
-  const closeEnough = gapToSecond <= 14;
+  const closeEnough = gapToSecond <= 12;
   const overlaySuggests = top.overlayTilt >= 1.2;
   const blockSuggests = top.blockTilt >= 0.8;
   const momentumSuggests = momentumDirection === "weakening" || momentumDirection === "transitioning";
-  const scoreSuggests = top.score >= 24 && top.weight >= 20;
-  return closeEnough || overlaySuggests || blockSuggests || momentumSuggests || scoreSuggests ? top.regime : null;
+  const scoreSuggests = top.score >= 24 && top.weight >= 22;
+  const meaningfulDrift = scoreSuggests || (closeEnough && (overlaySuggests || blockSuggests || top.weight >= 28)) || (momentumSuggests && top.weight >= 30 && (overlaySuggests || blockSuggests));
+  return meaningfulDrift ? top.regime : null;
 }
 
 export function buildMacroRegimeProbabilityFromSnapshot(input: {
@@ -245,11 +252,15 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
   const contradictingOverlays: string[] = [];
   OVERLAY_KEYS.forEach((overlayKey) => {
     const primaryEffect = effectForOverlay(top1.regime, overlayKey, overlayState);
-    const alternativeEffects = topAlternatives.map((regime) => effectForOverlay(regime, overlayKey, overlayState));
-    const altSupports = alternativeEffects.filter((effect) => effect === "supporting").length;
-    const altContradicts = alternativeEffects.filter((effect) => effect === "contradicting").length;
-    if (primaryEffect === "supporting" && altSupports === 0) supportingOverlays.push(overlayKey);
-    else if (primaryEffect === "contradicting" || (altSupports > 0 && primaryEffect !== "supporting" && altSupports > altContradicts)) contradictingOverlays.push(overlayKey);
+    const primaryScore = effectScore(primaryEffect);
+    const alternativeScores = topAlternatives.map((regime) => effectScore(effectForOverlay(regime, overlayKey, overlayState)));
+    const strongestAlternative = alternativeScores.length ? Math.max(...alternativeScores) : 0;
+    const weakestAlternative = alternativeScores.length ? Math.min(...alternativeScores) : 0;
+
+    if (primaryScore >= 1 && strongestAlternative <= 0) supportingOverlays.push(overlayKey);
+    else if (primaryScore <= -1 && strongestAlternative >= 0) contradictingOverlays.push(overlayKey);
+    else if ((strongestAlternative - primaryScore) >= 1) contradictingOverlays.push(overlayKey);
+    else if ((primaryScore - weakestAlternative) >= 1) supportingOverlays.push(overlayKey);
     else modulatingOverlays.push(overlayKey);
   });
 
@@ -277,8 +288,9 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
     const supportText = supportingOverlays.length > 0
       ? `${supportingOverlays.join(", ")} reinforce ${top1.regime}`
       : `No overlay gives clean one-way reinforcement to ${top1.regime}`;
+    const modVerb = modulatingOverlays.length > 1 ? "are" : "is";
     const modulationText = modulatingOverlays.length > 0
-      ? `${modulatingOverlays.join(", ")} are mixed and keep conviction moderate`
+      ? `${modulatingOverlays.join(", ")} ${modVerb} mixed and keeps conviction moderate`
       : "little mixed-signal modulation is present";
     const contradictionText = contradictingOverlays.length > 0
       ? `${contradictingOverlays.join(", ")} lean against the primary regime${leadAlternative ? ` and keep ${leadAlternative} in play` : ""}`
@@ -296,7 +308,15 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
 
   const strongestPositiveBlock = blockDelta.find((row) => row.delta > 0);
   const strongestNegativeBlock = blockDelta.find((row) => row.delta < 0);
+  const directionDriver = direction === "stable"
+    ? "top-gap remains broadly stable"
+    : direction === "strengthening"
+      ? "top-gap is widening in favor of primary"
+      : direction === "weakening"
+        ? "top-gap is narrowing against primary"
+        : "top regimes are compressing into transition";
   const changeDrivers = [
+    directionDriver,
     strongestPositiveBlock ? `${strongestPositiveBlock.block} strengthening (${strongestPositiveBlock.delta >= 0 ? "+" : ""}${strongestPositiveBlock.delta.toFixed(1)})` : null,
     strongestNegativeBlock ? `${strongestNegativeBlock.block} fading (${strongestNegativeBlock.delta >= 0 ? "+" : ""}${strongestNegativeBlock.delta.toFixed(1)})` : null,
     supportingOverlays[0] ? `${supportingOverlays[0]} reinforcing ${top1.regime}` : null,
