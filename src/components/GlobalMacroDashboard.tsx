@@ -1426,89 +1426,47 @@ Signal: ${gapLabel}`,
   async function runMacroCronRefresh() {
     setCronRefreshRunning(true);
     setCronRefreshResult(null);
-
-    const runClientFallback = async () => {
-      const adminHeaderValue = adminSecretInput.trim() || cronSecretInput.trim();
-      const headers = adminHeaderValue ? { "x-admin-secret": adminHeaderValue } : undefined;
-      const regions: Array<"US" | "EA" | "SE"> = ["US", "EA", "SE"];
-      const perRegion: Array<Record<string, unknown>> = [];
-
-      for (const region of regions) {
-        const row: Record<string, unknown> = { region, ingestOk: false, engineOk: false };
-        try {
-          const ingestResp = await fetch(`/api/admin/macro/ingest?mode=latest&region=${region}`, { method: "POST", headers, cache: "no-store" });
-          const ingestPayload = await ingestResp.json().catch(() => ({}));
-          row.ingestStatus = ingestResp.status;
-          row.ingestOk = ingestResp.ok;
-          row.ingestError = ingestResp.ok ? null : (ingestPayload?.error ?? "ingest failed");
-          if (!ingestResp.ok) {
-            perRegion.push(row);
-            continue;
-          }
-
-          const engineResp = await fetch(`/api/admin/macro/run-engine?region=${region}`, { method: "POST", headers, cache: "no-store" });
-          const enginePayload = await engineResp.json().catch(() => ({}));
-          row.engineStatus = engineResp.status;
-          row.engineOk = engineResp.ok;
-          row.engineError = engineResp.ok ? null : (enginePayload?.error ?? "engine failed");
-        } catch (fallbackError) {
-          row.error = fallbackError instanceof Error ? fallbackError.message : "fallback request failed";
-        }
-        perRegion.push(row);
-      }
-
-      const okRegions = perRegion.filter((r) => r.ingestOk && r.engineOk).length;
-      return {
-        ok: okRegions > 0,
-        mode: "client_fallback_ingest_plus_engine",
-        usedAdminSecretHeader: Boolean(adminHeaderValue),
-        successRegions: okRegions,
-        failedRegions: perRegion.length - okRegions,
-        perRegion,
-      };
-    };
-
+    const requestedMode = "quick";
+    const attemptedUrl = `/api/cron/macro-refresh?mode=${requestedMode}`;
     try {
-      const attemptedUrl = `/api/cron/macro-refresh?quick=1&region=US`;
-      const response = await fetch(`/api/cron/macro-refresh`, {
+      const response = await fetch(`/api/cron/macro-refresh?mode=${requestedMode}`, {
         cache: "no-store",
         method: "POST",
         headers: cronSecretInput.trim()
           ? { "x-cron-secret": cronSecretInput.trim() }
           : undefined,
       });
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({}));
       setCronRefreshResult({
         status: response.status,
         ok: response.ok,
-        requestedMode: "cron",
-        payload,
+        requestedMode,
         attemptedUrl,
         timestamp: new Date().toISOString(),
         authMethodUsed: cronSecretInput.trim() ? "x-cron-secret header (manual debug input)" : "none",
+        payload,
       });
       await loadGlobalMacro();
     } catch (error) {
-      const fallback = await runClientFallback();
-      await loadGlobalMacro();
       setCronRefreshResult({
         status: 0,
         ok: false,
-        requestedMode: "quick_with_full_fallback",
+        requestedMode,
+        attemptedUrl,
         timestamp: new Date().toISOString(),
         authMethodUsed: cronSecretInput.trim() ? "x-cron-secret header (manual debug input)" : "none",
         payload: {
-          error: "Load failed",
-          note: "Network/load failure on /api/cron/macro-refresh. Ran ingest+engine fallback per region.",
-          attemptedUrl: "/api/cron/macro-refresh?quick=1&region=US",
-          fallback,
-          originalError: error instanceof Error ? error.message : "Unknown cron-refresh error",
+          error: error instanceof Error ? error.message : "Unknown cron-refresh error",
+          note: "Cron refresh failed. No automatic ingest/engine fallback was triggered.",
+          workPerformedBeforeFailure: "none",
+          fallbackTriggered: false,
         },
       });
     } finally {
       setCronRefreshRunning(false);
     }
   }
+
 
 
   return (
