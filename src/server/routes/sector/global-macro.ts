@@ -4,7 +4,7 @@ import { query } from "../../../../api/_db.js";
 import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
 import { type HistoryResolution } from "../../../lib/macro/history.js";
-import { readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../lib/macro/readCache.js";
+import { MacroCacheReadError, readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../lib/macro/readCache.js";
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
 import { buildMacroExplanation } from "../../../lib/macro/explanationLayer.js";
@@ -2052,21 +2052,108 @@ export default async function handler(req: any, res: any) {
     if (!debugEnabled) return;
     timingBreakdown.push({ step, ms: Number(ms.toFixed(3)) });
   };
+  function buildDebugTiming() {
+    const totalMs = Date.now() - routeStartedAtMs;
+    const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
+    return {
+      totalMs: Number(totalMs.toFixed(3)),
+      breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
+      slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
+    };
+  }
+  function appendUsRequestChain(baseResponse: Record<string, unknown>) {
+    if (!debugEnabled || region !== "US") return baseResponse;
+    const serializationStart = Date.now();
+    const serialized = JSON.stringify(baseResponse);
+    const serializationMs = Date.now() - serializationStart;
+    pushTiming("json_serialization", serializationMs);
+    const totalBytes = Buffer.byteLength(serialized);
+    const sectionSizes = {
+      snapshotMetaBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.regime ?? null)),
+      historyBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.macroHistory ?? null)),
+      regimeProbabilityBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroRegimeProbability ?? null)),
+      driverBreakdownBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroExplanation ?? null)),
+      overlaysBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.overlays ?? (baseResponse as any)?.globalMacro?.overlayBundle ?? null)),
+      diagnosticsBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.diagnostics ?? null)),
+    };
+    const preDispatchAt = Date.now();
+    pushTiming("response_write_dispatch", 0);
+    const serverTotalRequestMs = preDispatchAt - routeStartedAtMs;
+    const measuredSubstepsSumMs = timingBreakdown.reduce((sum, row) => sum + (typeof row.ms === "number" ? row.ms : 0), 0);
+    const unmeasuredGapMs = serverTotalRequestMs - measuredSubstepsSumMs;
+    return {
+      ...baseResponse,
+      diagnostics: {
+        ...((baseResponse as any).diagnostics ?? {}),
+        usRequestChain: {
+          serverMeasuredMs: serverTotalRequestMs,
+          serverBreakdown: timingBreakdown,
+          measuredSubstepsSumMs: Number(measuredSubstepsSumMs.toFixed(3)),
+          unmeasuredGapMs: Number(unmeasuredGapMs.toFixed(3)),
+          payloadSizeBytes: totalBytes,
+          payloadSectionSizes: sectionSizes,
+          serializationMs,
+          responseWriteDispatchMs: 0,
+        },
+      },
+    };
+  }
   const ensureSchemaExecuted = false;
   pushTiming("request_received", 0);
-  const t0 = Date.now();
-  const snapshotCache = await readLatestMacroReadCache(region, { onTiming: pushTiming });
-  const snapshotReadMs = Date.now() - t0;
-  pushTiming("cache_lookup_snapshot", snapshotReadMs);
+  let snapshotCache: Awaited<ReturnType<typeof readLatestMacroReadCache>> = null;
+  let historyCache: Awaited<ReturnType<typeof readMacroHistoryReadCache>> = null;
+  let snapshotReadMs = 0;
+  let historyReadMs = 0;
+  let failingQueryName: string | null = null;
+  try {
+    const t0 = Date.now();
+    snapshotCache = await readLatestMacroReadCache(region, { onTiming: pushTiming });
+    snapshotReadMs = Date.now() - t0;
+    pushTiming("cache_lookup_snapshot", snapshotReadMs);
 
-  const t1 = Date.now();
-  const historyCache = await readMacroHistoryReadCache({
-    region,
-    resolution: historyResolution as HistoryResolution,
-    rangeYears: historyRangeYears,
-  }, { onTiming: pushTiming });
-  const historyReadMs = Date.now() - t1;
-  pushTiming("cache_lookup_history", historyReadMs);
+    const t1 = Date.now();
+    historyCache = await readMacroHistoryReadCache({
+      region,
+      resolution: historyResolution as HistoryResolution,
+      rangeYears: historyRangeYears,
+    }, { onTiming: pushTiming });
+    historyReadMs = Date.now() - t1;
+    pushTiming("cache_lookup_history", historyReadMs);
+  } catch (error) {
+    if (error instanceof MacroCacheReadError) {
+      failingQueryName = error.queryName;
+      const baseDiagnostics = {
+        readMode: "snapshot_cache_only",
+        cacheOnlyRead: true,
+        snapshotCacheKey: `macro_latest_read_cache:${region}`,
+        historyCacheKey: `macro_history_read_cache:${region}:${historyResolution}:${String(historyRangeYears)}`,
+        latest_cache_bytes: snapshotCache?.payloadBytes ?? null,
+        history_cache_bytes: historyCache?.payloadBytes ?? null,
+        latest_cache_rows: snapshotCache?.rowsReturned ?? null,
+        history_cache_rows: historyCache?.rowsReturned ?? null,
+        failing_query_name: error.queryName,
+        failing_table_name: error.tableName,
+        failing_key: error.key,
+        failing_rows_returned: error.rowsReturned,
+        failing_payload_bytes: error.payloadBytes,
+        routeDurationMs: Date.now() - routeStartedAtMs,
+      };
+      const responsePayload = {
+        ok: false,
+        error: "CACHE_READ_FAILURE",
+        globalMacro: null,
+        macroHistory: null,
+        inflationAnalysis: null,
+        diagnostics: {
+          ...baseDiagnostics,
+          ...(debugEnabled ? { debugTiming: buildDebugTiming() } : {}),
+        },
+      } as Record<string, unknown>;
+      res.status(503).json(appendUsRequestChain(responsePayload));
+      return;
+    }
+    throw error;
+  }
 
   const t2 = Date.now();
   const snapshotPayloadRaw = snapshotCache?.payload;
@@ -2122,6 +2209,11 @@ export default async function handler(req: any, res: any) {
     snapshotAsOfDate: ((globalMacro as any)?.regime?.asOfDate ?? (snapshotCache?.asOfDate ?? null)) as string | null,
     snapshotUpdatedAt: snapshotCache?.updatedAt ?? null,
     historyUpdatedAt: historyCache?.updatedAt ?? null,
+    latest_cache_bytes: snapshotCache?.payloadBytes ?? null,
+    history_cache_bytes: historyCache?.payloadBytes ?? null,
+    latest_cache_rows: snapshotCache?.rowsReturned ?? null,
+    history_cache_rows: historyCache?.rowsReturned ?? null,
+    failing_query_name: failingQueryName,
     snapshotPayloadValid: Boolean(normalizedGlobalMacro),
     historyPayloadValid: Boolean(historyCache?.payload && Array.isArray((historyCache.payload as any)?.points)),
     regimeProbabilityRichness: inspectRegimeProbabilityRichness((globalMacro as any)?.macroRegimeProbability),
@@ -2198,54 +2290,6 @@ export default async function handler(req: any, res: any) {
   pushTiming("diagnostics_prepare", Date.now() - t7);
   (diagnostics as any).renderCoverage.missingInPayload = (diagnostics as any).regimeProbabilityRichness?.missingFieldPaths ?? [];
   pushTiming("payload_assembly", Date.now() - routeStartedAtMs);
-
-  const buildDebugTiming = () => {
-    const totalMs = Date.now() - routeStartedAtMs;
-    const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
-    return {
-      totalMs: Number(totalMs.toFixed(3)),
-      breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
-      slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
-    };
-  };
-
-  const appendUsRequestChain = (baseResponse: Record<string, unknown>) => {
-    if (!debugEnabled || region !== "US") return baseResponse;
-    const serializationStart = Date.now();
-    const serialized = JSON.stringify(baseResponse);
-    const serializationMs = Date.now() - serializationStart;
-    pushTiming("json_serialization", serializationMs);
-    const totalBytes = Buffer.byteLength(serialized);
-    const sectionSizes = {
-      snapshotMetaBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.regime ?? null)),
-      historyBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.macroHistory ?? null)),
-      regimeProbabilityBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroRegimeProbability ?? null)),
-      driverBreakdownBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroExplanation ?? null)),
-      overlaysBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.overlays ?? (baseResponse as any)?.globalMacro?.overlayBundle ?? null)),
-      diagnosticsBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.diagnostics ?? null)),
-    };
-    const preDispatchAt = Date.now();
-    pushTiming("response_write_dispatch", 0);
-    const serverTotalRequestMs = preDispatchAt - routeStartedAtMs;
-    const measuredSubstepsSumMs = timingBreakdown.reduce((sum, row) => sum + (typeof row.ms === "number" ? row.ms : 0), 0);
-    const unmeasuredGapMs = serverTotalRequestMs - measuredSubstepsSumMs;
-    return {
-      ...baseResponse,
-      diagnostics: {
-        ...((baseResponse as any).diagnostics ?? {}),
-        usRequestChain: {
-          serverMeasuredMs: serverTotalRequestMs,
-          serverBreakdown: timingBreakdown,
-          measuredSubstepsSumMs: Number(measuredSubstepsSumMs.toFixed(3)),
-          unmeasuredGapMs: Number(unmeasuredGapMs.toFixed(3)),
-          payloadSizeBytes: totalBytes,
-          payloadSectionSizes: sectionSizes,
-          serializationMs,
-          responseWriteDispatchMs: 0,
-        },
-      },
-    };
-  };
 
   const cachedMetadata = snapshotPayload && "metadata" in snapshotPayload && typeof snapshotPayload.metadata === "object"
     ? snapshotPayload.metadata as Record<string, unknown>
