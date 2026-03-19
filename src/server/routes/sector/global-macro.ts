@@ -2047,6 +2047,39 @@ function normalizeMacroRegimeProbability(value: unknown) {
     supportingBlocks: Array.isArray(parsed.supportingBlocks) ? parsed.supportingBlocks.slice(0, 8) : [],
     supportingOverlays: Array.isArray(parsed.supportingOverlays) ? parsed.supportingOverlays.slice(0, 8) : [],
     contradictingOverlays: Array.isArray(parsed.contradictingOverlays) ? parsed.contradictingOverlays.slice(0, 8) : [],
+    regimeMomentum: parsed.regimeMomentum && typeof parsed.regimeMomentum === "object"
+      ? {
+        direction: typeof parsed.regimeMomentum.direction === "string" ? parsed.regimeMomentum.direction : "stable",
+        momentumScore: typeof parsed.regimeMomentum.momentumScore === "number" ? parsed.regimeMomentum.momentumScore : 0,
+        primaryRegimeChange: typeof parsed.regimeMomentum.primaryRegimeChange === "string" ? parsed.regimeMomentum.primaryRegimeChange : "stable",
+        driftTowardRegime: typeof parsed.regimeMomentum.driftTowardRegime === "string" ? parsed.regimeMomentum.driftTowardRegime : null,
+        changeDrivers: Array.isArray(parsed.regimeMomentum.changeDrivers) ? parsed.regimeMomentum.changeDrivers.slice(0, 6) : [],
+        narrative: typeof parsed.regimeMomentum.narrative === "string" ? parsed.regimeMomentum.narrative : "",
+      }
+      : {
+        direction: "stable",
+        momentumScore: 0,
+        primaryRegimeChange: "stable",
+        driftTowardRegime: null,
+        changeDrivers: [],
+        narrative: "",
+      },
+    overlayInfluence: parsed.overlayInfluence && typeof parsed.overlayInfluence === "object"
+      ? {
+        primarySignal: typeof parsed.overlayInfluence.primarySignal === "string" ? parsed.overlayInfluence.primarySignal : "modulating",
+        candidateSignals: Array.isArray(parsed.overlayInfluence.candidateSignals)
+          ? parsed.overlayInfluence.candidateSignals
+            .map((row: any) => ({ regime: typeof row?.regime === "string" ? row.regime : null, signal: typeof row?.signal === "string" ? row.signal : "modulating" }))
+            .filter((row: any) => row.regime)
+            .slice(0, 6)
+          : [],
+        summary: typeof parsed.overlayInfluence.summary === "string" ? parsed.overlayInfluence.summary : "",
+      }
+      : {
+        primarySignal: "modulating",
+        candidateSignals: [],
+        summary: "",
+      },
   };
 }
 

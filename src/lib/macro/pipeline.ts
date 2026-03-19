@@ -28,6 +28,13 @@ type ExistingIndicatorRow = {
   driver_note: string | null;
 };
 
+type PreviousRegimeRow = {
+  as_of_date: string;
+  macro_score_total: number | null;
+  block_scores_json: string | null;
+  macro_regime_probability_json: string | null;
+};
+
 type ExistingRegimeRow = {
   block_scores_json: string | null;
   macro_score_total: number | null;
@@ -281,6 +288,24 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
 
   const blockScoresJson = JSON.stringify(regime.blockScores);
   const topDriversJson = JSON.stringify(regime.topDrivers);
+  const previousRegimeRows = (await query(
+    `SELECT as_of_date, macro_score_total, block_scores_json, macro_regime_probability_json
+     FROM ${tables.macroRegimeSnapshots}
+     WHERE region = ? AND as_of_date < ?
+     ORDER BY as_of_date DESC
+     LIMIT 1`,
+    [region, regime.asOfDate],
+  )) as unknown as PreviousRegimeRow[];
+  const previousRegime = previousRegimeRows[0] ?? null;
+  const previousProbability = (() => {
+    if (!previousRegime?.macro_regime_probability_json) return null;
+    try { return JSON.parse(previousRegime.macro_regime_probability_json) as any; } catch { return null; }
+  })();
+  const previousBlockScores = (() => {
+    if (!previousRegime?.block_scores_json) return null;
+    try { return JSON.parse(previousRegime.block_scores_json) as Record<string, number | null>; } catch { return null; }
+  })();
+
   const macroRegimeProbability = regime.macroRegimeProbability ?? buildMacroRegimeProbabilityFromSnapshot({
     macroScoreTotal: regime.macroScoreTotal,
     macroConfidence: regime.macroConfidence,
@@ -289,6 +314,14 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
     stressOverlay: regime.stressOverlay,
     hardAssetOverlay: regime.hardAssetOverlay,
     blockScores: regime.blockScores,
+    previous: previousRegime ? {
+      macroScoreTotal: previousRegime.macro_score_total === null ? null : Number(previousRegime.macro_score_total),
+      primaryRegime: typeof previousProbability?.primaryRegime === "string" ? previousProbability.primaryRegime : null,
+      primaryWeight: typeof previousProbability?.primaryWeight === "number" ? previousProbability.primaryWeight : null,
+      decisiveness: typeof previousProbability?.decisiveness === "number" ? previousProbability.decisiveness : null,
+      distribution: Array.isArray(previousProbability?.distribution) ? previousProbability.distribution : undefined,
+      blockScores: previousBlockScores ?? undefined,
+    } : null,
   });
   const macroRegimeProbabilityJson = macroRegimeProbability ? JSON.stringify(macroRegimeProbability) : null;
   const existingRegimeRows = (await query(

@@ -99,6 +99,8 @@ type GlobalMacroPayload = {
     distribution: Array<{ regime: string; weight: number }>;
     narrative: { short: string; medium?: string; long?: string };
     structuralAdjustment: { summary: string; multiplier: number | null; penalty: number | null };
+    regimeMomentum?: { direction: string; momentumScore: number; primaryRegimeChange: string; driftTowardRegime: string | null; changeDrivers: string[]; narrative: string };
+    overlayInfluence?: { primarySignal: string; candidateSignals: Array<{ regime: string; signal: string }>; summary: string };
     supportingBlocks?: string[];
     supportingOverlays?: string[];
     contradictingOverlays?: string[];
@@ -1522,6 +1524,8 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12, marginBottom: 6 }}>Top candidates: {regimeProbabilityDistribution.slice(0, 3).map((row: any) => `${row?.regime ?? "?"} (${safePct(row?.weight)})`).join(" · ") || "—"}</div>
                   <p className="bread" style={{ marginTop: 0 }}>{String(regimeProbabilityAny?.narrative?.short ?? "") || "Regime probability narrative missing."}</p>
                   <div style={{ fontSize: 12 }}>Structural adjustment: {String(regimeProbabilityAny?.structuralAdjustment?.summary ?? "none")}</div>
+                  <div style={{ fontSize: 12 }}>Momentum: {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} {regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ? `→ ${regimeProbabilityAny.regimeMomentum.driftTowardRegime}` : ""}</div>
+                  <div style={{ fontSize: 12 }}>{String(regimeProbabilityAny?.regimeMomentum?.narrative ?? regimeProbabilityAny?.overlayInfluence?.summary ?? "")}</div>
                 </section>
               ) : (
                 <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>

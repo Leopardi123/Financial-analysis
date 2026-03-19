@@ -68,6 +68,19 @@ export type MacroRegimeProbability = {
   supportingBlocks: string[];
   supportingOverlays: string[];
   contradictingOverlays: string[];
+  regimeMomentum: {
+    direction: "strengthening" | "weakening" | "stable" | "transitioning";
+    momentumScore: number;
+    primaryRegimeChange: "improving" | "deteriorating" | "stable";
+    driftTowardRegime: string | null;
+    changeDrivers: string[];
+    narrative: string;
+  };
+  overlayInfluence: {
+    primarySignal: "confirming" | "modulating" | "contradicting";
+    candidateSignals: Array<{ regime: string; signal: "confirming" | "modulating" | "contradicting" }>;
+    summary: string;
+  };
 };
 
 export type MacroRegimeSnapshot = {

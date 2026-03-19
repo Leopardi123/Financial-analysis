@@ -32,7 +32,7 @@ type InflationPoint = {
   consumerInflation?: number | null;
 };
 
-type MacroLabPayload = { macroHistory?: { points?: MacroHistoryPoint[] }; inflationAnalysis?: { points?: InflationPoint[] }; globalMacro?: { macroExplanation?: MacroExplanation; macroRegimeProbability?: { primaryRegime: string | null; primaryWeight: number | null; decisiveness: number | null; transitionLike: boolean; distribution: Array<{ regime: string; weight: number }>; narrative?: { short?: string; medium?: string; long?: string }; structuralAdjustment?: { summary?: string }; supportingBlocks?: string[]; supportingOverlays?: string[]; contradictingOverlays?: string[] } | null } };
+type MacroLabPayload = { macroHistory?: { points?: MacroHistoryPoint[] }; inflationAnalysis?: { points?: InflationPoint[] }; globalMacro?: { macroExplanation?: MacroExplanation; macroRegimeProbability?: { primaryRegime: string | null; primaryWeight: number | null; decisiveness: number | null; transitionLike: boolean; distribution: Array<{ regime: string; weight: number }>; narrative?: { short?: string; medium?: string; long?: string }; structuralAdjustment?: { summary?: string }; regimeMomentum?: { direction?: string; momentumScore?: number; primaryRegimeChange?: string; driftTowardRegime?: string | null; changeDrivers?: string[]; narrative?: string }; overlayInfluence?: { primarySignal?: string; summary?: string }; supportingBlocks?: string[]; supportingOverlays?: string[]; contradictingOverlays?: string[] } | null } };
 
 type SubComponentControl = { weight: number; off: boolean; baselineWeight: number };
 
@@ -626,7 +626,9 @@ export default function MacroRegimeValidationLab() {
                 <div style={{ fontSize: 12 }}>Supporting overlays: {(labRegimeProbability.supportingOverlays ?? []).join(", ") || "—"}</div>
                 <div style={{ fontSize: 12 }}>Contradicting overlays: {(labRegimeProbability.contradictingOverlays ?? []).join(", ") || "—"}</div>
                 <div style={{ fontSize: 12 }}>Structural adjustment: {labRegimeProbability.structuralAdjustment?.summary ?? "none"}</div>
-                <div style={{ fontSize: 12 }}>{labRegimeProbability.narrative?.medium ?? labRegimeProbability.narrative?.short ?? ""}</div>
+                <div style={{ fontSize: 12 }}>Momentum: {labRegimeProbability.regimeMomentum?.direction ?? "stable"} · score {typeof labRegimeProbability.regimeMomentum?.momentumScore === "number" ? labRegimeProbability.regimeMomentum.momentumScore.toFixed(1) : "—"} {labRegimeProbability.regimeMomentum?.driftTowardRegime ? `→ ${labRegimeProbability.regimeMomentum.driftTowardRegime}` : ""}</div>
+                <div style={{ fontSize: 12 }}>Change drivers: {(labRegimeProbability.regimeMomentum?.changeDrivers ?? []).join(", ") || "—"}</div>
+                <div style={{ fontSize: 12 }}>{labRegimeProbability.regimeMomentum?.narrative ?? labRegimeProbability.overlayInfluence?.summary ?? labRegimeProbability.narrative?.medium ?? labRegimeProbability.narrative?.short ?? ""}</div>
               </details>
             </div>
           ) : (
