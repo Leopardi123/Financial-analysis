@@ -91,6 +91,18 @@ type GlobalMacroPayload = {
     readMode?: string;
   };
 
+  macroRegimeProbability?: {
+    primaryRegime: string | null;
+    primaryWeight: number | null;
+    decisiveness: number | null;
+    transitionLike: boolean;
+    distribution: Array<{ regime: string; weight: number }>;
+    narrative: { short: string; medium?: string; long?: string };
+    structuralAdjustment: { summary: string; multiplier: number | null; penalty: number | null };
+    supportingBlocks?: string[];
+    supportingOverlays?: string[];
+    contradictingOverlays?: string[];
+  } | null;
   macroExplanation?: {
     summary: {
       macroScore: number | null;
@@ -505,6 +517,9 @@ export default function GlobalMacroDashboard() {
       "tradeSupplyChainStressOverlay",
       "localUnrestOverlay",
     ];
+  const regimeProbabilityAny = (globalMacro as any)?.macroRegimeProbability as any;
+  const regimeProbabilityDistribution = Array.isArray(regimeProbabilityAny?.distribution) ? regimeProbabilityAny.distribution : [];
+
   const explanationAny = (globalMacro as any)?.macroExplanation as any;
   const explanationSummary = explanationAny && typeof explanationAny === "object" && explanationAny.summary && typeof explanationAny.summary === "object"
     ? explanationAny.summary
@@ -1534,6 +1549,27 @@ Signal: ${gapLabel}`,
             <>
               {isPartialData && (
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
+              )}
+
+              {regimeProbabilityAny ? (
+                <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
+                  <h4 style={{ marginTop: 0 }}>Regime Probability</h4>
+                  <div style={{ fontSize: 13, marginBottom: 8 }}>
+                    <strong>Primary regime:</strong> {String(regimeProbabilityAny?.primaryRegime ?? "—")} ·
+                    <strong> Primary weight:</strong> {safePct(regimeProbabilityAny?.primaryWeight)} ·
+                    <strong> Decisiveness:</strong> {safePct(regimeProbabilityAny?.decisiveness)} ·
+                    <strong> Transition-like:</strong> {regimeProbabilityAny?.transitionLike ? "Yes" : "No"}
+                  </div>
+                  <div style={{ fontSize: 12, marginBottom: 6 }}>Heuristic relative regime weights (not calibrated probabilities).</div>
+                  <div style={{ fontSize: 12, marginBottom: 6 }}>Top candidates: {regimeProbabilityDistribution.slice(0, 3).map((row: any) => `${row?.regime ?? "?"} (${safePct(row?.weight)})`).join(" · ") || "—"}</div>
+                  <p className="bread" style={{ marginTop: 0 }}>{String(regimeProbabilityAny?.narrative?.short ?? "") || "Regime probability narrative missing."}</p>
+                  <div style={{ fontSize: 12 }}>Structural adjustment: {String(regimeProbabilityAny?.structuralAdjustment?.summary ?? "none")}</div>
+                </section>
+              ) : (
+                <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
+                  <h4 style={{ marginTop: 0 }}>Regime Probability</h4>
+                  <div className="status empty">Regime probability not yet available for this snapshot.</div>
+                </section>
               )}
 
               {explanationAny && (() => {

@@ -32,7 +32,7 @@ type InflationPoint = {
   consumerInflation?: number | null;
 };
 
-type MacroLabPayload = { macroHistory?: { points?: MacroHistoryPoint[] }; inflationAnalysis?: { points?: InflationPoint[] }; globalMacro?: { macroExplanation?: MacroExplanation } };
+type MacroLabPayload = { macroHistory?: { points?: MacroHistoryPoint[] }; inflationAnalysis?: { points?: InflationPoint[] }; globalMacro?: { macroExplanation?: MacroExplanation; macroRegimeProbability?: { primaryRegime: string | null; primaryWeight: number | null; decisiveness: number | null; transitionLike: boolean; distribution: Array<{ regime: string; weight: number }>; narrative?: { short?: string; medium?: string; long?: string }; structuralAdjustment?: { summary?: string }; supportingBlocks?: string[]; supportingOverlays?: string[]; contradictingOverlays?: string[] } | null } };
 
 type SubComponentControl = { weight: number; off: boolean; baselineWeight: number };
 
@@ -323,6 +323,9 @@ export default function MacroRegimeValidationLab() {
   const allEvents = useMemo(() => MACRO_LAB_EVENT_ZONES.filter((z) => z.region === region || z.region === "GLOBAL"), [region]);
   const points = payload?.macroHistory?.points ?? [];
   const inflation = payload?.inflationAnalysis?.points ?? [];
+  const labRegimeProbability = payload?.globalMacro?.macroRegimeProbability ?? null;
+  const labRegimeDistribution = Array.isArray(labRegimeProbability?.distribution) ? labRegimeProbability.distribution : [];
+
   const labExplanation = payload?.globalMacro?.macroExplanation;
   const labBlocks = Array.isArray(labExplanation?.blockBreakdown) ? labExplanation.blockBreakdown : [];
   const labOverlays = Array.isArray(labExplanation?.overlayBreakdown) ? labExplanation.overlayBreakdown : [];
@@ -609,6 +612,27 @@ export default function MacroRegimeValidationLab() {
         <div className="macro-lab-panel">
           <h4>Event details + compare mode</h4>
           {selectedEvent ? <p><strong>{selectedEvent.name}</strong> ({selectedEvent.startDate} → {selectedEvent.endDate}) · {selectedEvent.category}<br />{selectedEvent.description}</p> : <p>Välj eventzon.</p>}
+          {labRegimeProbability ? (
+            <div className="macro-lab-note" style={{ marginBottom: 8 }}>
+              <strong>Regime Probability:</strong><br />
+              Primary {labRegimeProbability.primaryRegime ?? "—"} ({typeof labRegimeProbability.primaryWeight === "number" ? `${labRegimeProbability.primaryWeight}%` : "—"}), decisiveness {typeof labRegimeProbability.decisiveness === "number" ? `${labRegimeProbability.decisiveness}%` : "—"}, transition-like {labRegimeProbability.transitionLike ? "yes" : "no"}.<br />
+              <small>Heuristic relative regime weights, not calibrated probabilities.</small>
+              <details style={{ marginTop: 6 }}>
+                <summary style={{ cursor: "pointer" }}>Visa full distribution och stödjande signaler</summary>
+                <ul>
+                  {labRegimeDistribution.map((row) => <li key={`lab-regime-${row.regime}`}>{row.regime}: {typeof row.weight === "number" ? `${row.weight}%` : "—"}</li>)}
+                </ul>
+                <div style={{ fontSize: 12 }}>Supporting blocks: {(labRegimeProbability.supportingBlocks ?? []).join(", ") || "—"}</div>
+                <div style={{ fontSize: 12 }}>Supporting overlays: {(labRegimeProbability.supportingOverlays ?? []).join(", ") || "—"}</div>
+                <div style={{ fontSize: 12 }}>Contradicting overlays: {(labRegimeProbability.contradictingOverlays ?? []).join(", ") || "—"}</div>
+                <div style={{ fontSize: 12 }}>Structural adjustment: {labRegimeProbability.structuralAdjustment?.summary ?? "none"}</div>
+                <div style={{ fontSize: 12 }}>{labRegimeProbability.narrative?.medium ?? labRegimeProbability.narrative?.short ?? ""}</div>
+              </details>
+            </div>
+          ) : (
+            <div className="macro-lab-note" style={{ marginBottom: 8 }}>Regime probability not yet available for this snapshot.</div>
+          )}
+
           {labExplanation && (
             <div className="macro-lab-note" style={{ marginBottom: 8 }}>
               <strong>Driver breakdown (selected date/runtime):</strong><br />

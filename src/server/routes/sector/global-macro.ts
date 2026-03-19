@@ -1597,6 +1597,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       rootCauseHints,
     },
     macroExplanation,
+    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regimeRow as any)?.macroRegimeProbability ?? null } }).macroRegimeProbability,
   };
 }
 
@@ -1714,6 +1715,7 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
     },
     macroExplanation,
+    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regime as any)?.macroRegimeProbability ?? null } }).macroRegimeProbability,
   };
 }
 
@@ -1971,6 +1973,67 @@ async function readMacroHistoryWithCompatibleFallback(params: {
   };
 }
 
+
+function normalizeMacroRegimeProbability(value: unknown) {
+  const parseMaybeJson = (input: unknown) => {
+    if (typeof input !== "string") return input;
+    try { return JSON.parse(input); } catch { return null; }
+  };
+  const parsed = parseMaybeJson(value) as any;
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const distributionRaw = Array.isArray(parsed.distribution) ? parsed.distribution : [];
+  const distribution = distributionRaw
+    .map((item: any) => ({ regime: typeof item?.regime === "string" ? item.regime : null, weight: typeof item?.weight === "number" ? item.weight : null }))
+    .filter((item: any) => item.regime && item.weight !== null)
+    .slice(0, 8);
+
+  const primaryRegime = typeof parsed.primaryRegime === "string"
+    ? parsed.primaryRegime
+    : (distribution[0]?.regime ?? null);
+  const primaryWeight = typeof parsed.primaryWeight === "number"
+    ? parsed.primaryWeight
+    : (distribution[0]?.weight ?? null);
+
+  const structuralAdjustment = parsed.structuralAdjustment && typeof parsed.structuralAdjustment === "object"
+    ? {
+      summary: typeof parsed.structuralAdjustment.summary === "string" ? parsed.structuralAdjustment.summary : "none",
+      multiplier: typeof parsed.structuralAdjustment.multiplier === "number" ? parsed.structuralAdjustment.multiplier : null,
+      penalty: typeof parsed.structuralAdjustment.penalty === "number" ? parsed.structuralAdjustment.penalty : null,
+    }
+    : { summary: "none", multiplier: null, penalty: null };
+
+  const narrativeObj = parsed.narrative && typeof parsed.narrative === "object" ? parsed.narrative : {};
+
+  return {
+    primaryRegime,
+    primaryWeight,
+    decisiveness: typeof parsed.decisiveness === "number" ? parsed.decisiveness : null,
+    transitionLike: Boolean(parsed.transitionLike),
+    distribution,
+    narrative: {
+      short: typeof narrativeObj.short === "string" ? narrativeObj.short : "",
+      medium: typeof narrativeObj.medium === "string" ? narrativeObj.medium : "",
+      long: typeof narrativeObj.long === "string" ? narrativeObj.long : "",
+    },
+    structuralAdjustment,
+    supportingBlocks: Array.isArray(parsed.supportingBlocks) ? parsed.supportingBlocks.slice(0, 8) : [],
+    supportingOverlays: Array.isArray(parsed.supportingOverlays) ? parsed.supportingOverlays.slice(0, 8) : [],
+    contradictingOverlays: Array.isArray(parsed.contradictingOverlays) ? parsed.contradictingOverlays.slice(0, 8) : [],
+  };
+}
+
+function attachMacroRegimeProbability(snapshot: any) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  const direct = normalizeMacroRegimeProbability((snapshot as any).macroRegimeProbability);
+  const fromRegime = normalizeMacroRegimeProbability((snapshot as any)?.regime?.macroRegimeProbability);
+  const legacy = normalizeMacroRegimeProbability((snapshot as any).regimeProbability);
+  const debug = normalizeMacroRegimeProbability((snapshot as any)?.debug?.macroRegimeProbability);
+  const normalized = direct ?? fromRegime ?? legacy ?? debug;
+  if (!normalized) return { ...snapshot, macroRegimeProbability: null };
+  return { ...snapshot, macroRegimeProbability: normalized };
+}
+
 function trimSnapshotForNormalRead(snapshot: any, debugEnabled: boolean) {
   if (!snapshot || typeof snapshot !== "object" || debugEnabled) return snapshot;
   const clone: any = { ...snapshot };
@@ -2064,7 +2127,8 @@ export default async function handler(req: any, res: any) {
     : snapshotPayloadRaw ?? null;
   const normalizedGlobalMacro = normalizeGlobalMacroPayload(globalMacroRaw);
   const globalMacroTrimmed = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
-  const globalMacro = hydrateMacroExplanationFromSnapshot(globalMacroTrimmed, region);
+  const globalMacroHydrated = hydrateMacroExplanationFromSnapshot(globalMacroTrimmed, region);
+  const globalMacro = attachMacroRegimeProbability(globalMacroHydrated);
 
   const inflationAnalysis = snapshotPayload && "inflationAnalysis" in snapshotPayload
     ? snapshotPayload.inflationAnalysis
