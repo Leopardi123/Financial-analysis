@@ -67,6 +67,7 @@ export type MacroRegimeProbability = {
   structuralAdjustment: { summary: string; multiplier: number; penalty: number };
   supportingBlocks: string[];
   supportingOverlays: string[];
+  modulatingOverlays: string[];
   contradictingOverlays: string[];
   regimeMomentum: {
     direction: "strengthening" | "weakening" | "stable" | "transitioning";
