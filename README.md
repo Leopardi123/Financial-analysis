@@ -36,6 +36,7 @@ These must be configured in Vercel (or your local environment):
 - `GET /api/company` — read-only data from `financial_points_v2`.
 ## Local Development
 
+- Use Node.js 22+ (the test runner relies on `--experimental-strip-types`).
 - Install dependencies: `npm install`
 - Start the app: `npm run dev`
 - Run the automated test suite: `npm test`

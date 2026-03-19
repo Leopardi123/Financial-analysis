@@ -7,6 +7,8 @@ import { type HistoryResolution } from "../../../lib/macro/history.js";
 import { readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../lib/macro/readCache.js";
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
+import { buildMacroExplanation } from "../../../lib/macro/explanationLayer.js";
+import { buildMacroRegimeProbabilityFromSnapshot } from "../../../lib/macro/regimeProbability.js";
 
 const REGIONAL_OVERLAY_KEYS = [
   "liquidityOverlay",
@@ -38,6 +40,7 @@ type RegimeSnapshotRow = {
   clear_signal_strength: number | null;
   speculative_signal_strength: number | null;
   top_drivers_json: string | null;
+  macro_regime_probability_json: string | null;
 };
 
 type IndicatorSnapshotRow = {
@@ -1216,7 +1219,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
   const regimeRows = (await query(
     `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
-            clear_signal_strength, speculative_signal_strength, top_drivers_json
+            clear_signal_strength, speculative_signal_strength, top_drivers_json, macro_regime_probability_json
      FROM ${tables.macroRegimeSnapshots}
      WHERE region = ?
      ORDER BY as_of_date DESC
@@ -1434,6 +1437,29 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
     rootCauseHints.push("No obvious pipeline issue detected");
   }
 
+  const macroExplanation = buildMacroExplanation({
+    region,
+    asOfDate: regimeRow.as_of_date,
+    regime: {
+      macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
+      coreRegimeLabel: regimeRow.core_regime_label,
+      macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+      blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
+        A_FISCAL: null,
+        B_MONETARY: null,
+        C_INFLATION: null,
+        D_CREDIBILITY: null,
+      }),
+      topDrivers: normalizedTopDrivers,
+    },
+    indicators,
+    overlayBundle,
+    debug: {
+      blockStatus,
+      overlayDataStatus,
+    },
+  });
+
   return {
     regime: {
       asOfDate: regimeRow.as_of_date,
@@ -1572,6 +1598,25 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       },
       rootCauseHints,
     },
+    macroExplanation,
+    macroRegimeProbability: (() => {
+      const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability;
+      if (persisted) return persisted;
+      return buildMacroRegimeProbabilityFromSnapshot({
+        macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
+        macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+        coreRegimeLabel: regimeRow.core_regime_label,
+        growthOverlay: regimeRow.growth_overlay,
+        stressOverlay: regimeRow.stress_overlay,
+        hardAssetOverlay: regimeRow.hard_asset_overlay,
+        blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
+          A_FISCAL: null,
+          B_MONETARY: null,
+          C_INFLATION: null,
+          D_CREDIBILITY: null,
+        }) as any,
+      });
+    })(),
   };
 }
 
@@ -1606,6 +1651,20 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       globalUnrestOverlay: buildGlobalUnrestOverlay(asOfDate, regionalMap.US?.overlays ?? null, regionalMap.EA?.overlays ?? null),
     },
   };
+
+  const macroExplanation = buildMacroExplanation({
+    region: "GLOBAL",
+    asOfDate,
+    regime: {
+      macroScoreTotal: regime.macroScoreTotal,
+      coreRegimeLabel: regime.coreRegimeLabel,
+      macroConfidence: regime.macroConfidence,
+      blockScores: regime.blockScores as any,
+      topDrivers: globalDrivers,
+    },
+    indicators,
+    overlayBundle: globalOverlayBundle,
+  });
 
   return {
     regime: { ...regime, topDrivers: globalDrivers },
@@ -1674,9 +1733,62 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       rootCauseHints: [],
       regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
     },
+    macroExplanation,
+    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regime as any)?.macroRegimeProbability ?? buildMacroRegimeProbabilityFromSnapshot({
+      macroScoreTotal: regime.macroScoreTotal,
+      macroConfidence: regime.macroConfidence,
+      coreRegimeLabel: regime.coreRegimeLabel,
+      growthOverlay: regime.growthOverlay,
+      stressOverlay: regime.stressOverlay,
+      hardAssetOverlay: regime.hardAssetOverlay,
+      blockScores: regime.blockScores as any,
+    }) } }).macroRegimeProbability,
   };
 }
 
+
+
+function hydrateMacroExplanationFromSnapshot(snapshot: any, regionFallback: string) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  if (snapshot.macroExplanation && typeof snapshot.macroExplanation === "object") return snapshot;
+  const regime = snapshot.regime;
+  if (!regime || typeof regime !== "object") return snapshot;
+  const asOfDate = typeof regime.asOfDate === "string" ? regime.asOfDate : null;
+  const coreRegimeLabel = typeof regime.coreRegimeLabel === "string" ? regime.coreRegimeLabel : null;
+  if (!asOfDate || !coreRegimeLabel) return snapshot;
+
+  const blockScores = (regime.blockScores && typeof regime.blockScores === "object")
+    ? regime.blockScores
+    : { A_FISCAL: null, B_MONETARY: null, C_INFLATION: null, D_CREDIBILITY: null };
+
+  const safeDrivers = Array.isArray(regime.topDrivers)
+    ? regime.topDrivers.map((driver: any) => ({
+      indicatorId: String(driver?.indicatorId ?? "unknown"),
+      title: String(driver?.title ?? driver?.indicatorId ?? "unknown"),
+      block: (driver?.block === "A_FISCAL" || driver?.block === "B_MONETARY" || driver?.block === "C_INFLATION" || driver?.block === "D_CREDIBILITY") ? driver.block : "D_CREDIBILITY",
+      contribution: typeof driver?.contribution === "number" ? driver.contribution : 0,
+      direction: typeof driver?.direction === "string" ? driver.direction : "stable",
+      driverNote: typeof driver?.driverNote === "string" ? driver.driverNote : null,
+    }))
+    : [];
+
+  const built = buildMacroExplanation({
+    region: typeof snapshot.region === "string" ? snapshot.region : regionFallback,
+    asOfDate,
+    regime: {
+      macroScoreTotal: typeof regime.macroScoreTotal === "number" ? regime.macroScoreTotal : null,
+      coreRegimeLabel,
+      macroConfidence: typeof regime.macroConfidence === "number" ? regime.macroConfidence : 0,
+      blockScores: blockScores as any,
+      topDrivers: safeDrivers,
+    },
+    indicators: Array.isArray(snapshot.indicators) ? snapshot.indicators : [],
+    overlayBundle: snapshot.overlayBundle ?? snapshot.overlays,
+    debug: snapshot.debug,
+  });
+
+  return { ...snapshot, macroExplanation: built };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -1888,6 +2000,100 @@ async function readMacroHistoryWithCompatibleFallback(params: {
   };
 }
 
+
+function normalizeMacroRegimeProbability(value: unknown) {
+  const parseMaybeJson = (input: unknown) => {
+    if (typeof input !== "string") return input;
+    try { return JSON.parse(input); } catch { return null; }
+  };
+  const parsed = parseMaybeJson(value) as any;
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const distributionRaw = Array.isArray(parsed.distribution) ? parsed.distribution : [];
+  const distribution = distributionRaw
+    .map((item: any) => ({ regime: typeof item?.regime === "string" ? item.regime : null, weight: typeof item?.weight === "number" ? item.weight : null }))
+    .filter((item: any) => item.regime && item.weight !== null)
+    .slice(0, 8);
+
+  const primaryRegime = typeof parsed.primaryRegime === "string"
+    ? parsed.primaryRegime
+    : (distribution[0]?.regime ?? null);
+  const primaryWeight = typeof parsed.primaryWeight === "number"
+    ? parsed.primaryWeight
+    : (distribution[0]?.weight ?? null);
+
+  const structuralAdjustment = parsed.structuralAdjustment && typeof parsed.structuralAdjustment === "object"
+    ? {
+      summary: typeof parsed.structuralAdjustment.summary === "string" ? parsed.structuralAdjustment.summary : "none",
+      multiplier: typeof parsed.structuralAdjustment.multiplier === "number" ? parsed.structuralAdjustment.multiplier : null,
+      penalty: typeof parsed.structuralAdjustment.penalty === "number" ? parsed.structuralAdjustment.penalty : null,
+    }
+    : { summary: "none", multiplier: null, penalty: null };
+
+  const narrativeObj = parsed.narrative && typeof parsed.narrative === "object" ? parsed.narrative : {};
+
+  return {
+    primaryRegime,
+    primaryWeight,
+    decisiveness: typeof parsed.decisiveness === "number" ? parsed.decisiveness : null,
+    transitionLike: Boolean(parsed.transitionLike),
+    distribution,
+    narrative: {
+      short: typeof narrativeObj.short === "string" ? narrativeObj.short : "",
+      medium: typeof narrativeObj.medium === "string" ? narrativeObj.medium : "",
+      long: typeof narrativeObj.long === "string" ? narrativeObj.long : "",
+    },
+    structuralAdjustment,
+    supportingBlocks: Array.isArray(parsed.supportingBlocks) ? parsed.supportingBlocks.slice(0, 8) : [],
+    supportingOverlays: Array.isArray(parsed.supportingOverlays) ? parsed.supportingOverlays.slice(0, 8) : [],
+    contradictingOverlays: Array.isArray(parsed.contradictingOverlays) ? parsed.contradictingOverlays.slice(0, 8) : [],
+    regimeMomentum: parsed.regimeMomentum && typeof parsed.regimeMomentum === "object"
+      ? {
+        direction: typeof parsed.regimeMomentum.direction === "string" ? parsed.regimeMomentum.direction : "stable",
+        momentumScore: typeof parsed.regimeMomentum.momentumScore === "number" ? parsed.regimeMomentum.momentumScore : 0,
+        primaryRegimeChange: typeof parsed.regimeMomentum.primaryRegimeChange === "string" ? parsed.regimeMomentum.primaryRegimeChange : "stable",
+        driftTowardRegime: typeof parsed.regimeMomentum.driftTowardRegime === "string" ? parsed.regimeMomentum.driftTowardRegime : null,
+        changeDrivers: Array.isArray(parsed.regimeMomentum.changeDrivers) ? parsed.regimeMomentum.changeDrivers.slice(0, 6) : [],
+        narrative: typeof parsed.regimeMomentum.narrative === "string" ? parsed.regimeMomentum.narrative : "",
+      }
+      : {
+        direction: "stable",
+        momentumScore: 0,
+        primaryRegimeChange: "stable",
+        driftTowardRegime: null,
+        changeDrivers: [],
+        narrative: "",
+      },
+    overlayInfluence: parsed.overlayInfluence && typeof parsed.overlayInfluence === "object"
+      ? {
+        primarySignal: typeof parsed.overlayInfluence.primarySignal === "string" ? parsed.overlayInfluence.primarySignal : "modulating",
+        candidateSignals: Array.isArray(parsed.overlayInfluence.candidateSignals)
+          ? parsed.overlayInfluence.candidateSignals
+            .map((row: any) => ({ regime: typeof row?.regime === "string" ? row.regime : null, signal: typeof row?.signal === "string" ? row.signal : "modulating" }))
+            .filter((row: any) => row.regime)
+            .slice(0, 6)
+          : [],
+        summary: typeof parsed.overlayInfluence.summary === "string" ? parsed.overlayInfluence.summary : "",
+      }
+      : {
+        primarySignal: "modulating",
+        candidateSignals: [],
+        summary: "",
+      },
+  };
+}
+
+function attachMacroRegimeProbability(snapshot: any) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  const direct = normalizeMacroRegimeProbability((snapshot as any).macroRegimeProbability);
+  const fromRegime = normalizeMacroRegimeProbability((snapshot as any)?.regime?.macroRegimeProbability);
+  const legacy = normalizeMacroRegimeProbability((snapshot as any).regimeProbability);
+  const debug = normalizeMacroRegimeProbability((snapshot as any)?.debug?.macroRegimeProbability);
+  const normalized = direct ?? fromRegime ?? legacy ?? debug;
+  if (!normalized) return { ...snapshot, macroRegimeProbability: null };
+  return { ...snapshot, macroRegimeProbability: normalized };
+}
+
 function trimSnapshotForNormalRead(snapshot: any, debugEnabled: boolean) {
   if (!snapshot || typeof snapshot !== "object" || debugEnabled) return snapshot;
   const clone: any = { ...snapshot };
@@ -1935,6 +2141,12 @@ export async function buildMacroLatestReadPayload(region: string) {
 }
 
 export default async function handler(req: any, res: any) {
+  if (typeof res?.setHeader === "function") {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+  }
   if (req.method !== "GET") {
     res.status(405).json({ ok: false, error: "Method not allowed" });
     return;
@@ -1974,7 +2186,27 @@ export default async function handler(req: any, res: any) {
     ? snapshotPayload.globalMacro
     : snapshotPayloadRaw ?? null;
   const normalizedGlobalMacro = normalizeGlobalMacroPayload(globalMacroRaw);
-  const globalMacro = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
+  const globalMacroTrimmed = trimSnapshotForNormalRead(normalizedGlobalMacro, debugEnabled);
+  const globalMacroHydrated = hydrateMacroExplanationFromSnapshot(globalMacroTrimmed, region);
+  const globalMacroWithProbability = attachMacroRegimeProbability(globalMacroHydrated);
+  const globalMacro = globalMacroWithProbability?.macroRegimeProbability
+    ? globalMacroWithProbability
+    : (() => {
+      const regimeAny = (globalMacroWithProbability as any)?.regime;
+      if (!regimeAny || typeof regimeAny !== "object") return globalMacroWithProbability;
+      return {
+        ...globalMacroWithProbability,
+        macroRegimeProbability: buildMacroRegimeProbabilityFromSnapshot({
+          macroScoreTotal: typeof regimeAny.macroScoreTotal === "number" ? regimeAny.macroScoreTotal : null,
+          macroConfidence: typeof regimeAny.macroConfidence === "number" ? regimeAny.macroConfidence : 0,
+          coreRegimeLabel: typeof regimeAny.coreRegimeLabel === "string" ? regimeAny.coreRegimeLabel : "DataInsufficient",
+          growthOverlay: typeof regimeAny.growthOverlay === "string" ? regimeAny.growthOverlay : "Neutral",
+          stressOverlay: typeof regimeAny.stressOverlay === "string" ? regimeAny.stressOverlay : "Low",
+          hardAssetOverlay: typeof regimeAny.hardAssetOverlay === "string" ? regimeAny.hardAssetOverlay : "Neutral",
+          blockScores: (regimeAny.blockScores ?? {}) as any,
+        }),
+      };
+    })();
 
   const inflationAnalysis = snapshotPayload && "inflationAnalysis" in snapshotPayload
     ? snapshotPayload.inflationAnalysis
