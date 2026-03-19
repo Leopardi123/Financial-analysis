@@ -8,6 +8,8 @@ import { upsertLatestMacroReadCache, upsertMacroHistoryReadCache } from "../../.
 import { GLOBAL_MACRO_TEMPLATE } from "../../../lib/macro/template.js";
 
 const REGIONS = ["US", "EA", "SE"] as const;
+const MONTHLY_HISTORY_RANGES: Array<10 | 20 | "MAX"> = [10, 20, "MAX"];
+const WEEKLY_HISTORY_RANGES: Array<1 | 3 | 5> = [1, 3, 5];
 
 type Region = typeof REGIONS[number] | "GLOBAL";
 
@@ -76,10 +78,19 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
   const snapshotAsOf = (snapshotPayload as any)?.globalMacro?.regime?.asOfDate ?? summary.asOfDate ?? null;
   const cacheUpdatedAt = await upsertLatestMacroReadCache(region, snapshotAsOf, snapshotPayload);
 
-  const monthly20 = await computeMacroRegimeHistory({ region, resolution: "MONTHLY", rangeYears: 20 });
-  const weekly3 = await computeMacroRegimeHistory({ region, resolution: "WEEKLY", rangeYears: 3 });
-  await upsertMacroHistoryReadCache({ region, resolution: "MONTHLY", rangeYears: 20, payload: monthly20 });
-  await upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears: 3, payload: weekly3 });
+  const monthlyWrites: Array<{ rangeYears: 10 | 20 | "MAX"; points: number }> = [];
+  for (const rangeYears of MONTHLY_HISTORY_RANGES) {
+    const payload = await computeMacroRegimeHistory({ region, resolution: "MONTHLY", rangeYears });
+    await upsertMacroHistoryReadCache({ region, resolution: "MONTHLY", rangeYears, payload });
+    monthlyWrites.push({ rangeYears, points: payload.points.length });
+  }
+
+  const weeklyWrites: Array<{ rangeYears: 1 | 3 | 5; points: number }> = [];
+  for (const rangeYears of WEEKLY_HISTORY_RANGES) {
+    const payload = await computeMacroRegimeHistory({ region, resolution: "WEEKLY", rangeYears });
+    await upsertMacroHistoryReadCache({ region, resolution: "WEEKLY", rangeYears, payload });
+    weeklyWrites.push({ rangeYears, points: payload.points.length });
+  }
 
   return {
     ok: true,
@@ -95,8 +106,13 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
     writes: {
       indicatorWrites: summary.indicatorWrites,
       regimeWrites: summary.regimeWrites,
-      historyMonthly20Points: monthly20.points.length,
-      historyWeekly3Points: weekly3.points.length,
+      latestCacheKey: `macro_latest_read_cache:${region}`,
+      historyCacheKeys: [
+        ...monthlyWrites.map((row) => `macro_history_read_cache:${region}:MONTHLY:${String(row.rangeYears)}`),
+        ...weeklyWrites.map((row) => `macro_history_read_cache:${region}:WEEKLY:${String(row.rangeYears)}`),
+      ],
+      historyMonthly: monthlyWrites,
+      historyWeekly: weeklyWrites,
     },
   };
 }
@@ -111,10 +127,19 @@ async function rebuildGlobal() {
     throw error;
   }
   const snapshotUpdatedAt = await upsertLatestMacroReadCache("GLOBAL", asOfDate, payload);
-  const monthly20 = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "MONTHLY", rangeYears: 20 });
-  const weekly3 = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "WEEKLY", rangeYears: 3 });
-  await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "MONTHLY", rangeYears: 20, payload: monthly20 });
-  await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears: 3, payload: weekly3 });
+  const monthlyWrites: Array<{ rangeYears: 10 | 20 | "MAX"; points: number }> = [];
+  for (const rangeYears of MONTHLY_HISTORY_RANGES) {
+    const payload = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "MONTHLY", rangeYears });
+    await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "MONTHLY", rangeYears, payload });
+    monthlyWrites.push({ rangeYears, points: payload.points.length });
+  }
+
+  const weeklyWrites: Array<{ rangeYears: 1 | 3 | 5; points: number }> = [];
+  for (const rangeYears of WEEKLY_HISTORY_RANGES) {
+    const payload = await computeMacroRegimeHistory({ region: "GLOBAL", resolution: "WEEKLY", rangeYears });
+    await upsertMacroHistoryReadCache({ region: "GLOBAL", resolution: "WEEKLY", rangeYears, payload });
+    weeklyWrites.push({ rangeYears, points: payload.points.length });
+  }
 
   return {
     ok: true,
@@ -128,8 +153,13 @@ async function rebuildGlobal() {
     snapshotVersion: GLOBAL_MACRO_TEMPLATE.templateId,
     note: "This does NOT fetch new data.",
     writes: {
-      historyMonthly20Points: monthly20.points.length,
-      historyWeekly3Points: weekly3.points.length,
+      latestCacheKey: "macro_latest_read_cache:GLOBAL",
+      historyCacheKeys: [
+        ...monthlyWrites.map((row) => `macro_history_read_cache:GLOBAL:MONTHLY:${String(row.rangeYears)}`),
+        ...weeklyWrites.map((row) => `macro_history_read_cache:GLOBAL:WEEKLY:${String(row.rangeYears)}`),
+      ],
+      historyMonthly: monthlyWrites,
+      historyWeekly: weeklyWrites,
     },
   };
 }
@@ -156,6 +186,9 @@ export default async function handler(req: any, res: any) {
       }
       perRegion.push(await rebuildGlobal());
     } else if (requested === "GLOBAL") {
+      for (const region of REGIONS) {
+        perRegion.push(await rebuildRegion(region));
+      }
       perRegion.push(await rebuildGlobal());
     } else {
       perRegion.push(await rebuildRegion(requested));

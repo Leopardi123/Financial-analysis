@@ -2072,6 +2072,7 @@ export default async function handler(req: any, res: any) {
     readMode: "snapshot_cache_only",
     snapshotSource: snapshotCache ? "macro_latest_read_cache" : "cache_missing",
     snapshotCacheKey: `macro_latest_read_cache:${region}`,
+    historyCacheKey: `macro_history_read_cache:${region}:${historyResolution}:${String(historyRangeYears)}`,
     snapshotCacheHit: Boolean(snapshotCache),
     historyCacheHit: Boolean(historyCache),
     historyCacheExactRangeHit: Boolean(historyCache),
@@ -2201,6 +2202,11 @@ export default async function handler(req: any, res: any) {
         ...diagnostics,
         cacheMiss: true,
         missing,
+        rootCause: missing.includes("history_cache")
+          ? `Missing exact history cache key ${`macro_history_read_cache:${region}:${historyResolution}:${String(historyRangeYears)}`}`
+          : missing.includes("latest_snapshot_cache")
+            ? `Missing latest snapshot cache key macro_latest_read_cache:${region}`
+            : "Snapshot payload did not satisfy cache contract",
         message: "Macro read path is cache-only. Missing cache entries must be rebuilt by write paths.",
       },
     });
