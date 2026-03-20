@@ -1535,6 +1535,13 @@ export default function GlobalMacroDashboard() {
     return "neutral";
   }
 
+  function regimeQuadrantPosition(regime: string): { x: number; y: number } {
+    if (regime === "MonetaryDominance") return { x: 28, y: 28 };
+    if (regime === "Balanced") return { x: 72, y: 28 };
+    if (regime === "FiscalPressureBuilding") return { x: 28, y: 72 };
+    return { x: 72, y: 72 };
+  }
+
 
   function segmentPosition(startDate: string, endDate: string): { left: number; width: number } {
     if (!timelineWindow) return { left: 0, width: 100 };
@@ -1920,39 +1927,68 @@ Signal: ${gapLabel}`,
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
                 <h4 style={{ marginTop: 0, marginBottom: 10 }}>GLOBAL MACRO — NU-LÄGE</h4>
                 <div style={{ border: "1px solid #cbd5e1", borderRadius: 10, background: "#fff", padding: 10, marginBottom: 12, maxWidth: 520 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 8, aspectRatio: "1 / 1" }}>
+                  <div style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 8, background: "linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%)", overflow: "hidden" }}>
+                    <div style={{ position: "absolute", inset: 0, border: "1px solid #cbd5e1", borderRadius: 8 }} />
+                    <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "#cbd5e1" }} />
+                    <div style={{ position: "absolute", top: "50%", left: 0, right: 0, height: 1, background: "#cbd5e1" }} />
                     {([
-                      "MonetaryDominance",
-                      "Balanced",
-                      "FiscalPressureBuilding",
-                      "FiscalDominanceRisk",
-                    ] as const).map((regime) => {
-                      const distEntry = regimeProbabilityDistribution.find((row: any) => row?.regime === regime);
-                      const weight = typeof distEntry?.weight === "number" ? distEntry.weight : 0;
-                      const isPrimary = regimeProbabilityAny?.primaryRegime === regime;
-                      return (
-                        <div key={`now-regime-${regime}`} style={{ border: isPrimary ? "2px solid #0f172a" : "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: `rgba(15,23,42,${Math.max(0.08, Math.min(0.38, weight / 100))})`, color: "#0f172a", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                          <div style={{ fontWeight: 700, fontSize: 12, lineHeight: 1.2 }}>{regime}</div>
-                          <div style={{ fontSize: 12 }}>{safePct(weight)}</div>
-                          {isPrimary && <div style={{ fontSize: 11, fontWeight: 700 }}>Primary now</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ fontSize: 12, marginTop: 8, paddingTop: 6, borderTop: "1px dashed #cbd5e1" }}>
-                    Primary {String(regimeProbabilityAny?.primaryRegime ?? "—")} · weight {safePct(regimeProbabilityAny?.primaryWeight)} · decisiveness {safePct(regimeProbabilityAny?.decisiveness)} · quality {String(explanationSummary?.structuralQualityLabel ?? "—")} · momentum {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} · state {regimeNowStateLabel()}
+                      { regime: "MonetaryDominance", label: "Monetary Dominance", x: "6%", y: "6%" },
+                      { regime: "Balanced", label: "Balanced", x: "56%", y: "6%" },
+                      { regime: "FiscalPressureBuilding", label: "Fiscal Pressure", x: "6%", y: "56%" },
+                      { regime: "FiscalDominanceRisk", label: "Fiscal Dominance", x: "56%", y: "56%" },
+                    ] as const).map((cell) => (
+                      <div key={`regime-label-${cell.regime}`} style={{ position: "absolute", left: cell.x, top: cell.y, fontSize: 11, fontWeight: 700, color: "#475569" }}>{cell.label}</div>
+                    ))}
+                    {regimeProbabilityDistribution
+                      .slice()
+                      .sort((a: any, b: any) => (typeof b?.weight === "number" ? b.weight : 0) - (typeof a?.weight === "number" ? a.weight : 0))
+                      .slice(0, 3)
+                      .map((row: any, index: number) => {
+                        const pos = regimeQuadrantPosition(String(row?.regime ?? ""));
+                        const weight = typeof row?.weight === "number" ? row.weight : 0;
+                        const isPrimary = row?.regime === regimeProbabilityAny?.primaryRegime;
+                        return (
+                          <div
+                            key={`regime-point-${String(row?.regime ?? index)}`}
+                            style={{
+                              position: "absolute",
+                              left: `${pos.x}%`,
+                              top: `${pos.y}%`,
+                              width: isPrimary ? Math.max(18, Math.min(34, 16 + weight * 0.18)) : 10,
+                              height: isPrimary ? Math.max(18, Math.min(34, 16 + weight * 0.18)) : 10,
+                              marginLeft: isPrimary ? -12 : -5,
+                              marginTop: isPrimary ? -12 : -5,
+                              borderRadius: 999,
+                              border: isPrimary ? "2px solid #0f172a" : "1px solid #64748b",
+                              background: isPrimary ? "rgba(15,23,42,0.75)" : "rgba(148,163,184,0.45)",
+                              opacity: isPrimary ? Math.max(0.45, Math.min(1, (Number(regimeProbabilityAny?.decisiveness ?? 0) / 100) || 0.7)) : 0.8 - index * 0.2,
+                              boxShadow: isPrimary && (regimeProbabilityAny?.transitionLike || regimeNowStateLabel() !== "stable") ? "0 0 0 4px rgba(15,23,42,0.12)" : "none",
+                              outline: isPrimary && regimeProbabilityAny?.transitionLike ? "2px dashed #334155" : "none",
+                            }}
+                            title={`${String(row?.regime ?? "—")} ${safePct(weight)}`}
+                          />
+                        );
+                      })}
                   </div>
                 </div>
                 <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
-                  <div style={{ fontSize: 13 }}>
-                    <strong>{String(regimeProbabilityAny?.primaryRegime ?? globalMacro.regime?.coreRegimeLabel ?? "—")}</strong> · weight {safePct(regimeProbabilityAny?.primaryWeight)} · decisiveness {safePct(regimeProbabilityAny?.decisiveness)} · confidence {safePct(explanationSummary?.confidence ?? globalMacro.regime?.macroConfidence)} · structural quality {String(explanationSummary?.structuralQualityLabel ?? "—")} · state <strong>{regimeNowStateLabel()}</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 6, fontSize: 12, marginBottom: 6 }}>
+                    <div><strong>Primary</strong><br />{String(regimeProbabilityAny?.primaryRegime ?? globalMacro.regime?.coreRegimeLabel ?? "—")}</div>
+                    <div><strong>Weight</strong><br />{safePct(regimeProbabilityAny?.primaryWeight)}</div>
+                    <div><strong>Decisiveness</strong><br />{safePct(regimeProbabilityAny?.decisiveness)}</div>
+                    <div><strong>Quality</strong><br />{String(explanationSummary?.structuralQualityLabel ?? "—")}</div>
+                    <div><strong>State</strong><br />{regimeNowStateLabel()}</div>
                   </div>
-                  <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12 }}>
-                    <li>{String(regimeProbabilityAny?.narrative?.short ?? explanationNarrative?.short ?? globalMacro.regime?.regimeExplanation?.summary ?? "Regime narrative saknas.")}</li>
-                    <li>Ledande regim drivs av {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.join(", ") : "blend av blocksignaler"}.</li>
-                    <li>Conviction: {regimeNowStateLabel() === "stable" ? "stark" : regimeNowStateLabel() === "fragile" ? "skör" : regimeNowStateLabel() === "contested" ? "omstridd" : "övergångslik"}.</li>
-                    <li>Overlays: stöd {Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays.length : 0}, modulerar {Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays.length : 0}, motsäger {Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays.length : 0}.</li>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12 }}>
+                    <li>Driven by {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.slice(0, 2).join(", ") : "mixed block signals"}.</li>
+                    <li>Confirmed by {Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays.length : 0} overlays.</li>
+                    <li>Modulated by {Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays.length : 0} overlays.</li>
+                    <li>Contradicted by {Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays.length : 0} overlays.</li>
                   </ul>
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 12 }}>Visa detaljerad regimtolkning</summary>
+                    <div style={{ fontSize: 12, marginTop: 6 }}>{String(regimeProbabilityAny?.narrative?.short ?? explanationNarrative?.short ?? globalMacro.regime?.regimeExplanation?.summary ?? "Regime narrative saknas.")}</div>
+                  </details>
                 </div>
                 <div>
                   <strong>Overlay stack</strong>
