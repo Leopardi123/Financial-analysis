@@ -541,7 +541,6 @@ export default async function handler(req: any, res: any) {
       perRegion.push(await rebuildGlobal());
     } else {
       perRegion.push(await rebuildRegion(requested));
-      perRegion.push(await rebuildGlobal());
     }
 
     const endedAt = new Date().toISOString();
