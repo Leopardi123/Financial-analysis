@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
 import InfoPopover from "./InfoPopover";
+import MacroLabMiniSeries from "./MacroLabMiniSeries";
 
 type GlobalMacroPayload = {
   regime: {
@@ -498,7 +499,7 @@ export default function GlobalMacroDashboard() {
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
   const [openOverlayInfoId, setOpenOverlayInfoId] = useState<string | null>(null);
   const [expandedOverlayKey, setExpandedOverlayKey] = useState<string | null>(null);
-  const [expandedOverlaySize, setExpandedOverlaySize] = useState<"compact" | "expanded">("compact");
+  const [expandedOverlaySizeByKey, setExpandedOverlaySizeByKey] = useState<Record<string, boolean>>({});
 
   const uiOverlayKeysRequested = useMemo(() => (selectedRegion === "GLOBAL"
     ? ["globalUnrestOverlay"]
@@ -1918,19 +1919,29 @@ Signal: ${gapLabel}`,
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
                 <h4 style={{ marginTop: 0, marginBottom: 10 }}>GLOBAL MACRO — NU-LÄGE</h4>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 8, marginBottom: 12 }}>
-                  {(["MonetaryDominance", "Balanced", "FiscalPressureBuilding", "FiscalDominanceRisk"] as const).map((regime) => {
-                    const distEntry = regimeProbabilityDistribution.find((row: any) => row?.regime === regime);
-                    const weight = typeof distEntry?.weight === "number" ? distEntry.weight : null;
-                    const isPrimary = regimeProbabilityAny?.primaryRegime === regime;
-                    return (
-                      <div key={`now-regime-${regime}`} style={{ border: isPrimary ? "2px solid #0f172a" : "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: isPrimary ? "#e2e8f0" : "#fff" }}>
-                        <div style={{ fontWeight: 700, fontSize: 12 }}>{regime}</div>
-                        <div style={{ fontSize: 12, marginTop: 2 }}>weight: {safePct(weight)}</div>
-                        {isPrimary && <div style={{ fontSize: 11, marginTop: 3, color: "#0f172a" }}>Primary regime now</div>}
-                      </div>
-                    );
-                  })}
+                <div style={{ border: "1px solid #cbd5e1", borderRadius: 10, background: "#fff", padding: 10, marginBottom: 12, maxWidth: 520 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 8, aspectRatio: "1 / 1" }}>
+                    {([
+                      "MonetaryDominance",
+                      "Balanced",
+                      "FiscalPressureBuilding",
+                      "FiscalDominanceRisk",
+                    ] as const).map((regime) => {
+                      const distEntry = regimeProbabilityDistribution.find((row: any) => row?.regime === regime);
+                      const weight = typeof distEntry?.weight === "number" ? distEntry.weight : 0;
+                      const isPrimary = regimeProbabilityAny?.primaryRegime === regime;
+                      return (
+                        <div key={`now-regime-${regime}`} style={{ border: isPrimary ? "2px solid #0f172a" : "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: `rgba(15,23,42,${Math.max(0.08, Math.min(0.38, weight / 100))})`, color: "#0f172a", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                          <div style={{ fontWeight: 700, fontSize: 12, lineHeight: 1.2 }}>{regime}</div>
+                          <div style={{ fontSize: 12 }}>{safePct(weight)}</div>
+                          {isPrimary && <div style={{ fontSize: 11, fontWeight: 700 }}>Primary now</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 12, marginTop: 8, paddingTop: 6, borderTop: "1px dashed #cbd5e1" }}>
+                    Primary {String(regimeProbabilityAny?.primaryRegime ?? "—")} · weight {safePct(regimeProbabilityAny?.primaryWeight)} · decisiveness {safePct(regimeProbabilityAny?.decisiveness)} · quality {String(explanationSummary?.structuralQualityLabel ?? "—")} · momentum {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} · state {regimeNowStateLabel()}
+                  </div>
                 </div>
                 <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
                   <div style={{ fontSize: 13 }}>
@@ -1964,23 +1975,34 @@ Signal: ${gapLabel}`,
                           </button>
                           {expanded && (
                             <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 10px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                                <div style={{ fontSize: 12 }}>{overlay?.runtime?.directionTag ? `Direction: ${String(overlay.runtime.directionTag)} · ` : ""}confidence {safePct(overlay?.confidence)}</div>
-                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <button type="button" onClick={() => setExpandedOverlaySize((size) => size === "compact" ? "expanded" : "compact")} style={{ border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff", cursor: "pointer", padding: "2px 8px" }}>&lt;—&gt;</button>
-                                  {row && (
-                                    <InfoPopover
-                                      id={`overlay-inline-info-${overlayKey}`}
-                                      openId={openOverlayInfoId}
-                                      onToggle={(id) => setOpenOverlayInfoId((current) => (current === id ? null : id))}
-                                      onClose={() => setOpenOverlayInfoId(null)}
-                                      title={`${normalizeOverlayLabel(overlayKey)} info`}
-                                      sections={buildOverlayInfoSections(row)}
-                                    />
-                                  )}
-                                </div>
-                              </div>
-                              {renderOverlayHistoryChart(overlayKey, expandedOverlaySize)}
+                              <div style={{ fontSize: 12, marginBottom: 8 }}>{overlay?.runtime?.directionTag ? `Direction: ${String(overlay.runtime.directionTag)} · ` : ""}confidence {safePct(overlay?.confidence)}</div>
+                              <MacroLabMiniSeries
+                                id={`overlay-inline-${overlayKey}`}
+                                title={`${normalizeOverlayLabel(overlayKey)} history`}
+                                dates={overlayHistoryPoints.map((point) => point.asOfDate)}
+                                lines={[{
+                                  label: normalizeOverlayLabel(overlayKey),
+                                  color: "#7c3aed",
+                                  data: overlayHistoryPoints.map((point) => {
+                                    const value = point.scores?.[overlayKey];
+                                    return typeof value === "number" ? value : null;
+                                  }),
+                                }]}
+                                selectedRange={null}
+                                onSelectRange={() => {}}
+                                expanded={Boolean(expandedOverlaySizeByKey[overlayKey])}
+                                onToggleExpand={() => setExpandedOverlaySizeByKey((prev) => ({ ...prev, [overlayKey]: !prev[overlayKey] }))}
+                                rightControls={row ? (
+                                  <InfoPopover
+                                    id={`overlay-inline-info-${overlayKey}`}
+                                    openId={openOverlayInfoId}
+                                    onToggle={(id) => setOpenOverlayInfoId((current) => (current === id ? null : id))}
+                                    onClose={() => setOpenOverlayInfoId(null)}
+                                    title={`${normalizeOverlayLabel(overlayKey)} info`}
+                                    sections={buildOverlayInfoSections(row)}
+                                  />
+                                ) : null}
+                              />
                               <div style={{ fontSize: 12, marginTop: 6 }}>
                                 {String(overlayExplain?.narrative ?? row?.implementationDelta?.[5] ?? `${normalizeOverlayLabel(overlayKey)} är ${overlay?.label ?? "neutral"} och påverkar hur regimtolkningen ska vägas.`)}
                               </div>
