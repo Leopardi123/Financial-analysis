@@ -1223,6 +1223,16 @@ type SnapshotBuildStageReporter = (event: {
   bytes?: number;
 }) => void;
 
+function hasThematicCommentary(probability: any) {
+  if (!probability || typeof probability !== "object") return false;
+  const candidates = [
+    ...(Array.isArray(probability.supportingOverlays) ? probability.supportingOverlays : []),
+    ...(Array.isArray(probability.modulatingOverlays) ? probability.modulatingOverlays : []),
+    ...(Array.isArray(probability.contradictingOverlays) ? probability.contradictingOverlays : []),
+  ];
+  return candidates.some((item) => typeof item === "string" && item.startsWith("thematic:"));
+}
+
 async function readLatestSnapshot(region: string, allowLiveFallback: boolean, uiOverlayKeysRequested: string[], reportStage?: SnapshotBuildStageReporter) {
   const regimeRows = (await query(
     `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
@@ -1481,7 +1491,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
   reportStage?.({ region, stage: "regime_probability_build", status: "start" });
   const macroRegimeProbability = (() => {
     const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability;
-    if (persisted) return persisted;
+    if (persisted && hasThematicCommentary(persisted)) return persisted;
     return buildMacroRegimeProbabilityFromSnapshot({
       macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
       macroConfidence: Number(regimeRow.macro_confidence ?? 0),
@@ -1771,16 +1781,20 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
     },
     macroExplanation,
-    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regime as any)?.macroRegimeProbability ?? buildMacroRegimeProbabilityFromSnapshot({
-      macroScoreTotal: regime.macroScoreTotal,
-      macroConfidence: regime.macroConfidence,
-      coreRegimeLabel: regime.coreRegimeLabel,
-      growthOverlay: regime.growthOverlay,
-      stressOverlay: regime.stressOverlay,
-      hardAssetOverlay: regime.hardAssetOverlay,
-      thematicOverlays: globalOverlayBundle?.overlays as any,
-      blockScores: regime.blockScores as any,
-    }) } }).macroRegimeProbability,
+    macroRegimeProbability: (() => {
+      const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regime as any)?.macroRegimeProbability ?? null } }).macroRegimeProbability;
+      if (persisted && hasThematicCommentary(persisted)) return persisted;
+      return buildMacroRegimeProbabilityFromSnapshot({
+        macroScoreTotal: regime.macroScoreTotal,
+        macroConfidence: regime.macroConfidence,
+        coreRegimeLabel: regime.coreRegimeLabel,
+        growthOverlay: regime.growthOverlay,
+        stressOverlay: regime.stressOverlay,
+        hardAssetOverlay: regime.hardAssetOverlay,
+        thematicOverlays: globalOverlayBundle?.overlays as any,
+        blockScores: regime.blockScores as any,
+      });
+    })(),
   };
 }
 
