@@ -4,7 +4,7 @@ import { query } from "../../../../api/_db.js";
 import { MACRO_INDICATOR_CATALOG } from "../../../lib/macro/catalog.js";
 import { US_FRED_SERIES } from "../../../lib/macro/fred.js";
 import { type HistoryResolution } from "../../../lib/macro/history.js";
-import { readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../lib/macro/readCache.js";
+import { MacroCacheReadError, readLatestMacroReadCache, readMacroHistoryReadCache } from "../../../lib/macro/readCache.js";
 import { MACRO_REGIONS, aggregateGlobalRegimeFromRegional } from "../../../lib/macro/global.js";
 import { buildGlobalUnrestOverlay, buildRegionalOverlays, buildSeriesMap } from "../../../lib/macro/overlayEngine.js";
 import { buildMacroExplanation } from "../../../lib/macro/explanationLayer.js";
@@ -1215,7 +1215,25 @@ async function getGoldSourceDiagnostics(region: string) {
   };
 }
 
-async function readLatestSnapshot(region: string, allowLiveFallback: boolean, uiOverlayKeysRequested: string[]) {
+type SnapshotBuildStageReporter = (event: {
+  region: string;
+  stage: "overlay_build" | "regime_probability_build" | "payload_assembly";
+  status: "start" | "end";
+  ms?: number;
+  bytes?: number;
+}) => void;
+
+function hasThematicCommentary(probability: any) {
+  if (!probability || typeof probability !== "object") return false;
+  const candidates = [
+    ...(Array.isArray(probability.supportingOverlays) ? probability.supportingOverlays : []),
+    ...(Array.isArray(probability.modulatingOverlays) ? probability.modulatingOverlays : []),
+    ...(Array.isArray(probability.contradictingOverlays) ? probability.contradictingOverlays : []),
+  ];
+  return candidates.some((item) => typeof item === "string" && item.startsWith("thematic:"));
+}
+
+async function readLatestSnapshot(region: string, allowLiveFallback: boolean, uiOverlayKeysRequested: string[], reportStage?: SnapshotBuildStageReporter) {
   const regimeRows = (await query(
     `SELECT as_of_date, updated_at, block_scores_json, macro_score_total, macro_confidence, core_regime_label,
             growth_overlay, stress_overlay, hard_asset_overlay,
@@ -1415,7 +1433,16 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
 
   const rawSeriesRows = await loadRawSeriesRows(region);
   const seriesMap = buildSeriesMap(rawSeriesRows);
+  const overlayStageStarted = Date.now();
+  reportStage?.({ region, stage: "overlay_build", status: "start" });
   const overlayBundle = buildRegionalOverlays(region as "US" | "EA" | "SE", regimeRow.as_of_date, seriesMap);
+  reportStage?.({
+    region,
+    stage: "overlay_build",
+    status: "end",
+    ms: Date.now() - overlayStageStarted,
+    bytes: Buffer.byteLength(JSON.stringify(overlayBundle ?? null)),
+  });
 
   const rootCauseHints: string[] = [];
   if (rawStats.totalRawPointCount === 0) {
@@ -1460,7 +1487,37 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
     },
   });
 
-  return {
+  const regimeProbabilityStarted = Date.now();
+  reportStage?.({ region, stage: "regime_probability_build", status: "start" });
+  const macroRegimeProbability = (() => {
+    const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability;
+    if (persisted && hasThematicCommentary(persisted)) return persisted;
+    return buildMacroRegimeProbabilityFromSnapshot({
+      macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
+      macroConfidence: Number(regimeRow.macro_confidence ?? 0),
+      coreRegimeLabel: regimeRow.core_regime_label,
+      growthOverlay: regimeRow.growth_overlay,
+      stressOverlay: regimeRow.stress_overlay,
+      hardAssetOverlay: regimeRow.hard_asset_overlay,
+      thematicOverlays: overlayBundle?.overlays as any,
+      blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
+        A_FISCAL: null,
+        B_MONETARY: null,
+        C_INFLATION: null,
+        D_CREDIBILITY: null,
+      }) as any,
+    });
+  })();
+  reportStage?.({
+    region,
+    stage: "regime_probability_build",
+    status: "end",
+    ms: Date.now() - regimeProbabilityStarted,
+    bytes: Buffer.byteLength(JSON.stringify(macroRegimeProbability ?? null)),
+  });
+
+  reportStage?.({ region, stage: "payload_assembly", status: "start" });
+  const assembledPayload = {
     regime: {
       asOfDate: regimeRow.as_of_date,
       blockScores: safeJsonParse<Record<string, number | null>>(regimeRow.block_scores_json, {
@@ -1599,30 +1656,20 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       rootCauseHints,
     },
     macroExplanation,
-    macroRegimeProbability: (() => {
-      const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: regimeRow.macro_regime_probability_json } }).macroRegimeProbability;
-      if (persisted) return persisted;
-      return buildMacroRegimeProbabilityFromSnapshot({
-        macroScoreTotal: regimeRow.macro_score_total === null ? null : Number(regimeRow.macro_score_total),
-        macroConfidence: Number(regimeRow.macro_confidence ?? 0),
-        coreRegimeLabel: regimeRow.core_regime_label,
-        growthOverlay: regimeRow.growth_overlay,
-        stressOverlay: regimeRow.stress_overlay,
-        hardAssetOverlay: regimeRow.hard_asset_overlay,
-        blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
-          A_FISCAL: null,
-          B_MONETARY: null,
-          C_INFLATION: null,
-          D_CREDIBILITY: null,
-        }) as any,
-      });
-    })(),
+    macroRegimeProbability,
   };
+  reportStage?.({
+    region,
+    stage: "payload_assembly",
+    status: "end",
+    bytes: Buffer.byteLength(JSON.stringify(assembledPayload ?? null)),
+  });
+  return assembledPayload;
 }
 
 
-async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKeysRequested: string[]) {
-  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested)] as const));
+async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKeysRequested: string[], reportStage?: SnapshotBuildStageReporter) {
+  const regionalSnapshots = await Promise.all(MACRO_REGIONS.map(async (region) => [region, await readLatestSnapshot(region, allowLiveFallback, uiOverlayKeysRequested, reportStage)] as const));
   const regionalMap = Object.fromEntries(regionalSnapshots);
   const asOfDate = MACRO_REGIONS
     .map((region) => regionalMap[region]?.regime?.asOfDate ?? null)
@@ -1734,15 +1781,20 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       regionalCoverage: Object.fromEntries(MACRO_REGIONS.map((r) => [r, { available: Boolean(regionalMap[r]), indicatorCount: regionalMap[r]?.indicators?.length ?? 0 }])),
     },
     macroExplanation,
-    macroRegimeProbability: attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regime as any)?.macroRegimeProbability ?? buildMacroRegimeProbabilityFromSnapshot({
-      macroScoreTotal: regime.macroScoreTotal,
-      macroConfidence: regime.macroConfidence,
-      coreRegimeLabel: regime.coreRegimeLabel,
-      growthOverlay: regime.growthOverlay,
-      stressOverlay: regime.stressOverlay,
-      hardAssetOverlay: regime.hardAssetOverlay,
-      blockScores: regime.blockScores as any,
-    }) } }).macroRegimeProbability,
+    macroRegimeProbability: (() => {
+      const persisted = attachMacroRegimeProbability({ regime: { macroRegimeProbability: (regime as any)?.macroRegimeProbability ?? null } }).macroRegimeProbability;
+      if (persisted && hasThematicCommentary(persisted)) return persisted;
+      return buildMacroRegimeProbabilityFromSnapshot({
+        macroScoreTotal: regime.macroScoreTotal,
+        macroConfidence: regime.macroConfidence,
+        coreRegimeLabel: regime.coreRegimeLabel,
+        growthOverlay: regime.growthOverlay,
+        stressOverlay: regime.stressOverlay,
+        hardAssetOverlay: regime.hardAssetOverlay,
+        thematicOverlays: globalOverlayBundle?.overlays as any,
+        blockScores: regime.blockScores as any,
+      });
+    })(),
   };
 }
 
@@ -1972,6 +2024,7 @@ function inspectRegimeProbabilityRichness(probability: any) {
       if (!current || typeof current !== "object" || !(part in current)) return false;
       current = current[part];
     }
+    if (path === "regimeMomentum.driftTowardRegime") return true;
     if (Array.isArray(current)) return current.length > 0;
     if (typeof current === "string") return current.trim().length > 0;
     if (typeof current === "number") return Number.isFinite(current);
@@ -1993,10 +2046,10 @@ function inspectRegimeProbabilityRichness(probability: any) {
   };
 }
 
-export async function buildMacroLatestReadPayload(region: string) {
+export async function buildMacroLatestReadPayload(region: string, options?: { reportStage?: SnapshotBuildStageReporter }) {
   if (region === "GLOBAL") {
     return {
-      globalMacro: await readLatestGlobalSnapshot(false, []),
+      globalMacro: await readLatestGlobalSnapshot(false, [], options?.reportStage),
       inflationAnalysis: null,
       metadata: {
         dataTimestamp: null,
@@ -2014,7 +2067,7 @@ export async function buildMacroLatestReadPayload(region: string) {
   ) as unknown as Array<{ latest_date: string | null }>;
   const dataTimestamp = latestRawRows[0]?.latest_date ?? null;
   return {
-    globalMacro: await readLatestSnapshot(region, false, []),
+    globalMacro: await readLatestSnapshot(region, false, [], options?.reportStage),
     inflationAnalysis: await loadInflationAnalysis(region as "US" | "EA" | "SE"),
     metadata: {
       dataTimestamp,
@@ -2052,21 +2105,108 @@ export default async function handler(req: any, res: any) {
     if (!debugEnabled) return;
     timingBreakdown.push({ step, ms: Number(ms.toFixed(3)) });
   };
+  function buildDebugTiming() {
+    const totalMs = Date.now() - routeStartedAtMs;
+    const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
+    return {
+      totalMs: Number(totalMs.toFixed(3)),
+      breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
+      slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
+    };
+  }
+  function appendUsRequestChain(baseResponse: Record<string, unknown>) {
+    if (!debugEnabled || region !== "US") return baseResponse;
+    const serializationStart = Date.now();
+    const serialized = JSON.stringify(baseResponse);
+    const serializationMs = Date.now() - serializationStart;
+    pushTiming("json_serialization", serializationMs);
+    const totalBytes = Buffer.byteLength(serialized);
+    const sectionSizes = {
+      snapshotMetaBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.regime ?? null)),
+      historyBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.macroHistory ?? null)),
+      regimeProbabilityBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroRegimeProbability ?? null)),
+      driverBreakdownBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroExplanation ?? null)),
+      overlaysBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.overlays ?? (baseResponse as any)?.globalMacro?.overlayBundle ?? null)),
+      diagnosticsBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.diagnostics ?? null)),
+    };
+    const preDispatchAt = Date.now();
+    pushTiming("response_write_dispatch", 0);
+    const serverTotalRequestMs = preDispatchAt - routeStartedAtMs;
+    const measuredSubstepsSumMs = timingBreakdown.reduce((sum, row) => sum + (typeof row.ms === "number" ? row.ms : 0), 0);
+    const unmeasuredGapMs = serverTotalRequestMs - measuredSubstepsSumMs;
+    return {
+      ...baseResponse,
+      diagnostics: {
+        ...((baseResponse as any).diagnostics ?? {}),
+        usRequestChain: {
+          serverMeasuredMs: serverTotalRequestMs,
+          serverBreakdown: timingBreakdown,
+          measuredSubstepsSumMs: Number(measuredSubstepsSumMs.toFixed(3)),
+          unmeasuredGapMs: Number(unmeasuredGapMs.toFixed(3)),
+          payloadSizeBytes: totalBytes,
+          payloadSectionSizes: sectionSizes,
+          serializationMs,
+          responseWriteDispatchMs: 0,
+        },
+      },
+    };
+  }
   const ensureSchemaExecuted = false;
   pushTiming("request_received", 0);
-  const t0 = Date.now();
-  const snapshotCache = await readLatestMacroReadCache(region, { onTiming: pushTiming });
-  const snapshotReadMs = Date.now() - t0;
-  pushTiming("cache_lookup_snapshot", snapshotReadMs);
+  let snapshotCache: Awaited<ReturnType<typeof readLatestMacroReadCache>> = null;
+  let historyCache: Awaited<ReturnType<typeof readMacroHistoryReadCache>> = null;
+  let snapshotReadMs = 0;
+  let historyReadMs = 0;
+  let failingQueryName: string | null = null;
+  try {
+    const t0 = Date.now();
+    snapshotCache = await readLatestMacroReadCache(region, { onTiming: pushTiming });
+    snapshotReadMs = Date.now() - t0;
+    pushTiming("cache_lookup_snapshot", snapshotReadMs);
 
-  const t1 = Date.now();
-  const historyCache = await readMacroHistoryReadCache({
-    region,
-    resolution: historyResolution as HistoryResolution,
-    rangeYears: historyRangeYears,
-  }, { onTiming: pushTiming });
-  const historyReadMs = Date.now() - t1;
-  pushTiming("cache_lookup_history", historyReadMs);
+    const t1 = Date.now();
+    historyCache = await readMacroHistoryReadCache({
+      region,
+      resolution: historyResolution as HistoryResolution,
+      rangeYears: historyRangeYears,
+    }, { onTiming: pushTiming });
+    historyReadMs = Date.now() - t1;
+    pushTiming("cache_lookup_history", historyReadMs);
+  } catch (error) {
+    if (error instanceof MacroCacheReadError) {
+      failingQueryName = error.queryName;
+      const baseDiagnostics = {
+        readMode: "snapshot_cache_only",
+        cacheOnlyRead: true,
+        snapshotCacheKey: `macro_latest_read_cache:${region}`,
+        historyCacheKey: `macro_history_read_cache:${region}:${historyResolution}:${String(historyRangeYears)}`,
+        latest_cache_bytes: snapshotCache?.payloadBytes ?? null,
+        history_cache_bytes: historyCache?.payloadBytes ?? null,
+        latest_cache_rows: snapshotCache?.rowsReturned ?? null,
+        history_cache_rows: historyCache?.rowsReturned ?? null,
+        failing_query_name: error.queryName,
+        failing_table_name: error.tableName,
+        failing_key: error.key,
+        failing_rows_returned: error.rowsReturned,
+        failing_payload_bytes: error.payloadBytes,
+        routeDurationMs: Date.now() - routeStartedAtMs,
+      };
+      const responsePayload = {
+        ok: false,
+        error: "CACHE_READ_FAILURE",
+        globalMacro: null,
+        macroHistory: null,
+        inflationAnalysis: null,
+        diagnostics: {
+          ...baseDiagnostics,
+          ...(debugEnabled ? { debugTiming: buildDebugTiming() } : {}),
+        },
+      } as Record<string, unknown>;
+      res.status(503).json(appendUsRequestChain(responsePayload));
+      return;
+    }
+    throw error;
+  }
 
   const t2 = Date.now();
   const snapshotPayloadRaw = snapshotCache?.payload;
@@ -2122,6 +2262,11 @@ export default async function handler(req: any, res: any) {
     snapshotAsOfDate: ((globalMacro as any)?.regime?.asOfDate ?? (snapshotCache?.asOfDate ?? null)) as string | null,
     snapshotUpdatedAt: snapshotCache?.updatedAt ?? null,
     historyUpdatedAt: historyCache?.updatedAt ?? null,
+    latest_cache_bytes: snapshotCache?.payloadBytes ?? null,
+    history_cache_bytes: historyCache?.payloadBytes ?? null,
+    latest_cache_rows: snapshotCache?.rowsReturned ?? null,
+    history_cache_rows: historyCache?.rowsReturned ?? null,
+    failing_query_name: failingQueryName,
     snapshotPayloadValid: Boolean(normalizedGlobalMacro),
     historyPayloadValid: Boolean(historyCache?.payload && Array.isArray((historyCache.payload as any)?.points)),
     regimeProbabilityRichness: inspectRegimeProbabilityRichness((globalMacro as any)?.macroRegimeProbability),
@@ -2198,54 +2343,6 @@ export default async function handler(req: any, res: any) {
   pushTiming("diagnostics_prepare", Date.now() - t7);
   (diagnostics as any).renderCoverage.missingInPayload = (diagnostics as any).regimeProbabilityRichness?.missingFieldPaths ?? [];
   pushTiming("payload_assembly", Date.now() - routeStartedAtMs);
-
-  const buildDebugTiming = () => {
-    const totalMs = Date.now() - routeStartedAtMs;
-    const slowestSteps = [...timingBreakdown].sort((a, b) => b.ms - a.ms).slice(0, Math.min(3, timingBreakdown.length));
-    return {
-      totalMs: Number(totalMs.toFixed(3)),
-      breakdown: timingBreakdown.length > 0 ? timingBreakdown : [{ step: "no_timing_steps", ms: 0 }],
-      slowestSteps: slowestSteps.length > 0 ? slowestSteps : [{ step: "no_timing_steps", ms: 0 }],
-    };
-  };
-
-  const appendUsRequestChain = (baseResponse: Record<string, unknown>) => {
-    if (!debugEnabled || region !== "US") return baseResponse;
-    const serializationStart = Date.now();
-    const serialized = JSON.stringify(baseResponse);
-    const serializationMs = Date.now() - serializationStart;
-    pushTiming("json_serialization", serializationMs);
-    const totalBytes = Buffer.byteLength(serialized);
-    const sectionSizes = {
-      snapshotMetaBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.regime ?? null)),
-      historyBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.macroHistory ?? null)),
-      regimeProbabilityBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroRegimeProbability ?? null)),
-      driverBreakdownBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.macroExplanation ?? null)),
-      overlaysBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.globalMacro?.overlays ?? (baseResponse as any)?.globalMacro?.overlayBundle ?? null)),
-      diagnosticsBytes: Buffer.byteLength(JSON.stringify((baseResponse as any)?.diagnostics ?? null)),
-    };
-    const preDispatchAt = Date.now();
-    pushTiming("response_write_dispatch", 0);
-    const serverTotalRequestMs = preDispatchAt - routeStartedAtMs;
-    const measuredSubstepsSumMs = timingBreakdown.reduce((sum, row) => sum + (typeof row.ms === "number" ? row.ms : 0), 0);
-    const unmeasuredGapMs = serverTotalRequestMs - measuredSubstepsSumMs;
-    return {
-      ...baseResponse,
-      diagnostics: {
-        ...((baseResponse as any).diagnostics ?? {}),
-        usRequestChain: {
-          serverMeasuredMs: serverTotalRequestMs,
-          serverBreakdown: timingBreakdown,
-          measuredSubstepsSumMs: Number(measuredSubstepsSumMs.toFixed(3)),
-          unmeasuredGapMs: Number(unmeasuredGapMs.toFixed(3)),
-          payloadSizeBytes: totalBytes,
-          payloadSectionSizes: sectionSizes,
-          serializationMs,
-          responseWriteDispatchMs: 0,
-        },
-      },
-    };
-  };
 
   const cachedMetadata = snapshotPayload && "metadata" in snapshotPayload && typeof snapshotPayload.metadata === "object"
     ? snapshotPayload.metadata as Record<string, unknown>
