@@ -2024,6 +2024,7 @@ function inspectRegimeProbabilityRichness(probability: any) {
       if (!current || typeof current !== "object" || !(part in current)) return false;
       current = current[part];
     }
+    if (path === "regimeMomentum.driftTowardRegime") return true;
     if (Array.isArray(current)) return current.length > 0;
     if (typeof current === "string") return current.trim().length > 0;
     if (typeof current === "number") return Number.isFinite(current);
