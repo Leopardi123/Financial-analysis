@@ -1999,7 +1999,6 @@ Signal: ${gapLabel}`,
                     const decisivenessNorm = normalizeRegimeWeight(regimeProbabilityAny?.decisiveness);
                     const confidenceNorm = normalizeRegimeWeight(explanationSummary?.confidence ?? globalMacro.regime?.macroConfidence);
                     const markerSize = 16 + primaryWeightNorm * 24;
-                    const baseAuraRadius = markerSize + (1 - decisivenessNorm) * 30;
                     const prevPos = phaseMomentum.prevPos ? toDisplayPhasePosition(phaseMomentum.prevPos) : null;
                     const movementDistance = phaseMomentum.distance;
                     const secondaryRegimes = regimeProbabilityDistribution
@@ -2020,11 +2019,22 @@ Signal: ${gapLabel}`,
                       return { x: acc.x + display.x * w, y: acc.y + display.y * w };
                     }, { x: 0, y: 0 });
                     const pullMagnitude = Math.min(1, Math.sqrt(pullVector.x ** 2 + pullVector.y ** 2));
-                    const auraWidth = baseAuraRadius * 2 + (baseAuraRadius * 0.9 * pullMagnitude * Math.abs(pullVector.x));
-                    const auraHeight = baseAuraRadius * 2 + (baseAuraRadius * 0.9 * pullMagnitude * Math.abs(pullVector.y));
-                    const auraOffsetX = pullVector.x * baseAuraRadius * 0.26;
-                    const auraOffsetY = -pullVector.y * baseAuraRadius * 0.26;
-                    const auraAngle = Math.atan2(-pullVector.y, pullVector.x) * (180 / Math.PI);
+                    const pullNorm = pullMagnitude > 0 ? { x: pullVector.x / pullMagnitude, y: pullVector.y / pullMagnitude } : { x: 0, y: 0 };
+                    const auraBase = 4 + (1 - decisivenessNorm) * 7;
+                    const rRight = auraBase * (1 + Math.max(0, pullNorm.x) * 0.9);
+                    const rLeft = auraBase * (1 + Math.max(0, -pullNorm.x) * 0.9);
+                    const rUp = auraBase * (1 + Math.max(0, pullNorm.y) * 0.9);
+                    const rDown = auraBase * (1 + Math.max(0, -pullNorm.y) * 0.9);
+                    const cx = 50 + currentPosition.x * 40;
+                    const cy = 50 - currentPosition.y * 40;
+                    const blobPath = [
+                      `M ${cx} ${cy - rUp}`,
+                      `C ${cx + rRight * 0.6} ${cy - rUp}, ${cx + rRight} ${cy - rDown * 0.5}, ${cx + rRight} ${cy}`,
+                      `C ${cx + rRight} ${cy + rDown * 0.5}, ${cx + rRight * 0.6} ${cy + rDown}, ${cx} ${cy + rDown}`,
+                      `C ${cx - rLeft * 0.6} ${cy + rDown}, ${cx - rLeft} ${cy + rDown * 0.5}, ${cx - rLeft} ${cy}`,
+                      `C ${cx - rLeft} ${cy - rUp * 0.5}, ${cx - rLeft * 0.6} ${cy - rUp}, ${cx} ${cy - rUp}`,
+                      "Z",
+                    ].join(" ");
                     return (
                   <div style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 8, background: "linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%)", overflow: "hidden" }}>
                     <div style={{ position: "absolute", inset: 0, border: "1px solid #cbd5e1", borderRadius: 8 }} />
@@ -2037,8 +2047,8 @@ Signal: ${gapLabel}`,
                     {prevPos && movementDistance >= 0.01 && (
                       <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
                         <defs>
-                          <marker id="macro-phase-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
-                            <polygon points="0 0, 5 2.5, 0 5" fill="#64748b" />
+                          <marker id="macro-phase-arrow" markerWidth="4" markerHeight="4" refX="3.4" refY="2" orient="auto">
+                            <polygon points="0 0, 4 2, 0 4" fill="#475569" />
                           </marker>
                         </defs>
                         <line
@@ -2046,9 +2056,10 @@ Signal: ${gapLabel}`,
                           y1={50 - prevPos.y * 40}
                           x2={positionLeft}
                           y2={positionTop}
-                          stroke="#64748b"
-                          strokeWidth={movementDistance >= 0.16 ? 1.4 : 0.9}
-                          strokeOpacity={movementDistance >= 0.16 ? 0.7 : 0.35}
+                          stroke="#475569"
+                          strokeWidth={movementDistance >= 0.16 ? 1.2 : 0.8}
+                          strokeOpacity={movementDistance >= 0.16 ? 0.62 : 0.28}
+                          strokeLinecap="round"
                           markerEnd="url(#macro-phase-arrow)"
                         />
                       </svg>
@@ -2068,35 +2079,22 @@ Signal: ${gapLabel}`,
                             position: "absolute",
                             left: `${50 + unit.x * 34}%`,
                             top: `${50 - unit.y * 34}%`,
-                            width: 8,
-                            height: 8,
-                            marginLeft: -4,
-                            marginTop: -4,
+                            width: 6,
+                            height: 6,
+                            marginLeft: -3,
+                            marginTop: -3,
                             borderRadius: 999,
-                            background: "rgba(100,116,139,0.45)",
-                            border: "1px solid rgba(71,85,105,0.6)",
-                            opacity: 0.7 - index * 0.2,
+                            background: "rgba(71,85,105,0.28)",
+                            opacity: 0.42 - index * 0.14,
                           }}
                           title={`${regime} ${safePct(row?.weight)}`}
                         />
                       );
                     })}
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: `${positionLeft + auraOffsetX}%`,
-                        top: `${positionTop + auraOffsetY}%`,
-                        width: auraWidth,
-                        height: auraHeight,
-                        marginLeft: -auraWidth / 2,
-                        marginTop: -auraHeight / 2,
-                        borderRadius: 999,
-                        background: "rgba(30,41,59,0.1)",
-                        filter: regimeProbabilityAny?.transitionLike ? "blur(5px)" : "blur(2px)",
-                        opacity: Math.max(0.22, 1 - decisivenessNorm),
-                        transform: `rotate(${auraAngle}deg)`,
-                      }}
-                    />
+                    <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", filter: regimeProbabilityAny?.transitionLike ? "blur(3px)" : "blur(1px)" }}>
+                      <path d={blobPath} fill="rgba(30,41,59,0.10)" opacity={Math.max(0.2, 1 - decisivenessNorm)} />
+                      <path d={blobPath} fill="none" stroke="rgba(71,85,105,0.25)" strokeWidth="0.8" />
+                    </svg>
                     <div
                       style={{
                         position: "absolute",
