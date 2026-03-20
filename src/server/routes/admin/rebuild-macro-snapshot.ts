@@ -162,6 +162,55 @@ async function getRawDataDebug(region: string) {
   };
 }
 
+async function getRebuildKeyStatus(region: typeof REGIONS[number] | "GLOBAL") {
+  if (region === "GLOBAL") {
+    const globalLatest = await query(
+      `SELECT COUNT(*) AS row_count, MAX(updated_at) AS latest_updated_at
+       FROM ${tables.macroLatestReadCache}
+       WHERE region = 'GLOBAL'`,
+      [],
+    ) as unknown as Array<{ row_count: number | string; latest_updated_at: string | null }>;
+    return {
+      sourceSnapshotKey: "macro_regime_snapshots:{US,EA,SE}",
+      sourceSnapshotExists: true,
+      latestCacheKey: "macro_latest_read_cache:GLOBAL",
+      latestCacheExists: Number(globalLatest[0]?.row_count ?? 0) > 0,
+      latestCacheBytes: null,
+      historyCacheKeyPrefix: "macro_history_read_cache:GLOBAL:*",
+    };
+  }
+
+  const sourceRows = await query(
+    `SELECT COUNT(*) AS row_count, MAX(as_of_date) AS latest_as_of_date
+     FROM ${tables.macroRegimeSnapshots}
+     WHERE region = ?`,
+    [region],
+  ) as unknown as Array<{ row_count: number | string; latest_as_of_date: string | null }>;
+  const latestCacheRows = await query(
+    `SELECT COUNT(*) AS row_count, MAX(LENGTH(payload_json)) AS payload_bytes
+     FROM ${tables.macroLatestReadCache}
+     WHERE region = ?`,
+    [region],
+  ) as unknown as Array<{ row_count: number | string; payload_bytes: number | null }>;
+  const historyRows = await query(
+    `SELECT COUNT(*) AS row_count, MAX(LENGTH(payload_json)) AS max_payload_bytes
+     FROM ${tables.macroHistoryReadCache}
+     WHERE region = ?`,
+    [region],
+  ) as unknown as Array<{ row_count: number | string; max_payload_bytes: number | null }>;
+  return {
+    sourceSnapshotKey: `macro_regime_snapshots:${region}`,
+    sourceSnapshotExists: Number(sourceRows[0]?.row_count ?? 0) > 0,
+    sourceSnapshotLatestAsOf: sourceRows[0]?.latest_as_of_date ?? null,
+    latestCacheKey: `macro_latest_read_cache:${region}`,
+    latestCacheExists: Number(latestCacheRows[0]?.row_count ?? 0) > 0,
+    latestCacheBytes: latestCacheRows[0]?.payload_bytes ?? null,
+    historyCacheKeyPrefix: `macro_history_read_cache:${region}:*`,
+    historyCacheExists: Number(historyRows[0]?.row_count ?? 0) > 0,
+    historyCacheMaxBytes: historyRows[0]?.max_payload_bytes ?? null,
+  };
+}
+
 async function getRegionalSnapshotInputDebug() {
   const rows = await query(
     `SELECT region, COUNT(*) AS record_count, MAX(as_of_date) AS latest_as_of_date
@@ -191,9 +240,22 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
   const attemptedOutputKey = `macro_latest_read_cache:${region}`;
   try {
     const rawDebug = await runStage(stageMetrics, "load_latest_source_snapshot_input", () => getRawDataDebug(region), (value) => jsonBytes(value));
+    const keyStatus = await runStage(stageMetrics, "load_source_keys", () => getRebuildKeyStatus(region), (value) => jsonBytes(value));
     console.info("[admin-rebuild-macro-snapshot:data-source]", rawDebug);
+    if (!rawDebug.dataFound && !keyStatus.sourceSnapshotExists) {
+      const error = new Error(`No source snapshot found for region ${region}`);
+      (error as Error & { status?: number; debug?: unknown }).status = 409;
+      (error as Error & { status?: number; debug?: unknown }).debug = {
+        region,
+        attemptedInputKey: keyStatus.sourceSnapshotKey,
+        attemptedOutputKey,
+        keyStatus,
+        failedStage: "load_source_keys",
+      };
+      throw error;
+    }
     if (!rawDebug.dataFound) {
-      const error = new Error(`Load failed: no stored raw datapoints for ${region}.`);
+      const error = new Error(`No source raw datapoints found for region ${region}`);
       (error as Error & { status?: number; debug?: unknown }).status = 409;
       (error as Error & { status?: number; debug?: unknown }).debug = {
         region,
@@ -354,6 +416,7 @@ async function rebuildRegion(region: typeof REGIONS[number]) {
         historyWeekly: weeklyWrites,
       },
       diagnostics: {
+        keyStatus,
         snapshotBuildSubStages,
         stageMetrics,
         ...summarizeStageDiagnostics(stageMetrics),
@@ -383,8 +446,9 @@ async function rebuildGlobal() {
       () => getRegionalSnapshotInputDebug(),
       (value) => jsonBytes(value),
     );
+    const keyStatus = await runStage(stageMetrics, "load_source_keys", () => getRebuildKeyStatus("GLOBAL"), (value) => jsonBytes(value));
     if (!snapshotInputDebug.anyFound) {
-      const error = new Error("Load failed: no regional regime snapshots available for GLOBAL rebuild.");
+      const error = new Error("No source snapshot found for region GLOBAL");
       (error as Error & { status?: number; debug?: unknown }).status = 409;
       (error as Error & { status?: number; debug?: unknown }).debug = {
         region: "GLOBAL",
@@ -393,6 +457,7 @@ async function rebuildGlobal() {
         inputFound: false,
         inputShape: "macro_regime_snapshots rows by region",
         perRegion: snapshotInputDebug.byRegion,
+        keyStatus,
         failedStage: "load_input",
       };
       throw error;
@@ -498,6 +563,7 @@ async function rebuildGlobal() {
         historyWeekly: weeklyWrites,
       },
       diagnostics: {
+        keyStatus,
         snapshotBuildSubStages,
         stageMetrics,
         ...summarizeStageDiagnostics(stageMetrics),
