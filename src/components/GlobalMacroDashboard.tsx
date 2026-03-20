@@ -1499,6 +1499,39 @@ export default function GlobalMacroDashboard() {
     return { start, end };
   }, [timelineStartDate, timelineEndDate]);
   const pointByDate = useMemo(() => new Map(historyPoints.map((item) => [item.asOfDate, item])), [historyPoints]);
+  const phaseMomentum = useMemo(() => {
+    const currentWeights = extractRegimeWeights(regimeProbabilityDistribution, regimeProbabilityAny?.primaryRegime);
+    const currentPosition = regimePhasePosition(currentWeights);
+    const phaseHistory = historyPoints
+      .map((point) => {
+        const anyPoint = point as any;
+        const weights = extractRegimeWeights(anyPoint?.macroRegimeProbability?.distribution ?? anyPoint?.regimeProbability?.distribution, point.coreRegimeLabel);
+        const pos = regimePhasePosition(weights);
+        return { asOfDate: point.asOfDate, pos, weights, decisiveness: normalizeRegimeWeight(anyPoint?.macroRegimeProbability?.decisiveness) };
+      })
+      .filter((item) => Number.isFinite(item.pos.x) && Number.isFinite(item.pos.y));
+    const prevPoint = phaseHistory.length > 1 ? phaseHistory[phaseHistory.length - 2] : null;
+    const prevPos = prevPoint?.pos ?? null;
+    const dx = prevPos ? currentPosition.x - prevPos.x : 0;
+    const dy = prevPos ? currentPosition.y - prevPos.y : 0;
+    const distance = Math.sqrt(dx ** 2 + dy ** 2);
+    const primaryWeightNorm = normalizeRegimeWeight(regimeProbabilityAny?.primaryWeight);
+    const previousPrimaryWeight = prevPoint
+      ? Math.max(prevPoint.weights.md, prevPoint.weights.bal, prevPoint.weights.fpb, prevPoint.weights.fdr)
+      : primaryWeightNorm;
+    const primaryWeightDelta = primaryWeightNorm - previousPrimaryWeight;
+    const decisivenessNorm = normalizeRegimeWeight(regimeProbabilityAny?.decisiveness);
+    const decisivenessDelta = decisivenessNorm - (prevPoint?.decisiveness ?? decisivenessNorm);
+    const label = distance < 0.05
+      ? "Stable within current phase"
+      : distance >= 0.2 || primaryWeightDelta > 0.04
+        ? (dx > 0 ? "Strengthening toward fiscal dominance" : "Strengthening toward monetary/balance side")
+        : (dx > 0
+          ? (dy > 0 ? "Drifting toward fiscal-pressure regime mix" : "Drifting toward fiscal-dominance risk")
+          : (dy > 0 ? "Drifting toward monetary-pressure mix" : "Drifting toward balance/monetary side"));
+    const state = distance < 0.05 ? "stable" : (distance >= 0.2 || primaryWeightDelta > 0.04 || decisivenessDelta > 0.03 ? "strengthening" : "drifting");
+    return { currentPosition, prevPos, dx, dy, distance, label, state };
+  }, [historyPoints, regimeProbabilityDistribution, regimeProbabilityAny?.primaryRegime, regimeProbabilityAny?.primaryWeight, regimeProbabilityAny?.decisiveness]);
 
   function regimeColor(regime: string) {
     if (regime === "MonetaryDominance") return "#5a6a80";
@@ -1547,6 +1580,25 @@ export default function GlobalMacroDashboard() {
     return {
       x: Math.max(-1, Math.min(1, xRaw)),
       y: Math.max(-1, Math.min(1, yRaw)),
+    };
+  }
+
+  function extractRegimeWeights(distributionLike: unknown, fallbackRegime?: string | null): { md: number; bal: number; fpb: number; fdr: number } {
+    const rows = Array.isArray(distributionLike) ? distributionLike : [];
+    const read = (regime: string) => normalizeRegimeWeight((rows.find((row: any) => row?.regime === regime) as any)?.weight);
+    const fromDistribution = {
+      md: read("MonetaryDominance"),
+      bal: read("Balanced"),
+      fpb: read("FiscalPressureBuilding"),
+      fdr: read("FiscalDominanceRisk"),
+    };
+    const total = fromDistribution.md + fromDistribution.bal + fromDistribution.fpb + fromDistribution.fdr;
+    if (total > 0) return fromDistribution;
+    return {
+      md: fallbackRegime === "MonetaryDominance" ? 1 : 0,
+      bal: fallbackRegime === "Balanced" ? 1 : 0,
+      fpb: fallbackRegime === "FiscalPressureBuilding" ? 1 : 0,
+      fdr: fallbackRegime === "FiscalDominanceRisk" ? 1 : 0,
     };
   }
 
@@ -1936,18 +1988,7 @@ Signal: ${gapLabel}`,
                 <h4 style={{ marginTop: 0, marginBottom: 10 }}>GLOBAL MACRO — NU-LÄGE</h4>
                 <div style={{ border: "1px solid #cbd5e1", borderRadius: 10, background: "#fff", padding: 10, marginBottom: 12, maxWidth: 520 }}>
                   {(() => {
-                    const weightByRegime = {
-                      MonetaryDominance: normalizeRegimeWeight(regimeProbabilityDistribution.find((row: any) => row?.regime === "MonetaryDominance")?.weight),
-                      Balanced: normalizeRegimeWeight(regimeProbabilityDistribution.find((row: any) => row?.regime === "Balanced")?.weight),
-                      FiscalPressureBuilding: normalizeRegimeWeight(regimeProbabilityDistribution.find((row: any) => row?.regime === "FiscalPressureBuilding")?.weight),
-                      FiscalDominanceRisk: normalizeRegimeWeight(regimeProbabilityDistribution.find((row: any) => row?.regime === "FiscalDominanceRisk")?.weight),
-                    };
-                    const currentPosition = regimePhasePosition({
-                      md: weightByRegime.MonetaryDominance,
-                      bal: weightByRegime.Balanced,
-                      fpb: weightByRegime.FiscalPressureBuilding,
-                      fdr: weightByRegime.FiscalDominanceRisk,
-                    });
+                    const currentPosition = phaseMomentum.currentPosition;
                     const positionLeft = 50 + currentPosition.x * 40;
                     const positionTop = 50 - currentPosition.y * 40;
                     const primaryWeightNorm = normalizeRegimeWeight(regimeProbabilityAny?.primaryWeight);
@@ -1955,14 +1996,8 @@ Signal: ${gapLabel}`,
                     const confidenceNorm = normalizeRegimeWeight(explanationSummary?.confidence ?? globalMacro.regime?.macroConfidence);
                     const markerSize = 16 + primaryWeightNorm * 24;
                     const haloSize = markerSize + (1 - decisivenessNorm) * 28;
-                    const previousRegime = historyPoints.length > 1 ? historyPoints[historyPoints.length - 2]?.coreRegimeLabel : null;
-                    const previousWeights = previousRegime ? {
-                      md: previousRegime === "MonetaryDominance" ? 1 : 0,
-                      bal: previousRegime === "Balanced" ? 1 : 0,
-                      fpb: previousRegime === "FiscalPressureBuilding" ? 1 : 0,
-                      fdr: previousRegime === "FiscalDominanceRisk" ? 1 : 0,
-                    } : null;
-                    const prevPos = previousWeights ? regimePhasePosition(previousWeights) : null;
+                    const prevPos = phaseMomentum.prevPos;
+                    const movementDistance = phaseMomentum.distance;
                     const secondaryRegimes = regimeProbabilityDistribution
                       .slice()
                       .sort((a: any, b: any) => (typeof b?.weight === "number" ? b.weight : 0) - (typeof a?.weight === "number" ? a.weight : 0))
@@ -1977,7 +2012,7 @@ Signal: ${gapLabel}`,
                     <div style={{ position: "absolute", right: "12%", bottom: "2%", fontSize: 10, color: "#64748b" }}>Fiscal dominance</div>
                     <div style={{ position: "absolute", left: "2%", top: "12%", fontSize: 10, color: "#64748b", transform: "rotate(-90deg)", transformOrigin: "left top" }}>Inflation / Pressure</div>
                     <div style={{ position: "absolute", left: "2%", bottom: "18%", fontSize: 10, color: "#64748b", transform: "rotate(-90deg)", transformOrigin: "left top" }}>Stability / Balanced</div>
-                    {prevPos && (
+                    {prevPos && movementDistance >= 0.01 && (
                       <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
                         <defs>
                           <marker id="macro-phase-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
@@ -1990,8 +2025,8 @@ Signal: ${gapLabel}`,
                           x2={positionLeft}
                           y2={positionTop}
                           stroke="#64748b"
-                          strokeWidth="0.8"
-                          strokeOpacity="0.5"
+                          strokeWidth={movementDistance >= 0.16 ? 1.4 : 0.9}
+                          strokeOpacity={movementDistance >= 0.16 ? 0.7 : 0.35}
                           markerEnd="url(#macro-phase-arrow)"
                         />
                       </svg>
@@ -2056,8 +2091,8 @@ Signal: ${gapLabel}`,
                       }}
                       title={`${String(regimeProbabilityAny?.primaryRegime ?? "—")} ${safePct(regimeProbabilityAny?.primaryWeight)}`}
                     />
-                    <div style={{ position: "absolute", right: 8, top: 8, fontSize: 10, color: "#334155" }}>
-                      x {currentPosition.x >= 0 ? "+" : ""}{currentPosition.x.toFixed(2)} · y {currentPosition.y >= 0 ? "+" : ""}{currentPosition.y.toFixed(2)}
+                    <div style={{ position: "absolute", right: 8, top: 8, fontSize: 10, color: "#334155", background: "rgba(255,255,255,0.8)", padding: "2px 6px", borderRadius: 999 }}>
+                      {phaseMomentum.label}
                     </div>
                   </div>
                     );
@@ -2072,9 +2107,9 @@ Signal: ${gapLabel}`,
                     <div><strong>State</strong><br />{regimeNowStateLabel()}</div>
                   </div>
                   <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12 }}>
+                    <li>Momentum: {phaseMomentum.label}.</li>
                     <li>Driven by {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.slice(0, 2).join(", ") : "mixed block signals"}.</li>
                     <li>Confirmed by {Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays.length : 0} overlays.</li>
-                    <li>Modulated by {Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays.length : 0} overlays.</li>
                     <li>Contradicted by {Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays.length : 0} overlays.</li>
                   </ul>
                   <details style={{ marginTop: 6 }}>
