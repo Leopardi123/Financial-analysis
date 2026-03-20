@@ -1522,13 +1522,20 @@ export default function GlobalMacroDashboard() {
     const primaryWeightDelta = primaryWeightNorm - previousPrimaryWeight;
     const decisivenessNorm = normalizeRegimeWeight(regimeProbabilityAny?.decisiveness);
     const decisivenessDelta = decisivenessNorm - (prevPoint?.decisiveness ?? decisivenessNorm);
+    const directionTarget = (() => {
+      const displayDx = -dy;
+      const displayDy = -dx;
+      if (displayDx >= 0 && displayDy >= 0) return "Balanced";
+      if (displayDx < 0 && displayDy >= 0) return "MonetaryDominance";
+      if (displayDx < 0 && displayDy < 0) return "FiscalPressureBuilding";
+      return "FiscalDominanceRisk";
+    })();
+    const driftCandidate = regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ?? null;
     const label = distance < 0.05
-      ? "Stable within current phase"
+      ? `Stable${driftCandidate ? ` · pull ${driftCandidate}` : ""}`
       : distance >= 0.2 || primaryWeightDelta > 0.04
-        ? (dx > 0 ? "Strengthening toward fiscal dominance" : "Strengthening toward monetary/balance side")
-        : (dx > 0
-          ? (dy > 0 ? "Drifting toward fiscal-pressure regime mix" : "Drifting toward fiscal-dominance risk")
-          : (dy > 0 ? "Drifting toward monetary-pressure mix" : "Drifting toward balance/monetary side"));
+        ? `Momentum: toward ${directionTarget}`
+        : `Drift: toward ${directionTarget}`;
     const state = distance < 0.05 ? "stable" : (distance >= 0.2 || primaryWeightDelta > 0.04 || decisivenessDelta > 0.03 ? "strengthening" : "drifting");
     return { currentPosition, prevPos, dx, dy, distance, label, state };
   }, [historyPoints, regimeProbabilityDistribution, regimeProbabilityAny?.primaryRegime, regimeProbabilityAny?.primaryWeight, regimeProbabilityAny?.decisiveness]);
@@ -2006,7 +2013,7 @@ Signal: ${gapLabel}`,
                       .sort((a: any, b: any) => (typeof b?.weight === "number" ? b.weight : 0) - (typeof a?.weight === "number" ? a.weight : 0))
                       .filter((row: any) => row?.regime && row.regime !== regimeProbabilityAny?.primaryRegime)
                       .slice(0, 2);
-                    const pullVector = secondaryRegimes.reduce((acc: { x: number; y: number }, row: any) => {
+                    const secondaryVectors = secondaryRegimes.map((row: any) => {
                       const regime = String(row.regime ?? "");
                       const canonical = regimePhasePosition({
                         md: regime === "MonetaryDominance" ? 1 : 0,
@@ -2016,15 +2023,20 @@ Signal: ${gapLabel}`,
                       });
                       const display = toDisplayPhasePosition(canonical);
                       const w = normalizeRegimeWeight(row?.weight);
-                      return { x: acc.x + display.x * w, y: acc.y + display.y * w };
-                    }, { x: 0, y: 0 });
+                      return { regime, display, w };
+                    });
+                    const pullVector = secondaryVectors.reduce((acc: { x: number; y: number }, row: { display: { x: number; y: number }; w: number }) => ({ x: acc.x + row.display.x * row.w, y: acc.y + row.display.y * row.w }), { x: 0, y: 0 });
                     const pullMagnitude = Math.min(1, Math.sqrt(pullVector.x ** 2 + pullVector.y ** 2));
                     const pullNorm = pullMagnitude > 0 ? { x: pullVector.x / pullMagnitude, y: pullVector.y / pullMagnitude } : { x: 0, y: 0 };
                     const auraBase = 4 + (1 - decisivenessNorm) * 7;
-                    const rRight = auraBase * (1 + Math.max(0, pullNorm.x) * 0.9);
-                    const rLeft = auraBase * (1 + Math.max(0, -pullNorm.x) * 0.9);
-                    const rUp = auraBase * (1 + Math.max(0, pullNorm.y) * 0.9);
-                    const rDown = auraBase * (1 + Math.max(0, -pullNorm.y) * 0.9);
+                    const strongest = secondaryVectors[0] ?? null;
+                    const second = secondaryVectors[1] ?? null;
+                    const strongestStrength = strongest ? Math.min(1, strongest.w / Math.max(0.0001, primaryWeightNorm)) : 0;
+                    const secondStrength = second ? Math.min(1, second.w / Math.max(0.0001, primaryWeightNorm)) : 0;
+                    const rRight = auraBase * (1 + Math.max(0, pullNorm.x) * (0.7 + strongestStrength * 0.5) + secondStrength * 0.1);
+                    const rLeft = auraBase * (1 + Math.max(0, -pullNorm.x) * (0.7 + strongestStrength * 0.5) + secondStrength * 0.1);
+                    const rUp = auraBase * (1 + Math.max(0, pullNorm.y) * (0.7 + strongestStrength * 0.5) + secondStrength * 0.1);
+                    const rDown = auraBase * (1 + Math.max(0, -pullNorm.y) * (0.7 + strongestStrength * 0.5) + secondStrength * 0.1);
                     const cx = 50 + currentPosition.x * 40;
                     const cy = 50 - currentPosition.y * 40;
                     const blobPath = [
@@ -2044,11 +2056,28 @@ Signal: ${gapLabel}`,
                     <div style={{ position: "absolute", right: "6%", top: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>Balanced</div>
                     <div style={{ position: "absolute", left: "6%", bottom: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>FiscalPressureBuilding</div>
                     <div style={{ position: "absolute", right: "6%", bottom: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>FiscalDominanceRisk</div>
+                    {prevPos && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: `${50 + prevPos.x * 40}%`,
+                          top: `${50 - prevPos.y * 40}%`,
+                          width: 7,
+                          height: 7,
+                          marginLeft: -3.5,
+                          marginTop: -3.5,
+                          borderRadius: 999,
+                          border: "1px solid rgba(71,85,105,0.55)",
+                          background: "rgba(148,163,184,0.30)",
+                        }}
+                        title="Previous position"
+                      />
+                    )}
                     {prevPos && movementDistance >= 0.01 && (
                       <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
                         <defs>
-                          <marker id="macro-phase-arrow" markerWidth="4" markerHeight="4" refX="3.4" refY="2" orient="auto">
-                            <polygon points="0 0, 4 2, 0 4" fill="#475569" />
+                          <marker id="macro-phase-arrow" markerWidth="5" markerHeight="5" refX="4.4" refY="2.5" orient="auto">
+                            <polygon points="0 0, 5 2.5, 0 5" fill="#334155" />
                           </marker>
                         </defs>
                         <line
@@ -2057,8 +2086,8 @@ Signal: ${gapLabel}`,
                           x2={positionLeft}
                           y2={positionTop}
                           stroke="#475569"
-                          strokeWidth={movementDistance >= 0.16 ? 1.2 : 0.8}
-                          strokeOpacity={movementDistance >= 0.16 ? 0.62 : 0.28}
+                          strokeWidth={movementDistance >= 0.16 ? 1.0 : 0.7}
+                          strokeOpacity={movementDistance >= 0.16 ? 0.58 : 0.24}
                           strokeLinecap="round"
                           markerEnd="url(#macro-phase-arrow)"
                         />
@@ -2093,7 +2122,7 @@ Signal: ${gapLabel}`,
                     })}
                     <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", filter: regimeProbabilityAny?.transitionLike ? "blur(3px)" : "blur(1px)" }}>
                       <path d={blobPath} fill="rgba(30,41,59,0.10)" opacity={Math.max(0.2, 1 - decisivenessNorm)} />
-                      <path d={blobPath} fill="none" stroke="rgba(71,85,105,0.25)" strokeWidth="0.8" />
+                      <path d={blobPath} fill="none" stroke="rgba(71,85,105,0.22)" strokeWidth="0.7" />
                     </svg>
                     <div
                       style={{
@@ -2107,7 +2136,7 @@ Signal: ${gapLabel}`,
                         borderRadius: 999,
                         border: `${1 + Math.round(confidenceNorm * 2)}px solid #0f172a`,
                         background: "rgba(15,23,42,0.85)",
-                        opacity: Math.max(0.45, decisivenessNorm),
+                        opacity: Math.max(0.62, decisivenessNorm),
                         boxShadow: "0 2px 10px rgba(15,23,42,0.28)",
                       }}
                       title={`${String(regimeProbabilityAny?.primaryRegime ?? "—")} ${safePct(regimeProbabilityAny?.primaryWeight)}`}
