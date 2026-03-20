@@ -1583,6 +1583,10 @@ export default function GlobalMacroDashboard() {
     };
   }
 
+  function toDisplayPhasePosition(position: { x: number; y: number }): { x: number; y: number } {
+    return { x: -position.y, y: -position.x };
+  }
+
   function extractRegimeWeights(distributionLike: unknown, fallbackRegime?: string | null): { md: number; bal: number; fpb: number; fdr: number } {
     const rows = Array.isArray(distributionLike) ? distributionLike : [];
     const read = (regime: string) => normalizeRegimeWeight((rows.find((row: any) => row?.regime === regime) as any)?.weight);
@@ -1988,30 +1992,48 @@ Signal: ${gapLabel}`,
                 <h4 style={{ marginTop: 0, marginBottom: 10 }}>GLOBAL MACRO — NU-LÄGE</h4>
                 <div style={{ border: "1px solid #cbd5e1", borderRadius: 10, background: "#fff", padding: 10, marginBottom: 12, maxWidth: 520 }}>
                   {(() => {
-                    const currentPosition = phaseMomentum.currentPosition;
+                    const currentPosition = toDisplayPhasePosition(phaseMomentum.currentPosition);
                     const positionLeft = 50 + currentPosition.x * 40;
                     const positionTop = 50 - currentPosition.y * 40;
                     const primaryWeightNorm = normalizeRegimeWeight(regimeProbabilityAny?.primaryWeight);
                     const decisivenessNorm = normalizeRegimeWeight(regimeProbabilityAny?.decisiveness);
                     const confidenceNorm = normalizeRegimeWeight(explanationSummary?.confidence ?? globalMacro.regime?.macroConfidence);
                     const markerSize = 16 + primaryWeightNorm * 24;
-                    const haloSize = markerSize + (1 - decisivenessNorm) * 28;
-                    const prevPos = phaseMomentum.prevPos;
+                    const baseAuraRadius = markerSize + (1 - decisivenessNorm) * 30;
+                    const prevPos = phaseMomentum.prevPos ? toDisplayPhasePosition(phaseMomentum.prevPos) : null;
                     const movementDistance = phaseMomentum.distance;
                     const secondaryRegimes = regimeProbabilityDistribution
                       .slice()
                       .sort((a: any, b: any) => (typeof b?.weight === "number" ? b.weight : 0) - (typeof a?.weight === "number" ? a.weight : 0))
                       .filter((row: any) => row?.regime && row.regime !== regimeProbabilityAny?.primaryRegime)
                       .slice(0, 2);
+                    const pullVector = secondaryRegimes.reduce((acc: { x: number; y: number }, row: any) => {
+                      const regime = String(row.regime ?? "");
+                      const canonical = regimePhasePosition({
+                        md: regime === "MonetaryDominance" ? 1 : 0,
+                        bal: regime === "Balanced" ? 1 : 0,
+                        fpb: regime === "FiscalPressureBuilding" ? 1 : 0,
+                        fdr: regime === "FiscalDominanceRisk" ? 1 : 0,
+                      });
+                      const display = toDisplayPhasePosition(canonical);
+                      const w = normalizeRegimeWeight(row?.weight);
+                      return { x: acc.x + display.x * w, y: acc.y + display.y * w };
+                    }, { x: 0, y: 0 });
+                    const pullMagnitude = Math.min(1, Math.sqrt(pullVector.x ** 2 + pullVector.y ** 2));
+                    const auraWidth = baseAuraRadius * 2 + (baseAuraRadius * 0.9 * pullMagnitude * Math.abs(pullVector.x));
+                    const auraHeight = baseAuraRadius * 2 + (baseAuraRadius * 0.9 * pullMagnitude * Math.abs(pullVector.y));
+                    const auraOffsetX = pullVector.x * baseAuraRadius * 0.26;
+                    const auraOffsetY = -pullVector.y * baseAuraRadius * 0.26;
+                    const auraAngle = Math.atan2(-pullVector.y, pullVector.x) * (180 / Math.PI);
                     return (
                   <div style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 8, background: "linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%)", overflow: "hidden" }}>
                     <div style={{ position: "absolute", inset: 0, border: "1px solid #cbd5e1", borderRadius: 8 }} />
                     <div style={{ position: "absolute", left: "10%", right: "10%", top: "50%", height: 1, background: "#94a3b8" }} />
                     <div style={{ position: "absolute", top: "10%", bottom: "10%", left: "50%", width: 1, background: "#94a3b8" }} />
-                    <div style={{ position: "absolute", left: "12%", bottom: "2%", fontSize: 10, color: "#64748b" }}>Monetary dominance</div>
-                    <div style={{ position: "absolute", right: "12%", bottom: "2%", fontSize: 10, color: "#64748b" }}>Fiscal dominance</div>
-                    <div style={{ position: "absolute", left: "2%", top: "12%", fontSize: 10, color: "#64748b", transform: "rotate(-90deg)", transformOrigin: "left top" }}>Inflation / Pressure</div>
-                    <div style={{ position: "absolute", left: "2%", bottom: "18%", fontSize: 10, color: "#64748b", transform: "rotate(-90deg)", transformOrigin: "left top" }}>Stability / Balanced</div>
+                    <div style={{ position: "absolute", left: "6%", top: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>MonetaryDominance</div>
+                    <div style={{ position: "absolute", right: "6%", top: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>Balanced</div>
+                    <div style={{ position: "absolute", left: "6%", bottom: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>FiscalPressureBuilding</div>
+                    <div style={{ position: "absolute", right: "6%", bottom: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>FiscalDominanceRisk</div>
                     {prevPos && movementDistance >= 0.01 && (
                       <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
                         <defs>
@@ -2033,12 +2055,12 @@ Signal: ${gapLabel}`,
                     )}
                     {secondaryRegimes.map((row: any, index: number) => {
                       const regime = String(row.regime ?? "");
-                      const unit = regimePhasePosition({
+                      const unit = toDisplayPhasePosition(regimePhasePosition({
                         md: regime === "MonetaryDominance" ? 1 : 0,
                         bal: regime === "Balanced" ? 1 : 0,
                         fpb: regime === "FiscalPressureBuilding" ? 1 : 0,
                         fdr: regime === "FiscalDominanceRisk" ? 1 : 0,
-                      });
+                      }));
                       return (
                         <div
                           key={`secondary-${regime}`}
@@ -2062,16 +2084,17 @@ Signal: ${gapLabel}`,
                     <div
                       style={{
                         position: "absolute",
-                        left: `${positionLeft}%`,
-                        top: `${positionTop}%`,
-                        width: haloSize,
-                        height: haloSize,
-                        marginLeft: -haloSize / 2,
-                        marginTop: -haloSize / 2,
+                        left: `${positionLeft + auraOffsetX}%`,
+                        top: `${positionTop + auraOffsetY}%`,
+                        width: auraWidth,
+                        height: auraHeight,
+                        marginLeft: -auraWidth / 2,
+                        marginTop: -auraHeight / 2,
                         borderRadius: 999,
                         background: "rgba(30,41,59,0.1)",
                         filter: regimeProbabilityAny?.transitionLike ? "blur(5px)" : "blur(2px)",
                         opacity: Math.max(0.22, 1 - decisivenessNorm),
+                        transform: `rotate(${auraAngle}deg)`,
                       }}
                     />
                     <div
@@ -2091,9 +2114,6 @@ Signal: ${gapLabel}`,
                       }}
                       title={`${String(regimeProbabilityAny?.primaryRegime ?? "—")} ${safePct(regimeProbabilityAny?.primaryWeight)}`}
                     />
-                    <div style={{ position: "absolute", right: 8, top: 8, fontSize: 10, color: "#334155", background: "rgba(255,255,255,0.8)", padding: "2px 6px", borderRadius: 999 }}>
-                      {phaseMomentum.label}
-                    </div>
                   </div>
                     );
                   })()}
