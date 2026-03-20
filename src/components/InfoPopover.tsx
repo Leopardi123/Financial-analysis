@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 type InfoSection = {
   heading: string;
@@ -13,9 +13,12 @@ type InfoPopoverProps = {
   title: string;
   sections?: InfoSection[];
   content?: string[];
+  triggerContent?: ReactNode;
+  triggerClassName?: string;
+  triggerStyle?: CSSProperties;
 };
 
-export default function InfoPopover({ id, openId, onToggle, onClose, title, sections, content }: InfoPopoverProps) {
+export default function InfoPopover({ id, openId, onToggle, onClose, title, sections, content, triggerContent, triggerClassName, triggerStyle }: InfoPopoverProps) {
   const isOpen = openId === id;
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -88,11 +91,12 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
       <button
         ref={triggerRef}
         type="button"
-        className="info-popover-trigger"
+        className={["info-popover-trigger", triggerClassName].filter(Boolean).join(" ")}
+        style={triggerStyle}
         onClick={() => onToggle(id)}
         aria-label={`More info: ${title}`}
       >
-        (i)
+        {triggerContent ?? "(i)"}
       </button>
       {isOpen && (
         <div className="info-popover-panel" style={panelStyle ?? undefined}>

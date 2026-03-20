@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
 import InfoPopover from "./InfoPopover";
+import MacroLabMiniSeries from "./MacroLabMiniSeries";
 
 type GlobalMacroPayload = {
   regime: {
@@ -497,6 +498,9 @@ export default function GlobalMacroDashboard() {
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
   const [openOverlayInfoId, setOpenOverlayInfoId] = useState<string | null>(null);
+  const [openPhaseInfoId, setOpenPhaseInfoId] = useState<string | null>(null);
+  const [expandedOverlayKey, setExpandedOverlayKey] = useState<string | null>(null);
+  const [expandedOverlaySizeByKey, setExpandedOverlaySizeByKey] = useState<Record<string, boolean>>({});
 
   const uiOverlayKeysRequested = useMemo(() => (selectedRegion === "GLOBAL"
     ? ["globalUnrestOverlay"]
@@ -513,6 +517,10 @@ export default function GlobalMacroDashboard() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("globalMacro.selectedRegion", selectedRegion);
+  }, [selectedRegion]);
+
+  useEffect(() => {
+    if (selectedRegion === "GLOBAL") setSelectedRegion("US");
   }, [selectedRegion]);
 
 
@@ -1442,7 +1450,7 @@ export default function GlobalMacroDashboard() {
     ];
   }
 
-  function renderOverlayHistoryChart(overlayKey: string) {
+  function renderOverlayHistoryChart(overlayKey: string, chartSize: "compact" | "expanded" = "compact") {
     const valid = overlayHistoryPoints
       .map((point) => ({ asOfDate: point.asOfDate, score: point.scores?.[overlayKey] ?? null }))
       .filter((point) => typeof point.score === "number") as Array<{ asOfDate: string; score: number }>;
@@ -1463,7 +1471,7 @@ export default function GlobalMacroDashboard() {
       return `${x},${y}`;
     }).join(" ");
     return (
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: 580, height: 170, display: "block" }}>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: chartSize === "expanded" ? 960 : 580, height: chartSize === "expanded" ? 260 : 170, display: "block" }}>
         {[0, 25, 50, 75, 100].map((tick) => {
           const y = top + (1 - tick / 100) * plotH;
           return <g key={`${overlayKey}-tick-${tick}`}><line x1={left} y1={y} x2={width - right} y2={y} stroke="#d1d5db" strokeWidth={1} /><text x={left - 6} y={y + 4} textAnchor="end" fontSize={10} fill="#64748b">{tick}</text></g>;
@@ -1492,6 +1500,46 @@ export default function GlobalMacroDashboard() {
     return { start, end };
   }, [timelineStartDate, timelineEndDate]);
   const pointByDate = useMemo(() => new Map(historyPoints.map((item) => [item.asOfDate, item])), [historyPoints]);
+  const phaseMomentum = useMemo(() => {
+    const currentWeights = extractRegimeWeights(regimeProbabilityDistribution, regimeProbabilityAny?.primaryRegime);
+    const currentPosition = regimePhasePosition(currentWeights);
+    const phaseHistory = historyPoints
+      .map((point) => {
+        const anyPoint = point as any;
+        const weights = extractRegimeWeights(anyPoint?.macroRegimeProbability?.distribution ?? anyPoint?.regimeProbability?.distribution, point.coreRegimeLabel);
+        const pos = regimePhasePosition(weights);
+        return { asOfDate: point.asOfDate, pos, weights, decisiveness: normalizeRegimeWeight(anyPoint?.macroRegimeProbability?.decisiveness) };
+      })
+      .filter((item) => Number.isFinite(item.pos.x) && Number.isFinite(item.pos.y));
+    const prevPoint = phaseHistory.length > 1 ? phaseHistory[phaseHistory.length - 2] : null;
+    const prevPos = prevPoint?.pos ?? null;
+    const dx = prevPos ? currentPosition.x - prevPos.x : 0;
+    const dy = prevPos ? currentPosition.y - prevPos.y : 0;
+    const distance = Math.sqrt(dx ** 2 + dy ** 2);
+    const primaryWeightNorm = normalizeRegimeWeight(regimeProbabilityAny?.primaryWeight);
+    const previousPrimaryWeight = prevPoint
+      ? Math.max(prevPoint.weights.md, prevPoint.weights.bal, prevPoint.weights.fpb, prevPoint.weights.fdr)
+      : primaryWeightNorm;
+    const primaryWeightDelta = primaryWeightNorm - previousPrimaryWeight;
+    const decisivenessNorm = normalizeRegimeWeight(regimeProbabilityAny?.decisiveness);
+    const decisivenessDelta = decisivenessNorm - (prevPoint?.decisiveness ?? decisivenessNorm);
+    const directionTarget = (() => {
+      const displayDx = -dy;
+      const displayDy = -dx;
+      if (displayDx >= 0 && displayDy >= 0) return "Balanced";
+      if (displayDx < 0 && displayDy >= 0) return "MonetaryDominance";
+      if (displayDx < 0 && displayDy < 0) return "FiscalPressureBuilding";
+      return "FiscalDominanceRisk";
+    })();
+    const driftCandidate = regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ?? null;
+    const label = distance < 0.05
+      ? `Stable${driftCandidate ? ` · pull ${driftCandidate}` : ""}`
+      : distance >= 0.2 || primaryWeightDelta > 0.04
+        ? `Momentum: toward ${directionTarget}`
+        : `Drift: toward ${directionTarget}`;
+    const state = distance < 0.05 ? "stable" : (distance >= 0.2 || primaryWeightDelta > 0.04 || decisivenessDelta > 0.03 ? "strengthening" : "drifting");
+    return { currentPosition, prevPos, dx, dy, distance, label, state };
+  }, [historyPoints, regimeProbabilityDistribution, regimeProbabilityAny?.primaryRegime, regimeProbabilityAny?.primaryWeight, regimeProbabilityAny?.decisiveness]);
 
   function regimeColor(regime: string) {
     if (regime === "MonetaryDominance") return "#5a6a80";
@@ -1507,6 +1555,63 @@ export default function GlobalMacroDashboard() {
     if (regime === "FiscalPressureBuilding") return "Finansierings- och inflationspress börjar dominera och höjer känsligheten i riskmiljön.";
     if (regime === "FiscalDominanceRisk") return "Fiskal och finansiell stress väger tungt, vilket ofta innebär ett stramare och mer defensivt marknadsläge.";
     return "Regimen indikerar ett övergångsläge i makrobilden.";
+  }
+
+  function regimeNowStateLabel(): "stable" | "fragile" | "contested" | "transition-like" {
+    const decisiveness = typeof regimeProbabilityAny?.decisiveness === "number" ? regimeProbabilityAny.decisiveness : null;
+    const quality = String(explanationSummary?.structuralQualityLabel ?? "");
+    if (regimeProbabilityAny?.transitionLike) return "transition-like";
+    if (decisiveness !== null && decisiveness < 0.2) return "contested";
+    if (quality === "fragile" || (decisiveness !== null && decisiveness < 0.35)) return "fragile";
+    return "stable";
+  }
+
+  function overlayRole(overlayKey: string): "supporting" | "modulating" | "contradicting" | "neutral" {
+    const supporting = Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays : [];
+    const modulating = Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays : [];
+    const contradicting = Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays : [];
+    if (supporting.includes(overlayKey)) return "supporting";
+    if (modulating.includes(overlayKey)) return "modulating";
+    if (contradicting.includes(overlayKey)) return "contradicting";
+    return "neutral";
+  }
+
+  function normalizeRegimeWeight(value: unknown): number {
+    if (typeof value !== "number" || Number.isNaN(value)) return 0;
+    if (value <= 1) return value;
+    return value / 100;
+  }
+
+  function regimePhasePosition(weights: { md: number; bal: number; fpb: number; fdr: number }): { x: number; y: number } {
+    const xRaw = (weights.fdr + weights.fpb) - (weights.md + weights.bal);
+    const yRaw = (weights.fpb + weights.md) - (weights.bal + weights.fdr);
+    return {
+      x: Math.max(-1, Math.min(1, xRaw)),
+      y: Math.max(-1, Math.min(1, yRaw)),
+    };
+  }
+
+  function toDisplayPhasePosition(position: { x: number; y: number }): { x: number; y: number } {
+    return { x: -position.y, y: -position.x };
+  }
+
+  function extractRegimeWeights(distributionLike: unknown, fallbackRegime?: string | null): { md: number; bal: number; fpb: number; fdr: number } {
+    const rows = Array.isArray(distributionLike) ? distributionLike : [];
+    const read = (regime: string) => normalizeRegimeWeight((rows.find((row: any) => row?.regime === regime) as any)?.weight);
+    const fromDistribution = {
+      md: read("MonetaryDominance"),
+      bal: read("Balanced"),
+      fpb: read("FiscalPressureBuilding"),
+      fdr: read("FiscalDominanceRisk"),
+    };
+    const total = fromDistribution.md + fromDistribution.bal + fromDistribution.fpb + fromDistribution.fdr;
+    if (total > 0) return fromDistribution;
+    return {
+      md: fallbackRegime === "MonetaryDominance" ? 1 : 0,
+      bal: fallbackRegime === "Balanced" ? 1 : 0,
+      fpb: fallbackRegime === "FiscalPressureBuilding" ? 1 : 0,
+      fdr: fallbackRegime === "FiscalDominanceRisk" ? 1 : 0,
+    };
   }
 
 
@@ -1775,24 +1880,28 @@ Signal: ${gapLabel}`,
           <p className="bread">Global Macro tolkar det makroekonomiska klimatet över tid genom att väga samman finansiering, räntor, inflation, trovärdighet och marknadsstress. Målet är att ge en lugn men skarp lägesbild av vilken regim marknaden befinner sig i – och på sikt knyta den till riskklimat, bull/bear-faser och den bredare kapitalmiljön.</p>
 
           <div style={{ display: "flex", gap: 8, overflowX: "auto", scrollSnapType: "x mandatory", paddingBottom: 8, marginBottom: 8 }}>
-            {["GLOBAL", "US", "EA", "SE"].map((region) => (
+            {[
+              { value: "US", label: "US" },
+              { value: "EA", label: "EU" },
+              { value: "SE", label: "SE" },
+            ].map((region) => (
               <button
-                key={region}
+                key={region.value}
                 type="button"
-                onClick={() => setSelectedRegion(region as "GLOBAL" | "US" | "EA" | "SE")}
+                onClick={() => setSelectedRegion(region.value as "GLOBAL" | "US" | "EA" | "SE")}
                 style={{
                   padding: "6px 10px",
                   borderRadius: 999,
-                  border: selectedRegion === region ? "1px solid #111" : "1px solid #d0d7de",
-                  background: selectedRegion === region ? "#111" : "#fff",
-                  color: selectedRegion === region ? "#fff" : "#111",
+                  border: selectedRegion === region.value ? "1px solid #111" : "1px solid #d0d7de",
+                  background: selectedRegion === region.value ? "#111" : "#fff",
+                  color: selectedRegion === region.value ? "#fff" : "#111",
                   cursor: "pointer",
                   fontSize: 12,
                   fontWeight: 600,
                   scrollSnapAlign: "start",
                 }}
               >
-                {region}
+                {region.label}
               </button>
             ))}
           </div>
@@ -1886,6 +1995,303 @@ Signal: ${gapLabel}`,
               {isPartialData && (
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
               )}
+
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
+                <h4 style={{ marginTop: 0, marginBottom: 10 }}>GLOBAL MACRO — NU-LÄGE</h4>
+                <div style={{ border: "1px solid #cbd5e1", borderRadius: 10, background: "#fff", padding: 10, marginBottom: 12, maxWidth: 520 }}>
+                  {(() => {
+                    const currentPosition = toDisplayPhasePosition(phaseMomentum.currentPosition);
+                    const positionLeft = 50 + currentPosition.x * 40;
+                    const positionTop = 50 - currentPosition.y * 40;
+                    const primaryWeightNorm = normalizeRegimeWeight(regimeProbabilityAny?.primaryWeight);
+                    const decisivenessNorm = normalizeRegimeWeight(regimeProbabilityAny?.decisiveness);
+                    const confidenceNorm = normalizeRegimeWeight(explanationSummary?.confidence ?? globalMacro.regime?.macroConfidence);
+                    const markerSize = 16 + primaryWeightNorm * 24;
+                    const prevPos = phaseMomentum.prevPos ? toDisplayPhasePosition(phaseMomentum.prevPos) : null;
+                    const movementDistance = phaseMomentum.distance;
+                    const secondaryRegimes = regimeProbabilityDistribution
+                      .slice()
+                      .sort((a: any, b: any) => (typeof b?.weight === "number" ? b.weight : 0) - (typeof a?.weight === "number" ? a.weight : 0))
+                      .filter((row: any) => row?.regime && row.regime !== regimeProbabilityAny?.primaryRegime)
+                      .slice(0, 2);
+                    const secondaryVectors = secondaryRegimes.map((row: any) => {
+                      const regime = String(row.regime ?? "");
+                      const canonical = regimePhasePosition({
+                        md: regime === "MonetaryDominance" ? 1 : 0,
+                        bal: regime === "Balanced" ? 1 : 0,
+                        fpb: regime === "FiscalPressureBuilding" ? 1 : 0,
+                        fdr: regime === "FiscalDominanceRisk" ? 1 : 0,
+                      });
+                      const display = toDisplayPhasePosition(canonical);
+                      const w = normalizeRegimeWeight(row?.weight);
+                      return { regime, display, w };
+                    });
+                    const pullVector = secondaryVectors.reduce((acc: { x: number; y: number }, row: { display: { x: number; y: number }; w: number }) => ({ x: acc.x + row.display.x * row.w, y: acc.y + row.display.y * row.w }), { x: 0, y: 0 });
+                    const pullMagnitude = Math.min(1, Math.sqrt(pullVector.x ** 2 + pullVector.y ** 2));
+                    const pullNorm = pullMagnitude > 0 ? { x: pullVector.x / pullMagnitude, y: pullVector.y / pullMagnitude } : { x: 0, y: 0 };
+                    const auraBase = 4 + (1 - decisivenessNorm) * 7;
+                    const strongest = secondaryVectors[0] ?? null;
+                    const second = secondaryVectors[1] ?? null;
+                    const strongestStrength = strongest ? Math.min(1, strongest.w / Math.max(0.0001, primaryWeightNorm)) : 0;
+                    const secondStrength = second ? Math.min(1, second.w / Math.max(0.0001, primaryWeightNorm)) : 0;
+                    const rRight = auraBase * (1 + Math.max(0, pullNorm.x) * (0.7 + strongestStrength * 0.5) + secondStrength * 0.1);
+                    const rLeft = auraBase * (1 + Math.max(0, -pullNorm.x) * (0.7 + strongestStrength * 0.5) + secondStrength * 0.1);
+                    const rUp = auraBase * (1 + Math.max(0, pullNorm.y) * (0.7 + strongestStrength * 0.5) + secondStrength * 0.1);
+                    const rDown = auraBase * (1 + Math.max(0, -pullNorm.y) * (0.7 + strongestStrength * 0.5) + secondStrength * 0.1);
+                    const cx = 50 + currentPosition.x * 40;
+                    const cy = 50 - currentPosition.y * 40;
+                    const blobPath = [
+                      `M ${cx} ${cy - rUp}`,
+                      `C ${cx + rRight * 0.6} ${cy - rUp}, ${cx + rRight} ${cy - rDown * 0.5}, ${cx + rRight} ${cy}`,
+                      `C ${cx + rRight} ${cy + rDown * 0.5}, ${cx + rRight * 0.6} ${cy + rDown}, ${cx} ${cy + rDown}`,
+                      `C ${cx - rLeft * 0.6} ${cy + rDown}, ${cx - rLeft} ${cy + rDown * 0.5}, ${cx - rLeft} ${cy}`,
+                      `C ${cx - rLeft} ${cy - rUp * 0.5}, ${cx - rLeft * 0.6} ${cy - rUp}, ${cx} ${cy - rUp}`,
+                      "Z",
+                    ].join(" ");
+                    const arrowMid = prevPos ? { x: (50 + prevPos.x * 40 + positionLeft) / 2, y: (50 - prevPos.y * 40 + positionTop) / 2 } : null;
+                    const strongestAlt = secondaryRegimes[0]?.regime ? String(secondaryRegimes[0].regime) : "none";
+                    return (
+                  <div style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 8, background: "linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%)", overflow: "hidden" }}>
+                    <div style={{ position: "absolute", inset: 0, border: "1px solid #cbd5e1", borderRadius: 8 }} />
+                    <div style={{ position: "absolute", left: "10%", right: "10%", top: "50%", height: 1, background: "#94a3b8" }} />
+                    <div style={{ position: "absolute", top: "10%", bottom: "10%", left: "50%", width: 1, background: "#94a3b8" }} />
+                    <div style={{ position: "absolute", left: "6%", top: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>MonetaryDominance</div>
+                    <div style={{ position: "absolute", right: "6%", top: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>Balanced</div>
+                    <div style={{ position: "absolute", left: "6%", bottom: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>FiscalPressureBuilding</div>
+                    <div style={{ position: "absolute", right: "6%", bottom: "6%", fontSize: 10, color: "#64748b", fontWeight: 700 }}>FiscalDominanceRisk</div>
+                    {prevPos && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: `${50 + prevPos.x * 40}%`,
+                          top: `${50 - prevPos.y * 40}%`,
+                          width: 7,
+                          height: 7,
+                          marginLeft: -3.5,
+                          marginTop: -3.5,
+                          borderRadius: 999,
+                          border: "1px solid rgba(71,85,105,0.55)",
+                          background: "rgba(148,163,184,0.30)",
+                        }}
+                        title="Previous position"
+                      />
+                    )}
+                    {prevPos && movementDistance >= 0.01 && (
+                      <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+                        <defs>
+                          <marker id="macro-phase-arrow" markerWidth="5" markerHeight="5" refX="4.4" refY="2.5" orient="auto">
+                            <polygon points="0 0, 5 2.5, 0 5" fill="#334155" />
+                          </marker>
+                        </defs>
+                        <line
+                          x1={50 + prevPos.x * 40}
+                          y1={50 - prevPos.y * 40}
+                          x2={positionLeft}
+                          y2={positionTop}
+                          stroke="#475569"
+                          strokeWidth={movementDistance >= 0.16 ? 1.0 : 0.7}
+                          strokeOpacity={movementDistance >= 0.16 ? 0.58 : 0.24}
+                          strokeLinecap="round"
+                          markerEnd="url(#macro-phase-arrow)"
+                        />
+                      </svg>
+                    )}
+                    {secondaryRegimes.map((row: any, index: number) => {
+                      const regime = String(row.regime ?? "");
+                      const unit = toDisplayPhasePosition(regimePhasePosition({
+                        md: regime === "MonetaryDominance" ? 1 : 0,
+                        bal: regime === "Balanced" ? 1 : 0,
+                        fpb: regime === "FiscalPressureBuilding" ? 1 : 0,
+                        fdr: regime === "FiscalDominanceRisk" ? 1 : 0,
+                      }));
+                      return (
+                        <div
+                          key={`secondary-${regime}`}
+                          style={{
+                            position: "absolute",
+                            left: `${50 + unit.x * 34}%`,
+                            top: `${50 - unit.y * 34}%`,
+                            width: 6,
+                            height: 6,
+                            marginLeft: -3,
+                            marginTop: -3,
+                            borderRadius: 999,
+                            background: "rgba(71,85,105,0.28)",
+                            opacity: 0.42 - index * 0.14,
+                          }}
+                          title={`${regime} ${safePct(row?.weight)}`}
+                        />
+                      );
+                    })}
+                    <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", filter: regimeProbabilityAny?.transitionLike ? "blur(3px)" : "blur(1px)" }}>
+                      <path d={blobPath} fill="rgba(30,41,59,0.10)" opacity={Math.max(0.2, 1 - decisivenessNorm)} />
+                      <path d={blobPath} fill="none" stroke="rgba(71,85,105,0.22)" strokeWidth="0.7" />
+                    </svg>
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: `${positionLeft}%`,
+                        top: `${positionTop}%`,
+                        width: markerSize,
+                        height: markerSize,
+                        marginLeft: -markerSize / 2,
+                        marginTop: -markerSize / 2,
+                        borderRadius: 999,
+                        border: `${1 + Math.round(confidenceNorm * 2)}px solid #0f172a`,
+                        background: "rgba(15,23,42,0.85)",
+                        opacity: Math.max(0.62, decisivenessNorm),
+                        boxShadow: "0 2px 10px rgba(15,23,42,0.28)",
+                      }}
+                      title={`${String(regimeProbabilityAny?.primaryRegime ?? "—")} ${safePct(regimeProbabilityAny?.primaryWeight)}`}
+                    />
+                    <InfoPopover
+                      id="phase-point-info"
+                      openId={openPhaseInfoId}
+                      onToggle={(id) => setOpenPhaseInfoId((current) => current === id ? null : id)}
+                      onClose={() => setOpenPhaseInfoId(null)}
+                      title="Current regime point"
+                      triggerClassName="phase-hit-target"
+                      triggerStyle={{ position: "absolute", left: `${positionLeft}%`, top: `${positionTop}%`, width: 20, height: 20, marginLeft: -10, marginTop: -10, borderRadius: 999, background: "transparent", border: "none", padding: 0 }}
+                      triggerContent={<span style={{ display: "none" }}>Point info</span>}
+                      sections={[
+                        {
+                          heading: "Current placement",
+                          lines: [
+                            `Current regime: ${String(regimeProbabilityAny?.primaryRegime ?? "—")}`,
+                            `Primary weight ${safePct(regimeProbabilityAny?.primaryWeight)} · decisiveness ${safePct(regimeProbabilityAny?.decisiveness)} · quality ${String(explanationSummary?.structuralQualityLabel ?? "—")}`,
+                            `Placement is driven mainly by ${Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.slice(0, 2).join(", ") : "mixed block signals"}.`,
+                          ],
+                        },
+                      ]}
+                    />
+                    {prevPos && arrowMid && movementDistance >= 0.01 && (
+                      <InfoPopover
+                        id="phase-arrow-info"
+                        openId={openPhaseInfoId}
+                        onToggle={(id) => setOpenPhaseInfoId((current) => current === id ? null : id)}
+                        onClose={() => setOpenPhaseInfoId(null)}
+                        title="Momentum arrow"
+                        triggerClassName="phase-hit-target"
+                        triggerStyle={{ position: "absolute", left: `${arrowMid.x}%`, top: `${arrowMid.y}%`, width: 22, height: 22, marginLeft: -11, marginTop: -11, borderRadius: 999, background: "transparent", border: "none", padding: 0 }}
+                        triggerContent={<span style={{ display: "none" }}>Arrow info</span>}
+                        sections={[
+                          {
+                            heading: "Previous → current movement",
+                            lines: [
+                              "Arrow starts at previous position and ends at current position.",
+                              `Movement magnitude: ${phaseMomentum.distance < 0.05 ? "small (stable)" : phaseMomentum.distance < 0.2 ? "moderate drift" : "meaningful shift"}.`,
+                              `${phaseMomentum.label}.`,
+                              `Change context: primary ${String(regimeProbabilityAny?.regimeMomentum?.primaryRegimeChange ?? "—")} · drift candidate ${String(regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ?? "none")}.`,
+                            ],
+                          },
+                        ]}
+                      />
+                    )}
+                    <InfoPopover
+                      id="phase-aura-info"
+                      openId={openPhaseInfoId}
+                      onToggle={(id) => setOpenPhaseInfoId((current) => current === id ? null : id)}
+                      onClose={() => setOpenPhaseInfoId(null)}
+                      title="Uncertainty / pull field"
+                      triggerClassName="phase-hit-target"
+                      triggerStyle={{ position: "absolute", left: `${positionLeft}%`, top: `${positionTop}%`, width: 48, height: 48, marginLeft: -24, marginTop: -24, borderRadius: 999, background: "transparent", border: "none", padding: 0 }}
+                      triggerContent={<span style={{ display: "none" }}>Aura info</span>}
+                      sections={[
+                        {
+                          heading: "Why the blob is shaped this way",
+                          lines: [
+                            "The blob shows uncertainty and competing regime pull around the current point.",
+                            `Lower decisiveness widens the field; higher decisiveness tightens it (decisiveness ${safePct(regimeProbabilityAny?.decisiveness)}).`,
+                            `Strongest alternative pull now: ${strongestAlt}.`,
+                            "Arrow shows recent movement; blob shows surrounding uncertainty/pull and may point differently.",
+                          ],
+                        },
+                      ]}
+                    />
+                  </div>
+                    );
+                  })()}
+                </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: -6, marginBottom: 8 }}>Tap point, arrow, or aura to inspect.</div>
+                <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 6, fontSize: 12, marginBottom: 6 }}>
+                    <div><strong>Primary</strong><br />{String(regimeProbabilityAny?.primaryRegime ?? globalMacro.regime?.coreRegimeLabel ?? "—")}</div>
+                    <div><strong>Weight</strong><br />{safePct(regimeProbabilityAny?.primaryWeight)}</div>
+                    <div><strong>Decisiveness</strong><br />{safePct(regimeProbabilityAny?.decisiveness)}</div>
+                    <div><strong>Quality</strong><br />{String(explanationSummary?.structuralQualityLabel ?? "—")}</div>
+                    <div><strong>State</strong><br />{regimeNowStateLabel()}</div>
+                  </div>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12 }}>
+                    <li>Momentum: {phaseMomentum.label}.</li>
+                    <li>Driven by {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.slice(0, 2).join(", ") : "mixed block signals"}.</li>
+                    <li>Confirmed by {Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays.length : 0} overlays.</li>
+                    <li>Contradicted by {Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays.length : 0} overlays.</li>
+                  </ul>
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 12 }}>Visa detaljerad regimtolkning</summary>
+                    <div style={{ fontSize: 12, marginTop: 6 }}>{String(regimeProbabilityAny?.narrative?.short ?? explanationNarrative?.short ?? globalMacro.regime?.regimeExplanation?.summary ?? "Regime narrative saknas.")}</div>
+                  </details>
+                </div>
+                <div>
+                  <strong>Overlay stack</strong>
+                  <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                    {uiOverlayKeysRequested.map((overlayKey) => {
+                      const overlay = activeOverlayBundle?.overlays?.[overlayKey];
+                      const role = overlayRole(overlayKey);
+                      const expanded = expandedOverlayKey === overlayKey;
+                      const overlayExplain = explanationOverlays.find((item: any) => item.overlayId === overlayKey);
+                      const row = overlayDebugRows.find((item) => item.overlayKey === overlayKey);
+                      return (
+                        <div key={`overlay-stack-${overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedOverlayKey((current) => current === overlayKey ? null : overlayKey)}
+                            style={{ width: "100%", border: "none", background: "transparent", textAlign: "left", cursor: "pointer", padding: "8px 10px", display: "flex", justifyContent: "space-between", gap: 8 }}
+                          >
+                            <span style={{ fontSize: 13, fontWeight: 700 }}>{normalizeOverlayLabel(overlayKey)}</span>
+                            <span style={{ fontSize: 12 }}>score {safeNumber(overlay?.score, 1)} · {overlay?.label ?? "—"} · role {role}</span>
+                          </button>
+                          {expanded && (
+                            <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 10px" }}>
+                              <div style={{ fontSize: 12, marginBottom: 8 }}>{overlay?.runtime?.directionTag ? `Direction: ${String(overlay.runtime.directionTag)} · ` : ""}confidence {safePct(overlay?.confidence)}</div>
+                              <MacroLabMiniSeries
+                                id={`overlay-inline-${overlayKey}`}
+                                title={`${normalizeOverlayLabel(overlayKey)} history`}
+                                dates={overlayHistoryPoints.map((point) => point.asOfDate)}
+                                lines={[{
+                                  label: normalizeOverlayLabel(overlayKey),
+                                  color: "#7c3aed",
+                                  data: overlayHistoryPoints.map((point) => {
+                                    const value = point.scores?.[overlayKey];
+                                    return typeof value === "number" ? value : null;
+                                  }),
+                                }]}
+                                selectedRange={null}
+                                onSelectRange={() => {}}
+                                expanded={Boolean(expandedOverlaySizeByKey[overlayKey])}
+                                onToggleExpand={() => setExpandedOverlaySizeByKey((prev) => ({ ...prev, [overlayKey]: !prev[overlayKey] }))}
+                                rightControls={row ? (
+                                  <InfoPopover
+                                    id={`overlay-inline-info-${overlayKey}`}
+                                    openId={openOverlayInfoId}
+                                    onToggle={(id) => setOpenOverlayInfoId((current) => (current === id ? null : id))}
+                                    onClose={() => setOpenOverlayInfoId(null)}
+                                    title={`${normalizeOverlayLabel(overlayKey)} info`}
+                                    sections={buildOverlayInfoSections(row)}
+                                  />
+                                ) : null}
+                              />
+                              <div style={{ fontSize: 12, marginTop: 6 }}>
+                                {String(overlayExplain?.narrative ?? row?.implementationDelta?.[5] ?? `${normalizeOverlayLabel(overlayKey)} är ${overlay?.label ?? "neutral"} och påverkar hur regimtolkningen ska vägas.`)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
 
               {regimeProbabilityAny ? (
                 <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
@@ -2526,8 +2932,9 @@ Signal: ${gapLabel}`,
                 </div>
               </details>
 
-
-              <h4>Macro Regime History</h4>
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
+              <h4 style={{ marginTop: 0 }}>GLOBAL MACRO — HISTORIK</h4>
+              <h5>Macro Regime History</h5>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <label>
                   Resolution
@@ -2809,6 +3216,7 @@ Signal: ${gapLabel}`,
               ) : (
                 <div className="status empty">{historyEmptyMessage ?? "Ingen historik kunde genereras för vald period/upplösning."}</div>
               )}
+              </section>
 
               <details>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>▸ Indicator drilldown</summary>
