@@ -1535,11 +1535,19 @@ export default function GlobalMacroDashboard() {
     return "neutral";
   }
 
-  function regimeQuadrantPosition(regime: string): { x: number; y: number } {
-    if (regime === "MonetaryDominance") return { x: 28, y: 28 };
-    if (regime === "Balanced") return { x: 72, y: 28 };
-    if (regime === "FiscalPressureBuilding") return { x: 28, y: 72 };
-    return { x: 72, y: 72 };
+  function normalizeRegimeWeight(value: unknown): number {
+    if (typeof value !== "number" || Number.isNaN(value)) return 0;
+    if (value <= 1) return value;
+    return value / 100;
+  }
+
+  function regimePhasePosition(weights: { md: number; bal: number; fpb: number; fdr: number }): { x: number; y: number } {
+    const xRaw = (weights.fdr + weights.fpb) - (weights.md + weights.bal);
+    const yRaw = (weights.fpb + weights.md) - (weights.bal + weights.fdr);
+    return {
+      x: Math.max(-1, Math.min(1, xRaw)),
+      y: Math.max(-1, Math.min(1, yRaw)),
+    };
   }
 
 
@@ -1927,49 +1935,133 @@ Signal: ${gapLabel}`,
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
                 <h4 style={{ marginTop: 0, marginBottom: 10 }}>GLOBAL MACRO — NU-LÄGE</h4>
                 <div style={{ border: "1px solid #cbd5e1", borderRadius: 10, background: "#fff", padding: 10, marginBottom: 12, maxWidth: 520 }}>
-                  <div style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 8, background: "linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%)", overflow: "hidden" }}>
-                    <div style={{ position: "absolute", inset: 0, border: "1px solid #cbd5e1", borderRadius: 8 }} />
-                    <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "#cbd5e1" }} />
-                    <div style={{ position: "absolute", top: "50%", left: 0, right: 0, height: 1, background: "#cbd5e1" }} />
-                    {([
-                      { regime: "MonetaryDominance", label: "Monetary Dominance", x: "6%", y: "6%" },
-                      { regime: "Balanced", label: "Balanced", x: "56%", y: "6%" },
-                      { regime: "FiscalPressureBuilding", label: "Fiscal Pressure", x: "6%", y: "56%" },
-                      { regime: "FiscalDominanceRisk", label: "Fiscal Dominance", x: "56%", y: "56%" },
-                    ] as const).map((cell) => (
-                      <div key={`regime-label-${cell.regime}`} style={{ position: "absolute", left: cell.x, top: cell.y, fontSize: 11, fontWeight: 700, color: "#475569" }}>{cell.label}</div>
-                    ))}
-                    {regimeProbabilityDistribution
+                  {(() => {
+                    const weightByRegime = {
+                      MonetaryDominance: normalizeRegimeWeight(regimeProbabilityDistribution.find((row: any) => row?.regime === "MonetaryDominance")?.weight),
+                      Balanced: normalizeRegimeWeight(regimeProbabilityDistribution.find((row: any) => row?.regime === "Balanced")?.weight),
+                      FiscalPressureBuilding: normalizeRegimeWeight(regimeProbabilityDistribution.find((row: any) => row?.regime === "FiscalPressureBuilding")?.weight),
+                      FiscalDominanceRisk: normalizeRegimeWeight(regimeProbabilityDistribution.find((row: any) => row?.regime === "FiscalDominanceRisk")?.weight),
+                    };
+                    const currentPosition = regimePhasePosition({
+                      md: weightByRegime.MonetaryDominance,
+                      bal: weightByRegime.Balanced,
+                      fpb: weightByRegime.FiscalPressureBuilding,
+                      fdr: weightByRegime.FiscalDominanceRisk,
+                    });
+                    const positionLeft = 50 + currentPosition.x * 40;
+                    const positionTop = 50 - currentPosition.y * 40;
+                    const primaryWeightNorm = normalizeRegimeWeight(regimeProbabilityAny?.primaryWeight);
+                    const decisivenessNorm = normalizeRegimeWeight(regimeProbabilityAny?.decisiveness);
+                    const confidenceNorm = normalizeRegimeWeight(explanationSummary?.confidence ?? globalMacro.regime?.macroConfidence);
+                    const markerSize = 16 + primaryWeightNorm * 24;
+                    const haloSize = markerSize + (1 - decisivenessNorm) * 28;
+                    const previousRegime = historyPoints.length > 1 ? historyPoints[historyPoints.length - 2]?.coreRegimeLabel : null;
+                    const previousWeights = previousRegime ? {
+                      md: previousRegime === "MonetaryDominance" ? 1 : 0,
+                      bal: previousRegime === "Balanced" ? 1 : 0,
+                      fpb: previousRegime === "FiscalPressureBuilding" ? 1 : 0,
+                      fdr: previousRegime === "FiscalDominanceRisk" ? 1 : 0,
+                    } : null;
+                    const prevPos = previousWeights ? regimePhasePosition(previousWeights) : null;
+                    const secondaryRegimes = regimeProbabilityDistribution
                       .slice()
                       .sort((a: any, b: any) => (typeof b?.weight === "number" ? b.weight : 0) - (typeof a?.weight === "number" ? a.weight : 0))
-                      .slice(0, 3)
-                      .map((row: any, index: number) => {
-                        const pos = regimeQuadrantPosition(String(row?.regime ?? ""));
-                        const weight = typeof row?.weight === "number" ? row.weight : 0;
-                        const isPrimary = row?.regime === regimeProbabilityAny?.primaryRegime;
-                        return (
-                          <div
-                            key={`regime-point-${String(row?.regime ?? index)}`}
-                            style={{
-                              position: "absolute",
-                              left: `${pos.x}%`,
-                              top: `${pos.y}%`,
-                              width: isPrimary ? Math.max(18, Math.min(34, 16 + weight * 0.18)) : 10,
-                              height: isPrimary ? Math.max(18, Math.min(34, 16 + weight * 0.18)) : 10,
-                              marginLeft: isPrimary ? -12 : -5,
-                              marginTop: isPrimary ? -12 : -5,
-                              borderRadius: 999,
-                              border: isPrimary ? "2px solid #0f172a" : "1px solid #64748b",
-                              background: isPrimary ? "rgba(15,23,42,0.75)" : "rgba(148,163,184,0.45)",
-                              opacity: isPrimary ? Math.max(0.45, Math.min(1, (Number(regimeProbabilityAny?.decisiveness ?? 0) / 100) || 0.7)) : 0.8 - index * 0.2,
-                              boxShadow: isPrimary && (regimeProbabilityAny?.transitionLike || regimeNowStateLabel() !== "stable") ? "0 0 0 4px rgba(15,23,42,0.12)" : "none",
-                              outline: isPrimary && regimeProbabilityAny?.transitionLike ? "2px dashed #334155" : "none",
-                            }}
-                            title={`${String(row?.regime ?? "—")} ${safePct(weight)}`}
-                          />
-                        );
-                      })}
+                      .filter((row: any) => row?.regime && row.regime !== regimeProbabilityAny?.primaryRegime)
+                      .slice(0, 2);
+                    return (
+                  <div style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 8, background: "linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%)", overflow: "hidden" }}>
+                    <div style={{ position: "absolute", inset: 0, border: "1px solid #cbd5e1", borderRadius: 8 }} />
+                    <div style={{ position: "absolute", left: "10%", right: "10%", top: "50%", height: 1, background: "#94a3b8" }} />
+                    <div style={{ position: "absolute", top: "10%", bottom: "10%", left: "50%", width: 1, background: "#94a3b8" }} />
+                    <div style={{ position: "absolute", left: "12%", bottom: "2%", fontSize: 10, color: "#64748b" }}>Monetary dominance</div>
+                    <div style={{ position: "absolute", right: "12%", bottom: "2%", fontSize: 10, color: "#64748b" }}>Fiscal dominance</div>
+                    <div style={{ position: "absolute", left: "2%", top: "12%", fontSize: 10, color: "#64748b", transform: "rotate(-90deg)", transformOrigin: "left top" }}>Inflation / Pressure</div>
+                    <div style={{ position: "absolute", left: "2%", bottom: "18%", fontSize: 10, color: "#64748b", transform: "rotate(-90deg)", transformOrigin: "left top" }}>Stability / Balanced</div>
+                    {prevPos && (
+                      <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+                        <defs>
+                          <marker id="macro-phase-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+                            <polygon points="0 0, 5 2.5, 0 5" fill="#64748b" />
+                          </marker>
+                        </defs>
+                        <line
+                          x1={50 + prevPos.x * 40}
+                          y1={50 - prevPos.y * 40}
+                          x2={positionLeft}
+                          y2={positionTop}
+                          stroke="#64748b"
+                          strokeWidth="0.8"
+                          strokeOpacity="0.5"
+                          markerEnd="url(#macro-phase-arrow)"
+                        />
+                      </svg>
+                    )}
+                    {secondaryRegimes.map((row: any, index: number) => {
+                      const regime = String(row.regime ?? "");
+                      const unit = regimePhasePosition({
+                        md: regime === "MonetaryDominance" ? 1 : 0,
+                        bal: regime === "Balanced" ? 1 : 0,
+                        fpb: regime === "FiscalPressureBuilding" ? 1 : 0,
+                        fdr: regime === "FiscalDominanceRisk" ? 1 : 0,
+                      });
+                      return (
+                        <div
+                          key={`secondary-${regime}`}
+                          style={{
+                            position: "absolute",
+                            left: `${50 + unit.x * 34}%`,
+                            top: `${50 - unit.y * 34}%`,
+                            width: 8,
+                            height: 8,
+                            marginLeft: -4,
+                            marginTop: -4,
+                            borderRadius: 999,
+                            background: "rgba(100,116,139,0.45)",
+                            border: "1px solid rgba(71,85,105,0.6)",
+                            opacity: 0.7 - index * 0.2,
+                          }}
+                          title={`${regime} ${safePct(row?.weight)}`}
+                        />
+                      );
+                    })}
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: `${positionLeft}%`,
+                        top: `${positionTop}%`,
+                        width: haloSize,
+                        height: haloSize,
+                        marginLeft: -haloSize / 2,
+                        marginTop: -haloSize / 2,
+                        borderRadius: 999,
+                        background: "rgba(30,41,59,0.1)",
+                        filter: regimeProbabilityAny?.transitionLike ? "blur(5px)" : "blur(2px)",
+                        opacity: Math.max(0.22, 1 - decisivenessNorm),
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: `${positionLeft}%`,
+                        top: `${positionTop}%`,
+                        width: markerSize,
+                        height: markerSize,
+                        marginLeft: -markerSize / 2,
+                        marginTop: -markerSize / 2,
+                        borderRadius: 999,
+                        border: `${1 + Math.round(confidenceNorm * 2)}px solid #0f172a`,
+                        background: "rgba(15,23,42,0.85)",
+                        opacity: Math.max(0.45, decisivenessNorm),
+                        boxShadow: "0 2px 10px rgba(15,23,42,0.28)",
+                      }}
+                      title={`${String(regimeProbabilityAny?.primaryRegime ?? "—")} ${safePct(regimeProbabilityAny?.primaryWeight)}`}
+                    />
+                    <div style={{ position: "absolute", right: 8, top: 8, fontSize: 10, color: "#334155" }}>
+                      x {currentPosition.x >= 0 ? "+" : ""}{currentPosition.x.toFixed(2)} · y {currentPosition.y >= 0 ? "+" : ""}{currentPosition.y.toFixed(2)}
+                    </div>
                   </div>
+                    );
+                  })()}
                 </div>
                 <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 6, fontSize: 12, marginBottom: 6 }}>
