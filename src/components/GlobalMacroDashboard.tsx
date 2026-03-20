@@ -497,6 +497,8 @@ export default function GlobalMacroDashboard() {
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
   const [openOverlayInfoId, setOpenOverlayInfoId] = useState<string | null>(null);
+  const [expandedOverlayKey, setExpandedOverlayKey] = useState<string | null>(null);
+  const [expandedOverlaySize, setExpandedOverlaySize] = useState<"compact" | "expanded">("compact");
 
   const uiOverlayKeysRequested = useMemo(() => (selectedRegion === "GLOBAL"
     ? ["globalUnrestOverlay"]
@@ -513,6 +515,10 @@ export default function GlobalMacroDashboard() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("globalMacro.selectedRegion", selectedRegion);
+  }, [selectedRegion]);
+
+  useEffect(() => {
+    if (selectedRegion === "GLOBAL") setSelectedRegion("US");
   }, [selectedRegion]);
 
 
@@ -1442,7 +1448,7 @@ export default function GlobalMacroDashboard() {
     ];
   }
 
-  function renderOverlayHistoryChart(overlayKey: string) {
+  function renderOverlayHistoryChart(overlayKey: string, chartSize: "compact" | "expanded" = "compact") {
     const valid = overlayHistoryPoints
       .map((point) => ({ asOfDate: point.asOfDate, score: point.scores?.[overlayKey] ?? null }))
       .filter((point) => typeof point.score === "number") as Array<{ asOfDate: string; score: number }>;
@@ -1463,7 +1469,7 @@ export default function GlobalMacroDashboard() {
       return `${x},${y}`;
     }).join(" ");
     return (
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: 580, height: 170, display: "block" }}>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: chartSize === "expanded" ? 960 : 580, height: chartSize === "expanded" ? 260 : 170, display: "block" }}>
         {[0, 25, 50, 75, 100].map((tick) => {
           const y = top + (1 - tick / 100) * plotH;
           return <g key={`${overlayKey}-tick-${tick}`}><line x1={left} y1={y} x2={width - right} y2={y} stroke="#d1d5db" strokeWidth={1} /><text x={left - 6} y={y + 4} textAnchor="end" fontSize={10} fill="#64748b">{tick}</text></g>;
@@ -1507,6 +1513,25 @@ export default function GlobalMacroDashboard() {
     if (regime === "FiscalPressureBuilding") return "Finansierings- och inflationspress börjar dominera och höjer känsligheten i riskmiljön.";
     if (regime === "FiscalDominanceRisk") return "Fiskal och finansiell stress väger tungt, vilket ofta innebär ett stramare och mer defensivt marknadsläge.";
     return "Regimen indikerar ett övergångsläge i makrobilden.";
+  }
+
+  function regimeNowStateLabel(): "stable" | "fragile" | "contested" | "transition-like" {
+    const decisiveness = typeof regimeProbabilityAny?.decisiveness === "number" ? regimeProbabilityAny.decisiveness : null;
+    const quality = String(explanationSummary?.structuralQualityLabel ?? "");
+    if (regimeProbabilityAny?.transitionLike) return "transition-like";
+    if (decisiveness !== null && decisiveness < 0.2) return "contested";
+    if (quality === "fragile" || (decisiveness !== null && decisiveness < 0.35)) return "fragile";
+    return "stable";
+  }
+
+  function overlayRole(overlayKey: string): "supporting" | "modulating" | "contradicting" | "neutral" {
+    const supporting = Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays : [];
+    const modulating = Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays : [];
+    const contradicting = Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays : [];
+    if (supporting.includes(overlayKey)) return "supporting";
+    if (modulating.includes(overlayKey)) return "modulating";
+    if (contradicting.includes(overlayKey)) return "contradicting";
+    return "neutral";
   }
 
 
@@ -1775,24 +1800,28 @@ Signal: ${gapLabel}`,
           <p className="bread">Global Macro tolkar det makroekonomiska klimatet över tid genom att väga samman finansiering, räntor, inflation, trovärdighet och marknadsstress. Målet är att ge en lugn men skarp lägesbild av vilken regim marknaden befinner sig i – och på sikt knyta den till riskklimat, bull/bear-faser och den bredare kapitalmiljön.</p>
 
           <div style={{ display: "flex", gap: 8, overflowX: "auto", scrollSnapType: "x mandatory", paddingBottom: 8, marginBottom: 8 }}>
-            {["GLOBAL", "US", "EA", "SE"].map((region) => (
+            {[
+              { value: "US", label: "US" },
+              { value: "EA", label: "EU" },
+              { value: "SE", label: "SE" },
+            ].map((region) => (
               <button
-                key={region}
+                key={region.value}
                 type="button"
-                onClick={() => setSelectedRegion(region as "GLOBAL" | "US" | "EA" | "SE")}
+                onClick={() => setSelectedRegion(region.value as "GLOBAL" | "US" | "EA" | "SE")}
                 style={{
                   padding: "6px 10px",
                   borderRadius: 999,
-                  border: selectedRegion === region ? "1px solid #111" : "1px solid #d0d7de",
-                  background: selectedRegion === region ? "#111" : "#fff",
-                  color: selectedRegion === region ? "#fff" : "#111",
+                  border: selectedRegion === region.value ? "1px solid #111" : "1px solid #d0d7de",
+                  background: selectedRegion === region.value ? "#111" : "#fff",
+                  color: selectedRegion === region.value ? "#fff" : "#111",
                   cursor: "pointer",
                   fontSize: 12,
                   fontWeight: 600,
                   scrollSnapAlign: "start",
                 }}
               >
-                {region}
+                {region.label}
               </button>
             ))}
           </div>
@@ -1886,6 +1915,83 @@ Signal: ${gapLabel}`,
               {isPartialData && (
                 <div className="status">Partial data: {scoredCount}/{globalMacroIndicators.length} indikatorer är poängsatta.</div>
               )}
+
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
+                <h4 style={{ marginTop: 0, marginBottom: 10 }}>GLOBAL MACRO — NU-LÄGE</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 8, marginBottom: 12 }}>
+                  {(["MonetaryDominance", "Balanced", "FiscalPressureBuilding", "FiscalDominanceRisk"] as const).map((regime) => {
+                    const distEntry = regimeProbabilityDistribution.find((row: any) => row?.regime === regime);
+                    const weight = typeof distEntry?.weight === "number" ? distEntry.weight : null;
+                    const isPrimary = regimeProbabilityAny?.primaryRegime === regime;
+                    return (
+                      <div key={`now-regime-${regime}`} style={{ border: isPrimary ? "2px solid #0f172a" : "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: isPrimary ? "#e2e8f0" : "#fff" }}>
+                        <div style={{ fontWeight: 700, fontSize: 12 }}>{regime}</div>
+                        <div style={{ fontSize: 12, marginTop: 2 }}>weight: {safePct(weight)}</div>
+                        {isPrimary && <div style={{ fontSize: 11, marginTop: 3, color: "#0f172a" }}>Primary regime now</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
+                  <div style={{ fontSize: 13 }}>
+                    <strong>{String(regimeProbabilityAny?.primaryRegime ?? globalMacro.regime?.coreRegimeLabel ?? "—")}</strong> · weight {safePct(regimeProbabilityAny?.primaryWeight)} · decisiveness {safePct(regimeProbabilityAny?.decisiveness)} · confidence {safePct(explanationSummary?.confidence ?? globalMacro.regime?.macroConfidence)} · structural quality {String(explanationSummary?.structuralQualityLabel ?? "—")} · state <strong>{regimeNowStateLabel()}</strong>
+                  </div>
+                  <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12 }}>
+                    <li>{String(regimeProbabilityAny?.narrative?.short ?? explanationNarrative?.short ?? globalMacro.regime?.regimeExplanation?.summary ?? "Regime narrative saknas.")}</li>
+                    <li>Ledande regim drivs av {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.join(", ") : "blend av blocksignaler"}.</li>
+                    <li>Conviction: {regimeNowStateLabel() === "stable" ? "stark" : regimeNowStateLabel() === "fragile" ? "skör" : regimeNowStateLabel() === "contested" ? "omstridd" : "övergångslik"}.</li>
+                    <li>Overlays: stöd {Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays.length : 0}, modulerar {Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays.length : 0}, motsäger {Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays.length : 0}.</li>
+                  </ul>
+                </div>
+                <div>
+                  <strong>Overlay stack</strong>
+                  <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                    {uiOverlayKeysRequested.map((overlayKey) => {
+                      const overlay = activeOverlayBundle?.overlays?.[overlayKey];
+                      const role = overlayRole(overlayKey);
+                      const expanded = expandedOverlayKey === overlayKey;
+                      const overlayExplain = explanationOverlays.find((item: any) => item.overlayId === overlayKey);
+                      const row = overlayDebugRows.find((item) => item.overlayKey === overlayKey);
+                      return (
+                        <div key={`overlay-stack-${overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedOverlayKey((current) => current === overlayKey ? null : overlayKey)}
+                            style={{ width: "100%", border: "none", background: "transparent", textAlign: "left", cursor: "pointer", padding: "8px 10px", display: "flex", justifyContent: "space-between", gap: 8 }}
+                          >
+                            <span style={{ fontSize: 13, fontWeight: 700 }}>{normalizeOverlayLabel(overlayKey)}</span>
+                            <span style={{ fontSize: 12 }}>score {safeNumber(overlay?.score, 1)} · {overlay?.label ?? "—"} · role {role}</span>
+                          </button>
+                          {expanded && (
+                            <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 10px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                                <div style={{ fontSize: 12 }}>{overlay?.runtime?.directionTag ? `Direction: ${String(overlay.runtime.directionTag)} · ` : ""}confidence {safePct(overlay?.confidence)}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <button type="button" onClick={() => setExpandedOverlaySize((size) => size === "compact" ? "expanded" : "compact")} style={{ border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff", cursor: "pointer", padding: "2px 8px" }}>&lt;—&gt;</button>
+                                  {row && (
+                                    <InfoPopover
+                                      id={`overlay-inline-info-${overlayKey}`}
+                                      openId={openOverlayInfoId}
+                                      onToggle={(id) => setOpenOverlayInfoId((current) => (current === id ? null : id))}
+                                      onClose={() => setOpenOverlayInfoId(null)}
+                                      title={`${normalizeOverlayLabel(overlayKey)} info`}
+                                      sections={buildOverlayInfoSections(row)}
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                              {renderOverlayHistoryChart(overlayKey, expandedOverlaySize)}
+                              <div style={{ fontSize: 12, marginTop: 6 }}>
+                                {String(overlayExplain?.narrative ?? row?.implementationDelta?.[5] ?? `${normalizeOverlayLabel(overlayKey)} är ${overlay?.label ?? "neutral"} och påverkar hur regimtolkningen ska vägas.`)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
 
               {regimeProbabilityAny ? (
                 <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
@@ -2526,8 +2632,9 @@ Signal: ${gapLabel}`,
                 </div>
               </details>
 
-
-              <h4>Macro Regime History</h4>
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
+              <h4 style={{ marginTop: 0 }}>GLOBAL MACRO — HISTORIK</h4>
+              <h5>Macro Regime History</h5>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <label>
                   Resolution
@@ -2809,6 +2916,7 @@ Signal: ${gapLabel}`,
               ) : (
                 <div className="status empty">{historyEmptyMessage ?? "Ingen historik kunde genereras för vald period/upplösning."}</div>
               )}
+              </section>
 
               <details>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>▸ Indicator drilldown</summary>
