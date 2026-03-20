@@ -1489,6 +1489,7 @@ async function readLatestSnapshot(region: string, allowLiveFallback: boolean, ui
       growthOverlay: regimeRow.growth_overlay,
       stressOverlay: regimeRow.stress_overlay,
       hardAssetOverlay: regimeRow.hard_asset_overlay,
+      thematicOverlays: overlayBundle?.overlays as any,
       blockScores: safeJsonParse<Record<any, number | null>>(regimeRow.block_scores_json, {
         A_FISCAL: null,
         B_MONETARY: null,
@@ -1777,6 +1778,7 @@ async function readLatestGlobalSnapshot(allowLiveFallback: boolean, uiOverlayKey
       growthOverlay: regime.growthOverlay,
       stressOverlay: regime.stressOverlay,
       hardAssetOverlay: regime.hardAssetOverlay,
+      thematicOverlays: globalOverlayBundle?.overlays as any,
       blockScores: regime.blockScores as any,
     }) } }).macroRegimeProbability,
   };

@@ -12,6 +12,7 @@ type OverlaySnapshot = {
   stressOverlay: string;
   hardAssetOverlay: string;
 };
+type ThematicOverlaySnapshot = Record<string, { score?: number | null; signal?: string | null } | null | undefined>;
 
 type OverlayEffect = "supporting" | "modulating" | "contradicting";
 type OverlaySignal = "confirming" | "modulating" | "contradicting";
@@ -107,6 +108,32 @@ function effectScore(effect: OverlayEffect): number {
   return 0;
 }
 
+const THEMATIC_OVERLAY_KEYS = [
+  "liquidityOverlay",
+  "creditFundingOverlay",
+  "energyShockOverlay",
+  "localUnrestOverlay",
+  "safeHavenRiskOffOverlay",
+  "inflationCostShockOverlay",
+  "tradeSupplyChainStressOverlay",
+  "globalUnrestOverlay",
+] as const;
+
+function classifyThematicEffect(regime: string, overlayKey: string, score: number | null): OverlayEffect {
+  if (score === null || !Number.isFinite(score)) return "modulating";
+  const riskOffFamily = ["creditFundingOverlay", "energyShockOverlay", "localUnrestOverlay", "safeHavenRiskOffOverlay", "inflationCostShockOverlay", "tradeSupplyChainStressOverlay", "globalUnrestOverlay"];
+  const isRiskOff = riskOffFamily.includes(overlayKey);
+  const supportiveIfPositive = regime === "FiscalDominanceRisk" || regime === "FiscalPressureBuilding"
+    ? isRiskOff
+    : regime === "MonetaryDominance" || regime === "Balanced"
+      ? overlayKey === "liquidityOverlay"
+      : false;
+  const directionalScore = supportiveIfPositive ? score : -score;
+  if (directionalScore >= 15) return "supporting";
+  if (directionalScore <= -15) return "contradicting";
+  return "modulating";
+}
+
 function overlayEffectForRegime(regime: string, overlay: OverlaySnapshot) {
   const effects = [
     { key: "growthOverlay" as const, value: overlay.growthOverlay, effect: classifyGrowthEffect(regime, overlay.growthOverlay) },
@@ -173,6 +200,7 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
   stressOverlay: string;
   hardAssetOverlay: string;
   blockScores: MacroRegimeSnapshot["blockScores"];
+  thematicOverlays?: ThematicOverlaySnapshot | null;
   previous?: {
     macroScoreTotal: number | null;
     primaryRegime?: string | null;
@@ -263,9 +291,29 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
     else if ((primaryScore - weakestAlternative) >= 1) supportingOverlays.push(overlayKey);
     else modulatingOverlays.push(overlayKey);
   });
+  const thematicAvailable = Object.entries(input.thematicOverlays ?? {})
+    .filter(([key, value]) => THEMATIC_OVERLAY_KEYS.includes(key as any) && value && typeof value === "object")
+    .map(([key, value]) => ({ key, score: typeof value?.score === "number" ? value.score : null }));
+  const thematicUnavailable = THEMATIC_OVERLAY_KEYS.filter((key) => !thematicAvailable.some((row) => row.key === key));
+  thematicAvailable.forEach(({ key, score }) => {
+    const primaryEffect = classifyThematicEffect(top1.regime, key, score);
+    const primaryScore = effectScore(primaryEffect);
+    const alternativeScores = topAlternatives.map((regime) => effectScore(classifyThematicEffect(regime, key, score)));
+    const strongestAlternative = alternativeScores.length ? Math.max(...alternativeScores) : 0;
+    const weakestAlternative = alternativeScores.length ? Math.min(...alternativeScores) : 0;
+    const themedId = `thematic:${key}`;
+    if (primaryScore >= 1 && strongestAlternative <= 0) supportingOverlays.push(themedId);
+    else if (primaryScore <= -1 && strongestAlternative >= 0) contradictingOverlays.push(themedId);
+    else if ((strongestAlternative - primaryScore) >= 1) contradictingOverlays.push(themedId);
+    else if ((primaryScore - weakestAlternative) >= 1) supportingOverlays.push(themedId);
+    else modulatingOverlays.push(themedId);
+  });
+  const normalizedSupportingOverlays = supportingOverlays.map((id) => id.includes(":") ? id : `legacy:${id}`);
+  const normalizedModulatingOverlays = modulatingOverlays.map((id) => id.includes(":") ? id : `legacy:${id}`);
+  const normalizedContradictingOverlays = contradictingOverlays.map((id) => id.includes(":") ? id : `legacy:${id}`);
 
   let structuralSummary = "partial_confirmation";
-  if (top1.signal === "confirming" && contradictingOverlays.length === 0) structuralSummary = "overlay_supportive";
+  if (top1.signal === "confirming" && normalizedContradictingOverlays.length === 0) structuralSummary = "overlay_supportive";
   else if (top1.signal === "contradicting") structuralSummary = "overlay_conflicted";
   else if (confidenceMultiplier < 0.6) structuralSummary = "structural_fragility";
   else if (input.stressOverlay === "High" && (input.hardAssetOverlay === "Strong" || input.hardAssetOverlay === "High")) structuralSummary = "cost_pressure_confirmation";
@@ -285,17 +333,18 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
 
   const overlayNarrative = (() => {
     const leadAlternative = normalized.find((row) => row.regime !== top1.regime)?.regime ?? null;
-    const supportText = supportingOverlays.length > 0
-      ? `${supportingOverlays.join(", ")} reinforce ${top1.regime}`
+    const supportText = normalizedSupportingOverlays.length > 0
+      ? `${normalizedSupportingOverlays.join(", ")} reinforce ${top1.regime}`
       : `No overlay gives clean one-way reinforcement to ${top1.regime}`;
-    const modVerb = modulatingOverlays.length > 1 ? "are" : "is";
-    const modulationText = modulatingOverlays.length > 0
-      ? `${modulatingOverlays.join(", ")} ${modVerb} mixed and keeps conviction moderate`
+    const modVerb = normalizedModulatingOverlays.length > 1 ? "are" : "is";
+    const modulationText = normalizedModulatingOverlays.length > 0
+      ? `${normalizedModulatingOverlays.join(", ")} ${modVerb} mixed and keeps conviction moderate`
       : "little mixed-signal modulation is present";
-    const contradictionText = contradictingOverlays.length > 0
-      ? `${contradictingOverlays.join(", ")} lean against the primary regime${leadAlternative ? ` and keep ${leadAlternative} in play` : ""}`
+    const contradictionText = normalizedContradictingOverlays.length > 0
+      ? `${normalizedContradictingOverlays.join(", ")} lean against the primary regime${leadAlternative ? ` and keep ${leadAlternative} in play` : ""}`
       : "no overlay contradiction is broad enough to overturn the primary read";
-    return `${supportText}; ${modulationText}; ${contradictionText}.`;
+    const availabilityText = `Commentary inputs used: legacy=${OVERLAY_KEYS.join(", ")}; thematic=${thematicAvailable.map((row) => row.key).join(", ") || "none"}. Unavailable thematic=${thematicUnavailable.join(", ") || "none"}.`;
+    return `${supportText}; ${modulationText}; ${contradictionText}. ${availabilityText}`;
   })();
 
   const momentumNarrative = direction === "strengthening"
@@ -319,9 +368,9 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
     directionDriver,
     strongestPositiveBlock ? `${strongestPositiveBlock.block} strengthening (${strongestPositiveBlock.delta >= 0 ? "+" : ""}${strongestPositiveBlock.delta.toFixed(1)})` : null,
     strongestNegativeBlock ? `${strongestNegativeBlock.block} fading (${strongestNegativeBlock.delta >= 0 ? "+" : ""}${strongestNegativeBlock.delta.toFixed(1)})` : null,
-    supportingOverlays[0] ? `${supportingOverlays[0]} reinforcing ${top1.regime}` : null,
-    modulatingOverlays[0] ? `${modulatingOverlays[0]} mixed, limiting conviction` : null,
-    contradictingOverlays[0] ? `${contradictingOverlays[0]} leaning against ${top1.regime}` : null,
+    normalizedSupportingOverlays[0] ? `${normalizedSupportingOverlays[0]} reinforcing ${top1.regime}` : null,
+    normalizedModulatingOverlays[0] ? `${normalizedModulatingOverlays[0]} mixed, limiting conviction` : null,
+    normalizedContradictingOverlays[0] ? `${normalizedContradictingOverlays[0]} leaning against ${top1.regime}` : null,
     driftTowardRegime ? `drift pressure building toward ${driftTowardRegime}` : null,
   ].filter((item): item is string => Boolean(item)).slice(0, 6);
 
@@ -333,8 +382,8 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
     distribution: normalized.slice(0, 4).map((row) => ({ regime: row.regime, weight: row.weight })),
     narrative: {
       short: `${top1.regime} remains primary (${top1.weight.toFixed(1)}%). ${overlayNarrative}`,
-      medium: `Primary regime is ${top1.regime} (${top1.weight.toFixed(1)}%), with alternatives ${normalized.slice(1, 3).map((d) => `${d.regime} ${d.weight.toFixed(1)}%`).join(" · ") || "not meaningful"}. It leads on block mix (${supportingBlocks.join(", ") || "none"}) and current overlay structure: supporting ${supportingOverlays.join(", ") || "none"}, modulating ${modulatingOverlays.join(", ") || "none"}, contradicting ${contradictingOverlays.join(", ") || "none"}. Momentum is ${direction} (score ${momentumScore.toFixed(1)}). ${driftTowardRegime ? `Drift risk is currently toward ${driftTowardRegime}.` : "No meaningful drift candidate is active."} Structural caveat: ${structuralSummary}.`,
-      long: `Primary regime ${top1.regime} leads at ${top1.weight.toFixed(1)}% versus ${top2.regime} at ${top2.weight.toFixed(1)}% (gap ${(top1.weight - top2.weight).toFixed(1)}), with next alternatives ${normalized.slice(1, 4).map((d) => `${d.regime} ${d.weight.toFixed(1)}%`).join(", ")}. The lead is sustained mainly by block ranking (${supportingBlocks.join(", ") || "none"}) and recent block-direction shifts (${blockDelta.slice(0, 3).map((b) => `${b.block} ${b.delta >= 0 ? "+" : ""}${b.delta.toFixed(1)}`).join(", ") || "none"}). Overlay decomposition is explicit: supporting ${supportingOverlays.join(", ") || "none"}; modulating ${modulatingOverlays.join(", ") || "none"}; contradicting ${contradictingOverlays.join(", ") || "none"}. ${overlayNarrative} Momentum state is ${direction} with score ${momentumScore.toFixed(1)} and primary change ${primaryRegimeChange}. ${driftTowardRegime ? `Current drift points to ${driftTowardRegime}.` : "No meaningful drift toward an alternative regime is detected."} Structural caveat remains ${structuralSummary}.`,
+      medium: `Primary regime is ${top1.regime} (${top1.weight.toFixed(1)}%), with alternatives ${normalized.slice(1, 3).map((d) => `${d.regime} ${d.weight.toFixed(1)}%`).join(" · ") || "not meaningful"}. It leads on block mix (${supportingBlocks.join(", ") || "none"}) and current overlay structure: supporting ${normalizedSupportingOverlays.join(", ") || "none"}, modulating ${normalizedModulatingOverlays.join(", ") || "none"}, contradicting ${normalizedContradictingOverlays.join(", ") || "none"}. Momentum is ${direction} (score ${momentumScore.toFixed(1)}). ${driftTowardRegime ? `Drift risk is currently toward ${driftTowardRegime}.` : "No meaningful drift candidate is active."} Structural caveat: ${structuralSummary}.`,
+      long: `Primary regime ${top1.regime} leads at ${top1.weight.toFixed(1)}% versus ${top2.regime} at ${top2.weight.toFixed(1)}% (gap ${(top1.weight - top2.weight).toFixed(1)}), with next alternatives ${normalized.slice(1, 4).map((d) => `${d.regime} ${d.weight.toFixed(1)}%`).join(", ")}. The lead is sustained mainly by block ranking (${supportingBlocks.join(", ") || "none"}) and recent block-direction shifts (${blockDelta.slice(0, 3).map((b) => `${b.block} ${b.delta >= 0 ? "+" : ""}${b.delta.toFixed(1)}`).join(", ") || "none"}). Overlay decomposition is explicit: supporting ${normalizedSupportingOverlays.join(", ") || "none"}; modulating ${normalizedModulatingOverlays.join(", ") || "none"}; contradicting ${normalizedContradictingOverlays.join(", ") || "none"}. ${overlayNarrative} Momentum state is ${direction} with score ${momentumScore.toFixed(1)} and primary change ${primaryRegimeChange}. ${driftTowardRegime ? `Current drift points to ${driftTowardRegime}.` : "No meaningful drift toward an alternative regime is detected."} Structural caveat remains ${structuralSummary}.`,
     },
     structuralAdjustment: {
       summary: structuralSummary,
@@ -342,9 +391,9 @@ export function buildMacroRegimeProbabilityFromSnapshot(input: {
       penalty: clamp(1 - (overlayConflictFactor * confidenceFactor), 0, 0.3),
     },
     supportingBlocks,
-    supportingOverlays,
-    modulatingOverlays,
-    contradictingOverlays,
+    supportingOverlays: normalizedSupportingOverlays,
+    modulatingOverlays: normalizedModulatingOverlays,
+    contradictingOverlays: normalizedContradictingOverlays,
     regimeMomentum: {
       direction,
       momentumScore,
