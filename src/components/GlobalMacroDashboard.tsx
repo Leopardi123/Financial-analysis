@@ -498,6 +498,7 @@ export default function GlobalMacroDashboard() {
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
   const [openOverlayInfoId, setOpenOverlayInfoId] = useState<string | null>(null);
+  const [openPhaseInfoId, setOpenPhaseInfoId] = useState<string | null>(null);
   const [expandedOverlayKey, setExpandedOverlayKey] = useState<string | null>(null);
   const [expandedOverlaySizeByKey, setExpandedOverlaySizeByKey] = useState<Record<string, boolean>>({});
 
@@ -2047,6 +2048,8 @@ Signal: ${gapLabel}`,
                       `C ${cx - rLeft} ${cy - rUp * 0.5}, ${cx - rLeft * 0.6} ${cy - rUp}, ${cx} ${cy - rUp}`,
                       "Z",
                     ].join(" ");
+                    const arrowMid = prevPos ? { x: (50 + prevPos.x * 40 + positionLeft) / 2, y: (50 - prevPos.y * 40 + positionTop) / 2 } : null;
+                    const strongestAlt = secondaryRegimes[0]?.regime ? String(secondaryRegimes[0].regime) : "none";
                     return (
                   <div style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 8, background: "linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%)", overflow: "hidden" }}>
                     <div style={{ position: "absolute", inset: 0, border: "1px solid #cbd5e1", borderRadius: 8 }} />
@@ -2141,10 +2144,75 @@ Signal: ${gapLabel}`,
                       }}
                       title={`${String(regimeProbabilityAny?.primaryRegime ?? "—")} ${safePct(regimeProbabilityAny?.primaryWeight)}`}
                     />
+                    <InfoPopover
+                      id="phase-point-info"
+                      openId={openPhaseInfoId}
+                      onToggle={(id) => setOpenPhaseInfoId((current) => current === id ? null : id)}
+                      onClose={() => setOpenPhaseInfoId(null)}
+                      title="Current regime point"
+                      triggerClassName="phase-hit-target"
+                      triggerStyle={{ position: "absolute", left: `${positionLeft}%`, top: `${positionTop}%`, width: 20, height: 20, marginLeft: -10, marginTop: -10, borderRadius: 999, background: "transparent", border: "none", padding: 0 }}
+                      triggerContent={<span style={{ display: "none" }}>Point info</span>}
+                      sections={[
+                        {
+                          heading: "Current placement",
+                          lines: [
+                            `Current regime: ${String(regimeProbabilityAny?.primaryRegime ?? "—")}`,
+                            `Primary weight ${safePct(regimeProbabilityAny?.primaryWeight)} · decisiveness ${safePct(regimeProbabilityAny?.decisiveness)} · quality ${String(explanationSummary?.structuralQualityLabel ?? "—")}`,
+                            `Placement is driven mainly by ${Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.slice(0, 2).join(", ") : "mixed block signals"}.`,
+                          ],
+                        },
+                      ]}
+                    />
+                    {prevPos && arrowMid && movementDistance >= 0.01 && (
+                      <InfoPopover
+                        id="phase-arrow-info"
+                        openId={openPhaseInfoId}
+                        onToggle={(id) => setOpenPhaseInfoId((current) => current === id ? null : id)}
+                        onClose={() => setOpenPhaseInfoId(null)}
+                        title="Momentum arrow"
+                        triggerClassName="phase-hit-target"
+                        triggerStyle={{ position: "absolute", left: `${arrowMid.x}%`, top: `${arrowMid.y}%`, width: 22, height: 22, marginLeft: -11, marginTop: -11, borderRadius: 999, background: "transparent", border: "none", padding: 0 }}
+                        triggerContent={<span style={{ display: "none" }}>Arrow info</span>}
+                        sections={[
+                          {
+                            heading: "Previous → current movement",
+                            lines: [
+                              "Arrow starts at previous position and ends at current position.",
+                              `Movement magnitude: ${phaseMomentum.distance < 0.05 ? "small (stable)" : phaseMomentum.distance < 0.2 ? "moderate drift" : "meaningful shift"}.`,
+                              `${phaseMomentum.label}.`,
+                              `Change context: primary ${String(regimeProbabilityAny?.regimeMomentum?.primaryRegimeChange ?? "—")} · drift candidate ${String(regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ?? "none")}.`,
+                            ],
+                          },
+                        ]}
+                      />
+                    )}
+                    <InfoPopover
+                      id="phase-aura-info"
+                      openId={openPhaseInfoId}
+                      onToggle={(id) => setOpenPhaseInfoId((current) => current === id ? null : id)}
+                      onClose={() => setOpenPhaseInfoId(null)}
+                      title="Uncertainty / pull field"
+                      triggerClassName="phase-hit-target"
+                      triggerStyle={{ position: "absolute", left: `${positionLeft}%`, top: `${positionTop}%`, width: 48, height: 48, marginLeft: -24, marginTop: -24, borderRadius: 999, background: "transparent", border: "none", padding: 0 }}
+                      triggerContent={<span style={{ display: "none" }}>Aura info</span>}
+                      sections={[
+                        {
+                          heading: "Why the blob is shaped this way",
+                          lines: [
+                            "The blob shows uncertainty and competing regime pull around the current point.",
+                            `Lower decisiveness widens the field; higher decisiveness tightens it (decisiveness ${safePct(regimeProbabilityAny?.decisiveness)}).`,
+                            `Strongest alternative pull now: ${strongestAlt}.`,
+                            "Arrow shows recent movement; blob shows surrounding uncertainty/pull and may point differently.",
+                          ],
+                        },
+                      ]}
+                    />
                   </div>
                     );
                   })()}
                 </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: -6, marginBottom: 8 }}>Tap point, arrow, or aura to inspect.</div>
                 <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 10 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 6, fontSize: 12, marginBottom: 6 }}>
                     <div><strong>Primary</strong><br />{String(regimeProbabilityAny?.primaryRegime ?? globalMacro.regime?.coreRegimeLabel ?? "—")}</div>
