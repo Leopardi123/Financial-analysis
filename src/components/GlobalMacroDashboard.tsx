@@ -1665,6 +1665,10 @@ export default function GlobalMacroDashboard() {
       return { index, date, label: historyResolution === "MONTHLY" ? date.slice(0, 7) : date };
     });
   }, [historyPoints, historyResolution]);
+  const quickRegimeChartHeight = expandedRegimeHistoryChart ? 640 : 190;
+  const quickRegimePlotTop = 24;
+  const quickRegimePlotBottom = expandedRegimeHistoryChart ? 42 : 34;
+  const quickRegimePlotHeight = quickRegimeChartHeight - quickRegimePlotTop - quickRegimePlotBottom;
 
   const historyEmptyMessage = useMemo(() => {
     if (!macroHistory || historyPoints.length > 0) return null;
@@ -2351,46 +2355,46 @@ Signal: ${gapLabel}`,
                 <div style={{ fontSize: 12, marginBottom: 8 }}>{macroHistoryNarrative}</div>
                 {macroHistory && historyPoints.length > 0 ? (
                   <>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8, border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 8px", background: "#fff" }}>
-                      <label>
-                        Resolution
-                        <select value={historyResolution} onChange={(event) => setHistoryResolution(event.target.value as "WEEKLY" | "MONTHLY")} style={{ marginLeft: 6 }}>
-                          <option value="MONTHLY">MONTHLY</option>
-                          <option value="WEEKLY">WEEKLY</option>
-                        </select>
-                      </label>
-                      <label>
-                        Range
-                        <select value={String(historyRangeYears)} onChange={(event) => setHistoryRangeYears(event.target.value === "MAX" ? "MAX" : Number(event.target.value))} style={{ marginLeft: 6 }}>
-                          {historyResolution === "MONTHLY" ? (
-                            <>
-                              <option value={10}>10 år</option>
-                              <option value={20}>20 år</option>
-                              <option value="MAX">Max</option>
-                            </>
-                          ) : (
-                            <>
-                              <option value={1}>1 år</option>
-                              <option value={3}>3 år</option>
-                              <option value={5}>5 år</option>
-                            </>
-                          )}
-                        </select>
-                      </label>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <div style={{ fontSize: 12, color: "#475569" }}>
+                    <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 8px", background: "#fff", marginBottom: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <label>
+                            Resolution
+                            <select value={historyResolution} onChange={(event) => setHistoryResolution(event.target.value as "WEEKLY" | "MONTHLY")} style={{ marginLeft: 6 }}>
+                              <option value="MONTHLY">MONTHLY</option>
+                              <option value="WEEKLY">WEEKLY</option>
+                            </select>
+                          </label>
+                          <label>
+                            Range
+                            <select value={String(historyRangeYears)} onChange={(event) => setHistoryRangeYears(event.target.value === "MAX" ? "MAX" : Number(event.target.value))} style={{ marginLeft: 6 }}>
+                              {historyResolution === "MONTHLY" ? (
+                                <>
+                                  <option value={10}>10 år</option>
+                                  <option value={20}>20 år</option>
+                                  <option value="MAX">Max</option>
+                                </>
+                              ) : (
+                                <>
+                                  <option value={1}>1 år</option>
+                                  <option value={3}>3 år</option>
+                                  <option value={5}>5 år</option>
+                                </>
+                              )}
+                            </select>
+                          </label>
+                        </div>
+                        <button className="macro-lab-expand" type="button" onClick={() => setExpandedRegimeHistoryChart((prev) => !prev)} title={expandedRegimeHistoryChart ? "Collapse" : "Expand"}>
+                          {expandedRegimeHistoryChart ? "⤢" : "⤡"}
+                        </button>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: "#475569", marginBottom: 4 }}>
                         Visible range: {historyPoints[0]?.asOfDate ?? "—"} to {historyPoints[historyPoints.length - 1]?.asOfDate ?? "—"}
                       </div>
-                      <button className="macro-lab-expand" type="button" onClick={() => setExpandedRegimeHistoryChart((prev) => !prev)} title={expandedRegimeHistoryChart ? "Collapse" : "Expand"}>
-                        {expandedRegimeHistoryChart ? "⤢" : "⤡"}
-                      </button>
-                    </div>
-                    <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 8 }}>
-                      <svg viewBox="0 0 1000 170" style={{ width: "100%", height: expandedRegimeHistoryChart ? 510 : 220, display: "block" }} role="img" aria-label="Regime history quick timeline">
+                      <svg viewBox={`0 0 1000 ${quickRegimeChartHeight}`} style={{ width: "100%", height: quickRegimeChartHeight, display: "block" }} role="img" aria-label="Regime history quick timeline">
                         {regimeIntervals.map((interval) => {
                           const pos = segmentPosition(interval.startDate, interval.endDate);
-                          return <rect key={`hist-quick-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`} x={40 + (pos.left / 100) * 940} y={18} width={(pos.width / 100) * 940} height={106} fill={regimeColor(interval.coreRegimeLabel)} fillOpacity={0.45} />;
+                          return <rect key={`hist-quick-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`} x={40 + (pos.left / 100) * 940} y={quickRegimePlotTop} width={(pos.width / 100) * 940} height={quickRegimePlotHeight} fill={regimeColor(interval.coreRegimeLabel)} fillOpacity={0.45} />;
                         })}
                         <polyline
                           fill="none"
@@ -2398,21 +2402,21 @@ Signal: ${gapLabel}`,
                           strokeWidth={1.9}
                           points={historyPoints.filter((point) => typeof point.macroScoreTotal === "number").map((point) => {
                             const x = 40 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 940;
-                            const y = 18 + (1 - (point.macroScoreTotal ?? 0) / 100) * 106;
+                            const y = quickRegimePlotTop + (1 - (point.macroScoreTotal ?? 0) / 100) * quickRegimePlotHeight;
                             return `${x},${y}`;
                           }).join(" ")}
                         />
                         {historyPoints.filter((point) => point.regimeChanged && typeof point.macroScoreTotal === "number").map((point) => {
                           const x = 40 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 940;
-                          const y = 18 + (1 - (point.macroScoreTotal ?? 0) / 100) * 106;
-                          return <circle key={`hist-quick-change-${point.asOfDate}`} cx={x} cy={y} r={2.6} fill="#7f1d1d" />;
+                          const y = quickRegimePlotTop + (1 - (point.macroScoreTotal ?? 0) / 100) * quickRegimePlotHeight;
+                          return <circle key={`hist-quick-change-${point.asOfDate}`} cx={x} cy={y} r={3.2} fill="#7f1d1d" />;
                         })}
                         {latestHistoryPoint && typeof latestHistoryPoint.macroScoreTotal === "number" && (
-                          <circle cx={40 + (segmentPosition(latestHistoryPoint.asOfDate, latestHistoryPoint.asOfDate).left / 100) * 940} cy={18 + (1 - latestHistoryPoint.macroScoreTotal / 100) * 106} r={4} fill="#fff" stroke="#111827" strokeWidth={1.2} />
+                          <circle cx={40 + (segmentPosition(latestHistoryPoint.asOfDate, latestHistoryPoint.asOfDate).left / 100) * 940} cy={quickRegimePlotTop + (1 - latestHistoryPoint.macroScoreTotal / 100) * quickRegimePlotHeight} r={4.2} fill="#fff" stroke="#111827" strokeWidth={1.2} />
                         )}
-                        <line x1={40} y1={124} x2={980} y2={124} stroke="#94a3b8" strokeWidth={1} />
-                        <text x={40} y={145} fontSize={12} fill="#475569">{historyPoints[0]?.asOfDate ?? "—"}</text>
-                        <text x={980} y={145} textAnchor="end" fontSize={12} fill="#475569">{historyPoints[historyPoints.length - 1]?.asOfDate ?? "—"}</text>
+                        <line x1={40} y1={quickRegimeChartHeight - quickRegimePlotBottom} x2={980} y2={quickRegimeChartHeight - quickRegimePlotBottom} stroke="#94a3b8" strokeWidth={1} />
+                        <text x={40} y={quickRegimeChartHeight - 10} fontSize={14} fill="#475569">{historyPoints[0]?.asOfDate ?? "—"}</text>
+                        <text x={980} y={quickRegimeChartHeight - 10} textAnchor="end" fontSize={14} fill="#475569">{historyPoints[historyPoints.length - 1]?.asOfDate ?? "—"}</text>
                       </svg>
                     </div>
                     <div style={{ fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
