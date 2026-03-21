@@ -1665,19 +1665,19 @@ export default function GlobalMacroDashboard() {
     };
 
     if (primaryRegime === "FiscalPressureBuilding") {
+      pushUnique(favored, "Gold");
+      pushUnique(favored, "Energy");
+      pushUnique(neutral, "Broad equities");
       pushUnique(underPressure, "Duration assets");
       pushUnique(underPressure, "Small caps");
-      pushUnique(favored, "Real assets");
-      pushUnique(favored, "Commodities");
-      pushUnique(neutral, "Broad equities");
     } else if (primaryRegime === "MonetaryDominance") {
       pushUnique(favored, "Duration assets");
       pushUnique(favored, "Growth equities");
       pushUnique(neutral, "Broad equities");
       pushUnique(neutral, "Industrials");
     } else if (primaryRegime === "FiscalDominanceRisk") {
-      pushUnique(favored, "Real assets");
-      pushUnique(favored, "Inflation hedges");
+      pushUnique(favored, "Gold");
+      pushUnique(favored, "Energy");
       pushUnique(underPressure, "Duration assets");
       pushUnique(underPressure, "Small caps");
       pushUnique(neutral, "Broad equities");
@@ -1685,7 +1685,7 @@ export default function GlobalMacroDashboard() {
       pushUnique(neutral, "Broad equities");
       pushUnique(neutral, "Industrials");
       pushUnique(neutral, "Duration assets");
-      pushUnique(neutral, "Commodities");
+      pushUnique(neutral, "Gold");
     }
 
     if (momentumDirection === "weakening" || momentumDirection === "transitioning") {
@@ -1708,6 +1708,13 @@ export default function GlobalMacroDashboard() {
     const energyShockScore = overlays.energyShockOverlay?.score;
     const inflationCostShockScore = overlays.inflationCostShockOverlay?.score;
     if (isSupportive(energyShockScore) || isSupportive(inflationCostShockScore)) pushUnique(favored, "Energy");
+    if (isSupportive(energyShockScore) && isSupportive(inflationCostShockScore)) pushUnique(favored, "Copper");
+
+    const localUnrestScore = overlays.localUnrestOverlay?.score;
+    if (isSupportive(localUnrestScore)) {
+      pushUnique(favored, "Gold");
+      pushUnique(favored, "Energy");
+    }
 
     const liquidityScore = overlays.liquidityOverlay?.score;
     if (isContradicting(liquidityScore)) {
