@@ -1710,17 +1710,63 @@ export default function GlobalMacroDashboard() {
       contribution: typeof driver.contribution === "number" ? driver.contribution : 0,
     }));
     const focusAny = focusPoint as any;
-    const historicalOverlays = focusAny?.overlays && typeof focusAny.overlays === "object" ? focusAny.overlays : null;
+    const probableOverlayMaps = [
+      focusAny?.overlays,
+      focusAny?.overlayBundle?.overlays,
+      focusAny?.thematicOverlays,
+      focusAny?.macroRegimeProbability?.thematicOverlays,
+      focusAny?.regimeProbability?.thematicOverlays,
+      focusAny?.macroRegimeProbability?.overlaySnapshots,
+      focusAny?.regimeProbability?.overlaySnapshots,
+    ].filter((entry) => entry && typeof entry === "object");
+    const overlayInfluence = focusAny?.macroRegimeProbability ?? focusAny?.regimeProbability ?? null;
+    const normalizeOverlayId = (value: unknown) => String(value ?? "")
+      .toLowerCase()
+      .replace(/^thematic:/, "")
+      .replace(/^legacy:/, "")
+      .trim();
+    const supporting = new Set(
+      (Array.isArray(overlayInfluence?.supportingOverlays) ? overlayInfluence.supportingOverlays : [])
+        .map(normalizeOverlayId),
+    );
+    const modulating = new Set(
+      (Array.isArray(overlayInfluence?.modulatingOverlays) ? overlayInfluence.modulatingOverlays : [])
+        .map(normalizeOverlayId),
+    );
+    const contradicting = new Set(
+      (Array.isArray(overlayInfluence?.contradictingOverlays) ? overlayInfluence.contradictingOverlays : [])
+        .map(normalizeOverlayId),
+    );
     const thematicOverlayContext: HistoricalOverlayRow[] = thematicOverlayDefs.map((def) => {
-      const overlay = historicalOverlays?.[def.key];
+      const overlay = probableOverlayMaps
+        .map((row: any) => row?.[def.key])
+        .find((row: unknown) => row && typeof row === "object");
+      const normalizedKey = normalizeOverlayId(def.key);
       if (overlay && typeof overlay === "object") {
         const label = typeof overlay.label === "string" && overlay.label.trim() ? overlay.label.trim() : "State unavailable";
         return {
           key: def.key,
           name: def.name,
           label,
-          score: typeof overlay.score === "number" ? overlay.score : null,
+          score: typeof overlay.score === "number"
+            ? overlay.score
+            : (typeof focusAny?.overlayScores?.[def.key] === "number" ? focusAny.overlayScores[def.key] : null),
           available: true,
+        };
+      }
+      if (supporting.has(normalizedKey) || modulating.has(normalizedKey) || contradicting.has(normalizedKey)) {
+        const inferredLabel = contradicting.has(normalizedKey)
+          ? "Contradicting"
+          : supporting.has(normalizedKey)
+            ? "Supportive"
+            : "Modulating";
+        return {
+          key: def.key,
+          name: def.name,
+          label: inferredLabel,
+          score: typeof focusAny?.overlayScores?.[def.key] === "number" ? focusAny.overlayScores[def.key] : null,
+          available: true,
+          reason: "Inferred from regime probability overlay influence",
         };
       }
       return {
