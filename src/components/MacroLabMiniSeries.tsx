@@ -35,6 +35,8 @@ export default function MacroLabMiniSeries({
   rightControls,
   showZeroLine = false,
   symmetricAroundZero = false,
+  expandGlyphCollapsed = "⤡",
+  expandGlyphExpanded = "⤢",
 }: {
   id: string;
   title: string;
@@ -47,6 +49,8 @@ export default function MacroLabMiniSeries({
   rightControls?: React.ReactNode;
   showZeroLine?: boolean;
   symmetricAroundZero?: boolean;
+  expandGlyphCollapsed?: string;
+  expandGlyphExpanded?: string;
 }) {
   const w = 980;
   const h = expanded ? 300 : 150;
@@ -72,7 +76,7 @@ export default function MacroLabMiniSeries({
         <div className="macro-lab-chart-title">{title}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {rightControls}
-          <button className="macro-lab-expand" onClick={() => onToggleExpand(id)} title={expanded ? "Collapse" : "Expand"}>{expanded ? "⤢" : "⤡"}</button>
+          <button className="macro-lab-expand" onClick={() => onToggleExpand(id)} title={expanded ? "Collapse" : "Expand"}>{expanded ? expandGlyphExpanded : expandGlyphCollapsed}</button>
         </div>
       </div>
       <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: "100%", height: `${h}px`, display: "block" }} onClick={(e) => {
