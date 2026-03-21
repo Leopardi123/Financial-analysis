@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
 import InfoPopover from "./InfoPopover";
-import MacroLabMiniSeries from "./MacroLabMiniSeries";
 
 type GlobalMacroPayload = {
   regime: {
@@ -524,6 +523,8 @@ export default function GlobalMacroDashboard() {
   const [openOverlayInfoId, setOpenOverlayInfoId] = useState<string | null>(null);
   const [expandedOverlayKey, setExpandedOverlayKey] = useState<string | null>(null);
   const [expandedOverlaySizeByKey, setExpandedOverlaySizeByKey] = useState<Record<string, boolean>>({});
+  const [expandedRegimeHistoryChart, setExpandedRegimeHistoryChart] = useState(false);
+  const [expandedBlockHistoryChart, setExpandedBlockHistoryChart] = useState(false);
   const [phaseSelectionNote, setPhaseSelectionNote] = useState<string>("Klicka på pil, blob eller punkt för snabbtolkning.");
 
   const uiOverlayKeysRequested = useMemo(() => (selectedRegion === "GLOBAL"
@@ -1495,7 +1496,7 @@ export default function GlobalMacroDashboard() {
       return `${x},${y}`;
     }).join(" ");
     return (
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: chartSize === "expanded" ? 960 : 580, height: chartSize === "expanded" ? 260 : 170, display: "block" }}>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: chartSize === "expanded" ? 960 : 580, height: chartSize === "expanded" ? 170 : 88, display: "block" }}>
         {[0, 25, 50, 75, 100].map((tick) => {
           const y = top + (1 - tick / 100) * plotH;
           return <g key={`${overlayKey}-tick-${tick}`}><line x1={left} y1={y} x2={width - right} y2={y} stroke="#d1d5db" strokeWidth={1} /><text x={left - 6} y={y + 4} textAnchor="end" fontSize={10} fill="#64748b">{tick}</text></g>;
@@ -1590,16 +1591,6 @@ export default function GlobalMacroDashboard() {
     return "stable";
   }
 
-  function overlayRole(overlayKey: string): "supporting" | "modulating" | "contradicting" | "neutral" {
-    const supporting = Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays : [];
-    const modulating = Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays : [];
-    const contradicting = Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays : [];
-    if (supporting.includes(overlayKey)) return "supporting";
-    if (modulating.includes(overlayKey)) return "modulating";
-    if (contradicting.includes(overlayKey)) return "contradicting";
-    return "neutral";
-  }
-
   function normalizeRegimeWeight(value: unknown): number {
     if (typeof value !== "number" || Number.isNaN(value)) return 0;
     if (value <= 1) return value;
@@ -1664,7 +1655,7 @@ export default function GlobalMacroDashboard() {
 
   const axisTicks = useMemo(() => {
     if (historyPoints.length === 0) return [] as Array<{ index: number; date: string; label: string }>;
-    const desired = historyResolution === "MONTHLY" ? 8 : 10;
+    const desired = historyResolution === "MONTHLY" ? 6 : 8;
     const total = historyPoints.length;
     const step = Math.max(1, Math.floor((total - 1) / Math.max(1, desired - 1)));
     const idx = new Set<number>([0, total - 1]);
@@ -2295,55 +2286,56 @@ Signal: ${gapLabel}`,
                 </div>
                 <div>
                   <strong>Overlay stack</strong>
-                  <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                  <div style={{ marginTop: 6, display: "grid", gap: 5 }}>
                     {uiOverlayKeysRequested.map((overlayKey) => {
                       const overlay = activeOverlayBundle?.overlays?.[overlayKey];
-                      const role = overlayRole(overlayKey);
                       const expanded = expandedOverlayKey === overlayKey;
                       const overlayExplain = explanationOverlays.find((item: any) => item.overlayId === overlayKey);
                       const row = overlayDebugRows.find((item) => item.overlayKey === overlayKey);
                       return (
-                        <div key={`overlay-stack-${overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
+                        <div key={`overlay-stack-${overlayKey}`} style={{ border: "1px solid #cbd5e1", borderRadius: 7, background: "#fff" }}>
                           <button
                             type="button"
                             onClick={() => setExpandedOverlayKey((current) => current === overlayKey ? null : overlayKey)}
-                            style={{ width: "100%", border: "none", background: "transparent", textAlign: "left", cursor: "pointer", padding: "8px 10px", display: "flex", justifyContent: "space-between", gap: 8 }}
+                            style={{ width: "100%", border: "none", background: "transparent", textAlign: "left", cursor: "pointer", padding: "5px 8px", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}
                           >
-                            <span style={{ fontSize: 13, fontWeight: 700 }}>{normalizeOverlayLabel(overlayKey)}</span>
-                            <span style={{ fontSize: 12 }}>score {safeNumber(overlay?.score, 1)} · {overlay?.label ?? "—"} · role {role}</span>
+                            <span style={{ fontSize: 12.5, fontWeight: 700 }}>{normalizeOverlayLabel(overlayKey)}</span>
+                            <span style={{ fontSize: 12, color: "#334155" }}>{overlay?.label ?? "—"}</span>
                           </button>
                           {expanded && (
-                            <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 10px" }}>
-                              <div style={{ fontSize: 12, marginBottom: 8 }}>{overlay?.runtime?.directionTag ? `Direction: ${String(overlay.runtime.directionTag)} · ` : ""}confidence {safePct(overlay?.confidence)}</div>
-                              <MacroLabMiniSeries
-                                id={`overlay-inline-${overlayKey}`}
-                                title={`${normalizeOverlayLabel(overlayKey)} history`}
-                                dates={overlayHistoryPoints.map((point) => point.asOfDate)}
-                                lines={[{
-                                  label: normalizeOverlayLabel(overlayKey),
-                                  color: "#7c3aed",
-                                  data: overlayHistoryPoints.map((point) => {
-                                    const value = point.scores?.[overlayKey];
-                                    return typeof value === "number" ? value : null;
-                                  }),
-                                }]}
-                                selectedRange={null}
-                                onSelectRange={() => {}}
-                                expanded={Boolean(expandedOverlaySizeByKey[overlayKey])}
-                                onToggleExpand={() => setExpandedOverlaySizeByKey((prev) => ({ ...prev, [overlayKey]: !prev[overlayKey] }))}
-                                rightControls={row ? (
-                                  <InfoPopover
-                                    id={`overlay-inline-info-${overlayKey}`}
-                                    openId={openOverlayInfoId}
-                                    onToggle={(id) => setOpenOverlayInfoId((current) => (current === id ? null : id))}
-                                    onClose={() => setOpenOverlayInfoId(null)}
-                                    title={`${normalizeOverlayLabel(overlayKey)} info`}
-                                    sections={buildOverlayInfoSections(row)}
-                                  />
-                                ) : null}
-                              />
-                              <div style={{ fontSize: 12, marginTop: 6 }}>
+                            <div style={{ borderTop: "1px solid #e2e8f0", padding: "6px 8px 7px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600 }}>{normalizeOverlayLabel(overlayKey)} history</div>
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedOverlaySizeByKey((prev) => ({ ...prev, [overlayKey]: !prev[overlayKey] }))}
+                                    style={{ border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff", cursor: "pointer", padding: "2px 8px", fontSize: 11 }}
+                                    title="Resize chart"
+                                  >
+                                    &lt;—&gt;
+                                  </button>
+                                  {row ? (
+                                    <InfoPopover
+                                      id={`overlay-inline-info-${overlayKey}`}
+                                      openId={openOverlayInfoId}
+                                      onToggle={(id) => setOpenOverlayInfoId((current) => (current === id ? null : id))}
+                                      onClose={() => setOpenOverlayInfoId(null)}
+                                      title={`${normalizeOverlayLabel(overlayKey)} info`}
+                                      sections={buildOverlayInfoSections(row)}
+                                    />
+                                  ) : null}
+                                </div>
+                              </div>
+                              {renderOverlayHistoryChart(overlayKey, expandedOverlaySizeByKey[overlayKey] ? "expanded" : "compact")}
+                              <div style={{ fontSize: 11.5, marginTop: 5, color: "#475569" }}>
+                                Visible range: {overlayHistoryPoints[0]?.asOfDate ?? "—"} to {overlayHistoryPoints[overlayHistoryPoints.length - 1]?.asOfDate ?? "—"}
+                              </div>
+                              <div style={{ fontSize: 11.5, marginTop: 4, color: "#334155" }}>
                                 {String(overlayExplain?.narrative ?? row?.implementationDelta?.[5] ?? `${normalizeOverlayLabel(overlayKey)} är ${overlay?.label ?? "neutral"} och påverkar hur regimtolkningen ska vägas.`)}
+                              </div>
+                              <div style={{ fontSize: 11.5, marginTop: 4 }}>
+                                {overlay?.runtime?.directionTag ? `Direction: ${String(overlay.runtime.directionTag)} · ` : ""}confidence {safePct(overlay?.confidence)} · score {safeNumber(overlay?.score, 1)}
                               </div>
                             </div>
                           )}
@@ -3044,8 +3036,13 @@ Signal: ${gapLabel}`,
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
               <h4 style={{ marginTop: 0 }}>GLOBAL MACRO — HISTORIK (FÖRDJUPNING)</h4>
-              <h5>Macro Regime History</h5>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                <h5 style={{ margin: 0 }}>Macro Regime History</h5>
+                <div style={{ fontSize: 12, color: "#475569" }}>
+                  Visible range: {historyPoints[0]?.asOfDate ?? "—"} to {historyPoints[historyPoints.length - 1]?.asOfDate ?? "—"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8, border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 8px", background: "#fff" }}>
                 <label>
                   Resolution
                   <select value={historyResolution} onChange={(event) => setHistoryResolution(event.target.value as "WEEKLY" | "MONTHLY")} style={{ marginLeft: 6 }}>
@@ -3082,8 +3079,11 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12, marginBottom: 6 }}>
                     <strong>Score zones:</strong> ≤{macroHistory.template.thresholds.monetaryDominanceMax} MonetaryDominance, {macroHistory.template.thresholds.monetaryDominanceMax + 1}–{macroHistory.template.thresholds.balancedMax} Balanced, {macroHistory.template.thresholds.balancedMax + 1}–{macroHistory.template.thresholds.fiscalPressureMax} FiscalPressureBuilding, &gt;{macroHistory.template.thresholds.fiscalPressureMax} FiscalDominanceRisk.
                   </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                    <button type="button" onClick={() => setExpandedRegimeHistoryChart((prev) => !prev)} style={{ border: "1px solid #8e8678", borderRadius: 6, background: "#2f2b27", color: "#d6cfc4", cursor: "pointer", padding: "3px 9px", fontSize: 11 }}>&lt;—&gt;</button>
+                  </div>
                   <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27", marginBottom: 8 }}>
-                    <svg viewBox="0 0 1000 320" style={{ width: "100%", height: "360px", display: "block" }} role="img" aria-label="Macro score history med regimebakgrund">
+                    <svg viewBox="0 0 1000 320" style={{ width: "100%", height: expandedRegimeHistoryChart ? "760px" : "350px", display: "block" }} role="img" aria-label="Macro score history med regimebakgrund">
                       {regimeIntervals.map((interval) => {
                         const pos = segmentPosition(interval.startDate, interval.endDate);
                         return (
@@ -3128,7 +3128,7 @@ Signal: ${gapLabel}`,
                       {[0, 25, 50, 75, 100].map((tick) => (
                         <g key={`score-y-${tick}`}>
                           <line x1={72} y1={28 + (1 - tick / 100) * 240} x2={972} y2={28 + (1 - tick / 100) * 240} stroke="#62584d" strokeWidth={1} />
-                          <text x={52} y={32 + (1 - tick / 100) * 240} textAnchor="end" fontSize={11} fill="#d6cfc4">{tick}</text>
+                          <text x={52} y={32 + (1 - tick / 100) * 240} textAnchor="end" fontSize={13} fill="#d6cfc4">{tick}</text>
                         </g>
                       ))}
 
@@ -3194,7 +3194,7 @@ Signal: ${gapLabel}`,
                         return (
                           <g key={`score-x-${tick.index}`}>
                             <line x1={x} y1={268} x2={x} y2={272} stroke="#b8afa1" strokeWidth={1} />
-                            <text x={x} y={289} textAnchor="middle" fontSize={11} fill="#d6cfc4">{tick.label}</text>
+                            <text x={x} y={289} textAnchor="middle" fontSize={13} fill="#d6cfc4">{tick.label}</text>
                           </g>
                         );
                       })}
@@ -3208,6 +3208,41 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12, marginBottom: 8 }}>
                     Latest punkt: <strong>{latestHistoryPoint?.asOfDate ?? "—"}</strong> | Regim <strong>{latestHistoryPoint?.coreRegimeLabel ?? "—"}</strong> | Score <strong>{typeof latestHistoryPoint?.macroScoreTotal === "number" ? latestHistoryPoint.macroScoreTotal.toFixed(1) : "—"}</strong> | Top driver <strong>{latestHistoryPoint?.topDriver ?? "—"}</strong> | Changes logged <strong>{macroRegimeHistory.changeLog.length}</strong>
                   </div>
+                  <details>
+                    <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 600 }}>▸ 2) Regime Change Log</summary>
+                    <div style={{ overflowX: "auto", marginBottom: 8, marginTop: 8 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Datum</th>
+                          <th>Från</th>
+                          <th>Till</th>
+                          <th>Shift quality</th>
+                          <th>Decisiveness</th>
+                          <th>Note</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {macroRegimeHistory.changeLog.length > 0 ? (
+                          macroRegimeHistory.changeLog.map((row) => (
+                            <tr key={`change-${row.date}-${row.fromRegime ?? "none"}-${row.toRegime}`}>
+                              <td>{row.date}</td>
+                              <td>{row.fromRegime ?? "—"}</td>
+                              <td>{row.toRegime}</td>
+                              <td>{row.shiftQuality}</td>
+                              <td>{typeof row.decisivenessAtChange === "number" ? safePct(row.decisivenessAtChange) : "—"}</td>
+                              <td>{row.note}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6}>No regime changes in selected range ({String(macroRegimeHistory.range)} {macroRegimeHistory.resolution.toLowerCase()}).</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                    </div>
+                  </details>
                   {selectedRegimeInterval && (
                     <div style={{ marginBottom: 12, fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
                       <strong>{selectedRegimeInterval.coreRegimeLabel}</strong> · {selectedRegimeInterval.startDate} → {selectedRegimeInterval.endDate} · {selectedRegimeInterval.pointCount} punkter<br />
@@ -3222,7 +3257,10 @@ Signal: ${gapLabel}`,
                     </div>
                   )}
 
-                  <h5>2) Block History (Neon Focus)</h5>
+                  <h5>3) Block History</h5>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                    <button type="button" onClick={() => setExpandedBlockHistoryChart((prev) => !prev)} style={{ border: "1px solid #8e8678", borderRadius: 6, background: "#2f2b27", color: "#d6cfc4", cursor: "pointer", padding: "3px 9px", fontSize: 11 }}>&lt;—&gt;</button>
+                  </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                     {blockSeriesMeta.map((series) => {
                       const isFocused = focusedBlockSeries === series.key;
@@ -3254,7 +3292,7 @@ Signal: ${gapLabel}`,
                   <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27", marginBottom: 8 }}>
                     <svg
                       viewBox="0 0 1000 320"
-                      style={{ width: "100%", height: "340px", display: "block" }}
+                      style={{ width: "100%", height: expandedBlockHistoryChart ? "760px" : "350px", display: "block" }}
                       onMouseMove={(event) => {
                         const rect = event.currentTarget.getBoundingClientRect();
                         const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 72) / 900));
@@ -3270,7 +3308,7 @@ Signal: ${gapLabel}`,
                       {[0, 25, 50, 75, 100].map((tick) => (
                         <g key={`block-y-${tick}`}>
                           <line x1={72} y1={28 + (1 - tick / 100) * 240} x2={972} y2={28 + (1 - tick / 100) * 240} stroke="#5f564a" strokeWidth={1} />
-                          <text x={62} y={32 + (1 - tick / 100) * 240} textAnchor="end" fontSize={11} fill="#d6cfc4">{tick}</text>
+                          <text x={62} y={32 + (1 - tick / 100) * 240} textAnchor="end" fontSize={13} fill="#d6cfc4">{tick}</text>
                         </g>
                       ))}
 
@@ -3319,11 +3357,14 @@ Signal: ${gapLabel}`,
                         return (
                           <g key={`block-x-${tick.index}`}>
                             <line x1={x} y1={268} x2={x} y2={272} stroke="#b8afa1" strokeWidth={1} />
-                            <text x={x} y={289} textAnchor="middle" fontSize={11} fill="#d6cfc4">{tick.label}</text>
+                            <text x={x} y={289} textAnchor="middle" fontSize={13} fill="#d6cfc4">{tick.label}</text>
                           </g>
                         );
                       })}
                     </svg>
+                  </div>
+                  <div style={{ fontSize: 12, marginBottom: 8, color: "#475569" }}>
+                    Visible range: {historyPoints[0]?.asOfDate ?? "—"} to {historyPoints[historyPoints.length - 1]?.asOfDate ?? "—"}
                   </div>
                   {blockHoverIndex !== null && historyPoints[blockHoverIndex] && (
                     <div style={{ fontSize: 12, marginBottom: 12, border: "1px solid #8e8678", borderRadius: 8, padding: "8px 10px", background: "#2f2b27", color: "#ece4d7" }}>
@@ -3331,44 +3372,8 @@ Signal: ${gapLabel}`,
                     </div>
                   )}
 
-                  <h5>3) Legacy Overlay Timelines</h5>
+                  <h5>4) Legacy Overlay Timelines</h5>
                   <div className="status" style={{ marginBottom: 8 }}>Legacy overlay-tidslinjer och debug finns i Admin.</div>
-
-                  <details>
-                    <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 600 }}>▸ 4) Regime Change Log</summary>
-                    <div style={{ overflowX: "auto", marginBottom: 8, marginTop: 8 }}>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Datum</th>
-                          <th>Från</th>
-                          <th>Till</th>
-                          <th>Shift quality</th>
-                          <th>Decisiveness</th>
-                          <th>Note</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {macroRegimeHistory.changeLog.length > 0 ? (
-                          macroRegimeHistory.changeLog.map((row) => (
-                            <tr key={`change-${row.date}-${row.fromRegime ?? "none"}-${row.toRegime}`}>
-                              <td>{row.date}</td>
-                              <td>{row.fromRegime ?? "—"}</td>
-                              <td>{row.toRegime}</td>
-                              <td>{row.shiftQuality}</td>
-                              <td>{typeof row.decisivenessAtChange === "number" ? safePct(row.decisivenessAtChange) : "—"}</td>
-                              <td>{row.note}</td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={6}>No regime changes in selected range ({String(macroRegimeHistory.range)} {macroRegimeHistory.resolution.toLowerCase()}).</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                    </div>
-                  </details>
                 </>
               ) : (
                 <div className="status empty">{historyEmptyMessage ?? "Ingen historik kunde genereras för vald period/upplösning."}</div>
