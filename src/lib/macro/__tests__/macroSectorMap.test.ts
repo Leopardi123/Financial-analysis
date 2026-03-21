@@ -10,8 +10,8 @@ import { buildMacroSectorMap } from "../macroSectorMap.ts";
 
   const sectorMap = buildMacroSectorMap(assetMap);
   assert.equal(sectorMap.metadata.derivedFromAssetMap, true);
-  assert.ok(sectorMap.favored.some((item) => item.id === "gold-miners"));
-  assert.ok(sectorMap.underPressure.some((item) => item.id === "long-duration-tech"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "gold_miners"));
+  assert.ok(sectorMap.underPressure.some((item) => item.id === "tech"));
 })();
 
 (function testOverlaySectorInterpretation() {
@@ -25,9 +25,31 @@ import { buildMacroSectorMap } from "../macroSectorMap.ts";
   });
 
   const sectorMap = buildMacroSectorMap(assetMap);
-  assert.ok(sectorMap.favored.some((item) => item.id === "gold-hard-assets-safehaven"));
-  assert.ok(sectorMap.favored.some((item) => item.id === "defense-energy-logistics"));
-  assert.ok(sectorMap.neutral.some((item) => item.id === "financials-cyclicals-softened"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "gold_miners"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "defense"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "energy"));
+  assert.ok(sectorMap.neutral.some((item) => item.id === "financials"));
+})();
+
+(function testCanonicalDedupAndLabelCleanliness() {
+  const assetMap = buildMacroAssetMap({
+    primaryRegime: "FiscalPressureBuilding",
+    overlays: {
+      safeHavenRiskOffOverlay: { score: 75 },
+      localUnrestOverlay: { score: 75 },
+      energyShockOverlay: { score: 80 },
+      inflationCostShockOverlay: { score: 80 },
+    },
+  });
+
+  const sectorMap = buildMacroSectorMap(assetMap);
+  const favoredIds = sectorMap.favored.map((item) => item.id);
+  const uniqueFavoredIds = new Set(favoredIds);
+  assert.equal(favoredIds.length, uniqueFavoredIds.size);
+  assert.ok(!sectorMap.favored.some((item) => item.title.includes("/")));
+
+  const goldMiners = sectorMap.favored.find((item) => item.id === "gold_miners");
+  assert.ok(goldMiners?.sourceAssets.some((asset) => asset.id === "gold"));
 })();
 
 (function testSourceAssetsAreTracked() {
@@ -36,9 +58,9 @@ import { buildMacroSectorMap } from "../macroSectorMap.ts";
     momentumDirection: "stable",
   });
   const sectorMap = buildMacroSectorMap(assetMap);
-  const growthTech = sectorMap.favored.find((item) => item.id === "growth-tech");
-  assert.ok(growthTech);
-  assert.ok(growthTech?.sourceAssets.some((asset) => asset.id === "growthEquities"));
+  const tech = sectorMap.favored.find((item) => item.id === "tech");
+  assert.ok(tech);
+  assert.ok(tech?.sourceAssets.some((asset) => asset.id === "growthEquities"));
 })();
 
 console.log("macroSectorMap.test.ts: all tests passed");

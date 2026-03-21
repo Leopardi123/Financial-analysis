@@ -22,6 +22,33 @@ type SectorCandidate = {
   rationale: string;
 };
 
+type CanonicalSectorId =
+  | "energy"
+  | "materials"
+  | "gold_miners"
+  | "defense"
+  | "industrials"
+  | "financials"
+  | "tech"
+  | "utilities"
+  | "consumer"
+  | "small_caps"
+  | "shipping_logistics";
+
+const CANONICAL_SECTOR_TITLE: Record<CanonicalSectorId, string> = {
+  energy: "Energy",
+  materials: "Materials",
+  gold_miners: "Gold miners",
+  defense: "Defense",
+  industrials: "Industrials",
+  financials: "Financials",
+  tech: "Tech",
+  utilities: "Utilities",
+  consumer: "Consumer",
+  small_caps: "Small caps",
+  shipping_logistics: "Shipping / logistics",
+};
+
 const ASSET_TO_SECTORS: Record<string, SectorCandidate[]> = {
   gold: [
     { id: "gold-miners", title: "Gold miners", rationale: "Gold is macro-favored, supporting gold-linked equities." },
@@ -54,6 +81,59 @@ const ASSET_TO_SECTORS: Record<string, SectorCandidate[]> = {
 function bucketForAsset(item: MacroAssetMapItem): MacroAssetBucket {
   if (item.bucket === "favored" || item.bucket === "neutral" || item.bucket === "underPressure") return item.bucket;
   return "neutral";
+}
+
+function canonicalTargets(candidateId: string): CanonicalSectorId[] {
+  if (candidateId === "gold-miners") return ["gold_miners"];
+  if (candidateId === "hard-asset-defensives") return ["gold_miners"];
+  if (candidateId === "gold-hard-assets-safehaven") return ["gold_miners"];
+  if (candidateId === "energy-sector") return ["energy"];
+  if (candidateId === "materials-resources") return ["materials"];
+  if (candidateId === "resource-equities") return ["materials"];
+  if (candidateId === "defense-energy-logistics") return ["defense", "energy"];
+  if (candidateId === "long-duration-tech") return ["tech"];
+  if (candidateId === "growth-tech") return ["tech"];
+  if (candidateId === "small-caps-cyclicals") return ["small_caps"];
+  if (candidateId === "broad-market-industrials") return ["industrials"];
+  if (candidateId === "industrials") return ["industrials"];
+  if (candidateId === "financials-cyclicals-softened") return ["financials"];
+  return [];
+}
+
+function normalizeMacroSectorBucket(items: MacroSectorMapItem[]): MacroSectorMapItem[] {
+  const merged = new Map<CanonicalSectorId, MacroSectorMapItem & { rationaleParts: string[] }>();
+
+  items.forEach((item) => {
+    const targets = canonicalTargets(item.id);
+    targets.forEach((canonicalId) => {
+      const existing = merged.get(canonicalId);
+      if (!existing) {
+        merged.set(canonicalId, {
+          id: canonicalId,
+          title: CANONICAL_SECTOR_TITLE[canonicalId],
+          rationale: item.rationale,
+          rationaleParts: [item.rationale],
+          sourceAssets: [...item.sourceAssets],
+        });
+        return;
+      }
+
+      if (!existing.rationaleParts.includes(item.rationale)) {
+        existing.rationaleParts.push(item.rationale);
+      }
+
+      item.sourceAssets.forEach((asset) => {
+        if (!existing.sourceAssets.some((existingAsset) => existingAsset.id === asset.id)) {
+          existing.sourceAssets.push(asset);
+        }
+      });
+    });
+  });
+
+  return [...merged.values()].map(({ rationaleParts, ...item }) => ({
+    ...item,
+    rationale: rationaleParts.join(" | "),
+  }));
 }
 
 export function buildMacroSectorMap(assetMap: MacroAssetMap): MacroSectorMap {
@@ -131,9 +211,9 @@ export function buildMacroSectorMap(assetMap: MacroAssetMap): MacroSectorMap {
   });
 
   return {
-    favored: grouped.favored,
-    neutral: grouped.neutral,
-    underPressure: grouped.underPressure,
+    favored: normalizeMacroSectorBucket(grouped.favored),
+    neutral: normalizeMacroSectorBucket(grouped.neutral),
+    underPressure: normalizeMacroSectorBucket(grouped.underPressure),
     metadata: {
       derivedFromAssetMap: true,
     },
