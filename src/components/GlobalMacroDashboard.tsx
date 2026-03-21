@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ChartCard from "./ChartCard";
 import InfoPopover from "./InfoPopover";
 import { buildMacroAssetMap } from "../lib/macro/macroAssetMap";
+import { buildMacroSectorMap } from "../lib/macro/macroSectorMap";
 
 type GlobalMacroPayload = {
   regime: {
@@ -1726,6 +1727,8 @@ export default function GlobalMacroDashboard() {
     regimeProbabilityAny?.regimeMomentum?.direction,
   ]);
 
+  const macroSectorMap = useMemo(() => buildMacroSectorMap(macroAssetMap), [macroAssetMap]);
+
   function regimeColor(regime: string) {
     if (regime === "MonetaryDominance") return "#5a6a80";
     if (regime === "Balanced") return "#6e7b64";
@@ -2610,19 +2613,19 @@ Signal: ${gapLabel}`,
                     <div style={{ marginTop: 4 }}>
                       <div><strong>Favored:</strong></div>
                       <ul style={{ margin: "2px 0 4px", paddingLeft: 18 }}>
-                        {macroAssetMap.favored.length ? macroAssetMap.favored.map((item) => <li key={`favored-${item.id}`}>{item.title}</li>) : <li>—</li>}
+                        {macroSectorMap.favored.length ? macroSectorMap.favored.map((item) => <li key={`favored-${item.id}`}>{item.title}</li>) : <li>—</li>}
                       </ul>
                     </div>
                     <div>
                       <div><strong>Neutral:</strong></div>
                       <ul style={{ margin: "2px 0 4px", paddingLeft: 18 }}>
-                        {macroAssetMap.neutral.length ? macroAssetMap.neutral.map((item) => <li key={`neutral-${item.id}`}>{item.title}</li>) : <li>—</li>}
+                        {macroSectorMap.neutral.length ? macroSectorMap.neutral.map((item) => <li key={`neutral-${item.id}`}>{item.title}</li>) : <li>—</li>}
                       </ul>
                     </div>
                     <div>
                       <div><strong>Under pressure:</strong></div>
                       <ul style={{ margin: "2px 0 0", paddingLeft: 18 }}>
-                        {macroAssetMap.underPressure.length ? macroAssetMap.underPressure.map((item) => <li key={`under-${item.id}`}>{item.title}</li>) : <li>—</li>}
+                        {macroSectorMap.underPressure.length ? macroSectorMap.underPressure.map((item) => <li key={`under-${item.id}`}>{item.title}</li>) : <li>—</li>}
                       </ul>
                     </div>
                   </div>
