@@ -508,15 +508,18 @@ export default function GlobalMacroDashboard() {
   const [cronRefreshResult, setCronRefreshResult] = useState<Record<string, unknown> | null>(null);
   const [rebuildSnapshotResult, setRebuildSnapshotResult] = useState<Record<string, unknown> | null>(null);
   const [selectedRegimeInterval, setSelectedRegimeInterval] = useState<{
+    asOfDate: string;
     coreRegimeLabel: string;
     startDate: string;
     endDate: string;
     pointCount: number;
     topDriver: string | null;
+    macroScore: number | null;
     upFactors: string[];
     downFactors: string[];
     topDrivers: Array<{ title: string; direction: string; block: string; contribution: number }>;
     explanation: string;
+    overlayContext: string;
   } | null>(null);
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
@@ -1645,6 +1648,54 @@ export default function GlobalMacroDashboard() {
     return intervals.length > 0 ? intervals[intervals.length - 1].endDate : "—";
   }
 
+  function inflationContextAtDate(asOfDate: string): string | null {
+    const rows = inflationAnalysis?.points ?? [];
+    if (!rows.length) return null;
+    const exact = rows.find((row) => row.date === asOfDate);
+    const fallback = exact ?? rows.filter((row) => row.date <= asOfDate).slice(-1)[0] ?? rows[rows.length - 1];
+    if (!fallback) return null;
+    return `Inflation split: goods ${safeNumber(fallback.goodsInflation, 1)} · monetary ${safeNumber(fallback.monetaryInflation, 1)} · actual ${safeNumber(fallback.actualInflation, 1)} · gap ${safeNumber(fallback.monetaryInflationGap, 1)}.`;
+  }
+
+  function selectHistoricalRegimeFocus(
+    interval: { coreRegimeLabel: string; startDate: string; endDate: string; pointCount: number; topDriver: string | null },
+    focusDate: string,
+  ) {
+    const startPoint = pointByDate.get(interval.startDate);
+    const endPoint = pointByDate.get(interval.endDate);
+    const focusPoint = pointByDate.get(focusDate) ?? endPoint ?? startPoint;
+    const deltas = [
+      { key: "Fiscal", delta: (endPoint?.fiscalScore ?? 0) - (startPoint?.fiscalScore ?? 0) },
+      { key: "Monetary", delta: (endPoint?.monetaryScore ?? 0) - (startPoint?.monetaryScore ?? 0) },
+      { key: "Inflation", delta: (endPoint?.inflationScore ?? 0) - (startPoint?.inflationScore ?? 0) },
+      { key: "Credibility", delta: (endPoint?.credibilityScore ?? 0) - (startPoint?.credibilityScore ?? 0) },
+    ];
+    const topDrivers = (focusPoint?.topDrivers ?? endPoint?.topDrivers ?? []).slice(0, 5).map((driver) => ({
+      title: driver.title ?? driver.indicatorId,
+      direction: driver.direction ?? "stable",
+      block: driver.block ?? "D_CREDIBILITY",
+      contribution: typeof driver.contribution === "number" ? driver.contribution : 0,
+    }));
+    const overlaySummary = [focusPoint?.growthOverlay, focusPoint?.stressOverlay, focusPoint?.hardAssetOverlay]
+      .filter((item): item is string => Boolean(item))
+      .join(" · ");
+    const inflationContext = inflationContextAtDate(focusPoint?.asOfDate ?? focusDate);
+    setSelectedRegimeInterval({
+      asOfDate: focusPoint?.asOfDate ?? focusDate,
+      coreRegimeLabel: focusPoint?.coreRegimeLabel ?? interval.coreRegimeLabel,
+      startDate: interval.startDate,
+      endDate: interval.endDate,
+      pointCount: interval.pointCount,
+      topDriver: focusPoint?.topDriver ?? interval.topDriver,
+      macroScore: typeof focusPoint?.macroScoreTotal === "number" ? focusPoint.macroScoreTotal : null,
+      upFactors: deltas.filter((item) => item.delta > 2).map((item) => `${item.key} ↑`).slice(0, 3),
+      downFactors: deltas.filter((item) => item.delta < -2).map((item) => `${item.key} ↓`).slice(0, 3),
+      topDrivers,
+      explanation: focusPoint?.regimeExplanation?.summary ?? regimeExplanation(focusPoint?.coreRegimeLabel ?? interval.coreRegimeLabel),
+      overlayContext: [overlaySummary ? `Overlay context: ${overlaySummary}.` : "Overlay context: none.", inflationContext].filter(Boolean).join(" "),
+    });
+  }
+
 
   const blockSeriesMeta = [
     { key: "A_FISCAL" as const, label: "Fiscal", color: "#6f86a8", valueOf: (point: MacroHistoryPayload["points"][number]) => point.fiscalScore },
@@ -2394,7 +2445,19 @@ Signal: ${gapLabel}`,
                       <svg viewBox="0 0 1000 170" preserveAspectRatio="none" style={{ width: "100%", height: expandedRegimeHistoryChart ? 360 : 160, display: "block" }} role="img" aria-label="Regime history quick timeline">
                         {regimeIntervals.map((interval) => {
                           const pos = segmentPosition(interval.startDate, interval.endDate);
-                          return <rect key={`hist-quick-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`} x={22 + (pos.left / 100) * 956} y={14} width={(pos.width / 100) * 956} height={118} fill={regimeColor(interval.coreRegimeLabel)} fillOpacity={0.45} />;
+                          return (
+                            <rect
+                              key={`hist-quick-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`}
+                              x={22 + (pos.left / 100) * 956}
+                              y={14}
+                              width={(pos.width / 100) * 956}
+                              height={118}
+                              fill={regimeColor(interval.coreRegimeLabel)}
+                              fillOpacity={0.45}
+                              style={{ cursor: "pointer" }}
+                              onClick={() => selectHistoricalRegimeFocus(interval, interval.endDate)}
+                            />
+                          );
                         })}
                         <polyline
                           fill="none"
@@ -2409,7 +2472,26 @@ Signal: ${gapLabel}`,
                         {historyPoints.filter((point) => point.regimeChanged && typeof point.macroScoreTotal === "number").map((point) => {
                           const x = 22 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 956;
                           const y = 14 + (1 - (point.macroScoreTotal ?? 0) / 100) * 118;
-                          return <circle key={`hist-quick-change-${point.asOfDate}`} cx={x} cy={y} r={2.6} fill="#7f1d1d" />;
+                          const owningInterval = regimeIntervals.find((interval) => point.asOfDate >= interval.startDate && point.asOfDate <= interval.endDate) ?? latestRegimeInterval;
+                          if (!owningInterval) return null;
+                          return (
+                            <circle
+                              key={`hist-quick-change-${point.asOfDate}`}
+                              cx={x}
+                              cy={y}
+                              r={2.6}
+                              fill="#7f1d1d"
+                              style={{ cursor: "pointer" }}
+                              onClick={() => selectHistoricalRegimeFocus(owningInterval, point.asOfDate)}
+                            />
+                          );
+                        })}
+                        {historyPoints.filter((point) => typeof point.macroScoreTotal === "number").map((point) => {
+                          const x = 22 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 956;
+                          const y = 14 + (1 - (point.macroScoreTotal ?? 0) / 100) * 118;
+                          const owningInterval = regimeIntervals.find((interval) => point.asOfDate >= interval.startDate && point.asOfDate <= interval.endDate) ?? latestRegimeInterval;
+                          if (!owningInterval) return null;
+                          return <circle key={`hist-quick-hit-${point.asOfDate}`} cx={x} cy={y} r={6.2} fill="transparent" style={{ cursor: "pointer" }} onClick={() => selectHistoricalRegimeFocus(owningInterval, point.asOfDate)} />;
                         })}
                         {latestHistoryPoint && typeof latestHistoryPoint.macroScoreTotal === "number" && (
                           <circle cx={22 + (segmentPosition(latestHistoryPoint.asOfDate, latestHistoryPoint.asOfDate).left / 100) * 956} cy={14 + (1 - latestHistoryPoint.macroScoreTotal / 100) * 118} r={4} fill="#fff" stroke="#111827" strokeWidth={1.2} />
@@ -2428,11 +2510,91 @@ Signal: ${gapLabel}`,
                       ))}
                       {macroRegimeHistory.changeLog.length === 0 && <div style={{ marginTop: 4 }}>No regime changes in selected range.</div>}
                     </div>
+                    {selectedRegimeInterval && (
+                      <div style={{ marginTop: 8, marginBottom: 4, fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                        <strong>{selectedRegimeInterval.asOfDate}</strong> · {selectedRegimeInterval.coreRegimeLabel} · score {safeNumber(selectedRegimeInterval.macroScore, 1)}<br />
+                        Regime period: {selectedRegimeInterval.startDate} → {selectedRegimeInterval.endDate} ({selectedRegimeInterval.pointCount} points)<br />
+                        Top driver: <strong>{selectedRegimeInterval.topDriver ?? "—"}</strong><br />
+                        Key explanation: {selectedRegimeInterval.explanation}<br />
+                        Key drivers up/down: {selectedRegimeInterval.upFactors.join(", ") || "No clear up factors"} · {selectedRegimeInterval.downFactors.join(", ") || "No clear down factors"}<br />
+                        {selectedRegimeInterval.overlayContext}
+                        <ul>
+                          {selectedRegimeInterval.topDrivers.map((driver) => (
+                            <li key={`${driver.title}-${driver.block}`}>{driver.title} ({driver.block}) · {driver.direction} · contrib {driver.contribution.toFixed(2)}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="status empty">{historyEmptyMessage ?? "Ingen historik kunde genereras för vald period/upplösning."}</div>
                 )}
               </section>
+
+              {selectedRegion !== "GLOBAL" && macroHistory && historyPoints.length > 0 && (
+                <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
+                  <h4 style={{ marginTop: 0, marginBottom: 10 }}>Inflation History</h4>
+                  <div style={{ display: "grid", gap: 14 }}>
+                    <ChartCard title="Inflation split" chartType="LineChart" height={340} data={inflationSplitData} unitLabel="YoY %" unitKind="percent" options={{ colors: ["#6f86a8", "#5f7f63", "#a27a4a"], vAxis: { format: "#,##0.0'%'" } }} infoSections={[{ heading: "Introduktion", lines: ["Varuinflation = pristryck från energi, råvaror, varor och insatskostnader.", "Monetär inflation = pristryck från likviditet, penningmängd, kredit och balansräkningsdynamik.", `Faktisk inflation följer regional referens: ${inflationAnalysis?.metadata.actualInflationSeries ?? "—"}.`] }, { heading: "Tolkning", lines: ["Hög varuinflation + låg monetär inflation tyder på mer kostnadsdriven inflation.", "Låg varuinflation + hög monetär inflation tyder på uppbyggt monetärt tryck.", "När båda är höga är inflationsregimen bred; när båda är låga är inflationsklimatet svagt.", "Om faktisk inflation ligger under båda kan inflation vara latent; ligger den över kan en separat prischock vara i spel."] }]} />
+                    <ChartCard title="LynAldenology: Inflation" chartType="LineChart" height={340} data={lynAldenData} unitLabel="YoY %" unitKind="percent" options={{ colors: ["#5f7f63", "#7b6676", "#6f86a8", "#a27a4a"], vAxis: { format: "#,##0.0'%'" } }} infoSections={[{ heading: "Money → Assets → Commodities → Consumer prices", lines: ["Monetary pressure visar uppbyggt monetärt tryck i systemet.", "Asset inflation visar om likviditet först går in i tillgångar.", "Commodity inflation visar om trycket spiller över i råvaror.", "Consumer inflation visar när trycket når konsumentpriser."] }, { heading: "Så läser du kedjan", lines: ["Hög monetary pressure men låg consumer inflation betyder ofta tidig fas i kedjan.", "Hög asset inflation men låg CPI/HICP betyder att likviditet främst driver tillgångar.", "Hög commodity inflation efter monetärt uppsving signalerar transmission till real ekonomi.", "Hög consumer inflation efter asset/commodity-trend indikerar senare fas i inflationsprocessen."] }]} />
+                    <ChartCard title="Monetary Inflation Gap" chartType="AreaChart" height={340} data={inflationGapData} unitLabel="pp" unitKind="percent" options={{ colors: ["#6f86a8"], areaOpacity: 0.18, vAxis: { format: "#,##0.0' pp'" }, hAxis: { gridlines: { color: "#d5dcc5" } }, series: { 0: { lineWidth: 2.5 } }, intervals: { style: "area" }, baseline: 0, baselineColor: "#2f2b27" }} infoSections={[{ heading: "Vad gapet visar", lines: ["Positivt gap = monetärt tryck större än observerad inflation.", "Negativt gap = prisinflationen är högre än det monetära tryckmåttet.", "Nära noll = monetärt tryck och faktisk inflation ligger nära varandra."] }, { heading: "Signaler", lines: ["Högt positivt gap kan signalera latent inflation innan CPI/HICP fullt reagerar.", "Snabbt fallande gap kan betyda att CPI hinner ikapp eller att åtstramning biter.", "Snabbt stigande gap fungerar som tidig inflationssignal i makrolagret."] }]} />
+                    {inflationAnalysis?.metadata.proxyNotes?.length ? (
+                      <div style={{ fontSize: 12, border: "1px solid #d0d7de", borderRadius: 8, padding: "10px 12px", background: "#fff" }}>
+                        <strong>Proxy notes:</strong>
+                        <ul style={{ margin: "6px 0 0 18px" }}>
+                          {inflationAnalysis.metadata.proxyNotes.map((note) => (<li key={note}>{note}</li>))}
+                        </ul>
+                        <div style={{ marginTop: 6 }}>
+                          <strong>Series:</strong> Actual: {inflationAnalysis.metadata.actualInflationSeries} · Monetary: {inflationAnalysis.metadata.monetaryInflationSeries} · Goods: {inflationAnalysis.metadata.goodsInflationSeries} · Asset: {inflationAnalysis.metadata.assetInflationSeries} · Commodity: {inflationAnalysis.metadata.commodityInflationSeries}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              )}
+
+              {macroHistory && historyPoints.length > 0 && (
+                <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
+                  <h4 style={{ marginTop: 0, marginBottom: 8 }}>Block History</h4>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "#475569" }}>Visible range: {historyPoints[0]?.asOfDate ?? "—"} to {historyPoints[historyPoints.length - 1]?.asOfDate ?? "—"}</div>
+                    <button className="macro-lab-expand" type="button" onClick={() => setExpandedBlockHistoryChart((prev) => !prev)} title={expandedBlockHistoryChart ? "Collapse" : "Expand"}>
+                      {expandedBlockHistoryChart ? "⤢" : "⤡"}
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                    {blockSeriesMeta.map((series) => {
+                      const isFocused = focusedBlockSeries === series.key;
+                      const isDimmed = focusedBlockSeries !== null && !isFocused;
+                      return (
+                        <button key={`focus-new-${series.key}`} type="button" onClick={() => setFocusedBlockSeries((prev) => (prev === series.key ? null : series.key))} style={{ border: `1px solid ${series.color}`, background: isFocused ? series.color : "#fff", color: isFocused ? "#fff" : "#1f2937", opacity: isDimmed ? 0.42 : 1, borderRadius: 999, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>
+                          {series.label}
+                        </button>
+                      );
+                    })}
+                    <button type="button" onClick={() => setFocusedBlockSeries(null)} style={{ border: "1px solid #94a3b8", background: "#fff", color: "#334155", borderRadius: 999, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>Återställ fokus</button>
+                  </div>
+                  <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 8px", background: "#fff", marginBottom: 8 }}>
+                    <svg viewBox="0 0 1000 320" style={{ width: "100%", height: expandedBlockHistoryChart ? "760px" : "350px", display: "block" }} onMouseMove={(event) => { const rect = event.currentTarget.getBoundingClientRect(); const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 72) / 900)); setBlockHoverIndex(Math.round(ratio * Math.max(0, historyPoints.length - 1))); }} onMouseLeave={() => setBlockHoverIndex(null)} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 72) / 900)); setBlockHoverIndex(Math.round(ratio * Math.max(0, historyPoints.length - 1))); }}>
+                      {[0, 25, 50, 75, 100].map((tick) => (<g key={`new-block-y-${tick}`}><line x1={72} y1={28 + (1 - tick / 100) * 240} x2={972} y2={28 + (1 - tick / 100) * 240} stroke="#e2e8f0" strokeWidth={1} /><text x={62} y={32 + (1 - tick / 100) * 240} textAnchor="end" fontSize={13} fill="#475569">{tick}</text></g>))}
+                      {blockSeriesMeta.map((series) => {
+                        const focused = focusedBlockSeries === series.key;
+                        const dimmed = focusedBlockSeries !== null && !focused;
+                        const points = historyPoints.map((point, index) => { const value = series.valueOf(point); if (typeof value !== "number") return null; const x = 72 + ((historyPoints.length <= 1 ? 0 : index / (historyPoints.length - 1)) * 900); const y = 28 + (1 - value / 100) * 240; return `${x},${y}`; }).filter((item): item is string => item !== null).join(" ");
+                        return <polyline key={`new-block-line-${series.key}`} fill="none" stroke={series.color} strokeWidth={focused ? 3.8 : 1.8} strokeOpacity={dimmed ? 0.14 : focused ? 1 : 0.46} points={points} strokeLinecap="round" strokeLinejoin="round" />;
+                      })}
+                      {blockHoverIndex !== null && historyPoints[blockHoverIndex] && <line x1={72 + ((historyPoints.length <= 1 ? 0 : blockHoverIndex / (historyPoints.length - 1)) * 900)} y1={28} x2={72 + ((historyPoints.length <= 1 ? 0 : blockHoverIndex / (historyPoints.length - 1)) * 900)} y2={268} stroke="#94a3b8" strokeWidth={1} strokeDasharray="4 4" />}
+                      <line x1={72} y1={268} x2={972} y2={268} stroke="#94a3b8" strokeWidth={1} />
+                      {axisTicks.map((tick) => { const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900); return <g key={`new-block-x-${tick.index}`}><line x1={x} y1={268} x2={x} y2={272} stroke="#94a3b8" strokeWidth={1} /><text x={x} y={289} textAnchor="middle" fontSize={13} fill="#475569">{tick.label}</text></g>; })}
+                    </svg>
+                  </div>
+                  {blockHoverIndex !== null && historyPoints[blockHoverIndex] && (
+                    <div style={{ fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                      <strong>{historyPoints[blockHoverIndex].asOfDate}</strong> · Fiscal {historyPoints[blockHoverIndex].fiscalScore ?? "—"} · Monetary {historyPoints[blockHoverIndex].monetaryScore ?? "—"} · Inflation {historyPoints[blockHoverIndex].inflationScore ?? "—"} · Credibility {historyPoints[blockHoverIndex].credibilityScore ?? "—"}
+                    </div>
+                  )}
+                </section>
+              )}
 
               {regimeProbabilityAny ? (
                 <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
@@ -3114,28 +3276,7 @@ Signal: ${gapLabel}`,
                               fillOpacity={0.6}
                               stroke="#ffffff"
                               strokeWidth={0.5}
-                              onClick={() => {
-                                const startPoint = pointByDate.get(interval.startDate);
-                                const endPoint = pointByDate.get(interval.endDate);
-                                const deltas = [
-                                  { key: "Fiscal", delta: (endPoint?.fiscalScore ?? 0) - (startPoint?.fiscalScore ?? 0) },
-                                  { key: "Monetary", delta: (endPoint?.monetaryScore ?? 0) - (startPoint?.monetaryScore ?? 0) },
-                                  { key: "Inflation", delta: (endPoint?.inflationScore ?? 0) - (startPoint?.inflationScore ?? 0) },
-                                  { key: "Credibility", delta: (endPoint?.credibilityScore ?? 0) - (startPoint?.credibilityScore ?? 0) },
-                                ];
-                                const endTopDrivers = endPoint?.topDrivers ?? [];
-                                setSelectedRegimeInterval({
-                                  coreRegimeLabel: interval.coreRegimeLabel,
-                                  startDate: interval.startDate,
-                                  endDate: interval.endDate,
-                                  pointCount: interval.pointCount,
-                                  topDriver: interval.topDriver,
-                                  upFactors: deltas.filter((item) => item.delta > 2).map((item) => `${item.key} ↑`).slice(0, 3),
-                                  downFactors: deltas.filter((item) => item.delta < -2).map((item) => `${item.key} ↓`).slice(0, 3),
-                                  topDrivers: endTopDrivers.slice(0, 5).map((driver) => ({ title: driver.title ?? driver.indicatorId, direction: driver.direction ?? "stable", block: driver.block ?? "D_CREDIBILITY", contribution: typeof driver.contribution === "number" ? driver.contribution : 0 })),
-                                  explanation: endPoint?.regimeExplanation?.summary ?? regimeExplanation(interval.coreRegimeLabel),
-                                });
-                              }}
+                              onClick={() => selectHistoricalRegimeFocus(interval, interval.endDate)}
                               style={{ cursor: "pointer" }}
                             />
                           </g>
@@ -3274,124 +3415,7 @@ Signal: ${gapLabel}`,
                     </div>
                   )}
 
-                  <h5>3) Block History</h5>
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-                    <button className="macro-lab-expand" type="button" onClick={() => setExpandedBlockHistoryChart((prev) => !prev)} title={expandedBlockHistoryChart ? "Collapse" : "Expand"}>
-                      {expandedBlockHistoryChart ? "⤢" : "⤡"}
-                    </button>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                    {blockSeriesMeta.map((series) => {
-                      const isFocused = focusedBlockSeries === series.key;
-                      const isDimmed = focusedBlockSeries !== null && !isFocused;
-                      return (
-                        <button
-                          key={`focus-${series.key}`}
-                          type="button"
-                          onClick={() => setFocusedBlockSeries((prev) => (prev === series.key ? null : series.key))}
-                          style={{
-                            border: `1px solid ${series.color}`,
-                            background: isFocused ? series.color : "#332f2a",
-                            color: isFocused ? "#f3eee5" : "#d8d0c3",
-                            opacity: isDimmed ? 0.42 : 1,
-                            borderRadius: 999,
-                            padding: "5px 12px",
-                            fontSize: 12,
-                            cursor: "pointer",
-                          }}
-                        >
-                          {series.label}
-                        </button>
-                      );
-                    })}
-                    <button type="button" onClick={() => setFocusedBlockSeries(null)} style={{ border: "1px solid #8b8376", background: "#2f2b27", color: "#d8d0c3", borderRadius: 999, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>
-                      Återställ fokus
-                    </button>
-                  </div>
-                  <div style={{ border: "1px solid #8e8678", borderRadius: 10, padding: "8px 10px", background: "#2f2b27", marginBottom: 8 }}>
-                    <svg
-                      viewBox="0 0 1000 320"
-                      style={{ width: "100%", height: expandedBlockHistoryChart ? "760px" : "350px", display: "block" }}
-                      onMouseMove={(event) => {
-                        const rect = event.currentTarget.getBoundingClientRect();
-                        const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 72) / 900));
-                        setBlockHoverIndex(Math.round(ratio * Math.max(0, historyPoints.length - 1)));
-                      }}
-                      onMouseLeave={() => setBlockHoverIndex(null)}
-                      onClick={(event) => {
-                        const rect = event.currentTarget.getBoundingClientRect();
-                        const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 72) / 900));
-                        setBlockHoverIndex(Math.round(ratio * Math.max(0, historyPoints.length - 1)));
-                      }}
-                    >
-                      {[0, 25, 50, 75, 100].map((tick) => (
-                        <g key={`block-y-${tick}`}>
-                          <line x1={72} y1={28 + (1 - tick / 100) * 240} x2={972} y2={28 + (1 - tick / 100) * 240} stroke="#5f564a" strokeWidth={1} />
-                          <text x={62} y={32 + (1 - tick / 100) * 240} textAnchor="end" fontSize={13} fill="#d6cfc4">{tick}</text>
-                        </g>
-                      ))}
-
-                      {blockSeriesMeta.map((series) => {
-                        const focused = focusedBlockSeries === series.key;
-                        const dimmed = focusedBlockSeries !== null && !focused;
-                        const points = historyPoints
-                          .map((point, index) => {
-                            const value = series.valueOf(point);
-                            if (typeof value !== "number") return null;
-                            const x = 72 + ((historyPoints.length <= 1 ? 0 : index / (historyPoints.length - 1)) * 900);
-                            const y = 28 + (1 - value / 100) * 240;
-                            return `${x},${y}`;
-                          })
-                          .filter((item): item is string => item !== null)
-                          .join(" ");
-                        return (
-                          <polyline
-                            key={`block-line-${series.key}`}
-                            fill="none"
-                            stroke={series.color}
-                            strokeWidth={focused ? 3.8 : 1.8}
-                            strokeOpacity={dimmed ? 0.14 : focused ? 1 : 0.46}
-                            points={points}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        );
-                      })}
-
-                      {blockHoverIndex !== null && historyPoints[blockHoverIndex] && (
-                        <line
-                          x1={72 + ((historyPoints.length <= 1 ? 0 : blockHoverIndex / (historyPoints.length - 1)) * 900)}
-                          y1={28}
-                          x2={72 + ((historyPoints.length <= 1 ? 0 : blockHoverIndex / (historyPoints.length - 1)) * 900)}
-                          y2={268}
-                          stroke="#cfc5b3"
-                          strokeWidth={1}
-                          strokeDasharray="4 4"
-                        />
-                      )}
-
-                      <line x1={72} y1={268} x2={972} y2={268} stroke="#b8afa1" strokeWidth={1} />
-                      {axisTicks.map((tick) => {
-                        const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900);
-                        return (
-                          <g key={`block-x-${tick.index}`}>
-                            <line x1={x} y1={268} x2={x} y2={272} stroke="#b8afa1" strokeWidth={1} />
-                            <text x={x} y={289} textAnchor="middle" fontSize={13} fill="#d6cfc4">{tick.label}</text>
-                          </g>
-                        );
-                      })}
-                    </svg>
-                  </div>
-                  <div style={{ fontSize: 12, marginBottom: 8, color: "#475569" }}>
-                    Visible range: {historyPoints[0]?.asOfDate ?? "—"} to {historyPoints[historyPoints.length - 1]?.asOfDate ?? "—"}
-                  </div>
-                  {blockHoverIndex !== null && historyPoints[blockHoverIndex] && (
-                    <div style={{ fontSize: 12, marginBottom: 12, border: "1px solid #8e8678", borderRadius: 8, padding: "8px 10px", background: "#2f2b27", color: "#ece4d7" }}>
-                      <strong>{historyPoints[blockHoverIndex].asOfDate}</strong> · Fiscal {historyPoints[blockHoverIndex].fiscalScore ?? "—"} · Monetary {historyPoints[blockHoverIndex].monetaryScore ?? "—"} · Inflation {historyPoints[blockHoverIndex].inflationScore ?? "—"} · Credibility {historyPoints[blockHoverIndex].credibilityScore ?? "—"}
-                    </div>
-                  )}
-
-                  <h5>4) Legacy Overlay Timelines</h5>
+                  <h5>3) Legacy Overlay Timelines</h5>
                   <div className="status" style={{ marginBottom: 8 }}>Legacy overlay-tidslinjer och debug finns i Admin.</div>
                 </>
               ) : (
@@ -3440,129 +3464,6 @@ Signal: ${gapLabel}`,
               </details>
             </>
           )}
-          {selectedRegion !== "GLOBAL" && (
-            <details style={{ marginTop: 14 }}>
-              <summary style={{ cursor: "pointer", fontWeight: 700 }}>Inflation</summary>
-              <div style={{ marginTop: 12, display: "grid", gap: 18 }}>
-                <ChartCard
-                  title="Inflation split"
-                  chartType="LineChart"
-                  height={360}
-                  data={inflationSplitData}
-                  unitLabel="YoY %"
-                  unitKind="percent"
-                  options={{
-                    colors: ["#6f86a8", "#5f7f63", "#a27a4a"],
-                    vAxis: { format: "#,##0.0'%'" },
-                  }}
-                  infoSections={[
-                    {
-                      heading: "Introduktion",
-                      lines: [
-                        "Varuinflation = pristryck från energi, råvaror, varor och insatskostnader.",
-                        "Monetär inflation = pristryck från likviditet, penningmängd, kredit och balansräkningsdynamik.",
-                        `Faktisk inflation följer regional referens: ${inflationAnalysis?.metadata.actualInflationSeries ?? "—"}.`,
-                      ],
-                    },
-                    {
-                      heading: "Tolkning",
-                      lines: [
-                        "Hög varuinflation + låg monetär inflation tyder på mer kostnadsdriven inflation.",
-                        "Låg varuinflation + hög monetär inflation tyder på uppbyggt monetärt tryck.",
-                        "När båda är höga är inflationsregimen bred; när båda är låga är inflationsklimatet svagt.",
-                        "Om faktisk inflation ligger under båda kan inflation vara latent; ligger den över kan en separat prischock vara i spel.",
-                      ],
-                    },
-                  ]}
-                />
-
-                <ChartCard
-                  title="LynAldenology: Inflation"
-                  chartType="LineChart"
-                  height={360}
-                  data={lynAldenData}
-                  unitLabel="YoY %"
-                  unitKind="percent"
-                  options={{
-                    colors: ["#5f7f63", "#7b6676", "#6f86a8", "#a27a4a"],
-                    vAxis: { format: "#,##0.0'%'" },
-                  }}
-                  infoSections={[
-                    {
-                      heading: "Money → Assets → Commodities → Consumer prices",
-                      lines: [
-                        "Monetary pressure visar uppbyggt monetärt tryck i systemet.",
-                        "Asset inflation visar om likviditet först går in i tillgångar.",
-                        "Commodity inflation visar om trycket spiller över i råvaror.",
-                        "Consumer inflation visar när trycket når konsumentpriser.",
-                      ],
-                    },
-                    {
-                      heading: "Så läser du kedjan",
-                      lines: [
-                        "Hög monetary pressure men låg consumer inflation betyder ofta tidig fas i kedjan.",
-                        "Hög asset inflation men låg CPI/HICP betyder att likviditet främst driver tillgångar.",
-                        "Hög commodity inflation efter monetärt uppsving signalerar transmission till real ekonomi.",
-                        "Hög consumer inflation efter asset/commodity-trend indikerar senare fas i inflationsprocessen.",
-                      ],
-                    },
-                  ]}
-                />
-
-                <ChartCard
-                  title="Monetary Inflation Gap"
-                  chartType="AreaChart"
-                  height={360}
-                  data={inflationGapData}
-                  unitLabel="pp"
-                  unitKind="percent"
-                  options={{
-                    colors: ["#6f86a8"],
-                    areaOpacity: 0.18,
-                    vAxis: { format: "#,##0.0' pp'" },
-                    hAxis: { gridlines: { color: "#d5dcc5" } },
-                    series: { 0: { lineWidth: 2.5 } },
-                    intervals: { style: "area" },
-                    baseline: 0,
-                    baselineColor: "#2f2b27",
-                  }}
-                  infoSections={[
-                    {
-                      heading: "Vad gapet visar",
-                      lines: [
-                        "Positivt gap = monetärt tryck större än observerad inflation.",
-                        "Negativt gap = prisinflationen är högre än det monetära tryckmåttet.",
-                        "Nära noll = monetärt tryck och faktisk inflation ligger nära varandra.",
-                      ],
-                    },
-                    {
-                      heading: "Signaler",
-                      lines: [
-                        "Högt positivt gap kan signalera latent inflation innan CPI/HICP fullt reagerar.",
-                        "Snabbt fallande gap kan betyda att CPI hinner ikapp eller att åtstramning biter.",
-                        "Snabbt stigande gap fungerar som tidig inflationssignal i makrolagret.",
-                      ],
-                    },
-                  ]}
-                />
-
-                {inflationAnalysis?.metadata.proxyNotes?.length ? (
-                  <div style={{ fontSize: 12, border: "1px solid #d0d7de", borderRadius: 8, padding: "10px 12px", background: "#f8fafc" }}>
-                    <strong>Proxy notes:</strong>
-                    <ul style={{ margin: "6px 0 0 18px" }}>
-                      {inflationAnalysis.metadata.proxyNotes.map((note) => (
-                        <li key={note}>{note}</li>
-                      ))}
-                    </ul>
-                    <div style={{ marginTop: 6 }}>
-                      <strong>Series:</strong> Actual: {inflationAnalysis.metadata.actualInflationSeries} · Monetary: {inflationAnalysis.metadata.monetaryInflationSeries} · Goods: {inflationAnalysis.metadata.goodsInflationSeries} · Asset: {inflationAnalysis.metadata.assetInflationSeries} · Commodity: {inflationAnalysis.metadata.commodityInflationSeries}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </details>
-          )}
-
           <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 12px", marginTop: 12, background: "#f8fafc" }}>
             <h4 style={{ marginTop: 0 }}>Legacy Debug</h4>
             <ul>
