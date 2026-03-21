@@ -102,6 +102,47 @@
   gap: 20px;
 }
 
+.macro-backdrop-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #eef3e3;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+
+.macro-backdrop-banner strong {
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 1px;
+}
+
+.sector-macro-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: #e5e7eb;
+  color: #1f2937;
+}
+
+.sector-macro-tag-favored {
+  background: #dff7e8;
+  border-color: #9dd8b3;
+}
+
+.sector-macro-tag-neutral {
+  background: #edf2f7;
+  border-color: #cbd5e1;
+}
+
+.sector-macro-tag-underPressure {
+  background: #fae8e8;
+  border-color: #e8b4b4;
+}
+
 .sector-header {
   display: flex;
   flex-wrap: wrap;

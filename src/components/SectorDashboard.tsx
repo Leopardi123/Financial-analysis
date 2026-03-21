@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { buildMacroAssetMap } from "../lib/macro/macroAssetMap";
+import { buildMacroSectorMap, type MacroSectorMapItem } from "../lib/macro/macroSectorMap";
 
 type ManualInput = {
   input_type: string;
@@ -14,6 +16,28 @@ type OverviewPayload = {
   computedMetrics?: Array<{ metric: string; value: number; sampleSize?: number }>;
   missingMetrics?: string[];
   suggestedFmpEndpoints?: string[];
+};
+
+type MacroOverlay = { score: number | null };
+
+type MacroSnapshotPayload = {
+  globalMacro?: {
+    regime?: { coreRegimeLabel?: string | null };
+    macroRegimeProbability?: {
+      primaryRegime?: string | null;
+      decisiveness?: number | null;
+      supportingOverlays?: string[];
+      modulatingOverlays?: string[];
+      contradictingOverlays?: string[];
+      regimeMomentum?: { direction?: string | null; driftTowardRegime?: string | null };
+    };
+    overlayBundle?: {
+      overlays?: Record<string, MacroOverlay>;
+    };
+    overlays?: {
+      overlays?: Record<string, MacroOverlay>;
+    };
+  };
 };
 
 const SECTORS = [
@@ -150,6 +174,88 @@ export default function SectorDashboard() {
   const [status, setStatus] = useState<string | null>(null);
   const [mappingTickers, setMappingTickers] = useState("");
   const [mappingCategory, setMappingCategory] = useState(COMPANY_CATEGORIES[0]);
+  const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
+
+  const activeOverlayBundle = macroSnapshot?.globalMacro?.overlayBundle ?? macroSnapshot?.globalMacro?.overlays ?? null;
+  const regimeProbability = macroSnapshot?.globalMacro?.macroRegimeProbability ?? null;
+  const primaryRegime = String(
+    regimeProbability?.primaryRegime ?? macroSnapshot?.globalMacro?.regime?.coreRegimeLabel ?? "Balanced"
+  );
+
+  const regimeInterpretation = useMemo(() => {
+    const decisiveness = typeof regimeProbability?.decisiveness === "number" ? regimeProbability.decisiveness : null;
+    const momentumDirection = String(regimeProbability?.regimeMomentum?.direction ?? "");
+    const driftToward = String(regimeProbability?.regimeMomentum?.driftTowardRegime ?? "");
+    const supportingCount = Array.isArray(regimeProbability?.supportingOverlays)
+      ? regimeProbability.supportingOverlays.length
+      : 0;
+    const modulatingCount = Array.isArray(regimeProbability?.modulatingOverlays)
+      ? regimeProbability.modulatingOverlays.length
+      : 0;
+    const contradictingCount = Array.isArray(regimeProbability?.contradictingOverlays)
+      ? regimeProbability.contradictingOverlays.length
+      : 0;
+
+    let riskClimate: "Neutral" | "Neutral to risk-off" | "Risk-off" = primaryRegime === "FiscalDominanceRisk"
+      ? "Risk-off"
+      : primaryRegime === "FiscalPressureBuilding"
+        ? "Neutral to risk-off"
+        : "Neutral";
+    const softenRiskOff = driftToward === "Balanced" || /toward_balanced/i.test(momentumDirection) || modulatingCount >= 3;
+    if (softenRiskOff) {
+      if (riskClimate === "Risk-off") riskClimate = "Neutral to risk-off";
+      else if (riskClimate === "Neutral to risk-off") riskClimate = "Neutral";
+    }
+
+    const hasDirectionalSupport = supportingCount >= 3;
+    const reducedConviction = modulatingCount >= 2 && contradictingCount >= 1;
+    const sectorBias = hasDirectionalSupport && !reducedConviction
+      ? "Broad risk-on"
+      : (contradictingCount >= 2 || reducedConviction ? "Defensive" : "Selective");
+
+    if (decisiveness !== null && decisiveness < 0.2) {
+      return { riskClimate, sectorBias: `${sectorBias} (low conviction)` };
+    }
+    return { riskClimate, sectorBias };
+  }, [
+    primaryRegime,
+    regimeProbability?.contradictingOverlays,
+    regimeProbability?.decisiveness,
+    regimeProbability?.modulatingOverlays,
+    regimeProbability?.regimeMomentum?.direction,
+    regimeProbability?.regimeMomentum?.driftTowardRegime,
+    regimeProbability?.supportingOverlays,
+  ]);
+
+  const macroSectorMap = useMemo(() => {
+    const macroAssetMap = buildMacroAssetMap({
+      primaryRegime,
+      momentumDirection: String(regimeProbability?.regimeMomentum?.direction ?? ""),
+      overlays: activeOverlayBundle?.overlays,
+    });
+    return buildMacroSectorMap(macroAssetMap);
+  }, [activeOverlayBundle?.overlays, primaryRegime, regimeProbability?.regimeMomentum?.direction]);
+
+  const macroTagBySector = useMemo(() => {
+    const tagMap = new Map<string, { tone: "favored" | "neutral" | "underPressure"; strength: MacroSectorMapItem["strength"] }>();
+    const addTags = (items: MacroSectorMapItem[], tone: "favored" | "neutral" | "underPressure") => {
+      items.forEach((item) => tagMap.set(item.id, { tone, strength: item.strength }));
+    };
+    addTags(macroSectorMap.favored, "favored");
+    addTags(macroSectorMap.neutral, "neutral");
+    addTags(macroSectorMap.underPressure, "underPressure");
+    return tagMap;
+  }, [macroSectorMap]);
+
+  const activeSectorMacroTag = useMemo(() => {
+    const keyCandidates: string[] = [];
+    if (sector === "Råvaror" && subsector === "Guld") keyCandidates.push("gold_miners", "materials");
+    if (sector === "Råvaror" && subsector === "Olja") keyCandidates.push("energy", "materials");
+    if (sector === "Industri") keyCandidates.push("industrials");
+    if (sector === "Tech") keyCandidates.push("tech");
+    keyCandidates.push("materials", "energy", "industrials", "tech");
+    return keyCandidates.map((key) => macroTagBySector.get(key)).find(Boolean) ?? null;
+  }, [macroTagBySector, sector, subsector]);
 
   const subsectors = useMemo(() => {
     return SECTORS.find((item) => item.name === sector)?.subsectors ?? [];
@@ -189,6 +295,20 @@ export default function SectorDashboard() {
     };
   }, [sector, subsector]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadMacroBackdrop() {
+      const response = await fetch("/api/sector/global-macro?region=GLOBAL");
+      const payload = await response.json();
+      if (active && response.ok) {
+        setMacroSnapshot(payload);
+      }
+    }
+    void loadMacroBackdrop();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -246,6 +366,12 @@ export default function SectorDashboard() {
 
   return (
     <div className="sector-dashboard">
+      <div className="macro-backdrop-banner" aria-live="polite">
+        <strong>Macro backdrop</strong>
+        <span>Regime: {primaryRegime}</span>
+        <span>Risk climate: {regimeInterpretation.riskClimate}</span>
+        <span>Sector bias: {regimeInterpretation.sectorBias}</span>
+      </div>
       <div className="sector-header">
         <div>
           <label htmlFor="sector-select">Sektor</label>
@@ -278,6 +404,14 @@ export default function SectorDashboard() {
         <a className="sector-link" href="#singlestock">
           Gå till Single Stock Dashboard →
         </a>
+        {activeSectorMacroTag ? (
+          <div className={`sector-macro-tag sector-macro-tag-${activeSectorMacroTag.tone}`}>
+            {activeSectorMacroTag.tone === "favored" && "Macro favored"}
+            {activeSectorMacroTag.tone === "neutral" && "Macro neutral"}
+            {activeSectorMacroTag.tone === "underPressure" && "Macro under pressure"}
+            {activeSectorMacroTag.strength ? ` (${activeSectorMacroTag.strength})` : ""}
+          </div>
+        ) : null}
       </div>
 
       <div className="sector-grid">
