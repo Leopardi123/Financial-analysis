@@ -2354,6 +2354,55 @@ Signal: ${gapLabel}`,
                 </div>
               </section>
 
+              <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
+                <h4 style={{ marginTop: 0, marginBottom: 8 }}>GLOBAL MACRO — HISTORIK</h4>
+                <div style={{ fontSize: 12, marginBottom: 8 }}>{macroHistoryNarrative}</div>
+                {macroHistory && historyPoints.length > 0 ? (
+                  <>
+                    <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 10px", background: "#fff", marginBottom: 8 }}>
+                      <svg viewBox="0 0 1000 170" style={{ width: "100%", height: 170, display: "block" }} role="img" aria-label="Regime history quick timeline">
+                        {regimeIntervals.map((interval) => {
+                          const pos = segmentPosition(interval.startDate, interval.endDate);
+                          return <rect key={`hist-quick-${interval.startDate}-${interval.endDate}-${interval.coreRegimeLabel}`} x={40 + (pos.left / 100) * 940} y={18} width={(pos.width / 100) * 940} height={106} fill={regimeColor(interval.coreRegimeLabel)} fillOpacity={0.45} />;
+                        })}
+                        <polyline
+                          fill="none"
+                          stroke="#111827"
+                          strokeWidth={1.9}
+                          points={historyPoints.filter((point) => typeof point.macroScoreTotal === "number").map((point) => {
+                            const x = 40 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 940;
+                            const y = 18 + (1 - (point.macroScoreTotal ?? 0) / 100) * 106;
+                            return `${x},${y}`;
+                          }).join(" ")}
+                        />
+                        {historyPoints.filter((point) => point.regimeChanged && typeof point.macroScoreTotal === "number").map((point) => {
+                          const x = 40 + (segmentPosition(point.asOfDate, point.asOfDate).left / 100) * 940;
+                          const y = 18 + (1 - (point.macroScoreTotal ?? 0) / 100) * 106;
+                          return <circle key={`hist-quick-change-${point.asOfDate}`} cx={x} cy={y} r={2.6} fill="#7f1d1d" />;
+                        })}
+                        {latestHistoryPoint && typeof latestHistoryPoint.macroScoreTotal === "number" && (
+                          <circle cx={40 + (segmentPosition(latestHistoryPoint.asOfDate, latestHistoryPoint.asOfDate).left / 100) * 940} cy={18 + (1 - latestHistoryPoint.macroScoreTotal / 100) * 106} r={4} fill="#fff" stroke="#111827" strokeWidth={1.2} />
+                        )}
+                        <line x1={40} y1={124} x2={980} y2={124} stroke="#94a3b8" strokeWidth={1} />
+                        <text x={40} y={145} fontSize={10} fill="#475569">{historyPoints[0]?.asOfDate ?? "—"}</text>
+                        <text x={980} y={145} textAnchor="end" fontSize={10} fill="#475569">{historyPoints[historyPoints.length - 1]?.asOfDate ?? "—"}</text>
+                      </svg>
+                    </div>
+                    <div style={{ fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
+                      <strong>Compact change log</strong>
+                      {(macroRegimeHistory.changeLog.length > 0 ? macroRegimeHistory.changeLog.slice(-4).reverse() : []).map((row) => (
+                        <div key={`compact-change-${row.date}-${row.fromRegime ?? "none"}-${row.toRegime}`} style={{ marginTop: 4 }}>
+                          {row.date}: {row.fromRegime ?? "—"} → {row.toRegime} · {row.shiftQuality}
+                        </div>
+                      ))}
+                      {macroRegimeHistory.changeLog.length === 0 && <div style={{ marginTop: 4 }}>No regime changes in selected range.</div>}
+                    </div>
+                  </>
+                ) : (
+                  <div className="status empty">{historyEmptyMessage ?? "Ingen historik kunde genereras för vald period/upplösning."}</div>
+                )}
+              </section>
+
               {regimeProbabilityAny ? (
                 <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
                   <h4 style={{ marginTop: 0 }}>Regime Probability</h4>
@@ -2994,7 +3043,7 @@ Signal: ${gapLabel}`,
               </details>
 
               <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
-              <h4 style={{ marginTop: 0 }}>GLOBAL MACRO — HISTORIK</h4>
+              <h4 style={{ marginTop: 0 }}>GLOBAL MACRO — HISTORIK (FÖRDJUPNING)</h4>
               <h5>Macro Regime History</h5>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <label>
