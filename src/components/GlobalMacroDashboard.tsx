@@ -1646,6 +1646,102 @@ export default function GlobalMacroDashboard() {
     regimeProbabilityAny?.supportingOverlays,
   ]);
 
+  const macroSectorTilt = useMemo(() => {
+    const primaryRegime = String(regimeProbabilityAny?.primaryRegime ?? globalMacro?.regime?.coreRegimeLabel ?? "Balanced");
+    const momentumDirection = String(regimeProbabilityAny?.regimeMomentum?.direction ?? "");
+    const overlays = activeOverlayBundle?.overlays ?? {};
+
+    const favored: string[] = [];
+    const neutral: string[] = [];
+    const underPressure: string[] = [];
+
+    const pushUnique = (list: string[], item: string) => {
+      if (!item || list.includes(item)) return;
+      list.push(item);
+    };
+    const removeItem = (list: string[], item: string) => {
+      const idx = list.indexOf(item);
+      if (idx >= 0) list.splice(idx, 1);
+    };
+
+    if (primaryRegime === "FiscalPressureBuilding") {
+      pushUnique(favored, "Gold");
+      pushUnique(favored, "Energy");
+      pushUnique(neutral, "Broad equities");
+      pushUnique(underPressure, "Duration assets");
+      pushUnique(underPressure, "Small caps");
+    } else if (primaryRegime === "MonetaryDominance") {
+      pushUnique(favored, "Duration assets");
+      pushUnique(favored, "Growth equities");
+      pushUnique(neutral, "Broad equities");
+      pushUnique(neutral, "Industrials");
+    } else if (primaryRegime === "FiscalDominanceRisk") {
+      pushUnique(favored, "Gold");
+      pushUnique(favored, "Energy");
+      pushUnique(underPressure, "Duration assets");
+      pushUnique(underPressure, "Small caps");
+      pushUnique(neutral, "Broad equities");
+    } else {
+      pushUnique(neutral, "Broad equities");
+      pushUnique(neutral, "Industrials");
+      pushUnique(neutral, "Duration assets");
+      pushUnique(neutral, "Gold");
+    }
+
+    if (momentumDirection === "weakening" || momentumDirection === "transitioning") {
+      if (favored.includes("Growth equities")) {
+        removeItem(favored, "Growth equities");
+        pushUnique(neutral, "Growth equities");
+      }
+      if (underPressure.includes("Small caps")) {
+        removeItem(underPressure, "Small caps");
+        pushUnique(neutral, "Small caps");
+      }
+    }
+
+    const isSupportive = (score: number | null | undefined) => typeof score === "number" && score >= 60;
+    const isContradicting = (score: number | null | undefined) => typeof score === "number" && score <= 40;
+
+    const safeHavenScore = overlays.safeHavenRiskOffOverlay?.score;
+    if (isSupportive(safeHavenScore)) pushUnique(favored, "Gold");
+
+    const energyShockScore = overlays.energyShockOverlay?.score;
+    const inflationCostShockScore = overlays.inflationCostShockOverlay?.score;
+    if (isSupportive(energyShockScore) || isSupportive(inflationCostShockScore)) pushUnique(favored, "Energy");
+    if (isSupportive(energyShockScore) && isSupportive(inflationCostShockScore)) pushUnique(favored, "Copper");
+
+    const localUnrestScore = overlays.localUnrestOverlay?.score;
+    if (isSupportive(localUnrestScore)) {
+      pushUnique(favored, "Gold");
+      pushUnique(favored, "Energy");
+    }
+
+    const liquidityScore = overlays.liquidityOverlay?.score;
+    if (isContradicting(liquidityScore)) {
+      while (underPressure.length > 0 && neutral.length < 4) {
+        const moved = underPressure.shift();
+        if (moved) pushUnique(neutral, moved);
+      }
+    }
+
+    const creditFundingScore = overlays.creditFundingOverlay?.score;
+    if (isSupportive(creditFundingScore) && underPressure.includes("Small caps")) {
+      removeItem(underPressure, "Small caps");
+      pushUnique(neutral, "Small caps");
+    }
+
+    return {
+      favored: favored.slice(0, 4),
+      neutral: neutral.slice(0, 4),
+      underPressure: underPressure.slice(0, 4),
+    };
+  }, [
+    activeOverlayBundle?.overlays,
+    globalMacro?.regime?.coreRegimeLabel,
+    regimeProbabilityAny?.primaryRegime,
+    regimeProbabilityAny?.regimeMomentum?.direction,
+  ]);
+
   function regimeColor(regime: string) {
     if (regime === "MonetaryDominance") return "#5a6a80";
     if (regime === "Balanced") return "#6e7b64";
@@ -2490,6 +2586,27 @@ Signal: ${gapLabel}`,
                     <div>Macro stance: {regimeInterpretation.macroStance}</div>
                     <div>Risk climate: {regimeInterpretation.riskClimate}</div>
                     <div>Positioning: {regimeInterpretation.positioning}</div>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
+                    <strong>Macro → Sector tilt</strong>
+                    <div style={{ marginTop: 4 }}>
+                      <div><strong>Favored:</strong></div>
+                      <ul style={{ margin: "2px 0 4px", paddingLeft: 18 }}>
+                        {macroSectorTilt.favored.length ? macroSectorTilt.favored.map((item) => <li key={`favored-${item}`}>{item}</li>) : <li>—</li>}
+                      </ul>
+                    </div>
+                    <div>
+                      <div><strong>Neutral:</strong></div>
+                      <ul style={{ margin: "2px 0 4px", paddingLeft: 18 }}>
+                        {macroSectorTilt.neutral.length ? macroSectorTilt.neutral.map((item) => <li key={`neutral-${item}`}>{item}</li>) : <li>—</li>}
+                      </ul>
+                    </div>
+                    <div>
+                      <div><strong>Under pressure:</strong></div>
+                      <ul style={{ margin: "2px 0 0", paddingLeft: 18 }}>
+                        {macroSectorTilt.underPressure.length ? macroSectorTilt.underPressure.map((item) => <li key={`under-${item}`}>{item}</li>) : <li>—</li>}
+                      </ul>
+                    </div>
                   </div>
                   <details style={{ marginTop: 6 }}>
                     <summary style={{ cursor: "pointer", fontSize: 12 }}>Visa detaljerad regimtolkning</summary>
