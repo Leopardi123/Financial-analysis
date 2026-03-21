@@ -2644,6 +2644,17 @@ Signal: ${gapLabel}`,
                     <div>Risk climate: {regimeInterpretation.riskClimate}</div>
                     <div>Positioning: {regimeInterpretation.positioning}</div>
                   </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#334155", border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", background: "#f8fafc" }}>
+                    <strong>Regime consistency block</strong>
+                    <div>Regime coherence: {regimeConsistencyBlock.coherence}</div>
+                    <div>Overlay alignment: {regimeConsistencyBlock.overlayAlignment}</div>
+                    <div>Signal conflict: {regimeConsistencyBlock.conflict}</div>
+                    <div>Interpretation confidence: {regimeConsistencyBlock.adjustedConfidence.toFixed(2)}</div>
+                    <div>Key tension:</div>
+                    <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                      {regimeConsistencyBlock.tensionBullets.map((item, idx) => <li key={`regime-summary-tension-${idx}`}>{item}</li>)}
+                    </ul>
+                  </div>
                   <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
                     <strong>Macro → Sector tilt</strong>
                     <div style={{ marginTop: 4 }}>
@@ -2983,16 +2994,6 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12 }}>Modulating overlays: {Array.isArray(regimeProbabilityAny?.modulatingOverlays) && regimeProbabilityAny.modulatingOverlays.length ? regimeProbabilityAny.modulatingOverlays.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Contradicting overlays: {Array.isArray(regimeProbabilityAny?.contradictingOverlays) && regimeProbabilityAny.contradictingOverlays.length ? regimeProbabilityAny.contradictingOverlays.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Momentum: {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} {regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ? `→ ${regimeProbabilityAny.regimeMomentum.driftTowardRegime}` : ""} · score {typeof regimeProbabilityAny?.regimeMomentum?.momentumScore === "number" ? regimeProbabilityAny.regimeMomentum.momentumScore.toFixed(1) : "—"} · primary change {String(regimeProbabilityAny?.regimeMomentum?.primaryRegimeChange ?? "—")}</div>
-                  <div style={{ fontSize: 12, marginTop: 6, border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", background: "#f8fafc" }}>
-                    <div><strong>Regime coherence:</strong> {regimeConsistencyBlock.coherence}</div>
-                    <div><strong>Overlay alignment:</strong> {regimeConsistencyBlock.overlayAlignment}</div>
-                    <div><strong>Signal conflict:</strong> {regimeConsistencyBlock.conflict}</div>
-                    <div><strong>Interpretation confidence:</strong> {regimeConsistencyBlock.adjustedConfidence.toFixed(2)}</div>
-                    <div><strong>Key tension:</strong></div>
-                    <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
-                      {regimeConsistencyBlock.tensionBullets.map((item, idx) => <li key={`regime-tension-${idx}`}>{item}</li>)}
-                    </ul>
-                  </div>
                   <div style={{ fontSize: 12 }}>Momentum drivers: {Array.isArray(regimeProbabilityAny?.regimeMomentum?.changeDrivers) && regimeProbabilityAny.regimeMomentum.changeDrivers.length ? regimeProbabilityAny.regimeMomentum.changeDrivers.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Overlay influence: {String(regimeProbabilityAny?.overlayInfluence?.primarySignal ?? "—")} · {(Array.isArray(regimeProbabilityAny?.overlayInfluence?.candidateSignals) ? regimeProbabilityAny.overlayInfluence.candidateSignals : []).map((row: any) => `${row?.regime ?? "?"}:${row?.signal ?? "?"}`).join(", ") || "—"}</div>
                   <div style={{ fontSize: 12 }}>{String(regimeProbabilityAny?.regimeMomentum?.narrative ?? regimeProbabilityAny?.overlayInfluence?.summary ?? "")}</div>
