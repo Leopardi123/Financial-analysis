@@ -798,45 +798,6 @@ export default function GlobalMacroDashboard() {
   const regimeProbabilityAny = (globalMacro as any)?.macroRegimeProbability as any;
   const regimeProbabilityDistribution = Array.isArray(regimeProbabilityAny?.distribution) ? regimeProbabilityAny.distribution : [];
   const readDiagnostics = ((globalMacroRaw as any)?.diagnostics ?? null) as any;
-  const expectedRegimeFields = [
-    "primaryRegime",
-    "primaryWeight",
-    "decisiveness",
-    "transitionLike",
-    "distribution",
-    "narrative.short",
-    "narrative.medium",
-    "narrative.long",
-    "structuralAdjustment.summary",
-    "structuralAdjustment.multiplier",
-    "structuralAdjustment.penalty",
-    "supportingBlocks",
-    "supportingOverlays",
-    "contradictingOverlays",
-    "regimeMomentum.direction",
-    "regimeMomentum.momentumScore",
-    "regimeMomentum.primaryRegimeChange",
-    "regimeMomentum.driftTowardRegime",
-    "regimeMomentum.changeDrivers",
-    "regimeMomentum.narrative",
-    "overlayInfluence.primarySignal",
-    "overlayInfluence.candidateSignals",
-    "overlayInfluence.summary",
-  ];
-  const compactRenderedRegimeFields = [
-    "primaryRegime",
-    "primaryWeight",
-    "decisiveness",
-    "transitionLike",
-    "distribution(top+full)",
-    "narrative.short/medium/long",
-    "structuralAdjustment.summary/multiplier/penalty",
-    "supportingBlocks",
-    "supportingOverlays",
-    "contradictingOverlays",
-    "regimeMomentum.direction/momentumScore/primaryRegimeChange/driftTowardRegime/changeDrivers/narrative",
-    "overlayInfluence.primarySignal/candidateSignals/summary",
-  ];
 
   const explanationAny = (globalMacro as any)?.macroExplanation as any;
   const explanationSummary = explanationAny && typeof explanationAny === "object" && explanationAny.summary && typeof explanationAny.summary === "object"
@@ -1643,6 +1604,63 @@ export default function GlobalMacroDashboard() {
     regimeProbabilityAny?.primaryRegime,
     regimeProbabilityAny?.regimeMomentum?.direction,
     regimeProbabilityAny?.regimeMomentum?.driftTowardRegime,
+    regimeProbabilityAny?.supportingOverlays,
+  ]);
+
+  const regimeConsistencyBlock = useMemo(() => {
+    const supportingOverlays = Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays : [];
+    const modulatingOverlays = Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays : [];
+    const contradictingOverlays = Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays : [];
+    const supportingCount = supportingOverlays.length;
+    const modulatingCount = modulatingOverlays.length;
+    const contradictingCount = contradictingOverlays.length;
+    const total = supportingCount + modulatingCount + contradictingCount;
+
+    let coherence: "High" | "Medium" | "Low" = "Medium";
+    if (contradictingCount >= 2) coherence = "Low";
+    else if (contradictingCount === 0 && modulatingCount <= 2) coherence = "High";
+    else if (contradictingCount >= 1 || modulatingCount >= 3) coherence = "Medium";
+
+    const conflict = contradictingCount > 0 ? "Present" : "None";
+    const overlayAlignment = coherence === "High" ? "Aligned" : coherence === "Low" ? "Dislocated" : "Mixed";
+
+    const decisivenessRaw = typeof regimeProbabilityAny?.decisiveness === "number" ? regimeProbabilityAny.decisiveness : null;
+    const baseConfidence = decisivenessRaw !== null ? (decisivenessRaw > 1 ? decisivenessRaw / 100 : decisivenessRaw) : 0.5;
+    const coherenceMultiplier = coherence === "High" ? 1 : coherence === "Medium" ? 0.75 : 0.5;
+    let adjustedConfidence = baseConfidence * coherenceMultiplier;
+    adjustedConfidence = Math.max(0.3, Math.min(0.95, adjustedConfidence));
+
+    const momentumScore = typeof regimeProbabilityAny?.regimeMomentum?.momentumScore === "number" ? regimeProbabilityAny.regimeMomentum.momentumScore : 0;
+    const topSupporting = supportingOverlays.slice(0, 2);
+    const topModulating = modulatingOverlays.slice(0, 1);
+    const topContradicting = contradictingOverlays.slice(0, 2);
+    const tensionBullets: string[] = [];
+    if (topContradicting.length && topSupporting.length) {
+      tensionBullets.push(`${topContradicting[0]} contradicts ${topSupporting[0]} support for the active regime.`);
+    } else if (topContradicting.length) {
+      tensionBullets.push(`${topContradicting[0]} introduces direct opposition to the current regime signal.`);
+    }
+    if (topSupporting.length > 1) {
+      tensionBullets.push(`${topSupporting[1]} reinforces ${topSupporting[0]} and keeps baseline alignment intact.`);
+    } else if (topSupporting.length === 1 && topModulating.length) {
+      tensionBullets.push(`${topSupporting[0]} remains supportive, while ${topModulating[0]} moderates conviction.`);
+    } else if (topModulating.length) {
+      tensionBullets.push(`${topModulating[0]} tempers directional certainty without flipping the signal.`);
+    }
+    tensionBullets.push(`Momentum score ${momentumScore.toFixed(1)} ${momentumScore >= 0 ? "supports persistence" : "adds drift pressure"} under ${total} active overlays.`);
+
+    return {
+      coherence,
+      conflict,
+      overlayAlignment,
+      adjustedConfidence,
+      tensionBullets: tensionBullets.slice(0, 3),
+    };
+  }, [
+    regimeProbabilityAny?.contradictingOverlays,
+    regimeProbabilityAny?.decisiveness,
+    regimeProbabilityAny?.modulatingOverlays,
+    regimeProbabilityAny?.regimeMomentum?.momentumScore,
     regimeProbabilityAny?.supportingOverlays,
   ]);
 
@@ -2587,6 +2605,28 @@ Signal: ${gapLabel}`,
                     <div>Risk climate: {regimeInterpretation.riskClimate}</div>
                     <div>Positioning: {regimeInterpretation.positioning}</div>
                   </div>
+                  {regimeProbabilityAny ? (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#334155", border: "1px solid #cbd5e1", borderRadius: 8, padding: "7px 8px", background: "#f8fafc" }}>
+                      <strong>Regime probability</strong>
+                      <div style={{ marginTop: 4 }}>Top candidates: {regimeProbabilityDistribution.slice(0, 3).map((row: any) => `${row?.regime ?? "?"} (${safePct(row?.weight)})`).join(" · ") || "—"}</div>
+                      <div>Supporting overlays: {Array.isArray(regimeProbabilityAny?.supportingOverlays) && regimeProbabilityAny.supportingOverlays.length ? regimeProbabilityAny.supportingOverlays.join(", ") : "—"}</div>
+                      <div>Modulating overlays: {Array.isArray(regimeProbabilityAny?.modulatingOverlays) && regimeProbabilityAny.modulatingOverlays.length ? regimeProbabilityAny.modulatingOverlays.join(", ") : "—"}</div>
+                      <div>Contradicting overlays: {Array.isArray(regimeProbabilityAny?.contradictingOverlays) && regimeProbabilityAny.contradictingOverlays.length ? regimeProbabilityAny.contradictingOverlays.join(", ") : "—"}</div>
+                      <div>Momentum: {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} {regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ? `→ ${regimeProbabilityAny.regimeMomentum.driftTowardRegime}` : ""} · score {typeof regimeProbabilityAny?.regimeMomentum?.momentumScore === "number" ? regimeProbabilityAny.regimeMomentum.momentumScore.toFixed(1) : "—"} · primary change {String(regimeProbabilityAny?.regimeMomentum?.primaryRegimeChange ?? "—")}</div>
+                      <div style={{ marginTop: 4, border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", background: "#f8fafc" }}>
+                        <div><strong>Regime coherence:</strong> {regimeConsistencyBlock.coherence}</div>
+                        <div><strong>Overlay alignment:</strong> {regimeConsistencyBlock.overlayAlignment}</div>
+                        <div><strong>Signal conflict:</strong> {regimeConsistencyBlock.conflict}</div>
+                        <div><strong>Interpretation confidence:</strong> {regimeConsistencyBlock.adjustedConfidence.toFixed(2)}</div>
+                        <div><strong>Key tension:</strong></div>
+                        <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                          {regimeConsistencyBlock.tensionBullets.map((item, idx) => <li key={`regime-tension-current-${idx}`}>{item}</li>)}
+                        </ul>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#334155" }}>Regime probability not yet available for this snapshot.</div>
+                  )}
                   <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
                     <strong>Macro → Sector tilt</strong>
                     <div style={{ marginTop: 4 }}>
@@ -2893,61 +2933,6 @@ Signal: ${gapLabel}`,
                       <strong>{historyPoints[blockHoverIndex].asOfDate}</strong> · Fiscal {historyPoints[blockHoverIndex].fiscalScore ?? "—"} · Monetary {historyPoints[blockHoverIndex].monetaryScore ?? "—"} · Inflation {historyPoints[blockHoverIndex].inflationScore ?? "—"} · Credibility {historyPoints[blockHoverIndex].credibilityScore ?? "—"}
                     </div>
                   )}
-                </section>
-              )}
-
-              {regimeProbabilityAny ? (
-                <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px 12px 8px", marginBottom: 14, background: "#f8fafc" }}>
-                  <h4 style={{ marginTop: 0 }}>Regime Probability</h4>
-                  <div style={{ fontSize: 13, marginBottom: 8 }}>
-                    <strong>Primary regime:</strong> {String(regimeProbabilityAny?.primaryRegime ?? "—")} ·
-                    <strong> Primary weight:</strong> {safePct(regimeProbabilityAny?.primaryWeight)} ·
-                    <strong> Decisiveness:</strong> {safePct(regimeProbabilityAny?.decisiveness)} ·
-                    <strong> Transition-like:</strong> {regimeProbabilityAny?.transitionLike ? "Yes" : "No"}
-                  </div>
-                  <div style={{ fontSize: 12, marginBottom: 6 }}>Heuristic relative regime weights (not calibrated probabilities).</div>
-                  <div style={{ fontSize: 12, marginBottom: 6 }}>Top candidates: {regimeProbabilityDistribution.slice(0, 3).map((row: any) => `${row?.regime ?? "?"} (${safePct(row?.weight)})`).join(" · ") || "—"}</div>
-                  <div style={{ fontSize: 12, marginBottom: 6, background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 6, padding: "6px 8px" }}>
-                    <strong>Snapshot diagnostics:</strong> asOf {String(readDiagnostics?.snapshotAsOfDate ?? (globalMacro as any)?.regime?.asOfDate ?? "—")} ·
-                    updatedAt {String(readDiagnostics?.snapshotUpdatedAt ?? "—")} ·
-                    cacheOnlyRead {String(readDiagnostics?.cacheOnlyRead ?? "—")} ·
-                    cache hit {String(readDiagnostics?.snapshotCacheHit ?? "—")} ·
-                    source {String(readDiagnostics?.snapshotSource ?? readDiagnostics?.readMode ?? "—")} ·
-                    cache key {String(readDiagnostics?.snapshotCacheKey ?? "—")} ·
-                    routeMs {String(readDiagnostics?.routeDurationMs ?? "—")} ·
-                    stale-vs-data {String(readDiagnostics?.snapshotStaleVsUnderlyingData ?? "unknown")} ·
-                    dataTimestamp {String(readDiagnostics?.dataTimestamp ?? "—")} ·
-                    richness {(typeof readDiagnostics?.regimeProbabilityRichness?.presentFieldCount === "number" ? readDiagnostics.regimeProbabilityRichness.presentFieldCount : 0)}/{(typeof readDiagnostics?.regimeProbabilityRichness?.expectedFieldCount === "number" ? readDiagnostics.regimeProbabilityRichness.expectedFieldCount : expectedRegimeFields.length)}
-                  </div>
-                  <p className="bread" style={{ marginTop: 0 }}>{String(regimeProbabilityAny?.narrative?.short ?? "") || "Regime probability narrative missing."}</p>
-                  <div style={{ fontSize: 12 }}>Structural adjustment: {String(regimeProbabilityAny?.structuralAdjustment?.summary ?? "none")} · multiplier {typeof regimeProbabilityAny?.structuralAdjustment?.multiplier === "number" ? regimeProbabilityAny.structuralAdjustment.multiplier.toFixed(2) : "—"} · penalty {typeof regimeProbabilityAny?.structuralAdjustment?.penalty === "number" ? regimeProbabilityAny.structuralAdjustment.penalty.toFixed(2) : "—"}</div>
-                  <div style={{ fontSize: 12 }}>Supporting blocks: {Array.isArray(regimeProbabilityAny?.supportingBlocks) && regimeProbabilityAny.supportingBlocks.length ? regimeProbabilityAny.supportingBlocks.join(", ") : "—"}</div>
-                  <div style={{ fontSize: 12 }}>Supporting overlays: {Array.isArray(regimeProbabilityAny?.supportingOverlays) && regimeProbabilityAny.supportingOverlays.length ? regimeProbabilityAny.supportingOverlays.join(", ") : "—"}</div>
-                  <div style={{ fontSize: 12 }}>Modulating overlays: {Array.isArray(regimeProbabilityAny?.modulatingOverlays) && regimeProbabilityAny.modulatingOverlays.length ? regimeProbabilityAny.modulatingOverlays.join(", ") : "—"}</div>
-                  <div style={{ fontSize: 12 }}>Contradicting overlays: {Array.isArray(regimeProbabilityAny?.contradictingOverlays) && regimeProbabilityAny.contradictingOverlays.length ? regimeProbabilityAny.contradictingOverlays.join(", ") : "—"}</div>
-                  <div style={{ fontSize: 12 }}>Momentum: {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} {regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ? `→ ${regimeProbabilityAny.regimeMomentum.driftTowardRegime}` : ""} · score {typeof regimeProbabilityAny?.regimeMomentum?.momentumScore === "number" ? regimeProbabilityAny.regimeMomentum.momentumScore.toFixed(1) : "—"} · primary change {String(regimeProbabilityAny?.regimeMomentum?.primaryRegimeChange ?? "—")}</div>
-                  <div style={{ fontSize: 12 }}>Momentum drivers: {Array.isArray(regimeProbabilityAny?.regimeMomentum?.changeDrivers) && regimeProbabilityAny.regimeMomentum.changeDrivers.length ? regimeProbabilityAny.regimeMomentum.changeDrivers.join(", ") : "—"}</div>
-                  <div style={{ fontSize: 12 }}>Overlay influence: {String(regimeProbabilityAny?.overlayInfluence?.primarySignal ?? "—")} · {(Array.isArray(regimeProbabilityAny?.overlayInfluence?.candidateSignals) ? regimeProbabilityAny.overlayInfluence.candidateSignals : []).map((row: any) => `${row?.regime ?? "?"}:${row?.signal ?? "?"}`).join(", ") || "—"}</div>
-                  <div style={{ fontSize: 12 }}>{String(regimeProbabilityAny?.regimeMomentum?.narrative ?? regimeProbabilityAny?.overlayInfluence?.summary ?? "")}</div>
-                  <details style={{ marginTop: 6 }}>
-                    <summary style={{ cursor: "pointer" }}>Full regime-probability payload details</summary>
-                    <div style={{ fontSize: 12, marginTop: 6 }}>
-                      <div><strong>Narrative (medium):</strong> {String(regimeProbabilityAny?.narrative?.medium ?? "—")}</div>
-                      <div><strong>Narrative (long):</strong> {String(regimeProbabilityAny?.narrative?.long ?? "—")}</div>
-                      <div><strong>Overlay summary:</strong> {String(regimeProbabilityAny?.overlayInfluence?.summary ?? "—")}</div>
-                      <div><strong>Distribution (full):</strong> {regimeProbabilityDistribution.map((row: any) => `${row?.regime ?? "?"} ${safePct(row?.weight)}`).join(" · ") || "—"}</div>
-                      <div><strong>Expected payload fields:</strong> {expectedRegimeFields.join(", ")}</div>
-                      <div><strong>Fields rendered (Global Macro compact):</strong> {compactRenderedRegimeFields.join(", ")}</div>
-                      <div><strong>Present payload fields (runtime):</strong> {Array.isArray(readDiagnostics?.regimeProbabilityRichness?.presentFieldPaths) ? readDiagnostics.regimeProbabilityRichness.presentFieldPaths.join(", ") : "—"}</div>
-                      <div><strong>Missing payload fields (runtime):</strong> {Array.isArray(readDiagnostics?.regimeProbabilityRichness?.missingFieldPaths) && readDiagnostics.regimeProbabilityRichness.missingFieldPaths.length ? readDiagnostics.regimeProbabilityRichness.missingFieldPaths.join(", ") : "none"}</div>
-                      <div><strong>Trim report:</strong> {Array.isArray(readDiagnostics?.trimReport?.trimSnapshotForNormalReadRemoves) ? readDiagnostics.trimReport.trimSnapshotForNormalReadRemoves.join(", ") : "—"}</div>
-                    </div>
-                  </details>
-                </section>
-              ) : (
-                <section style={{ border: "1px solid #d1d5db", borderRadius: 10, padding: "12px", marginBottom: 14, background: "#f8fafc" }}>
-                  <h4 style={{ marginTop: 0 }}>Regime Probability</h4>
-                  <div className="status empty">Regime probability not yet available for this snapshot.</div>
                 </section>
               )}
 
