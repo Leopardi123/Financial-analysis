@@ -1646,6 +1646,63 @@ export default function GlobalMacroDashboard() {
     regimeProbabilityAny?.supportingOverlays,
   ]);
 
+  const regimeConsistencyBlock = useMemo(() => {
+    const supportingOverlays = Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays : [];
+    const modulatingOverlays = Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays : [];
+    const contradictingOverlays = Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays : [];
+    const supportingCount = supportingOverlays.length;
+    const modulatingCount = modulatingOverlays.length;
+    const contradictingCount = contradictingOverlays.length;
+    const total = supportingCount + modulatingCount + contradictingCount;
+
+    let coherence: "High" | "Medium" | "Low" = "Medium";
+    if (contradictingCount >= 2) coherence = "Low";
+    else if (contradictingCount === 0 && modulatingCount <= 2) coherence = "High";
+    else if (contradictingCount >= 1 || modulatingCount >= 3) coherence = "Medium";
+
+    const conflict = contradictingCount > 0 ? "Present" : "None";
+    const overlayAlignment = coherence === "High" ? "Aligned" : coherence === "Low" ? "Dislocated" : "Mixed";
+
+    const decisivenessRaw = typeof regimeProbabilityAny?.decisiveness === "number" ? regimeProbabilityAny.decisiveness : null;
+    const baseConfidence = decisivenessRaw !== null ? (decisivenessRaw > 1 ? decisivenessRaw / 100 : decisivenessRaw) : 0.5;
+    const coherenceMultiplier = coherence === "High" ? 1 : coherence === "Medium" ? 0.75 : 0.5;
+    let adjustedConfidence = baseConfidence * coherenceMultiplier;
+    adjustedConfidence = Math.max(0.3, Math.min(0.95, adjustedConfidence));
+
+    const momentumScore = typeof regimeProbabilityAny?.regimeMomentum?.momentumScore === "number" ? regimeProbabilityAny.regimeMomentum.momentumScore : 0;
+    const topSupporting = supportingOverlays.slice(0, 2);
+    const topModulating = modulatingOverlays.slice(0, 1);
+    const topContradicting = contradictingOverlays.slice(0, 2);
+    const tensionBullets: string[] = [];
+    if (topContradicting.length && topSupporting.length) {
+      tensionBullets.push(`${topContradicting[0]} contradicts ${topSupporting[0]} support for the active regime.`);
+    } else if (topContradicting.length) {
+      tensionBullets.push(`${topContradicting[0]} introduces direct opposition to the current regime signal.`);
+    }
+    if (topSupporting.length > 1) {
+      tensionBullets.push(`${topSupporting[1]} reinforces ${topSupporting[0]} and keeps baseline alignment intact.`);
+    } else if (topSupporting.length === 1 && topModulating.length) {
+      tensionBullets.push(`${topSupporting[0]} remains supportive, while ${topModulating[0]} moderates conviction.`);
+    } else if (topModulating.length) {
+      tensionBullets.push(`${topModulating[0]} tempers directional certainty without flipping the signal.`);
+    }
+    tensionBullets.push(`Momentum score ${momentumScore.toFixed(1)} ${momentumScore >= 0 ? "supports persistence" : "adds drift pressure"} under ${total} active overlays.`);
+
+    return {
+      coherence,
+      conflict,
+      overlayAlignment,
+      adjustedConfidence,
+      tensionBullets: tensionBullets.slice(0, 3),
+    };
+  }, [
+    regimeProbabilityAny?.contradictingOverlays,
+    regimeProbabilityAny?.decisiveness,
+    regimeProbabilityAny?.modulatingOverlays,
+    regimeProbabilityAny?.regimeMomentum?.momentumScore,
+    regimeProbabilityAny?.supportingOverlays,
+  ]);
+
   const macroSectorTilt = useMemo(() => {
     const primaryRegime = String(regimeProbabilityAny?.primaryRegime ?? globalMacro?.regime?.coreRegimeLabel ?? "Balanced");
     const momentumDirection = String(regimeProbabilityAny?.regimeMomentum?.direction ?? "");
@@ -2239,8 +2296,9 @@ Signal: ${gapLabel}`,
     }
     setRebuildSnapshotRunning(true);
     setRebuildSnapshotResult(null);
+    const attemptedUrl = `/api/admin/rebuild-macro-snapshot?region=${selectedRegion}`;
     try {
-      const response = await fetch(`/api/admin/rebuild-macro-snapshot?region=${selectedRegion}`, {
+      const response = await fetch(attemptedUrl, {
         cache: "no-store",
         method: "POST",
         headers: {
@@ -2254,6 +2312,7 @@ Signal: ${gapLabel}`,
         status: response.status,
         ok: response.ok,
         region: selectedRegion,
+        attemptedUrl,
         timestamp: new Date().toISOString(),
         note: "This does NOT fetch new data.",
         payload,
@@ -2267,9 +2326,13 @@ Signal: ${gapLabel}`,
         status: 0,
         ok: false,
         region: selectedRegion,
+        attemptedUrl,
         timestamp: new Date().toISOString(),
-        note: "No ingest fallback was attempted.",
-        payload: { error: error instanceof Error ? error.message : "Unknown snapshot rebuild error" },
+        note: "Snapshot rebuild request failed before response (network/CORS/admin route issue). No ingest fallback was attempted.",
+        payload: {
+          error: error instanceof Error ? error.message : "Unknown snapshot rebuild error",
+          hint: "Verify x-admin-secret and that /api/admin/rebuild-macro-snapshot is reachable from this runtime.",
+        },
       });
     } finally {
       setRebuildSnapshotRunning(false);
@@ -2926,6 +2989,16 @@ Signal: ${gapLabel}`,
                   <div style={{ fontSize: 12 }}>Modulating overlays: {Array.isArray(regimeProbabilityAny?.modulatingOverlays) && regimeProbabilityAny.modulatingOverlays.length ? regimeProbabilityAny.modulatingOverlays.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Contradicting overlays: {Array.isArray(regimeProbabilityAny?.contradictingOverlays) && regimeProbabilityAny.contradictingOverlays.length ? regimeProbabilityAny.contradictingOverlays.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Momentum: {String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable")} {regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ? `→ ${regimeProbabilityAny.regimeMomentum.driftTowardRegime}` : ""} · score {typeof regimeProbabilityAny?.regimeMomentum?.momentumScore === "number" ? regimeProbabilityAny.regimeMomentum.momentumScore.toFixed(1) : "—"} · primary change {String(regimeProbabilityAny?.regimeMomentum?.primaryRegimeChange ?? "—")}</div>
+                  <div style={{ fontSize: 12, marginTop: 6, border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", background: "#f8fafc" }}>
+                    <div><strong>Regime coherence:</strong> {regimeConsistencyBlock.coherence}</div>
+                    <div><strong>Overlay alignment:</strong> {regimeConsistencyBlock.overlayAlignment}</div>
+                    <div><strong>Signal conflict:</strong> {regimeConsistencyBlock.conflict}</div>
+                    <div><strong>Interpretation confidence:</strong> {regimeConsistencyBlock.adjustedConfidence.toFixed(2)}</div>
+                    <div><strong>Key tension:</strong></div>
+                    <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                      {regimeConsistencyBlock.tensionBullets.map((item, idx) => <li key={`regime-tension-${idx}`}>{item}</li>)}
+                    </ul>
+                  </div>
                   <div style={{ fontSize: 12 }}>Momentum drivers: {Array.isArray(regimeProbabilityAny?.regimeMomentum?.changeDrivers) && regimeProbabilityAny.regimeMomentum.changeDrivers.length ? regimeProbabilityAny.regimeMomentum.changeDrivers.join(", ") : "—"}</div>
                   <div style={{ fontSize: 12 }}>Overlay influence: {String(regimeProbabilityAny?.overlayInfluence?.primarySignal ?? "—")} · {(Array.isArray(regimeProbabilityAny?.overlayInfluence?.candidateSignals) ? regimeProbabilityAny.overlayInfluence.candidateSignals : []).map((row: any) => `${row?.regime ?? "?"}:${row?.signal ?? "?"}`).join(", ") || "—"}</div>
                   <div style={{ fontSize: 12 }}>{String(regimeProbabilityAny?.regimeMomentum?.narrative ?? regimeProbabilityAny?.overlayInfluence?.summary ?? "")}</div>
