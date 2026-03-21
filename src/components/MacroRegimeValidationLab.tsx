@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MACRO_LAB_EVENT_ZONES, MacroEventZone, MacroLabRegion } from "../data/macroLabEventZones";
 import { buildMacroCompareExplanation, type MacroExplanation } from "../lib/macro/explanationLayer";
+import MacroLabMiniSeries from "./MacroLabMiniSeries";
 
 type BlockKey = "A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY";
 type OverlayKey = "growth" | "stress" | "hardAsset";
@@ -156,29 +157,6 @@ function normalizeLite(series: Array<number | null>, mode: "none" | "zscore-lite
   return series.map((v) => (v === null ? null : ((v - mean) / std) * 10));
 }
 
-function calculateAutoscale(series: Array<Array<number | null>>, opts?: { includeZero?: boolean; symmetricAroundZero?: boolean }) {
-  const values = series.flat().filter((v): v is number => typeof v === "number");
-  if (!values.length) return { min: -1, max: 1 };
-
-  let min = Math.min(...values);
-  let max = Math.max(...values);
-  if (opts?.includeZero) {
-    min = Math.min(min, 0);
-    max = Math.max(max, 0);
-  }
-
-  const range = max - min;
-  const safeRange = range < 1e-6 ? Math.max(Math.abs(max), 1) * 0.2 : range;
-  const pad = safeRange * 0.12;
-
-  if (opts?.symmetricAroundZero) {
-    const extent = Math.max(Math.abs(min), Math.abs(max), safeRange * 0.6);
-    return { min: -extent - pad * 0.3, max: extent + pad * 0.3 };
-  }
-
-  return { min: min - pad, max: max + pad };
-}
-
 function getBlockScore(point: MacroHistoryPoint, block: BlockKey): number {
   if (block === "A_FISCAL") return point.fiscalScore ?? 0;
   if (block === "B_MONETARY") return point.monetaryScore ?? 0;
@@ -218,71 +196,6 @@ function inferBlockSubComponents(region: MacroLabRegion, points: MacroHistoryPoi
   });
 
   return inferred;
-}
-
-function MiniSeries({
-  id,
-  title,
-  dates,
-  lines,
-  selectedRange,
-  onSelectRange,
-  expanded,
-  onToggleExpand,
-  showZeroLine = false,
-  symmetricAroundZero = false,
-}: {
-  id: ChartId;
-  title: string;
-  dates: string[];
-  lines: Array<{ label: string; color: string; data: Array<number | null>; dashed?: boolean }>;
-  selectedRange: { startDate: string; endDate: string } | null;
-  onSelectRange: (s: string, e: string) => void;
-  expanded: boolean;
-  onToggleExpand: (id: ChartId) => void;
-  showZeroLine?: boolean;
-  symmetricAroundZero?: boolean;
-}) {
-  const w = 980;
-  const h = expanded ? 300 : 150;
-  const domain = calculateAutoscale(lines.map((line) => line.data), { includeZero: showZeroLine, symmetricAroundZero });
-  const topPad = 14;
-  const bottomPad = 24;
-  const y = (v: number | null) => (v === null ? null : h - bottomPad - ((v - domain.min) / ((domain.max - domain.min) || 1)) * (h - topPad - bottomPad));
-  const x = (i: number) => 35 + (i / Math.max(dates.length - 1, 1)) * (w - 55);
-
-  const path = (series: Array<number | null>) => series.map((v, i) => (y(v) === null ? "" : `${i === 0 ? "M" : "L"}${x(i)},${y(v)}`)).join(" ");
-  const selectRect = (() => {
-    if (!selectedRange) return null;
-    const i1 = dates.findIndex((d) => d >= selectedRange.startDate);
-    const i2 = dates.findIndex((d) => d >= selectedRange.endDate);
-    if (i1 < 0 || i2 < 0) return null;
-    return { x1: x(i1), x2: x(i2) };
-  })();
-
-  const zeroY = y(0);
-
-  return (
-    <div className={`macro-lab-chart ${expanded ? "is-expanded" : ""}`}>
-      <div className="macro-lab-chart-head">
-        <div className="macro-lab-chart-title">{title}</div>
-        <button className="macro-lab-expand" onClick={() => onToggleExpand(id)} title={expanded ? "Collapse" : "Expand"}>{expanded ? "⤢" : "⤡"}</button>
-      </div>
-      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: "100%", height: `${h}px`, display: "block" }} onClick={(e) => {
-        const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
-        const ratio = (e.clientX - rect.left) / rect.width;
-        const idx = Math.max(0, Math.min(dates.length - 1, Math.round(ratio * (dates.length - 1))));
-        const i2 = Math.min(dates.length - 1, idx + Math.max(2, Math.round(dates.length * 0.05)));
-        onSelectRange(dates[idx], dates[i2]);
-      }}>
-        {selectRect && <rect x={Math.min(selectRect.x1, selectRect.x2)} y={topPad} width={Math.abs(selectRect.x2 - selectRect.x1)} height={h - topPad - bottomPad} fill="rgba(14,165,233,0.18)" />}
-        {showZeroLine && typeof zeroY === "number" && zeroY > topPad && zeroY < h - bottomPad && <line x1={35} y1={zeroY} x2={w - 20} y2={zeroY} stroke="#64748b" strokeDasharray="3 3" />}
-        <line x1={35} y1={h - bottomPad} x2={w - 20} y2={h - bottomPad} stroke="#475569" />
-        {lines.map((line) => <path key={line.label} d={path(line.data)} fill="none" stroke={line.color} strokeWidth="2" strokeDasharray={line.dashed ? "6 4" : undefined} />)}
-      </svg>
-      <div className="macro-lab-legend">{lines.map((line) => <span key={line.label} style={{ color: line.color }}>{line.dashed ? "▭" : "—"} {line.label}</span>)}</div>
-    </div>
-  );
 }
 
 function AccordionHeader({ title, open, onToggle }: { title: string; open: boolean; onToggle: () => void }) {
@@ -534,12 +447,12 @@ export default function MacroRegimeValidationLab() {
       </div>
 
       <div className="macro-lab-grid">
-        <MiniSeries id="macro" title="Macro score history (baseline vs modified)" dates={dates} lines={[{ label: "Baseline", color: "#1d4ed8", data: baselineMacro }, { label: "Modified", color: "#dc2626", data: modifiedMacro, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.macro} onToggleExpand={toggleChart} />
-        <MiniSeries id="blocks" title="Block history composite" dates={dates} lines={[{ label: "Block composite", color: "#2563eb", data: blockComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.blocks} onToggleExpand={toggleChart} />
-        <MiniSeries id="overlay" title="Overlay history" dates={dates} lines={[{ label: "Overlay composite", color: "#7c3aed", data: overlayComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.overlay} onToggleExpand={toggleChart} />
-        <MiniSeries id="inflationSplit" title="Inflation split (baseline vs modified)" dates={inflDates} lines={[{ label: "Baseline split", color: "#0f766e", data: inflationSplitBaseline }, { label: "Modified split", color: "#b91c1c", data: inflationSplitModified, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.inflationSplit} onToggleExpand={toggleChart} showZeroLine />
-        <MiniSeries id="lyn" title="LynAldenology: Inflation" dates={inflDates} lines={[{ label: "Monetary pressure", color: "#0ea5e9", data: lynSeries.monetaryPressure ?? [] }, { label: "Asset inflation", color: "#6366f1", data: lynSeries.assetInflation ?? [] }, { label: "Commodity inflation", color: "#f97316", data: lynSeries.commodityInflation ?? [] }, { label: "Consumer inflation", color: "#16a34a", data: lynSeries.consumerInflation ?? [] }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.lyn} onToggleExpand={toggleChart} showZeroLine />
-        <MiniSeries id="gap" title="Monetary Inflation Gap" dates={inflDates} lines={[{ label: "Gap", color: "#1d4ed8", data: gapSeries }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.gap} onToggleExpand={toggleChart} showZeroLine symmetricAroundZero />
+        <MacroLabMiniSeries id="macro" title="Macro score history (baseline vs modified)" dates={dates} lines={[{ label: "Baseline", color: "#1d4ed8", data: baselineMacro }, { label: "Modified", color: "#dc2626", data: modifiedMacro, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.macro} onToggleExpand={(id) => toggleChart(id as ChartId)} />
+        <MacroLabMiniSeries id="blocks" title="Block history composite" dates={dates} lines={[{ label: "Block composite", color: "#2563eb", data: blockComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.blocks} onToggleExpand={(id) => toggleChart(id as ChartId)} />
+        <MacroLabMiniSeries id="overlay" title="Overlay history" dates={dates} lines={[{ label: "Overlay composite", color: "#7c3aed", data: overlayComposite }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.overlay} onToggleExpand={(id) => toggleChart(id as ChartId)} />
+        <MacroLabMiniSeries id="inflationSplit" title="Inflation split (baseline vs modified)" dates={inflDates} lines={[{ label: "Baseline split", color: "#0f766e", data: inflationSplitBaseline }, { label: "Modified split", color: "#b91c1c", data: inflationSplitModified, dashed: true }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.inflationSplit} onToggleExpand={(id) => toggleChart(id as ChartId)} showZeroLine />
+        <MacroLabMiniSeries id="lyn" title="LynAldenology: Inflation" dates={inflDates} lines={[{ label: "Monetary pressure", color: "#0ea5e9", data: lynSeries.monetaryPressure ?? [] }, { label: "Asset inflation", color: "#6366f1", data: lynSeries.assetInflation ?? [] }, { label: "Commodity inflation", color: "#f97316", data: lynSeries.commodityInflation ?? [] }, { label: "Consumer inflation", color: "#16a34a", data: lynSeries.consumerInflation ?? [] }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.lyn} onToggleExpand={(id) => toggleChart(id as ChartId)} showZeroLine />
+        <MacroLabMiniSeries id="gap" title="Monetary Inflation Gap" dates={inflDates} lines={[{ label: "Gap", color: "#1d4ed8", data: gapSeries }]} selectedRange={selectedRange} onSelectRange={(s, e) => setSelectedRange({ startDate: s, endDate: e })} expanded={expandedCharts.gap} onToggleExpand={(id) => toggleChart(id as ChartId)} showZeroLine symmetricAroundZero />
       </div>
 
       <div className="macro-lab-layout">
