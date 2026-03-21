@@ -1597,6 +1597,55 @@ export default function GlobalMacroDashboard() {
     return { currentPosition, prevPos, dx, dy, distance, label, state };
   }, [historyPoints, regimeProbabilityDistribution, regimeProbabilityAny?.primaryRegime, regimeProbabilityAny?.primaryWeight, regimeProbabilityAny?.decisiveness]);
 
+  const regimeInterpretation = useMemo(() => {
+    const primaryRegime = String(regimeProbabilityAny?.primaryRegime ?? globalMacro?.regime?.coreRegimeLabel ?? "Balanced");
+    const decisiveness = typeof regimeProbabilityAny?.decisiveness === "number" ? regimeProbabilityAny.decisiveness : null;
+    const momentumDirection = String(regimeProbabilityAny?.regimeMomentum?.direction ?? "");
+    const driftToward = String(regimeProbabilityAny?.regimeMomentum?.driftTowardRegime ?? "");
+    const supportingCount = Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays.length : 0;
+    const modulatingCount = Array.isArray(regimeProbabilityAny?.modulatingOverlays) ? regimeProbabilityAny.modulatingOverlays.length : 0;
+    const contradictingCount = Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays.length : 0;
+
+    let macroStance = "Neutral";
+    if (primaryRegime === "FiscalPressureBuilding") {
+      if (decisiveness !== null && decisiveness < 0.3) macroStance = "Mild tightening";
+      else if (decisiveness !== null && decisiveness >= 0.55) macroStance = "Strong tightening";
+      else macroStance = "Tightening";
+    } else if (primaryRegime === "FiscalDominanceRisk") {
+      macroStance = "Strong tightening";
+    } else if (primaryRegime === "MonetaryDominance") {
+      macroStance = "Mild tightening";
+    }
+
+    let riskClimate: "Neutral" | "Neutral to risk-off" | "Risk-off" = primaryRegime === "FiscalDominanceRisk"
+      ? "Risk-off"
+      : primaryRegime === "FiscalPressureBuilding"
+        ? "Neutral to risk-off"
+        : "Neutral";
+    const softenRiskOff = driftToward === "Balanced" || /toward_balanced/i.test(momentumDirection) || modulatingCount >= 3;
+    if (softenRiskOff) {
+      if (riskClimate === "Risk-off") riskClimate = "Neutral to risk-off";
+      else if (riskClimate === "Neutral to risk-off") riskClimate = "Neutral";
+    }
+
+    const hasDirectionalSupport = supportingCount >= 3;
+    const reducedConviction = modulatingCount >= 2 && contradictingCount >= 1;
+    const positioning = hasDirectionalSupport && !reducedConviction
+      ? "Broad risk-on"
+      : (contradictingCount >= 2 || reducedConviction ? "Defensive" : "Selective");
+
+    return { macroStance, riskClimate, positioning };
+  }, [
+    globalMacro?.regime?.coreRegimeLabel,
+    regimeProbabilityAny?.contradictingOverlays,
+    regimeProbabilityAny?.decisiveness,
+    regimeProbabilityAny?.modulatingOverlays,
+    regimeProbabilityAny?.primaryRegime,
+    regimeProbabilityAny?.regimeMomentum?.direction,
+    regimeProbabilityAny?.regimeMomentum?.driftTowardRegime,
+    regimeProbabilityAny?.supportingOverlays,
+  ]);
+
   function regimeColor(regime: string) {
     if (regime === "MonetaryDominance") return "#5a6a80";
     if (regime === "Balanced") return "#6e7b64";
@@ -2436,6 +2485,12 @@ Signal: ${gapLabel}`,
                     <li>Confirmed by {Array.isArray(regimeProbabilityAny?.supportingOverlays) ? regimeProbabilityAny.supportingOverlays.length : 0} overlays.</li>
                     <li>Contradicted by {Array.isArray(regimeProbabilityAny?.contradictingOverlays) ? regimeProbabilityAny.contradictingOverlays.length : 0} overlays.</li>
                   </ul>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
+                    <strong>Regime interpretation</strong>
+                    <div>Macro stance: {regimeInterpretation.macroStance}</div>
+                    <div>Risk climate: {regimeInterpretation.riskClimate}</div>
+                    <div>Positioning: {regimeInterpretation.positioning}</div>
+                  </div>
                   <details style={{ marginTop: 6 }}>
                     <summary style={{ cursor: "pointer", fontSize: 12 }}>Visa detaljerad regimtolkning</summary>
                     <div style={{ fontSize: 12, marginTop: 6 }}>{String(regimeProbabilityAny?.narrative?.short ?? explanationNarrative?.short ?? globalMacro.regime?.regimeExplanation?.summary ?? "Regime narrative saknas.")}</div>
