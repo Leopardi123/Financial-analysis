@@ -359,6 +359,22 @@ type MacroRegimeHistoryPoint = {
   overlaySummaryShort: string;
 };
 
+type HistoricalOverlayRow = {
+  key: string;
+  name: string;
+  label: string;
+  score: number | null;
+  available: boolean;
+  reason?: string;
+};
+
+type HistoricalInflationContext = {
+  goodsInflation: number | null;
+  monetaryInflation: number | null;
+  actualInflation: number | null;
+  inflationGap: number | null;
+};
+
 type MacroRegimeHistoryChange = {
   date: string;
   fromRegime: string | null;
@@ -519,7 +535,9 @@ export default function GlobalMacroDashboard() {
     downFactors: string[];
     topDrivers: Array<{ title: string; direction: string; block: string; contribution: number }>;
     explanation: string;
-    overlayContext: string;
+    thematicOverlayContext: HistoricalOverlayRow[];
+    legacyOverlayContext: HistoricalOverlayRow[];
+    inflationContext: HistoricalInflationContext | null;
   } | null>(null);
   const [focusedBlockSeries, setFocusedBlockSeries] = useState<"A_FISCAL" | "B_MONETARY" | "C_INFLATION" | "D_CREDIBILITY" | null>(null);
   const [blockHoverIndex, setBlockHoverIndex] = useState<number | null>(null);
@@ -541,6 +559,16 @@ export default function GlobalMacroDashboard() {
       "inflationCostShockOverlay",
       "tradeSupplyChainStressOverlay",
     ]), [selectedRegion]);
+
+  const thematicOverlayDefs = useMemo(() => [
+    { key: "liquidityOverlay", name: "Liquidity" },
+    { key: "creditFundingOverlay", name: "Credit Funding" },
+    { key: "energyShockOverlay", name: "Energy Shock" },
+    { key: "localUnrestOverlay", name: "Local Unrest" },
+    { key: "safeHavenRiskOffOverlay", name: "Safe Haven Risk Off" },
+    { key: "inflationCostShockOverlay", name: "Inflation Cost Shock" },
+    { key: "tradeSupplyChainStressOverlay", name: "Trade Supply Chain Stress" },
+  ], []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1648,13 +1676,18 @@ export default function GlobalMacroDashboard() {
     return intervals.length > 0 ? intervals[intervals.length - 1].endDate : "—";
   }
 
-  function inflationContextAtDate(asOfDate: string): string | null {
+  function inflationContextAtDate(asOfDate: string): HistoricalInflationContext | null {
     const rows = inflationAnalysis?.points ?? [];
     if (!rows.length) return null;
     const exact = rows.find((row) => row.date === asOfDate);
     const fallback = exact ?? rows.filter((row) => row.date <= asOfDate).slice(-1)[0] ?? rows[rows.length - 1];
     if (!fallback) return null;
-    return `Inflation split: goods ${safeNumber(fallback.goodsInflation, 1)} · monetary ${safeNumber(fallback.monetaryInflation, 1)} · actual ${safeNumber(fallback.actualInflation, 1)} · gap ${safeNumber(fallback.monetaryInflationGap, 1)}.`;
+    return {
+      goodsInflation: typeof fallback.goodsInflation === "number" ? fallback.goodsInflation : null,
+      monetaryInflation: typeof fallback.monetaryInflation === "number" ? fallback.monetaryInflation : null,
+      actualInflation: typeof fallback.actualInflation === "number" ? fallback.actualInflation : null,
+      inflationGap: typeof fallback.monetaryInflationGap === "number" ? fallback.monetaryInflationGap : null,
+    };
   }
 
   function selectHistoricalRegimeFocus(
@@ -1676,9 +1709,34 @@ export default function GlobalMacroDashboard() {
       block: driver.block ?? "D_CREDIBILITY",
       contribution: typeof driver.contribution === "number" ? driver.contribution : 0,
     }));
-    const overlaySummary = [focusPoint?.growthOverlay, focusPoint?.stressOverlay, focusPoint?.hardAssetOverlay]
-      .filter((item): item is string => Boolean(item))
-      .join(" · ");
+    const focusAny = focusPoint as any;
+    const historicalOverlays = focusAny?.overlays && typeof focusAny.overlays === "object" ? focusAny.overlays : null;
+    const thematicOverlayContext: HistoricalOverlayRow[] = thematicOverlayDefs.map((def) => {
+      const overlay = historicalOverlays?.[def.key];
+      if (overlay && typeof overlay === "object") {
+        const label = typeof overlay.label === "string" && overlay.label.trim() ? overlay.label.trim() : "State unavailable";
+        return {
+          key: def.key,
+          name: def.name,
+          label,
+          score: typeof overlay.score === "number" ? overlay.score : null,
+          available: true,
+        };
+      }
+      return {
+        key: def.key,
+        name: def.name,
+        label: "Unavailable",
+        score: null,
+        available: false,
+        reason: "Not available for this historical point",
+      };
+    });
+    const legacyOverlayContext: HistoricalOverlayRow[] = [
+      { key: "growthOverlay", name: "Growth", label: focusPoint?.growthOverlay || "Unavailable", score: null, available: Boolean(focusPoint?.growthOverlay) },
+      { key: "stressOverlay", name: "Stress", label: focusPoint?.stressOverlay || "Unavailable", score: null, available: Boolean(focusPoint?.stressOverlay) },
+      { key: "hardAssetOverlay", name: "Hard asset", label: focusPoint?.hardAssetOverlay || "Unavailable", score: null, available: Boolean(focusPoint?.hardAssetOverlay) },
+    ];
     const inflationContext = inflationContextAtDate(focusPoint?.asOfDate ?? focusDate);
     setSelectedRegimeInterval({
       asOfDate: focusPoint?.asOfDate ?? focusDate,
@@ -1692,7 +1750,9 @@ export default function GlobalMacroDashboard() {
       downFactors: deltas.filter((item) => item.delta < -2).map((item) => `${item.key} ↓`).slice(0, 3),
       topDrivers,
       explanation: focusPoint?.regimeExplanation?.summary ?? regimeExplanation(focusPoint?.coreRegimeLabel ?? interval.coreRegimeLabel),
-      overlayContext: [overlaySummary ? `Overlay context: ${overlaySummary}.` : "Overlay context: none.", inflationContext].filter(Boolean).join(" "),
+      thematicOverlayContext,
+      legacyOverlayContext,
+      inflationContext,
     });
   }
 
@@ -2517,7 +2577,29 @@ Signal: ${gapLabel}`,
                         Top driver: <strong>{selectedRegimeInterval.topDriver ?? "—"}</strong><br />
                         Key explanation: {selectedRegimeInterval.explanation}<br />
                         Key drivers up/down: {selectedRegimeInterval.upFactors.join(", ") || "No clear up factors"} · {selectedRegimeInterval.downFactors.join(", ") || "No clear down factors"}<br />
-                        {selectedRegimeInterval.overlayContext}
+                        <div style={{ marginTop: 6 }}>
+                          <strong>Overlay context</strong>
+                          <div>
+                            {selectedRegimeInterval.thematicOverlayContext.map((row) => (
+                              <div key={`thematic-overlay-${row.key}`}>- {row.name}: {row.label}{row.score !== null ? ` (${safeNumber(row.score, 1)})` : ""}{!row.available && row.reason ? ` — ${row.reason}` : ""}</div>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          <strong>Legacy overlay context</strong>
+                          <div>
+                            {selectedRegimeInterval.legacyOverlayContext.map((row) => (
+                              <div key={`legacy-overlay-${row.key}`}>- {row.name}: {row.label}</div>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          <strong>Inflation context</strong>
+                          <div>- Goods inflation: {safeNumber(selectedRegimeInterval.inflationContext?.goodsInflation ?? null, 1)}</div>
+                          <div>- Monetary inflation: {safeNumber(selectedRegimeInterval.inflationContext?.monetaryInflation ?? null, 1)}</div>
+                          <div>- Actual inflation: {safeNumber(selectedRegimeInterval.inflationContext?.actualInflation ?? null, 1)}</div>
+                          <div>- Inflation gap: {safeNumber(selectedRegimeInterval.inflationContext?.inflationGap ?? null, 1)}</div>
+                        </div>
                         <ul>
                           {selectedRegimeInterval.topDrivers.map((driver) => (
                             <li key={`${driver.title}-${driver.block}`}>{driver.title} ({driver.block}) · {driver.direction} · contrib {driver.contribution.toFixed(2)}</li>
