@@ -347,6 +347,30 @@ type MacroHistoryPayload = {
   }>;
 };
 
+type MacroRegimeHistoryPoint = {
+  asOfDate: string;
+  macroScore: number | null;
+  primaryRegime: string;
+  primaryWeight: number | null;
+  decisiveness: number | null;
+  transitionLike: boolean;
+  momentumDirection: string;
+  driftTowardRegime: string | null;
+  structuralQuality: "robust" | "usable_with_caveats" | "fragile" | "unknown";
+  overlaySummaryShort: string;
+};
+
+type MacroRegimeHistoryChange = {
+  date: string;
+  fromRegime: string | null;
+  toRegime: string;
+  confidence: number | null;
+  decisivenessAtChange: number | null;
+  transitionContext: string;
+  note: string;
+  shiftQuality: "clean shift" | "fragile shift" | "transition-like shift" | "low-confidence shift";
+};
+
 
 type InflationAnalysisPayload = {
   metadata: {
@@ -1663,6 +1687,95 @@ export default function GlobalMacroDashboard() {
     return `Historik saknas för vald period/upplösning. Orsak: ${unfilledReason}.`;
   }, [macroHistory, historyPoints.length, historyRangeYears, historyResolution]);
 
+  const macroRegimeHistory = useMemo(() => {
+    const derivedPoints: MacroRegimeHistoryPoint[] = historyPoints.map((point) => {
+      const anyPoint = point as any;
+      const pointRegimeProbability = anyPoint?.macroRegimeProbability ?? anyPoint?.regimeProbability ?? null;
+      const overlays = [point.growthOverlay, point.stressOverlay, point.hardAssetOverlay].filter((item): item is string => Boolean(item));
+      const structuralQuality = String(anyPoint?.macroExplanation?.summary?.structuralQualityLabel ?? "unknown");
+      return {
+        asOfDate: point.asOfDate,
+        macroScore: typeof point.macroScoreTotal === "number" ? point.macroScoreTotal : null,
+        primaryRegime: point.coreRegimeLabel,
+        primaryWeight: typeof pointRegimeProbability?.primaryWeight === "number" ? normalizeRegimeWeight(pointRegimeProbability.primaryWeight) : null,
+        decisiveness: typeof pointRegimeProbability?.decisiveness === "number" ? normalizeRegimeWeight(pointRegimeProbability.decisiveness) : null,
+        transitionLike: Boolean(pointRegimeProbability?.transitionLike),
+        momentumDirection: String(pointRegimeProbability?.regimeMomentum?.direction ?? "stable"),
+        driftTowardRegime: pointRegimeProbability?.regimeMomentum?.driftTowardRegime ?? null,
+        structuralQuality: structuralQuality === "robust" || structuralQuality === "usable_with_caveats" || structuralQuality === "fragile" ? structuralQuality : "unknown",
+        overlaySummaryShort: overlays.length > 0 ? overlays.join(" · ") : "No overlay context",
+      };
+    });
+
+    const classifyShiftQuality = (entry: MacroRegimeHistoryPoint): MacroRegimeHistoryChange["shiftQuality"] => {
+      const decisiveness = typeof entry.decisiveness === "number" ? entry.decisiveness : null;
+      if (entry.transitionLike) return "transition-like shift";
+      if (decisiveness !== null && decisiveness < 0.28) return "low-confidence shift";
+      if (entry.structuralQuality === "fragile" || (decisiveness !== null && decisiveness < 0.44)) return "fragile shift";
+      return "clean shift";
+    };
+
+    const changes: MacroRegimeHistoryChange[] = [];
+    for (let i = 1; i < derivedPoints.length; i += 1) {
+      const prev = derivedPoints[i - 1];
+      const current = derivedPoints[i];
+      if (current.primaryRegime !== prev.primaryRegime) {
+        const shiftQuality = classifyShiftQuality(current);
+        changes.push({
+          date: current.asOfDate,
+          fromRegime: prev.primaryRegime,
+          toRegime: current.primaryRegime,
+          confidence: current.primaryWeight,
+          decisivenessAtChange: current.decisiveness,
+          transitionContext: current.transitionLike ? "Transition-like behavior around handoff." : "Direct handoff between primary regimes.",
+          note: `${prev.primaryRegime} → ${current.primaryRegime} · ${current.overlaySummaryShort}`,
+          shiftQuality,
+        });
+      } else {
+        const prevDec = typeof prev.decisiveness === "number" ? prev.decisiveness : null;
+        const currDec = typeof current.decisiveness === "number" ? current.decisiveness : null;
+        if (prevDec !== null && currDec !== null && currDec - prevDec >= 0.16) {
+          changes.push({
+            date: current.asOfDate,
+            fromRegime: current.primaryRegime,
+            toRegime: current.primaryRegime,
+            confidence: current.primaryWeight,
+            decisivenessAtChange: current.decisiveness,
+            transitionContext: "No handoff, but conviction strengthened.",
+            note: `Remained ${current.primaryRegime} · decisiveness strengthened`,
+            shiftQuality: classifyShiftQuality(current),
+          });
+        }
+      }
+    }
+
+    return {
+      resolution: macroHistory?.resolution ?? historyResolution,
+      range: macroHistory?.requestedRangeYears ?? historyRangeYears,
+      points: derivedPoints,
+      changeLog: changes,
+    };
+  }, [historyPoints, macroHistory?.requestedRangeYears, macroHistory?.resolution, historyRangeYears, historyResolution]);
+
+  const macroHistoryNarrative = useMemo(() => {
+    if (!macroRegimeHistory.points.length) return "Ingen historik finns för valt intervall.";
+    const current = macroRegimeHistory.points[macroRegimeHistory.points.length - 1];
+    const lastHandoff = [...macroRegimeHistory.changeLog].reverse().find((item) => item.fromRegime && item.fromRegime !== item.toRegime);
+    const recentWindow = macroRegimeHistory.points.slice(-Math.min(6, macroRegimeHistory.points.length));
+    const lowDecisiveness = recentWindow.filter((row) => typeof row.decisiveness === "number" && row.decisiveness < 0.35).length;
+    const hasDrift = recentWindow.find((row) => row.driftTowardRegime && row.driftTowardRegime !== row.primaryRegime);
+    if (!lastHandoff) {
+      return `Regimen har varit ${current.primaryRegime} genom hela perioden.`;
+    }
+    if (lowDecisiveness >= 2) {
+      return `Senaste regimskifte skedde ${lastHandoff.date}. Nyligen syns lägre conviction men ingen ny full handoff.`;
+    }
+    if (hasDrift?.driftTowardRegime) {
+      return `Senaste handoff var ${lastHandoff.date}. Därefter har regimen drivit mot ${hasDrift.driftTowardRegime} utan att fullfölja skifte.`;
+    }
+    return `Senaste regimskifte skedde ${lastHandoff.date} (${lastHandoff.fromRegime} → ${lastHandoff.toRegime}) och nuvarande regim är ${current.primaryRegime}.`;
+  }, [macroRegimeHistory]);
+
   const inflationRows = inflationAnalysis?.points ?? [];
   const inflationSplitData = useMemo(() => {
     if (inflationRows.length === 0) return null;
@@ -2913,7 +3026,10 @@ Signal: ${gapLabel}`,
 
               {macroHistory && historyPoints.length > 0 ? (
                 <>
-                  <h5>1) Macro Score History</h5>
+                  <h5>1) Regime timeline</h5>
+                  <div style={{ fontSize: 12, marginBottom: 8 }}>
+                    <strong>Historisk summary:</strong> {macroHistoryNarrative}
+                  </div>
                   <div style={{ fontSize: 12, marginBottom: 6 }}>
                     <strong>Score zones:</strong> ≤{macroHistory.template.thresholds.monetaryDominanceMax} MonetaryDominance, {macroHistory.template.thresholds.monetaryDominanceMax + 1}–{macroHistory.template.thresholds.balancedMax} Balanced, {macroHistory.template.thresholds.balancedMax + 1}–{macroHistory.template.thresholds.fiscalPressureMax} FiscalPressureBuilding, &gt;{macroHistory.template.thresholds.fiscalPressureMax} FiscalDominanceRisk.
                   </div>
@@ -2987,6 +3103,42 @@ Signal: ${gapLabel}`,
                         return <circle key={`score-change-${point.asOfDate}`} cx={x} cy={y} r={3.2} fill="#8f5f55" />;
                       })}
 
+                      {(() => {
+                        const lastClean = [...macroRegimeHistory.changeLog].reverse().find((row) => row.shiftQuality === "clean shift" && row.fromRegime !== row.toRegime);
+                        if (!lastClean) return null;
+                        const targetPoint = historyPoints.find((point) => point.asOfDate === lastClean.date && typeof point.macroScoreTotal === "number");
+                        if (!targetPoint || typeof targetPoint.macroScoreTotal !== "number") return null;
+                        const x = 72 + (segmentPosition(targetPoint.asOfDate, targetPoint.asOfDate).left / 100) * 900;
+                        const y = 28 + (1 - targetPoint.macroScoreTotal / 100) * 240;
+                        return (
+                          <g>
+                            <circle cx={x} cy={y} r={6.5} fill="transparent" stroke="#f8fafc" strokeWidth={1.4} strokeDasharray="2 2" />
+                            <text x={x + 8} y={Math.max(20, y - 8)} fontSize={10} fill="#f8fafc">last clean</text>
+                          </g>
+                        );
+                      })()}
+
+                      {latestHistoryPoint && typeof latestHistoryPoint.macroScoreTotal === "number" && (
+                        <g>
+                          <circle
+                            cx={72 + (segmentPosition(latestHistoryPoint.asOfDate, latestHistoryPoint.asOfDate).left / 100) * 900}
+                            cy={28 + (1 - latestHistoryPoint.macroScoreTotal / 100) * 240}
+                            r={5}
+                            fill="#f8fafc"
+                            stroke="#111827"
+                            strokeWidth={1.3}
+                          />
+                          <text
+                            x={72 + (segmentPosition(latestHistoryPoint.asOfDate, latestHistoryPoint.asOfDate).left / 100) * 900 + 8}
+                            y={28 + (1 - latestHistoryPoint.macroScoreTotal / 100) * 240 + 4}
+                            fontSize={10}
+                            fill="#f8fafc"
+                          >
+                            now
+                          </text>
+                        </g>
+                      )}
+
                       <line x1={72} y1={268} x2={972} y2={268} stroke="#b8afa1" strokeWidth={1} />
                       {axisTicks.map((tick) => {
                         const x = 72 + ((historyPoints.length <= 1 ? 0 : tick.index / (historyPoints.length - 1)) * 900);
@@ -3005,7 +3157,7 @@ Signal: ${gapLabel}`,
                     ))}
                   </div>
                   <div style={{ fontSize: 12, marginBottom: 8 }}>
-                    Latest punkt: <strong>{latestHistoryPoint?.asOfDate ?? "—"}</strong> | Regim <strong>{latestHistoryPoint?.coreRegimeLabel ?? "—"}</strong> | Score <strong>{typeof latestHistoryPoint?.macroScoreTotal === "number" ? latestHistoryPoint.macroScoreTotal.toFixed(1) : "—"}</strong> | Top driver <strong>{latestHistoryPoint?.topDriver ?? "—"}</strong>
+                    Latest punkt: <strong>{latestHistoryPoint?.asOfDate ?? "—"}</strong> | Regim <strong>{latestHistoryPoint?.coreRegimeLabel ?? "—"}</strong> | Score <strong>{typeof latestHistoryPoint?.macroScoreTotal === "number" ? latestHistoryPoint.macroScoreTotal.toFixed(1) : "—"}</strong> | Top driver <strong>{latestHistoryPoint?.topDriver ?? "—"}</strong> | Changes logged <strong>{macroRegimeHistory.changeLog.length}</strong>
                   </div>
                   {selectedRegimeInterval && (
                     <div style={{ marginBottom: 12, fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
@@ -3142,20 +3294,28 @@ Signal: ${gapLabel}`,
                           <th>Datum</th>
                           <th>Från</th>
                           <th>Till</th>
-                          <th>Overlay change</th>
-                          <th>Viktigaste driver</th>
+                          <th>Shift quality</th>
+                          <th>Decisiveness</th>
+                          <th>Note</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {historyPoints.filter((point) => point.regimeChanged).map((point) => (
-                          <tr key={`change-${point.asOfDate}`}>
-                            <td>{point.asOfDate}</td>
-                            <td>{point.previousRegimeLabel ?? "—"}</td>
-                            <td>{point.coreRegimeLabel}</td>
-                            <td>{point.overlayChanged ? "Ja" : "Nej"}</td>
-                            <td>{point.topDriver ?? "—"}</td>
+                        {macroRegimeHistory.changeLog.length > 0 ? (
+                          macroRegimeHistory.changeLog.map((row) => (
+                            <tr key={`change-${row.date}-${row.fromRegime ?? "none"}-${row.toRegime}`}>
+                              <td>{row.date}</td>
+                              <td>{row.fromRegime ?? "—"}</td>
+                              <td>{row.toRegime}</td>
+                              <td>{row.shiftQuality}</td>
+                              <td>{typeof row.decisivenessAtChange === "number" ? safePct(row.decisivenessAtChange) : "—"}</td>
+                              <td>{row.note}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6}>No regime changes in selected range ({String(macroRegimeHistory.range)} {macroRegimeHistory.resolution.toLowerCase()}).</td>
                           </tr>
-                        ))}
+                        )}
                       </tbody>
                     </table>
                     </div>

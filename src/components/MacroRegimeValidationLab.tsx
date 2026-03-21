@@ -254,6 +254,22 @@ export default function MacroRegimeValidationLab() {
 
   const filtered = useMemo(() => points.filter((p) => !lookbackStart || p.asOfDate >= lookbackStart), [points, lookbackStart]);
   const dates = filtered.map((p) => p.asOfDate);
+  const labRegimeHistoryChangeLog = useMemo(() => {
+    const rows: Array<{ date: string; from: string; to: string; note: string }> = [];
+    for (let i = 1; i < filtered.length; i += 1) {
+      const prev = filtered[i - 1];
+      const current = filtered[i];
+      if (prev.coreRegimeLabel !== current.coreRegimeLabel) {
+        rows.push({
+          date: current.asOfDate,
+          from: prev.coreRegimeLabel,
+          to: current.coreRegimeLabel,
+          note: `driver ${current.topDrivers?.[0]?.title ?? current.topDrivers?.[0]?.indicatorId ?? "mixed"}`,
+        });
+      }
+    }
+    return rows;
+  }, [filtered]);
 
   const blockSubMultipliers = useMemo(() => {
     return (Object.keys(BLOCK_LABELS) as BlockKey[]).reduce<Record<BlockKey, number>>((acc, block) => {
@@ -561,6 +577,22 @@ export default function MacroRegimeValidationLab() {
           ) : (
             <div className="macro-lab-note" style={{ marginBottom: 8 }}>Regime probability not yet available for this snapshot.</div>
           )}
+          <div className="macro-lab-note" style={{ marginBottom: 8 }}>
+            <strong>Regime history (lab depth):</strong><br />
+            Points in active lookback: {filtered.length}. Logged handoffs: {labRegimeHistoryChangeLog.length}.
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: "pointer" }}>Visa handoff-logg</summary>
+              {labRegimeHistoryChangeLog.length ? (
+                <ul>
+                  {labRegimeHistoryChangeLog.slice(-10).reverse().map((row) => (
+                    <li key={`lab-history-change-${row.date}-${row.from}-${row.to}`}>{row.date}: {row.from} → {row.to} · {row.note}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div style={{ fontSize: 12 }}>Inga regime-handoffs i vald lookback.</div>
+              )}
+            </details>
+          </div>
 
           {labExplanation && (
             <div className="macro-lab-note" style={{ marginBottom: 8 }}>
