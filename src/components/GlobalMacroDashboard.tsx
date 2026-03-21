@@ -2620,19 +2620,19 @@ Signal: ${gapLabel}`,
                     <div>
                       <div><strong>Favored:</strong></div>
                       <ul style={{ margin: "2px 0 4px", paddingLeft: 18 }}>
-                        {macroSectorMap.favored.length ? macroSectorMap.favored.map((item) => <li key={`favored-${item.id}`}>{item.title}</li>) : <li>—</li>}
+                        {macroSectorMap.favored.length ? macroSectorMap.favored.map((item) => <li key={`favored-${item.id}`}>{item.title} ({item.strength})</li>) : <li>—</li>}
                       </ul>
                     </div>
                     <div>
                       <div><strong>Neutral:</strong></div>
                       <ul style={{ margin: "2px 0 4px", paddingLeft: 18 }}>
-                        {macroSectorMap.neutral.length ? macroSectorMap.neutral.map((item) => <li key={`neutral-${item.id}`}>{item.title}</li>) : <li>—</li>}
+                        {macroSectorMap.neutral.length ? macroSectorMap.neutral.map((item) => <li key={`neutral-${item.id}`}>{item.title} ({item.strength})</li>) : <li>—</li>}
                       </ul>
                     </div>
                     <div>
                       <div><strong>Under pressure:</strong></div>
                       <ul style={{ margin: "2px 0 0", paddingLeft: 18 }}>
-                        {macroSectorMap.underPressure.length ? macroSectorMap.underPressure.map((item) => <li key={`under-${item.id}`}>{item.title}</li>) : <li>—</li>}
+                        {macroSectorMap.underPressure.length ? macroSectorMap.underPressure.map((item) => <li key={`under-${item.id}`}>{item.title} ({item.strength} pressure)</li>) : <li>—</li>}
                       </ul>
                     </div>
                   </div>

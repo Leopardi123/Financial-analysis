@@ -3,6 +3,7 @@ import type { MacroAssetMap, MacroAssetMapItem, MacroAssetBucket } from "./macro
 export type MacroSectorMapItem = {
   id: string;
   title: string;
+  strength: "strong" | "moderate" | "weak";
   rationale: string;
   sourceAssets: Array<{ id: string; title: string }>;
 };
@@ -111,6 +112,7 @@ function normalizeMacroSectorBucket(items: MacroSectorMapItem[]): MacroSectorMap
         merged.set(canonicalId, {
           id: canonicalId,
           title: CANONICAL_SECTOR_TITLE[canonicalId],
+          strength: item.strength,
           rationale: item.rationale,
           rationaleParts: [item.rationale],
           sourceAssets: [...item.sourceAssets],
@@ -136,6 +138,21 @@ function normalizeMacroSectorBucket(items: MacroSectorMapItem[]): MacroSectorMap
   }));
 }
 
+function classifyStrength(item: MacroSectorMapItem, bucket: MacroAssetBucket): "strong" | "moderate" | "weak" {
+  const rationale = item.rationale.toLowerCase();
+  const hasOverlayBoost =
+    rationale.includes("safe-haven")
+    || rationale.includes("overlay")
+    || rationale.includes("credit/funding")
+    || rationale.includes("unrest risk");
+  const multiAssetSupport = item.sourceAssets.length >= 2;
+  const primaryBucketAlignment = bucket === "favored" || bucket === "underPressure";
+
+  if (multiAssetSupport || hasOverlayBoost || primaryBucketAlignment) return "strong";
+  if (bucket === "neutral" || item.sourceAssets.length === 1) return "moderate";
+  return "weak";
+}
+
 export function buildMacroSectorMap(assetMap: MacroAssetMap): MacroSectorMap {
   const grouped: Record<MacroAssetBucket, MacroSectorMapItem[]> = {
     favored: [],
@@ -158,6 +175,7 @@ export function buildMacroSectorMap(assetMap: MacroAssetMap): MacroSectorMap {
     const item: MacroSectorMapItem = {
       id: candidate.id,
       title: candidate.title,
+      strength: "weak",
       rationale: candidate.rationale,
       sourceAssets: [sourceRef],
     };
@@ -210,10 +228,23 @@ export function buildMacroSectorMap(assetMap: MacroAssetMap): MacroSectorMap {
     }
   });
 
+  const favored = normalizeMacroSectorBucket(grouped.favored).map((item) => ({
+    ...item,
+    strength: classifyStrength(item, "favored"),
+  }));
+  const neutral = normalizeMacroSectorBucket(grouped.neutral).map((item) => ({
+    ...item,
+    strength: classifyStrength(item, "neutral"),
+  }));
+  const underPressure = normalizeMacroSectorBucket(grouped.underPressure).map((item) => ({
+    ...item,
+    strength: classifyStrength(item, "underPressure"),
+  }));
+
   return {
-    favored: normalizeMacroSectorBucket(grouped.favored),
-    neutral: normalizeMacroSectorBucket(grouped.neutral),
-    underPressure: normalizeMacroSectorBucket(grouped.underPressure),
+    favored,
+    neutral,
+    underPressure,
     metadata: {
       derivedFromAssetMap: true,
     },
