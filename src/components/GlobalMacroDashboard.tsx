@@ -1649,17 +1649,59 @@ export default function GlobalMacroDashboard() {
     }
     tensionBullets.push(`Momentum score ${momentumScore.toFixed(1)} ${momentumScore >= 0 ? "supports persistence" : "adds drift pressure"} under ${total} active overlays.`);
 
+    const distribution = Array.isArray(regimeProbabilityAny?.distribution)
+      ? [...regimeProbabilityAny.distribution].sort((a: any, b: any) => Number(b?.weight ?? 0) - Number(a?.weight ?? 0))
+      : [];
+    const secondRow = distribution[1] ?? null;
+    const secondWeight = typeof secondRow?.weight === "number" ? secondRow.weight : 0;
+    const primaryWeight = typeof regimeProbabilityAny?.primaryWeight === "number"
+      ? regimeProbabilityAny.primaryWeight
+      : (typeof distribution[0]?.weight === "number" ? distribution[0].weight : 0);
+    const regimeGap = Math.max(0, primaryWeight - secondWeight);
+    const gapBand = regimeGap > 30 ? "Stable" : regimeGap >= 15 ? "Moderate" : "Fragile";
+
+    let transitionRisk: "High" | "Elevated" | "Low" = "Low";
+    if (regimeGap < 15) transitionRisk = "High";
+    else if (coherence === "Low") transitionRisk = "High";
+    else if (contradictingCount >= 1) transitionRisk = "Elevated";
+
+    const momentumDirection = String(regimeProbabilityAny?.regimeMomentum?.direction ?? "stable").toLowerCase();
+    const timeHorizon = momentumDirection === "weakening"
+      ? "Near-term risk"
+      : momentumDirection === "strengthening"
+        ? "Low risk"
+        : "Medium-term";
+
+    const changeDrivers = Array.isArray(regimeProbabilityAny?.regimeMomentum?.changeDrivers)
+      ? regimeProbabilityAny.regimeMomentum.changeDrivers
+      : [];
+    const triggerPressure = [
+      ...contradictingOverlays.map((name: string) => `${name} contradicts primary regime`),
+      ...modulatingOverlays.map((name: string) => `${name} is modulating conviction`),
+      ...changeDrivers.map((name: string) => `${name} momentum driver`),
+    ].filter((item, idx, arr) => item && arr.indexOf(item) === idx).slice(0, 3);
+
     return {
       coherence,
       conflict,
       overlayAlignment,
       adjustedConfidence,
       tensionBullets: tensionBullets.slice(0, 3),
+      transitionRisk,
+      driftDirection: secondRow?.regime ?? "—",
+      regimeGap,
+      regimeGapBand: gapBand,
+      triggerPressure,
+      timeHorizon,
     };
   }, [
     regimeProbabilityAny?.contradictingOverlays,
     regimeProbabilityAny?.decisiveness,
+    regimeProbabilityAny?.distribution,
     regimeProbabilityAny?.modulatingOverlays,
+    regimeProbabilityAny?.primaryWeight,
+    regimeProbabilityAny?.regimeMomentum?.changeDrivers,
+    regimeProbabilityAny?.regimeMomentum?.direction,
     regimeProbabilityAny?.regimeMomentum?.momentumScore,
     regimeProbabilityAny?.supportingOverlays,
   ]);
@@ -2621,6 +2663,18 @@ Signal: ${gapLabel}`,
                         <div><strong>Key tension:</strong></div>
                         <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
                           {regimeConsistencyBlock.tensionBullets.map((item, idx) => <li key={`regime-tension-current-${idx}`}>{item}</li>)}
+                        </ul>
+                      </div>
+                      <div style={{ marginTop: 4, border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", background: "#f8fafc" }}>
+                        <div><strong>Regime transition risk:</strong> {regimeConsistencyBlock.transitionRisk}</div>
+                        <div><strong>Drift direction:</strong> {regimeConsistencyBlock.driftDirection}</div>
+                        <div><strong>Regime gap:</strong> {regimeConsistencyBlock.regimeGap.toFixed(1)} ({regimeConsistencyBlock.regimeGapBand})</div>
+                        <div><strong>Time horizon:</strong> {regimeConsistencyBlock.timeHorizon}</div>
+                        <div><strong>Trigger pressure:</strong></div>
+                        <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                          {regimeConsistencyBlock.triggerPressure.length
+                            ? regimeConsistencyBlock.triggerPressure.map((item, idx) => <li key={`regime-trigger-pressure-${idx}`}>{item}</li>)
+                            : <li>No active transition triggers.</li>}
                         </ul>
                       </div>
                     </div>
