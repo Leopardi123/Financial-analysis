@@ -2608,9 +2608,16 @@ Signal: ${gapLabel}`,
                   ) : (
                     <div style={{ marginTop: 8, fontSize: 12, color: "#334155" }}>Regime probability not yet available for this snapshot.</div>
                   )}
-                  <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
-                    <strong>Macro → Sector tilt</strong>
-                    <div style={{ marginTop: 4 }}>
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 12 }}>Visa detaljerad regimtolkning</summary>
+                    <div style={{ fontSize: 12, marginTop: 6 }}>{String(regimeProbabilityAny?.narrative?.short ?? explanationNarrative?.short ?? globalMacro.regime?.regimeExplanation?.summary ?? "Regime narrative saknas.")}</div>
+                  </details>
+                </div>
+                <div style={{ border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 10px", background: "#eff6ff", marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, color: "#1e3a8a", fontWeight: 700 }}>Macro → Sector tilt</div>
+                  <div style={{ fontSize: 11, color: "#334155", marginTop: 2 }}>Derived from normalized <code>macroSectorMap</code> (not legacy sector UI path).</div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#1f2937" }}>
+                    <div>
                       <div><strong>Favored:</strong></div>
                       <ul style={{ margin: "2px 0 4px", paddingLeft: 18 }}>
                         {macroSectorMap.favored.length ? macroSectorMap.favored.map((item) => <li key={`favored-${item.id}`}>{item.title}</li>) : <li>—</li>}
@@ -2629,10 +2636,11 @@ Signal: ${gapLabel}`,
                       </ul>
                     </div>
                   </div>
-                  <details style={{ marginTop: 6 }}>
-                    <summary style={{ cursor: "pointer", fontSize: 12 }}>Visa detaljerad regimtolkning</summary>
-                    <div style={{ fontSize: 12, marginTop: 6 }}>{String(regimeProbabilityAny?.narrative?.short ?? explanationNarrative?.short ?? globalMacro.regime?.regimeExplanation?.summary ?? "Regime narrative saknas.")}</div>
-                  </details>
+                  {debugEnabled ? (
+                    <div style={{ marginTop: 6, fontSize: 11, color: "#334155" }}>
+                      Debug proof: source=<code>macroSectorMap</code> · counts=favored:{macroSectorMap.favored.length}, neutral:{macroSectorMap.neutral.length}, underPressure:{macroSectorMap.underPressure.length}
+                    </div>
+                  ) : null}
                 </div>
                 <div>
                   <strong>Overlay stack</strong>
