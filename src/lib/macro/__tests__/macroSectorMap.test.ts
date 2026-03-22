@@ -28,7 +28,25 @@ import { buildMacroSectorMap } from "../macroSectorMap.ts";
   assert.ok(sectorMap.favored.some((item) => item.id === "gold_miners"));
   assert.ok(sectorMap.favored.some((item) => item.id === "defense"));
   assert.ok(sectorMap.favored.some((item) => item.id === "energy"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "defense_contractors"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "shipping_logistics"));
   assert.ok(sectorMap.neutral.some((item) => item.id === "financials"));
+})();
+
+(function testExpandedUniverseCapturesSubsectorsAndMacroBuckets() {
+  const assetMap = buildMacroAssetMap({
+    primaryRegime: "FiscalPressureBuilding",
+    overlays: {
+      energyShockOverlay: { score: 80 },
+      inflationCostShockOverlay: { score: 80 },
+    },
+  });
+
+  const sectorMap = buildMacroSectorMap(assetMap);
+  assert.ok(sectorMap.favored.some((item) => item.id === "oil_gas_producers"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "oil_services"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "refiners"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "hard_asset_equities"));
 })();
 
 (function testCanonicalDedupAndLabelCleanliness() {

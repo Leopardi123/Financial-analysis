@@ -1,4 +1,5 @@
 import type { MacroAssetMap, MacroAssetMapItem, MacroAssetBucket } from "./macroAssetMap";
+import { getCanonicalSectorTitle, resolveCanonicalSectorTargets } from "./macroSectorUniverse.ts";
 
 export type MacroSectorMapItem = {
   id: string;
@@ -23,59 +24,49 @@ type SectorCandidate = {
   rationale: string;
 };
 
-type CanonicalSectorId =
-  | "energy"
-  | "materials"
-  | "gold_miners"
-  | "defense"
-  | "industrials"
-  | "financials"
-  | "tech"
-  | "utilities"
-  | "consumer"
-  | "small_caps"
-  | "shipping_logistics";
-
-const CANONICAL_SECTOR_TITLE: Record<CanonicalSectorId, string> = {
-  energy: "Energy",
-  materials: "Materials",
-  gold_miners: "Gold miners",
-  defense: "Defense",
-  industrials: "Industrials",
-  financials: "Financials",
-  tech: "Tech",
-  utilities: "Utilities",
-  consumer: "Consumer",
-  small_caps: "Small caps",
-  shipping_logistics: "Shipping / logistics",
-};
-
 const ASSET_TO_SECTORS: Record<string, SectorCandidate[]> = {
   gold: [
     { id: "gold-miners", title: "Gold miners", rationale: "Gold is macro-favored, supporting gold-linked equities." },
     { id: "hard-asset-defensives", title: "Hard-asset defensives", rationale: "Hard-asset preference supports defensive real-asset equity exposure." },
+    { id: "materials-resources", title: "Materials and resources", rationale: "Gold strength often spills over into broader materials and miners." },
   ],
   energy: [
     { id: "energy-sector", title: "Energy", rationale: "Energy asset signal maps directly to energy equities." },
+    { id: "oil_gas_producers", title: "Oil and gas producers", rationale: "Macro energy support reinforces upstream producer exposure." },
+    { id: "oil_services", title: "Oil services", rationale: "Sustained energy pressure supports capex/service parts of the value chain." },
+    { id: "refiners", title: "Refiners", rationale: "Energy complex dislocations can support downstream refiners." },
+    { id: "value_cyclicals", title: "Value cyclicals", rationale: "Energy-linked cyclicality usually aligns with value cyclicals." },
   ],
   copper: [
     { id: "materials-resources", title: "Materials", rationale: "Commodity/real-asset support benefits materials and resource producers." },
     { id: "resource-equities", title: "Resource equities", rationale: "Commodity beta from copper supports resource-heavy equities." },
+    { id: "copper_miners", title: "Copper miners", rationale: "Copper demand proxies map directly to copper-focused miners." },
+    { id: "industrial_cyclicals", title: "Industrial cyclicals", rationale: "Copper cyclicality often co-moves with industrial cyclicals." },
   ],
   durationAssets: [
     { id: "long-duration-tech", title: "Long-duration tech", rationale: "Duration sensitivity channels into long-duration growth/tech valuation pressure." },
+    { id: "duration_sensitive_equities", title: "Duration-sensitive equities", rationale: "Rate-duration moves directly affect duration-sensitive equity cohorts." },
+    { id: "reits_rate_sensitive", title: "Rate-sensitive REITs", rationale: "Duration shifts also spill into rate-sensitive real estate equities." },
   ],
   smallCaps: [
     { id: "small-caps-cyclicals", title: "Small caps & funding-sensitive cyclicals", rationale: "Small-cap stress translates to funding-sensitive cyclical pressure." },
+    { id: "credit_sensitive_cyclicals", title: "Credit-sensitive cyclicals", rationale: "Funding stress maps into credit-sensitive cyclicals." },
+    { id: "consumer_cyclicals", title: "Consumer cyclicals", rationale: "Small-cap conditions tend to impact cyclical consumer exposures." },
   ],
   broadEquities: [
     { id: "broad-market-industrials", title: "Industrials / broad market", rationale: "Broad-equity neutrality suggests benchmark cyclicals remain balanced absent strong overlay change." },
+    { id: "financials", title: "Financials", rationale: "Broad equity tone can carry into diversified financial exposure." },
   ],
   growthEquities: [
     { id: "growth-tech", title: "Growth tech", rationale: "Growth-equity signal maps into duration-sensitive growth sectors." },
+    { id: "semiconductors", title: "Semiconductors", rationale: "Growth leadership often transmits through semiconductors." },
+    { id: "software", title: "Software", rationale: "Growth regimes tend to support software and long-duration compounders." },
   ],
   industrials: [
     { id: "industrials", title: "Industrials", rationale: "Direct industrial signal maps to industrial sector stance." },
+    { id: "capital_goods", title: "Capital goods", rationale: "Industrial activity maps into capital-goods sensitivity." },
+    { id: "industrial_cyclicals", title: "Industrial cyclicals", rationale: "Macro industrial tone maps into industrial cyclicals." },
+    { id: "transportation_logistics", title: "Transportation and logistics", rationale: "Industrial backdrop supports transportation and logistics demand." },
   ],
 };
 
@@ -84,34 +75,19 @@ function bucketForAsset(item: MacroAssetMapItem): MacroAssetBucket {
   return "neutral";
 }
 
-function canonicalTargets(candidateId: string): CanonicalSectorId[] {
-  if (candidateId === "gold-miners") return ["gold_miners"];
-  if (candidateId === "hard-asset-defensives") return ["gold_miners"];
-  if (candidateId === "gold-hard-assets-safehaven") return ["gold_miners"];
-  if (candidateId === "energy-sector") return ["energy"];
-  if (candidateId === "materials-resources") return ["materials"];
-  if (candidateId === "resource-equities") return ["materials"];
-  if (candidateId === "defense-energy-logistics") return ["defense", "energy"];
-  if (candidateId === "long-duration-tech") return ["tech"];
-  if (candidateId === "growth-tech") return ["tech"];
-  if (candidateId === "small-caps-cyclicals") return ["small_caps"];
-  if (candidateId === "broad-market-industrials") return ["industrials"];
-  if (candidateId === "industrials") return ["industrials"];
-  if (candidateId === "financials-cyclicals-softened") return ["financials"];
-  return [];
-}
-
 function normalizeMacroSectorBucket(items: MacroSectorMapItem[]): MacroSectorMapItem[] {
-  const merged = new Map<CanonicalSectorId, MacroSectorMapItem & { rationaleParts: string[] }>();
+  const merged = new Map<string, MacroSectorMapItem & { rationaleParts: string[] }>();
 
   items.forEach((item) => {
-    const targets = canonicalTargets(item.id);
+    const targets = resolveCanonicalSectorTargets(item.id);
     targets.forEach((canonicalId) => {
+      const canonicalTitle = getCanonicalSectorTitle(canonicalId);
+      if (!canonicalTitle) return;
       const existing = merged.get(canonicalId);
       if (!existing) {
         merged.set(canonicalId, {
           id: canonicalId,
-          title: CANONICAL_SECTOR_TITLE[canonicalId],
+          title: canonicalTitle,
           strength: item.strength,
           rationale: item.rationale,
           rationaleParts: [item.rationale],
@@ -196,7 +172,7 @@ export function buildMacroSectorMap(assetMap: MacroAssetMap): MacroSectorMap {
         "neutral",
         {
           id: "financials-cyclicals-softened",
-          title: "Financials / cyclicals (pressure softened)",
+          title: "Financials and cyclicals (pressure softened)",
           rationale: "Supportive credit/funding conditions soften macro pressure on financing-sensitive cyclicals.",
         },
         asset
@@ -220,7 +196,7 @@ export function buildMacroSectorMap(assetMap: MacroAssetMap): MacroSectorMap {
         "favored",
         {
           id: "defense-energy-logistics",
-          title: "Defense / energy / shipping-logistics",
+          title: "Defense energy shipping logistics",
           rationale: "Elevated unrest risk can support defense demand and strategic energy/logistics exposure.",
         },
         asset
