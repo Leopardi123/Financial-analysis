@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getSectorDashboardUniverse, macroSectorUniverse, resolveCanonicalSectorTargets } from "../macroSectorUniverse.ts";
+import { getSectorDashboardUniverse, getSubsectorMacroRouting, macroSectorUniverse, resolveCanonicalSectorTargets } from "../macroSectorUniverse.ts";
 
 (function testUniverseContainsRequiredTopLevelSectors() {
   const mainSectors = macroSectorUniverse.sectors
@@ -63,6 +63,20 @@ import { getSectorDashboardUniverse, macroSectorUniverse, resolveCanonicalSector
   assert.equal(byId.get("semiconductors")?.parentId, "tech");
   assert.equal(byId.get("defense_contractors")?.parentId, "defense");
   assert.equal(byId.get("shipping")?.parentId, "transportation_logistics");
+})();
+
+(function testSubsectorSemanticRoutingDifferentiatesGoldAndCopper() {
+  const goldRouting = getSubsectorMacroRouting("materials", "gold_miners");
+  const copperRouting = getSubsectorMacroRouting("materials", "copper_miners");
+  assert.notDeepEqual(goldRouting.explicitTargetIds, copperRouting.explicitTargetIds);
+  assert.ok(goldRouting.explicitTargetIds.includes("safe_haven_equities"));
+  assert.ok(copperRouting.explicitTargetIds.includes("base_metals"));
+})();
+
+(function testRoutingFallbackDefaultsToLimitedCoverage() {
+  const fallback = getSubsectorMacroRouting("healthcare", "diagnostics");
+  assert.equal(fallback.coverage, "limited");
+  assert.deepEqual(fallback.explicitTargetIds, ["diagnostics"]);
 })();
 
 console.log("macroSectorUniverse.test.ts: all tests passed");

@@ -7,7 +7,7 @@ import {
   type RegimeCoherenceLevel,
   type TransitionRiskLevel,
 } from "../lib/macro/macroSectorQuality";
-import { getSectorDashboardUniverse } from "../lib/macro/macroSectorUniverse";
+import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/macro/macroSectorUniverse";
 
 type ManualInput = {
   input_type: string;
@@ -190,6 +190,30 @@ function resolveSectorMacroTag(
   return macroKeysForSector(sectorId, subsectorId).map((key) => tagMap.get(key)).find(Boolean) ?? null;
 }
 
+function resolveSectorMacroTagWithPath(
+  tagMap: Map<string, {
+    tone: "favored" | "neutral" | "underPressure";
+    strength: MacroSectorMapItem["strength"];
+    quality: MacroSignalQuality;
+  }>,
+  sectorId: string,
+  subsectorId: string
+) {
+  const routing = getSubsectorMacroRouting(sectorId, subsectorId);
+  const explicit = routing.explicitTargetIds.find((id) => tagMap.has(id));
+  if (explicit) {
+    return { tag: tagMap.get(explicit) ?? null, path: "explicit_subsector" as const, matchedTargetId: explicit, coverage: routing.coverage };
+  }
+  if (routing.sectorFallbackId && tagMap.has(routing.sectorFallbackId)) {
+    return { tag: tagMap.get(routing.sectorFallbackId) ?? null, path: "sector_fallback" as const, matchedTargetId: routing.sectorFallbackId, coverage: routing.coverage };
+  }
+  const macroBucketFallback = routing.macroBucketFallbackIds.find((id) => tagMap.has(id));
+  if (macroBucketFallback) {
+    return { tag: tagMap.get(macroBucketFallback) ?? null, path: "macro_bucket_fallback" as const, matchedTargetId: macroBucketFallback, coverage: routing.coverage };
+  }
+  return { tag: null, path: "unmapped" as const, matchedTargetId: null, coverage: routing.coverage };
+}
+
 export default function SectorDashboard() {
   const [sector, setSector] = useState(SECTORS[0]?.id ?? "");
   const [subsector, setSubsector] = useState(SECTORS[0]?.subsectors[0]?.id ?? "");
@@ -204,6 +228,10 @@ export default function SectorDashboard() {
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
   const [macroStrength, setMacroStrength] = useState<MacroStrengthFilter>("all");
+  const debugMacroMapping = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("macroDebug") === "1";
+  }, []);
 
   const activeOverlayBundle = macroSnapshot?.globalMacro?.overlayBundle ?? macroSnapshot?.globalMacro?.overlays ?? null;
   const regimeProbability = macroSnapshot?.globalMacro?.macroRegimeProbability ?? null;
@@ -315,9 +343,10 @@ export default function SectorDashboard() {
     return tagMap;
   }, [macroSectorQualityMap]);
 
-  const activeSectorMacroTag = useMemo(() => {
-    return resolveSectorMacroTag(macroTagBySector, sector, subsector);
+  const activeSectorMacroResolution = useMemo(() => {
+    return resolveSectorMacroTagWithPath(macroTagBySector, sector, subsector);
   }, [macroTagBySector, sector, subsector]);
+  const activeSectorMacroTag = activeSectorMacroResolution.tag;
 
   const filteredSectorOptions = useMemo(() => {
     return SECTORS.filter((sectorItem) => {
@@ -536,6 +565,11 @@ export default function SectorDashboard() {
             {activeSectorMacroTag.tone === "neutral" && "Macro neutral"}
             {activeSectorMacroTag.tone === "underPressure" && "Macro under pressure"}
             {activeSectorMacroTag.strength ? ` (${activeSectorMacroTag.strength}, ${activeSectorMacroTag.quality})` : ""}
+          </div>
+        ) : null}
+        {debugMacroMapping ? (
+          <div style={{ fontSize: 11, color: activeSectorMacroTag ? "#475569" : "#64748b", marginTop: 4 }}>
+            debug: path={activeSectorMacroResolution.path}, matched={activeSectorMacroResolution.matchedTargetId ?? "none"}, coverage={activeSectorMacroResolution.coverage}
           </div>
         ) : null}
       </div>

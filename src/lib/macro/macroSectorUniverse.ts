@@ -24,6 +24,14 @@ export type DashboardSectorOption = {
   }>;
 };
 
+export type SubsectorMacroRouting = {
+  subsectorId: string;
+  explicitTargetIds: string[];
+  sectorFallbackId: string;
+  macroBucketFallbackIds: string[];
+  coverage: "explicit" | "limited";
+};
+
 export const macroSectorUniverse: MacroSectorUniverse = {
   sectors: [
     { id: "energy", title: "Energy", category: "main_sector", parentId: null, aliases: ["energy-sector", "oil"], assetDrivers: ["energy", "localUnrestOverlay", "energyShockOverlay", "inflationCostShockOverlay"] },
@@ -173,6 +181,41 @@ const explicitAliasTargets: Record<string, string[]> = {
   shipping_logistics: ["shipping", "logistics", "transportation_logistics", "global_trade_sensitives"],
 };
 
+const subsectorRoutingOverrides: Record<string, Omit<SubsectorMacroRouting, "subsectorId">> = {
+  gold_miners: { explicitTargetIds: ["gold_miners", "precious_metals", "safe_haven_equities"], sectorFallbackId: "materials", macroBucketFallbackIds: ["hard_asset_equities", "inflation_hedges"], coverage: "explicit" },
+  silver_miners: { explicitTargetIds: ["silver_miners", "precious_metals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["hard_asset_equities"], coverage: "explicit" },
+  copper_miners: { explicitTargetIds: ["copper_miners", "base_metals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["deep_cyclicals", "global_trade_sensitives"], coverage: "explicit" },
+  diversified_miners: { explicitTargetIds: ["diversified_miners", "base_metals", "precious_metals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["hard_asset_equities", "deep_cyclicals"], coverage: "explicit" },
+  steel: { explicitTargetIds: ["steel", "base_metals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["deep_cyclicals"], coverage: "explicit" },
+  chemicals: { explicitTargetIds: ["chemicals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["deep_cyclicals"], coverage: "explicit" },
+  fertilizers: { explicitTargetIds: ["fertilizers"], sectorFallbackId: "materials", macroBucketFallbackIds: ["inflation_hedges"], coverage: "explicit" },
+  oil_gas_producers: { explicitTargetIds: ["oil_gas_producers", "integrated_energy"], sectorFallbackId: "energy", macroBucketFallbackIds: ["hard_asset_equities", "inflation_hedges"], coverage: "explicit" },
+  integrated_energy: { explicitTargetIds: ["integrated_energy"], sectorFallbackId: "energy", macroBucketFallbackIds: ["hard_asset_equities"], coverage: "explicit" },
+  oil_services: { explicitTargetIds: ["oil_services"], sectorFallbackId: "energy", macroBucketFallbackIds: ["value_cyclicals"], coverage: "explicit" },
+  refiners: { explicitTargetIds: ["refiners"], sectorFallbackId: "energy", macroBucketFallbackIds: ["value_cyclicals"], coverage: "explicit" },
+  uranium: { explicitTargetIds: ["uranium"], sectorFallbackId: "energy", macroBucketFallbackIds: ["real_asset_equities"], coverage: "explicit" },
+  coal: { explicitTargetIds: ["coal"], sectorFallbackId: "energy", macroBucketFallbackIds: ["real_asset_equities"], coverage: "explicit" },
+  banks: { explicitTargetIds: ["banks", "regional_banks"], sectorFallbackId: "financials", macroBucketFallbackIds: ["credit_sensitive_cyclicals"], coverage: "explicit" },
+  insurers: { explicitTargetIds: ["insurers"], sectorFallbackId: "financials", macroBucketFallbackIds: ["quality_defensives"], coverage: "explicit" },
+  asset_managers: { explicitTargetIds: ["asset_managers"], sectorFallbackId: "financials", macroBucketFallbackIds: ["deep_cyclicals"], coverage: "explicit" },
+  brokers_exchanges: { explicitTargetIds: ["brokers_exchanges"], sectorFallbackId: "financials", macroBucketFallbackIds: ["deep_cyclicals"], coverage: "explicit" },
+  software: { explicitTargetIds: ["software"], sectorFallbackId: "tech", macroBucketFallbackIds: ["duration_sensitive_equities"], coverage: "explicit" },
+  semiconductors: { explicitTargetIds: ["semiconductors"], sectorFallbackId: "tech", macroBucketFallbackIds: ["duration_sensitive_equities", "deep_cyclicals"], coverage: "explicit" },
+  hardware: { explicitTargetIds: ["hardware"], sectorFallbackId: "tech", macroBucketFallbackIds: ["duration_sensitive_equities"], coverage: "explicit" },
+  long_duration_tech: { explicitTargetIds: ["long_duration_tech"], sectorFallbackId: "tech", macroBucketFallbackIds: ["duration_sensitive_equities"], coverage: "explicit" },
+  consumer_cyclicals: { explicitTargetIds: ["consumer_cyclicals", "retail", "autos"], sectorFallbackId: "consumer_discretionary", macroBucketFallbackIds: ["domestic_demand_cyclicals"], coverage: "explicit" },
+  consumer_defensives: { explicitTargetIds: ["consumer_defensives"], sectorFallbackId: "consumer_staples", macroBucketFallbackIds: ["quality_defensives", "safe_haven_equities"], coverage: "explicit" },
+  household_products: { explicitTargetIds: ["household_products"], sectorFallbackId: "consumer_staples", macroBucketFallbackIds: ["quality_defensives"], coverage: "explicit" },
+  food_beverage: { explicitTargetIds: ["food_beverage"], sectorFallbackId: "consumer_staples", macroBucketFallbackIds: ["quality_defensives"], coverage: "explicit" },
+  regulated_utilities: { explicitTargetIds: ["regulated_utilities"], sectorFallbackId: "utilities", macroBucketFallbackIds: ["safe_haven_equities"], coverage: "explicit" },
+  reits_rate_sensitive: { explicitTargetIds: ["reits_rate_sensitive"], sectorFallbackId: "real_estate", macroBucketFallbackIds: ["rate_sensitive_real_estate"], coverage: "explicit" },
+  power_grid_utilities: { explicitTargetIds: ["power_grid_utilities"], sectorFallbackId: "utilities", macroBucketFallbackIds: ["real_asset_equities"], coverage: "explicit" },
+  shipping: { explicitTargetIds: ["shipping", "ports_infrastructure"], sectorFallbackId: "transportation_logistics", macroBucketFallbackIds: ["global_trade_sensitives"], coverage: "explicit" },
+  airlines: { explicitTargetIds: ["airlines"], sectorFallbackId: "transportation_logistics", macroBucketFallbackIds: ["global_trade_sensitives"], coverage: "explicit" },
+  logistics: { explicitTargetIds: ["logistics"], sectorFallbackId: "transportation_logistics", macroBucketFallbackIds: ["global_trade_sensitives"], coverage: "explicit" },
+  defense_contractors: { explicitTargetIds: ["defense_contractors", "aerospace_defense"], sectorFallbackId: "defense", macroBucketFallbackIds: ["quality_defensives"], coverage: "explicit" },
+};
+
 export function resolveCanonicalSectorTargets(candidateId: string): string[] {
   if (explicitAliasTargets[candidateId]) return explicitAliasTargets[candidateId];
   return aliasToIds.get(candidateId) ?? [];
@@ -186,6 +229,23 @@ export function getMacroSectorUniverseNode(id: string): CanonicalSectorNode | nu
   return sectorById.get(id) ?? null;
 }
 
+export function getSubsectorMacroRouting(sectorId: string, subsectorId: string): SubsectorMacroRouting {
+  const override = subsectorRoutingOverrides[subsectorId];
+  if (override) {
+    return {
+      subsectorId,
+      ...override,
+    };
+  }
+  return {
+    subsectorId,
+    explicitTargetIds: [subsectorId],
+    sectorFallbackId: sectorId,
+    macroBucketFallbackIds: [],
+    coverage: "limited",
+  };
+}
+
 export function getSectorDashboardUniverse(): DashboardSectorOption[] {
   const mainSectors = macroSectorUniverse.sectors
     .filter((item) => item.category === "main_sector")
@@ -195,11 +255,14 @@ export function getSectorDashboardUniverse(): DashboardSectorOption[] {
     const subsectors = macroSectorUniverse.sectors
       .filter((item) => item.category === "subsector" && item.parentId === sector.id)
       .sort((a, b) => a.title.localeCompare(b.title))
-      .map((subsector) => ({
-        id: subsector.id,
-        title: subsector.title,
-        macroTargetIds: [subsector.id, sector.id],
-      }));
+      .map((subsector) => {
+        const routing = getSubsectorMacroRouting(sector.id, subsector.id);
+        return {
+          id: subsector.id,
+          title: subsector.title,
+          macroTargetIds: [...routing.explicitTargetIds, routing.sectorFallbackId, ...routing.macroBucketFallbackIds],
+        };
+      });
 
     return {
       id: sector.id,

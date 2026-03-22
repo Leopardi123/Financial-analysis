@@ -50,6 +50,25 @@ import { getMacroSectorUniverseNode } from "../macroSectorUniverse.ts";
   assert.ok(sectorMap.favored.some((item) => item.id === "hard_asset_equities"));
 })();
 
+(function testGoldAndCopperSemanticsAreDifferentiated() {
+  const assetMap = buildMacroAssetMap({
+    primaryRegime: "FiscalPressureBuilding",
+    overlays: {
+      energyShockOverlay: { score: 80 },
+      inflationCostShockOverlay: { score: 80 },
+      safeHavenRiskOffOverlay: { score: 75 },
+    },
+  });
+  const sectorMap = buildMacroSectorMap(assetMap);
+  const goldMiners = sectorMap.favored.find((item) => item.id === "gold_miners");
+  const copperMiners = sectorMap.favored.find((item) => item.id === "copper_miners");
+  assert.ok(goldMiners);
+  assert.ok(copperMiners);
+  assert.notEqual(goldMiners?.rationale, copperMiners?.rationale);
+  assert.ok(sectorMap.favored.some((item) => item.id === "safe_haven_equities"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "base_metals"));
+})();
+
 (function testCanonicalDedupAndLabelCleanliness() {
   const assetMap = buildMacroAssetMap({
     primaryRegime: "FiscalPressureBuilding",
