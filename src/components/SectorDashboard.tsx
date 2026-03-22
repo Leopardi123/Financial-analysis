@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildMacroAssetMap } from "../lib/macro/macroAssetMap";
 import { buildMacroSectorMap, type MacroSectorMapItem } from "../lib/macro/macroSectorMap";
+import {
+  buildMacroSectorQualityMap,
+  type MacroSignalQuality,
+  type RegimeCoherenceLevel,
+  type TransitionRiskLevel,
+} from "../lib/macro/macroSectorQuality";
 
 type ManualInput = {
   input_type: string;
@@ -177,7 +183,11 @@ function macroKeysForSector(sectorName: string, subsectorName: string): string[]
 }
 
 function resolveSectorMacroTag(
-  tagMap: Map<string, { tone: "favored" | "neutral" | "underPressure"; strength: MacroSectorMapItem["strength"] }>,
+  tagMap: Map<string, {
+    tone: "favored" | "neutral" | "underPressure";
+    strength: MacroSectorMapItem["strength"];
+    quality: MacroSignalQuality;
+  }>,
   sectorName: string,
   subsectorName: string
 ) {
@@ -259,16 +269,55 @@ export default function SectorDashboard() {
     return buildMacroSectorMap(macroAssetMap);
   }, [activeOverlayBundle?.overlays, primaryRegime, regimeProbability?.regimeMomentum?.direction]);
 
+  const macroRegimeQuality = useMemo(() => {
+    const modulatingCount = Array.isArray(regimeProbability?.modulatingOverlays)
+      ? regimeProbability.modulatingOverlays.length
+      : 0;
+    const contradictingCount = Array.isArray(regimeProbability?.contradictingOverlays)
+      ? regimeProbability.contradictingOverlays.length
+      : 0;
+    const coherence: RegimeCoherenceLevel = contradictingCount >= 2
+      ? "low"
+      : (contradictingCount === 0 && modulatingCount <= 2 ? "high" : "medium");
+    const transitionRisk: TransitionRiskLevel = coherence === "low"
+      ? "high"
+      : (contradictingCount >= 1 ? "elevated" : "low");
+
+    return { coherence, transitionRisk };
+  }, [regimeProbability?.contradictingOverlays, regimeProbability?.modulatingOverlays]);
+
+  const macroSectorQualityMap = useMemo(() => {
+    return buildMacroSectorQualityMap(macroSectorMap, {
+      regimeCoherence: macroRegimeQuality.coherence,
+      transitionRisk: macroRegimeQuality.transitionRisk,
+      contradictingOverlays: regimeProbability?.contradictingOverlays,
+      modulatingOverlays: regimeProbability?.modulatingOverlays,
+    });
+  }, [
+    macroRegimeQuality.coherence,
+    macroRegimeQuality.transitionRisk,
+    macroSectorMap,
+    regimeProbability?.contradictingOverlays,
+    regimeProbability?.modulatingOverlays,
+  ]);
+
   const macroTagBySector = useMemo(() => {
-    const tagMap = new Map<string, { tone: "favored" | "neutral" | "underPressure"; strength: MacroSectorMapItem["strength"] }>();
-    const addTags = (items: MacroSectorMapItem[], tone: "favored" | "neutral" | "underPressure") => {
-      items.forEach((item) => tagMap.set(item.id, { tone, strength: item.strength }));
+    const tagMap = new Map<string, {
+      tone: "favored" | "neutral" | "underPressure";
+      strength: MacroSectorMapItem["strength"];
+      quality: MacroSignalQuality;
+    }>();
+    const addTags = (
+      items: Array<MacroSectorMapItem & { quality: MacroSignalQuality }>,
+      tone: "favored" | "neutral" | "underPressure"
+    ) => {
+      items.forEach((item) => tagMap.set(item.id, { tone, strength: item.strength, quality: item.quality }));
     };
-    addTags(macroSectorMap.favored, "favored");
-    addTags(macroSectorMap.neutral, "neutral");
-    addTags(macroSectorMap.underPressure, "underPressure");
+    addTags(macroSectorQualityMap.favored, "favored");
+    addTags(macroSectorQualityMap.neutral, "neutral");
+    addTags(macroSectorQualityMap.underPressure, "underPressure");
     return tagMap;
-  }, [macroSectorMap]);
+  }, [macroSectorQualityMap]);
 
   const activeSectorMacroTag = useMemo(() => {
     return resolveSectorMacroTag(macroTagBySector, sector, subsector);
@@ -490,7 +539,7 @@ export default function SectorDashboard() {
             {activeSectorMacroTag.tone === "favored" && "Macro favored"}
             {activeSectorMacroTag.tone === "neutral" && "Macro neutral"}
             {activeSectorMacroTag.tone === "underPressure" && "Macro under pressure"}
-            {activeSectorMacroTag.strength ? ` (${activeSectorMacroTag.strength})` : ""}
+            {activeSectorMacroTag.strength ? ` (${activeSectorMacroTag.strength}, ${activeSectorMacroTag.quality})` : ""}
           </div>
         ) : null}
       </div>
