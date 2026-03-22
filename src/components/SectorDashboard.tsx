@@ -8,6 +8,7 @@ import {
   type TransitionRiskLevel,
 } from "../lib/macro/macroSectorQuality";
 import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/macro/macroSectorUniverse";
+import { buildSubsectorCoverageAuditReport } from "../lib/macro/subsectorCoverageAudit";
 
 type ManualInput = {
   input_type: string;
@@ -228,6 +229,7 @@ export default function SectorDashboard() {
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
   const [macroStrength, setMacroStrength] = useState<MacroStrengthFilter>("all");
+  const subsectorCoverageAudit = useMemo(() => buildSubsectorCoverageAuditReport(), []);
   const debugMacroMapping = useMemo(() => {
     if (typeof window === "undefined") return false;
     return new URLSearchParams(window.location.search).get("macroDebug") === "1";
@@ -347,6 +349,10 @@ export default function SectorDashboard() {
     return resolveSectorMacroTagWithPath(macroTagBySector, sector, subsector);
   }, [macroTagBySector, sector, subsector]);
   const activeSectorMacroTag = activeSectorMacroResolution.tag;
+  const activeCoverage = subsectorCoverageAudit.matrix[subsector] ?? null;
+  const activePairChecks = useMemo(() => {
+    return subsectorCoverageAudit.differentiationChecks.filter((pair) => pair.pair.includes(subsector));
+  }, [subsector, subsectorCoverageAudit.differentiationChecks]);
 
   const filteredSectorOptions = useMemo(() => {
     return SECTORS.filter((sectorItem) => {
@@ -571,6 +577,49 @@ export default function SectorDashboard() {
           <div style={{ fontSize: 11, color: activeSectorMacroTag ? "#475569" : "#64748b", marginTop: 4 }}>
             debug: path={activeSectorMacroResolution.path}, matched={activeSectorMacroResolution.matchedTargetId ?? "none"}, coverage={activeSectorMacroResolution.coverage}
           </div>
+        ) : null}
+        {activeCoverage ? (
+          <details className="sector-coverage-debug" open={debugMacroMapping}>
+            <summary>Coverage diagnostics (dev)</summary>
+            <div className="sector-coverage-debug-grid">
+              <div>
+                <strong>Coverage</strong>: {activeCoverage.currentCoverageLevel} · {activeCoverage.interpretationPath}
+              </div>
+              <div>
+                <strong>Fallback</strong>: {activeCoverage.fallbackOnly.routingCoverage}
+              </div>
+              <div>
+                <strong>Explicit drivers</strong>: {activeCoverage.explicitDrivers.join(", ") || "none"}
+              </div>
+              <div>
+                <strong>Sector fallback</strong>: {activeCoverage.sectorFallbackDrivers.join(", ") || "none"}
+              </div>
+              <div>
+                <strong>Bucket fallback</strong>: {activeCoverage.macroBucketFallbackDrivers.join(", ") || "none"}
+              </div>
+              <div>
+                <strong>Overlays used</strong>: {activeCoverage.driverTypes.overlays.join(", ") || "none"}
+              </div>
+              <div>
+                <strong>Regime/block inputs</strong>: {activeCoverage.driverTypes.regimeBlockInputs.join(", ") || "none"}
+              </div>
+              <div>
+                <strong>Blind spots</strong>: {activeCoverage.likelyBlindSpots.join(", ") || "none"}
+              </div>
+              {activePairChecks.length > 0 ? (
+                <div className="sector-coverage-debug-pairs">
+                  <strong>Differentiation checks</strong>
+                  <ul>
+                    {activePairChecks.map((pair) => (
+                      <li key={pair.pair.join("_")}>
+                        {pair.pair[0]} vs {pair.pair[1]}: {pair.quality}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </details>
         ) : null}
       </div>
 
