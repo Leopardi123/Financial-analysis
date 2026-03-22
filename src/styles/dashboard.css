@@ -193,6 +193,33 @@
   color: #1c2310;
 }
 
+.sector-coverage-debug {
+  width: 100%;
+  border: 1px dashed #9ca3af;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+}
+
+.sector-coverage-debug summary {
+  cursor: pointer;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.8px;
+  font-size: 11px;
+}
+
+.sector-coverage-debug-grid {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sector-coverage-debug-pairs ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
 .sector-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

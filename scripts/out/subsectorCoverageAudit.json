@@ -1,0 +1,3164 @@
+{
+  "generatedAt": "2026-03-22T10:52:11.391Z",
+  "matrix": {
+    "oil_gas_producers": {
+      "subsectorId": "oil_gas_producers",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "energyShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "gold",
+        "energy",
+        "copper",
+        "safeHavenRiskOffOverlay",
+        "materials",
+        "inflationCostShockOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "energyShockOverlay",
+          "localUnrestOverlay",
+          "inflationCostShockOverlay",
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "gold",
+          "copper",
+          "materials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "integrated_energy": {
+      "subsectorId": "integrated_energy",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "gold",
+        "energy",
+        "copper",
+        "safeHavenRiskOffOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "localUnrestOverlay",
+          "energyShockOverlay",
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "gold",
+          "copper"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "oil_services": {
+      "subsectorId": "oil_services",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "energy",
+        "materials",
+        "industrials"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "localUnrestOverlay",
+          "energyShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "materials",
+          "industrials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "refiners": {
+      "subsectorId": "refiners",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "energy",
+        "materials",
+        "industrials"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "localUnrestOverlay",
+          "energyShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "materials",
+          "industrials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "midstream": {
+      "subsectorId": "midstream",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "localUnrestOverlay",
+          "energyShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "coal": {
+      "subsectorId": "coal",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "energy",
+        "materials",
+        "real_estate"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "localUnrestOverlay",
+          "energyShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "materials",
+          "real_estate"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input",
+        "energy_availability"
+      ]
+    },
+    "uranium": {
+      "subsectorId": "uranium",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "energy",
+        "materials",
+        "real_estate"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "localUnrestOverlay",
+          "energyShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "materials",
+          "real_estate"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input",
+        "energy_availability",
+        "future_power_demand"
+      ]
+    },
+    "renewable_developers": {
+      "subsectorId": "renewable_developers",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "durationAssets"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay",
+          "energyShockOverlay",
+          "inflationCostShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "energy_equipment": {
+      "subsectorId": "energy_equipment",
+      "sectorId": "energy",
+      "explicitDrivers": [
+        "energy",
+        "industrials"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "inflationCostShockOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay",
+          "energyShockOverlay",
+          "inflationCostShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "industrials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "gold_miners": {
+      "subsectorId": "gold_miners",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "gold",
+        "safeHavenRiskOffOverlay",
+        "localUnrestOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [
+        "gold",
+        "energy",
+        "copper",
+        "safeHavenRiskOffOverlay",
+        "materials",
+        "inflationCostShockOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "safeHavenRiskOffOverlay",
+          "localUnrestOverlay",
+          "inflationCostShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "gold",
+          "copper",
+          "energy",
+          "materials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "high",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "silver_miners": {
+      "subsectorId": "silver_miners",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "gold",
+        "copper"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [
+        "gold",
+        "energy",
+        "copper",
+        "safeHavenRiskOffOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "gold",
+          "copper",
+          "energy"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "copper_miners": {
+      "subsectorId": "copper_miners",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "copper"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [
+        "industrials",
+        "materials",
+        "consumer_cyclicals",
+        "shipping",
+        "logistics"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "copper",
+          "gold",
+          "industrials",
+          "materials",
+          "consumer_cyclicals",
+          "shipping",
+          "logistics"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "low",
+      "likelyBlindSpots": [
+        "no_overlay_linkage",
+        "no_direct_regime_block_input",
+        "maritime_routes",
+        "future_power_demand"
+      ]
+    },
+    "diversified_miners": {
+      "subsectorId": "diversified_miners",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "copper",
+        "gold",
+        "materials"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [
+        "gold",
+        "energy",
+        "copper",
+        "safeHavenRiskOffOverlay",
+        "industrials",
+        "materials",
+        "consumer_cyclicals"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "copper",
+          "gold",
+          "materials",
+          "energy",
+          "industrials",
+          "consumer_cyclicals"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "steel": {
+      "subsectorId": "steel",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "copper",
+        "industrials"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [
+        "industrials",
+        "materials",
+        "consumer_cyclicals"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "copper",
+          "industrials",
+          "gold",
+          "materials",
+          "consumer_cyclicals"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "low",
+      "likelyBlindSpots": [
+        "no_overlay_linkage",
+        "no_direct_regime_block_input",
+        "industrial_rebuild"
+      ]
+    },
+    "chemicals": {
+      "subsectorId": "chemicals",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "energy",
+        "industrials"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [
+        "industrials",
+        "materials",
+        "consumer_cyclicals"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "energy",
+          "industrials",
+          "copper",
+          "gold",
+          "materials",
+          "consumer_cyclicals"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "low",
+      "likelyBlindSpots": [
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "fertilizers": {
+      "subsectorId": "fertilizers",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "energy",
+        "materials"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [
+        "gold",
+        "energy",
+        "materials",
+        "inflationCostShockOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "materials",
+          "copper",
+          "gold"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "construction_materials": {
+      "subsectorId": "construction_materials",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "industrials",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "industrials",
+          "broadEquities",
+          "copper",
+          "gold"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "precious_metals": {
+      "subsectorId": "precious_metals",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "gold",
+        "safeHavenRiskOffOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "gold",
+          "copper"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "base_metals": {
+      "subsectorId": "base_metals",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "copper",
+        "industrials"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "copper",
+          "industrials",
+          "gold"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "lithium_miners": {
+      "subsectorId": "lithium_miners",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "copper",
+        "growthEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "copper",
+          "growthEquities",
+          "gold"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "paper_packaging": {
+      "subsectorId": "paper_packaging",
+      "sectorId": "materials",
+      "explicitDrivers": [
+        "broadEquities",
+        "industrials"
+      ],
+      "sectorFallbackDrivers": [
+        "copper",
+        "gold"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "broadEquities",
+          "industrials",
+          "copper",
+          "gold"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "capital_goods": {
+      "subsectorId": "capital_goods",
+      "sectorId": "industrials",
+      "explicitDrivers": [
+        "industrials"
+      ],
+      "sectorFallbackDrivers": [
+        "industrials",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "industrials",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input",
+        "industrial_rebuild"
+      ]
+    },
+    "machinery": {
+      "subsectorId": "machinery",
+      "sectorId": "industrials",
+      "explicitDrivers": [
+        "industrials",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "industrials",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "industrials",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input",
+        "industrial_rebuild"
+      ]
+    },
+    "electrical_equipment": {
+      "subsectorId": "electrical_equipment",
+      "sectorId": "industrials",
+      "explicitDrivers": [
+        "industrials",
+        "energy"
+      ],
+      "sectorFallbackDrivers": [
+        "industrials",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "industrials",
+          "energy",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input",
+        "industrial_rebuild"
+      ]
+    },
+    "engineering_construction": {
+      "subsectorId": "engineering_construction",
+      "sectorId": "industrials",
+      "explicitDrivers": [
+        "industrials",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "industrials",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "industrials",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input",
+        "industrial_rebuild"
+      ]
+    },
+    "building_products": {
+      "subsectorId": "building_products",
+      "sectorId": "industrials",
+      "explicitDrivers": [
+        "industrials",
+        "housing_related"
+      ],
+      "sectorFallbackDrivers": [
+        "industrials",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "industrials",
+          "housing_related",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "rail": {
+      "subsectorId": "rail",
+      "sectorId": "transportation_logistics",
+      "explicitDrivers": [
+        "energy",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "trucking": {
+      "subsectorId": "trucking",
+      "sectorId": "transportation_logistics",
+      "explicitDrivers": [
+        "energy",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "shipping": {
+      "subsectorId": "shipping",
+      "sectorId": "transportation_logistics",
+      "explicitDrivers": [
+        "energy",
+        "localUnrestOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [
+        "shipping",
+        "logistics",
+        "industrials"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "broadEquities",
+          "shipping",
+          "logistics",
+          "industrials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input",
+        "maritime_routes"
+      ]
+    },
+    "airlines": {
+      "subsectorId": "airlines",
+      "sectorId": "transportation_logistics",
+      "explicitDrivers": [
+        "energy",
+        "consumer_cyclicals"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [
+        "shipping",
+        "logistics",
+        "industrials"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "consumer_cyclicals",
+          "broadEquities",
+          "shipping",
+          "logistics",
+          "industrials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input",
+        "maritime_routes"
+      ]
+    },
+    "logistics": {
+      "subsectorId": "logistics",
+      "sectorId": "transportation_logistics",
+      "explicitDrivers": [
+        "energy",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [
+        "shipping",
+        "logistics",
+        "industrials"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "broadEquities",
+          "shipping",
+          "logistics",
+          "industrials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input",
+        "maritime_routes"
+      ]
+    },
+    "ports_infrastructure": {
+      "subsectorId": "ports_infrastructure",
+      "sectorId": "transportation_logistics",
+      "explicitDrivers": [
+        "energy",
+        "localUnrestOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input",
+        "maritime_routes"
+      ]
+    },
+    "defense_contractors": {
+      "subsectorId": "defense_contractors",
+      "sectorId": "defense",
+      "explicitDrivers": [
+        "localUnrestOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "localUnrestOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk",
+        "localUnrestOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "FiscalDominanceRisk"
+        ],
+        "overlays": [
+          "localUnrestOverlay",
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": []
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "low",
+      "likelyBlindSpots": [
+        "defense_budget_cycle"
+      ]
+    },
+    "aerospace_defense": {
+      "subsectorId": "aerospace_defense",
+      "sectorId": "defense",
+      "explicitDrivers": [
+        "localUnrestOverlay",
+        "industrials"
+      ],
+      "sectorFallbackDrivers": [
+        "localUnrestOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "industrials"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input",
+        "defense_budget_cycle"
+      ]
+    },
+    "banks": {
+      "subsectorId": "banks",
+      "sectorId": "financials",
+      "explicitDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "smallCaps"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "regional_banks": {
+      "subsectorId": "regional_banks",
+      "sectorId": "financials",
+      "explicitDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "smallCaps"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "insurers": {
+      "subsectorId": "insurers",
+      "sectorId": "financials",
+      "explicitDrivers": [
+        "creditFundingOverlay",
+        "Balanced"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk",
+        "localUnrestOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "Balanced",
+          "FiscalDominanceRisk"
+        ],
+        "overlays": [
+          "creditFundingOverlay",
+          "safeHavenRiskOffOverlay",
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "smallCaps"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": []
+    },
+    "asset_managers": {
+      "subsectorId": "asset_managers",
+      "sectorId": "financials",
+      "explicitDrivers": [
+        "broadEquities",
+        "creditFundingOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "industrials",
+        "materials",
+        "consumer_cyclicals"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "broadEquities",
+          "smallCaps",
+          "industrials",
+          "materials",
+          "consumer_cyclicals"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "brokers_exchanges": {
+      "subsectorId": "brokers_exchanges",
+      "sectorId": "financials",
+      "explicitDrivers": [
+        "broadEquities",
+        "growthEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "industrials",
+        "materials",
+        "consumer_cyclicals"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "broadEquities",
+          "growthEquities",
+          "smallCaps",
+          "industrials",
+          "materials",
+          "consumer_cyclicals"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "specialty_finance": {
+      "subsectorId": "specialty_finance",
+      "sectorId": "financials",
+      "explicitDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "smallCaps"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "payment_networks": {
+      "subsectorId": "payment_networks",
+      "sectorId": "financials",
+      "explicitDrivers": [
+        "consumer_cyclicals",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "consumer_cyclicals",
+          "broadEquities",
+          "smallCaps"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "software": {
+      "subsectorId": "software",
+      "sectorId": "tech",
+      "explicitDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "durationAssets",
+        "growthEquities",
+        "liquidityOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "liquidityOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "semiconductors": {
+      "subsectorId": "semiconductors",
+      "sectorId": "tech",
+      "explicitDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "durationAssets",
+        "growthEquities",
+        "liquidityOverlay",
+        "industrials",
+        "materials",
+        "consumer_cyclicals"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "liquidityOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "durationAssets",
+          "industrials",
+          "materials",
+          "consumer_cyclicals"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "hardware": {
+      "subsectorId": "hardware",
+      "sectorId": "tech",
+      "explicitDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "durationAssets",
+        "growthEquities",
+        "liquidityOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "liquidityOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "it_services": {
+      "subsectorId": "it_services",
+      "sectorId": "tech",
+      "explicitDrivers": [
+        "growthEquities",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "liquidityOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "broadEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "cybersecurity": {
+      "subsectorId": "cybersecurity",
+      "sectorId": "tech",
+      "explicitDrivers": [
+        "growthEquities",
+        "defense"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "liquidityOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "defense",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input",
+        "defense_budget_cycle"
+      ]
+    },
+    "long_duration_tech": {
+      "subsectorId": "long_duration_tech",
+      "sectorId": "tech",
+      "explicitDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "durationAssets",
+        "growthEquities",
+        "liquidityOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "liquidityOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "cloud_infrastructure": {
+      "subsectorId": "cloud_infrastructure",
+      "sectorId": "tech",
+      "explicitDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "liquidityOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "regulated_utilities": {
+      "subsectorId": "regulated_utilities",
+      "sectorId": "utilities",
+      "explicitDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "consumer_defensives",
+        "regulated_utilities"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "FiscalDominanceRisk"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "consumer_defensives",
+          "regulated_utilities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": []
+    },
+    "power_grid_utilities": {
+      "subsectorId": "power_grid_utilities",
+      "sectorId": "utilities",
+      "explicitDrivers": [
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "energy",
+        "materials",
+        "real_estate"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy",
+          "materials",
+          "real_estate"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input",
+        "energy_availability",
+        "future_power_demand"
+      ]
+    },
+    "independent_power": {
+      "subsectorId": "independent_power",
+      "sectorId": "utilities",
+      "explicitDrivers": [
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input",
+        "energy_availability"
+      ]
+    },
+    "water_utilities": {
+      "subsectorId": "water_utilities",
+      "sectorId": "utilities",
+      "explicitDrivers": [
+        "safeHavenRiskOffOverlay",
+        "Balanced"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "Balanced"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": []
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "multi_utilities": {
+      "subsectorId": "multi_utilities",
+      "sectorId": "utilities",
+      "explicitDrivers": [
+        "energy",
+        "safeHavenRiskOffOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "energy"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "consumer_cyclicals": {
+      "subsectorId": "consumer_cyclicals",
+      "sectorId": "consumer_discretionary",
+      "explicitDrivers": [
+        "smallCaps",
+        "broadEquities",
+        "creditFundingOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [
+        "consumer_cyclicals",
+        "smallCaps",
+        "housing_related"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "smallCaps",
+          "broadEquities",
+          "consumer_cyclicals",
+          "housing_related"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "autos": {
+      "subsectorId": "autos",
+      "sectorId": "consumer_discretionary",
+      "explicitDrivers": [
+        "consumer_cyclicals",
+        "energy"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "consumer_cyclicals",
+          "energy",
+          "smallCaps",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "retail": {
+      "subsectorId": "retail",
+      "sectorId": "consumer_discretionary",
+      "explicitDrivers": [
+        "consumer_cyclicals",
+        "smallCaps"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "consumer_cyclicals",
+          "smallCaps",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "housing_related": {
+      "subsectorId": "housing_related",
+      "sectorId": "consumer_discretionary",
+      "explicitDrivers": [
+        "durationAssets",
+        "smallCaps"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "durationAssets",
+          "smallCaps",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "travel_leisure": {
+      "subsectorId": "travel_leisure",
+      "sectorId": "consumer_discretionary",
+      "explicitDrivers": [
+        "consumer_cyclicals",
+        "energy"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "consumer_cyclicals",
+          "energy",
+          "smallCaps",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "apparel_luxury": {
+      "subsectorId": "apparel_luxury",
+      "sectorId": "consumer_discretionary",
+      "explicitDrivers": [
+        "consumer_cyclicals",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "smallCaps",
+        "broadEquities"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "consumer_cyclicals",
+          "broadEquities",
+          "smallCaps"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "consumer_defensives": {
+      "subsectorId": "consumer_defensives",
+      "sectorId": "consumer_staples",
+      "explicitDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk"
+      ],
+      "macroBucketFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk",
+        "localUnrestOverlay",
+        "consumer_defensives",
+        "regulated_utilities"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "FiscalDominanceRisk"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay",
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "consumer_defensives",
+          "regulated_utilities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": []
+    },
+    "food_beverage": {
+      "subsectorId": "food_beverage",
+      "sectorId": "consumer_staples",
+      "explicitDrivers": [
+        "consumer_defensives",
+        "inflationCostShockOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk"
+      ],
+      "macroBucketFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk",
+        "localUnrestOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "FiscalDominanceRisk"
+        ],
+        "overlays": [
+          "inflationCostShockOverlay",
+          "safeHavenRiskOffOverlay",
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "consumer_defensives"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": []
+    },
+    "household_products": {
+      "subsectorId": "household_products",
+      "sectorId": "consumer_staples",
+      "explicitDrivers": [
+        "consumer_defensives",
+        "safeHavenRiskOffOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk"
+      ],
+      "macroBucketFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk",
+        "localUnrestOverlay"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "FiscalDominanceRisk"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay",
+          "localUnrestOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "consumer_defensives"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": []
+    },
+    "personal_care": {
+      "subsectorId": "personal_care",
+      "sectorId": "consumer_staples",
+      "explicitDrivers": [
+        "consumer_defensives",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "FiscalDominanceRisk"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "consumer_defensives",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "tobacco": {
+      "subsectorId": "tobacco",
+      "sectorId": "consumer_staples",
+      "explicitDrivers": [
+        "consumer_defensives",
+        "safeHavenRiskOffOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "FiscalDominanceRisk"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "consumer_defensives"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "pharma": {
+      "subsectorId": "pharma",
+      "sectorId": "healthcare",
+      "explicitDrivers": [
+        "safeHavenRiskOffOverlay",
+        "Balanced"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "Balanced"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "Balanced"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": []
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "biotech": {
+      "subsectorId": "biotech",
+      "sectorId": "healthcare",
+      "explicitDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "Balanced"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "Balanced"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "healthcare_equipment": {
+      "subsectorId": "healthcare_equipment",
+      "sectorId": "healthcare",
+      "explicitDrivers": [
+        "healthcare",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "Balanced"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "Balanced"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "healthcare",
+          "broadEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "healthcare_services": {
+      "subsectorId": "healthcare_services",
+      "sectorId": "healthcare",
+      "explicitDrivers": [
+        "healthcare",
+        "consumer_defensives"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "Balanced"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "Balanced"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "healthcare",
+          "consumer_defensives"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "diagnostics": {
+      "subsectorId": "diagnostics",
+      "sectorId": "healthcare",
+      "explicitDrivers": [
+        "healthcare",
+        "growthEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "Balanced"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "Balanced"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "healthcare",
+          "growthEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "life_sciences_tools": {
+      "subsectorId": "life_sciences_tools",
+      "sectorId": "healthcare",
+      "explicitDrivers": [
+        "healthcare",
+        "growthEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "safeHavenRiskOffOverlay",
+        "Balanced"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [
+          "Balanced"
+        ],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "healthcare",
+          "growthEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing"
+      ]
+    },
+    "telecom": {
+      "subsectorId": "telecom",
+      "sectorId": "communication_services",
+      "explicitDrivers": [
+        "communication_services",
+        "safeHavenRiskOffOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "safeHavenRiskOffOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "communication_services",
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "media": {
+      "subsectorId": "media",
+      "sectorId": "communication_services",
+      "explicitDrivers": [
+        "communication_services",
+        "broadEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "communication_services",
+          "broadEquities",
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "internet_platforms": {
+      "subsectorId": "internet_platforms",
+      "sectorId": "communication_services",
+      "explicitDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "advertising_gaming": {
+      "subsectorId": "advertising_gaming",
+      "sectorId": "communication_services",
+      "explicitDrivers": [
+        "consumer_cyclicals",
+        "growthEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "growthEquities",
+        "durationAssets"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [],
+        "marketAssetsAndThemes": [
+          "consumer_cyclicals",
+          "growthEquities",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_overlay_linkage",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "reits_rate_sensitive": {
+      "subsectorId": "reits_rate_sensitive",
+      "sectorId": "real_estate",
+      "explicitDrivers": [
+        "durationAssets",
+        "creditFundingOverlay"
+      ],
+      "sectorFallbackDrivers": [
+        "durationAssets",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [
+        "reits_rate_sensitive",
+        "durationAssets"
+      ],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "durationAssets",
+          "reits_rate_sensitive"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": true,
+        "routingCoverage": "explicit"
+      },
+      "interpretationPath": "explicit_subsector",
+      "currentCoverageLevel": "medium",
+      "likelyBlindSpots": [
+        "no_direct_regime_block_input"
+      ]
+    },
+    "industrial_reits": {
+      "subsectorId": "industrial_reits",
+      "sectorId": "real_estate",
+      "explicitDrivers": [
+        "broadEquities",
+        "logistics"
+      ],
+      "sectorFallbackDrivers": [
+        "durationAssets",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "broadEquities",
+          "logistics",
+          "durationAssets"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "residential_reits": {
+      "subsectorId": "residential_reits",
+      "sectorId": "real_estate",
+      "explicitDrivers": [
+        "durationAssets",
+        "housing_related"
+      ],
+      "sectorFallbackDrivers": [
+        "durationAssets",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "durationAssets",
+          "housing_related"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input"
+      ]
+    },
+    "data_center_reits": {
+      "subsectorId": "data_center_reits",
+      "sectorId": "real_estate",
+      "explicitDrivers": [
+        "durationAssets",
+        "growthEquities"
+      ],
+      "sectorFallbackDrivers": [
+        "durationAssets",
+        "creditFundingOverlay"
+      ],
+      "macroBucketFallbackDrivers": [],
+      "driverTypes": {
+        "regimeBlockInputs": [],
+        "overlays": [
+          "creditFundingOverlay"
+        ],
+        "marketAssetsAndThemes": [
+          "durationAssets",
+          "growthEquities"
+        ]
+      },
+      "fallbackOnly": {
+        "usesSectorFallback": true,
+        "usesMacroBucketFallback": false,
+        "routingCoverage": "limited"
+      },
+      "interpretationPath": "sector_fallback",
+      "currentCoverageLevel": "minimal",
+      "likelyBlindSpots": [
+        "no_explicit_subsector_routing",
+        "no_direct_regime_block_input",
+        "future_power_demand"
+      ]
+    }
+  },
+  "differentiationChecks": [
+    {
+      "pair": [
+        "gold_miners",
+        "copper_miners"
+      ],
+      "quality": "clearly differentiated",
+      "overlapDrivers": [
+        "gold",
+        "copper",
+        "materials"
+      ],
+      "uniqueToLeft": [
+        "safeHavenRiskOffOverlay",
+        "localUnrestOverlay",
+        "energy",
+        "inflationCostShockOverlay"
+      ],
+      "uniqueToRight": [
+        "industrials",
+        "consumer_cyclicals",
+        "shipping",
+        "logistics"
+      ],
+      "note": "Distinct explicit + fallback stacks create robust macro differentiation."
+    },
+    {
+      "pair": [
+        "oil_gas_producers",
+        "refiners"
+      ],
+      "quality": "partially differentiated",
+      "overlapDrivers": [
+        "energy",
+        "energyShockOverlay",
+        "localUnrestOverlay",
+        "inflationCostShockOverlay",
+        "materials"
+      ],
+      "uniqueToLeft": [
+        "gold",
+        "copper",
+        "safeHavenRiskOffOverlay"
+      ],
+      "uniqueToRight": [
+        "industrials"
+      ],
+      "note": "There is meaningful differentiation, but substantial shared macro plumbing remains."
+    },
+    {
+      "pair": [
+        "banks",
+        "insurers"
+      ],
+      "quality": "clearly differentiated",
+      "overlapDrivers": [
+        "smallCaps",
+        "creditFundingOverlay"
+      ],
+      "uniqueToLeft": [],
+      "uniqueToRight": [
+        "Balanced",
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk",
+        "localUnrestOverlay"
+      ],
+      "note": "Distinct explicit + fallback stacks create robust macro differentiation."
+    },
+    {
+      "pair": [
+        "semiconductors",
+        "software"
+      ],
+      "quality": "clearly differentiated",
+      "overlapDrivers": [
+        "growthEquities",
+        "durationAssets",
+        "liquidityOverlay"
+      ],
+      "uniqueToLeft": [
+        "industrials",
+        "materials",
+        "consumer_cyclicals"
+      ],
+      "uniqueToRight": [],
+      "note": "Distinct explicit + fallback stacks create robust macro differentiation."
+    },
+    {
+      "pair": [
+        "uranium",
+        "coal"
+      ],
+      "quality": "not meaningfully differentiated",
+      "overlapDrivers": [
+        "energy",
+        "inflationCostShockOverlay",
+        "localUnrestOverlay",
+        "energyShockOverlay",
+        "materials",
+        "real_estate"
+      ],
+      "uniqueToLeft": [],
+      "uniqueToRight": [],
+      "note": "Pair relies on highly overlapping driver stacks and fallback inheritance."
+    },
+    {
+      "pair": [
+        "shipping",
+        "airlines"
+      ],
+      "quality": "weakly differentiated",
+      "overlapDrivers": [
+        "energy",
+        "localUnrestOverlay",
+        "broadEquities",
+        "shipping",
+        "logistics",
+        "industrials"
+      ],
+      "uniqueToLeft": [],
+      "uniqueToRight": [
+        "consumer_cyclicals"
+      ],
+      "note": "Some unique drivers exist, but overlap remains dominant."
+    },
+    {
+      "pair": [
+        "regulated_utilities",
+        "reits_rate_sensitive"
+      ],
+      "quality": "clearly differentiated",
+      "overlapDrivers": [],
+      "uniqueToLeft": [
+        "safeHavenRiskOffOverlay",
+        "FiscalDominanceRisk",
+        "consumer_defensives",
+        "regulated_utilities"
+      ],
+      "uniqueToRight": [
+        "durationAssets",
+        "creditFundingOverlay",
+        "reits_rate_sensitive"
+      ],
+      "note": "Distinct explicit + fallback stacks create robust macro differentiation."
+    }
+  ],
+  "rankedOverlayGaps": [
+    {
+      "overlayId": "maritimeTradeRouteStress",
+      "priority": 1,
+      "helpsSubsectors": [
+        "shipping",
+        "ports_infrastructure",
+        "logistics",
+        "airlines",
+        "insurers",
+        "refiners"
+      ],
+      "fillsBlindSpot": "Chokepoints, rerouting risk, freight dislocation, and war-risk insurance dynamics are not explicitly modeled.",
+      "profile": "thematic",
+      "evidence": {
+        "blindSpotHitCount": 7,
+        "exampleSubsectors": [
+          "refiners",
+          "copper_miners",
+          "shipping",
+          "airlines",
+          "logistics",
+          "ports_infrastructure",
+          "insurers"
+        ]
+      }
+    },
+    {
+      "overlayId": "energyAvailabilityPowerSufficiency",
+      "priority": 2,
+      "helpsSubsectors": [
+        "uranium",
+        "coal",
+        "power_grid_utilities",
+        "independent_power",
+        "chemicals",
+        "steel"
+      ],
+      "fillsBlindSpot": "Physical energy tightness and grid adequacy are weakly captured beyond price-sensitive overlays.",
+      "profile": "broad-system",
+      "evidence": {
+        "blindSpotHitCount": 6,
+        "exampleSubsectors": [
+          "coal",
+          "uranium",
+          "steel",
+          "chemicals",
+          "power_grid_utilities",
+          "independent_power"
+        ]
+      }
+    },
+    {
+      "overlayId": "futurePowerDemandElectrification",
+      "priority": 3,
+      "helpsSubsectors": [
+        "uranium",
+        "copper_miners",
+        "electrical_equipment",
+        "power_grid_utilities",
+        "data_center_reits"
+      ],
+      "fillsBlindSpot": "Forward demand from electrification/AI power draw is not represented in current overlays.",
+      "profile": "thematic",
+      "evidence": {
+        "blindSpotHitCount": 5,
+        "exampleSubsectors": [
+          "uranium",
+          "copper_miners",
+          "electrical_equipment",
+          "power_grid_utilities",
+          "data_center_reits"
+        ]
+      }
+    },
+    {
+      "overlayId": "defenseSecurityCycle",
+      "priority": 4,
+      "helpsSubsectors": [
+        "defense_contractors",
+        "aerospace_defense",
+        "cybersecurity",
+        "shipping",
+        "energy_equipment"
+      ],
+      "fillsBlindSpot": "Security procurement cycles and defense replenishment cadence are conflated into a single unrest signal.",
+      "profile": "thematic",
+      "evidence": {
+        "blindSpotHitCount": 5,
+        "exampleSubsectors": [
+          "energy_equipment",
+          "shipping",
+          "defense_contractors",
+          "aerospace_defense",
+          "cybersecurity"
+        ]
+      }
+    },
+    {
+      "overlayId": "industrialCapexRebuild",
+      "priority": 5,
+      "helpsSubsectors": [
+        "capital_goods",
+        "machinery",
+        "engineering_construction",
+        "steel",
+        "chemicals",
+        "electrical_equipment"
+      ],
+      "fillsBlindSpot": "Industrial rebuild and re-shoring capex impulses are not directly distinguishable from generic cyclicality.",
+      "profile": "subsector-heavy",
+      "evidence": {
+        "blindSpotHitCount": 6,
+        "exampleSubsectors": [
+          "steel",
+          "chemicals",
+          "capital_goods",
+          "machinery",
+          "electrical_equipment",
+          "engineering_construction"
+        ]
+      }
+    }
+  ]
+}
