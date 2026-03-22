@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { buildMacroAssetMap } from "../macroAssetMap.ts";
 import { buildMacroSectorMap } from "../macroSectorMap.ts";
+import { getMacroSectorUniverseNode } from "../macroSectorUniverse.ts";
 
 (function testDerivedFromAssetMapMetadata() {
   const assetMap = buildMacroAssetMap({
@@ -28,7 +29,44 @@ import { buildMacroSectorMap } from "../macroSectorMap.ts";
   assert.ok(sectorMap.favored.some((item) => item.id === "gold_miners"));
   assert.ok(sectorMap.favored.some((item) => item.id === "defense"));
   assert.ok(sectorMap.favored.some((item) => item.id === "energy"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "defense_contractors"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "shipping"));
   assert.ok(sectorMap.neutral.some((item) => item.id === "financials"));
+})();
+
+(function testExpandedUniverseCapturesSubsectorsAndMacroBuckets() {
+  const assetMap = buildMacroAssetMap({
+    primaryRegime: "FiscalPressureBuilding",
+    overlays: {
+      energyShockOverlay: { score: 80 },
+      inflationCostShockOverlay: { score: 80 },
+    },
+  });
+
+  const sectorMap = buildMacroSectorMap(assetMap);
+  assert.ok(sectorMap.favored.some((item) => item.id === "oil_gas_producers"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "oil_services"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "refiners"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "hard_asset_equities"));
+})();
+
+(function testGoldAndCopperSemanticsAreDifferentiated() {
+  const assetMap = buildMacroAssetMap({
+    primaryRegime: "FiscalPressureBuilding",
+    overlays: {
+      energyShockOverlay: { score: 80 },
+      inflationCostShockOverlay: { score: 80 },
+      safeHavenRiskOffOverlay: { score: 75 },
+    },
+  });
+  const sectorMap = buildMacroSectorMap(assetMap);
+  const goldMiners = sectorMap.favored.find((item) => item.id === "gold_miners");
+  const copperMiners = sectorMap.favored.find((item) => item.id === "copper_miners");
+  assert.ok(goldMiners);
+  assert.ok(copperMiners);
+  assert.notEqual(goldMiners?.rationale, copperMiners?.rationale);
+  assert.ok(sectorMap.favored.some((item) => item.id === "safe_haven_equities"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "base_metals"));
 })();
 
 (function testCanonicalDedupAndLabelCleanliness() {
@@ -61,6 +99,24 @@ import { buildMacroSectorMap } from "../macroSectorMap.ts";
   const tech = sectorMap.favored.find((item) => item.id === "tech");
   assert.ok(tech);
   assert.ok(tech?.sourceAssets.some((asset) => asset.id === "growthEquities"));
+})();
+
+(function testNoOrphanMacroSectorCategoriesRemain() {
+  const assetMap = buildMacroAssetMap({
+    primaryRegime: "FiscalDominanceRisk",
+    overlays: {
+      safeHavenRiskOffOverlay: { score: 75 },
+      localUnrestOverlay: { score: 75 },
+      energyShockOverlay: { score: 80 },
+      inflationCostShockOverlay: { score: 80 },
+      creditFundingOverlay: { score: 80 },
+    },
+  });
+
+  const sectorMap = buildMacroSectorMap(assetMap);
+  [...sectorMap.favored, ...sectorMap.neutral, ...sectorMap.underPressure].forEach((item) => {
+    assert.ok(getMacroSectorUniverseNode(item.id), `Expected canonical universe node for ${item.id}`);
+  });
 })();
 
 console.log("macroSectorMap.test.ts: all tests passed");

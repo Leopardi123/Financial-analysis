@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildMacroAssetMap } from "../lib/macro/macroAssetMap";
 import { buildMacroSectorMap, type MacroSectorMapItem } from "../lib/macro/macroSectorMap";
+import {
+  buildMacroSectorQualityMap,
+  type MacroSignalQuality,
+  type RegimeCoherenceLevel,
+  type TransitionRiskLevel,
+} from "../lib/macro/macroSectorQuality";
+import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/macro/macroSectorUniverse";
 
 type ManualInput = {
   input_type: string;
@@ -40,11 +47,7 @@ type MacroSnapshotPayload = {
   };
 };
 
-const SECTORS = [
-  { name: "Råvaror", subsectors: ["Guld", "Olja"] },
-  { name: "Industri", subsectors: ["Verkstad"] },
-  { name: "Tech", subsectors: ["Semiconductors"] },
-];
+const SECTORS = getSectorDashboardUniverse();
 
 const GENERIC_QUESTIONS = [
   {
@@ -166,27 +169,54 @@ const COMPANY_CATEGORIES = [
 type MacroToneFilter = "all" | "favored" | "neutral" | "underPressure";
 type MacroStrengthFilter = "all" | MacroSectorMapItem["strength"];
 
-function macroKeysForSector(sectorName: string, subsectorName: string): string[] {
-  const keys: string[] = [];
-  if (sectorName === "Råvaror" && subsectorName === "Guld") keys.push("gold_miners", "materials");
-  if (sectorName === "Råvaror" && subsectorName === "Olja") keys.push("energy", "materials");
-  if (sectorName === "Industri") keys.push("industrials");
-  if (sectorName === "Tech") keys.push("tech");
-  keys.push("materials", "energy", "industrials", "tech");
-  return keys;
+function macroKeysForSector(sectorId: string, subsectorId: string): string[] {
+  const sector = SECTORS.find((item) => item.id === sectorId);
+  if (!sector) return [];
+  const subsector = sector.subsectors.find((item) => item.id === subsectorId);
+  if (!subsector) return [sectorId];
+  const broadFallbacks = [sectorId];
+  return [...subsector.macroTargetIds, ...broadFallbacks];
 }
 
 function resolveSectorMacroTag(
-  tagMap: Map<string, { tone: "favored" | "neutral" | "underPressure"; strength: MacroSectorMapItem["strength"] }>,
-  sectorName: string,
-  subsectorName: string
+  tagMap: Map<string, {
+    tone: "favored" | "neutral" | "underPressure";
+    strength: MacroSectorMapItem["strength"];
+    quality: MacroSignalQuality;
+  }>,
+  sectorId: string,
+  subsectorId: string
 ) {
-  return macroKeysForSector(sectorName, subsectorName).map((key) => tagMap.get(key)).find(Boolean) ?? null;
+  return macroKeysForSector(sectorId, subsectorId).map((key) => tagMap.get(key)).find(Boolean) ?? null;
+}
+
+function resolveSectorMacroTagWithPath(
+  tagMap: Map<string, {
+    tone: "favored" | "neutral" | "underPressure";
+    strength: MacroSectorMapItem["strength"];
+    quality: MacroSignalQuality;
+  }>,
+  sectorId: string,
+  subsectorId: string
+) {
+  const routing = getSubsectorMacroRouting(sectorId, subsectorId);
+  const explicit = routing.explicitTargetIds.find((id) => tagMap.has(id));
+  if (explicit) {
+    return { tag: tagMap.get(explicit) ?? null, path: "explicit_subsector" as const, matchedTargetId: explicit, coverage: routing.coverage };
+  }
+  if (routing.sectorFallbackId && tagMap.has(routing.sectorFallbackId)) {
+    return { tag: tagMap.get(routing.sectorFallbackId) ?? null, path: "sector_fallback" as const, matchedTargetId: routing.sectorFallbackId, coverage: routing.coverage };
+  }
+  const macroBucketFallback = routing.macroBucketFallbackIds.find((id) => tagMap.has(id));
+  if (macroBucketFallback) {
+    return { tag: tagMap.get(macroBucketFallback) ?? null, path: "macro_bucket_fallback" as const, matchedTargetId: macroBucketFallback, coverage: routing.coverage };
+  }
+  return { tag: null, path: "unmapped" as const, matchedTargetId: null, coverage: routing.coverage };
 }
 
 export default function SectorDashboard() {
-  const [sector, setSector] = useState(SECTORS[0].name);
-  const [subsector, setSubsector] = useState(SECTORS[0].subsectors[0]);
+  const [sector, setSector] = useState(SECTORS[0]?.id ?? "");
+  const [subsector, setSubsector] = useState(SECTORS[0]?.subsectors[0]?.id ?? "");
   const [manualInputs, setManualInputs] = useState<ManualInput[]>([]);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
@@ -198,6 +228,10 @@ export default function SectorDashboard() {
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
   const [macroStrength, setMacroStrength] = useState<MacroStrengthFilter>("all");
+  const debugMacroMapping = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("macroDebug") === "1";
+  }, []);
 
   const activeOverlayBundle = macroSnapshot?.globalMacro?.overlayBundle ?? macroSnapshot?.globalMacro?.overlays ?? null;
   const regimeProbability = macroSnapshot?.globalMacro?.macroRegimeProbability ?? null;
@@ -259,25 +293,65 @@ export default function SectorDashboard() {
     return buildMacroSectorMap(macroAssetMap);
   }, [activeOverlayBundle?.overlays, primaryRegime, regimeProbability?.regimeMomentum?.direction]);
 
-  const macroTagBySector = useMemo(() => {
-    const tagMap = new Map<string, { tone: "favored" | "neutral" | "underPressure"; strength: MacroSectorMapItem["strength"] }>();
-    const addTags = (items: MacroSectorMapItem[], tone: "favored" | "neutral" | "underPressure") => {
-      items.forEach((item) => tagMap.set(item.id, { tone, strength: item.strength }));
-    };
-    addTags(macroSectorMap.favored, "favored");
-    addTags(macroSectorMap.neutral, "neutral");
-    addTags(macroSectorMap.underPressure, "underPressure");
-    return tagMap;
-  }, [macroSectorMap]);
+  const macroRegimeQuality = useMemo(() => {
+    const modulatingCount = Array.isArray(regimeProbability?.modulatingOverlays)
+      ? regimeProbability.modulatingOverlays.length
+      : 0;
+    const contradictingCount = Array.isArray(regimeProbability?.contradictingOverlays)
+      ? regimeProbability.contradictingOverlays.length
+      : 0;
+    const coherence: RegimeCoherenceLevel = contradictingCount >= 2
+      ? "low"
+      : (contradictingCount === 0 && modulatingCount <= 2 ? "high" : "medium");
+    const transitionRisk: TransitionRiskLevel = coherence === "low"
+      ? "high"
+      : (contradictingCount >= 1 ? "elevated" : "low");
 
-  const activeSectorMacroTag = useMemo(() => {
-    return resolveSectorMacroTag(macroTagBySector, sector, subsector);
+    return { coherence, transitionRisk };
+  }, [regimeProbability?.contradictingOverlays, regimeProbability?.modulatingOverlays]);
+
+  const macroSectorQualityMap = useMemo(() => {
+    return buildMacroSectorQualityMap(macroSectorMap, {
+      regimeCoherence: macroRegimeQuality.coherence,
+      transitionRisk: macroRegimeQuality.transitionRisk,
+      contradictingOverlays: regimeProbability?.contradictingOverlays,
+      modulatingOverlays: regimeProbability?.modulatingOverlays,
+    });
+  }, [
+    macroRegimeQuality.coherence,
+    macroRegimeQuality.transitionRisk,
+    macroSectorMap,
+    regimeProbability?.contradictingOverlays,
+    regimeProbability?.modulatingOverlays,
+  ]);
+
+  const macroTagBySector = useMemo(() => {
+    const tagMap = new Map<string, {
+      tone: "favored" | "neutral" | "underPressure";
+      strength: MacroSectorMapItem["strength"];
+      quality: MacroSignalQuality;
+    }>();
+    const addTags = (
+      items: Array<MacroSectorMapItem & { quality: MacroSignalQuality }>,
+      tone: "favored" | "neutral" | "underPressure"
+    ) => {
+      items.forEach((item) => tagMap.set(item.id, { tone, strength: item.strength, quality: item.quality }));
+    };
+    addTags(macroSectorQualityMap.favored, "favored");
+    addTags(macroSectorQualityMap.neutral, "neutral");
+    addTags(macroSectorQualityMap.underPressure, "underPressure");
+    return tagMap;
+  }, [macroSectorQualityMap]);
+
+  const activeSectorMacroResolution = useMemo(() => {
+    return resolveSectorMacroTagWithPath(macroTagBySector, sector, subsector);
   }, [macroTagBySector, sector, subsector]);
+  const activeSectorMacroTag = activeSectorMacroResolution.tag;
 
   const filteredSectorOptions = useMemo(() => {
     return SECTORS.filter((sectorItem) => {
       const hasMatchingSubsector = sectorItem.subsectors.some((subsectorItem) => {
-        const macroTag = resolveSectorMacroTag(macroTagBySector, sectorItem.name, subsectorItem);
+        const macroTag = resolveSectorMacroTag(macroTagBySector, sectorItem.id, subsectorItem.id);
         if (!macroTag) return macroLens === "all" && macroStrength === "all";
         if (macroLens !== "all" && macroTag.tone !== macroLens) return false;
         if (macroStrength !== "all" && macroTag.strength !== macroStrength) return false;
@@ -288,10 +362,10 @@ export default function SectorDashboard() {
   }, [macroLens, macroStrength, macroTagBySector]);
 
   const subsectors = useMemo(() => {
-    const selectedSector = filteredSectorOptions.find((item) => item.name === sector);
+    const selectedSector = filteredSectorOptions.find((item) => item.id === sector);
     if (!selectedSector) return [];
     return selectedSector.subsectors.filter((item) => {
-      const macroTag = resolveSectorMacroTag(macroTagBySector, sector, item);
+      const macroTag = resolveSectorMacroTag(macroTagBySector, sector, item.id);
       if (!macroTag) return macroLens === "all" && macroStrength === "all";
       if (macroLens !== "all" && macroTag.tone !== macroLens) return false;
       if (macroStrength !== "all" && macroTag.strength !== macroStrength) return false;
@@ -300,24 +374,24 @@ export default function SectorDashboard() {
   }, [filteredSectorOptions, macroLens, macroStrength, macroTagBySector, sector]);
 
   const questions = useMemo(() => {
-    if (sector === "Råvaror" && subsector === "Guld") {
+    if (sector === "materials" && subsector === "gold_miners") {
       return [...GENERIC_QUESTIONS, ...GOLD_QUESTIONS];
     }
-    if (sector === "Råvaror" && subsector === "Olja") {
+    if (sector === "energy" && subsector === "oil_gas_producers") {
       return [...GENERIC_QUESTIONS, ...OIL_QUESTIONS];
     }
     return GENERIC_QUESTIONS;
   }, [sector, subsector]);
 
   useEffect(() => {
-    if (!filteredSectorOptions.some((item) => item.name === sector)) {
-      setSector(filteredSectorOptions[0]?.name ?? "");
+    if (!filteredSectorOptions.some((item) => item.id === sector)) {
+      setSector(filteredSectorOptions[0]?.id ?? "");
     }
   }, [filteredSectorOptions, sector]);
 
   useEffect(() => {
-    if (!subsectors.includes(subsector)) {
-      setSubsector(subsectors[0] ?? "");
+    if (!subsectors.some((item) => item.id === subsector)) {
+      setSubsector(subsectors[0]?.id ?? "");
     }
   }, [subsector, subsectors]);
 
@@ -461,8 +535,8 @@ export default function SectorDashboard() {
             disabled={filteredSectorOptions.length === 0}
           >
             {filteredSectorOptions.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name}
+              <option key={item.id} value={item.id}>
+                {item.title}
               </option>
             ))}
           </select>
@@ -476,8 +550,8 @@ export default function SectorDashboard() {
             disabled={subsectors.length === 0}
           >
             {subsectors.map((item) => (
-              <option key={item} value={item}>
-                {item}
+              <option key={item.id} value={item.id}>
+                {item.title}
               </option>
             ))}
           </select>
@@ -490,7 +564,12 @@ export default function SectorDashboard() {
             {activeSectorMacroTag.tone === "favored" && "Macro favored"}
             {activeSectorMacroTag.tone === "neutral" && "Macro neutral"}
             {activeSectorMacroTag.tone === "underPressure" && "Macro under pressure"}
-            {activeSectorMacroTag.strength ? ` (${activeSectorMacroTag.strength})` : ""}
+            {activeSectorMacroTag.strength ? ` (${activeSectorMacroTag.strength}, ${activeSectorMacroTag.quality})` : ""}
+          </div>
+        ) : null}
+        {debugMacroMapping ? (
+          <div style={{ fontSize: 11, color: activeSectorMacroTag ? "#475569" : "#64748b", marginTop: 4 }}>
+            debug: path={activeSectorMacroResolution.path}, matched={activeSectorMacroResolution.matchedTargetId ?? "none"}, coverage={activeSectorMacroResolution.coverage}
           </div>
         ) : null}
       </div>
