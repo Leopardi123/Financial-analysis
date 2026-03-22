@@ -119,6 +119,27 @@
   letter-spacing: 1px;
 }
 
+.macro-lens-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.macro-lens-controls label {
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.5px;
+}
+
+.macro-lens-controls select {
+  padding: 4px 8px;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 11px;
+}
+
 .sector-macro-tag {
   font-size: 11px;
   padding: 2px 8px;
@@ -619,6 +640,10 @@ td.sticky-col {
 
 .status.empty {
   color: #555;
+}
+
+.macro-lens-empty {
+  margin-top: -8px;
 }
 
 .admin-grid {
