@@ -174,7 +174,7 @@ function macroKeysForSector(sectorId: string, subsectorId: string): string[] {
   if (!sector) return [];
   const subsector = sector.subsectors.find((item) => item.id === subsectorId);
   if (!subsector) return [sectorId];
-  const broadFallbacks = [sectorId, "materials", "energy", "industrials", "tech"];
+  const broadFallbacks = [sectorId];
   return [...subsector.macroTargetIds, ...broadFallbacks];
 }
 

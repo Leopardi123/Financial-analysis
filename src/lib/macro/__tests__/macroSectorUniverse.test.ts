@@ -25,14 +25,14 @@ import { getSectorDashboardUniverse, macroSectorUniverse, resolveCanonicalSector
 
 (function testUniverseContainsMacroRelevantSubsectorsAndBuckets() {
   const ids = macroSectorUniverse.sectors.map((item) => item.id);
-  ["gold_miners", "diversified_miners", "oil_gas_producers", "semiconductors", "reits_rate_sensitive"].forEach((id) => assert.ok(ids.includes(id)));
-  ["hard_asset_equities", "small_caps", "duration_sensitive_equities", "credit_sensitive_cyclicals", "quality_defensives"].forEach((id) => assert.ok(ids.includes(id)));
+  ["gold_miners", "diversified_miners", "oil_gas_producers", "semiconductors", "reits_rate_sensitive", "pharma", "telecom", "midstream"].forEach((id) => assert.ok(ids.includes(id)));
+  ["hard_asset_equities", "small_caps", "duration_sensitive_equities", "credit_sensitive_cyclicals", "quality_defensives", "safe_haven_equities", "inflation_hedges"].forEach((id) => assert.ok(ids.includes(id)));
 })();
 
 (function testAliasResolutionSupportsLegacyMacroSectorCandidates() {
   const targets = resolveCanonicalSectorTargets("defense-energy-logistics");
   assert.ok(targets.includes("defense"));
-  assert.ok(targets.includes("shipping_logistics"));
+  assert.ok(targets.includes("shipping"));
   assert.ok(targets.includes("energy"));
 })();
 
@@ -45,6 +45,24 @@ import { getSectorDashboardUniverse, macroSectorUniverse, resolveCanonicalSector
       assert.ok(macroSectorUniverse.sectors.some((item) => item.id === subsector.id));
     });
   });
+})();
+
+(function testUniverseHasRequiredV2Breadth() {
+  const mainSectorCount = macroSectorUniverse.sectors.filter((item) => item.category === "main_sector").length;
+  const subsectorCount = macroSectorUniverse.sectors.filter((item) => item.category === "subsector").length;
+  const macroBucketCount = macroSectorUniverse.sectors.filter((item) => item.category === "macro_bucket").length;
+  assert.ok(mainSectorCount >= 12 && mainSectorCount <= 15, `mainSectorCount=${mainSectorCount}`);
+  assert.ok(subsectorCount >= 40 && subsectorCount <= 80, `subsectorCount=${subsectorCount}`);
+  assert.ok(macroBucketCount >= 10 && macroBucketCount <= 20, `macroBucketCount=${macroBucketCount}`);
+})();
+
+(function testParentChildIntegrityForRepresentativeNodes() {
+  const byId = new Map(macroSectorUniverse.sectors.map((item) => [item.id, item]));
+  assert.equal(byId.get("gold_miners")?.parentId, "materials");
+  assert.equal(byId.get("oil_services")?.parentId, "energy");
+  assert.equal(byId.get("semiconductors")?.parentId, "tech");
+  assert.equal(byId.get("defense_contractors")?.parentId, "defense");
+  assert.equal(byId.get("shipping")?.parentId, "transportation_logistics");
 })();
 
 console.log("macroSectorUniverse.test.ts: all tests passed");

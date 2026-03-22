@@ -30,7 +30,7 @@ import { getMacroSectorUniverseNode } from "../macroSectorUniverse.ts";
   assert.ok(sectorMap.favored.some((item) => item.id === "defense"));
   assert.ok(sectorMap.favored.some((item) => item.id === "energy"));
   assert.ok(sectorMap.favored.some((item) => item.id === "defense_contractors"));
-  assert.ok(sectorMap.favored.some((item) => item.id === "shipping_logistics"));
+  assert.ok(sectorMap.favored.some((item) => item.id === "shipping"));
   assert.ok(sectorMap.neutral.some((item) => item.id === "financials"));
 })();
 

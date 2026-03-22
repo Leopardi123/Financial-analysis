@@ -26,49 +26,124 @@ export type DashboardSectorOption = {
 
 export const macroSectorUniverse: MacroSectorUniverse = {
   sectors: [
-    { id: "energy", title: "Energy", category: "main_sector", parentId: null, aliases: ["energy-sector"], assetDrivers: ["energy", "localUnrestOverlay", "energyShockOverlay", "inflationCostShockOverlay"] },
-    { id: "materials", title: "Materials", category: "main_sector", parentId: null, aliases: ["materials-resources", "resource-equities"], assetDrivers: ["copper", "gold"] },
+    { id: "energy", title: "Energy", category: "main_sector", parentId: null, aliases: ["energy-sector", "oil"], assetDrivers: ["energy", "localUnrestOverlay", "energyShockOverlay", "inflationCostShockOverlay"] },
+    { id: "materials", title: "Materials", category: "main_sector", parentId: null, aliases: ["materials-resources", "resource-equities", "commodities"], assetDrivers: ["copper", "gold"] },
     { id: "industrials", title: "Industrials", category: "main_sector", parentId: null, aliases: ["broad-market-industrials"], assetDrivers: ["industrials", "broadEquities"] },
     { id: "financials", title: "Financials", category: "main_sector", parentId: null, aliases: ["financials-cyclicals-softened"], assetDrivers: ["smallCaps", "creditFundingOverlay"] },
-    { id: "tech", title: "Tech", category: "main_sector", parentId: null, aliases: ["growth-tech", "long-duration-tech"], assetDrivers: ["growthEquities", "durationAssets", "liquidityOverlay"] },
+    { id: "tech", title: "Information technology", category: "main_sector", parentId: null, aliases: ["information_technology", "growth-tech", "long-duration-tech"], assetDrivers: ["growthEquities", "durationAssets", "liquidityOverlay"] },
     { id: "utilities", title: "Utilities", category: "main_sector", parentId: null, aliases: [], assetDrivers: ["safeHavenRiskOffOverlay"] },
     { id: "consumer_discretionary", title: "Consumer discretionary", category: "main_sector", parentId: null, aliases: [], assetDrivers: ["smallCaps", "broadEquities"] },
     { id: "consumer_staples", title: "Consumer staples", category: "main_sector", parentId: null, aliases: [], assetDrivers: ["safeHavenRiskOffOverlay", "FiscalDominanceRisk"] },
     { id: "healthcare", title: "Healthcare", category: "main_sector", parentId: null, aliases: [], assetDrivers: ["safeHavenRiskOffOverlay", "Balanced"] },
-    { id: "real_estate", title: "Real estate", category: "main_sector", parentId: null, aliases: [], assetDrivers: ["durationAssets", "creditFundingOverlay"] },
+    { id: "real_estate", title: "Real estate", category: "main_sector", parentId: null, aliases: ["property"], assetDrivers: ["durationAssets", "creditFundingOverlay"] },
     { id: "communication_services", title: "Communication services", category: "main_sector", parentId: null, aliases: [], assetDrivers: ["growthEquities", "durationAssets"] },
     { id: "defense", title: "Defense", category: "main_sector", parentId: null, aliases: ["defense-energy-logistics"], assetDrivers: ["localUnrestOverlay"] },
-    { id: "transportation_logistics", title: "Transportation and logistics", category: "main_sector", parentId: null, aliases: ["shipping-logistics", "shipping_logistics"], assetDrivers: ["energy", "localUnrestOverlay", "broadEquities"] },
+    { id: "transportation_logistics", title: "Transportation and logistics", category: "main_sector", parentId: null, aliases: ["shipping-logistics", "shipping_logistics", "transport"], assetDrivers: ["energy", "localUnrestOverlay", "broadEquities"] },
 
-    { id: "gold_miners", title: "Gold miners", category: "subsector", parentId: "materials", aliases: ["gold-miners", "gold-hard-assets-safehaven", "hard-asset-defensives"], assetDrivers: ["gold", "safeHavenRiskOffOverlay", "localUnrestOverlay"] },
-    { id: "diversified_miners", title: "Diversified miners", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["copper", "gold", "materials"] },
+    { id: "oil_gas_producers", title: "Oil and gas producers", category: "subsector", parentId: "energy", aliases: ["exploration_production"], assetDrivers: ["energy", "energyShockOverlay"] },
+    { id: "integrated_energy", title: "Integrated energy", category: "subsector", parentId: "energy", aliases: ["majors"], assetDrivers: ["energy", "inflationCostShockOverlay"] },
+    { id: "oil_services", title: "Oil services", category: "subsector", parentId: "energy", aliases: ["ofs"], assetDrivers: ["energy", "inflationCostShockOverlay"] },
+    { id: "refiners", title: "Refiners", category: "subsector", parentId: "energy", aliases: ["downstream"], assetDrivers: ["energy", "inflationCostShockOverlay"] },
+    { id: "midstream", title: "Midstream", category: "subsector", parentId: "energy", aliases: ["pipelines"], assetDrivers: ["energy", "inflationCostShockOverlay"] },
+    { id: "coal", title: "Coal", category: "subsector", parentId: "energy", aliases: [], assetDrivers: ["energy", "inflationCostShockOverlay"] },
+    { id: "uranium", title: "Uranium", category: "subsector", parentId: "energy", aliases: [], assetDrivers: ["energy", "inflationCostShockOverlay"] },
+    { id: "renewable_developers", title: "Renewable developers", category: "subsector", parentId: "energy", aliases: ["renewables"], assetDrivers: ["energy", "durationAssets"] },
+    { id: "energy_equipment", title: "Energy equipment", category: "subsector", parentId: "energy", aliases: [], assetDrivers: ["energy", "industrials"] },
+
+    { id: "gold_miners", title: "Gold miners", category: "subsector", parentId: "materials", aliases: ["gold-miners", "gold-hard-assets-safehaven", "hard-asset-defensives", "gold"], assetDrivers: ["gold", "safeHavenRiskOffOverlay", "localUnrestOverlay"] },
+    { id: "silver_miners", title: "Silver miners", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["gold", "copper"] },
     { id: "copper_miners", title: "Copper miners", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["copper"] },
-    { id: "uranium", title: "Uranium", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["energy", "inflationCostShockOverlay"] },
-    { id: "oil_gas_producers", title: "Oil and gas producers", category: "subsector", parentId: "energy", aliases: [], assetDrivers: ["energy", "energyShockOverlay"] },
-    { id: "oil_services", title: "Oil services", category: "subsector", parentId: "energy", aliases: [], assetDrivers: ["energy", "inflationCostShockOverlay"] },
-    { id: "refiners", title: "Refiners", category: "subsector", parentId: "energy", aliases: [], assetDrivers: ["energy", "inflationCostShockOverlay"] },
-    { id: "defense_contractors", title: "Defense contractors", category: "subsector", parentId: "defense", aliases: [], assetDrivers: ["localUnrestOverlay"] },
-    { id: "shipping_logistics", title: "Shipping logistics", category: "subsector", parentId: "transportation_logistics", aliases: [], assetDrivers: ["energy", "localUnrestOverlay"] },
-    { id: "industrial_cyclicals", title: "Industrial cyclicals", category: "subsector", parentId: "industrials", aliases: [], assetDrivers: ["industrials", "broadEquities"] },
+    { id: "diversified_miners", title: "Diversified miners", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["copper", "gold", "materials"] },
+    { id: "steel", title: "Steel", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["copper", "industrials"] },
+    { id: "chemicals", title: "Chemicals", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["energy", "industrials"] },
+    { id: "fertilizers", title: "Fertilizers", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["energy", "materials"] },
+    { id: "construction_materials", title: "Construction materials", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["industrials", "broadEquities"] },
+    { id: "precious_metals", title: "Precious metals", category: "subsector", parentId: "materials", aliases: ["precious_metals_miners"], assetDrivers: ["gold", "safeHavenRiskOffOverlay"] },
+    { id: "base_metals", title: "Base metals", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["copper", "industrials"] },
+    { id: "lithium_miners", title: "Lithium miners", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["copper", "growthEquities"] },
+    { id: "paper_packaging", title: "Paper and packaging", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["broadEquities", "industrials"] },
+
     { id: "capital_goods", title: "Capital goods", category: "subsector", parentId: "industrials", aliases: [], assetDrivers: ["industrials"] },
+    { id: "machinery", title: "Machinery", category: "subsector", parentId: "industrials", aliases: [], assetDrivers: ["industrials", "broadEquities"] },
+    { id: "electrical_equipment", title: "Electrical equipment", category: "subsector", parentId: "industrials", aliases: [], assetDrivers: ["industrials", "energy"] },
+    { id: "engineering_construction", title: "Engineering and construction", category: "subsector", parentId: "industrials", aliases: [], assetDrivers: ["industrials", "broadEquities"] },
+    { id: "building_products", title: "Building products", category: "subsector", parentId: "industrials", aliases: [], assetDrivers: ["industrials", "housing_related"] },
+
+    { id: "rail", title: "Rail", category: "subsector", parentId: "transportation_logistics", aliases: [], assetDrivers: ["energy", "broadEquities"] },
+    { id: "trucking", title: "Trucking", category: "subsector", parentId: "transportation_logistics", aliases: [], assetDrivers: ["energy", "broadEquities"] },
+    { id: "shipping", title: "Shipping", category: "subsector", parentId: "transportation_logistics", aliases: ["shipping_logistics"], assetDrivers: ["energy", "localUnrestOverlay"] },
+    { id: "airlines", title: "Airlines", category: "subsector", parentId: "transportation_logistics", aliases: [], assetDrivers: ["energy", "consumer_cyclicals"] },
+    { id: "logistics", title: "Logistics", category: "subsector", parentId: "transportation_logistics", aliases: [], assetDrivers: ["energy", "broadEquities"] },
+    { id: "ports_infrastructure", title: "Ports and infrastructure", category: "subsector", parentId: "transportation_logistics", aliases: [], assetDrivers: ["energy", "localUnrestOverlay"] },
+
+    { id: "defense_contractors", title: "Defense contractors", category: "subsector", parentId: "defense", aliases: ["military_contractors"], assetDrivers: ["localUnrestOverlay"] },
+    { id: "aerospace_defense", title: "Aerospace and defense", category: "subsector", parentId: "defense", aliases: [], assetDrivers: ["localUnrestOverlay", "industrials"] },
+
     { id: "banks", title: "Banks", category: "subsector", parentId: "financials", aliases: [], assetDrivers: ["smallCaps", "creditFundingOverlay"] },
+    { id: "regional_banks", title: "Regional banks", category: "subsector", parentId: "financials", aliases: [], assetDrivers: ["smallCaps", "creditFundingOverlay"] },
     { id: "insurers", title: "Insurers", category: "subsector", parentId: "financials", aliases: [], assetDrivers: ["creditFundingOverlay", "Balanced"] },
     { id: "asset_managers", title: "Asset managers", category: "subsector", parentId: "financials", aliases: [], assetDrivers: ["broadEquities", "creditFundingOverlay"] },
-    { id: "semiconductors", title: "Semiconductors", category: "subsector", parentId: "tech", aliases: [], assetDrivers: ["growthEquities", "durationAssets", "liquidityOverlay"] },
+    { id: "brokers_exchanges", title: "Brokers and exchanges", category: "subsector", parentId: "financials", aliases: [], assetDrivers: ["broadEquities", "growthEquities"] },
+    { id: "specialty_finance", title: "Specialty finance", category: "subsector", parentId: "financials", aliases: [], assetDrivers: ["smallCaps", "creditFundingOverlay"] },
+    { id: "payment_networks", title: "Payment networks", category: "subsector", parentId: "financials", aliases: [], assetDrivers: ["consumer_cyclicals", "broadEquities"] },
+
     { id: "software", title: "Software", category: "subsector", parentId: "tech", aliases: [], assetDrivers: ["growthEquities", "durationAssets", "liquidityOverlay"] },
+    { id: "semiconductors", title: "Semiconductors", category: "subsector", parentId: "tech", aliases: ["chips"], assetDrivers: ["growthEquities", "durationAssets", "liquidityOverlay"] },
+    { id: "hardware", title: "Hardware", category: "subsector", parentId: "tech", aliases: [], assetDrivers: ["growthEquities", "durationAssets"] },
+    { id: "it_services", title: "IT services", category: "subsector", parentId: "tech", aliases: [], assetDrivers: ["growthEquities", "broadEquities"] },
+    { id: "cybersecurity", title: "Cybersecurity", category: "subsector", parentId: "tech", aliases: [], assetDrivers: ["growthEquities", "defense"] },
     { id: "long_duration_tech", title: "Long duration tech", category: "subsector", parentId: "tech", aliases: [], assetDrivers: ["growthEquities", "durationAssets"] },
+    { id: "cloud_infrastructure", title: "Cloud infrastructure", category: "subsector", parentId: "tech", aliases: [], assetDrivers: ["growthEquities", "durationAssets"] },
+
     { id: "regulated_utilities", title: "Regulated utilities", category: "subsector", parentId: "utilities", aliases: [], assetDrivers: ["safeHavenRiskOffOverlay", "FiscalDominanceRisk"] },
     { id: "power_grid_utilities", title: "Power grid utilities", category: "subsector", parentId: "utilities", aliases: [], assetDrivers: ["energy", "inflationCostShockOverlay"] },
-    { id: "consumer_cyclicals", title: "Consumer cyclicals", category: "subsector", parentId: "consumer_discretionary", aliases: [], assetDrivers: ["smallCaps", "broadEquities", "creditFundingOverlay"] },
-    { id: "consumer_defensives", title: "Consumer defensives", category: "subsector", parentId: "consumer_staples", aliases: [], assetDrivers: ["safeHavenRiskOffOverlay", "FiscalDominanceRisk"] },
-    { id: "reits_rate_sensitive", title: "Rate-sensitive REITs", category: "subsector", parentId: "real_estate", aliases: [], assetDrivers: ["durationAssets", "creditFundingOverlay"] },
+    { id: "independent_power", title: "Independent power producers", category: "subsector", parentId: "utilities", aliases: ["ipp"], assetDrivers: ["energy", "inflationCostShockOverlay"] },
+    { id: "water_utilities", title: "Water utilities", category: "subsector", parentId: "utilities", aliases: [], assetDrivers: ["safeHavenRiskOffOverlay", "Balanced"] },
+    { id: "multi_utilities", title: "Multi-utilities", category: "subsector", parentId: "utilities", aliases: [], assetDrivers: ["energy", "safeHavenRiskOffOverlay"] },
 
-    { id: "hard_asset_equities", title: "Hard asset equities", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["gold", "energy", "copper", "safeHavenRiskOffOverlay"] },
+    { id: "consumer_cyclicals", title: "Consumer cyclicals", category: "subsector", parentId: "consumer_discretionary", aliases: [], assetDrivers: ["smallCaps", "broadEquities", "creditFundingOverlay"] },
+    { id: "autos", title: "Autos", category: "subsector", parentId: "consumer_discretionary", aliases: [], assetDrivers: ["consumer_cyclicals", "energy"] },
+    { id: "retail", title: "Retail", category: "subsector", parentId: "consumer_discretionary", aliases: [], assetDrivers: ["consumer_cyclicals", "smallCaps"] },
+    { id: "housing_related", title: "Housing-related", category: "subsector", parentId: "consumer_discretionary", aliases: ["homebuilders"], assetDrivers: ["durationAssets", "smallCaps"] },
+    { id: "travel_leisure", title: "Travel and leisure", category: "subsector", parentId: "consumer_discretionary", aliases: [], assetDrivers: ["consumer_cyclicals", "energy"] },
+    { id: "apparel_luxury", title: "Apparel and luxury", category: "subsector", parentId: "consumer_discretionary", aliases: [], assetDrivers: ["consumer_cyclicals", "broadEquities"] },
+
+    { id: "consumer_defensives", title: "Consumer defensives", category: "subsector", parentId: "consumer_staples", aliases: [], assetDrivers: ["safeHavenRiskOffOverlay", "FiscalDominanceRisk"] },
+    { id: "food_beverage", title: "Food and beverage", category: "subsector", parentId: "consumer_staples", aliases: [], assetDrivers: ["consumer_defensives", "inflationCostShockOverlay"] },
+    { id: "household_products", title: "Household products", category: "subsector", parentId: "consumer_staples", aliases: [], assetDrivers: ["consumer_defensives", "safeHavenRiskOffOverlay"] },
+    { id: "personal_care", title: "Personal care", category: "subsector", parentId: "consumer_staples", aliases: [], assetDrivers: ["consumer_defensives", "broadEquities"] },
+    { id: "tobacco", title: "Tobacco", category: "subsector", parentId: "consumer_staples", aliases: [], assetDrivers: ["consumer_defensives", "safeHavenRiskOffOverlay"] },
+
+    { id: "pharma", title: "Pharma", category: "subsector", parentId: "healthcare", aliases: ["pharmaceuticals"], assetDrivers: ["safeHavenRiskOffOverlay", "Balanced"] },
+    { id: "biotech", title: "Biotech", category: "subsector", parentId: "healthcare", aliases: [], assetDrivers: ["growthEquities", "durationAssets"] },
+    { id: "healthcare_equipment", title: "Healthcare equipment", category: "subsector", parentId: "healthcare", aliases: [], assetDrivers: ["healthcare", "broadEquities"] },
+    { id: "healthcare_services", title: "Healthcare services", category: "subsector", parentId: "healthcare", aliases: [], assetDrivers: ["healthcare", "consumer_defensives"] },
+    { id: "diagnostics", title: "Diagnostics", category: "subsector", parentId: "healthcare", aliases: [], assetDrivers: ["healthcare", "growthEquities"] },
+    { id: "life_sciences_tools", title: "Life sciences tools", category: "subsector", parentId: "healthcare", aliases: [], assetDrivers: ["healthcare", "growthEquities"] },
+
+    { id: "telecom", title: "Telecom", category: "subsector", parentId: "communication_services", aliases: [], assetDrivers: ["communication_services", "safeHavenRiskOffOverlay"] },
+    { id: "media", title: "Media", category: "subsector", parentId: "communication_services", aliases: [], assetDrivers: ["communication_services", "broadEquities"] },
+    { id: "internet_platforms", title: "Internet platforms", category: "subsector", parentId: "communication_services", aliases: [], assetDrivers: ["growthEquities", "durationAssets"] },
+    { id: "advertising_gaming", title: "Advertising and gaming", category: "subsector", parentId: "communication_services", aliases: [], assetDrivers: ["consumer_cyclicals", "growthEquities"] },
+
+    { id: "reits_rate_sensitive", title: "Rate-sensitive REITs", category: "subsector", parentId: "real_estate", aliases: [], assetDrivers: ["durationAssets", "creditFundingOverlay"] },
+    { id: "industrial_reits", title: "Industrial REITs", category: "subsector", parentId: "real_estate", aliases: [], assetDrivers: ["broadEquities", "logistics"] },
+    { id: "residential_reits", title: "Residential REITs", category: "subsector", parentId: "real_estate", aliases: [], assetDrivers: ["durationAssets", "housing_related"] },
+    { id: "data_center_reits", title: "Data-center REITs", category: "subsector", parentId: "real_estate", aliases: [], assetDrivers: ["durationAssets", "growthEquities"] },
+
     { id: "small_caps", title: "Small caps", category: "macro_bucket", parentId: null, aliases: ["small-caps-cyclicals"], assetDrivers: ["smallCaps", "creditFundingOverlay"] },
     { id: "duration_sensitive_equities", title: "Duration-sensitive equities", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["durationAssets", "growthEquities", "liquidityOverlay"] },
     { id: "credit_sensitive_cyclicals", title: "Credit-sensitive cyclicals", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["smallCaps", "creditFundingOverlay"] },
-    { id: "value_cyclicals", title: "Value cyclicals", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["energy", "materials", "industrials"] },
+    { id: "hard_asset_equities", title: "Hard-asset equities", category: "macro_bucket", parentId: null, aliases: ["hard_asset_defensives"], assetDrivers: ["gold", "energy", "copper", "safeHavenRiskOffOverlay"] },
+    { id: "real_asset_equities", title: "Real-asset equities", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["energy", "materials", "real_estate"] },
     { id: "quality_defensives", title: "Quality defensives", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["safeHavenRiskOffOverlay", "FiscalDominanceRisk", "localUnrestOverlay"] },
+    { id: "deep_cyclicals", title: "Deep cyclicals", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["industrials", "materials", "consumer_cyclicals"] },
+    { id: "domestic_demand_cyclicals", title: "Domestic-demand cyclicals", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["consumer_cyclicals", "smallCaps", "housing_related"] },
+    { id: "global_trade_sensitives", title: "Global-trade sensitives", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["shipping", "logistics", "industrials"] },
+    { id: "rate_sensitive_real_estate", title: "Rate-sensitive real estate", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["reits_rate_sensitive", "durationAssets"] },
+    { id: "inflation_hedges", title: "Inflation hedges", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["gold", "energy", "materials", "inflationCostShockOverlay"] },
+    { id: "safe_haven_equities", title: "Safe-haven equities", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["safeHavenRiskOffOverlay", "consumer_defensives", "regulated_utilities"] },
+    { id: "value_cyclicals", title: "Value cyclicals", category: "macro_bucket", parentId: null, aliases: [], assetDrivers: ["energy", "materials", "industrials"] },
   ],
 };
 
@@ -85,16 +160,17 @@ macroSectorUniverse.sectors.forEach((sector) => {
 });
 
 const explicitAliasTargets: Record<string, string[]> = {
-  "defense-energy-logistics": ["defense", "defense_contractors", "shipping_logistics", "transportation_logistics", "energy"],
-  "hard-asset-defensives": ["hard_asset_equities", "quality_defensives", "gold_miners"],
-  "gold-hard-assets-safehaven": ["gold_miners", "hard_asset_equities", "quality_defensives"],
-  "financials-cyclicals-softened": ["financials", "banks", "credit_sensitive_cyclicals"],
-  "resource-equities": ["materials", "diversified_miners", "value_cyclicals"],
-  "materials-resources": ["materials", "diversified_miners", "copper_miners"],
+  "defense-energy-logistics": ["defense", "defense_contractors", "aerospace_defense", "shipping", "transportation_logistics", "energy"],
+  "hard-asset-defensives": ["hard_asset_equities", "safe_haven_equities", "gold_miners"],
+  "gold-hard-assets-safehaven": ["gold_miners", "precious_metals", "hard_asset_equities", "safe_haven_equities"],
+  "financials-cyclicals-softened": ["financials", "banks", "regional_banks", "credit_sensitive_cyclicals"],
+  "resource-equities": ["materials", "diversified_miners", "base_metals", "inflation_hedges"],
+  "materials-resources": ["materials", "diversified_miners", "copper_miners", "precious_metals"],
   "growth-tech": ["tech", "semiconductors", "software", "long_duration_tech", "duration_sensitive_equities"],
   "long-duration-tech": ["long_duration_tech", "duration_sensitive_equities", "tech"],
-  "small-caps-cyclicals": ["small_caps", "consumer_cyclicals", "credit_sensitive_cyclicals"],
-  "broad-market-industrials": ["industrials", "industrial_cyclicals", "capital_goods", "value_cyclicals"],
+  "small-caps-cyclicals": ["small_caps", "consumer_cyclicals", "credit_sensitive_cyclicals", "domestic_demand_cyclicals"],
+  "broad-market-industrials": ["industrials", "capital_goods", "machinery", "value_cyclicals"],
+  shipping_logistics: ["shipping", "logistics", "transportation_logistics", "global_trade_sensitives"],
 };
 
 export function resolveCanonicalSectorTargets(candidateId: string): string[] {
@@ -110,37 +186,25 @@ export function getMacroSectorUniverseNode(id: string): CanonicalSectorNode | nu
   return sectorById.get(id) ?? null;
 }
 
-const dashboardSubsectorConfig: Array<{
-  id: string;
-  parentSectorId: string;
-  macroTargetIds: string[];
-}> = [
-  { id: "gold_miners", parentSectorId: "materials", macroTargetIds: ["gold_miners", "materials", "hard_asset_equities"] },
-  { id: "oil_gas_producers", parentSectorId: "energy", macroTargetIds: ["oil_gas_producers", "energy", "value_cyclicals"] },
-  { id: "capital_goods", parentSectorId: "industrials", macroTargetIds: ["capital_goods", "industrial_cyclicals", "industrials"] },
-  { id: "semiconductors", parentSectorId: "tech", macroTargetIds: ["semiconductors", "tech", "long_duration_tech"] },
-];
-
 export function getSectorDashboardUniverse(): DashboardSectorOption[] {
-  const grouped = new Map<string, DashboardSectorOption>();
+  const mainSectors = macroSectorUniverse.sectors
+    .filter((item) => item.category === "main_sector")
+    .sort((a, b) => a.title.localeCompare(b.title));
 
-  dashboardSubsectorConfig.forEach((subsector) => {
-    const parent = sectorById.get(subsector.parentSectorId);
-    const child = sectorById.get(subsector.id);
-    if (!parent || !child) return;
+  return mainSectors.map((sector) => {
+    const subsectors = macroSectorUniverse.sectors
+      .filter((item) => item.category === "subsector" && item.parentId === sector.id)
+      .sort((a, b) => a.title.localeCompare(b.title))
+      .map((subsector) => ({
+        id: subsector.id,
+        title: subsector.title,
+        macroTargetIds: [subsector.id, sector.id],
+      }));
 
-    const existing = grouped.get(parent.id) ?? {
-      id: parent.id,
-      title: parent.title,
-      subsectors: [],
+    return {
+      id: sector.id,
+      title: sector.title,
+      subsectors,
     };
-    existing.subsectors.push({
-      id: child.id,
-      title: child.title,
-      macroTargetIds: subsector.macroTargetIds,
-    });
-    grouped.set(parent.id, existing);
-  });
-
-  return [...grouped.values()];
+  }).filter((sector) => sector.subsectors.length > 0);
 }
