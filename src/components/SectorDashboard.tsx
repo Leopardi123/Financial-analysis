@@ -7,6 +7,7 @@ import {
   type RegimeCoherenceLevel,
   type TransitionRiskLevel,
 } from "../lib/macro/macroSectorQuality";
+import { getSectorDashboardUniverse } from "../lib/macro/macroSectorUniverse";
 
 type ManualInput = {
   input_type: string;
@@ -46,11 +47,7 @@ type MacroSnapshotPayload = {
   };
 };
 
-const SECTORS = [
-  { name: "Råvaror", subsectors: ["Guld", "Olja"] },
-  { name: "Industri", subsectors: ["Verkstad"] },
-  { name: "Tech", subsectors: ["Semiconductors"] },
-];
+const SECTORS = getSectorDashboardUniverse();
 
 const GENERIC_QUESTIONS = [
   {
@@ -172,14 +169,13 @@ const COMPANY_CATEGORIES = [
 type MacroToneFilter = "all" | "favored" | "neutral" | "underPressure";
 type MacroStrengthFilter = "all" | MacroSectorMapItem["strength"];
 
-function macroKeysForSector(sectorName: string, subsectorName: string): string[] {
-  const keys: string[] = [];
-  if (sectorName === "Råvaror" && subsectorName === "Guld") keys.push("gold_miners", "materials");
-  if (sectorName === "Råvaror" && subsectorName === "Olja") keys.push("energy", "materials");
-  if (sectorName === "Industri") keys.push("industrials");
-  if (sectorName === "Tech") keys.push("tech");
-  keys.push("materials", "energy", "industrials", "tech");
-  return keys;
+function macroKeysForSector(sectorId: string, subsectorId: string): string[] {
+  const sector = SECTORS.find((item) => item.id === sectorId);
+  if (!sector) return [];
+  const subsector = sector.subsectors.find((item) => item.id === subsectorId);
+  if (!subsector) return [sectorId];
+  const broadFallbacks = [sectorId, "materials", "energy", "industrials", "tech"];
+  return [...subsector.macroTargetIds, ...broadFallbacks];
 }
 
 function resolveSectorMacroTag(
@@ -188,15 +184,15 @@ function resolveSectorMacroTag(
     strength: MacroSectorMapItem["strength"];
     quality: MacroSignalQuality;
   }>,
-  sectorName: string,
-  subsectorName: string
+  sectorId: string,
+  subsectorId: string
 ) {
-  return macroKeysForSector(sectorName, subsectorName).map((key) => tagMap.get(key)).find(Boolean) ?? null;
+  return macroKeysForSector(sectorId, subsectorId).map((key) => tagMap.get(key)).find(Boolean) ?? null;
 }
 
 export default function SectorDashboard() {
-  const [sector, setSector] = useState(SECTORS[0].name);
-  const [subsector, setSubsector] = useState(SECTORS[0].subsectors[0]);
+  const [sector, setSector] = useState(SECTORS[0]?.id ?? "");
+  const [subsector, setSubsector] = useState(SECTORS[0]?.subsectors[0]?.id ?? "");
   const [manualInputs, setManualInputs] = useState<ManualInput[]>([]);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
@@ -326,7 +322,7 @@ export default function SectorDashboard() {
   const filteredSectorOptions = useMemo(() => {
     return SECTORS.filter((sectorItem) => {
       const hasMatchingSubsector = sectorItem.subsectors.some((subsectorItem) => {
-        const macroTag = resolveSectorMacroTag(macroTagBySector, sectorItem.name, subsectorItem);
+        const macroTag = resolveSectorMacroTag(macroTagBySector, sectorItem.id, subsectorItem.id);
         if (!macroTag) return macroLens === "all" && macroStrength === "all";
         if (macroLens !== "all" && macroTag.tone !== macroLens) return false;
         if (macroStrength !== "all" && macroTag.strength !== macroStrength) return false;
@@ -337,10 +333,10 @@ export default function SectorDashboard() {
   }, [macroLens, macroStrength, macroTagBySector]);
 
   const subsectors = useMemo(() => {
-    const selectedSector = filteredSectorOptions.find((item) => item.name === sector);
+    const selectedSector = filteredSectorOptions.find((item) => item.id === sector);
     if (!selectedSector) return [];
     return selectedSector.subsectors.filter((item) => {
-      const macroTag = resolveSectorMacroTag(macroTagBySector, sector, item);
+      const macroTag = resolveSectorMacroTag(macroTagBySector, sector, item.id);
       if (!macroTag) return macroLens === "all" && macroStrength === "all";
       if (macroLens !== "all" && macroTag.tone !== macroLens) return false;
       if (macroStrength !== "all" && macroTag.strength !== macroStrength) return false;
@@ -349,24 +345,24 @@ export default function SectorDashboard() {
   }, [filteredSectorOptions, macroLens, macroStrength, macroTagBySector, sector]);
 
   const questions = useMemo(() => {
-    if (sector === "Råvaror" && subsector === "Guld") {
+    if (sector === "materials" && subsector === "gold_miners") {
       return [...GENERIC_QUESTIONS, ...GOLD_QUESTIONS];
     }
-    if (sector === "Råvaror" && subsector === "Olja") {
+    if (sector === "energy" && subsector === "oil_gas_producers") {
       return [...GENERIC_QUESTIONS, ...OIL_QUESTIONS];
     }
     return GENERIC_QUESTIONS;
   }, [sector, subsector]);
 
   useEffect(() => {
-    if (!filteredSectorOptions.some((item) => item.name === sector)) {
-      setSector(filteredSectorOptions[0]?.name ?? "");
+    if (!filteredSectorOptions.some((item) => item.id === sector)) {
+      setSector(filteredSectorOptions[0]?.id ?? "");
     }
   }, [filteredSectorOptions, sector]);
 
   useEffect(() => {
-    if (!subsectors.includes(subsector)) {
-      setSubsector(subsectors[0] ?? "");
+    if (!subsectors.some((item) => item.id === subsector)) {
+      setSubsector(subsectors[0]?.id ?? "");
     }
   }, [subsector, subsectors]);
 
@@ -510,8 +506,8 @@ export default function SectorDashboard() {
             disabled={filteredSectorOptions.length === 0}
           >
             {filteredSectorOptions.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name}
+              <option key={item.id} value={item.id}>
+                {item.title}
               </option>
             ))}
           </select>
@@ -525,8 +521,8 @@ export default function SectorDashboard() {
             disabled={subsectors.length === 0}
           >
             {subsectors.map((item) => (
-              <option key={item} value={item}>
-                {item}
+              <option key={item.id} value={item.id}>
+                {item.title}
               </option>
             ))}
           </select>

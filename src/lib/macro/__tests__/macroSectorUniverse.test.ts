@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { macroSectorUniverse, resolveCanonicalSectorTargets } from "../macroSectorUniverse.ts";
+import { getSectorDashboardUniverse, macroSectorUniverse, resolveCanonicalSectorTargets } from "../macroSectorUniverse.ts";
 
 (function testUniverseContainsRequiredTopLevelSectors() {
   const mainSectors = macroSectorUniverse.sectors
@@ -34,6 +34,17 @@ import { macroSectorUniverse, resolveCanonicalSectorTargets } from "../macroSect
   assert.ok(targets.includes("defense"));
   assert.ok(targets.includes("shipping_logistics"));
   assert.ok(targets.includes("energy"));
+})();
+
+(function testSectorDashboardTaxonomyUsesCanonicalUniverseIds() {
+  const selectorUniverse = getSectorDashboardUniverse();
+  assert.ok(selectorUniverse.length > 0);
+  selectorUniverse.forEach((sector) => {
+    assert.ok(macroSectorUniverse.sectors.some((item) => item.id === sector.id));
+    sector.subsectors.forEach((subsector) => {
+      assert.ok(macroSectorUniverse.sectors.some((item) => item.id === subsector.id));
+    });
+  });
 })();
 
 console.log("macroSectorUniverse.test.ts: all tests passed");

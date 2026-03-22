@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { buildMacroAssetMap } from "../macroAssetMap.ts";
 import { buildMacroSectorMap } from "../macroSectorMap.ts";
+import { getMacroSectorUniverseNode } from "../macroSectorUniverse.ts";
 
 (function testDerivedFromAssetMapMetadata() {
   const assetMap = buildMacroAssetMap({
@@ -79,6 +80,24 @@ import { buildMacroSectorMap } from "../macroSectorMap.ts";
   const tech = sectorMap.favored.find((item) => item.id === "tech");
   assert.ok(tech);
   assert.ok(tech?.sourceAssets.some((asset) => asset.id === "growthEquities"));
+})();
+
+(function testNoOrphanMacroSectorCategoriesRemain() {
+  const assetMap = buildMacroAssetMap({
+    primaryRegime: "FiscalDominanceRisk",
+    overlays: {
+      safeHavenRiskOffOverlay: { score: 75 },
+      localUnrestOverlay: { score: 75 },
+      energyShockOverlay: { score: 80 },
+      inflationCostShockOverlay: { score: 80 },
+      creditFundingOverlay: { score: 80 },
+    },
+  });
+
+  const sectorMap = buildMacroSectorMap(assetMap);
+  [...sectorMap.favored, ...sectorMap.neutral, ...sectorMap.underPressure].forEach((item) => {
+    assert.ok(getMacroSectorUniverseNode(item.id), `Expected canonical universe node for ${item.id}`);
+  });
 })();
 
 console.log("macroSectorMap.test.ts: all tests passed");

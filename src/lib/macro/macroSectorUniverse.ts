@@ -14,6 +14,16 @@ export type MacroSectorUniverse = {
   sectors: CanonicalSectorNode[];
 };
 
+export type DashboardSectorOption = {
+  id: string;
+  title: string;
+  subsectors: Array<{
+    id: string;
+    title: string;
+    macroTargetIds: string[];
+  }>;
+};
+
 export const macroSectorUniverse: MacroSectorUniverse = {
   sectors: [
     { id: "energy", title: "Energy", category: "main_sector", parentId: null, aliases: ["energy-sector"], assetDrivers: ["energy", "localUnrestOverlay", "energyShockOverlay", "inflationCostShockOverlay"] },
@@ -98,4 +108,39 @@ export function getCanonicalSectorTitle(canonicalId: string): string | null {
 
 export function getMacroSectorUniverseNode(id: string): CanonicalSectorNode | null {
   return sectorById.get(id) ?? null;
+}
+
+const dashboardSubsectorConfig: Array<{
+  id: string;
+  parentSectorId: string;
+  macroTargetIds: string[];
+}> = [
+  { id: "gold_miners", parentSectorId: "materials", macroTargetIds: ["gold_miners", "materials", "hard_asset_equities"] },
+  { id: "oil_gas_producers", parentSectorId: "energy", macroTargetIds: ["oil_gas_producers", "energy", "value_cyclicals"] },
+  { id: "capital_goods", parentSectorId: "industrials", macroTargetIds: ["capital_goods", "industrial_cyclicals", "industrials"] },
+  { id: "semiconductors", parentSectorId: "tech", macroTargetIds: ["semiconductors", "tech", "long_duration_tech"] },
+];
+
+export function getSectorDashboardUniverse(): DashboardSectorOption[] {
+  const grouped = new Map<string, DashboardSectorOption>();
+
+  dashboardSubsectorConfig.forEach((subsector) => {
+    const parent = sectorById.get(subsector.parentSectorId);
+    const child = sectorById.get(subsector.id);
+    if (!parent || !child) return;
+
+    const existing = grouped.get(parent.id) ?? {
+      id: parent.id,
+      title: parent.title,
+      subsectors: [],
+    };
+    existing.subsectors.push({
+      id: child.id,
+      title: child.title,
+      macroTargetIds: subsector.macroTargetIds,
+    });
+    grouped.set(parent.id, existing);
+  });
+
+  return [...grouped.values()];
 }
