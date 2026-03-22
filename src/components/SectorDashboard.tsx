@@ -8,6 +8,7 @@ import {
   type TransitionRiskLevel,
 } from "../lib/macro/macroSectorQuality";
 import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/macro/macroSectorUniverse";
+import { buildSubsectorCoverageAuditReport } from "../lib/macro/subsectorCoverageAudit";
 
 type ManualInput = {
   input_type: string;
@@ -228,10 +229,18 @@ export default function SectorDashboard() {
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
   const [macroStrength, setMacroStrength] = useState<MacroStrengthFilter>("all");
+  const debugMode = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  }, []);
   const debugMacroMapping = useMemo(() => {
     if (typeof window === "undefined") return false;
     return new URLSearchParams(window.location.search).get("macroDebug") === "1";
   }, []);
+  const subsectorCoverageAudit = useMemo(() => {
+    if (!debugMode) return null;
+    return buildSubsectorCoverageAuditReport();
+  }, [debugMode]);
 
   const activeOverlayBundle = macroSnapshot?.globalMacro?.overlayBundle ?? macroSnapshot?.globalMacro?.overlays ?? null;
   const regimeProbability = macroSnapshot?.globalMacro?.macroRegimeProbability ?? null;
@@ -766,6 +775,20 @@ export default function SectorDashboard() {
           )}
         </div>
       </div>
+
+      {debugMode && subsectorCoverageAudit ? (
+        <details className="sector-debug-panel" style={{ marginTop: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+            Debug: subsector → driver coverage matrix
+          </summary>
+          <p className="bread" style={{ marginTop: 8 }}>
+            Full diagnostics payload (matrix, differentiation checks, overlay gap ranking). Endast synlig med <code>?debug=1</code>.
+          </p>
+          <pre style={{ maxHeight: 520, overflow: "auto", fontSize: 11, background: "#f8fafc", padding: 12, borderRadius: 8 }}>
+            {JSON.stringify(subsectorCoverageAudit, null, 2)}
+          </pre>
+        </details>
+      ) : null}
     </div>
   );
 }
