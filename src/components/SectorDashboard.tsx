@@ -163,6 +163,27 @@ const COMPANY_CATEGORIES = [
   "Junior explorer - pre descovery",
 ];
 
+type MacroToneFilter = "all" | "favored" | "neutral" | "underPressure";
+type MacroStrengthFilter = "all" | MacroSectorMapItem["strength"];
+
+function macroKeysForSector(sectorName: string, subsectorName: string): string[] {
+  const keys: string[] = [];
+  if (sectorName === "Råvaror" && subsectorName === "Guld") keys.push("gold_miners", "materials");
+  if (sectorName === "Råvaror" && subsectorName === "Olja") keys.push("energy", "materials");
+  if (sectorName === "Industri") keys.push("industrials");
+  if (sectorName === "Tech") keys.push("tech");
+  keys.push("materials", "energy", "industrials", "tech");
+  return keys;
+}
+
+function resolveSectorMacroTag(
+  tagMap: Map<string, { tone: "favored" | "neutral" | "underPressure"; strength: MacroSectorMapItem["strength"] }>,
+  sectorName: string,
+  subsectorName: string
+) {
+  return macroKeysForSector(sectorName, subsectorName).map((key) => tagMap.get(key)).find(Boolean) ?? null;
+}
+
 export default function SectorDashboard() {
   const [sector, setSector] = useState(SECTORS[0].name);
   const [subsector, setSubsector] = useState(SECTORS[0].subsectors[0]);
@@ -175,6 +196,8 @@ export default function SectorDashboard() {
   const [mappingTickers, setMappingTickers] = useState("");
   const [mappingCategory, setMappingCategory] = useState(COMPANY_CATEGORIES[0]);
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
+  const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
+  const [macroStrength, setMacroStrength] = useState<MacroStrengthFilter>("all");
 
   const activeOverlayBundle = macroSnapshot?.globalMacro?.overlayBundle ?? macroSnapshot?.globalMacro?.overlays ?? null;
   const regimeProbability = macroSnapshot?.globalMacro?.macroRegimeProbability ?? null;
@@ -248,18 +271,33 @@ export default function SectorDashboard() {
   }, [macroSectorMap]);
 
   const activeSectorMacroTag = useMemo(() => {
-    const keyCandidates: string[] = [];
-    if (sector === "Råvaror" && subsector === "Guld") keyCandidates.push("gold_miners", "materials");
-    if (sector === "Råvaror" && subsector === "Olja") keyCandidates.push("energy", "materials");
-    if (sector === "Industri") keyCandidates.push("industrials");
-    if (sector === "Tech") keyCandidates.push("tech");
-    keyCandidates.push("materials", "energy", "industrials", "tech");
-    return keyCandidates.map((key) => macroTagBySector.get(key)).find(Boolean) ?? null;
+    return resolveSectorMacroTag(macroTagBySector, sector, subsector);
   }, [macroTagBySector, sector, subsector]);
 
+  const filteredSectorOptions = useMemo(() => {
+    return SECTORS.filter((sectorItem) => {
+      const hasMatchingSubsector = sectorItem.subsectors.some((subsectorItem) => {
+        const macroTag = resolveSectorMacroTag(macroTagBySector, sectorItem.name, subsectorItem);
+        if (!macroTag) return macroLens === "all" && macroStrength === "all";
+        if (macroLens !== "all" && macroTag.tone !== macroLens) return false;
+        if (macroStrength !== "all" && macroTag.strength !== macroStrength) return false;
+        return true;
+      });
+      return hasMatchingSubsector;
+    });
+  }, [macroLens, macroStrength, macroTagBySector]);
+
   const subsectors = useMemo(() => {
-    return SECTORS.find((item) => item.name === sector)?.subsectors ?? [];
-  }, [sector]);
+    const selectedSector = filteredSectorOptions.find((item) => item.name === sector);
+    if (!selectedSector) return [];
+    return selectedSector.subsectors.filter((item) => {
+      const macroTag = resolveSectorMacroTag(macroTagBySector, sector, item);
+      if (!macroTag) return macroLens === "all" && macroStrength === "all";
+      if (macroLens !== "all" && macroTag.tone !== macroLens) return false;
+      if (macroStrength !== "all" && macroTag.strength !== macroStrength) return false;
+      return true;
+    });
+  }, [filteredSectorOptions, macroLens, macroStrength, macroTagBySector, sector]);
 
   const questions = useMemo(() => {
     if (sector === "Råvaror" && subsector === "Guld") {
@@ -272,12 +310,22 @@ export default function SectorDashboard() {
   }, [sector, subsector]);
 
   useEffect(() => {
+    if (!filteredSectorOptions.some((item) => item.name === sector)) {
+      setSector(filteredSectorOptions[0]?.name ?? "");
+    }
+  }, [filteredSectorOptions, sector]);
+
+  useEffect(() => {
     if (!subsectors.includes(subsector)) {
       setSubsector(subsectors[0] ?? "");
     }
   }, [subsector, subsectors]);
 
   useEffect(() => {
+    if (!sector || !subsector) {
+      setOverview(null);
+      return;
+    }
     let active = true;
     async function loadOverview() {
       const response = await fetch(
@@ -311,6 +359,10 @@ export default function SectorDashboard() {
   }, []);
 
   useEffect(() => {
+    if (!sector || !subsector) {
+      setManualInputs([]);
+      return;
+    }
     let active = true;
     async function loadManualInputs() {
       const response = await fetch(
@@ -371,7 +423,34 @@ export default function SectorDashboard() {
         <span>Regime: {primaryRegime}</span>
         <span>Risk climate: {regimeInterpretation.riskClimate}</span>
         <span>Sector bias: {regimeInterpretation.sectorBias}</span>
+        <div className="macro-lens-controls">
+          <label htmlFor="macro-lens-filter">Macro lens:</label>
+          <select
+            id="macro-lens-filter"
+            value={macroLens}
+            onChange={(event) => setMacroLens(event.target.value as MacroToneFilter)}
+          >
+            <option value="all">All</option>
+            <option value="favored">Favored</option>
+            <option value="neutral">Neutral</option>
+            <option value="underPressure">Under pressure</option>
+          </select>
+          <label htmlFor="macro-strength-filter">Strength:</label>
+          <select
+            id="macro-strength-filter"
+            value={macroStrength}
+            onChange={(event) => setMacroStrength(event.target.value as MacroStrengthFilter)}
+          >
+            <option value="all">All</option>
+            <option value="strong">Strong</option>
+            <option value="moderate">Moderate</option>
+            <option value="weak">Weak</option>
+          </select>
+        </div>
       </div>
+      {filteredSectorOptions.length === 0 ? (
+        <div className="status empty macro-lens-empty">No sectors match the current macro lens.</div>
+      ) : null}
       <div className="sector-header">
         <div>
           <label htmlFor="sector-select">Sektor</label>
@@ -379,8 +458,9 @@ export default function SectorDashboard() {
             id="sector-select"
             value={sector}
             onChange={(event) => setSector(event.target.value)}
+            disabled={filteredSectorOptions.length === 0}
           >
-            {SECTORS.map((item) => (
+            {filteredSectorOptions.map((item) => (
               <option key={item.name} value={item.name}>
                 {item.name}
               </option>
@@ -393,6 +473,7 @@ export default function SectorDashboard() {
             id="subsector-select"
             value={subsector}
             onChange={(event) => setSubsector(event.target.value)}
+            disabled={subsectors.length === 0}
           >
             {subsectors.map((item) => (
               <option key={item} value={item}>
