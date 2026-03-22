@@ -8,6 +8,7 @@ import {
   type TransitionRiskLevel,
 } from "../lib/macro/macroSectorQuality";
 import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/macro/macroSectorUniverse";
+import { buildSubsectorCoverageAuditReport } from "../lib/macro/subsectorCoverageAudit";
 
 type ManualInput = {
   input_type: string;
@@ -347,6 +348,13 @@ export default function SectorDashboard() {
     return resolveSectorMacroTagWithPath(macroTagBySector, sector, subsector);
   }, [macroTagBySector, sector, subsector]);
   const activeSectorMacroTag = activeSectorMacroResolution.tag;
+  const subsectorCoverageAudit = useMemo(() => buildSubsectorCoverageAuditReport(), []);
+  const activeCoverage = subsectorCoverageAudit.matrix[subsector] ?? null;
+  const focusedPairChecks = useMemo(() => {
+    return subsectorCoverageAudit.differentiationChecks.filter(
+      (item) => item.pair[0] === subsector || item.pair[1] === subsector
+    );
+  }, [subsector, subsectorCoverageAudit.differentiationChecks]);
 
   const filteredSectorOptions = useMemo(() => {
     return SECTORS.filter((sectorItem) => {
@@ -573,6 +581,62 @@ export default function SectorDashboard() {
           </div>
         ) : null}
       </div>
+      {debugMacroMapping && activeCoverage ? (
+        <div className="sector-card" style={{ marginBottom: 12 }}>
+          <h3>Macro coverage diagnostics (debug)</h3>
+          <p className="bread">
+            Toggla med <code>?macroDebug=1</code>. Visar current subsector coverage enligt audit-matrisen.
+          </p>
+          <div style={{ fontSize: 12, color: "#334155", display: "grid", gap: 6 }}>
+            <div>
+              <strong>Subsector:</strong> {activeCoverage.subsectorId}
+            </div>
+            <div>
+              <strong>Coverage:</strong> {activeCoverage.currentCoverageLevel} · <strong>Path:</strong> {activeCoverage.interpretationPath}
+            </div>
+            <div>
+              <strong>Explicit drivers:</strong> {activeCoverage.explicitDrivers.join(", ") || "none"}
+            </div>
+            <div>
+              <strong>Sector fallback:</strong> {activeCoverage.sectorFallbackDrivers.join(", ") || "none"}
+            </div>
+            <div>
+              <strong>Bucket fallback:</strong> {activeCoverage.macroBucketFallbackDrivers.join(", ") || "none"}
+            </div>
+            <div>
+              <strong>Regime/block inputs:</strong> {activeCoverage.driverTypes.regimeBlockInputs.join(", ") || "none"}
+            </div>
+            <div>
+              <strong>Overlay inputs:</strong> {activeCoverage.driverTypes.overlays.join(", ") || "none"}
+            </div>
+            <div>
+              <strong>Likely blind spots:</strong> {activeCoverage.likelyBlindSpots.join(", ") || "none"}
+            </div>
+            {focusedPairChecks.length > 0 ? (
+              <div>
+                <strong>Differentiation checks:</strong>
+                <ul style={{ marginTop: 4, marginBottom: 0 }}>
+                  {focusedPairChecks.map((item) => (
+                    <li key={item.pair.join("-")}>
+                      {item.pair[0]} vs {item.pair[1]} → {item.quality}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div>
+              <strong>Top overlay gaps:</strong>
+              <ul style={{ marginTop: 4, marginBottom: 0 }}>
+                {subsectorCoverageAudit.rankedOverlayGaps.slice(0, 3).map((gap) => (
+                  <li key={gap.overlayId}>
+                    P{gap.priority}: {gap.overlayId} ({gap.profile})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="sector-grid">
         <div className="sector-card">
