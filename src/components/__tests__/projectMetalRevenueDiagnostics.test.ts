@@ -26,11 +26,11 @@ test('rowHasMetalRevenueFailure marks metal-specific rows and skips inactive lab
   assert.equal(rowHasMetalRevenueFailure('Payable Au (toz)', metals), false);
 });
 
-test('extractFallbackOrFailingPriceMetals returns json-fallback and failure metals', () => {
+test('extractFallbackOrFailingPriceMetals returns manual/missing/expired metals', () => {
   const metals = extractFallbackOrFailingPriceMetals({
-    Au: { priceSourceUsed: 'live' },
-    Pb: { priceSourceUsed: 'json-fallback' },
-    Zn: { priceSourceUsed: 'failure' },
+    Au: { priceSourceUsed: 'fmp' },
+    Pb: { priceSourceUsed: 'manual' },
+    Zn: { priceSourceUsed: 'missing' },
   });
   assert.deepEqual(metals, ['Pb', 'Zn']);
 });
