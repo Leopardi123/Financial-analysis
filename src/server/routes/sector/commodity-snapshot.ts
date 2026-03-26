@@ -26,19 +26,32 @@ type GoldRawRow = {
   value: number | null;
 };
 
-const SUPPORTED_COMMODITIES = new Set<CommodityId>(["gold"]);
-const INDICATOR_KEYS: CommodityIndicatorKey[] = [
-  "gold_usd",
-  "gold_minus_real_yield_spread",
-  "real_yield_10y_us",
-  "usd_broad_index",
-  "usd_yoy",
-  "core_cpi_yoy_us",
-  "breakeven_10y_us",
-  "vix_index",
-  "hy_spread_us",
-  "financial_conditions_index",
-];
+const SUPPORTED_COMMODITIES = new Set<CommodityId>(["gold", "copper"]);
+const COMMODITY_INDICATOR_KEYS: Record<CommodityId, CommodityIndicatorKey[]> = {
+  gold: [
+    "gold_usd",
+    "gold_minus_real_yield_spread",
+    "real_yield_10y_us",
+    "usd_broad_index",
+    "usd_yoy",
+    "core_cpi_yoy_us",
+    "breakeven_10y_us",
+    "vix_index",
+    "hy_spread_us",
+    "financial_conditions_index",
+  ],
+  copper: [
+    "copper_usd",
+    "pmi_us",
+    "copper_lme_inventory",
+    "copper_capex_proxy",
+  ],
+};
+
+const PRICE_SERIES_BY_COMMODITY: Record<CommodityId, CommodityIndicatorKey> = {
+  gold: "gold_usd",
+  copper: "copper_usd",
+};
 
 function parseCommodity(value: unknown): CommodityId | null {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -85,9 +98,12 @@ export default async function handler(req: any, res: any) {
     await ensureSchema();
     const commodity = parseCommodity(req.query?.commodity);
     if (!commodity) {
-      res.status(400).json({ ok: false, error: "Unsupported commodity. Expected: gold" });
+      res.status(400).json({ ok: false, error: "Unsupported commodity. Expected: gold or copper" });
       return;
     }
+
+    const indicatorKeys = COMMODITY_INDICATOR_KEYS[commodity];
+    const priceSeriesKey = PRICE_SERIES_BY_COMMODITY[commodity];
 
     const globalRegimeRows = (await query(
       `SELECT as_of_date, core_regime_label, hard_asset_overlay, macro_confidence, macro_regime_probability_json
@@ -112,31 +128,32 @@ export default async function handler(req: any, res: any) {
       `SELECT indicator_id, as_of_date, value_latest, percentile_10y, score, change_1m, change_3m, yoy
        FROM ${tables.macroIndicatorSnapshots}
        WHERE region = 'US'
-         AND indicator_id IN (${INDICATOR_KEYS.map(() => "?").join(",")})
+         AND indicator_id IN (${indicatorKeys.map(() => "?").join(",")})
        ORDER BY as_of_date DESC`,
-      INDICATOR_KEYS,
+      indicatorKeys,
     )) as unknown as IndicatorRow[];
 
-    const goldRawRows = (await query(
+    const commodityRawRows = (await query(
       `SELECT date, value
        FROM ${tables.macroRawDatapoints}
        WHERE region = 'US'
          AND source_type = 'auto'
-         AND series_key = 'gold_usd'
+         AND series_key = ?
          AND date >= date('now', '-10 years')
        ORDER BY date ASC`,
+      [priceSeriesKey],
     )) as unknown as GoldRawRow[];
-    const numericGoldValues = goldRawRows.map((row) => row.value).filter((value): value is number => typeof value === "number");
-    const goldMean10y = numericGoldValues.length > 0
-      ? numericGoldValues.reduce((sum, value) => sum + value, 0) / numericGoldValues.length
+    const numericCommodityValues = commodityRawRows.map((row) => row.value).filter((value): value is number => typeof value === "number");
+    const commodityMean10y = numericCommodityValues.length > 0
+      ? numericCommodityValues.reduce((sum, value) => sum + value, 0) / numericCommodityValues.length
       : null;
-    const goldStd10y = goldMean10y !== null && numericGoldValues.length > 1
-      ? Math.sqrt(numericGoldValues.reduce((sum, value) => sum + ((value - goldMean10y) ** 2), 0) / numericGoldValues.length)
+    const commodityStd10y = commodityMean10y !== null && numericCommodityValues.length > 1
+      ? Math.sqrt(numericCommodityValues.reduce((sum, value) => sum + ((value - commodityMean10y) ** 2), 0) / numericCommodityValues.length)
       : null;
-    const goldLatest = numericGoldValues.length > 0 ? numericGoldValues[numericGoldValues.length - 1] : null;
+    const commodityLatest = numericCommodityValues.length > 0 ? numericCommodityValues[numericCommodityValues.length - 1] : null;
 
     const indicatorByKey = new Map<CommodityIndicatorKey, CommodityProfileInputIndicator>();
-    for (const key of INDICATOR_KEYS) {
+    for (const key of indicatorKeys) {
       const row = indicatorRows.find((entry) => entry.indicator_id === key);
       if (!row) continue;
       indicatorByKey.set(key, {
@@ -148,11 +165,11 @@ export default async function handler(req: any, res: any) {
         change3m: row.change_3m === null ? null : Number(row.change_3m),
         yoy: row.yoy === null ? null : Number(row.yoy),
         asOf: row.as_of_date ?? null,
-        momentum12m: key === "gold_usd" ? (row.yoy === null ? null : Number(row.yoy)) : null,
-        deviationFromMeanZ: key === "gold_usd"
+        momentum12m: key === priceSeriesKey ? (row.yoy === null ? null : Number(row.yoy)) : null,
+        deviationFromMeanZ: key === priceSeriesKey
           ? (() => {
-            if (goldMean10y === null || goldStd10y === null || goldLatest === null || goldStd10y === 0) return null;
-            return (goldLatest - goldMean10y) / goldStd10y;
+            if (commodityMean10y === null || commodityStd10y === null || commodityLatest === null || commodityStd10y === 0) return null;
+            return (commodityLatest - commodityMean10y) / commodityStd10y;
           })()
           : null,
       });
