@@ -8,6 +8,7 @@ import type {
   CommodityProfileInput,
   CommodityProfileInputIndicator,
   CommodityPhase,
+  CommodityRegimeDriver,
   CommodityScreeningAdjustment,
 } from "../types";
 
@@ -29,6 +30,7 @@ const GOLD_RELEVANT_OVERLAYS = [
 ] as const;
 
 type OverlayAgreement = "supportive" | "neutral" | "conflicting" | "unavailable";
+type RegimeAgreementWithPrice = "confirming" | "diverging" | "neutral";
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -156,12 +158,88 @@ function resolveOverlayAgreement(priceTrendScore: number | null, overlayComposit
   };
 }
 
+function classifyGoldRegime(input: CommodityProfileInput): {
+  regime: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+  regimeConfidence: number;
+  regimeDrivers: CommodityRegimeDriver[];
+} {
+  const realYield = getIndicator(input, "real_yield_10y_us");
+  const usdYoy = getIndicator(input, "usd_yoy");
+  const usdBroad = getIndicator(input, "usd_broad_index");
+  const breakeven = getIndicator(input, "breakeven_10y_us");
+  const goldSpread = getIndicator(input, "gold_minus_real_yield_spread");
+  const gold = getIndicator(input, "gold_usd");
+
+  const realYieldDown = (realYield?.change3m ?? 0) < 0 || (realYield?.valueLatest ?? 999) < 0;
+  const realYieldUp = (realYield?.change3m ?? 0) > 0;
+  const usdUp = (usdYoy?.yoy ?? usdYoy?.change3m ?? usdBroad?.change3m ?? 0) > 0;
+  const inflationUp = (breakeven?.change3m ?? 0) > 0;
+  const inflationDownOrFlat = (breakeven?.change3m ?? 0) <= 0.05;
+  const goldUp = (gold?.momentum12m ?? gold?.yoy ?? 0) > 0;
+  const spreadUp = (goldSpread?.change3m ?? 0) > 0 || (goldSpread?.score ?? 0) > 0;
+
+  const regimeDrivers: CommodityRegimeDriver[] = [
+    {
+      id: "real_rates",
+      label: "Real rates",
+      signal: realYieldDown ? "supportive" : realYieldUp ? "headwind" : "neutral",
+      note: `change3m=${realYield?.change3m ?? "n/a"}, latest=${realYield?.valueLatest ?? "n/a"}`,
+    },
+    {
+      id: "usd_trend",
+      label: "USD trend",
+      signal: usdUp ? "headwind" : "supportive",
+      note: `usd signal=${usdYoy?.yoy ?? usdYoy?.change3m ?? usdBroad?.change3m ?? "n/a"}`,
+    },
+    {
+      id: "inflation_expectations",
+      label: "Inflation expectations",
+      signal: inflationUp ? "supportive" : inflationDownOrFlat ? "headwind" : "neutral",
+      note: `breakeven change3m=${breakeven?.change3m ?? "n/a"}`,
+    },
+    {
+      id: "gold_real_rate_spread",
+      label: "Gold vs real-rate spread",
+      signal: spreadUp ? "supportive" : "neutral",
+      note: `spread change3m=${goldSpread?.change3m ?? "n/a"}, score=${goldSpread?.score ?? "n/a"}`,
+    },
+  ];
+
+  const availableSignals = [realYield, usdYoy ?? usdBroad, breakeven, goldSpread].filter(Boolean).length;
+  const regimeConfidence = clamp(availableSignals / 4, 0, 1);
+
+  if (realYieldDown && inflationUp) {
+    return { regime: "Monetary Stress", regimeConfidence, regimeDrivers };
+  }
+  if (realYieldUp && inflationDownOrFlat) {
+    return { regime: "Disinflation / Real Yield Rising", regimeConfidence, regimeDrivers };
+  }
+  if (usdUp && realYieldDown && goldUp) {
+    return { regime: "Risk-Off (deflationary)", regimeConfidence, regimeDrivers };
+  }
+  return { regime: "Neutral / Competing Assets", regimeConfidence, regimeDrivers };
+}
+
+function resolveRegimeAgreementWithPrice(args: {
+  phase: CommodityPhase;
+  phaseScore: number | null;
+  regime: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+}): RegimeAgreementWithPrice {
+  const pricePositive = (args.phaseScore ?? 0) > 0.15;
+  if (!pricePositive) return "neutral";
+  if (args.regime === "Monetary Stress" || args.regime === "Risk-Off (deflationary)") return "confirming";
+  if (args.regime === "Disinflation / Real Yield Rising") return "diverging";
+  if (args.phase === "Late Cycle" && args.regime === "Neutral / Competing Assets") return "diverging";
+  return "neutral";
+}
+
 function buildConfidence(args: {
   required: CommodityIndicatorKey[];
   optional: CommodityIndicatorKey[];
   indicatorDiagnostics: CommodityIndicatorDiagnostic[];
   blockScores: CommodityBlockScore[];
   overlayAgreement: OverlayAgreement;
+  regimeAgreementWithPrice: RegimeAgreementWithPrice;
 }): CommodityConfidence {
   const usedRequired = args.indicatorDiagnostics.filter((item) => item.used && args.required.includes(item.key)).length;
   const usedOptional = args.indicatorDiagnostics.filter((item) => item.used && args.optional.includes(item.key)).length;
@@ -180,6 +258,8 @@ function buildConfidence(args: {
 
   if (args.overlayAgreement === "supportive") signalCoherence = clamp(signalCoherence + 0.08, 0, 1);
   if (args.overlayAgreement === "conflicting") signalCoherence = clamp(signalCoherence - 0.12, 0, 1);
+  if (args.regimeAgreementWithPrice === "confirming") signalCoherence = clamp(signalCoherence + 0.06, 0, 1);
+  if (args.regimeAgreementWithPrice === "diverging") signalCoherence = clamp(signalCoherence - 0.1, 0, 1);
 
   const fallbackCount = args.indicatorDiagnostics.filter((item) => item.fallbackUsed).length;
   const fallbackPenalty = clamp(fallbackCount * 0.2, 0, 1);
@@ -188,7 +268,7 @@ function buildConfidence(args: {
   const tier = score >= 0.75 ? "high" : score >= 0.45 ? "medium" : "low";
   const reasons = [
     `Data completeness=${dataCompleteness.toFixed(2)} from required/optional coverage.`,
-    `Signal coherence=${signalCoherence.toFixed(2)} including overlay agreement effect (${args.overlayAgreement}).`,
+    `Signal coherence=${signalCoherence.toFixed(2)} including overlay effect (${args.overlayAgreement}) and regime/price agreement (${args.regimeAgreementWithPrice}).`,
     `Fallback penalty=${fallbackPenalty.toFixed(2)} (fallback count=${fallbackCount}).`,
   ];
 
@@ -269,7 +349,25 @@ function resolveGoldPhase(args: {
   return { phase: "Early Cycle", reasoning };
 }
 
-function buildScreeningAdjustment(phase: CommodityPhase): CommodityScreeningAdjustment {
+function buildScreeningAdjustment(
+  phase: CommodityPhase,
+  regime: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets",
+  regimeAgreementWithPrice: RegimeAgreementWithPrice,
+): CommodityScreeningAdjustment {
+  if (phase === "Late Cycle" && regime === "Monetary Stress") {
+    return {
+      bias: "supportive",
+      notes: ["Late Cycle price action is confirmed by Monetary Stress regime."],
+      thresholdAdjustments: { valuationMultipleFloorDeltaPct: 4, maxPositionSizeDeltaPct: 8 },
+    };
+  }
+  if (phase === "Late Cycle" && regimeAgreementWithPrice === "diverging") {
+    return {
+      bias: "caution",
+      notes: ["Late Cycle price signal diverges from macro regime; reduce conviction."],
+      thresholdAdjustments: { valuationMultipleFloorDeltaPct: -4, maxPositionSizeDeltaPct: -6 },
+    };
+  }
   if (phase === "Structural Bull") {
     return {
       bias: "supportive",
@@ -306,7 +404,7 @@ export const goldCommodityProfile: CommodityProfile = {
   category: "monetary_store_of_value",
   requiredIndicators: REQUIRED_INDICATORS,
   optionalIndicators: OPTIONAL_INDICATORS,
-  profileVersion: "gold-v3",
+  profileVersion: "gold-v4",
   compute(input: CommodityProfileInput) {
     const gold = getIndicator(input, "gold_usd");
     const goldRealSpread = getIndicator(input, "gold_minus_real_yield_spread");
@@ -394,6 +492,17 @@ export const goldCommodityProfile: CommodityProfile = {
       overlayContributionScore: overlayResolution.contribution.score,
       phaseScore,
     });
+    const regimeClassification = classifyGoldRegime(input);
+    const regimeAgreementWithPrice = resolveRegimeAgreementWithPrice({
+      phase: phaseResolution.phase,
+      phaseScore,
+      regime: regimeClassification.regime,
+    });
+    if (regimeAgreementWithPrice === "diverging") {
+      phaseResolution.reasoning.push("Macro regime diverges from current price phase and lowers conviction.");
+    } else if (regimeAgreementWithPrice === "confirming") {
+      phaseResolution.reasoning.push("Macro regime confirms the current price phase.");
+    }
 
     const indicatorDiagnostics: CommodityIndicatorDiagnostic[] = [...REQUIRED_INDICATORS, ...OPTIONAL_INDICATORS].map((key) => {
       const indicator = getIndicator(input, key);
@@ -416,6 +525,7 @@ export const goldCommodityProfile: CommodityProfile = {
       indicatorDiagnostics,
       blockScores,
       overlayAgreement: overlayResolution.agreement,
+      regimeAgreementWithPrice,
     });
 
     const dataCompleteness = confidence.breakdown.dataCompleteness;
@@ -439,6 +549,7 @@ export const goldCommodityProfile: CommodityProfile = {
         "Gold profile is monetary/store-of-value centered.",
         "Snapshot separates indicator-layer and overlay-layer contributions explicitly.",
         "Missing overlay data does not create synthetic proxies; it reduces agreement/coherence instead.",
+        `Gold regime=${regimeClassification.regime}; agreementWithPrice=${regimeAgreementWithPrice}.`,
       ],
     };
 
@@ -481,11 +592,15 @@ export const goldCommodityProfile: CommodityProfile = {
       indicatorDiagnostics,
       dataCompleteness,
       relevantOverlays: GOLD_RELEVANT_OVERLAYS.map((key) => ({ key, score: input.overlays[key] ?? null })),
-      screeningAdjustments: buildScreeningAdjustment(phaseResolution.phase),
-      profileVersion: "gold-v3",
+      screeningAdjustments: buildScreeningAdjustment(phaseResolution.phase, regimeClassification.regime, regimeAgreementWithPrice),
+      profileVersion: "gold-v4",
       asOf: input.asOf,
       status: "partial",
       diagnostics,
+      goldRegime: regimeClassification.regime,
+      regimeConfidence: regimeClassification.regimeConfidence,
+      regimeDrivers: regimeClassification.regimeDrivers,
+      regimeAgreementWithPrice,
     };
   },
 };

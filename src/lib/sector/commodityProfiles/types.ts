@@ -30,6 +30,15 @@ export type CommodityDriver = {
   note?: string;
 };
 
+export type CommodityRegime = "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+
+export type CommodityRegimeDriver = {
+  id: string;
+  label: string;
+  signal: "supportive" | "headwind" | "neutral";
+  note: string;
+};
+
 export type CommodityBlockScore = {
   blockId: "price_trend" | "macro_monetary" | "equity_confirmation" | "policy_narrative";
   label: string;
@@ -138,6 +147,10 @@ export type CommodityProfileOutput = {
   asOf: string;
   status: CommodityStatus;
   diagnostics: CommodityDiagnostics;
+  goldRegime?: CommodityRegime;
+  regimeConfidence?: number;
+  regimeDrivers?: CommodityRegimeDriver[];
+  regimeAgreementWithPrice?: "confirming" | "diverging" | "neutral";
 };
 
 export type CommodityProfile = {

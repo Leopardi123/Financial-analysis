@@ -59,6 +59,10 @@ type CommoditySnapshotPayload = {
     status: "ok" | "partial" | "insufficient";
     profileVersion: string;
     asOf: string;
+    goldRegime?: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+    regimeConfidence?: number;
+    regimeAgreementWithPrice?: "confirming" | "diverging" | "neutral";
+    regimeDrivers?: Array<{ id: string; label: string; signal: "supportive" | "headwind" | "neutral"; note: string }>;
     confidence: {
       score: number;
       tier: "high" | "medium" | "low";
@@ -891,6 +895,9 @@ export default function SectorDashboard() {
                   <div><strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</div>
                   <div><strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}</div>
                   <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
+                  <div><strong>Gold regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? "n/a"}</div>
+                  <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
+                  <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
                   <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
                   <div><strong>Analyst layer:</strong> {manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</div>
                 </div>
@@ -923,8 +930,17 @@ export default function SectorDashboard() {
                 <div><strong>Source of truth:</strong> commodity snapshot</div>
                 <div><strong>Manual input status:</strong> {manualInputStatus}</div>
                 <div><strong>Manual impact on snapshot:</strong> none (supplemental layer only in current phase)</div>
+                <div><strong>Regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? "n/a"} ({commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"})</div>
                 <details>
                   <summary>Diagnostics (debug)</summary>
+                  <div><strong>Regime drivers:</strong></div>
+                  <ul>
+                    {(commoditySnapshot.snapshot.regimeDrivers ?? []).map((driver) => (
+                      <li key={driver.id}>
+                        {driver.label}: {driver.signal} — {driver.note}
+                      </li>
+                    ))}
+                  </ul>
                   <div><strong>Drivers:</strong></div>
                   <ul>
                     {commoditySnapshot.snapshot.drivers.map((driver) => (
