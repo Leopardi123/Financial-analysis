@@ -1,0 +1,562 @@
+Sektor. Samlat.
+
+SECTOR FUNCTION – MASTER ARCHITECTURE
+======================================
+
+GOAL
+-----
+Provide a macro-to-micro analytical layer that:
+- Classifies raw material sectors
+- Determines cycle phase
+- Feeds interpretation into producer ranking
+- Does NOT modify internal corporate math (NPV, FCFF, etc.)
+- Remains read-only and non-circular
+
+------------------------------------------------------------
+I. SECTOR DEFINITION LAYER
+------------------------------------------------------------
+
+Purpose:
+Define the raw material universe and hierarchical grouping.
+
+Structure:
+
+Raw Materials (Top Level)
+  ├── Precious Metals
+  │     ├── Gold
+  │     ├── Silver
+  │     ├── PGM (Platinum, Palladium)
+  │
+  ├── Base Metals
+  │     ├── Copper
+  │     ├── Zinc
+  │     ├── Nickel
+  │     ├── Aluminium
+  │
+  ├── Energy
+  │     ├── Oil
+  │     ├── Gas
+  │     ├── Uranium
+  │
+  ├── Battery / Strategic
+  │     ├── Lithium
+  │     ├── Graphite
+  │     ├── Rare Earths
+  │
+  └── Bulk / Steel
+        ├── Iron Ore
+        ├── Metallurgical Coal
+
+Each company:
+- Can map to 1–N raw materials
+- Has a dominant revenue driver (primary sector)
+- Sector mapping stored in DB (company_sector_map)
+
+------------------------------------------------------------
+II. SECTOR DATA LAYER
+------------------------------------------------------------
+
+Purpose:
+Collect and normalize sector-level data.
+
+Inputs:
+
+A. Price Data
+   - Spot price
+   - 1Y, 3Y, 10Y history
+   - Percentile vs 10Y band
+
+B. Supply/Demand Proxies
+   - Production growth
+   - Inventory levels (if available)
+   - Capex trends (sector aggregated)
+   - Exploration spending proxy
+
+C. Equity Behaviour
+   - Sector ETF performance
+   - Relative performance vs broad market
+   - Sector FCF trend (aggregate)
+
+D. Macro Linkage
+   - Real rates
+   - Dollar index
+   - PMI / industrial indicators
+   - Inflation regime
+
+All stored as:
+- Raw time series
+- Snapshot indicators
+- Derived percentile scores (-2 to +2)
+
+------------------------------------------------------------
+III. SECTOR CYCLE ENGINE
+------------------------------------------------------------
+
+Purpose:
+Classify sector phase without modifying corporate calculations.
+
+Inputs:
+- Price percentile (10Y)
+- Momentum (12M change)
+- Supply tightness proxy
+- Capex expansion proxy
+- Equity inflow behaviour
+
+Outputs:
+
+Sector Phase:
+  - Early Cycle
+  - Mid Cycle
+  - Late Cycle
+  - Compression
+  - Structural Bull
+  - Structural Bear
+
+Also outputs:
+  - Confidence score
+  - Dominant drivers
+
+Important:
+- Sector cycle feeds into CYCLE ranking of companies
+- It does NOT change their Structure score
+- It does NOT alter discount rates
+
+------------------------------------------------------------
+IV. SECTOR DASHBOARD VIEW
+------------------------------------------------------------
+
+Displays:
+
+1. Sector Overview
+   - Phase
+   - Price percentile
+   - 1Y momentum
+   - Macro sensitivity
+
+2. Company Distribution
+   - List of companies within sector
+   - Structure score
+   - Cycle score
+   - Valuation anchor
+
+3. Capital Allocation Heatmap
+   - Sector-wide M&A intensity
+   - Goodwill growth
+   - Capex intensity
+
+------------------------------------------------------------
+V. SECTOR → COMPANY INTERACTION RULES
+------------------------------------------------------------
+
+Allowed:
+- Sector phase influences company CYCLE score context
+- Sector percentile used for interpretation banner
+- Sector macro used for screening filters
+
+Not Allowed:
+- Sector phase altering NPV math
+- Sector phase altering FCFF math
+- Sector phase altering corporate Structure score
+
+------------------------------------------------------------
+VI. EDGE FUNCTION (Optional Advanced)
+------------------------------------------------------------
+
+Purpose:
+Detect asymmetry at sector level.
+
+Logic:
+- High structural quality companies
+- In sectors classified as Compression
+- With attractive valuation anchor
+
+Output:
+Cross-sector asymmetry list
+
+------------------------------------------------------------
+VII. DESIGN PRINCIPLES
+------------------------------------------------------------
+
+- No circularity
+- Sector does not write into corporate math
+- Corporate Structure remains raw enterprise metric
+- Sector layer is interpretive and comparative
+- Developers handled separately
+- Fully API-driven, no manual aggregation
+
+
+
+
+
+SECTOR FLOW – END-TO-END (Macro → Sector → Company → Lists)
+===========================================================
+
+0) INPUT SOURCES (READ-ONLY)
+----------------------------
+A) Macro Layer (Layer 0)
+   - macro_series_raw[t] (rates, DXY, PMI, inflation, etc.)
+   - macro_snapshots (latest, deltas, 10y percentiles, score -2..+2)
+
+B) Sector Data
+   - commodity_price_series[t] per commodity
+   - optional: inventories / supply proxies / capex proxies
+   - equity proxies (sector ETF, relative strength)
+
+C) Company Corporate Data (Producers only)
+   - financial statements (IS/BS/CF) time series
+   - market data (price, shares_current, market cap, debt, cash)
+   - optional: SR-NAV anchor if available (project model output)
+
+D) Mapping Tables
+   - company_sector_map: company_id → {commodities[]} + primary_commodity
+   - sector_hierarchy: commodity → category (precious/base/energy/etc.)
+
+
+1) PIPELINE STEP: INGEST → NORMALIZE
+------------------------------------
+1.1 Macro ingestion:
+   - store raw macro series
+   - compute macro indicators (percentiles, z-like transforms)
+   - write macro_snapshots (timestamped)
+
+1.2 Sector ingestion:
+   - store commodity price histories
+   - compute sector price percentile (10y) + momentum (12m)
+   - store sector_snapshots_raw (price, momentum, etc.)
+
+1.3 Company ingestion:
+   - store corporate statements + market fields
+   - compute enterprise metrics (EV, debt, cash, OCF, FCF, EBIT, etc.)
+
+
+2) ENGINE STEP: DERIVE SCORES (NO CIRCULARITY)
+----------------------------------------------
+2.1 Sector Cycle Engine (commodity-level)
+   INPUT:
+     - price_percentile_10y
+     - price_momentum_12m
+     - optional supply proxies
+     - macro_snapshots (as context inputs)
+     - equity behaviour proxies
+   OUTPUT:
+     - sector_phase ∈ {Compression, Early, Mid, Late, StructuralBull, StructuralBear}
+     - sector_cycle_score (0..100 or -2..+2 internal)
+     - confidence (0..1)
+     - drivers[] (top contributing signals)
+   WRITE:
+     - sector_cycle_snapshot(commodity, ts)
+
+   RULE:
+     - sector engine may READ macro, may not write into macro
+     - sector engine may not touch corporate math (NPV/FCFF)
+
+
+2.2 Company STRUCTURE Engine (producer universe only)
+   INPUT:
+     - corporate historical metrics (5y–10y)
+   OUTPUT:
+     - structure_level_percentile (0..100) vs producer universe
+     - structure_momentum_percentile (0..100) (3y trend vs universe)
+   WRITE:
+     - company_structure_snapshot(company_id, ts)
+
+   RULE:
+     - structure is commodity-agnostic (no sector inputs)
+     - structure does not use price percentiles (avoid cycle bleed)
+
+
+2.3 Company CYCLE Engine (producer universe only)
+   INPUT:
+     - company corporate LTM deltas (FCF acceleration, margin expansion, debt change)
+     - sector_cycle_snapshot(primary_commodity) for context
+     - macro_snapshots for context (optional)
+   OUTPUT:
+     - company_cycle_percentile (0..100) vs producer universe
+     - cycle_flags (e.g., “cycle-boosted”, “cycle-compressed”)
+   WRITE:
+     - company_cycle_snapshot(company_id, ts)
+
+   RULE:
+     - cycle can READ sector+macro, but must be separable:
+       (company cycle signal) + (sector context label)
+     - cycle does NOT change structure scores
+
+
+2.4 Company ASYMMETRY View (computed at query-time or snapshot)
+   INPUT:
+     - structure_level_rank
+     - company_cycle_rank
+     - valuation_anchors (EV/SR-NAV if available, EV/normalized_FCF)
+   OUTPUT (display fields):
+     - rank_delta = structure_rank − cycle_rank
+     - sortable columns:
+        structure_level, structure_momentum, cycle, rank_delta,
+        EV/SR-NAV, EV/NormFCF, net_debt/EBITDA
+   RULE:
+     - no extra scoring; show columns + sorting
+
+
+3) PRESENTATION LAYER (THREE PARALLEL LISTS + SECTOR DASHBOARD)
+---------------------------------------------------------------
+3.1 STRUCTURE LIST (global, producers)
+   - columns: company, structure_level, structure_momentum, key sanity metrics
+   - default sort: structure_level desc
+   - filter: commodity, category, geography (optional)
+
+3.2 CYCLE LIST (global, producers)
+   - columns: company, company_cycle, primary_commodity, sector_phase, confidence
+   - default sort: company_cycle desc
+   - banners: “Sector: Compression/Early/Mid/Late…”
+
+3.3 ASYMMETRY LIST (global, producers)
+   - columns: company, structure_level, cycle, rank_delta, valuation anchors
+   - default sort: rank_delta desc (or EV/SR-NAV asc)
+   - this is the “edge finder” without hidden weighting
+
+3.4 SECTOR DASHBOARD
+   - per commodity: phase, price percentile, momentum, drivers, confidence
+   - distribution: companies mapped to sector (primary + secondary)
+   - overlays: macro context cards
+
+
+4) INTERACTION RULES (GUARDS)
+-----------------------------
+- Sector/Macro may influence ONLY:
+    * cycle context labels
+    * company_cycle score inputs (as context)
+    * screening flags/banners
+- Sector/Macro may NOT influence:
+    * company_structure_level / structure_momentum
+    * internal NPV/FCFF math (project/corporate)
+- Pre-revenue developers:
+    * excluded from producer universe
+    * handled by separate developer/project mode (NPV/risk/dilution)
+
+
+5) USER ACTION LOOP (HOW YOU USE IT)
+------------------------------------
+- Start at SECTOR DASHBOARD to see phase + confidence
+- Jump to CYCLE LIST for macro/cycle positioning
+- Jump to STRUCTURE LIST for long-term quality filter
+- Use ASYMMETRY LIST to find:
+    “high structure + low cycle + attractive anchor”
+- Then open Single Stock page for deep dive (no automatic decision)
+
+
+
+
+
+
+CYCLE ENGINE, PRODUCER UNIVERSE (Corporate-level, sector-context, no segmentdata)
+===============================================================================
+
+MÅL
+----
+Ge en råvaruagnostisk, kvantifierad “Cycle score” per bolag (0–100 percentil),
+som fångar nuvarande cykelmedvind, eller motvind, utan att blanda in STRUCTURE.
+
+CYCLE ska kunna driva:
+- CYCLE-listan (ranking)
+- Kontext, banner, flaggor (”sector compression”, ”sector expansion”)
+- Asymmetry-listan (via rank-delta mot Structure)
+
+CYCLE får INTE:
+- Ändra NPV, NAV, FCFF, discount rate, CAPEX-serier
+- Ändra STRUCTURE-scoren
+- Bli cirkulär mot valuation, dvs inte använda EV, multiplar eller pris på aktien
+
+-----------------------------------------------------------------------
+A) INPUTS
+-----------------------------------------------------------------------
+
+A1. Company corporate signals (från standard statements)
+- FCF_LTM, OCF_LTM, EBIT_LTM, EBITDA_LTM (om finns), annars EBIT proxy
+- Revenue_LTM
+- NetDebt_t0 (debt − cash), NetDebt_t0_minus_1y (om möjligt)
+- Shares_current (för dilution trend om du vill, men helst STRUCTURE)
+
+A2. Company baselines (historik, 5Y rullande)
+- Median_5Y(FCF), Median_5Y(EBIT margin), Median_5Y(OCF), Median_5Y(Revenue growth)
+- IQR_5Y (interquartile range) för robust normalisering, eller MAD
+
+A3. Sector context (primary commodity)
+- Sector phase label: Compression, Early, Mid, Late, StructuralBull, StructuralBear
+- Sector confidence (0..1)
+- Sector price percentile (10Y), och momentum (12M)
+OBS: Sector input används som KONTEKST, inte som substitut för corporate-signal.
+
+A4. Macro context (valfritt, men endast som kontext)
+- Macro regime label och confidence
+- Exempel: liquidity tight, real rates up, etc.
+
+-----------------------------------------------------------------------
+B) NORMALISERING, hur vi gör det råvaruagnostiskt
+-----------------------------------------------------------------------
+
+Grundprincip:
+Jämför bolagets LTM mot bolagets egen historik, inte mot andra råvaror direkt.
+
+B1. Robust z-lik transform per bolag
+För varje signal X:
+- baseline = Median_5Y(X)
+- scale = IQR_5Y(X) eller MAD_5Y(X)
+- z = (X_LTM − baseline) / max(scale, epsilon)
+- clamp z till ett rimligt intervall, tex [-3, +3]
+
+B2. Convert z till en 0..100 intern score per signal
+- s = 50 + 16.67 * z    (så z=+3 ≈ 100, z=-3 ≈ 0)
+- clamp s till [0, 100]
+
+Poängen:
+En uranproducent och en oljemajor kan jämföras på ”hur mycket bättre än sin egen norm”
+de är just nu.
+
+-----------------------------------------------------------------------
+C) CORE SIGNALS (minimalt, corporate-only)
+-----------------------------------------------------------------------
+
+Vi vill fånga tre saker:
+1) Marginalexpansion och kassaflödesacceleration
+2) Balansräkningsförbättring, eller stress
+3) Toppen, eller botten, riskindikatorer via intern överhettning, utan prisdata
+
+C1. FCF acceleration signal
+- X = FCF_LTM
+- baseline = Median_5Y(FCF)
+- z_FCF = robust_z(FCF_LTM vs baseline)
+
+C2. OCF quality signal (robusthet)
+- X = OCF_LTM
+- z_OCF = robust_z(OCF_LTM vs 5Y baseline)
+OBS: om OCF inte finns, använd CFO proxy, men helst riktig OCF.
+
+C3. Margin expansion signal
+- EBIT_margin_LTM = EBIT_LTM / Revenue_LTM
+- z_margin = robust_z(EBIT_margin_LTM vs 5Y baseline)
+
+C4. Deleveraging signal
+- NetDebt_change = NetDebt_t0 − NetDebt_t0_minus_1y
+- Vi vill att skuld minskar, så vi inverterar tecken:
+  z_debt = robust_z(−NetDebt_change vs 5Y baseline av förändringen)
+
+C5. Revenue acceleration signal
+- Revenue_growth_LTM = (Revenue_LTM / Revenue_LTM_minus_1y) − 1
+- z_rev = robust_z(Revenue_growth_LTM vs 5Y baseline)
+
+Minimikrav:
+Du kan börja med C1, C3, C4.
+C2 och C5 förbättrar stabilitet.
+
+-----------------------------------------------------------------------
+D) SECTOR CONTEXT, som kontext, inte dubbelräkning
+-----------------------------------------------------------------------
+
+D1. Sector phase modifier (kontext, inte core)
+Vi skapar en ”context label” och en mild justering, som aldrig dominerar corporate signal.
+
+Exempel:
+- Compression: context_bias = +5
+- Early: +3
+- Mid: 0
+- Late: -3
+- StructuralBear: -5
+- StructuralBull: +2
+
+D2. Confidence scaling
+context_bias_effective = context_bias * sector_confidence
+
+D3. Guardrail:
+|context_bias_effective| max 7
+Det ska aldrig ersätta corporate performance.
+
+-----------------------------------------------------------------------
+E) AGGREGERING, inga interna viktmonster
+-----------------------------------------------------------------------
+
+E1. Company cycle raw score, 0..100
+CycleRaw = mean( s_FCF, s_margin, s_debt, optional s_OCF, optional s_rev )
+CycleRawAdj = clamp(CycleRaw + context_bias_effective, 0, 100)
+
+E2. Convert till percentil i producer-universumet
+CyclePercentile = percentile_rank(CycleRawAdj across all included producers)
+
+Det är detta som rankar i CYCLE-listan.
+
+E3. Flagging (för UX, inte score)
+- If CycleRawAdj > 80 and sector_phase in {Late} then flag: “Late-cycle risk”
+- If CycleRawAdj < 30 and sector_phase in {Compression} then flag: “Compression candidate”
+- If z_FCF very high but z_debt very negative then flag: “FCF up, balance sheet stress”
+
+-----------------------------------------------------------------------
+F) MULTI COMMODITY COMPANIES
+-----------------------------------------------------------------------
+
+F1. Primary commodity rule
+- All CYCLE context tas från bolagets primary commodity.
+- Secondary commodities visas som metadata, inte i scoring.
+
+F2. Optional advanced, om du senare vill
+- Låt bolag ha 2–3 commodity weights, men detta kräver segmentdata, så default är OFF.
+
+-----------------------------------------------------------------------
+G) DATA GAPS, graceful degradation
+-----------------------------------------------------------------------
+
+G1. Missing one signal
+- Om en signal saknas, exkludera den från mean, minska confidence.
+
+G2. Too short history
+- Om < 3 års historik, använd 3Y baseline, sänk confidence.
+
+G3. Negative revenue, eller nonsens
+- Då kan margin bli instabil, fallback till EBITDA proxy om finns, annars exkludera margin.
+
+G4. Universe inclusion
+- Bolag utan meningsfull OCF historik exkluderas från producer-universumet, enligt din regel.
+
+-----------------------------------------------------------------------
+H) OUTPUT CONTRACT (per bolag)
+-----------------------------------------------------------------------
+
+CompanyCycleSnapshot:
+- company_id
+- ts
+- cycle_raw_adj (0..100)
+- cycle_percentile (0..100)
+- sector_phase (label)
+- sector_confidence (0..1)
+- flags[] (strings)
+- signal_components:
+    z_FCF, z_margin, z_debt, z_OCF, z_rev (om beräknade)
+    s_FCF, s_margin, s_debt, s_OCF, s_rev (om beräknade)
+- confidence (0..1) baserat på datatäckning och historiklängd
+
+-----------------------------------------------------------------------
+I) PSEUDOCODE
+-----------------------------------------------------------------------
+
+for company in producer_universe:
+  signals = []
+
+  z_fcf = robust_z(company.FCF_LTM, median5y(company.FCF), iqr5y(company.FCF))
+  signals.append(to_score(z_fcf))
+
+  z_margin = robust_z(company.EBIT_margin_LTM, median5y(company.EBIT_margin), iqr5y(company.EBIT_margin))
+  if valid(z_margin): signals.append(to_score(z_margin))
+
+  z_debt = robust_z(-company.NetDebt_change_1y, median5y(-NetDebt_change_1y), iqr5y(-NetDebt_change_1y))
+  signals.append(to_score(z_debt))
+
+  optional z_ocf, z_rev
+
+  cycle_raw = mean(signals)
+
+  context_bias = phase_bias(primary_sector.phase) * primary_sector.confidence
+  cycle_raw_adj = clamp(cycle_raw + context_bias, 0, 100)
+
+store cycle_raw_adj
+
+after all companies:
+  cycle_percentile = percentile_rank(cycle_raw_adj across universe)
+  store snapshot with flags and components
+
