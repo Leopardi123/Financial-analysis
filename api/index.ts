@@ -123,6 +123,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "sector/map-companies": () => import("../src/server/routes/sector/map-companies.js"),
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),
   "sector/global-macro": () => import("../src/server/routes/sector/global-macro.js"),
+  "sector/commodity-snapshot": () => import("../src/server/routes/sector/commodity-snapshot.js"),
 };
 
 export default async function handler(req: any, res: any) {

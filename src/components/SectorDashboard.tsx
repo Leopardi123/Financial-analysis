@@ -48,6 +48,86 @@ type MacroSnapshotPayload = {
   };
 };
 
+type CommoditySnapshotPayload = {
+  ok: boolean;
+  commodity?: string;
+  snapshot?: {
+    commodity: string;
+    category: string;
+    phase: string;
+    phaseScore: number | null;
+    status: "ok" | "partial" | "insufficient";
+    profileVersion: string;
+    asOf: string;
+    goldRegime?: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+    regimeConfidence?: number;
+    regimeAgreementWithPrice?: "confirming" | "diverging" | "neutral";
+    regimeDrivers?: Array<{ id: string; label: string; signal: "supportive" | "headwind" | "neutral"; note: string }>;
+    confidence: {
+      score: number;
+      tier: "high" | "medium" | "low";
+      breakdown: {
+        dataCompleteness: number;
+        signalCoherence: number;
+        fallbackPenalty: number;
+      };
+      confidenceComponents: {
+        dataCompleteness: number;
+        signalCoherence: number;
+        fallbackPenalty: number;
+      };
+      reasons: string[];
+    };
+    drivers: Array<{ id: string; label: string; signal: "bullish" | "bearish" | "neutral"; weight: number; note?: string }>;
+    blockScores: Array<{ blockId: string; label: string; score: number | null; status: "used" | "missing" | "not_used" }>;
+    diagnostics: {
+      usedIndicators: string[];
+      missingIndicators: string[];
+      fallbackIndicators: string[];
+      usedOverlays: string[];
+      missingOverlays: string[];
+      ignoredOverlays: string[];
+      overlayContribution: {
+        score: number | null;
+        classification: "supportive" | "partial_support" | "neutral" | "partial_conflict" | "conflict" | "unavailable";
+        note: string;
+      };
+      overlayAgreement: "supportive" | "partial_support" | "neutral" | "partial_conflict" | "conflict" | "unavailable";
+      overlayConflict: string[];
+      overlayLayerDiagnostics?: {
+        goldMonetaryStressOverlay: {
+          score: number | null;
+          direction: "supportive" | "neutral" | "opposing";
+          confidence: number;
+        };
+        marketRiskOffOverlay: {
+          score: number | null;
+          direction: "supportive" | "neutral" | "opposing";
+          confidence: number;
+        };
+        primaryDecisionDriver: "goldMonetaryStressOverlay" | "marketRiskOffOverlay" | "none";
+        overlaysDiverging: boolean;
+        regimeOverrideApplied?: boolean;
+        baseRegime?: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+        regimeOverrideReason?: string | null;
+      };
+      confidenceReasons: string[];
+      phaseStrength: "strong" | "moderate" | "weak";
+      phaseReasoning: string[];
+      notes: string[];
+    };
+    screeningAdjustments: {
+      bias: "supportive" | "neutral" | "defensive" | "caution";
+      notes?: string[];
+      thresholdAdjustments?: {
+        valuationMultipleFloorDeltaPct?: number;
+        maxPositionSizeDeltaPct?: number;
+      };
+    };
+  };
+  error?: string;
+};
+
 const SECTORS = getSectorDashboardUniverse();
 
 const GENERIC_QUESTIONS = [
@@ -227,6 +307,7 @@ export default function SectorDashboard() {
   const [mappingTickers, setMappingTickers] = useState("");
   const [mappingCategory, setMappingCategory] = useState(COMPANY_CATEGORIES[0]);
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
+  const [commoditySnapshot, setCommoditySnapshot] = useState<CommoditySnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
   const [macroStrength, setMacroStrength] = useState<MacroStrengthFilter>("all");
   const subsectorCoverageAudit = useMemo(() => buildSubsectorCoverageAuditReport(), []);
@@ -388,6 +469,8 @@ export default function SectorDashboard() {
     }
     return GENERIC_QUESTIONS;
   }, [sector, subsector]);
+  const isGoldCommodityView = sector === "materials" && subsector === "gold_miners";
+  const manualInputStatus = manualInputs.length > 0 ? "available" : "none";
 
   useEffect(() => {
     if (!filteredSectorOptions.some((item) => item.id === sector)) {
@@ -418,6 +501,25 @@ export default function SectorDashboard() {
     }
     void loadOverview();
 
+    return () => {
+      active = false;
+    };
+  }, [sector, subsector]);
+
+  useEffect(() => {
+    if (!(sector === "materials" && subsector === "gold_miners")) {
+      setCommoditySnapshot(null);
+      return;
+    }
+    let active = true;
+    async function loadCommoditySnapshot() {
+      const response = await fetch("/api/sector/commodity-snapshot?commodity=gold");
+      const payload = (await response.json()) as CommoditySnapshotPayload;
+      if (active) {
+        setCommoditySnapshot(payload);
+      }
+    }
+    void loadCommoditySnapshot();
     return () => {
       active = false;
     };
@@ -673,8 +775,9 @@ export default function SectorDashboard() {
         <div className="sector-card">
           <h3>Manual inputs</h3>
           <p className="bread">
-            Fyll i manuella inputs för cykelbedömning. Alla svar sparas med tidsstämpel och kopplas
-            till sektor/undersektor.
+            Manuella inputs är ett valfritt analystlager som kompletterar den automatiska
+            commodity-bedömningen. Alla svar sparas med tidsstämpel och kopplas till
+            sektor/undersektor.
           </p>
           <div className="manual-inputs">
             {questions.map((question) => (
@@ -790,12 +893,111 @@ export default function SectorDashboard() {
 
         <div className="sector-card">
           <h3>Cykelbedömning</h3>
-          <p className="bread">
-            Cykelstatus genereras först när både automatiska datapunkter och manuella inputs finns.
-            Just nu saknas automatiska datapunkter, så status visas som TODO.
-          </p>
-          <div className="cycle-status">TODO: Kombinera datapunkter och manuella inputs.</div>
+          {isGoldCommodityView ? (
+            !commoditySnapshot?.ok || !commoditySnapshot.snapshot ? (
+              <>
+                <p className="bread">
+                  Commodity snapshot är source of truth för gold_miners, men kunde inte laddas nu.
+                </p>
+                <div className="cycle-status">Status: snapshot unavailable.</div>
+              </>
+            ) : (
+              <>
+                <p className="bread">
+                  Automatisk commodity-bedömning är primär source of truth. Manuella inputs är ett
+                  kompletterande analystlager och blockerar inte grundfasen.
+                </p>
+                <div className="metric-list">
+                  <div><strong>Phase:</strong> {commoditySnapshot.snapshot.phase}</div>
+                  <div><strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</div>
+                  <div><strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}</div>
+                  <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
+                  <div><strong>Gold regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? "n/a"}</div>
+                  <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
+                  <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
+                  <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
+                  <div><strong>Analyst layer:</strong> {manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</div>
+                </div>
+              </>
+            )
+          ) : (
+            <>
+              <p className="bread">
+                Cykelstatus för denna vy är ännu inte kopplad till commodity snapshot.
+              </p>
+              <div className="cycle-status">TODO: Integrera snapshot-baserad cykelbedömning för fler råvaruvyer.</div>
+            </>
+          )}
         </div>
+
+        {isGoldCommodityView ? (
+          <div className="sector-card">
+            <h3>Commodity snapshot (Gold) – debug/readout</h3>
+            {!commoditySnapshot?.ok || !commoditySnapshot.snapshot ? (
+              <div className="status empty">
+                {commoditySnapshot?.error ?? "Ingen commodity snapshot tillgänglig."}
+              </div>
+            ) : (
+              <div className="metric-list">
+                <div><strong>Phase:</strong> {commoditySnapshot.snapshot.phase}</div>
+                <div><strong>Phase score:</strong> {commoditySnapshot.snapshot.phaseScore?.toFixed(2) ?? "n/a"}</div>
+                <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
+                <div><strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</div>
+                <div><strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}</div>
+                <div><strong>Source of truth:</strong> commodity snapshot</div>
+                <div><strong>Manual input status:</strong> {manualInputStatus}</div>
+                <div><strong>Manual impact on snapshot:</strong> none (supplemental layer only in current phase)</div>
+                <div><strong>Regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? "n/a"} ({commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"})</div>
+                <details>
+                  <summary>Diagnostics (debug)</summary>
+                  <div><strong>Regime drivers:</strong></div>
+                  <ul>
+                    {(commoditySnapshot.snapshot.regimeDrivers ?? []).map((driver) => (
+                      <li key={driver.id}>
+                        {driver.label}: {driver.signal} — {driver.note}
+                      </li>
+                    ))}
+                  </ul>
+                  <div><strong>Drivers:</strong></div>
+                  <ul>
+                    {commoditySnapshot.snapshot.drivers.map((driver) => (
+                      <li key={driver.id}>
+                        {driver.label}: {driver.signal} (w={driver.weight.toFixed(2)})
+                        {driver.note ? ` — ${driver.note}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                  <div><strong>Used indicators:</strong> {commoditySnapshot.snapshot.diagnostics.usedIndicators.join(", ") || "none"}</div>
+                  <div><strong>Missing indicators:</strong> {commoditySnapshot.snapshot.diagnostics.missingIndicators.join(", ") || "none"}</div>
+                  <div><strong>Used overlays:</strong> {commoditySnapshot.snapshot.diagnostics.usedOverlays.join(", ") || "none"}</div>
+                  <div><strong>Missing overlays:</strong> {commoditySnapshot.snapshot.diagnostics.missingOverlays.join(", ") || "none"}</div>
+                  <div><strong>Ignored overlays:</strong> {commoditySnapshot.snapshot.diagnostics.ignoredOverlays.join(", ") || "none"}</div>
+                  <div><strong>Overlay contribution:</strong> {commoditySnapshot.snapshot.diagnostics.overlayContribution.classification} ({commoditySnapshot.snapshot.diagnostics.overlayContribution.score?.toFixed(2) ?? "n/a"}) — {commoditySnapshot.snapshot.diagnostics.overlayContribution.note}</div>
+                  <div><strong>Overlay agreement/conflict:</strong> {commoditySnapshot.snapshot.diagnostics.overlayAgreement}{commoditySnapshot.snapshot.diagnostics.overlayConflict.length > 0 ? ` | ${commoditySnapshot.snapshot.diagnostics.overlayConflict.join(" | ")}` : ""}</div>
+                  <div><strong>Gold Monetary Stress Overlay:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.score?.toFixed(2) ?? "n/a"} ({commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.direction ?? "n/a"}, conf={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.confidence.toFixed(2) ?? "n/a"})</div>
+                  <div><strong>Market Risk-Off Overlay:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.score?.toFixed(2) ?? "n/a"} ({commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.direction ?? "n/a"}, conf={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.confidence.toFixed(2) ?? "n/a"})</div>
+                  <div><strong>Primary overlay driver:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.primaryDecisionDriver ?? "n/a"} | diverging={String(commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.overlaysDiverging ?? false)}</div>
+                  <div><strong>Regime override:</strong> {String(commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.regimeOverrideApplied ?? false)} (base={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.baseRegime ?? "n/a"}){commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.regimeOverrideReason ? ` — ${commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics.regimeOverrideReason}` : ""}</div>
+                  <div><strong>Block scores:</strong></div>
+                  <ul>
+                    {commoditySnapshot.snapshot.blockScores.map((block) => (
+                      <li key={block.blockId}>
+                        {block.label}: {block.score?.toFixed(2) ?? "n/a"} ({block.status})
+                      </li>
+                    ))}
+                  </ul>
+                  <div><strong>Confidence breakdown:</strong> completeness={commoditySnapshot.snapshot.confidence.breakdown.dataCompleteness.toFixed(2)}, coherence={commoditySnapshot.snapshot.confidence.breakdown.signalCoherence.toFixed(2)}, fallbackPenalty={commoditySnapshot.snapshot.confidence.breakdown.fallbackPenalty.toFixed(2)}</div>
+                  <div><strong>Confidence overlay impact:</strong> overlay agreement={commoditySnapshot.snapshot.diagnostics.overlayAgreement}, coherence={commoditySnapshot.snapshot.confidence.confidenceComponents.signalCoherence.toFixed(2)}</div>
+                  <div><strong>Resolved phase:</strong> {commoditySnapshot.snapshot.phase} ({commoditySnapshot.snapshot.diagnostics.phaseStrength})</div>
+                  <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
+                  <div><strong>Screening adjustments:</strong> {commoditySnapshot.snapshot.screeningAdjustments.notes?.join(" | ") ?? "none"}</div>
+                  <div><strong>Threshold adjustments:</strong> valuation floor Δ={commoditySnapshot.snapshot.screeningAdjustments.thresholdAdjustments?.valuationMultipleFloorDeltaPct ?? 0}%, max position Δ={commoditySnapshot.snapshot.screeningAdjustments.thresholdAdjustments?.maxPositionSizeDeltaPct ?? 0}%</div>
+                  <div><strong>Profile version:</strong> {commoditySnapshot.snapshot.profileVersion}</div>
+                </details>
+              </div>
+            )}
+          </div>
+        ) : null}
 
         <div className="sector-card">
           <h3>Senaste inputs</h3>
