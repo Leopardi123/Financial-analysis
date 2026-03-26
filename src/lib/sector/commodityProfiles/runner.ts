@@ -5,7 +5,7 @@ import type {
   CommodityProfileInput,
   CommodityProfileOutput,
   CommodityStatus,
-} from "./types";
+} from "./types.js";
 
 function inferStatus(phase: CommodityPhase, dataCompleteness: number): CommodityStatus {
   if (phase === "Unknown" || dataCompleteness < 0.35) return "insufficient";
