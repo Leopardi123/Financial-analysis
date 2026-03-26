@@ -48,6 +48,45 @@ type MacroSnapshotPayload = {
   };
 };
 
+type CommoditySnapshotPayload = {
+  ok: boolean;
+  commodity?: string;
+  snapshot?: {
+    commodity: string;
+    category: string;
+    phase: string;
+    phaseScore: number | null;
+    status: "ok" | "partial" | "insufficient";
+    profileVersion: string;
+    asOf: string;
+    confidence: {
+      score: number;
+      tier: "high" | "medium" | "low";
+      breakdown: {
+        dataCompleteness: number;
+        signalCoherence: number;
+        fallbackPenalty: number;
+      };
+      reasons: string[];
+    };
+    drivers: Array<{ id: string; label: string; signal: "bullish" | "bearish" | "neutral"; weight: number; note?: string }>;
+    blockScores: Array<{ blockId: string; label: string; score: number | null; status: "used" | "missing" | "not_used" }>;
+    diagnostics: {
+      usedIndicators: string[];
+      missingIndicators: string[];
+      fallbackIndicators: string[];
+      confidenceReasons: string[];
+      phaseStrength: "strong" | "moderate" | "weak";
+      notes: string[];
+    };
+    screeningAdjustments: {
+      bias: "supportive" | "neutral" | "defensive" | "caution";
+      notes?: string[];
+    };
+  };
+  error?: string;
+};
+
 const SECTORS = getSectorDashboardUniverse();
 
 const GENERIC_QUESTIONS = [
@@ -227,6 +266,7 @@ export default function SectorDashboard() {
   const [mappingTickers, setMappingTickers] = useState("");
   const [mappingCategory, setMappingCategory] = useState(COMPANY_CATEGORIES[0]);
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
+  const [commoditySnapshot, setCommoditySnapshot] = useState<CommoditySnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
   const [macroStrength, setMacroStrength] = useState<MacroStrengthFilter>("all");
   const subsectorCoverageAudit = useMemo(() => buildSubsectorCoverageAuditReport(), []);
@@ -418,6 +458,25 @@ export default function SectorDashboard() {
     }
     void loadOverview();
 
+    return () => {
+      active = false;
+    };
+  }, [sector, subsector]);
+
+  useEffect(() => {
+    if (!(sector === "materials" && subsector === "gold_miners")) {
+      setCommoditySnapshot(null);
+      return;
+    }
+    let active = true;
+    async function loadCommoditySnapshot() {
+      const response = await fetch("/api/sector/commodity-snapshot?commodity=gold");
+      const payload = (await response.json()) as CommoditySnapshotPayload;
+      if (active) {
+        setCommoditySnapshot(payload);
+      }
+    }
+    void loadCommoditySnapshot();
     return () => {
       active = false;
     };
@@ -796,6 +855,42 @@ export default function SectorDashboard() {
           </p>
           <div className="cycle-status">TODO: Kombinera datapunkter och manuella inputs.</div>
         </div>
+
+        {sector === "materials" && subsector === "gold_miners" ? (
+          <div className="sector-card">
+            <h3>Commodity snapshot (Gold)</h3>
+            {!commoditySnapshot?.ok || !commoditySnapshot.snapshot ? (
+              <div className="status empty">
+                {commoditySnapshot?.error ?? "Ingen commodity snapshot tillgänglig."}
+              </div>
+            ) : (
+              <div className="metric-list">
+                <div><strong>Phase:</strong> {commoditySnapshot.snapshot.phase}</div>
+                <div><strong>Phase score:</strong> {commoditySnapshot.snapshot.phaseScore?.toFixed(2) ?? "n/a"}</div>
+                <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
+                <div><strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</div>
+                <div><strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}</div>
+                <details>
+                  <summary>Diagnostics (debug)</summary>
+                  <div><strong>Used indicators:</strong> {commoditySnapshot.snapshot.diagnostics.usedIndicators.join(", ") || "none"}</div>
+                  <div><strong>Missing indicators:</strong> {commoditySnapshot.snapshot.diagnostics.missingIndicators.join(", ") || "none"}</div>
+                  <div><strong>Block scores:</strong></div>
+                  <ul>
+                    {commoditySnapshot.snapshot.blockScores.map((block) => (
+                      <li key={block.blockId}>
+                        {block.label}: {block.score?.toFixed(2) ?? "n/a"} ({block.status})
+                      </li>
+                    ))}
+                  </ul>
+                  <div><strong>Confidence breakdown:</strong> completeness={commoditySnapshot.snapshot.confidence.breakdown.dataCompleteness.toFixed(2)}, coherence={commoditySnapshot.snapshot.confidence.breakdown.signalCoherence.toFixed(2)}, fallbackPenalty={commoditySnapshot.snapshot.confidence.breakdown.fallbackPenalty.toFixed(2)}</div>
+                  <div><strong>Resolved phase:</strong> {commoditySnapshot.snapshot.phase} ({commoditySnapshot.snapshot.diagnostics.phaseStrength})</div>
+                  <div><strong>Screening adjustments:</strong> {commoditySnapshot.snapshot.screeningAdjustments.notes?.join(" | ") ?? "none"}</div>
+                  <div><strong>Profile version:</strong> {commoditySnapshot.snapshot.profileVersion}</div>
+                </details>
+              </div>
+            )}
+          </div>
+        ) : null}
 
         <div className="sector-card">
           <h3>Senaste inputs</h3>
