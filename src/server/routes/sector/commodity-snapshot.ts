@@ -66,6 +66,17 @@ function toOverlayMap(macroRegimeProbabilityJson: string | null): Record<string,
   return out;
 }
 
+function mergeOverlayMaps(
+  primary: Record<string, number | null>,
+  secondary: Record<string, number | null>,
+): Record<string, number | null> {
+  const out: Record<string, number | null> = { ...secondary };
+  for (const [key, value] of Object.entries(primary)) {
+    out[key] = value;
+  }
+  return out;
+}
+
 export default async function handler(req: any, res: any) {
   try {
     await ensureSchema();
@@ -75,16 +86,24 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const regimeRows = (await query(
+    const globalRegimeRows = (await query(
       `SELECT as_of_date, core_regime_label, hard_asset_overlay, macro_confidence, macro_regime_probability_json
        FROM ${tables.macroRegimeSnapshots}
        WHERE region = 'GLOBAL'
        ORDER BY as_of_date DESC
        LIMIT 1`,
     )) as unknown as RegimeRow[];
+    const usRegimeRows = (await query(
+      `SELECT as_of_date, core_regime_label, hard_asset_overlay, macro_confidence, macro_regime_probability_json
+       FROM ${tables.macroRegimeSnapshots}
+       WHERE region = 'US'
+       ORDER BY as_of_date DESC
+       LIMIT 1`,
+    )) as unknown as RegimeRow[];
 
-    const regime = regimeRows[0] ?? null;
-    const asOf = regime?.as_of_date ?? new Date().toISOString().slice(0, 10);
+    const globalRegime = globalRegimeRows[0] ?? null;
+    const usRegime = usRegimeRows[0] ?? null;
+    const asOf = globalRegime?.as_of_date ?? usRegime?.as_of_date ?? new Date().toISOString().slice(0, 10);
 
     const indicatorRows = (await query(
       `SELECT indicator_id, as_of_date, value_latest, percentile_10y, score, change_1m, change_3m, yoy
@@ -140,14 +159,17 @@ export default async function handler(req: any, res: any) {
       commodity,
       asOf,
       indicators: Object.fromEntries(indicatorByKey.entries()) as Partial<Record<CommodityIndicatorKey, CommodityProfileInputIndicator>>,
-      overlays: toOverlayMap(regime?.macro_regime_probability_json ?? null),
+      overlays: mergeOverlayMaps(
+        toOverlayMap(usRegime?.macro_regime_probability_json ?? null),
+        toOverlayMap(globalRegime?.macro_regime_probability_json ?? null),
+      ),
       manualInputs: {},
       macroContext: {
-        coreRegimeLabel: regime?.core_regime_label ?? null,
-        hardAssetOverlay: regime?.hard_asset_overlay ?? null,
-        macroConfidence: regime?.macro_confidence === null || regime?.macro_confidence === undefined
+        coreRegimeLabel: globalRegime?.core_regime_label ?? usRegime?.core_regime_label ?? null,
+        hardAssetOverlay: globalRegime?.hard_asset_overlay ?? usRegime?.hard_asset_overlay ?? null,
+        macroConfidence: globalRegime?.macro_confidence === null || globalRegime?.macro_confidence === undefined
           ? null
-          : Number(regime.macro_confidence),
+          : Number(globalRegime.macro_confidence),
       },
     });
 

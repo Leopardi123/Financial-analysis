@@ -55,6 +55,16 @@ export type CommodityDiagnostics = {
   usedIndicators: CommodityIndicatorKey[];
   missingIndicators: CommodityIndicatorKey[];
   fallbackIndicators: CommodityIndicatorKey[];
+  usedOverlays: string[];
+  missingOverlays: string[];
+  ignoredOverlays: string[];
+  overlayContribution: {
+    score: number | null;
+    classification: "supportive" | "neutral" | "conflicting" | "unavailable";
+    note: string;
+  };
+  overlayAgreement: "supportive" | "neutral" | "conflicting" | "unavailable";
+  overlayConflict: string[];
   confidenceReasons: string[];
   phaseStrength: "strong" | "moderate" | "weak";
   phaseReasoning: string[];

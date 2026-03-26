@@ -80,6 +80,16 @@ type CommoditySnapshotPayload = {
       usedIndicators: string[];
       missingIndicators: string[];
       fallbackIndicators: string[];
+      usedOverlays: string[];
+      missingOverlays: string[];
+      ignoredOverlays: string[];
+      overlayContribution: {
+        score: number | null;
+        classification: "supportive" | "neutral" | "conflicting" | "unavailable";
+        note: string;
+      };
+      overlayAgreement: "supportive" | "neutral" | "conflicting" | "unavailable";
+      overlayConflict: string[];
       confidenceReasons: string[];
       phaseStrength: "strong" | "moderate" | "weak";
       phaseReasoning: string[];
@@ -884,6 +894,11 @@ export default function SectorDashboard() {
                   <summary>Diagnostics (debug)</summary>
                   <div><strong>Used indicators:</strong> {commoditySnapshot.snapshot.diagnostics.usedIndicators.join(", ") || "none"}</div>
                   <div><strong>Missing indicators:</strong> {commoditySnapshot.snapshot.diagnostics.missingIndicators.join(", ") || "none"}</div>
+                  <div><strong>Used overlays:</strong> {commoditySnapshot.snapshot.diagnostics.usedOverlays.join(", ") || "none"}</div>
+                  <div><strong>Missing overlays:</strong> {commoditySnapshot.snapshot.diagnostics.missingOverlays.join(", ") || "none"}</div>
+                  <div><strong>Ignored overlays:</strong> {commoditySnapshot.snapshot.diagnostics.ignoredOverlays.join(", ") || "none"}</div>
+                  <div><strong>Overlay contribution:</strong> {commoditySnapshot.snapshot.diagnostics.overlayContribution.classification} ({commoditySnapshot.snapshot.diagnostics.overlayContribution.score?.toFixed(2) ?? "n/a"}) — {commoditySnapshot.snapshot.diagnostics.overlayContribution.note}</div>
+                  <div><strong>Overlay agreement/conflict:</strong> {commoditySnapshot.snapshot.diagnostics.overlayAgreement}{commoditySnapshot.snapshot.diagnostics.overlayConflict.length > 0 ? ` | ${commoditySnapshot.snapshot.diagnostics.overlayConflict.join(" | ")}` : ""}</div>
                   <div><strong>Block scores:</strong></div>
                   <ul>
                     {commoditySnapshot.snapshot.blockScores.map((block) => (
@@ -893,6 +908,7 @@ export default function SectorDashboard() {
                     ))}
                   </ul>
                   <div><strong>Confidence breakdown:</strong> completeness={commoditySnapshot.snapshot.confidence.breakdown.dataCompleteness.toFixed(2)}, coherence={commoditySnapshot.snapshot.confidence.breakdown.signalCoherence.toFixed(2)}, fallbackPenalty={commoditySnapshot.snapshot.confidence.breakdown.fallbackPenalty.toFixed(2)}</div>
+                  <div><strong>Confidence overlay impact:</strong> overlay agreement={commoditySnapshot.snapshot.diagnostics.overlayAgreement}, coherence={commoditySnapshot.snapshot.confidence.confidenceComponents.signalCoherence.toFixed(2)}</div>
                   <div><strong>Resolved phase:</strong> {commoditySnapshot.snapshot.phase} ({commoditySnapshot.snapshot.diagnostics.phaseStrength})</div>
                   <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
                   <div><strong>Screening adjustments:</strong> {commoditySnapshot.snapshot.screeningAdjustments.notes?.join(" | ") ?? "none"}</div>

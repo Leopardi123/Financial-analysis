@@ -20,6 +20,16 @@ const REQUIRED_INDICATORS: CommodityIndicatorKey[] = [
 
 const OPTIONAL_INDICATORS: CommodityIndicatorKey[] = ["usd_yoy", "core_cpi_yoy_us", "breakeven_10y_us"];
 
+const GOLD_RELEVANT_OVERLAYS = [
+  "inflationCostShockOverlay",
+  "liquidityOverlay",
+  "creditFundingOverlay",
+  "safeHavenRiskOffOverlay",
+  "globalUnrestOverlay",
+] as const;
+
+type OverlayAgreement = "supportive" | "neutral" | "conflicting" | "unavailable";
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -65,11 +75,93 @@ function macroRegimeSignal(coreRegimeLabel: string | null): number | null {
   return 0;
 }
 
+function overlayScore(input: CommodityProfileInput, key: string): number | null {
+  const value = input.overlays[key];
+  if (typeof value !== "number") return null;
+  return clamp((value - 50) / 50, -1, 1);
+}
+
+function summarizeOverlays(input: CommodityProfileInput) {
+  const usedOverlays: string[] = [];
+  const missingOverlays: string[] = [];
+  for (const key of GOLD_RELEVANT_OVERLAYS) {
+    if (typeof input.overlays[key] === "number") usedOverlays.push(key);
+    else missingOverlays.push(key);
+  }
+  const ignoredOverlays = Object.keys(input.overlays).filter((key) => !GOLD_RELEVANT_OVERLAYS.includes(key as (typeof GOLD_RELEVANT_OVERLAYS)[number]));
+
+  const policyNarrativeScore = avg([
+    overlayScore(input, "safeHavenRiskOffOverlay"),
+    overlayScore(input, "globalUnrestOverlay"),
+    overlayScore(input, "creditFundingOverlay"),
+  ]);
+  const macroOverlayScore = avg([
+    overlayScore(input, "inflationCostShockOverlay"),
+    overlayScore(input, "liquidityOverlay"),
+  ]);
+
+  return {
+    usedOverlays,
+    missingOverlays,
+    ignoredOverlays,
+    policyNarrativeScore,
+    macroOverlayScore,
+  };
+}
+
+function resolveOverlayAgreement(priceTrendScore: number | null, overlayCompositeScore: number | null): {
+  agreement: OverlayAgreement;
+  contribution: { score: number | null; classification: OverlayAgreement; note: string };
+  conflicts: string[];
+} {
+  if (overlayCompositeScore === null) {
+    return {
+      agreement: "unavailable",
+      contribution: { score: null, classification: "unavailable", note: "No usable gold-relevant overlays were available." },
+      conflicts: [],
+    };
+  }
+
+  if (priceTrendScore === null) {
+    return {
+      agreement: "neutral",
+      contribution: { score: overlayCompositeScore, classification: "neutral", note: "Overlay layer available, but price/trend baseline is missing." },
+      conflicts: [],
+    };
+  }
+
+  const sameDirection = Math.sign(priceTrendScore) === Math.sign(overlayCompositeScore) || Math.abs(overlayCompositeScore) < 0.1;
+  const conflict = Math.sign(priceTrendScore) !== 0 && Math.sign(overlayCompositeScore) !== 0 && Math.sign(priceTrendScore) !== Math.sign(overlayCompositeScore);
+
+  if (sameDirection && Math.abs(overlayCompositeScore) >= 0.15) {
+    return {
+      agreement: "supportive",
+      contribution: { score: overlayCompositeScore, classification: "supportive", note: "Overlays confirm price/trend direction." },
+      conflicts: [],
+    };
+  }
+
+  if (conflict) {
+    return {
+      agreement: "conflicting",
+      contribution: { score: overlayCompositeScore, classification: "conflicting", note: "Overlays conflict with price/trend direction." },
+      conflicts: ["Price/Trend and overlay layer point in opposite directions."],
+    };
+  }
+
+  return {
+    agreement: "neutral",
+    contribution: { score: overlayCompositeScore, classification: "neutral", note: "Overlay influence is weak/mixed relative to price/trend." },
+    conflicts: [],
+  };
+}
+
 function buildConfidence(args: {
   required: CommodityIndicatorKey[];
   optional: CommodityIndicatorKey[];
   indicatorDiagnostics: CommodityIndicatorDiagnostic[];
   blockScores: CommodityBlockScore[];
+  overlayAgreement: OverlayAgreement;
 }): CommodityConfidence {
   const usedRequired = args.indicatorDiagnostics.filter((item) => item.used && args.required.includes(item.key)).length;
   const usedOptional = args.indicatorDiagnostics.filter((item) => item.used && args.optional.includes(item.key)).length;
@@ -86,6 +178,9 @@ function buildConfidence(args: {
     signalCoherence = clamp(1 - divergence, 0, 1);
   }
 
+  if (args.overlayAgreement === "supportive") signalCoherence = clamp(signalCoherence + 0.08, 0, 1);
+  if (args.overlayAgreement === "conflicting") signalCoherence = clamp(signalCoherence - 0.12, 0, 1);
+
   const fallbackCount = args.indicatorDiagnostics.filter((item) => item.fallbackUsed).length;
   const fallbackPenalty = clamp(fallbackCount * 0.2, 0, 1);
 
@@ -93,7 +188,7 @@ function buildConfidence(args: {
   const tier = score >= 0.75 ? "high" : score >= 0.45 ? "medium" : "low";
   const reasons = [
     `Data completeness=${dataCompleteness.toFixed(2)} from required/optional coverage.`,
-    `Signal coherence=${signalCoherence.toFixed(2)} from active block agreement.`,
+    `Signal coherence=${signalCoherence.toFixed(2)} including overlay agreement effect (${args.overlayAgreement}).`,
     `Fallback penalty=${fallbackPenalty.toFixed(2)} (fallback count=${fallbackCount}).`,
   ];
 
@@ -110,6 +205,8 @@ function resolveGoldPhase(args: {
   percentile: number | null;
   momentum12m: number | null;
   macroScore: number | null;
+  overlayAgreement: OverlayAgreement;
+  overlayContributionScore: number | null;
   phaseScore: number | null;
 }): { phase: CommodityPhase; reasoning: string[] } {
   const reasoning: string[] = [];
@@ -128,20 +225,26 @@ function resolveGoldPhase(args: {
 
   if (p >= 75 && monetaryStress) {
     reasoning.push("High percentile + monetary stress => Structural Bull.");
+    if (args.overlayAgreement === "supportive") reasoning.push("Overlays are supportive, reinforcing Structural Bull.");
+    if (args.overlayAgreement === "conflicting") reasoning.push("Overlays are conflicting; conviction reduced despite Structural Bull classification.");
     return { phase: "Structural Bull", reasoning };
   }
   if (p <= 35 && macroImproving) {
     reasoning.push("Low percentile + improving macro backdrop => Early Cycle.");
+    if (args.overlayAgreement === "supportive") reasoning.push("Overlays support early turn in backdrop.");
     return { phase: "Early Cycle", reasoning };
   }
   if (p >= 70 && m >= 8) {
     reasoning.push("High percentile + strong 12M momentum => Late Cycle.");
+    if (args.overlayAgreement === "neutral") reasoning.push("Late Cycle driven mainly by price/trend; overlays only weakly supportive.");
+    if (args.overlayAgreement === "conflicting") reasoning.push("Price suggests Late Cycle but overlays are conflicting.");
     return { phase: "Late Cycle", reasoning };
   }
   if (p <= 35 && macroWeak) {
     reasoning.push("Low percentile + weak macro/monetary context => Compression.");
     return { phase: "Compression", reasoning };
   }
+
   if (args.phaseScore >= 0.55) {
     reasoning.push("Aggregate phase score strongly positive => Structural Bull.");
     return { phase: "Structural Bull", reasoning };
@@ -152,6 +255,9 @@ function resolveGoldPhase(args: {
   }
   if (args.phaseScore >= 0.2) {
     reasoning.push("Aggregate phase score moderately positive => Mid Cycle.");
+    if (typeof args.overlayContributionScore === "number" && args.overlayContributionScore > 0.2) {
+      reasoning.push("Overlay layer contributes positively to Mid Cycle signal.");
+    }
     return { phase: "Mid Cycle", reasoning };
   }
   if (args.phaseScore <= -0.2) {
@@ -200,7 +306,7 @@ export const goldCommodityProfile: CommodityProfile = {
   category: "monetary_store_of_value",
   requiredIndicators: REQUIRED_INDICATORS,
   optionalIndicators: OPTIONAL_INDICATORS,
-  profileVersion: "gold-v2",
+  profileVersion: "gold-v3",
   compute(input: CommodityProfileInput) {
     const gold = getIndicator(input, "gold_usd");
     const goldRealSpread = getIndicator(input, "gold_minus_real_yield_spread");
@@ -209,6 +315,8 @@ export const goldCommodityProfile: CommodityProfile = {
     const usdYoy = getIndicator(input, "usd_yoy");
     const coreCpi = getIndicator(input, "core_cpi_yoy_us");
     const breakeven = getIndicator(input, "breakeven_10y_us");
+
+    const overlaySummary = summarizeOverlays(input);
 
     const blockAPercentile = percentileSignal(gold?.percentile10y ?? null);
     const blockAMomentum = momentumSignal(gold?.momentum12m ?? gold?.yoy ?? null);
@@ -224,7 +332,13 @@ export const goldCommodityProfile: CommodityProfile = {
       scoreToNormalized(coreCpi),
       scoreToNormalized(breakeven),
       macroRegimeScore,
+      overlaySummary.macroOverlayScore,
     ]);
+
+    const blockDScore = overlaySummary.policyNarrativeScore;
+
+    const overlayCompositeScore = avg([overlaySummary.macroOverlayScore, blockDScore]);
+    const overlayResolution = resolveOverlayAgreement(blockAScore, overlayCompositeScore);
 
     const blockScores: CommodityBlockScore[] = [
       {
@@ -246,8 +360,9 @@ export const goldCommodityProfile: CommodityProfile = {
         confidence: blockBScore === null ? 0 : 0.9,
         status: blockBScore === null ? "missing" : "used",
         notes: [
-          "Uses real rates, dollar pressure and macro regime input.",
+          "Uses real rates, dollar pressure, macro regime and macro-relevant overlays.",
           `Macro regime=${input.macroContext.coreRegimeLabel ?? "n/a"} (${macroRegimeScore === null ? "n/a" : macroRegimeScore.toFixed(2)})`,
+          `Overlay macro contribution=${overlaySummary.macroOverlayScore === null ? "n/a" : overlaySummary.macroOverlayScore.toFixed(2)}`,
         ],
       },
       {
@@ -256,23 +371,27 @@ export const goldCommodityProfile: CommodityProfile = {
         score: null,
         confidence: 0,
         status: "not_used",
-        notes: ["Not used in phase 2 yet (equity breadth/relative-strength feed missing)."],
+        notes: ["Not used in phase 3 yet (equity breadth/relative-strength feed missing)."],
       },
       {
         blockId: "policy_narrative",
         label: "Policy / Narrative",
-        score: null,
-        confidence: 0,
-        status: "not_used",
-        notes: ["Not used: no dedicated policy narrative dataset wired in this phase."],
+        score: blockDScore,
+        confidence: blockDScore === null ? 0 : 0.7,
+        status: blockDScore === null ? "not_used" : "used",
+        notes: blockDScore === null
+          ? ["Policy/systemic overlays missing -> block kept as not_used."]
+          : ["Built from systemic stress overlays (safe haven/unrest/credit funding)."],
       },
     ];
 
-    const phaseScore = avg([blockAScore, blockBScore]);
+    const phaseScore = avg([blockAScore, blockBScore, blockDScore]);
     const phaseResolution = resolveGoldPhase({
       percentile: gold?.percentile10y ?? null,
       momentum12m: gold?.momentum12m ?? gold?.yoy ?? null,
       macroScore: blockBScore,
+      overlayAgreement: overlayResolution.agreement,
+      overlayContributionScore: overlayResolution.contribution.score,
       phaseScore,
     });
 
@@ -296,6 +415,7 @@ export const goldCommodityProfile: CommodityProfile = {
       optional: OPTIONAL_INDICATORS,
       indicatorDiagnostics,
       blockScores,
+      overlayAgreement: overlayResolution.agreement,
     });
 
     const dataCompleteness = confidence.breakdown.dataCompleteness;
@@ -306,12 +426,19 @@ export const goldCommodityProfile: CommodityProfile = {
       usedIndicators,
       missingIndicators,
       fallbackIndicators: [],
+      usedOverlays: overlaySummary.usedOverlays,
+      missingOverlays: overlaySummary.missingOverlays,
+      ignoredOverlays: overlaySummary.ignoredOverlays,
+      overlayContribution: overlayResolution.contribution,
+      overlayAgreement: overlayResolution.agreement,
+      overlayConflict: overlayResolution.conflicts,
       confidenceReasons: confidence.reasons,
       phaseStrength: phaseScore === null ? "weak" : Math.abs(phaseScore) >= 0.5 ? "strong" : Math.abs(phaseScore) >= 0.25 ? "moderate" : "weak",
       phaseReasoning: phaseResolution.reasoning,
       notes: [
         "Gold profile is monetary/store-of-value centered.",
-        "Missing data is surfaced explicitly and lowers confidence/status instead of using synthetic proxies.",
+        "Snapshot separates indicator-layer and overlay-layer contributions explicitly.",
+        "Missing overlay data does not create synthetic proxies; it reduces agreement/coherence instead.",
       ],
     };
 
@@ -320,15 +447,26 @@ export const goldCommodityProfile: CommodityProfile = {
         id: "gold_price_trend",
         label: "Gold percentile + momentum",
         signal: blockAScore !== null && blockAScore > 0.1 ? "bullish" : blockAScore !== null && blockAScore < -0.1 ? "bearish" : "neutral",
-        weight: 0.5,
+        weight: 0.45,
         note: `percentile=${gold?.percentile10y ?? "n/a"}, momentum12m=${gold?.momentum12m ?? gold?.yoy ?? "n/a"}`,
       },
       {
         id: "macro_monetary_context",
         label: "Real rates / dollar / regime",
         signal: blockBScore !== null && blockBScore > 0.1 ? "bullish" : blockBScore !== null && blockBScore < -0.1 ? "bearish" : "neutral",
-        weight: 0.5,
+        weight: 0.4,
         note: `regime=${input.macroContext.coreRegimeLabel ?? "n/a"}`,
+      },
+      {
+        id: "overlay_layer",
+        label: "Overlay decision layer",
+        signal: overlayResolution.contribution.score !== null && overlayResolution.contribution.score > 0.1
+          ? "bullish"
+          : overlayResolution.contribution.score !== null && overlayResolution.contribution.score < -0.1
+            ? "bearish"
+            : "neutral",
+        weight: 0.15,
+        note: `${overlayResolution.agreement}: ${overlayResolution.contribution.note}`,
       },
     ] as const;
 
@@ -342,12 +480,9 @@ export const goldCommodityProfile: CommodityProfile = {
       blockScores,
       indicatorDiagnostics,
       dataCompleteness,
-      relevantOverlays: [
-        { key: "safeHavenRiskOffOverlay", score: input.overlays.safeHavenRiskOffOverlay ?? null },
-        { key: "globalUnrestOverlay", score: input.overlays.globalUnrestOverlay ?? null },
-      ],
+      relevantOverlays: GOLD_RELEVANT_OVERLAYS.map((key) => ({ key, score: input.overlays[key] ?? null })),
       screeningAdjustments: buildScreeningAdjustment(phaseResolution.phase),
-      profileVersion: "gold-v2",
+      profileVersion: "gold-v3",
       asOf: input.asOf,
       status: "partial",
       diagnostics,
