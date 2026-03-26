@@ -18,7 +18,10 @@ export type CommodityIndicatorKey =
   | "usd_broad_index"
   | "usd_yoy"
   | "core_cpi_yoy_us"
-  | "breakeven_10y_us";
+  | "breakeven_10y_us"
+  | "vix_index"
+  | "hy_spread_us"
+  | "financial_conditions_index";
 
 export type CommodityStatus = "ok" | "partial" | "insufficient";
 
@@ -74,6 +77,20 @@ export type CommodityDiagnostics = {
   };
   overlayAgreement: "supportive" | "neutral" | "conflicting" | "unavailable";
   overlayConflict: string[];
+  overlayLayerDiagnostics?: {
+    goldMonetaryStressOverlay: {
+      score: number | null;
+      direction: "supportive" | "neutral" | "opposing";
+      confidence: number;
+    };
+    marketRiskOffOverlay: {
+      score: number | null;
+      direction: "supportive" | "neutral" | "opposing";
+      confidence: number;
+    };
+    primaryDecisionDriver: "goldMonetaryStressOverlay" | "marketRiskOffOverlay" | "none";
+    overlaysDiverging: boolean;
+  };
   confidenceReasons: string[];
   phaseStrength: "strong" | "moderate" | "weak";
   phaseReasoning: string[];

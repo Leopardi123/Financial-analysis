@@ -35,6 +35,9 @@ const INDICATOR_KEYS: CommodityIndicatorKey[] = [
   "usd_yoy",
   "core_cpi_yoy_us",
   "breakeven_10y_us",
+  "vix_index",
+  "hy_spread_us",
+  "financial_conditions_index",
 ];
 
 function parseCommodity(value: unknown): CommodityId | null {

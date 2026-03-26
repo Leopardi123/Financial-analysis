@@ -94,6 +94,20 @@ type CommoditySnapshotPayload = {
       };
       overlayAgreement: "supportive" | "neutral" | "conflicting" | "unavailable";
       overlayConflict: string[];
+      overlayLayerDiagnostics?: {
+        goldMonetaryStressOverlay: {
+          score: number | null;
+          direction: "supportive" | "neutral" | "opposing";
+          confidence: number;
+        };
+        marketRiskOffOverlay: {
+          score: number | null;
+          direction: "supportive" | "neutral" | "opposing";
+          confidence: number;
+        };
+        primaryDecisionDriver: "goldMonetaryStressOverlay" | "marketRiskOffOverlay" | "none";
+        overlaysDiverging: boolean;
+      };
       confidenceReasons: string[];
       phaseStrength: "strong" | "moderate" | "weak";
       phaseReasoning: string[];
@@ -957,6 +971,9 @@ export default function SectorDashboard() {
                   <div><strong>Ignored overlays:</strong> {commoditySnapshot.snapshot.diagnostics.ignoredOverlays.join(", ") || "none"}</div>
                   <div><strong>Overlay contribution:</strong> {commoditySnapshot.snapshot.diagnostics.overlayContribution.classification} ({commoditySnapshot.snapshot.diagnostics.overlayContribution.score?.toFixed(2) ?? "n/a"}) — {commoditySnapshot.snapshot.diagnostics.overlayContribution.note}</div>
                   <div><strong>Overlay agreement/conflict:</strong> {commoditySnapshot.snapshot.diagnostics.overlayAgreement}{commoditySnapshot.snapshot.diagnostics.overlayConflict.length > 0 ? ` | ${commoditySnapshot.snapshot.diagnostics.overlayConflict.join(" | ")}` : ""}</div>
+                  <div><strong>Gold Monetary Stress Overlay:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.score?.toFixed(2) ?? "n/a"} ({commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.direction ?? "n/a"}, conf={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.confidence.toFixed(2) ?? "n/a"})</div>
+                  <div><strong>Market Risk-Off Overlay:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.score?.toFixed(2) ?? "n/a"} ({commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.direction ?? "n/a"}, conf={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.confidence.toFixed(2) ?? "n/a"})</div>
+                  <div><strong>Primary overlay driver:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.primaryDecisionDriver ?? "n/a"} | diverging={String(commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.overlaysDiverging ?? false)}</div>
                   <div><strong>Block scores:</strong></div>
                   <ul>
                     {commoditySnapshot.snapshot.blockScores.map((block) => (

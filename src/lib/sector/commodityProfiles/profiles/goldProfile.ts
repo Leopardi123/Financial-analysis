@@ -31,6 +31,7 @@ const GOLD_RELEVANT_OVERLAYS = [
 
 type OverlayAgreement = "supportive" | "neutral" | "conflicting" | "unavailable";
 type RegimeAgreementWithPrice = "confirming" | "diverging" | "neutral";
+type LayerDirection = "supportive" | "neutral" | "opposing";
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -158,7 +159,60 @@ function resolveOverlayAgreement(priceTrendScore: number | null, overlayComposit
   };
 }
 
-function classifyGoldRegime(input: CommodityProfileInput): {
+function toLayerDirection(score: number | null): LayerDirection {
+  if (score === null) return "neutral";
+  if (score >= 0.15) return "supportive";
+  if (score <= -0.15) return "opposing";
+  return "neutral";
+}
+
+function buildGoldMonetaryStressOverlay(input: CommodityProfileInput) {
+  const goldSpread = getIndicator(input, "gold_minus_real_yield_spread");
+  const realYield = getIndicator(input, "real_yield_10y_us");
+  const usdTrend = getIndicator(input, "usd_yoy") ?? getIndicator(input, "usd_broad_index");
+  const spreadSignal = scoreToNormalized(goldSpread);
+  const realRateSignal = scoreToNormalized(realYield, true);
+  const usdSignal = scoreToNormalized(usdTrend, true);
+  const score = avg([spreadSignal, realRateSignal, usdSignal]);
+  const confidence = clamp([spreadSignal, realRateSignal, usdSignal].filter((item) => item !== null).length / 3, 0, 1);
+  return {
+    score,
+    direction: toLayerDirection(score),
+    confidence,
+    notes: [
+      `spread=${spreadSignal === null ? "n/a" : spreadSignal.toFixed(2)}`,
+      `realRate=${realRateSignal === null ? "n/a" : realRateSignal.toFixed(2)}`,
+      `usd=${usdSignal === null ? "n/a" : usdSignal.toFixed(2)}`,
+    ],
+  };
+}
+
+function buildMarketRiskOffOverlay(input: CommodityProfileInput) {
+  const vix = getIndicator(input, "vix_index");
+  const hySpread = getIndicator(input, "hy_spread_us");
+  const fci = getIndicator(input, "financial_conditions_index");
+  const vixSignal = scoreToNormalized(vix);
+  const hySignal = scoreToNormalized(hySpread);
+  const fciSignal = scoreToNormalized(fci);
+  const score = avg([vixSignal, hySignal, fciSignal]);
+  const confidence = clamp([vixSignal, hySignal, fciSignal].filter((item) => item !== null).length / 3, 0, 1);
+  return {
+    score,
+    direction: toLayerDirection(score),
+    confidence,
+    notes: [
+      `vix=${vixSignal === null ? "n/a" : vixSignal.toFixed(2)}`,
+      `hy=${hySignal === null ? "n/a" : hySignal.toFixed(2)}`,
+      `fci=${fciSignal === null ? "n/a" : fciSignal.toFixed(2)}`,
+    ],
+  };
+}
+
+function classifyGoldRegime(
+  input: CommodityProfileInput,
+  monetaryStressOverlay: { score: number | null; direction: LayerDirection; confidence: number },
+  marketRiskOffOverlay: { score: number | null; direction: LayerDirection; confidence: number },
+): {
   regime: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
   regimeConfidence: number;
   regimeDrivers: CommodityRegimeDriver[];
@@ -205,16 +259,29 @@ function classifyGoldRegime(input: CommodityProfileInput): {
     },
   ];
 
-  const availableSignals = [realYield, usdYoy ?? usdBroad, breakeven, goldSpread].filter(Boolean).length;
-  const regimeConfidence = clamp(availableSignals / 4, 0, 1);
+  regimeDrivers.push({
+    id: "gold_monetary_stress_overlay",
+    label: "Gold Monetary Stress Overlay",
+    signal: monetaryStressOverlay.direction === "supportive" ? "supportive" : monetaryStressOverlay.direction === "opposing" ? "headwind" : "neutral",
+    note: `score=${monetaryStressOverlay.score === null ? "n/a" : monetaryStressOverlay.score.toFixed(2)}, confidence=${monetaryStressOverlay.confidence.toFixed(2)}`,
+  });
+  regimeDrivers.push({
+    id: "market_risk_off_overlay",
+    label: "Market Risk-Off Overlay",
+    signal: marketRiskOffOverlay.direction === "supportive" ? "supportive" : marketRiskOffOverlay.direction === "opposing" ? "headwind" : "neutral",
+    note: `score=${marketRiskOffOverlay.score === null ? "n/a" : marketRiskOffOverlay.score.toFixed(2)}, confidence=${marketRiskOffOverlay.confidence.toFixed(2)}`,
+  });
 
-  if (realYieldDown && inflationUp) {
+  const availableSignals = [realYield, usdYoy ?? usdBroad, breakeven, goldSpread].filter(Boolean).length;
+  const regimeConfidence = clamp(availableSignals / 4 * 0.7 + ((monetaryStressOverlay.confidence + marketRiskOffOverlay.confidence) / 2) * 0.3, 0, 1);
+
+  if ((realYieldDown && inflationUp) || (monetaryStressOverlay.score ?? 0) >= 0.35) {
     return { regime: "Monetary Stress", regimeConfidence, regimeDrivers };
   }
-  if (realYieldUp && inflationDownOrFlat) {
+  if (realYieldUp && inflationDownOrFlat && (monetaryStressOverlay.score ?? 0) <= 0.1) {
     return { regime: "Disinflation / Real Yield Rising", regimeConfidence, regimeDrivers };
   }
-  if (usdUp && realYieldDown && goldUp) {
+  if ((usdUp && realYieldDown && goldUp) || (marketRiskOffOverlay.score ?? 0) >= 0.35) {
     return { regime: "Risk-Off (deflationary)", regimeConfidence, regimeDrivers };
   }
   return { regime: "Neutral / Competing Assets", regimeConfidence, regimeDrivers };
@@ -240,6 +307,7 @@ function buildConfidence(args: {
   blockScores: CommodityBlockScore[];
   overlayAgreement: OverlayAgreement;
   regimeAgreementWithPrice: RegimeAgreementWithPrice;
+  overlaysDiverging: boolean;
 }): CommodityConfidence {
   const usedRequired = args.indicatorDiagnostics.filter((item) => item.used && args.required.includes(item.key)).length;
   const usedOptional = args.indicatorDiagnostics.filter((item) => item.used && args.optional.includes(item.key)).length;
@@ -258,6 +326,7 @@ function buildConfidence(args: {
 
   if (args.overlayAgreement === "supportive") signalCoherence = clamp(signalCoherence + 0.08, 0, 1);
   if (args.overlayAgreement === "conflicting") signalCoherence = clamp(signalCoherence - 0.12, 0, 1);
+  if (args.overlaysDiverging) signalCoherence = clamp(signalCoherence - 0.08, 0, 1);
   if (args.regimeAgreementWithPrice === "confirming") signalCoherence = clamp(signalCoherence + 0.06, 0, 1);
   if (args.regimeAgreementWithPrice === "diverging") signalCoherence = clamp(signalCoherence - 0.1, 0, 1);
 
@@ -268,7 +337,7 @@ function buildConfidence(args: {
   const tier = score >= 0.75 ? "high" : score >= 0.45 ? "medium" : "low";
   const reasons = [
     `Data completeness=${dataCompleteness.toFixed(2)} from required/optional coverage.`,
-    `Signal coherence=${signalCoherence.toFixed(2)} including overlay effect (${args.overlayAgreement}) and regime/price agreement (${args.regimeAgreementWithPrice}).`,
+    `Signal coherence=${signalCoherence.toFixed(2)} including overlay effect (${args.overlayAgreement}), overlay divergence=${String(args.overlaysDiverging)}, and regime/price agreement (${args.regimeAgreementWithPrice}).`,
     `Fallback penalty=${fallbackPenalty.toFixed(2)} (fallback count=${fallbackCount}).`,
   ];
 
@@ -415,6 +484,16 @@ export const goldCommodityProfile: CommodityProfile = {
     const breakeven = getIndicator(input, "breakeven_10y_us");
 
     const overlaySummary = summarizeOverlays(input);
+    const goldMonetaryStressOverlay = buildGoldMonetaryStressOverlay(input);
+    const marketRiskOffOverlay = buildMarketRiskOffOverlay(input);
+    const overlaysDiverging = goldMonetaryStressOverlay.score !== null
+      && marketRiskOffOverlay.score !== null
+      && Math.sign(goldMonetaryStressOverlay.score) !== 0
+      && Math.sign(marketRiskOffOverlay.score) !== 0
+      && Math.sign(goldMonetaryStressOverlay.score) !== Math.sign(marketRiskOffOverlay.score);
+    const primaryOverlayDriver = Math.abs((goldMonetaryStressOverlay.score ?? 0) * goldMonetaryStressOverlay.confidence) >= Math.abs((marketRiskOffOverlay.score ?? 0) * marketRiskOffOverlay.confidence)
+      ? "goldMonetaryStressOverlay"
+      : "marketRiskOffOverlay";
 
     const blockAPercentile = percentileSignal(gold?.percentile10y ?? null);
     const blockAMomentum = momentumSignal(gold?.momentum12m ?? gold?.yoy ?? null);
@@ -430,12 +509,12 @@ export const goldCommodityProfile: CommodityProfile = {
       scoreToNormalized(coreCpi),
       scoreToNormalized(breakeven),
       macroRegimeScore,
-      overlaySummary.macroOverlayScore,
+      goldMonetaryStressOverlay.score,
     ]);
 
-    const blockDScore = overlaySummary.policyNarrativeScore;
+    const blockDScore = marketRiskOffOverlay.score;
 
-    const overlayCompositeScore = avg([overlaySummary.macroOverlayScore, blockDScore]);
+    const overlayCompositeScore = avg([goldMonetaryStressOverlay.score, marketRiskOffOverlay.score]);
     const overlayResolution = resolveOverlayAgreement(blockAScore, overlayCompositeScore);
 
     const blockScores: CommodityBlockScore[] = [
@@ -460,7 +539,7 @@ export const goldCommodityProfile: CommodityProfile = {
         notes: [
           "Uses real rates, dollar pressure, macro regime and macro-relevant overlays.",
           `Macro regime=${input.macroContext.coreRegimeLabel ?? "n/a"} (${macroRegimeScore === null ? "n/a" : macroRegimeScore.toFixed(2)})`,
-          `Overlay macro contribution=${overlaySummary.macroOverlayScore === null ? "n/a" : overlaySummary.macroOverlayScore.toFixed(2)}`,
+          `Gold Monetary Stress Overlay=${goldMonetaryStressOverlay.score === null ? "n/a" : goldMonetaryStressOverlay.score.toFixed(2)} (${goldMonetaryStressOverlay.direction})`,
         ],
       },
       {
@@ -478,8 +557,8 @@ export const goldCommodityProfile: CommodityProfile = {
         confidence: blockDScore === null ? 0 : 0.7,
         status: blockDScore === null ? "not_used" : "used",
         notes: blockDScore === null
-          ? ["Policy/systemic overlays missing -> block kept as not_used."]
-          : ["Built from systemic stress overlays (safe haven/unrest/credit funding)."],
+          ? ["Market Risk-Off overlay missing -> block kept as not_used."]
+          : [`Built from market risk-off inputs (VIX/credit/equity stress): ${marketRiskOffOverlay.notes.join(", ")}`],
       },
     ];
 
@@ -492,7 +571,7 @@ export const goldCommodityProfile: CommodityProfile = {
       overlayContributionScore: overlayResolution.contribution.score,
       phaseScore,
     });
-    const regimeClassification = classifyGoldRegime(input);
+    const regimeClassification = classifyGoldRegime(input, goldMonetaryStressOverlay, marketRiskOffOverlay);
     const regimeAgreementWithPrice = resolveRegimeAgreementWithPrice({
       phase: phaseResolution.phase,
       phaseScore,
@@ -526,6 +605,7 @@ export const goldCommodityProfile: CommodityProfile = {
       blockScores,
       overlayAgreement: overlayResolution.agreement,
       regimeAgreementWithPrice,
+      overlaysDiverging,
     });
 
     const dataCompleteness = confidence.breakdown.dataCompleteness;
@@ -542,6 +622,20 @@ export const goldCommodityProfile: CommodityProfile = {
       overlayContribution: overlayResolution.contribution,
       overlayAgreement: overlayResolution.agreement,
       overlayConflict: overlayResolution.conflicts,
+      overlayLayerDiagnostics: {
+        goldMonetaryStressOverlay: {
+          score: goldMonetaryStressOverlay.score,
+          direction: goldMonetaryStressOverlay.direction,
+          confidence: goldMonetaryStressOverlay.confidence,
+        },
+        marketRiskOffOverlay: {
+          score: marketRiskOffOverlay.score,
+          direction: marketRiskOffOverlay.direction,
+          confidence: marketRiskOffOverlay.confidence,
+        },
+        primaryDecisionDriver: primaryOverlayDriver,
+        overlaysDiverging,
+      },
       confidenceReasons: confidence.reasons,
       phaseStrength: phaseScore === null ? "weak" : Math.abs(phaseScore) >= 0.5 ? "strong" : Math.abs(phaseScore) >= 0.25 ? "moderate" : "weak",
       phaseReasoning: phaseResolution.reasoning,
@@ -550,6 +644,7 @@ export const goldCommodityProfile: CommodityProfile = {
         "Snapshot separates indicator-layer and overlay-layer contributions explicitly.",
         "Missing overlay data does not create synthetic proxies; it reduces agreement/coherence instead.",
         `Gold regime=${regimeClassification.regime}; agreementWithPrice=${regimeAgreementWithPrice}.`,
+        `Primary overlay driver=${primaryOverlayDriver}; overlaysDiverging=${String(overlaysDiverging)}.`,
       ],
     };
 
