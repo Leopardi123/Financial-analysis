@@ -448,6 +448,8 @@ export default function SectorDashboard() {
     }
     return GENERIC_QUESTIONS;
   }, [sector, subsector]);
+  const isGoldCommodityView = sector === "materials" && subsector === "gold_miners";
+  const manualInputStatus = manualInputs.length > 0 ? "available" : "none";
 
   useEffect(() => {
     if (!filteredSectorOptions.some((item) => item.id === sector)) {
@@ -752,8 +754,9 @@ export default function SectorDashboard() {
         <div className="sector-card">
           <h3>Manual inputs</h3>
           <p className="bread">
-            Fyll i manuella inputs för cykelbedömning. Alla svar sparas med tidsstämpel och kopplas
-            till sektor/undersektor.
+            Manuella inputs är ett valfritt analystlager som kompletterar den automatiska
+            commodity-bedömningen. Alla svar sparas med tidsstämpel och kopplas till
+            sektor/undersektor.
           </p>
           <div className="manual-inputs">
             {questions.map((question) => (
@@ -869,16 +872,43 @@ export default function SectorDashboard() {
 
         <div className="sector-card">
           <h3>Cykelbedömning</h3>
-          <p className="bread">
-            Cykelstatus genereras först när både automatiska datapunkter och manuella inputs finns.
-            Just nu saknas automatiska datapunkter, så status visas som TODO.
-          </p>
-          <div className="cycle-status">TODO: Kombinera datapunkter och manuella inputs.</div>
+          {isGoldCommodityView ? (
+            !commoditySnapshot?.ok || !commoditySnapshot.snapshot ? (
+              <>
+                <p className="bread">
+                  Commodity snapshot är source of truth för gold_miners, men kunde inte laddas nu.
+                </p>
+                <div className="cycle-status">Status: snapshot unavailable.</div>
+              </>
+            ) : (
+              <>
+                <p className="bread">
+                  Automatisk commodity-bedömning är primär source of truth. Manuella inputs är ett
+                  kompletterande analystlager och blockerar inte grundfasen.
+                </p>
+                <div className="metric-list">
+                  <div><strong>Phase:</strong> {commoditySnapshot.snapshot.phase}</div>
+                  <div><strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</div>
+                  <div><strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}</div>
+                  <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
+                  <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
+                  <div><strong>Analyst layer:</strong> {manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</div>
+                </div>
+              </>
+            )
+          ) : (
+            <>
+              <p className="bread">
+                Cykelstatus för denna vy är ännu inte kopplad till commodity snapshot.
+              </p>
+              <div className="cycle-status">TODO: Integrera snapshot-baserad cykelbedömning för fler råvaruvyer.</div>
+            </>
+          )}
         </div>
 
-        {sector === "materials" && subsector === "gold_miners" ? (
+        {isGoldCommodityView ? (
           <div className="sector-card">
-            <h3>Commodity snapshot (Gold)</h3>
+            <h3>Commodity snapshot (Gold) – debug/readout</h3>
             {!commoditySnapshot?.ok || !commoditySnapshot.snapshot ? (
               <div className="status empty">
                 {commoditySnapshot?.error ?? "Ingen commodity snapshot tillgänglig."}
@@ -890,8 +920,20 @@ export default function SectorDashboard() {
                 <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
                 <div><strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</div>
                 <div><strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}</div>
+                <div><strong>Source of truth:</strong> commodity snapshot</div>
+                <div><strong>Manual input status:</strong> {manualInputStatus}</div>
+                <div><strong>Manual impact on snapshot:</strong> none (supplemental layer only in current phase)</div>
                 <details>
                   <summary>Diagnostics (debug)</summary>
+                  <div><strong>Drivers:</strong></div>
+                  <ul>
+                    {commoditySnapshot.snapshot.drivers.map((driver) => (
+                      <li key={driver.id}>
+                        {driver.label}: {driver.signal} (w={driver.weight.toFixed(2)})
+                        {driver.note ? ` — ${driver.note}` : ""}
+                      </li>
+                    ))}
+                  </ul>
                   <div><strong>Used indicators:</strong> {commoditySnapshot.snapshot.diagnostics.usedIndicators.join(", ") || "none"}</div>
                   <div><strong>Missing indicators:</strong> {commoditySnapshot.snapshot.diagnostics.missingIndicators.join(", ") || "none"}</div>
                   <div><strong>Used overlays:</strong> {commoditySnapshot.snapshot.diagnostics.usedOverlays.join(", ") || "none"}</div>
