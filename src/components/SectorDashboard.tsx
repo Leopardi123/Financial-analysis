@@ -60,6 +60,7 @@ type CommoditySnapshotPayload = {
     profileVersion: string;
     asOf: string;
     goldRegime?: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+    copperRegime?: "Demand expansion" | "Demand contraction" | "Supply tightness" | "Supply expansion";
     regimeConfidence?: number;
     regimeAgreementWithPrice?: "confirming" | "diverging" | "neutral";
     regimeDrivers?: Array<{ id: string; label: string; signal: "supportive" | "headwind" | "neutral"; note: string }>;
@@ -208,6 +209,24 @@ const GOLD_QUESTIONS = [
     inputType: "management_focus",
     label: "Ledningens fokus",
     options: ["Avkastning", "Volym", "Tillväxt till varje pris"],
+  },
+];
+
+const COPPER_QUESTIONS = [
+  {
+    inputType: "copper_demand_trend",
+    label: "PMI / demand-trend",
+    options: ["Accelererande", "Stabil", "Avtagande"],
+  },
+  {
+    inputType: "copper_supply_balance",
+    label: "Supply balance (koppar)",
+    options: ["Tight", "Balans", "Överskott"],
+  },
+  {
+    inputType: "copper_capex_cycle",
+    label: "CAPEX-cykel (koppar)",
+    options: ["Expanderar", "Neutral", "Kontraherar"],
   },
 ];
 
@@ -464,12 +483,18 @@ export default function SectorDashboard() {
     if (sector === "materials" && subsector === "gold_miners") {
       return [...GENERIC_QUESTIONS, ...GOLD_QUESTIONS];
     }
+    if (sector === "materials" && subsector === "copper_miners") {
+      return [...GENERIC_QUESTIONS, ...COPPER_QUESTIONS];
+    }
     if (sector === "energy" && subsector === "oil_gas_producers") {
       return [...GENERIC_QUESTIONS, ...OIL_QUESTIONS];
     }
     return GENERIC_QUESTIONS;
   }, [sector, subsector]);
   const isGoldCommodityView = sector === "materials" && subsector === "gold_miners";
+  const isCopperCommodityView = sector === "materials" && subsector === "copper_miners";
+  const selectedCommodity = isGoldCommodityView ? "gold" : isCopperCommodityView ? "copper" : null;
+  const isCommoditySnapshotView = selectedCommodity !== null;
   const manualInputStatus = manualInputs.length > 0 ? "available" : "none";
 
   useEffect(() => {
@@ -507,13 +532,13 @@ export default function SectorDashboard() {
   }, [sector, subsector]);
 
   useEffect(() => {
-    if (!(sector === "materials" && subsector === "gold_miners")) {
+    if (!selectedCommodity) {
       setCommoditySnapshot(null);
       return;
     }
     let active = true;
     async function loadCommoditySnapshot() {
-      const response = await fetch("/api/sector/commodity-snapshot?commodity=gold");
+      const response = await fetch(`/api/sector/commodity-snapshot?commodity=${selectedCommodity}`);
       const payload = (await response.json()) as CommoditySnapshotPayload;
       if (active) {
         setCommoditySnapshot(payload);
@@ -523,7 +548,7 @@ export default function SectorDashboard() {
     return () => {
       active = false;
     };
-  }, [sector, subsector]);
+  }, [selectedCommodity]);
 
   useEffect(() => {
     let active = true;
@@ -893,11 +918,11 @@ export default function SectorDashboard() {
 
         <div className="sector-card">
           <h3>Cykelbedömning</h3>
-          {isGoldCommodityView ? (
+          {isCommoditySnapshotView ? (
             !commoditySnapshot?.ok || !commoditySnapshot.snapshot ? (
               <>
                 <p className="bread">
-                  Commodity snapshot är source of truth för gold_miners, men kunde inte laddas nu.
+                  Commodity snapshot är source of truth för denna råvaruvy, men kunde inte laddas nu.
                 </p>
                 <div className="cycle-status">Status: snapshot unavailable.</div>
               </>
@@ -912,7 +937,7 @@ export default function SectorDashboard() {
                   <div><strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</div>
                   <div><strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}</div>
                   <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
-                  <div><strong>Gold regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? "n/a"}</div>
+                  <div><strong>Regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a"}</div>
                   <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
                   <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
                   <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
@@ -930,9 +955,9 @@ export default function SectorDashboard() {
           )}
         </div>
 
-        {isGoldCommodityView ? (
+        {isCommoditySnapshotView ? (
           <div className="sector-card">
-            <h3>Commodity snapshot (Gold) – debug/readout</h3>
+            <h3>Commodity snapshot ({selectedCommodity === "gold" ? "Gold" : "Copper"}) – debug/readout</h3>
             {!commoditySnapshot?.ok || !commoditySnapshot.snapshot ? (
               <div className="status empty">
                 {commoditySnapshot?.error ?? "Ingen commodity snapshot tillgänglig."}
@@ -947,7 +972,7 @@ export default function SectorDashboard() {
                 <div><strong>Source of truth:</strong> commodity snapshot</div>
                 <div><strong>Manual input status:</strong> {manualInputStatus}</div>
                 <div><strong>Manual impact on snapshot:</strong> none (supplemental layer only in current phase)</div>
-                <div><strong>Regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? "n/a"} ({commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"})</div>
+                <div><strong>Regime:</strong> {(commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a")} ({commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"})</div>
                 <details>
                   <summary>Diagnostics (debug)</summary>
                   <div><strong>Regime drivers:</strong></div>
@@ -974,10 +999,16 @@ export default function SectorDashboard() {
                   <div><strong>Ignored overlays:</strong> {commoditySnapshot.snapshot.diagnostics.ignoredOverlays.join(", ") || "none"}</div>
                   <div><strong>Overlay contribution:</strong> {commoditySnapshot.snapshot.diagnostics.overlayContribution.classification} ({commoditySnapshot.snapshot.diagnostics.overlayContribution.score?.toFixed(2) ?? "n/a"}) — {commoditySnapshot.snapshot.diagnostics.overlayContribution.note}</div>
                   <div><strong>Overlay agreement/conflict:</strong> {commoditySnapshot.snapshot.diagnostics.overlayAgreement}{commoditySnapshot.snapshot.diagnostics.overlayConflict.length > 0 ? ` | ${commoditySnapshot.snapshot.diagnostics.overlayConflict.join(" | ")}` : ""}</div>
-                  <div><strong>Gold Monetary Stress Overlay:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.score?.toFixed(2) ?? "n/a"} ({commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.direction ?? "n/a"}, conf={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.confidence.toFixed(2) ?? "n/a"})</div>
-                  <div><strong>Market Risk-Off Overlay:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.score?.toFixed(2) ?? "n/a"} ({commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.direction ?? "n/a"}, conf={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.confidence.toFixed(2) ?? "n/a"})</div>
-                  <div><strong>Primary overlay driver:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.primaryDecisionDriver ?? "n/a"} | diverging={String(commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.overlaysDiverging ?? false)}</div>
-                  <div><strong>Regime override:</strong> {String(commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.regimeOverrideApplied ?? false)} (base={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.baseRegime ?? "n/a"}){commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.regimeOverrideReason ? ` — ${commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics.regimeOverrideReason}` : ""}</div>
+                  {selectedCommodity === "gold" ? (
+                    <>
+                      <div><strong>Gold Monetary Stress Overlay:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.score?.toFixed(2) ?? "n/a"} ({commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.direction ?? "n/a"}, conf={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.goldMonetaryStressOverlay.confidence.toFixed(2) ?? "n/a"})</div>
+                      <div><strong>Market Risk-Off Overlay:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.score?.toFixed(2) ?? "n/a"} ({commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.direction ?? "n/a"}, conf={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.marketRiskOffOverlay.confidence.toFixed(2) ?? "n/a"})</div>
+                      <div><strong>Primary overlay driver:</strong> {commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.primaryDecisionDriver ?? "n/a"} | diverging={String(commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.overlaysDiverging ?? false)}</div>
+                      <div><strong>Regime override:</strong> {String(commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.regimeOverrideApplied ?? false)} (base={commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.baseRegime ?? "n/a"}){commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics?.regimeOverrideReason ? ` — ${commoditySnapshot.snapshot.diagnostics.overlayLayerDiagnostics.regimeOverrideReason}` : ""}</div>
+                    </>
+                  ) : (
+                    <div><strong>Copper note:</strong> Monetary overlay diagnostics är ej relevanta för copper-profilen.</div>
+                  )}
                   <div><strong>Block scores:</strong></div>
                   <ul>
                     {commoditySnapshot.snapshot.blockScores.map((block) => (
