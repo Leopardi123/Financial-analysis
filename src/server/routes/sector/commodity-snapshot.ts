@@ -21,6 +21,11 @@ type RegimeRow = {
   macro_regime_probability_json: string | null;
 };
 
+type GoldRawRow = {
+  date: string;
+  value: number | null;
+};
+
 const SUPPORTED_COMMODITIES = new Set<CommodityId>(["gold"]);
 const INDICATOR_KEYS: CommodityIndicatorKey[] = [
   "gold_usd",
@@ -90,6 +95,24 @@ export default async function handler(req: any, res: any) {
       INDICATOR_KEYS,
     )) as unknown as IndicatorRow[];
 
+    const goldRawRows = (await query(
+      `SELECT date, value
+       FROM ${tables.macroRawDatapoints}
+       WHERE region = 'US'
+         AND source_type = 'auto'
+         AND series_key = 'gold_usd'
+         AND date >= date('now', '-10 years')
+       ORDER BY date ASC`,
+    )) as unknown as GoldRawRow[];
+    const numericGoldValues = goldRawRows.map((row) => row.value).filter((value): value is number => typeof value === "number");
+    const goldMean10y = numericGoldValues.length > 0
+      ? numericGoldValues.reduce((sum, value) => sum + value, 0) / numericGoldValues.length
+      : null;
+    const goldStd10y = goldMean10y !== null && numericGoldValues.length > 1
+      ? Math.sqrt(numericGoldValues.reduce((sum, value) => sum + ((value - goldMean10y) ** 2), 0) / numericGoldValues.length)
+      : null;
+    const goldLatest = numericGoldValues.length > 0 ? numericGoldValues[numericGoldValues.length - 1] : null;
+
     const indicatorByKey = new Map<CommodityIndicatorKey, CommodityProfileInputIndicator>();
     for (const key of INDICATOR_KEYS) {
       const row = indicatorRows.find((entry) => entry.indicator_id === key);
@@ -103,6 +126,13 @@ export default async function handler(req: any, res: any) {
         change3m: row.change_3m === null ? null : Number(row.change_3m),
         yoy: row.yoy === null ? null : Number(row.yoy),
         asOf: row.as_of_date ?? null,
+        momentum12m: key === "gold_usd" ? (row.yoy === null ? null : Number(row.yoy)) : null,
+        deviationFromMeanZ: key === "gold_usd"
+          ? (() => {
+            if (goldMean10y === null || goldStd10y === null || goldLatest === null || goldStd10y === 0) return null;
+            return (goldLatest - goldMean10y) / goldStd10y;
+          })()
+          : null,
       });
     }
 

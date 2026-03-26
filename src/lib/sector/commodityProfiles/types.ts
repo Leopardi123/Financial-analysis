@@ -57,6 +57,7 @@ export type CommodityDiagnostics = {
   fallbackIndicators: CommodityIndicatorKey[];
   confidenceReasons: string[];
   phaseStrength: "strong" | "moderate" | "weak";
+  phaseReasoning: string[];
   notes: string[];
 };
 
@@ -64,6 +65,11 @@ export type CommodityConfidence = {
   score: number;
   tier: "high" | "medium" | "low";
   breakdown: {
+    dataCompleteness: number;
+    signalCoherence: number;
+    fallbackPenalty: number;
+  };
+  confidenceComponents: {
     dataCompleteness: number;
     signalCoherence: number;
     fallbackPenalty: number;
@@ -89,6 +95,8 @@ export type CommodityProfileInputIndicator = {
   change3m: number | null;
   yoy: number | null;
   asOf: string | null;
+  momentum12m?: number | null;
+  deviationFromMeanZ?: number | null;
 };
 
 export type CommodityProfileInput = {

@@ -67,6 +67,11 @@ type CommoditySnapshotPayload = {
         signalCoherence: number;
         fallbackPenalty: number;
       };
+      confidenceComponents: {
+        dataCompleteness: number;
+        signalCoherence: number;
+        fallbackPenalty: number;
+      };
       reasons: string[];
     };
     drivers: Array<{ id: string; label: string; signal: "bullish" | "bearish" | "neutral"; weight: number; note?: string }>;
@@ -77,11 +82,16 @@ type CommoditySnapshotPayload = {
       fallbackIndicators: string[];
       confidenceReasons: string[];
       phaseStrength: "strong" | "moderate" | "weak";
+      phaseReasoning: string[];
       notes: string[];
     };
     screeningAdjustments: {
       bias: "supportive" | "neutral" | "defensive" | "caution";
       notes?: string[];
+      thresholdAdjustments?: {
+        valuationMultipleFloorDeltaPct?: number;
+        maxPositionSizeDeltaPct?: number;
+      };
     };
   };
   error?: string;
@@ -884,7 +894,9 @@ export default function SectorDashboard() {
                   </ul>
                   <div><strong>Confidence breakdown:</strong> completeness={commoditySnapshot.snapshot.confidence.breakdown.dataCompleteness.toFixed(2)}, coherence={commoditySnapshot.snapshot.confidence.breakdown.signalCoherence.toFixed(2)}, fallbackPenalty={commoditySnapshot.snapshot.confidence.breakdown.fallbackPenalty.toFixed(2)}</div>
                   <div><strong>Resolved phase:</strong> {commoditySnapshot.snapshot.phase} ({commoditySnapshot.snapshot.diagnostics.phaseStrength})</div>
+                  <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
                   <div><strong>Screening adjustments:</strong> {commoditySnapshot.snapshot.screeningAdjustments.notes?.join(" | ") ?? "none"}</div>
+                  <div><strong>Threshold adjustments:</strong> valuation floor Δ={commoditySnapshot.snapshot.screeningAdjustments.thresholdAdjustments?.valuationMultipleFloorDeltaPct ?? 0}%, max position Δ={commoditySnapshot.snapshot.screeningAdjustments.thresholdAdjustments?.maxPositionSizeDeltaPct ?? 0}%</div>
                   <div><strong>Profile version:</strong> {commoditySnapshot.snapshot.profileVersion}</div>
                 </details>
               </div>
