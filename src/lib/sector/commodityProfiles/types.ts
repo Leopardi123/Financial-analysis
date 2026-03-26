@@ -72,10 +72,10 @@ export type CommodityDiagnostics = {
   ignoredOverlays: string[];
   overlayContribution: {
     score: number | null;
-    classification: "supportive" | "neutral" | "conflicting" | "unavailable";
+    classification: "supportive" | "partial_support" | "neutral" | "partial_conflict" | "conflict" | "unavailable";
     note: string;
   };
-  overlayAgreement: "supportive" | "neutral" | "conflicting" | "unavailable";
+  overlayAgreement: "supportive" | "partial_support" | "neutral" | "partial_conflict" | "conflict" | "unavailable";
   overlayConflict: string[];
   overlayLayerDiagnostics?: {
     goldMonetaryStressOverlay: {
@@ -90,6 +90,9 @@ export type CommodityDiagnostics = {
     };
     primaryDecisionDriver: "goldMonetaryStressOverlay" | "marketRiskOffOverlay" | "none";
     overlaysDiverging: boolean;
+    regimeOverrideApplied?: boolean;
+    baseRegime?: CommodityRegime;
+    regimeOverrideReason?: string | null;
   };
   confidenceReasons: string[];
   phaseStrength: "strong" | "moderate" | "weak";

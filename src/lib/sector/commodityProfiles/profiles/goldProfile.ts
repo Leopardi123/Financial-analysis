@@ -29,7 +29,7 @@ const GOLD_RELEVANT_OVERLAYS = [
   "globalUnrestOverlay",
 ] as const;
 
-type OverlayAgreement = "supportive" | "neutral" | "conflicting" | "unavailable";
+type OverlayAgreement = "supportive" | "partial_support" | "neutral" | "partial_conflict" | "conflict" | "unavailable";
 type RegimeAgreementWithPrice = "confirming" | "diverging" | "neutral";
 type LayerDirection = "supportive" | "neutral" | "opposing";
 
@@ -137,6 +137,13 @@ function resolveOverlayAgreement(priceTrendScore: number | null, overlayComposit
   const conflict = Math.sign(priceTrendScore) !== 0 && Math.sign(overlayCompositeScore) !== 0 && Math.sign(priceTrendScore) !== Math.sign(overlayCompositeScore);
 
   if (sameDirection && Math.abs(overlayCompositeScore) >= 0.15) {
+    if (Math.abs(overlayCompositeScore) < 0.35) {
+      return {
+        agreement: "partial_support",
+        contribution: { score: overlayCompositeScore, classification: "partial_support", note: "Overlays support price/trend, but support is moderate." },
+        conflicts: [],
+      };
+    }
     return {
       agreement: "supportive",
       contribution: { score: overlayCompositeScore, classification: "supportive", note: "Overlays confirm price/trend direction." },
@@ -145,9 +152,16 @@ function resolveOverlayAgreement(priceTrendScore: number | null, overlayComposit
   }
 
   if (conflict) {
+    if (Math.abs(overlayCompositeScore) < 0.35) {
+      return {
+        agreement: "partial_conflict",
+        contribution: { score: overlayCompositeScore, classification: "partial_conflict", note: "Overlays partially conflict with price/trend direction." },
+        conflicts: ["Price/Trend and overlay layer are misaligned (moderate conflict)."],
+      };
+    }
     return {
-      agreement: "conflicting",
-      contribution: { score: overlayCompositeScore, classification: "conflicting", note: "Overlays conflict with price/trend direction." },
+      agreement: "conflict",
+      contribution: { score: overlayCompositeScore, classification: "conflict", note: "Overlays conflict with price/trend direction." },
       conflicts: ["Price/Trend and overlay layer point in opposite directions."],
     };
   }
@@ -214,6 +228,9 @@ function classifyGoldRegime(
   marketRiskOffOverlay: { score: number | null; direction: LayerDirection; confidence: number },
 ): {
   regime: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+  baseRegime: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+  regimeOverrideApplied: boolean;
+  regimeOverrideReason: string | null;
   regimeConfidence: number;
   regimeDrivers: CommodityRegimeDriver[];
 } {
@@ -275,16 +292,30 @@ function classifyGoldRegime(
   const availableSignals = [realYield, usdYoy ?? usdBroad, breakeven, goldSpread].filter(Boolean).length;
   const regimeConfidence = clamp(availableSignals / 4 * 0.7 + ((monetaryStressOverlay.confidence + marketRiskOffOverlay.confidence) / 2) * 0.3, 0, 1);
 
-  if ((realYieldDown && inflationUp) || (monetaryStressOverlay.score ?? 0) >= 0.35) {
-    return { regime: "Monetary Stress", regimeConfidence, regimeDrivers };
+  let baseRegime: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets" = "Neutral / Competing Assets";
+  if (realYieldDown && inflationUp) baseRegime = "Monetary Stress";
+  else if (realYieldUp && inflationDownOrFlat) baseRegime = "Disinflation / Real Yield Rising";
+  else if (usdUp && realYieldDown && goldUp) baseRegime = "Risk-Off (deflationary)";
+
+  let regime = baseRegime;
+  let regimeOverrideApplied = false;
+  let regimeOverrideReason: string | null = null;
+  const realRatesHeadwind = realYieldUp;
+  if ((monetaryStressOverlay.score ?? 0) >= 0.35 && realRatesHeadwind && baseRegime !== "Monetary Stress") {
+    regime = "Monetary Stress";
+    regimeOverrideApplied = true;
+    regimeOverrideReason = "goldMonetaryStressOverlay exceeded threshold while real rates were a headwind.";
+  } else if (baseRegime === "Neutral / Competing Assets" && (marketRiskOffOverlay.score ?? 0) >= 0.35) {
+    regime = "Risk-Off (deflationary)";
+    regimeOverrideApplied = true;
+    regimeOverrideReason = "marketRiskOffOverlay exceeded threshold from neutral base regime.";
+  } else if (baseRegime === "Neutral / Competing Assets" && (monetaryStressOverlay.score ?? 0) >= 0.35) {
+    regime = "Monetary Stress";
+    regimeOverrideApplied = true;
+    regimeOverrideReason = "goldMonetaryStressOverlay exceeded threshold from neutral base regime.";
   }
-  if (realYieldUp && inflationDownOrFlat && (monetaryStressOverlay.score ?? 0) <= 0.1) {
-    return { regime: "Disinflation / Real Yield Rising", regimeConfidence, regimeDrivers };
-  }
-  if ((usdUp && realYieldDown && goldUp) || (marketRiskOffOverlay.score ?? 0) >= 0.35) {
-    return { regime: "Risk-Off (deflationary)", regimeConfidence, regimeDrivers };
-  }
-  return { regime: "Neutral / Competing Assets", regimeConfidence, regimeDrivers };
+
+  return { regime, baseRegime, regimeOverrideApplied, regimeOverrideReason, regimeConfidence, regimeDrivers };
 }
 
 function resolveRegimeAgreementWithPrice(args: {
@@ -308,6 +339,7 @@ function buildConfidence(args: {
   overlayAgreement: OverlayAgreement;
   regimeAgreementWithPrice: RegimeAgreementWithPrice;
   overlaysDiverging: boolean;
+  triangleAlignment: "aligned" | "partial" | "misaligned";
 }): CommodityConfidence {
   const usedRequired = args.indicatorDiagnostics.filter((item) => item.used && args.required.includes(item.key)).length;
   const usedOptional = args.indicatorDiagnostics.filter((item) => item.used && args.optional.includes(item.key)).length;
@@ -325,10 +357,14 @@ function buildConfidence(args: {
   }
 
   if (args.overlayAgreement === "supportive") signalCoherence = clamp(signalCoherence + 0.08, 0, 1);
-  if (args.overlayAgreement === "conflicting") signalCoherence = clamp(signalCoherence - 0.12, 0, 1);
+  if (args.overlayAgreement === "partial_support") signalCoherence = clamp(signalCoherence + 0.04, 0, 1);
+  if (args.overlayAgreement === "partial_conflict") signalCoherence = clamp(signalCoherence - 0.07, 0, 1);
+  if (args.overlayAgreement === "conflict") signalCoherence = clamp(signalCoherence - 0.12, 0, 1);
   if (args.overlaysDiverging) signalCoherence = clamp(signalCoherence - 0.08, 0, 1);
   if (args.regimeAgreementWithPrice === "confirming") signalCoherence = clamp(signalCoherence + 0.06, 0, 1);
   if (args.regimeAgreementWithPrice === "diverging") signalCoherence = clamp(signalCoherence - 0.1, 0, 1);
+  if (args.triangleAlignment === "aligned") signalCoherence = clamp(signalCoherence + 0.05, 0, 1);
+  if (args.triangleAlignment === "misaligned") signalCoherence = clamp(signalCoherence - 0.08, 0, 1);
 
   const fallbackCount = args.indicatorDiagnostics.filter((item) => item.fallbackUsed).length;
   const fallbackPenalty = clamp(fallbackCount * 0.2, 0, 1);
@@ -337,7 +373,7 @@ function buildConfidence(args: {
   const tier = score >= 0.75 ? "high" : score >= 0.45 ? "medium" : "low";
   const reasons = [
     `Data completeness=${dataCompleteness.toFixed(2)} from required/optional coverage.`,
-    `Signal coherence=${signalCoherence.toFixed(2)} including overlay effect (${args.overlayAgreement}), overlay divergence=${String(args.overlaysDiverging)}, and regime/price agreement (${args.regimeAgreementWithPrice}).`,
+    `Signal coherence=${signalCoherence.toFixed(2)} including overlay effect (${args.overlayAgreement}), overlay divergence=${String(args.overlaysDiverging)}, regime/price agreement (${args.regimeAgreementWithPrice}), triangle=${args.triangleAlignment}.`,
     `Fallback penalty=${fallbackPenalty.toFixed(2)} (fallback count=${fallbackCount}).`,
   ];
 
@@ -374,19 +410,19 @@ function resolveGoldPhase(args: {
 
   if (p >= 75 && monetaryStress) {
     reasoning.push("High percentile + monetary stress => Structural Bull.");
-    if (args.overlayAgreement === "supportive") reasoning.push("Overlays are supportive, reinforcing Structural Bull.");
-    if (args.overlayAgreement === "conflicting") reasoning.push("Overlays are conflicting; conviction reduced despite Structural Bull classification.");
+    if (args.overlayAgreement === "supportive" || args.overlayAgreement === "partial_support") reasoning.push("Overlays are supportive, reinforcing Structural Bull.");
+    if (args.overlayAgreement === "conflict" || args.overlayAgreement === "partial_conflict") reasoning.push("Overlays are conflicting; conviction reduced despite Structural Bull classification.");
     return { phase: "Structural Bull", reasoning };
   }
   if (p <= 35 && macroImproving) {
     reasoning.push("Low percentile + improving macro backdrop => Early Cycle.");
-    if (args.overlayAgreement === "supportive") reasoning.push("Overlays support early turn in backdrop.");
+    if (args.overlayAgreement === "supportive" || args.overlayAgreement === "partial_support") reasoning.push("Overlays support early turn in backdrop.");
     return { phase: "Early Cycle", reasoning };
   }
   if (p >= 70 && m >= 8) {
     reasoning.push("High percentile + strong 12M momentum => Late Cycle.");
     if (args.overlayAgreement === "neutral") reasoning.push("Late Cycle driven mainly by price/trend; overlays only weakly supportive.");
-    if (args.overlayAgreement === "conflicting") reasoning.push("Price suggests Late Cycle but overlays are conflicting.");
+    if (args.overlayAgreement === "conflict" || args.overlayAgreement === "partial_conflict") reasoning.push("Price suggests Late Cycle but overlays are conflicting.");
     return { phase: "Late Cycle", reasoning };
   }
   if (p <= 35 && macroWeak) {
@@ -577,6 +613,15 @@ export const goldCommodityProfile: CommodityProfile = {
       phaseScore,
       regime: regimeClassification.regime,
     });
+    const triangleAlignment: "aligned" | "partial" | "misaligned" = (() => {
+      const overlayPositive = overlayResolution.agreement === "supportive" || overlayResolution.agreement === "partial_support";
+      const overlayNegative = overlayResolution.agreement === "conflict" || overlayResolution.agreement === "partial_conflict";
+      const regimePositive = regimeAgreementWithPrice === "confirming";
+      const regimeNegative = regimeAgreementWithPrice === "diverging";
+      if (overlayPositive && regimePositive && !overlaysDiverging) return "aligned";
+      if (overlayNegative && regimeNegative) return "misaligned";
+      return "partial";
+    })();
     if (regimeAgreementWithPrice === "diverging") {
       phaseResolution.reasoning.push("Macro regime diverges from current price phase and lowers conviction.");
     } else if (regimeAgreementWithPrice === "confirming") {
@@ -606,6 +651,7 @@ export const goldCommodityProfile: CommodityProfile = {
       overlayAgreement: overlayResolution.agreement,
       regimeAgreementWithPrice,
       overlaysDiverging,
+      triangleAlignment,
     });
 
     const dataCompleteness = confidence.breakdown.dataCompleteness;
@@ -616,8 +662,16 @@ export const goldCommodityProfile: CommodityProfile = {
       usedIndicators,
       missingIndicators,
       fallbackIndicators: [],
-      usedOverlays: overlaySummary.usedOverlays,
-      missingOverlays: overlaySummary.missingOverlays,
+      usedOverlays: [
+        ...overlaySummary.usedOverlays,
+        ...(goldMonetaryStressOverlay.confidence > 0 ? ["goldMonetaryStressOverlay"] : []),
+        ...(marketRiskOffOverlay.confidence > 0 ? ["marketRiskOffOverlay"] : []),
+      ],
+      missingOverlays: [
+        ...overlaySummary.missingOverlays,
+        ...(goldMonetaryStressOverlay.confidence === 0 ? ["goldMonetaryStressOverlay"] : []),
+        ...(marketRiskOffOverlay.confidence === 0 ? ["marketRiskOffOverlay"] : []),
+      ],
       ignoredOverlays: overlaySummary.ignoredOverlays,
       overlayContribution: overlayResolution.contribution,
       overlayAgreement: overlayResolution.agreement,
@@ -635,6 +689,9 @@ export const goldCommodityProfile: CommodityProfile = {
         },
         primaryDecisionDriver: primaryOverlayDriver,
         overlaysDiverging,
+        regimeOverrideApplied: regimeClassification.regimeOverrideApplied,
+        baseRegime: regimeClassification.baseRegime,
+        regimeOverrideReason: regimeClassification.regimeOverrideReason,
       },
       confidenceReasons: confidence.reasons,
       phaseStrength: phaseScore === null ? "weak" : Math.abs(phaseScore) >= 0.5 ? "strong" : Math.abs(phaseScore) >= 0.25 ? "moderate" : "weak",
@@ -645,6 +702,7 @@ export const goldCommodityProfile: CommodityProfile = {
         "Missing overlay data does not create synthetic proxies; it reduces agreement/coherence instead.",
         `Gold regime=${regimeClassification.regime}; agreementWithPrice=${regimeAgreementWithPrice}.`,
         `Primary overlay driver=${primaryOverlayDriver}; overlaysDiverging=${String(overlaysDiverging)}.`,
+        `Alignment triangle (price↔regime↔overlays)=${triangleAlignment}.`,
       ],
     };
 
