@@ -4,6 +4,7 @@ import { evaluateCommodityProfile, type CommodityId, type CommodityIndicatorKey,
 
 type IndicatorRow = {
   indicator_id: string;
+  region: string;
   as_of_date: string;
   value_latest: number | null;
   percentile_10y: number | null;
@@ -26,19 +27,33 @@ type GoldRawRow = {
   value: number | null;
 };
 
-const SUPPORTED_COMMODITIES = new Set<CommodityId>(["gold"]);
-const INDICATOR_KEYS: CommodityIndicatorKey[] = [
-  "gold_usd",
-  "gold_minus_real_yield_spread",
-  "real_yield_10y_us",
-  "usd_broad_index",
-  "usd_yoy",
-  "core_cpi_yoy_us",
-  "breakeven_10y_us",
-  "vix_index",
-  "hy_spread_us",
-  "financial_conditions_index",
-];
+const SUPPORTED_COMMODITIES = new Set<CommodityId>(["gold", "copper"]);
+const COMMODITY_INDICATOR_KEYS: Record<CommodityId, CommodityIndicatorKey[]> = {
+  gold: [
+    "gold_usd",
+    "gold_minus_real_yield_spread",
+    "real_yield_10y_us",
+    "usd_broad_index",
+    "usd_yoy",
+    "core_cpi_yoy_us",
+    "breakeven_10y_us",
+    "vix_index",
+    "hy_spread_us",
+    "financial_conditions_index",
+  ],
+  copper: [
+    "copper_usd",
+    "pmi_china",
+    "pmi_us",
+    "copper_lme_inventory",
+    "copper_capex_proxy",
+  ],
+};
+
+const PRICE_SERIES_BY_COMMODITY: Record<CommodityId, CommodityIndicatorKey> = {
+  gold: "gold_usd",
+  copper: "copper_usd",
+};
 
 function parseCommodity(value: unknown): CommodityId | null {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -83,11 +98,15 @@ function mergeOverlayMaps(
 export default async function handler(req: any, res: any) {
   try {
     await ensureSchema();
+    const debugEnabled = String(req.query?.debug ?? "").trim() === "1";
     const commodity = parseCommodity(req.query?.commodity);
     if (!commodity) {
-      res.status(400).json({ ok: false, error: "Unsupported commodity. Expected: gold" });
+      res.status(400).json({ ok: false, error: "Unsupported commodity. Expected: gold or copper" });
       return;
     }
+
+    const indicatorKeys = COMMODITY_INDICATOR_KEYS[commodity];
+    const priceSeriesKey = PRICE_SERIES_BY_COMMODITY[commodity];
 
     const globalRegimeRows = (await query(
       `SELECT as_of_date, core_regime_label, hard_asset_overlay, macro_confidence, macro_regime_probability_json
@@ -109,36 +128,72 @@ export default async function handler(req: any, res: any) {
     const asOf = globalRegime?.as_of_date ?? usRegime?.as_of_date ?? new Date().toISOString().slice(0, 10);
 
     const indicatorRows = (await query(
-      `SELECT indicator_id, as_of_date, value_latest, percentile_10y, score, change_1m, change_3m, yoy
+      `SELECT indicator_id, region, as_of_date, value_latest, percentile_10y, score, change_1m, change_3m, yoy
        FROM ${tables.macroIndicatorSnapshots}
-       WHERE region = 'US'
-         AND indicator_id IN (${INDICATOR_KEYS.map(() => "?").join(",")})
+       WHERE region IN ('US', 'GLOBAL')
+         AND indicator_id IN (${indicatorKeys.map(() => "?").join(",")})
        ORDER BY as_of_date DESC`,
-      INDICATOR_KEYS,
+      indicatorKeys,
     )) as unknown as IndicatorRow[];
 
-    const goldRawRows = (await query(
+    const commodityRawRows = (await query(
       `SELECT date, value
        FROM ${tables.macroRawDatapoints}
        WHERE region = 'US'
          AND source_type = 'auto'
-         AND series_key = 'gold_usd'
+         AND series_key = ?
          AND date >= date('now', '-10 years')
        ORDER BY date ASC`,
+      [priceSeriesKey],
     )) as unknown as GoldRawRow[];
-    const numericGoldValues = goldRawRows.map((row) => row.value).filter((value): value is number => typeof value === "number");
-    const goldMean10y = numericGoldValues.length > 0
-      ? numericGoldValues.reduce((sum, value) => sum + value, 0) / numericGoldValues.length
+    const numericCommodityValues = commodityRawRows.map((row) => row.value).filter((value): value is number => typeof value === "number");
+    const commodityMean10y = numericCommodityValues.length > 0
+      ? numericCommodityValues.reduce((sum, value) => sum + value, 0) / numericCommodityValues.length
       : null;
-    const goldStd10y = goldMean10y !== null && numericGoldValues.length > 1
-      ? Math.sqrt(numericGoldValues.reduce((sum, value) => sum + ((value - goldMean10y) ** 2), 0) / numericGoldValues.length)
+    const commodityStd10y = commodityMean10y !== null && numericCommodityValues.length > 1
+      ? Math.sqrt(numericCommodityValues.reduce((sum, value) => sum + ((value - commodityMean10y) ** 2), 0) / numericCommodityValues.length)
       : null;
-    const goldLatest = numericGoldValues.length > 0 ? numericGoldValues[numericGoldValues.length - 1] : null;
+    const commodityLatest = numericCommodityValues.length > 0 ? numericCommodityValues[numericCommodityValues.length - 1] : null;
 
     const indicatorByKey = new Map<CommodityIndicatorKey, CommodityProfileInputIndicator>();
-    for (const key of INDICATOR_KEYS) {
-      const row = indicatorRows.find((entry) => entry.indicator_id === key);
-      if (!row) continue;
+    const indicatorSelectionDebug: Array<{
+      key: CommodityIndicatorKey;
+      selectedRegion: string | null;
+      selectedAsOf: string | null;
+      candidates: Array<{ region: string; asOf: string }>;
+      note: string;
+    }> = [];
+    for (const key of indicatorKeys) {
+      const candidates = indicatorRows
+        .filter((entry) => entry.indicator_id === key)
+        .sort((a, b) => String(b.as_of_date).localeCompare(String(a.as_of_date)));
+      const preferredRegion = key === "pmi_china" ? "GLOBAL" : "US";
+      const preferredRegionCandidates = candidates.filter((entry) => entry.region === preferredRegion);
+      const pmiKey = key === "pmi_china" || key === "pmi_us";
+      const row = pmiKey
+        ? (
+          preferredRegionCandidates.find((entry) =>
+            typeof entry.value_latest === "number" && (typeof entry.change_3m === "number" || typeof entry.change_1m === "number"),
+          )
+          ?? preferredRegionCandidates.find((entry) => typeof entry.value_latest === "number")
+          ?? candidates.find((entry) =>
+            typeof entry.value_latest === "number" && (typeof entry.change_3m === "number" || typeof entry.change_1m === "number"),
+          )
+          ?? preferredRegionCandidates[0]
+          ?? candidates[0]
+          ?? null
+        )
+        : (preferredRegionCandidates[0] ?? candidates[0] ?? null);
+      if (!row) {
+        indicatorSelectionDebug.push({
+          key,
+          selectedRegion: null,
+          selectedAsOf: null,
+          candidates: [],
+          note: `No snapshot rows found for ${key} in US/GLOBAL.`,
+        });
+        continue;
+      }
       indicatorByKey.set(key, {
         key,
         valueLatest: row.value_latest === null ? null : Number(row.value_latest),
@@ -148,13 +203,24 @@ export default async function handler(req: any, res: any) {
         change3m: row.change_3m === null ? null : Number(row.change_3m),
         yoy: row.yoy === null ? null : Number(row.yoy),
         asOf: row.as_of_date ?? null,
-        momentum12m: key === "gold_usd" ? (row.yoy === null ? null : Number(row.yoy)) : null,
-        deviationFromMeanZ: key === "gold_usd"
+        momentum12m: key === priceSeriesKey ? (row.yoy === null ? null : Number(row.yoy)) : null,
+        deviationFromMeanZ: key === priceSeriesKey
           ? (() => {
-            if (goldMean10y === null || goldStd10y === null || goldLatest === null || goldStd10y === 0) return null;
-            return (goldLatest - goldMean10y) / goldStd10y;
+            if (commodityMean10y === null || commodityStd10y === null || commodityLatest === null || commodityStd10y === 0) return null;
+            return (commodityLatest - commodityMean10y) / commodityStd10y;
           })()
           : null,
+      });
+      indicatorSelectionDebug.push({
+        key,
+        selectedRegion: row.region ?? null,
+        selectedAsOf: row.as_of_date ?? null,
+        candidates: candidates.map((candidate) => ({ region: candidate.region, asOf: candidate.as_of_date })),
+        note: pmiKey
+          ? `PMI selection favored rows with non-null level + momentum. Preferred region=${preferredRegion}, selected=${row.region}.`
+          : row.region === preferredRegion
+            ? `Selected preferred region=${preferredRegion}.`
+            : `Preferred region=${preferredRegion} missing; used fallback region=${row.region}.`,
       });
     }
 
@@ -185,6 +251,55 @@ export default async function handler(req: any, res: any) {
       ok: true,
       commodity,
       snapshot,
+      ...(debugEnabled
+        ? {
+          ...(function buildPmiDebug() {
+            const pmiChina = indicatorByKey.get("pmi_china");
+            const pmiUs = indicatorByKey.get("pmi_us");
+            const pmiChinaSelection = indicatorSelectionDebug.find((item) => item.key === "pmi_china");
+            const pmiUsSelection = indicatorSelectionDebug.find((item) => item.key === "pmi_us");
+            return {
+              pmiDebug: {
+                pmiChina: {
+                  valueLatest: pmiChina?.valueLatest ?? null,
+                  change3m: pmiChina?.change3m ?? null,
+                  change1m: pmiChina?.change1m ?? null,
+                  asOf: pmiChina?.asOf ?? null,
+                  selectedRegion: pmiChinaSelection?.selectedRegion ?? null,
+                },
+                pmiUs: {
+                  valueLatest: pmiUs?.valueLatest ?? null,
+                  change3m: pmiUs?.change3m ?? null,
+                  change1m: pmiUs?.change1m ?? null,
+                  asOf: pmiUs?.asOf ?? null,
+                  selectedRegion: pmiUsSelection?.selectedRegion ?? null,
+                },
+              },
+            };
+          })(),
+          debug: {
+            mode: "snapshot_only",
+            externalFetchAttempted: false,
+            externalFetchReason: "This endpoint reads persisted macro snapshots only; no live external fetch is attempted at request time.",
+            indicatorKeysRequested: indicatorKeys,
+            indicatorSelection: indicatorSelectionDebug,
+            priceSeriesKey,
+            priceSeriesWindow10y: {
+              observationCount: numericCommodityValues.length,
+              mean10y: commodityMean10y,
+              std10y: commodityStd10y,
+              latest: commodityLatest,
+            },
+            pmiChinaAvailable: indicatorByKey.has("pmi_china"),
+            pmiUsAvailable: indicatorByKey.has("pmi_us"),
+            blockers: [
+              ...(!indicatorByKey.has("pmi_china")
+                ? ["pmi_china missing in macro_indicator_snapshots (US/GLOBAL), so Copper phase remains Unknown by design."]
+                : []),
+            ],
+          },
+        }
+        : {}),
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: (error as Error).message });
