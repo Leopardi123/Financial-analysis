@@ -179,9 +179,9 @@ function computeIndicatorSnapshot(
   const cadenceMonths = estimateCadenceMonths(trailing);
   const expectedPointCount = Math.max(1, Math.round(TEN_YEAR_MONTHS / cadenceMonths));
   const coverage10yPct = Math.max(0, Math.min(100, (validValues.length / expectedPointCount) * 100));
-  const latest = trailing[trailing.length - 1];
-  const valueLatest = latest?.value ?? null;
-  const freshnessDays = latest ? Math.max(0, Math.round((Date.parse(asOfDate) - Date.parse(latest.date)) / 86400000)) : null;
+  const latestValid = [...trailing].reverse().find((point) => typeof point.value === "number") ?? null;
+  const valueLatest = latestValid?.value ?? null;
+  const freshnessDays = latestValid ? Math.max(0, Math.round((Date.parse(asOfDate) - Date.parse(latestValid.date)) / 86400000)) : null;
 
   if (coverage10yPct < MIN_COVERAGE_PCT || valueLatest === null) {
     return {
