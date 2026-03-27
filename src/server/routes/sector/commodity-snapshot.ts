@@ -42,6 +42,7 @@ const COMMODITY_INDICATOR_KEYS: Record<CommodityId, CommodityIndicatorKey[]> = {
   ],
   copper: [
     "copper_usd",
+    "pmi_china",
     "pmi_us",
     "copper_lme_inventory",
     "copper_capex_proxy",

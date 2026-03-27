@@ -14,9 +14,11 @@ import type {
 type OverlayAgreement = "supportive" | "partial_support" | "neutral" | "partial_conflict" | "conflict" | "unavailable";
 type RegimeAgreementWithPrice = "confirming" | "diverging" | "neutral";
 type CopperRegime = "Demand expansion" | "Demand contraction" | "Supply tightness" | "Supply expansion";
+type DemandState = "expansion_strong" | "expansion" | "contraction" | "weakening";
+type PriceState = "high" | "mid" | "low";
 
 const REQUIRED_INDICATORS: CommodityIndicatorKey[] = ["copper_usd", "pmi_us"];
-const OPTIONAL_INDICATORS: CommodityIndicatorKey[] = ["copper_lme_inventory", "copper_capex_proxy"];
+const OPTIONAL_INDICATORS: CommodityIndicatorKey[] = ["pmi_china", "copper_lme_inventory", "copper_capex_proxy"];
 const COPPER_RELEVANT_OVERLAYS = ["pmiDemandOverlay", "copperSupplyOverlay"] as const;
 
 function clamp(value: number, min: number, max: number): number {
@@ -116,6 +118,31 @@ function resolveOverlayAgreement(priceScore: number | null, overlayCompositeScor
   };
 }
 
+function resolveDemandState(pmiLevel: number, pmiChange3m: number): DemandState {
+  if (pmiLevel >= 52 && pmiChange3m > 0) return "expansion_strong";
+  if (pmiLevel >= 50 && pmiChange3m >= 0) return "expansion";
+  if (pmiLevel < 50 && pmiChange3m < 0) return "contraction";
+  return "weakening";
+}
+
+function resolvePriceState(percentile10y: number | null): PriceState {
+  if (percentile10y !== null && percentile10y > 80) return "high";
+  if (percentile10y !== null && percentile10y < 30) return "low";
+  return "mid";
+}
+
+function resolveCopperPmi(input: CommodityProfileInput): { indicator: CommodityProfileInputIndicator | null; source: "pmi_china" | "pmi_us" | "none" } {
+  const pmiChina = getIndicator(input, "pmi_china");
+  if (pmiChina && typeof pmiChina.valueLatest === "number" && typeof (pmiChina.change3m ?? pmiChina.change1m) === "number") {
+    return { indicator: pmiChina, source: "pmi_china" };
+  }
+  const pmiUs = getIndicator(input, "pmi_us");
+  if (pmiUs && typeof pmiUs.valueLatest === "number" && typeof (pmiUs.change3m ?? pmiUs.change1m) === "number") {
+    return { indicator: pmiUs, source: "pmi_us" };
+  }
+  return { indicator: null, source: "none" };
+}
+
 function classifyCopperRegime(input: CommodityProfileInput): {
   regime: CopperRegime;
   score: number;
@@ -185,54 +212,49 @@ function classifyCopperRegime(input: CommodityProfileInput): {
 function resolveCopperPhase(args: {
   percentile: number | null;
   pmiLevel: number | null;
-  pmiChange: number | null;
+  pmiChange3m: number | null;
   capexMomentum: number | null;
-  phaseScore: number | null;
-}): { phase: CommodityPhase; reasoning: string[] } {
+}): { phase: CommodityPhase; demandState: DemandState | null; priceState: PriceState; divergence: boolean; reasoning: string[] } {
   const reasoning: string[] = [];
 
-  if (args.percentile === null || args.pmiLevel === null || args.pmiChange === null) {
-    reasoning.push("Missing percentile/PMI inputs; returning Unknown.");
-    return { phase: "Unknown", reasoning };
+  const priceState = resolvePriceState(args.percentile);
+
+  if (args.pmiLevel === null || args.pmiChange3m === null) {
+    reasoning.push("PMI level or PMI 3m change missing; returning Unknown.");
+    return { phase: "Unknown", demandState: null, priceState, divergence: false, reasoning };
   }
 
-  const improvingDemand = args.pmiLevel >= 49 && args.pmiChange > 0;
-  const strongDemand = args.pmiLevel >= 52 && args.pmiChange >= 0;
-  const weakDemand = args.pmiLevel < 50 && args.pmiChange <= 0;
-  const capexExpansion = (args.capexMomentum ?? 0) > 0.15;
+  const demandState = resolveDemandState(args.pmiLevel, args.pmiChange3m);
+  const divergence = priceState === "high" && args.pmiChange3m < 0;
 
-  if (args.percentile <= 35 && improvingDemand) {
-    reasoning.push("Low percentile + improving demand => Early Cycle.");
-    return { phase: "Early Cycle", reasoning };
+  if (priceState === "low" && (demandState === "expansion" || demandState === "expansion_strong")) {
+    reasoning.push("price_state=low + demand_state=expansion => Early Cycle.");
+    return { phase: "Early Cycle", demandState, priceState, divergence, reasoning };
   }
 
-  if (strongDemand) {
-    reasoning.push("Strong industrial demand (PMI level/trend) => Mid Cycle.");
-    return { phase: "Mid Cycle", reasoning };
+  if (priceState === "mid" && (demandState === "expansion" || demandState === "expansion_strong")) {
+    reasoning.push("price_state=mid + demand_state=expansion => Mid Cycle.");
+    return { phase: "Mid Cycle", demandState, priceState, divergence, reasoning };
   }
 
-  if (args.percentile >= 70 && capexExpansion) {
-    reasoning.push("High percentile + capex expansion => Late Cycle.");
-    return { phase: "Late Cycle", reasoning };
+  if (priceState === "high" && (demandState === "weakening" || demandState === "contraction")) {
+    reasoning.push("price_state=high + demand_state=weakening/contraction => Late Cycle.");
+    if (divergence) reasoning.push("Divergence detected: high price percentile while PMI change is negative.");
+    return { phase: "Late Cycle", demandState, priceState, divergence, reasoning };
   }
 
-  if (weakDemand) {
-    reasoning.push("Weak industrial demand => Compression.");
-    return { phase: "Compression", reasoning };
+  if (demandState === "contraction") {
+    reasoning.push("demand_state=contraction => Recession/Compression.");
+    return { phase: "Compression", demandState, priceState, divergence, reasoning };
   }
 
-  if ((args.phaseScore ?? 0) >= 0.45) {
-    reasoning.push("Fallback aggregate score positive => Mid Cycle.");
-    return { phase: "Mid Cycle", reasoning };
+  if (priceState === "high" && (args.capexMomentum ?? 0) > 0.15 && demandState === "expansion_strong") {
+    reasoning.push("high percentile + capex expansion with strong demand => Late Cycle.");
+    return { phase: "Late Cycle", demandState, priceState, divergence, reasoning };
   }
 
-  if ((args.phaseScore ?? 0) <= -0.35) {
-    reasoning.push("Fallback aggregate score negative => Compression.");
-    return { phase: "Compression", reasoning };
-  }
-
-  reasoning.push("Mixed inputs; defaulting to Early Cycle.");
-  return { phase: "Early Cycle", reasoning };
+  reasoning.push("No deterministic phase mapping matched; returning Unknown.");
+  return { phase: "Unknown", demandState, priceState, divergence, reasoning };
 }
 
 function resolveRegimeAgreementWithPrice(phase: CommodityPhase, regime: CopperRegime): RegimeAgreementWithPrice {
@@ -328,7 +350,8 @@ export const copperCommodityProfile: CommodityProfile = {
   profileVersion: "copper-v1",
   compute(input) {
     const copper = getIndicator(input, "copper_usd");
-    const pmi = getIndicator(input, "pmi_us");
+    const pmiResolution = resolveCopperPmi(input);
+    const pmi = pmiResolution.indicator;
     const inventory = getIndicator(input, "copper_lme_inventory");
     const capex = getIndicator(input, "copper_capex_proxy");
 
@@ -345,8 +368,9 @@ export const copperCommodityProfile: CommodityProfile = {
       momentumSignal(copper?.momentum12m ?? copper?.yoy ?? null),
     ]);
 
+    const pmiChange3m = pmi?.change3m ?? pmi?.change1m ?? null;
     const demandScore = avg([
-      momentumSignal(pmi?.change3m ?? pmi?.change1m ?? null, 3),
+      momentumSignal(pmiChange3m, 3),
       pmi?.valueLatest === null || pmi?.valueLatest === undefined ? null : clamp((pmi.valueLatest - 50) / 5, -1, 1),
     ]);
 
@@ -409,9 +433,8 @@ export const copperCommodityProfile: CommodityProfile = {
     const phaseResolution = resolveCopperPhase({
       percentile: copper?.percentile10y ?? null,
       pmiLevel: pmi?.valueLatest ?? null,
-      pmiChange: pmi?.change3m ?? pmi?.change1m ?? null,
+      pmiChange3m,
       capexMomentum: scoreToNormalized(capex),
-      phaseScore,
     });
 
     const regimeClassification = classifyCopperRegime(input);
@@ -426,9 +449,12 @@ export const copperCommodityProfile: CommodityProfile = {
       capex?.score,
     ].filter((value) => typeof value === "number").length;
     const dataCompleteness = clamp(usedIndicatorCount / 6, 0, 1);
+    const pmiCompleteness = pmi?.valueLatest !== null && pmi?.valueLatest !== undefined && pmiChange3m !== null ? 1 : 0;
+    const coherencePenalty = phaseResolution.divergence ? 0.18 : 0;
 
     const diagnosticKeys: CommodityIndicatorKey[] = [
       "copper_usd",
+      "pmi_china",
       "pmi_us",
       "copper_lme_inventory",
       "copper_capex_proxy",
@@ -450,11 +476,11 @@ export const copperCommodityProfile: CommodityProfile = {
 
     const fallbackCount = indicatorDiagnostics.filter((item) => item.missing).length;
     const confidence = buildConfidence({
-      dataCompleteness,
+      dataCompleteness: clamp(dataCompleteness * 0.6 + pmiCompleteness * 0.4, 0, 1),
       overlayAgreement: overlayResolution.agreement,
       regimeAgreement: regimeAgreementWithPrice,
       fallbackCount,
-      phaseScore,
+      phaseScore: phaseScore === null ? null : clamp(phaseScore - coherencePenalty, -1, 1),
       overlaysDiverging,
     });
 
@@ -474,6 +500,8 @@ export const copperCommodityProfile: CommodityProfile = {
       notes: [
         "Copper profile is industrial-cycle centered (demand, supply, capex).",
         "Monetary overlays are intentionally ignored for copper.",
+        `PMI source=${pmiResolution.source}, pmi=${pmi?.valueLatest ?? "n/a"}, pmi_change_3m=${pmiChange3m ?? "n/a"}.`,
+        `demand_state=${phaseResolution.demandState ?? "n/a"}, price_state=${phaseResolution.priceState}, divergence=${String(phaseResolution.divergence)}.`,
         `Regime=${regimeClassification.regime}; agreementWithPrice=${regimeAgreementWithPrice}.`,
       ],
     };
@@ -497,7 +525,7 @@ export const copperCommodityProfile: CommodityProfile = {
           label: "Industrial demand (PMI)",
           signal: (demandScore ?? 0) > 0.1 ? "bullish" : (demandScore ?? 0) < -0.1 ? "bearish" : "neutral",
           weight: 0.35,
-          note: `pmi=${pmi?.valueLatest ?? "n/a"}, change3m=${pmi?.change3m ?? pmi?.change1m ?? "n/a"}`,
+          note: `source=${pmiResolution.source}, pmi=${pmi?.valueLatest ?? "n/a"}, change3m=${pmiChange3m ?? "n/a"}, demand_state=${phaseResolution.demandState ?? "n/a"}`,
         },
         {
           id: "copper_supply_capex",

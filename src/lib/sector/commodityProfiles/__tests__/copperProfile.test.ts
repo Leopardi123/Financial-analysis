@@ -54,6 +54,20 @@ const copperInput: CommodityProfileInput = {
 
 const goldSnapshot = goldCommodityProfile.compute(goldInput);
 const copperSnapshot = copperCommodityProfile.compute(copperInput);
+const copperNoPmiSnapshot = copperCommodityProfile.compute({
+  ...copperInput,
+  indicators: {
+    copper_usd: copperInput.indicators.copper_usd!,
+  },
+});
+const copperLateDivergenceSnapshot = copperCommodityProfile.compute({
+  ...copperInput,
+  indicators: {
+    ...copperInput.indicators,
+    copper_usd: { ...(copperInput.indicators.copper_usd!), percentile10y: 88, score: 1.1 },
+    pmi_us: { ...(copperInput.indicators.pmi_us!), valueLatest: 49.2, change3m: -1.1, change1m: -0.6 },
+  },
+});
 
 assert.ok(goldSnapshot, "gold snapshot should resolve");
 assert.ok(copperSnapshot, "copper snapshot should resolve");
@@ -66,5 +80,15 @@ assert.equal(copperSnapshot?.diagnostics.ignoredOverlays.includes("liquidityOver
 assert.notEqual(goldSnapshot?.phase, copperSnapshot?.phase, "Gold and Copper should diverge under different logic.");
 assert.equal(goldSnapshot?.commodity, "gold");
 assert.ok(goldSnapshot?.goldRegime, "Gold regime should remain available and unaffected");
+assert.equal(copperNoPmiSnapshot.phase, "Unknown", "Unknown should only occur when PMI is unavailable.");
+assert.equal(copperLateDivergenceSnapshot.phase, "Late Cycle", "High percentile + weakening/contraction demand should map to Late Cycle.");
+assert.ok(
+  copperLateDivergenceSnapshot.diagnostics.notes.some((note) => note.includes("divergence=true")),
+  "Divergence should be visible in debug notes.",
+);
+assert.ok(
+  copperLateDivergenceSnapshot.confidence.breakdown.signalCoherence < 0.75,
+  "Confidence coherence should be penalized when divergence is true.",
+);
 
 console.log("copperProfile.test.ts passed");
