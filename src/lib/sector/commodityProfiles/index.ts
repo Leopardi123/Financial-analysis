@@ -1,8 +1,9 @@
 import { runCommodityProfile, resolveCommodityProfile } from "./runner.js";
+import { copperCommodityProfile } from "./profiles/copperProfile.js";
 import { goldCommodityProfile } from "./profiles/goldProfile.js";
 import type { CommodityId, CommodityProfileInput, CommodityProfileOutput } from "./types.js";
 
-const COMMODITY_PROFILES = [goldCommodityProfile] as const;
+const COMMODITY_PROFILES = [goldCommodityProfile, copperCommodityProfile] as const;
 
 export { COMMODITY_PROFILES };
 export * from "./types.js";
