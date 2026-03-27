@@ -1,4 +1,4 @@
-export type CommodityId = "gold";
+export type CommodityId = "gold" | "copper";
 
 export type CommodityCategory = "monetary_store_of_value" | "industrial" | "energy" | "agriculture" | "other";
 
@@ -21,7 +21,12 @@ export type CommodityIndicatorKey =
   | "breakeven_10y_us"
   | "vix_index"
   | "hy_spread_us"
-  | "financial_conditions_index";
+  | "financial_conditions_index"
+  | "copper_usd"
+  | "pmi_china"
+  | "pmi_us"
+  | "copper_lme_inventory"
+  | "copper_capex_proxy";
 
 export type CommodityStatus = "ok" | "partial" | "insufficient";
 
@@ -33,7 +38,7 @@ export type CommodityDriver = {
   note?: string;
 };
 
-export type CommodityRegime = "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
+export type CommodityRegime = "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets" | "Demand expansion" | "Demand contraction" | "Supply tightness" | "Supply expansion";
 
 export type CommodityRegimeDriver = {
   id: string;
@@ -168,6 +173,7 @@ export type CommodityProfileOutput = {
   status: CommodityStatus;
   diagnostics: CommodityDiagnostics;
   goldRegime?: CommodityRegime;
+  copperRegime?: Extract<CommodityRegime, "Demand expansion" | "Demand contraction" | "Supply tightness" | "Supply expansion">;
   regimeConfidence?: number;
   regimeDrivers?: CommodityRegimeDriver[];
   regimeAgreementWithPrice?: "confirming" | "diverging" | "neutral";
