@@ -69,7 +69,8 @@ function chunk<T>(items: T[], size: number): T[][] {
   return output;
 }
 
-function sourceForRegionSeries(region: "US" | "EA" | "SE", seriesKey: string): string {
+function sourceForRegionSeries(region: "US" | "EA" | "SE" | "GLOBAL", seriesKey: string): string {
+  if (region === "GLOBAL") return ["gold_usd", "silver_usd"].includes(seriesKey) ? "fmp" : "fred";
   if (region === "US") return ["gold_usd", "silver_usd"].includes(seriesKey) ? "fmp" : "fred";
   if (region === "EA") return (seriesKey.includes("ea") || seriesKey.includes("hicp") || seriesKey.includes("debt") || seriesKey.includes("deficit")) ? "eurostat_ecb" : "fmp";
   return "scb_riksbank";
@@ -117,8 +118,8 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    if (!["US", "EA", "SE"].includes(region)) {
-      res.status(400).json({ ok: false, error: "Supported regions: US, EA, SE" });
+    if (!["US", "EA", "SE", "GLOBAL"].includes(region)) {
+      res.status(400).json({ ok: false, error: "Supported regions: US, EA, SE, GLOBAL" });
       return;
     }
 
@@ -146,8 +147,9 @@ export default async function handler(req: any, res: any) {
     const now = new Date().toISOString();
     debug.fetchStarted = true;
 
-    const typedRegion = region as "US" | "EA" | "SE";
-    const { sourceSeries, derivedSeries, sourceDiagnostics = {} } = await loadCanonicalMacroSeries(typedRegion, mode);
+    const typedRegion = region as "US" | "EA" | "SE" | "GLOBAL";
+    const sourceRegion = typedRegion === "GLOBAL" ? "US" : typedRegion;
+    const { sourceSeries, derivedSeries, sourceDiagnostics = {} } = await loadCanonicalMacroSeries(sourceRegion, mode);
 
     for (const [seriesKey, rows] of Object.entries(sourceSeries)) {
       const source = sourceForRegionSeries(typedRegion, seriesKey);

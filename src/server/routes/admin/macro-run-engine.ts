@@ -13,8 +13,8 @@ export default async function handler(req: any, res: any) {
     await ensureSchema();
 
     const region = String(req.query?.region ?? "US").toUpperCase();
-    if (!["US", "EA", "SE"].includes(region)) {
-      res.status(400).json({ ok: false, error: "Supported regions: US, EA, SE" });
+    if (!["US", "EA", "SE", "GLOBAL"].includes(region)) {
+      res.status(400).json({ ok: false, error: "Supported regions: US, EA, SE, GLOBAL" });
       return;
     }
 
