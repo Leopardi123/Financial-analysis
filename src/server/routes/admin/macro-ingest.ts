@@ -344,7 +344,7 @@ export default async function handler(req: any, res: any) {
 
     const statusCode = allSeriesFailed ? 502 : 200;
     const pmiSeriesDiagnostics = seriesResults
-      .filter((item) => item.seriesKey === "pmi_china" || item.seriesKey === "pmi_us")
+      .filter((item) => item.seriesKey === "china_cli" || item.seriesKey === "pmi_us")
       .map((item) => ({
         seriesKey: item.seriesKey,
         fetchSuccess: item.fetchSuccess,

@@ -38,7 +38,7 @@ const copperInput: CommodityProfileInput = {
   asOf,
   indicators: {
     copper_usd: { key: "copper_usd", valueLatest: 4.1, percentile10y: 22, score: -0.4, change1m: 1.4, change3m: 3.2, yoy: 4.5, asOf, momentum12m: 4.5, deviationFromMeanZ: -0.7 },
-    pmi_china: { key: "pmi_china", valueLatest: 51.8, percentile10y: 66, score: 0.4, change1m: 0.4, change3m: 1.1, yoy: 1.7, asOf },
+    china_cli: { key: "china_cli", valueLatest: 101.2, percentile10y: 66, score: 0.4, change1m: 0.2, change3m: 0.8, yoy: 1.1, asOf },
     pmi_us: { key: "pmi_us", valueLatest: 52.6, percentile10y: 68, score: 0.5, change1m: 0.6, change3m: 1.8, yoy: 2.1, asOf },
     copper_lme_inventory: { key: "copper_lme_inventory", valueLatest: 180, percentile10y: 32, score: -0.6, change1m: -0.8, change3m: -1.2, yoy: -3.3, asOf },
     copper_capex_proxy: { key: "copper_capex_proxy", valueLatest: 54, percentile10y: 62, score: 0.4, change1m: 0.8, change3m: 1.4, yoy: 2.5, asOf },
@@ -67,7 +67,7 @@ const copperLateDivergenceSnapshot = copperCommodityProfile.compute({
   indicators: {
     ...copperInput.indicators,
     copper_usd: { ...(copperInput.indicators.copper_usd!), percentile10y: 94, score: 1.1 },
-    pmi_china: { ...(copperInput.indicators.pmi_china!), valueLatest: 48.9, change3m: -1.1, change1m: -0.6 },
+    china_cli: { ...(copperInput.indicators.china_cli!), valueLatest: 98.7, change3m: -0.9, change1m: -0.5 },
   },
 });
 const copperRecoverySnapshot = copperCommodityProfile.compute({
@@ -75,7 +75,7 @@ const copperRecoverySnapshot = copperCommodityProfile.compute({
   indicators: {
     ...copperInput.indicators,
     copper_usd: { ...(copperInput.indicators.copper_usd!), percentile10y: 24, score: -0.8 },
-    pmi_china: { ...(copperInput.indicators.pmi_china!), valueLatest: 49.4, change3m: 0.6, change1m: 0.5 },
+    china_cli: { ...(copperInput.indicators.china_cli!), valueLatest: 99.2, change3m: 0.4, change1m: 0.3 },
   },
 });
 const copperHighThresholdSnapshot = copperCommodityProfile.compute({
@@ -83,7 +83,7 @@ const copperHighThresholdSnapshot = copperCommodityProfile.compute({
   indicators: {
     ...copperInput.indicators,
     copper_usd: { ...(copperInput.indicators.copper_usd!), percentile10y: 88, score: 0.9 },
-    pmi_china: { ...(copperInput.indicators.pmi_china!), valueLatest: 49.1, change3m: -0.4, change1m: -0.2 },
+    china_cli: { ...(copperInput.indicators.china_cli!), valueLatest: 99.0, change3m: -0.3, change1m: -0.1 },
   },
 });
 
@@ -94,12 +94,12 @@ assert.equal(copperSnapshot?.category, "industrial");
 assert.equal(copperSnapshot?.phase, "Early Cycle", "Copper should classify low percentile + improving PMI as Early Cycle");
 assert.equal(copperSnapshot?.copperRegime, "Demand expansion");
 assert.equal(copperSnapshot?.diagnostics.ignoredOverlays.includes("liquidityOverlay"), true, "Copper must ignore monetary overlays");
-assert.ok(copperSnapshot?.diagnostics.notes.some((note) => note.includes("demand_signal_source=pmi_china")), "China PMI must be the phase source.");
+assert.ok(copperSnapshot?.diagnostics.notes.some((note) => note.includes("demand_signal_source=china_cli")), "China CLI must be the phase source.");
 
 assert.notEqual(goldSnapshot?.phase, copperSnapshot?.phase, "Gold and Copper should diverge under different logic.");
 assert.equal(goldSnapshot?.commodity, "gold");
 assert.ok(goldSnapshot?.goldRegime, "Gold regime should remain available and unaffected");
-assert.equal(copperNoPmiSnapshot.phase, "Unknown", "pmi_china missing should force Unknown even if pmi_us exists.");
+assert.equal(copperNoPmiSnapshot.phase, "Unknown", "china_cli missing should force Unknown even if pmi_us exists.");
 assert.equal(copperLateDivergenceSnapshot.phase, "Late Cycle", "High percentile + weakening/contraction demand should map to Late Cycle.");
 assert.ok(
   copperLateDivergenceSnapshot.diagnostics.notes.some((note) => note.includes("divergenceType=bearish_divergence")),

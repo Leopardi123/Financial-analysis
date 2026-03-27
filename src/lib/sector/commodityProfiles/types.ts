@@ -23,7 +23,7 @@ export type CommodityIndicatorKey =
   | "hy_spread_us"
   | "financial_conditions_index"
   | "copper_usd"
-  | "pmi_china"
+  | "china_cli"
   | "pmi_us"
   | "copper_lme_inventory"
   | "copper_capex_proxy";

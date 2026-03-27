@@ -19,8 +19,8 @@ type PriceState = "high" | "mid" | "low";
 type DivergenceType = "bearish_divergence" | "bullish_recovery" | "none";
 type CopperPhase = CommodityPhase | "Recession";
 
-const REQUIRED_INDICATORS: CommodityIndicatorKey[] = ["copper_usd", "pmi_us"];
-const OPTIONAL_INDICATORS: CommodityIndicatorKey[] = ["pmi_china", "copper_lme_inventory", "copper_capex_proxy"];
+const REQUIRED_INDICATORS: CommodityIndicatorKey[] = ["copper_usd", "china_cli"];
+const OPTIONAL_INDICATORS: CommodityIndicatorKey[] = ["pmi_us", "copper_lme_inventory", "copper_capex_proxy"];
 const COPPER_RELEVANT_OVERLAYS = ["pmiDemandOverlay", "copperSupplyOverlay"] as const;
 
 function clamp(value: number, min: number, max: number): number {
@@ -120,10 +120,10 @@ function resolveOverlayAgreement(priceScore: number | null, overlayCompositeScor
   };
 }
 
-function resolveDemandState(pmiLevel: number, pmiChange3m: number): DemandState {
-  if (pmiLevel < 50) return "contraction";
-  if (pmiLevel >= 52 && pmiChange3m > 0) return "expansion_strong";
-  if (pmiLevel >= 50 && pmiChange3m >= 0) return "expansion";
+function resolveDemandState(cliLevel: number, cliChange3m: number): DemandState {
+  if (cliLevel < 100) return "contraction";
+  if (cliLevel >= 101 && cliChange3m > 0) return "expansion_strong";
+  if (cliLevel >= 100 && cliChange3m >= 0) return "expansion";
   return "weakening";
 }
 
@@ -134,10 +134,10 @@ function resolvePriceState(percentile10y: number | null): PriceState {
   return "mid";
 }
 
-function resolveCopperPmi(input: CommodityProfileInput): { indicator: CommodityProfileInputIndicator | null; source: "pmi_china" | "missing" } {
-  const pmiChina = getIndicator(input, "pmi_china");
-  if (pmiChina && typeof pmiChina.valueLatest === "number" && typeof (pmiChina.change3m ?? pmiChina.change1m) === "number") {
-    return { indicator: pmiChina, source: "pmi_china" };
+function resolveCopperChinaCli(input: CommodityProfileInput): { indicator: CommodityProfileInputIndicator | null; source: "china_cli" | "missing" } {
+  const chinaCli = getIndicator(input, "china_cli");
+  if (chinaCli && typeof chinaCli.valueLatest === "number" && typeof (chinaCli.change3m ?? chinaCli.change1m) === "number") {
+    return { indicator: chinaCli, source: "china_cli" };
   }
   return { indicator: null, source: "missing" };
 }
@@ -147,7 +147,7 @@ function classifyCopperRegime(input: CommodityProfileInput): {
   score: number;
   drivers: string[];
 } {
-  const pmi = getIndicator(input, "pmi_china") ?? getIndicator(input, "pmi_us");
+  const pmi = getIndicator(input, "china_cli");
   const inventory = getIndicator(input, "copper_lme_inventory");
 
   const pmiChange = pmi?.change3m ?? pmi?.change1m ?? null;
@@ -228,50 +228,50 @@ function resolveCopperPhase(args: {
   const priceState = resolvePriceState(args.percentile);
 
   if (args.pmiLevel === null || args.pmiChange3m === null) {
-    reasoning.push("PMI level or PMI 3m change missing; returning Unknown.");
+    reasoning.push("China CLI level or 3m change missing; returning Unknown.");
     return { phase: "Unknown", demandState: null, priceState, divergence: false, divergenceType: "none", overrideApplied: false, overrideReason: null, reasoning };
   }
 
   const demandState = resolveDemandState(args.pmiLevel, args.pmiChange3m);
   const divergenceType: DivergenceType = priceState === "high" && args.pmiChange3m < 0
     ? "bearish_divergence"
-    : (priceState === "low" || priceState === "mid") && args.pmiLevel < 50 && args.pmiChange3m > 0
+    : (priceState === "low" || priceState === "mid") && args.pmiLevel < 100 && args.pmiChange3m > 0
       ? "bullish_recovery"
       : "none";
   const divergence = divergenceType !== "none";
-  const chinaOverride = args.pmiLevel < 50 && priceState === "high";
+  const chinaOverride = args.pmiLevel < 100 && priceState === "high";
   if (chinaOverride) {
-    reasoning.push("China override: pmi_china < 50 while price_state=high prevents any Early/Mid classification.");
+    reasoning.push("China CLI override: china_cli < 100 while price_state=high prevents any Early/Mid classification.");
   }
 
   if (priceState === "low" && (demandState === "expansion" || demandState === "expansion_strong")) {
     reasoning.push("price_state=low + demand_state=expansion => Early Cycle.");
-    return { phase: "Early Cycle", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "pmi_china<50 with high price blocks Early/Mid." : null, reasoning };
+    return { phase: "Early Cycle", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "china_cli<100 with high price blocks Early/Mid." : null, reasoning };
   }
 
   if (priceState === "mid" && (demandState === "expansion" || demandState === "expansion_strong")) {
     reasoning.push("price_state=mid + demand_state=expansion => Mid Cycle.");
-    return { phase: "Mid Cycle", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "pmi_china<50 with high price blocks Early/Mid." : null, reasoning };
+    return { phase: "Mid Cycle", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "china_cli<100 with high price blocks Early/Mid." : null, reasoning };
   }
 
   if (priceState === "high" && (demandState === "weakening" || demandState === "contraction")) {
     reasoning.push("price_state=high + demand_state=weakening/contraction => Late Cycle.");
-    if (divergenceType === "bearish_divergence") reasoning.push("Bearish divergence: high price percentile while PMI change is negative.");
-    return { phase: "Late Cycle", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "pmi_china<50 with high price blocks Early/Mid." : null, reasoning };
+    if (divergenceType === "bearish_divergence") reasoning.push("Bearish divergence: high price percentile while China CLI change is negative.");
+    return { phase: "Late Cycle", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "china_cli<100 with high price blocks Early/Mid." : null, reasoning };
   }
 
   if (demandState === "contraction") {
     reasoning.push("demand_state=contraction => Recession.");
-    return { phase: "Recession", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "pmi_china<50 with high price blocks Early/Mid." : null, reasoning };
+    return { phase: "Recession", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "china_cli<100 with high price blocks Early/Mid." : null, reasoning };
   }
 
   if (priceState === "high" && (args.capexMomentum ?? 0) > 0.15 && demandState === "expansion_strong") {
     reasoning.push("high percentile + capex expansion with strong demand => Late Cycle.");
-    return { phase: "Late Cycle", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "pmi_china<50 with high price blocks Early/Mid." : null, reasoning };
+    return { phase: "Late Cycle", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "china_cli<100 with high price blocks Early/Mid." : null, reasoning };
   }
 
   reasoning.push("No deterministic phase mapping matched; returning Unknown.");
-  return { phase: "Unknown", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "pmi_china<50 with high price blocks Early/Mid." : null, reasoning };
+  return { phase: "Unknown", demandState, priceState, divergence, divergenceType, overrideApplied: chinaOverride, overrideReason: chinaOverride ? "china_cli<100 with high price blocks Early/Mid." : null, reasoning };
 }
 
 function resolveRegimeAgreementWithPrice(phase: CommodityPhase, regime: CopperRegime): RegimeAgreementWithPrice {
@@ -367,7 +367,7 @@ export const copperCommodityProfile: CommodityProfile = {
   profileVersion: "copper-v1",
   compute(input) {
     const copper = getIndicator(input, "copper_usd");
-    const pmiResolution = resolveCopperPmi(input);
+    const pmiResolution = resolveCopperChinaCli(input);
     const pmi = pmiResolution.indicator;
     const pmiUsSupplemental = getIndicator(input, "pmi_us");
     const inventory = getIndicator(input, "copper_lme_inventory");
@@ -422,8 +422,8 @@ export const copperCommodityProfile: CommodityProfile = {
         confidence: [pmi?.valueLatest, pmi?.change3m ?? pmi?.change1m].filter((v) => typeof v === "number").length / 2,
         status: demandScore === null ? "missing" : "used",
         notes: [
-          "Uses PMI level + short-term PMI trend.",
-          `pmi=${pmi?.valueLatest ?? "n/a"}, change3m=${pmi?.change3m ?? pmi?.change1m ?? "n/a"}`,
+          "Uses China CLI level + short-term China CLI trend.",
+          `china_cli=${pmi?.valueLatest ?? "n/a"}, change3m=${pmi?.change3m ?? pmi?.change1m ?? "n/a"}`,
         ],
       },
       {
@@ -473,7 +473,7 @@ export const copperCommodityProfile: CommodityProfile = {
 
     const diagnosticKeys: CommodityIndicatorKey[] = [
       "copper_usd",
-      "pmi_china",
+      "china_cli",
       "pmi_us",
       "copper_lme_inventory",
       "copper_capex_proxy",
@@ -519,9 +519,10 @@ export const copperCommodityProfile: CommodityProfile = {
       notes: [
         "Copper profile is industrial-cycle centered (demand, supply, capex).",
         "Monetary overlays are intentionally ignored for copper.",
+        "China PMI via FRED is intentionally disabled in current pipeline; China CLI is the verified China-led proxy.",
         `demand_signal_source=${pmiResolution.source}.`,
-        `pmi_china=${pmi?.valueLatest ?? "n/a"}, pmi_change_3m=${pmiChange3m ?? "n/a"}.`,
-        `pmi_us_supplemental=${pmiUsSupplemental?.valueLatest ?? "n/a"} (supplemental only, does not drive phase).`,
+        `china_cli=${pmi?.valueLatest ?? "n/a"}, china_cli_change_3m=${pmiChange3m ?? "n/a"} (China-led proxy, not PMI).`,
+        `pmi_us_supplemental=${pmiUsSupplemental?.valueLatest ?? "n/a"} (supplemental/global context only, does not drive phase).`,
         `demand_state=${phaseResolution.demandState ?? "n/a"}, price_state=${phaseResolution.priceState}.`,
         `divergence=${String(phaseResolution.divergence)}, divergenceType=${phaseResolution.divergenceType}.`,
         `overrideApplied=${String(phaseResolution.overrideApplied)}, overrideReason=${phaseResolution.overrideReason ?? "none"}.`,
@@ -545,10 +546,10 @@ export const copperCommodityProfile: CommodityProfile = {
         },
         {
           id: "copper_industrial_demand",
-          label: "Industrial demand (PMI)",
+          label: "Industrial demand (China CLI proxy)",
           signal: (demandScore ?? 0) > 0.1 ? "bullish" : (demandScore ?? 0) < -0.1 ? "bearish" : "neutral",
           weight: 0.35,
-          note: `source=${pmiResolution.source}, pmi=${pmi?.valueLatest ?? "n/a"}, change3m=${pmiChange3m ?? "n/a"}, demand_state=${phaseResolution.demandState ?? "n/a"}`,
+          note: `source=${pmiResolution.source}, china_cli=${pmi?.valueLatest ?? "n/a"}, change3m=${pmiChange3m ?? "n/a"}, demand_state=${phaseResolution.demandState ?? "n/a"}`,
         },
         {
           id: "copper_supply_capex",

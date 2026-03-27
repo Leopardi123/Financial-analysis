@@ -43,7 +43,7 @@ export const US_FRED_SERIES: FredSeriesConfig[] = [
   { fredSeriesId: "GFDEGDQ188S", seriesKey: "debt_to_gdp_us", latestLookbackMonths: 180, backfillLookbackYears: 25 },
   { fredSeriesId: "FYFSGDA188S", seriesKey: "deficit_to_gdp_us", latestLookbackMonths: 240, backfillLookbackYears: 25 },
   { fredSeriesId: "NAPM", seriesKey: "pmi_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
-  { fredSeriesId: "CHNPMIMFG", seriesKey: "pmi_china", latestLookbackMonths: 180, backfillLookbackYears: 20 },
+  { fredSeriesId: "CHNLOLITOAASTSAM", seriesKey: "china_cli", latestLookbackMonths: 180, backfillLookbackYears: 20 },
   { fredSeriesId: "THREEFYTP10", seriesKey: "acmtp10_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
   { fredSeriesId: "DGORDER", seriesKey: "new_orders_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },
   { fredSeriesId: "ISRATIO", seriesKey: "isratio_us", latestLookbackMonths: 180, backfillLookbackYears: 20 },

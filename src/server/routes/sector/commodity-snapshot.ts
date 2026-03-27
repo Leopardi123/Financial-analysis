@@ -43,7 +43,7 @@ const COMMODITY_INDICATOR_KEYS: Record<CommodityId, CommodityIndicatorKey[]> = {
   ],
   copper: [
     "copper_usd",
-    "pmi_china",
+    "china_cli",
     "pmi_us",
     "copper_lme_inventory",
     "copper_capex_proxy",
@@ -167,10 +167,10 @@ export default async function handler(req: any, res: any) {
       const candidates = indicatorRows
         .filter((entry) => entry.indicator_id === key)
         .sort((a, b) => String(b.as_of_date).localeCompare(String(a.as_of_date)));
-      const preferredRegion = key === "pmi_china" ? "GLOBAL" : "US";
+      const preferredRegion = key === "china_cli" ? "GLOBAL" : "US";
       const preferredRegionCandidates = candidates.filter((entry) => entry.region === preferredRegion);
-      const pmiKey = key === "pmi_china" || key === "pmi_us";
-      const row = pmiKey
+      const demandSignalKey = key === "china_cli" || key === "pmi_us";
+      const row = demandSignalKey
         ? (
           preferredRegionCandidates.find((entry) =>
             typeof entry.value_latest === "number" && (typeof entry.change_3m === "number" || typeof entry.change_1m === "number"),
@@ -216,8 +216,8 @@ export default async function handler(req: any, res: any) {
         selectedRegion: row.region ?? null,
         selectedAsOf: row.as_of_date ?? null,
         candidates: candidates.map((candidate) => ({ region: candidate.region, asOf: candidate.as_of_date })),
-        note: pmiKey
-          ? `PMI selection favored rows with non-null level + momentum. Preferred region=${preferredRegion}, selected=${row.region}.`
+        note: demandSignalKey
+          ? `Demand-signal selection favored rows with non-null level + momentum. Preferred region=${preferredRegion}, selected=${row.region}.`
           : row.region === preferredRegion
             ? `Selected preferred region=${preferredRegion}.`
             : `Preferred region=${preferredRegion} missing; used fallback region=${row.region}.`,
@@ -254,18 +254,18 @@ export default async function handler(req: any, res: any) {
       ...(debugEnabled
         ? {
           ...(function buildPmiDebug() {
-            const pmiChina = indicatorByKey.get("pmi_china");
+            const chinaCli = indicatorByKey.get("china_cli");
             const pmiUs = indicatorByKey.get("pmi_us");
-            const pmiChinaSelection = indicatorSelectionDebug.find((item) => item.key === "pmi_china");
+            const chinaCliSelection = indicatorSelectionDebug.find((item) => item.key === "china_cli");
             const pmiUsSelection = indicatorSelectionDebug.find((item) => item.key === "pmi_us");
             return {
               pmiDebug: {
-                pmiChina: {
-                  valueLatest: pmiChina?.valueLatest ?? null,
-                  change3m: pmiChina?.change3m ?? null,
-                  change1m: pmiChina?.change1m ?? null,
-                  asOf: pmiChina?.asOf ?? null,
-                  selectedRegion: pmiChinaSelection?.selectedRegion ?? null,
+                chinaCli: {
+                  valueLatest: chinaCli?.valueLatest ?? null,
+                  change3m: chinaCli?.change3m ?? null,
+                  change1m: chinaCli?.change1m ?? null,
+                  asOf: chinaCli?.asOf ?? null,
+                  selectedRegion: chinaCliSelection?.selectedRegion ?? null,
                 },
                 pmiUs: {
                   valueLatest: pmiUs?.valueLatest ?? null,
@@ -290,11 +290,11 @@ export default async function handler(req: any, res: any) {
               std10y: commodityStd10y,
               latest: commodityLatest,
             },
-            pmiChinaAvailable: indicatorByKey.has("pmi_china"),
+            chinaCliAvailable: indicatorByKey.has("china_cli"),
             pmiUsAvailable: indicatorByKey.has("pmi_us"),
             blockers: [
-              ...(!indicatorByKey.has("pmi_china")
-                ? ["pmi_china missing in macro_indicator_snapshots (US/GLOBAL), so Copper phase remains Unknown by design."]
+              ...(!indicatorByKey.has("china_cli")
+                ? ["china_cli missing in macro_indicator_snapshots (US/GLOBAL), so Copper phase remains Unknown by design."]
                 : []),
             ],
           },

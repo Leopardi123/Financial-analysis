@@ -52,7 +52,7 @@ type CommoditySnapshotPayload = {
   ok: boolean;
   commodity?: string;
   pmiDebug?: {
-    pmiChina?: {
+    chinaCli?: {
       valueLatest: number | null;
       change3m: number | null;
       change1m: number | null;
@@ -86,7 +86,7 @@ type CommoditySnapshotPayload = {
       std10y?: number | null;
       latest?: number | null;
     };
-    pmiChinaAvailable?: boolean;
+    chinaCliAvailable?: boolean;
     pmiUsAvailable?: boolean;
     blockers?: string[];
   };
@@ -1022,9 +1022,9 @@ export default function SectorDashboard() {
                       <div><strong>External fetch note:</strong> {commoditySnapshot.debug.externalFetchReason ?? "n/a"}</div>
                       <div><strong>Requested indicators:</strong> {commoditySnapshot.debug.indicatorKeysRequested?.join(", ") || "none"}</div>
                       <div><strong>Price series:</strong> {commoditySnapshot.debug.priceSeriesKey ?? "n/a"} (obs={commoditySnapshot.debug.priceSeriesWindow10y?.observationCount ?? 0}, latest={commoditySnapshot.debug.priceSeriesWindow10y?.latest ?? "n/a"})</div>
-                      <div><strong>PMI availability:</strong> pmi_china={String(commoditySnapshot.debug.pmiChinaAvailable ?? false)}, pmi_us={String(commoditySnapshot.debug.pmiUsAvailable ?? false)}</div>
-                      <div><strong>PMI (selected rows):</strong> pmi_china={commoditySnapshot.pmiDebug?.pmiChina?.valueLatest ?? "n/a"} (chg3m={commoditySnapshot.pmiDebug?.pmiChina?.change3m ?? "n/a"}, region={commoditySnapshot.pmiDebug?.pmiChina?.selectedRegion ?? "n/a"}, asOf={commoditySnapshot.pmiDebug?.pmiChina?.asOf ?? "n/a"})</div>
-                      <div><strong>PMI US supplemental:</strong> pmi_us={commoditySnapshot.pmiDebug?.pmiUs?.valueLatest ?? "n/a"} (chg3m={commoditySnapshot.pmiDebug?.pmiUs?.change3m ?? "n/a"}, region={commoditySnapshot.pmiDebug?.pmiUs?.selectedRegion ?? "n/a"}, asOf={commoditySnapshot.pmiDebug?.pmiUs?.asOf ?? "n/a"})</div>
+                      <div><strong>China signal availability:</strong> china_cli={String(commoditySnapshot.debug.chinaCliAvailable ?? false)}, pmi_us={String(commoditySnapshot.debug.pmiUsAvailable ?? false)}</div>
+                      <div><strong>China CLI (selected row):</strong> china_cli={commoditySnapshot.pmiDebug?.chinaCli?.valueLatest ?? "n/a"} (chg3m={commoditySnapshot.pmiDebug?.chinaCli?.change3m ?? "n/a"}, region={commoditySnapshot.pmiDebug?.chinaCli?.selectedRegion ?? "n/a"}, asOf={commoditySnapshot.pmiDebug?.chinaCli?.asOf ?? "n/a"})</div>
+                      <div><strong>US PMI supplemental:</strong> pmi_us={commoditySnapshot.pmiDebug?.pmiUs?.valueLatest ?? "n/a"} (chg3m={commoditySnapshot.pmiDebug?.pmiUs?.change3m ?? "n/a"}, region={commoditySnapshot.pmiDebug?.pmiUs?.selectedRegion ?? "n/a"}, asOf={commoditySnapshot.pmiDebug?.pmiUs?.asOf ?? "n/a"})</div>
                       <div><strong>Blockers:</strong> {commoditySnapshot.debug.blockers?.join(" | ") || "none"}</div>
                       <div><strong>Indicator selection:</strong></div>
                       <ul>
