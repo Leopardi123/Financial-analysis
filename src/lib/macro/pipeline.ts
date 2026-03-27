@@ -174,6 +174,7 @@ function changedRegime(existing: ExistingRegimeRow | undefined, next: {
 
 export async function runAndPersistMacroSnapshots(params: { region: string; asOfDate?: string }) {
   const region = params.region.toUpperCase();
+  const engineRegion = region === "GLOBAL" ? "US" : region;
   const rawPoints = (await query(
     `SELECT series_key, date, value
      FROM ${tables.macroRawDatapoints}
@@ -201,13 +202,13 @@ export async function runAndPersistMacroSnapshots(params: { region: string; asOf
   const seriesMap = new Map(series.map((item) => [item.seriesKey, item]));
 
   const { regime, indicators } = runGlobalMacroEngine({
-    region,
+    region: engineRegion,
     asOfDate: params.asOfDate,
     series,
   });
 
   const catalogById = new Map(
-    MACRO_INDICATOR_CATALOG.filter((entry) => entry.region === region).map((entry) => [entry.indicatorId, entry]),
+    MACRO_INDICATOR_CATALOG.filter((entry) => entry.region === engineRegion).map((entry) => [entry.indicatorId, entry]),
   );
 
   const existingIndicators = (await query(
