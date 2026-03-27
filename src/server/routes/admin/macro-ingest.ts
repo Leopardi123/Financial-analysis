@@ -343,6 +343,15 @@ export default async function handler(req: any, res: any) {
     ]);
 
     const statusCode = allSeriesFailed ? 502 : 200;
+    const pmiSeriesDiagnostics = seriesResults
+      .filter((item) => item.seriesKey === "pmi_china" || item.seriesKey === "pmi_us")
+      .map((item) => ({
+        seriesKey: item.seriesKey,
+        fetchSuccess: item.fetchSuccess,
+        observationsFetched: item.observationsFetched,
+        providerSeriesId: item.meta?.providerSeriesId ?? null,
+        zeroRowsReason: item.meta?.zeroRowsReason ?? null,
+      }));
     res.status(statusCode).json({
       ok: !allSeriesFailed,
       partialSuccess: !allSeriesFailed && debug.fetchedSeries < Object.keys(sourceSeriesMap).length,
@@ -362,6 +371,7 @@ export default async function handler(req: any, res: any) {
         dedupeOnlyRun: debug.dedupeOnlyRun,
         ingestOutcome: debug.ingestOutcome,
       },
+      pmiSeriesDiagnostics,
       debug,
     });
   } catch (error) {
