@@ -9,6 +9,14 @@ type Props = {
 };
 
 type SeriesSpec = { label: string; color: string; values: Array<number | null> };
+type SpreadAreaSpec = {
+  label: string;
+  positiveColor: string;
+  negativeColor: string;
+  positiveOpacity: number;
+  negativeOpacity: number;
+  values: Array<number | null>;
+};
 
 function validSeries(series: SeriesSpec[]): SeriesSpec[] {
   return series
@@ -96,6 +104,117 @@ function TrendLineChart({
   );
 }
 
+function buildLinePath(values: Array<number | null>, x: (index: number) => number, y: (value: number | null) => number | null): string {
+  let hasStarted = false;
+  return values
+    .map((value, index) => {
+      const yPos = y(value);
+      if (yPos === null) {
+        hasStarted = false;
+        return "";
+      }
+      const command = hasStarted ? "L" : "M";
+      hasStarted = true;
+      return `${command}${x(index)},${yPos}`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildAreaPath(values: Array<number | null>, baseline: number, x: (index: number) => number, y: (value: number | null) => number | null): string {
+  let path = "";
+  let segmentStart: number | null = null;
+  let segmentPoints = "";
+
+  values.forEach((value, index) => {
+    const yPos = y(value);
+    if (yPos === null) {
+      if (segmentStart !== null && segmentPoints.length > 0) {
+        const endX = x(index - 1);
+        path += `${segmentPoints} L${endX},${baseline} L${x(segmentStart)},${baseline} Z `;
+      }
+      segmentStart = null;
+      segmentPoints = "";
+      return;
+    }
+
+    if (segmentStart === null) {
+      segmentStart = index;
+      segmentPoints = `M${x(index)},${baseline} L${x(index)},${yPos}`;
+      return;
+    }
+
+    segmentPoints += ` L${x(index)},${yPos}`;
+  });
+
+  if (segmentStart !== null && segmentPoints.length > 0) {
+    const endX = x(values.length - 1);
+    path += `${segmentPoints} L${endX},${baseline} L${x(segmentStart)},${baseline} Z`;
+  }
+
+  return path.trim();
+}
+
+function TrendSpreadAreaChart({ dates, series, height = 210 }: { dates: string[]; series: SpreadAreaSpec[]; height?: number }) {
+  const cleaned = series
+    .map((item) => ({ ...item, values: item.values.map((value) => (typeof value === "number" && Number.isFinite(value) ? value : null)) }))
+    .filter((item) => item.values.some((value) => typeof value === "number"));
+  if (cleaned.length === 0 || dates.length === 0) return <FallbackState message="Otillräcklig historik för att rita grafen." />;
+
+  const width = 960;
+  const top = 16;
+  const bottom = 24;
+  const left = 24;
+  const right = 10;
+  const values = cleaned.flatMap((item) => item.values).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (values.length === 0) return <FallbackState message="Serierna innehåller inga giltiga datapunkter." />;
+
+  const minRaw = Math.min(...values, 0);
+  const maxRaw = Math.max(...values, 0);
+  const range = Math.max(1e-6, maxRaw - minRaw);
+  const pad = range * 0.12;
+  const domainMin = minRaw - pad;
+  const domainMax = maxRaw + pad;
+
+  const x = (index: number) => left + (index / Math.max(1, dates.length - 1)) * (width - left - right);
+  const y = (value: number | null) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    return height - bottom - ((value - domainMin) / Math.max(1e-6, domainMax - domainMin)) * (height - top - bottom);
+  };
+  const zeroY = y(0) ?? height - bottom;
+
+  return (
+    <div className="commodity-trend-svg-wrap">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Trendexpansion spread-graf" style={{ width: "100%", height: `${height}px`, display: "block" }}>
+        <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke="#94a3b8" strokeWidth="1" />
+        <line x1={left} y1={zeroY} x2={width - right} y2={zeroY} stroke="#94a3b8" strokeWidth="1" />
+        {cleaned.map((item) => {
+          const positiveValues = item.values.map((value) => (typeof value === "number" ? Math.max(0, value) : null));
+          const negativeValues = item.values.map((value) => (typeof value === "number" ? Math.min(0, value) : null));
+          const positiveAreaPath = buildAreaPath(positiveValues, zeroY, x, y);
+          const negativeAreaPath = buildAreaPath(negativeValues, zeroY, x, y);
+          const linePath = buildLinePath(item.values, x, y);
+          return (
+            <g key={item.label}>
+              {positiveAreaPath ? <path d={positiveAreaPath} fill={item.positiveColor} fillOpacity={item.positiveOpacity} stroke="none" /> : null}
+              {negativeAreaPath ? <path d={negativeAreaPath} fill={item.negativeColor} fillOpacity={item.negativeOpacity} stroke="none" /> : null}
+              {linePath ? <path d={linePath} fill="none" stroke={item.positiveColor} strokeOpacity={0.75} strokeWidth="1.2" /> : null}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="commodity-trend-axis-labels">
+        <span>{dates[0] ?? ""}</span>
+        <span>{dates[dates.length - 1] ?? ""}</span>
+      </div>
+      <div className="commodity-trend-legend">
+        {cleaned.map((item) => <span key={item.label} style={{ color: item.positiveColor }}>■ {item.label}</span>)}
+        <span style={{ color: "#b91c1c" }}>■ Negativ spread</span>
+      </div>
+    </div>
+  );
+}
+
 export default function CommodityTrendSwipeSection({ priceHistory, commodityLabel, debugMode = false }: Props) {
   const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const trend = useMemo(() => buildCommodityTrendStructure(priceHistory, 5), [priceHistory]);
@@ -107,10 +226,14 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
     trend.hasSma500Coverage ? { label: "SMA500 (index)", color: "#7c3aed", values: trend.points.map((point) => point.indexSma500) } : null,
   ].filter((item): item is SeriesSpec => item !== null);
 
-  const spreadSeries: SeriesSpec[] = [
-    trend.hasSma50Coverage && trend.hasSma200Coverage ? { label: "SMA50 - SMA200", color: "#0f766e", values: trend.points.map((point) => point.spread50_200) } : null,
-    trend.hasSma200Coverage && trend.hasSma500Coverage ? { label: "SMA200 - SMA500", color: "#b45309", values: trend.points.map((point) => point.spread200_500) } : null,
-  ].filter((item): item is SeriesSpec => item !== null);
+  const spreadSeries: SpreadAreaSpec[] = [
+    trend.hasSma200Coverage && trend.hasSma500Coverage
+      ? { label: "SMA200 - SMA500", positiveColor: "#b45309", negativeColor: "#dc2626", positiveOpacity: 0.25, negativeOpacity: 0.2, values: trend.points.map((point) => point.spread200_500) }
+      : null,
+    trend.hasSma50Coverage && trend.hasSma200Coverage
+      ? { label: "SMA50 - SMA200", positiveColor: "#0f766e", negativeColor: "#b91c1c", positiveOpacity: 0.6, negativeOpacity: 0.38, values: trend.points.map((point) => point.spread50_200) }
+      : null,
+  ].filter((item): item is SpreadAreaSpec => item !== null);
 
   const relationClass = trend.trendStructureState === "bullish_aligned" || trend.trendStructureState === "bullish_but_narrowing"
     ? "is-bullish"
@@ -157,12 +280,16 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
               onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
               onClose={() => setOpenInfoId(null)}
               title="Trendexpansion, 5 månader"
-              content={trend.expansionInfoLines}
+              content={[
+                "Grafen visar avståndet mellan kort, mellan och lång trend.",
+                "När avståndet växer stärks trenden. När det krymper avtar momentum.",
+                ...trend.expansionInfoLines,
+              ]}
             />
           </div>
-          <p className="commodity-trend-subtitle">Spread mellan kort, mellan och lång trend (0-linje markerad)</p>
+          <p className="commodity-trend-subtitle">Spread visualiserad som area mot 0-linje: tjockare area = starkare trendexpansion.</p>
           {spreadHasRenderableData
-            ? <TrendLineChart dates={dates} series={spreadSeries} showZero />
+            ? <TrendSpreadAreaChart dates={dates} series={spreadSeries} />
             : <FallbackState message="Trendexpansion kan inte visas fullt ut eftersom SMA-underlag saknas." />}
           <p className="commodity-trend-interpretation">{trend.expansionInterpretation}</p>
           {trend.degradationLevel === "medium" ? <div className="commodity-trend-warning">Lång spread kan inte beräknas ännu – visar endast kort vs mellantrend.</div> : null}

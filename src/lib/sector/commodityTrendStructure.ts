@@ -155,26 +155,48 @@ export function buildTrendStructureInterpretation(model: CommodityTrendStructure
 
 export function buildTrendExpansionInterpretation(model: CommodityTrendStructure): string {
   if (model.degradationLevel === "insufficient") return "Trendexpansion kan inte visas med nuvarande historik.";
-  if (model.degradationLevel === "minimal") return "Trendexpansion saknas eftersom mellan/lång trend inte kan beräknas ännu.";
+  if (model.degradationLevel === "minimal") return "Otillräcklig data för lång trend.";
   if (model.degradationLevel === "medium") {
     const shortSpread = model.points.map((point) => point.spread50_200);
     const dir = trendDirection(shortSpread);
-    if (dir === "up") return "Spreaden mellan kort och mellantrend ökar, vilket tyder på tilltagande momentum.";
-    if (dir === "down") return "Spreaden mellan kort och mellantrend krymper, vilket tyder på tappad kraft.";
+    const latestShort = [...shortSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
+    if (dir === "up") return "Trendexpansionen tilltar – både kort och lång trend divergerar.";
+    if (dir === "down") return "Kort trend tappar momentum trots positiv struktur.";
     return "Kort spread är stabil men lång spread saknar underlag för full trendexpansion.";
+  }
+
+  const shortSpread = model.points.map((point) => point.spread50_200);
+  const longSpread = model.points.map((point) => point.spread200_500);
+  const shortDirection = trendDirection(shortSpread);
+  const longDirection = trendDirection(longSpread);
+  const latestShort = [...shortSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const latestLong = [...longSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+  if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
+  if (typeof latestShort === "number" && latestShort > 0 && shortDirection === "down") return "Kort trend tappar momentum trots positiv struktur.";
+  if (
+    typeof latestShort === "number"
+    && typeof latestLong === "number"
+    && latestShort > 0
+    && latestLong > 0
+    && shortDirection === "up"
+    && longDirection === "up"
+  ) {
+    return "Trendexpansionen tilltar – både kort och lång trend divergerar.";
   }
 
   switch (model.trendExpansionState) {
     case "expanding":
-      return "Både kort och lång spread stöder en expanderande trendstruktur.";
+      return "Trendexpansionen tilltar – både kort och lång trend divergerar.";
     case "narrowing":
-      return "Spreadar krymper, vilket signalerar avtagande trendexpansion.";
+      return "Kort trend tappar momentum trots positiv struktur.";
     case "negative_short_spread":
-      return "Kort spread är negativ, vilket pekar på trendbrott i den korta strukturen.";
+      return "Kort trend bryter ned – risk för trendvändning.";
     case "flat":
       return "Spreadar är relativt platta och visar begränsad trendacceleration.";
     default:
-      return "Trendexpansionen är otydlig med nuvarande datapunkter.";
+      return "Otillräcklig data för lång trend.";
   }
 }
 
