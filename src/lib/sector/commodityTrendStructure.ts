@@ -162,8 +162,8 @@ export function buildTrendExpansionInterpretation(model: CommodityTrendStructure
     const latestShort = [...shortSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
     if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
     if (dir === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
-    if (dir === "up") return "Otillräcklig data för lång trend.";
-    return "Kort spread är stabil men lång spread saknar underlag för full trendexpansion.";
+    if (dir === "up") return "Lång spread kan ännu inte visas eftersom SMA500 saknar tillräcklig historik.";
+    return "Lång spread kan ännu inte visas eftersom SMA500 saknar tillräcklig historik.";
   }
 
   const shortSpread = model.points.map((point) => point.spread50_200);
@@ -362,9 +362,11 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
     ...(model.degradationLevel !== "full" && model.missingHistoryReason ? [model.missingHistoryReason] : []),
   ];
   model.expansionInfoLines = [
-    model.expansionInterpretation,
-    `Trend expansion state: ${model.trendExpansionState}.`,
-    ...(model.degradationLevel === "medium" ? ["Lång spread (SMA200-SMA500) kan inte bedömas fullt ut ännu."] : []),
+    "Kort spread visar avståndet mellan SMA50 och SMA200.",
+    "Lång spread visar avståndet mellan SMA200 och SMA500.",
+    model.degradationLevel === "medium"
+      ? "Lång spread kan ännu inte visas eftersom SMA500 saknar tillräcklig historik."
+      : "När spreaden ökar stärks trendstrukturen. När den minskar tappar trenden kraft.",
   ];
 
   return model;

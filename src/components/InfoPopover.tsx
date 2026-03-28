@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type InfoSection = {
   heading: string;
@@ -19,7 +20,7 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
   const isOpen = openId === id;
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const [panelStyle, setPanelStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [panelStyle, setPanelStyle] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
 
   const normalizedSections: InfoSection[] = sections && sections.length
     ? sections
@@ -45,13 +46,14 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
       left = Math.min(left, window.innerWidth - panelWidth - viewportPadding);
 
       const preferredTop = rect.bottom + 8;
-      const estimatedHeight = 240;
+      const estimatedHeight = Math.min(320, window.innerHeight * 0.6);
       let top = preferredTop;
       if (preferredTop + estimatedHeight > window.innerHeight - viewportPadding) {
         top = Math.max(viewportPadding, rect.top - estimatedHeight - 8);
       }
+      const maxHeight = Math.max(160, window.innerHeight - top - viewportPadding);
 
-      setPanelStyle({ top, left, width: panelWidth });
+      setPanelStyle({ top, left, width: panelWidth, maxHeight });
     };
 
     updatePosition();
@@ -94,21 +96,24 @@ export default function InfoPopover({ id, openId, onToggle, onClose, title, sect
       >
         (i)
       </button>
-      {isOpen && (
-        <div className="info-popover-panel" style={panelStyle ?? undefined}>
-          <h4>{title}</h4>
-          {normalizedSections.map((section) => (
-            <div key={`${section.heading}-${section.lines.join("|")}`} className="info-popover-section">
-              <p className="info-popover-heading">{section.heading}</p>
-              <ul>
-                {section.lines.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
+      {isOpen
+        ? createPortal(
+          <div className="info-popover-panel" style={panelStyle ?? undefined} role="dialog" aria-modal="false" aria-label={title}>
+            <h4>{title}</h4>
+            {normalizedSections.map((section) => (
+              <div key={`${section.heading}-${section.lines.join("|")}`} className="info-popover-section">
+                <p className="info-popover-heading">{section.heading}</p>
+                <ul>
+                  {section.lines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   );
 }

@@ -215,8 +215,8 @@ function TrendSpreadAreaChart({ dates, shortSpread, longSpread, height = 210 }: 
     <div className="commodity-trend-svg-wrap">
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Trendexpansion spread-graf" style={{ width: "100%", height: `${height}px`, display: "block" }}>
         <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke="#94a3b8" strokeWidth="1" />
-        <line x1={left} y1={zeroY} x2={width - right} y2={zeroY} stroke="#475569" strokeWidth="1.4" />
-        <text x={left + 4} y={zeroY - 6} fill="#475569" fontSize="11">Trendneutral</text>
+        <line x1={left} y1={zeroY} x2={width - right} y2={zeroY} stroke="#334155" strokeWidth="1.6" strokeDasharray="3 3" />
+        <text x={left + 4} y={zeroY - 6} fill="#1e293b" fontSize="11">0 = ingen skillnad mellan medelvärden</text>
         {shortAreaPath ? <path d={shortAreaPath} fill={cleanedShort.positiveColor} fillOpacity={cleanedShort.positiveOpacity} stroke="none" /> : null}
         {shortNegativeAreaPath ? <path d={shortNegativeAreaPath} fill={cleanedShort.negativeColor} fillOpacity={cleanedShort.negativeOpacity} stroke="none" /> : null}
         {momentumHighlightPath ? <path d={momentumHighlightPath} fill="#facc15" fillOpacity={0.35} stroke="none" /> : null}
@@ -278,12 +278,22 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
       : "";
 
   const spreadHasRenderableData = shortSpreadSeries?.values.some((value) => typeof value === "number" && Number.isFinite(value)) ?? false;
+  const structureHasRenderableData = trend.hasSma50Coverage && trend.hasSma200Coverage && trendSeries.length > 0 && dates.length > 0;
+  const coverageLabel = trend.trendDataCompleteness === "full" ? "full" : trend.trendDataCompleteness === "partial" ? "partial" : "insufficient";
+  const expansionCoverageMessage = trend.degradationLevel === "full"
+    ? "Trendexpansion använder både kort spread (SMA50-SMA200) och lång spread (SMA200-SMA500)."
+    : trend.degradationLevel === "medium"
+      ? "Lång spread kan ännu inte visas eftersom SMA500 saknar tillräcklig historik."
+      : "Prisunderlag saknas för full lång trend.";
 
   return (
     <section className="commodity-trend-carousel-card" aria-label={`Trendvisualisering för ${commodityLabel}`}>
       <div className="commodity-trend-carousel-head">
         <h3>Trendstruktur för {commodityLabel}</h3>
         <p>Visualisering av trendkvalitet (ingen prisnivågraf).</p>
+        <div className={`commodity-trend-coverage-chip is-${coverageLabel}`}>
+          Datatäckning: <strong>{coverageLabel}</strong> · degradation: <strong>{trend.degradationLevel}</strong>
+        </div>
       </div>
 
       <div className="commodity-trend-carousel" role="region" aria-label="Swipebara trendgrafer">
@@ -300,11 +310,17 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
             />
           </div>
           <p className="commodity-trend-subtitle">Tillgängliga SMA-serier indexerade från startpunkt (100)</p>
-          {trendSeries.length > 0 && dates.length > 0
+          {structureHasRenderableData
             ? <TrendLineChart dates={dates} series={trendSeries} />
             : <FallbackState message="Otillräcklig historik för att visa trendstruktur." />}
           <p className="commodity-trend-interpretation">{trend.structureInterpretation}</p>
           {trend.missingHistoryReason ? <div className="commodity-trend-warning">{trend.missingHistoryReason}</div> : null}
+          <div className="commodity-trend-data-readout">
+            <div><strong>Observationer:</strong> {trend.debug.rawObservationCount}</div>
+            <div><strong>Period:</strong> {trend.debug.rawFromDate ?? "n/a"} → {trend.debug.rawToDate ?? "n/a"}</div>
+            <div><strong>SMA:</strong> 50={String(trend.debug.sma50Computable)}, 200={String(trend.debug.sma200Computable)}, 500={String(trend.debug.sma500Computable)}</div>
+            <div><strong>Degradation:</strong> {trend.degradationLevel}</div>
+          </div>
         </article>
 
         <article className="commodity-trend-page">
@@ -317,18 +333,25 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
               onClose={() => setOpenInfoId(null)}
               title="Trendexpansion, 5 månader"
               content={[
-                "Grafen visar hur avståndet mellan kort, mellan och lång trend utvecklas.",
-                "När kort spread minskar tappar marknaden momentum även om trenden fortfarande är intakt.",
+                "Kort spread visar avståndet mellan SMA50 och SMA200.",
+                "Lång spread visar avståndet mellan SMA200 och SMA500.",
+                "När spread = 0 finns inget avstånd mellan de två glidande medelvärdena.",
+                "När spreaden ökar stärks trendstrukturen. När den minskar tappar trenden kraft.",
                 ...trend.expansionInfoLines,
               ]}
             />
           </div>
-          <p className="commodity-trend-subtitle">Spread visualiserad som area mot 0-linje: tjockare area = starkare trendexpansion.</p>
+          <p className="commodity-trend-subtitle">Kort spread visas som area (huvudsignal). Lång spread visas som tunn referenslinje.</p>
           {spreadHasRenderableData
             ? <TrendSpreadAreaChart dates={dates} shortSpread={shortSpreadSeries!} longSpread={longSpreadSeries} />
             : <FallbackState message="Trendexpansion kan inte visas fullt ut eftersom SMA-underlag saknas." />}
           <p className="commodity-trend-interpretation">{trend.expansionInterpretation}</p>
-          {trend.degradationLevel === "medium" ? <div className="commodity-trend-warning">Lång spread kan inte beräknas ännu – visar endast kort vs mellantrend.</div> : null}
+          {trend.degradationLevel !== "full" ? <div className="commodity-trend-warning">{expansionCoverageMessage}</div> : null}
+          <div className="commodity-trend-data-readout">
+            <div><strong>Spreads giltiga punkter:</strong> 50-200={trend.debug.spread50_200ValidPoints}, 200-500={trend.debug.spread200_500ValidPoints}</div>
+            <div><strong>Datatäckning:</strong> {trend.trendDataCompleteness}</div>
+            <div><strong>Tillstånd:</strong> expansion={trend.trendExpansionState}</div>
+          </div>
         </article>
       </div>
 
