@@ -15,6 +15,9 @@ type SpreadAreaSpec = {
   negativeColor: string;
   positiveOpacity: number;
   negativeOpacity: number;
+  strokeColor: string;
+  strokeOpacity: number;
+  strokeWidth: number;
   values: Array<number | null>;
 };
 
@@ -147,18 +150,23 @@ function buildAreaPath(values: Array<number | null>, baseline: number, x: (index
   return segments.join(" ");
 }
 
-function TrendSpreadAreaChart({ dates, series, height = 210 }: { dates: string[]; series: SpreadAreaSpec[]; height?: number }) {
-  const cleaned = series
-    .map((item) => ({ ...item, values: item.values.map((value) => (typeof value === "number" && Number.isFinite(value) ? value : null)) }))
-    .filter((item) => item.values.some((value) => typeof value === "number"));
-  if (cleaned.length === 0 || dates.length === 0) return <FallbackState message="Otillräcklig historik för att rita grafen." />;
+function TrendSpreadAreaChart({ dates, shortSpread, longSpread, height = 210 }: { dates: string[]; shortSpread: SpreadAreaSpec; longSpread: SpreadAreaSpec | null; height?: number }) {
+  const cleanedShort = { ...shortSpread, values: shortSpread.values.map((value) => (typeof value === "number" && Number.isFinite(value) ? value : null)) };
+  const cleanedLong = longSpread
+    ? { ...longSpread, values: longSpread.values.map((value) => (typeof value === "number" && Number.isFinite(value) ? value : null)) }
+    : null;
+  const hasShortData = cleanedShort.values.some((value) => typeof value === "number");
+  const hasLongData = cleanedLong?.values.some((value) => typeof value === "number") ?? false;
+  if (!hasShortData || dates.length === 0) return <FallbackState message="Otillräcklig historik för att rita grafen." />;
 
   const width = 960;
   const top = 16;
   const bottom = 24;
   const left = 24;
   const right = 10;
-  const values = cleaned.flatMap((item) => item.values).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const values = [cleanedShort, ...(cleanedLong ? [cleanedLong] : [])]
+    .flatMap((item) => item.values)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (values.length === 0) return <FallbackState message="Serierna innehåller inga giltiga datapunkter." />;
 
   const minRaw = Math.min(...values, 0);
@@ -174,34 +182,52 @@ function TrendSpreadAreaChart({ dates, series, height = 210 }: { dates: string[]
     return height - bottom - ((value - domainMin) / Math.max(1e-6, domainMax - domainMin)) * (height - top - bottom);
   };
   const zeroY = y(0) ?? height - bottom;
+  const shortPositiveValues = cleanedShort.values.map((value) => (typeof value === "number" ? Math.max(0, value) : null));
+  const shortNegativeValues = cleanedShort.values.map((value) => (typeof value === "number" ? Math.min(0, value) : null));
+  const shortAreaPath = buildAreaPath(shortPositiveValues, zeroY, x, y);
+  const shortNegativeAreaPath = buildAreaPath(shortNegativeValues, zeroY, x, y);
+  const shortLinePath = buildLinePath(cleanedShort.values, x, y);
+  const longLinePath = cleanedLong ? buildLinePath(cleanedLong.values, x, y) : "";
+
+  const shortRecentIndices = cleanedShort.values
+    .map((value, index) => (typeof value === "number" ? index : -1))
+    .filter((index) => index >= 0)
+    .slice(-10);
+  const shortRecentValues = shortRecentIndices
+    .map((index) => cleanedShort.values[index])
+    .filter((value): value is number => typeof value === "number");
+  const shortMomentumFalling = shortRecentValues.length >= 2 && shortRecentValues[shortRecentValues.length - 1] < shortRecentValues[0];
+  const momentumHighlightValues = cleanedShort.values.map((value, index) => (shortMomentumFalling && shortRecentIndices.includes(index) ? value : null));
+  const momentumHighlightPath = buildAreaPath(momentumHighlightValues, zeroY, x, y);
+
+  const findLastPoint = (valuesToSearch: Array<number | null>) => {
+    for (let index = valuesToSearch.length - 1; index >= 0; index -= 1) {
+      const value = valuesToSearch[index];
+      const yPos = y(value);
+      if (typeof value === "number" && yPos !== null) return { x: x(index), y: yPos };
+    }
+    return null;
+  };
+  const shortLastPoint = findLastPoint(cleanedShort.values);
+  const longLastPoint = cleanedLong ? findLastPoint(cleanedLong.values) : null;
 
   return (
     <div className="commodity-trend-svg-wrap">
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Trendexpansion spread-graf" style={{ width: "100%", height: `${height}px`, display: "block" }}>
         <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke="#94a3b8" strokeWidth="1" />
-        <line x1={left} y1={zeroY} x2={width - right} y2={zeroY} stroke="#94a3b8" strokeWidth="1" />
-        {cleaned.map((item) => {
-          const positiveValues = item.values.map((value) => (typeof value === "number" ? Math.max(0, value) : null));
-          const negativeValues = item.values.map((value) => (typeof value === "number" ? Math.min(0, value) : null));
-          const positiveAreaPath = buildAreaPath(positiveValues, zeroY, x, y);
-          const negativeAreaPath = buildAreaPath(negativeValues, zeroY, x, y);
-          const linePath = buildLinePath(item.values, x, y);
-          return (
-            <g key={item.label}>
-              {positiveAreaPath ? <path d={positiveAreaPath} fill={item.positiveColor} fillOpacity={item.positiveOpacity} stroke="none" /> : null}
-              {negativeAreaPath ? <path d={negativeAreaPath} fill={item.negativeColor} fillOpacity={item.negativeOpacity} stroke="none" /> : null}
-              {linePath ? <path d={linePath} fill="none" stroke={item.positiveColor} strokeOpacity={0.75} strokeWidth="1.2" /> : null}
-            </g>
-          );
-        })}
+        <line x1={left} y1={zeroY} x2={width - right} y2={zeroY} stroke="#475569" strokeWidth="1.4" />
+        <text x={left + 4} y={zeroY - 6} fill="#475569" fontSize="11">Trendneutral</text>
+        {shortAreaPath ? <path d={shortAreaPath} fill={cleanedShort.positiveColor} fillOpacity={cleanedShort.positiveOpacity} stroke="none" /> : null}
+        {shortNegativeAreaPath ? <path d={shortNegativeAreaPath} fill={cleanedShort.negativeColor} fillOpacity={cleanedShort.negativeOpacity} stroke="none" /> : null}
+        {momentumHighlightPath ? <path d={momentumHighlightPath} fill="#facc15" fillOpacity={0.35} stroke="none" /> : null}
+        {longLinePath && hasLongData ? <path d={longLinePath} fill="none" stroke={cleanedLong!.strokeColor} strokeOpacity={cleanedLong!.strokeOpacity} strokeWidth={cleanedLong!.strokeWidth} /> : null}
+        {shortLinePath ? <path d={shortLinePath} fill="none" stroke={cleanedShort.strokeColor} strokeOpacity={cleanedShort.strokeOpacity} strokeWidth={cleanedShort.strokeWidth} /> : null}
+        {shortLastPoint ? <text x={Math.min(width - right - 72, shortLastPoint.x + 8)} y={shortLastPoint.y - 6} fill="#0f766e" fontSize="11">Kort trend</text> : null}
+        {longLastPoint ? <text x={Math.min(width - right - 72, longLastPoint.x + 8)} y={longLastPoint.y + 12} fill="#b45309" fontSize="11">Lång trend</text> : null}
       </svg>
       <div className="commodity-trend-axis-labels">
         <span>{dates[0] ?? ""}</span>
         <span>{dates[dates.length - 1] ?? ""}</span>
-      </div>
-      <div className="commodity-trend-legend">
-        {cleaned.map((item) => <span key={item.label} style={{ color: item.positiveColor }}>■ {item.label}</span>)}
-        <span style={{ color: "#b91c1c" }}>■ Negativ spread</span>
       </div>
     </div>
   );
@@ -218,14 +244,32 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
     trend.hasSma500Coverage ? { label: "SMA500 (index)", color: "#7c3aed", values: trend.points.map((point) => point.indexSma500) } : null,
   ].filter((item): item is SeriesSpec => item !== null);
 
-  const spreadSeries: SpreadAreaSpec[] = [
-    trend.hasSma200Coverage && trend.hasSma500Coverage
-      ? { label: "SMA200 - SMA500", positiveColor: "#b45309", negativeColor: "#dc2626", positiveOpacity: 0.25, negativeOpacity: 0.2, values: trend.points.map((point) => point.spread200_500) }
-      : null,
-    trend.hasSma50Coverage && trend.hasSma200Coverage
-      ? { label: "SMA50 - SMA200", positiveColor: "#0f766e", negativeColor: "#b91c1c", positiveOpacity: 0.6, negativeOpacity: 0.38, values: trend.points.map((point) => point.spread50_200) }
-      : null,
-  ].filter((item): item is SpreadAreaSpec => item !== null);
+  const shortSpreadSeries: SpreadAreaSpec | null = trend.hasSma50Coverage && trend.hasSma200Coverage
+    ? {
+      label: "SMA50 - SMA200",
+      positiveColor: "#0f766e",
+      negativeColor: "#b91c1c",
+      positiveOpacity: 0.6,
+      negativeOpacity: 0.38,
+      strokeColor: "#0f766e",
+      strokeOpacity: 0.92,
+      strokeWidth: 1.4,
+      values: trend.points.map((point) => point.spread50_200),
+    }
+    : null;
+  const longSpreadSeries: SpreadAreaSpec | null = trend.hasSma200Coverage && trend.hasSma500Coverage
+    ? {
+      label: "SMA200 - SMA500",
+      positiveColor: "#b45309",
+      negativeColor: "#dc2626",
+      positiveOpacity: 0,
+      negativeOpacity: 0,
+      strokeColor: "#b45309",
+      strokeOpacity: 0.8,
+      strokeWidth: 1.2,
+      values: trend.points.map((point) => point.spread200_500),
+    }
+    : null;
 
   const relationClass = trend.trendStructureState === "bullish_aligned" || trend.trendStructureState === "bullish_but_narrowing"
     ? "is-bullish"
@@ -233,7 +277,7 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
       ? "is-bearish"
       : "";
 
-  const spreadHasRenderableData = spreadSeries.some((line) => line.values.some((value) => typeof value === "number" && Number.isFinite(value)));
+  const spreadHasRenderableData = shortSpreadSeries?.values.some((value) => typeof value === "number" && Number.isFinite(value)) ?? false;
 
   return (
     <section className="commodity-trend-carousel-card" aria-label={`Trendvisualisering för ${commodityLabel}`}>
@@ -273,15 +317,15 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
               onClose={() => setOpenInfoId(null)}
               title="Trendexpansion, 5 månader"
               content={[
-                "Grafen visar avståndet mellan kort, mellan och lång trend.",
-                "När avståndet växer stärks trenden. När det krymper avtar momentum.",
+                "Grafen visar hur avståndet mellan kort, mellan och lång trend utvecklas.",
+                "När kort spread minskar tappar marknaden momentum även om trenden fortfarande är intakt.",
                 ...trend.expansionInfoLines,
               ]}
             />
           </div>
           <p className="commodity-trend-subtitle">Spread visualiserad som area mot 0-linje: tjockare area = starkare trendexpansion.</p>
           {spreadHasRenderableData
-            ? <TrendSpreadAreaChart dates={dates} series={spreadSeries} />
+            ? <TrendSpreadAreaChart dates={dates} shortSpread={shortSpreadSeries!} longSpread={longSpreadSeries} />
             : <FallbackState message="Trendexpansion kan inte visas fullt ut eftersom SMA-underlag saknas." />}
           <p className="commodity-trend-interpretation">{trend.expansionInterpretation}</p>
           {trend.degradationLevel === "medium" ? <div className="commodity-trend-warning">Lång spread kan inte beräknas ännu – visar endast kort vs mellantrend.</div> : null}

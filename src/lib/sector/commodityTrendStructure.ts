@@ -161,8 +161,8 @@ export function buildTrendExpansionInterpretation(model: CommodityTrendStructure
     const dir = trendDirection(shortSpread);
     const latestShort = [...shortSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
     if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
-    if (dir === "up") return "Trendexpansionen tilltar – både kort och lång trend divergerar.";
-    if (dir === "down") return "Kort trend tappar momentum trots positiv struktur.";
+    if (dir === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
+    if (dir === "up") return "Otillräcklig data för lång trend.";
     return "Kort spread är stabil men lång spread saknar underlag för full trendexpansion.";
   }
 
@@ -174,7 +174,7 @@ export function buildTrendExpansionInterpretation(model: CommodityTrendStructure
   const latestLong = [...longSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
 
   if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
-  if (typeof latestShort === "number" && latestShort > 0 && shortDirection === "down") return "Kort trend tappar momentum trots positiv struktur.";
+  if (typeof latestShort === "number" && latestShort > 0 && shortDirection === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
   if (
     typeof latestShort === "number"
     && typeof latestLong === "number"
@@ -183,14 +183,14 @@ export function buildTrendExpansionInterpretation(model: CommodityTrendStructure
     && shortDirection === "up"
     && longDirection === "up"
   ) {
-    return "Trendexpansionen tilltar – både kort och lång trend divergerar.";
+    return "Trenden stärks – både kort och lång trend divergerar.";
   }
 
   switch (model.trendExpansionState) {
     case "expanding":
-      return "Trendexpansionen tilltar – både kort och lång trend divergerar.";
+      return "Trenden stärks – både kort och lång trend divergerar.";
     case "narrowing":
-      return "Kort trend tappar momentum trots positiv struktur.";
+      return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
     case "negative_short_spread":
       return "Kort trend bryter ned – risk för trendvändning.";
     case "flat":
