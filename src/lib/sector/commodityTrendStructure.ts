@@ -1,0 +1,349 @@
+export type CommodityPricePoint = {
+  date: string;
+  value: number | null;
+};
+
+export type TrendDataCompleteness = "full" | "partial" | "insufficient";
+export type DegradationLevel = "full" | "medium" | "minimal" | "insufficient";
+export type TrendStructureState = "bullish_aligned" | "bullish_but_narrowing" | "bearish_short_term" | "mixed" | "insufficient";
+export type TrendExpansionState = "expanding" | "narrowing" | "negative_short_spread" | "flat" | "insufficient";
+
+export type CommodityTrendPoint = {
+  date: string;
+  sma50: number | null;
+  sma200: number | null;
+  sma500: number | null;
+  indexSma50: number | null;
+  indexSma200: number | null;
+  indexSma500: number | null;
+  spread50_200: number | null;
+  spread200_500: number | null;
+};
+
+export type CommodityTrendStructure = {
+  windowStartDate: string | null;
+  windowEndDate: string | null;
+  points: CommodityTrendPoint[];
+  hasSma50Coverage: boolean;
+  hasSma200Coverage: boolean;
+  hasSma500Coverage: boolean;
+  degradationLevel: DegradationLevel;
+  trendDataCompleteness: TrendDataCompleteness;
+  trendStructureState: TrendStructureState;
+  trendExpansionState: TrendExpansionState;
+  structureInterpretation: string;
+  expansionInterpretation: string;
+  structureInfoLines: string[];
+  expansionInfoLines: string[];
+  missingHistoryReason: string | null;
+  debug: {
+    rawObservationCount: number;
+    rawFromDate: string | null;
+    rawToDate: string | null;
+    windowObservationCount: number;
+    sma50Computable: boolean;
+    sma200Computable: boolean;
+    sma500Computable: boolean;
+    spread50_200ValidPoints: number;
+    spread200_500ValidPoints: number;
+    fallbackReason: string | null;
+  };
+};
+
+function parseDate(date: string): Date | null {
+  const parsed = new Date(date);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function computeSma(values: Array<number | null>, period: number): Array<number | null> {
+  const out: Array<number | null> = new Array(values.length).fill(null);
+  let sum = 0;
+  let validCount = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    const next = values[i];
+    if (typeof next === "number" && Number.isFinite(next)) {
+      sum += next;
+      validCount += 1;
+    }
+    if (i >= period) {
+      const leaving = values[i - period];
+      if (typeof leaving === "number" && Number.isFinite(leaving)) {
+        sum -= leaving;
+        validCount -= 1;
+      }
+    }
+    if (i >= period - 1 && validCount === period) out[i] = sum / period;
+  }
+  return out;
+}
+
+function normalizeFromBase(series: Array<number | null>): Array<number | null> {
+  const base = series.find((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (base === undefined || Math.abs(base) < 1e-12) return series.map(() => null);
+  return series.map((value) => (typeof value === "number" && Number.isFinite(value) ? (value / base) * 100 : null));
+}
+
+function countValid(values: Array<number | null>): number {
+  return values.filter((value) => typeof value === "number" && Number.isFinite(value)).length;
+}
+
+function trendDirection(values: Array<number | null>): "up" | "down" | "flat" | "insufficient" {
+  const numeric = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (numeric.length < 2) return "insufficient";
+  const delta = numeric[numeric.length - 1] - numeric[0];
+  if (Math.abs(delta) < 1e-6) return "flat";
+  return delta > 0 ? "up" : "down";
+}
+
+function buildStructureState(args: {
+  hasSma50Coverage: boolean;
+  hasSma200Coverage: boolean;
+  hasSma500Coverage: boolean;
+  latest: CommodityTrendPoint | null;
+  shortSpreadDirection: "up" | "down" | "flat" | "insufficient";
+}): TrendStructureState {
+  const { hasSma50Coverage, hasSma200Coverage, hasSma500Coverage, latest, shortSpreadDirection } = args;
+  if (!hasSma50Coverage || !hasSma200Coverage || !latest) return "insufficient";
+  const bullishShortMid = typeof latest.sma50 === "number" && typeof latest.sma200 === "number" && latest.sma50 > latest.sma200;
+  if (
+    bullishShortMid
+    && hasSma500Coverage
+    && typeof latest.sma200 === "number"
+    && typeof latest.sma500 === "number"
+    && latest.sma200 > latest.sma500
+  ) {
+    return shortSpreadDirection === "down" ? "bullish_but_narrowing" : "bullish_aligned";
+  }
+  if (!bullishShortMid) return "bearish_short_term";
+  return "mixed";
+}
+
+function buildExpansionState(spread50_200: Array<number | null>, spread200_500: Array<number | null>): TrendExpansionState {
+  const shortDirection = trendDirection(spread50_200);
+  const shortLatest = [...spread50_200].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const longDirection = trendDirection(spread200_500);
+
+  if (shortDirection === "insufficient") return "insufficient";
+  if (typeof shortLatest === "number" && shortLatest < 0) return "negative_short_spread";
+  if (shortDirection === "up" && (longDirection === "up" || longDirection === "insufficient")) return "expanding";
+  if (shortDirection === "down" || longDirection === "down") return "narrowing";
+  if (shortDirection === "flat") return "flat";
+  return "insufficient";
+}
+
+export function buildTrendStructureInterpretation(model: CommodityTrendStructure): string {
+  if (model.degradationLevel === "insufficient") return "Otillräcklig historik för att bedöma trendstruktur.";
+  if (model.degradationLevel === "minimal") return "Endast kort trend finns tillgänglig. Visa med försiktighet tills mer historik finns.";
+  if (model.degradationLevel === "medium") {
+    const latest = model.points[model.points.length - 1] ?? null;
+    if (latest && typeof latest.sma50 === "number" && typeof latest.sma200 === "number" && latest.sma50 > latest.sma200) {
+      return "Kort trend ligger över mellantrend, vilket visar fortsatt styrka men lång trend saknar underlag.";
+    }
+    return "Kort trend har tappat mot mellantrend och lång trend saknar ännu underlag.";
+  }
+  switch (model.trendStructureState) {
+    case "bullish_aligned":
+      return "Kort, mellan och lång trend är i bullish ordning, vilket tyder på intakt trendstruktur.";
+    case "bullish_but_narrowing":
+      return "Trenden är fortfarande positiv men den korta styrkan mot mellantrend avtar.";
+    case "bearish_short_term":
+      return "Kort trend ligger under mellantrend, vilket signalerar kortsiktig svaghet i strukturen.";
+    default:
+      return "Trendstrukturen är blandad och visar ingen entydig riktning just nu.";
+  }
+}
+
+export function buildTrendExpansionInterpretation(model: CommodityTrendStructure): string {
+  if (model.degradationLevel === "insufficient") return "Trendexpansion kan inte visas med nuvarande historik.";
+  if (model.degradationLevel === "minimal") return "Trendexpansion saknas eftersom mellan/lång trend inte kan beräknas ännu.";
+  if (model.degradationLevel === "medium") {
+    const shortSpread = model.points.map((point) => point.spread50_200);
+    const dir = trendDirection(shortSpread);
+    if (dir === "up") return "Spreaden mellan kort och mellantrend ökar, vilket tyder på tilltagande momentum.";
+    if (dir === "down") return "Spreaden mellan kort och mellantrend krymper, vilket tyder på tappad kraft.";
+    return "Kort spread är stabil men lång spread saknar underlag för full trendexpansion.";
+  }
+
+  switch (model.trendExpansionState) {
+    case "expanding":
+      return "Både kort och lång spread stöder en expanderande trendstruktur.";
+    case "narrowing":
+      return "Spreadar krymper, vilket signalerar avtagande trendexpansion.";
+    case "negative_short_spread":
+      return "Kort spread är negativ, vilket pekar på trendbrott i den korta strukturen.";
+    case "flat":
+      return "Spreadar är relativt platta och visar begränsad trendacceleration.";
+    default:
+      return "Trendexpansionen är otydlig med nuvarande datapunkter.";
+  }
+}
+
+export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[], months = 5): CommodityTrendStructure {
+  const sorted = [...pricePoints]
+    .map((point) => ({ ...point, parsed: parseDate(point.date) }))
+    .filter((point) => point.parsed !== null)
+    .sort((a, b) => (a.parsed!.getTime() - b.parsed!.getTime()));
+
+  const emptyBase: CommodityTrendStructure = {
+    windowStartDate: null,
+    windowEndDate: null,
+    points: [],
+    hasSma50Coverage: false,
+    hasSma200Coverage: false,
+    hasSma500Coverage: false,
+    degradationLevel: "insufficient",
+    trendDataCompleteness: "insufficient",
+    trendStructureState: "insufficient",
+    trendExpansionState: "insufficient",
+    structureInterpretation: "Otillräcklig historik för att bedöma trendstruktur.",
+    expansionInterpretation: "Trendexpansion kan inte visas med nuvarande historik.",
+    structureInfoLines: [],
+    expansionInfoLines: [],
+    missingHistoryReason: "Otillräcklig historik för att visa trendstruktur.",
+    debug: {
+      rawObservationCount: sorted.length,
+      rawFromDate: sorted[0]?.date ?? null,
+      rawToDate: sorted[sorted.length - 1]?.date ?? null,
+      windowObservationCount: 0,
+      sma50Computable: false,
+      sma200Computable: false,
+      sma500Computable: false,
+      spread50_200ValidPoints: 0,
+      spread200_500ValidPoints: 0,
+      fallbackReason: "no_raw_points",
+    },
+  };
+
+  if (sorted.length === 0) return emptyBase;
+
+  const dates = sorted.map((point) => point.date);
+  const values = sorted.map((point) => (typeof point.value === "number" && Number.isFinite(point.value) ? point.value : null));
+  const sma50 = computeSma(values, 50);
+  const sma200 = computeSma(values, 200);
+  const sma500 = computeSma(values, 500);
+
+  const endDate = sorted[sorted.length - 1].parsed!;
+  const startDate = new Date(endDate);
+  startDate.setMonth(startDate.getMonth() - Math.max(1, months));
+
+  const windowIndices = sorted
+    .map((point, idx) => ({ idx, ts: point.parsed!.getTime() }))
+    .filter((point) => point.ts >= startDate.getTime())
+    .map((point) => point.idx);
+
+  if (windowIndices.length === 0) {
+    return {
+      ...emptyBase,
+      windowEndDate: dates[dates.length - 1] ?? null,
+      debug: {
+        ...emptyBase.debug,
+        sma50Computable: countValid(sma50) > 0,
+        sma200Computable: countValid(sma200) > 0,
+        sma500Computable: countValid(sma500) > 0,
+        fallbackReason: "no_points_in_display_window",
+      },
+    };
+  }
+
+  const windowSma50 = windowIndices.map((index) => sma50[index]);
+  const windowSma200 = windowIndices.map((index) => sma200[index]);
+  const windowSma500 = windowIndices.map((index) => sma500[index]);
+  const indexed50 = normalizeFromBase(windowSma50);
+  const indexed200 = normalizeFromBase(windowSma200);
+  const indexed500 = normalizeFromBase(windowSma500);
+
+  const points: CommodityTrendPoint[] = windowIndices.map((index, i) => {
+    const spread50_200 = typeof sma50[index] === "number" && typeof sma200[index] === "number" ? sma50[index]! - sma200[index]! : null;
+    const spread200_500 = typeof sma200[index] === "number" && typeof sma500[index] === "number" ? sma200[index]! - sma500[index]! : null;
+    return {
+      date: dates[index],
+      sma50: sma50[index],
+      sma200: sma200[index],
+      sma500: sma500[index],
+      indexSma50: indexed50[i],
+      indexSma200: indexed200[i],
+      indexSma500: indexed500[i],
+      spread50_200,
+      spread200_500,
+    };
+  });
+
+  const hasSma50Coverage = countValid(points.map((point) => point.sma50)) >= 2;
+  const hasSma200Coverage = countValid(points.map((point) => point.sma200)) >= 2;
+  const hasSma500Coverage = countValid(points.map((point) => point.sma500)) >= 2;
+
+  const degradationLevel: DegradationLevel = hasSma50Coverage && hasSma200Coverage && hasSma500Coverage
+    ? "full"
+    : hasSma50Coverage && hasSma200Coverage
+      ? "medium"
+      : hasSma50Coverage
+        ? "minimal"
+        : "insufficient";
+
+  const trendDataCompleteness: TrendDataCompleteness = degradationLevel === "full"
+    ? "full"
+    : degradationLevel === "insufficient"
+      ? "insufficient"
+      : "partial";
+
+  const shortSpread = points.map((point) => point.spread50_200);
+  const longSpread = points.map((point) => point.spread200_500);
+  const shortSpreadDirection = trendDirection(shortSpread);
+  const latest = points[points.length - 1] ?? null;
+
+  const trendStructureState = buildStructureState({ hasSma50Coverage, hasSma200Coverage, hasSma500Coverage, latest, shortSpreadDirection });
+  const trendExpansionState = buildExpansionState(shortSpread, longSpread);
+
+  const missingHistoryReason = degradationLevel === "full"
+    ? null
+    : degradationLevel === "medium"
+      ? "Lång trend saknar tillräcklig historik, grafen visar kort vs mellantrend."
+      : degradationLevel === "minimal"
+        ? "Endast kort trend tillgänglig."
+        : "Otillräcklig historik för att visa trendstruktur.";
+
+  const model: CommodityTrendStructure = {
+    windowStartDate: points[0]?.date ?? null,
+    windowEndDate: points[points.length - 1]?.date ?? null,
+    points,
+    hasSma50Coverage,
+    hasSma200Coverage,
+    hasSma500Coverage,
+    degradationLevel,
+    trendDataCompleteness,
+    trendStructureState,
+    trendExpansionState,
+    structureInterpretation: "",
+    expansionInterpretation: "",
+    structureInfoLines: [],
+    expansionInfoLines: [],
+    missingHistoryReason,
+    debug: {
+      rawObservationCount: sorted.length,
+      rawFromDate: sorted[0]?.date ?? null,
+      rawToDate: sorted[sorted.length - 1]?.date ?? null,
+      windowObservationCount: points.length,
+      sma50Computable: countValid(sma50) > 0,
+      sma200Computable: countValid(sma200) > 0,
+      sma500Computable: countValid(sma500) > 0,
+      spread50_200ValidPoints: countValid(shortSpread),
+      spread200_500ValidPoints: countValid(longSpread),
+      fallbackReason: degradationLevel === "full" ? null : missingHistoryReason,
+    },
+  };
+
+  model.structureInterpretation = buildTrendStructureInterpretation(model);
+  model.expansionInterpretation = buildTrendExpansionInterpretation(model);
+  model.structureInfoLines = [
+    model.structureInterpretation,
+    `Data completeness: ${model.trendDataCompleteness}.`,
+    ...(model.degradationLevel !== "full" && model.missingHistoryReason ? [model.missingHistoryReason] : []),
+  ];
+  model.expansionInfoLines = [
+    model.expansionInterpretation,
+    `Trend expansion state: ${model.trendExpansionState}.`,
+    ...(model.degradationLevel === "medium" ? ["Lång spread (SMA200-SMA500) kan inte bedömas fullt ut ännu."] : []),
+  ];
+
+  return model;
+}

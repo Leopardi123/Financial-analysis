@@ -18,6 +18,8 @@ type DemandState = "expansion_strong" | "expansion" | "contraction" | "weakening
 type PriceState = "high" | "mid" | "low";
 type DivergenceType = "bearish_divergence" | "bullish_recovery" | "none";
 type CopperPhase = CommodityPhase | "Recession";
+type TrendCompleteness = "full" | "partial" | "insufficient";
+type TrendPhaseEffect = "none" | "late_softened_by_trend" | "late_reinforced_by_breakdown" | "early_promoted_to_mid" | "unstable_late_cycle";
 
 const REQUIRED_INDICATORS: CommodityIndicatorKey[] = ["copper_usd", "china_cli"];
 const OPTIONAL_INDICATORS: CommodityIndicatorKey[] = ["pmi_us", "copper_lme_inventory", "copper_capex_proxy"];
@@ -284,6 +286,77 @@ function resolveRegimeAgreementWithPrice(phase: CommodityPhase, regime: CopperRe
   return "neutral";
 }
 
+function mapTrendStructureScore(structure: string | null | undefined): number | null {
+  if (!structure) return null;
+  if (structure === "bullish_aligned") return 1.0;
+  if (structure === "bullish_but_narrowing") return 0.5;
+  if (structure === "neutral" || structure === "mixed") return 0;
+  if (structure === "bearish_short_term") return -0.5;
+  if (structure === "breakdown") return -1.0;
+  if (structure === "insufficient") return null;
+  return 0;
+}
+
+function mapTrendExpansionScore(expansion: string | null | undefined): number | null {
+  if (!expansion) return null;
+  if (expansion === "expanding") return 1.0;
+  if (expansion === "stable" || expansion === "flat") return 0.5;
+  if (expansion === "narrowing") return -0.5;
+  if (expansion === "negative_short_spread") return -1.0;
+  if (expansion === "insufficient") return null;
+  return 0;
+}
+
+function deriveTrendScore(structure: string | null | undefined, expansion: string | null | undefined): number | null {
+  const structureScore = mapTrendStructureScore(structure);
+  const expansionScore = mapTrendExpansionScore(expansion);
+  if (structureScore === null || expansionScore === null) return null;
+  return clamp(structureScore * 0.6 + expansionScore * 0.4, -1, 1);
+}
+
+function applyTrendToPhase(args: {
+  phase: CopperPhase;
+  priceState: PriceState;
+  demandState: DemandState | null;
+  trendScore: number | null;
+  trendExpansionState: string | null | undefined;
+  priceTrendScore: number | null;
+}): {
+  phase: CopperPhase;
+  effect: TrendPhaseEffect;
+  notes: string[];
+} {
+  const notes: string[] = [];
+  const trendStrong = args.trendScore !== null && args.trendScore >= 0.6;
+  const trendBreaking = args.trendScore !== null && args.trendScore <= -0.6;
+  const trendCompressing = args.trendExpansionState === "narrowing";
+  const demandWeak = args.demandState === "weakening" || args.demandState === "contraction";
+  const demandImproving = args.demandState === "expansion" || args.demandState === "expansion_strong";
+  const priceRising = (args.priceTrendScore ?? 0) > 0.15;
+
+  if (args.priceState === "high" && demandWeak && trendStrong && args.phase === "Late Cycle") {
+    notes.push("trend strong while demand is weak at high price: softening Late toward Mid/Late hybrid.");
+    return { phase: "Mid Cycle", effect: "late_softened_by_trend", notes };
+  }
+
+  if (args.priceState === "high" && demandWeak && trendBreaking) {
+    notes.push("trend breakdown reinforces Late-cycle pressure.");
+    return { phase: args.phase === "Compression" ? "Compression" : "Late Cycle", effect: "late_reinforced_by_breakdown", notes };
+  }
+
+  if (args.phase === "Early Cycle" && priceRising && demandImproving && trendStrong) {
+    notes.push("price rising + improving demand + strong trend allows Early → Mid transition.");
+    return { phase: "Mid Cycle", effect: "early_promoted_to_mid", notes };
+  }
+
+  if (args.priceState === "high" && trendCompressing) {
+    notes.push("high price with narrowing trend spread indicates unstable late cycle.");
+    return { phase: args.phase, effect: "unstable_late_cycle", notes };
+  }
+
+  return { phase: args.phase, effect: "none", notes };
+}
+
 function buildConfidence(args: {
   dataCompleteness: number;
   overlayAgreement: OverlayAgreement;
@@ -291,6 +364,8 @@ function buildConfidence(args: {
   fallbackCount: number;
   phaseScore: number | null;
   overlaysDiverging: boolean;
+  trendScore: number | null;
+  trendAgreementWithPrice: "confirming" | "diverging" | "neutral" | "unavailable";
 }): CommodityConfidence {
   const fallbackPenalty = clamp(args.fallbackCount * 0.08, 0, 0.35);
   let signalCoherence = args.phaseScore === null ? 0.35 : clamp(Math.abs(args.phaseScore), 0.25, 0.9);
@@ -302,6 +377,9 @@ function buildConfidence(args: {
   if (args.regimeAgreement === "confirming") signalCoherence = clamp(signalCoherence + 0.06, 0, 1);
   if (args.regimeAgreement === "diverging") signalCoherence = clamp(signalCoherence - 0.1, 0, 1);
   if (args.overlaysDiverging) signalCoherence = clamp(signalCoherence - 0.05, 0, 1);
+  if (args.trendAgreementWithPrice === "confirming") signalCoherence = clamp(signalCoherence + 0.08, 0, 1);
+  if (args.trendAgreementWithPrice === "diverging") signalCoherence = clamp(signalCoherence - 0.1, 0, 1);
+  if (args.trendScore !== null && Math.abs(args.trendScore) < 0.2) signalCoherence = clamp(signalCoherence - 0.02, 0, 1);
 
   const score = clamp(args.dataCompleteness * 0.5 + signalCoherence * 0.4 - fallbackPenalty * 0.1, 0, 1);
   const tier: CommodityConfidence["tier"] = score >= 0.72 ? "high" : score >= 0.5 ? "medium" : "low";
@@ -321,7 +399,7 @@ function buildConfidence(args: {
     },
     reasons: [
       `Data completeness=${args.dataCompleteness.toFixed(2)}.`,
-      `Signal coherence=${signalCoherence.toFixed(2)} (overlay=${args.overlayAgreement}, regimeAgreement=${args.regimeAgreement}).`,
+      `Signal coherence=${signalCoherence.toFixed(2)} (overlay=${args.overlayAgreement}, regimeAgreement=${args.regimeAgreement}, trendAgreement=${args.trendAgreementWithPrice}).`,
       `Fallback penalty=${fallbackPenalty.toFixed(2)} for ${args.fallbackCount} fallback signals.`,
     ],
   };
@@ -454,9 +532,27 @@ export const copperCommodityProfile: CommodityProfile = {
       cliChange3m,
       capexMomentum: scoreToNormalized(capex),
     });
+    const trendStructureState = input.trendSignal?.structure ?? null;
+    const trendExpansionState = input.trendSignal?.expansion ?? null;
+    const trendCompleteness = (input.trendSignal?.completeness ?? "insufficient") as TrendCompleteness;
+    const trendScore = input.trendSignal?.score ?? deriveTrendScore(trendStructureState, trendExpansionState);
+    const trendAgreementWithPrice: "confirming" | "diverging" | "neutral" | "unavailable" = trendScore === null || priceTrendScore === null
+      ? "unavailable"
+      : Math.sign(trendScore) === Math.sign(priceTrendScore) || Math.abs(trendScore) < 0.15
+        ? "confirming"
+        : "diverging";
+    const trendAdjustment = applyTrendToPhase({
+      phase: phaseResolution.phase,
+      priceState: phaseResolution.priceState,
+      demandState: phaseResolution.demandState,
+      trendScore,
+      trendExpansionState,
+      priceTrendScore,
+    });
+    const adjustedPhase = trendAdjustment.phase;
 
     const regimeClassification = classifyCopperRegime(input);
-    const normalizedPhaseForFramework: CommodityPhase = phaseResolution.phase === "Recession" ? "Compression" : phaseResolution.phase;
+    const normalizedPhaseForFramework: CommodityPhase = adjustedPhase === "Recession" ? "Compression" : adjustedPhase;
     const regimeAgreementWithPrice = resolveRegimeAgreementWithPrice(normalizedPhaseForFramework, regimeClassification.regime);
 
     const usedIndicatorCount = [
@@ -501,6 +597,8 @@ export const copperCommodityProfile: CommodityProfile = {
       fallbackCount,
       phaseScore: phaseScore === null ? null : clamp(phaseScore - coherencePenalty, -1, 1),
       overlaysDiverging,
+      trendScore,
+      trendAgreementWithPrice,
     });
 
     const diagnostics: CommodityDiagnostics = {
@@ -524,16 +622,24 @@ export const copperCommodityProfile: CommodityProfile = {
         `china_cli=${chinaCli?.valueLatest ?? "n/a"}, china_cli_change_3m=${cliChange3m ?? "n/a"} (China-led proxy, not PMI).`,
         `pmi_us_supplemental=${pmiUsSupplemental?.valueLatest ?? "n/a"} (supplemental/global context only, does not drive phase).`,
         `demand_state=${phaseResolution.demandState ?? "n/a"}, price_state=${phaseResolution.priceState}.`,
+        `trend_signal structure=${trendStructureState ?? "insufficient"}, expansion=${trendExpansionState ?? "insufficient"}, completeness=${trendCompleteness}, trend_score=${trendScore ?? "n/a"}, trendAgreementWithPrice=${trendAgreementWithPrice}.`,
+        `trend_phase_effect=${trendAdjustment.effect}.`,
         `divergence=${String(phaseResolution.divergence)}, divergenceType=${phaseResolution.divergenceType}.`,
         `overrideApplied=${String(phaseResolution.overrideApplied)}, overrideReason=${phaseResolution.overrideReason ?? "none"}.`,
         `Regime=${regimeClassification.regime}; agreementWithPrice=${regimeAgreementWithPrice}.`,
+        ...(trendAgreementWithPrice === "confirming" ? ["trend confirms price"] : []),
+        ...(trendAgreementWithPrice === "diverging" ? ["trend diverges from price"] : []),
+        ...(trendExpansionState === "narrowing" ? ["trend weakening"] : []),
+        ...(trendExpansionState === "negative_short_spread" ? ["trend breakdown"] : []),
+        ...trendAdjustment.notes,
       ],
     };
+    diagnostics.phaseReasoning = [...phaseResolution.reasoning, ...trendAdjustment.notes];
 
     return {
       commodity: "copper",
       category: "industrial",
-      phase: phaseResolution.phase as CommodityPhase,
+      phase: adjustedPhase as CommodityPhase,
       phaseScore,
       confidence,
       drivers: [
@@ -570,6 +676,12 @@ export const copperCommodityProfile: CommodityProfile = {
       diagnostics,
       regimeAgreementWithPrice,
       copperRegime: regimeClassification.regime,
+      trendSignal: {
+        structure: trendStructureState ?? "insufficient",
+        expansion: trendExpansionState ?? "insufficient",
+        completeness: trendCompleteness,
+        score: trendScore,
+      },
     };
   },
 };
