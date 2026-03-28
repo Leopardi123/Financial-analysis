@@ -1021,7 +1021,19 @@ export default function SectorDashboard() {
                       />
                     ) : null}
                   </div>
-                  <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
+                  <div>
+                    <strong>Status:</strong> {commoditySnapshot.snapshot.status}
+                    {copperInterpretation ? (
+                      <InfoPopover
+                        id="copper-status-interpretation"
+                        openId={openCopperInfoId}
+                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
+                        onClose={() => setOpenCopperInfoId(null)}
+                        title="Copper status interpretation"
+                        content={[copperInterpretation.statusInterpretation]}
+                      />
+                    ) : null}
+                  </div>
                   <div>
                     <strong>Regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a"}
                     {copperInterpretation ? (
@@ -1154,7 +1166,17 @@ export default function SectorDashboard() {
                   <div><strong>Confidence overlay impact:</strong> overlay agreement={commoditySnapshot.snapshot.diagnostics.overlayAgreement}, coherence={commoditySnapshot.snapshot.confidence.confidenceComponents.signalCoherence.toFixed(2)}</div>
                   <div><strong>Resolved phase:</strong> {commoditySnapshot.snapshot.phase} ({commoditySnapshot.snapshot.diagnostics.phaseStrength})</div>
                   <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
-                  {copperInterpretation ? <div><strong>Interpretation case:</strong> {copperInterpretation.interpretationCase}</div> : null}
+                  {copperInterpretation ? (
+                    <>
+                      <div><strong>Interpretation case:</strong> {copperInterpretation.interpretationCase}</div>
+                      <div><strong>missingSignalSummary:</strong> {copperInterpretation.debug.missingSignalSummary}</div>
+                      <div><strong>conflictSummary:</strong> {copperInterpretation.debug.conflictSummary}</div>
+                      <div><strong>demandDriver:</strong> {copperInterpretation.debug.demandDriver}</div>
+                      <div><strong>priceDriver:</strong> {copperInterpretation.debug.priceDriver}</div>
+                      <div><strong>phaseCause:</strong> {copperInterpretation.debug.phaseCause}</div>
+                      <div><strong>screeningCause:</strong> {copperInterpretation.debug.screeningCause}</div>
+                    </>
+                  ) : null}
                   <div><strong>Screening adjustments:</strong> {commoditySnapshot.snapshot.screeningAdjustments.notes?.join(" | ") ?? "none"}</div>
                   <div><strong>Threshold adjustments:</strong> valuation floor Δ={commoditySnapshot.snapshot.screeningAdjustments.thresholdAdjustments?.valuationMultipleFloorDeltaPct ?? 0}%, max position Δ={commoditySnapshot.snapshot.screeningAdjustments.thresholdAdjustments?.maxPositionSizeDeltaPct ?? 0}%</div>
                   <div><strong>Profile version:</strong> {commoditySnapshot.snapshot.profileVersion}</div>
