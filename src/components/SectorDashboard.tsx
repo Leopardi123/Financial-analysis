@@ -1130,7 +1130,7 @@ export default function SectorDashboard() {
                   </div>
                   {copperInterpretation ? (
                     <div>
-                      <strong>Interpretation:</strong> {copperInterpretation.interpretationCase}
+                      <strong>Interpretation:</strong> {copperInterpretation.interpretationText}
                       <InfoPopover
                         id="copper-overall-interpretation"
                         openId={openCopperInfoId}
@@ -1141,10 +1141,15 @@ export default function SectorDashboard() {
                       />
                     </div>
                   ) : null}
+                  {copperInterpretation ? (
+                    <div>
+                      <strong>Summary:</strong> {copperInterpretation.summarySentences.join(" ")}
+                    </div>
+                  ) : null}
                   <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
                   <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
                   <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, score={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
-                  <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
+                  <div><strong>Phase reasoning:</strong> {copperInterpretation ? copperInterpretation.phaseReasoningHuman.join(" | ") : commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
                   <div><strong>Analyst layer:</strong> {manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</div>
                 </div>
               </>
@@ -1253,7 +1258,7 @@ export default function SectorDashboard() {
                   <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
                   {copperInterpretation ? (
                     <>
-                      <div><strong>Interpretation case:</strong> {copperInterpretation.interpretationCase}</div>
+                      <div><strong>Interpretation case (debug):</strong> {copperInterpretation.interpretationCase}</div>
                       <div><strong>missingSignalSummary:</strong> {copperInterpretation.debug.missingSignalSummary}</div>
                       <div><strong>conflictSummary:</strong> {copperInterpretation.debug.conflictSummary}</div>
                       <div><strong>demandDriver:</strong> {copperInterpretation.debug.demandDriver}</div>

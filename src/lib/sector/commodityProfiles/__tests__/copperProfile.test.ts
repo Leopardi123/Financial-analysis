@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { copperCommodityProfile } from "../profiles/copperProfile.ts";
 import { goldCommodityProfile } from "../profiles/goldProfile.ts";
+import { buildCopperInterpretation } from "../copperInterpretation.ts";
 import type { CommodityProfileInput } from "../types.ts";
 
 const asOf = "2026-03-01";
@@ -169,6 +170,19 @@ assert.ok(
 assert.ok(
   goldFragileTrendSnapshot.diagnostics.trendInfluence?.trendDataCompleteness === "partial",
   "Gold trend influence should retain partial completeness state.",
+);
+const copperInterpretation = buildCopperInterpretation(copperLateStrongTrendSnapshot as any);
+assert.ok(
+  !copperInterpretation.interpretationText.includes("phase="),
+  "Human interpretation text should not leak raw interpretationCase keys.",
+);
+assert.ok(
+  copperInterpretation.debug.demandDriver.includes("change_3m=-0.8"),
+  "change_3m should remain available in interpretation debug driver.",
+);
+assert.ok(
+  copperInterpretation.phaseReasoningHuman.length > 0,
+  "Human readable phase reasoning should be generated.",
 );
 
 console.log("copperProfile.test.ts passed");

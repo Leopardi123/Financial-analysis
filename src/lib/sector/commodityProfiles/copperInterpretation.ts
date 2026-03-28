@@ -21,6 +21,7 @@ type CopperSnapshot = {
     missingIndicators: string[];
     usedIndicators: string[];
     overlayConflict: string[];
+    phaseReasoning?: string[];
     trendInfluence?: {
       trendStructureState: string;
       trendExpansionState: string;
@@ -36,6 +37,9 @@ type CopperSnapshot = {
 
 type CopperInterpretation = {
   interpretationCase: string;
+  interpretationText: string;
+  summarySentences: string[];
+  phaseReasoningHuman: string[];
   phaseInterpretation: string;
   regimeInterpretation: string;
   confidenceInterpretation: string;
@@ -71,7 +75,8 @@ function parseDiagnosticTag(notes: string[], key: string): string | null {
 
 function parseNumberOrNull(value: string | null): number | null {
   if (!value || value === "n/a") return null;
-  const parsed = Number(value);
+  const numericPrefix = value.match(/-?\d+(?:\.\d+)?/);
+  const parsed = Number(numericPrefix?.[0] ?? value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -175,6 +180,58 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
     ? `Slutsatsen är ofullständig eftersom ${formatList(missingSignals)} saknas.`
     : "Slutsatsen har full täckning från tillgängliga nyckelsignaler."}`;
 
+  const phaseReasoningHuman = (snapshot.diagnostics.phaseReasoning ?? []).map((line) => {
+    if (line.includes("price_state=high + demand_state=weakening/contraction => Late Cycle")) {
+      return "Högt pris tillsammans med avtagande eller kontraherande China-led demand pekar mot en sen cykelfas.";
+    }
+    if (line.includes("China CLI override")) {
+      return "När den China-ledda signalen ligger under trend samtidigt som priset redan är högt talar det emot en tidig eller mittcyklisk tolkning.";
+    }
+    if (line.includes("Bearish divergence")) {
+      return "Priset håller sig högt, men efterfrågedatan försvagas – en klassisk divergenseffekt.";
+    }
+    if (line.includes("Late Cycle retained")) {
+      return "Trenden är fortfarande stödjande, men den ändrar inte huvudtolkningen att marknaden befinner sig sent i cykeln.";
+    }
+    if (line.includes("trend breakdown reinforces")) {
+      return "Trendbrott förstärker bilden av en instabil sen fas.";
+    }
+    if (line.includes("unstable late cycle")) {
+      return "Komprimerande trend vid hög prisnivå signalerar skör marknadsstruktur.";
+    }
+    if (line.includes("Early → Mid transition")) {
+      return "Förbättrad efterfråga och expanderande trend motiverar en lutning från tidig till mittcykel.";
+    }
+    return line;
+  });
+
+  const summarySentences = [
+    missingSignalSummary.replace("Saknade signaler:", "Modellen saknar"),
+    conflictSummary.replace("Konflikt:", "Signalbild:"),
+    trendState
+      ? `Trendstrukturen är ${trendState.trendStructureState.replace(/_/g, " ")}, vilket ${trendState.trendInfluenceOnPhase === "late_softened_by_trend" ? "mildrar men inte upphäver" : "stödjer"} huvudtolkningen.`
+      : "Trendstrukturen saknar tillräcklig täckning för stark slutsats.",
+  ];
+
+  const interpretationText = (() => {
+    const demandPart = demandState === "contraction" || demandState === "weakening"
+      ? "den China-ledda efterfrågesignalen pekar mot avmattning"
+      : "den China-ledda efterfrågesignalen är fortsatt konstruktiv";
+    const pricePart = priceState === "high"
+      ? "Kopparpriset är fortsatt starkt"
+      : priceState === "mid"
+        ? "Kopparpriset ligger i ett mellanläge"
+        : "Kopparpriset är fortsatt pressat";
+    const trendPart = trendState?.trendInfluenceOnPhase === "late_softened_by_trend"
+      ? "Trendstrukturen mildrar den negativa bilden något, men inte tillräckligt för att bekräfta en sund expansionsfas."
+      : trendState?.trendInfluenceOnPhase === "late_reinforced_by_breakdown"
+        ? "Trendförsvagningen förstärker risken i den sena fasen."
+        : trendState?.trendInfluenceOnPhase === "unstable_late_cycle"
+          ? "Den komprimerade trenden ökar risken för en skör uppgång."
+          : "Trendbilden fungerar främst som kompletterande bekräftelse till pris- och efterfrågesignalen.";
+    return `${pricePart}, men ${demandPart}. ${trendPart}`;
+  })();
+
   const interpretationCase = [
     `phase=${snapshot.phase}`,
     `price_state=${priceState ?? "n/a"}`,
@@ -185,6 +242,9 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
 
   return {
     interpretationCase,
+    interpretationText,
+    summarySentences,
+    phaseReasoningHuman,
     phaseInterpretation,
     regimeInterpretation,
     confidenceInterpretation,
