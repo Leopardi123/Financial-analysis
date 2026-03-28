@@ -583,6 +583,16 @@ export default function SectorDashboard() {
     };
   }, [commoditySnapshot]);
 
+  const directionalInterpretationText = useMemo(() => {
+    if (!commoditySnapshot?.snapshot) return "n/a";
+    if (copperInterpretation?.interpretationCase) return copperInterpretation.interpretationCase;
+    const phaseToken = `phase=${commoditySnapshot.snapshot.phase}`;
+    const demandToken = `demand_state=${directionalSpineInput?.demand_state ?? "neutral"}`;
+    const divergenceToken = `divergence=${directionalSpineInput?.divergenceType ?? "none"}`;
+    const missingToken = `missing=${commoditySnapshot.snapshot.diagnostics.missingIndicators.join("|") || "none"}`;
+    return `${phaseToken}__${demandToken}__${divergenceToken}__${missingToken}`;
+  }, [commoditySnapshot, copperInterpretation, directionalSpineInput]);
+
   useEffect(() => {
     if (!filteredSectorOptions.some((item) => item.id === sector)) {
       setSector(filteredSectorOptions[0]?.id ?? "");
@@ -1014,10 +1024,6 @@ export default function SectorDashboard() {
               </>
             ) : (
               <>
-                <p className="bread">
-                  Automatisk commodity-bedömning är primär source of truth. Manuella inputs är ett
-                  kompletterande analystlager och blockerar inte grundfasen.
-                </p>
                 {directionalSpineInput ? (
                   <DirectionalSpine
                     price_percentile={directionalSpineInput.price_percentile}
@@ -1029,89 +1035,61 @@ export default function SectorDashboard() {
                     supplySignal={directionalSpineInput.supplySignal}
                   />
                 ) : null}
-                <div className="metric-list">
-                  <div>
-                    <strong>Phase:</strong> {commoditySnapshot.snapshot.phase}
-                    {copperInterpretation ? (
-                      <InfoPopover
-                        id="copper-phase-interpretation"
-                        openId={openCopperInfoId}
-                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
-                        onClose={() => setOpenCopperInfoId(null)}
-                        title="Copper phase interpretation"
-                        content={[copperInterpretation.phaseInterpretation]}
-                      />
-                    ) : null}
-                  </div>
-                  <div>
-                    <strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})
-                    {copperInterpretation ? (
-                      <InfoPopover
-                        id="copper-confidence-interpretation"
-                        openId={openCopperInfoId}
-                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
-                        onClose={() => setOpenCopperInfoId(null)}
-                        title="Copper confidence interpretation"
-                        content={[copperInterpretation.confidenceInterpretation]}
-                      />
-                    ) : null}
-                  </div>
-                  <div>
-                    <strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}
-                    {copperInterpretation ? (
-                      <InfoPopover
-                        id="copper-bias-interpretation"
-                        openId={openCopperInfoId}
-                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
-                        onClose={() => setOpenCopperInfoId(null)}
-                        title="Copper screening interpretation"
-                        content={[copperInterpretation.biasInterpretation]}
-                      />
-                    ) : null}
-                  </div>
-                  <div>
-                    <strong>Status:</strong> {commoditySnapshot.snapshot.status}
-                    {copperInterpretation ? (
-                      <InfoPopover
-                        id="copper-status-interpretation"
-                        openId={openCopperInfoId}
-                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
-                        onClose={() => setOpenCopperInfoId(null)}
-                        title="Copper status interpretation"
-                        content={[copperInterpretation.statusInterpretation]}
-                      />
-                    ) : null}
-                  </div>
-                  <div>
-                    <strong>Regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a"}
-                    {copperInterpretation ? (
-                      <InfoPopover
-                        id="copper-regime-interpretation"
-                        openId={openCopperInfoId}
-                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
-                        onClose={() => setOpenCopperInfoId(null)}
-                        title="Copper regime interpretation"
-                        content={[copperInterpretation.regimeInterpretation]}
-                      />
-                    ) : null}
-                  </div>
-                  {copperInterpretation ? (
-                    <div>
-                      <strong>Interpretation:</strong> {copperInterpretation.interpretationCase}
-                      <InfoPopover
-                        id="copper-overall-interpretation"
-                        openId={openCopperInfoId}
-                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
-                        onClose={() => setOpenCopperInfoId(null)}
-                        title="Copper interpretation"
-                        content={[copperInterpretation.overallInterpretation]}
-                      />
+                <div className="metric-list sector-excel-readout">
+                  <div className="compact-metrics-grid">
+                    <div className="compact-metric-row">
+                      <span className="compact-metric-label-wrap">
+                        <span className="compact-metric-label">Phase</span>
+                        <InfoPopover id="copper-phase-interpretation" openId={openCopperInfoId} onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))} onClose={() => setOpenCopperInfoId(null)} title="Phase" content={[copperInterpretation?.phaseInterpretation ?? "Övergripande cykelfas i snapshot."]} />
+                      </span>
+                      <span className="compact-metric-dots" />
+                      <span className="compact-metric-value">{commoditySnapshot.snapshot.phase}</span>
                     </div>
-                  ) : null}
-                  <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
-                  <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
-                  <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
-                  <div><strong>Analyst layer:</strong> {manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</div>
+                    <div className="compact-metric-row">
+                      <span className="compact-metric-label-wrap">
+                        <span className="compact-metric-label">Confidence</span>
+                        <InfoPopover id="copper-confidence-interpretation" openId={openCopperInfoId} onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))} onClose={() => setOpenCopperInfoId(null)} title="Confidence" content={[copperInterpretation?.confidenceInterpretation ?? "Tillförlitlighet i klassificeringen."]} />
+                      </span>
+                      <span className="compact-metric-dots" />
+                      <span className="compact-metric-value">{(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</span>
+                    </div>
+                    <div className="compact-metric-row">
+                      <span className="compact-metric-label-wrap">
+                        <span className="compact-metric-label">Bias</span>
+                        <InfoPopover id="copper-bias-interpretation" openId={openCopperInfoId} onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))} onClose={() => setOpenCopperInfoId(null)} title="Bias" content={[copperInterpretation?.biasInterpretation ?? "Screening-justering för riskläge."]} />
+                      </span>
+                      <span className="compact-metric-dots" />
+                      <span className="compact-metric-value">{commoditySnapshot.snapshot.screeningAdjustments.bias}</span>
+                    </div>
+                    <div className="compact-metric-row">
+                      <span className="compact-metric-label-wrap">
+                        <span className="compact-metric-label">Status</span>
+                        <InfoPopover id="copper-status-interpretation" openId={openCopperInfoId} onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))} onClose={() => setOpenCopperInfoId(null)} title="Status" content={[copperInterpretation?.statusInterpretation ?? "Datakvalitet och täckning i snapshot."]} />
+                      </span>
+                      <span className="compact-metric-dots" />
+                      <span className="compact-metric-value">{commoditySnapshot.snapshot.status}</span>
+                    </div>
+                    <div className="compact-metric-row">
+                      <span className="compact-metric-label-wrap">
+                        <span className="compact-metric-label">Regime</span>
+                        <InfoPopover id="copper-regime-interpretation" openId={openCopperInfoId} onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))} onClose={() => setOpenCopperInfoId(null)} title="Regime" content={[copperInterpretation?.regimeInterpretation ?? "Övergripande regime-klassificering."]} />
+                      </span>
+                      <span className="compact-metric-dots" />
+                      <span className="compact-metric-value">{commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a"}</span>
+                    </div>
+                    <div className="compact-metric-row sector-excel-long-row">
+                      <span className="compact-metric-label-wrap">
+                        <span className="compact-metric-label">Interpretation</span>
+                        <InfoPopover id="copper-overall-interpretation" openId={openCopperInfoId} onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))} onClose={() => setOpenCopperInfoId(null)} title="Interpretation string" content={[copperInterpretation?.overallInterpretation ?? "Kompakt kodning av phase/price/demand/divergence/missing."]} />
+                      </span>
+                      <span className="compact-metric-dots" />
+                      <span className="compact-metric-value">{directionalInterpretationText}</span>
+                    </div>
+                    <div className="compact-metric-row"><span className="compact-metric-label">Regime confidence</span><span className="compact-metric-dots" /><span className="compact-metric-value">{commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</span></div>
+                    <div className="compact-metric-row"><span className="compact-metric-label">Regime vs price</span><span className="compact-metric-dots" /><span className="compact-metric-value">{commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</span></div>
+                    <div className="compact-metric-row sector-excel-long-row"><span className="compact-metric-label">Phase reasoning</span><span className="compact-metric-dots" /><span className="compact-metric-value">{commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</span></div>
+                    <div className="compact-metric-row"><span className="compact-metric-label">Analyst layer</span><span className="compact-metric-dots" /><span className="compact-metric-value">{manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</span></div>
+                  </div>
                 </div>
               </>
             )

@@ -310,6 +310,19 @@
   margin-bottom: 6px;
 }
 
+.directional-spine-axis-head > span,
+.directional-driver-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.directional-spine .info-popover-trigger {
+  padding: 2px 5px;
+  font-size: 10px;
+  line-height: 1;
+}
+
 .directional-spine-axis-wrap {
   position: relative;
   height: 58px;
@@ -375,6 +388,41 @@
   color: #334155;
   font-family: "Josefin Sans", sans-serif;
   letter-spacing: 0.7px;
+}
+
+.sector-excel-readout {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 10px 8px;
+}
+
+.sector-excel-readout .compact-metric-label {
+  font-size: 12px;
+}
+
+.sector-excel-readout .compact-metric-value {
+  font-size: 12px;
+  max-width: 64%;
+  text-align: left;
+}
+
+.sector-excel-readout .compact-metric-row {
+  align-items: flex-start;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 4px 0;
+}
+
+.sector-excel-readout .compact-metric-row:last-child {
+  border-bottom: 0;
+}
+
+.sector-excel-readout .compact-metric-dots {
+  margin-top: 8px;
+}
+
+.sector-excel-long-row .compact-metric-value {
+  max-width: 70%;
 }
 
 .directional-driver-meta em {

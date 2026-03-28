@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import InfoPopover from "./InfoPopover";
 
 type DemandState = "contraction" | "neutral" | "expansion";
 type DivergenceType = "none" | "confirming" | "diverging" | "bullish_divergence" | "bearish_divergence";
@@ -55,6 +56,7 @@ function driverToBarWidth(value: number | null): string {
 }
 
 export default function DirectionalSpine(props: DirectionalSpineProps) {
+  const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const {
     price_percentile,
     momentum_12m,
@@ -99,8 +101,28 @@ export default function DirectionalSpine(props: DirectionalSpineProps) {
   return (
     <div className="directional-spine" aria-label="Directional Spine">
       <div className="directional-spine-axis-head">
-        <span>Contraction</span>
-        <span>Expansion</span>
+        <span>
+          Contraction
+          <InfoPopover
+            id="directional-axis-contraction"
+            openId={openInfoId}
+            onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+            onClose={() => setOpenInfoId(null)}
+            title="Contraction side"
+            content={["Vänster sida = svagare/avtagande cykel och lägre efterfrågedynamik."]}
+          />
+        </span>
+        <span>
+          Expansion
+          <InfoPopover
+            id="directional-axis-expansion"
+            openId={openInfoId}
+            onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+            onClose={() => setOpenInfoId(null)}
+            title="Expansion side"
+            content={["Höger sida = starkare/accelererande cykel och högre efterfrågedynamik."]}
+          />
+        </span>
       </div>
 
       <div className="directional-spine-axis-wrap">
@@ -118,6 +140,14 @@ export default function DirectionalSpine(props: DirectionalSpineProps) {
           aria-label="Long term (5y)"
         >
           <span>5Y</span>
+          <InfoPopover
+            id="directional-marker-5y"
+            openId={openInfoId}
+            onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+            onClose={() => setOpenInfoId(null)}
+            title="5Y marker"
+            content={["Långsiktig cykelposition (5 år). Baseras på strukturell/övergripande fasposition."]}
+          />
         </div>
 
         <div
@@ -131,6 +161,14 @@ export default function DirectionalSpine(props: DirectionalSpineProps) {
           aria-label="Short term (1y)"
         >
           <span>1Y</span>
+          <InfoPopover
+            id="directional-marker-1y"
+            openId={openInfoId}
+            onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+            onClose={() => setOpenInfoId(null)}
+            title="1Y marker"
+            content={["Kortsiktig cykelposition (1 år). Avvikelse mot 5Y visar acceleration/deceleration."]}
+          />
         </div>
       </div>
 
@@ -138,7 +176,23 @@ export default function DirectionalSpine(props: DirectionalSpineProps) {
         {driverBars.map((bar) => (
           <div key={bar.id} className="directional-driver-row">
             <div className="directional-driver-meta">
-              <span>{bar.label}</span>
+              <span>
+                {bar.label}
+                <InfoPopover
+                  id={`directional-driver-${bar.id}`}
+                  openId={openInfoId}
+                  onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                  onClose={() => setOpenInfoId(null)}
+                  title={`${bar.label} driver`}
+                  content={[
+                    bar.id === "price_momentum"
+                      ? "Visar om prisimpulsen stödjer expansion eller signalerar avmattning."
+                      : bar.id === "demand"
+                        ? "Efterfrågeimpuls från China CLI (eller relevant demand-driver)."
+                        : "Utbudsimpuls. Missing state visas när datapunkt saknas i snapshot.",
+                  ]}
+                />
+              </span>
               {bar.missing ? <em>{bar.missingLabel}</em> : null}
             </div>
             <div className={`directional-driver-track ${bar.missing ? "is-missing" : ""}`}>
