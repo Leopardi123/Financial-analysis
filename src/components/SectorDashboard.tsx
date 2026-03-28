@@ -176,6 +176,14 @@ type CommoditySnapshotPayload = {
       confidenceReasons: string[];
       phaseStrength: "strong" | "moderate" | "weak";
       phaseReasoning: string[];
+      trendInfluence?: {
+        trendStructureState: string;
+        trendExpansionState: string;
+        trendDataCompleteness: "full" | "partial" | "insufficient";
+        trendScore: number | null;
+        trendInfluenceOnPhase: string;
+        trendInfluenceOnConfidence: string;
+      };
       notes: string[];
     };
     screeningAdjustments: {
@@ -1169,7 +1177,9 @@ export default function SectorDashboard() {
                 <div><strong>Manual input status:</strong> {manualInputStatus}</div>
                 <div><strong>Manual impact on snapshot:</strong> none (supplemental layer only in current phase)</div>
                 <div><strong>Regime:</strong> {(commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a")} ({commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"})</div>
-                <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, trendScore={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
+                  <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, trendScore={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
+                  <div><strong>Trend influence on phase:</strong> {commoditySnapshot.snapshot.diagnostics.trendInfluence?.trendInfluenceOnPhase ?? "n/a"}</div>
+                  <div><strong>Trend influence on confidence:</strong> {commoditySnapshot.snapshot.diagnostics.trendInfluence?.trendInfluenceOnConfidence ?? "n/a"}</div>
                 <details>
                   <summary>Diagnostics (debug)</summary>
                   {commoditySnapshot.debug ? (

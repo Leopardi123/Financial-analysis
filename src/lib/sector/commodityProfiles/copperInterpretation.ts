@@ -21,6 +21,14 @@ type CopperSnapshot = {
     missingIndicators: string[];
     usedIndicators: string[];
     overlayConflict: string[];
+    trendInfluence?: {
+      trendStructureState: string;
+      trendExpansionState: string;
+      trendDataCompleteness: "full" | "partial" | "insufficient";
+      trendScore: number | null;
+      trendInfluenceOnPhase: string;
+      trendInfluenceOnConfidence: string;
+    };
   };
   drivers: Array<{ id: string; signal: "bullish" | "bearish" | "neutral"; note?: string }>;
   blockScores: Array<{ blockId: string; score: number | null }>;
@@ -92,6 +100,7 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
   const chinaCliLevel = parseNumberOrNull(parseDiagnosticTag(snapshot.diagnostics.notes, "china_cli"));
   const chinaCliChange3m = parseNumberOrNull(parseDiagnosticTag(snapshot.diagnostics.notes, "china_cli_change_3m"));
   const pricePercentile = inferPricePercentile(snapshot);
+  const trendState = snapshot.diagnostics.trendInfluence;
 
   const missingSignals = snapshot.diagnostics.missingIndicators.map((key) => INDICATOR_LABELS[key] ?? `${key} (okänd etikett)`);
   const missingSignalSummary = missingSignals.length > 0
@@ -108,6 +117,9 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
   if (snapshot.diagnostics.overlayConflict.length > 0) {
     conflictParts.push(`overlayConflict=${snapshot.diagnostics.overlayConflict.join(" | ")}`);
   }
+  if (trendState?.trendInfluenceOnPhase && trendState.trendInfluenceOnPhase !== "none") {
+    conflictParts.push(`trendPhaseEffect=${trendState.trendInfluenceOnPhase}`);
+  }
   const conflictSummary = conflictParts.length > 0
     ? `Konflikt: ${conflictParts.join("; ")}.`
     : "Konflikt: inga explicit flaggade divergenser.";
@@ -122,7 +134,10 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
     ? `Det finns explicit konflikt i modellen (${conflictParts.join(", ")}).`
     : "Inga explicit flaggade konflikter mellan pris och övriga signaler.";
 
-  const phaseInterpretation = `${demandSentence} ${priceSentence} ${divergenceSentence} Slutsats: fasen ${snapshot.phase} drivs av kombinationen demand + pris, inte en isolerad prisnivå.`;
+  const trendSentence = trendState
+    ? `Trend visar structure=${trendState.trendStructureState}, expansion=${trendState.trendExpansionState} och påverkar fasen via ${trendState.trendInfluenceOnPhase}.`
+    : "Trenddata saknas eller är otillräcklig.";
+  const phaseInterpretation = `${demandSentence} ${priceSentence} ${trendSentence} ${divergenceSentence} Slutsats: fasen ${snapshot.phase} drivs av demand + pris med trend som kompletterande bekräftelse/varning.`;
   const regimeInterpretation = `Regim=${snapshot.copperRegime ?? "n/a"} och regimeAgreementWithPrice=${snapshot.regimeAgreementWithPrice ?? "n/a"}; detta visar hur regimlagret bekräftar eller motsäger prisläsningen.`;
 
   const confidenceInterpretation = [
@@ -133,6 +148,9 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
     conflictParts.length > 0
       ? `Divergerande datapunkter: ${conflictParts.join(", ")}.`
       : "Divergerande datapunkter: inga explicit flaggade.",
+    trendState
+      ? `Trendblock: structure=${trendState.trendStructureState}, expansion=${trendState.trendExpansionState}, completeness=${trendState.trendDataCompleteness}, score=${trendState.trendScore ?? "n/a"}.`
+      : "Trendblock: n/a.",
   ].join(" ");
 
   const usedSignals = snapshot.diagnostics.usedIndicators.map((key) => INDICATOR_LABELS[key] ?? key);

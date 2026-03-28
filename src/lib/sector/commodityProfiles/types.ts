@@ -102,6 +102,14 @@ export type CommodityDiagnostics = {
   confidenceReasons: string[];
   phaseStrength: "strong" | "moderate" | "weak";
   phaseReasoning: string[];
+  trendInfluence?: {
+    trendStructureState: string;
+    trendExpansionState: string;
+    trendDataCompleteness: "full" | "partial" | "insufficient";
+    trendScore: number | null;
+    trendInfluenceOnPhase: string;
+    trendInfluenceOnConfidence: string;
+  };
   notes: string[];
 };
 
