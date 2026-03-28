@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import InfoPopover from "./InfoPopover";
 
 type DemandState = "contraction" | "neutral" | "expansion";
 type DivergenceType = "none" | "confirming" | "diverging" | "bullish_divergence" | "bearish_divergence";
@@ -55,6 +56,7 @@ function driverToBarWidth(value: number | null): string {
 }
 
 export default function DirectionalSpine(props: DirectionalSpineProps) {
+  const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const {
     price_percentile,
     momentum_12m,
@@ -96,21 +98,25 @@ export default function DirectionalSpine(props: DirectionalSpineProps) {
     ];
   }, [momentumNorm, china_cli, supplySignal]);
 
-  const axisInfoText = "Contraction sits on the left side and expansion on the right side. 5Y shows long-term cycle position; 1Y shows shorter-term drift around that base.";
+  const axisInfoContent = [
+    "Contraction is shown on the left and expansion on the right.",
+    "5Y marker shows long-term cycle position, 1Y marker shows short-term drift around that base.",
+    "Distance/offset between 5Y and 1Y reflects acceleration or deceleration.",
+  ];
 
   return (
     <div className="directional-spine" aria-label="Directional Spine">
       <div className="directional-spine-axis-head">
         <span className="directional-spine-axis-label">
           Contraction
-          <button
-            type="button"
-            className="directional-spine-axis-info"
-            aria-label="Contraction/expansion information"
-            title={axisInfoText}
-          >
-            i
-          </button>
+          <InfoPopover
+            id="directional-spine-axis-info"
+            openId={openInfoId}
+            onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+            onClose={() => setOpenInfoId(null)}
+            title="Contraction ↔ Expansion"
+            content={axisInfoContent}
+          />
         </span>
         <span>Expansion</span>
       </div>

@@ -316,19 +316,6 @@
   gap: 6px;
 }
 
-.directional-spine-axis-info {
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  border: 1px solid #94a3b8;
-  background: #ffffff;
-  color: #2563eb;
-  font-size: 12px;
-  line-height: 1;
-  font-family: "Merriweather", serif;
-  cursor: help;
-}
-
 .directional-spine-axis-wrap {
   position: relative;
   height: 58px;
