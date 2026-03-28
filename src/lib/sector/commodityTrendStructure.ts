@@ -7,6 +7,12 @@ export type TrendDataCompleteness = "full" | "partial" | "insufficient";
 export type DegradationLevel = "full" | "medium" | "minimal" | "insufficient";
 export type TrendStructureState = "bullish_aligned" | "bullish_but_narrowing" | "bearish_short_term" | "mixed" | "insufficient";
 export type TrendExpansionState = "expanding" | "narrowing" | "negative_short_spread" | "flat" | "insufficient";
+export type TrendSeriesFrequency = "daily" | "weekly" | "monthly" | "unknown";
+export type TrendWindows = {
+  shortTrendWindow: number;
+  mediumTrendWindow: number;
+  longTrendWindow: number;
+};
 
 export type CommodityTrendPoint = {
   date: string;
@@ -23,6 +29,8 @@ export type CommodityTrendPoint = {
 export type CommodityTrendStructure = {
   windowStartDate: string | null;
   windowEndDate: string | null;
+  trendFrequency: TrendSeriesFrequency;
+  trendWindows: TrendWindows;
   points: CommodityTrendPoint[];
   hasSma50Coverage: boolean;
   hasSma200Coverage: boolean;
@@ -46,6 +54,10 @@ export type CommodityTrendStructure = {
     sma500Computable: boolean;
     spread50_200ValidPoints: number;
     spread200_500ValidPoints: number;
+    trendFrequency: TrendSeriesFrequency;
+    shortTrendWindow: number;
+    mediumTrendWindow: number;
+    longTrendWindow: number;
     fallbackReason: string | null;
   };
 };
@@ -85,6 +97,41 @@ function normalizeFromBase(series: Array<number | null>): Array<number | null> {
 
 function countValid(values: Array<number | null>): number {
   return values.filter((value) => typeof value === "number" && Number.isFinite(value)).length;
+}
+
+function dayDiff(from: string, to: string): number | null {
+  const fromDate = parseDate(from);
+  const toDate = parseDate(to);
+  if (!fromDate || !toDate) return null;
+  const raw = (toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24);
+  return Number.isFinite(raw) ? raw : null;
+}
+
+function detectTrendSeriesFrequency(points: CommodityPricePoint[]): TrendSeriesFrequency {
+  if (points.length < 3) return "unknown";
+  const deltas: number[] = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const diff = dayDiff(points[index - 1].date, points[index].date);
+    if (typeof diff === "number" && Number.isFinite(diff) && diff > 0) deltas.push(diff);
+  }
+  if (deltas.length === 0) return "unknown";
+  const sorted = [...deltas].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  if (median <= 3) return "daily";
+  if (median <= 10) return "weekly";
+  return "monthly";
+}
+
+/**
+ * Trendfönster uttrycks som 50d/200d/500d-proxy i observationsenheter per frekvens:
+ * - daily: 50 / 200 / 500
+ * - weekly: ~10 / ~40 / ~100
+ * - monthly: ~3 / ~10 / ~24
+ */
+export function resolveTrendWindowsForFrequency(frequency: TrendSeriesFrequency): TrendWindows {
+  if (frequency === "daily") return { shortTrendWindow: 50, mediumTrendWindow: 200, longTrendWindow: 500 };
+  if (frequency === "weekly") return { shortTrendWindow: 10, mediumTrendWindow: 40, longTrendWindow: 100 };
+  return { shortTrendWindow: 3, mediumTrendWindow: 10, longTrendWindow: 24 };
 }
 
 function trendDirection(values: Array<number | null>): "up" | "down" | "flat" | "insufficient" {
@@ -155,26 +202,48 @@ export function buildTrendStructureInterpretation(model: CommodityTrendStructure
 
 export function buildTrendExpansionInterpretation(model: CommodityTrendStructure): string {
   if (model.degradationLevel === "insufficient") return "Trendexpansion kan inte visas med nuvarande historik.";
-  if (model.degradationLevel === "minimal") return "Trendexpansion saknas eftersom mellan/lång trend inte kan beräknas ännu.";
+  if (model.degradationLevel === "minimal") return "Otillräcklig data för lång trend.";
   if (model.degradationLevel === "medium") {
     const shortSpread = model.points.map((point) => point.spread50_200);
     const dir = trendDirection(shortSpread);
-    if (dir === "up") return "Spreaden mellan kort och mellantrend ökar, vilket tyder på tilltagande momentum.";
-    if (dir === "down") return "Spreaden mellan kort och mellantrend krymper, vilket tyder på tappad kraft.";
+    const latestShort = [...shortSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
+    if (dir === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
+    if (dir === "up") return "Otillräcklig data för lång trend.";
     return "Kort spread är stabil men lång spread saknar underlag för full trendexpansion.";
+  }
+
+  const shortSpread = model.points.map((point) => point.spread50_200);
+  const longSpread = model.points.map((point) => point.spread200_500);
+  const shortDirection = trendDirection(shortSpread);
+  const longDirection = trendDirection(longSpread);
+  const latestShort = [...shortSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const latestLong = [...longSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+  if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
+  if (typeof latestShort === "number" && latestShort > 0 && shortDirection === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
+  if (
+    typeof latestShort === "number"
+    && typeof latestLong === "number"
+    && latestShort > 0
+    && latestLong > 0
+    && shortDirection === "up"
+    && longDirection === "up"
+  ) {
+    return "Trenden stärks – både kort och lång trend divergerar.";
   }
 
   switch (model.trendExpansionState) {
     case "expanding":
-      return "Både kort och lång spread stöder en expanderande trendstruktur.";
+      return "Trenden stärks – både kort och lång trend divergerar.";
     case "narrowing":
-      return "Spreadar krymper, vilket signalerar avtagande trendexpansion.";
+      return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
     case "negative_short_spread":
-      return "Kort spread är negativ, vilket pekar på trendbrott i den korta strukturen.";
+      return "Kort trend bryter ned – risk för trendvändning.";
     case "flat":
       return "Spreadar är relativt platta och visar begränsad trendacceleration.";
     default:
-      return "Trendexpansionen är otydlig med nuvarande datapunkter.";
+      return "Otillräcklig data för lång trend.";
   }
 }
 
@@ -187,6 +256,8 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
   const emptyBase: CommodityTrendStructure = {
     windowStartDate: null,
     windowEndDate: null,
+    trendFrequency: "unknown",
+    trendWindows: resolveTrendWindowsForFrequency("unknown"),
     points: [],
     hasSma50Coverage: false,
     hasSma200Coverage: false,
@@ -210,6 +281,10 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
       sma500Computable: false,
       spread50_200ValidPoints: 0,
       spread200_500ValidPoints: 0,
+      trendFrequency: "unknown",
+      shortTrendWindow: resolveTrendWindowsForFrequency("unknown").shortTrendWindow,
+      mediumTrendWindow: resolveTrendWindowsForFrequency("unknown").mediumTrendWindow,
+      longTrendWindow: resolveTrendWindowsForFrequency("unknown").longTrendWindow,
       fallbackReason: "no_raw_points",
     },
   };
@@ -218,9 +293,11 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
 
   const dates = sorted.map((point) => point.date);
   const values = sorted.map((point) => (typeof point.value === "number" && Number.isFinite(point.value) ? point.value : null));
-  const sma50 = computeSma(values, 50);
-  const sma200 = computeSma(values, 200);
-  const sma500 = computeSma(values, 500);
+  const trendFrequency = detectTrendSeriesFrequency(sorted);
+  const trendWindows = resolveTrendWindowsForFrequency(trendFrequency);
+  const sma50 = computeSma(values, trendWindows.shortTrendWindow);
+  const sma200 = computeSma(values, trendWindows.mediumTrendWindow);
+  const sma500 = computeSma(values, trendWindows.longTrendWindow);
 
   const endDate = sorted[sorted.length - 1].parsed!;
   const startDate = new Date(endDate);
@@ -240,6 +317,10 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
         sma50Computable: countValid(sma50) > 0,
         sma200Computable: countValid(sma200) > 0,
         sma500Computable: countValid(sma500) > 0,
+        trendFrequency,
+        shortTrendWindow: trendWindows.shortTrendWindow,
+        mediumTrendWindow: trendWindows.mediumTrendWindow,
+        longTrendWindow: trendWindows.longTrendWindow,
         fallbackReason: "no_points_in_display_window",
       },
     };
@@ -305,6 +386,8 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
   const model: CommodityTrendStructure = {
     windowStartDate: points[0]?.date ?? null,
     windowEndDate: points[points.length - 1]?.date ?? null,
+    trendFrequency,
+    trendWindows,
     points,
     hasSma50Coverage,
     hasSma200Coverage,
@@ -328,6 +411,10 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
       sma500Computable: countValid(sma500) > 0,
       spread50_200ValidPoints: countValid(shortSpread),
       spread200_500ValidPoints: countValid(longSpread),
+      trendFrequency,
+      shortTrendWindow: trendWindows.shortTrendWindow,
+      mediumTrendWindow: trendWindows.mediumTrendWindow,
+      longTrendWindow: trendWindows.longTrendWindow,
       fallbackReason: degradationLevel === "full" ? null : missingHistoryReason,
     },
   };
@@ -336,13 +423,15 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
   model.expansionInterpretation = buildTrendExpansionInterpretation(model);
   model.structureInfoLines = [
     model.structureInterpretation,
+    `Frekvens: ${model.trendFrequency}. Fönster (kort/mellan/lång): ${model.trendWindows.shortTrendWindow}/${model.trendWindows.mediumTrendWindow}/${model.trendWindows.longTrendWindow}.`,
     `Data completeness: ${model.trendDataCompleteness}.`,
     ...(model.degradationLevel !== "full" && model.missingHistoryReason ? [model.missingHistoryReason] : []),
   ];
   model.expansionInfoLines = [
     model.expansionInterpretation,
+    `Frekvens: ${model.trendFrequency}. Fönster (kort/mellan/lång): ${model.trendWindows.shortTrendWindow}/${model.trendWindows.mediumTrendWindow}/${model.trendWindows.longTrendWindow}.`,
     `Trend expansion state: ${model.trendExpansionState}.`,
-    ...(model.degradationLevel === "medium" ? ["Lång spread (SMA200-SMA500) kan inte bedömas fullt ut ännu."] : []),
+    ...(model.degradationLevel === "medium" ? ["Lång spread (mellantrend-lång trend) kan inte bedömas fullt ut ännu."] : []),
   ];
 
   return model;
