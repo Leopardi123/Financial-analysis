@@ -226,6 +226,124 @@
   gap: 16px;
 }
 
+.commodity-trend-carousel-card {
+  background: #f7f7ef;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  padding: 12px 12px 10px;
+}
+
+.commodity-trend-carousel-head h3 {
+  margin: 0;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 1px;
+  font-size: 16px;
+}
+
+.commodity-trend-carousel-head p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #334155;
+}
+
+.commodity-trend-carousel {
+  margin-top: 10px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 100%;
+  gap: 10px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+
+.commodity-trend-page {
+  scroll-snap-align: start;
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.commodity-trend-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.commodity-trend-title-row h4 {
+  margin: 0;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.9px;
+  font-size: 14px;
+}
+
+.commodity-trend-subtitle {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  color: #475569;
+}
+
+.commodity-trend-svg-wrap {
+  width: 100%;
+}
+
+.commodity-trend-axis-labels {
+  display: flex;
+  justify-content: space-between;
+  color: #64748b;
+  font-size: 10px;
+  margin-top: 4px;
+}
+
+.commodity-trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.commodity-trend-empty,
+.commodity-trend-warning {
+  font-size: 12px;
+  color: #7c2d12;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.commodity-trend-warning {
+  margin-top: 8px;
+}
+
+.commodity-trend-dots {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.commodity-trend-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #94a3b8;
+  opacity: 0.75;
+}
+
+.commodity-trend-debug {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #334155;
+  display: grid;
+  gap: 2px;
+}
+
 .sector-card {
   background: #f7f7ef;
   border-radius: 6px;

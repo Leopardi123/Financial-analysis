@@ -12,6 +12,7 @@ import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/mac
 import { buildSubsectorCoverageAuditReport } from "../lib/macro/subsectorCoverageAudit";
 import { buildCopperInterpretation } from "../lib/sector/commodityProfiles/copperInterpretation";
 import DirectionalSpine from "./DirectionalSpine";
+import CommodityTrendSwipeSection from "./CommodityTrendSwipeSection";
 
 type ManualInput = {
   input_type: string;
@@ -54,6 +55,10 @@ type MacroSnapshotPayload = {
 type CommoditySnapshotPayload = {
   ok: boolean;
   commodity?: string;
+  trendPriceHistory?: Array<{
+    date: string;
+    value: number | null;
+  }>;
   pmiDebug?: {
     chinaCli?: {
       valueLatest: number | null;
@@ -835,6 +840,14 @@ export default function SectorDashboard() {
           </details>
         ) : null}
       </div>
+
+      {isCommoditySnapshotView ? (
+        <CommodityTrendSwipeSection
+          priceHistory={commoditySnapshot?.trendPriceHistory ?? []}
+          commodityLabel={selectedCommodity === "gold" ? "guld" : "koppar"}
+          debugMode={debugMode}
+        />
+      ) : null}
 
       <div className="sector-grid">
         <div className="sector-card">

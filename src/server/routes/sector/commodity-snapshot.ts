@@ -251,6 +251,10 @@ export default async function handler(req: any, res: any) {
       ok: true,
       commodity,
       snapshot,
+      trendPriceHistory: commodityRawRows.map((row) => ({
+        date: row.date,
+        value: row.value === null ? null : Number(row.value),
+      })),
       ...(debugEnabled
         ? {
           ...(function buildPmiDebug() {
