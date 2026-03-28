@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import InfoPopover from "./InfoPopover";
 import { buildMacroAssetMap } from "../lib/macro/macroAssetMap";
 import { buildMacroSectorMap, type MacroSectorMapItem } from "../lib/macro/macroSectorMap";
 import {
@@ -9,6 +10,7 @@ import {
 } from "../lib/macro/macroSectorQuality";
 import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/macro/macroSectorUniverse";
 import { buildSubsectorCoverageAuditReport } from "../lib/macro/subsectorCoverageAudit";
+import { buildCopperInterpretation } from "../lib/sector/commodityProfiles/copperInterpretation";
 
 type ManualInput = {
   input_type: string;
@@ -370,6 +372,7 @@ export default function SectorDashboard() {
   const [commoditySnapshot, setCommoditySnapshot] = useState<CommoditySnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
   const [macroStrength, setMacroStrength] = useState<MacroStrengthFilter>("all");
+  const [openCopperInfoId, setOpenCopperInfoId] = useState<string | null>(null);
   const subsectorCoverageAudit = useMemo(() => buildSubsectorCoverageAuditReport(), []);
   const debugMacroMapping = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -538,6 +541,10 @@ export default function SectorDashboard() {
   const isCommoditySnapshotView = selectedCommodity !== null;
   const debugMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
   const manualInputStatus = manualInputs.length > 0 ? "available" : "none";
+  const copperInterpretation = useMemo(() => {
+    if (selectedCommodity !== "copper" || !commoditySnapshot?.snapshot) return null;
+    return buildCopperInterpretation(commoditySnapshot.snapshot);
+  }, [commoditySnapshot?.snapshot, selectedCommodity]);
 
   useEffect(() => {
     if (!filteredSectorOptions.some((item) => item.id === sector)) {
@@ -975,11 +982,84 @@ export default function SectorDashboard() {
                   kompletterande analystlager och blockerar inte grundfasen.
                 </p>
                 <div className="metric-list">
-                  <div><strong>Phase:</strong> {commoditySnapshot.snapshot.phase}</div>
-                  <div><strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})</div>
-                  <div><strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}</div>
-                  <div><strong>Status:</strong> {commoditySnapshot.snapshot.status}</div>
-                  <div><strong>Regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a"}</div>
+                  <div>
+                    <strong>Phase:</strong> {commoditySnapshot.snapshot.phase}
+                    {copperInterpretation ? (
+                      <InfoPopover
+                        id="copper-phase-interpretation"
+                        openId={openCopperInfoId}
+                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
+                        onClose={() => setOpenCopperInfoId(null)}
+                        title="Copper phase interpretation"
+                        content={[copperInterpretation.phaseInterpretation]}
+                      />
+                    ) : null}
+                  </div>
+                  <div>
+                    <strong>Confidence:</strong> {(commoditySnapshot.snapshot.confidence.score * 100).toFixed(0)}% ({commoditySnapshot.snapshot.confidence.tier})
+                    {copperInterpretation ? (
+                      <InfoPopover
+                        id="copper-confidence-interpretation"
+                        openId={openCopperInfoId}
+                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
+                        onClose={() => setOpenCopperInfoId(null)}
+                        title="Copper confidence interpretation"
+                        content={[copperInterpretation.confidenceInterpretation]}
+                      />
+                    ) : null}
+                  </div>
+                  <div>
+                    <strong>Bias:</strong> {commoditySnapshot.snapshot.screeningAdjustments.bias}
+                    {copperInterpretation ? (
+                      <InfoPopover
+                        id="copper-bias-interpretation"
+                        openId={openCopperInfoId}
+                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
+                        onClose={() => setOpenCopperInfoId(null)}
+                        title="Copper screening interpretation"
+                        content={[copperInterpretation.biasInterpretation]}
+                      />
+                    ) : null}
+                  </div>
+                  <div>
+                    <strong>Status:</strong> {commoditySnapshot.snapshot.status}
+                    {copperInterpretation ? (
+                      <InfoPopover
+                        id="copper-status-interpretation"
+                        openId={openCopperInfoId}
+                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
+                        onClose={() => setOpenCopperInfoId(null)}
+                        title="Copper status interpretation"
+                        content={[copperInterpretation.statusInterpretation]}
+                      />
+                    ) : null}
+                  </div>
+                  <div>
+                    <strong>Regime:</strong> {commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a"}
+                    {copperInterpretation ? (
+                      <InfoPopover
+                        id="copper-regime-interpretation"
+                        openId={openCopperInfoId}
+                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
+                        onClose={() => setOpenCopperInfoId(null)}
+                        title="Copper regime interpretation"
+                        content={[copperInterpretation.regimeInterpretation]}
+                      />
+                    ) : null}
+                  </div>
+                  {copperInterpretation ? (
+                    <div>
+                      <strong>Interpretation:</strong> {copperInterpretation.interpretationCase}
+                      <InfoPopover
+                        id="copper-overall-interpretation"
+                        openId={openCopperInfoId}
+                        onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
+                        onClose={() => setOpenCopperInfoId(null)}
+                        title="Copper interpretation"
+                        content={[copperInterpretation.overallInterpretation]}
+                      />
+                    </div>
+                  ) : null}
                   <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
                   <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
                   <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
@@ -1086,6 +1166,17 @@ export default function SectorDashboard() {
                   <div><strong>Confidence overlay impact:</strong> overlay agreement={commoditySnapshot.snapshot.diagnostics.overlayAgreement}, coherence={commoditySnapshot.snapshot.confidence.confidenceComponents.signalCoherence.toFixed(2)}</div>
                   <div><strong>Resolved phase:</strong> {commoditySnapshot.snapshot.phase} ({commoditySnapshot.snapshot.diagnostics.phaseStrength})</div>
                   <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
+                  {copperInterpretation ? (
+                    <>
+                      <div><strong>Interpretation case:</strong> {copperInterpretation.interpretationCase}</div>
+                      <div><strong>missingSignalSummary:</strong> {copperInterpretation.debug.missingSignalSummary}</div>
+                      <div><strong>conflictSummary:</strong> {copperInterpretation.debug.conflictSummary}</div>
+                      <div><strong>demandDriver:</strong> {copperInterpretation.debug.demandDriver}</div>
+                      <div><strong>priceDriver:</strong> {copperInterpretation.debug.priceDriver}</div>
+                      <div><strong>phaseCause:</strong> {copperInterpretation.debug.phaseCause}</div>
+                      <div><strong>screeningCause:</strong> {copperInterpretation.debug.screeningCause}</div>
+                    </>
+                  ) : null}
                   <div><strong>Screening adjustments:</strong> {commoditySnapshot.snapshot.screeningAdjustments.notes?.join(" | ") ?? "none"}</div>
                   <div><strong>Threshold adjustments:</strong> valuation floor Δ={commoditySnapshot.snapshot.screeningAdjustments.thresholdAdjustments?.valuationMultipleFloorDeltaPct ?? 0}%, max position Δ={commoditySnapshot.snapshot.screeningAdjustments.thresholdAdjustments?.maxPositionSizeDeltaPct ?? 0}%</div>
                   <div><strong>Profile version:</strong> {commoditySnapshot.snapshot.profileVersion}</div>
