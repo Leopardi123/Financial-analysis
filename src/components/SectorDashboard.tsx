@@ -11,6 +11,7 @@ import {
 import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/macro/macroSectorUniverse";
 import { buildSubsectorCoverageAuditReport } from "../lib/macro/subsectorCoverageAudit";
 import { buildCopperInterpretation } from "../lib/sector/commodityProfiles/copperInterpretation";
+import { buildGoldInterpretation } from "../lib/sector/commodityProfiles/goldInterpretation";
 import DirectionalSpine from "./DirectionalSpine";
 import CommodityTrendSwipeSection from "./CommodityTrendSwipeSection";
 
@@ -571,6 +572,11 @@ export default function SectorDashboard() {
     if (selectedCommodity !== "copper" || !commoditySnapshot?.snapshot) return null;
     return buildCopperInterpretation(commoditySnapshot.snapshot);
   }, [commoditySnapshot?.snapshot, selectedCommodity]);
+  const goldInterpretation = useMemo(() => {
+    if (selectedCommodity !== "gold" || !commoditySnapshot?.snapshot) return null;
+    return buildGoldInterpretation(commoditySnapshot.snapshot);
+  }, [commoditySnapshot?.snapshot, selectedCommodity]);
+  const activeInterpretation = selectedCommodity === "gold" ? goldInterpretation : copperInterpretation;
 
   const directionalSpineInput = useMemo(() => {
     if (!commoditySnapshot?.snapshot) return null;
@@ -1128,28 +1134,30 @@ export default function SectorDashboard() {
                       />
                     ) : null}
                   </div>
-                  {copperInterpretation ? (
+                  {activeInterpretation ? (
                     <div>
-                      <strong>Interpretation:</strong> {copperInterpretation.interpretationText}
+                      <strong>Interpretation:</strong> {activeInterpretation.interpretationText}
                       <InfoPopover
                         id="copper-overall-interpretation"
                         openId={openCopperInfoId}
                         onToggle={(id) => setOpenCopperInfoId((prev) => (prev === id ? null : id))}
                         onClose={() => setOpenCopperInfoId(null)}
                         title="Copper interpretation"
-                        content={[copperInterpretation.overallInterpretation]}
+                        content={selectedCommodity === "gold"
+                          ? [activeInterpretation.summarySentences.join(" ")]
+                          : [copperInterpretation?.overallInterpretation ?? "n/a"]}
                       />
                     </div>
                   ) : null}
-                  {copperInterpretation ? (
+                  {activeInterpretation ? (
                     <div>
-                      <strong>Summary:</strong> {copperInterpretation.summarySentences.join(" ")}
+                      <strong>Summary:</strong> {activeInterpretation.summarySentences.join(" ")}
                     </div>
                   ) : null}
                   <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
                   <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
                   <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, score={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
-                  <div><strong>Phase reasoning:</strong> {copperInterpretation ? copperInterpretation.phaseReasoningHuman.join(" | ") : commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
+                  <div><strong>Phase reasoning:</strong> {activeInterpretation ? activeInterpretation.phaseReasoningHuman.join(" | ") : commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
                   <div><strong>Analyst layer:</strong> {manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</div>
                 </div>
               </>
@@ -1265,6 +1273,16 @@ export default function SectorDashboard() {
                       <div><strong>priceDriver:</strong> {copperInterpretation.debug.priceDriver}</div>
                       <div><strong>phaseCause:</strong> {copperInterpretation.debug.phaseCause}</div>
                       <div><strong>screeningCause:</strong> {copperInterpretation.debug.screeningCause}</div>
+                    </>
+                  ) : null}
+                  {goldInterpretation ? (
+                    <>
+                      <div><strong>Gold primaryHeadwind (debug):</strong> {goldInterpretation.debug.primaryHeadwind}</div>
+                      <div><strong>Gold primarySupport (debug):</strong> {goldInterpretation.debug.primarySupport}</div>
+                      <div><strong>Gold divergenceType (debug):</strong> {goldInterpretation.debug.divergenceType}</div>
+                      <div><strong>Gold driver summary (debug):</strong> {goldInterpretation.debug.driverSummary}</div>
+                      <div><strong>Gold divergence explanation (debug):</strong> {goldInterpretation.debug.divergenceExplanation}</div>
+                      <div><strong>Gold trend explanation (debug):</strong> {goldInterpretation.debug.trendExplanation}</div>
                     </>
                   ) : null}
                   <div><strong>Screening adjustments:</strong> {commoditySnapshot.snapshot.screeningAdjustments.notes?.join(" | ") ?? "none"}</div>
