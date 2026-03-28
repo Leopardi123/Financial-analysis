@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { copperCommodityProfile } from "../profiles/copperProfile.ts";
 import { goldCommodityProfile } from "../profiles/goldProfile.ts";
+import { buildCopperInterpretation } from "../copperInterpretation.ts";
 import type { CommodityProfileInput } from "../types.ts";
 
 const asOf = "2026-03-01";
@@ -31,6 +32,12 @@ const goldInput: CommodityProfileInput = {
   },
   manualInputs: {},
   macroContext: { coreRegimeLabel: "FiscalPressureBuilding", hardAssetOverlay: null, macroConfidence: 0.7 },
+  trendSignal: {
+    structure: "bullish_aligned",
+    expansion: "narrowing",
+    completeness: "full",
+    score: null,
+  },
 };
 
 const copperInput: CommodityProfileInput = {
@@ -51,6 +58,12 @@ const copperInput: CommodityProfileInput = {
   },
   manualInputs: {},
   macroContext: { coreRegimeLabel: "Balanced", hardAssetOverlay: null, macroConfidence: 0.5 },
+  trendSignal: {
+    structure: "bullish_aligned",
+    expansion: "expanding",
+    completeness: "full",
+    score: null,
+  },
 };
 
 const goldSnapshot = goldCommodityProfile.compute(goldInput);
@@ -86,6 +99,29 @@ const copperHighThresholdSnapshot = copperCommodityProfile.compute({
     china_cli: { ...(copperInput.indicators.china_cli!), valueLatest: 99.0, change3m: -0.3, change1m: -0.1 },
   },
 });
+const copperLateStrongTrendSnapshot = copperCommodityProfile.compute({
+  ...copperInput,
+  indicators: {
+    ...copperInput.indicators,
+    copper_usd: { ...(copperInput.indicators.copper_usd!), percentile10y: 94, score: 1.1 },
+    china_cli: { ...(copperInput.indicators.china_cli!), valueLatest: 99.1, change3m: -0.8, change1m: -0.4 },
+  },
+  trendSignal: {
+    structure: "bullish_aligned",
+    expansion: "expanding",
+    completeness: "full",
+    score: null,
+  },
+});
+const goldFragileTrendSnapshot = goldCommodityProfile.compute({
+  ...goldInput,
+  trendSignal: {
+    structure: "bullish_but_narrowing",
+    expansion: "narrowing",
+    completeness: "partial",
+    score: null,
+  },
+});
 
 assert.ok(goldSnapshot, "gold snapshot should resolve");
 assert.ok(copperSnapshot, "copper snapshot should resolve");
@@ -117,6 +153,36 @@ assert.ok(
 assert.ok(
   copperHighThresholdSnapshot.diagnostics.notes.some((note) => note.includes("price_state=mid")),
   "88th percentile should no longer be tagged as high with tighter threshold.",
+);
+assert.equal(copperLateStrongTrendSnapshot.phase, "Late Cycle", "Strong trend must not override primary Late Cycle logic.");
+assert.ok(
+  copperLateStrongTrendSnapshot.diagnostics.phaseReasoning.some((line) => line.includes("Late Cycle retained")),
+  "Late-cycle reasoning should mention supportive trend without flipping primary phase.",
+);
+assert.ok(
+  copperLateStrongTrendSnapshot.diagnostics.trendInfluence?.trendInfluenceOnPhase === "late_softened_by_trend",
+  "Trend influence debug should expose phase effect.",
+);
+assert.ok(
+  goldFragileTrendSnapshot.diagnostics.phaseReasoning.some((line) => line.toLowerCase().includes("fragile")),
+  "Gold reasoning should mention fragile trend when macro is favorable but expansion narrows.",
+);
+assert.ok(
+  goldFragileTrendSnapshot.diagnostics.trendInfluence?.trendDataCompleteness === "partial",
+  "Gold trend influence should retain partial completeness state.",
+);
+const copperInterpretation = buildCopperInterpretation(copperLateStrongTrendSnapshot as any);
+assert.ok(
+  !copperInterpretation.interpretationText.includes("phase="),
+  "Human interpretation text should not leak raw interpretationCase keys.",
+);
+assert.ok(
+  copperInterpretation.debug.demandDriver.includes("change_3m=-0.8"),
+  "change_3m should remain available in interpretation debug driver.",
+);
+assert.ok(
+  copperInterpretation.phaseReasoningHuman.length > 0,
+  "Human readable phase reasoning should be generated.",
 );
 
 console.log("copperProfile.test.ts passed");

@@ -11,6 +11,7 @@ import type {
   CommodityRegimeDriver,
   CommodityScreeningAdjustment,
 } from "../types";
+import { deriveTrendSignal, type TrendDataCompleteness } from "../trendSignal.js";
 
 const REQUIRED_INDICATORS: CommodityIndicatorKey[] = [
   "gold_usd",
@@ -332,34 +333,6 @@ function resolveRegimeAgreementWithPrice(args: {
   return "neutral";
 }
 
-function mapTrendStructureScore(structure: string | null | undefined): number | null {
-  if (!structure) return null;
-  if (structure === "bullish_aligned") return 1;
-  if (structure === "bullish_but_narrowing") return 0.5;
-  if (structure === "neutral" || structure === "mixed") return 0;
-  if (structure === "bearish_short_term") return -0.5;
-  if (structure === "breakdown") return -1;
-  if (structure === "insufficient") return null;
-  return 0;
-}
-
-function mapTrendExpansionScore(expansion: string | null | undefined): number | null {
-  if (!expansion) return null;
-  if (expansion === "expanding") return 1;
-  if (expansion === "stable" || expansion === "flat") return 0.5;
-  if (expansion === "narrowing") return -0.5;
-  if (expansion === "negative_short_spread") return -1;
-  if (expansion === "insufficient") return null;
-  return 0;
-}
-
-function deriveTrendScore(structure: string | null | undefined, expansion: string | null | undefined): number | null {
-  const structureScore = mapTrendStructureScore(structure);
-  const expansionScore = mapTrendExpansionScore(expansion);
-  if (structureScore === null || expansionScore === null) return null;
-  return clamp(structureScore * 0.6 + expansionScore * 0.4, -1, 1);
-}
-
 function buildConfidence(args: {
   required: CommodityIndicatorKey[];
   optional: CommodityIndicatorKey[];
@@ -370,6 +343,7 @@ function buildConfidence(args: {
   overlaysDiverging: boolean;
   triangleAlignment: "aligned" | "partial" | "misaligned";
   trendScore: number | null;
+  trendCompleteness: TrendDataCompleteness;
   trendAgreementWithMacro: TrendAgreementWithMacro;
 }): CommodityConfidence {
   const usedRequired = args.indicatorDiagnostics.filter((item) => item.used && args.required.includes(item.key)).length;
@@ -401,6 +375,8 @@ function buildConfidence(args: {
   if (args.trendAgreementWithMacro === "diverging") signalCoherence = clamp(signalCoherence - 0.1, 0, 1);
   if (args.trendAgreementWithMacro === "ahead_of_regime") signalCoherence = clamp(signalCoherence - 0.07, 0, 1);
   if (args.trendScore !== null && Math.abs(args.trendScore) < 0.15) signalCoherence = clamp(signalCoherence - 0.01, 0, 1);
+  if (args.trendCompleteness === "partial") signalCoherence = clamp(signalCoherence - 0.04, 0, 1);
+  if (args.trendCompleteness === "insufficient") signalCoherence = clamp(signalCoherence - 0.08, 0, 1);
 
   const fallbackCount = args.indicatorDiagnostics.filter((item) => item.fallbackUsed).length;
   const fallbackPenalty = clamp(fallbackCount * 0.2, 0, 1);
@@ -409,7 +385,7 @@ function buildConfidence(args: {
   const tier = score >= 0.75 ? "high" : score >= 0.45 ? "medium" : "low";
   const reasons = [
     `Data completeness=${dataCompleteness.toFixed(2)} from required/optional coverage.`,
-    `Signal coherence=${signalCoherence.toFixed(2)} including overlay effect (${args.overlayAgreement}), overlay divergence=${String(args.overlaysDiverging)}, regime/price agreement (${args.regimeAgreementWithPrice}), trend/macro=${args.trendAgreementWithMacro}, triangle=${args.triangleAlignment}.`,
+    `Signal coherence=${signalCoherence.toFixed(2)} including overlay effect (${args.overlayAgreement}), overlay divergence=${String(args.overlaysDiverging)}, regime/price agreement (${args.regimeAgreementWithPrice}), trend/macro=${args.trendAgreementWithMacro}, trendCompleteness=${args.trendCompleteness}, triangle=${args.triangleAlignment}.`,
     `Fallback penalty=${fallbackPenalty.toFixed(2)} (fallback count=${fallbackCount}).`,
   ];
 
@@ -494,12 +470,18 @@ function buildScreeningAdjustment(
   phase: CommodityPhase,
   regime: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets",
   regimeAgreementWithPrice: RegimeAgreementWithPrice,
+  trendAgreementWithMacro: TrendAgreementWithMacro,
+  trendScore: number | null,
 ): CommodityScreeningAdjustment {
+  const trendFragile = trendAgreementWithMacro === "fragile" || trendAgreementWithMacro === "diverging";
+  const trendConfirming = trendAgreementWithMacro === "confirming" && (trendScore ?? 0) >= 0.5;
   if (phase === "Late Cycle" && regime === "Monetary Stress") {
     return {
-      bias: "supportive",
-      notes: ["Late Cycle price action is confirmed by Monetary Stress regime."],
-      thresholdAdjustments: { valuationMultipleFloorDeltaPct: 4, maxPositionSizeDeltaPct: 8 },
+      bias: trendFragile ? "caution" : "supportive",
+      notes: [trendFragile
+        ? "Macro remains supportive, but narrowing/breaking trend lowers conviction."
+        : "Late Cycle price action is confirmed by Monetary Stress regime."],
+      thresholdAdjustments: { valuationMultipleFloorDeltaPct: trendFragile ? 0 : 4, maxPositionSizeDeltaPct: trendFragile ? 2 : 8 },
     };
   }
   if (phase === "Late Cycle" && regimeAgreementWithPrice === "diverging") {
@@ -518,9 +500,11 @@ function buildScreeningAdjustment(
   }
   if (phase === "Late Cycle") {
     return {
-      bias: "supportive",
-      notes: ["Trend still favorable; keep quality filters but allow constructive stance."],
-      thresholdAdjustments: { valuationMultipleFloorDeltaPct: 3, maxPositionSizeDeltaPct: 5 },
+      bias: trendConfirming ? "supportive" : "caution",
+      notes: [trendConfirming
+        ? "Trend confirms macro backdrop; maintain constructive stance."
+        : "Late-cycle setup without trend confirmation: prioritize resilience."],
+      thresholdAdjustments: { valuationMultipleFloorDeltaPct: trendConfirming ? 3 : -2, maxPositionSizeDeltaPct: trendConfirming ? 5 : -3 },
     };
   }
   if (phase === "Compression") {
@@ -665,8 +649,14 @@ export const goldCommodityProfile: CommodityProfile = {
     }
     const trendStructureState = input.trendSignal?.structure ?? "insufficient";
     const trendExpansionState = input.trendSignal?.expansion ?? "insufficient";
-    const trendCompleteness = input.trendSignal?.completeness ?? "insufficient";
-    const trendScore = input.trendSignal?.score ?? deriveTrendScore(trendStructureState, trendExpansionState);
+    const trendSignal = deriveTrendSignal({
+      structure: trendStructureState,
+      expansion: trendExpansionState,
+      completeness: input.trendSignal?.completeness ?? null,
+      explicitScore: input.trendSignal?.score ?? null,
+    });
+    const trendCompleteness = trendSignal.trendDataCompleteness;
+    const trendScore = trendSignal.trendScore;
     const macroBullish = (blockBScore ?? 0) >= 0.2 || regimeClassification.regime === "Monetary Stress" || regimeClassification.regime === "Risk-Off (deflationary)";
     const macroBearish = (blockBScore ?? 0) <= -0.2 || regimeClassification.regime === "Disinflation / Real Yield Rising";
     const trendStrong = trendScore !== null && trendScore >= 0.6;
@@ -713,6 +703,7 @@ export const goldCommodityProfile: CommodityProfile = {
       overlaysDiverging,
       triangleAlignment,
       trendScore,
+      trendCompleteness,
       trendAgreementWithMacro,
     });
 
@@ -780,6 +771,14 @@ export const goldCommodityProfile: CommodityProfile = {
         ...(trendAgreementWithMacro === "ahead_of_regime" ? ["trend ahead of regime"] : []),
         ...(trendAgreementWithMacro === "fragile" ? ["macro favored but fragile"] : []),
       ],
+      trendInfluence: {
+        trendStructureState,
+        trendExpansionState,
+        trendDataCompleteness: trendCompleteness,
+        trendScore,
+        trendInfluenceOnPhase: `trendVsMacro=${trendAgreementWithMacro}`,
+        trendInfluenceOnConfidence: `trendCompleteness=${trendCompleteness}; trendVsMacro=${trendAgreementWithMacro}`,
+      },
     };
 
     const drivers = [
@@ -821,7 +820,13 @@ export const goldCommodityProfile: CommodityProfile = {
       indicatorDiagnostics,
       dataCompleteness,
       relevantOverlays: GOLD_RELEVANT_OVERLAYS.map((key) => ({ key, score: input.overlays[key] ?? null })),
-      screeningAdjustments: buildScreeningAdjustment(phaseResolution.phase, regimeClassification.regime, regimeAgreementWithPrice),
+      screeningAdjustments: buildScreeningAdjustment(
+        phaseResolution.phase,
+        regimeClassification.regime,
+        regimeAgreementWithPrice,
+        trendAgreementWithMacro,
+        trendScore,
+      ),
       profileVersion: "gold-v4",
       asOf: input.asOf,
       status: "partial",
