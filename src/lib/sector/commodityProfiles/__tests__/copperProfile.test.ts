@@ -35,6 +35,7 @@ const goldInput: CommodityProfileInput = {
   trendSignal: {
     structure: "bullish_aligned",
     expansion: "narrowing",
+    momentumState: "decelerating",
     completeness: "full",
     score: null,
   },
@@ -61,6 +62,7 @@ const copperInput: CommodityProfileInput = {
   trendSignal: {
     structure: "bullish_aligned",
     expansion: "expanding",
+    momentumState: "accelerating",
     completeness: "full",
     score: null,
   },
@@ -109,6 +111,22 @@ const copperLateStrongTrendSnapshot = copperCommodityProfile.compute({
   trendSignal: {
     structure: "bullish_aligned",
     expansion: "expanding",
+    momentumState: "accelerating",
+    completeness: "full",
+    score: null,
+  },
+});
+const copperLateDeceleratingSnapshot = copperCommodityProfile.compute({
+  ...copperInput,
+  indicators: {
+    ...copperInput.indicators,
+    copper_usd: { ...(copperInput.indicators.copper_usd!), percentile10y: 94, score: 1.1 },
+    china_cli: { ...(copperInput.indicators.china_cli!), valueLatest: 99.1, change3m: -0.8, change1m: -0.4 },
+  },
+  trendSignal: {
+    structure: "bullish_aligned",
+    expansion: "expanding",
+    momentumState: "decelerating",
     completeness: "full",
     score: null,
   },
@@ -162,6 +180,10 @@ assert.ok(
 assert.ok(
   copperLateStrongTrendSnapshot.diagnostics.trendInfluence?.trendInfluenceOnPhase === "late_softened_by_trend",
   "Trend influence debug should expose phase effect.",
+);
+assert.ok(
+  copperLateDeceleratingSnapshot.diagnostics.trendInfluence?.trendInfluenceOnPhase === "late_cycle_softening",
+  "Late cycle + decelerating momentum should expose late_cycle_softening effect.",
 );
 assert.ok(
   goldFragileTrendSnapshot.diagnostics.phaseReasoning.some((line) => line.toLowerCase().includes("fragile")),

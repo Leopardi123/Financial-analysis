@@ -209,7 +209,7 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
     missingSignalSummary.replace("Saknade signaler:", "Modellen saknar"),
     conflictSummary.replace("Konflikt:", "Signalbild:"),
     trendState
-      ? `Trendstrukturen är ${trendState.trendStructureState.replace(/_/g, " ")}, vilket ${trendState.trendInfluenceOnPhase === "late_softened_by_trend" ? "mildrar men inte upphäver" : "stödjer"} huvudtolkningen.`
+      ? `Trendstrukturen är ${trendState.trendStructureState.replace(/_/g, " ")}, vilket ${trendState.trendInfluenceOnPhase === "late_softened_by_trend" || trendState.trendInfluenceOnPhase === "late_cycle_softening" ? "mildrar men inte upphäver" : "stödjer"} huvudtolkningen.`
       : "Trendstrukturen saknar tillräcklig täckning för stark slutsats.",
   ];
 
@@ -224,6 +224,8 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
         : "Kopparpriset är fortsatt pressat";
     const trendPart = trendState?.trendInfluenceOnPhase === "late_softened_by_trend"
       ? "Trendstrukturen mildrar den negativa bilden något, men inte tillräckligt för att bekräfta en sund expansionsfas."
+      : trendState?.trendInfluenceOnPhase === "late_cycle_softening"
+        ? "Trenden är stark men tappar momentum, vilket signalerar en mjukare senfas."
       : trendState?.trendInfluenceOnPhase === "late_reinforced_by_breakdown"
         ? "Trendförsvagningen förstärker risken i den sena fasen."
         : trendState?.trendInfluenceOnPhase === "unstable_late_cycle"

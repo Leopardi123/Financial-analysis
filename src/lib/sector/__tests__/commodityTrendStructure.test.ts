@@ -33,14 +33,16 @@ function buildMonthlyPoints(values: number[]): Array<{ date: string; value: numb
 
   const deceleratingModel = buildCommodityTrendStructure(buildMonthlyPoints(deceleratingButBullishValues), 60);
   assertEqual(deceleratingModel.trendStructureState, 'bullish_aligned', 'should keep bullish structure when moving averages remain aligned');
+  assertEqual(deceleratingModel.trendExpansionState, 'expanding', 'should keep expansion state expanding when spread level is still expanding overall');
   assertEqual(deceleratingModel.trendMomentumState, 'decelerating', 'should detect decelerating momentum from latest short spread datapoints');
   assertEqual(
     deceleratingModel.expansionInterpretation,
-    'Trenden är fortsatt positiv, men kortsiktig momentum avtar. Detta kan indikera att trendexpansionen mattas av.',
-    'should use deceleration text when bullish structure is intact but momentum slows',
+    'Trenden är fortsatt positiv, men kortsiktig momentum avtar. Det indikerar att uppgången tappar styrka trots att den övergripande strukturen är intakt.',
+    'should use deceleration text when bullish structure and expansion are intact but momentum slows',
   );
+  assert(deceleratingModel.expansionInfoLines.includes('Trenden är stark men tappar momentum.'), 'summary line should mention strong trend but fading momentum');
   assert(!deceleratingModel.expansionInterpretation.toLowerCase().includes('trenden stärks'), 'decelerating text must not claim strengthening trend');
-  assert(!deceleratingModel.expansionInterpretation.toLowerCase().includes('divergerar'), 'decelerating text must not claim divergence expansion');
+  assert(!deceleratingModel.expansionInterpretation.toLowerCase().includes('expansionen ökar'), 'decelerating text must not claim increasing expansion');
 
   const acceleratingModel = buildCommodityTrendStructure(buildMonthlyPoints(Array.from({ length: 30 }, (_, i) => 100 + i * i * 0.2)), 60);
   assertEqual(acceleratingModel.trendMomentumState, 'accelerating', 'should mark momentum as accelerating when short spread rises at latest datapoint');

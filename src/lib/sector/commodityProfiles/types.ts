@@ -105,6 +105,7 @@ export type CommodityDiagnostics = {
   trendInfluence?: {
     trendStructureState: string;
     trendExpansionState: string;
+    trendMomentumState?: string;
     trendDataCompleteness: "full" | "partial" | "insufficient";
     trendScore: number | null;
     trendInfluenceOnPhase: string;
@@ -165,6 +166,7 @@ export type CommodityProfileInput = {
   trendSignal?: {
     structure: string;
     expansion: string;
+    momentumState?: string;
     completeness: "full" | "partial" | "insufficient";
     score: number | null;
   } | null;

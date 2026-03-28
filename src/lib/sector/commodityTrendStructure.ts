@@ -154,6 +154,12 @@ function latestDirection(values: Array<number | null>): "up" | "down" | "flat" |
   return delta > 0 ? "up" : "down";
 }
 
+function latestDelta(values: Array<number | null>): number | null {
+  const numeric = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (numeric.length < 2) return null;
+  return numeric[numeric.length - 1] - numeric[numeric.length - 2];
+}
+
 function buildStructureState(args: {
   hasSma50Coverage: boolean;
   hasSma200Coverage: boolean;
@@ -220,8 +226,15 @@ export function buildTrendExpansionInterpretation(model: CommodityTrendStructure
     const dir = trendDirection(shortSpread);
     const latestShort = [...shortSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
     if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
-    if (model.trendStructureState === "bullish_aligned" && model.trendMomentumState === "decelerating") {
-      return "Trenden är fortsatt positiv, men kortsiktig momentum avtar. Detta kan indikera att trendexpansionen mattas av.";
+    if (
+      model.trendStructureState === "bullish_aligned"
+      && model.trendExpansionState === "expanding"
+      && model.trendMomentumState === "decelerating"
+    ) {
+      return "Trenden är fortsatt positiv, men kortsiktig momentum avtar. Det indikerar att uppgången tappar styrka trots att den övergripande strukturen är intakt.";
+    }
+    if (model.trendMomentumState === "decelerating") {
+      return "Kortsiktig momentum avtar, vilket signalerar att trendexpansionen mattas av.";
     }
     if (dir === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
     if (dir === "up") return "Otillräcklig data för lång trend.";
@@ -236,8 +249,15 @@ export function buildTrendExpansionInterpretation(model: CommodityTrendStructure
   const latestLong = [...longSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
 
   if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
-  if (model.trendStructureState === "bullish_aligned" && model.trendMomentumState === "decelerating") {
-    return "Trenden är fortsatt positiv, men kortsiktig momentum avtar. Detta kan indikera att trendexpansionen mattas av.";
+  if (
+    model.trendStructureState === "bullish_aligned"
+    && model.trendExpansionState === "expanding"
+    && model.trendMomentumState === "decelerating"
+  ) {
+    return "Trenden är fortsatt positiv, men kortsiktig momentum avtar. Det indikerar att uppgången tappar styrka trots att den övergripande strukturen är intakt.";
+  }
+  if (model.trendMomentumState === "decelerating") {
+    return "Kortsiktig momentum avtar, vilket signalerar att trendexpansionen mattas av.";
   }
   if (typeof latestShort === "number" && latestShort > 0 && shortDirection === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
   if (
@@ -393,12 +413,13 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
 
   const trendStructureState = buildStructureState({ hasSma50Coverage, hasSma200Coverage, hasSma500Coverage, latest, shortSpreadDirection });
   const trendExpansionState = buildExpansionState(shortSpread, longSpread);
+  const deltaShortSpread = latestDelta(shortSpread);
   const shortSpreadLatestDirection = latestDirection(shortSpread);
-  const trendMomentumState: TrendMomentumState = shortSpreadLatestDirection === "up"
+  const trendMomentumState: TrendMomentumState = (deltaShortSpread ?? 0) > 1e-6
     ? "accelerating"
-    : shortSpreadLatestDirection === "down" && trendStructureState === "bullish_aligned"
+    : (deltaShortSpread ?? 0) < -1e-6
       ? "decelerating"
-      : shortSpreadLatestDirection === "flat"
+      : shortSpreadLatestDirection === "flat" || (deltaShortSpread !== null && Math.abs(deltaShortSpread) <= 1e-6)
         ? "stable"
         : shortSpreadLatestDirection === "insufficient"
           ? "insufficient"
@@ -459,6 +480,11 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
   ];
   model.expansionInfoLines = [
     model.expansionInterpretation,
+    ...(model.trendStructureState === "bullish_aligned"
+      && model.trendExpansionState === "expanding"
+      && model.trendMomentumState === "decelerating"
+      ? ["Trenden är stark men tappar momentum."]
+      : []),
     `Frekvens: ${model.trendFrequency}. Fönster (kort/mellan/lång): ${model.trendWindows.shortTrendWindow}/${model.trendWindows.mediumTrendWindow}/${model.trendWindows.longTrendWindow}.`,
     `Trend expansion state: ${model.trendExpansionState}.`,
     ...(model.degradationLevel === "medium" ? ["Lång spread (mellantrend-lång trend) kan inte bedömas fullt ut ännu."] : []),

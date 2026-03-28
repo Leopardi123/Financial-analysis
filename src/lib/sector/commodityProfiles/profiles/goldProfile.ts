@@ -649,6 +649,7 @@ export const goldCommodityProfile: CommodityProfile = {
     }
     const trendStructureState = input.trendSignal?.structure ?? "insufficient";
     const trendExpansionState = input.trendSignal?.expansion ?? "insufficient";
+    const trendMomentumState = input.trendSignal?.momentumState ?? "insufficient";
     const trendSignal = deriveTrendSignal({
       structure: trendStructureState,
       expansion: trendExpansionState,
@@ -761,7 +762,7 @@ export const goldCommodityProfile: CommodityProfile = {
         "Snapshot separates indicator-layer and overlay-layer contributions explicitly.",
         "Missing overlay data does not create synthetic proxies; it reduces agreement/coherence instead.",
         `Gold regime=${regimeClassification.regime}; agreementWithPrice=${regimeAgreementWithPrice}.`,
-        `trend_signal structure=${trendStructureState}, expansion=${trendExpansionState}, completeness=${trendCompleteness}, trend_score=${trendScore ?? "n/a"}, trendVsMacro=${trendAgreementWithMacro}.`,
+        `trend_signal structure=${trendStructureState}, expansion=${trendExpansionState}, momentum=${trendMomentumState}, completeness=${trendCompleteness}, trend_score=${trendScore ?? "n/a"}, trendVsMacro=${trendAgreementWithMacro}.`,
         `Primary overlay driver=${primaryOverlayDriver}; overlaysDiverging=${String(overlaysDiverging)}.`,
         `Alignment triangle (price↔regime↔overlays)=${triangleAlignment}.`,
         ...(trendAgreementWithMacro === "confirming" ? ["trend confirms macro"] : []),
@@ -774,6 +775,7 @@ export const goldCommodityProfile: CommodityProfile = {
       trendInfluence: {
         trendStructureState,
         trendExpansionState,
+        trendMomentumState,
         trendDataCompleteness: trendCompleteness,
         trendScore,
         trendInfluenceOnPhase: `trendVsMacro=${trendAgreementWithMacro}`,
@@ -838,6 +840,7 @@ export const goldCommodityProfile: CommodityProfile = {
       trendSignal: {
         structure: trendStructureState,
         expansion: trendExpansionState,
+        momentumState: trendMomentumState,
         completeness: trendCompleteness,
         score: trendScore,
       },

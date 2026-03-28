@@ -249,6 +249,7 @@ export default async function handler(req: any, res: any) {
       trendSignal: {
         structure: trendModel.trendStructureState,
         expansion: trendModel.trendExpansionState,
+        momentumState: trendModel.trendMomentumState,
         completeness: derivedTrendSignal.trendDataCompleteness,
         score: derivedTrendSignal.trendScore,
       },
