@@ -186,6 +186,10 @@ assert.ok(
   "Late cycle + decelerating momentum should expose late_cycle_softening effect.",
 );
 assert.ok(
+  copperLateDeceleratingSnapshot.diagnostics.phaseReasoning.some((line) => line.includes("Lång trend upp, men kort momentum avtar")),
+  "Phase reasoning should explicitly separate long trend and short momentum in late cycle softening.",
+);
+assert.ok(
   goldFragileTrendSnapshot.diagnostics.phaseReasoning.some((line) => line.toLowerCase().includes("fragile")),
   "Gold reasoning should mention fragile trend when macro is favorable but expansion narrows.",
 );

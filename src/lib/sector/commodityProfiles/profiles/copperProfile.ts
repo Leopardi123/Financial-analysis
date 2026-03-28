@@ -525,6 +525,10 @@ export const copperCommodityProfile: CommodityProfile = {
     const trendStructureState = input.trendSignal?.structure ?? null;
     const trendExpansionState = input.trendSignal?.expansion ?? null;
     const trendMomentumState = input.trendSignal?.momentumState ?? null;
+    const longTrendDirection = input.trendSignal?.longTrendDirection ?? "insufficient";
+    const shortTrendMomentum = input.trendSignal?.shortTrendMomentum ?? "insufficient";
+    const trendCombinedInterpretation = input.trendSignal?.trendCombinedInterpretation
+      ?? "Trendbilden är otillräcklig för att separera långsiktig riktning och kortsiktig momentum.";
     const trendSignal = deriveTrendSignal({
       structure: trendStructureState,
       expansion: trendExpansionState,
@@ -547,6 +551,12 @@ export const copperCommodityProfile: CommodityProfile = {
       trendMomentumState,
       priceTrendScore,
     });
+    const longShortReasoning = longTrendDirection === "up" && shortTrendMomentum === "decelerating"
+      ? "Lång trend upp, men kort momentum avtar, vilket är förenligt med en sen cykelfas."
+      : longTrendDirection === "up" && shortTrendMomentum === "accelerating"
+        ? "Lång trend upp och kort momentum accelererar, vilket stödjer fortsatt expansionsfas."
+        : null;
+    if (longShortReasoning) trendAdjustment.notes.push(longShortReasoning);
     const adjustedPhase = trendAdjustment.phase;
 
     const regimeClassification = classifyCopperRegime(input);
@@ -622,6 +632,7 @@ export const copperCommodityProfile: CommodityProfile = {
         `pmi_us_supplemental=${pmiUsSupplemental?.valueLatest ?? "n/a"} (supplemental/global context only, does not drive phase).`,
         `demand_state=${phaseResolution.demandState ?? "n/a"}, price_state=${phaseResolution.priceState}.`,
         `trend_signal structure=${trendStructureState ?? "insufficient"}, expansion=${trendExpansionState ?? "insufficient"}, momentum=${trendMomentumState ?? "insufficient"}, completeness=${trendCompleteness}, trend_score=${trendScore ?? "n/a"}, trendAgreementWithPrice=${trendAgreementWithPrice}.`,
+        `trend_synthesis long=${longTrendDirection}, short=${shortTrendMomentum}, combined="${trendCombinedInterpretation}"`,
         `trend_phase_effect=${trendAdjustment.effect}.`,
         `divergence=${String(phaseResolution.divergence)}, divergenceType=${phaseResolution.divergenceType}.`,
         `overrideApplied=${String(phaseResolution.overrideApplied)}, overrideReason=${phaseResolution.overrideReason ?? "none"}.`,
@@ -637,6 +648,9 @@ export const copperCommodityProfile: CommodityProfile = {
         trendStructureState: trendStructureState ?? "insufficient",
         trendExpansionState: trendExpansionState ?? "insufficient",
         trendMomentumState: trendMomentumState ?? "insufficient",
+        longTrendDirection,
+        shortTrendMomentum,
+        trendCombinedInterpretation,
         trendDataCompleteness: trendCompleteness,
         trendScore,
         trendInfluenceOnPhase: trendAdjustment.effect,
@@ -689,6 +703,9 @@ export const copperCommodityProfile: CommodityProfile = {
         structure: trendStructureState ?? "insufficient",
         expansion: trendExpansionState ?? "insufficient",
         momentumState: trendMomentumState ?? "insufficient",
+        longTrendDirection,
+        shortTrendMomentum,
+        trendCombinedInterpretation,
         completeness: trendCompleteness,
         score: trendScore,
       },

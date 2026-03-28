@@ -37,9 +37,11 @@ function buildMonthlyPoints(values: number[]): Array<{ date: string; value: numb
   assertEqual(deceleratingModel.trendMomentumState, 'decelerating', 'should detect decelerating momentum from latest short spread datapoints');
   assertEqual(
     deceleratingModel.expansionInterpretation,
-    'Trenden är fortsatt positiv, men kortsiktig momentum avtar. Det indikerar att uppgången tappar styrka trots att den övergripande strukturen är intakt.',
-    'should use deceleration text when bullish structure and expansion are intact but momentum slows',
+    'Den långsiktiga trendstrukturen är fortsatt positiv, men kortsiktig momentum avtar.',
+    'should synthesize long direction and short momentum when structure is bullish and momentum slows',
   );
+  assertEqual(deceleratingModel.longTrendDirection, 'up', 'long direction should be up for bullish aligned structure');
+  assertEqual(deceleratingModel.shortTrendMomentum, 'decelerating', 'short momentum should be decelerating when latest spread delta is negative');
   assert(deceleratingModel.expansionInfoLines.includes('Trenden är stark men tappar momentum.'), 'summary line should mention strong trend but fading momentum');
   assert(!deceleratingModel.expansionInterpretation.toLowerCase().includes('trenden stärks'), 'decelerating text must not claim strengthening trend');
   assert(!deceleratingModel.expansionInterpretation.toLowerCase().includes('expansionen ökar'), 'decelerating text must not claim increasing expansion');

@@ -122,6 +122,9 @@ type CommoditySnapshotPayload = {
       structure: string;
       expansion: string;
       momentumState?: string;
+      longTrendDirection?: string;
+      shortTrendMomentum?: string;
+      trendCombinedInterpretation?: string;
       completeness: "full" | "partial" | "insufficient";
       score: number | null;
     };
@@ -182,6 +185,9 @@ type CommoditySnapshotPayload = {
         trendStructureState: string;
         trendExpansionState: string;
         trendMomentumState?: string;
+        longTrendDirection?: string;
+        shortTrendMomentum?: string;
+        trendCombinedInterpretation?: string;
         trendDataCompleteness: "full" | "partial" | "insufficient";
         trendScore: number | null;
         trendInfluenceOnPhase: string;
@@ -1158,7 +1164,8 @@ export default function SectorDashboard() {
                   ) : null}
                   <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
                   <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
-                  <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, momentum={commoditySnapshot.snapshot.trendSignal?.momentumState ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, score={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
+                  <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, momentum={commoditySnapshot.snapshot.trendSignal?.momentumState ?? "n/a"}, longDirection={commoditySnapshot.snapshot.trendSignal?.longTrendDirection ?? "n/a"}, shortMomentum={commoditySnapshot.snapshot.trendSignal?.shortTrendMomentum ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, score={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
+                  <div><strong>Trend synthesis:</strong> {commoditySnapshot.snapshot.trendSignal?.trendCombinedInterpretation ?? "n/a"}</div>
                   <div><strong>Phase reasoning:</strong> {activeInterpretation ? activeInterpretation.phaseReasoningHuman.join(" | ") : commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
                   <div><strong>Analyst layer:</strong> {manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</div>
                 </div>
@@ -1192,7 +1199,8 @@ export default function SectorDashboard() {
                 <div><strong>Manual input status:</strong> {manualInputStatus}</div>
                 <div><strong>Manual impact on snapshot:</strong> none (supplemental layer only in current phase)</div>
                 <div><strong>Regime:</strong> {(commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a")} ({commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"})</div>
-                  <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, momentum={commoditySnapshot.snapshot.trendSignal?.momentumState ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, trendScore={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
+                  <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, momentum={commoditySnapshot.snapshot.trendSignal?.momentumState ?? "n/a"}, longDirection={commoditySnapshot.snapshot.trendSignal?.longTrendDirection ?? "n/a"}, shortMomentum={commoditySnapshot.snapshot.trendSignal?.shortTrendMomentum ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, trendScore={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
+                  <div><strong>Trend synthesis:</strong> {commoditySnapshot.snapshot.trendSignal?.trendCombinedInterpretation ?? "n/a"}</div>
                   <div><strong>Trend influence on phase:</strong> {commoditySnapshot.snapshot.diagnostics.trendInfluence?.trendInfluenceOnPhase ?? "n/a"}</div>
                   <div><strong>Trend influence on confidence:</strong> {commoditySnapshot.snapshot.diagnostics.trendInfluence?.trendInfluenceOnConfidence ?? "n/a"}</div>
                 <details>

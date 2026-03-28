@@ -25,6 +25,10 @@ type CopperSnapshot = {
     trendInfluence?: {
       trendStructureState: string;
       trendExpansionState: string;
+      trendMomentumState?: string;
+      longTrendDirection?: string;
+      shortTrendMomentum?: string;
+      trendCombinedInterpretation?: string;
       trendDataCompleteness: "full" | "partial" | "insufficient";
       trendScore: number | null;
       trendInfluenceOnPhase: string;
@@ -209,7 +213,7 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
     missingSignalSummary.replace("Saknade signaler:", "Modellen saknar"),
     conflictSummary.replace("Konflikt:", "Signalbild:"),
     trendState
-      ? `Trendstrukturen är ${trendState.trendStructureState.replace(/_/g, " ")}, vilket ${trendState.trendInfluenceOnPhase === "late_softened_by_trend" || trendState.trendInfluenceOnPhase === "late_cycle_softening" ? "mildrar men inte upphäver" : "stödjer"} huvudtolkningen.`
+      ? `${trendState.trendCombinedInterpretation ?? "Trendsyntes saknas."} (lång trend: ${trendState.longTrendDirection ?? "n/a"}, kort momentum: ${trendState.shortTrendMomentum ?? "n/a"}).`
       : "Trendstrukturen saknar tillräcklig täckning för stark slutsats.",
   ];
 
@@ -231,7 +235,10 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
         : trendState?.trendInfluenceOnPhase === "unstable_late_cycle"
           ? "Den komprimerade trenden ökar risken för en skör uppgång."
           : "Trendbilden fungerar främst som kompletterande bekräftelse till pris- och efterfrågesignalen.";
-    return `${pricePart}, men ${demandPart}. ${trendPart}`;
+    const combinedTrendPart = trendState?.trendCombinedInterpretation
+      ? `Trendsyntes: ${trendState.trendCombinedInterpretation}`
+      : "";
+    return `${pricePart}, men ${demandPart}. ${combinedTrendPart} ${trendPart}`.trim();
   })();
 
   const interpretationCase = [

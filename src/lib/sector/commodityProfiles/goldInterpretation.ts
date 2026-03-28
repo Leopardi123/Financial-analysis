@@ -7,6 +7,10 @@ type GoldSnapshot = {
   trendSignal?: {
     structure: string;
     expansion: string;
+    momentumState?: string;
+    longTrendDirection?: string;
+    shortTrendMomentum?: string;
+    trendCombinedInterpretation?: string;
     completeness: "full" | "partial" | "insufficient";
     score: number | null;
   };
@@ -16,6 +20,9 @@ type GoldSnapshot = {
     trendInfluence?: {
       trendInfluenceOnPhase: string;
       trendInfluenceOnConfidence: string;
+      longTrendDirection?: string;
+      shortTrendMomentum?: string;
+      trendCombinedInterpretation?: string;
     };
   };
 };
@@ -85,20 +92,21 @@ function goldDivergenceExplanation(snapshot: GoldSnapshot): { divergenceType: Go
 }
 
 function goldTrendExplanation(snapshot: GoldSnapshot): string {
-  const trendStructure = snapshot.trendSignal?.structure ?? "insufficient";
-  const trendExpansion = snapshot.trendSignal?.expansion ?? "insufficient";
+  const longTrendDirection = snapshot.trendSignal?.longTrendDirection ?? snapshot.diagnostics.trendInfluence?.longTrendDirection ?? "insufficient";
+  const shortTrendMomentum = snapshot.trendSignal?.shortTrendMomentum ?? snapshot.diagnostics.trendInfluence?.shortTrendMomentum ?? "insufficient";
+  const trendCombined = snapshot.trendSignal?.trendCombinedInterpretation ?? snapshot.diagnostics.trendInfluence?.trendCombinedInterpretation ?? null;
   const trendPhaseEffect = snapshot.diagnostics.trendInfluence?.trendInfluenceOnPhase ?? "none";
 
-  if (trendStructure === "bullish_aligned" && trendExpansion === "expanding") {
-    return "Trenden bekräftar uppgången och visar att marknaden fortfarande accepterar högre prisnivåer.";
+  if (trendCombined) {
+    return `${trendCombined} (lång trend: ${longTrendDirection}, kort momentum: ${shortTrendMomentum}).`;
   }
-  if (trendPhaseEffect.includes("diverging") || trendPhaseEffect.includes("fragile")) {
+  if (trendPhaseEffect.includes("diverging") || trendPhaseEffect.includes("fragile") || (longTrendDirection === "up" && shortTrendMomentum === "decelerating")) {
     return "Trenden håller emot fundamenta, vilket gör rörelsen mer sårbar.";
   }
-  if (trendExpansion === "narrowing" || trendExpansion === "negative_short_spread") {
-    return "Trendexpansionen försvagas, vilket ökar risken för lägre övertygelse i uppgången.";
+  if (longTrendDirection === "up" && shortTrendMomentum === "accelerating") {
+    return "Lång trend upp och kort momentum accelererar, vilket stödjer fortsatt expansionsfas.";
   }
-  return "Trenden fungerar som sekundär bekräftelse men ger inget starkt extra stöd i nuläget.";
+  return "Trendsyntes saknas eller är otillräcklig för tydlig lång/kort-separation.";
 }
 
 function resolvePrimaryAxes(snapshot: GoldSnapshot): {
