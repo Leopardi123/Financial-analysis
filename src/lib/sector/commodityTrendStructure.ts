@@ -7,6 +7,7 @@ export type TrendDataCompleteness = "full" | "partial" | "insufficient";
 export type DegradationLevel = "full" | "medium" | "minimal" | "insufficient";
 export type TrendStructureState = "bullish_aligned" | "bullish_but_narrowing" | "bearish_short_term" | "mixed" | "insufficient";
 export type TrendExpansionState = "expanding" | "narrowing" | "negative_short_spread" | "flat" | "insufficient";
+export type TrendMomentumState = "accelerating" | "decelerating" | "stable" | "insufficient";
 export type TrendSeriesFrequency = "daily" | "weekly" | "monthly" | "unknown";
 export type TrendWindows = {
   shortTrendWindow: number;
@@ -39,6 +40,7 @@ export type CommodityTrendStructure = {
   trendDataCompleteness: TrendDataCompleteness;
   trendStructureState: TrendStructureState;
   trendExpansionState: TrendExpansionState;
+  trendMomentumState: TrendMomentumState;
   structureInterpretation: string;
   expansionInterpretation: string;
   structureInfoLines: string[];
@@ -142,6 +144,16 @@ function trendDirection(values: Array<number | null>): "up" | "down" | "flat" | 
   return delta > 0 ? "up" : "down";
 }
 
+function latestDirection(values: Array<number | null>): "up" | "down" | "flat" | "insufficient" {
+  const numeric = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (numeric.length < 2) return "insufficient";
+  const previous = numeric[numeric.length - 2];
+  const latest = numeric[numeric.length - 1];
+  const delta = latest - previous;
+  if (Math.abs(delta) < 1e-6) return "flat";
+  return delta > 0 ? "up" : "down";
+}
+
 function buildStructureState(args: {
   hasSma50Coverage: boolean;
   hasSma200Coverage: boolean;
@@ -208,6 +220,9 @@ export function buildTrendExpansionInterpretation(model: CommodityTrendStructure
     const dir = trendDirection(shortSpread);
     const latestShort = [...shortSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
     if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
+    if (model.trendStructureState === "bullish_aligned" && model.trendMomentumState === "decelerating") {
+      return "Trenden är fortsatt positiv, men kortsiktig momentum avtar. Detta kan indikera att trendexpansionen mattas av.";
+    }
     if (dir === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
     if (dir === "up") return "Otillräcklig data för lång trend.";
     return "Kort spread är stabil men lång spread saknar underlag för full trendexpansion.";
@@ -221,6 +236,9 @@ export function buildTrendExpansionInterpretation(model: CommodityTrendStructure
   const latestLong = [...longSpread].reverse().find((value): value is number => typeof value === "number" && Number.isFinite(value));
 
   if (typeof latestShort === "number" && latestShort < 0) return "Kort trend bryter ned – risk för trendvändning.";
+  if (model.trendStructureState === "bullish_aligned" && model.trendMomentumState === "decelerating") {
+    return "Trenden är fortsatt positiv, men kortsiktig momentum avtar. Detta kan indikera att trendexpansionen mattas av.";
+  }
   if (typeof latestShort === "number" && latestShort > 0 && shortDirection === "down") return "Kort momentum avtar trots fortsatt positiv trendstruktur.";
   if (
     typeof latestShort === "number"
@@ -266,6 +284,7 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
     trendDataCompleteness: "insufficient",
     trendStructureState: "insufficient",
     trendExpansionState: "insufficient",
+    trendMomentumState: "insufficient",
     structureInterpretation: "Otillräcklig historik för att bedöma trendstruktur.",
     expansionInterpretation: "Trendexpansion kan inte visas med nuvarande historik.",
     structureInfoLines: [],
@@ -374,6 +393,16 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
 
   const trendStructureState = buildStructureState({ hasSma50Coverage, hasSma200Coverage, hasSma500Coverage, latest, shortSpreadDirection });
   const trendExpansionState = buildExpansionState(shortSpread, longSpread);
+  const shortSpreadLatestDirection = latestDirection(shortSpread);
+  const trendMomentumState: TrendMomentumState = shortSpreadLatestDirection === "up"
+    ? "accelerating"
+    : shortSpreadLatestDirection === "down" && trendStructureState === "bullish_aligned"
+      ? "decelerating"
+      : shortSpreadLatestDirection === "flat"
+        ? "stable"
+        : shortSpreadLatestDirection === "insufficient"
+          ? "insufficient"
+          : "stable";
 
   const missingHistoryReason = degradationLevel === "full"
     ? null
@@ -396,6 +425,7 @@ export function buildCommodityTrendStructure(pricePoints: CommodityPricePoint[],
     trendDataCompleteness,
     trendStructureState,
     trendExpansionState,
+    trendMomentumState,
     structureInterpretation: "",
     expansionInterpretation: "",
     structureInfoLines: [],
