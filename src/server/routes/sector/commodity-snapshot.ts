@@ -26,6 +26,7 @@ type GoldRawRow = {
   date: string;
   value: number | null;
 };
+const TREND_HISTORY_LOOKBACK_YEARS = 30;
 
 const SUPPORTED_COMMODITIES = new Set<CommodityId>(["gold", "copper"]);
 const COMMODITY_INDICATOR_KEYS: Record<CommodityId, CommodityIndicatorKey[]> = {
@@ -142,9 +143,9 @@ export default async function handler(req: any, res: any) {
        WHERE region = 'US'
          AND source_type = 'auto'
          AND series_key = ?
-         AND date >= date('now', '-10 years')
+         AND date >= date('now', ?)
        ORDER BY date ASC`,
-      [priceSeriesKey],
+      [priceSeriesKey, `-${TREND_HISTORY_LOOKBACK_YEARS} years`],
     )) as unknown as GoldRawRow[];
     const numericCommodityValues = commodityRawRows.map((row) => row.value).filter((value): value is number => typeof value === "number");
     const commodityMean10y = numericCommodityValues.length > 0
@@ -255,6 +256,12 @@ export default async function handler(req: any, res: any) {
         date: row.date,
         value: row.value === null ? null : Number(row.value),
       })),
+      trendPriceMeta: {
+        lookbackYearsRequested: TREND_HISTORY_LOOKBACK_YEARS,
+        observationCount: commodityRawRows.length,
+        fromDate: commodityRawRows[0]?.date ?? null,
+        toDate: commodityRawRows[commodityRawRows.length - 1]?.date ?? null,
+      },
       ...(debugEnabled
         ? {
           ...(function buildPmiDebug() {

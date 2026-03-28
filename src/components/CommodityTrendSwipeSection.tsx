@@ -10,6 +10,16 @@ type Props = {
 
 type SeriesSpec = { label: string; color: string; values: Array<number | null> };
 
+function validSeries(series: SeriesSpec[]): SeriesSpec[] {
+  return series
+    .map((item) => ({ ...item, values: item.values.map((value) => (typeof value === "number" && Number.isFinite(value) ? value : null)) }))
+    .filter((item) => item.values.some((value) => typeof value === "number"));
+}
+
+function FallbackState({ message }: { message: string }) {
+  return <div className="commodity-trend-fallback-state">{message}</div>;
+}
+
 function TrendLineChart({
   dates,
   series,
@@ -21,14 +31,23 @@ function TrendLineChart({
   height?: number;
   showZero?: boolean;
 }) {
+  const cleaned = validSeries(series);
+  if (cleaned.length === 0 || dates.length === 0) {
+    return <FallbackState message="Otillräcklig historik för att rita grafen." />;
+  }
+
   const width = 960;
   const top = 16;
   const bottom = 24;
   const left = 24;
   const right = 10;
-  const values = series.flatMap((item) => item.values).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  const minRaw = values.length ? Math.min(...values) : -1;
-  const maxRaw = values.length ? Math.max(...values) : 1;
+  const values = cleaned.flatMap((item) => item.values).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (values.length === 0) {
+    return <FallbackState message="Serierna innehåller inga giltiga datapunkter." />;
+  }
+
+  const minRaw = Math.min(...values);
+  const maxRaw = Math.max(...values);
   const min = showZero ? Math.min(minRaw, 0) : minRaw;
   const max = showZero ? Math.max(maxRaw, 0) : maxRaw;
   const range = Math.max(1e-6, max - min);
@@ -47,10 +66,8 @@ function TrendLineChart({
     <div className="commodity-trend-svg-wrap">
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Trendstruktur graf" style={{ width: "100%", height: `${height}px`, display: "block" }}>
         <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke="#94a3b8" strokeWidth="1" />
-        {showZero && typeof zeroY === "number" ? (
-          <line x1={left} y1={zeroY} x2={width - right} y2={zeroY} stroke="#94a3b8" strokeDasharray="4 4" strokeWidth="1" />
-        ) : null}
-        {series.map((item) => {
+        {showZero && typeof zeroY === "number" ? <line x1={left} y1={zeroY} x2={width - right} y2={zeroY} stroke="#64748b" strokeDasharray="4 4" strokeWidth="1" /> : null}
+        {cleaned.map((item) => {
           let hasStarted = false;
           const path = item.values
             .map((value, index) => {
@@ -73,9 +90,7 @@ function TrendLineChart({
         <span>{dates[dates.length - 1] ?? ""}</span>
       </div>
       <div className="commodity-trend-legend">
-        {series.map((item) => (
-          <span key={item.label} style={{ color: item.color }}>— {item.label}</span>
-        ))}
+        {cleaned.map((item) => <span key={item.label} style={{ color: item.color }}>— {item.label}</span>)}
       </div>
     </div>
   );
@@ -85,25 +100,35 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
   const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const trend = useMemo(() => buildCommodityTrendStructure(priceHistory, 5), [priceHistory]);
 
+  const dates = trend.points.map((point) => point.date);
   const trendSeries: SeriesSpec[] = [
-    { label: "SMA50 (index)", color: "#2563eb", values: trend.points.map((point) => point.indexSma50) },
-    { label: "SMA200 (index)", color: "#475569", values: trend.points.map((point) => point.indexSma200) },
-    { label: "SMA500 (index)", color: "#7c3aed", values: trend.points.map((point) => point.indexSma500) },
-  ];
+    trend.hasSma50Coverage ? { label: "SMA50 (index)", color: "#2563eb", values: trend.points.map((point) => point.indexSma50) } : null,
+    trend.hasSma200Coverage ? { label: "SMA200 (index)", color: "#475569", values: trend.points.map((point) => point.indexSma200) } : null,
+    trend.hasSma500Coverage ? { label: "SMA500 (index)", color: "#7c3aed", values: trend.points.map((point) => point.indexSma500) } : null,
+  ].filter((item): item is SeriesSpec => item !== null);
+
   const spreadSeries: SeriesSpec[] = [
-    { label: "SMA50 - SMA200", color: "#0f766e", values: trend.points.map((point) => point.spread50_200) },
-    { label: "SMA200 - SMA500", color: "#b45309", values: trend.points.map((point) => point.spread200_500) },
-  ];
+    trend.hasSma50Coverage && trend.hasSma200Coverage ? { label: "SMA50 - SMA200", color: "#0f766e", values: trend.points.map((point) => point.spread50_200) } : null,
+    trend.hasSma200Coverage && trend.hasSma500Coverage ? { label: "SMA200 - SMA500", color: "#b45309", values: trend.points.map((point) => point.spread200_500) } : null,
+  ].filter((item): item is SeriesSpec => item !== null);
+
+  const relationClass = trend.trendStructureState === "bullish_aligned" || trend.trendStructureState === "bullish_but_narrowing"
+    ? "is-bullish"
+    : trend.trendStructureState === "bearish_short_term"
+      ? "is-bearish"
+      : "";
+
+  const spreadHasRenderableData = spreadSeries.some((line) => line.values.some((value) => typeof value === "number" && Number.isFinite(value)));
 
   return (
     <section className="commodity-trend-carousel-card" aria-label={`Trendvisualisering för ${commodityLabel}`}>
       <div className="commodity-trend-carousel-head">
         <h3>Trendstruktur för {commodityLabel}</h3>
-        <p>Ny visualisering ovanpå råvarudata (ingen prisgraf).</p>
+        <p>Visualisering av trendkvalitet (ingen prisnivågraf).</p>
       </div>
 
       <div className="commodity-trend-carousel" role="region" aria-label="Swipebara trendgrafer">
-        <article className="commodity-trend-page">
+        <article className={`commodity-trend-page ${relationClass}`}>
           <div className="commodity-trend-title-row">
             <h4>Trendstruktur, 5 månader</h4>
             <InfoPopover
@@ -112,16 +137,15 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
               onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
               onClose={() => setOpenInfoId(null)}
               title="Trendstruktur, 5 månader"
-              content={[
-                "Grafen visar trendens struktur, inte prisnivån.",
-                "När SMA50 ligger över SMA200 och SMA500 är den korta trenden stark relativt den långa.",
-                "När linjerna dras ihop ökar sannolikheten för kompression, trendbrott eller ny acceleration.",
-              ]}
+              content={trend.structureInfoLines}
             />
           </div>
-          <p className="commodity-trend-subtitle">SMA50, SMA200, SMA500, indexerat från startpunkt</p>
-          {trend.points.length === 0 ? <div className="commodity-trend-empty">Saknar datapunkter för de senaste fem månaderna.</div> : <TrendLineChart dates={trend.points.map((point) => point.date)} series={trendSeries} />}
-          {!trend.hasSma500Coverage ? <div className="commodity-trend-warning">{trend.missingHistoryReason}</div> : null}
+          <p className="commodity-trend-subtitle">Tillgängliga SMA-serier indexerade från startpunkt (100)</p>
+          {trendSeries.length > 0 && dates.length > 0
+            ? <TrendLineChart dates={dates} series={trendSeries} />
+            : <FallbackState message="Otillräcklig historik för att visa trendstruktur." />}
+          <p className="commodity-trend-interpretation">{trend.structureInterpretation}</p>
+          {trend.missingHistoryReason ? <div className="commodity-trend-warning">{trend.missingHistoryReason}</div> : null}
         </article>
 
         <article className="commodity-trend-page">
@@ -133,15 +157,15 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
               onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
               onClose={() => setOpenInfoId(null)}
               title="Trendexpansion, 5 månader"
-              content={[
-                "Grafen visar om trenden expanderar eller tappar kraft.",
-                "När båda spreads ökar stärks trenden brett.",
-                "När SMA50-SMA200 faller medan SMA200-SMA500 håller sig positiv tyder det på kortsiktig svaghet i en intakt längre trend.",
-              ]}
+              content={trend.expansionInfoLines}
             />
           </div>
-          <p className="commodity-trend-subtitle">Spread mellan kort, mellan och lång trend</p>
-          {trend.points.length === 0 ? <div className="commodity-trend-empty">Saknar datapunkter för spreads i femmånadersfönstret.</div> : <TrendLineChart dates={trend.points.map((point) => point.date)} series={spreadSeries} showZero />}
+          <p className="commodity-trend-subtitle">Spread mellan kort, mellan och lång trend (0-linje markerad)</p>
+          {spreadHasRenderableData
+            ? <TrendLineChart dates={dates} series={spreadSeries} showZero />
+            : <FallbackState message="Trendexpansion kan inte visas fullt ut eftersom SMA-underlag saknas." />}
+          <p className="commodity-trend-interpretation">{trend.expansionInterpretation}</p>
+          {trend.degradationLevel === "medium" ? <div className="commodity-trend-warning">Lång spread kan inte beräknas ännu – visar endast kort vs mellantrend.</div> : null}
         </article>
       </div>
 
@@ -152,9 +176,13 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
 
       {debugMode ? (
         <div className="commodity-trend-debug">
-          <div><strong>SMA-order:</strong> {trend.debug.orderingLatest}</div>
-          <div><strong>Kort spread:</strong> {trend.debug.shortSpreadDirection}</div>
-          <div><strong>Lång spread:</strong> {trend.debug.longSpreadDirection}</div>
+          <div><strong>Raw obs:</strong> {trend.debug.rawObservationCount} ({trend.debug.rawFromDate ?? "n/a"} → {trend.debug.rawToDate ?? "n/a"})</div>
+          <div><strong>Window obs:</strong> {trend.debug.windowObservationCount}</div>
+          <div><strong>SMA computable:</strong> 50={String(trend.debug.sma50Computable)}, 200={String(trend.debug.sma200Computable)}, 500={String(trend.debug.sma500Computable)}</div>
+          <div><strong>Spreads valid:</strong> 50-200={trend.debug.spread50_200ValidPoints}, 200-500={trend.debug.spread200_500ValidPoints}</div>
+          <div><strong>Degradation:</strong> {trend.degradationLevel} | completeness={trend.trendDataCompleteness}</div>
+          <div><strong>States:</strong> structure={trend.trendStructureState}, expansion={trend.trendExpansionState}</div>
+          <div><strong>Fallback reason:</strong> {trend.debug.fallbackReason ?? "none"}</div>
         </div>
       ) : null}
     </section>

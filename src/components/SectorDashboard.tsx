@@ -59,6 +59,12 @@ type CommoditySnapshotPayload = {
     date: string;
     value: number | null;
   }>;
+  trendPriceMeta?: {
+    lookbackYearsRequested?: number;
+    observationCount?: number;
+    fromDate?: string | null;
+    toDate?: string | null;
+  };
   pmiDebug?: {
     chinaCli?: {
       valueLatest: number | null;
