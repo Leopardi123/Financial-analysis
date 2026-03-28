@@ -154,6 +154,12 @@ export type CommodityProfileInput = {
     hardAssetOverlay: string | null;
     macroConfidence: number | null;
   };
+  trendSignal?: {
+    structure: string;
+    expansion: string;
+    completeness: "full" | "partial" | "insufficient";
+    score: number | null;
+  } | null;
 };
 
 export type CommodityProfileOutput = {
@@ -177,6 +183,12 @@ export type CommodityProfileOutput = {
   regimeConfidence?: number;
   regimeDrivers?: CommodityRegimeDriver[];
   regimeAgreementWithPrice?: "confirming" | "diverging" | "neutral";
+  trendSignal?: {
+    structure: string;
+    expansion: string;
+    completeness: "full" | "partial" | "insufficient";
+    score: number | null;
+  } | null;
 };
 
 export type CommodityProfile = {

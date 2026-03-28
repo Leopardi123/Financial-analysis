@@ -1,6 +1,7 @@
 import { query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { evaluateCommodityProfile, type CommodityId, type CommodityIndicatorKey, type CommodityProfileInputIndicator } from "../../../lib/sector/commodityProfiles/index.js";
+import { buildCommodityTrendStructure } from "../../../lib/sector/commodityTrendStructure.js";
 
 type IndicatorRow = {
   indicator_id: string;
@@ -155,6 +156,10 @@ export default async function handler(req: any, res: any) {
       ? Math.sqrt(numericCommodityValues.reduce((sum, value) => sum + ((value - commodityMean10y) ** 2), 0) / numericCommodityValues.length)
       : null;
     const commodityLatest = numericCommodityValues.length > 0 ? numericCommodityValues[numericCommodityValues.length - 1] : null;
+    const trendModel = buildCommodityTrendStructure(
+      commodityRawRows.map((row) => ({ date: row.date, value: row.value === null ? null : Number(row.value) })),
+      5,
+    );
 
     const indicatorByKey = new Map<CommodityIndicatorKey, CommodityProfileInputIndicator>();
     const indicatorSelectionDebug: Array<{
@@ -234,6 +239,19 @@ export default async function handler(req: any, res: any) {
         toOverlayMap(globalRegime?.macro_regime_probability_json ?? null),
       ),
       manualInputs: {},
+      trendSignal: {
+        structure: trendModel.trendStructureState,
+        expansion: trendModel.trendExpansionState,
+        completeness: trendModel.trendDataCompleteness,
+        score: trendModel.degradationLevel === "insufficient" ? null : trendModel.points.length > 0 ? (() => {
+          const structure = trendModel.trendStructureState;
+          const expansion = trendModel.trendExpansionState;
+          const structureScore = structure === "bullish_aligned" ? 1 : structure === "bullish_but_narrowing" ? 0.5 : structure === "bearish_short_term" ? -0.5 : 0;
+          const expansionScore = expansion === "expanding" ? 1 : expansion === "flat" ? 0.5 : expansion === "narrowing" ? -0.5 : expansion === "negative_short_spread" ? -1 : 0;
+          if (structure === "insufficient" || expansion === "insufficient") return null;
+          return Math.max(-1, Math.min(1, structureScore * 0.6 + expansionScore * 0.4));
+        })() : null,
+      },
       macroContext: {
         coreRegimeLabel: globalRegime?.core_regime_label ?? usRegime?.core_regime_label ?? null,
         hardAssetOverlay: globalRegime?.hard_asset_overlay ?? usRegime?.hard_asset_overlay ?? null,
@@ -248,10 +266,15 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    const snapshotWithTrendAlias = {
+      ...snapshot,
+      trend_signal: snapshot.trendSignal ?? null,
+    };
+
     res.status(200).json({
       ok: true,
       commodity,
-      snapshot,
+      snapshot: snapshotWithTrendAlias,
       trendPriceHistory: commodityRawRows.map((row) => ({
         date: row.date,
         value: row.value === null ? null : Number(row.value),

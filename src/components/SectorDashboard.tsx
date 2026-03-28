@@ -117,6 +117,12 @@ type CommoditySnapshotPayload = {
     goldRegime?: "Monetary Stress" | "Disinflation / Real Yield Rising" | "Risk-Off (deflationary)" | "Neutral / Competing Assets";
     copperRegime?: "Demand expansion" | "Demand contraction" | "Supply tightness" | "Supply expansion";
     regimeConfidence?: number;
+    trendSignal?: {
+      structure: string;
+      expansion: string;
+      completeness: "full" | "partial" | "insufficient";
+      score: number | null;
+    };
     regimeAgreementWithPrice?: "confirming" | "diverging" | "neutral";
     regimeDrivers?: Array<{ id: string; label: string; signal: "supportive" | "headwind" | "neutral"; note: string }>;
     confidence: {
@@ -1129,6 +1135,7 @@ export default function SectorDashboard() {
                   ) : null}
                   <div><strong>Regime confidence:</strong> {commoditySnapshot.snapshot.regimeConfidence !== undefined ? `${(commoditySnapshot.snapshot.regimeConfidence * 100).toFixed(0)}%` : "n/a"}</div>
                   <div><strong>Regime vs price:</strong> {commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"}</div>
+                  <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, score={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
                   <div><strong>Phase reasoning:</strong> {commoditySnapshot.snapshot.diagnostics.phaseReasoning.join(" | ") || "none"}</div>
                   <div><strong>Analyst layer:</strong> {manualInputStatus === "available" ? "supplemental available" : "enhancement missing (system-driven only)"}</div>
                 </div>
@@ -1162,6 +1169,7 @@ export default function SectorDashboard() {
                 <div><strong>Manual input status:</strong> {manualInputStatus}</div>
                 <div><strong>Manual impact on snapshot:</strong> none (supplemental layer only in current phase)</div>
                 <div><strong>Regime:</strong> {(commoditySnapshot.snapshot.goldRegime ?? commoditySnapshot.snapshot.copperRegime ?? "n/a")} ({commoditySnapshot.snapshot.regimeAgreementWithPrice ?? "n/a"})</div>
+                <div><strong>Trend signal:</strong> structure={commoditySnapshot.snapshot.trendSignal?.structure ?? "n/a"}, expansion={commoditySnapshot.snapshot.trendSignal?.expansion ?? "n/a"}, completeness={commoditySnapshot.snapshot.trendSignal?.completeness ?? "n/a"}, trendScore={commoditySnapshot.snapshot.trendSignal?.score?.toFixed(2) ?? "n/a"}</div>
                 <details>
                   <summary>Diagnostics (debug)</summary>
                   {commoditySnapshot.debug ? (
