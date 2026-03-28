@@ -122,37 +122,29 @@ function buildLinePath(values: Array<number | null>, x: (index: number) => numbe
 }
 
 function buildAreaPath(values: Array<number | null>, baseline: number, x: (index: number) => number, y: (value: number | null) => number | null): string {
-  let path = "";
-  let segmentStart: number | null = null;
-  let segmentPoints = "";
+  const segments: string[] = [];
+  let points: Array<{ x: number; y: number }> = [];
+
+  const flush = () => {
+    if (points.length === 0) return;
+    const first = points[0];
+    const last = points[points.length - 1];
+    const body = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`).join(" ");
+    segments.push(`${body} L${last.x},${baseline} L${first.x},${baseline} Z`);
+    points = [];
+  };
 
   values.forEach((value, index) => {
     const yPos = y(value);
     if (yPos === null) {
-      if (segmentStart !== null && segmentPoints.length > 0) {
-        const endX = x(index - 1);
-        path += `${segmentPoints} L${endX},${baseline} L${x(segmentStart)},${baseline} Z `;
-      }
-      segmentStart = null;
-      segmentPoints = "";
+      flush();
       return;
     }
-
-    if (segmentStart === null) {
-      segmentStart = index;
-      segmentPoints = `M${x(index)},${baseline} L${x(index)},${yPos}`;
-      return;
-    }
-
-    segmentPoints += ` L${x(index)},${yPos}`;
+    points.push({ x: x(index), y: yPos });
   });
+  flush();
 
-  if (segmentStart !== null && segmentPoints.length > 0) {
-    const endX = x(values.length - 1);
-    path += `${segmentPoints} L${endX},${baseline} L${x(segmentStart)},${baseline} Z`;
-  }
-
-  return path.trim();
+  return segments.join(" ");
 }
 
 function TrendSpreadAreaChart({ dates, series, height = 210 }: { dates: string[]; series: SpreadAreaSpec[]; height?: number }) {
