@@ -25,6 +25,10 @@ type CopperSnapshot = {
     trendInfluence?: {
       trendStructureState: string;
       trendExpansionState: string;
+      trendMomentumState?: string;
+      longTrendDirection?: string;
+      shortTrendMomentum?: string;
+      trendCombinedInterpretation?: string;
       trendDataCompleteness: "full" | "partial" | "insufficient";
       trendScore: number | null;
       trendInfluenceOnPhase: string;
@@ -209,7 +213,7 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
     missingSignalSummary.replace("Saknade signaler:", "Modellen saknar"),
     conflictSummary.replace("Konflikt:", "Signalbild:"),
     trendState
-      ? `Trendstrukturen är ${trendState.trendStructureState.replace(/_/g, " ")}, vilket ${trendState.trendInfluenceOnPhase === "late_softened_by_trend" ? "mildrar men inte upphäver" : "stödjer"} huvudtolkningen.`
+      ? `${trendState.trendCombinedInterpretation ?? "Trendsyntes saknas."} (lång trend: ${trendState.longTrendDirection ?? "n/a"}, kort momentum: ${trendState.shortTrendMomentum ?? "n/a"}).`
       : "Trendstrukturen saknar tillräcklig täckning för stark slutsats.",
   ];
 
@@ -224,12 +228,17 @@ export function buildCopperInterpretation(snapshot: CopperSnapshot): CopperInter
         : "Kopparpriset är fortsatt pressat";
     const trendPart = trendState?.trendInfluenceOnPhase === "late_softened_by_trend"
       ? "Trendstrukturen mildrar den negativa bilden något, men inte tillräckligt för att bekräfta en sund expansionsfas."
+      : trendState?.trendInfluenceOnPhase === "late_cycle_softening"
+        ? "Trenden är stark men tappar momentum, vilket signalerar en mjukare senfas."
       : trendState?.trendInfluenceOnPhase === "late_reinforced_by_breakdown"
         ? "Trendförsvagningen förstärker risken i den sena fasen."
         : trendState?.trendInfluenceOnPhase === "unstable_late_cycle"
           ? "Den komprimerade trenden ökar risken för en skör uppgång."
           : "Trendbilden fungerar främst som kompletterande bekräftelse till pris- och efterfrågesignalen.";
-    return `${pricePart}, men ${demandPart}. ${trendPart}`;
+    const combinedTrendPart = trendState?.trendCombinedInterpretation
+      ? `Trendsyntes: ${trendState.trendCombinedInterpretation}`
+      : "";
+    return `${pricePart}, men ${demandPart}. ${combinedTrendPart} ${trendPart}`.trim();
   })();
 
   const interpretationCase = [

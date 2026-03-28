@@ -105,6 +105,10 @@ export type CommodityDiagnostics = {
   trendInfluence?: {
     trendStructureState: string;
     trendExpansionState: string;
+    trendMomentumState?: string;
+    longTrendDirection?: string;
+    shortTrendMomentum?: string;
+    trendCombinedInterpretation?: string;
     trendDataCompleteness: "full" | "partial" | "insufficient";
     trendScore: number | null;
     trendInfluenceOnPhase: string;
@@ -165,6 +169,10 @@ export type CommodityProfileInput = {
   trendSignal?: {
     structure: string;
     expansion: string;
+    momentumState?: string;
+    longTrendDirection?: string;
+    shortTrendMomentum?: string;
+    trendCombinedInterpretation?: string;
     completeness: "full" | "partial" | "insufficient";
     score: number | null;
   } | null;

@@ -19,7 +19,7 @@ type DemandState = "expansion_strong" | "expansion" | "contraction" | "weakening
 type PriceState = "high" | "mid" | "low";
 type DivergenceType = "bearish_divergence" | "bullish_recovery" | "none";
 type CopperPhase = CommodityPhase | "Recession";
-type TrendPhaseEffect = "none" | "late_softened_by_trend" | "late_reinforced_by_breakdown" | "early_promoted_to_mid" | "unstable_late_cycle";
+type TrendPhaseEffect = "none" | "late_softened_by_trend" | "late_reinforced_by_breakdown" | "early_promoted_to_mid" | "unstable_late_cycle" | "late_cycle_softening";
 
 const REQUIRED_INDICATORS: CommodityIndicatorKey[] = ["copper_usd", "china_cli"];
 const OPTIONAL_INDICATORS: CommodityIndicatorKey[] = ["pmi_us", "copper_lme_inventory", "copper_capex_proxy"];
@@ -292,6 +292,7 @@ function applyTrendToPhase(args: {
   demandState: DemandState | null;
   trendScore: number | null;
   trendExpansionState: string | null | undefined;
+  trendMomentumState: string | null | undefined;
   priceTrendScore: number | null;
 }): {
   phase: CopperPhase;
@@ -302,9 +303,15 @@ function applyTrendToPhase(args: {
   const trendStrong = args.trendScore !== null && args.trendScore >= 0.6;
   const trendBreaking = args.trendScore !== null && args.trendScore <= -0.6;
   const trendCompressing = args.trendExpansionState === "narrowing";
+  const trendDecelerating = args.trendMomentumState === "decelerating";
   const demandWeak = args.demandState === "weakening" || args.demandState === "contraction";
   const demandImproving = args.demandState === "expansion" || args.demandState === "expansion_strong";
   const priceRising = (args.priceTrendScore ?? 0) > 0.15;
+
+  if (args.phase === "Late Cycle" && trendDecelerating) {
+    notes.push("Late Cycle with decelerating momentum indicates late-cycle softening.");
+    return { phase: args.phase, effect: "late_cycle_softening", notes };
+  }
 
   if (args.priceState === "high" && demandWeak && trendStrong && args.phase === "Late Cycle") {
     notes.push("Late Cycle retained: price is high and demand is weak, but trend still supportive.");
@@ -517,6 +524,11 @@ export const copperCommodityProfile: CommodityProfile = {
     });
     const trendStructureState = input.trendSignal?.structure ?? null;
     const trendExpansionState = input.trendSignal?.expansion ?? null;
+    const trendMomentumState = input.trendSignal?.momentumState ?? null;
+    const longTrendDirection = input.trendSignal?.longTrendDirection ?? "insufficient";
+    const shortTrendMomentum = input.trendSignal?.shortTrendMomentum ?? "insufficient";
+    const trendCombinedInterpretation = input.trendSignal?.trendCombinedInterpretation
+      ?? "Trendbilden är otillräcklig för att separera långsiktig riktning och kortsiktig momentum.";
     const trendSignal = deriveTrendSignal({
       structure: trendStructureState,
       expansion: trendExpansionState,
@@ -536,8 +548,15 @@ export const copperCommodityProfile: CommodityProfile = {
       demandState: phaseResolution.demandState,
       trendScore,
       trendExpansionState,
+      trendMomentumState,
       priceTrendScore,
     });
+    const longShortReasoning = longTrendDirection === "up" && shortTrendMomentum === "decelerating"
+      ? "Lång trend upp, men kort momentum avtar, vilket är förenligt med en sen cykelfas."
+      : longTrendDirection === "up" && shortTrendMomentum === "accelerating"
+        ? "Lång trend upp och kort momentum accelererar, vilket stödjer fortsatt expansionsfas."
+        : null;
+    if (longShortReasoning) trendAdjustment.notes.push(longShortReasoning);
     const adjustedPhase = trendAdjustment.phase;
 
     const regimeClassification = classifyCopperRegime(input);
@@ -612,7 +631,8 @@ export const copperCommodityProfile: CommodityProfile = {
         `china_cli=${chinaCli?.valueLatest ?? "n/a"}, china_cli_change_3m=${cliChange3m ?? "n/a"} (China-led proxy, not PMI).`,
         `pmi_us_supplemental=${pmiUsSupplemental?.valueLatest ?? "n/a"} (supplemental/global context only, does not drive phase).`,
         `demand_state=${phaseResolution.demandState ?? "n/a"}, price_state=${phaseResolution.priceState}.`,
-        `trend_signal structure=${trendStructureState ?? "insufficient"}, expansion=${trendExpansionState ?? "insufficient"}, completeness=${trendCompleteness}, trend_score=${trendScore ?? "n/a"}, trendAgreementWithPrice=${trendAgreementWithPrice}.`,
+        `trend_signal structure=${trendStructureState ?? "insufficient"}, expansion=${trendExpansionState ?? "insufficient"}, momentum=${trendMomentumState ?? "insufficient"}, completeness=${trendCompleteness}, trend_score=${trendScore ?? "n/a"}, trendAgreementWithPrice=${trendAgreementWithPrice}.`,
+        `trend_synthesis long=${longTrendDirection}, short=${shortTrendMomentum}, combined="${trendCombinedInterpretation}"`,
         `trend_phase_effect=${trendAdjustment.effect}.`,
         `divergence=${String(phaseResolution.divergence)}, divergenceType=${phaseResolution.divergenceType}.`,
         `overrideApplied=${String(phaseResolution.overrideApplied)}, overrideReason=${phaseResolution.overrideReason ?? "none"}.`,
@@ -621,11 +641,16 @@ export const copperCommodityProfile: CommodityProfile = {
         ...(trendAgreementWithPrice === "diverging" ? ["trend diverges from price"] : []),
         ...(trendExpansionState === "narrowing" ? ["trend weakening"] : []),
         ...(trendExpansionState === "negative_short_spread" ? ["trend breakdown"] : []),
+        ...(trendMomentumState === "decelerating" ? ["trend momentum decelerating"] : []),
         ...trendAdjustment.notes,
       ],
       trendInfluence: {
         trendStructureState: trendStructureState ?? "insufficient",
         trendExpansionState: trendExpansionState ?? "insufficient",
+        trendMomentumState: trendMomentumState ?? "insufficient",
+        longTrendDirection,
+        shortTrendMomentum,
+        trendCombinedInterpretation,
         trendDataCompleteness: trendCompleteness,
         trendScore,
         trendInfluenceOnPhase: trendAdjustment.effect,
@@ -677,6 +702,10 @@ export const copperCommodityProfile: CommodityProfile = {
       trendSignal: {
         structure: trendStructureState ?? "insufficient",
         expansion: trendExpansionState ?? "insufficient",
+        momentumState: trendMomentumState ?? "insufficient",
+        longTrendDirection,
+        shortTrendMomentum,
+        trendCombinedInterpretation,
         completeness: trendCompleteness,
         score: trendScore,
       },

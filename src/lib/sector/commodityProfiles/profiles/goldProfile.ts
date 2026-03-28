@@ -649,6 +649,11 @@ export const goldCommodityProfile: CommodityProfile = {
     }
     const trendStructureState = input.trendSignal?.structure ?? "insufficient";
     const trendExpansionState = input.trendSignal?.expansion ?? "insufficient";
+    const trendMomentumState = input.trendSignal?.momentumState ?? "insufficient";
+    const longTrendDirection = input.trendSignal?.longTrendDirection ?? "insufficient";
+    const shortTrendMomentum = input.trendSignal?.shortTrendMomentum ?? "insufficient";
+    const trendCombinedInterpretation = input.trendSignal?.trendCombinedInterpretation
+      ?? "Trendbilden är otillräcklig för att separera långsiktig riktning och kortsiktig momentum.";
     const trendSignal = deriveTrendSignal({
       structure: trendStructureState,
       expansion: trendExpansionState,
@@ -677,6 +682,12 @@ export const goldCommodityProfile: CommodityProfile = {
     if (trendAgreementWithMacro === "fragile") phaseResolution.reasoning.push("Macro favored but trend is fragile.");
     if (trendAgreementWithMacro === "diverging") phaseResolution.reasoning.push("Macro favorable, market not fully confirming trend.");
     if (trendAgreementWithMacro === "ahead_of_regime") phaseResolution.reasoning.push("Trend ahead of regime; possible front-run.");
+    if (longTrendDirection === "up" && shortTrendMomentum === "decelerating") {
+      phaseResolution.reasoning.push("Lång trend upp, men kort momentum avtar, vilket är förenligt med en sen cykelfas.");
+    }
+    if (longTrendDirection === "up" && shortTrendMomentum === "accelerating") {
+      phaseResolution.reasoning.push("Lång trend upp och kort momentum accelererar, vilket stödjer fortsatt expansionsfas.");
+    }
 
     const indicatorDiagnostics: CommodityIndicatorDiagnostic[] = [...REQUIRED_INDICATORS, ...OPTIONAL_INDICATORS].map((key) => {
       const indicator = getIndicator(input, key);
@@ -761,7 +772,8 @@ export const goldCommodityProfile: CommodityProfile = {
         "Snapshot separates indicator-layer and overlay-layer contributions explicitly.",
         "Missing overlay data does not create synthetic proxies; it reduces agreement/coherence instead.",
         `Gold regime=${regimeClassification.regime}; agreementWithPrice=${regimeAgreementWithPrice}.`,
-        `trend_signal structure=${trendStructureState}, expansion=${trendExpansionState}, completeness=${trendCompleteness}, trend_score=${trendScore ?? "n/a"}, trendVsMacro=${trendAgreementWithMacro}.`,
+        `trend_signal structure=${trendStructureState}, expansion=${trendExpansionState}, momentum=${trendMomentumState}, completeness=${trendCompleteness}, trend_score=${trendScore ?? "n/a"}, trendVsMacro=${trendAgreementWithMacro}.`,
+        `trend_synthesis long=${longTrendDirection}, short=${shortTrendMomentum}, combined="${trendCombinedInterpretation}"`,
         `Primary overlay driver=${primaryOverlayDriver}; overlaysDiverging=${String(overlaysDiverging)}.`,
         `Alignment triangle (price↔regime↔overlays)=${triangleAlignment}.`,
         ...(trendAgreementWithMacro === "confirming" ? ["trend confirms macro"] : []),
@@ -774,6 +786,10 @@ export const goldCommodityProfile: CommodityProfile = {
       trendInfluence: {
         trendStructureState,
         trendExpansionState,
+        trendMomentumState,
+        longTrendDirection,
+        shortTrendMomentum,
+        trendCombinedInterpretation,
         trendDataCompleteness: trendCompleteness,
         trendScore,
         trendInfluenceOnPhase: `trendVsMacro=${trendAgreementWithMacro}`,
@@ -838,6 +854,10 @@ export const goldCommodityProfile: CommodityProfile = {
       trendSignal: {
         structure: trendStructureState,
         expansion: trendExpansionState,
+        momentumState: trendMomentumState,
+        longTrendDirection,
+        shortTrendMomentum,
+        trendCombinedInterpretation,
         completeness: trendCompleteness,
         score: trendScore,
       },

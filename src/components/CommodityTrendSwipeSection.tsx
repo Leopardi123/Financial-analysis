@@ -351,7 +351,10 @@ export default function CommodityTrendSwipeSection({ priceHistory, commodityLabe
           <div><strong>Trend windows:</strong> short={trend.debug.shortTrendWindow}, medium={trend.debug.mediumTrendWindow}, long={trend.debug.longTrendWindow}</div>
           <div><strong>Spreads valid:</strong> short-medium={trend.debug.spread50_200ValidPoints}, medium-long={trend.debug.spread200_500ValidPoints}</div>
           <div><strong>Degradation:</strong> {trend.degradationLevel} | completeness={trend.trendDataCompleteness}</div>
-          <div><strong>States:</strong> structure={trend.trendStructureState}, expansion={trend.trendExpansionState}</div>
+          <div><strong>States:</strong> structure={trend.trendStructureState}, expansion={trend.trendExpansionState}, momentum={trend.trendMomentumState}</div>
+          <div><strong>Long trend direction:</strong> {trend.longTrendDirection}</div>
+          <div><strong>Short trend momentum:</strong> {trend.shortTrendMomentum}</div>
+          <div><strong>Trend synthesis:</strong> {trend.trendCombinedInterpretation}</div>
           <div><strong>Fallback reason:</strong> {trend.debug.fallbackReason ?? "none"}</div>
         </div>
       ) : null}
