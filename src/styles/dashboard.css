@@ -291,6 +291,120 @@
   font-size: 12px;
 }
 
+.directional-spine {
+  margin: 8px 0 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  background: #ffffff;
+}
+
+.directional-spine-axis-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.directional-spine-axis-wrap {
+  position: relative;
+  height: 58px;
+}
+
+.directional-spine-axis {
+  position: absolute;
+  top: 24px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.directional-spine-marker {
+  position: absolute;
+  top: 18px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid #0f172a;
+  background: #fff;
+  transform: translate(-50%, 0);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.26);
+}
+
+.directional-spine-marker span {
+  position: absolute;
+  top: -15px;
+  font-size: 9px;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.7px;
+  color: #0f172a;
+}
+
+.directional-spine-marker.short-term span {
+  top: 20px;
+}
+
+.directional-spine-marker.is-divergent {
+  box-shadow:
+    0 0 0 2px rgba(250, 204, 21, 0.22),
+    0 0 10px rgba(250, 204, 21, 0.7);
+}
+
+.directional-spine-driver-bars {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.directional-driver-row {
+  display: grid;
+  gap: 4px;
+}
+
+.directional-driver-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #334155;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 0.7px;
+}
+
+.directional-driver-meta em {
+  color: #9a3412;
+  font-style: normal;
+}
+
+.directional-driver-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.directional-driver-track.is-missing {
+  background: repeating-linear-gradient(
+    135deg,
+    #fee2e2,
+    #fee2e2 6px,
+    #fecaca 6px,
+    #fecaca 12px
+  );
+}
+
+.directional-driver-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 250ms ease;
+}
+
 .metric-list ul {
   margin: 0;
   padding-left: 18px;

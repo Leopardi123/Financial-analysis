@@ -11,6 +11,7 @@ import {
 import { getSectorDashboardUniverse, getSubsectorMacroRouting } from "../lib/macro/macroSectorUniverse";
 import { buildSubsectorCoverageAuditReport } from "../lib/macro/subsectorCoverageAudit";
 import { buildCopperInterpretation } from "../lib/sector/commodityProfiles/copperInterpretation";
+import DirectionalSpine from "./DirectionalSpine";
 
 type ManualInput = {
   input_type: string;
@@ -546,6 +547,42 @@ export default function SectorDashboard() {
     return buildCopperInterpretation(commoditySnapshot.snapshot);
   }, [commoditySnapshot?.snapshot, selectedCommodity]);
 
+  const directionalSpineInput = useMemo(() => {
+    if (!commoditySnapshot?.snapshot) return null;
+    const momentumDriver = commoditySnapshot.snapshot.drivers.find((driver) =>
+      /momentum|price/i.test(driver.id) || /momentum|price/i.test(driver.label),
+    );
+    const supplyDriver = commoditySnapshot.snapshot.drivers.find((driver) =>
+      /supply|inventory|stock/i.test(driver.id) || /supply|inventory|stock/i.test(driver.label),
+    );
+    const pricePercentileFromPhase = commoditySnapshot.snapshot.phaseScore === null
+      ? 0.5
+      : Math.max(0, Math.min(1, (commoditySnapshot.snapshot.phaseScore + 1) / 2));
+    const demandState = commoditySnapshot.snapshot.phase.toLowerCase().includes("expansion")
+      ? "expansion"
+      : commoditySnapshot.snapshot.phase.toLowerCase().includes("contraction")
+        ? "contraction"
+        : "neutral";
+    const divergenceType = commoditySnapshot.snapshot.regimeAgreementWithPrice === "diverging"
+      ? "diverging"
+      : commoditySnapshot.snapshot.regimeAgreementWithPrice === "confirming"
+        ? "confirming"
+        : "none";
+    return {
+      price_percentile: pricePercentileFromPhase,
+      momentum_12m: momentumDriver
+        ? (momentumDriver.signal === "bullish" ? 0.8 : momentumDriver.signal === "bearish" ? -0.8 : 0)
+        : null,
+      china_cli: commoditySnapshot.pmiDebug?.chinaCli?.change3m ?? commoditySnapshot.pmiDebug?.chinaCli?.valueLatest ?? null,
+      demand_state: demandState as "expansion" | "contraction" | "neutral",
+      divergenceType: divergenceType as "diverging" | "confirming" | "none",
+      confidence: commoditySnapshot.snapshot.confidence.score,
+      supplySignal: supplyDriver
+        ? (supplyDriver.signal === "bullish" ? 0.7 : supplyDriver.signal === "bearish" ? -0.7 : 0)
+        : null,
+    };
+  }, [commoditySnapshot]);
+
   useEffect(() => {
     if (!filteredSectorOptions.some((item) => item.id === sector)) {
       setSector(filteredSectorOptions[0]?.id ?? "");
@@ -981,6 +1018,17 @@ export default function SectorDashboard() {
                   Automatisk commodity-bedömning är primär source of truth. Manuella inputs är ett
                   kompletterande analystlager och blockerar inte grundfasen.
                 </p>
+                {directionalSpineInput ? (
+                  <DirectionalSpine
+                    price_percentile={directionalSpineInput.price_percentile}
+                    momentum_12m={directionalSpineInput.momentum_12m}
+                    china_cli={directionalSpineInput.china_cli}
+                    demand_state={directionalSpineInput.demand_state}
+                    divergenceType={directionalSpineInput.divergenceType}
+                    confidence={directionalSpineInput.confidence}
+                    supplySignal={directionalSpineInput.supplySignal}
+                  />
+                ) : null}
                 <div className="metric-list">
                   <div>
                     <strong>Phase:</strong> {commoditySnapshot.snapshot.phase}
