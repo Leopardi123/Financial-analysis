@@ -107,6 +107,28 @@ type PriceIngestResult = {
   writtenDailyRows?: number;
   snapshotWrites?: number;
   error?: string;
+  debug?: ScreeningDebugPayload;
+};
+
+type ScreeningDebugStep = {
+  key: string;
+  label: string;
+  status: "pending" | "running" | "success" | "skipped" | "failed";
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  details?: Record<string, unknown>;
+  error?: { message?: string } | null;
+};
+
+type ScreeningDebugPayload = {
+  steps?: ScreeningDebugStep[];
+  lastCompletedStep?: string | null;
+  failedStep?: string | null;
+  timeoutStage?: string | null;
+  requestStartedAt?: string;
+  requestEndedAt?: string;
+  durationMs?: number;
 };
 
 function sleep(ms: number) {
@@ -127,6 +149,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [screeningTotal, setScreeningTotal] = useState<number | null>(null);
   const [screeningStatus, setScreeningStatus] = useState<AutoRefreshStatus>("idle");
   const [screeningMessage, setScreeningMessage] = useState("Not started.");
+  const [screeningDebugOpen, setScreeningDebugOpen] = useState(false);
+  const [screeningDebug, setScreeningDebug] = useState<ScreeningDebugPayload | null>(null);
   const [materializationCursor, setMaterializationCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDisplayCursor, setMaterializationDisplayCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDone, setMaterializationDone] = useState(true);
@@ -181,6 +205,14 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       },
       ...prev,
     ].slice(0, 20));
+  }
+
+  function getStepBadge(status: ScreeningDebugStep["status"]) {
+    if (status === "success") return "✅";
+    if (status === "failed") return "❌";
+    if (status === "running") return "⏳";
+    if (status === "skipped") return "⏭";
+    return "•";
   }
 
   function withAdminQuery(url: string): string {
@@ -258,11 +290,17 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     if (payload?.__error) {
       setPriceIngestResult({ ok: false, error: payload.__error });
       setScreeningStatus("error");
-      setScreeningMessage(payload.__error);
+      const timeoutMessage = payload.__error.includes("timed out")
+        ? `Timed out during request. Last completed step: ${screeningDebug?.lastCompletedStep ?? "none"}. Active stage likely: ${screeningDebug?.failedStep ?? "request_in_flight"}.`
+        : payload.__error;
+      setScreeningMessage(timeoutMessage);
+      setScreeningDebugOpen(true);
       return;
     }
     const cursor = payload?.cursor;
-    setPriceIngestResult(payload as unknown as PriceIngestResult);
+    const nextResult = payload as unknown as PriceIngestResult;
+    setPriceIngestResult(nextResult);
+    setScreeningDebug(nextResult.debug ?? null);
     if (cursor) {
       setScreeningOffset(cursor.nextOffset ?? 0);
       setScreeningRemaining(cursor.remaining ?? null);
@@ -273,9 +311,11 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
           ? `Completed ${cursor.totalToProcess}/${cursor.totalToProcess}.`
           : `Processed batch ${cursor.processedInRun}. Next offset ${cursor.nextOffset}. Remaining ${cursor.remaining ?? "?"}.`
       );
+      setScreeningDebugOpen(!cursor.done);
     } else {
       setScreeningStatus("error");
       setScreeningMessage("Missing cursor in response.");
+      setScreeningDebugOpen(true);
     }
   }
 
@@ -294,14 +334,21 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       if (payload?.__error) {
         setPriceIngestResult({ ok: false, error: payload.__error });
         setScreeningStatus("error");
-        setScreeningMessage(payload.__error);
+        const timeoutMessage = payload.__error.includes("timed out")
+          ? `Timed out before completion. Last completed step: ${screeningDebug?.lastCompletedStep ?? "none"}.`
+          : payload.__error;
+        setScreeningMessage(timeoutMessage);
+        setScreeningDebugOpen(true);
         break;
       }
-      setPriceIngestResult(payload as unknown as PriceIngestResult);
+      const nextResult = payload as unknown as PriceIngestResult;
+      setPriceIngestResult(nextResult);
+      setScreeningDebug(nextResult.debug ?? null);
       const cursor = payload?.cursor;
       if (!cursor) {
         setScreeningStatus("error");
         setScreeningMessage("Missing cursor in response.");
+        setScreeningDebugOpen(true);
         break;
       }
       setScreeningOffset(cursor.nextOffset ?? 0);
@@ -310,6 +357,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       if (cursor.done || cursor.nextOffset === null) {
         setScreeningStatus("done");
         setScreeningMessage(`Completed ${cursor.totalToProcess}/${cursor.totalToProcess}.`);
+        setScreeningDebugOpen(false);
         break;
       }
       nextOffset = cursor.nextOffset;
@@ -330,6 +378,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setScreeningStatus("idle");
     setScreeningMessage("Reset. Ready to run from offset 0.");
     setPriceIngestResult(null);
+    setScreeningDebug(null);
+    setScreeningDebugOpen(false);
   }
 
 
@@ -840,6 +890,37 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             {priceIngestResult.error ? <><br /><strong>Error:</strong> {priceIngestResult.error}</> : null}
           </div>
         )}
+        <details open={screeningDebugOpen} onToggle={(event) => setScreeningDebugOpen((event.target as HTMLDetailsElement).open)} style={{ marginTop: 8 }}>
+          <summary><strong>Debug: Screening price ingest</strong></summary>
+          <p className="bread">Technical debug for screening price data. Auto-opens on error.</p>
+          {screeningDebug?.steps?.length ? (
+            <div>
+              <p className="bread">
+                Last completed: {screeningDebug.lastCompletedStep ?? "none"} · Failed step: {screeningDebug.failedStep ?? "none"} · Duration: {screeningDebug.durationMs ?? 0} ms
+              </p>
+              {screeningDebug.steps.map((step) => (
+                <details key={step.key} style={{ marginBottom: 6 }}>
+                  <summary>
+                    {getStepBadge(step.status)} {step.label} — <strong>{step.status}</strong>
+                  </summary>
+                  <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", fontSize: 12 }}>
+                    {JSON.stringify({
+                      key: step.key,
+                      status: step.status,
+                      startedAt: step.startedAt,
+                      endedAt: step.endedAt,
+                      durationMs: step.durationMs,
+                      details: step.details ?? {},
+                      error: step.error ?? null,
+                    }, null, 2)}
+                  </pre>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <p className="bread">No debug steps yet. Run a screening batch to populate debug details.</p>
+          )}
+        </details>
       </details>
 
       <details open style={{ marginBottom: 12 }}>
