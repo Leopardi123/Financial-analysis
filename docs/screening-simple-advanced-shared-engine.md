@@ -44,6 +44,16 @@ Det är samma regelmotor och samma resultatmodell som i Simple.
 Prisfält hämtas primärt från `price_screen_snapshot` via `/api/screening/price-snapshot`.
 Fundamental/risk/manual hämtas från befintliga company-data och analyst overrides.
 
+## Universe-derivering (default-beteende)
+- Default-universe är `All available data`.
+- Bas-universe hämtas från alla tickers i `company/list`.
+- Aktiv screen läser vilka `mustHave`-fält som krävs.
+- Efter körning klassas varje bolag som:
+  - `passed`
+  - `failed`
+  - `not_evaluated` (saknar obligatorisk data för minst ett required field)
+- UI visar både bas-universe och hur många som faktiskt kunde utvärderas.
+
 ## Lägga till nya screeningfält
 1. Lägg till fält i `SCREENING_FIELDS`.
 2. Lägg till resolver i `resolveFieldValue`.

@@ -165,15 +165,25 @@ export function evaluateScreen(args: {
 
   const includeReasons = mustEvaluations.filter((item) => item.passed).map((item) => item.reason);
   const excludeReasons = mustEvaluations.filter((item) => !item.passed).map((item) => item.reason);
+  const missingRequiredFields = mustEvaluations
+    .filter((item) => item.value === null)
+    .map((item) => item.rule.field);
 
-  const matched = mustEvaluations.every((item) => item.passed);
+  const matched = missingRequiredFields.length === 0 && mustEvaluations.every((item) => item.passed);
   const score = mustEvaluations.reduce((acc, item) => acc + (item.passed ? (item.rule.weight ?? 1) : 0), 0);
+  const evaluationStatus: ScreeningResult["evaluationStatus"] = missingRequiredFields.length > 0
+    ? "not_evaluated"
+    : matched
+      ? "passed"
+      : "failed";
 
   const metrics = mustEvaluations.map((item) => toMetric(item.rule.field, item.value));
 
   return {
     matched,
     score,
+    evaluationStatus,
+    missingRequiredFields,
     includeReasons,
     excludeReasons,
     metrics,

@@ -38,6 +38,7 @@ const snapshot: CompanySnapshot = {
   const result = evaluateScreen({ snapshot, screen });
   assert(result.matched, "expected all mustHave rules to pass");
   assert(result.score === 3, "expected score to equal number of passed rules");
+  assert(result.evaluationStatus === "passed", "expected passed status");
   assert(result.excludeReasons.length === 0, "expected no excludes on fully passing snapshot");
 
   const failed = evaluateScreen({
@@ -45,6 +46,7 @@ const snapshot: CompanySnapshot = {
     screen,
   });
   assert(!failed.matched, "expected fail when trend_state mismatches");
+  assert(failed.evaluationStatus === "failed", "expected failed status");
   assert(failed.excludeReasons.length > 0, "expected at least one exclude reason");
 
   console.log("screening engine tests passed");

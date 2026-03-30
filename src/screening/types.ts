@@ -84,6 +84,8 @@ export type ScreeningResult = {
   presetId: string;
   matched: boolean;
   score: number;
+  evaluationStatus: "passed" | "failed" | "not_evaluated";
+  missingRequiredFields: string[];
   includeReasons: string[];
   excludeReasons: string[];
   metrics: MetricResult[];

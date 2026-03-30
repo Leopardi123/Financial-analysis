@@ -77,16 +77,16 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
     fetchJson(`/api/screening/price-snapshot?symbol=${encodeURIComponent(ticker)}`).catch(() => null),
   ]);
 
-  if (!companyPayload || !Array.isArray(companyPayload.years)) {
+  if (!companyPayload && !pricePayload?.snapshot) {
     return null;
   }
 
   const snapshot: CompanySnapshot = {
     ticker,
-    years: companyPayload.years,
-    income: companyPayload.income ?? {},
-    balance: companyPayload.balance ?? {},
-    cashflow: companyPayload.cashflow ?? {},
+    years: Array.isArray(companyPayload?.years) ? companyPayload.years : [],
+    income: companyPayload?.income ?? {},
+    balance: companyPayload?.balance ?? {},
+    cashflow: companyPayload?.cashflow ?? {},
     profile: profilePayload?.profile ?? null,
     manual: manualData[ticker] ?? {},
     price: pricePayload?.snapshot ?? null,
@@ -96,7 +96,7 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
 
 export default function ScreeningDashboard() {
   const [mode, setMode] = useState<ScreeningMode>("simple");
-  const [universe, setUniverse] = useState<UniverseType>("watchlist");
+  const [universe, setUniverse] = useState<UniverseType>("all");
   const [presetId, setPresetId] = useState(SCREENING_PRESETS[0].id);
   const [sectorFilter, setSectorFilter] = useState("");
   const [manualTickers, setManualTickers] = useState("AAPL, MSFT");
@@ -107,19 +107,34 @@ export default function ScreeningDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ScreeningResult[]>([]);
+  const [showPassedOnly, setShowPassedOnly] = useState(false);
+  const [universeInfo, setUniverseInfo] = useState<{
+    selectedUniverseCount: number;
+    screenedCount: number;
+    passedCount: number;
+    failedCount: number;
+    missingCount: number;
+    requiredFields: string[];
+    requiredSources: string[];
+    manualUsed: boolean;
+    manualFieldsUsed: string[];
+    manualTickersApplied: number;
+    notes: string[];
+  } | null>(null);
   const [sortBy, setSortBy] = useState<"score" | "ticker">("score");
 
   const preset = useMemo(() => getPresetById(presetId), [presetId]);
 
   const sortedResults = useMemo(() => {
-    const next = [...results];
+    const filtered = showPassedOnly ? results.filter((item) => item.evaluationStatus === "passed") : results;
+    const next = [...filtered];
     if (sortBy === "score") {
       next.sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
     } else {
       next.sort((a, b) => a.ticker.localeCompare(b.ticker));
     }
     return next;
-  }, [results, sortBy]);
+  }, [results, sortBy, showPassedOnly]);
 
   const activeScreen = useMemo(() => {
     if (mode === "advanced") {
@@ -146,7 +161,7 @@ export default function ScreeningDashboard() {
     if (universe === "sector") {
       if (!sectorFilter.trim()) return [];
       const filtered: string[] = [];
-      for (const ticker of list.slice(0, 40)) {
+      for (const ticker of list) {
         const profilePayload = await fetchJson(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`).catch(() => null);
         const sector = String(profilePayload?.profile?.sector ?? "").toLowerCase();
         if (sector.includes(sectorFilter.trim().toLowerCase())) {
@@ -155,7 +170,7 @@ export default function ScreeningDashboard() {
       }
       return filtered;
     }
-    return list.slice(0, 40);
+    return list;
   }
 
   function resolveParams(screen: ScreenDefinition): Record<string, number> {
@@ -175,6 +190,15 @@ export default function ScreeningDashboard() {
       const tickers = await resolveUniverse();
       const manualData = parseManualJson(manualJson);
       const params = resolveParams(activeScreen);
+      const requiredFields = [...new Set(activeScreen.rules.mustHave.map((rule) => rule.field))];
+      const requiredSources = requiredFields
+        .map((field) => SCREENING_FIELD_MAP.get(field)?.source ?? "unknown")
+        .filter((value, idx, arr) => arr.indexOf(value) === idx);
+      const manualFieldsUsed = requiredFields.filter((field) => SCREENING_FIELD_MAP.get(field)?.group === "manual");
+      const manualUsed = manualFieldsUsed.length > 0;
+      const manualTickersApplied = manualUsed
+        ? Object.values(manualData).filter((record) => manualFieldsUsed.some((field) => typeof record[field] === "number")).length
+        : 0;
 
       const snapshots = await Promise.all(tickers.map((ticker) => loadSnapshot(ticker, manualData)));
       const evaluated = snapshots
@@ -186,6 +210,8 @@ export default function ScreeningDashboard() {
             presetId: activeScreen.id,
             matched: score.matched,
             score: score.score,
+            evaluationStatus: score.evaluationStatus,
+            missingRequiredFields: score.missingRequiredFields,
             includeReasons: score.includeReasons,
             excludeReasons: score.excludeReasons,
             metrics: score.metrics,
@@ -193,9 +219,33 @@ export default function ScreeningDashboard() {
           } as ScreeningResult;
         });
       setResults(evaluated);
+      const screenedCount = evaluated.filter((item) => item.evaluationStatus !== "not_evaluated").length;
+      const passedCount = evaluated.filter((item) => item.evaluationStatus === "passed").length;
+      const failedCount = evaluated.filter((item) => item.evaluationStatus === "failed").length;
+      const missingCount = evaluated.filter((item) => item.evaluationStatus === "not_evaluated").length;
+      const notes: string[] = [];
+      if (universe === "all") notes.push(`All available data: ${tickers.length} bolag i bas-universe.`);
+      if (universe === "watchlist") notes.push(`Watchlist innehåller ${tickers.length} bolag.`);
+      if (missingCount > 0) notes.push(`Aktiv regel kräver ${requiredFields.join(", ")}; ${missingCount} bolag saknade obligatorisk data.`);
+      if (!manualUsed) notes.push("Denna screening använder inte analyst overrides.");
+      if (manualUsed) notes.push(`Uses manual fields: ${manualFieldsUsed.join(", ")}.`);
+      setUniverseInfo({
+        selectedUniverseCount: tickers.length,
+        screenedCount,
+        passedCount,
+        failedCount,
+        missingCount,
+        requiredFields,
+        requiredSources,
+        manualUsed,
+        manualFieldsUsed,
+        manualTickersApplied,
+        notes,
+      });
     } catch (err) {
       setError((err as Error).message);
       setResults([]);
+      setUniverseInfo(null);
     } finally {
       setLoading(false);
     }
@@ -249,6 +299,15 @@ export default function ScreeningDashboard() {
           </select>
         </div>
       </div>
+
+      {universeInfo && (
+        <div className="breadcontainersinglecolumn">
+          <p className="bread"><strong>Universe:</strong> {universe === "all" ? "All available data" : universe}, {universeInfo.selectedUniverseCount} bolag.</p>
+          <p className="bread"><strong>Aktiv screen använder data från:</strong> {universeInfo.requiredSources.join(" + ") || "okänd källa"}.</p>
+          <p className="bread"><strong>Efter datatäckningsfilter:</strong> {universeInfo.screenedCount} bolag kunde utvärderas.</p>
+          {universeInfo.notes.map((note) => <p className="bread" key={note}>{note}</p>)}
+        </div>
+      )}
 
       {universe === "sector" && (
         <div className="stock-selector-row form">
@@ -397,7 +456,8 @@ export default function ScreeningDashboard() {
       {showManualOverrides && (
         <div className="stock-selector-row form">
           <div style={{ width: "100%" }}>
-            <label>Manual JSON input (per ticker metrics)</label>
+            <label>Analyst overrides (optional)</label>
+            <p className="bread">Valfritt. Används endast för manuella flaggor per ticker (t.ex. founderFlag, insiderScore). Påverkar inte universe eller ersätter inte pris/fundamentaldata.</p>
             <textarea
               className="manual-json"
               value={manualJson}
@@ -419,6 +479,18 @@ export default function ScreeningDashboard() {
       </div>
 
       {error && <p className="status error">{error}</p>}
+
+      {universeInfo && (
+        <div className="breadcontainersinglecolumn">
+          <p className="bread"><strong>Screened:</strong> {universeInfo.screenedCount} bolag • <strong>Passed:</strong> {universeInfo.passedCount} • <strong>Failed:</strong> {universeInfo.failedCount} • <strong>Not evaluated (missing data):</strong> {universeInfo.missingCount}</p>
+          <p className="bread">
+            {universeInfo.manualUsed
+              ? `Manual overrides applied to ${universeInfo.manualTickersApplied} tickers.`
+              : "Manual overrides not used by current rules."}
+          </p>
+          <label className="bread"><input type="checkbox" checked={showPassedOnly} onChange={(event) => setShowPassedOnly(event.target.checked)} /> Show passed only</label>
+        </div>
+      )}
 
       <div className="viewer-table">
         {sortedResults.length === 0 && !loading ? (
@@ -443,9 +515,9 @@ export default function ScreeningDashboard() {
                       <button type="button" onClick={() => openTicker(result.ticker)}>{result.ticker}</button>
                     </td>
                     <td>{result.score.toFixed(1)}</td>
-                    <td>{result.matched ? "Pass" : "Fail"}</td>
+                    <td>{result.evaluationStatus === "not_evaluated" ? "Not evaluated" : result.matched ? "Pass" : "Fail"}</td>
                     <td>{result.includeReasons.slice(0, 2).join(" ") || "-"}</td>
-                    <td>{result.excludeReasons.slice(0, 2).join(" ") || "-"}</td>
+                    <td>{result.evaluationStatus === "not_evaluated" ? `Missing: ${result.missingRequiredFields.join(", ")}` : result.excludeReasons.slice(0, 2).join(" ") || "-"}</td>
                     {visibleColumns.map((column) => {
                       const metric = result.metrics.find((item) => item.key === column);
                       return <td key={`${result.ticker}-${column}`}>{metric?.value === null || metric?.value === undefined ? "-" : String(metric.value)}</td>;
