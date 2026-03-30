@@ -133,6 +133,17 @@ type ScreeningDebugPayload = {
   durationMs?: number;
 };
 
+type ScreeningAttempt = {
+  attemptId: string;
+  startedAt: string;
+  endedAt?: string;
+  offset: number;
+  batchSize: number;
+  status: "running" | "success" | "failed" | "timeout";
+  error?: string;
+  debug: ScreeningDebugPayload;
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -153,6 +164,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [screeningMessage, setScreeningMessage] = useState("Not started.");
   const [screeningDebugOpen, setScreeningDebugOpen] = useState(false);
   const [screeningDebug, setScreeningDebug] = useState<ScreeningDebugPayload | null>(null);
+  const [screeningAttempts, setScreeningAttempts] = useState<ScreeningAttempt[]>([]);
+  const [latestSuccessAttemptId, setLatestSuccessAttemptId] = useState<string | null>(null);
   const [materializationCursor, setMaterializationCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDisplayCursor, setMaterializationDisplayCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDone, setMaterializationDone] = useState(true);
@@ -298,19 +311,34 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     }
   }
 
+  function startScreeningAttempt(offset: number, batchSize: number) {
+    const now = new Date().toISOString();
+    const attemptId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const initialDebug: ScreeningDebugPayload = {
+      lastCompletedStep: null,
+      lastStartedStep: "target_resolution_started",
+      currentStage: "target_resolution_started",
+      requestStartedAt: now,
+      steps: [
+        { key: "request_started", label: "Request started", status: "running", startedAt: now, details: { offset, batchSize } },
+        { key: "resolve_targets", label: "Resolve targets", status: "running", startedAt: now, details: { offset, batchSize } },
+      ],
+    };
+    const attempt: ScreeningAttempt = { attemptId, startedAt: now, offset, batchSize, status: "running", debug: initialDebug };
+    setScreeningAttempts((prev) => [attempt, ...prev].slice(0, 30));
+    setScreeningDebug(initialDebug);
+    return { attemptId, initialDebug };
+  }
+
+  function patchScreeningAttempt(attemptId: string, patch: Partial<ScreeningAttempt>) {
+    setScreeningAttempts((prev) => prev.map((item) => item.attemptId === attemptId ? { ...item, ...patch } : item));
+  }
+
   async function runScreeningPriceIngest(offset = screeningOffset) {
     const normalBatchSize = 10;
     setScreeningStatus("running");
     setScreeningMessage(`Running batch from offset ${offset}...`);
-    setScreeningDebug({
-      lastCompletedStep: null,
-      lastStartedStep: "target_resolution_started",
-      currentStage: "target_resolution_started",
-      steps: [
-        { key: "request_started", label: "Request started", status: "running", startedAt: new Date().toISOString(), details: { offset, batchSize: normalBatchSize } },
-        { key: "resolve_targets", label: "Resolve targets", status: "running", startedAt: new Date().toISOString(), details: { offset, batchSize: normalBatchSize } },
-      ],
-    });
+    const { attemptId, initialDebug } = startScreeningAttempt(offset, normalBatchSize);
     const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
       offset,
       batchSize: normalBatchSize,
@@ -318,17 +346,35 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     if (payload?.__error) {
       setPriceIngestResult({ ok: false, error: payload.__error });
       setScreeningStatus("error");
+      const endedAt = new Date().toISOString();
       const timeoutMessage = payload.__error.includes("timed out")
-        ? `Timed out before first symbol completed. Last completed step: ${screeningDebug?.lastCompletedStep ?? "none"}. Last started step: ${screeningDebug?.lastStartedStep ?? "target_resolution_started"}. Possible cause: target resolution/query setup too slow; external call may not have started.`
+        ? `Timed out before first symbol completed. Last completed step: ${initialDebug.lastCompletedStep ?? "none"}. Last started step: ${initialDebug.lastStartedStep ?? "target_resolution_started"}. Possible cause: target resolution/query setup too slow; external call may not have started.`
         : payload.__error;
       setScreeningMessage(timeoutMessage);
+      patchScreeningAttempt(attemptId, {
+        endedAt,
+        status: payload.__error.includes("timed out") ? "timeout" : "failed",
+        error: payload.__error,
+        debug: { ...initialDebug, requestEndedAt: endedAt },
+      });
+      setScreeningDebug({ ...initialDebug, requestEndedAt: endedAt });
       setScreeningDebugOpen(true);
       return;
     }
     const cursor = payload?.cursor;
     const nextResult = payload as unknown as PriceIngestResult;
     setPriceIngestResult(nextResult);
-    setScreeningDebug(nextResult.debug ?? null);
+    const resolvedDebug = nextResult.debug ?? initialDebug;
+    setScreeningDebug(resolvedDebug);
+    const endedAt = new Date().toISOString();
+    patchScreeningAttempt(attemptId, {
+      endedAt,
+      status: cursor?.done ? "success" : "running",
+      debug: resolvedDebug,
+    });
+    if (cursor?.done) {
+      setLatestSuccessAttemptId(attemptId);
+    }
     if (cursor) {
       setScreeningOffset(cursor.nextOffset ?? 0);
       setScreeningRemaining(cursor.remaining ?? null);
@@ -358,6 +404,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     let nextOffset = 0;
 
     while (screeningAutoRunningRef.current) {
+      const { attemptId, initialDebug } = startScreeningAttempt(nextOffset, 10);
       const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
         offset: nextOffset,
         batchSize: 10,
@@ -365,22 +412,45 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       if (payload?.__error) {
         setPriceIngestResult({ ok: false, error: payload.__error });
         setScreeningStatus("error");
+        const endedAt = new Date().toISOString();
         const timeoutMessage = payload.__error.includes("timed out")
-          ? `Timed out before completion. Last completed step: ${screeningDebug?.lastCompletedStep ?? "none"}. Last started: ${screeningDebug?.lastStartedStep ?? "unknown"}.`
+          ? `Timed out before completion. Last completed step: ${initialDebug.lastCompletedStep ?? "none"}. Last started: ${initialDebug.lastStartedStep ?? "unknown"}.`
           : payload.__error;
         setScreeningMessage(timeoutMessage);
+        patchScreeningAttempt(attemptId, {
+          endedAt,
+          status: payload.__error.includes("timed out") ? "timeout" : "failed",
+          error: payload.__error,
+          debug: { ...initialDebug, requestEndedAt: endedAt },
+        });
+        setScreeningDebug({ ...initialDebug, requestEndedAt: endedAt });
         setScreeningDebugOpen(true);
         break;
       }
       const nextResult = payload as unknown as PriceIngestResult;
       setPriceIngestResult(nextResult);
-      setScreeningDebug(nextResult.debug ?? null);
+      const resolvedDebug = nextResult.debug ?? initialDebug;
+      setScreeningDebug(resolvedDebug);
       const cursor = payload?.cursor;
       if (!cursor) {
         setScreeningStatus("error");
         setScreeningMessage("Missing cursor in response.");
+        patchScreeningAttempt(attemptId, {
+          endedAt: new Date().toISOString(),
+          status: "failed",
+          error: "Missing cursor in response.",
+          debug: resolvedDebug,
+        });
         setScreeningDebugOpen(true);
         break;
+      }
+      patchScreeningAttempt(attemptId, {
+        endedAt: new Date().toISOString(),
+        status: cursor.done ? "success" : "running",
+        debug: resolvedDebug,
+      });
+      if (cursor.done) {
+        setLatestSuccessAttemptId(attemptId);
       }
       setScreeningOffset(cursor.nextOffset ?? 0);
       setScreeningRemaining(cursor.remaining ?? null);
@@ -411,6 +481,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setPriceIngestResult(null);
     setScreeningDebug(null);
     setScreeningDebugOpen(false);
+    setScreeningAttempts([]);
+    setLatestSuccessAttemptId(null);
   }
 
 
@@ -438,6 +510,10 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     ? Math.min(100, Math.round((companiesProcessedTotal / companiesTotalToProcess) * 100))
     : 0;
   const tickerProgressPercent = tickerProgressPercentShown;
+  const latestAttempt = screeningAttempts[0] ?? null;
+  const latestSuccessAttempt = latestSuccessAttemptId
+    ? screeningAttempts.find((item) => item.attemptId === latestSuccessAttemptId) ?? null
+    : null;
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -924,12 +1000,16 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         <details open={screeningDebugOpen} onToggle={(event) => setScreeningDebugOpen((event.target as HTMLDetailsElement).open)} style={{ marginTop: 8 }}>
           <summary><strong>Debug: Screening price ingest</strong></summary>
           <p className="bread">Technical debug for screening price data. Auto-opens on error.</p>
-          {screeningDebug?.steps?.length ? (
+          <p className="bread">
+            Latest attempt: {latestAttempt ? `${latestAttempt.attemptId} (${latestAttempt.status})` : "none"}
+            {latestSuccessAttempt ? ` · Latest successful attempt: ${latestSuccessAttempt.attemptId} (offset ${latestSuccessAttempt.offset})` : " · Latest successful attempt: none"}
+          </p>
+          {(latestAttempt?.debug?.steps?.length ?? screeningDebug?.steps?.length ?? 0) > 0 ? (
             <div>
               <p className="bread">
-                Last completed: {screeningDebug.lastCompletedStep ?? "none"} · Last started: {screeningDebug.lastStartedStep ?? "none"} · Current stage: {screeningDebug.currentStage ?? "none"} · Failed step: {screeningDebug.failedStep ?? "none"} · Duration: {screeningDebug.durationMs ?? 0} ms
+                Last completed: {(latestAttempt?.debug?.lastCompletedStep ?? screeningDebug?.lastCompletedStep) ?? "none"} · Last started: {(latestAttempt?.debug?.lastStartedStep ?? screeningDebug?.lastStartedStep) ?? "none"} · Current stage: {(latestAttempt?.debug?.currentStage ?? screeningDebug?.currentStage) ?? "none"} · Failed step: {(latestAttempt?.debug?.failedStep ?? screeningDebug?.failedStep) ?? "none"} · Duration: {(latestAttempt?.debug?.durationMs ?? screeningDebug?.durationMs) ?? 0} ms
               </p>
-              {screeningDebug.steps.map((step) => (
+              {(latestAttempt?.debug?.steps ?? screeningDebug?.steps ?? []).map((step) => (
                 <details key={step.key} style={{ marginBottom: 6 }}>
                   <summary>
                     {getStepBadge(step.status)} {step.label} — <strong>{step.status}</strong>
