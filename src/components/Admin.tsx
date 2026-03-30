@@ -87,6 +87,17 @@ type AdminProps = {
 
 type AutoRefreshStatus = "idle" | "running" | "paused" | "done" | "error";
 
+type PriceIngestResult = {
+  ok?: boolean;
+  total?: number;
+  succeeded?: number;
+  failed?: number;
+  changedSymbols?: number;
+  writtenDailyRows?: number;
+  snapshotWrites?: number;
+  error?: string;
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -98,8 +109,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [tickers, setTickers] = useState(DEFAULT_TICKERS);
   const [refreshTicker, setRefreshTicker] = useState("AAPL");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
-  const [showLog, setShowLog] = useState(false);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
+  const [priceIngestResult, setPriceIngestResult] = useState<PriceIngestResult | null>(null);
   const [materializationCursor, setMaterializationCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDisplayCursor, setMaterializationDisplayCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDone, setMaterializationDone] = useState(true);
@@ -218,6 +229,15 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     } finally {
       setLoadingKey(null);
     }
+  }
+
+  async function runScreeningPriceIngest() {
+    const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {});
+    if (payload?.__error) {
+      setPriceIngestResult({ ok: false, error: payload.__error });
+      return;
+    }
+    setPriceIngestResult(payload as unknown as PriceIngestResult);
   }
 
 
@@ -578,338 +598,199 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
 
   return (
     <div className="admin">
-      <div className="admin-guidance">
-        <h3 className="subrub small">Admin — så fungerar flödet</h3>
-        <ul className="bread">
-          <li>1) Lägg till ticker: skriv in tickers och kör “Upsert Tickers”. Detta sparar listan.</li>
-          <li>2) Hämta data: kör “Refresh Ticker” för att ladda ned och materialisera data för en aktie.</li>
-          <li>3) Fortsätt materialisering: om refresh avbryts, kör “Continue materialization”.</li>
-          <li>4) “Fetch” i UI hämtar endast redan sparad data från DB — den laddar inte ner nya.</li>
-          <li>5) Att välja ticker i UI byter bara visning; du måste “Refresh Ticker” om data saknas.</li>
-        </ul>
-        <p className="bread">
-          CRON_SECRET krävs för admin‑åtgärder. Init DB skapar tabeller och index. Run Cron triggar
-          den schemalagda uppdateringen.
-        </p>
+      <div style={{ marginBottom: 16 }}>
+        <label htmlFor="cron-secret">CRON_SECRET</label>
+        <input
+          id="cron-secret"
+          type="password"
+          value={secret}
+          onChange={(event) => setSecret(event.target.value)}
+          placeholder="CRON_SECRET"
+        />
       </div>
-      <div className="admin-grid">
-        <div>
-          <label htmlFor="cron-secret">CRON_SECRET</label>
-          <input
-            id="cron-secret"
-            type="password"
-            value={secret}
-            onChange={(event) => setSecret(event.target.value)}
-            placeholder="CRON_SECRET"
-          />
-        </div>
 
-        <div className="admin-actions">
-          <div className="admin-row">
-            <button
-              type="button"
-              onClick={() => void postJson("Init DB", "/api/admin/init-db", {})}
-              disabled={!secretReady || loadingKey !== null}
-            >
-              {loadingKey === "Init DB" ? "Initializing..." : "Init DB"}
-            </button>
+      <details open style={{ marginBottom: 12 }}>
+        <summary><strong>Databas / Setup</strong></summary>
+        <p className="bread">Initierar tekniska tabeller och index som admin- och screeningfunktioner behöver.</p>
+        <button type="button" onClick={() => void postJson("Init DB", "/api/admin/init-db", {})} disabled={!secretReady || loadingKey !== null}>
+          {loadingKey === "Init DB" ? "Initializing..." : "Init DB"}
+        </button>
+        {initLog && (
+          <span className={initLog.status === "error" ? "status error" : "status success"} style={{ marginLeft: 8 }}>
+            {initLog.status.toUpperCase()}
+          </span>
+        )}
+      </details>
+
+      <details open style={{ marginBottom: 12 }}>
+        <summary><strong>Company universe / Companies ingest</strong></summary>
+        <p className="bread">Används för att ladda eller uppdatera stora bolagslistan och bolagsmetadata.</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() =>
+              void postJson("Refresh Companies", "/api/companies", { cursorOffset: 0, reset: true }).then((payload) => {
+                const cursor = payload?.cursor;
+                if (cursor) applyCursor(cursor);
+              })
+            }
+            disabled={!secretReady || loadingKey !== null || autoRefreshStatus === "running"}
+          >
+            {loadingKey === "Refresh Companies" ? "Refreshing list..." : "Refresh Companies"}
+          </button>
+          {!companiesRefreshDone && companiesCursorOffset !== null && (
             <button
               type="button"
               onClick={() =>
-                void postJson("Refresh Companies", "/api/companies", {
-                  cursorOffset: 0,
-                  reset: true,
-                }).then((payload) => {
+                void postJson("Continue Companies Refresh", "/api/companies", { cursorOffset: companiesCursorOffset }).then((payload) => {
                   const cursor = payload?.cursor;
-                  if (cursor) {
-                    applyCursor(cursor);
-                  }
+                  if (cursor) applyCursor(cursor);
                 })
               }
               disabled={!secretReady || loadingKey !== null || autoRefreshStatus === "running"}
             >
-              {loadingKey === "Refresh Companies" ? "Refreshing list..." : "Refresh Companies"}
+              {loadingKey === "Continue Companies Refresh" ? "Continuing list refresh..." : "Continue companies refresh"}
             </button>
-            {!companiesRefreshDone && companiesCursorOffset !== null && (
-              <button
-                type="button"
-                onClick={() =>
-                  void postJson("Continue Companies Refresh", "/api/companies", {
-                    cursorOffset: companiesCursorOffset,
-                  }).then((payload) => {
-                    const cursor = payload?.cursor;
-                    if (cursor) {
-                      applyCursor(cursor);
-                    }
-                  })
-                }
-                disabled={!secretReady || loadingKey !== null || autoRefreshStatus === "running"}
-              >
-                {loadingKey === "Continue Companies Refresh" ? "Continuing list refresh..." : "Continue companies refresh"}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => void runAutoRefresh(false)}
-              disabled={!secretReady || autoRefreshStatus === "running" || loadingKey !== null}
-            >
-              Start auto refresh
-            </button>
-            <button
-              type="button"
-              onClick={handlePauseAutoRefresh}
-              disabled={!secretReady || autoRefreshStatus !== "running"}
-            >
-              Pause
-            </button>
-            <button
-              type="button"
-              onClick={() => void runAutoRefresh(false)}
-              disabled={!secretReady || (autoRefreshStatus !== "paused" && autoRefreshStatus !== "error") || loadingKey !== null}
-            >
-              Resume
-            </button>
-            <button
-              type="button"
-              onClick={() => void runAutoRefresh(true)}
-              disabled={!secretReady || autoRefreshStatus === "running" || loadingKey !== null}
-            >
-              Reset
-            </button>
-            {initLog && (
-              <span className={initLog.status === "error" ? "status error" : "status success"}>
-                {initLog.status.toUpperCase()}
-              </span>
-            )}
-          </div>
+          )}
+          <button type="button" onClick={() => void runAutoRefresh(false)} disabled={!secretReady || autoRefreshStatus === "running" || loadingKey !== null}>Start auto refresh companies</button>
+          <button type="button" onClick={handlePauseAutoRefresh} disabled={!secretReady || autoRefreshStatus !== "running"}>Pause</button>
+          <button type="button" onClick={() => void runAutoRefresh(false)} disabled={!secretReady || (autoRefreshStatus !== "paused" && autoRefreshStatus !== "error") || loadingKey !== null}>Resume</button>
+          <button type="button" onClick={() => void runAutoRefresh(true)} disabled={!secretReady || autoRefreshStatus === "running" || loadingKey !== null}>Reset</button>
+        </div>
+      </details>
 
-          <div>
-            <p className="bread">
-              Auto refresh status: <strong>{autoRefreshStatus}</strong> — {autoRefreshMessage}
-            </p>
-            <p className="bread">
-              Processed {companiesProcessedTotal} of {companiesTotalToProcess || "?"} · Last batch {companiesLastBatchProcessed}
-            </p>
-            <p className="bread">
-              Current cursorOffset: {companiesCursorOffset ?? 0} · Next offset: {companiesNextOffset ?? "done"}
-            </p>
-            <div
-              style={{
-                width: "100%",
-                maxWidth: 520,
-                height: 12,
-                borderRadius: 8,
-                background: "#e5e7eb",
-                overflow: "hidden",
-              }}
-              aria-label="Companies refresh progress"
-            >
-              <div
-                style={{
-                  width: `${companiesProgressPercent}%`,
-                  height: "100%",
-                  background: autoRefreshStatus === "error" ? "#b91c1c" : "#2563eb",
-                  transition: "width 180ms ease",
-                }}
-              />
-            </div>
-            <p className="bread">{companiesProgressPercent}%</p>
-          </div>
-
-          <div>
-            <CompanyPicker
-              label="Lägg till bolag via namn"
-              placeholder="T.ex. Microsoft"
-              onSelect={(company) => appendTicker(company.symbol)}
-            />
-            <label htmlFor="tickers">Tickers (comma-separated)</label>
-            <input
-              id="tickers"
-              value={tickers}
-              onChange={(event) => setTickers(event.target.value)}
-            />
+      <details open style={{ marginBottom: 12 }}>
+        <summary><strong>Ticker management</strong></summary>
+        <p className="bread">Används för att lägga till eller uppdatera enskilda tickers.</p>
+        <CompanyPicker label="Lägg till bolag via namn" placeholder="T.ex. Microsoft" onSelect={(company) => appendTicker(company.symbol)} />
+        <label htmlFor="tickers">Tickers (comma-separated)</label>
+        <input id="tickers" value={tickers} onChange={(event) => setTickers(event.target.value)} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() =>
+              void postJson("Upsert Tickers", "/api/admin/companies", {
+                tickers: tickers.split(",").map((ticker) => ticker.trim().toUpperCase()).filter(Boolean),
+              })
+            }
+            disabled={!secretReady || loadingKey !== null}
+          >
+            {loadingKey === "Upsert Tickers" ? "Upserting..." : "Upsert Tickers"}
+          </button>
+        </div>
+        <label htmlFor="refresh-ticker">Refresh ticker</label>
+        <input id="refresh-ticker" value={refreshTicker} onChange={(event) => setRefreshTicker(event.target.value)} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() =>
+              void postJson("Refresh Ticker", "/api/company/refresh", { ticker: refreshTicker.trim().toUpperCase() }).then((payload) => {
+                const materialization = payload?.materialization;
+                if (materialization) applyMaterialization(materialization);
+              })
+            }
+            disabled={!secretReady || loadingKey !== null || tickerAutoStatus === "running"}
+          >
+            {loadingKey === "Refresh Ticker" ? "Refreshing..." : "Refresh Ticker"}
+          </button>
+          {!materializationDone && materializationCursor && (
             <button
               type="button"
               onClick={() =>
-                void postJson("Upsert Tickers", "/api/admin/companies", {
-                  tickers: tickers
-                    .split(",")
-                    .map((ticker) => ticker.trim().toUpperCase())
-                    .filter(Boolean),
-                })
-              }
-              disabled={!secretReady || loadingKey !== null}
-            >
-              {loadingKey === "Upsert Tickers" ? "Upserting..." : "Upsert Tickers"}
-            </button>
-          </div>
-
-          <div>
-            <label htmlFor="refresh-ticker">Refresh ticker</label>
-            <input
-              id="refresh-ticker"
-              value={refreshTicker}
-              onChange={(event) => setRefreshTicker(event.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() =>
-                void postJson("Refresh Ticker", "/api/company/refresh", {
+                void postJson("Continue Materialization", "/api/company/refresh", {
                   ticker: refreshTicker.trim().toUpperCase(),
+                  skipFetch: true,
+                  cursor: materializationCursor,
                 }).then((payload) => {
                   const materialization = payload?.materialization;
-                  if (materialization) {
-                    applyMaterialization(materialization);
-                  }
+                  if (materialization) applyMaterialization(materialization);
                 })
               }
               disabled={!secretReady || loadingKey !== null || tickerAutoStatus === "running"}
             >
-              {loadingKey === "Refresh Ticker" ? "Refreshing..." : "Refresh Ticker"}
+              {loadingKey === "Continue Materialization" ? "Continuing..." : "Continue materialization"}
             </button>
-            {!materializationDone && materializationCursor && (
-              <button
-                type="button"
-                onClick={() =>
-                  void postJson("Continue Materialization", "/api/company/refresh", {
-                    ticker: refreshTicker.trim().toUpperCase(),
-                    skipFetch: true,
-                    cursor: materializationCursor,
-                  }).then((payload) => {
-                    const materialization = payload?.materialization;
-                    if (materialization) {
-                      applyMaterialization(materialization);
-                    }
-                  })
-                }
-                disabled={!secretReady || loadingKey !== null || tickerAutoStatus === "running"}
-              >
-                {loadingKey === "Continue Materialization" ? "Continuing..." : "Continue materialization"}
-              </button>
-            )}
-            <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => void runTickerAutoFlow(true)}
-                disabled={!secretReady || tickerAutoStatus === "running" || loadingKey !== null}
-              >
-                Start auto refresh ticker
-              </button>
-              <button
-                type="button"
-                onClick={handlePauseTickerAutoFlow}
-                disabled={!secretReady || tickerAutoStatus !== "running"}
-              >
-                Pause
-              </button>
-              <button
-                type="button"
-                onClick={() => void runTickerAutoFlow(false)}
-                disabled={!secretReady || (tickerAutoStatus !== "paused" && tickerAutoStatus !== "error") || loadingKey !== null}
-              >
-                Resume
-              </button>
-              <button
-                type="button"
-                onClick={() => void runTickerAutoFlow(true)}
-                disabled={!secretReady || tickerAutoStatus === "running" || loadingKey !== null}
-              >
-                Reset
-              </button>
-            </div>
-            <p className="bread">
-              Ticker auto status: <strong>{tickerAutoStatus}</strong> — {tickerAutoMessage}
-            </p>
-            <p className="bread">
-              Materializing {tickerProgressUnit}: {tickerProcessedTotal} of {tickerTotalToProcess || "?"} ({tickerProgressPercent}%)
-            </p>
-            <p className="bread">
-              Last batch: +{tickerLastBatchProcessed} {tickerProgressUnit}
-            </p>
-            <p className="bread">
-              Rows written last batch: {tickerLastBatchRowsWritten} (cumulative {tickerRowsWrittenTotal})
-            </p>
-            <p className="bread">
-              Cursor (local): {String(materializationDisplayCursor?.statement ?? "-")}/{String(materializationDisplayCursor?.period ?? "-")} offset {tickerCurrentOffset}
-              {tickerNextOffset === null ? "" : ` → ${tickerNextOffset}`}
-            </p>
-            <div
-              style={{
-                width: "100%",
-                maxWidth: 520,
-                height: 12,
-                borderRadius: 8,
-                background: "#e5e7eb",
-                overflow: "hidden",
-              }}
-              aria-label="Ticker materialization progress"
-            >
-              <div
-                style={{
-                  width: `${tickerProgressPercent}%`,
-                  height: "100%",
-                  background: tickerAutoStatus === "error" ? "#b91c1c" : "#059669",
-                  transition: "width 180ms ease",
-                }}
-              />
-            </div>
-            <p className="bread">{tickerProgressPercent}%</p>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              type="button"
-              onClick={() => void postJson("Run Cron", "/api/cron/refresh", {})}
-              disabled={!secretReady || loadingKey !== null}
-            >
-              {loadingKey === "Run Cron" ? "Running..." : "Run Cron"}
-            </button>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={showLog}
-                onChange={(event) => setShowLog(event.target.checked)}
-              />
-              Visa logg
-            </label>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={debugParamEnabled}
-                onChange={(event) => setDebugParamEnabled(event.target.checked)}
-              />
-              Debug (debug=1)
-            </label>
-            <button
-              type="button"
-              onClick={openAppFromAdmin}
-            >
-              {debugParamEnabled ? "Open app (debug)" : "Open app"}
-            </button>
-          </div>
+          )}
+          <button type="button" onClick={() => void runTickerAutoFlow(true)} disabled={!secretReady || tickerAutoStatus === "running" || loadingKey !== null}>Start auto refresh ticker</button>
+          <button type="button" onClick={handlePauseTickerAutoFlow} disabled={!secretReady || tickerAutoStatus !== "running"}>Pause</button>
+          <button type="button" onClick={() => void runTickerAutoFlow(false)} disabled={!secretReady || (tickerAutoStatus !== "paused" && tickerAutoStatus !== "error") || loadingKey !== null}>Resume</button>
+          <button type="button" onClick={() => void runTickerAutoFlow(true)} disabled={!secretReady || tickerAutoStatus === "running" || loadingKey !== null}>Reset</button>
         </div>
-      </div>
+      </details>
 
-      {showLog && (
-        <div className="log-panel">
-          <h3>Logg</h3>
-          {logEntries.length === 0 ? (
-            <div className="status empty">No requests yet.</div>
-          ) : (
-            logEntries.map((entry) => (
+      <details open style={{ marginBottom: 12 }}>
+        <summary><strong>Screening price data</strong></summary>
+        <p className="bread">Används för att hämta och beräkna prisdata för screening. Fyller daily_price_history och price_screen_snapshot.</p>
+        <button type="button" onClick={() => void runScreeningPriceIngest()} disabled={!secretReady || loadingKey !== null}>
+          {loadingKey === "Refresh Screening Price Data" ? "Updating screening prices..." : "Update screening prices"}
+        </button>
+        <p className="bread">Hämtar prisdata för screening och uppdaterar daily_price_history samt price_screen_snapshot.</p>
+        {priceIngestResult && (
+          <div className="bread">
+            <strong>Status:</strong> {priceIngestResult.ok ? "Success" : "Error"}<br />
+            <strong>Tickers processed:</strong> {priceIngestResult.total ?? 0} (succeeded {priceIngestResult.succeeded ?? 0}, failed {priceIngestResult.failed ?? 0})<br />
+            <strong>daily_price_history writes:</strong> {priceIngestResult.writtenDailyRows ?? 0}<br />
+            <strong>price_screen_snapshot writes:</strong> {priceIngestResult.snapshotWrites ?? 0}<br />
+            <strong>Symbols changed:</strong> {priceIngestResult.changedSymbols ?? 0}
+            {priceIngestResult.error ? <><br /><strong>Error:</strong> {priceIngestResult.error}</> : null}
+          </div>
+        )}
+      </details>
+
+      <details open style={{ marginBottom: 12 }}>
+        <summary><strong>Status / Progress</strong></summary>
+        <p className="bread">Översikt av pågående jobb och progress för companies ingest och ticker materialization.</p>
+        <p className="bread">Auto refresh status: <strong>{autoRefreshStatus}</strong> — {autoRefreshMessage}</p>
+        <p className="bread">Processed {companiesProcessedTotal} of {companiesTotalToProcess || "?"} · Last batch {companiesLastBatchProcessed}</p>
+        <p className="bread">Current cursorOffset: {companiesCursorOffset ?? 0} · Next offset: {companiesNextOffset ?? "done"}</p>
+        <div style={{ width: "100%", maxWidth: 520, height: 12, borderRadius: 8, background: "#e5e7eb", overflow: "hidden" }} aria-label="Companies refresh progress">
+          <div style={{ width: `${companiesProgressPercent}%`, height: "100%", background: autoRefreshStatus === "error" ? "#b91c1c" : "#2563eb", transition: "width 180ms ease" }} />
+        </div>
+        <p className="bread">{companiesProgressPercent}%</p>
+        <p className="bread">Ticker auto status: <strong>{tickerAutoStatus}</strong> — {tickerAutoMessage}</p>
+        <p className="bread">Materializing {tickerProgressUnit}: {tickerProcessedTotal} of {tickerTotalToProcess || "?"} ({tickerProgressPercent}%)</p>
+        <p className="bread">Last batch: +{tickerLastBatchProcessed} {tickerProgressUnit}</p>
+        <p className="bread">Rows written last batch: {tickerLastBatchRowsWritten} (cumulative {tickerRowsWrittenTotal})</p>
+        <p className="bread">
+          Cursor (local): {String(materializationDisplayCursor?.statement ?? "-")}/{String(materializationDisplayCursor?.period ?? "-")} offset {tickerCurrentOffset}
+          {tickerNextOffset === null ? "" : ` → ${tickerNextOffset}`}
+        </p>
+        <div style={{ width: "100%", maxWidth: 520, height: 12, borderRadius: 8, background: "#e5e7eb", overflow: "hidden" }} aria-label="Ticker materialization progress">
+          <div style={{ width: `${tickerProgressPercent}%`, height: "100%", background: tickerAutoStatus === "error" ? "#b91c1c" : "#059669", transition: "width 180ms ease" }} />
+        </div>
+        <p className="bread">{tickerProgressPercent}%</p>
+      </details>
+
+      <details style={{ marginBottom: 12 }}>
+        <summary><strong>Admin activity log</strong></summary>
+        <p className="bread">Gemensam logg för admin actions. Öppna vid felsökning.</p>
+        {logEntries.length === 0 ? (
+          <div className="status empty">No requests yet.</div>
+        ) : (
+          <div className="log-panel">
+            {logEntries.map((entry) => (
               <div key={entry.id} className={`log-entry ${entry.status}`}>
                 <div className="log-entry-header">
                   <strong>{entry.title}</strong>
-                  <span className={`log-status ${entry.status}`}>
-                    {STATUS_LABELS[entry.status]}
-                  </span>
+                  <span className={`log-status ${entry.status}`}>{STATUS_LABELS[entry.status]}</span>
                 </div>
                 <pre>{entry.message}</pre>
               </div>
-            ))
-          )}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </details>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button type="button" onClick={() => void postJson("Run Cron", "/api/cron/refresh", {})} disabled={!secretReady || loadingKey !== null}>
+          {loadingKey === "Run Cron" ? "Running..." : "Run Cron"}
+        </button>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={debugParamEnabled} onChange={(event) => setDebugParamEnabled(event.target.checked)} />
+          Debug (debug=1)
+        </label>
+        <button type="button" onClick={openAppFromAdmin}>{debugParamEnabled ? "Open app (debug)" : "Open app"}</button>
+      </div>
     </div>
   );
 }
