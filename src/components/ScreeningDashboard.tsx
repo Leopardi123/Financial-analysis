@@ -108,10 +108,6 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
     fetchJson(`/api/screening/price-snapshot?symbol=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
   ]);
 
-  if (!companyPayload && !pricePayload?.snapshot) {
-    return null;
-  }
-
   const snapshot: CompanySnapshot = {
     ticker,
     years: Array.isArray(companyPayload?.years) ? companyPayload.years : [],
@@ -180,30 +176,59 @@ export default function ScreeningDashboard() {
     return unique;
   }, [activeScreen]);
 
-  async function resolveUniverse(): Promise<string[]> {
+  async function resolveUniverse(requiredFields: string[]): Promise<{ tickers: string[]; notes: string[] }> {
+    const notes: string[] = [];
+    const requiresPriceSnapshot = requiredFields.some((field) => SCREENING_FIELD_MAP.get(field)?.source === "price_screen_snapshot");
+
+    let baseUniverse: string[] = [];
     if (universe === "watchlist") {
-      return WATCHLIST.map(normalizeTicker).filter((ticker): ticker is string => Boolean(ticker));
-    }
-    if (universe === "manual") {
-      return manualTickers.split(",").map(normalizeTicker).filter((ticker): ticker is string => Boolean(ticker));
-    }
-    const payload = await fetchJson("/api/company/list");
-    const list = Array.isArray(payload.tickers)
-      ? payload.tickers.map((item: string) => normalizeTicker(String(item))).filter((ticker: string | null): ticker is string => Boolean(ticker))
-      : [];
-    if (universe === "sector") {
-      if (!sectorFilter.trim()) return [];
-      const filtered: string[] = [];
-      for (const ticker of list) {
-        const profilePayload = await fetchJson(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`).catch(() => null);
-        const sector = String(profilePayload?.profile?.sector ?? "").toLowerCase();
-        if (sector.includes(sectorFilter.trim().toLowerCase())) {
-          filtered.push(ticker);
+      baseUniverse = WATCHLIST.map(normalizeTicker).filter((ticker): ticker is string => Boolean(ticker));
+    } else if (universe === "manual") {
+      baseUniverse = manualTickers.split(",").map(normalizeTicker).filter((ticker): ticker is string => Boolean(ticker));
+    } else {
+      const payload = await fetchJson("/api/company/list");
+      const list = Array.isArray(payload.tickers)
+        ? payload.tickers.map((item: string) => normalizeTicker(String(item))).filter((ticker: string | null): ticker is string => Boolean(ticker))
+        : [];
+      if (universe === "sector") {
+        if (!sectorFilter.trim()) {
+          return { tickers: [], notes: ["Sector-universe kräver sektorfilter."] };
         }
+        const filtered: string[] = [];
+        for (const ticker of list) {
+          const profilePayload = await fetchJson(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`).catch(() => null);
+          const sector = String(profilePayload?.profile?.sector ?? "").toLowerCase();
+          if (sector.includes(sectorFilter.trim().toLowerCase())) {
+            filtered.push(ticker);
+          }
+        }
+        baseUniverse = filtered;
+      } else {
+        baseUniverse = list;
       }
-      return filtered;
     }
-    return list;
+
+    if (!requiresPriceSnapshot) {
+      return { tickers: baseUniverse, notes };
+    }
+
+    const priceSnapshotPayload = await fetchJson("/api/screening/price-snapshot").catch(() => null);
+    const availablePriceSymbols = new Set(
+      Array.isArray(priceSnapshotPayload?.rows)
+        ? priceSnapshotPayload.rows
+          .map((row: Record<string, unknown>) => normalizeTicker(String(row.symbol ?? "")))
+          .filter((ticker: string | null): ticker is string => Boolean(ticker))
+        : [],
+    );
+
+    if (availablePriceSymbols.size === 0) {
+      notes.push("Inga price snapshots hittades ännu. Kör /api/admin/refresh-price-screen innan price-baserad screening.");
+      return { tickers: [], notes };
+    }
+
+    const filteredByPrice = baseUniverse.filter((ticker) => availablePriceSymbols.has(ticker));
+    notes.push(`Price snapshot coverage: ${filteredByPrice.length}/${baseUniverse.length} tickers i valt universe.`);
+    return { tickers: filteredByPrice, notes };
   }
 
   function resolveParams(screen: ScreenDefinition): Record<string, number> {
@@ -220,10 +245,11 @@ export default function ScreeningDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const tickers = await resolveUniverse();
+      const requiredFields = [...new Set(activeScreen.rules.mustHave.map((rule) => rule.field))];
+      const resolvedUniverse = await resolveUniverse(requiredFields);
+      const tickers = resolvedUniverse.tickers;
       const manualData = parseManualJson(manualJson);
       const params = resolveParams(activeScreen);
-      const requiredFields = [...new Set(activeScreen.rules.mustHave.map((rule) => rule.field))];
       const requiredSources = requiredFields
         .map((field) => SCREENING_FIELD_MAP.get(field)?.source ?? "unknown")
         .filter((value, idx, arr) => arr.indexOf(value) === idx);
@@ -264,7 +290,7 @@ export default function ScreeningDashboard() {
       const passedCount = evaluated.filter((item) => item.evaluationStatus === "passed").length;
       const failedCount = evaluated.filter((item) => item.evaluationStatus === "failed").length;
       const missingCount = evaluated.filter((item) => item.evaluationStatus === "not_evaluated").length;
-      const notes: string[] = [];
+      const notes: string[] = [...resolvedUniverse.notes];
       if (universe === "all") notes.push(`All available data: ${tickers.length} bolag i bas-universe.`);
       if (universe === "watchlist") notes.push(`Watchlist innehåller ${tickers.length} bolag.`);
       if (missingCount > 0) notes.push(`Aktiv regel kräver ${requiredFields.join(", ")}; ${missingCount} bolag saknade obligatorisk data.`);
