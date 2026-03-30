@@ -108,6 +108,8 @@ type PriceIngestResult = {
   writtenDailyRows?: number;
   unchangedDailyRows?: number;
   snapshotWrites?: number;
+  results?: Array<{ symbol?: string } & Record<string, unknown>>;
+  failures?: Array<{ symbol?: string; classification?: string; stage?: string; error?: string } & Record<string, unknown>>;
   error?: string;
   debug?: ScreeningDebugPayload;
 };
@@ -1027,6 +1029,20 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <strong>price_screen_snapshot writes:</strong> {priceIngestResult.snapshotWrites ?? 0}<br />
             <strong>Symbols changed:</strong> {priceIngestResult.changedSymbols ?? 0}
             {priceIngestResult.error ? <><br /><strong>Error:</strong> {priceIngestResult.error}</> : null}
+            {((priceIngestResult.results?.length ?? 0) > 0 || (priceIngestResult.failures?.length ?? 0) > 0) && (
+              <>
+                <br />
+                <strong>Batch symbols:</strong>
+                <ul style={{ marginTop: 4 }}>
+                  {(priceIngestResult.results ?? []).map((item, idx) => (
+                    <li key={`ok-${String(item.symbol ?? idx)}`}>{String(item.symbol ?? "unknown")} ✅ success</li>
+                  ))}
+                  {(priceIngestResult.failures ?? []).map((item, idx) => (
+                    <li key={`fail-${String(item.symbol ?? idx)}`}>{String(item.symbol ?? "unknown")} ❌ failed: {String(item.classification ?? "unknown")} ({String(item.stage ?? "unknown stage")})</li>
+                  ))}
+                </ul>
+              </>
+            )}
           </div>
         )}
         <details open={screeningDebugOpen} onToggle={(event) => setScreeningDebugOpen((event.target as HTMLDetailsElement).open)} style={{ marginTop: 8 }}>

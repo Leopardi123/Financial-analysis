@@ -19,6 +19,19 @@ interface IngestSymbolResult {
   snapshotUpdated: boolean;
   snapshot?: PriceScreenSnapshotRow;
   debug?: PriceScreenSnapshotDebug;
+  ingestDebug?: Record<string, unknown>;
+}
+
+class IngestSymbolError extends Error {
+  stage: string;
+  classification: string;
+  context?: Record<string, unknown>;
+  constructor(message: string, stage: string, classification: string, context?: Record<string, unknown>) {
+    super(message);
+    this.stage = stage;
+    this.classification = classification;
+    this.context = context;
+  }
 }
 
 function toIsoDateUtc(input: Date): string {
@@ -154,14 +167,37 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
     throw new Error("symbol is required");
   }
 
+  const preExistingDailyRows = await query(
+    `SELECT COUNT(*) AS c FROM ${tables.dailyPriceHistory} WHERE symbol = ?`,
+    [normalized],
+  ) as Array<{ c?: number | string }>;
+  const preExistingSnapshotRows = await query(
+    `SELECT 1 AS has_row FROM ${tables.priceScreenSnapshot} WHERE symbol = ? LIMIT 1`,
+    [normalized],
+  ) as Array<{ has_row?: number }>;
+
   const latestLocalDate = await readLatestDate(normalized);
   const fetchFrom = latestLocalDate ? addDays(latestLocalDate, -INCREMENTAL_BUFFER_DAYS) : addDays(toIsoDateUtc(new Date()), -3650);
   const fetchTo = toIsoDateUtc(new Date());
 
-  const payload = await fetchApiV3Json<FmpHistoricalResponse>(`historical-price-full/${encodeURIComponent(normalized)}`, {
-    from: fetchFrom,
-    to: fetchTo,
-  });
+  let payload: FmpHistoricalResponse;
+  try {
+    payload = await fetchApiV3Json<FmpHistoricalResponse>(`historical-price-full/${encodeURIComponent(normalized)}`, {
+      from: fetchFrom,
+      to: fetchTo,
+    });
+  } catch (error) {
+    const message = (error as Error).message;
+    const lower = message.toLowerCase();
+    const classification = lower.includes("404") || lower.includes("not found")
+      ? "not_in_fmp"
+      : (lower.includes("timeout") ? "timeout_during_symbol_fetch" : "fmp_fetch_failed");
+    throw new IngestSymbolError(message, "fetch_from_fmp", classification, {
+      symbol: normalized,
+      preExistingDailyRows: Number(preExistingDailyRows[0]?.c ?? 0),
+      preExistingSnapshot: preExistingSnapshotRows.length > 0,
+    });
+  }
 
   const incoming = dedupeByPriceDate(
     normalizeHistoryRows(payload).map((row) => ({ ...row, symbol: normalized })),
@@ -187,19 +223,28 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
   for (const row of incoming) {
     const existing = existingByDate.get(row.price_date);
     if (!existing) {
-      await execute(
-        `INSERT INTO ${tables.dailyPriceHistory}
-          (symbol, price_date, close, adjusted_close, volume, source, currency, updated_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(symbol, price_date) DO UPDATE SET
-           close = excluded.close,
-           adjusted_close = excluded.adjusted_close,
-           volume = excluded.volume,
-           source = excluded.source,
-           currency = excluded.currency,
-           updated_at = excluded.updated_at`,
-        [row.symbol, row.price_date, row.close, row.adjusted_close, row.volume, row.source, row.currency, now, now],
-      );
+      try {
+        await execute(
+          `INSERT INTO ${tables.dailyPriceHistory}
+            (symbol, price_date, close, adjusted_close, volume, source, currency, updated_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(symbol, price_date) DO UPDATE SET
+             close = excluded.close,
+             adjusted_close = excluded.adjusted_close,
+             volume = excluded.volume,
+             source = excluded.source,
+             currency = excluded.currency,
+             updated_at = excluded.updated_at`,
+          [row.symbol, row.price_date, row.close, row.adjusted_close, row.volume, row.source, row.currency, now, now],
+        );
+      } catch (error) {
+        const message = (error as Error).message;
+        const classification = message.includes("UNIQUE constraint") ? "duplicate_row_conflict" : "db_write_failed";
+        throw new IngestSymbolError(message, "write_daily_price_history", classification, {
+          symbol: normalized,
+          priceDate: row.price_date,
+        });
+      }
       inserted += 1;
       existingByDate.set(row.price_date, row);
       continue;
@@ -216,12 +261,19 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
       continue;
     }
 
-    await execute(
-      `UPDATE ${tables.dailyPriceHistory}
-       SET close = ?, adjusted_close = ?, volume = ?, source = ?, currency = ?, updated_at = ?
-       WHERE symbol = ? AND price_date = ?`,
-      [row.close, row.adjusted_close, row.volume, row.source, row.currency, now, row.symbol, row.price_date],
-    );
+    try {
+      await execute(
+        `UPDATE ${tables.dailyPriceHistory}
+         SET close = ?, adjusted_close = ?, volume = ?, source = ?, currency = ?, updated_at = ?
+         WHERE symbol = ? AND price_date = ?`,
+        [row.close, row.adjusted_close, row.volume, row.source, row.currency, now, row.symbol, row.price_date],
+      );
+    } catch (error) {
+      throw new IngestSymbolError((error as Error).message, "write_daily_price_history", "db_write_failed", {
+        symbol: normalized,
+        priceDate: row.price_date,
+      });
+    }
     updated += 1;
   }
 
@@ -247,8 +299,19 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
   ) as unknown as DailyPriceRow[];
 
   const ascRows = [...historyRows].sort((a, b) => a.price_date.localeCompare(b.price_date));
-  const { snapshot, debug: debugData } = computePriceScreenSnapshot(normalized, ascRows);
-  const snapshotUpdated = await upsertSnapshotIfChanged(snapshot);
+  let snapshot;
+  let debugData;
+  try {
+    ({ snapshot, debug: debugData } = computePriceScreenSnapshot(normalized, ascRows));
+  } catch (error) {
+    throw new IngestSymbolError((error as Error).message, "compute_snapshot", "snapshot_compute_failed", { symbol: normalized });
+  }
+  let snapshotUpdated = false;
+  try {
+    snapshotUpdated = await upsertSnapshotIfChanged(snapshot);
+  } catch (error) {
+    throw new IngestSymbolError((error as Error).message, "write_price_screen_snapshot", "db_write_failed", { symbol: normalized });
+  }
 
   return {
     symbol: normalized,
@@ -257,19 +320,39 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
     unchanged,
     skipped: false,
     snapshotUpdated,
-    ...(debug ? { snapshot, debug: debugData } : {}),
+    ...(debug ? {
+      snapshot,
+      debug: debugData,
+      ingestDebug: {
+        symbol: normalized,
+        fmpRowsReturned: Array.isArray(payload.historical) ? payload.historical.length : 0,
+        latestFmpDate: incoming[incoming.length - 1]?.price_date ?? null,
+        preExistingDailyRows: Number(preExistingDailyRows[0]?.c ?? 0),
+        preExistingSnapshot: preExistingSnapshotRows.length > 0,
+        inserted,
+        updated,
+        unchanged,
+      },
+    } : {}),
   };
 }
 
 export async function ingestManySymbols(args: { symbols: string[]; debug?: boolean }) {
   const results: IngestSymbolResult[] = [];
-  const failures: Array<{ symbol: string; error: string }> = [];
+  const failures: Array<{ symbol: string; error: string; stage?: string; classification?: string; context?: Record<string, unknown> }> = [];
   for (const symbol of args.symbols) {
     try {
       const item = await ingestDailyPricesAndRefreshSnapshot(symbol, Boolean(args.debug));
       results.push(item);
     } catch (error) {
-      failures.push({ symbol, error: (error as Error).message });
+      const asIngest = error as IngestSymbolError;
+      failures.push({
+        symbol,
+        error: asIngest.message,
+        stage: asIngest.stage ?? "unknown",
+        classification: asIngest.classification ?? "unknown",
+        context: asIngest.context,
+      });
     }
   }
   return {

@@ -224,8 +224,15 @@ export default async function handler(req: any, res: any) {
     let unchangedDailyRows = 0;
     const adaptiveMessages: string[] = [];
     const attemptedBatchSizes: number[] = [];
-    const isRetryableFailure = (message: string) => /timed out|timeout|network|ECONN|ENOTFOUND|429|503|502|504|fetch/i.test(message);
-    const isWriteFailure = (message: string) => /SQLITE|constraint|database|daily_price_history|price_screen_snapshot/i.test(message);
+    const isRetryableFailure = (failure: { error: string; classification?: string; stage?: string }) => {
+      if (failure.classification === "timeout_during_symbol_fetch" || failure.classification === "fmp_fetch_failed") return true;
+      return /timed out|timeout|network|ECONN|ENOTFOUND|429|503|502|504|fetch/i.test(failure.error);
+    };
+    const isWriteFailure = (failure: { error: string; classification?: string; stage?: string }) => {
+      if (failure.stage === "write_daily_price_history" || failure.stage === "write_price_screen_snapshot") return true;
+      if (failure.classification === "duplicate_row_conflict" || failure.classification === "db_write_failed") return true;
+      return /SQLITE|constraint|database|daily_price_history|price_screen_snapshot/i.test(failure.error);
+    };
 
     markRunning("fetch_price_data", { source: "fmp", symbols: runSymbols, currentSymbols: runSymbols });
     markRunning("normalize_parse_response", { currentSymbols: runSymbols });
@@ -275,8 +282,8 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
-      const retryableFailures = chunkFailures.filter((item) => isRetryableFailure(item.error));
-      const nonRetryableFailures = chunkFailures.filter((item) => !isRetryableFailure(item.error));
+      const retryableFailures = chunkFailures.filter((item) => isRetryableFailure(item));
+      const nonRetryableFailures = chunkFailures.filter((item) => !isRetryableFailure(item));
 
       for (const item of nonRetryableFailures) {
         failed += 1;
@@ -309,8 +316,8 @@ export default async function handler(req: any, res: any) {
       recoveredFromFallback = true;
     }
     const failureCount = failures.length;
-    const fetchFailed = failures.some((item) => isRetryableFailure(item.error));
-    const writeFailed = failures.some((item) => isWriteFailure(item.error));
+    const fetchFailed = failures.some((item) => isRetryableFailure(item));
+    const writeFailed = failures.some((item) => isWriteFailure(item));
     const topLevelStatus = failureCount > 0 && succeeded > 0
       ? "partial_success"
       : (failureCount > 0 ? "error" : "success");
