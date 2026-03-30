@@ -84,6 +84,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/macro/ingest": () => import("../src/server/routes/admin/macro-ingest.js"),
   "admin/macro/run-engine": () => import("../src/server/routes/admin/macro-run-engine.js"),
   "admin/rebuild-macro-snapshot": () => import("../src/server/routes/admin/rebuild-macro-snapshot.js"),
+  "admin/refresh-price-screen": () => import("../src/server/routes/admin/refresh-price-screen.js"),
   companies: () => import("../src/server/routes/companies.js"),
   "companies/search": () => import("../src/server/routes/companies/search.js"),
   company: () => import("../src/server/routes/company/index.js"),
@@ -124,6 +125,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),
   "sector/global-macro": () => import("../src/server/routes/sector/global-macro.js"),
   "sector/commodity-snapshot": () => import("../src/server/routes/sector/commodity-snapshot.js"),
+  "screening/price-snapshot": () => import("../src/server/routes/screening/price-snapshot.js"),
 };
 
 export default async function handler(req: any, res: any) {
