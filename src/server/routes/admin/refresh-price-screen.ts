@@ -4,6 +4,25 @@ import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { requireFmpApiKey } from "../../../../api/_fmp.js";
 import { ingestManySymbols } from "../../../lib/prices/screening/ingest.js";
 
+let cachedActiveSymbols: { symbols: string[]; loadedAt: number } | null = null;
+const SYMBOL_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function loadActiveSymbols(): Promise<string[]> {
+  const now = Date.now();
+  if (cachedActiveSymbols && now - cachedActiveSymbols.loadedAt < SYMBOL_CACHE_TTL_MS) {
+    return cachedActiveSymbols.symbols;
+  }
+  const rows = await query(
+    `SELECT ticker
+     FROM ${tables.companiesV2}
+     WHERE active = 1
+     ORDER BY ticker`,
+  ) as unknown as Array<{ ticker: string }>;
+  const symbols = rows.map((row) => String(row.ticker).trim().toUpperCase()).filter(Boolean);
+  cachedActiveSymbols = { symbols, loadedAt: now };
+  return symbols;
+}
+
 export default async function handler(req: any, res: any) {
   try {
     const startedAt = Date.now();
@@ -112,13 +131,7 @@ export default async function handler(req: any, res: any) {
     });
     let symbols = explicitSymbols;
     if (symbols.length === 0) {
-      const rows = await query(
-        `SELECT ticker
-         FROM ${tables.companiesV2}
-         WHERE active = 1
-         ORDER BY ticker`,
-      ) as unknown as Array<{ ticker: string }>;
-      symbols = rows.map((row) => String(row.ticker).trim().toUpperCase()).filter(Boolean);
+      symbols = await loadActiveSymbols();
     }
     markDone("resolve_targets", "success", {
       resolvedCount: symbols.length,

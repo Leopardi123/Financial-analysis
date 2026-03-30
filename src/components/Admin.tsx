@@ -401,90 +401,6 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     }
   }
 
-  async function runAllScreeningBatches(options?: { reset?: boolean }) {
-    if (screeningAutoRunningRef.current) return;
-    screeningAutoRunningRef.current = true;
-    const shouldReset = Boolean(options?.reset);
-    const initialOffset = shouldReset ? 0 : screeningOffset;
-    if (shouldReset) {
-      setScreeningOffset(0);
-      setScreeningRemaining(null);
-      setScreeningTotal(null);
-    }
-    setScreeningStatus("running");
-    setScreeningMessage(shouldReset
-      ? "Initializing screening price refresh from offset 0..."
-      : `Continuing screening price refresh from offset ${initialOffset}...`);
-    let nextOffset = initialOffset;
-
-    while (screeningAutoRunningRef.current) {
-      const { attemptId, initialDebug } = startScreeningAttempt(nextOffset, 3);
-      const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
-        offset: nextOffset,
-        batchSize: 3,
-      });
-      if (payload?.__error) {
-        setPriceIngestResult({ ok: false, error: payload.__error });
-        setScreeningStatus("error");
-        const endedAt = new Date().toISOString();
-        const timeoutMessage = payload.__error.includes("timed out")
-          ? `Timed out before first symbol was selected. No symbols processed in this attempt. Timed out during target resolution/query setup; load_symbols_batch, fetch, save and snapshot did not start. Continue will retry from offset ${nextOffset} with batch size 3.`
-          : payload.__error;
-        setScreeningMessage(timeoutMessage);
-        patchScreeningAttempt(attemptId, {
-          endedAt,
-          status: payload.__error.includes("timed out") ? "timeout" : "failed",
-          error: payload.__error,
-          debug: { ...initialDebug, requestEndedAt: endedAt },
-        });
-        setScreeningDebug({ ...initialDebug, requestEndedAt: endedAt });
-        setScreeningDebugOpen(true);
-        break;
-      }
-      const nextResult = payload as unknown as PriceIngestResult;
-      setPriceIngestResult(nextResult);
-      const resolvedDebug = nextResult.debug ?? initialDebug;
-      setScreeningDebug(resolvedDebug);
-      const cursor = payload?.cursor;
-      if (!cursor) {
-        setScreeningStatus("error");
-        setScreeningMessage("Missing cursor in response.");
-        patchScreeningAttempt(attemptId, {
-          endedAt: new Date().toISOString(),
-          status: "failed",
-          error: "Missing cursor in response.",
-          debug: resolvedDebug,
-        });
-        setScreeningDebugOpen(true);
-        break;
-      }
-      patchScreeningAttempt(attemptId, {
-        endedAt: new Date().toISOString(),
-        status: cursor.done ? "success" : "running",
-        debug: resolvedDebug,
-      });
-      if (cursor.done) {
-        setLatestSuccessAttemptId(attemptId);
-      }
-      setScreeningOffset(cursor.nextOffset ?? 0);
-      setScreeningRemaining(cursor.remaining ?? null);
-      setScreeningTotal(cursor.totalToProcess);
-      if (cursor.done || cursor.nextOffset === null) {
-        setScreeningStatus("done");
-        setScreeningMessage(`Completed ${cursor.totalToProcess}/${cursor.totalToProcess}.`);
-        setScreeningDebugOpen(false);
-        break;
-      }
-      nextOffset = cursor.nextOffset;
-      setScreeningMessage(
-        `Processed batch ${cursor.processedInRun}. Next offset ${cursor.nextOffset}. Remaining ${cursor.remaining ?? "?"}.`
-      );
-      await sleep(120);
-    }
-
-    screeningAutoRunningRef.current = false;
-  }
-
   function pauseScreeningRefresh() {
     screeningAutoRunningRef.current = false;
     setScreeningStatus("paused");
@@ -992,13 +908,13 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         <summary><strong>Screening price data</strong></summary>
         <p className="bread">Används för att hämta och beräkna prisdata för screening. Fyller daily_price_history och price_screen_snapshot.</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => void runAllScreeningBatches()} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
             {loadingKey === "Refresh Screening Price Data" ? "Running screening refresh..." : "Start / Continue screening price refresh"}
           </button>
           <button type="button" onClick={pauseScreeningRefresh} disabled={!secretReady || screeningStatus !== "running"}>
             Pause
           </button>
-          <button type="button" onClick={() => void runAllScreeningBatches()} disabled={!secretReady || loadingKey !== null || (screeningStatus !== "paused" && screeningStatus !== "error")}>
+          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || (screeningStatus !== "paused" && screeningStatus !== "error")}>
             Resume
           </button>
           <button type="button" onClick={resetScreeningProgress} disabled={loadingKey !== null}>Reset progress</button>
@@ -1007,7 +923,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
           </button>
         </div>
         <ul className="bread" style={{ marginTop: 8 }}>
-          <li><strong>Start / Continue screening price refresh:</strong> runs the full pipeline (fetch prices → save history → build snapshots) and continues from current offset.</li>
+          <li><strong>Start / Continue screening price refresh:</strong> runs one safe batch of the full pipeline (fetch prices → save history → build snapshots) from current offset and persists progress.</li>
           <li><strong>Pause:</strong> stops after current batch.</li>
           <li><strong>Resume:</strong> continues from current offset.</li>
           <li><strong>Reset progress:</strong> resets cursor/progress only, does not delete stored price data.</li>
