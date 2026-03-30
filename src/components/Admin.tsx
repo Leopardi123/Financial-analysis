@@ -249,7 +249,21 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         payload = text;
       }
       if (!response.ok) {
-        const errorMessage = `ERROR ${response.status}: ${response.statusText} — ${typeof payload === "string" ? payload : JSON.stringify(payload)}`;
+        const payloadObject = typeof payload === "string" ? null : (payload as Record<string, unknown> | null);
+        const authReason = typeof payloadObject?.authReason === "string" ? payloadObject.authReason : null;
+        let friendlyError: string | null = null;
+        if (response.status === 401) {
+          if (!secret.trim()) {
+            friendlyError = "Missing CRON_SECRET in admin input.";
+          } else if (authReason === "missing_server_secret") {
+            friendlyError = "Missing CRON_SECRET/ADMIN_SECRET on server.";
+          } else {
+            friendlyError = "Secret mismatch. Provided secret does not match server CRON_SECRET/ADMIN_SECRET.";
+          }
+        }
+        const errorMessage = friendlyError
+          ? `ERROR ${response.status}: ${friendlyError}`
+          : `ERROR ${response.status}: ${response.statusText} — ${typeof payload === "string" ? payload : JSON.stringify(payload)}`;
         console.error("Admin request failed", {
           title,
           status: response.status,
@@ -259,7 +273,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         updateLog(
           title,
           "error",
-          `ERROR ${response.status}: ${response.statusText}\n${JSON.stringify(payload, null, 2)}`,
+          friendlyError
+            ? `ERROR ${response.status}: ${friendlyError}\n${JSON.stringify(payload, null, 2)}`
+            : `ERROR ${response.status}: ${response.statusText}\n${JSON.stringify(payload, null, 2)}`,
         );
         return { __error: errorMessage } as RefreshPayload;
       }

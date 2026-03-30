@@ -1,4 +1,4 @@
-import { assertCronSecret } from "../../../../api/_auth.js";
+import { getAdminSecret } from "../../../../api/_auth.js";
 import { query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { requireFmpApiKey } from "../../../../api/_fmp.js";
@@ -54,7 +54,37 @@ export default async function handler(req: any, res: any) {
       }
     };
 
-    assertCronSecret(req);
+    const expectedSecret = getAdminSecret();
+    const headerCronRaw = req.headers?.["x-cron-secret"];
+    const headerAdminRaw = req.headers?.["x-admin-secret"];
+    const authRaw = req.headers?.authorization;
+    const headerCron = Array.isArray(headerCronRaw) ? headerCronRaw[0] : headerCronRaw;
+    const headerAdmin = Array.isArray(headerAdminRaw) ? headerAdminRaw[0] : headerAdminRaw;
+    const authHeader = Array.isArray(authRaw) ? authRaw[0] : authRaw;
+    const bearer = typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")
+      ? authHeader.slice(7).trim()
+      : null;
+
+    if (!expectedSecret) {
+      res.status(401).json({
+        ok: false,
+        error: "Unauthorized",
+        authReason: "missing_server_secret",
+        detail: "Missing CRON_SECRET/ADMIN_SECRET on server.",
+      });
+      return;
+    }
+
+    const matched = headerCron === expectedSecret || headerAdmin === expectedSecret || bearer === expectedSecret;
+    if (!matched) {
+      res.status(401).json({
+        ok: false,
+        error: "Unauthorized",
+        authReason: "secret_mismatch",
+        detail: "Provide matching secret via x-cron-secret, x-admin-secret, or Authorization: Bearer <secret>.",
+      });
+      return;
+    }
     if (!requireFmpApiKey()) {
       res.status(500).json({ ok: false, error: "FMP_API_KEY missing" });
       return;
