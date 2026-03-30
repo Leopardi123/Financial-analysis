@@ -395,15 +395,21 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     }
   }
 
-  async function runAllScreeningBatches() {
+  async function runAllScreeningBatches(options?: { reset?: boolean }) {
     if (screeningAutoRunningRef.current) return;
     screeningAutoRunningRef.current = true;
-    setScreeningOffset(0);
-    setScreeningRemaining(null);
-    setScreeningTotal(null);
+    const shouldReset = Boolean(options?.reset);
+    const initialOffset = shouldReset ? 0 : screeningOffset;
+    if (shouldReset) {
+      setScreeningOffset(0);
+      setScreeningRemaining(null);
+      setScreeningTotal(null);
+    }
     setScreeningStatus("running");
-    setScreeningMessage("Initializing full refresh (batched, small chunks)...");
-    let nextOffset = 0;
+    setScreeningMessage(shouldReset
+      ? "Initializing screening price refresh from offset 0..."
+      : `Continuing screening price refresh from offset ${initialOffset}...`);
+    let nextOffset = initialOffset;
 
     while (screeningAutoRunningRef.current) {
       const { attemptId, initialDebug } = startScreeningAttempt(nextOffset, 10);
@@ -471,6 +477,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     }
 
     screeningAutoRunningRef.current = false;
+  }
+
+  function pauseScreeningRefresh() {
+    screeningAutoRunningRef.current = false;
+    setScreeningStatus("paused");
+    setScreeningMessage("Paused. Current batch will not continue.");
   }
 
   function resetScreeningProgress() {
@@ -974,20 +986,36 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         <summary><strong>Screening price data</strong></summary>
         <p className="bread">Används för att hämta och beräkna prisdata för screening. Fyller daily_price_history och price_screen_snapshot.</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
-            {loadingKey === "Refresh Screening Price Data" ? "Updating screening prices..." : "Run next screening batch"}
-          </button>
           <button type="button" onClick={() => void runAllScreeningBatches()} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
-            Run full screening refresh (batched)
+            {loadingKey === "Refresh Screening Price Data" ? "Running screening refresh..." : "Start / Continue screening price refresh"}
           </button>
-          <button type="button" onClick={resetScreeningProgress} disabled={loadingKey !== null}>Reset screening cursor</button>
+          <button type="button" onClick={pauseScreeningRefresh} disabled={!secretReady || screeningStatus !== "running"}>
+            Pause
+          </button>
+          <button type="button" onClick={() => void runAllScreeningBatches()} disabled={!secretReady || loadingKey !== null || (screeningStatus !== "paused" && screeningStatus !== "error")}>
+            Resume
+          </button>
+          <button type="button" onClick={resetScreeningProgress} disabled={loadingKey !== null}>Reset progress</button>
+          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+            Run one debug batch
+          </button>
         </div>
+        <ul className="bread" style={{ marginTop: 8 }}>
+          <li><strong>Start / Continue screening price refresh:</strong> runs the full pipeline (fetch prices → save history → build snapshots) and continues from current offset.</li>
+          <li><strong>Pause:</strong> stops after current batch.</li>
+          <li><strong>Resume:</strong> continues from current offset.</li>
+          <li><strong>Reset progress:</strong> resets cursor/progress only, does not delete stored price data.</li>
+          <li><strong>Run one debug batch:</strong> runs exactly one batch for debugging.</li>
+        </ul>
         <p className="bread">Hämtar prisdata för screening och uppdaterar daily_price_history samt price_screen_snapshot.</p>
         <p className="bread">
           Screening status: <strong>{screeningStatus}</strong> — {screeningMessage}
         </p>
         <p className="bread">
           Offset: {screeningOffset} · Remaining: {screeningRemaining ?? "?"} · Total: {screeningTotal ?? "?"}
+        </p>
+        <p className="bread">
+          Pipeline: <strong>Fetch prices → Save history → Build snapshots</strong>
         </p>
         {priceIngestResult && (
           <div className="bread">
