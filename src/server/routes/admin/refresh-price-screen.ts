@@ -33,12 +33,12 @@ export default async function handler(req: any, res: any) {
     }
 
     if (symbols.length === 0) {
-      res.status(200).json({ ok: true, total: 0, changedSymbols: 0, snapshotWrites: 0, results: [] });
+      res.status(200).json({ ok: true, total: 0, succeeded: 0, failed: 0, changedSymbols: 0, writtenDailyRows: 0, snapshotWrites: 0, results: [], failures: [] });
       return;
     }
 
     const result = await ingestManySymbols({ symbols, debug });
-    res.status(200).json(result);
+    res.status(result.ok ? 200 : 207).json(result);
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;
     res.status(status).json({ ok: false, error: (error as Error).message });

@@ -245,15 +245,24 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
 
 export async function ingestManySymbols(args: { symbols: string[]; debug?: boolean }) {
   const results: IngestSymbolResult[] = [];
+  const failures: Array<{ symbol: string; error: string }> = [];
   for (const symbol of args.symbols) {
-    const item = await ingestDailyPricesAndRefreshSnapshot(symbol, Boolean(args.debug));
-    results.push(item);
+    try {
+      const item = await ingestDailyPricesAndRefreshSnapshot(symbol, Boolean(args.debug));
+      results.push(item);
+    } catch (error) {
+      failures.push({ symbol, error: (error as Error).message });
+    }
   }
   return {
-    ok: true,
-    total: results.length,
+    ok: failures.length === 0,
+    total: args.symbols.length,
+    succeeded: results.length,
+    failed: failures.length,
     changedSymbols: results.filter((item) => item.inserted > 0 || item.updated > 0).length,
+    writtenDailyRows: results.reduce((acc, item) => acc + item.inserted + item.updated, 0),
     snapshotWrites: results.filter((item) => item.snapshotUpdated).length,
     results,
+    failures,
   };
 }
