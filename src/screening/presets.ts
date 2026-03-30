@@ -51,9 +51,9 @@ export const SCREENING_PRESETS: ScreenDefinition[] = [
     fallback: "Om pris-snapshot saknas blir preseten informativ men matchar inte.",
     rules: {
       mustHave: [
-        { id: "dd60", field: "drawdown_60d", operator: "<=", value: -0.25 },
+        { id: "dd60", field: "drawdown_60d", operator: ">=", value: 25 },
         { id: "recovery", field: "recovery_state", operator: "in", value: ["stabilizing", "early_reversal"] },
-        { id: "ret20", field: "return_20d", operator: ">", value: -0.1 },
+        { id: "ret20", field: "return_20d", operator: ">", value: -10 },
       ],
     },
   },
@@ -84,7 +84,7 @@ export const SCREENING_PRESETS: ScreenDefinition[] = [
     ignores: ["Kortsiktig trend"],
     requiredFields: ["founderFlag", "net_income_growth", "dilution"],
     optionalFields: ["insiderScore"],
-    defaults: { maxDilution: 0.05 },
+    defaults: { maxDilution: 5 },
     fallback: "Manual flags kan sättas i Analyst/Manual overrides.",
     rules: {
       mustHave: [

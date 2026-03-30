@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { evaluateScreen } from "../screening/engine";
-import { SCREENING_FIELDS } from "../screening/fieldCatalog";
+import { SCREENING_FIELDS, SCREENING_FIELD_MAP } from "../screening/fieldCatalog";
 import { getPresetById, SCREENING_PRESETS } from "../screening/presets";
 import type { CompanySnapshot, ScreenDefinition, ScreenRule, ScreeningMode, ScreeningResult, UniverseType } from "../screening/types";
 
@@ -29,6 +29,30 @@ function parseManualJson(value: string) {
 function asNumber(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function unitLabel(unit: "percent" | "ratio" | "absolute" | "state") {
+  if (unit === "percent") return "Value (%)";
+  if (unit === "ratio") return "Value (x)";
+  if (unit === "absolute") return "Value";
+  return "Value";
+}
+
+function unitSuffix(unit: "percent" | "ratio" | "absolute" | "state") {
+  if (unit === "percent") return "%";
+  if (unit === "ratio") return "x";
+  return "";
+}
+
+function liveInterpretation(fieldKey: string, value: string) {
+  const numeric = asNumber(value);
+  if (numeric === null) return null;
+  if (fieldKey === "drawdown_20d") return `Matches stocks down at least ${numeric}% over last 20 days.`;
+  if (fieldKey === "drawdown_60d") return `Matches stocks down at least ${numeric}% over last 60 days.`;
+  if (fieldKey === "drawdown_252d") return `Matches stocks down at least ${numeric}% over last 252 days.`;
+  if (fieldKey === "return_20d") return `Matches stocks with at least ${numeric}% return over last 20 days.`;
+  if (fieldKey === "return_60d") return `Matches stocks with at least ${numeric}% return over last 60 days.`;
+  return null;
 }
 
 function buildAdvancedScreen(rules: ScreenRule[]): ScreenDefinition {
@@ -295,6 +319,12 @@ export default function ScreeningDashboard() {
 
           {advancedRules.map((rule, index) => (
             <div key={rule.id} className="stock-selector-row form">
+              {(() => {
+                const fieldDef = SCREENING_FIELD_MAP.get(rule.field);
+                const suffix = unitSuffix(fieldDef?.unit ?? "absolute");
+                const valueText = Array.isArray(rule.value) ? rule.value.join(",") : typeof rule.value === "object" ? "" : String(rule.value);
+                return (
+                  <>
               <div>
                 <label>Field</label>
                 <select value={rule.field} onChange={(event) => updateAdvancedRule(index, { field: event.target.value })}>
@@ -316,26 +346,43 @@ export default function ScreeningDashboard() {
                 </select>
               </div>
               <div>
-                <label>Value</label>
-                <input
-                  value={Array.isArray(rule.value) ? rule.value.join(",") : typeof rule.value === "object" ? "" : String(rule.value)}
-                  onChange={(event) => {
-                    const raw = event.target.value.trim();
-                    const asNum = Number(raw);
-                    if (rule.operator === "in") {
-                      updateAdvancedRule(index, { value: raw.split(",").map((item) => item.trim()).filter(Boolean) });
-                    } else if (Number.isFinite(asNum)) {
-                      updateAdvancedRule(index, { value: asNum });
-                    } else {
-                      updateAdvancedRule(index, { value: raw });
-                    }
-                  }}
-                />
+                <label>{unitLabel(fieldDef?.unit ?? "absolute")}</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    value={valueText}
+                    onChange={(event) => {
+                      const raw = event.target.value.trim();
+                      const asNum = Number(raw);
+                      if (rule.operator === "in") {
+                        updateAdvancedRule(index, { value: raw.split(",").map((item) => item.trim()).filter(Boolean) });
+                      } else if (Number.isFinite(asNum)) {
+                        updateAdvancedRule(index, { value: asNum });
+                      } else {
+                        updateAdvancedRule(index, { value: raw });
+                      }
+                    }}
+                  />
+                  {suffix && <span className="bread">{suffix}</span>}
+                </div>
+                {liveInterpretation(rule.field, valueText) && (
+                  <p className="bread" style={{ marginTop: 6 }}>{liveInterpretation(rule.field, valueText)}</p>
+                )}
               </div>
               <div>
                 <label>&nbsp;</label>
                 <button type="button" onClick={() => removeAdvancedRule(index)}>Ta bort</button>
               </div>
+              {fieldDef && (
+                <div style={{ width: "100%", borderRadius: 10, padding: 10, background: "rgba(255,255,255,0.04)", marginTop: 8 }}>
+                  <p className="bread"><strong>{fieldDef.label}</strong></p>
+                  {fieldDef.description && <p className="bread">{fieldDef.description}</p>}
+                  {fieldDef.interpretation && <p className="bread">{fieldDef.interpretation}</p>}
+                  {fieldDef.example && <p className="bread"><em>Exempel:</em> {fieldDef.example}</p>}
+                </div>
+              )}
+                  </>
+                );
+              })()}
             </div>
           ))}
         </>

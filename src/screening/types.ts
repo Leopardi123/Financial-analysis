@@ -9,9 +9,13 @@ export type ScreeningFieldDef = {
   label: string;
   group: ScreeningFieldGroup;
   dataType: ScreeningFieldType;
+  unit: "percent" | "ratio" | "absolute" | "state";
   source: string;
   simple: boolean;
   advanced: boolean;
+  description?: string;
+  interpretation?: string;
+  example?: string;
 };
 
 export type MetricState = "ok" | "manual" | "missing";

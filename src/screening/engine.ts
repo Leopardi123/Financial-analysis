@@ -39,9 +39,13 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "return_5d":
     case "return_20d":
     case "return_60d":
+      return typeof price[fieldKey] === "number" ? Number(price[fieldKey]) * 100 : null;
     case "drawdown_20d":
-    case "drawdown_60d":
-      return typeof price[fieldKey] === "number" ? Number(price[fieldKey]) : null;
+    case "drawdown_60d": {
+      if (typeof price[fieldKey] !== "number") return null;
+      const raw = Number(price[fieldKey]);
+      return raw < 0 ? Math.abs(raw) * 100 : 0;
+    }
     case "trend_state":
     case "recovery_state":
       return typeof price[fieldKey] === "string" ? String(price[fieldKey]) : null;
@@ -50,11 +54,20 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "free_cash_flow":
       return latest(cashflow.freeCashFlow);
     case "revenue_growth":
-      return growth(latest(income.revenue), prev(income.revenue));
+      return (() => {
+        const value = growth(latest(income.revenue), prev(income.revenue));
+        return value === null ? null : value * 100;
+      })();
     case "ebit_growth":
-      return growth(latest(income.ebitda), prev(income.ebitda));
+      return (() => {
+        const value = growth(latest(income.ebitda), prev(income.ebitda));
+        return value === null ? null : value * 100;
+      })();
     case "net_income_growth":
-      return growth(latest(income.netIncome), prev(income.netIncome));
+      return (() => {
+        const value = growth(latest(income.netIncome), prev(income.netIncome));
+        return value === null ? null : value * 100;
+      })();
     case "debt_to_equity": {
       const debt = latest(balance.totalLiabilities);
       const equity = latest(balance.totalStockholdersEquity);
@@ -66,7 +79,10 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
       return currentAssets !== null && currentLiabilities !== null && currentLiabilities !== 0 ? currentAssets / currentLiabilities : null;
     }
     case "dilution":
-      return growth(latest(income.weightedAverageShsOut), prev(income.weightedAverageShsOut));
+      return (() => {
+        const value = growth(latest(income.weightedAverageShsOut), prev(income.weightedAverageShsOut));
+        return value === null ? null : value * 100;
+      })();
     case "runway_months": {
       const cash = latest(balance.cashAndShortTermInvestments);
       const fcf = latest(cashflow.freeCashFlow);
