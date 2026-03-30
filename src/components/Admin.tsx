@@ -299,6 +299,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   }
 
   async function runScreeningPriceIngest(offset = screeningOffset) {
+    const normalBatchSize = 10;
     setScreeningStatus("running");
     setScreeningMessage(`Running batch from offset ${offset}...`);
     setScreeningDebug({
@@ -306,13 +307,13 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       lastStartedStep: "target_resolution_started",
       currentStage: "target_resolution_started",
       steps: [
-        { key: "request_started", label: "Request started", status: "running", startedAt: new Date().toISOString(), details: { offset, batchSize: 1 } },
-        { key: "resolve_targets", label: "Resolve targets", status: "running", startedAt: new Date().toISOString(), details: { offset, batchSize: 1 } },
+        { key: "request_started", label: "Request started", status: "running", startedAt: new Date().toISOString(), details: { offset, batchSize: normalBatchSize } },
+        { key: "resolve_targets", label: "Resolve targets", status: "running", startedAt: new Date().toISOString(), details: { offset, batchSize: normalBatchSize } },
       ],
     });
     const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
       offset,
-      batchSize: 1,
+      batchSize: normalBatchSize,
     });
     if (payload?.__error) {
       setPriceIngestResult({ ok: false, error: payload.__error });
@@ -359,7 +360,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     while (screeningAutoRunningRef.current) {
       const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
         offset: nextOffset,
-        batchSize: 3,
+        batchSize: 10,
       });
       if (payload?.__error) {
         setPriceIngestResult({ ok: false, error: payload.__error });

@@ -2,7 +2,7 @@ import { getAdminSecret } from "../../../../api/_auth.js";
 import { query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { requireFmpApiKey } from "../../../../api/_fmp.js";
-import { ingestDailyPricesAndRefreshSnapshot } from "../../../lib/prices/screening/ingest.js";
+import { ingestManySymbols } from "../../../lib/prices/screening/ingest.js";
 
 export default async function handler(req: any, res: any) {
   try {
@@ -221,6 +221,8 @@ export default async function handler(req: any, res: any) {
     let changedSymbols = 0;
     let writtenDailyRows = 0;
     let snapshotWrites = 0;
+    const adaptiveMessages: string[] = [];
+    const attemptedBatchSizes: number[] = [];
 
     markRunning("fetch_price_data", { source: "fmp", symbols: runSymbols, currentSymbols: runSymbols });
     markRunning("normalize_parse_response", { currentSymbols: runSymbols });
@@ -231,9 +233,20 @@ export default async function handler(req: any, res: any) {
     markRunning("compute_snapshot", { currentSymbols: runSymbols });
     markRunning("write_snapshot", { currentSymbols: runSymbols });
 
-    for (const symbol of runSymbols) {
-      try {
-        const item = await ingestDailyPricesAndRefreshSnapshot(symbol, true);
+    const normalBatchSize = batchSize;
+    let currentBatchSize = batchSize;
+    let pending = [...runSymbols];
+    let recoveredFromFallback = false;
+
+    while (pending.length > 0) {
+      const chunk = pending.slice(0, currentBatchSize);
+      attemptedBatchSizes.push(currentBatchSize);
+      const batchResult = await ingestManySymbols({ symbols: chunk, debug: true });
+      const chunkFailures = batchResult.failures ?? [];
+      const failedSymbols = new Set(chunkFailures.map((item) => item.symbol));
+      const chunkSuccesses = (batchResult.results ?? []).filter((item) => !failedSymbols.has(String(item.symbol ?? "")));
+
+      for (const item of chunkSuccesses) {
         results.push(item as unknown as Record<string, unknown>);
         succeeded += 1;
         const inserted = Number(item.inserted ?? 0);
@@ -241,14 +254,53 @@ export default async function handler(req: any, res: any) {
         writtenDailyRows += inserted + updated;
         if (inserted > 0 || updated > 0) changedSymbols += 1;
         if (item.snapshotUpdated) snapshotWrites += 1;
-      } catch (error) {
-        failed += 1;
-        failures.push({ symbol, error: (error as Error).message });
       }
+
+      // Remove processed chunk from queue; re-queue failures for retries if needed.
+      pending = pending.slice(chunk.length);
+
+      if (chunkFailures.length === 0) {
+        if (recoveredFromFallback && currentBatchSize !== normalBatchSize) {
+          currentBatchSize = normalBatchSize;
+        }
+        if (recoveredFromFallback) {
+          adaptiveMessages.push(`Resuming normal batch size ${normalBatchSize}`);
+          recoveredFromFallback = false;
+        }
+        continue;
+      }
+
+      if (currentBatchSize > 1) {
+        const nextBatchSize = Math.max(1, Math.floor(currentBatchSize / 2));
+        adaptiveMessages.push(`Batch failed at size ${currentBatchSize}, retrying at size ${nextBatchSize}`);
+        if (nextBatchSize === 1) {
+          adaptiveMessages.push("Retry failed, falling back to single-symbol mode");
+        }
+        pending = [...chunkFailures.map((item) => item.symbol), ...pending];
+        currentBatchSize = nextBatchSize;
+        recoveredFromFallback = true;
+        continue;
+      }
+
+      // Single-symbol fallback mode: mark failed symbol and move on.
+      for (const item of chunkFailures) {
+        failed += 1;
+        failures.push(item);
+        adaptiveMessages.push(`Symbol ${item.symbol} failed, skipped`);
+      }
+      adaptiveMessages.push("Recovered in single-symbol mode");
+      currentBatchSize = normalBatchSize;
+      recoveredFromFallback = true;
     }
     const failureCount = failures.length;
     const successStatus: "failed" | "success" = failureCount > 0 ? "failed" : "success";
-    const sharedDetails = { processedSymbols: succeeded, failedSymbols: failed, currentSymbols: runSymbols };
+    const sharedDetails = {
+      processedSymbols: succeeded,
+      failedSymbols: failed,
+      currentSymbols: runSymbols,
+      attemptedBatchSizes,
+      adaptiveMessages,
+    };
     markDone("fetch_price_data", successStatus, { ...sharedDetails, failures: failures.slice(0, 10) }, failureCount > 0 ? "One or more symbol ingests failed." : undefined);
     markDone("normalize_parse_response", successStatus, sharedDetails, failureCount > 0 ? "See symbol failures." : undefined);
     markDone("validate_required_fields", successStatus, sharedDetails, failureCount > 0 ? "See symbol failures." : undefined);
