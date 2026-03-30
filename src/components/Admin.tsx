@@ -84,6 +84,16 @@ type AdminProps = {
   onTickersUpserted?: () => void;
 };
 
+type PriceStatusRow = {
+  ticker: string;
+  active: boolean;
+  price_data_status: "pending" | "ready" | "failed" | "stale" | string;
+  price_last_update_at: string | null;
+  price_snapshot_at: string | null;
+  price_last_error: string | null;
+  price_init_requested_at: string | null;
+};
+
 type AutoRefreshStatus = "idle" | "running" | "paused" | "done" | "error";
 
 function sleep(ms: number) {
@@ -121,6 +131,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [tickerNextOffset, setTickerNextOffset] = useState<number | null>(null);
   const [tickerProgressUnit, setTickerProgressUnit] = useState<"rows" | "targets">("targets");
   const [tickerProgressPercentShown, setTickerProgressPercentShown] = useState(0);
+  const [priceStatuses, setPriceStatuses] = useState<PriceStatusRow[]>([]);
   const [debugParamEnabled, setDebugParamEnabled] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("admin.debugParamEnabled") === "1";
@@ -235,6 +246,23 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       return list.join(", ");
     });
     setRefreshTicker(normalized);
+  }
+
+  function selectedTickerList() {
+    return tickers
+      .split(",")
+      .map((ticker) => ticker.trim().toUpperCase())
+      .filter(Boolean);
+  }
+
+  async function fetchPriceStatuses() {
+    const selected = selectedTickerList();
+    if (selected.length === 0) {
+      setPriceStatuses([]);
+      return;
+    }
+    const payload = await postJson("Load Price Status", "/api/admin/price-status", { tickers: selected }) as { rows?: PriceStatusRow[] } | undefined;
+    setPriceStatuses(Array.isArray(payload?.rows) ? payload.rows : []);
   }
 
   const initLog = logByKey["Init DB"];
@@ -715,16 +743,62 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               type="button"
               onClick={() =>
                 void postJson("Upsert Tickers", "/api/admin/companies", {
-                  tickers: tickers
-                    .split(",")
-                    .map((ticker) => ticker.trim().toUpperCase())
-                    .filter(Boolean),
-                })
+                  tickers: selectedTickerList(),
+                }).then(() => fetchPriceStatuses())
               }
               disabled={!secretReady || loadingKey !== null}
             >
               {loadingKey === "Upsert Tickers" ? "Upserting..." : "Upsert Tickers"}
             </button>
+            <button
+              type="button"
+              onClick={() => void fetchPriceStatuses()}
+              disabled={!secretReady || loadingKey !== null}
+            >
+              {loadingKey === "Load Price Status" ? "Loading status..." : "Load price status"}
+            </button>
+            {priceStatuses.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <p className="bread"><strong>Price data status</strong> (pending/ready/failed/stale)</p>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Ticker</th>
+                        <th>Status</th>
+                        <th>Last update</th>
+                        <th>Snapshot</th>
+                        <th>Error</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {priceStatuses.map((item) => (
+                        <tr key={item.ticker}>
+                          <td>{item.ticker}</td>
+                          <td>{item.price_data_status}</td>
+                          <td>{item.price_last_update_at ?? "-"}</td>
+                          <td>{item.price_snapshot_at ?? "-"}</td>
+                          <td>{item.price_last_error ?? "-"}</td>
+                          <td>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void postJson("Retry Price Init", "/api/admin/refresh-price-screen", { symbols: [item.ticker] })
+                                  .then(() => fetchPriceStatuses())
+                              }
+                              disabled={!secretReady || loadingKey !== null}
+                            >
+                              Retry
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
