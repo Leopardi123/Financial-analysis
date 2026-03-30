@@ -5,6 +5,7 @@ import { getPresetById, SCREENING_PRESETS } from "../screening/presets";
 import type { CompanySnapshot, ScreenDefinition, ScreenRule, ScreeningMode, ScreeningResult, UniverseType } from "../screening/types";
 
 const WATCHLIST = ["AAPL", "MSFT", "BRK.B", "COST", "NVO"];
+const SAFE_TICKER_PATTERN = /^[A-Z0-9.\-_/]+$/;
 
 async function fetchJson(url: string) {
   const response = await fetch(url);
@@ -44,6 +45,12 @@ function parseManualJson(value: string) {
   } catch {
     return {} as Record<string, Record<string, number>>;
   }
+}
+
+function normalizeTicker(raw: string): string | null {
+  const ticker = String(raw ?? "").trim().toUpperCase();
+  if (!ticker) return null;
+  return SAFE_TICKER_PATTERN.test(ticker) ? ticker : null;
 }
 
 function asNumber(value: string) {
@@ -91,10 +98,14 @@ function buildAdvancedScreen(rules: ScreenRule[]): ScreenDefinition {
 }
 
 async function loadSnapshot(ticker: string, manualData: Record<string, Record<string, number>>) {
+  const normalizedTicker = normalizeTicker(ticker);
+  if (!normalizedTicker) {
+    return null;
+  }
   const [companyPayload, profilePayload, pricePayload] = await Promise.all([
-    fetchJson(`/api/company?ticker=${encodeURIComponent(ticker)}&period=fy`).catch(() => null),
-    fetchJson(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`).catch(() => null),
-    fetchJson(`/api/screening/price-snapshot?symbol=${encodeURIComponent(ticker)}`).catch(() => null),
+    fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=fy`).catch(() => null),
+    fetchJson(`/api/company/profile?ticker=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
+    fetchJson(`/api/screening/price-snapshot?symbol=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
   ]);
 
   if (!companyPayload && !pricePayload?.snapshot) {
@@ -108,7 +119,7 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
     balance: companyPayload?.balance ?? {},
     cashflow: companyPayload?.cashflow ?? {},
     profile: profilePayload?.profile ?? null,
-    manual: manualData[ticker] ?? {},
+    manual: manualData[normalizedTicker] ?? {},
     price: pricePayload?.snapshot ?? null,
   };
   return snapshot;
@@ -171,13 +182,15 @@ export default function ScreeningDashboard() {
 
   async function resolveUniverse(): Promise<string[]> {
     if (universe === "watchlist") {
-      return WATCHLIST;
+      return WATCHLIST.map(normalizeTicker).filter((ticker): ticker is string => Boolean(ticker));
     }
     if (universe === "manual") {
-      return manualTickers.split(",").map((ticker) => ticker.trim().toUpperCase()).filter(Boolean);
+      return manualTickers.split(",").map(normalizeTicker).filter((ticker): ticker is string => Boolean(ticker));
     }
     const payload = await fetchJson("/api/company/list");
-    const list = Array.isArray(payload.tickers) ? payload.tickers.map((item: string) => String(item).toUpperCase()) : [];
+    const list = Array.isArray(payload.tickers)
+      ? payload.tickers.map((item: string) => normalizeTicker(String(item))).filter((ticker: string | null): ticker is string => Boolean(ticker))
+      : [];
     if (universe === "sector") {
       if (!sectorFilter.trim()) return [];
       const filtered: string[] = [];
@@ -220,7 +233,15 @@ export default function ScreeningDashboard() {
         ? Object.values(manualData).filter((record) => manualFieldsUsed.some((field) => typeof record[field] === "number")).length
         : 0;
 
-      const snapshots = await mapWithConcurrency(tickers, 6, (ticker) => loadSnapshot(ticker, manualData));
+      let skippedFetchErrors = 0;
+      const snapshots = await mapWithConcurrency(tickers, 6, async (ticker) => {
+        try {
+          return await loadSnapshot(ticker, manualData);
+        } catch {
+          skippedFetchErrors += 1;
+          return null;
+        }
+      });
       const evaluated = snapshots
         .filter((snapshot): snapshot is CompanySnapshot => snapshot !== null)
         .map((snapshot) => {
@@ -247,6 +268,7 @@ export default function ScreeningDashboard() {
       if (universe === "all") notes.push(`All available data: ${tickers.length} bolag i bas-universe.`);
       if (universe === "watchlist") notes.push(`Watchlist innehåller ${tickers.length} bolag.`);
       if (missingCount > 0) notes.push(`Aktiv regel kräver ${requiredFields.join(", ")}; ${missingCount} bolag saknade obligatorisk data.`);
+      if (skippedFetchErrors > 0) notes.push(`${skippedFetchErrors} bolag hoppades över p.g.a. ogiltig/otillgänglig tickerdata.`);
       if (!manualUsed) notes.push("Denna screening använder inte analyst overrides.");
       if (manualUsed) notes.push(`Uses manual fields: ${manualFieldsUsed.join(", ")}.`);
       setUniverseInfo({
