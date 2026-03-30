@@ -1,8 +1,11 @@
 import { useMemo, useState } from "react";
+import { evaluateScreen } from "../screening/engine";
+import { SCREENING_FIELDS, SCREENING_FIELD_MAP } from "../screening/fieldCatalog";
 import { getPresetById, SCREENING_PRESETS } from "../screening/presets";
-import type { CompanySnapshot, ScreeningResult, UniverseType } from "../screening/types";
+import type { CompanySnapshot, ScreenDefinition, ScreenRule, ScreeningMode, ScreeningResult, UniverseType } from "../screening/types";
 
 const WATCHLIST = ["AAPL", "MSFT", "BRK.B", "COST", "NVO"];
+const SAFE_TICKER_PATTERN = /^[A-Z0-9.\-_/]+$/;
 
 async function fetchJson(url: string) {
   const response = await fetch(url);
@@ -13,122 +16,324 @@ async function fetchJson(url: string) {
   return payload;
 }
 
+async function mapWithConcurrency<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+
+  const runWorker = async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index]);
+      if (index % 20 === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+  };
+
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, () => runWorker());
+  await Promise.all(workers);
+  return results;
+}
+
 function parseManualJson(value: string) {
   if (!value.trim()) {
     return {} as Record<string, Record<string, number>>;
   }
   try {
-    const parsed = JSON.parse(value) as Record<string, Record<string, number>>;
-    return parsed;
+    return JSON.parse(value) as Record<string, Record<string, number>>;
   } catch {
     return {} as Record<string, Record<string, number>>;
   }
 }
 
-async function loadSnapshot(ticker: string, manualData: Record<string, Record<string, number>>) {
-  const [companyPayload, profilePayload] = await Promise.all([
-    fetchJson(`/api/company?ticker=${encodeURIComponent(ticker)}&period=fy`).catch(() => null),
-    fetchJson(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`).catch(() => null),
-  ]);
+function normalizeTicker(raw: string): string | null {
+  const ticker = String(raw ?? "").trim().toUpperCase();
+  if (!ticker) return null;
+  return SAFE_TICKER_PATTERN.test(ticker) ? ticker : null;
+}
 
-  if (!companyPayload || !Array.isArray(companyPayload.years)) {
+function asNumber(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function unitLabel(unit: "percent" | "ratio" | "absolute" | "state") {
+  if (unit === "percent") return "Value (%)";
+  if (unit === "ratio") return "Value (x)";
+  if (unit === "absolute") return "Value";
+  return "Value";
+}
+
+function unitSuffix(unit: "percent" | "ratio" | "absolute" | "state") {
+  if (unit === "percent") return "%";
+  if (unit === "ratio") return "x";
+  return "";
+}
+
+function liveInterpretation(fieldKey: string, value: string) {
+  const numeric = asNumber(value);
+  if (numeric === null) return null;
+  if (fieldKey === "drawdown_20d") return `Matches stocks down at least ${numeric}% over last 20 days.`;
+  if (fieldKey === "drawdown_60d") return `Matches stocks down at least ${numeric}% over last 60 days.`;
+  if (fieldKey === "drawdown_252d") return `Matches stocks down at least ${numeric}% over last 252 days.`;
+  if (fieldKey === "return_20d") return `Matches stocks with at least ${numeric}% return over last 20 days.`;
+  if (fieldKey === "return_60d") return `Matches stocks with at least ${numeric}% return over last 60 days.`;
+  return null;
+}
+
+function buildAdvancedScreen(rules: ScreenRule[]): ScreenDefinition {
+  return {
+    id: "advanced-custom",
+    name: "Advanced custom screen",
+    category: "Advanced",
+    description: "Hypotesdriven screening via mustHave-regler (AND).",
+    checks: ["Alla regler i mustHave måste passera"],
+    ignores: ["Preset-opinionering"],
+    requiredFields: rules.map((rule) => rule.field),
+    optionalFields: [],
+    fallback: "Saknade värden faller ut som fail i respektive regel.",
+    rules: { mustHave: rules },
+  };
+}
+
+async function loadSnapshot(ticker: string, manualData: Record<string, Record<string, number>>) {
+  const normalizedTicker = normalizeTicker(ticker);
+  if (!normalizedTicker) {
     return null;
   }
+  const [companyPayload, profilePayload, pricePayload] = await Promise.all([
+    fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=fy`).catch(() => null),
+    fetchJson(`/api/company/profile?ticker=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
+    fetchJson(`/api/screening/price-snapshot?symbol=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
+  ]);
 
   const snapshot: CompanySnapshot = {
     ticker,
-    years: companyPayload.years,
-    income: companyPayload.income ?? {},
-    balance: companyPayload.balance ?? {},
-    cashflow: companyPayload.cashflow ?? {},
+    years: Array.isArray(companyPayload?.years) ? companyPayload.years : [],
+    income: companyPayload?.income ?? {},
+    balance: companyPayload?.balance ?? {},
+    cashflow: companyPayload?.cashflow ?? {},
     profile: profilePayload?.profile ?? null,
-    manual: manualData[ticker] ?? {},
+    manual: manualData[normalizedTicker] ?? {},
+    price: pricePayload?.snapshot ?? null,
   };
   return snapshot;
 }
 
 export default function ScreeningDashboard() {
-  // Screening in this instrumentbräda is an explainable candidate finder:
-  // choose universe -> choose preset -> optional params -> execute -> see include/exclude reasons -> click through.
-  const [universe, setUniverse] = useState<UniverseType>("watchlist");
+  const [mode, setMode] = useState<ScreeningMode>("simple");
+  const [universe, setUniverse] = useState<UniverseType>("all");
   const [presetId, setPresetId] = useState(SCREENING_PRESETS[0].id);
   const [sectorFilter, setSectorFilter] = useState("");
   const [manualTickers, setManualTickers] = useState("AAPL, MSFT");
-  const [paramValue, setParamValue] = useState("2");
   const [manualJson, setManualJson] = useState('{"AAPL":{"founderFlag":1},"MSFT":{"insiderScore":1}}');
+  const [overrideValues, setOverrideValues] = useState<Record<string, string>>({});
+  const [showManualOverrides, setShowManualOverrides] = useState(false);
+  const [advancedRules, setAdvancedRules] = useState<ScreenRule[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ScreeningResult[]>([]);
+  const [showPassedOnly, setShowPassedOnly] = useState(false);
+  const [universeInfo, setUniverseInfo] = useState<{
+    selectedUniverseCount: number;
+    screenedCount: number;
+    passedCount: number;
+    failedCount: number;
+    missingCount: number;
+    requiredFields: string[];
+    requiredSources: string[];
+    manualUsed: boolean;
+    manualFieldsUsed: string[];
+    manualTickersApplied: number;
+    notes: string[];
+  } | null>(null);
   const [sortBy, setSortBy] = useState<"score" | "ticker">("score");
 
   const preset = useMemo(() => getPresetById(presetId), [presetId]);
 
   const sortedResults = useMemo(() => {
-    const next = [...results];
+    const filtered = showPassedOnly ? results.filter((item) => item.evaluationStatus === "passed") : results;
+    const next = [...filtered];
     if (sortBy === "score") {
       next.sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
     } else {
       next.sort((a, b) => a.ticker.localeCompare(b.ticker));
     }
     return next;
-  }, [results, sortBy]);
+  }, [results, sortBy, showPassedOnly]);
 
-  async function resolveUniverse(): Promise<string[]> {
+  const activeScreen = useMemo(() => {
+    if (mode === "advanced") {
+      return buildAdvancedScreen(advancedRules);
+    }
+    return preset;
+  }, [mode, preset, advancedRules]);
+
+  const visibleColumns = useMemo(() => {
+    const ruleFields = activeScreen.rules.mustHave.map((rule) => rule.field);
+    const unique = [...new Set(ruleFields)].slice(0, 4);
+    return unique;
+  }, [activeScreen]);
+
+  async function resolveUniverse(requiredFields: string[]): Promise<{ tickers: string[]; notes: string[] }> {
+    const notes: string[] = [];
+    const requiresPriceSnapshot = requiredFields.some((field) => SCREENING_FIELD_MAP.get(field)?.source === "price_screen_snapshot");
+
+    let baseUniverse: string[] = [];
     if (universe === "watchlist") {
-      return WATCHLIST;
-    }
-    if (universe === "manual") {
-      return manualTickers.split(",").map((ticker) => ticker.trim().toUpperCase()).filter(Boolean);
-    }
-    const payload = await fetchJson("/api/company/list");
-    const list = Array.isArray(payload.tickers) ? payload.tickers.map((item: string) => String(item).toUpperCase()) : [];
-    if (universe === "sector") {
-      if (!sectorFilter.trim()) return [];
-      const filtered: string[] = [];
-      for (const ticker of list.slice(0, 40)) {
-        const profilePayload = await fetchJson(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`).catch(() => null);
-        const sector = String(profilePayload?.profile?.sector ?? "").toLowerCase();
-        if (sector.includes(sectorFilter.trim().toLowerCase())) {
-          filtered.push(ticker);
+      baseUniverse = WATCHLIST.map(normalizeTicker).filter((ticker): ticker is string => Boolean(ticker));
+    } else if (universe === "manual") {
+      baseUniverse = manualTickers.split(",").map(normalizeTicker).filter((ticker): ticker is string => Boolean(ticker));
+    } else {
+      const payload = await fetchJson("/api/company/list");
+      const list = Array.isArray(payload.tickers)
+        ? payload.tickers.map((item: string) => normalizeTicker(String(item))).filter((ticker: string | null): ticker is string => Boolean(ticker))
+        : [];
+      if (universe === "sector") {
+        if (!sectorFilter.trim()) {
+          return { tickers: [], notes: ["Sector-universe kräver sektorfilter."] };
         }
+        const filtered: string[] = [];
+        for (const ticker of list) {
+          const profilePayload = await fetchJson(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`).catch(() => null);
+          const sector = String(profilePayload?.profile?.sector ?? "").toLowerCase();
+          if (sector.includes(sectorFilter.trim().toLowerCase())) {
+            filtered.push(ticker);
+          }
+        }
+        baseUniverse = filtered;
+      } else {
+        baseUniverse = list;
       }
-      return filtered;
     }
-    return list.slice(0, 40);
+
+    if (!requiresPriceSnapshot) {
+      return { tickers: baseUniverse, notes };
+    }
+
+    const priceSnapshotPayload = await fetchJson("/api/screening/price-snapshot").catch(() => null);
+    const availablePriceSymbols = new Set(
+      Array.isArray(priceSnapshotPayload?.rows)
+        ? priceSnapshotPayload.rows
+          .map((row: Record<string, unknown>) => normalizeTicker(String(row.symbol ?? "")))
+          .filter((ticker: string | null): ticker is string => Boolean(ticker))
+        : [],
+    );
+
+    if (availablePriceSymbols.size === 0) {
+      notes.push("Inga price snapshots hittades ännu. Kör /api/admin/refresh-price-screen innan price-baserad screening.");
+      return { tickers: [], notes };
+    }
+
+    const filteredByPrice = baseUniverse.filter((ticker) => availablePriceSymbols.has(ticker));
+    notes.push(`Price snapshot coverage: ${filteredByPrice.length}/${baseUniverse.length} tickers i valt universe.`);
+    return { tickers: filteredByPrice, notes };
+  }
+
+  function resolveParams(screen: ScreenDefinition): Record<string, number> {
+    const defaults = screen.defaults ?? {};
+    const result: Record<string, number> = {};
+    for (const [key, defaultValue] of Object.entries(defaults)) {
+      const maybe = asNumber(overrideValues[key] ?? "");
+      result[key] = maybe ?? defaultValue;
+    }
+    return result;
   }
 
   async function runScreening() {
     setLoading(true);
     setError(null);
     try {
-      const tickers = await resolveUniverse();
+      const requiredFields = [...new Set(activeScreen.rules.mustHave.map((rule) => rule.field))];
+      const resolvedUniverse = await resolveUniverse(requiredFields);
+      const tickers = resolvedUniverse.tickers;
       const manualData = parseManualJson(manualJson);
-      const params: Record<string, number> = {};
-      if (preset.defaults) {
-        Object.entries(preset.defaults).forEach(([key, value]) => {
-          params[key] = Number.isFinite(Number(paramValue)) ? Number(paramValue) : value;
+      const params = resolveParams(activeScreen);
+      const requiredSources = requiredFields
+        .map((field) => SCREENING_FIELD_MAP.get(field)?.source ?? "unknown")
+        .filter((value, idx, arr) => arr.indexOf(value) === idx);
+      const manualFieldsUsed = requiredFields.filter((field) => SCREENING_FIELD_MAP.get(field)?.group === "manual");
+      const manualUsed = manualFieldsUsed.length > 0;
+      const manualTickersApplied = manualUsed
+        ? Object.values(manualData).filter((record) => manualFieldsUsed.some((field) => typeof record[field] === "number")).length
+        : 0;
+
+      if (tickers.length === 0) {
+        const notes: string[] = [...resolvedUniverse.notes];
+        notes.push("Inga bolag kunde väljas för den aktiva screenen med nuvarande datatäckning.");
+        setResults([]);
+        setUniverseInfo({
+          selectedUniverseCount: 0,
+          screenedCount: 0,
+          passedCount: 0,
+          failedCount: 0,
+          missingCount: 0,
+          requiredFields,
+          requiredSources,
+          manualUsed,
+          manualFieldsUsed,
+          manualTickersApplied,
+          notes,
         });
+        return;
       }
 
-      const snapshots = await Promise.all(tickers.map((ticker) => loadSnapshot(ticker, manualData)));
+      let skippedFetchErrors = 0;
+      const snapshots = await mapWithConcurrency(tickers, 6, async (ticker) => {
+        try {
+          return await loadSnapshot(ticker, manualData);
+        } catch {
+          skippedFetchErrors += 1;
+          return null;
+        }
+      });
       const evaluated = snapshots
         .filter((snapshot): snapshot is CompanySnapshot => snapshot !== null)
         .map((snapshot) => {
-          const score = preset.evaluate(snapshot, params);
+          const score = evaluateScreen({ snapshot, screen: activeScreen, params });
           return {
             ticker: snapshot.ticker,
-            presetId: preset.id,
+            presetId: activeScreen.id,
             matched: score.matched,
             score: score.score,
+            evaluationStatus: score.evaluationStatus,
+            missingRequiredFields: score.missingRequiredFields,
             includeReasons: score.includeReasons,
             excludeReasons: score.excludeReasons,
             metrics: score.metrics,
+            ruleResults: score.ruleResults,
           } as ScreeningResult;
         });
       setResults(evaluated);
+      const screenedCount = evaluated.filter((item) => item.evaluationStatus !== "not_evaluated").length;
+      const passedCount = evaluated.filter((item) => item.evaluationStatus === "passed").length;
+      const failedCount = evaluated.filter((item) => item.evaluationStatus === "failed").length;
+      const missingCount = evaluated.filter((item) => item.evaluationStatus === "not_evaluated").length;
+      const notes: string[] = [...resolvedUniverse.notes];
+      if (universe === "all") notes.push(`All available data: ${tickers.length} bolag i bas-universe.`);
+      if (universe === "watchlist") notes.push(`Watchlist innehåller ${tickers.length} bolag.`);
+      if (missingCount > 0) notes.push(`Aktiv regel kräver ${requiredFields.join(", ")}; ${missingCount} bolag saknade obligatorisk data.`);
+      if (skippedFetchErrors > 0) notes.push(`${skippedFetchErrors} bolag hoppades över p.g.a. ogiltig/otillgänglig tickerdata.`);
+      if (!manualUsed) notes.push("Denna screening använder inte analyst overrides.");
+      if (manualUsed) notes.push(`Uses manual fields: ${manualFieldsUsed.join(", ")}.`);
+      setUniverseInfo({
+        selectedUniverseCount: tickers.length,
+        screenedCount,
+        passedCount,
+        failedCount,
+        missingCount,
+        requiredFields,
+        requiredSources,
+        manualUsed,
+        manualFieldsUsed,
+        manualTickersApplied,
+        notes,
+      });
     } catch (err) {
       setError((err as Error).message);
       setResults([]);
+      setUniverseInfo(null);
     } finally {
       setLoading(false);
     }
@@ -139,14 +344,29 @@ export default function ScreeningDashboard() {
     window.location.hash = "singlestock";
   }
 
+  function openPresetInAdvanced() {
+    setAdvancedRules([...preset.rules.mustHave]);
+    setMode("advanced");
+  }
+
+  function addAdvancedRule() {
+    const field = SCREENING_FIELDS.find((item) => item.advanced)?.key ?? "return_20d";
+    setAdvancedRules((prev) => [...prev, { id: `rule-${Date.now()}`, field, operator: ">", value: 0 }]);
+  }
+
+  function updateAdvancedRule(index: number, patch: Partial<ScreenRule>) {
+    setAdvancedRules((prev) => prev.map((rule, idx) => (idx === index ? { ...rule, ...patch } : rule)));
+  }
+
+  function removeAdvancedRule(index: number) {
+    setAdvancedRules((prev) => prev.filter((_rule, idx) => idx !== index));
+  }
+
   return (
     <div className="screening-dashboard">
       <div className="breadcontainersinglecolumn">
         <h3 className="subrub small">Screening är kandidatjakt, inte köp/sälj-signal</h3>
-        <p className="bread">
-          Flöde: välj universum → välj preset → justera parameter (valfritt) → kör → läs varför
-          bolag inkluderades/exkluderades → klicka vidare till Single Stock Dashboard.
-        </p>
+        <p className="bread">Snabbt läge för opinionerade presets, avancerat läge för hypotesdriven regelbyggnad — samma motor under huven.</p>
       </div>
 
       <div className="stock-selector-row form">
@@ -160,18 +380,25 @@ export default function ScreeningDashboard() {
           </select>
         </div>
         <div>
-          <label>Preset</label>
-          <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
-            {SCREENING_PRESETS.map((item) => (
-              <option key={item.id} value={item.id}>{item.name}</option>
-            ))}
+          <label>Mode</label>
+          <select value={mode} onChange={(event) => setMode(event.target.value as ScreeningMode)}>
+            <option value="simple">Simple</option>
+            <option value="advanced">Advanced</option>
           </select>
         </div>
-        <div>
-          <label>Parameter override</label>
-          <input value={paramValue} onChange={(event) => setParamValue(event.target.value)} />
-        </div>
       </div>
+
+      {universeInfo && (
+        <div className="breadcontainersinglecolumn">
+          <p className="bread"><strong>Universe:</strong> {universe === "all" ? "All available data" : universe}, {universeInfo.selectedUniverseCount} bolag.</p>
+          <p className="bread"><strong>Aktiv screen använder data från:</strong> {universeInfo.requiredSources.join(" + ") || "okänd källa"}.</p>
+          <p className="bread"><strong>Efter datatäckningsfilter:</strong> {universeInfo.screenedCount} bolag kunde utvärderas.</p>
+          {universeInfo.screenedCount === 0 && (
+            <p className="status error">Ingen screening kunde köras: price snapshot eller annan required data saknas för aktiva regler.</p>
+          )}
+          {universeInfo.notes.map((note) => <p className="bread" key={note}>{note}</p>)}
+        </div>
+      )}
 
       {universe === "sector" && (
         <div className="stock-selector-row form">
@@ -191,24 +418,145 @@ export default function ScreeningDashboard() {
         </div>
       )}
 
-      <div className="stock-selector-row form">
-        <div style={{ width: "100%" }}>
-          <label>Manual JSON input (per ticker metrics)</label>
-          <textarea
-            className="manual-json"
-            value={manualJson}
-            onChange={(event) => setManualJson(event.target.value)}
-          />
-        </div>
-      </div>
+      {mode === "simple" ? (
+        <>
+          <div className="stock-selector-row form">
+            <div>
+              <label>Preset</label>
+              <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
+                {SCREENING_PRESETS.map((item) => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>Quick action</label>
+              <button type="button" onClick={openPresetInAdvanced}>Öppna i avancerat läge</button>
+            </div>
+          </div>
+
+          <div className="breadcontainersinglecolumn">
+            <p className="bread"><strong>Preset:</strong> {preset.description}</p>
+            <p className="bread"><strong>Detta tittar preset på:</strong> {preset.checks.join(" • ")}</p>
+            <p className="bread"><strong>Detta ignorerar preset:</strong> {preset.ignores.join(" • ")}</p>
+            <p className="bread"><strong>Fallback:</strong> {preset.fallback}</p>
+          </div>
+
+          {Object.keys(preset.defaults ?? {}).length > 0 && (
+            <div className="stock-selector-row form">
+              {Object.entries(preset.defaults ?? {}).slice(0, 4).map(([key, value]) => (
+                <div key={key}>
+                  <label>{key}</label>
+                  <input
+                    value={overrideValues[key] ?? String(value)}
+                    onChange={(event) => setOverrideValues((prev) => ({ ...prev, [key]: event.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="breadcontainersinglecolumn">
+            <p className="bread"><strong>Advanced:</strong> Bygg mustHave-regler (AND). Presets kan öppnas här och justeras.</p>
+          </div>
+          <div className="stock-selector-row">
+            <button type="button" onClick={addAdvancedRule}>+ Lägg till regel</button>
+          </div>
+
+          {advancedRules.length === 0 && <p className="bread">Inga regler ännu. Lägg till en regel för att köra Advanced-screening.</p>}
+
+          {advancedRules.map((rule, index) => (
+            <div key={rule.id} className="stock-selector-row form">
+              {(() => {
+                const fieldDef = SCREENING_FIELD_MAP.get(rule.field);
+                const suffix = unitSuffix(fieldDef?.unit ?? "absolute");
+                const valueText = Array.isArray(rule.value) ? rule.value.join(",") : typeof rule.value === "object" ? "" : String(rule.value);
+                return (
+                  <>
+              <div>
+                <label>Field</label>
+                <select value={rule.field} onChange={(event) => updateAdvancedRule(index, { field: event.target.value })}>
+                  {SCREENING_FIELDS.filter((field) => field.advanced).map((field) => (
+                    <option key={field.key} value={field.key}>{field.group.toUpperCase()} • {field.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label>Operator</label>
+                <select value={rule.operator} onChange={(event) => updateAdvancedRule(index, { operator: event.target.value as ScreenRule["operator"] })}>
+                  <option value=">">&gt;</option>
+                  <option value=">=">&gt;=</option>
+                  <option value="<">&lt;</option>
+                  <option value="<=">&lt;=</option>
+                  <option value="==">==</option>
+                  <option value="!=">!=</option>
+                  <option value="in">in (csv)</option>
+                </select>
+              </div>
+              <div>
+                <label>{unitLabel(fieldDef?.unit ?? "absolute")}</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    value={valueText}
+                    onChange={(event) => {
+                      const raw = event.target.value.trim();
+                      const asNum = Number(raw);
+                      if (rule.operator === "in") {
+                        updateAdvancedRule(index, { value: raw.split(",").map((item) => item.trim()).filter(Boolean) });
+                      } else if (Number.isFinite(asNum)) {
+                        updateAdvancedRule(index, { value: asNum });
+                      } else {
+                        updateAdvancedRule(index, { value: raw });
+                      }
+                    }}
+                  />
+                  {suffix && <span className="bread">{suffix}</span>}
+                </div>
+                {liveInterpretation(rule.field, valueText) && (
+                  <p className="bread" style={{ marginTop: 6 }}>{liveInterpretation(rule.field, valueText)}</p>
+                )}
+              </div>
+              <div>
+                <label>&nbsp;</label>
+                <button type="button" onClick={() => removeAdvancedRule(index)}>Ta bort</button>
+              </div>
+              {fieldDef && (
+                <div style={{ width: "100%", borderRadius: 10, padding: 10, background: "rgba(255,255,255,0.04)", marginTop: 8 }}>
+                  <p className="bread"><strong>{fieldDef.label}</strong></p>
+                  {fieldDef.description && <p className="bread">{fieldDef.description}</p>}
+                  {fieldDef.interpretation && <p className="bread">{fieldDef.interpretation}</p>}
+                  {fieldDef.example && <p className="bread"><em>Exempel:</em> {fieldDef.example}</p>}
+                </div>
+              )}
+                  </>
+                );
+              })()}
+            </div>
+          ))}
+        </>
+      )}
 
       <div className="breadcontainersinglecolumn">
-        <p className="bread"><strong>Preset:</strong> {preset.description}</p>
-        <p className="bread"><strong>Checks:</strong> {preset.checks.join(" • ")}</p>
-        <p className="bread"><strong>Ignores:</strong> {preset.ignores.join(" • ")}</p>
-        <p className="bread"><strong>Fallback:</strong> {preset.fallback}</p>
-        <p className="bread"><strong>Required fields:</strong> {preset.requiredFields.join(", ")}</p>
+        <button type="button" onClick={() => setShowManualOverrides((prev) => !prev)}>
+          {showManualOverrides ? "Dölj" : "Visa"} Analyst / Manual overrides
+        </button>
       </div>
+
+      {showManualOverrides && (
+        <div className="stock-selector-row form">
+          <div style={{ width: "100%" }}>
+            <label>Analyst overrides (optional)</label>
+            <p className="bread">Valfritt. Används endast för manuella flaggor per ticker (t.ex. founderFlag, insiderScore). Påverkar inte universe eller ersätter inte pris/fundamentaldata.</p>
+            <textarea
+              className="manual-json"
+              value={manualJson}
+              onChange={(event) => setManualJson(event.target.value)}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="stock-selector-row">
         <button type="button" onClick={() => void runScreening()} disabled={loading}>
@@ -223,9 +571,21 @@ export default function ScreeningDashboard() {
 
       {error && <p className="status error">{error}</p>}
 
+      {universeInfo && (
+        <div className="breadcontainersinglecolumn">
+          <p className="bread"><strong>Screened:</strong> {universeInfo.screenedCount} bolag • <strong>Passed:</strong> {universeInfo.passedCount} • <strong>Failed:</strong> {universeInfo.failedCount} • <strong>Not evaluated (missing data):</strong> {universeInfo.missingCount}</p>
+          <p className="bread">
+            {universeInfo.manualUsed
+              ? `Manual overrides applied to ${universeInfo.manualTickersApplied} tickers.`
+              : "Manual overrides not used by current rules."}
+          </p>
+          <label className="bread"><input type="checkbox" checked={showPassedOnly} onChange={(event) => setShowPassedOnly(event.target.checked)} /> Show passed only</label>
+        </div>
+      )}
+
       <div className="viewer-table">
         {sortedResults.length === 0 && !loading ? (
-          <p className="status empty">Inga resultat ännu. Kör en preset för att se förklarade kandidater.</p>
+          <p className="status empty">Inga resultat ännu. Kör en screen för att se kandidater.</p>
         ) : (
           <div className="table-scroll">
             <table>
@@ -233,10 +593,10 @@ export default function ScreeningDashboard() {
                 <tr>
                   <th className="sticky-col">Ticker</th>
                   <th>Score</th>
-                  <th>Matched</th>
+                  <th>Pass/Fail</th>
                   <th>Why included</th>
                   <th>Why excluded</th>
-                  <th>Why did this match?</th>
+                  {visibleColumns.map((column) => <th key={column}>{column}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -246,16 +606,13 @@ export default function ScreeningDashboard() {
                       <button type="button" onClick={() => openTicker(result.ticker)}>{result.ticker}</button>
                     </td>
                     <td>{result.score.toFixed(1)}</td>
-                    <td>{result.matched ? "Ja" : "Nej"}</td>
-                    <td>{result.includeReasons.join(" ") || "-"}</td>
-                    <td>{result.excludeReasons.join(" ") || "-"}</td>
-                    <td>
-                      {result.metrics.map((item) => (
-                        <div key={item.key}>
-                          {item.label}: {item.value === null ? `(${item.state})` : item.value.toFixed(2)}
-                        </div>
-                      ))}
-                    </td>
+                    <td>{result.evaluationStatus === "not_evaluated" ? "Not evaluated" : result.matched ? "Pass" : "Fail"}</td>
+                    <td>{result.includeReasons.slice(0, 2).join(" ") || "-"}</td>
+                    <td>{result.evaluationStatus === "not_evaluated" ? `Missing: ${result.missingRequiredFields.join(", ")}` : result.excludeReasons.slice(0, 2).join(" ") || "-"}</td>
+                    {visibleColumns.map((column) => {
+                      const metric = result.metrics.find((item) => item.key === column);
+                      return <td key={`${result.ticker}-${column}`}>{metric?.value === null || metric?.value === undefined ? "-" : String(metric.value)}</td>;
+                    })}
                   </tr>
                 ))}
               </tbody>
