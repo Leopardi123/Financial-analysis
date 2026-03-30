@@ -23,6 +23,8 @@ const TABLES = {
   macroIngestRuns: "macro_ingest_runs",
   macroLatestReadCache: "macro_latest_read_cache",
   macroHistoryReadCache: "macro_history_read_cache",
+  dailyPriceHistory: "daily_price_history",
+  priceScreenSnapshot: "price_screen_snapshot",
 };
 
 export async function ensureSchema() {
@@ -293,6 +295,43 @@ export async function ensureSchema() {
   );
 
   await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.dailyPriceHistory} (
+      symbol TEXT NOT NULL,
+      price_date TEXT NOT NULL,
+      close REAL NOT NULL,
+      adjusted_close REAL,
+      volume REAL,
+      source TEXT NOT NULL,
+      currency TEXT,
+      updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(symbol, price_date)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.priceScreenSnapshot} (
+      symbol TEXT PRIMARY KEY,
+      as_of_date TEXT NOT NULL,
+      last_close REAL,
+      return_5d REAL,
+      return_20d REAL,
+      return_60d REAL,
+      high_20d REAL,
+      high_60d REAL,
+      drawdown_20d REAL,
+      drawdown_60d REAL,
+      ma20 REAL,
+      ma50 REAL,
+      trend_state TEXT,
+      recovery_state TEXT,
+      history_points_used INTEGER,
+      source TEXT,
+      updated_at TEXT NOT NULL
+    )`
+  );
+
+  await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companyProjects} (
       id TEXT PRIMARY KEY,
       symbol TEXT NOT NULL,
@@ -366,6 +405,14 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_company_sector_map_company
             ON ${TABLES.companySectorMap} (company_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_daily_price_history_symbol_date_desc
+            ON ${TABLES.dailyPriceHistory} (symbol, price_date DESC)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_daily_price_history_date
+            ON ${TABLES.dailyPriceHistory} (price_date)`,
     },
 
 

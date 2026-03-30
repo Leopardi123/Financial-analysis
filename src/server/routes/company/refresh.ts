@@ -8,6 +8,7 @@ import {
 } from "../../../../api/_fmp.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { getCoverageCounts, materializeReports, toFiscalDateCutoffIso } from "../../materialization/materializeReportsCore.js";
+import { ingestDailyPricesAndRefreshSnapshot } from "../../../lib/prices/screening/ingest.js";
 
 const STATEMENTS: StatementType[] = ["balance", "income", "cashflow"];
 const PERIODS: PeriodType[] = ["fy", "q"];
@@ -343,11 +344,48 @@ export default async function handler(req: any, res: any) {
       insertedLegacy: rowsWrittenInRun,
     });
 
+    let priceRefresh: {
+      attempted: boolean;
+      ok: boolean;
+      inserted: number;
+      updated: number;
+      unchanged: number;
+      snapshotUpdated: boolean;
+      skipped?: boolean;
+      error?: string;
+    } | null = null;
+    const includePriceRefresh = req.body?.includePrice !== false;
+    if (includePriceRefresh) {
+      try {
+        const priceResult = await ingestDailyPricesAndRefreshSnapshot(ticker, false);
+        priceRefresh = {
+          attempted: true,
+          ok: true,
+          inserted: priceResult.inserted,
+          updated: priceResult.updated,
+          unchanged: priceResult.unchanged,
+          snapshotUpdated: priceResult.snapshotUpdated,
+          skipped: priceResult.skipped,
+        };
+      } catch (error) {
+        priceRefresh = {
+          attempted: true,
+          ok: false,
+          inserted: 0,
+          updated: 0,
+          unchanged: 0,
+          snapshotUpdated: false,
+          error: (error as Error).message,
+        };
+      }
+    }
+
     res.status(200).json({
       ok: true,
       ticker,
       phase: done ? "materialized_done" : "materialized_partial",
       raw: rawSummary,
+      priceRefresh,
       materialization: {
         cursor: responseCursor,
         nextCursor,

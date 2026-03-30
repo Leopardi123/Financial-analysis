@@ -6,7 +6,9 @@ import {
   requireFmpApiKey,
 } from "../../../../api/_fmp.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { assertCronSecret } from "../../../../api/_auth.js";
 import { getCoverageCounts, materializeReports, toFiscalDateCutoffIso } from "../../materialization/materializeReportsCore.js";
+import { ingestManySymbols } from "../../../lib/prices/screening/ingest.js";
 
 const STATEMENTS: StatementType[] = ["balance", "income", "cashflow"];
 const MAX_CALLS = 120;
@@ -18,16 +20,6 @@ const LOCK_PERIOD = "lock";
 const LOCK_STATEMENT = "refresh";
 const PERIODS: PeriodType[] = ["q", "fy"];
 const BOOTSTRAP_REPORT_LIMIT = 12;
-
-function isCronAuthorized(req: { headers: Record<string, string | string[] | undefined> }) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    return true;
-  }
-  const authorization = req.headers.authorization;
-  const bearer = Array.isArray(authorization) ? authorization[0] : authorization;
-  return bearer === `Bearer ${secret}`;
-}
 
 async function acquireCronLock(runId: string) {
   const now = new Date();
@@ -137,8 +129,14 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  if (!isCronAuthorized(req)) {
-    res.status(401).json({ ok: false, error: "Unauthorized" });
+  try {
+    assertCronSecret(req);
+  } catch {
+    res.status(401).json({
+      ok: false,
+      error: "Unauthorized",
+      detail: "Provide CRON_SECRET via x-cron-secret header or Authorization: Bearer <CRON_SECRET>.",
+    });
     return;
   }
 
@@ -357,6 +355,26 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    const priceRefreshSymbols = [...new Set(processed.map((item) => item.ticker))].slice(0, 40);
+    let priceRefresh: { attemptedSymbols: number; snapshotWrites: number; changedSymbols: number; error?: string } | null = null;
+    if (priceRefreshSymbols.length > 0) {
+      try {
+        const priceResult = await ingestManySymbols({ symbols: priceRefreshSymbols });
+        priceRefresh = {
+          attemptedSymbols: priceRefreshSymbols.length,
+          snapshotWrites: priceResult.snapshotWrites,
+          changedSymbols: priceResult.changedSymbols,
+        };
+      } catch (error) {
+        priceRefresh = {
+          attemptedSymbols: priceRefreshSymbols.length,
+          snapshotWrites: 0,
+          changedSymbols: 0,
+          error: (error as Error).message,
+        };
+      }
+    }
+
     res.status(200).json({
       ok: true,
       budget: {
@@ -365,6 +383,7 @@ export default async function handler(req: any, res: any) {
       },
       processedCount: processed.length,
       processed,
+      priceRefresh,
     });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;
