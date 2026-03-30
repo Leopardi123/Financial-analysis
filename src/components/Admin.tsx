@@ -320,12 +320,16 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     const attemptId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const initialDebug: ScreeningDebugPayload = {
       lastCompletedStep: null,
-      lastStartedStep: "target_resolution_started",
-      currentStage: "target_resolution_started",
+      lastStartedStep: "resolve_targets",
+      currentStage: "resolve_targets",
       requestStartedAt: now,
       steps: [
         { key: "request_started", label: "Request started", status: "running", startedAt: now, details: { offset, batchSize } },
         { key: "resolve_targets", label: "Resolve targets", status: "running", startedAt: now, details: { offset, batchSize } },
+        { key: "load_symbols_batch", label: "Load symbols / batch", status: "pending" },
+        { key: "fetch_price_data", label: "Fetch price data", status: "pending" },
+        { key: "write_daily_history", label: "Write daily_price_history", status: "pending" },
+        { key: "compute_snapshot", label: "Compute price_screen_snapshot", status: "pending" },
       ],
     };
     const attempt: ScreeningAttempt = { attemptId, startedAt: now, offset, batchSize, status: "running", debug: initialDebug };
@@ -339,7 +343,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   }
 
   async function runScreeningPriceIngest(offset = screeningOffset) {
-    const normalBatchSize = 10;
+    const normalBatchSize = 3;
     setScreeningStatus("running");
     setScreeningMessage(`Running batch from offset ${offset}...`);
     const { attemptId, initialDebug } = startScreeningAttempt(offset, normalBatchSize);
@@ -352,7 +356,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       setScreeningStatus("error");
       const endedAt = new Date().toISOString();
       const timeoutMessage = payload.__error.includes("timed out")
-        ? `Timed out before first symbol completed. Last completed step: ${initialDebug.lastCompletedStep ?? "none"}. Last started step: ${initialDebug.lastStartedStep ?? "target_resolution_started"}. Possible cause: target resolution/query setup too slow; external call may not have started.`
+        ? `Timed out before first symbol was selected. No symbols processed in this attempt. Timed out during target resolution/query setup; load_symbols_batch, fetch, save and snapshot did not start. Continue will retry from offset ${offset} with batch size ${normalBatchSize}.`
         : payload.__error;
       setScreeningMessage(timeoutMessage);
       patchScreeningAttempt(attemptId, {
@@ -414,17 +418,17 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     let nextOffset = initialOffset;
 
     while (screeningAutoRunningRef.current) {
-      const { attemptId, initialDebug } = startScreeningAttempt(nextOffset, 10);
+      const { attemptId, initialDebug } = startScreeningAttempt(nextOffset, 3);
       const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
         offset: nextOffset,
-        batchSize: 10,
+        batchSize: 3,
       });
       if (payload?.__error) {
         setPriceIngestResult({ ok: false, error: payload.__error });
         setScreeningStatus("error");
         const endedAt = new Date().toISOString();
         const timeoutMessage = payload.__error.includes("timed out")
-          ? `Timed out before completion. Last completed step: ${initialDebug.lastCompletedStep ?? "none"}. Last started: ${initialDebug.lastStartedStep ?? "unknown"}.`
+          ? `Timed out before first symbol was selected. No symbols processed in this attempt. Timed out during target resolution/query setup; load_symbols_batch, fetch, save and snapshot did not start. Continue will retry from offset ${nextOffset} with batch size 3.`
           : payload.__error;
         setScreeningMessage(timeoutMessage);
         patchScreeningAttempt(attemptId, {
