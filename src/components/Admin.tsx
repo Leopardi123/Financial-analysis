@@ -124,6 +124,8 @@ type ScreeningDebugStep = {
 type ScreeningDebugPayload = {
   steps?: ScreeningDebugStep[];
   lastCompletedStep?: string | null;
+  lastStartedStep?: string | null;
+  currentStage?: string | null;
   failedStep?: string | null;
   timeoutStage?: string | null;
   requestStartedAt?: string;
@@ -299,15 +301,24 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   async function runScreeningPriceIngest(offset = screeningOffset) {
     setScreeningStatus("running");
     setScreeningMessage(`Running batch from offset ${offset}...`);
+    setScreeningDebug({
+      lastCompletedStep: null,
+      lastStartedStep: "target_resolution_started",
+      currentStage: "target_resolution_started",
+      steps: [
+        { key: "request_started", label: "Request started", status: "running", startedAt: new Date().toISOString(), details: { offset, batchSize: 1 } },
+        { key: "resolve_targets", label: "Resolve targets", status: "running", startedAt: new Date().toISOString(), details: { offset, batchSize: 1 } },
+      ],
+    });
     const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
       offset,
-      batchSize: 10,
+      batchSize: 1,
     });
     if (payload?.__error) {
       setPriceIngestResult({ ok: false, error: payload.__error });
       setScreeningStatus("error");
       const timeoutMessage = payload.__error.includes("timed out")
-        ? `Timed out during request. Last completed step: ${screeningDebug?.lastCompletedStep ?? "none"}. Active stage likely: ${screeningDebug?.failedStep ?? "request_in_flight"}.`
+        ? `Timed out before first symbol completed. Last completed step: ${screeningDebug?.lastCompletedStep ?? "none"}. Last started step: ${screeningDebug?.lastStartedStep ?? "target_resolution_started"}. Possible cause: target resolution/query setup too slow; external call may not have started.`
         : payload.__error;
       setScreeningMessage(timeoutMessage);
       setScreeningDebugOpen(true);
@@ -338,20 +349,23 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   async function runAllScreeningBatches() {
     if (screeningAutoRunningRef.current) return;
     screeningAutoRunningRef.current = true;
+    setScreeningOffset(0);
+    setScreeningRemaining(null);
+    setScreeningTotal(null);
     setScreeningStatus("running");
-    setScreeningMessage("Starting batched screening refresh...");
+    setScreeningMessage("Initializing full refresh (batched, small chunks)...");
     let nextOffset = 0;
 
     while (screeningAutoRunningRef.current) {
       const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
         offset: nextOffset,
-        batchSize: 10,
+        batchSize: 3,
       });
       if (payload?.__error) {
         setPriceIngestResult({ ok: false, error: payload.__error });
         setScreeningStatus("error");
         const timeoutMessage = payload.__error.includes("timed out")
-          ? `Timed out before completion. Last completed step: ${screeningDebug?.lastCompletedStep ?? "none"}.`
+          ? `Timed out before completion. Last completed step: ${screeningDebug?.lastCompletedStep ?? "none"}. Last started: ${screeningDebug?.lastStartedStep ?? "unknown"}.`
           : payload.__error;
         setScreeningMessage(timeoutMessage);
         setScreeningDebugOpen(true);
@@ -912,7 +926,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
           {screeningDebug?.steps?.length ? (
             <div>
               <p className="bread">
-                Last completed: {screeningDebug.lastCompletedStep ?? "none"} · Failed step: {screeningDebug.failedStep ?? "none"} · Duration: {screeningDebug.durationMs ?? 0} ms
+                Last completed: {screeningDebug.lastCompletedStep ?? "none"} · Last started: {screeningDebug.lastStartedStep ?? "none"} · Current stage: {screeningDebug.currentStage ?? "none"} · Failed step: {screeningDebug.failedStep ?? "none"} · Duration: {screeningDebug.durationMs ?? 0} ms
               </p>
               {screeningDebug.steps.map((step) => (
                 <details key={step.key} style={{ marginBottom: 6 }}>

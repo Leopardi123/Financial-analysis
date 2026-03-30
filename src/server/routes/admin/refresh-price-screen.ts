@@ -2,7 +2,7 @@ import { getAdminSecret } from "../../../../api/_auth.js";
 import { query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { requireFmpApiKey } from "../../../../api/_fmp.js";
-import { ingestManySymbols } from "../../../lib/prices/screening/ingest.js";
+import { ingestDailyPricesAndRefreshSnapshot } from "../../../lib/prices/screening/ingest.js";
 
 export default async function handler(req: any, res: any) {
   try {
@@ -32,9 +32,11 @@ export default async function handler(req: any, res: any) {
       { key: "finalize_response", label: "Finalize progress / cursor / response", status: "pending" },
     ];
     let lastCompletedStep: string | null = null;
+    let lastStartedStep: string | null = "request_started";
     const markRunning = (key: string, details?: Record<string, unknown>) => {
       const step = debugSteps.find((item) => item.key === key);
       if (!step) return;
+      lastStartedStep = key;
       step.status = "running";
       step.startedAt = new Date().toISOString();
       if (details) step.details = { ...(step.details ?? {}), ...details };
@@ -98,8 +100,8 @@ export default async function handler(req: any, res: any) {
       : [];
     const rawOffset = Number(req.query?.offset ?? body.offset ?? 0);
     const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.floor(rawOffset)) : 0;
-    const rawBatchSize = Number(req.query?.batchSize ?? body.batchSize ?? 10);
-    const batchSize = Math.max(1, Math.min(10, Number.isFinite(rawBatchSize) ? Math.floor(rawBatchSize) : 10));
+    const rawBatchSize = Number(req.query?.batchSize ?? body.batchSize ?? 1);
+    const batchSize = Math.max(1, Math.min(3, Number.isFinite(rawBatchSize) ? Math.floor(rawBatchSize) : 1));
 
     markRunning("resolve_targets", {
       requestedSymbols: explicitSymbols.slice(0, 20),
@@ -147,6 +149,8 @@ export default async function handler(req: any, res: any) {
         debug: {
           steps: debugSteps,
           lastCompletedStep,
+          lastStartedStep,
+          currentStage: lastStartedStep,
           failedStep: null,
           timeoutStage: null,
           requestStartedAt: requestStartIso,
@@ -198,6 +202,8 @@ export default async function handler(req: any, res: any) {
         debug: {
           steps: debugSteps,
           lastCompletedStep,
+          lastStartedStep,
+          currentStage: lastStartedStep,
           failedStep: null,
           timeoutStage: null,
           requestStartedAt: requestStartIso,
@@ -208,48 +214,49 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    markRunning("fetch_price_data", { source: "fmp", symbols: runSymbols });
-    markRunning("normalize_parse_response");
-    markRunning("validate_required_fields");
-    markRunning("transform_daily_rows");
-    markRunning("write_daily_history");
-    markRunning("load_recent_window");
-    markRunning("compute_snapshot");
-    markRunning("write_snapshot");
-    const result = await ingestManySymbols({ symbols: runSymbols, debug: true });
-    const failureCount = result.failures.length;
+    const results: Array<Record<string, unknown>> = [];
+    const failures: Array<{ symbol: string; error: string }> = [];
+    let succeeded = 0;
+    let failed = 0;
+    let changedSymbols = 0;
+    let writtenDailyRows = 0;
+    let snapshotWrites = 0;
+
+    markRunning("fetch_price_data", { source: "fmp", symbols: runSymbols, currentSymbols: runSymbols });
+    markRunning("normalize_parse_response", { currentSymbols: runSymbols });
+    markRunning("validate_required_fields", { currentSymbols: runSymbols });
+    markRunning("transform_daily_rows", { currentSymbols: runSymbols });
+    markRunning("write_daily_history", { currentSymbols: runSymbols });
+    markRunning("load_recent_window", { currentSymbols: runSymbols });
+    markRunning("compute_snapshot", { currentSymbols: runSymbols });
+    markRunning("write_snapshot", { currentSymbols: runSymbols });
+
+    for (const symbol of runSymbols) {
+      try {
+        const item = await ingestDailyPricesAndRefreshSnapshot(symbol, true);
+        results.push(item as unknown as Record<string, unknown>);
+        succeeded += 1;
+        const inserted = Number(item.inserted ?? 0);
+        const updated = Number(item.updated ?? 0);
+        writtenDailyRows += inserted + updated;
+        if (inserted > 0 || updated > 0) changedSymbols += 1;
+        if (item.snapshotUpdated) snapshotWrites += 1;
+      } catch (error) {
+        failed += 1;
+        failures.push({ symbol, error: (error as Error).message });
+      }
+    }
+    const failureCount = failures.length;
     const successStatus: "failed" | "success" = failureCount > 0 ? "failed" : "success";
-    markDone("fetch_price_data", successStatus, {
-      failedSymbols: result.failures.slice(0, 10).map((item) => item.symbol),
-      failures: result.failures.slice(0, 10),
-    }, failureCount > 0 ? "One or more symbol ingests failed." : undefined);
-    markDone("normalize_parse_response", successStatus, {
-      processedSymbols: result.succeeded,
-      failedSymbols: result.failed,
-    }, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("validate_required_fields", successStatus, {
-      processedSymbols: result.succeeded,
-      failedSymbols: result.failed,
-    }, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("transform_daily_rows", successStatus, {
-      writtenDailyRows: result.writtenDailyRows,
-    }, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("write_daily_history", successStatus, {
-      writtenDailyRows: result.writtenDailyRows,
-      changedSymbols: result.changedSymbols,
-    }, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("load_recent_window", successStatus, {}, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("compute_snapshot", successStatus, {
-      snapshotWrites: result.snapshotWrites,
-      sampleSnapshotDebug: (result.results ?? []).slice(0, 5).map((item) => ({
-        symbol: item.symbol,
-        snapshotUpdated: item.snapshotUpdated,
-        debug: item.debug ?? null,
-      })),
-    }, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("write_snapshot", successStatus, {
-      snapshotWrites: result.snapshotWrites,
-    }, failureCount > 0 ? "See symbol failures." : undefined);
+    const sharedDetails = { processedSymbols: succeeded, failedSymbols: failed, currentSymbols: runSymbols };
+    markDone("fetch_price_data", successStatus, { ...sharedDetails, failures: failures.slice(0, 10) }, failureCount > 0 ? "One or more symbol ingests failed." : undefined);
+    markDone("normalize_parse_response", successStatus, sharedDetails, failureCount > 0 ? "See symbol failures." : undefined);
+    markDone("validate_required_fields", successStatus, sharedDetails, failureCount > 0 ? "See symbol failures." : undefined);
+    markDone("transform_daily_rows", successStatus, { ...sharedDetails, writtenDailyRows }, failureCount > 0 ? "See symbol failures." : undefined);
+    markDone("write_daily_history", successStatus, { ...sharedDetails, writtenDailyRows, changedSymbols }, failureCount > 0 ? "See symbol failures." : undefined);
+    markDone("load_recent_window", successStatus, sharedDetails, failureCount > 0 ? "See symbol failures." : undefined);
+    markDone("compute_snapshot", successStatus, { ...sharedDetails, snapshotWrites }, failureCount > 0 ? "See symbol failures." : undefined);
+    markDone("write_snapshot", successStatus, { ...sharedDetails, snapshotWrites }, failureCount > 0 ? "See symbol failures." : undefined);
     const processedInRun = runSymbols.length;
     const processedTotal = Math.min(totalToProcess, offset + processedInRun);
     const remaining = Math.max(0, totalToProcess - processedTotal);
@@ -258,8 +265,16 @@ export default async function handler(req: any, res: any) {
     markRunning("finalize_response", { nextOffset, remaining, processedInRun, totalToProcess });
     markDone("finalize_response", "success");
 
-    res.status(result.ok ? 200 : 207).json({
-      ...result,
+    const ok = failureCount === 0;
+    res.status(ok ? 200 : 207).json({
+      ok,
+      succeeded,
+      failed,
+      changedSymbols,
+      writtenDailyRows,
+      snapshotWrites,
+      results,
+      failures,
       total: totalToProcess,
       cursor: {
         offset,
@@ -273,7 +288,9 @@ export default async function handler(req: any, res: any) {
       debug: {
         steps: debugSteps,
         lastCompletedStep,
-        failedStep: result.ok ? null : "fetch_price_data",
+        lastStartedStep,
+        currentStage: lastStartedStep,
+        failedStep: ok ? null : "fetch_price_data",
         timeoutStage: null,
         requestStartedAt: requestStartIso,
         requestEndedAt: new Date().toISOString(),
