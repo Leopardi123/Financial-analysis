@@ -517,7 +517,13 @@ export default function ScreeningDashboard() {
                     <td>{result.score.toFixed(1)}</td>
                     <td>{result.evaluationStatus === "not_evaluated" ? "Not evaluated" : result.matched ? "Pass" : "Fail"}</td>
                     <td>{result.includeReasons.slice(0, 2).join(" ") || "-"}</td>
-                    <td>{result.evaluationStatus === "not_evaluated" ? `Missing: ${result.missingRequiredFields.join(", ")}` : result.excludeReasons.slice(0, 2).join(" ") || "-"}</td>
+                    <td>{result.evaluationStatus === "not_evaluated"
+                      ? (() => {
+                        const hasPriceGap = result.missingRequiredFields.some((field) => SCREENING_FIELD_MAP.get(field)?.group === "price");
+                        if (hasPriceGap) return "Price data not initialized yet (snapshot pending).";
+                        return `Missing: ${result.missingRequiredFields.join(", ")}`;
+                      })()
+                      : result.excludeReasons.slice(0, 2).join(" ") || "-"}</td>
                     {visibleColumns.map((column) => {
                       const metric = result.metrics.find((item) => item.key === column);
                       return <td key={`${result.ticker}-${column}`}>{metric?.value === null || metric?.value === undefined ? "-" : String(metric.value)}</td>;

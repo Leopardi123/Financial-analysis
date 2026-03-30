@@ -81,6 +81,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/companies": () => import("../src/server/routes/admin/companies.js"),
   "admin/init-db": () => import("../src/server/routes/admin/init-db.js"),
   "admin/refresh-companies": () => import("../src/server/routes/admin/refresh-companies.js"),
+  "admin/price-status": () => import("../src/server/routes/admin/price-status.js"),
   "admin/macro/ingest": () => import("../src/server/routes/admin/macro-ingest.js"),
   "admin/macro/run-engine": () => import("../src/server/routes/admin/macro-run-engine.js"),
   "admin/rebuild-macro-snapshot": () => import("../src/server/routes/admin/rebuild-macro-snapshot.js"),
@@ -97,6 +98,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "cron/refresh": () => import("../src/server/routes/cron/refresh.js"),
   "cron/macro-refresh": () => import("../src/server/routes/cron/macro-refresh.js"),
   "cron/refresh-companies": () => import("../src/server/routes/cron/refresh-companies.js"),
+  "cron/price-refresh": () => import("../src/server/routes/cron/price-refresh.js"),
   "debug/info": async () => ({
     default: async (req: any, res: any) => {
       const segments = normalizePathSegments(req);

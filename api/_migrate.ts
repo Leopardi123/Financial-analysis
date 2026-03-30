@@ -458,6 +458,36 @@ export async function ensureSchema() {
   }
 
   try {
+    await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN price_data_status TEXT`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN price_last_update_at TEXT`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN price_snapshot_at TEXT`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN price_last_error TEXT`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN price_init_requested_at TEXT`);
+  } catch {
+    // Column already exists.
+  }
+
+  try {
     await execute(`ALTER TABLE ${TABLES.macroIndicatorSnapshots} ADD COLUMN data_date_latest TEXT`);
   } catch {
     // Column already exists.

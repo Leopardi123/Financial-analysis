@@ -85,3 +85,33 @@ Lägg till separat tabell, t.ex. `price_cycle_snapshot` / `sector_cycle_snapshot
 - commodity/sector regime detection
 
 Viktigt: denna pipeline ska läsa från `daily_price_history` men vara separat från screeningens lätta read path så dashboarden förblir snabb.
+
+---
+
+## Automation: nattjobb + auto-init från Single Stock Admin
+
+### Nattjobb
+- Cron-route: `GET/POST /api/cron/price-refresh`
+- Kör inkrementell price engine för alla aktiva tickers.
+- Flöde:
+  1. markera tidigare `ready` som `stale`
+  2. kör ingest/snapshot per ticker
+  3. status uppdateras till `ready` eller `failed`
+  4. enkel retry (1 extra försök) per ticker
+
+### Auto-init vid ny ticker i Single Stock Admin
+- Triggerpunkt: `POST /api/admin/companies` (ticker upsert).
+- För nya tickers:
+  1. status sätts `pending`
+  2. price engine initieras för tickern
+  3. status blir `ready` (med timestamps) eller `failed` (med feltext)
+
+### Statusmodell
+- Lagrad i `companies_v2`:
+  - `price_data_status` (`pending` | `ready` | `failed` | `stale`)
+  - `price_last_update_at`
+  - `price_snapshot_at`
+  - `price_last_error`
+  - `price_init_requested_at`
+
+Single Stock Admin kan läsa status via `POST /api/admin/price-status` och trigga retry via `POST /api/admin/refresh-price-screen`.
