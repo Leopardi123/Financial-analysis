@@ -7,6 +7,7 @@ import {
 } from "../../../../api/_fmp.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { getCoverageCounts, materializeReports, toFiscalDateCutoffIso } from "../../materialization/materializeReportsCore.js";
+import { ingestManySymbols } from "../../../lib/prices/screening/ingest.js";
 
 const STATEMENTS: StatementType[] = ["balance", "income", "cashflow"];
 const MAX_CALLS = 120;
@@ -357,6 +358,26 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    const priceRefreshSymbols = [...new Set(processed.map((item) => item.ticker))].slice(0, 40);
+    let priceRefresh: { attemptedSymbols: number; snapshotWrites: number; changedSymbols: number; error?: string } | null = null;
+    if (priceRefreshSymbols.length > 0) {
+      try {
+        const priceResult = await ingestManySymbols({ symbols: priceRefreshSymbols });
+        priceRefresh = {
+          attemptedSymbols: priceRefreshSymbols.length,
+          snapshotWrites: priceResult.snapshotWrites,
+          changedSymbols: priceResult.changedSymbols,
+        };
+      } catch (error) {
+        priceRefresh = {
+          attemptedSymbols: priceRefreshSymbols.length,
+          snapshotWrites: 0,
+          changedSymbols: 0,
+          error: (error as Error).message,
+        };
+      }
+    }
+
     res.status(200).json({
       ok: true,
       budget: {
@@ -365,6 +386,7 @@ export default async function handler(req: any, res: any) {
       },
       processedCount: processed.length,
       processed,
+      priceRefresh,
     });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 500;

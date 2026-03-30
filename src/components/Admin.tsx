@@ -48,6 +48,7 @@ type MaterializationProgress = {
 };
 
 type RefreshPayload = {
+  __error?: string;
   cursor?: {
     nextOffset: number | null;
     done: boolean;
@@ -188,6 +189,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         payload = text;
       }
       if (!response.ok) {
+        const errorMessage = `ERROR ${response.status}: ${response.statusText} — ${typeof payload === "string" ? payload : JSON.stringify(payload)}`;
         console.error("Admin request failed", {
           title,
           status: response.status,
@@ -199,7 +201,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
           "error",
           `ERROR ${response.status}: ${response.statusText}\n${JSON.stringify(payload, null, 2)}`,
         );
-        return;
+        return { __error: errorMessage } as RefreshPayload;
       }
       updateLog(title, "success", `SUCCESS\n${JSON.stringify(payload, null, 2)}`);
       if (title === "Upsert Tickers") {
@@ -212,6 +214,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
           ? "Request timed out. Try Continue materialization."
           : (error as Error).message;
       updateLog(title, "error", `ERROR\n${message}`);
+      return { __error: message } as RefreshPayload;
     } finally {
       setLoadingKey(null);
     }
@@ -346,6 +349,13 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     const payload = await postJson(title, "/api/companies", reset
       ? { cursorOffset: 0, reset: true }
       : { cursorOffset: baseOffset });
+    if (payload?.__error) {
+      setAutoRefreshStatus("error");
+      setAutoRefreshMessage(`Auto refresh failed: ${payload.__error}`);
+      autoRefreshRunningRef.current = false;
+      autoRefreshPausedRef.current = true;
+      return null;
+    }
 
     if (payload?.cursor) {
       applyCursor(payload.cursor);
@@ -436,6 +446,13 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         ? { skipFetch: true, cursor: materializationCursorRef.current }
         : {}),
     });
+    if (payload?.__error) {
+      setTickerAutoStatus("error");
+      setTickerAutoMessage(`Ticker refresh failed: ${payload.__error}`);
+      tickerAutoRunningRef.current = false;
+      tickerAutoPausedRef.current = true;
+      return null;
+    }
 
     if (payload?.materialization) {
       applyMaterialization(payload.materialization);
