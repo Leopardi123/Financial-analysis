@@ -49,11 +49,22 @@ type MaterializationProgress = {
 
 type RefreshPayload = {
   __error?: string;
+  total?: number;
+  succeeded?: number;
+  failed?: number;
+  changedSymbols?: number;
+  writtenDailyRows?: number;
+  snapshotWrites?: number;
+  remaining?: number;
+  nextOffset?: number | null;
   cursor?: {
+    offset?: number;
     nextOffset: number | null;
     done: boolean;
     processedInRun: number;
     totalToProcess: number;
+    remaining?: number;
+    batchSize?: number;
   };
   materialization?: {
     cursor: MaterializationCursor | null;
@@ -111,6 +122,11 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [priceIngestResult, setPriceIngestResult] = useState<PriceIngestResult | null>(null);
+  const [screeningOffset, setScreeningOffset] = useState(0);
+  const [screeningRemaining, setScreeningRemaining] = useState<number | null>(null);
+  const [screeningTotal, setScreeningTotal] = useState<number | null>(null);
+  const [screeningStatus, setScreeningStatus] = useState<AutoRefreshStatus>("idle");
+  const [screeningMessage, setScreeningMessage] = useState("Not started.");
   const [materializationCursor, setMaterializationCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDisplayCursor, setMaterializationDisplayCursor] = useState<MaterializationCursor | null>(null);
   const [materializationDone, setMaterializationDone] = useState(true);
@@ -143,6 +159,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const companiesCursorOffsetRef = useRef<number>(0);
   const tickerAutoRunningRef = useRef(false);
   const tickerAutoPausedRef = useRef(false);
+  const screeningAutoRunningRef = useRef(false);
   const materializationCursorRef = useRef<MaterializationCursor | null>(null);
 
   const secretReady = secret.trim().length > 0;
@@ -231,13 +248,88 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     }
   }
 
-  async function runScreeningPriceIngest() {
-    const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {});
+  async function runScreeningPriceIngest(offset = screeningOffset) {
+    setScreeningStatus("running");
+    setScreeningMessage(`Running batch from offset ${offset}...`);
+    const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
+      offset,
+      batchSize: 10,
+    });
     if (payload?.__error) {
       setPriceIngestResult({ ok: false, error: payload.__error });
+      setScreeningStatus("error");
+      setScreeningMessage(payload.__error);
       return;
     }
+    const cursor = payload?.cursor;
     setPriceIngestResult(payload as unknown as PriceIngestResult);
+    if (cursor) {
+      setScreeningOffset(cursor.nextOffset ?? 0);
+      setScreeningRemaining(cursor.remaining ?? null);
+      setScreeningTotal(cursor.totalToProcess);
+      setScreeningStatus(cursor.done ? "done" : "running");
+      setScreeningMessage(
+        cursor.done
+          ? `Completed ${cursor.totalToProcess}/${cursor.totalToProcess}.`
+          : `Processed batch ${cursor.processedInRun}. Next offset ${cursor.nextOffset}. Remaining ${cursor.remaining ?? "?"}.`
+      );
+    } else {
+      setScreeningStatus("error");
+      setScreeningMessage("Missing cursor in response.");
+    }
+  }
+
+  async function runAllScreeningBatches() {
+    if (screeningAutoRunningRef.current) return;
+    screeningAutoRunningRef.current = true;
+    setScreeningStatus("running");
+    setScreeningMessage("Starting batched screening refresh...");
+    let nextOffset = 0;
+
+    while (screeningAutoRunningRef.current) {
+      const payload = await postJson("Refresh Screening Price Data", "/api/admin/refresh-price-screen", {
+        offset: nextOffset,
+        batchSize: 10,
+      });
+      if (payload?.__error) {
+        setPriceIngestResult({ ok: false, error: payload.__error });
+        setScreeningStatus("error");
+        setScreeningMessage(payload.__error);
+        break;
+      }
+      setPriceIngestResult(payload as unknown as PriceIngestResult);
+      const cursor = payload?.cursor;
+      if (!cursor) {
+        setScreeningStatus("error");
+        setScreeningMessage("Missing cursor in response.");
+        break;
+      }
+      setScreeningOffset(cursor.nextOffset ?? 0);
+      setScreeningRemaining(cursor.remaining ?? null);
+      setScreeningTotal(cursor.totalToProcess);
+      if (cursor.done || cursor.nextOffset === null) {
+        setScreeningStatus("done");
+        setScreeningMessage(`Completed ${cursor.totalToProcess}/${cursor.totalToProcess}.`);
+        break;
+      }
+      nextOffset = cursor.nextOffset;
+      setScreeningMessage(
+        `Processed batch ${cursor.processedInRun}. Next offset ${cursor.nextOffset}. Remaining ${cursor.remaining ?? "?"}.`
+      );
+      await sleep(120);
+    }
+
+    screeningAutoRunningRef.current = false;
+  }
+
+  function resetScreeningProgress() {
+    screeningAutoRunningRef.current = false;
+    setScreeningOffset(0);
+    setScreeningRemaining(null);
+    setScreeningTotal(null);
+    setScreeningStatus("idle");
+    setScreeningMessage("Reset. Ready to run from offset 0.");
+    setPriceIngestResult(null);
   }
 
 
@@ -278,6 +370,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       autoRefreshPausedRef.current = true;
       tickerAutoRunningRef.current = false;
       tickerAutoPausedRef.current = true;
+      screeningAutoRunningRef.current = false;
     };
   }, []);
 
@@ -721,10 +814,22 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       <details open style={{ marginBottom: 12 }}>
         <summary><strong>Screening price data</strong></summary>
         <p className="bread">Används för att hämta och beräkna prisdata för screening. Fyller daily_price_history och price_screen_snapshot.</p>
-        <button type="button" onClick={() => void runScreeningPriceIngest()} disabled={!secretReady || loadingKey !== null}>
-          {loadingKey === "Refresh Screening Price Data" ? "Updating screening prices..." : "Update screening prices"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+            {loadingKey === "Refresh Screening Price Data" ? "Updating screening prices..." : "Run next screening batch"}
+          </button>
+          <button type="button" onClick={() => void runAllScreeningBatches()} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+            Run full screening refresh (batched)
+          </button>
+          <button type="button" onClick={resetScreeningProgress} disabled={loadingKey !== null}>Reset screening cursor</button>
+        </div>
         <p className="bread">Hämtar prisdata för screening och uppdaterar daily_price_history samt price_screen_snapshot.</p>
+        <p className="bread">
+          Screening status: <strong>{screeningStatus}</strong> — {screeningMessage}
+        </p>
+        <p className="bread">
+          Offset: {screeningOffset} · Remaining: {screeningRemaining ?? "?"} · Total: {screeningTotal ?? "?"}
+        </p>
         {priceIngestResult && (
           <div className="bread">
             <strong>Status:</strong> {priceIngestResult.ok ? "Success" : "Error"}<br />
