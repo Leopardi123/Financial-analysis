@@ -52,6 +52,14 @@ function normalizeHistoryRows(payload: FmpHistoricalResponse): DailyPriceRow[] {
     .sort((a, b) => a.price_date.localeCompare(b.price_date));
 }
 
+function dedupeByPriceDate(rows: DailyPriceRow[]): DailyPriceRow[] {
+  const byDate = new Map<string, DailyPriceRow>();
+  for (const row of rows) {
+    byDate.set(row.price_date, row);
+  }
+  return Array.from(byDate.values()).sort((a, b) => a.price_date.localeCompare(b.price_date));
+}
+
 function equalNumberish(a: unknown, b: unknown): boolean {
   if (a === null && b === null) return true;
   if (typeof a !== "number" || typeof b !== "number") return false;
@@ -155,7 +163,9 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
     to: fetchTo,
   });
 
-  const incoming = normalizeHistoryRows(payload).map((row) => ({ ...row, symbol: normalized }));
+  const incoming = dedupeByPriceDate(
+    normalizeHistoryRows(payload).map((row) => ({ ...row, symbol: normalized })),
+  );
   if (incoming.length === 0) {
     return { symbol: normalized, inserted: 0, updated: 0, unchanged: 0, skipped: true, snapshotUpdated: false };
   }
@@ -180,10 +190,18 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
       await execute(
         `INSERT INTO ${tables.dailyPriceHistory}
           (symbol, price_date, close, adjusted_close, volume, source, currency, updated_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(symbol, price_date) DO UPDATE SET
+           close = excluded.close,
+           adjusted_close = excluded.adjusted_close,
+           volume = excluded.volume,
+           source = excluded.source,
+           currency = excluded.currency,
+           updated_at = excluded.updated_at`,
         [row.symbol, row.price_date, row.close, row.adjusted_close, row.volume, row.source, row.currency, now, now],
       );
       inserted += 1;
+      existingByDate.set(row.price_date, row);
       continue;
     }
 

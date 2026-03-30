@@ -221,8 +221,11 @@ export default async function handler(req: any, res: any) {
     let changedSymbols = 0;
     let writtenDailyRows = 0;
     let snapshotWrites = 0;
+    let unchangedDailyRows = 0;
     const adaptiveMessages: string[] = [];
     const attemptedBatchSizes: number[] = [];
+    const isRetryableFailure = (message: string) => /timed out|timeout|network|ECONN|ENOTFOUND|429|503|502|504|fetch/i.test(message);
+    const isWriteFailure = (message: string) => /SQLITE|constraint|database|daily_price_history|price_screen_snapshot/i.test(message);
 
     markRunning("fetch_price_data", { source: "fmp", symbols: runSymbols, currentSymbols: runSymbols });
     markRunning("normalize_parse_response", { currentSymbols: runSymbols });
@@ -251,7 +254,9 @@ export default async function handler(req: any, res: any) {
         succeeded += 1;
         const inserted = Number(item.inserted ?? 0);
         const updated = Number(item.updated ?? 0);
+        const unchanged = Number(item.unchanged ?? 0);
         writtenDailyRows += inserted + updated;
+        unchangedDailyRows += unchanged;
         if (inserted > 0 || updated > 0) changedSymbols += 1;
         if (item.snapshotUpdated) snapshotWrites += 1;
       }
@@ -270,30 +275,45 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
-      if (currentBatchSize > 1) {
+      const retryableFailures = chunkFailures.filter((item) => isRetryableFailure(item.error));
+      const nonRetryableFailures = chunkFailures.filter((item) => !isRetryableFailure(item.error));
+
+      for (const item of nonRetryableFailures) {
+        failed += 1;
+        failures.push(item);
+        adaptiveMessages.push(`Symbol ${item.symbol} failed, skipped`);
+      }
+
+      if (retryableFailures.length > 0 && currentBatchSize > 1) {
         const nextBatchSize = Math.max(1, Math.floor(currentBatchSize / 2));
         adaptiveMessages.push(`Batch failed at size ${currentBatchSize}, retrying at size ${nextBatchSize}`);
         if (nextBatchSize === 1) {
           adaptiveMessages.push("Retry failed, falling back to single-symbol mode");
         }
-        pending = [...chunkFailures.map((item) => item.symbol), ...pending];
+        pending = [...retryableFailures.map((item) => item.symbol), ...pending];
         currentBatchSize = nextBatchSize;
         recoveredFromFallback = true;
         continue;
       }
 
-      // Single-symbol fallback mode: mark failed symbol and move on.
-      for (const item of chunkFailures) {
+      // Single-symbol fallback mode for retryable failures.
+      for (const item of retryableFailures) {
         failed += 1;
         failures.push(item);
         adaptiveMessages.push(`Symbol ${item.symbol} failed, skipped`);
       }
-      adaptiveMessages.push("Recovered in single-symbol mode");
+      if (retryableFailures.length > 0) {
+        adaptiveMessages.push("Recovered in single-symbol mode");
+      }
       currentBatchSize = normalBatchSize;
       recoveredFromFallback = true;
     }
     const failureCount = failures.length;
-    const successStatus: "failed" | "success" = failureCount > 0 ? "failed" : "success";
+    const fetchFailed = failures.some((item) => isRetryableFailure(item.error));
+    const writeFailed = failures.some((item) => isWriteFailure(item.error));
+    const topLevelStatus = failureCount > 0 && succeeded > 0
+      ? "partial_success"
+      : (failureCount > 0 ? "error" : "success");
     const sharedDetails = {
       processedSymbols: succeeded,
       failedSymbols: failed,
@@ -301,14 +321,14 @@ export default async function handler(req: any, res: any) {
       attemptedBatchSizes,
       adaptiveMessages,
     };
-    markDone("fetch_price_data", successStatus, { ...sharedDetails, failures: failures.slice(0, 10) }, failureCount > 0 ? "One or more symbol ingests failed." : undefined);
-    markDone("normalize_parse_response", successStatus, sharedDetails, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("validate_required_fields", successStatus, sharedDetails, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("transform_daily_rows", successStatus, { ...sharedDetails, writtenDailyRows }, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("write_daily_history", successStatus, { ...sharedDetails, writtenDailyRows, changedSymbols }, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("load_recent_window", successStatus, sharedDetails, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("compute_snapshot", successStatus, { ...sharedDetails, snapshotWrites }, failureCount > 0 ? "See symbol failures." : undefined);
-    markDone("write_snapshot", successStatus, { ...sharedDetails, snapshotWrites }, failureCount > 0 ? "See symbol failures." : undefined);
+    markDone("fetch_price_data", fetchFailed ? "failed" : "success", { ...sharedDetails, failures: failures.slice(0, 10) }, fetchFailed ? "Fetch/network failures detected." : undefined);
+    markDone("normalize_parse_response", "success", sharedDetails);
+    markDone("validate_required_fields", "success", sharedDetails);
+    markDone("transform_daily_rows", "success", { ...sharedDetails, writtenDailyRows, unchangedDailyRows });
+    markDone("write_daily_history", writeFailed ? "failed" : "success", { ...sharedDetails, writtenDailyRows, unchangedDailyRows, changedSymbols }, writeFailed ? "DB/write failures detected." : undefined);
+    markDone("load_recent_window", "success", sharedDetails);
+    markDone("compute_snapshot", "success", { ...sharedDetails, snapshotWrites });
+    markDone("write_snapshot", writeFailed ? "failed" : "success", { ...sharedDetails, snapshotWrites }, writeFailed ? "See write step failures." : undefined);
     const processedInRun = runSymbols.length;
     const processedTotal = Math.min(totalToProcess, offset + processedInRun);
     const remaining = Math.max(0, totalToProcess - processedTotal);
@@ -320,10 +340,12 @@ export default async function handler(req: any, res: any) {
     const ok = failureCount === 0;
     res.status(ok ? 200 : 207).json({
       ok,
+      status: topLevelStatus,
       succeeded,
       failed,
       changedSymbols,
       writtenDailyRows,
+      unchangedDailyRows,
       snapshotWrites,
       results,
       failures,

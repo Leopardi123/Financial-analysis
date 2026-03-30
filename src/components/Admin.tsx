@@ -100,11 +100,13 @@ type AutoRefreshStatus = "idle" | "running" | "paused" | "done" | "error";
 
 type PriceIngestResult = {
   ok?: boolean;
+  status?: "success" | "partial_success" | "error";
   total?: number;
   succeeded?: number;
   failed?: number;
   changedSymbols?: number;
   writtenDailyRows?: number;
+  unchangedDailyRows?: number;
   snapshotWrites?: number;
   error?: string;
   debug?: ScreeningDebugPayload;
@@ -989,9 +991,11 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         </p>
         {priceIngestResult && (
           <div className="bread">
-            <strong>Status:</strong> {priceIngestResult.ok ? "Success" : "Error"}<br />
+            <strong>Status:</strong> {priceIngestResult.status === "partial_success"
+              ? "Partial success"
+              : priceIngestResult.ok ? "Success" : "Error"}<br />
             <strong>Tickers processed:</strong> {priceIngestResult.total ?? 0} (succeeded {priceIngestResult.succeeded ?? 0}, failed {priceIngestResult.failed ?? 0})<br />
-            <strong>daily_price_history writes:</strong> {priceIngestResult.writtenDailyRows ?? 0}<br />
+            <strong>daily_price_history writes:</strong> {priceIngestResult.writtenDailyRows ?? 0} (unchanged {priceIngestResult.unchangedDailyRows ?? 0})<br />
             <strong>price_screen_snapshot writes:</strong> {priceIngestResult.snapshotWrites ?? 0}<br />
             <strong>Symbols changed:</strong> {priceIngestResult.changedSymbols ?? 0}
             {priceIngestResult.error ? <><br /><strong>Error:</strong> {priceIngestResult.error}</> : null}
