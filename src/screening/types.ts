@@ -3,6 +3,7 @@ export type ScreeningMode = "simple" | "advanced";
 
 export type ScreeningFieldGroup = "price" | "fundamentals" | "risk" | "mining" | "manual";
 export type ScreeningFieldType = "number" | "string" | "boolean";
+export type ScreeningInputKind = "numeric" | "percent_like" | "ratio" | "categorical";
 
 export type ScreeningFieldDef = {
   key: string;
@@ -10,6 +11,10 @@ export type ScreeningFieldDef = {
   group: ScreeningFieldGroup;
   dataType: ScreeningFieldType;
   unit: "percent" | "ratio" | "absolute" | "state";
+  inputKind: ScreeningInputKind;
+  allowedOperators?: RuleOperator[];
+  enumValues?: string[];
+  valueFormatHint?: string;
   source: string;
   simple: boolean;
   advanced: boolean;
@@ -37,6 +42,7 @@ export type CompanySnapshot = {
   profile?: Record<string, unknown> | null;
   manual?: Record<string, number>;
   price?: Record<string, unknown> | null;
+  corporateSnapshot?: Record<string, unknown> | null;
 };
 
 export type RuleOperator = ">" | ">=" | "<" | "<=" | "==" | "!=" | "in";

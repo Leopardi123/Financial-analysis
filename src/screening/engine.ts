@@ -34,6 +34,14 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
   const cashflow = snapshot.cashflow;
   const manual = snapshot.manual ?? {};
   const price = (snapshot.price ?? {}) as Record<string, unknown>;
+  const corporate = (snapshot.corporateSnapshot ?? {}) as Record<string, unknown>;
+
+  const readFinite = (key: string) => {
+    const raw = corporate[key];
+    return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+  };
+  const ratio = (num: number | null, den: number | null) =>
+    num !== null && den !== null && den !== 0 ? num / den : null;
 
   switch (fieldKey) {
     case "return_5d":
@@ -49,6 +57,39 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "trend_state":
     case "recovery_state":
       return typeof price[fieldKey] === "string" ? String(price[fieldKey]) : null;
+    case "corp_npv":
+      return readFinite("NPV_today_TargetCurrency");
+    case "corp_dcf":
+      return readFinite("DCF_prodStart_present_TargetCurrency");
+    case "corp_nav":
+      return readFinite("NAV_today_TargetCurrency");
+    case "corp_npv_per_share":
+      return readFinite("NPV_today_perShare_TargetCurrency");
+    case "corp_dcf_per_share":
+      return readFinite("DCF_prodStart_present_perShare_TargetCurrency");
+    case "corp_nav_per_share": {
+      const nav = readFinite("NAV_today_TargetCurrency");
+      const shares = readFinite("shares_post_financing");
+      return ratio(nav, shares);
+    }
+    case "corp_ev":
+      return readFinite("EV_TargetCurrency");
+    case "corp_market_cap":
+      return readFinite("MarketCap_TargetCurrency");
+    case "corp_ev_over_npv":
+      return readFinite("EV_over_NPV");
+    case "corp_ev_over_nav":
+      return readFinite("EV_over_NAV");
+    case "corp_p_over_nav":
+      return readFinite("P_over_NAV");
+    case "corp_market_cap_over_npv":
+      return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NPV_today_TargetCurrency"));
+    case "corp_market_cap_over_nav":
+      return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NAV_today_TargetCurrency"));
+    case "corp_price_over_dcf_per_share":
+      return ratio(readFinite("price_current_TargetCurrency"), readFinite("DCF_prodStart_present_perShare_TargetCurrency"));
+    case "corp_price_over_nav_per_share":
+      return ratio(readFinite("price_current_TargetCurrency"), ratio(readFinite("NAV_today_TargetCurrency"), readFinite("shares_post_financing")));
     case "operating_cash_flow":
       return latest(cashflow.operatingCashFlow);
     case "free_cash_flow":

@@ -2,13 +2,13 @@ import { useMemo, useState } from "react";
 import { evaluateScreen } from "../screening/engine";
 import { SCREENING_FIELDS, SCREENING_FIELD_MAP } from "../screening/fieldCatalog";
 import { getPresetById, SCREENING_PRESETS } from "../screening/presets";
-import type { CompanySnapshot, ScreenDefinition, ScreenRule, ScreeningMode, ScreeningResult, UniverseType } from "../screening/types";
+import type { CompanySnapshot, RuleOperator, ScreenDefinition, ScreenRule, ScreeningMode, ScreeningResult, UniverseType } from "../screening/types";
 
 const WATCHLIST = ["AAPL", "MSFT", "BRK.B", "COST", "NVO"];
 const SAFE_TICKER_PATTERN = /^[A-Z0-9.\-_/]+$/;
 
-async function fetchJson(url: string) {
-  const response = await fetch(url);
+async function fetchJson(url: string, init?: RequestInit) {
+  const response = await fetch(url, init);
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(String(payload.error ?? "Request failed"));
@@ -53,33 +53,17 @@ function normalizeTicker(raw: string): string | null {
   return SAFE_TICKER_PATTERN.test(ticker) ? ticker : null;
 }
 
-function asNumber(value: string) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function unitLabel(unit: "percent" | "ratio" | "absolute" | "state") {
-  if (unit === "percent") return "Value (%)";
-  if (unit === "ratio") return "Value (x)";
-  if (unit === "absolute") return "Value";
-  return "Value";
+  if (unit === "percent") return "Värde (%)";
+  if (unit === "ratio") return "Värde (x)";
+  if (unit === "absolute") return "Värde";
+  return "Värde";
 }
 
 function unitSuffix(unit: "percent" | "ratio" | "absolute" | "state") {
   if (unit === "percent") return "%";
   if (unit === "ratio") return "x";
   return "";
-}
-
-function liveInterpretation(fieldKey: string, value: string) {
-  const numeric = asNumber(value);
-  if (numeric === null) return null;
-  if (fieldKey === "drawdown_20d") return `Matches stocks down at least ${numeric}% over last 20 days.`;
-  if (fieldKey === "drawdown_60d") return `Matches stocks down at least ${numeric}% over last 60 days.`;
-  if (fieldKey === "drawdown_252d") return `Matches stocks down at least ${numeric}% over last 252 days.`;
-  if (fieldKey === "return_20d") return `Matches stocks with at least ${numeric}% return over last 20 days.`;
-  if (fieldKey === "return_60d") return `Matches stocks with at least ${numeric}% return over last 60 days.`;
-  return null;
 }
 
 function buildAdvancedScreen(rules: ScreenRule[]): ScreenDefinition {
@@ -92,21 +76,91 @@ function buildAdvancedScreen(rules: ScreenRule[]): ScreenDefinition {
     ignores: ["Preset-opinionering"],
     requiredFields: rules.map((rule) => rule.field),
     optionalFields: [],
-    fallback: "Saknade värden faller ut som fail i respektive regel.",
+    fallback: "Saknade värden markeras som not evaluated.",
     rules: { mustHave: rules },
   };
 }
 
-async function loadSnapshot(ticker: string, manualData: Record<string, Record<string, number>>) {
+function defaultRuleValue(fieldKey: string): ScreenRule["value"] {
+  const def = SCREENING_FIELD_MAP.get(fieldKey);
+  if (!def) return 0;
+  if (def.inputKind === "categorical") return def.enumValues?.[0] ?? "";
+  return 0;
+}
+
+function allowedOperatorsFor(fieldKey: string): RuleOperator[] {
+  return SCREENING_FIELD_MAP.get(fieldKey)?.allowedOperators ?? [">", ">=", "<", "<=", "==", "!=", "in"];
+}
+
+function normalizeRuleForField(rule: ScreenRule, nextField: string): ScreenRule {
+  const ops = allowedOperatorsFor(nextField);
+  const nextOperator = ops.includes(rule.operator) ? rule.operator : ops[0];
+  return {
+    ...rule,
+    field: nextField,
+    operator: nextOperator,
+    value: defaultRuleValue(nextField),
+  };
+}
+
+async function fetchCorporateSnapshot(symbol: string, sharesCurrent: number | null, priceCurrent: number | null) {
+  if (!sharesCurrent || !priceCurrent) return null;
+  const payload = await fetchJson("/api/snapshot/corporate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      symbol,
+      targetCurrency: "USD",
+      discountRate: 0.1,
+      scenario: { mode: "spot" },
+      fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } },
+      market: {
+        shares_current: sharesCurrent,
+        price_current_TargetCurrency: priceCurrent,
+      },
+    }),
+  }).catch(() => null);
+
+  const snapshot = payload?.snapshot ?? null;
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const asObj = snapshot as Record<string, unknown>;
+  return {
+    ...asObj,
+    shares_post_financing: typeof asObj.shares_post_financing === "number"
+      ? asObj.shares_post_financing
+      : (typeof sharesCurrent === "number" ? sharesCurrent : null),
+    price_current_TargetCurrency: priceCurrent,
+  };
+}
+
+async function loadSnapshot(ticker: string, manualData: Record<string, Record<string, number>>, includeCorporateSnapshot: boolean) {
   const normalizedTicker = normalizeTicker(ticker);
-  if (!normalizedTicker) {
-    return null;
-  }
-  const [companyPayload, profilePayload, pricePayload] = await Promise.all([
+  if (!normalizedTicker) return null;
+
+  const [companyPayload, profilePayload, pricePayload, priceNowPayload] = await Promise.all([
     fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=fy`).catch(() => null),
     fetchJson(`/api/company/profile?ticker=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
     fetchJson(`/api/screening/price-snapshot?symbol=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
+    includeCorporateSnapshot
+      ? fetchJson(`/api/company/price?ticker=${encodeURIComponent(normalizedTicker)}`).catch(() => null)
+      : Promise.resolve(null),
   ]);
+
+  const profile = profilePayload?.profile ?? null;
+  const sharesCurrent = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding)
+    ? Number(profile.sharesOutstanding)
+    : null;
+  const profilePrice = typeof profile?.price === "number" && Number.isFinite(profile.price)
+    ? Number(profile.price)
+    : null;
+  const quotePrice = typeof priceNowPayload?.price === "number" && Number.isFinite(priceNowPayload.price)
+    ? Number(priceNowPayload.price)
+    : null;
+  const priceCurrent = quotePrice ?? profilePrice;
+
+  const corporateSnapshot = includeCorporateSnapshot
+    ? await fetchCorporateSnapshot(normalizedTicker, sharesCurrent, priceCurrent)
+    : null;
 
   const snapshot: CompanySnapshot = {
     ticker,
@@ -114,9 +168,10 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
     income: companyPayload?.income ?? {},
     balance: companyPayload?.balance ?? {},
     cashflow: companyPayload?.cashflow ?? {},
-    profile: profilePayload?.profile ?? null,
+    profile,
     manual: manualData[normalizedTicker] ?? {},
     price: pricePayload?.snapshot ?? null,
+    corporateSnapshot,
   };
   return snapshot;
 }
@@ -128,9 +183,9 @@ export default function ScreeningDashboard() {
   const [sectorFilter, setSectorFilter] = useState("");
   const [manualTickers, setManualTickers] = useState("AAPL, MSFT");
   const [manualJson, setManualJson] = useState('{"AAPL":{"founderFlag":1},"MSFT":{"insiderScore":1}}');
-  const [overrideValues, setOverrideValues] = useState<Record<string, string>>({});
   const [showManualOverrides, setShowManualOverrides] = useState(false);
   const [advancedRules, setAdvancedRules] = useState<ScreenRule[]>([]);
+  const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ScreeningResult[]>([]);
@@ -172,9 +227,11 @@ export default function ScreeningDashboard() {
 
   const visibleColumns = useMemo(() => {
     const ruleFields = activeScreen.rules.mustHave.map((rule) => rule.field);
-    const unique = [...new Set(ruleFields)].slice(0, 4);
-    return unique;
+    return [...new Set(ruleFields)].slice(0, 4);
   }, [activeScreen]);
+
+  const selectedRule = useMemo(() => advancedRules.find((rule) => rule.id === selectedRuleId) ?? advancedRules[0] ?? null, [advancedRules, selectedRuleId]);
+  const selectedField = selectedRule ? SCREENING_FIELD_MAP.get(selectedRule.field) : null;
 
   async function resolveUniverse(requiredFields: string[]): Promise<{ tickers: string[]; notes: string[] }> {
     const notes: string[] = [];
@@ -191,16 +248,12 @@ export default function ScreeningDashboard() {
         ? payload.tickers.map((item: string) => normalizeTicker(String(item))).filter((ticker: string | null): ticker is string => Boolean(ticker))
         : [];
       if (universe === "sector") {
-        if (!sectorFilter.trim()) {
-          return { tickers: [], notes: ["Sector-universe kräver sektorfilter."] };
-        }
+        if (!sectorFilter.trim()) return { tickers: [], notes: ["Sector-universe kräver sektorfilter."] };
         const filtered: string[] = [];
         for (const ticker of list) {
           const profilePayload = await fetchJson(`/api/company/profile?ticker=${encodeURIComponent(ticker)}`).catch(() => null);
           const sector = String(profilePayload?.profile?.sector ?? "").toLowerCase();
-          if (sector.includes(sectorFilter.trim().toLowerCase())) {
-            filtered.push(ticker);
-          }
+          if (sector.includes(sectorFilter.trim().toLowerCase())) filtered.push(ticker);
         }
         baseUniverse = filtered;
       } else {
@@ -208,9 +261,7 @@ export default function ScreeningDashboard() {
       }
     }
 
-    if (!requiresPriceSnapshot) {
-      return { tickers: baseUniverse, notes };
-    }
+    if (!requiresPriceSnapshot) return { tickers: baseUniverse, notes };
 
     const priceSnapshotPayload = await fetchJson("/api/screening/price-snapshot").catch(() => null);
     const availablePriceSymbols = new Set(
@@ -232,13 +283,7 @@ export default function ScreeningDashboard() {
   }
 
   function resolveParams(screen: ScreenDefinition): Record<string, number> {
-    const defaults = screen.defaults ?? {};
-    const result: Record<string, number> = {};
-    for (const [key, defaultValue] of Object.entries(defaults)) {
-      const maybe = asNumber(overrideValues[key] ?? "");
-      result[key] = maybe ?? defaultValue;
-    }
-    return result;
+    return screen.defaults ?? {};
   }
 
   async function runScreening() {
@@ -246,6 +291,7 @@ export default function ScreeningDashboard() {
     setError(null);
     try {
       const requiredFields = [...new Set(activeScreen.rules.mustHave.map((rule) => rule.field))];
+      const requiresCorporateSnapshot = requiredFields.some((field) => SCREENING_FIELD_MAP.get(field)?.source === "corporate_snapshot");
       const resolvedUniverse = await resolveUniverse(requiredFields);
       const tickers = resolvedUniverse.tickers;
       const manualData = parseManualJson(manualJson);
@@ -260,8 +306,6 @@ export default function ScreeningDashboard() {
         : 0;
 
       if (tickers.length === 0) {
-        const notes: string[] = [...resolvedUniverse.notes];
-        notes.push("Inga bolag kunde väljas för den aktiva screenen med nuvarande datatäckning.");
         setResults([]);
         setUniverseInfo({
           selectedUniverseCount: 0,
@@ -274,20 +318,21 @@ export default function ScreeningDashboard() {
           manualUsed,
           manualFieldsUsed,
           manualTickersApplied,
-          notes,
+          notes: [...resolvedUniverse.notes, "Inga bolag kunde väljas för den aktiva screenen med nuvarande datatäckning."],
         });
         return;
       }
 
       let skippedFetchErrors = 0;
-      const snapshots = await mapWithConcurrency(tickers, 6, async (ticker) => {
+      const snapshots = await mapWithConcurrency(tickers, 4, async (ticker) => {
         try {
-          return await loadSnapshot(ticker, manualData);
+          return await loadSnapshot(ticker, manualData, requiresCorporateSnapshot);
         } catch {
           skippedFetchErrors += 1;
           return null;
         }
       });
+
       const evaluated = snapshots
         .filter((snapshot): snapshot is CompanySnapshot => snapshot !== null)
         .map((snapshot) => {
@@ -305,18 +350,18 @@ export default function ScreeningDashboard() {
             ruleResults: score.ruleResults,
           } as ScreeningResult;
         });
+
       setResults(evaluated);
       const screenedCount = evaluated.filter((item) => item.evaluationStatus !== "not_evaluated").length;
       const passedCount = evaluated.filter((item) => item.evaluationStatus === "passed").length;
       const failedCount = evaluated.filter((item) => item.evaluationStatus === "failed").length;
       const missingCount = evaluated.filter((item) => item.evaluationStatus === "not_evaluated").length;
       const notes: string[] = [...resolvedUniverse.notes];
-      if (universe === "all") notes.push(`All available data: ${tickers.length} bolag i bas-universe.`);
-      if (universe === "watchlist") notes.push(`Watchlist innehåller ${tickers.length} bolag.`);
+      if (requiresCorporateSnapshot) notes.push("Corporate metrics beräknas via /api/snapshot/corporate med symbol-mode per bolag.");
       if (missingCount > 0) notes.push(`Aktiv regel kräver ${requiredFields.join(", ")}; ${missingCount} bolag saknade obligatorisk data.`);
-      if (skippedFetchErrors > 0) notes.push(`${skippedFetchErrors} bolag hoppades över p.g.a. ogiltig/otillgänglig tickerdata.`);
+      if (skippedFetchErrors > 0) notes.push(`${skippedFetchErrors} bolag hoppades över p.g.a. otillgänglig tickerdata.`);
       if (!manualUsed) notes.push("Denna screening använder inte analyst overrides.");
-      if (manualUsed) notes.push(`Uses manual fields: ${manualFieldsUsed.join(", ")}.`);
+
       setUniverseInfo({
         selectedUniverseCount: tickers.length,
         screenedCount,
@@ -346,16 +391,24 @@ export default function ScreeningDashboard() {
 
   function openPresetInAdvanced() {
     setAdvancedRules([...preset.rules.mustHave]);
+    setSelectedRuleId(preset.rules.mustHave[0]?.id ?? null);
     setMode("advanced");
   }
 
   function addAdvancedRule() {
     const field = SCREENING_FIELDS.find((item) => item.advanced)?.key ?? "return_20d";
-    setAdvancedRules((prev) => [...prev, { id: `rule-${Date.now()}`, field, operator: ">", value: 0 }]);
+    const ops = allowedOperatorsFor(field);
+    const nextRule = { id: `rule-${Date.now()}`, field, operator: ops[0], value: defaultRuleValue(field) } as ScreenRule;
+    setAdvancedRules((prev) => [...prev, nextRule]);
+    setSelectedRuleId(nextRule.id);
   }
 
   function updateAdvancedRule(index: number, patch: Partial<ScreenRule>) {
-    setAdvancedRules((prev) => prev.map((rule, idx) => (idx === index ? { ...rule, ...patch } : rule)));
+    setAdvancedRules((prev) => prev.map((rule, idx) => {
+      if (idx !== index) return rule;
+      if (patch.field && patch.field !== rule.field) return normalizeRuleForField(rule, patch.field);
+      return { ...rule, ...patch };
+    }));
   }
 
   function removeAdvancedRule(index: number) {
@@ -363,263 +416,194 @@ export default function ScreeningDashboard() {
   }
 
   return (
-    <div className="screening-dashboard">
-      <div className="breadcontainersinglecolumn">
+    <div className="screening-dashboard screening-compact-layout">
+      <div className="screening-card">
         <h3 className="subrub small">Screening är kandidatjakt, inte köp/sälj-signal</h3>
-        <p className="bread">Snabbt läge för opinionerade presets, avancerat läge för hypotesdriven regelbyggnad — samma motor under huven.</p>
-      </div>
-
-      <div className="stock-selector-row form">
-        <div>
-          <label>Universe</label>
-          <select value={universe} onChange={(event) => setUniverse(event.target.value as UniverseType)}>
-            <option value="all">All</option>
-            <option value="watchlist">Watchlist</option>
-            <option value="sector">Sector</option>
-            <option value="manual">Manual list</option>
-          </select>
-        </div>
-        <div>
-          <label>Mode</label>
-          <select value={mode} onChange={(event) => setMode(event.target.value as ScreeningMode)}>
-            <option value="simple">Simple</option>
-            <option value="advanced">Advanced</option>
-          </select>
-        </div>
-      </div>
-
-      {universeInfo && (
-        <div className="breadcontainersinglecolumn">
-          <p className="bread"><strong>Universe:</strong> {universe === "all" ? "All available data" : universe}, {universeInfo.selectedUniverseCount} bolag.</p>
-          <p className="bread"><strong>Aktiv screen använder data från:</strong> {universeInfo.requiredSources.join(" + ") || "okänd källa"}.</p>
-          <p className="bread"><strong>Efter datatäckningsfilter:</strong> {universeInfo.screenedCount} bolag kunde utvärderas.</p>
-          {universeInfo.screenedCount === 0 && (
-            <p className="status error">Ingen screening kunde köras: price snapshot eller annan required data saknas för aktiva regler.</p>
-          )}
-          {universeInfo.notes.map((note) => <p className="bread" key={note}>{note}</p>)}
-        </div>
-      )}
-
-      {universe === "sector" && (
-        <div className="stock-selector-row form">
+        <p className="bread">Simple = opinionerade presets. Advanced = hypotesdriven regelbyggnad på samma motor.</p>
+        <div className="screening-inline-grid">
           <div>
-            <label>Sector filter</label>
-            <input value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value)} placeholder="e.g. Technology" />
+            <label>Universe</label>
+            <select value={universe} onChange={(event) => setUniverse(event.target.value as UniverseType)}>
+              <option value="all">All</option>
+              <option value="watchlist">Watchlist</option>
+              <option value="sector">Sector</option>
+              <option value="manual">Manual list</option>
+            </select>
           </div>
-        </div>
-      )}
-
-      {universe === "manual" && (
-        <div className="stock-selector-row form">
           <div>
-            <label>Manual tickers</label>
-            <input value={manualTickers} onChange={(event) => setManualTickers(event.target.value)} />
+            <label>Mode</label>
+            <select value={mode} onChange={(event) => setMode(event.target.value as ScreeningMode)}>
+              <option value="simple">Simple</option>
+              <option value="advanced">Advanced</option>
+            </select>
           </div>
-        </div>
-      )}
-
-      {mode === "simple" ? (
-        <>
-          <div className="stock-selector-row form">
+          {mode === "simple" && (
             <div>
               <label>Preset</label>
               <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
-                {SCREENING_PRESETS.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
+                {SCREENING_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             </div>
-            <div>
-              <label>Quick action</label>
-              <button type="button" onClick={openPresetInAdvanced}>Öppna i avancerat läge</button>
-            </div>
-          </div>
-
-          <div className="breadcontainersinglecolumn">
-            <p className="bread"><strong>Preset:</strong> {preset.description}</p>
-            <p className="bread"><strong>Detta tittar preset på:</strong> {preset.checks.join(" • ")}</p>
-            <p className="bread"><strong>Detta ignorerar preset:</strong> {preset.ignores.join(" • ")}</p>
-            <p className="bread"><strong>Fallback:</strong> {preset.fallback}</p>
-          </div>
-
-          {Object.keys(preset.defaults ?? {}).length > 0 && (
-            <div className="stock-selector-row form">
-              {Object.entries(preset.defaults ?? {}).slice(0, 4).map(([key, value]) => (
-                <div key={key}>
-                  <label>{key}</label>
-                  <input
-                    value={overrideValues[key] ?? String(value)}
-                    onChange={(event) => setOverrideValues((prev) => ({ ...prev, [key]: event.target.value }))}
-                  />
-                </div>
-              ))}
-            </div>
           )}
-        </>
-      ) : (
-        <>
-          <div className="breadcontainersinglecolumn">
-            <p className="bread"><strong>Advanced:</strong> Bygg mustHave-regler (AND). Presets kan öppnas här och justeras.</p>
-          </div>
-          <div className="stock-selector-row">
-            <button type="button" onClick={addAdvancedRule}>+ Lägg till regel</button>
-          </div>
-
-          {advancedRules.length === 0 && <p className="bread">Inga regler ännu. Lägg till en regel för att köra Advanced-screening.</p>}
-
-          {advancedRules.map((rule, index) => (
-            <div key={rule.id} className="stock-selector-row form">
-              {(() => {
-                const fieldDef = SCREENING_FIELD_MAP.get(rule.field);
-                const suffix = unitSuffix(fieldDef?.unit ?? "absolute");
-                const valueText = Array.isArray(rule.value) ? rule.value.join(",") : typeof rule.value === "object" ? "" : String(rule.value);
-                return (
-                  <>
-              <div>
-                <label>Field</label>
-                <select value={rule.field} onChange={(event) => updateAdvancedRule(index, { field: event.target.value })}>
-                  {SCREENING_FIELDS.filter((field) => field.advanced).map((field) => (
-                    <option key={field.key} value={field.key}>{field.group.toUpperCase()} • {field.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label>Operator</label>
-                <select value={rule.operator} onChange={(event) => updateAdvancedRule(index, { operator: event.target.value as ScreenRule["operator"] })}>
-                  <option value=">">&gt;</option>
-                  <option value=">=">&gt;=</option>
-                  <option value="<">&lt;</option>
-                  <option value="<=">&lt;=</option>
-                  <option value="==">==</option>
-                  <option value="!=">!=</option>
-                  <option value="in">in (csv)</option>
-                </select>
-              </div>
-              <div>
-                <label>{unitLabel(fieldDef?.unit ?? "absolute")}</label>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input
-                    value={valueText}
-                    onChange={(event) => {
-                      const raw = event.target.value.trim();
-                      const asNum = Number(raw);
-                      if (rule.operator === "in") {
-                        updateAdvancedRule(index, { value: raw.split(",").map((item) => item.trim()).filter(Boolean) });
-                      } else if (Number.isFinite(asNum)) {
-                        updateAdvancedRule(index, { value: asNum });
-                      } else {
-                        updateAdvancedRule(index, { value: raw });
-                      }
-                    }}
-                  />
-                  {suffix && <span className="bread">{suffix}</span>}
-                </div>
-                {liveInterpretation(rule.field, valueText) && (
-                  <p className="bread" style={{ marginTop: 6 }}>{liveInterpretation(rule.field, valueText)}</p>
-                )}
-              </div>
-              <div>
-                <label>&nbsp;</label>
-                <button type="button" onClick={() => removeAdvancedRule(index)}>Ta bort</button>
-              </div>
-              {fieldDef && (
-                <div style={{ width: "100%", borderRadius: 10, padding: 10, background: "rgba(255,255,255,0.04)", marginTop: 8 }}>
-                  <p className="bread"><strong>{fieldDef.label}</strong></p>
-                  {fieldDef.description && <p className="bread">{fieldDef.description}</p>}
-                  {fieldDef.interpretation && <p className="bread">{fieldDef.interpretation}</p>}
-                  {fieldDef.example && <p className="bread"><em>Exempel:</em> {fieldDef.example}</p>}
-                </div>
-              )}
-                  </>
-                );
-              })()}
-            </div>
-          ))}
-        </>
-      )}
-
-      <div className="breadcontainersinglecolumn">
-        <button type="button" onClick={() => setShowManualOverrides((prev) => !prev)}>
-          {showManualOverrides ? "Dölj" : "Visa"} Analyst / Manual overrides
-        </button>
+        </div>
+        {universe === "sector" && <input value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value)} placeholder="Sector filter, t.ex. Technology" />}
+        {universe === "manual" && <input value={manualTickers} onChange={(event) => setManualTickers(event.target.value)} placeholder="AAPL, MSFT, ..." />}
       </div>
 
-      {showManualOverrides && (
-        <div className="stock-selector-row form">
-          <div style={{ width: "100%" }}>
-            <label>Analyst overrides (optional)</label>
-            <p className="bread">Valfritt. Används endast för manuella flaggor per ticker (t.ex. founderFlag, insiderScore). Påverkar inte universe eller ersätter inte pris/fundamentaldata.</p>
-            <textarea
-              className="manual-json"
-              value={manualJson}
-              onChange={(event) => setManualJson(event.target.value)}
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="stock-selector-row">
-        <button type="button" onClick={() => void runScreening()} disabled={loading}>
-          {loading ? "Kör screening..." : "Kör screening"}
-        </button>
-        <label>Sortera</label>
-        <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "score" | "ticker")}>
-          <option value="score">Score</option>
-          <option value="ticker">Ticker</option>
-        </select>
-      </div>
-
-      {error && <p className="status error">{error}</p>}
-
-      {universeInfo && (
-        <div className="breadcontainersinglecolumn">
-          <p className="bread"><strong>Screened:</strong> {universeInfo.screenedCount} bolag • <strong>Passed:</strong> {universeInfo.passedCount} • <strong>Failed:</strong> {universeInfo.failedCount} • <strong>Not evaluated (missing data):</strong> {universeInfo.missingCount}</p>
-          <p className="bread">
-            {universeInfo.manualUsed
-              ? `Manual overrides applied to ${universeInfo.manualTickersApplied} tickers.`
-              : "Manual overrides not used by current rules."}
-          </p>
-          <label className="bread"><input type="checkbox" checked={showPassedOnly} onChange={(event) => setShowPassedOnly(event.target.checked)} /> Show passed only</label>
-        </div>
-      )}
-
-      <div className="viewer-table">
-        {sortedResults.length === 0 && !loading ? (
-          <p className="status empty">Inga resultat ännu. Kör en screen för att se kandidater.</p>
+      <div className="screening-card">
+        {mode === "simple" ? (
+          <>
+            <p className="bread"><strong>{preset.name}:</strong> {preset.description}</p>
+            <p className="bread"><strong>Tittar på:</strong> {preset.checks.join(" • ")}</p>
+            <button type="button" onClick={openPresetInAdvanced}>Öppna preset i Advanced</button>
+          </>
         ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th className="sticky-col">Ticker</th>
-                  <th>Score</th>
-                  <th>Pass/Fail</th>
-                  <th>Why included</th>
-                  <th>Why excluded</th>
-                  {visibleColumns.map((column) => <th key={column}>{column}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedResults.map((result) => (
-                  <tr key={`${result.presetId}-${result.ticker}`}>
-                    <td className="sticky-col">
-                      <button type="button" onClick={() => openTicker(result.ticker)}>{result.ticker}</button>
-                    </td>
-                    <td>{result.score.toFixed(1)}</td>
-                    <td>{result.evaluationStatus === "not_evaluated" ? "Not evaluated" : result.matched ? "Pass" : "Fail"}</td>
-                    <td>{result.includeReasons.slice(0, 2).join(" ") || "-"}</td>
-                    <td>{result.evaluationStatus === "not_evaluated" ? `Missing: ${result.missingRequiredFields.join(", ")}` : result.excludeReasons.slice(0, 2).join(" ") || "-"}</td>
-                    {visibleColumns.map((column) => {
-                      const metric = result.metrics.find((item) => item.key === column);
-                      return <td key={`${result.ticker}-${column}`}>{metric?.value === null || metric?.value === undefined ? "-" : String(metric.value)}</td>;
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="screening-rule-header">
+              <strong>Advanced rules (AND)</strong>
+              <button type="button" onClick={addAdvancedRule}>+ Lägg till regel</button>
+            </div>
+            {advancedRules.length === 0 && <p className="bread">Inga regler ännu. Lägg till en regel för att köra Advanced-screening.</p>}
+            <div className="screening-rules-list">
+              {advancedRules.map((rule, index) => {
+                const fieldDef = SCREENING_FIELD_MAP.get(rule.field);
+                const operators = allowedOperatorsFor(rule.field);
+                const valueText = Array.isArray(rule.value) ? rule.value.join(",") : typeof rule.value === "object" ? "" : String(rule.value);
+                const enumValues = fieldDef?.enumValues ?? [];
+                const isCategorical = fieldDef?.inputKind === "categorical";
+                return (
+                  <div key={rule.id} className={`screening-rule-row ${selectedRule?.id === rule.id ? "is-selected" : ""}`} onClick={() => setSelectedRuleId(rule.id)}>
+                    <select value={rule.field} onChange={(event) => updateAdvancedRule(index, { field: event.target.value })}>
+                      {SCREENING_FIELDS.filter((field) => field.advanced).map((field) => (
+                        <option key={field.key} value={field.key}>{field.label}</option>
+                      ))}
+                    </select>
+                    <select value={rule.operator} onChange={(event) => updateAdvancedRule(index, { operator: event.target.value as RuleOperator })}>
+                      {operators.map((operator) => <option key={operator} value={operator}>{operator === "in" ? "in" : operator}</option>)}
+                    </select>
+                    {isCategorical ? (
+                      <>
+                        {rule.operator === "in" ? (
+                          <select
+                            value={Array.isArray(rule.value) ? String(rule.value[0] ?? "") : String(rule.value)}
+                            onChange={(event) => updateAdvancedRule(index, { value: [event.target.value] })}
+                          >
+                            {enumValues.map((value) => <option key={value} value={value}>{value}</option>)}
+                          </select>
+                        ) : (
+                          <select value={String(rule.value)} onChange={(event) => updateAdvancedRule(index, { value: event.target.value })}>
+                            {enumValues.map((value) => <option key={value} value={value}>{value}</option>)}
+                          </select>
+                        )}
+                      </>
+                    ) : (
+                      <div className="screening-value-wrap">
+                        <input
+                          type="number"
+                          value={valueText}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            const asNum = Number(raw);
+                            if (Number.isFinite(asNum)) updateAdvancedRule(index, { value: asNum });
+                            else updateAdvancedRule(index, { value: raw });
+                          }}
+                          placeholder={fieldDef?.valueFormatHint ?? unitLabel(fieldDef?.unit ?? "absolute")}
+                        />
+                        {fieldDef && unitSuffix(fieldDef.unit) && <span className="bread">{unitSuffix(fieldDef.unit)}</span>}
+                      </div>
+                    )}
+                    <button type="button" onClick={() => removeAdvancedRule(index)}>✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
+
+      <div className="screening-card screening-info-box">
+        <h4 className="subrub small">Om detta mått</h4>
+        {selectedField ? (
+          <>
+            <p className="bread"><strong>{selectedField.label}</strong></p>
+            <p className="bread"><strong>Hur värdet tolkas:</strong> {selectedField.interpretation ?? selectedField.valueFormatHint ?? "Ange numeriskt värde enligt enheten."}</p>
+            {selectedField.description && <p className="bread"><strong>Definition:</strong> {selectedField.description}</p>}
+            {selectedField.example && <p className="bread"><strong>Exempel:</strong> {selectedField.example}</p>}
+            <p className="bread"><strong>Källa:</strong> {selectedField.source}</p>
+          </>
+        ) : (
+          <p className="bread">Välj en advanced-regel för att se fältspecifik hjälptext.</p>
+        )}
+      </div>
+
+      <div className="screening-card">
+        <div className="screening-rule-header">
+          <div>
+            <button type="button" onClick={() => setShowManualOverrides((prev) => !prev)}>
+              {showManualOverrides ? "Dölj" : "Visa"} Analyst / Manual overrides
+            </button>
+            {showManualOverrides && (
+              <textarea className="manual-json" value={manualJson} onChange={(event) => setManualJson(event.target.value)} />
+            )}
+          </div>
+          <div className="screening-inline-actions">
+            <button type="button" onClick={() => void runScreening()} disabled={loading}>{loading ? "Kör screening..." : "Kör screening"}</button>
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "score" | "ticker")}>
+              <option value="score">Sort: Score</option>
+              <option value="ticker">Sort: Ticker</option>
+            </select>
+            <label className="bread"><input type="checkbox" checked={showPassedOnly} onChange={(event) => setShowPassedOnly(event.target.checked)} /> Endast pass</label>
+          </div>
+        </div>
+
+        {error && <p className="status error">{error}</p>}
+        {universeInfo && <p className="bread"><strong>Screened:</strong> {universeInfo.screenedCount} • <strong>Passed:</strong> {universeInfo.passedCount} • <strong>Failed:</strong> {universeInfo.failedCount} • <strong>Not evaluated:</strong> {universeInfo.missingCount}</p>}
+
+        <div className="viewer-table">
+          {sortedResults.length === 0 && !loading ? (
+            <p className="status empty">Inga resultat ännu. Kör en screen för att se kandidater.</p>
+          ) : (
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="sticky-col">Ticker</th>
+                    <th>Score</th>
+                    <th>Status</th>
+                    <th>Include</th>
+                    <th>Exclude / Missing</th>
+                    {visibleColumns.map((column) => <th key={column}>{column}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedResults.map((result) => (
+                    <tr key={`${result.presetId}-${result.ticker}`}>
+                      <td className="sticky-col"><button type="button" onClick={() => openTicker(result.ticker)}>{result.ticker}</button></td>
+                      <td>{result.score.toFixed(1)}</td>
+                      <td>{result.evaluationStatus === "not_evaluated" ? "Not evaluated" : result.matched ? "Pass" : "Fail"}</td>
+                      <td>{result.includeReasons.slice(0, 2).join(" ") || "-"}</td>
+                      <td>{result.evaluationStatus === "not_evaluated" ? `Missing: ${result.missingRequiredFields.join(", ")}` : result.excludeReasons.slice(0, 2).join(" ") || "-"}</td>
+                      {visibleColumns.map((column) => {
+                        const metric = result.metrics.find((item) => item.key === column);
+                        return <td key={`${result.ticker}-${column}`}>{metric?.value === null || metric?.value === undefined ? "-" : String(metric.value)}</td>;
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {universeInfo && (
+        <div className="screening-card screening-debug-box">
+          <h4 className="subrub small">Debug / coverage</h4>
+          <p className="bread"><strong>Universe:</strong> {universe}, {universeInfo.selectedUniverseCount} bolag.</p>
+          <p className="bread"><strong>Required sources:</strong> {universeInfo.requiredSources.join(" + ") || "okänd"}</p>
+          {universeInfo.notes.map((note) => <p className="bread" key={note}>{note}</p>)}
+        </div>
+      )}
     </div>
   );
 }

@@ -1088,6 +1088,76 @@ td.sticky-col {
   font-size: 12px;
 }
 
+.screening-compact-layout {
+  display: grid;
+  gap: 10px;
+}
+
+.screening-card {
+  background: #f7f7ef;
+  border: 1px solid rgba(28, 35, 16, 0.14);
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.screening-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.screening-rule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.screening-rules-list {
+  display: grid;
+  gap: 6px;
+}
+
+.screening-rule-row {
+  display: grid;
+  grid-template-columns: 2.2fr 0.9fr 1.5fr auto;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid rgba(28, 35, 16, 0.12);
+  border-radius: 8px;
+  padding: 6px;
+  background: #fff;
+}
+
+.screening-rule-row.is-selected {
+  border-color: #687348;
+  background: #f4f8e8;
+}
+
+.screening-value-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.screening-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.screening-info-box {
+  background: #eef3e1;
+}
+
+.screening-debug-box {
+  background: #f2f4ea;
+}
+
 .company-picker {
   position: relative;
   min-width: 260px;
