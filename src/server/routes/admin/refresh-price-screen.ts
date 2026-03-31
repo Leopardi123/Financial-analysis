@@ -20,6 +20,20 @@ type PersistedStateRow = {
   updated_at: string;
 };
 
+type StateDiagnostics = {
+  stateFound: boolean;
+  stateValid: boolean;
+  targetsPersisted: boolean;
+  targetsCount: number;
+  cursorValue: number | null;
+  stateStatus: string | null;
+  stateUpdatedAt: string | null;
+  cronLastTouchedState: "yes" | "no" | "unknown";
+  lockPresent: boolean;
+  targetsSourceUnknownReason: string | null;
+  stateError: string | null;
+};
+
 async function loadActiveSymbols(): Promise<string[]> {
   const now = Date.now();
   if (cachedActiveSymbols && now - cachedActiveSymbols.loadedAt < SYMBOL_CACHE_TTL_MS) {
@@ -127,6 +141,19 @@ export default async function handler(req: any, res: any) {
     let workerStarted = false;
     let targetsSource: "fresh" | "persisted" | "request_symbols" = "fresh";
     let targetsRecomputed = false;
+    const stateDiagnostics: StateDiagnostics = {
+      stateFound: false,
+      stateValid: false,
+      targetsPersisted: false,
+      targetsCount: 0,
+      cursorValue: null,
+      stateStatus: null,
+      stateUpdatedAt: null,
+      cronLastTouchedState: "unknown",
+      lockPresent: false,
+      targetsSourceUnknownReason: null,
+      stateError: null,
+    };
     const markRunning = (key: string, details?: Record<string, unknown>) => {
       const step = debugSteps.find((item) => item.key === key);
       if (!step) return;
@@ -194,13 +221,69 @@ export default async function handler(req: any, res: any) {
     const explicitSymbols = Array.isArray(body.symbols)
       ? body.symbols.map((item: unknown) => String(item).trim().toUpperCase()).filter(Boolean)
       : [];
+    const inspectStateOnly = Boolean(body.inspectState);
     const reset = Boolean(body.reset);
     const requestedOffsetRaw = Number(req.query?.offset ?? body.offset ?? 0);
     const requestedOffset = Number.isFinite(requestedOffsetRaw) ? Math.max(0, Math.floor(requestedOffsetRaw)) : 0;
     const rawBatchSize = Number(req.query?.batchSize ?? body.batchSize ?? 1);
     const batchSize = Math.max(1, Math.min(3, Number.isFinite(rawBatchSize) ? Math.floor(rawBatchSize) : 1));
 
-    const persistedState = await readPersistedState();
+    let persistedState: PersistedStateRow | null = null;
+    try {
+      persistedState = await readPersistedState();
+    } catch (error) {
+      persistedState = null;
+      stateDiagnostics.stateError = `read_state_failed: ${(error as Error).message}`;
+      stateDiagnostics.targetsSourceUnknownReason = "Persisted controller state could not be read.";
+    }
+    stateDiagnostics.stateFound = Boolean(persistedState);
+    stateDiagnostics.stateStatus = persistedState?.status ?? null;
+    stateDiagnostics.stateUpdatedAt = persistedState?.updated_at ?? null;
+    stateDiagnostics.cursorValue = persistedState ? Math.max(0, Math.floor(Number(persistedState.offset ?? 0))) : null;
+    stateDiagnostics.lockPresent = Boolean(
+      persistedState
+      && persistedState.status === "running"
+      && persistedState.updated_at
+      && (Date.now() - new Date(persistedState.updated_at).getTime()) < 10 * 60 * 1000
+    );
+    if (persistedState) {
+      const cronRows = await query(
+        `SELECT run_at FROM ${tables.fetchLog}
+         WHERE ticker = '__cron_refresh_lock__' AND period = 'lock' AND statement = 'refresh'
+         ORDER BY run_at DESC
+         LIMIT 1`
+      ) as unknown as Array<{ run_at: string }>;
+      const latestCron = cronRows[0]?.run_at ? new Date(cronRows[0].run_at).getTime() : null;
+      const stateUpdated = persistedState.updated_at ? new Date(persistedState.updated_at).getTime() : null;
+      if (!latestCron || !stateUpdated) {
+        stateDiagnostics.cronLastTouchedState = "unknown";
+      } else {
+        // Current code path does not let cron write this table; mark explicit "no".
+        stateDiagnostics.cronLastTouchedState = "no";
+      }
+    }
+    if (inspectStateOnly) {
+      const persistedSymbols = persistedState ? parsePersistedSymbols(persistedState.symbols_json) : [];
+      res.status(200).json({
+        ok: true,
+        inspectState: true,
+        state: persistedState ? {
+          scope: STATE_SCOPE,
+          offset: Number(persistedState.offset ?? 0),
+          totalCount: Number(persistedState.total_count ?? 0),
+          status: persistedState.status ?? null,
+          targetsSource: persistedState.targets_source ?? null,
+          lastControllerStage: persistedState.last_controller_stage ?? null,
+          lastWorkerStarted: Number(persistedState.last_worker_started ?? 0) === 1,
+          lastError: persistedState.last_error ?? null,
+          updatedAt: persistedState.updated_at ?? null,
+          symbolsCount: persistedSymbols.length,
+          symbolsSample: persistedSymbols.slice(0, 20),
+        } : null,
+        stateDiagnostics,
+      });
+      return;
+    }
 
     markRunning("resolve_targets", {
       requestedSymbols: explicitSymbols.slice(0, 20),
@@ -214,15 +297,39 @@ export default async function handler(req: any, res: any) {
 
     let symbols = explicitSymbols;
     let offset = requestedOffset;
+    let persistedSymbols: string[] = [];
+    let persistedStateValid = false;
+    if (persistedState) {
+      persistedSymbols = parsePersistedSymbols(persistedState.symbols_json);
+      const persistedOffset = Number.isFinite(Number(persistedState.offset))
+        ? Math.max(0, Math.floor(Number(persistedState.offset)))
+        : -1;
+      const staleRunningState = persistedState.status === "running"
+        && persistedState.updated_at
+        && (Date.now() - new Date(persistedState.updated_at).getTime()) > 24 * 60 * 60 * 1000;
+      persistedStateValid = persistedSymbols.length > 0
+        && persistedOffset >= 0
+        && persistedOffset <= persistedSymbols.length
+        && !staleRunningState;
+      stateDiagnostics.targetsPersisted = persistedSymbols.length > 0;
+      stateDiagnostics.targetsCount = persistedSymbols.length;
+      stateDiagnostics.stateValid = persistedStateValid;
+      if (!persistedStateValid) {
+        stateDiagnostics.targetsSourceUnknownReason = staleRunningState
+          ? "Persisted state is stale running state older than 24h."
+          : "Persisted state is incomplete/invalid (symbols or cursor).";
+      }
+    }
     if (explicitSymbols.length > 0) {
       targetsSource = "request_symbols";
       targetsRecomputed = true;
-    } else if (!reset && persistedState) {
-      const persistedSymbols = parsePersistedSymbols(persistedState.symbols_json);
+      stateDiagnostics.targetsSourceUnknownReason = null;
+    } else if (!reset && persistedState && persistedStateValid) {
       if (persistedSymbols.length > 0) {
         symbols = persistedSymbols;
         offset = Number.isFinite(Number(persistedState.offset)) ? Math.max(0, Math.floor(Number(persistedState.offset))) : requestedOffset;
         targetsSource = "persisted";
+        stateDiagnostics.targetsSourceUnknownReason = null;
       } else {
         symbols = await loadActiveSymbols();
         targetsSource = "fresh";
@@ -233,6 +340,25 @@ export default async function handler(req: any, res: any) {
       offset = 0;
       targetsSource = "fresh";
       targetsRecomputed = true;
+      stateDiagnostics.targetsSourceUnknownReason = persistedState
+        ? (stateDiagnostics.targetsSourceUnknownReason ?? "Persisted state invalid, rebuilt from active universe.")
+        : "No persisted state found, bootstrapped fresh run.";
+      await writePersistedState({
+        symbols,
+        offset: 0,
+        status: "running",
+        targetsSource,
+        lastControllerStage: "resolve_targets",
+        lastWorkerStarted: false,
+        lastError: stateDiagnostics.targetsSourceUnknownReason,
+      });
+      stateDiagnostics.stateFound = true;
+      stateDiagnostics.stateValid = symbols.length > 0;
+      stateDiagnostics.targetsPersisted = symbols.length > 0;
+      stateDiagnostics.targetsCount = symbols.length;
+      stateDiagnostics.cursorValue = 0;
+      stateDiagnostics.stateStatus = "running";
+      stateDiagnostics.stateUpdatedAt = new Date().toISOString();
     }
 
     markDone("resolve_targets", "success", {
@@ -241,6 +367,14 @@ export default async function handler(req: any, res: any) {
       targetsSource,
       targetsRecomputed,
       offset,
+      stateFound: stateDiagnostics.stateFound,
+      stateValid: stateDiagnostics.stateValid,
+      targetsPersisted: stateDiagnostics.targetsPersisted,
+      targetsCount: stateDiagnostics.targetsCount,
+      cursorValue: stateDiagnostics.cursorValue,
+      cronLastTouchedState: stateDiagnostics.cronLastTouchedState,
+      lockPresent: stateDiagnostics.lockPresent,
+      targetsSourceUnknownReason: stateDiagnostics.targetsSourceUnknownReason,
     });
 
     if (symbols.length === 0) {
@@ -272,6 +406,7 @@ export default async function handler(req: any, res: any) {
         snapshotWrites: 0,
         results: [],
         failures: [],
+        stateDiagnostics,
         cursor: { offset: 0, nextOffset: null, done: true, processedInRun: 0, totalToProcess: 0, remaining: 0, batchSize },
         debug: {
           steps: debugSteps,
@@ -288,6 +423,7 @@ export default async function handler(req: any, res: any) {
           targetsSource,
           targetsRecomputed,
           dispatchStatus: "controller_no_targets",
+          stateDiagnostics,
         },
       });
       return;
@@ -333,6 +469,7 @@ export default async function handler(req: any, res: any) {
         snapshotWrites: 0,
         results: [],
         failures: [],
+        stateDiagnostics,
         cursor: {
           offset,
           nextOffset: null,
@@ -357,6 +494,7 @@ export default async function handler(req: any, res: any) {
           targetsSource,
           targetsRecomputed,
           dispatchStatus: "controller_done_before_dispatch",
+          stateDiagnostics,
         },
       });
       return;
@@ -515,6 +653,7 @@ export default async function handler(req: any, res: any) {
       snapshotWrites,
       results,
       failures,
+      stateDiagnostics,
       total: totalToProcess,
       cursor: {
         offset,
@@ -540,6 +679,7 @@ export default async function handler(req: any, res: any) {
         targetsSource,
         targetsRecomputed,
         dispatchStatus: "worker_dispatched",
+        stateDiagnostics,
       },
     });
   } catch (error) {

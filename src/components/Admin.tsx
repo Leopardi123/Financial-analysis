@@ -119,6 +119,7 @@ type PriceIngestResult = {
     remaining?: number;
     batchSize?: number;
   };
+  stateDiagnostics?: ScreeningDebugPayload["stateDiagnostics"];
   error?: string;
   debug?: ScreeningDebugPayload;
 };
@@ -149,6 +150,19 @@ type ScreeningDebugPayload = {
   targetsSource?: string;
   targetsRecomputed?: boolean;
   dispatchStatus?: string;
+  stateDiagnostics?: {
+    stateFound?: boolean;
+    stateValid?: boolean;
+    targetsPersisted?: boolean;
+    targetsCount?: number;
+    cursorValue?: number | null;
+    stateStatus?: string | null;
+    stateUpdatedAt?: string | null;
+    cronLastTouchedState?: "yes" | "no" | "unknown";
+    lockPresent?: boolean;
+    targetsSourceUnknownReason?: string | null;
+    stateError?: string | null;
+  };
 };
 
 type ScreeningAttempt = {
@@ -483,6 +497,26 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       setScreeningMessage("Paused by user. Resume continues from saved cursor.");
     }
     screeningAutoRunningRef.current = false;
+  }
+
+  async function inspectScreeningRefreshState(): Promise<void> {
+    const payload = await postJson("Inspect Screening Refresh State", "/api/admin/refresh-price-screen", {
+      inspectState: true,
+      batchSize: 1,
+      offset: screeningOffsetRef.current,
+    });
+    if (payload?.__error) {
+      setScreeningStatus("error");
+      setScreeningMessage(`Inspect state failed: ${payload.__error}`);
+      return;
+    }
+    const nextResult = payload as unknown as PriceIngestResult;
+    if (nextResult.debug) {
+      setScreeningDebug(nextResult.debug);
+    } else if (nextResult.stateDiagnostics) {
+      setScreeningDebug({ stateDiagnostics: nextResult.stateDiagnostics });
+    }
+    setScreeningMessage("Loaded persisted screening refresh state.");
   }
 
 
@@ -987,6 +1021,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             Resume
           </button>
           <button type="button" onClick={resetScreeningProgress} disabled={loadingKey !== null}>Reset progress</button>
+          <button type="button" onClick={() => void inspectScreeningRefreshState()} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+            Inspect persisted state
+          </button>
           <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
             Run one debug batch
           </button>
@@ -1048,6 +1085,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               </p>
               <p className="bread">
                 Controller stop stage: {(latestAttempt?.debug?.controllerStopStage ?? screeningDebug?.controllerStopStage) ?? "none"} · Worker started: {String((latestAttempt?.debug?.workerStarted ?? screeningDebug?.workerStarted) ?? false)} · Targets source: {(latestAttempt?.debug?.targetsSource ?? screeningDebug?.targetsSource) ?? "unknown"} · Targets recomputed: {String((latestAttempt?.debug?.targetsRecomputed ?? screeningDebug?.targetsRecomputed) ?? false)} · Dispatch status: {(latestAttempt?.debug?.dispatchStatus ?? screeningDebug?.dispatchStatus) ?? "unknown"}
+              </p>
+              <p className="bread">
+                State found: {String((latestAttempt?.debug?.stateDiagnostics?.stateFound ?? screeningDebug?.stateDiagnostics?.stateFound) ?? false)} · State valid: {String((latestAttempt?.debug?.stateDiagnostics?.stateValid ?? screeningDebug?.stateDiagnostics?.stateValid) ?? false)} · Targets persisted: {String((latestAttempt?.debug?.stateDiagnostics?.targetsPersisted ?? screeningDebug?.stateDiagnostics?.targetsPersisted) ?? false)} · Targets count: {(latestAttempt?.debug?.stateDiagnostics?.targetsCount ?? screeningDebug?.stateDiagnostics?.targetsCount) ?? 0} · Cursor: {String((latestAttempt?.debug?.stateDiagnostics?.cursorValue ?? screeningDebug?.stateDiagnostics?.cursorValue) ?? "null")} · Cron last touched state: {(latestAttempt?.debug?.stateDiagnostics?.cronLastTouchedState ?? screeningDebug?.stateDiagnostics?.cronLastTouchedState) ?? "unknown"} · Lock present: {String((latestAttempt?.debug?.stateDiagnostics?.lockPresent ?? screeningDebug?.stateDiagnostics?.lockPresent) ?? false)} · targetsSource unknown reason: {(latestAttempt?.debug?.stateDiagnostics?.targetsSourceUnknownReason ?? screeningDebug?.stateDiagnostics?.targetsSourceUnknownReason) ?? "n/a"} · state error: {(latestAttempt?.debug?.stateDiagnostics?.stateError ?? screeningDebug?.stateDiagnostics?.stateError) ?? "none"}
               </p>
               {(latestAttempt?.debug?.steps ?? screeningDebug?.steps ?? []).map((step) => (
                 <details key={step.key} style={{ marginBottom: 6 }}>
