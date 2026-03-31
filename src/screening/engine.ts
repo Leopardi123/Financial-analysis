@@ -34,6 +34,7 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
   const cashflow = snapshot.cashflow;
   const manual = snapshot.manual ?? {};
   const price = (snapshot.price ?? {}) as Record<string, unknown>;
+  const profile = (snapshot.profile ?? {}) as Record<string, unknown>;
   const corporate = (snapshot.corporateSnapshot ?? {}) as Record<string, unknown>;
 
   const readFinite = (key: string) => {
@@ -108,13 +109,27 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "corp_market_cap_over_nav":
       return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NAV_today_TargetCurrency"));
     case "corp_cash_over_market_cap": {
-      const cashT0 = readFiniteFromPaths(
-        "cash_t0_TargetCurrency",
-        "financing.cash_t0_post_TargetCurrency",
-        "financing.cash_AfterCashFirst_TargetCurrency_t0",
-      );
-      const marketCap = readFiniteFromPaths("MarketCap_TargetCurrency", "marketValue.MarketCap_TargetCurrency") ?? marketCapFromInputs;
-      return ratio(cashT0, marketCap);
+      const reportedCash =
+        latest(balance.cashAndShortTermInvestments)
+        ?? latest(balance.cashAndCashEquivalents)
+        ?? latest(balance.cashAndCashEquivalentsAtCarryingValue);
+      const profileMarketCap = typeof profile.mktCap === "number" && Number.isFinite(profile.mktCap) && profile.mktCap > 0
+        ? profile.mktCap
+        : null;
+      const profilePrice = typeof profile.price === "number" && Number.isFinite(profile.price) && profile.price > 0
+        ? profile.price
+        : null;
+      const profileShares = typeof profile.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding) && profile.sharesOutstanding > 0
+        ? profile.sharesOutstanding
+        : null;
+      const profileDerivedMarketCap = profilePrice !== null && profileShares !== null
+        ? profilePrice * profileShares
+        : null;
+      const marketCap = readFiniteFromPaths("MarketCap_TargetCurrency", "marketValue.MarketCap_TargetCurrency")
+        ?? marketCapFromInputs
+        ?? profileMarketCap
+        ?? profileDerivedMarketCap;
+      return ratio(reportedCash, marketCap);
     }
     case "corp_price_over_dcf_per_share":
       return ratio(readFinite("price_current_TargetCurrency"), readFinite("DCF_prodStart_present_perShare_TargetCurrency"));
