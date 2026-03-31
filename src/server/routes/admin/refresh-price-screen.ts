@@ -307,6 +307,46 @@ export default async function handler(req: any, res: any) {
       else if (durationMs > 2000) merged.warning = "slow_substep";
       item.details = merged;
     };
+    const ensureMicroSteps = (subStep: Record<string, unknown>): Array<Record<string, unknown>> => {
+      const details = (subStep.details ?? {}) as Record<string, unknown>;
+      const microSteps = Array.isArray(details.microSteps) ? details.microSteps as Array<Record<string, unknown>> : [];
+      details.microSteps = microSteps;
+      subStep.details = details;
+      return microSteps;
+    };
+    const startMicroStep = (subStep: Record<string, unknown>, key: string, details?: Record<string, unknown>) => {
+      const microSteps = ensureMicroSteps(subStep);
+      const item: Record<string, unknown> = {
+        key,
+        status: "running",
+        startedAt: new Date().toISOString(),
+        details: details ?? {},
+      };
+      microSteps.push(item);
+      const stepDetails = (subStep.details ?? {}) as Record<string, unknown>;
+      stepDetails.lastStartedMicroStep = key;
+      subStep.details = stepDetails;
+      return item;
+    };
+    const finishMicroStep = (subStep: Record<string, unknown>, item: Record<string, unknown>, status: "success" | "failed" | "skipped", details?: Record<string, unknown>) => {
+      const endedAt = new Date().toISOString();
+      item.status = status;
+      item.endedAt = endedAt;
+      const startedAtMs = typeof item.startedAt === "string" ? new Date(item.startedAt).getTime() : Date.now();
+      const durationMs = Math.max(0, new Date(endedAt).getTime() - startedAtMs);
+      item.durationMs = durationMs;
+      const merged = { ...((item.details as Record<string, unknown>) ?? {}), ...(details ?? {}) };
+      if (durationMs > 10000) merged.warning = "very_slow_substep";
+      else if (durationMs > 2000) merged.warning = "slow_substep";
+      item.details = merged;
+      const stepDetails = (subStep.details ?? {}) as Record<string, unknown>;
+      const cumulative = Number(stepDetails.cumulativeDurationMs ?? 0);
+      stepDetails.cumulativeDurationMs = cumulative + durationMs;
+      if (status === "success" || status === "skipped") {
+        stepDetails.lastCompletedMicroStep = String(item.key ?? "unknown");
+      }
+      subStep.details = stepDetails;
+    };
 
     const expectedSecret = getAdminSecret();
     const headerCronRaw = req.headers?.["x-cron-secret"];
@@ -358,19 +398,68 @@ export default async function handler(req: any, res: any) {
     const batchSize = Math.max(1, Math.min(3, Number.isFinite(rawBatchSize) ? Math.floor(rawBatchSize) : 1));
 
     const subLoadPersisted = startResolveSubStep("load_persisted_state");
+    const callerPath = inspectStateOnly ? "inspect_state" : "refresh_controller";
+    const stateReadEntry = startMicroStep(subLoadPersisted, "state_read_entry", {
+      timestamp: new Date().toISOString(),
+      attemptId: requestStartIso,
+      scope: STATE_SCOPE,
+      callerPath,
+      stateReaderVariant: "readPersistedState",
+      sharedImplementation: true,
+    });
+    finishMicroStep(subLoadPersisted, stateReadEntry, "success");
+    const storageKeyResolved = startMicroStep(subLoadPersisted, "state_storage_key_resolved", {
+      scope: STATE_SCOPE,
+      keysTested: [STATE_SCOPE],
+      queryShape: "single_scope_lookup",
+    });
+    finishMicroStep(subLoadPersisted, storageKeyResolved, "success");
+    const backendSelected = startMicroStep(subLoadPersisted, "state_backend_selected", {
+      backendUsed: "turso_libsql",
+      callerPath,
+      stateReaderVariant: "readPersistedState",
+      sharedImplementation: true,
+      operationKind: "db_select_single_row",
+    });
+    finishMicroStep(subLoadPersisted, backendSelected, "success");
+    const dbQueryStart = startMicroStep(subLoadPersisted, "state_db_query_start", {
+      operation: "SELECT screening_price_refresh_state by scope",
+      table: tables.screeningPriceRefreshState,
+      params: { scope: STATE_SCOPE },
+    });
     let persistedState: PersistedStateRow | null = null;
+    let loadPersistedFailed = false;
+    let loadPersistedError: string | null = null;
     try {
       persistedState = await readPersistedState();
-      finishResolveSubStep(subLoadPersisted, "success", {
-        stateFound: Boolean(persistedState),
-        size: persistedState?.symbols_json?.length ?? 0,
+      finishMicroStep(subLoadPersisted, dbQueryStart, "success", {
+        rowCount: persistedState ? 1 : 0,
+        empty: !persistedState,
+        payloadSize: persistedState?.symbols_json?.length ?? 0,
+        branchStateFound: Boolean(persistedState),
       });
     } catch (error) {
       persistedState = null;
       stateDiagnostics.stateError = `read_state_failed: ${(error as Error).message}`;
       stateDiagnostics.targetsSourceUnknownReason = "Persisted controller state could not be read.";
-      finishResolveSubStep(subLoadPersisted, "failed", { error: (error as Error).message });
+      loadPersistedFailed = true;
+      loadPersistedError = (error as Error).message;
+      finishMicroStep(subLoadPersisted, dbQueryStart, "failed", {
+        error: (error as Error).message,
+        rowCount: 0,
+        empty: true,
+      });
     }
+    const dbQueryEnd = startMicroStep(subLoadPersisted, "state_db_query_end");
+    finishMicroStep(subLoadPersisted, dbQueryEnd, "success", {
+      rowCount: persistedState ? 1 : 0,
+      empty: !persistedState,
+      payloadSize: persistedState?.symbols_json?.length ?? 0,
+      branchDbRowFound: Boolean(persistedState),
+    });
+    const decodeStart = startMicroStep(subLoadPersisted, "state_row_decode_start", {
+      rawPayloadPresent: Boolean(persistedState?.symbols_json),
+    });
     const subValidateState = startResolveSubStep("validate_state");
     stateDiagnostics.stateFound = Boolean(persistedState);
     stateDiagnostics.stateStatus = persistedState?.status ?? null;
@@ -414,9 +503,15 @@ export default async function handler(req: any, res: any) {
     let persistedSymbols: string[] = [];
     let persistedPayload: PersistedControllerPayload = { targets: [] };
     let persistedStateValid = false;
+    let rawPayloadBytes = 0;
+    let serializedStateBytes = 0;
+    let decodedStateBytes = 0;
     if (persistedState) {
+      rawPayloadBytes = persistedState.symbols_json?.length ?? 0;
       persistedPayload = parsePersistedPayload(persistedState.symbols_json);
       persistedSymbols = parsePersistedSymbols(persistedState.symbols_json);
+      serializedStateBytes = rawPayloadBytes;
+      decodedStateBytes = JSON.stringify(persistedPayload).length;
       const persistedOffset = Number.isFinite(Number(persistedState.offset))
         ? Math.max(0, Math.floor(Number(persistedState.offset)))
         : -1;
@@ -436,10 +531,84 @@ export default async function handler(req: any, res: any) {
           : "Persisted state is incomplete/invalid (symbols or cursor).";
       }
     }
+    finishMicroStep(subLoadPersisted, decodeStart, "success", {
+      rawPayloadBytes,
+      serializedStateBytes,
+      decodedStateBytes,
+      symbolsCount: persistedSymbols.length,
+      retryMapCount: Object.keys(persistedPayload.retryMap ?? {}).length,
+      failuresCount: Array.isArray(persistedPayload.failures) ? persistedPayload.failures.length : 0,
+      branchJsonParseExecuted: Boolean(persistedState?.symbols_json),
+    });
+    const decodeEnd = startMicroStep(subLoadPersisted, "state_row_decode_end");
+    finishMicroStep(subLoadPersisted, decodeEnd, "success", {
+      rawPayloadBytes,
+      symbolsCount: persistedSymbols.length,
+      retryMapCount: Object.keys(persistedPayload.retryMap ?? {}).length,
+      failuresCount: Array.isArray(persistedPayload.failures) ? persistedPayload.failures.length : 0,
+    });
+    const validationStart = startMicroStep(subLoadPersisted, "state_validation_start");
+    finishMicroStep(subLoadPersisted, validationStart, "success", {
+      branchValidationRejected: Boolean(persistedState && !persistedStateValid),
+    });
     finishResolveSubStep(subValidateState, "success", {
       stateFound: stateDiagnostics.stateFound,
       stateValid: stateDiagnostics.stateValid,
       targetsCount: stateDiagnostics.targetsCount,
+    });
+    const validationEnd = startMicroStep(subLoadPersisted, "state_validation_end");
+    finishMicroStep(subLoadPersisted, validationEnd, "success", {
+      stateFound: stateDiagnostics.stateFound,
+      stateValid: stateDiagnostics.stateValid,
+      offset: stateDiagnostics.cursorValue,
+      totalCount: persistedState ? Number(persistedState.total_count ?? 0) : 0,
+      symbolsCount: persistedSymbols.length,
+      workerRunning: Boolean(persistedPayload.workerRunning),
+      status: stateDiagnostics.stateStatus,
+      updatedAt: stateDiagnostics.stateUpdatedAt,
+      branchStateExists: Boolean(persistedState),
+    });
+    const lockDiagStart = startMicroStep(subLoadPersisted, "lock_diagnostics_start");
+    finishMicroStep(subLoadPersisted, lockDiagStart, "success", {
+      lockPresent: stateDiagnostics.lockPresent,
+      callerPath,
+    });
+    const lockDiagEnd = startMicroStep(subLoadPersisted, "lock_diagnostics_end");
+    finishMicroStep(subLoadPersisted, lockDiagEnd, "success", {
+      lockPresent: stateDiagnostics.lockPresent,
+      lockScope: stateDiagnostics.lockScope,
+      lockOwner: stateDiagnostics.lockOwner,
+      lockCreatedAt: stateDiagnostics.lockCreatedAt,
+      lockUpdatedAt: stateDiagnostics.lockUpdatedAt,
+      lockAgeMs: stateDiagnostics.lockAgeMs,
+      lockClassification: stateDiagnostics.lockClassification,
+      controllerLockDecision: stateDiagnostics.controllerLockDecision,
+      controllerLockReason: stateDiagnostics.controllerLockReason,
+    });
+    const finalizeLoadPersisted = startMicroStep(subLoadPersisted, "load_persisted_state_finalize");
+    finishMicroStep(subLoadPersisted, finalizeLoadPersisted, loadPersistedFailed ? "failed" : "success", {
+      success: !loadPersistedFailed,
+      error: loadPersistedError,
+      stateFound: Boolean(persistedState),
+      symbolsCount: persistedSymbols.length,
+      retryMapCount: Object.keys(persistedPayload.retryMap ?? {}).length,
+      failuresCount: Array.isArray(persistedPayload.failures) ? persistedPayload.failures.length : 0,
+    });
+    finishResolveSubStep(subLoadPersisted, loadPersistedFailed ? "failed" : "success", {
+      stateFound: Boolean(persistedState),
+      size: persistedState?.symbols_json?.length ?? 0,
+      callerPath,
+      stateReaderVariant: "readPersistedState",
+      sharedImplementation: true,
+      backendUsed: "turso_libsql",
+      rawPayloadBytes,
+      serializedStateBytes,
+      decodedStateBytes,
+      symbolsCount: persistedSymbols.length,
+      retryMapCount: Object.keys(persistedPayload.retryMap ?? {}).length,
+      failuresCount: Array.isArray(persistedPayload.failures) ? persistedPayload.failures.length : 0,
+      success: !loadPersistedFailed,
+      error: loadPersistedError,
     });
     const subLoadTargetsFromState = startResolveSubStep("load_targets_from_state");
     const subRecomputeTargets = startResolveSubStep("recompute_targets");
