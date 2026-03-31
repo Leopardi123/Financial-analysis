@@ -40,6 +40,21 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     const raw = corporate[key];
     return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
   };
+  const readFiniteFromPaths = (...paths: string[]) => {
+    for (const path of paths) {
+      const parts = path.split(".");
+      let cursor: unknown = corporate;
+      for (const part of parts) {
+        if (!cursor || typeof cursor !== "object") {
+          cursor = undefined;
+          break;
+        }
+        cursor = (cursor as Record<string, unknown>)[part];
+      }
+      if (typeof cursor === "number" && Number.isFinite(cursor)) return cursor;
+    }
+    return null;
+  };
   const ratio = (num: number | null, den: number | null) =>
     num !== null && den !== null && den !== 0 ? num / den : null;
 
@@ -77,11 +92,11 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "corp_market_cap":
       return readFinite("MarketCap_TargetCurrency");
     case "corp_ev_over_npv":
-      return readFinite("EV_over_NPV");
+      return readFiniteFromPaths("EV_over_NPV", "marketValue.EV_over_NPV", "marketValue.ev_over_npv");
     case "corp_ev_over_nav":
-      return readFinite("EV_over_NAV");
+      return readFiniteFromPaths("EV_over_NAV", "marketValue.EV_over_NAV", "marketValue.ev_over_nav");
     case "corp_p_over_nav":
-      return readFinite("P_over_NAV");
+      return readFiniteFromPaths("P_over_NAV", "marketValue.P_over_NAV", "marketValue.p_over_nav");
     case "corp_market_cap_over_npv":
       return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NPV_today_TargetCurrency"));
     case "corp_market_cap_over_nav":

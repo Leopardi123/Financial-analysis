@@ -133,6 +133,43 @@ async function fetchCorporateSnapshot(symbol: string, sharesCurrent: number | nu
   };
 }
 
+function readPathValue(source: Record<string, unknown>, path: string): unknown {
+  const parts = path.split(".");
+  let cursor: unknown = source;
+  for (const part of parts) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = (cursor as Record<string, unknown>)[part];
+  }
+  return cursor;
+}
+
+function resolveCorporateDebugMetric(snapshot: Record<string, unknown> | null | undefined, field: string) {
+  const candidatesByField: Record<string, string[]> = {
+    corp_ev_over_nav: ["EV_over_NAV", "marketValue.EV_over_NAV", "marketValue.ev_over_nav"],
+    corp_ev_over_npv: ["EV_over_NPV", "marketValue.EV_over_NPV", "marketValue.ev_over_npv"],
+    corp_p_over_nav: ["P_over_NAV", "marketValue.P_over_NAV", "marketValue.p_over_nav"],
+  };
+  const candidates = candidatesByField[field] ?? [];
+  if (!snapshot) {
+    return {
+      resolvedPath: candidates[0] ?? "n/a",
+      rawValue: null,
+      missingReason: "corporateSnapshot saknas i payload",
+    };
+  }
+  for (const path of candidates) {
+    const raw = readPathValue(snapshot, path);
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return { resolvedPath: path, rawValue: raw, missingReason: null };
+    }
+  }
+  return {
+    resolvedPath: candidates.join(" | "),
+    rawValue: null,
+    missingReason: "ingen finite siffra hittades på förväntade paths",
+  };
+}
+
 async function loadSnapshot(ticker: string, manualData: Record<string, Record<string, number>>, includeCorporateSnapshot: boolean) {
   const normalizedTicker = normalizeTicker(ticker);
   if (!normalizedTicker) return null;
@@ -153,13 +190,20 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
   const profilePrice = typeof profile?.price === "number" && Number.isFinite(profile.price)
     ? Number(profile.price)
     : null;
-  const quotePrice = typeof priceNowPayload?.price === "number" && Number.isFinite(priceNowPayload.price)
-    ? Number(priceNowPayload.price)
+  const quotePrice = typeof priceNowPayload?.short?.price?.[1]?.[1] === "number" && Number.isFinite(priceNowPayload.short.price[1][1])
+    ? Number(priceNowPayload.short.price[1][1])
     : null;
+  const marketCap = typeof profile?.mktCap === "number" && Number.isFinite(profile.mktCap)
+    ? Number(profile.mktCap)
+    : null;
+  const fallbackShares = marketCap !== null && profilePrice !== null && profilePrice > 0
+    ? marketCap / profilePrice
+    : null;
+  const sharesResolved = sharesCurrent ?? fallbackShares;
   const priceCurrent = quotePrice ?? profilePrice;
 
   const corporateSnapshot = includeCorporateSnapshot
-    ? await fetchCorporateSnapshot(normalizedTicker, sharesCurrent, priceCurrent)
+    ? await fetchCorporateSnapshot(normalizedTicker, sharesResolved, priceCurrent)
     : null;
 
   const snapshot: CompanySnapshot = {
@@ -358,6 +402,16 @@ export default function ScreeningDashboard() {
       const missingCount = evaluated.filter((item) => item.evaluationStatus === "not_evaluated").length;
       const notes: string[] = [...resolvedUniverse.notes];
       if (requiresCorporateSnapshot) notes.push("Corporate metrics beräknas via /api/snapshot/corporate med symbol-mode per bolag.");
+      const requestedCorporateFields = requiredFields.filter((field) => SCREENING_FIELD_MAP.get(field)?.source === "corporate_snapshot");
+      if (requestedCorporateFields.length > 0) {
+        const sampleSnapshot = snapshots.find((item): item is CompanySnapshot => Boolean(item?.corporateSnapshot));
+        for (const corporateField of requestedCorporateFields) {
+          const debug = resolveCorporateDebugMetric(sampleSnapshot?.corporateSnapshot as Record<string, unknown> | null | undefined, corporateField);
+          notes.push(
+            `[corp-debug] field=${corporateField} path=${debug.resolvedPath} raw=${debug.rawValue === null ? "null" : String(debug.rawValue)} reason=${debug.missingReason ?? "ok"}`,
+          );
+        }
+      }
       if (missingCount > 0) notes.push(`Aktiv regel kräver ${requiredFields.join(", ")}; ${missingCount} bolag saknade obligatorisk data.`);
       if (skippedFetchErrors > 0) notes.push(`${skippedFetchErrors} bolag hoppades över p.g.a. otillgänglig tickerdata.`);
       if (!manualUsed) notes.push("Denna screening använder inte analyst overrides.");
