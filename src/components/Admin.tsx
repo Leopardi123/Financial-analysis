@@ -382,7 +382,24 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       requestStartedAt: now,
       steps: [
         { key: "request_started", label: "Request started", status: "running", startedAt: now, details: { offset, batchSize } },
-        { key: "resolve_targets", label: "Resolve targets", status: "running", startedAt: now, details: { offset, batchSize } },
+        {
+          key: "resolve_targets",
+          label: "Resolve targets",
+          status: "running",
+          startedAt: now,
+          details: {
+            offset,
+            batchSize,
+            subSteps: [
+              { key: "load_persisted_state", status: "running", startedAt: now, details: {} },
+              { key: "validate_state", status: "pending", details: {} },
+              { key: "load_targets_from_state", status: "pending", details: {} },
+              { key: "recompute_targets", status: "pending", details: {} },
+              { key: "acquire_lock", status: "pending", details: {} },
+              { key: "finalize_targets", status: "pending", details: {} },
+            ],
+          },
+        },
         { key: "load_symbols_batch", label: "Load symbols / batch", status: "pending" },
         { key: "fetch_price_data", label: "Fetch price data", status: "pending" },
         { key: "write_daily_history", label: "Write daily_price_history", status: "pending" },
@@ -422,9 +439,21 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         endedAt,
         status: payload.__error.includes("timed out") ? "timeout" : "failed",
         error: payload.__error,
-        debug: { ...initialDebug, requestEndedAt: endedAt },
+        debug: {
+          ...initialDebug,
+          requestEndedAt: endedAt,
+          failedStep: "resolve_targets",
+          currentStage: "resolve_targets",
+          lastStartedStep: "resolve_targets",
+        },
       });
-      setScreeningDebug({ ...initialDebug, requestEndedAt: endedAt });
+      setScreeningDebug({
+        ...initialDebug,
+        requestEndedAt: endedAt,
+        failedStep: "resolve_targets",
+        currentStage: "resolve_targets",
+        lastStartedStep: "resolve_targets",
+      });
       updateLog(
         "Refresh Screening Price Data",
         "error",
@@ -436,7 +465,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
           debug: {
             ...initialDebug,
             requestEndedAt: endedAt,
-            failedStep: initialDebug?.currentStage ?? "resolve_targets",
+            failedStep: "resolve_targets",
           },
         }, null, 2)}`,
       );

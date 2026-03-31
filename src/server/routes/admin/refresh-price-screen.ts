@@ -258,6 +258,39 @@ export default async function handler(req: any, res: any) {
       }
       controllerStopStage = key;
     };
+    const resolveStep = () => debugSteps.find((item) => item.key === "resolve_targets");
+    const ensureResolveSubSteps = (): Array<Record<string, unknown>> => {
+      const step = resolveStep();
+      if (!step) return [];
+      const details = (step.details ?? {}) as Record<string, unknown>;
+      const subSteps = Array.isArray(details.subSteps) ? details.subSteps as Array<Record<string, unknown>> : [];
+      details.subSteps = subSteps;
+      step.details = details;
+      return subSteps;
+    };
+    const startResolveSubStep = (key: string, details?: Record<string, unknown>): Record<string, unknown> => {
+      const subSteps = ensureResolveSubSteps();
+      const item: Record<string, unknown> = {
+        key,
+        status: "running",
+        startedAt: new Date().toISOString(),
+        details: details ?? {},
+      };
+      subSteps.push(item);
+      return item;
+    };
+    const finishResolveSubStep = (item: Record<string, unknown>, status: "success" | "failed" | "skipped", details?: Record<string, unknown>) => {
+      const endedAt = new Date().toISOString();
+      item.status = status;
+      item.endedAt = endedAt;
+      const startedAtMs = typeof item.startedAt === "string" ? new Date(item.startedAt).getTime() : Date.now();
+      const durationMs = Math.max(0, new Date(endedAt).getTime() - startedAtMs);
+      item.durationMs = durationMs;
+      const merged = { ...((item.details as Record<string, unknown>) ?? {}), ...(details ?? {}) };
+      if (durationMs > 10000) merged.warning = "very_slow_substep";
+      else if (durationMs > 2000) merged.warning = "slow_substep";
+      item.details = merged;
+    };
 
     const expectedSecret = getAdminSecret();
     const headerCronRaw = req.headers?.["x-cron-secret"];
@@ -308,14 +341,21 @@ export default async function handler(req: any, res: any) {
     const rawBatchSize = Number(req.query?.batchSize ?? body.batchSize ?? 1);
     const batchSize = Math.max(1, Math.min(3, Number.isFinite(rawBatchSize) ? Math.floor(rawBatchSize) : 1));
 
+    const subLoadPersisted = startResolveSubStep("load_persisted_state");
     let persistedState: PersistedStateRow | null = null;
     try {
       persistedState = await readPersistedState();
+      finishResolveSubStep(subLoadPersisted, "success", {
+        stateFound: Boolean(persistedState),
+        size: persistedState?.symbols_json?.length ?? 0,
+      });
     } catch (error) {
       persistedState = null;
       stateDiagnostics.stateError = `read_state_failed: ${(error as Error).message}`;
       stateDiagnostics.targetsSourceUnknownReason = "Persisted controller state could not be read.";
+      finishResolveSubStep(subLoadPersisted, "failed", { error: (error as Error).message });
     }
+    const subValidateState = startResolveSubStep("validate_state");
     stateDiagnostics.stateFound = Boolean(persistedState);
     stateDiagnostics.stateStatus = persistedState?.status ?? null;
     stateDiagnostics.stateUpdatedAt = persistedState?.updated_at ?? null;
@@ -367,6 +407,16 @@ export default async function handler(req: any, res: any) {
           : "Persisted state is incomplete/invalid (symbols or cursor).";
       }
     }
+    finishResolveSubStep(subValidateState, "success", {
+      stateFound: stateDiagnostics.stateFound,
+      stateValid: stateDiagnostics.stateValid,
+      targetsCount: stateDiagnostics.targetsCount,
+    });
+    const subLoadTargetsFromState = startResolveSubStep("load_targets_from_state");
+    const subRecomputeTargets = startResolveSubStep("recompute_targets");
+    finishResolveSubStep(subRecomputeTargets, "skipped", { triggered: false });
+    const subAcquireLock = startResolveSubStep("acquire_lock");
+    finishResolveSubStep(subAcquireLock, "skipped", { lockStatus: "not_applicable" });
 
     if (inspectStateOnly) {
       res.status(200).json({
@@ -411,22 +461,38 @@ export default async function handler(req: any, res: any) {
       targetsSource = "request_symbols";
       targetsRecomputed = true;
       stateDiagnostics.targetsSourceUnknownReason = null;
+      finishResolveSubStep(subLoadTargetsFromState, "success", {
+        source: "request_symbols",
+        symbolsCount: explicitSymbols.length,
+      });
     } else if (!reset && persistedState && persistedStateValid) {
       if (persistedSymbols.length > 0) {
         symbols = persistedSymbols;
         offset = Number.isFinite(Number(persistedState.offset)) ? Math.max(0, Math.floor(Number(persistedState.offset))) : requestedOffset;
         targetsSource = "persisted";
         stateDiagnostics.targetsSourceUnknownReason = null;
+        finishResolveSubStep(subLoadTargetsFromState, "success", {
+          source: "persisted",
+          symbolsCount: persistedSymbols.length,
+          cursorOffset: offset,
+        });
       } else {
         symbols = await loadActiveSymbols();
         targetsSource = "fresh";
         targetsRecomputed = true;
+        finishResolveSubStep(subLoadTargetsFromState, "failed", { reason: "persisted_targets_empty" });
+        const subRecompute = startResolveSubStep("recompute_targets");
+        finishResolveSubStep(subRecompute, "success", { triggered: true, symbolsCount: symbols.length });
       }
     } else {
       symbols = await loadActiveSymbols();
       offset = 0;
       targetsSource = "fresh";
       targetsRecomputed = true;
+      finishResolveSubStep(subLoadTargetsFromState, "skipped", { reason: "missing_or_invalid_state" });
+      const subRecompute = startResolveSubStep("recompute_targets");
+      finishResolveSubStep(subRecompute, "success", { triggered: true, symbolsCount: symbols.length });
+      const subAcquire = startResolveSubStep("acquire_lock");
       stateDiagnostics.targetsSourceUnknownReason = persistedState
         ? (stateDiagnostics.targetsSourceUnknownReason ?? "Persisted state invalid, rebuilt from active universe.")
         : "No persisted state found, bootstrapped fresh run.";
@@ -446,8 +512,20 @@ export default async function handler(req: any, res: any) {
       stateDiagnostics.cursorValue = 0;
       stateDiagnostics.stateStatus = "running";
       stateDiagnostics.stateUpdatedAt = new Date().toISOString();
+      finishResolveSubStep(subAcquire, "success", { lockStatus: "state_persisted_for_run_start" });
     }
+    const subFinalizeTargets = startResolveSubStep("finalize_targets");
+    finishResolveSubStep(subFinalizeTargets, "success", {
+      symbolsCount: symbols.length,
+      offset,
+      targetsSource,
+    });
 
+    const resolveSubSteps = ensureResolveSubSteps();
+    const lastStartedSubStep = resolveSubSteps.length > 0
+      ? String(resolveSubSteps[resolveSubSteps.length - 1]?.key ?? "none")
+      : "none";
+    const lastCompletedSubStep = [...resolveSubSteps].reverse().find((item) => item.status === "success" || item.status === "skipped");
     markDone("resolve_targets", "success", {
       resolvedCount: symbols.length,
       resolvedSample: symbols.slice(0, 20),
@@ -462,6 +540,8 @@ export default async function handler(req: any, res: any) {
       cronLastTouchedState: stateDiagnostics.cronLastTouchedState,
       lockPresent: stateDiagnostics.lockPresent,
       targetsSourceUnknownReason: stateDiagnostics.targetsSourceUnknownReason,
+      lastStartedSubStep,
+      lastCompletedSubStep: String(lastCompletedSubStep?.key ?? "none"),
     });
 
     if (symbols.length === 0) {
