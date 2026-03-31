@@ -120,6 +120,12 @@ type PriceIngestResult = {
     batchSize?: number;
   };
   stateDiagnostics?: ScreeningDebugPayload["stateDiagnostics"];
+  stateWriteVerification?: {
+    expectedOffset?: number;
+    persistedOffsetAfterWrite?: number | null;
+    persistedUpdatedAtAfterWrite?: string | null;
+    stalePersistedStateAfterSuccess?: boolean;
+  };
   error?: string;
   debug?: ScreeningDebugPayload;
 };
@@ -162,6 +168,12 @@ type ScreeningDebugPayload = {
     lockPresent?: boolean;
     targetsSourceUnknownReason?: string | null;
     stateError?: string | null;
+  };
+  stateWriteVerification?: {
+    expectedOffset?: number;
+    persistedOffsetAfterWrite?: number | null;
+    persistedUpdatedAtAfterWrite?: string | null;
+    stalePersistedStateAfterSuccess?: boolean;
   };
 };
 
@@ -1050,6 +1062,13 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         </p>
         {priceIngestResult && (
           <div className="bread">
+            {(() => {
+              const heavy = (priceIngestResult.results ?? []).some((item) => {
+                const ingestDebug = (item as Record<string, unknown>).ingestDebug as Record<string, unknown> | undefined;
+                return Boolean(ingestDebug?.isHeavySymbol || ingestDebug?.isBackfill);
+              });
+              return <><strong>Run mode:</strong> {heavy ? "Heavy/backfill symbol present" : "Normal incremental refresh"}<br /></>;
+            })()}
             <strong>Status:</strong> {priceIngestResult.status === "partial_success"
               ? "Partial success"
               : priceIngestResult.ok ? "Success" : "Error"}<br />
@@ -1057,6 +1076,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <strong>daily_price_history writes:</strong> {priceIngestResult.writtenDailyRows ?? 0} (unchanged {priceIngestResult.unchangedDailyRows ?? 0})<br />
             <strong>price_screen_snapshot writes:</strong> {priceIngestResult.snapshotWrites ?? 0}<br />
             <strong>Symbols changed:</strong> {priceIngestResult.changedSymbols ?? 0}
+            {priceIngestResult.stateWriteVerification?.stalePersistedStateAfterSuccess
+              ? <><br /><strong>State write check:</strong> ⚠️ successful batch but persisted state looks stale (expected offset {priceIngestResult.stateWriteVerification.expectedOffset}, found {String(priceIngestResult.stateWriteVerification.persistedOffsetAfterWrite)}).</>
+              : null}
             {priceIngestResult.error ? <><br /><strong>Error:</strong> {priceIngestResult.error}</> : null}
             {((priceIngestResult.results?.length ?? 0) > 0 || (priceIngestResult.failures?.length ?? 0) > 0) && (
               <>
@@ -1064,7 +1086,15 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
                 <strong>Batch symbols:</strong>
                 <ul style={{ marginTop: 4 }}>
                   {(priceIngestResult.results ?? []).map((item, idx) => (
-                    <li key={`ok-${String(item.symbol ?? idx)}`}>{String(item.symbol ?? "unknown")} ✅ success</li>
+                    <li key={`ok-${String(item.symbol ?? idx)}`}>
+                      {String(item.symbol ?? "unknown")} ✅ success
+                      {(() => {
+                        const ingestDebug = (item as Record<string, unknown>).ingestDebug as Record<string, unknown> | undefined;
+                        const timing = ingestDebug?.timingMs as Record<string, unknown> | undefined;
+                        if (!timing) return null;
+                        return ` · timing(ms): fetch ${String(timing.fetch ?? 0)}, parse ${String(timing.parse ?? 0)}, write ${String(timing.writeDailyHistory ?? 0)}, snapshot ${String(timing.snapshotComputeWrite ?? 0)}, total ${String(timing.total ?? 0)} · rows ${String(ingestDebug?.historicalRowsReturned ?? ingestDebug?.fmpRowsReturned ?? 0)} · inserted ${String(ingestDebug?.insertedRows ?? 0)} · backfill ${String(Boolean(ingestDebug?.isBackfill))} · heavy ${String(Boolean(ingestDebug?.isHeavySymbol))}`;
+                      })()}
+                    </li>
                   ))}
                   {(priceIngestResult.failures ?? []).map((item, idx) => (
                     <li key={`fail-${String(item.symbol ?? idx)}`}>{String(item.symbol ?? "unknown")} ❌ failed: {String(item.classification ?? "unknown")} ({String(item.stage ?? "unknown stage")})</li>
@@ -1091,6 +1121,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               </p>
               <p className="bread">
                 State found: {String((latestAttempt?.debug?.stateDiagnostics?.stateFound ?? screeningDebug?.stateDiagnostics?.stateFound) ?? false)} · State valid: {String((latestAttempt?.debug?.stateDiagnostics?.stateValid ?? screeningDebug?.stateDiagnostics?.stateValid) ?? false)} · Targets persisted: {String((latestAttempt?.debug?.stateDiagnostics?.targetsPersisted ?? screeningDebug?.stateDiagnostics?.targetsPersisted) ?? false)} · Targets count: {(latestAttempt?.debug?.stateDiagnostics?.targetsCount ?? screeningDebug?.stateDiagnostics?.targetsCount) ?? 0} · Cursor: {String((latestAttempt?.debug?.stateDiagnostics?.cursorValue ?? screeningDebug?.stateDiagnostics?.cursorValue) ?? "null")} · Cron last touched state: {(latestAttempt?.debug?.stateDiagnostics?.cronLastTouchedState ?? screeningDebug?.stateDiagnostics?.cronLastTouchedState) ?? "unknown"} · Lock present: {String((latestAttempt?.debug?.stateDiagnostics?.lockPresent ?? screeningDebug?.stateDiagnostics?.lockPresent) ?? false)} · targetsSource unknown reason: {(latestAttempt?.debug?.stateDiagnostics?.targetsSourceUnknownReason ?? screeningDebug?.stateDiagnostics?.targetsSourceUnknownReason) ?? "n/a"} · state error: {(latestAttempt?.debug?.stateDiagnostics?.stateError ?? screeningDebug?.stateDiagnostics?.stateError) ?? "none"}
+              </p>
+              <p className="bread">
+                State write verification: expected offset {String((latestAttempt?.debug?.stateWriteVerification?.expectedOffset ?? screeningDebug?.stateWriteVerification?.expectedOffset) ?? "n/a")} · persisted offset after write {String((latestAttempt?.debug?.stateWriteVerification?.persistedOffsetAfterWrite ?? screeningDebug?.stateWriteVerification?.persistedOffsetAfterWrite) ?? "n/a")} · stale persisted state after success {String((latestAttempt?.debug?.stateWriteVerification?.stalePersistedStateAfterSuccess ?? screeningDebug?.stateWriteVerification?.stalePersistedStateAfterSuccess) ?? false)}
               </p>
               {(latestAttempt?.debug?.steps ?? screeningDebug?.steps ?? []).map((step) => (
                 <details key={step.key} style={{ marginBottom: 6 }}>

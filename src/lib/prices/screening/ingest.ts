@@ -5,6 +5,8 @@ import { computePriceScreenSnapshot, type DailyPriceRow, type PriceScreenSnapsho
 
 const SCREENING_WORKING_WINDOW_ROWS = 120;
 const INCREMENTAL_BUFFER_DAYS = 10;
+const HEAVY_ROWS_THRESHOLD = 250;
+const HEAVY_INSERT_THRESHOLD = 150;
 
 interface FmpHistoricalResponse {
   historical?: Array<Record<string, unknown>>;
@@ -160,6 +162,7 @@ async function upsertSnapshotIfChanged(next: PriceScreenSnapshotRow): Promise<bo
 }
 
 export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug = false): Promise<IngestSymbolResult> {
+  const symbolStartedAt = Date.now();
   await ensureSchema();
 
   const normalized = symbol.trim().toUpperCase();
@@ -181,6 +184,7 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
   const fetchTo = toIsoDateUtc(new Date());
 
   let payload: FmpHistoricalResponse;
+  const fetchStartedAt = Date.now();
   try {
     payload = await fetchApiV3Json<FmpHistoricalResponse>(`historical-price-full/${encodeURIComponent(normalized)}`, {
       from: fetchFrom,
@@ -198,10 +202,13 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
       preExistingSnapshot: preExistingSnapshotRows.length > 0,
     });
   }
+  const fetchDurationMs = Date.now() - fetchStartedAt;
 
+  const parseStartedAt = Date.now();
   const incoming = dedupeByPriceDate(
     normalizeHistoryRows(payload).map((row) => ({ ...row, symbol: normalized })),
   );
+  const parseDurationMs = Date.now() - parseStartedAt;
   if (incoming.length === 0) {
     return { symbol: normalized, inserted: 0, updated: 0, unchanged: 0, skipped: true, snapshotUpdated: false };
   }
@@ -219,6 +226,7 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
   let inserted = 0;
   let updated = 0;
   let unchanged = 0;
+  const writeDailyStartedAt = Date.now();
 
   for (const row of incoming) {
     const existing = existingByDate.get(row.price_date);
@@ -276,9 +284,15 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
     }
     updated += 1;
   }
+  const writeDailyDurationMs = Date.now() - writeDailyStartedAt;
 
   const changed = inserted > 0 || updated > 0;
   if (!changed) {
+    const totalDurationMs = Date.now() - symbolStartedAt;
+    const historicalRowsReturned = Array.isArray(payload.historical) ? payload.historical.length : 0;
+    const insertedRows = inserted + updated;
+    const isBackfill = Number(preExistingDailyRows[0]?.c ?? 0) === 0 || preExistingSnapshotRows.length === 0;
+    const isHeavySymbol = historicalRowsReturned >= HEAVY_ROWS_THRESHOLD || insertedRows >= HEAVY_INSERT_THRESHOLD || isBackfill;
     return {
       symbol: normalized,
       inserted,
@@ -286,6 +300,29 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
       unchanged,
       skipped: false,
       snapshotUpdated: false,
+      ...(debug ? {
+        ingestDebug: {
+          symbol: normalized,
+          fmpRowsReturned: historicalRowsReturned,
+          latestFmpDate: incoming[incoming.length - 1]?.price_date ?? null,
+          preExistingDailyRows: Number(preExistingDailyRows[0]?.c ?? 0),
+          preExistingSnapshot: preExistingSnapshotRows.length > 0,
+          inserted,
+          updated,
+          unchanged,
+          timingMs: {
+            fetch: fetchDurationMs,
+            parse: parseDurationMs,
+            writeDailyHistory: writeDailyDurationMs,
+            snapshotComputeWrite: 0,
+            total: totalDurationMs,
+          },
+          historicalRowsReturned,
+          insertedRows,
+          isBackfill,
+          isHeavySymbol,
+        },
+      } : {}),
     };
   }
 
@@ -299,6 +336,7 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
   ) as unknown as DailyPriceRow[];
 
   const ascRows = [...historyRows].sort((a, b) => a.price_date.localeCompare(b.price_date));
+  const snapshotStartedAt = Date.now();
   let snapshot;
   let debugData;
   try {
@@ -312,6 +350,12 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
   } catch (error) {
     throw new IngestSymbolError((error as Error).message, "write_price_screen_snapshot", "db_write_failed", { symbol: normalized });
   }
+  const snapshotDurationMs = Date.now() - snapshotStartedAt;
+  const totalDurationMs = Date.now() - symbolStartedAt;
+  const historicalRowsReturned = Array.isArray(payload.historical) ? payload.historical.length : 0;
+  const insertedRows = inserted + updated;
+  const isBackfill = Number(preExistingDailyRows[0]?.c ?? 0) === 0 || preExistingSnapshotRows.length === 0;
+  const isHeavySymbol = historicalRowsReturned >= HEAVY_ROWS_THRESHOLD || insertedRows >= HEAVY_INSERT_THRESHOLD || isBackfill;
 
   return {
     symbol: normalized,
@@ -325,13 +369,24 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
       debug: debugData,
       ingestDebug: {
         symbol: normalized,
-        fmpRowsReturned: Array.isArray(payload.historical) ? payload.historical.length : 0,
+        fmpRowsReturned: historicalRowsReturned,
         latestFmpDate: incoming[incoming.length - 1]?.price_date ?? null,
         preExistingDailyRows: Number(preExistingDailyRows[0]?.c ?? 0),
         preExistingSnapshot: preExistingSnapshotRows.length > 0,
         inserted,
         updated,
         unchanged,
+        timingMs: {
+          fetch: fetchDurationMs,
+          parse: parseDurationMs,
+          writeDailyHistory: writeDailyDurationMs,
+          snapshotComputeWrite: snapshotDurationMs,
+          total: totalDurationMs,
+        },
+        historicalRowsReturned,
+        insertedRows,
+        isBackfill,
+        isHeavySymbol,
       },
     } : {}),
   };

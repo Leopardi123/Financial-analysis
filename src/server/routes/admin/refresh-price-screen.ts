@@ -99,6 +99,26 @@ async function writePersistedState(next: {
   );
 }
 
+async function classifyHeavyCandidates(symbols: string[]): Promise<Set<string>> {
+  const heavy = new Set<string>();
+  for (const symbol of symbols) {
+    const historyRows = await query(
+      `SELECT COUNT(*) AS c FROM ${tables.dailyPriceHistory} WHERE symbol = ?`,
+      [symbol],
+    ) as Array<{ c?: number | string }>;
+    const snapshotRows = await query(
+      `SELECT 1 AS has_row FROM ${tables.priceScreenSnapshot} WHERE symbol = ? LIMIT 1`,
+      [symbol],
+    ) as Array<{ has_row?: number }>;
+    const historyCount = Number(historyRows[0]?.c ?? 0);
+    const hasSnapshot = snapshotRows.length > 0;
+    if (!hasSnapshot || historyCount < 50) {
+      heavy.add(symbol);
+    }
+  }
+  return heavy;
+}
+
 function parsePersistedSymbols(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw);
@@ -510,6 +530,8 @@ export default async function handler(req: any, res: any) {
     let unchangedDailyRows = 0;
     const adaptiveMessages: string[] = [];
     const attemptedBatchSizes: number[] = [];
+    const perSymbolTiming: Array<Record<string, unknown>> = [];
+    const heavySymbolDiagnostics: Array<Record<string, unknown>> = [];
     const isRetryableFailure = (failure: { error: string; classification?: string; stage?: string }) => {
       if (failure.classification === "timeout_during_symbol_fetch" || failure.classification === "fmp_fetch_failed") return true;
       return /timed out|timeout|network|ECONN|ENOTFOUND|429|503|502|504|fetch/i.test(failure.error);
@@ -532,11 +554,20 @@ export default async function handler(req: any, res: any) {
     const normalBatchSize = batchSize;
     let currentBatchSize = batchSize;
     let pending = [...runSymbols];
+    const heavyCandidates = await classifyHeavyCandidates(runSymbols);
     let recoveredFromFallback = false;
     workerStarted = true;
 
     while (pending.length > 0) {
-      const chunk = pending.slice(0, currentBatchSize);
+      let chunk = pending.slice(0, currentBatchSize);
+      if (chunk.length > 1) {
+        const forcedHeavy = chunk.find((symbol) => heavyCandidates.has(symbol));
+        if (forcedHeavy) {
+          chunk = [forcedHeavy];
+          pending = [forcedHeavy, ...pending.filter((symbol) => symbol !== forcedHeavy)];
+          adaptiveMessages.push(`Isolated heavy/backfill candidate ${forcedHeavy} into single-symbol chunk`);
+        }
+      }
       attemptedBatchSizes.push(currentBatchSize);
       const batchResult = await ingestManySymbols({ symbols: chunk, debug: true });
       const chunkFailures = batchResult.failures ?? [];
@@ -553,6 +584,26 @@ export default async function handler(req: any, res: any) {
         unchangedDailyRows += unchanged;
         if (inserted > 0 || updated > 0) changedSymbols += 1;
         if (item.snapshotUpdated) snapshotWrites += 1;
+        const ingestDebug = item.ingestDebug as Record<string, unknown> | undefined;
+        if (ingestDebug?.timingMs) {
+          perSymbolTiming.push({
+            symbol: item.symbol ?? "unknown",
+            timingMs: ingestDebug.timingMs,
+            historicalRowsReturned: ingestDebug.historicalRowsReturned ?? ingestDebug.fmpRowsReturned ?? null,
+            insertedRows: ingestDebug.insertedRows ?? (Number(item.inserted ?? 0) + Number(item.updated ?? 0)),
+            isBackfill: ingestDebug.isBackfill ?? false,
+            isHeavySymbol: ingestDebug.isHeavySymbol ?? false,
+          });
+        }
+        if (ingestDebug?.isBackfill || ingestDebug?.isHeavySymbol) {
+          heavySymbolDiagnostics.push({
+            symbol: item.symbol ?? "unknown",
+            isBackfill: Boolean(ingestDebug?.isBackfill),
+            isHeavySymbol: Boolean(ingestDebug?.isHeavySymbol),
+            historicalRowsReturned: ingestDebug?.historicalRowsReturned ?? null,
+            insertedRows: ingestDebug?.insertedRows ?? null,
+          });
+        }
       }
 
       pending = pending.slice(chunk.length);
@@ -613,6 +664,8 @@ export default async function handler(req: any, res: any) {
       currentSymbols: runSymbols,
       attemptedBatchSizes,
       adaptiveMessages,
+      perSymbolTiming,
+      heavySymbolDiagnostics,
     };
     markDone("fetch_price_data", fetchFailed ? "failed" : "success", { ...sharedDetails, failures: failures.slice(0, 10) }, fetchFailed ? "Fetch/network failures detected." : undefined);
     markDone("normalize_parse_response", "success", sharedDetails);
@@ -637,6 +690,16 @@ export default async function handler(req: any, res: any) {
       lastWorkerStarted: workerStarted,
       lastError: failureCount > 0 ? failures[0]?.error ?? "batch_failed" : null,
     });
+    const stateAfterWrite = await readPersistedState();
+    const persistedOffsetAfterWrite = stateAfterWrite ? Number(stateAfterWrite.offset ?? 0) : null;
+    const expectedPersistedOffset = nextOffset ?? totalToProcess;
+    const stalePersistedStateAfterSuccess = persistedOffsetAfterWrite !== expectedPersistedOffset;
+    const stateWriteVerification = {
+      expectedOffset: expectedPersistedOffset,
+      persistedOffsetAfterWrite,
+      persistedUpdatedAtAfterWrite: stateAfterWrite?.updated_at ?? null,
+      stalePersistedStateAfterSuccess,
+    };
 
     markRunning("finalize_response", { nextOffset, remaining, processedInRun, totalToProcess, workerStarted, targetsSource, targetsRecomputed });
     markDone("finalize_response", "success");
@@ -654,6 +717,7 @@ export default async function handler(req: any, res: any) {
       results,
       failures,
       stateDiagnostics,
+      stateWriteVerification,
       total: totalToProcess,
       cursor: {
         offset,
@@ -680,6 +744,7 @@ export default async function handler(req: any, res: any) {
         targetsRecomputed,
         dispatchStatus: "worker_dispatched",
         stateDiagnostics,
+        stateWriteVerification,
       },
     });
   } catch (error) {
