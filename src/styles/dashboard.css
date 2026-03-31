@@ -1088,6 +1088,119 @@ td.sticky-col {
   font-size: 12px;
 }
 
+.screening-compact-layout {
+  display: grid;
+  gap: 10px;
+}
+
+.screening-card {
+  background: #f7f7ef;
+  border: 1px solid rgba(28, 35, 16, 0.14);
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.screening-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.screening-rule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.screening-rules-list {
+  display: grid;
+  gap: 6px;
+}
+
+.screening-rule-row {
+  display: grid;
+  grid-template-columns: 2.2fr 0.9fr 1.5fr auto;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid rgba(28, 35, 16, 0.12);
+  border-radius: 8px;
+  padding: 6px;
+  background: #fff;
+  min-width: 0;
+}
+
+.screening-rule-row select,
+.screening-rule-row input,
+.screening-rule-row button,
+.screening-inline-grid select,
+.screening-inline-grid input {
+  width: 100%;
+  min-width: 0;
+}
+
+.screening-rule-row.is-selected {
+  border-color: #687348;
+  background: #f4f8e8;
+}
+
+.screening-value-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.screening-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.screening-info-box {
+  background: #eef3e1;
+}
+
+.screening-debug-box {
+  background: #f2f4ea;
+}
+
+.screening-dashboard .viewer-table,
+.screening-dashboard .table-scroll {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.screening-dashboard .table-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.screening-dashboard table {
+  width: max-content;
+  min-width: 100%;
+}
+
+@media (max-width: 700px) {
+  .screening-rule-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .screening-rule-row > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  .screening-rule-row > :nth-child(4) {
+    grid-column: 1 / 2;
+  }
+}
+
 .company-picker {
   position: relative;
   min-width: 260px;

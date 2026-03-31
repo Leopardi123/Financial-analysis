@@ -34,6 +34,35 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
   const cashflow = snapshot.cashflow;
   const manual = snapshot.manual ?? {};
   const price = (snapshot.price ?? {}) as Record<string, unknown>;
+  const corporate = (snapshot.corporateSnapshot ?? {}) as Record<string, unknown>;
+
+  const readFinite = (key: string) => {
+    const raw = corporate[key];
+    return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+  };
+  const readFiniteFromPaths = (...paths: string[]) => {
+    for (const path of paths) {
+      const parts = path.split(".");
+      let cursor: unknown = corporate;
+      for (const part of parts) {
+        if (!cursor || typeof cursor !== "object") {
+          cursor = undefined;
+          break;
+        }
+        cursor = (cursor as Record<string, unknown>)[part];
+      }
+      if (typeof cursor === "number" && Number.isFinite(cursor)) return cursor;
+    }
+    return null;
+  };
+  const ratio = (num: number | null, den: number | null) =>
+    num !== null && den !== null && den !== 0 ? num / den : null;
+  const marketCapFromInputs = (() => {
+    const price = readFiniteFromPaths("price_current_TargetCurrency", "market.price_current_TargetCurrency");
+    const shares = readFiniteFromPaths("shares_current", "market.shares_current");
+    if (price === null || shares === null) return null;
+    return price * shares;
+  })();
 
   switch (fieldKey) {
     case "return_5d":
@@ -49,6 +78,48 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "trend_state":
     case "recovery_state":
       return typeof price[fieldKey] === "string" ? String(price[fieldKey]) : null;
+    case "corp_npv":
+      return readFinite("NPV_today_TargetCurrency");
+    case "corp_dcf":
+      return readFinite("DCF_prodStart_present_TargetCurrency");
+    case "corp_nav":
+      return readFinite("NAV_today_TargetCurrency");
+    case "corp_npv_per_share":
+      return readFinite("NPV_today_perShare_TargetCurrency");
+    case "corp_dcf_per_share":
+      return readFinite("DCF_prodStart_present_perShare_TargetCurrency");
+    case "corp_nav_per_share": {
+      const nav = readFinite("NAV_today_TargetCurrency");
+      const shares = readFinite("shares_post_financing");
+      return ratio(nav, shares);
+    }
+    case "corp_ev":
+      return readFinite("EV_TargetCurrency");
+    case "corp_market_cap":
+      return readFinite("MarketCap_TargetCurrency");
+    case "corp_ev_over_npv":
+      return readFiniteFromPaths("EV_over_NPV", "marketValue.EV_over_NPV", "marketValue.ev_over_npv");
+    case "corp_ev_over_nav":
+      return readFiniteFromPaths("EV_over_NAV", "marketValue.EV_over_NAV", "marketValue.ev_over_nav");
+    case "corp_p_over_nav":
+      return readFiniteFromPaths("P_over_NAV", "marketValue.P_over_NAV", "marketValue.p_over_nav");
+    case "corp_market_cap_over_npv":
+      return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NPV_today_TargetCurrency"));
+    case "corp_market_cap_over_nav":
+      return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NAV_today_TargetCurrency"));
+    case "corp_cash_over_market_cap": {
+      const cashT0 = readFiniteFromPaths(
+        "cash_t0_TargetCurrency",
+        "financing.cash_t0_post_TargetCurrency",
+        "financing.cash_AfterCashFirst_TargetCurrency_t0",
+      );
+      const marketCap = readFiniteFromPaths("MarketCap_TargetCurrency", "marketValue.MarketCap_TargetCurrency") ?? marketCapFromInputs;
+      return ratio(cashT0, marketCap);
+    }
+    case "corp_price_over_dcf_per_share":
+      return ratio(readFinite("price_current_TargetCurrency"), readFinite("DCF_prodStart_present_perShare_TargetCurrency"));
+    case "corp_price_over_nav_per_share":
+      return ratio(readFinite("price_current_TargetCurrency"), ratio(readFinite("NAV_today_TargetCurrency"), readFinite("shares_post_financing")));
     case "operating_cash_flow":
       return latest(cashflow.operatingCashFlow);
     case "free_cash_flow":
