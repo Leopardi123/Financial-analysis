@@ -29,15 +29,6 @@ type PersistedControllerPayload = {
   workerRunning?: boolean;
 };
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`${label}_timeout`)), ms);
-    }),
-  ]);
-}
-
 function detectStage(errorMessage: string): string {
   const message = errorMessage.toLowerCase();
   if (message.includes("fetch")) return "fetch_price_data";
@@ -65,25 +56,25 @@ async function loadActiveSymbols(): Promise<string[]> {
   if (cachedActiveSymbols && now - cachedActiveSymbols.loadedAt < SYMBOL_CACHE_TTL_MS) {
     return cachedActiveSymbols.symbols;
   }
-  const rows = await withTimeout(query(
+  const rows = await query(
     `SELECT ticker
      FROM ${tables.companiesV2}
      WHERE active = 1
      ORDER BY ticker`,
-  ), 2000, "db_load_targets") as unknown as Array<{ ticker: string }>;
+  ) as unknown as Array<{ ticker: string }>;
   const symbols = rows.map((row) => String(row.ticker).trim().toUpperCase()).filter(Boolean);
   cachedActiveSymbols = { symbols, loadedAt: now };
   return symbols;
 }
 
 async function readPersistedState(): Promise<PersistedStateRow | null> {
-  const rows = await withTimeout(query(
+  const rows = await query(
     `SELECT symbols_json, total_count, offset, status, targets_source, last_controller_stage, last_worker_started, last_error, updated_at
      FROM ${tables.screeningPriceRefreshState}
      WHERE scope = ?
      LIMIT 1`,
     [STATE_SCOPE],
-  ), 2000, "db_read_state") as unknown as PersistedStateRow[];
+  ) as unknown as PersistedStateRow[];
   return rows[0] ?? null;
 }
 
@@ -102,7 +93,7 @@ async function writePersistedState(next: {
   const targetCount = Array.isArray(next.symbols)
     ? next.symbols.length
     : next.symbols.targets.length;
-  await withTimeout(execute(
+  await execute(
     `INSERT INTO ${tables.screeningPriceRefreshState}
       (scope, symbols_json, total_count, offset, status, targets_source, last_controller_stage, last_worker_started, last_error, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -128,20 +119,20 @@ async function writePersistedState(next: {
       next.lastError ?? null,
       new Date().toISOString(),
     ],
-  ), 2000, "db_write_state");
+  );
 }
 
 async function classifyHeavyCandidates(symbols: string[]): Promise<Set<string>> {
   const heavy = new Set<string>();
   for (const symbol of symbols) {
-    const historyRows = await withTimeout(query(
+    const historyRows = await query(
       `SELECT COUNT(*) AS c FROM ${tables.dailyPriceHistory} WHERE symbol = ?`,
       [symbol],
-    ), 2000, "db_classify_history") as Array<{ c?: number | string }>;
-    const snapshotRows = await withTimeout(query(
+    ) as Array<{ c?: number | string }>;
+    const snapshotRows = await query(
       `SELECT 1 AS has_row FROM ${tables.priceScreenSnapshot} WHERE symbol = ? LIMIT 1`,
       [symbol],
-    ), 2000, "db_classify_snapshot") as Array<{ has_row?: number }>;
+    ) as Array<{ has_row?: number }>;
     const historyCount = Number(historyRows[0]?.c ?? 0);
     const hasSnapshot = snapshotRows.length > 0;
     if (!hasSnapshot || historyCount < 50) {
@@ -221,6 +212,16 @@ export default async function handler(req: any, res: any) {
     let workerStarted = false;
     let targetsSource: "fresh" | "persisted" | "request_symbols" = "fresh";
     let targetsRecomputed = false;
+    let currentResolveStep = "init";
+    const logResolveStep = (key: string, status: string, details: Record<string, unknown> = {}) => {
+      console.log(JSON.stringify({
+        scope: "resolve_targets_debug",
+        key,
+        status,
+        ts: Date.now(),
+        details,
+      }));
+    };
     const stateDiagnostics: StateDiagnostics = {
       stateFound: false,
       stateValid: false,
@@ -307,14 +308,25 @@ export default async function handler(req: any, res: any) {
     const requestedOffset = Number.isFinite(requestedOffsetRaw) ? Math.max(0, Math.floor(requestedOffsetRaw)) : 0;
     const rawBatchSize = Number(req.query?.batchSize ?? body.batchSize ?? 1);
     const batchSize = Math.max(1, Math.min(3, Number.isFinite(rawBatchSize) ? Math.floor(rawBatchSize) : 1));
+    logResolveStep("start", "start");
+    const resolveWatchdog = setTimeout(() => {
+      logResolveStep("watchdog", "timeout_warning", {
+        message: "resolve_targets taking too long",
+        lastStep: currentResolveStep,
+      });
+    }, 2000);
 
     let persistedState: PersistedStateRow | null = null;
+    currentResolveStep = "read_state_start";
+    logResolveStep("read_state", "start");
     try {
       persistedState = await readPersistedState();
+      logResolveStep("read_state", "end", { hasState: Boolean(persistedState) });
     } catch (error) {
       persistedState = null;
       stateDiagnostics.stateError = `read_state_failed: ${(error as Error).message}`;
       stateDiagnostics.targetsSourceUnknownReason = "Persisted controller state could not be read.";
+      logResolveStep("read_state", "error", { message: (error as Error).message });
     }
     stateDiagnostics.stateFound = Boolean(persistedState);
     stateDiagnostics.stateStatus = persistedState?.status ?? null;
@@ -326,7 +338,10 @@ export default async function handler(req: any, res: any) {
       && persistedState.updated_at
       && (Date.now() - new Date(persistedState.updated_at).getTime()) < 10 * 60 * 1000
     );
+    currentResolveStep = "check_lock_start";
+    logResolveStep("check_lock", "start");
     if (persistedState) {
+      currentResolveStep = "check_lock_start";
       const cronRows = await query(
         `SELECT run_at FROM ${tables.fetchLog}
          WHERE ticker = '__cron_refresh_lock__' AND period = 'lock' AND statement = 'refresh'
@@ -342,6 +357,7 @@ export default async function handler(req: any, res: any) {
         stateDiagnostics.cronLastTouchedState = "no";
       }
     }
+    logResolveStep("check_lock", "end", { lockPresent: stateDiagnostics.lockPresent });
     let persistedSymbols: string[] = [];
     let persistedPayload: PersistedControllerPayload = { targets: [] };
     let persistedStateValid = false;
@@ -369,6 +385,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (inspectStateOnly) {
+      clearTimeout(resolveWatchdog);
       res.status(200).json({
         ok: true,
         inspectState: true,
@@ -407,6 +424,8 @@ export default async function handler(req: any, res: any) {
 
     let symbols = explicitSymbols;
     let offset = requestedOffset;
+    currentResolveStep = "load_symbols_start";
+    logResolveStep("load_symbols", "start");
     if (explicitSymbols.length > 0) {
       targetsSource = "request_symbols";
       targetsRecomputed = true;
@@ -423,6 +442,8 @@ export default async function handler(req: any, res: any) {
         targetsRecomputed = true;
       }
     } else {
+      currentResolveStep = "acquire_lock_start";
+      logResolveStep("acquire_lock", "start");
       symbols = await loadActiveSymbols();
       offset = 0;
       targetsSource = "fresh";
@@ -439,6 +460,7 @@ export default async function handler(req: any, res: any) {
         lastWorkerStarted: false,
         lastError: stateDiagnostics.targetsSourceUnknownReason,
       });
+      logResolveStep("acquire_lock", "end");
       stateDiagnostics.stateFound = true;
       stateDiagnostics.stateValid = symbols.length > 0;
       stateDiagnostics.targetsPersisted = symbols.length > 0;
@@ -447,6 +469,9 @@ export default async function handler(req: any, res: any) {
       stateDiagnostics.stateStatus = "running";
       stateDiagnostics.stateUpdatedAt = new Date().toISOString();
     }
+    logResolveStep("load_symbols", "end", { count: symbols?.length ?? 0 });
+    currentResolveStep = "finalize";
+    logResolveStep("finalize", "end");
 
     markDone("resolve_targets", "success", {
       resolvedCount: symbols.length,
@@ -463,6 +488,7 @@ export default async function handler(req: any, res: any) {
       lockPresent: stateDiagnostics.lockPresent,
       targetsSourceUnknownReason: stateDiagnostics.targetsSourceUnknownReason,
     });
+    clearTimeout(resolveWatchdog);
 
     if (symbols.length === 0) {
       await writePersistedState({
@@ -642,11 +668,7 @@ export default async function handler(req: any, res: any) {
       for (const symbol of chunk) {
         const symbolStartedAt = Date.now();
         try {
-          const item = await withTimeout(
-            ingestDailyPricesAndRefreshSnapshot(symbol, true),
-            3000,
-            "process_symbol",
-          );
+          const item = await ingestDailyPricesAndRefreshSnapshot(symbol, true);
           chunkSuccesses.push(item as unknown as Record<string, unknown>);
         } catch (error) {
           const message = (error as Error).message;
