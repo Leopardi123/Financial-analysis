@@ -1168,8 +1168,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
                       {(() => {
                         const ingestDebug = (item as Record<string, unknown>).ingestDebug as Record<string, unknown> | undefined;
                         const timing = ingestDebug?.timingMs as Record<string, unknown> | undefined;
+                        const writeDiag = ingestDebug?.writeDiagnostics as Record<string, unknown> | undefined;
                         if (!timing) return null;
-                        return ` · timing(ms): fetch ${String(timing.fetch ?? 0)}, parse ${String(timing.parse ?? 0)}, write ${String(timing.writeDailyHistory ?? 0)}, snapshot ${String(timing.snapshotComputeWrite ?? 0)}, total ${String(timing.total ?? 0)} · rows ${String(ingestDebug?.historicalRowsReturned ?? ingestDebug?.fmpRowsReturned ?? 0)} · inserted ${String(ingestDebug?.insertedRows ?? 0)} · backfill ${String(Boolean(ingestDebug?.isBackfill))} · heavy ${String(Boolean(ingestDebug?.isHeavySymbol))}`;
+                        const writeMeta = writeDiag
+                          ? ` · writeMode ${String(writeDiag.writeMode ?? "unknown")} · tx ${String(Boolean(writeDiag.transactionUsed))} · chunkSize ${String(writeDiag.chunkSize ?? "n/a")} · statements ${String(writeDiag.statementCount ?? "n/a")} · rowsAttempted ${String(writeDiag.rowsAttempted ?? "n/a")} · rowsInserted ${String(writeDiag.rowsInserted ?? "n/a")} · rowsUpdated ${String(writeDiag.rowsUpdated ?? "n/a")} · rowsUnchanged ${String(writeDiag.rowsUnchanged ?? "n/a")} · writeDurationMs ${String(writeDiag.writeDurationMs ?? "n/a")}`
+                          : "";
+                        return ` · timing(ms): fetch ${String(timing.fetch ?? 0)}, parse ${String(timing.parse ?? 0)}, write ${String(timing.writeDailyHistory ?? 0)}, snapshot ${String(timing.snapshotComputeWrite ?? 0)}, total ${String(timing.total ?? 0)}${writeMeta} · rows ${String(ingestDebug?.historicalRowsReturned ?? ingestDebug?.fmpRowsReturned ?? 0)} · inserted ${String(ingestDebug?.insertedRows ?? 0)} · backfill ${String(Boolean(ingestDebug?.isBackfill))} · heavy ${String(Boolean(ingestDebug?.isHeavySymbol))}`;
                       })()}
                     </li>
                   ))}

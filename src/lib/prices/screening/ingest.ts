@@ -1,4 +1,4 @@
-import { execute, query } from "../../../../api/_db.js";
+import { batch, execute, query } from "../../../../api/_db.js";
 import { fetchApiV3Json } from "../../../../api/_fmp.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { computePriceScreenSnapshot, type DailyPriceRow, type PriceScreenSnapshotDebug, type PriceScreenSnapshotRow } from "./snapshotEngine.js";
@@ -7,6 +7,7 @@ const SCREENING_WORKING_WINDOW_ROWS = 120;
 const INCREMENTAL_BUFFER_DAYS = 10;
 const HEAVY_ROWS_THRESHOLD = 250;
 const HEAVY_INSERT_THRESHOLD = 150;
+const WRITE_CHUNK_SIZE = 250;
 
 interface FmpHistoricalResponse {
   historical?: Array<Record<string, unknown>>;
@@ -227,32 +228,27 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
   let updated = 0;
   let unchanged = 0;
   const writeDailyStartedAt = Date.now();
+  const writeStatements: Array<{ sql: string; args: Array<string | number | null> }> = [];
+  let writeMode: "row_by_row" | "bulk" | "chunked_bulk" = "row_by_row";
+  let transactionUsed = false;
+  let statementCount = 0;
 
   for (const row of incoming) {
     const existing = existingByDate.get(row.price_date);
     if (!existing) {
-      try {
-        await execute(
-          `INSERT INTO ${tables.dailyPriceHistory}
-            (symbol, price_date, close, adjusted_close, volume, source, currency, updated_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(symbol, price_date) DO UPDATE SET
-             close = excluded.close,
-             adjusted_close = excluded.adjusted_close,
-             volume = excluded.volume,
-             source = excluded.source,
-             currency = excluded.currency,
-             updated_at = excluded.updated_at`,
-          [row.symbol, row.price_date, row.close, row.adjusted_close, row.volume, row.source, row.currency, now, now],
-        );
-      } catch (error) {
-        const message = (error as Error).message;
-        const classification = message.includes("UNIQUE constraint") ? "duplicate_row_conflict" : "db_write_failed";
-        throw new IngestSymbolError(message, "write_daily_price_history", classification, {
-          symbol: normalized,
-          priceDate: row.price_date,
-        });
-      }
+      writeStatements.push({
+        sql: `INSERT INTO ${tables.dailyPriceHistory}
+          (symbol, price_date, close, adjusted_close, volume, source, currency, updated_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(symbol, price_date) DO UPDATE SET
+           close = excluded.close,
+           adjusted_close = excluded.adjusted_close,
+           volume = excluded.volume,
+           source = excluded.source,
+           currency = excluded.currency,
+           updated_at = excluded.updated_at`,
+        args: [row.symbol, row.price_date, row.close, row.adjusted_close, row.volume, row.source, row.currency, now, now],
+      });
       inserted += 1;
       existingByDate.set(row.price_date, row);
       continue;
@@ -269,20 +265,50 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
       continue;
     }
 
-    try {
-      await execute(
-        `UPDATE ${tables.dailyPriceHistory}
-         SET close = ?, adjusted_close = ?, volume = ?, source = ?, currency = ?, updated_at = ?
-         WHERE symbol = ? AND price_date = ?`,
-        [row.close, row.adjusted_close, row.volume, row.source, row.currency, now, row.symbol, row.price_date],
-      );
-    } catch (error) {
-      throw new IngestSymbolError((error as Error).message, "write_daily_price_history", "db_write_failed", {
-        symbol: normalized,
-        priceDate: row.price_date,
-      });
-    }
+    writeStatements.push({
+      sql: `UPDATE ${tables.dailyPriceHistory}
+       SET close = ?, adjusted_close = ?, volume = ?, source = ?, currency = ?, updated_at = ?
+       WHERE symbol = ? AND price_date = ?`,
+      args: [row.close, row.adjusted_close, row.volume, row.source, row.currency, now, row.symbol, row.price_date],
+    });
     updated += 1;
+  }
+
+  try {
+    if (writeStatements.length > 0) {
+      if (writeStatements.length <= 10) {
+        writeMode = "row_by_row";
+        transactionUsed = false;
+        for (const statement of writeStatements) {
+          await execute(statement.sql, statement.args);
+          statementCount += 1;
+        }
+      } else {
+        writeMode = writeStatements.length <= WRITE_CHUNK_SIZE ? "bulk" : "chunked_bulk";
+        transactionUsed = true;
+        await execute("BEGIN");
+        try {
+          for (let index = 0; index < writeStatements.length; index += WRITE_CHUNK_SIZE) {
+            const chunk = writeStatements.slice(index, index + WRITE_CHUNK_SIZE);
+            await batch(chunk);
+            statementCount += chunk.length;
+          }
+          await execute("COMMIT");
+        } catch (error) {
+          await execute("ROLLBACK");
+          throw error;
+        }
+      }
+    }
+  } catch (error) {
+    const message = (error as Error).message;
+    const classification = message.includes("UNIQUE constraint") ? "duplicate_row_conflict" : "db_write_failed";
+    throw new IngestSymbolError(message, "write_daily_price_history", classification, {
+      symbol: normalized,
+      writeMode,
+      statementCount,
+      attempted: writeStatements.length,
+    });
   }
   const writeDailyDurationMs = Date.now() - writeDailyStartedAt;
 
@@ -316,6 +342,17 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
             writeDailyHistory: writeDailyDurationMs,
             snapshotComputeWrite: 0,
             total: totalDurationMs,
+          },
+          writeDiagnostics: {
+            writeMode,
+            transactionUsed,
+            chunkSize: WRITE_CHUNK_SIZE,
+            statementCount,
+            rowsAttempted: incoming.length,
+            rowsInserted: inserted,
+            rowsUpdated: updated,
+            rowsUnchanged: unchanged,
+            writeDurationMs: writeDailyDurationMs,
           },
           historicalRowsReturned,
           insertedRows,
@@ -382,6 +419,17 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
           writeDailyHistory: writeDailyDurationMs,
           snapshotComputeWrite: snapshotDurationMs,
           total: totalDurationMs,
+        },
+        writeDiagnostics: {
+          writeMode,
+          transactionUsed,
+          chunkSize: WRITE_CHUNK_SIZE,
+          statementCount,
+          rowsAttempted: incoming.length,
+          rowsInserted: inserted,
+          rowsUpdated: updated,
+          rowsUnchanged: unchanged,
+          writeDurationMs: writeDailyDurationMs,
         },
         historicalRowsReturned,
         insertedRows,
