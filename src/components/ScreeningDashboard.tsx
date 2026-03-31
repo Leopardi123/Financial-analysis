@@ -148,24 +148,35 @@ function resolveCorporateDebugMetric(snapshot: Record<string, unknown> | null | 
     corp_ev_over_nav: ["EV_over_NAV", "marketValue.EV_over_NAV", "marketValue.ev_over_nav"],
     corp_ev_over_npv: ["EV_over_NPV", "marketValue.EV_over_NPV", "marketValue.ev_over_npv"],
     corp_p_over_nav: ["P_over_NAV", "marketValue.P_over_NAV", "marketValue.p_over_nav"],
+    corp_cash_over_market_cap: [
+      "cash_t0_TargetCurrency",
+      "financing.cash_t0_post_TargetCurrency",
+      "financing.cash_AfterCashFirst_TargetCurrency_t0",
+      "MarketCap_TargetCurrency",
+      "marketValue.MarketCap_TargetCurrency",
+    ],
   };
   const candidates = candidatesByField[field] ?? [];
   if (!snapshot) {
     return {
       resolvedPath: candidates[0] ?? "n/a",
+      sourceObject: "corporateSnapshot",
       rawValue: null,
+      normalizedValue: null,
       missingReason: "corporateSnapshot saknas i payload",
     };
   }
   for (const path of candidates) {
     const raw = readPathValue(snapshot, path);
     if (typeof raw === "number" && Number.isFinite(raw)) {
-      return { resolvedPath: path, rawValue: raw, missingReason: null };
+      return { resolvedPath: path, sourceObject: "corporateSnapshot", rawValue: raw, normalizedValue: raw, missingReason: null };
     }
   }
   return {
     resolvedPath: candidates.join(" | "),
+    sourceObject: "corporateSnapshot",
     rawValue: null,
+    normalizedValue: null,
     missingReason: "ingen finite siffra hittades på förväntade paths",
   };
 }
@@ -184,23 +195,24 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
   ]);
 
   const profile = profilePayload?.profile ?? null;
-  const sharesCurrent = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding)
-    ? Number(profile.sharesOutstanding)
+  const snapshotPrice = typeof pricePayload?.snapshot?.close === "number" && Number.isFinite(pricePayload.snapshot.close)
+    ? Number(pricePayload.snapshot.close)
     : null;
-  const profilePrice = typeof profile?.price === "number" && Number.isFinite(profile.price)
-    ? Number(profile.price)
-    : null;
+  const profileShares = Number(profile?.sharesOutstanding);
+  const sharesCurrent = Number.isFinite(profileShares) && profileShares > 0 ? profileShares : null;
+  const profilePriceRaw = Number(profile?.price);
+  const profilePrice = Number.isFinite(profilePriceRaw) && profilePriceRaw > 0 ? profilePriceRaw : null;
   const quotePrice = typeof priceNowPayload?.short?.price?.[1]?.[1] === "number" && Number.isFinite(priceNowPayload.short.price[1][1])
     ? Number(priceNowPayload.short.price[1][1])
     : null;
-  const marketCap = typeof profile?.mktCap === "number" && Number.isFinite(profile.mktCap)
-    ? Number(profile.mktCap)
-    : null;
-  const fallbackShares = marketCap !== null && profilePrice !== null && profilePrice > 0
-    ? marketCap / profilePrice
+  const marketCapRaw = Number(profile?.mktCap);
+  const marketCap = Number.isFinite(marketCapRaw) && marketCapRaw > 0 ? marketCapRaw : null;
+  const fallbackPrice = quotePrice ?? profilePrice ?? snapshotPrice;
+  const fallbackShares = marketCap !== null && fallbackPrice !== null && fallbackPrice > 0
+    ? marketCap / fallbackPrice
     : null;
   const sharesResolved = sharesCurrent ?? fallbackShares;
-  const priceCurrent = quotePrice ?? profilePrice;
+  const priceCurrent = fallbackPrice;
 
   const corporateSnapshot = includeCorporateSnapshot
     ? await fetchCorporateSnapshot(normalizedTicker, sharesResolved, priceCurrent)
@@ -408,7 +420,7 @@ export default function ScreeningDashboard() {
         for (const corporateField of requestedCorporateFields) {
           const debug = resolveCorporateDebugMetric(sampleSnapshot?.corporateSnapshot as Record<string, unknown> | null | undefined, corporateField);
           notes.push(
-            `[corp-debug] field=${corporateField} path=${debug.resolvedPath} raw=${debug.rawValue === null ? "null" : String(debug.rawValue)} reason=${debug.missingReason ?? "ok"}`,
+            `[corp-debug] field=${corporateField} source=${debug.sourceObject} path=${debug.resolvedPath} raw=${debug.rawValue === null ? "null" : String(debug.rawValue)} normalized=${debug.normalizedValue === null ? "null" : String(debug.normalizedValue)} reason=${debug.missingReason ?? "ok"}`,
           );
         }
       }

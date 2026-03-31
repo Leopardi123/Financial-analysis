@@ -57,6 +57,12 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
   };
   const ratio = (num: number | null, den: number | null) =>
     num !== null && den !== null && den !== 0 ? num / den : null;
+  const marketCapFromInputs = (() => {
+    const price = readFiniteFromPaths("price_current_TargetCurrency", "market.price_current_TargetCurrency");
+    const shares = readFiniteFromPaths("shares_current", "market.shares_current");
+    if (price === null || shares === null) return null;
+    return price * shares;
+  })();
 
   switch (fieldKey) {
     case "return_5d":
@@ -101,6 +107,15 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
       return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NPV_today_TargetCurrency"));
     case "corp_market_cap_over_nav":
       return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NAV_today_TargetCurrency"));
+    case "corp_cash_over_market_cap": {
+      const cashT0 = readFiniteFromPaths(
+        "cash_t0_TargetCurrency",
+        "financing.cash_t0_post_TargetCurrency",
+        "financing.cash_AfterCashFirst_TargetCurrency_t0",
+      );
+      const marketCap = readFiniteFromPaths("MarketCap_TargetCurrency", "marketValue.MarketCap_TargetCurrency") ?? marketCapFromInputs;
+      return ratio(cashT0, marketCap);
+    }
     case "corp_price_over_dcf_per_share":
       return ratio(readFinite("price_current_TargetCurrency"), readFinite("DCF_prodStart_present_perShare_TargetCurrency"));
     case "corp_price_over_nav_per_share":
