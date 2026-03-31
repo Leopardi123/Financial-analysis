@@ -2,7 +2,7 @@ import { getAdminSecret } from "../../../../api/_auth.js";
 import { query, execute } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { requireFmpApiKey } from "../../../../api/_fmp.js";
-import { ingestManySymbols } from "../../../lib/prices/screening/ingest.js";
+import { ingestDailyPricesAndRefreshSnapshot } from "../../../lib/prices/screening/ingest.js";
 
 let cachedActiveSymbols: { symbols: string[]; loadedAt: number } | null = null;
 const SYMBOL_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -19,6 +19,32 @@ type PersistedStateRow = {
   last_error: string | null;
   updated_at: string;
 };
+
+type PersistedControllerPayload = {
+  targets: string[];
+  failures?: Array<Record<string, unknown>>;
+  retryMap?: Record<string, number>;
+  retryPhase?: boolean;
+  lastBatchSummary?: Record<string, unknown> | null;
+  workerRunning?: boolean;
+};
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`${label}_timeout`)), ms);
+    }),
+  ]);
+}
+
+function detectStage(errorMessage: string): string {
+  const message = errorMessage.toLowerCase();
+  if (message.includes("fetch")) return "fetch_price_data";
+  if (message.includes("db")) return "write_daily_history";
+  if (message.includes("timeout")) return "timeout";
+  return "unknown";
+}
 
 type StateDiagnostics = {
   stateFound: boolean;
@@ -39,30 +65,30 @@ async function loadActiveSymbols(): Promise<string[]> {
   if (cachedActiveSymbols && now - cachedActiveSymbols.loadedAt < SYMBOL_CACHE_TTL_MS) {
     return cachedActiveSymbols.symbols;
   }
-  const rows = await query(
+  const rows = await withTimeout(query(
     `SELECT ticker
      FROM ${tables.companiesV2}
      WHERE active = 1
      ORDER BY ticker`,
-  ) as unknown as Array<{ ticker: string }>;
+  ), 2000, "db_load_targets") as unknown as Array<{ ticker: string }>;
   const symbols = rows.map((row) => String(row.ticker).trim().toUpperCase()).filter(Boolean);
   cachedActiveSymbols = { symbols, loadedAt: now };
   return symbols;
 }
 
 async function readPersistedState(): Promise<PersistedStateRow | null> {
-  const rows = await query(
+  const rows = await withTimeout(query(
     `SELECT symbols_json, total_count, offset, status, targets_source, last_controller_stage, last_worker_started, last_error, updated_at
      FROM ${tables.screeningPriceRefreshState}
      WHERE scope = ?
      LIMIT 1`,
     [STATE_SCOPE],
-  ) as unknown as PersistedStateRow[];
+  ), 2000, "db_read_state") as unknown as PersistedStateRow[];
   return rows[0] ?? null;
 }
 
 async function writePersistedState(next: {
-  symbols: string[];
+  symbols: string[] | PersistedControllerPayload;
   offset: number;
   status: "idle" | "running" | "paused" | "done" | "error";
   targetsSource: "fresh" | "persisted" | "request_symbols";
@@ -70,7 +96,13 @@ async function writePersistedState(next: {
   lastWorkerStarted: boolean;
   lastError?: string | null;
 }): Promise<void> {
-  await execute(
+  const serializedPayload = Array.isArray(next.symbols)
+    ? JSON.stringify(next.symbols)
+    : JSON.stringify(next.symbols);
+  const targetCount = Array.isArray(next.symbols)
+    ? next.symbols.length
+    : next.symbols.targets.length;
+  await withTimeout(execute(
     `INSERT INTO ${tables.screeningPriceRefreshState}
       (scope, symbols_json, total_count, offset, status, targets_source, last_controller_stage, last_worker_started, last_error, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -86,8 +118,8 @@ async function writePersistedState(next: {
       updated_at = excluded.updated_at`,
     [
       STATE_SCOPE,
-      JSON.stringify(next.symbols),
-      next.symbols.length,
+      serializedPayload,
+      targetCount,
       Math.max(0, next.offset),
       next.status,
       next.targetsSource,
@@ -96,20 +128,20 @@ async function writePersistedState(next: {
       next.lastError ?? null,
       new Date().toISOString(),
     ],
-  );
+  ), 2000, "db_write_state");
 }
 
 async function classifyHeavyCandidates(symbols: string[]): Promise<Set<string>> {
   const heavy = new Set<string>();
   for (const symbol of symbols) {
-    const historyRows = await query(
+    const historyRows = await withTimeout(query(
       `SELECT COUNT(*) AS c FROM ${tables.dailyPriceHistory} WHERE symbol = ?`,
       [symbol],
-    ) as Array<{ c?: number | string }>;
-    const snapshotRows = await query(
+    ), 2000, "db_classify_history") as Array<{ c?: number | string }>;
+    const snapshotRows = await withTimeout(query(
       `SELECT 1 AS has_row FROM ${tables.priceScreenSnapshot} WHERE symbol = ? LIMIT 1`,
       [symbol],
-    ) as Array<{ has_row?: number }>;
+    ), 2000, "db_classify_snapshot") as Array<{ has_row?: number }>;
     const historyCount = Number(historyRows[0]?.c ?? 0);
     const hasSnapshot = snapshotRows.length > 0;
     if (!hasSnapshot || historyCount < 50) {
@@ -122,11 +154,39 @@ async function classifyHeavyCandidates(symbols: string[]): Promise<Set<string>> 
 function parsePersistedSymbols(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((item) => String(item).trim().toUpperCase()).filter(Boolean);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item).trim().toUpperCase()).filter(Boolean);
+    }
+    if (parsed && typeof parsed === "object" && Array.isArray((parsed as PersistedControllerPayload).targets)) {
+      return (parsed as PersistedControllerPayload).targets.map((item) => String(item).trim().toUpperCase()).filter(Boolean);
+    }
+    return [];
   } catch {
     return [];
   }
+}
+
+function parsePersistedPayload(raw: string): PersistedControllerPayload {
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return { targets: parsed.map((item) => String(item).trim().toUpperCase()).filter(Boolean) };
+    }
+    if (parsed && typeof parsed === "object") {
+      const payload = parsed as PersistedControllerPayload;
+      return {
+        targets: Array.isArray(payload.targets) ? payload.targets.map((item) => String(item).trim().toUpperCase()).filter(Boolean) : [],
+        failures: Array.isArray(payload.failures) ? payload.failures : [],
+        retryMap: payload.retryMap && typeof payload.retryMap === "object" ? payload.retryMap : {},
+        retryPhase: Boolean(payload.retryPhase),
+        lastBatchSummary: payload.lastBatchSummary ?? null,
+        workerRunning: Boolean(payload.workerRunning),
+      };
+    }
+  } catch {
+    // noop
+  }
+  return { targets: [] };
 }
 
 export default async function handler(req: any, res: any) {
@@ -283,8 +343,10 @@ export default async function handler(req: any, res: any) {
       }
     }
     let persistedSymbols: string[] = [];
+    let persistedPayload: PersistedControllerPayload = { targets: [] };
     let persistedStateValid = false;
     if (persistedState) {
+      persistedPayload = parsePersistedPayload(persistedState.symbols_json);
       persistedSymbols = parsePersistedSymbols(persistedState.symbols_json);
       const persistedOffset = Number.isFinite(Number(persistedState.offset))
         ? Math.max(0, Math.floor(Number(persistedState.offset)))
@@ -322,6 +384,11 @@ export default async function handler(req: any, res: any) {
           updatedAt: persistedState.updated_at ?? null,
           symbolsCount: persistedSymbols.length,
           symbolsSample: persistedSymbols.slice(0, 20),
+          retryMap: persistedPayload.retryMap ?? {},
+          retryPhase: Boolean(persistedPayload.retryPhase),
+          failuresCount: Array.isArray(persistedPayload.failures) ? persistedPayload.failures.length : 0,
+          lastBatchSummary: persistedPayload.lastBatchSummary ?? null,
+          workerRunning: Boolean(persistedPayload.workerRunning),
         } : null,
         stateDiagnostics,
       });
@@ -569,10 +636,32 @@ export default async function handler(req: any, res: any) {
         }
       }
       attemptedBatchSizes.push(currentBatchSize);
-      const batchResult = await ingestManySymbols({ symbols: chunk, debug: true });
-      const chunkFailures = batchResult.failures ?? [];
-      const failedSymbols = new Set(chunkFailures.map((item) => item.symbol));
-      const chunkSuccesses = (batchResult.results ?? []).filter((item) => !failedSymbols.has(String(item.symbol ?? "")));
+      const chunkFailures: Array<{ symbol: string; error: string; stage?: string; classification?: string; context?: Record<string, unknown>; durationMs?: number; attempt?: number }> = [];
+      const chunkSuccesses: Array<Record<string, unknown>> = [];
+
+      for (const symbol of chunk) {
+        const symbolStartedAt = Date.now();
+        try {
+          const item = await withTimeout(
+            ingestDailyPricesAndRefreshSnapshot(symbol, true),
+            3000,
+            "process_symbol",
+          );
+          chunkSuccesses.push(item as unknown as Record<string, unknown>);
+        } catch (error) {
+          const message = (error as Error).message;
+          const retryMap = persistedPayload.retryMap ?? {};
+          const attempt = Number(retryMap[symbol] ?? 0) + 1;
+          chunkFailures.push({
+            symbol,
+            error: message,
+            stage: detectStage(message),
+            classification: message.includes("timeout") ? "timeout_during_symbol_fetch" : "unknown",
+            durationMs: Date.now() - symbolStartedAt,
+            attempt,
+          });
+        }
+      }
 
       for (const item of chunkSuccesses) {
         results.push(item as unknown as Record<string, unknown>);
@@ -667,6 +756,10 @@ export default async function handler(req: any, res: any) {
       perSymbolTiming,
       heavySymbolDiagnostics,
     };
+    const slowSymbols = perSymbolTiming
+      .filter((item) => Number((item.timingMs as Record<string, unknown> | undefined)?.total ?? 0) > 2000)
+      .map((item) => String(item.symbol ?? ""));
+    const retryAttempts = Object.entries(persistedPayload.retryMap ?? {}).map(([symbol, attempts]) => ({ symbol, attempts }));
     markDone("fetch_price_data", fetchFailed ? "failed" : "success", { ...sharedDetails, failures: failures.slice(0, 10) }, fetchFailed ? "Fetch/network failures detected." : undefined);
     markDone("normalize_parse_response", "success", sharedDetails);
     markDone("validate_required_fields", "success", sharedDetails);
@@ -678,12 +771,46 @@ export default async function handler(req: any, res: any) {
     const processedInRun = runSymbols.length;
     const processedTotal = Math.min(totalToProcess, offset + processedInRun);
     const remaining = Math.max(0, totalToProcess - processedTotal);
-    const done = remaining === 0;
-    const nextOffset = done ? null : processedTotal;
+    let done = remaining === 0;
+    let nextOffset = done ? null : processedTotal;
+
+    const retryMap = { ...(persistedPayload.retryMap ?? {}) };
+    const persistedFailures = Array.isArray(persistedPayload.failures) ? [...persistedPayload.failures] : [];
+    for (const failedItem of failures) {
+      const symbol = String(failedItem.symbol ?? "");
+      if (!symbol) continue;
+      retryMap[symbol] = Number(retryMap[symbol] ?? 0) + 1;
+      persistedFailures.push(failedItem);
+    }
+    let enteredRetryPhase = false;
+    if (done) {
+      const retryable = Object.entries(retryMap)
+        .filter(([, attempts]) => Number(attempts) < 3)
+        .map(([symbol]) => symbol);
+      if (retryable.length > 0) {
+        done = false;
+        nextOffset = 0;
+        symbols = retryable;
+        enteredRetryPhase = true;
+      }
+    }
+
+    const statePayload: PersistedControllerPayload = {
+      targets: symbols,
+      retryMap,
+      retryPhase: enteredRetryPhase,
+      failures: persistedFailures,
+      workerRunning: false,
+      lastBatchSummary: {
+        processed: runSymbols.length,
+        succeeded: succeeded,
+        failed: failures.length,
+      },
+    };
 
     await writePersistedState({
-      symbols,
-      offset: nextOffset ?? totalToProcess,
+      symbols: statePayload,
+      offset: nextOffset ?? symbols.length,
       status: done ? "done" : "running",
       targetsSource,
       lastControllerStage: "finalize_response",
@@ -692,7 +819,7 @@ export default async function handler(req: any, res: any) {
     });
     const stateAfterWrite = await readPersistedState();
     const persistedOffsetAfterWrite = stateAfterWrite ? Number(stateAfterWrite.offset ?? 0) : null;
-    const expectedPersistedOffset = nextOffset ?? totalToProcess;
+    const expectedPersistedOffset = nextOffset ?? symbols.length;
     const stalePersistedStateAfterSuccess = persistedOffsetAfterWrite !== expectedPersistedOffset;
     const stateWriteVerification = {
       expectedOffset: expectedPersistedOffset,
@@ -718,6 +845,10 @@ export default async function handler(req: any, res: any) {
       failures,
       stateDiagnostics,
       stateWriteVerification,
+      totalFailuresCount: failures.length,
+      lastFailedSymbols: failures.slice(-5).map((item) => item.symbol),
+      retryAttempts,
+      slowSymbols,
       total: totalToProcess,
       cursor: {
         offset,
@@ -745,6 +876,8 @@ export default async function handler(req: any, res: any) {
         dispatchStatus: "worker_dispatched",
         stateDiagnostics,
         stateWriteVerification,
+        slowSymbols,
+        retryAttempts,
       },
     });
   } catch (error) {

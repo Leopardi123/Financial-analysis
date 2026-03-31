@@ -126,6 +126,10 @@ type PriceIngestResult = {
     persistedUpdatedAtAfterWrite?: string | null;
     stalePersistedStateAfterSuccess?: boolean;
   };
+  totalFailuresCount?: number;
+  lastFailedSymbols?: string[];
+  retryAttempts?: Array<{ symbol: string; attempts: number }>;
+  slowSymbols?: string[];
   error?: string;
   debug?: ScreeningDebugPayload;
 };
@@ -1076,6 +1080,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <strong>daily_price_history writes:</strong> {priceIngestResult.writtenDailyRows ?? 0} (unchanged {priceIngestResult.unchangedDailyRows ?? 0})<br />
             <strong>price_screen_snapshot writes:</strong> {priceIngestResult.snapshotWrites ?? 0}<br />
             <strong>Symbols changed:</strong> {priceIngestResult.changedSymbols ?? 0}
+            {Number(priceIngestResult.failed ?? 0) > 0
+              ? <><br /><strong>⚠️ {priceIngestResult.failed} symbols failed (click to inspect)</strong></>
+              : null}
             {priceIngestResult.stateWriteVerification?.stalePersistedStateAfterSuccess
               ? <><br /><strong>State write check:</strong> ⚠️ successful batch but persisted state looks stale (expected offset {priceIngestResult.stateWriteVerification.expectedOffset}, found {String(priceIngestResult.stateWriteVerification.persistedOffsetAfterWrite)}).</>
               : null}
@@ -1124,6 +1131,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
               </p>
               <p className="bread">
                 State write verification: expected offset {String((latestAttempt?.debug?.stateWriteVerification?.expectedOffset ?? screeningDebug?.stateWriteVerification?.expectedOffset) ?? "n/a")} · persisted offset after write {String((latestAttempt?.debug?.stateWriteVerification?.persistedOffsetAfterWrite ?? screeningDebug?.stateWriteVerification?.persistedOffsetAfterWrite) ?? "n/a")} · stale persisted state after success {String((latestAttempt?.debug?.stateWriteVerification?.stalePersistedStateAfterSuccess ?? screeningDebug?.stateWriteVerification?.stalePersistedStateAfterSuccess) ?? false)}
+              </p>
+              <p className="bread">
+                Slow symbols (&gt;2s): {Array.isArray((latestAttempt?.debug as any)?.slowSymbols) ? (latestAttempt?.debug as any).slowSymbols.join(", ") : Array.isArray((screeningDebug as any)?.slowSymbols) ? (screeningDebug as any).slowSymbols.join(", ") : "none"} · Retry attempts: {Array.isArray((latestAttempt?.debug as any)?.retryAttempts) ? JSON.stringify((latestAttempt?.debug as any).retryAttempts) : Array.isArray((screeningDebug as any)?.retryAttempts) ? JSON.stringify((screeningDebug as any).retryAttempts) : "[]"}
               </p>
               {(latestAttempt?.debug?.steps ?? screeningDebug?.steps ?? []).map((step) => (
                 <details key={step.key} style={{ marginBottom: 6 }}>
