@@ -345,6 +345,14 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         );
         return { __error: errorMessage } as RefreshPayload;
       }
+      const payloadRecord = payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
+      const logicalError = payloadRecord
+        && payloadRecord.ok === false
+        && (payloadRecord.status === "error" || typeof payloadRecord.error === "string");
+      if (logicalError) {
+        updateLog(title, "error", `ERROR\n${JSON.stringify(payload, null, 2)}`);
+        return payload as RefreshPayload;
+      }
       updateLog(title, "success", `SUCCESS\n${JSON.stringify(payload, null, 2)}`);
       if (title === "Upsert Tickers") {
         onTickersUpserted?.();

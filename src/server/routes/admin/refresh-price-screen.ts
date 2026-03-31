@@ -642,11 +642,7 @@ export default async function handler(req: any, res: any) {
       for (const symbol of chunk) {
         const symbolStartedAt = Date.now();
         try {
-          const item = await withTimeout(
-            ingestDailyPricesAndRefreshSnapshot(symbol, true),
-            3000,
-            "process_symbol",
-          );
+          const item = await ingestDailyPricesAndRefreshSnapshot(symbol, true);
           chunkSuccesses.push(item as unknown as Record<string, unknown>);
         } catch (error) {
           const message = (error as Error).message;
@@ -761,13 +757,24 @@ export default async function handler(req: any, res: any) {
       .map((item) => String(item.symbol ?? ""));
     const retryAttempts = Object.entries(persistedPayload.retryMap ?? {}).map(([symbol, attempts]) => ({ symbol, attempts }));
     markDone("fetch_price_data", fetchFailed ? "failed" : "success", { ...sharedDetails, failures: failures.slice(0, 10) }, fetchFailed ? "Fetch/network failures detected." : undefined);
-    markDone("normalize_parse_response", "success", sharedDetails);
-    markDone("validate_required_fields", "success", sharedDetails);
-    markDone("transform_daily_rows", "success", { ...sharedDetails, writtenDailyRows, unchangedDailyRows });
-    markDone("write_daily_history", writeFailed ? "failed" : "success", { ...sharedDetails, writtenDailyRows, unchangedDailyRows, changedSymbols }, writeFailed ? "DB/write failures detected." : undefined);
-    markDone("load_recent_window", "success", sharedDetails);
-    markDone("compute_snapshot", "success", { ...sharedDetails, snapshotWrites });
-    markDone("write_snapshot", writeFailed ? "failed" : "success", { ...sharedDetails, snapshotWrites }, writeFailed ? "See write step failures." : undefined);
+    const noSuccessfulProcessing = succeeded === 0 && fetchFailed;
+    if (noSuccessfulProcessing) {
+      markDone("normalize_parse_response", "skipped", { reason: "fetch_failed_prevented_execution", ...sharedDetails });
+      markDone("validate_required_fields", "skipped", { reason: "fetch_failed_prevented_execution", ...sharedDetails });
+      markDone("transform_daily_rows", "skipped", { reason: "fetch_failed_prevented_execution", ...sharedDetails, writtenDailyRows, unchangedDailyRows });
+      markDone("write_daily_history", "skipped", { reason: "fetch_failed_prevented_execution", ...sharedDetails, writtenDailyRows, unchangedDailyRows, changedSymbols });
+      markDone("load_recent_window", "skipped", { reason: "fetch_failed_prevented_execution", ...sharedDetails });
+      markDone("compute_snapshot", "skipped", { reason: "fetch_failed_prevented_execution", ...sharedDetails, snapshotWrites });
+      markDone("write_snapshot", "skipped", { reason: "fetch_failed_prevented_execution", ...sharedDetails, snapshotWrites });
+    } else {
+      markDone("normalize_parse_response", "success", sharedDetails);
+      markDone("validate_required_fields", "success", sharedDetails);
+      markDone("transform_daily_rows", "success", { ...sharedDetails, writtenDailyRows, unchangedDailyRows });
+      markDone("write_daily_history", writeFailed ? "failed" : "success", { ...sharedDetails, writtenDailyRows, unchangedDailyRows, changedSymbols }, writeFailed ? "DB/write failures detected." : undefined);
+      markDone("load_recent_window", "success", sharedDetails);
+      markDone("compute_snapshot", "success", { ...sharedDetails, snapshotWrites });
+      markDone("write_snapshot", writeFailed ? "failed" : "success", { ...sharedDetails, snapshotWrites }, writeFailed ? "See write step failures." : undefined);
+    }
     const processedInRun = runSymbols.length;
     const processedTotal = Math.min(totalToProcess, offset + processedInRun);
     const remaining = Math.max(0, totalToProcess - processedTotal);
