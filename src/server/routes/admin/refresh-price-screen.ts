@@ -246,22 +246,8 @@ export default async function handler(req: any, res: any) {
       && persistedState.updated_at
       && (Date.now() - new Date(persistedState.updated_at).getTime()) < 10 * 60 * 1000
     );
-    if (persistedState) {
-      const cronRows = await query(
-        `SELECT run_at FROM ${tables.fetchLog}
-         WHERE ticker = '__cron_refresh_lock__' AND period = 'lock' AND statement = 'refresh'
-         ORDER BY run_at DESC
-         LIMIT 1`
-      ) as unknown as Array<{ run_at: string }>;
-      const latestCron = cronRows[0]?.run_at ? new Date(cronRows[0].run_at).getTime() : null;
-      const stateUpdated = persistedState.updated_at ? new Date(persistedState.updated_at).getTime() : null;
-      if (!latestCron || !stateUpdated) {
-        stateDiagnostics.cronLastTouchedState = "unknown";
-      } else {
-        // Current code path does not let cron write this table; mark explicit "no".
-        stateDiagnostics.cronLastTouchedState = "no";
-      }
-    }
+    // Keep this explicit and cheap on hot path: cron route does not read/write this table in code.
+    stateDiagnostics.cronLastTouchedState = "no";
     if (inspectStateOnly) {
       const persistedSymbols = persistedState ? parsePersistedSymbols(persistedState.symbols_json) : [];
       res.status(200).json({
