@@ -25,6 +25,7 @@ const TABLES = {
   macroHistoryReadCache: "macro_history_read_cache",
   dailyPriceHistory: "daily_price_history",
   priceScreenSnapshot: "price_screen_snapshot",
+  screeningPriceRefreshState: "screening_price_refresh_state",
 };
 
 export async function ensureSchema() {
@@ -86,6 +87,21 @@ export async function ensureSchema() {
       statement TEXT,
       ok INTEGER,
       error TEXT
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.screeningPriceRefreshState} (
+      scope TEXT PRIMARY KEY,
+      symbols_json TEXT NOT NULL,
+      total_count INTEGER NOT NULL,
+      offset INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'idle',
+      targets_source TEXT NOT NULL DEFAULT 'fresh',
+      last_controller_stage TEXT,
+      last_worker_started INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      updated_at TEXT NOT NULL
     )`
   );
 

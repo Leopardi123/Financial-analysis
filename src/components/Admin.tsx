@@ -110,6 +110,16 @@ type PriceIngestResult = {
   snapshotWrites?: number;
   results?: Array<{ symbol?: string } & Record<string, unknown>>;
   failures?: Array<{ symbol?: string; classification?: string; stage?: string; error?: string } & Record<string, unknown>>;
+  cursor?: {
+    offset?: number;
+    nextOffset: number | null;
+    done: boolean;
+    processedInRun: number;
+    totalToProcess: number;
+    remaining?: number;
+    batchSize?: number;
+  };
+  stateDiagnostics?: ScreeningDebugPayload["stateDiagnostics"];
   error?: string;
   debug?: ScreeningDebugPayload;
 };
@@ -135,6 +145,24 @@ type ScreeningDebugPayload = {
   requestStartedAt?: string;
   requestEndedAt?: string;
   durationMs?: number;
+  controllerStopStage?: string;
+  workerStarted?: boolean;
+  targetsSource?: string;
+  targetsRecomputed?: boolean;
+  dispatchStatus?: string;
+  stateDiagnostics?: {
+    stateFound?: boolean;
+    stateValid?: boolean;
+    targetsPersisted?: boolean;
+    targetsCount?: number;
+    cursorValue?: number | null;
+    stateStatus?: string | null;
+    stateUpdatedAt?: string | null;
+    cronLastTouchedState?: "yes" | "no" | "unknown";
+    lockPresent?: boolean;
+    targetsSourceUnknownReason?: string | null;
+    stateError?: string | null;
+  };
 };
 
 type ScreeningAttempt = {
@@ -203,6 +231,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const tickerAutoRunningRef = useRef(false);
   const tickerAutoPausedRef = useRef(false);
   const screeningAutoRunningRef = useRef(false);
+  const screeningAutoPausedRef = useRef(false);
+  const screeningOffsetRef = useRef(0);
   const materializationCursorRef = useRef<MaterializationCursor | null>(null);
 
   const secretReady = secret.trim().length > 0;
@@ -248,7 +278,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     updateLog(title, "loading", "LOADING...");
     try {
       const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 45000);
+      const timeoutMs = title === "Refresh Screening Price Data" ? 180000 : 45000;
+      const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
       const response = await fetch(withAdminQuery(url), {
         method: "POST",
         headers: {
@@ -306,7 +337,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     } catch (error) {
       const message =
         (error as Error).name === "AbortError"
-          ? "Request timed out. Try Continue materialization."
+          ? (title === "Refresh Screening Price Data"
+            ? "Request timed out before response. Screening controller may still be running server-side; use Inspect persisted state and then Resume."
+            : "Request timed out. Try Continue materialization.")
           : (error as Error).message;
       updateLog(title, "error", `ERROR\n${message}`);
       return { __error: message } as RefreshPayload;
@@ -342,7 +375,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setScreeningAttempts((prev) => prev.map((item) => item.attemptId === attemptId ? { ...item, ...patch } : item));
   }
 
-  async function runScreeningPriceIngest(offset = screeningOffset) {
+  async function runScreeningPriceIngest(offset = screeningOffset): Promise<PriceIngestResult | null> {
     const normalBatchSize = 3;
     setScreeningStatus("running");
     setScreeningMessage(`Running batch from offset ${offset}...`);
@@ -353,10 +386,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     });
     if (payload?.__error) {
       setPriceIngestResult({ ok: false, error: payload.__error });
-      setScreeningStatus("error");
+      if (!screeningAutoPausedRef.current) {
+        setScreeningStatus("error");
+      }
       const endedAt = new Date().toISOString();
       const timeoutMessage = payload.__error.includes("timed out")
-        ? `Timed out before first symbol was selected. No symbols processed in this attempt. Timed out during target resolution/query setup; load_symbols_batch, fetch, save and snapshot did not start. Continue will retry from offset ${offset} with batch size ${normalBatchSize}.`
+        ? `Timed out before load_symbols_batch. Batch worker never started. Controller stopped before dispatch. Resume retries from saved cursor.`
         : payload.__error;
       setScreeningMessage(timeoutMessage);
       patchScreeningAttempt(attemptId, {
@@ -367,7 +402,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       });
       setScreeningDebug({ ...initialDebug, requestEndedAt: endedAt });
       setScreeningDebugOpen(true);
-      return;
+      return null;
     }
     const cursor = payload?.cursor;
     const nextResult = payload as unknown as PriceIngestResult;
@@ -398,17 +433,20 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       setScreeningStatus("error");
       setScreeningMessage("Missing cursor in response.");
       setScreeningDebugOpen(true);
+      return null;
     }
+    return nextResult;
   }
 
   function pauseScreeningRefresh() {
-    screeningAutoRunningRef.current = false;
+    screeningAutoPausedRef.current = true;
     setScreeningStatus("paused");
-    setScreeningMessage("Paused. Current batch will not continue.");
+    setScreeningMessage("Pausing after current screening batch...");
   }
 
   function resetScreeningProgress() {
     screeningAutoRunningRef.current = false;
+    screeningAutoPausedRef.current = true;
     setScreeningOffset(0);
     setScreeningRemaining(null);
     setScreeningTotal(null);
@@ -419,6 +457,69 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setScreeningDebugOpen(false);
     setScreeningAttempts([]);
     setLatestSuccessAttemptId(null);
+  }
+
+  async function runScreeningAutoFlow(): Promise<void> {
+    if (screeningAutoRunningRef.current) return;
+    screeningAutoRunningRef.current = true;
+    screeningAutoPausedRef.current = false;
+    setScreeningStatus("running");
+    setScreeningMessage("Starting screening auto refresh...");
+    let retryAttempt = 0;
+
+    while (screeningAutoRunningRef.current) {
+      if (screeningAutoPausedRef.current) break;
+      const payload = await runScreeningPriceIngest(screeningOffsetRef.current);
+      if (!payload) {
+        if (retryAttempt >= 2) {
+          setScreeningStatus("error");
+          setScreeningMessage("Controller failed before worker dispatch repeatedly. Paused in recoverable state. Click Resume.");
+          screeningAutoRunningRef.current = false;
+          screeningAutoPausedRef.current = true;
+          return;
+        }
+        retryAttempt += 1;
+        const backoffMs = 500 * (2 ** retryAttempt);
+        setScreeningMessage(`Controller pre-dispatch failure. Retrying in ${backoffMs}ms (attempt ${retryAttempt}/3)...`);
+        await sleep(backoffMs);
+        continue;
+      }
+      retryAttempt = 0;
+      if (payload.cursor?.done) {
+        setScreeningStatus("done");
+        setScreeningMessage("Screening price refresh completed.");
+        screeningAutoRunningRef.current = false;
+        screeningAutoPausedRef.current = false;
+        return;
+      }
+      await sleep(200 + Math.floor(Math.random() * 200));
+    }
+
+    if (screeningAutoPausedRef.current) {
+      setScreeningStatus("paused");
+      setScreeningMessage("Paused by user. Resume continues from saved cursor.");
+    }
+    screeningAutoRunningRef.current = false;
+  }
+
+  async function inspectScreeningRefreshState(): Promise<void> {
+    const payload = await postJson("Inspect Screening Refresh State", "/api/admin/refresh-price-screen", {
+      inspectState: true,
+      batchSize: 1,
+      offset: screeningOffsetRef.current,
+    });
+    if (payload?.__error) {
+      setScreeningStatus("error");
+      setScreeningMessage(`Inspect state failed: ${payload.__error}`);
+      return;
+    }
+    const nextResult = payload as unknown as PriceIngestResult;
+    if (nextResult.debug) {
+      setScreeningDebug(nextResult.debug);
+    } else if (nextResult.stateDiagnostics) {
+      setScreeningDebug({ stateDiagnostics: nextResult.stateDiagnostics });
+    }
+    setScreeningMessage("Loaded persisted screening refresh state.");
   }
 
 
@@ -458,12 +559,17 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   }, [debugParamEnabled]);
 
   useEffect(() => {
+    screeningOffsetRef.current = screeningOffset;
+  }, [screeningOffset]);
+
+  useEffect(() => {
     return () => {
       autoRefreshRunningRef.current = false;
       autoRefreshPausedRef.current = true;
       tickerAutoRunningRef.current = false;
       tickerAutoPausedRef.current = true;
       screeningAutoRunningRef.current = false;
+      screeningAutoPausedRef.current = true;
     };
   }, []);
 
@@ -908,22 +1014,25 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         <summary><strong>Screening price data</strong></summary>
         <p className="bread">Används för att hämta och beräkna prisdata för screening. Fyller daily_price_history och price_screen_snapshot.</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+          <button type="button" onClick={() => void runScreeningAutoFlow()} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
             {loadingKey === "Refresh Screening Price Data" ? "Running screening refresh..." : "Start / Continue screening price refresh"}
           </button>
           <button type="button" onClick={pauseScreeningRefresh} disabled={!secretReady || screeningStatus !== "running"}>
             Pause
           </button>
-          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || (screeningStatus !== "paused" && screeningStatus !== "error")}>
+          <button type="button" onClick={() => void runScreeningAutoFlow()} disabled={!secretReady || loadingKey !== null || (screeningStatus !== "paused" && screeningStatus !== "error")}>
             Resume
           </button>
           <button type="button" onClick={resetScreeningProgress} disabled={loadingKey !== null}>Reset progress</button>
+          <button type="button" onClick={() => void inspectScreeningRefreshState()} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+            Inspect persisted state
+          </button>
           <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
             Run one debug batch
           </button>
         </div>
         <ul className="bread" style={{ marginTop: 8 }}>
-          <li><strong>Start / Continue screening price refresh:</strong> runs one safe batch of the full pipeline (fetch prices → save history → build snapshots) from current offset and persists progress.</li>
+          <li><strong>Start / Continue screening price refresh:</strong> starts controller loop that dispatches safe 3-symbol batches (fetch prices → save history → build snapshots) from saved cursor.</li>
           <li><strong>Pause:</strong> stops after current batch.</li>
           <li><strong>Resume:</strong> continues from current offset.</li>
           <li><strong>Reset progress:</strong> resets cursor/progress only, does not delete stored price data.</li>
@@ -976,6 +1085,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <div>
               <p className="bread">
                 Last completed: {(latestAttempt?.debug?.lastCompletedStep ?? screeningDebug?.lastCompletedStep) ?? "none"} · Last started: {(latestAttempt?.debug?.lastStartedStep ?? screeningDebug?.lastStartedStep) ?? "none"} · Current stage: {(latestAttempt?.debug?.currentStage ?? screeningDebug?.currentStage) ?? "none"} · Failed step: {(latestAttempt?.debug?.failedStep ?? screeningDebug?.failedStep) ?? "none"} · Duration: {(latestAttempt?.debug?.durationMs ?? screeningDebug?.durationMs) ?? 0} ms
+              </p>
+              <p className="bread">
+                Controller stop stage: {(latestAttempt?.debug?.controllerStopStage ?? screeningDebug?.controllerStopStage) ?? "none"} · Worker started: {String((latestAttempt?.debug?.workerStarted ?? screeningDebug?.workerStarted) ?? false)} · Targets source: {(latestAttempt?.debug?.targetsSource ?? screeningDebug?.targetsSource) ?? "unknown"} · Targets recomputed: {String((latestAttempt?.debug?.targetsRecomputed ?? screeningDebug?.targetsRecomputed) ?? false)} · Dispatch status: {(latestAttempt?.debug?.dispatchStatus ?? screeningDebug?.dispatchStatus) ?? "unknown"}
+              </p>
+              <p className="bread">
+                State found: {String((latestAttempt?.debug?.stateDiagnostics?.stateFound ?? screeningDebug?.stateDiagnostics?.stateFound) ?? false)} · State valid: {String((latestAttempt?.debug?.stateDiagnostics?.stateValid ?? screeningDebug?.stateDiagnostics?.stateValid) ?? false)} · Targets persisted: {String((latestAttempt?.debug?.stateDiagnostics?.targetsPersisted ?? screeningDebug?.stateDiagnostics?.targetsPersisted) ?? false)} · Targets count: {(latestAttempt?.debug?.stateDiagnostics?.targetsCount ?? screeningDebug?.stateDiagnostics?.targetsCount) ?? 0} · Cursor: {String((latestAttempt?.debug?.stateDiagnostics?.cursorValue ?? screeningDebug?.stateDiagnostics?.cursorValue) ?? "null")} · Cron last touched state: {(latestAttempt?.debug?.stateDiagnostics?.cronLastTouchedState ?? screeningDebug?.stateDiagnostics?.cronLastTouchedState) ?? "unknown"} · Lock present: {String((latestAttempt?.debug?.stateDiagnostics?.lockPresent ?? screeningDebug?.stateDiagnostics?.lockPresent) ?? false)} · targetsSource unknown reason: {(latestAttempt?.debug?.stateDiagnostics?.targetsSourceUnknownReason ?? screeningDebug?.stateDiagnostics?.targetsSourceUnknownReason) ?? "n/a"} · state error: {(latestAttempt?.debug?.stateDiagnostics?.stateError ?? screeningDebug?.stateDiagnostics?.stateError) ?? "none"}
               </p>
               {(latestAttempt?.debug?.steps ?? screeningDebug?.steps ?? []).map((step) => (
                 <details key={step.key} style={{ marginBottom: 6 }}>
