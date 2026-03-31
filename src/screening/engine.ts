@@ -108,13 +108,12 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "corp_market_cap_over_nav":
       return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NAV_today_TargetCurrency"));
     case "corp_cash_over_market_cap": {
-      const cashT0 = readFiniteFromPaths(
-        "cash_t0_TargetCurrency",
-        "financing.cash_t0_post_TargetCurrency",
-        "financing.cash_AfterCashFirst_TargetCurrency_t0",
-      );
+      const reportedCash =
+        latest(balance.cashAndShortTermInvestments)
+        ?? latest(balance.cashAndCashEquivalents)
+        ?? latest(balance.cashAndCashEquivalentsAtCarryingValue);
       const marketCap = readFiniteFromPaths("MarketCap_TargetCurrency", "marketValue.MarketCap_TargetCurrency") ?? marketCapFromInputs;
-      return ratio(cashT0, marketCap);
+      return ratio(reportedCash, marketCap);
     }
     case "corp_price_over_dcf_per_share":
       return ratio(readFinite("price_current_TargetCurrency"), readFinite("DCF_prodStart_present_perShare_TargetCurrency"));
