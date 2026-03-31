@@ -56,6 +56,14 @@ type StateDiagnostics = {
   stateUpdatedAt: string | null;
   cronLastTouchedState: "yes" | "no" | "unknown";
   lockPresent: boolean;
+  lockScope?: string | null;
+  lockOwner?: string | null;
+  lockCreatedAt?: string | null;
+  lockUpdatedAt?: string | null;
+  lockAgeMs?: number | null;
+  lockClassification?: "none" | "active" | "stale_or_orphaned_candidate";
+  controllerLockDecision?: "not_waiting" | "would_wait";
+  controllerLockReason?: string | null;
   targetsSourceUnknownReason: string | null;
   stateError: string | null;
 };
@@ -231,6 +239,14 @@ export default async function handler(req: any, res: any) {
       stateUpdatedAt: null,
       cronLastTouchedState: "unknown",
       lockPresent: false,
+      lockScope: STATE_SCOPE,
+      lockOwner: null,
+      lockCreatedAt: null,
+      lockUpdatedAt: null,
+      lockAgeMs: null,
+      lockClassification: "none",
+      controllerLockDecision: "not_waiting",
+      controllerLockReason: "screening controller has no lock-wait path; lockPresent is diagnostic only.",
       targetsSourceUnknownReason: null,
       stateError: null,
     };
@@ -360,12 +376,25 @@ export default async function handler(req: any, res: any) {
     stateDiagnostics.stateStatus = persistedState?.status ?? null;
     stateDiagnostics.stateUpdatedAt = persistedState?.updated_at ?? null;
     stateDiagnostics.cursorValue = persistedState ? Math.max(0, Math.floor(Number(persistedState.offset ?? 0))) : null;
+    stateDiagnostics.lockUpdatedAt = persistedState?.updated_at ?? null;
+    stateDiagnostics.lockAgeMs = persistedState?.updated_at ? Math.max(0, Date.now() - new Date(persistedState.updated_at).getTime()) : null;
     stateDiagnostics.lockPresent = Boolean(
       persistedState
       && persistedState.status === "running"
       && persistedState.updated_at
       && (Date.now() - new Date(persistedState.updated_at).getTime()) < 10 * 60 * 1000
     );
+    if (!stateDiagnostics.lockPresent) {
+      stateDiagnostics.lockClassification = "none";
+    } else {
+      const parsedPayload = persistedState ? parsePersistedPayload(persistedState.symbols_json) : { workerRunning: false, targets: [] };
+      const workerRunning = Boolean(parsedPayload.workerRunning);
+      stateDiagnostics.lockClassification = workerRunning ? "active" : "stale_or_orphaned_candidate";
+      stateDiagnostics.controllerLockDecision = "not_waiting";
+      stateDiagnostics.controllerLockReason = workerRunning
+        ? "Worker appears running, but controller still does not wait on lock."
+        : "lockPresent=true while workerRunning=false; controller does not wait on lock.";
+    }
     if (persistedState) {
       const cronRows = await query(
         `SELECT run_at FROM ${tables.fetchLog}
@@ -539,6 +568,12 @@ export default async function handler(req: any, res: any) {
       cursorValue: stateDiagnostics.cursorValue,
       cronLastTouchedState: stateDiagnostics.cronLastTouchedState,
       lockPresent: stateDiagnostics.lockPresent,
+      lockScope: stateDiagnostics.lockScope,
+      lockUpdatedAt: stateDiagnostics.lockUpdatedAt,
+      lockAgeMs: stateDiagnostics.lockAgeMs,
+      lockClassification: stateDiagnostics.lockClassification,
+      controllerLockDecision: stateDiagnostics.controllerLockDecision,
+      controllerLockReason: stateDiagnostics.controllerLockReason,
       targetsSourceUnknownReason: stateDiagnostics.targetsSourceUnknownReason,
       lastStartedSubStep,
       lastCompletedSubStep: String(lastCompletedSubStep?.key ?? "none"),
