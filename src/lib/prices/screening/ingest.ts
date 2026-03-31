@@ -285,27 +285,12 @@ export async function ingestDailyPricesAndRefreshSnapshot(symbol: string, debug 
         }
       } else {
         writeMode = writeStatements.length <= WRITE_CHUNK_SIZE ? "bulk" : "chunked_bulk";
+        // libsql batch executes statements transactionally per batch; do not wrap with manual BEGIN/COMMIT.
         transactionUsed = true;
-        let transactionStarted = false;
-        try {
-          await execute("BEGIN");
-          transactionStarted = true;
-          for (let index = 0; index < writeStatements.length; index += WRITE_CHUNK_SIZE) {
-            const chunk = writeStatements.slice(index, index + WRITE_CHUNK_SIZE);
-            await batch(chunk);
-            statementCount += chunk.length;
-          }
-          await execute("COMMIT");
-          transactionStarted = false;
-        } catch (error) {
-          if (transactionStarted) {
-            try {
-              await execute("ROLLBACK");
-            } catch {
-              // no-op: preserve original write failure if transaction was already closed
-            }
-          }
-          throw error;
+        for (let index = 0; index < writeStatements.length; index += WRITE_CHUNK_SIZE) {
+          const chunk = writeStatements.slice(index, index + WRITE_CHUNK_SIZE);
+          await batch(chunk);
+          statementCount += chunk.length;
         }
       }
     }
