@@ -110,6 +110,26 @@ type PriceIngestResult = {
   snapshotWrites?: number;
   results?: Array<{ symbol?: string } & Record<string, unknown>>;
   failures?: Array<{ symbol?: string; classification?: string; stage?: string; error?: string } & Record<string, unknown>>;
+  cursor?: {
+    offset?: number;
+    nextOffset: number | null;
+    done: boolean;
+    processedInRun: number;
+    totalToProcess: number;
+    remaining?: number;
+    batchSize?: number;
+  };
+  stateDiagnostics?: ScreeningDebugPayload["stateDiagnostics"];
+  stateWriteVerification?: {
+    expectedOffset?: number;
+    persistedOffsetAfterWrite?: number | null;
+    persistedUpdatedAtAfterWrite?: string | null;
+    stalePersistedStateAfterSuccess?: boolean;
+  };
+  totalFailuresCount?: number;
+  lastFailedSymbols?: string[];
+  retryAttempts?: Array<{ symbol: string; attempts: number }>;
+  slowSymbols?: string[];
   error?: string;
   debug?: ScreeningDebugPayload;
 };
@@ -135,6 +155,38 @@ type ScreeningDebugPayload = {
   requestStartedAt?: string;
   requestEndedAt?: string;
   durationMs?: number;
+  controllerStopStage?: string;
+  workerStarted?: boolean;
+  targetsSource?: string;
+  targetsRecomputed?: boolean;
+  dispatchStatus?: string;
+  stateDiagnostics?: {
+    stateFound?: boolean;
+    stateValid?: boolean;
+    targetsPersisted?: boolean;
+    targetsCount?: number;
+    cursorValue?: number | null;
+    stateStatus?: string | null;
+    stateUpdatedAt?: string | null;
+    cronLastTouchedState?: "yes" | "no" | "unknown";
+    lockPresent?: boolean;
+    lockScope?: string | null;
+    lockOwner?: string | null;
+    lockCreatedAt?: string | null;
+    lockUpdatedAt?: string | null;
+    lockAgeMs?: number | null;
+    lockClassification?: "none" | "active" | "stale_or_orphaned_candidate";
+    controllerLockDecision?: "not_waiting" | "would_wait";
+    controllerLockReason?: string | null;
+    targetsSourceUnknownReason?: string | null;
+    stateError?: string | null;
+  };
+  stateWriteVerification?: {
+    expectedOffset?: number;
+    persistedOffsetAfterWrite?: number | null;
+    persistedUpdatedAtAfterWrite?: string | null;
+    stalePersistedStateAfterSuccess?: boolean;
+  };
 };
 
 type ScreeningAttempt = {
@@ -203,6 +255,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const tickerAutoRunningRef = useRef(false);
   const tickerAutoPausedRef = useRef(false);
   const screeningAutoRunningRef = useRef(false);
+  const screeningAutoPausedRef = useRef(false);
+  const screeningOffsetRef = useRef(0);
   const materializationCursorRef = useRef<MaterializationCursor | null>(null);
 
   const secretReady = secret.trim().length > 0;
@@ -248,7 +302,8 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     updateLog(title, "loading", "LOADING...");
     try {
       const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 45000);
+      const timeoutMs = title === "Refresh Screening Price Data" ? 180000 : 45000;
+      const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
       const response = await fetch(withAdminQuery(url), {
         method: "POST",
         headers: {
@@ -298,6 +353,14 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         );
         return { __error: errorMessage } as RefreshPayload;
       }
+      const payloadRecord = payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
+      const logicalError = payloadRecord
+        && payloadRecord.ok === false
+        && (payloadRecord.status === "error" || typeof payloadRecord.error === "string");
+      if (logicalError) {
+        updateLog(title, "error", `ERROR\n${JSON.stringify(payload, null, 2)}`);
+        return payload as RefreshPayload;
+      }
       updateLog(title, "success", `SUCCESS\n${JSON.stringify(payload, null, 2)}`);
       if (title === "Upsert Tickers") {
         onTickersUpserted?.();
@@ -306,7 +369,9 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     } catch (error) {
       const message =
         (error as Error).name === "AbortError"
-          ? "Request timed out. Try Continue materialization."
+          ? (title === "Refresh Screening Price Data"
+            ? "Request timed out before response. Screening controller may still be running server-side; use Inspect persisted state and then Resume."
+            : "Request timed out. Try Continue materialization.")
           : (error as Error).message;
       updateLog(title, "error", `ERROR\n${message}`);
       return { __error: message } as RefreshPayload;
@@ -325,7 +390,24 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       requestStartedAt: now,
       steps: [
         { key: "request_started", label: "Request started", status: "running", startedAt: now, details: { offset, batchSize } },
-        { key: "resolve_targets", label: "Resolve targets", status: "running", startedAt: now, details: { offset, batchSize } },
+        {
+          key: "resolve_targets",
+          label: "Resolve targets",
+          status: "running",
+          startedAt: now,
+          details: {
+            offset,
+            batchSize,
+            subSteps: [
+              { key: "load_persisted_state", status: "running", startedAt: now, details: {} },
+              { key: "validate_state", status: "pending", details: {} },
+              { key: "load_targets_from_state", status: "pending", details: {} },
+              { key: "recompute_targets", status: "pending", details: {} },
+              { key: "acquire_lock", status: "pending", details: {} },
+              { key: "finalize_targets", status: "pending", details: {} },
+            ],
+          },
+        },
         { key: "load_symbols_batch", label: "Load symbols / batch", status: "pending" },
         { key: "fetch_price_data", label: "Fetch price data", status: "pending" },
         { key: "write_daily_history", label: "Write daily_price_history", status: "pending" },
@@ -342,7 +424,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setScreeningAttempts((prev) => prev.map((item) => item.attemptId === attemptId ? { ...item, ...patch } : item));
   }
 
-  async function runScreeningPriceIngest(offset = screeningOffset) {
+  async function runScreeningPriceIngest(offset = screeningOffset): Promise<PriceIngestResult | null> {
     const normalBatchSize = 3;
     setScreeningStatus("running");
     setScreeningMessage(`Running batch from offset ${offset}...`);
@@ -353,21 +435,50 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     });
     if (payload?.__error) {
       setPriceIngestResult({ ok: false, error: payload.__error });
-      setScreeningStatus("error");
+      if (!screeningAutoPausedRef.current) {
+        setScreeningStatus("error");
+      }
       const endedAt = new Date().toISOString();
       const timeoutMessage = payload.__error.includes("timed out")
-        ? `Timed out before first symbol was selected. No symbols processed in this attempt. Timed out during target resolution/query setup; load_symbols_batch, fetch, save and snapshot did not start. Continue will retry from offset ${offset} with batch size ${normalBatchSize}.`
+        ? `Timed out before load_symbols_batch. Batch worker never started. Controller stopped before dispatch. Resume retries from saved cursor.`
         : payload.__error;
       setScreeningMessage(timeoutMessage);
       patchScreeningAttempt(attemptId, {
         endedAt,
         status: payload.__error.includes("timed out") ? "timeout" : "failed",
         error: payload.__error,
-        debug: { ...initialDebug, requestEndedAt: endedAt },
+        debug: {
+          ...initialDebug,
+          requestEndedAt: endedAt,
+          failedStep: "resolve_targets",
+          currentStage: "resolve_targets",
+          lastStartedStep: "resolve_targets",
+        },
       });
-      setScreeningDebug({ ...initialDebug, requestEndedAt: endedAt });
+      setScreeningDebug({
+        ...initialDebug,
+        requestEndedAt: endedAt,
+        failedStep: "resolve_targets",
+        currentStage: "resolve_targets",
+        lastStartedStep: "resolve_targets",
+      });
+      updateLog(
+        "Refresh Screening Price Data",
+        "error",
+        `ERROR\n${payload.__error}\n\nscreeningErrorDebug:\n${JSON.stringify({
+          attemptId,
+          offset,
+          batchSize: normalBatchSize,
+          timeout: payload.__error.includes("timed out"),
+          debug: {
+            ...initialDebug,
+            requestEndedAt: endedAt,
+            failedStep: "resolve_targets",
+          },
+        }, null, 2)}`,
+      );
       setScreeningDebugOpen(true);
-      return;
+      return null;
     }
     const cursor = payload?.cursor;
     const nextResult = payload as unknown as PriceIngestResult;
@@ -397,18 +508,31 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     } else {
       setScreeningStatus("error");
       setScreeningMessage("Missing cursor in response.");
+      updateLog(
+        "Refresh Screening Price Data",
+        "error",
+        `ERROR\nMissing cursor in response.\n\nscreeningErrorDebug:\n${JSON.stringify({
+          attemptId,
+          offset,
+          batchSize: normalBatchSize,
+          debug: resolvedDebug,
+        }, null, 2)}`,
+      );
       setScreeningDebugOpen(true);
+      return null;
     }
+    return nextResult;
   }
 
   function pauseScreeningRefresh() {
-    screeningAutoRunningRef.current = false;
+    screeningAutoPausedRef.current = true;
     setScreeningStatus("paused");
-    setScreeningMessage("Paused. Current batch will not continue.");
+    setScreeningMessage("Pausing after current screening batch...");
   }
 
   function resetScreeningProgress() {
     screeningAutoRunningRef.current = false;
+    screeningAutoPausedRef.current = true;
     setScreeningOffset(0);
     setScreeningRemaining(null);
     setScreeningTotal(null);
@@ -419,6 +543,69 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     setScreeningDebugOpen(false);
     setScreeningAttempts([]);
     setLatestSuccessAttemptId(null);
+  }
+
+  async function runScreeningAutoFlow(): Promise<void> {
+    if (screeningAutoRunningRef.current) return;
+    screeningAutoRunningRef.current = true;
+    screeningAutoPausedRef.current = false;
+    setScreeningStatus("running");
+    setScreeningMessage("Starting screening auto refresh...");
+    let retryAttempt = 0;
+
+    while (screeningAutoRunningRef.current) {
+      if (screeningAutoPausedRef.current) break;
+      const payload = await runScreeningPriceIngest(screeningOffsetRef.current);
+      if (!payload) {
+        if (retryAttempt >= 2) {
+          setScreeningStatus("error");
+          setScreeningMessage("Controller failed before worker dispatch repeatedly. Paused in recoverable state. Click Resume.");
+          screeningAutoRunningRef.current = false;
+          screeningAutoPausedRef.current = true;
+          return;
+        }
+        retryAttempt += 1;
+        const backoffMs = 500 * (2 ** retryAttempt);
+        setScreeningMessage(`Controller pre-dispatch failure. Retrying in ${backoffMs}ms (attempt ${retryAttempt}/3)...`);
+        await sleep(backoffMs);
+        continue;
+      }
+      retryAttempt = 0;
+      if (payload.cursor?.done) {
+        setScreeningStatus("done");
+        setScreeningMessage("Screening price refresh completed.");
+        screeningAutoRunningRef.current = false;
+        screeningAutoPausedRef.current = false;
+        return;
+      }
+      await sleep(200 + Math.floor(Math.random() * 200));
+    }
+
+    if (screeningAutoPausedRef.current) {
+      setScreeningStatus("paused");
+      setScreeningMessage("Paused by user. Resume continues from saved cursor.");
+    }
+    screeningAutoRunningRef.current = false;
+  }
+
+  async function inspectScreeningRefreshState(): Promise<void> {
+    const payload = await postJson("Inspect Screening Refresh State", "/api/admin/refresh-price-screen", {
+      inspectState: true,
+      batchSize: 1,
+      offset: screeningOffsetRef.current,
+    });
+    if (payload?.__error) {
+      setScreeningStatus("error");
+      setScreeningMessage(`Inspect state failed: ${payload.__error}`);
+      return;
+    }
+    const nextResult = payload as unknown as PriceIngestResult;
+    if (nextResult.debug) {
+      setScreeningDebug(nextResult.debug);
+    } else if (nextResult.stateDiagnostics) {
+      setScreeningDebug({ stateDiagnostics: nextResult.stateDiagnostics });
+    }
+    setScreeningMessage("Loaded persisted screening refresh state.");
   }
 
 
@@ -458,12 +645,17 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   }, [debugParamEnabled]);
 
   useEffect(() => {
+    screeningOffsetRef.current = screeningOffset;
+  }, [screeningOffset]);
+
+  useEffect(() => {
     return () => {
       autoRefreshRunningRef.current = false;
       autoRefreshPausedRef.current = true;
       tickerAutoRunningRef.current = false;
       tickerAutoPausedRef.current = true;
       screeningAutoRunningRef.current = false;
+      screeningAutoPausedRef.current = true;
     };
   }, []);
 
@@ -908,22 +1100,25 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         <summary><strong>Screening price data</strong></summary>
         <p className="bread">Används för att hämta och beräkna prisdata för screening. Fyller daily_price_history och price_screen_snapshot.</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+          <button type="button" onClick={() => void runScreeningAutoFlow()} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
             {loadingKey === "Refresh Screening Price Data" ? "Running screening refresh..." : "Start / Continue screening price refresh"}
           </button>
           <button type="button" onClick={pauseScreeningRefresh} disabled={!secretReady || screeningStatus !== "running"}>
             Pause
           </button>
-          <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || (screeningStatus !== "paused" && screeningStatus !== "error")}>
+          <button type="button" onClick={() => void runScreeningAutoFlow()} disabled={!secretReady || loadingKey !== null || (screeningStatus !== "paused" && screeningStatus !== "error")}>
             Resume
           </button>
           <button type="button" onClick={resetScreeningProgress} disabled={loadingKey !== null}>Reset progress</button>
+          <button type="button" onClick={() => void inspectScreeningRefreshState()} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
+            Inspect persisted state
+          </button>
           <button type="button" onClick={() => void runScreeningPriceIngest(screeningOffset)} disabled={!secretReady || loadingKey !== null || screeningStatus === "running"}>
             Run one debug batch
           </button>
         </div>
         <ul className="bread" style={{ marginTop: 8 }}>
-          <li><strong>Start / Continue screening price refresh:</strong> runs one safe batch of the full pipeline (fetch prices → save history → build snapshots) from current offset and persists progress.</li>
+          <li><strong>Start / Continue screening price refresh:</strong> starts controller loop that dispatches safe 3-symbol batches (fetch prices → save history → build snapshots) from saved cursor.</li>
           <li><strong>Pause:</strong> stops after current batch.</li>
           <li><strong>Resume:</strong> continues from current offset.</li>
           <li><strong>Reset progress:</strong> resets cursor/progress only, does not delete stored price data.</li>
@@ -941,6 +1136,13 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         </p>
         {priceIngestResult && (
           <div className="bread">
+            {(() => {
+              const heavy = (priceIngestResult.results ?? []).some((item) => {
+                const ingestDebug = (item as Record<string, unknown>).ingestDebug as Record<string, unknown> | undefined;
+                return Boolean(ingestDebug?.isHeavySymbol || ingestDebug?.isBackfill);
+              });
+              return <><strong>Run mode:</strong> {heavy ? "Heavy/backfill symbol present" : "Normal incremental refresh"}<br /></>;
+            })()}
             <strong>Status:</strong> {priceIngestResult.status === "partial_success"
               ? "Partial success"
               : priceIngestResult.ok ? "Success" : "Error"}<br />
@@ -948,6 +1150,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <strong>daily_price_history writes:</strong> {priceIngestResult.writtenDailyRows ?? 0} (unchanged {priceIngestResult.unchangedDailyRows ?? 0})<br />
             <strong>price_screen_snapshot writes:</strong> {priceIngestResult.snapshotWrites ?? 0}<br />
             <strong>Symbols changed:</strong> {priceIngestResult.changedSymbols ?? 0}
+            {Number(priceIngestResult.failed ?? 0) > 0
+              ? <><br /><strong>⚠️ {priceIngestResult.failed} symbols failed (click to inspect)</strong></>
+              : null}
+            {priceIngestResult.stateWriteVerification?.stalePersistedStateAfterSuccess
+              ? <><br /><strong>State write check:</strong> ⚠️ successful batch but persisted state looks stale (expected offset {priceIngestResult.stateWriteVerification.expectedOffset}, found {String(priceIngestResult.stateWriteVerification.persistedOffsetAfterWrite)}).</>
+              : null}
             {priceIngestResult.error ? <><br /><strong>Error:</strong> {priceIngestResult.error}</> : null}
             {((priceIngestResult.results?.length ?? 0) > 0 || (priceIngestResult.failures?.length ?? 0) > 0) && (
               <>
@@ -955,7 +1163,19 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
                 <strong>Batch symbols:</strong>
                 <ul style={{ marginTop: 4 }}>
                   {(priceIngestResult.results ?? []).map((item, idx) => (
-                    <li key={`ok-${String(item.symbol ?? idx)}`}>{String(item.symbol ?? "unknown")} ✅ success</li>
+                    <li key={`ok-${String(item.symbol ?? idx)}`}>
+                      {String(item.symbol ?? "unknown")} ✅ success
+                      {(() => {
+                        const ingestDebug = (item as Record<string, unknown>).ingestDebug as Record<string, unknown> | undefined;
+                        const timing = ingestDebug?.timingMs as Record<string, unknown> | undefined;
+                        const writeDiag = ingestDebug?.writeDiagnostics as Record<string, unknown> | undefined;
+                        if (!timing) return null;
+                        const writeMeta = writeDiag
+                          ? ` · writeMode ${String(writeDiag.writeMode ?? "unknown")} · tx ${String(Boolean(writeDiag.transactionUsed))} · chunkSize ${String(writeDiag.chunkSize ?? "n/a")} · statements ${String(writeDiag.statementCount ?? "n/a")} · rowsAttempted ${String(writeDiag.rowsAttempted ?? "n/a")} · rowsInserted ${String(writeDiag.rowsInserted ?? "n/a")} · rowsUpdated ${String(writeDiag.rowsUpdated ?? "n/a")} · rowsUnchanged ${String(writeDiag.rowsUnchanged ?? "n/a")} · writeDurationMs ${String(writeDiag.writeDurationMs ?? "n/a")}`
+                          : "";
+                        return ` · timing(ms): fetch ${String(timing.fetch ?? 0)}, parse ${String(timing.parse ?? 0)}, write ${String(timing.writeDailyHistory ?? 0)}, snapshot ${String(timing.snapshotComputeWrite ?? 0)}, total ${String(timing.total ?? 0)}${writeMeta} · rows ${String(ingestDebug?.historicalRowsReturned ?? ingestDebug?.fmpRowsReturned ?? 0)} · inserted ${String(ingestDebug?.insertedRows ?? 0)} · backfill ${String(Boolean(ingestDebug?.isBackfill))} · heavy ${String(Boolean(ingestDebug?.isHeavySymbol))}`;
+                      })()}
+                    </li>
                   ))}
                   {(priceIngestResult.failures ?? []).map((item, idx) => (
                     <li key={`fail-${String(item.symbol ?? idx)}`}>{String(item.symbol ?? "unknown")} ❌ failed: {String(item.classification ?? "unknown")} ({String(item.stage ?? "unknown stage")})</li>
@@ -976,6 +1196,18 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <div>
               <p className="bread">
                 Last completed: {(latestAttempt?.debug?.lastCompletedStep ?? screeningDebug?.lastCompletedStep) ?? "none"} · Last started: {(latestAttempt?.debug?.lastStartedStep ?? screeningDebug?.lastStartedStep) ?? "none"} · Current stage: {(latestAttempt?.debug?.currentStage ?? screeningDebug?.currentStage) ?? "none"} · Failed step: {(latestAttempt?.debug?.failedStep ?? screeningDebug?.failedStep) ?? "none"} · Duration: {(latestAttempt?.debug?.durationMs ?? screeningDebug?.durationMs) ?? 0} ms
+              </p>
+              <p className="bread">
+                Controller stop stage: {(latestAttempt?.debug?.controllerStopStage ?? screeningDebug?.controllerStopStage) ?? "none"} · Worker started: {String((latestAttempt?.debug?.workerStarted ?? screeningDebug?.workerStarted) ?? false)} · Targets source: {(latestAttempt?.debug?.targetsSource ?? screeningDebug?.targetsSource) ?? "unknown"} · Targets recomputed: {String((latestAttempt?.debug?.targetsRecomputed ?? screeningDebug?.targetsRecomputed) ?? false)} · Dispatch status: {(latestAttempt?.debug?.dispatchStatus ?? screeningDebug?.dispatchStatus) ?? "unknown"}
+              </p>
+              <p className="bread">
+                State found: {String((latestAttempt?.debug?.stateDiagnostics?.stateFound ?? screeningDebug?.stateDiagnostics?.stateFound) ?? false)} · State valid: {String((latestAttempt?.debug?.stateDiagnostics?.stateValid ?? screeningDebug?.stateDiagnostics?.stateValid) ?? false)} · Targets persisted: {String((latestAttempt?.debug?.stateDiagnostics?.targetsPersisted ?? screeningDebug?.stateDiagnostics?.targetsPersisted) ?? false)} · Targets count: {(latestAttempt?.debug?.stateDiagnostics?.targetsCount ?? screeningDebug?.stateDiagnostics?.targetsCount) ?? 0} · Cursor: {String((latestAttempt?.debug?.stateDiagnostics?.cursorValue ?? screeningDebug?.stateDiagnostics?.cursorValue) ?? "null")} · Cron last touched state: {(latestAttempt?.debug?.stateDiagnostics?.cronLastTouchedState ?? screeningDebug?.stateDiagnostics?.cronLastTouchedState) ?? "unknown"} · Lock present: {String((latestAttempt?.debug?.stateDiagnostics?.lockPresent ?? screeningDebug?.stateDiagnostics?.lockPresent) ?? false)} · Lock age ms: {String((latestAttempt?.debug?.stateDiagnostics as any)?.lockAgeMs ?? (screeningDebug?.stateDiagnostics as any)?.lockAgeMs ?? "n/a")} · Lock classification: {String((latestAttempt?.debug?.stateDiagnostics as any)?.lockClassification ?? (screeningDebug?.stateDiagnostics as any)?.lockClassification ?? "none")} · Lock decision: {String((latestAttempt?.debug?.stateDiagnostics as any)?.controllerLockDecision ?? (screeningDebug?.stateDiagnostics as any)?.controllerLockDecision ?? "not_waiting")} · lock reason: {String((latestAttempt?.debug?.stateDiagnostics as any)?.controllerLockReason ?? (screeningDebug?.stateDiagnostics as any)?.controllerLockReason ?? "n/a")} · targetsSource unknown reason: {(latestAttempt?.debug?.stateDiagnostics?.targetsSourceUnknownReason ?? screeningDebug?.stateDiagnostics?.targetsSourceUnknownReason) ?? "n/a"} · state error: {(latestAttempt?.debug?.stateDiagnostics?.stateError ?? screeningDebug?.stateDiagnostics?.stateError) ?? "none"}
+              </p>
+              <p className="bread">
+                State write verification: expected offset {String((latestAttempt?.debug?.stateWriteVerification?.expectedOffset ?? screeningDebug?.stateWriteVerification?.expectedOffset) ?? "n/a")} · persisted offset after write {String((latestAttempt?.debug?.stateWriteVerification?.persistedOffsetAfterWrite ?? screeningDebug?.stateWriteVerification?.persistedOffsetAfterWrite) ?? "n/a")} · stale persisted state after success {String((latestAttempt?.debug?.stateWriteVerification?.stalePersistedStateAfterSuccess ?? screeningDebug?.stateWriteVerification?.stalePersistedStateAfterSuccess) ?? false)}
+              </p>
+              <p className="bread">
+                Slow symbols (&gt;2s): {Array.isArray((latestAttempt?.debug as any)?.slowSymbols) ? (latestAttempt?.debug as any).slowSymbols.join(", ") : Array.isArray((screeningDebug as any)?.slowSymbols) ? (screeningDebug as any).slowSymbols.join(", ") : "none"} · Retry attempts: {Array.isArray((latestAttempt?.debug as any)?.retryAttempts) ? JSON.stringify((latestAttempt?.debug as any).retryAttempts) : Array.isArray((screeningDebug as any)?.retryAttempts) ? JSON.stringify((screeningDebug as any).retryAttempts) : "[]"}
               </p>
               {(latestAttempt?.debug?.steps ?? screeningDebug?.steps ?? []).map((step) => (
                 <details key={step.key} style={{ marginBottom: 6 }}>
