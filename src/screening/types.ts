@@ -39,6 +39,7 @@ export type CompanySnapshot = {
   income: Record<string, Array<number | null>>;
   balance: Record<string, Array<number | null>>;
   cashflow: Record<string, Array<number | null>>;
+  reportedQuarterlyBalance?: Record<string, Array<number | null>>;
   profile?: Record<string, unknown> | null;
   manual?: Record<string, number>;
   price?: Record<string, unknown> | null;

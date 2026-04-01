@@ -26,7 +26,7 @@ export default async function handler(req: any, res: any) {
          FROM ${tables.dailyPriceHistory}
          WHERE symbol = ?
          ORDER BY price_date DESC
-         LIMIT 120`,
+         LIMIT 320`,
         [symbol],
       ) as unknown as DailyPriceRow[];
       const ascRows = [...rows].sort((a, b) => a.price_date.localeCompare(b.price_date));

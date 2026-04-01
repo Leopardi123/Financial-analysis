@@ -101,8 +101,8 @@ async function upsertSnapshotIfChanged(next: PriceScreenSnapshotRow): Promise<bo
   const existing = existingRows[0] ?? null;
 
   const keys: Array<keyof PriceScreenSnapshotRow> = [
-    "as_of_date", "last_close", "return_5d", "return_20d", "return_60d", "high_20d", "high_60d",
-    "drawdown_20d", "drawdown_60d", "ma20", "ma50", "trend_state", "recovery_state", "history_points_used", "source",
+    "as_of_date", "last_close", "return_5d", "return_20d", "return_60d", "high_20d", "high_60d", "high_252d",
+    "drawdown_20d", "drawdown_60d", "drawdown_252d", "ma20", "ma50", "trend_state", "recovery_state", "history_points_used", "source",
   ];
 
   if (existing) {
@@ -119,8 +119,8 @@ async function upsertSnapshotIfChanged(next: PriceScreenSnapshotRow): Promise<bo
 
   await execute(
     `INSERT INTO ${tables.priceScreenSnapshot}
-      (symbol, as_of_date, last_close, return_5d, return_20d, return_60d, high_20d, high_60d, drawdown_20d, drawdown_60d, ma20, ma50, trend_state, recovery_state, history_points_used, source, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (symbol, as_of_date, last_close, return_5d, return_20d, return_60d, high_20d, high_60d, high_252d, drawdown_20d, drawdown_60d, drawdown_252d, ma20, ma50, trend_state, recovery_state, history_points_used, source, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(symbol) DO UPDATE SET
       as_of_date = excluded.as_of_date,
       last_close = excluded.last_close,
@@ -129,8 +129,10 @@ async function upsertSnapshotIfChanged(next: PriceScreenSnapshotRow): Promise<bo
       return_60d = excluded.return_60d,
       high_20d = excluded.high_20d,
       high_60d = excluded.high_60d,
+      high_252d = excluded.high_252d,
       drawdown_20d = excluded.drawdown_20d,
       drawdown_60d = excluded.drawdown_60d,
+      drawdown_252d = excluded.drawdown_252d,
       ma20 = excluded.ma20,
       ma50 = excluded.ma50,
       trend_state = excluded.trend_state,
@@ -147,8 +149,10 @@ async function upsertSnapshotIfChanged(next: PriceScreenSnapshotRow): Promise<bo
       next.return_60d,
       next.high_20d,
       next.high_60d,
+      next.high_252d,
       next.drawdown_20d,
       next.drawdown_60d,
+      next.drawdown_252d,
       next.ma20,
       next.ma50,
       next.trend_state,

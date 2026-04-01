@@ -35,6 +35,8 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
   const manual = snapshot.manual ?? {};
   const price = (snapshot.price ?? {}) as Record<string, unknown>;
   const corporate = (snapshot.corporateSnapshot ?? {}) as Record<string, unknown>;
+  const profile = (snapshot.profile ?? {}) as Record<string, unknown>;
+  const reportedQuarterlyBalance = (snapshot.reportedQuarterlyBalance ?? {}) as Record<string, Array<number | null>>;
 
   const readFinite = (key: string) => {
     const raw = corporate[key];
@@ -57,6 +59,7 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
   };
   const ratio = (num: number | null, den: number | null) =>
     num !== null && den !== null && den !== 0 ? num / den : null;
+  const latestSeriesValue = (series: Array<number | null> | undefined): number | null => latest(series);
   const marketCapFromInputs = (() => {
     const price = readFiniteFromPaths("price_current_TargetCurrency", "market.price_current_TargetCurrency");
     const shares = readFiniteFromPaths("shares_current", "market.shares_current");
@@ -70,7 +73,8 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "return_60d":
       return typeof price[fieldKey] === "number" ? Number(price[fieldKey]) * 100 : null;
     case "drawdown_20d":
-    case "drawdown_60d": {
+    case "drawdown_60d":
+    case "drawdown_252d": {
       if (typeof price[fieldKey] !== "number") return null;
       const raw = Number(price[fieldKey]);
       return raw < 0 ? Math.abs(raw) * 100 : 0;
@@ -108,13 +112,16 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "corp_market_cap_over_nav":
       return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NAV_today_TargetCurrency"));
     case "corp_cash_over_market_cap": {
-      const cashT0 = readFiniteFromPaths(
-        "cash_t0_TargetCurrency",
-        "financing.cash_t0_post_TargetCurrency",
-        "financing.cash_AfterCashFirst_TargetCurrency_t0",
-      );
-      const marketCap = readFiniteFromPaths("MarketCap_TargetCurrency", "marketValue.MarketCap_TargetCurrency") ?? marketCapFromInputs;
-      return ratio(cashT0, marketCap);
+      const reportedCorporateCash = latestSeriesValue(reportedQuarterlyBalance.cashAndCashEquivalents)
+        ?? latestSeriesValue(reportedQuarterlyBalance.cashAndShortTermInvestments)
+        ?? latestSeriesValue(reportedQuarterlyBalance.cashAndCashEquivalentsAndShortTermInvestments);
+      const profileMarketCapRaw = Number(profile.mktCap);
+      const profileMarketCap = Number.isFinite(profileMarketCapRaw) && profileMarketCapRaw > 0 ? profileMarketCapRaw : null;
+      const marketCap = readFiniteFromPaths("MarketCap_TargetCurrency", "marketValue.MarketCap_TargetCurrency")
+        ?? profileMarketCap
+        ?? marketCapFromInputs;
+      if (reportedCorporateCash === null || marketCap === null || marketCap <= 0) return null;
+      return ratio(reportedCorporateCash, marketCap);
     }
     case "corp_price_over_dcf_per_share":
       return ratio(readFinite("price_current_TargetCurrency"), readFinite("DCF_prodStart_present_perShare_TargetCurrency"));

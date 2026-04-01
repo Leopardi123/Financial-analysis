@@ -1,4 +1,4 @@
-import { batch, execute } from "./_db.js";
+import { batch, execute, query } from "./_db.js";
 import { ensurePriceSchema } from "../src/lib/prices/db/schema.js";
 import { seedPriceRegistry } from "../src/lib/prices/db/seed.js";
 
@@ -29,6 +29,13 @@ const TABLES = {
 };
 
 export async function ensureSchema() {
+  const ensureColumnExists = async (table: string, column: string, definition: string) => {
+    const info = await query(`PRAGMA table_info(${table})`) as Array<{ name?: string }>;
+    const exists = info.some((row) => String(row.name ?? "") === column);
+    if (!exists) {
+      await execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+  };
 
   await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companies} (
@@ -335,8 +342,10 @@ export async function ensureSchema() {
       return_60d REAL,
       high_20d REAL,
       high_60d REAL,
+      high_252d REAL,
       drawdown_20d REAL,
       drawdown_60d REAL,
+      drawdown_252d REAL,
       ma20 REAL,
       ma50 REAL,
       trend_state TEXT,
@@ -346,6 +355,8 @@ export async function ensureSchema() {
       updated_at TEXT NOT NULL
     )`
   );
+  await ensureColumnExists(TABLES.priceScreenSnapshot, "high_252d", "REAL");
+  await ensureColumnExists(TABLES.priceScreenSnapshot, "drawdown_252d", "REAL");
 
   await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companyProjects} (

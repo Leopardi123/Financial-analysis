@@ -33,12 +33,15 @@ function buildRows(symbol: string, count: number): DailyPriceRow[] {
   assert(result.snapshot.ma20 !== null, "ma20 should be present");
   assert(result.snapshot.ma50 !== null, "ma50 should be present");
   assert(result.snapshot.high_60d !== null, "high_60d should be present");
+  assert(result.snapshot.high_252d === null, "high_252d should be null with only 80 rows");
+  assert(result.snapshot.drawdown_252d === null, "drawdown_252d should be null with only 80 rows");
   assert(result.snapshot.trend_state !== null, "trend state should be resolved");
   assert(result.snapshot.recovery_state !== null, "recovery state should be resolved");
 
   const shortRows = buildRows("MSFT", 10);
   const shortResult = computePriceScreenSnapshot("MSFT", shortRows);
   assert(shortResult.snapshot.return_20d === null, "return_20d should be null with short history");
+  assert(shortResult.snapshot.drawdown_252d === null, "drawdown_252d should be null with short history");
   assert(shortResult.snapshot.ma50 === null, "ma50 should be null with short history");
   assert(shortResult.debug.null_reasons.return_20d === "insufficient_history_min_21", "debug should expose return_20d null reason");
 

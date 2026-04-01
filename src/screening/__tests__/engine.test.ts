@@ -49,5 +49,30 @@ const snapshot: CompanySnapshot = {
   assert(failed.evaluationStatus === "failed", "expected failed status");
   assert(failed.excludeReasons.length > 0, "expected at least one exclude reason");
 
+  const corporateCashScreen: ScreenDefinition = {
+    ...screen,
+    rules: { mustHave: [{ id: "corp-cash", field: "corp_cash_over_market_cap", operator: ">=", value: 0.2 }] },
+  };
+  const corporateCashResult = evaluateScreen({
+    snapshot: {
+      ...snapshot,
+      profile: { mktCap: 1000 },
+      reportedQuarterlyBalance: { cashAndCashEquivalents: [null, 300] },
+      corporateSnapshot: { MarketCap_TargetCurrency: 1000 },
+    },
+    screen: corporateCashScreen,
+  });
+  assert(corporateCashResult.ruleResults[0]?.value === 0.3, "expected corp cash / market cap to use reported quarterly cash");
+
+  const drawdown252Screen: ScreenDefinition = {
+    ...screen,
+    rules: { mustHave: [{ id: "dd252", field: "drawdown_252d", operator: ">=", value: 10 }] },
+  };
+  const drawdown252Result = evaluateScreen({
+    snapshot: { ...snapshot, price: { drawdown_252d: -0.25 } },
+    screen: drawdown252Screen,
+  });
+  assert(drawdown252Result.ruleResults[0]?.value === 25, "expected drawdown_252d to convert to positive percent");
+
   console.log("screening engine tests passed");
 })();
