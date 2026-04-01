@@ -1014,6 +1014,29 @@ function toFiniteNumber(value: unknown) {
   return null;
 }
 
+function pickFirstFiniteCandidate(
+  candidates: Array<{ path: string; value: unknown }>,
+): { path: string; value: number } | null {
+  for (const candidate of candidates) {
+    const parsed = toFiniteNumber(candidate.value);
+    if (parsed !== null) {
+      return { path: candidate.path, value: parsed };
+    }
+  }
+  return null;
+}
+
+function lastFinitePositiveFromSeries(series: unknown): number | null {
+  if (!Array.isArray(series)) return null;
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    const value = series[index];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function formatPriceValue(value: number | null) {
   if (value === null) {
     return "—";
@@ -2622,10 +2645,49 @@ Capital Available: ${availableLabel}`,
     profile?.symbolExchange,
   ].find((value) => typeof value === "string" && value.trim().length > 0);
 
-  const priceValue = toFiniteNumber(profile?.price);
-  const marketCapValue =
-    toFiniteNumber(profile?.mktCap) ??
-    toFiniteNumber(profile?.marketCap);
+  const priceResolved = pickFirstFiniteCandidate([
+    { path: "profile.price", value: profile?.price },
+    { path: "data.quote.price", value: (data as any)?.quote?.price },
+  ]);
+  const priceValue = priceResolved?.value ?? null;
+
+  const sharesResolved = pickFirstFiniteCandidate([
+    { path: "profile.sharesOutstanding", value: (profile as any)?.sharesOutstanding },
+    { path: "data.quote.sharesOutstanding", value: (data as any)?.quote?.sharesOutstanding },
+    { path: "data.balance.sharesOutstanding[last finite]", value: lastFinitePositiveFromSeries((data as any)?.balance?.sharesOutstanding) },
+    { path: "data.balance.commonStockSharesOutstanding[last finite]", value: lastFinitePositiveFromSeries((data as any)?.balance?.commonStockSharesOutstanding) },
+    { path: "data.income.weightedAverageShsOut[last finite]", value: lastFinitePositiveFromSeries((data as any)?.income?.weightedAverageShsOut) },
+    { path: "data.income.weightedAverageShsOutDil[last finite]", value: lastFinitePositiveFromSeries((data as any)?.income?.weightedAverageShsOutDil) },
+  ]);
+  const sharesValue = sharesResolved?.value ?? null;
+
+  const marketCapDirectResolved = pickFirstFiniteCandidate([
+    { path: "profile.mktCap", value: (profile as any)?.mktCap },
+    { path: "profile.marketCap", value: (profile as any)?.marketCap },
+    { path: "data.quote.marketCap", value: (data as any)?.quote?.marketCap },
+  ]);
+  const computedMarketCapValue =
+    priceValue !== null && sharesValue !== null && sharesValue > 0
+      ? priceValue * sharesValue
+      : null;
+  const marketCapDirectValue = marketCapDirectResolved?.value ?? null;
+  const marketCapDisagreementPct =
+    marketCapDirectValue !== null && computedMarketCapValue !== null && marketCapDirectValue > 0
+      ? Math.abs(computedMarketCapValue - marketCapDirectValue) / marketCapDirectValue
+      : null;
+  const marketCapUseComputed =
+    marketCapDirectValue === null
+    || (marketCapDisagreementPct !== null && marketCapDisagreementPct > 0.2);
+  const marketCapValue = marketCapUseComputed ? computedMarketCapValue : marketCapDirectValue;
+  const marketCapSourceMode: "profile_direct" | "computed_price_times_shares" | "other" =
+    marketCapUseComputed
+      ? "computed_price_times_shares"
+      : marketCapDirectResolved?.path?.startsWith("profile.")
+        ? "profile_direct"
+        : "other";
+  const marketCapSourcePath = marketCapUseComputed
+    ? (priceResolved && sharesResolved ? `${priceResolved.path} * ${sharesResolved.path}` : null)
+    : (marketCapDirectResolved?.path ?? null);
 
   const statementCurrencyRaw =
     (data as any)?.financials?.currency
@@ -2644,6 +2706,81 @@ Capital Available: ${availableLabel}`,
   const mixedCurrencyNote = mixedCurrency
     ? `Market data uses ${marketCurrency} while statements use ${statementCurrency}.`
     : undefined;
+  const companyProfileMarketCapDebug = {
+    ticker: ticker || null,
+    price_displayed: priceValue,
+    price_source_path: priceResolved?.path ?? null,
+    price_raw_value: priceResolved ? (priceResolved.path === "profile.price" ? profile?.price : (data as any)?.quote?.price) : null,
+    market_cap_displayed: marketCapValue,
+    market_cap_source_mode: marketCapSourceMode,
+    market_cap_source_path: marketCapSourcePath,
+    market_cap_raw_value: marketCapUseComputed ? computedMarketCapValue : marketCapDirectValue,
+    shares_displayed: sharesValue,
+    shares_source_path: sharesResolved?.path ?? null,
+    shares_raw_value: sharesResolved ? (() => {
+      if (sharesResolved.path === "profile.sharesOutstanding") return (profile as any)?.sharesOutstanding;
+      if (sharesResolved.path === "data.quote.sharesOutstanding") return (data as any)?.quote?.sharesOutstanding;
+      if (sharesResolved.path.startsWith("data.balance.sharesOutstanding")) return lastFinitePositiveFromSeries((data as any)?.balance?.sharesOutstanding);
+      if (sharesResolved.path.startsWith("data.balance.commonStockSharesOutstanding")) return lastFinitePositiveFromSeries((data as any)?.balance?.commonStockSharesOutstanding);
+      if (sharesResolved.path.startsWith("data.income.weightedAverageShsOutDil")) return lastFinitePositiveFromSeries((data as any)?.income?.weightedAverageShsOutDil);
+      if (sharesResolved.path.startsWith("data.income.weightedAverageShsOut")) return lastFinitePositiveFromSeries((data as any)?.income?.weightedAverageShsOut);
+      return null;
+    })() : null,
+    market_cap_currency: marketCurrency,
+    price_currency: marketCurrency,
+    shares_unit_basis: "common shares",
+    computed_market_cap_from_displayed_price_and_shares: computedMarketCapValue,
+    difference_vs_displayed_market_cap:
+      marketCapValue !== null && computedMarketCapValue !== null
+        ? computedMarketCapValue - marketCapValue
+        : null,
+    percentage_difference:
+      marketCapValue !== null && computedMarketCapValue !== null && marketCapValue !== 0
+        ? ((computedMarketCapValue - marketCapValue) / marketCapValue) * 100
+        : null,
+    direct_profile_market_cap_value: marketCapDirectValue,
+    direct_profile_market_cap_path: marketCapDirectResolved?.path ?? null,
+    direct_vs_computed_difference:
+      marketCapDirectValue !== null && computedMarketCapValue !== null
+        ? computedMarketCapValue - marketCapDirectValue
+        : null,
+    direct_vs_computed_pct:
+      marketCapDisagreementPct !== null
+        ? marketCapDisagreementPct * 100
+        : null,
+    fx_conversion_used: false,
+    stale_last_updated: {
+      profile_last_update: (profile as any)?.lastUpdate ?? null,
+      profile_timestamp: (profile as any)?.timestamp ?? null,
+      quote_timestamp: (data as any)?.quote?.timestamp ?? null,
+      data_fetched_at: (data as any)?.fetchedAt ?? null,
+      corporate_snapshot_generated_at: (corporateDiagnostics as any)?.generated_at ?? null,
+    },
+    profile_field_candidates: [
+      { path: "profile.mktCap", value: (profile as any)?.mktCap },
+      { path: "profile.marketCap", value: (profile as any)?.marketCap },
+      { path: "profile.sharesOutstanding", value: (profile as any)?.sharesOutstanding },
+      { path: "profile.companySharesOutstanding", value: (profile as any)?.companySharesOutstanding },
+      { path: "profile.weightedAverageShsOut", value: (profile as any)?.weightedAverageShsOut },
+      { path: "profile.weightedAverageShsOutDil", value: (profile as any)?.weightedAverageShsOutDil },
+    ],
+    quote_field_candidates: [
+      { path: "data.quote.marketCap", value: (data as any)?.quote?.marketCap },
+      { path: "data.quote.sharesOutstanding", value: (data as any)?.quote?.sharesOutstanding },
+      { path: "data.quote.price", value: (data as any)?.quote?.price },
+    ],
+    statement_field_candidates: [
+      { path: "data.balance.sharesOutstanding[last finite]", value: lastFinitePositiveFromSeries((data as any)?.balance?.sharesOutstanding) },
+      { path: "data.balance.commonStockSharesOutstanding[last finite]", value: lastFinitePositiveFromSeries((data as any)?.balance?.commonStockSharesOutstanding) },
+      { path: "data.income.weightedAverageShsOut[last finite]", value: lastFinitePositiveFromSeries((data as any)?.income?.weightedAverageShsOut) },
+      { path: "data.income.weightedAverageShsOutDil[last finite]", value: lastFinitePositiveFromSeries((data as any)?.income?.weightedAverageShsOutDil) },
+    ],
+    corporate_snapshot_field_candidates: corporateSnapshotData && typeof corporateSnapshotData === "object"
+      ? Object.entries(corporateSnapshotData)
+        .filter(([key]) => /mktcap|marketcap|shares|outstanding/i.test(key))
+        .map(([key, value]) => ({ path: `corporateSnapshot.${key}`, value }))
+      : [],
+  };
 
   const unitMetaByTitle: Record<string, ChartUnitMeta> = {
     "Aktieprishistoria": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
@@ -4325,7 +4462,21 @@ Capital Available: ${availableLabel}`,
                     <span className="compact-metric-label">Börsvärde</span>
                     <span className="compact-metric-value">{formatMarketCapValue(marketCapValue)}</span>
                   </div>
+                  <div className="compact-metric-row">
+                    <span className="compact-metric-label">Antal aktier</span>
+                    <span className="compact-metric-value">{sharesValue !== null ? sharesValue.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}</span>
+                  </div>
                 </div>
+                {debugEnabled && (
+                  <details style={{ marginTop: 10 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Company Profile Market Cap Debug</summary>
+                    <div style={{ display: "grid", gap: 4, marginTop: 8, fontSize: 12 }}>
+                      {Object.entries(companyProfileMarketCapDebug).map(([key, value]) => (
+                        <div key={`company-profile-market-cap-debug-${key}`}><strong>{key}:</strong> {formatDebugNumericValue(value)}</div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </section>
               <section className="producer-core-section single-stock-header-body">
                 <p className="bread">
