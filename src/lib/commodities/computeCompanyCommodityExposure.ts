@@ -3,10 +3,12 @@ import {
 } from "./commodityExposureInference";
 import type {
   CompanyCommodityExposureProfile,
+  ManualCommodityOverride,
   CommodityExposure,
   CommodityExposureEvidence,
   CommodityKey,
 } from "./commodityExposureTypes";
+import { normalizeExposureWeights } from "./normalizeExposureWeights";
 
 type CompanyCanonicalMapping = {
   companyId: string;
@@ -16,8 +18,10 @@ type CompanyCanonicalMapping = {
 };
 
 type ExposureComputationResult = {
+  defaultProfile: CompanyCommodityExposureProfile;
+  manualOverrideProfile?: CompanyCommodityExposureProfile;
   profile: CompanyCommodityExposureProfile;
-  note?: string;
+  defaultNote?: string;
 };
 
 function resolvePrimaryCommodity(exposures: CommodityExposure[]): CommodityKey | undefined {
@@ -47,21 +51,67 @@ export function computeCompanyCommodityExposure(mapping: CompanyCanonicalMapping
     || inference.lowConfidenceBasket === true
     || (exposures.length > 1 && !hasDominantWeight);
 
+  const defaultProfile: CompanyCommodityExposureProfile = {
+    companyId: mapping.companyId,
+    exposures,
+    primaryCommodity,
+    isDiversified,
+    basis: resolveBasis(exposures, inference.basis),
+    confidence: exposures.length > 0
+      ? exposures.reduce((acc, exposure) => acc + exposure.confidence, 0) / exposures.length
+      : 0.2,
+    notes: inference.note,
+  };
+
   return {
-    profile: {
-      companyId: mapping.companyId,
-      exposures,
-      primaryCommodity,
-      isDiversified,
-      basis: resolveBasis(exposures, inference.basis),
-    },
-    note: inference.note,
+    defaultProfile,
+    profile: defaultProfile,
+    defaultNote: inference.note,
   };
 }
 
-export function computeCompanyCommodityExposureBatch(mappings: CompanyCanonicalMapping[]) {
+function manualOverrideToProfile(override: ManualCommodityOverride): CompanyCommodityExposureProfile {
+  const normalized = normalizeExposureWeights(
+    override.exposures.map((exposure) => ({
+      commodity: exposure.commodity,
+      weight: exposure.weight,
+      evidence: "manual_override" as const,
+      confidence: 0.95,
+      notes: override.note,
+    }))
+  );
+  const primaryCommodity = resolvePrimaryCommodity(normalized);
+  const hasDominantWeight = normalized.some((exposure) => exposure.weight >= 0.5);
+  return {
+    companyId: override.companyId,
+    exposures: normalized,
+    primaryCommodity,
+    isDiversified: normalized.length > 1 && !hasDominantWeight,
+    basis: "manual_override",
+    confidence: 0.95,
+    notes: override.note,
+    source: override.source,
+  };
+}
+
+export function computeCompanyCommodityExposureBatch(
+  mappings: CompanyCanonicalMapping[],
+  manualOverridesByCompanyId?: Map<string, ManualCommodityOverride>
+) {
   return mappings.map((mapping) => ({
-    mapping,
-    ...computeCompanyCommodityExposure(mapping),
+    ...(() => {
+      const base = computeCompanyCommodityExposure(mapping);
+      const override = manualOverridesByCompanyId?.get(mapping.companyId);
+      if (!override) {
+        return { mapping, ...base };
+      }
+      const manualOverrideProfile = manualOverrideToProfile(override);
+      return {
+        mapping,
+        ...base,
+        manualOverrideProfile,
+        profile: manualOverrideProfile,
+      };
+    })(),
   }));
 }

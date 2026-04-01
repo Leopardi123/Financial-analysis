@@ -32,22 +32,44 @@ type OverviewPayload = {
   commodityExposure?: {
     mappedCompanies: number;
     companiesWithExposure: number;
+    manualOverrideCount: number;
     sampleProfiles: Array<{
       companyId: string;
       ticker: string | null;
       primaryCommodity: string | null;
       basis: string;
+      confidence: number;
       isDiversified: boolean;
       note: string | null;
+      source: string | null;
       canonicalSectorId: string;
       canonicalSubsectorId: string | null;
-      exposures: Array<{
-        commodity: string;
-        weight: number;
-        evidence: string;
+      defaultProfile: {
+        basis: string;
         confidence: number;
-        notes?: string;
-      }>;
+        exposures: Array<{
+          commodity: string;
+          weight: number;
+          evidence: string;
+          confidence: number;
+          notes?: string;
+        }>;
+      };
+      manualOverrideProfile: {
+        basis: string;
+        confidence: number;
+        exposures: Array<{ commodity: string; weight: number }>;
+      } | null;
+      finalProfile: {
+        basis: string;
+        confidence: number;
+        exposures: Array<{
+          commodity: string;
+          weight: number;
+          evidence: string;
+          confidence: number;
+        }>;
+      };
     }>;
   };
 };
@@ -424,6 +446,11 @@ export default function SectorDashboard() {
   const [status, setStatus] = useState<string | null>(null);
   const [mappingTickers, setMappingTickers] = useState("");
   const [mappingCategory, setMappingCategory] = useState(COMPANY_CATEGORIES[0]);
+  const [overrideTicker, setOverrideTicker] = useState("");
+  const [overrideWeights, setOverrideWeights] = useState("gold:1.0");
+  const [overrideSource, setOverrideSource] = useState("");
+  const [overrideNote, setOverrideNote] = useState("");
+  const [overviewReloadNonce, setOverviewReloadNonce] = useState(0);
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [commoditySnapshot, setCommoditySnapshot] = useState<CommoditySnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
@@ -590,7 +617,7 @@ export default function SectorDashboard() {
       return [...GENERIC_QUESTIONS, ...OIL_QUESTIONS];
     }
     return GENERIC_QUESTIONS;
-  }, [sector, subsector]);
+  }, [overviewReloadNonce, sector, subsector]);
   const isGoldCommodityView = sector === "materials" && subsector === "gold_miners";
   const isCopperCommodityView = sector === "materials" && subsector === "copper_miners";
   const selectedCommodity = isGoldCommodityView ? "gold" : isCopperCommodityView ? "copper" : null;
@@ -767,6 +794,45 @@ export default function SectorDashboard() {
       },
       ...prev,
     ]);
+  }
+
+  async function saveCommodityOverride() {
+    const ticker = overrideTicker.trim().toUpperCase();
+    if (!ticker) {
+      setStatus("Ange ticker för manuell commodity override.");
+      return;
+    }
+    const parsed = overrideWeights
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const [commodity, weightRaw] = item.split(":").map((part) => part.trim());
+        return { commodity, weight: Number(weightRaw) };
+      })
+      .filter((item) => item.commodity && Number.isFinite(item.weight) && item.weight > 0);
+    if (parsed.length === 0) {
+      setStatus("Ange minst en rad i formatet commodity:weight (ex. uranium:0.7,vanadium:0.3).");
+      return;
+    }
+    setStatus("Sparar commodity override...");
+    const response = await fetch("/api/sector/company-commodity-override", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker,
+        source: overrideSource,
+        note: overrideNote,
+        exposures: parsed,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setStatus(payload.error ?? "Misslyckades att spara override.");
+      return;
+    }
+    setStatus(`Commodity override sparad för ${payload.ticker}.`);
+    setOverviewReloadNonce((prev) => prev + 1);
   }
 
   return (
@@ -1073,26 +1139,50 @@ export default function SectorDashboard() {
             Spara mapping
           </button>
           <div className="metric-list">
-            <h4>Commodity exposure</h4>
+            <h4>Default commodity mapping</h4>
             <div>
               <strong>Coverage:</strong>{" "}
               {(overview?.commodityExposure?.companiesWithExposure ?? 0)}/
-              {(overview?.commodityExposure?.mappedCompanies ?? 0)} bolag med inferred exposure.
+              {(overview?.commodityExposure?.mappedCompanies ?? 0)} bolag med defaultprofil.
             </div>
             <div>
-              <strong>Basis:</strong> canonical sektor/undersektor (v1 inference)
+              <strong>Basis:</strong> deterministisk canonical mapping (ej exakt bolagssplit)
+            </div>
+            <div>
+              <strong>Manual overrides:</strong> {overview?.commodityExposure?.manualOverrideCount ?? 0}
             </div>
             {(overview?.commodityExposure?.sampleProfiles ?? []).slice(0, 4).map((profile) => (
               <div key={`exp-${profile.companyId}`}>
-                {profile.ticker ?? profile.companyId}: primary={profile.primaryCommodity ?? "n/a"},{" "}
-                basis={profile.basis}, confidence=
-                {profile.exposures.length > 0
-                  ? Math.round(
-                    (profile.exposures.reduce((acc, exposure) => acc + exposure.confidence, 0) / profile.exposures.length) * 100
-                  )
-                  : 0}%
+                {profile.ticker ?? profile.companyId}: final={profile.primaryCommodity ?? "unknown"},{" "}
+                basis={profile.basis}, confidence={Math.round(profile.confidence * 100)}%
               </div>
             ))}
+          </div>
+          <div className="metric-list">
+            <h4>Manual commodity override (admin/dev)</h4>
+            <input
+              value={overrideTicker}
+              onChange={(event) => setOverrideTicker(event.target.value)}
+              placeholder="Ticker (ex. CCJ)"
+            />
+            <input
+              value={overrideWeights}
+              onChange={(event) => setOverrideWeights(event.target.value)}
+              placeholder="commodity:weight, commodity:weight"
+            />
+            <input
+              value={overrideSource}
+              onChange={(event) => setOverrideSource(event.target.value)}
+              placeholder="Källa (valfri)"
+            />
+            <input
+              value={overrideNote}
+              onChange={(event) => setOverrideNote(event.target.value)}
+              placeholder="Notering (valfri)"
+            />
+            <button type="button" onClick={() => void saveCommodityOverride()}>
+              Spara commodity override
+            </button>
           </div>
         </div>
 
@@ -1394,10 +1484,17 @@ export default function SectorDashboard() {
             {(overview?.commodityExposure?.sampleProfiles ?? []).slice(0, 6).map((profile) => (
               <div key={`debug-exp-${profile.companyId}`}>
                 {profile.ticker ?? profile.companyId}: sector={profile.canonicalSectorId}, subsector={profile.canonicalSubsectorId ?? "n/a"}, diversified={String(profile.isDiversified)}, basis={profile.basis}
+                {profile.source ? `, source=${profile.source}` : ""}
                 {profile.note ? `, note=${profile.note}` : ""}
-                {profile.exposures.length > 0
-                  ? `, exposures=${profile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)} (${exposure.evidence}, c=${exposure.confidence.toFixed(2)})`).join(" | ")}`
-                  : ", exposures=none"}
+                {profile.defaultProfile.exposures.length > 0
+                  ? `, default=${profile.defaultProfile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)} (${exposure.evidence}, c=${exposure.confidence.toFixed(2)})`).join(" | ")}`
+                  : ", default=none"}
+                {profile.manualOverrideProfile?.exposures?.length
+                  ? `, manual=${profile.manualOverrideProfile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)}`).join(" | ")}`
+                  : ", manual=none"}
+                {profile.finalProfile.exposures.length > 0
+                  ? `, final=${profile.finalProfile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)}`).join(" | ")}`
+                  : ", final=none"}
               </div>
             ))}
           </div>

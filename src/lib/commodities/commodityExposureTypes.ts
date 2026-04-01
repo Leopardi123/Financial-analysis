@@ -14,12 +14,14 @@ export type CommodityKey =
   | "iron_ore"
   | "oil"
   | "gas"
+  | "vanadium"
   | "other";
 
 export type CommodityExposureEvidence =
   | "manual_mapping"
   | "subsector_inference"
   | "sector_inference"
+  | "manual_override"
   | "fallback";
 
 export type CommodityExposure = {
@@ -36,4 +38,18 @@ export type CompanyCommodityExposureProfile = {
   primaryCommodity?: CommodityKey;
   isDiversified: boolean;
   basis: CommodityExposureEvidence | "mixed";
+  confidence: number;
+  notes?: string;
+  source?: string;
+};
+
+export type ManualCommodityOverride = {
+  companyId: string;
+  exposures: Array<{
+    commodity: CommodityKey;
+    weight: number;
+  }>;
+  source?: string;
+  note?: string;
+  updatedAt?: string;
 };

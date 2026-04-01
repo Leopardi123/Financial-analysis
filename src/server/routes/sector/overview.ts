@@ -2,6 +2,7 @@ import { execute, query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { ensureCanonicalSelectionRows, listCanonicalTaxonomy } from "./canonicalTaxonomy.js";
 import { computeCompanyCommodityExposureBatch } from "../../../lib/commodities/computeCompanyCommodityExposure.js";
+import type { CommodityKey, ManualCommodityOverride } from "../../../lib/commodities/commodityExposureTypes.js";
 
 function normalizeName(value: unknown) {
   if (typeof value !== "string") {
@@ -46,6 +47,16 @@ function safeNumber(value: unknown) {
     return null;
   }
   return value;
+}
+
+function normalizeCommodityKey(value: unknown): CommodityKey | null {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  const allowed = new Set([
+    "gold", "silver", "copper", "uranium", "nickel", "zinc", "lead", "pgm", "tin",
+    "tungsten", "lithium", "coal", "iron_ore", "oil", "gas", "vanadium", "other",
+  ]);
+  if (!allowed.has(normalized)) return null;
+  return normalized as CommodityKey;
 }
 
 async function computeSectorMetrics(
@@ -202,6 +213,34 @@ export default async function handler(req: any, res: any) {
     );
     const companyIds = companyRows.map((row: any) => Number(row.company_id)).filter(Boolean);
     const computed = await computeSectorMetrics(companyIds, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null);
+    const manualOverrideRows = companyIds.length > 0
+      ? await query(
+        `SELECT company_id, commodity, weight, source, note, updated_at
+         FROM ${tables.companyCommodityOverride}
+         WHERE company_id IN (${companyIds.map(() => "?").join(",")})
+         ORDER BY updated_at DESC`,
+        companyIds
+      )
+      : [];
+    const manualOverridesByCompanyId = new Map<string, ManualCommodityOverride>();
+    for (const row of manualOverrideRows as any[]) {
+      const companyId = String(row.company_id ?? "");
+      const commodity = normalizeCommodityKey(row.commodity);
+      const weight = safeNumber(row.weight);
+      if (!companyId || !commodity || weight === null || weight <= 0) {
+        continue;
+      }
+      if (!manualOverridesByCompanyId.has(companyId)) {
+        manualOverridesByCompanyId.set(companyId, {
+          companyId,
+          exposures: [],
+          source: row.source ? String(row.source) : undefined,
+          note: row.note ? String(row.note) : undefined,
+          updatedAt: row.updated_at ? String(row.updated_at) : undefined,
+        });
+      }
+      manualOverridesByCompanyId.get(companyId)!.exposures.push({ commodity, weight });
+    }
     const exposureProfiles = computeCompanyCommodityExposureBatch(
       companyRows
         .map((row: any) => ({
@@ -210,7 +249,8 @@ export default async function handler(req: any, res: any) {
           subsectorId: row.subsector_id ? String(row.subsector_id) : null,
           ticker: row.ticker ? String(row.ticker) : null,
         }))
-        .filter((row) => row.companyId && row.sectorId)
+        .filter((row) => row.companyId && row.sectorId),
+      manualOverridesByCompanyId
     );
     const exposureWithSignals = exposureProfiles.filter((item) => item.profile.exposures.length > 0).length;
     const exposureSamples = exposureProfiles.slice(0, 10).map((item) => ({
@@ -218,9 +258,13 @@ export default async function handler(req: any, res: any) {
       ticker: item.mapping.ticker ?? null,
       primaryCommodity: item.profile.primaryCommodity ?? null,
       basis: item.profile.basis,
+      confidence: item.profile.confidence,
       isDiversified: item.profile.isDiversified,
-      exposures: item.profile.exposures,
-      note: item.note ?? null,
+      finalProfile: item.profile,
+      defaultProfile: item.defaultProfile,
+      manualOverrideProfile: item.manualOverrideProfile ?? null,
+      note: item.profile.notes ?? item.defaultNote ?? null,
+      source: item.profile.source ?? null,
       canonicalSectorId: item.mapping.sectorId,
       canonicalSubsectorId: item.mapping.subsectorId ?? null,
     }));
@@ -244,6 +288,7 @@ export default async function handler(req: any, res: any) {
       commodityExposure: {
         mappedCompanies: exposureProfiles.length,
         companiesWithExposure: exposureWithSignals,
+        manualOverrideCount: exposureProfiles.filter((item) => item.profile.basis === "manual_override").length,
         sampleProfiles: exposureSamples,
       },
       suggestedFmpEndpoints: FMP_SUGGESTED_ENDPOINTS,

@@ -42,8 +42,8 @@ const MANUAL_SUBSECTOR_MAPPING: Record<string, ExposureSeed[] | null> = {
 
 const SUBSECTOR_BASKET_MAPPING: Record<string, ExposureSeed[] | null> = {
   precious_metals: [
-    { commodity: "gold", weight: 0.5, confidence: 0.4, notes: "Basket approximation in v1." },
-    { commodity: "silver", weight: 0.5, confidence: 0.4, notes: "Basket approximation in v1." },
+    { commodity: "gold", weight: 0.5, confidence: 0.4, notes: "Default basket approximation in v1." },
+    { commodity: "silver", weight: 0.5, confidence: 0.4, notes: "Default basket approximation in v1." },
   ],
   base_metals: [
     { commodity: "copper", weight: 0.34, confidence: 0.35, notes: "Low-confidence base-metals basket in v1." },
@@ -88,7 +88,7 @@ export function inferCommodityExposureFromCanonical(sectorId: string, subsectorI
     return {
       exposures: fromSeed(inferred, "subsector_inference"),
       basis: "subsector_inference",
-      note: "Low-confidence subsector basket approximation.",
+      note: "Low-confidence default basket from canonical subsector.",
       lowConfidenceBasket: true,
     };
   }
