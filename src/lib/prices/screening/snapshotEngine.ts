@@ -17,8 +17,10 @@ export interface PriceScreenSnapshotRow {
   return_60d: number | null;
   high_20d: number | null;
   high_60d: number | null;
+  high_252d: number | null;
   drawdown_20d: number | null;
   drawdown_60d: number | null;
+  drawdown_252d: number | null;
   ma20: number | null;
   ma50: number | null;
   trend_state: "down" | "up" | "sideways" | null;
@@ -39,6 +41,10 @@ export interface PriceScreenSnapshotDebug {
   };
   high_20d: number | null;
   high_60d: number | null;
+  high_252d: number | null;
+  drawdown_20d: number | null;
+  drawdown_60d: number | null;
+  drawdown_252d: number | null;
   ma20: number | null;
   ma50: number | null;
   trend_state: PriceScreenSnapshotRow["trend_state"];
@@ -90,6 +96,8 @@ export function computePriceScreenSnapshot(symbol: string, rowsAsc: DailyPriceRo
   if (high20d === null) nullReasons.high_20d = "insufficient_history_min_20";
   const high60d = closes.length >= 60 ? Math.max(...closes.slice(-60)) : null;
   if (high60d === null) nullReasons.high_60d = "insufficient_history_min_60";
+  const high252d = closes.length >= 252 ? Math.max(...closes.slice(-252)) : null;
+  if (high252d === null) nullReasons.high_252d = "insufficient_history_min_252";
 
   const ma20 = closes.length >= 20 ? avg(closes.slice(-20)) : null;
   if (ma20 === null) nullReasons.ma20 = "insufficient_history_min_20";
@@ -103,6 +111,8 @@ export function computePriceScreenSnapshot(symbol: string, rowsAsc: DailyPriceRo
   if (drawdown20d === null) nullReasons.drawdown_20d = "insufficient_history_or_invalid_high";
   const drawdown60d = lastClose !== null && high60d !== null && high60d !== 0 ? (lastClose / high60d) - 1 : null;
   if (drawdown60d === null) nullReasons.drawdown_60d = "insufficient_history_or_invalid_high";
+  const drawdown252d = lastClose !== null && high252d !== null && high252d !== 0 ? (lastClose / high252d) - 1 : null;
+  if (drawdown252d === null) nullReasons.drawdown_252d = "insufficient_history_or_invalid_high";
 
   let trendState: PriceScreenSnapshotRow["trend_state"] = null;
   if (lastClose !== null && ma20 !== null && ma50 !== null && ma20Prev !== null) {
@@ -144,8 +154,10 @@ export function computePriceScreenSnapshot(symbol: string, rowsAsc: DailyPriceRo
     return_60d: return60d,
     high_20d: high20d,
     high_60d: high60d,
+    high_252d: high252d,
     drawdown_20d: drawdown20d,
     drawdown_60d: drawdown60d,
+    drawdown_252d: drawdown252d,
     ma20,
     ma50,
     trend_state: trendState,
@@ -168,6 +180,10 @@ export function computePriceScreenSnapshot(symbol: string, rowsAsc: DailyPriceRo
       },
       high_20d: high20d,
       high_60d: high60d,
+      high_252d: high252d,
+      drawdown_20d: drawdown20d,
+      drawdown_60d: drawdown60d,
+      drawdown_252d: drawdown252d,
       ma20,
       ma50,
       trend_state: trendState,

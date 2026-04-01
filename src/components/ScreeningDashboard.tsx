@@ -144,23 +144,92 @@ function readPathValue(source: Record<string, unknown>, path: string): unknown {
 }
 
 function resolveCorporateDebugMetric(snapshot: Record<string, unknown> | null | undefined, field: string) {
+  if (field === "corp_cash_over_market_cap") {
+    const cashCandidates = [
+      "reportedQuarterlyBalance.cashAndCashEquivalents",
+      "reportedQuarterlyBalance.cashAndShortTermInvestments",
+      "reportedQuarterlyBalance.cashAndCashEquivalentsAndShortTermInvestments",
+    ];
+    const marketCapCandidates = [
+      "profile.mktCap",
+      "profile.marketCap",
+      "profile.price * profile.sharesOutstanding",
+    ];
+    if (!snapshot) {
+      return {
+        resolvedPath: `${cashCandidates[0]} / ${marketCapCandidates[0]}`,
+        sourceObject: "screeningPayload",
+        rawValue: null,
+        normalizedValue: null,
+        missingReason: "corporateSnapshot saknas i payload",
+        cashSourcePathUsed: null,
+        marketCapSourcePathUsed: null,
+        usedReportedQuarterlyCash: false,
+        usedModeledMarketCap: false,
+        usedPostFinancingShares: false,
+      };
+    }
+
+    let cashValue: number | null = null;
+    let cashSourcePathUsed: string | null = null;
+    for (const path of cashCandidates) {
+      const raw = readPathValue(snapshot, path);
+      if (!Array.isArray(raw)) continue;
+      for (let i = raw.length - 1; i >= 0; i -= 1) {
+        const value = raw[i];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          cashValue = value;
+          cashSourcePathUsed = path;
+          break;
+        }
+      }
+      if (cashSourcePathUsed) break;
+    }
+
+    const profileMktCap = Number(readPathValue(snapshot, "profile.mktCap"));
+    const profileMarketCap = Number(readPathValue(snapshot, "profile.marketCap"));
+    const profilePrice = Number(readPathValue(snapshot, "profile.price"));
+    const profileShares = Number(readPathValue(snapshot, "profile.sharesOutstanding"));
+    const marketCapFromPriceShares = Number.isFinite(profilePrice) && profilePrice > 0 && Number.isFinite(profileShares) && profileShares > 0
+      ? profilePrice * profileShares
+      : null;
+
+    const marketCapResolved = Number.isFinite(profileMktCap) && profileMktCap > 0
+      ? { value: profileMktCap, path: "profile.mktCap" }
+      : (Number.isFinite(profileMarketCap) && profileMarketCap > 0
+        ? { value: profileMarketCap, path: "profile.marketCap" }
+        : (marketCapFromPriceShares !== null
+          ? { value: marketCapFromPriceShares, path: "profile.price * profile.sharesOutstanding" }
+          : null));
+
+    const normalizedValue = cashValue !== null && marketCapResolved && marketCapResolved.value > 0
+      ? cashValue / marketCapResolved.value
+      : null;
+
+    return {
+      resolvedPath: `${cashSourcePathUsed ?? cashCandidates.join(" | ")} / ${marketCapResolved?.path ?? marketCapCandidates.join(" | ")}`,
+      sourceObject: "screeningPayload",
+      rawValue: normalizedValue,
+      normalizedValue,
+      missingReason: normalizedValue === null ? "cash eller current market cap saknas/ogiltig" : null,
+      cashSourcePathUsed,
+      marketCapSourcePathUsed: marketCapResolved?.path ?? null,
+      usedReportedQuarterlyCash: cashSourcePathUsed !== null,
+      usedModeledMarketCap: false,
+      usedPostFinancingShares: false,
+    };
+  }
+
   const candidatesByField: Record<string, string[]> = {
     corp_ev_over_nav: ["EV_over_NAV", "marketValue.EV_over_NAV", "marketValue.ev_over_nav"],
     corp_ev_over_npv: ["EV_over_NPV", "marketValue.EV_over_NPV", "marketValue.ev_over_npv"],
     corp_p_over_nav: ["P_over_NAV", "marketValue.P_over_NAV", "marketValue.p_over_nav"],
-    corp_cash_over_market_cap: [
-      "cash_t0_TargetCurrency",
-      "financing.cash_t0_post_TargetCurrency",
-      "financing.cash_AfterCashFirst_TargetCurrency_t0",
-      "MarketCap_TargetCurrency",
-      "marketValue.MarketCap_TargetCurrency",
-    ],
   };
   const candidates = candidatesByField[field] ?? [];
   if (!snapshot) {
     return {
       resolvedPath: candidates[0] ?? "n/a",
-      sourceObject: "corporateSnapshot",
+      sourceObject: "screeningPayload",
       rawValue: null,
       normalizedValue: null,
       missingReason: "corporateSnapshot saknas i payload",
@@ -169,24 +238,41 @@ function resolveCorporateDebugMetric(snapshot: Record<string, unknown> | null | 
   for (const path of candidates) {
     const raw = readPathValue(snapshot, path);
     if (typeof raw === "number" && Number.isFinite(raw)) {
-      return { resolvedPath: path, sourceObject: "corporateSnapshot", rawValue: raw, normalizedValue: raw, missingReason: null };
+      return { resolvedPath: path, sourceObject: "screeningPayload", rawValue: raw, normalizedValue: raw, missingReason: null };
+    }
+    if (Array.isArray(raw)) {
+      for (let i = raw.length - 1; i >= 0; i -= 1) {
+        const value = raw[i];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return { resolvedPath: path, sourceObject: "screeningPayload", rawValue: value, normalizedValue: value, missingReason: null };
+        }
+      }
     }
   }
   return {
     resolvedPath: candidates.join(" | "),
-    sourceObject: "corporateSnapshot",
+    sourceObject: "screeningPayload",
     rawValue: null,
     normalizedValue: null,
     missingReason: "ingen finite siffra hittades på förväntade paths",
   };
 }
 
-async function loadSnapshot(ticker: string, manualData: Record<string, Record<string, number>>, includeCorporateSnapshot: boolean) {
+async function loadSnapshot(
+  ticker: string,
+  manualData: Record<string, Record<string, number>>,
+  includeCorporateSnapshot: boolean,
+  includeQuarterlyReportedCash: boolean,
+) {
   const normalizedTicker = normalizeTicker(ticker);
   if (!normalizedTicker) return null;
 
-  const [companyPayload, profilePayload, pricePayload, priceNowPayload] = await Promise.all([
+  const [companyPayload, quarterlyPayload, profilePayload, pricePayload, priceNowPayload] = await Promise.all([
     fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=fy`).catch(() => null),
+    includeQuarterlyReportedCash
+      ? fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=q`)
+        .catch(() => fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=quarterly`).catch(() => null))
+      : Promise.resolve(null),
     fetchJson(`/api/company/profile?ticker=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
     fetchJson(`/api/screening/price-snapshot?symbol=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
     includeCorporateSnapshot
@@ -207,7 +293,10 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
     : null;
   const marketCapRaw = Number(profile?.mktCap);
   const marketCap = Number.isFinite(marketCapRaw) && marketCapRaw > 0 ? marketCapRaw : null;
-  const fallbackPrice = quotePrice ?? profilePrice ?? snapshotPrice;
+  const derivedPriceFromMarketCap = marketCap !== null && sharesCurrent !== null && sharesCurrent > 0
+    ? marketCap / sharesCurrent
+    : null;
+  const fallbackPrice = quotePrice ?? profilePrice ?? derivedPriceFromMarketCap ?? snapshotPrice;
   const fallbackShares = marketCap !== null && fallbackPrice !== null && fallbackPrice > 0
     ? marketCap / fallbackPrice
     : null;
@@ -223,6 +312,7 @@ async function loadSnapshot(ticker: string, manualData: Record<string, Record<st
     years: Array.isArray(companyPayload?.years) ? companyPayload.years : [],
     income: companyPayload?.income ?? {},
     balance: companyPayload?.balance ?? {},
+    reportedQuarterlyBalance: quarterlyPayload?.balance ?? {},
     cashflow: companyPayload?.cashflow ?? {},
     profile,
     manual: manualData[normalizedTicker] ?? {},
@@ -348,6 +438,7 @@ export default function ScreeningDashboard() {
     try {
       const requiredFields = [...new Set(activeScreen.rules.mustHave.map((rule) => rule.field))];
       const requiresCorporateSnapshot = requiredFields.some((field) => SCREENING_FIELD_MAP.get(field)?.source === "corporate_snapshot");
+      const requiresQuarterlyReportedCash = requiredFields.includes("corp_cash_over_market_cap");
       const resolvedUniverse = await resolveUniverse(requiredFields);
       const tickers = resolvedUniverse.tickers;
       const manualData = parseManualJson(manualJson);
@@ -382,7 +473,7 @@ export default function ScreeningDashboard() {
       let skippedFetchErrors = 0;
       const snapshots = await mapWithConcurrency(tickers, 4, async (ticker) => {
         try {
-          return await loadSnapshot(ticker, manualData, requiresCorporateSnapshot);
+          return await loadSnapshot(ticker, manualData, requiresCorporateSnapshot, requiresQuarterlyReportedCash);
         } catch {
           skippedFetchErrors += 1;
           return null;
@@ -414,13 +505,27 @@ export default function ScreeningDashboard() {
       const missingCount = evaluated.filter((item) => item.evaluationStatus === "not_evaluated").length;
       const notes: string[] = [...resolvedUniverse.notes];
       if (requiresCorporateSnapshot) notes.push("Corporate metrics beräknas via /api/snapshot/corporate med symbol-mode per bolag.");
+      if (requiresCorporateSnapshot) {
+        const corporatePresent = snapshots.filter((item): item is CompanySnapshot => Boolean(item?.corporateSnapshot)).length;
+        notes.push(`[corp-debug] corporateSnapshot coverage=${corporatePresent}/${tickers.length}`);
+      }
       const requestedCorporateFields = requiredFields.filter((field) => SCREENING_FIELD_MAP.get(field)?.source === "corporate_snapshot");
       if (requestedCorporateFields.length > 0) {
         const sampleSnapshot = snapshots.find((item): item is CompanySnapshot => Boolean(item?.corporateSnapshot));
         for (const corporateField of requestedCorporateFields) {
-          const debug = resolveCorporateDebugMetric(sampleSnapshot?.corporateSnapshot as Record<string, unknown> | null | undefined, corporateField);
+          const debugSource = sampleSnapshot
+            ? {
+              ...(sampleSnapshot.corporateSnapshot ?? {}),
+              reportedQuarterlyBalance: sampleSnapshot.reportedQuarterlyBalance ?? {},
+              profile: sampleSnapshot.profile ?? {},
+            }
+            : null;
+          const debug = resolveCorporateDebugMetric(debugSource as Record<string, unknown> | null | undefined, corporateField);
+          const extra = corporateField === "corp_cash_over_market_cap"
+            ? ` cashSourcePathUsed=${String((debug as { cashSourcePathUsed?: string | null }).cashSourcePathUsed ?? "null")} marketCapSourcePathUsed=${String((debug as { marketCapSourcePathUsed?: string | null }).marketCapSourcePathUsed ?? "null")} usedReportedQuarterlyCash=${String((debug as { usedReportedQuarterlyCash?: boolean }).usedReportedQuarterlyCash ?? false)} usedModeledMarketCap=${String((debug as { usedModeledMarketCap?: boolean }).usedModeledMarketCap ?? false)} usedPostFinancingShares=${String((debug as { usedPostFinancingShares?: boolean }).usedPostFinancingShares ?? false)}`
+            : "";
           notes.push(
-            `[corp-debug] field=${corporateField} source=${debug.sourceObject} path=${debug.resolvedPath} raw=${debug.rawValue === null ? "null" : String(debug.rawValue)} normalized=${debug.normalizedValue === null ? "null" : String(debug.normalizedValue)} reason=${debug.missingReason ?? "ok"}`,
+            `[corp-debug] field=${corporateField} source=${debug.sourceObject} path=${debug.resolvedPath} raw=${debug.rawValue === null ? "null" : String(debug.rawValue)} normalized=${debug.normalizedValue === null ? "null" : String(debug.normalizedValue)} reason=${debug.missingReason ?? "ok"}${extra}`,
           );
         }
       }
