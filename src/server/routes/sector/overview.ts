@@ -1,46 +1,12 @@
 import { execute, query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { ensureCanonicalSelectionRows, listCanonicalTaxonomy } from "./canonicalTaxonomy.js";
 
 function normalizeName(value: unknown) {
   if (typeof value !== "string") {
     return "";
   }
   return value.trim();
-}
-
-type NamedRow = { id: number; name: string };
-
-function parseNamedRow(row: unknown): NamedRow | undefined {
-  const candidate = row as { id?: unknown; name?: unknown } | null | undefined;
-  const id = Number(candidate?.id);
-  const name = typeof candidate?.name === "string" ? candidate.name.trim() : "";
-  if (!Number.isFinite(id) || !name) {
-    return undefined;
-  }
-  return { id, name };
-}
-
-async function ensureSector(name: string) {
-  const now = new Date().toISOString();
-  await execute(
-    `INSERT OR IGNORE INTO ${tables.sectors} (name, created_at) VALUES (?, ?)`,
-    [name, now]
-  );
-  const rows = await query(`SELECT id, name FROM ${tables.sectors} WHERE name = ?`, [name]);
-  return parseNamedRow(rows[0]);
-}
-
-async function ensureSubsector(sectorId: number, name: string) {
-  const now = new Date().toISOString();
-  await execute(
-    `INSERT OR IGNORE INTO ${tables.subsectors} (sector_id, name, created_at) VALUES (?, ?, ?)`,
-    [sectorId, name, now]
-  );
-  const rows = await query(
-    `SELECT id, name FROM ${tables.subsectors} WHERE sector_id = ? AND name = ?`,
-    [sectorId, name]
-  );
-  return parseNamedRow(rows[0]);
 }
 
 const REQUIRED_METRICS = [
@@ -220,53 +186,47 @@ export default async function handler(req: any, res: any) {
     const subsectorName = normalizeName(req.query?.subsector);
 
     if (!sectorName) {
-      const sectors = await query(`SELECT id, name, description FROM ${tables.sectors} ORDER BY name ASC`);
-      const subsectors = await query(
-        `SELECT id, sector_id, name, description FROM ${tables.subsectors} ORDER BY name ASC`
-      );
-      res.status(200).json({ ok: true, sectors, subsectors });
+      res.status(200).json({ ok: true, canonicalTaxonomy: listCanonicalTaxonomy() });
       return;
     }
 
-    const sector = await ensureSector(sectorName);
-    if (!sector?.id) {
-      res.status(500).json({ ok: false, error: "Failed to resolve sector" });
-      return;
-    }
-
-    const subsector = subsectorName ? await ensureSubsector(sector.id, subsectorName) : null;
+    const resolvedRows = await ensureCanonicalSelectionRows(sectorName, subsectorName || null);
 
     const companyRows = await query(
       `SELECT company_id
        FROM ${tables.companySectorMap}
        WHERE sector_id = ? AND (subsector_id IS ? OR subsector_id = ?)`,
-      [sector.id, subsector?.id ?? null, subsector?.id ?? null]
+      [resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, resolvedRows.subsector?.id ?? null]
     );
     const companyIds = companyRows.map((row: any) => Number(row.company_id)).filter(Boolean);
-    const computed = await computeSectorMetrics(companyIds, sector.id, subsector?.id ?? null);
+    const computed = await computeSectorMetrics(companyIds, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null);
 
     const metrics = await query(
       `SELECT metric, period, value, source, as_of
        FROM ${tables.sectorMetrics}
        WHERE sector_id = ? AND (subsector_id IS ? OR subsector_id = ?)
        ORDER BY as_of DESC`,
-      [sector.id, subsector?.id ?? null, subsector?.id ?? null]
+      [resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, resolvedRows.subsector?.id ?? null]
     );
 
     res.status(200).json({
       ok: true,
-      sector,
-      subsector,
+      sector: resolvedRows.sector,
+      subsector: resolvedRows.subsector,
+      canonical: resolvedRows.canonical,
       metrics,
       computedMetrics: computed.metrics,
       missingMetrics: computed.missing,
       suggestedFmpEndpoints: FMP_SUGGESTED_ENDPOINTS,
       todo: [
-        "Missing automated sector metrics for EV/EBITDA, FCF yield, ROIC (requires market cap / EV sources).",
-        "Missing sector/company mapping for any unmapped tickers.",
+        "Pull/refresh latest annual fundamentals for mapped companies.",
+        "Compute cycle score and phase classification from metric z-scores.",
+        "Add volatility/risk metrics once price history integration is in place.",
       ],
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: (error as Error).message });
+    const message = (error as Error).message;
+    const status = /Unknown canonical|is not part of sector/.test(message) ? 400 : 500;
+    res.status(status).json({ ok: false, error: message });
   }
 }

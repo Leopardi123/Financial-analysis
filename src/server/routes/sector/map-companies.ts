@@ -1,46 +1,12 @@
 import { execute, query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { ensureCanonicalSelectionRows } from "./canonicalTaxonomy.js";
 
 function normalizeName(value: unknown) {
   if (typeof value !== "string") {
     return "";
   }
   return value.trim();
-}
-
-type NamedRow = { id: number; name: string };
-
-function parseNamedRow(row: unknown): NamedRow | undefined {
-  const candidate = row as { id?: unknown; name?: unknown } | null | undefined;
-  const id = Number(candidate?.id);
-  const name = typeof candidate?.name === "string" ? candidate.name.trim() : "";
-  if (!Number.isFinite(id) || !name) {
-    return undefined;
-  }
-  return { id, name };
-}
-
-async function ensureSector(name: string) {
-  const now = new Date().toISOString();
-  await execute(
-    `INSERT OR IGNORE INTO ${tables.sectors} (name, created_at) VALUES (?, ?)`,
-    [name, now]
-  );
-  const rows = await query(`SELECT id, name FROM ${tables.sectors} WHERE name = ?`, [name]);
-  return parseNamedRow(rows[0]);
-}
-
-async function ensureSubsector(sectorId: number, name: string) {
-  const now = new Date().toISOString();
-  await execute(
-    `INSERT OR IGNORE INTO ${tables.subsectors} (sector_id, name, created_at) VALUES (?, ?, ?)`,
-    [sectorId, name, now]
-  );
-  const rows = await query(
-    `SELECT id, name FROM ${tables.subsectors} WHERE sector_id = ? AND name = ?`,
-    [sectorId, name]
-  );
-  return parseNamedRow(rows[0]);
 }
 
 export default async function handler(req: any, res: any) {
@@ -54,19 +20,15 @@ export default async function handler(req: any, res: any) {
     const sectorName = normalizeName(req.body?.sector);
     const subsectorName = normalizeName(req.body?.subsector);
     const tickers = Array.isArray(req.body?.tickers) ? req.body.tickers : [];
-    const category = normalizeName(req.body?.category);
+    // Non-canonical metadata only. Must not drive stage/exposure logic.
+    const categoryMetadata = normalizeName(req.body?.category);
 
     if (!sectorName || tickers.length === 0) {
-      res.status(400).json({ ok: false, error: "Sector and tickers are required" });
+      res.status(400).json({ ok: false, error: "Canonical sector id and tickers are required" });
       return;
     }
 
-    const sector = await ensureSector(sectorName);
-    if (!sector?.id) {
-      res.status(500).json({ ok: false, error: "Failed to resolve sector" });
-      return;
-    }
-    const subsector = subsectorName ? await ensureSubsector(sector.id, subsectorName) : null;
+    const resolvedRows = await ensureCanonicalSelectionRows(sectorName, subsectorName || null);
 
     const results: Array<{ ticker: string; status: string }> = [];
     const now = new Date().toISOString();
@@ -85,19 +47,22 @@ export default async function handler(req: any, res: any) {
       await execute(
         `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, category, created_at)
          VALUES (?, ?, ?, ?, ?)`,
-        [companyId, sector.id, subsector?.id ?? null, category || null, now]
+        [companyId, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, categoryMetadata || null, now]
       );
       results.push({ ticker, status: "mapped" });
     }
 
     res.status(200).json({
       ok: true,
-      sector,
-      subsector,
+      sector: resolvedRows.sector,
+      subsector: resolvedRows.subsector,
+      canonical: resolvedRows.canonical,
       mapped: results.filter((result) => result.status === "mapped").length,
       results,
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: (error as Error).message });
+    const message = (error as Error).message;
+    const status = /Unknown canonical|is not part of sector/.test(message) ? 400 : 500;
+    res.status(status).json({ ok: false, error: message });
   }
 }

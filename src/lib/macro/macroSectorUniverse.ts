@@ -32,6 +32,8 @@ export type SubsectorMacroRouting = {
   coverage: "explicit" | "limited";
 };
 
+// Canonical registry for Sector Dashboard taxonomy (sector/subsector IDs).
+// All sector routes must resolve inbound requests against these IDs to avoid DB taxonomy drift.
 export const macroSectorUniverse: MacroSectorUniverse = {
   sectors: [
     { id: "energy", title: "Energy", category: "main_sector", parentId: null, aliases: ["energy-sector", "oil"], assetDrivers: ["energy", "localUnrestOverlay", "energyShockOverlay", "inflationCostShockOverlay"] },
@@ -69,6 +71,7 @@ export const macroSectorUniverse: MacroSectorUniverse = {
     { id: "precious_metals", title: "Precious metals", category: "subsector", parentId: "materials", aliases: ["precious_metals_miners"], assetDrivers: ["gold", "safeHavenRiskOffOverlay"] },
     { id: "base_metals", title: "Base metals", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["copper", "industrials"] },
     { id: "lithium_miners", title: "Lithium miners", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["copper", "growthEquities"] },
+    { id: "uranium_miners", title: "Uranium miners", category: "subsector", parentId: "materials", aliases: ["uranium-miners"], assetDrivers: ["energy", "materials"] },
     { id: "paper_packaging", title: "Paper and packaging", category: "subsector", parentId: "materials", aliases: [], assetDrivers: ["broadEquities", "industrials"] },
 
     { id: "capital_goods", title: "Capital goods", category: "subsector", parentId: "industrials", aliases: [], assetDrivers: ["industrials"] },
@@ -186,6 +189,7 @@ const subsectorRoutingOverrides: Record<string, Omit<SubsectorMacroRouting, "sub
   silver_miners: { explicitTargetIds: ["silver_miners", "precious_metals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["hard_asset_equities"], coverage: "explicit" },
   copper_miners: { explicitTargetIds: ["copper_miners", "base_metals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["deep_cyclicals", "global_trade_sensitives"], coverage: "explicit" },
   diversified_miners: { explicitTargetIds: ["diversified_miners", "base_metals", "precious_metals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["hard_asset_equities", "deep_cyclicals"], coverage: "explicit" },
+  uranium_miners: { explicitTargetIds: ["uranium_miners", "uranium"], sectorFallbackId: "materials", macroBucketFallbackIds: ["real_asset_equities", "inflation_hedges"], coverage: "explicit" },
   steel: { explicitTargetIds: ["steel", "base_metals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["deep_cyclicals"], coverage: "explicit" },
   chemicals: { explicitTargetIds: ["chemicals"], sectorFallbackId: "materials", macroBucketFallbackIds: ["deep_cyclicals"], coverage: "explicit" },
   fertilizers: { explicitTargetIds: ["fertilizers"], sectorFallbackId: "materials", macroBucketFallbackIds: ["inflation_hedges"], coverage: "explicit" },

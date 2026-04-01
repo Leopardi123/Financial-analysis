@@ -181,6 +181,7 @@ export async function ensureSchema() {
     )`
   );
 
+  // category is intentionally non-canonical metadata; do not use for stage/exposure logic.
   await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companySectorMap} (
       company_id INTEGER NOT NULL,
