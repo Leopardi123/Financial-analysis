@@ -253,7 +253,7 @@ export default async function handler(req: any, res: any) {
       manualOverridesByCompanyId
     );
     const exposureWithSignals = exposureProfiles.filter((item) => item.profile.exposures.length > 0).length;
-    const exposureSamples = exposureProfiles.slice(0, 10).map((item) => ({
+    const exposureSamples = exposureProfiles.map((item) => ({
       companyId: item.profile.companyId,
       ticker: item.mapping.ticker ?? null,
       primaryCommodity: item.profile.primaryCommodity ?? null,

@@ -1,5 +1,6 @@
 import { execute, query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { assertAdminSecret } from "../../../../api/_auth.js";
 import type { CommodityKey } from "../../../lib/commodities/commodityExposureTypes.js";
 
 function normalizeText(value: unknown) {
@@ -71,6 +72,7 @@ export default async function handler(req: any, res: any) {
       res.status(405).json({ ok: false, error: "Method not allowed" });
       return;
     }
+    assertAdminSecret(req);
 
     const ticker = normalizeText(req.body?.ticker).toUpperCase();
     const source = normalizeText(req.body?.source);
@@ -138,6 +140,8 @@ export default async function handler(req: any, res: any) {
       exposures: normalized,
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: (error as Error).message });
+    const message = (error as Error).message;
+    const status = message === "Unauthorized" ? 401 : 500;
+    res.status(status).json({ ok: false, error: status === 401 ? "Unauthorized: invalid admin password." : message });
   }
 }
