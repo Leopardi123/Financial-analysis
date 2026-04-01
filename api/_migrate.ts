@@ -15,6 +15,7 @@ const TABLES = {
   cycleScores: "cycle_scores",
   assumptionsLog: "assumptions_log",
   companySectorMap: "company_sector_map",
+  companyCommodityOverride: "company_commodity_override",
   companyProjects: "company_projects",
   macroRawDatapoints: "macro_raw_datapoints",
   macroIndicatorCatalog: "macro_indicator_catalog",
@@ -190,6 +191,18 @@ export async function ensureSchema() {
       category TEXT,
       created_at TEXT NOT NULL,
       UNIQUE(company_id, sector_id, subsector_id)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.companyCommodityOverride} (
+      company_id INTEGER NOT NULL,
+      commodity TEXT NOT NULL,
+      weight REAL NOT NULL,
+      source TEXT,
+      note TEXT,
+      updated_at TEXT NOT NULL,
+      UNIQUE(company_id, commodity)
     )`
   );
 
