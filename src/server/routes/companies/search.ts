@@ -3,6 +3,7 @@ import { normalizeName } from "../../../../api/_company_master.js";
 
 type SearchRow = {
   symbol?: unknown;
+  ticker?: unknown;
   name?: unknown;
   exchange?: unknown;
   type?: unknown;
@@ -79,18 +80,22 @@ export default async function handler(req: any, res: any) {
 
     const dbQueryStart = Date.now();
     const rows = await db.execute({
-      sql: `SELECT symbol, name, exchange, type
+      sql: `SELECT symbol, name, exchange, type, NULL as ticker
             FROM companies
-            WHERE normalized_name LIKE ?
-            ORDER BY normalized_name ASC
+            WHERE normalized_name LIKE ? OR symbol LIKE ?
+            UNION
+            SELECT ticker AS symbol, ticker AS name, NULL as exchange, NULL as type, ticker
+            FROM companies_v2
+            WHERE ticker LIKE ?
+            ORDER BY symbol ASC
             LIMIT 20`,
-      args: [`${cacheKey}%`],
+      args: [`${cacheKey}%`, `%${text.toUpperCase()}%`, `%${text.toUpperCase()}%`],
     });
     tDbQueryMs = Date.now() - dbQueryStart;
 
     const results = (rows.rows as SearchRow[]).map((row) => ({
-      symbol: String(row.symbol ?? ""),
-      name: String(row.name ?? ""),
+      symbol: String(row.symbol ?? row.ticker ?? "").toUpperCase(),
+      name: String(row.name ?? row.ticker ?? ""),
       exchange: row.exchange ? String(row.exchange) : null,
       type: row.type ? String(row.type) : null,
     })).filter((row) => row.symbol.length > 0);
