@@ -6,6 +6,24 @@ import type { CompanySnapshot, RuleOperator, ScreenDefinition, ScreenRule, Scree
 
 const WATCHLIST = ["AAPL", "MSFT", "BRK.B", "COST", "NVO"];
 const SAFE_TICKER_PATTERN = /^[A-Z0-9.\-_/]+$/;
+const FX_ANCHOR_FROM = "2000-01-01";
+
+type CorpCashOverMarketCapDebug = {
+  reportedCashRawValue: number | null;
+  reportedCashCurrency: string | null;
+  marketCapRawValue: number | null;
+  marketCapCurrency: string | null;
+  ratioCurrencyAligned: boolean;
+  cashSourcePathUsed: string | null;
+  cashCurrency: string | null;
+  marketCapSourcePathUsed: string | null;
+  fxConversionApplied: boolean;
+  fxRateUsed: number | null;
+  convertedCashValue: number | null;
+  finalRatioValue: number | null;
+  missingReason: string | null;
+  fxPathUsed: string | null;
+};
 
 async function fetchJson(url: string, init?: RequestInit) {
   const response = await fetch(url, init);
@@ -51,6 +69,113 @@ function normalizeTicker(raw: string): string | null {
   const ticker = String(raw ?? "").trim().toUpperCase();
   if (!ticker) return null;
   return SAFE_TICKER_PATTERN.test(ticker) ? ticker : null;
+}
+
+function normalizeCurrency(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const normalized = raw.trim().toUpperCase().replace(/[^A-Z]/g, "");
+  return normalized || null;
+}
+
+async function resolveUsdToCurrencyFx(currency: string): Promise<{ rate: number | null; pathUsed: string | null }> {
+  const normalized = normalizeCurrency(currency);
+  if (!normalized) return { rate: null, pathUsed: null };
+  if (normalized === "USD") return { rate: 1, pathUsed: "identity:USD" };
+  const candidates = [`USD_${normalized}`, `${normalized}_USD`];
+  for (const priceKey of candidates) {
+    const payload = await fetchJson(`/api/prices/history?key=${encodeURIComponent(priceKey)}&from=${FX_ANCHOR_FROM}&to=2100-01-01`)
+      .catch(() => null);
+    const rows = Array.isArray(payload?.rows) ? payload.rows as Array<{ close?: unknown }> : [];
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const close = Number(rows[i]?.close);
+      if (!Number.isFinite(close) || close <= 0) continue;
+      if (priceKey.startsWith("USD_")) return { rate: close, pathUsed: `/api/prices/history?key=${priceKey}` };
+      return { rate: 1 / close, pathUsed: `/api/prices/history?key=${priceKey} (inverted)` };
+    }
+  }
+  return { rate: null, pathUsed: null };
+}
+
+async function buildCorpCashOverMarketCapDebug(args: {
+  reportedQuarterlyBalance: Record<string, unknown> | null | undefined;
+  profile: Record<string, unknown> | null | undefined;
+  reportedCashCurrency: string | null;
+  fxCache: Map<string, { rate: number | null; pathUsed: string | null }>;
+}): Promise<CorpCashOverMarketCapDebug> {
+  const cashCandidates = [
+    "cashAndCashEquivalents",
+    "cashAndShortTermInvestments",
+    "cashAndCashEquivalentsAndShortTermInvestments",
+  ];
+  let reportedCashRawValue: number | null = null;
+  let cashSourcePathUsed: string | null = null;
+  for (const path of cashCandidates) {
+    const raw = args.reportedQuarterlyBalance?.[path];
+    if (!Array.isArray(raw)) continue;
+    for (let i = raw.length - 1; i >= 0; i -= 1) {
+      const value = raw[i];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        reportedCashRawValue = value;
+        cashSourcePathUsed = `reportedQuarterlyBalance.${path}`;
+        break;
+      }
+    }
+    if (cashSourcePathUsed) break;
+  }
+
+  const mktCap = Number(args.profile?.mktCap);
+  const marketCapAlt = Number(args.profile?.marketCap);
+  const marketCapResolved = Number.isFinite(mktCap) && mktCap > 0
+    ? { value: mktCap, path: "profile.mktCap" }
+    : (Number.isFinite(marketCapAlt) && marketCapAlt > 0 ? { value: marketCapAlt, path: "profile.marketCap" } : null);
+  const marketCapCurrency = normalizeCurrency(args.profile?.currency);
+  const reportedCashCurrency = normalizeCurrency(args.reportedCashCurrency);
+
+  if (reportedCashRawValue === null) {
+    return { reportedCashRawValue, reportedCashCurrency, marketCapRawValue: marketCapResolved?.value ?? null, marketCapCurrency, ratioCurrencyAligned: false, cashSourcePathUsed, cashCurrency: reportedCashCurrency, marketCapSourcePathUsed: marketCapResolved?.path ?? null, fxConversionApplied: false, fxRateUsed: null, convertedCashValue: null, finalRatioValue: null, missingReason: "missing reported quarterly cash value", fxPathUsed: null };
+  }
+  if (!reportedCashCurrency) {
+    return { reportedCashRawValue, reportedCashCurrency, marketCapRawValue: marketCapResolved?.value ?? null, marketCapCurrency, ratioCurrencyAligned: false, cashSourcePathUsed, cashCurrency: reportedCashCurrency, marketCapSourcePathUsed: marketCapResolved?.path ?? null, fxConversionApplied: false, fxRateUsed: null, convertedCashValue: null, finalRatioValue: null, missingReason: "reported cash exists but reported currency is missing", fxPathUsed: null };
+  }
+  if (!marketCapResolved || marketCapResolved.value <= 0) {
+    return { reportedCashRawValue, reportedCashCurrency, marketCapRawValue: marketCapResolved?.value ?? null, marketCapCurrency, ratioCurrencyAligned: false, cashSourcePathUsed, cashCurrency: reportedCashCurrency, marketCapSourcePathUsed: marketCapResolved?.path ?? null, fxConversionApplied: false, fxRateUsed: null, convertedCashValue: null, finalRatioValue: null, missingReason: "missing or non-positive market cap", fxPathUsed: null };
+  }
+  if (!marketCapCurrency) {
+    return { reportedCashRawValue, reportedCashCurrency, marketCapRawValue: marketCapResolved.value, marketCapCurrency, ratioCurrencyAligned: false, cashSourcePathUsed, cashCurrency: reportedCashCurrency, marketCapSourcePathUsed: marketCapResolved.path, fxConversionApplied: false, fxRateUsed: null, convertedCashValue: null, finalRatioValue: null, missingReason: "market cap currency missing on profile", fxPathUsed: null };
+  }
+
+  if (reportedCashCurrency === marketCapCurrency) {
+    const finalRatioValue = reportedCashRawValue / marketCapResolved.value;
+    return { reportedCashRawValue, reportedCashCurrency, marketCapRawValue: marketCapResolved.value, marketCapCurrency, ratioCurrencyAligned: true, cashSourcePathUsed, cashCurrency: reportedCashCurrency, marketCapSourcePathUsed: marketCapResolved.path, fxConversionApplied: false, fxRateUsed: 1, convertedCashValue: reportedCashRawValue, finalRatioValue, missingReason: null, fxPathUsed: "identity" };
+  }
+
+  const fromKey = `USD_TO_${reportedCashCurrency}`;
+  const toKey = `USD_TO_${marketCapCurrency}`;
+  if (!args.fxCache.has(fromKey)) args.fxCache.set(fromKey, await resolveUsdToCurrencyFx(reportedCashCurrency));
+  if (!args.fxCache.has(toKey)) args.fxCache.set(toKey, await resolveUsdToCurrencyFx(marketCapCurrency));
+  const from = args.fxCache.get(fromKey) ?? { rate: null, pathUsed: null };
+  const to = args.fxCache.get(toKey) ?? { rate: null, pathUsed: null };
+  const fxRateUsed = from.rate && to.rate ? to.rate / from.rate : null;
+  if (!fxRateUsed || !Number.isFinite(fxRateUsed) || fxRateUsed <= 0) {
+    return { reportedCashRawValue, reportedCashCurrency, marketCapRawValue: marketCapResolved.value, marketCapCurrency, ratioCurrencyAligned: false, cashSourcePathUsed, cashCurrency: reportedCashCurrency, marketCapSourcePathUsed: marketCapResolved.path, fxConversionApplied: false, fxRateUsed: null, convertedCashValue: null, finalRatioValue: null, missingReason: `fx missing for ${reportedCashCurrency}->${marketCapCurrency}`, fxPathUsed: `${from.pathUsed ?? "n/a"} + ${to.pathUsed ?? "n/a"}` };
+  }
+  const convertedCashValue = reportedCashRawValue * fxRateUsed;
+  return {
+    reportedCashRawValue,
+    reportedCashCurrency,
+    marketCapRawValue: marketCapResolved.value,
+    marketCapCurrency,
+    ratioCurrencyAligned: true,
+    cashSourcePathUsed,
+    cashCurrency: reportedCashCurrency,
+    marketCapSourcePathUsed: marketCapResolved.path,
+    fxConversionApplied: true,
+    fxRateUsed,
+    convertedCashValue,
+    finalRatioValue: convertedCashValue / marketCapResolved.value,
+    missingReason: null,
+    fxPathUsed: `${from.pathUsed ?? "n/a"} + ${to.pathUsed ?? "n/a"}`,
+  };
 }
 
 function unitLabel(unit: "percent" | "ratio" | "absolute" | "state") {
@@ -145,78 +270,16 @@ function readPathValue(source: Record<string, unknown>, path: string): unknown {
 
 function resolveCorporateDebugMetric(snapshot: Record<string, unknown> | null | undefined, field: string) {
   if (field === "corp_cash_over_market_cap") {
-    const cashCandidates = [
-      "reportedQuarterlyBalance.cashAndCashEquivalents",
-      "reportedQuarterlyBalance.cashAndShortTermInvestments",
-      "reportedQuarterlyBalance.cashAndCashEquivalentsAndShortTermInvestments",
-    ];
-    const marketCapCandidates = [
-      "profile.mktCap",
-      "profile.marketCap",
-      "profile.price * profile.sharesOutstanding",
-    ];
-    if (!snapshot) {
-      return {
-        resolvedPath: `${cashCandidates[0]} / ${marketCapCandidates[0]}`,
-        sourceObject: "screeningPayload",
-        rawValue: null,
-        normalizedValue: null,
-        missingReason: "corporateSnapshot saknas i payload",
-        cashSourcePathUsed: null,
-        marketCapSourcePathUsed: null,
-        usedReportedQuarterlyCash: false,
-        usedModeledMarketCap: false,
-        usedPostFinancingShares: false,
-      };
+    const debug = snapshot?.corpCashOverMarketCapDebug as CorpCashOverMarketCapDebug | undefined;
+    if (!debug) {
+      return { resolvedPath: "corpCashOverMarketCapDebug", sourceObject: "screeningPayload", rawValue: null, normalizedValue: null, missingReason: "corpCashOverMarketCapDebug saknas i payload" };
     }
-
-    let cashValue: number | null = null;
-    let cashSourcePathUsed: string | null = null;
-    for (const path of cashCandidates) {
-      const raw = readPathValue(snapshot, path);
-      if (!Array.isArray(raw)) continue;
-      for (let i = raw.length - 1; i >= 0; i -= 1) {
-        const value = raw[i];
-        if (typeof value === "number" && Number.isFinite(value)) {
-          cashValue = value;
-          cashSourcePathUsed = path;
-          break;
-        }
-      }
-      if (cashSourcePathUsed) break;
-    }
-
-    const profileMktCap = Number(readPathValue(snapshot, "profile.mktCap"));
-    const profileMarketCap = Number(readPathValue(snapshot, "profile.marketCap"));
-    const profilePrice = Number(readPathValue(snapshot, "profile.price"));
-    const profileShares = Number(readPathValue(snapshot, "profile.sharesOutstanding"));
-    const marketCapFromPriceShares = Number.isFinite(profilePrice) && profilePrice > 0 && Number.isFinite(profileShares) && profileShares > 0
-      ? profilePrice * profileShares
-      : null;
-
-    const marketCapResolved = Number.isFinite(profileMktCap) && profileMktCap > 0
-      ? { value: profileMktCap, path: "profile.mktCap" }
-      : (Number.isFinite(profileMarketCap) && profileMarketCap > 0
-        ? { value: profileMarketCap, path: "profile.marketCap" }
-        : (marketCapFromPriceShares !== null
-          ? { value: marketCapFromPriceShares, path: "profile.price * profile.sharesOutstanding" }
-          : null));
-
-    const normalizedValue = cashValue !== null && marketCapResolved && marketCapResolved.value > 0
-      ? cashValue / marketCapResolved.value
-      : null;
-
     return {
-      resolvedPath: `${cashSourcePathUsed ?? cashCandidates.join(" | ")} / ${marketCapResolved?.path ?? marketCapCandidates.join(" | ")}`,
+      resolvedPath: `${debug.cashSourcePathUsed ?? "n/a"} / ${debug.marketCapSourcePathUsed ?? "n/a"}`,
       sourceObject: "screeningPayload",
-      rawValue: normalizedValue,
-      normalizedValue,
-      missingReason: normalizedValue === null ? "cash eller current market cap saknas/ogiltig" : null,
-      cashSourcePathUsed,
-      marketCapSourcePathUsed: marketCapResolved?.path ?? null,
-      usedReportedQuarterlyCash: cashSourcePathUsed !== null,
-      usedModeledMarketCap: false,
-      usedPostFinancingShares: false,
+      rawValue: debug.reportedCashRawValue,
+      normalizedValue: debug.finalRatioValue,
+      ...debug,
     };
   }
 
@@ -267,6 +330,7 @@ async function loadSnapshot(
   const normalizedTicker = normalizeTicker(ticker);
   if (!normalizedTicker) return null;
 
+  const fxCache = new Map<string, { rate: number | null; pathUsed: string | null }>();
   const [companyPayload, quarterlyPayload, profilePayload, pricePayload, priceNowPayload] = await Promise.all([
     fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=fy`).catch(() => null),
     includeQuarterlyReportedCash
@@ -306,6 +370,12 @@ async function loadSnapshot(
   const corporateSnapshot = includeCorporateSnapshot
     ? await fetchCorporateSnapshot(normalizedTicker, sharesResolved, priceCurrent)
     : null;
+  const corpCashOverMarketCapDebug = await buildCorpCashOverMarketCapDebug({
+    reportedQuarterlyBalance: (quarterlyPayload?.balance ?? null) as Record<string, unknown> | null,
+    profile: (profile ?? null) as Record<string, unknown> | null,
+    reportedCashCurrency: normalizeCurrency(quarterlyPayload?.meta?.reportedCurrency),
+    fxCache,
+  });
 
   const snapshot: CompanySnapshot = {
     ticker,
@@ -318,6 +388,7 @@ async function loadSnapshot(
     manual: manualData[normalizedTicker] ?? {},
     price: pricePayload?.snapshot ?? null,
     corporateSnapshot,
+    corpCashOverMarketCapDebug,
   };
   return snapshot;
 }
@@ -518,11 +589,12 @@ export default function ScreeningDashboard() {
               ...(sampleSnapshot.corporateSnapshot ?? {}),
               reportedQuarterlyBalance: sampleSnapshot.reportedQuarterlyBalance ?? {},
               profile: sampleSnapshot.profile ?? {},
+              corpCashOverMarketCapDebug: sampleSnapshot.corpCashOverMarketCapDebug ?? null,
             }
             : null;
           const debug = resolveCorporateDebugMetric(debugSource as Record<string, unknown> | null | undefined, corporateField);
           const extra = corporateField === "corp_cash_over_market_cap"
-            ? ` cashSourcePathUsed=${String((debug as { cashSourcePathUsed?: string | null }).cashSourcePathUsed ?? "null")} marketCapSourcePathUsed=${String((debug as { marketCapSourcePathUsed?: string | null }).marketCapSourcePathUsed ?? "null")} usedReportedQuarterlyCash=${String((debug as { usedReportedQuarterlyCash?: boolean }).usedReportedQuarterlyCash ?? false)} usedModeledMarketCap=${String((debug as { usedModeledMarketCap?: boolean }).usedModeledMarketCap ?? false)} usedPostFinancingShares=${String((debug as { usedPostFinancingShares?: boolean }).usedPostFinancingShares ?? false)}`
+            ? ` reportedCashRawValue=${String((debug as { reportedCashRawValue?: number | null }).reportedCashRawValue ?? "null")} reportedCashCurrency=${String((debug as { reportedCashCurrency?: string | null }).reportedCashCurrency ?? "null")} marketCapRawValue=${String((debug as { marketCapRawValue?: number | null }).marketCapRawValue ?? "null")} marketCapCurrency=${String((debug as { marketCapCurrency?: string | null }).marketCapCurrency ?? "null")} ratioCurrencyAligned=${String((debug as { ratioCurrencyAligned?: boolean }).ratioCurrencyAligned ?? false)} cashSourcePathUsed=${String((debug as { cashSourcePathUsed?: string | null }).cashSourcePathUsed ?? "null")} cashCurrency=${String((debug as { cashCurrency?: string | null }).cashCurrency ?? "null")} marketCapSourcePathUsed=${String((debug as { marketCapSourcePathUsed?: string | null }).marketCapSourcePathUsed ?? "null")} fxConversionApplied=${String((debug as { fxConversionApplied?: boolean }).fxConversionApplied ?? false)} fxRateUsed=${String((debug as { fxRateUsed?: number | null }).fxRateUsed ?? "null")} convertedCashValue=${String((debug as { convertedCashValue?: number | null }).convertedCashValue ?? "null")} finalRatioValue=${String((debug as { finalRatioValue?: number | null }).finalRatioValue ?? "null")} fxPathUsed=${String((debug as { fxPathUsed?: string | null }).fxPathUsed ?? "null")}`
             : "";
           notes.push(
             `[corp-debug] field=${corporateField} source=${debug.sourceObject} path=${debug.resolvedPath} raw=${debug.rawValue === null ? "null" : String(debug.rawValue)} normalized=${debug.normalizedValue === null ? "null" : String(debug.normalizedValue)} reason=${debug.missingReason ?? "ok"}${extra}`,
