@@ -887,8 +887,12 @@ export default function SectorDashboard() {
         <div className="sector-card">
           <h3>Sector Overview</h3>
           <p className="bread">
-            Automatiska sektormått saknas ännu. Dessa ska komma från befintlig backend (EV/EBITDA,
-            FCF yield, ROIC, CAPEX/OCF m.m.).
+            Sector Dashboard bygger på en kanonisk sektor-/undersektorstruktur där bolag mappas via
+            company_sector_map. Nyckeltal beräknas från mappade bolag och tillgängliga fundamentals.
+          </p>
+          <p className="bread">
+            Vissa mått saknas fortfarande i datalagret (t.ex. EV/EBITDA, FCF yield, ROIC,
+            CAPEX/OCF). Commodity exposure och company stage är ännu inte implementerade.
           </p>
           <ul className="todo-list">
             {(overview?.todo ?? []).map((item) => (
@@ -999,7 +1003,7 @@ export default function SectorDashboard() {
           <p className="bread">
             Koppla tickers till vald sektor/undersektor för att beräkna automatiska sektormått.
           </p>
-          <label htmlFor="mapping-category">Kategori</label>
+          <label htmlFor="mapping-category">Kategori (ej klassificering)</label>
           <select
             id="mapping-category"
             value={mappingCategory}
@@ -1322,6 +1326,25 @@ export default function SectorDashboard() {
           )}
         </div>
       </div>
+      {debugMode ? (
+        <details className="sector-coverage-debug" open>
+          <summary>Sector mapping debug</summary>
+          <div className="sector-coverage-debug-grid">
+            <div>
+              <strong>Canonical sector (id)</strong>: {sector || "n/a"}
+            </div>
+            <div>
+              <strong>Canonical subsector (id)</strong>: {subsector || "n/a"}
+            </div>
+            <div>
+              <strong>Mapping source</strong>: company_sector_map
+            </div>
+            <div>
+              <strong>Provider sector</strong>: FMP (metadata only)
+            </div>
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
