@@ -895,6 +895,16 @@ export default function SectorDashboard() {
     setOverrideTicker(normalized);
   }
 
+  function applySearchSelectionFromText() {
+    const normalized = companySearchText.trim().toUpperCase();
+    if (!normalized) return;
+    const exact = companySearchResults.find((ticker) => ticker.toUpperCase() === normalized)
+      ?? companyList.find((ticker) => ticker.toUpperCase() === normalized);
+    if (exact) {
+      applyActiveCompanyTicker(exact);
+    }
+  }
+
   const overrideTotalWeight = useMemo(() => {
     return overrideRows.reduce((acc, row) => {
       const value = Number(String(row.weight).replace(",", "."));
@@ -1162,6 +1172,13 @@ export default function SectorDashboard() {
             id="company-search"
             value={companySearchText}
             onChange={(event) => setCompanySearchText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                applySearchSelectionFromText();
+              }
+            }}
+            onBlur={() => applySearchSelectionFromText()}
             placeholder="Sök ticker eller namn"
           />
           <label htmlFor="company-select">Välj bolag</label>
