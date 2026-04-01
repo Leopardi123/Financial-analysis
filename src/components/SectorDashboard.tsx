@@ -29,6 +29,49 @@ type OverviewPayload = {
   computedMetrics?: Array<{ metric: string; value: number; sampleSize?: number }>;
   missingMetrics?: string[];
   suggestedFmpEndpoints?: string[];
+  commodityExposure?: {
+    mappedCompanies: number;
+    companiesWithExposure: number;
+    manualOverrideCount: number;
+    sampleProfiles: Array<{
+      companyId: string;
+      ticker: string | null;
+      primaryCommodity: string | null;
+      basis: string;
+      confidence: number;
+      isDiversified: boolean;
+      note: string | null;
+      source: string | null;
+      canonicalSectorId: string;
+      canonicalSubsectorId: string | null;
+      defaultProfile: {
+        basis: string;
+        confidence: number;
+        exposures: Array<{
+          commodity: string;
+          weight: number;
+          evidence: string;
+          confidence: number;
+          notes?: string;
+        }>;
+      };
+      manualOverrideProfile: {
+        basis: string;
+        confidence: number;
+        exposures: Array<{ commodity: string; weight: number }>;
+      } | null;
+      finalProfile: {
+        basis: string;
+        confidence: number;
+        exposures: Array<{
+          commodity: string;
+          weight: number;
+          evidence: string;
+          confidence: number;
+        }>;
+      };
+    }>;
+  };
 };
 
 type MacroOverlay = { score: number | null };
@@ -343,6 +386,10 @@ const COMPANY_CATEGORIES = [
   "Junior explorer - fyndighet",
   "Junior explorer - pre descovery",
 ];
+const COMMODITY_OPTIONS = [
+  "gold", "silver", "copper", "uranium", "nickel", "zinc", "lead", "pgm", "tin", "tungsten",
+  "lithium", "coal", "iron_ore", "oil", "gas", "vanadium", "other",
+];
 
 type MacroToneFilter = "all" | "favored" | "neutral" | "underPressure";
 type MacroStrengthFilter = "all" | MacroSectorMapItem["strength"];
@@ -401,8 +448,22 @@ export default function SectorDashboard() {
   const [inputSource, setInputSource] = useState("");
   const [inputNote, setInputNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
-  const [mappingTickers, setMappingTickers] = useState("");
   const [mappingCategory, setMappingCategory] = useState(COMPANY_CATEGORIES[0]);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [companyOptions, setCompanyOptions] = useState<Array<{
+    companyId: string;
+    ticker: string;
+    name: string | null;
+    isMapped: boolean;
+  }>>([]);
+  const [companySearch, setCompanySearch] = useState("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [overrideRows, setOverrideRows] = useState<Array<{ commodity: string; weight: string }>>([
+    { commodity: "gold", weight: "1.0" },
+  ]);
+  const [overrideSource, setOverrideSource] = useState("");
+  const [overrideNote, setOverrideNote] = useState("");
+  const [overviewReloadNonce, setOverviewReloadNonce] = useState(0);
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [commoditySnapshot, setCommoditySnapshot] = useState<CommoditySnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
@@ -570,6 +631,38 @@ export default function SectorDashboard() {
     }
     return GENERIC_QUESTIONS;
   }, [sector, subsector]);
+  const selectedCompany = useMemo(
+    () => companyOptions.find((company) => company.companyId === selectedCompanyId) ?? null,
+    [companyOptions, selectedCompanyId]
+  );
+  const filteredCompanyOptions = useMemo(() => {
+    const search = companySearch.trim().toLowerCase();
+    if (!search) return companyOptions;
+    return companyOptions.filter((company) =>
+      company.ticker.toLowerCase().includes(search)
+      || (company.name ?? "").toLowerCase().includes(search)
+    );
+  }, [companyOptions, companySearch]);
+  const selectedCompanyProfile = useMemo(
+    () => (overview?.commodityExposure?.sampleProfiles ?? []).find((profile) => profile.companyId === selectedCompanyId) ?? null,
+    [overview?.commodityExposure?.sampleProfiles, selectedCompanyId]
+  );
+  const overrideValidationIssues = useMemo(() => {
+    const parsed = overrideRows.map((row) => ({ commodity: row.commodity, weight: Number(row.weight) }));
+    const issues: string[] = [];
+    if (parsed.some((row) => !Number.isFinite(row.weight) || row.weight <= 0)) {
+      issues.push("weights_must_be_positive");
+    }
+    const duplicates = new Set(parsed.map((row) => row.commodity));
+    if (duplicates.size !== parsed.length) {
+      issues.push("duplicate_commodities");
+    }
+    const total = parsed.reduce((acc, row) => acc + (Number.isFinite(row.weight) ? row.weight : 0), 0);
+    if (total < 0.98 || total > 1.02) {
+      issues.push(`invalid_total:${total.toFixed(3)}`);
+    }
+    return issues;
+  }, [overrideRows]);
   const isGoldCommodityView = sector === "materials" && subsector === "gold_miners";
   const isCopperCommodityView = sector === "materials" && subsector === "copper_miners";
   const selectedCommodity = isGoldCommodityView ? "gold" : isCopperCommodityView ? "copper" : null;
@@ -654,7 +747,29 @@ export default function SectorDashboard() {
     return () => {
       active = false;
     };
-  }, [sector, subsector]);
+  }, [overviewReloadNonce, sector, subsector]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadCompanyOptions() {
+      const response = await fetch(
+        `/api/sector/company-options?sector=${encodeURIComponent(sector)}&subsector=${encodeURIComponent(subsector)}`
+      );
+      const payload = await response.json();
+      if (!active || !response.ok) return;
+      const companies = Array.isArray(payload.companies) ? payload.companies : [];
+      setCompanyOptions(companies);
+      setSelectedCompanyId((prev) => (
+        prev && companies.some((item: { companyId: string }) => item.companyId === prev)
+          ? prev
+          : (companies[0]?.companyId ?? "")
+      ));
+    }
+    void loadCompanyOptions();
+    return () => {
+      active = false;
+    };
+  }, [overviewReloadNonce, sector, subsector]);
 
   useEffect(() => {
     if (!selectedCommodity) {
@@ -746,6 +861,83 @@ export default function SectorDashboard() {
       },
       ...prev,
     ]);
+  }
+
+  async function saveCommodityOverride() {
+    const ticker = selectedCompany?.ticker ?? "";
+    if (!ticker) {
+      setStatus("Välj bolag innan du sparar override.");
+      return;
+    }
+    if (!adminPassword) {
+      setStatus("Admin-lösenord krävs för att spara.");
+      return;
+    }
+    const parsed = overrideRows
+      .map((row) => ({ commodity: row.commodity, weight: Number(row.weight) }))
+      .filter((row) => row.commodity && Number.isFinite(row.weight) && row.weight > 0);
+    if (parsed.length === 0) {
+      setStatus("Lägg till minst en commodity-rad med vikt > 0.");
+      return;
+    }
+    const unique = new Set(parsed.map((row) => row.commodity));
+    if (unique.size !== parsed.length) {
+      setStatus("Dubblett av commodity är inte tillåtet.");
+      return;
+    }
+    const total = parsed.reduce((acc, row) => acc + row.weight, 0);
+    if (total < 0.98 || total > 1.02) {
+      setStatus(`Vikter måste summera till 1.0 (nu: ${total.toFixed(3)}).`);
+      return;
+    }
+    setStatus("Sparar commodity override...");
+    const response = await fetch("/api/sector/company-commodity-override", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": adminPassword },
+      body: JSON.stringify({
+        ticker,
+        source: overrideSource,
+        note: overrideNote,
+        exposures: parsed,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setStatus(payload.error ?? "Misslyckades att spara override.");
+      return;
+    }
+    setStatus(`Commodity override sparad för ${payload.ticker}.`);
+    setOverviewReloadNonce((prev) => prev + 1);
+  }
+
+  async function saveCompanyMapping() {
+    const ticker = selectedCompany?.ticker ?? "";
+    if (!ticker) {
+      setStatus("Välj bolag innan du mappar.");
+      return;
+    }
+    if (!adminPassword) {
+      setStatus("Admin-lösenord krävs för att spara mapping.");
+      return;
+    }
+    setStatus("Sparar mapping...");
+    const response = await fetch("/api/sector/map-companies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": adminPassword },
+      body: JSON.stringify({
+        sector,
+        subsector,
+        category: mappingCategory,
+        tickers: [ticker],
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setStatus(payload.error ?? "Misslyckades att spara mapping.");
+      return;
+    }
+    setStatus(`Mappade ${payload.mapped} ticker.`);
+    setOverviewReloadNonce((prev) => prev + 1);
   }
 
   return (
@@ -887,8 +1079,12 @@ export default function SectorDashboard() {
         <div className="sector-card">
           <h3>Sector Overview</h3>
           <p className="bread">
-            Automatiska sektormått saknas ännu. Dessa ska komma från befintlig backend (EV/EBITDA,
-            FCF yield, ROIC, CAPEX/OCF m.m.).
+            Sector Dashboard bygger på en kanonisk sektor-/undersektorstruktur där bolag mappas via
+            company_sector_map. Nyckeltal beräknas från mappade bolag och tillgängliga fundamentals.
+          </p>
+          <p className="bread">
+            Vissa mått saknas fortfarande i datalagret (t.ex. EV/EBITDA, FCF yield, ROIC,
+            CAPEX/OCF). Commodity exposure och company stage är ännu inte implementerade.
           </p>
           <ul className="todo-list">
             {(overview?.todo ?? []).map((item) => (
@@ -997,9 +1193,40 @@ export default function SectorDashboard() {
         <div className="sector-card">
           <h3>Map companies</h3>
           <p className="bread">
-            Koppla tickers till vald sektor/undersektor för att beräkna automatiska sektormått.
+            Välj ett bolag en gång och använd samma val för både mapping och manuell commodity override.
           </p>
-          <label htmlFor="mapping-category">Kategori</label>
+          <label htmlFor="admin-password">Admin-lösenord (krävs vid save)</label>
+          <input
+            id="admin-password"
+            type="password"
+            value={adminPassword}
+            onChange={(event) => setAdminPassword(event.target.value)}
+            placeholder="Admin password"
+          />
+          <label htmlFor="company-search">Sök bolag (lokal lista)</label>
+          <input
+            id="company-search"
+            value={companySearch}
+            onChange={(event) => setCompanySearch(event.target.value)}
+            placeholder="Sök ticker eller namn"
+          />
+          <label htmlFor="company-select">Välj bolag</label>
+          <select
+            id="company-select"
+            value={selectedCompanyId}
+            onChange={(event) => setSelectedCompanyId(event.target.value)}
+          >
+            {filteredCompanyOptions.map((company) => (
+              <option key={company.companyId} value={company.companyId}>
+                {company.ticker}{company.name ? ` — ${company.name}` : ""}{company.isMapped ? " (mapped)" : ""}
+              </option>
+            ))}
+          </select>
+          <div className="bread">
+            Aktivt bolag: <strong>{selectedCompany?.ticker ?? "Inget valt"}</strong>
+            {selectedCompany?.name ? ` — ${selectedCompany.name}` : ""}
+          </div>
+          <label htmlFor="mapping-category">Kategori (ej klassificering)</label>
           <select
             id="mapping-category"
             value={mappingCategory}
@@ -1011,42 +1238,100 @@ export default function SectorDashboard() {
               </option>
             ))}
           </select>
-          <input
-            value={mappingTickers}
-            onChange={(event) => setMappingTickers(event.target.value)}
-            placeholder="AAPL, MSFT, ... "
-          />
-          <button
-            type="button"
-            onClick={async () => {
-              if (!mappingTickers.trim()) {
-                setStatus("Ange minst en ticker.");
-                return;
-              }
-              setStatus("Sparar mappings...");
-              const response = await fetch("/api/sector/map-companies", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  sector,
-                  subsector,
-                  category: mappingCategory,
-                  tickers: mappingTickers
-                    .split(",")
-                    .map((ticker) => ticker.trim().toUpperCase())
-                    .filter(Boolean),
-                }),
-              });
-              const payload = await response.json();
-              if (!response.ok) {
-                setStatus(payload.error ?? "Misslyckades att spara mappings.");
-                return;
-              }
-              setStatus(`Mappade ${payload.mapped} tickers.`);
-            }}
-          >
+          <button type="button" onClick={() => void saveCompanyMapping()}>
             Spara mapping
           </button>
+          <div className="metric-list">
+            <h4>Default commodity mapping</h4>
+            <div>
+              <strong>Coverage:</strong>{" "}
+              {(overview?.commodityExposure?.companiesWithExposure ?? 0)}/
+              {(overview?.commodityExposure?.mappedCompanies ?? 0)} bolag med defaultprofil.
+            </div>
+            <div>
+              <strong>Basis:</strong> deterministisk canonical mapping (ej exakt bolagssplit)
+            </div>
+            <div>
+              <strong>Manual overrides:</strong> {overview?.commodityExposure?.manualOverrideCount ?? 0}
+            </div>
+            {(overview?.commodityExposure?.sampleProfiles ?? []).slice(0, 4).map((profile) => (
+              <div key={`exp-${profile.companyId}`}>
+                {profile.ticker ?? profile.companyId}: final={profile.primaryCommodity ?? "unknown"},{" "}
+                basis={profile.basis}, confidence={Math.round(profile.confidence * 100)}%
+              </div>
+            ))}
+            {selectedCompanyProfile ? (
+              <div>
+                <strong>Valt bolag resultat:</strong> default=
+                {selectedCompanyProfile.defaultProfile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)}`).join(" | ") || "none"}
+                , manual=
+                {selectedCompanyProfile.manualOverrideProfile?.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)}`).join(" | ") || "none"}
+                , final=
+                {selectedCompanyProfile.finalProfile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)}`).join(" | ") || "none"}
+                , basis={selectedCompanyProfile.basis}, confidence={Math.round(selectedCompanyProfile.confidence * 100)}%
+                {selectedCompanyProfile.source ? `, source=${selectedCompanyProfile.source}` : ""}
+                {selectedCompanyProfile.note ? `, note=${selectedCompanyProfile.note}` : ""}
+              </div>
+            ) : (
+              <div>Valt bolag har inget resultat i aktuell sektorsample ännu.</div>
+            )}
+          </div>
+          <div className="metric-list">
+            <h4>Manual commodity override (admin/dev)</h4>
+            {overrideRows.map((row, index) => (
+              <div key={`override-row-${index}`} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <select
+                  value={row.commodity}
+                  onChange={(event) =>
+                    setOverrideRows((prev) => prev.map((item, i) => (i === index ? { ...item, commodity: event.target.value } : item)))
+                  }
+                >
+                  {COMMODITY_OPTIONS.map((commodity) => (
+                    <option key={commodity} value={commodity}>{commodity}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={row.weight}
+                  onChange={(event) =>
+                    setOverrideRows((prev) => prev.map((item, i) => (i === index ? { ...item, weight: event.target.value } : item)))
+                  }
+                  placeholder="Weight (0..1)"
+                />
+                <button
+                  type="button"
+                  onClick={() => setOverrideRows((prev) => prev.filter((_, i) => i !== index))}
+                  disabled={overrideRows.length <= 1}
+                >
+                  Ta bort
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setOverrideRows((prev) => [...prev, { commodity: "gold", weight: "0.0" }])}
+            >
+              Lägg till rad
+            </button>
+            <div>
+              Total vikt: {overrideRows.reduce((acc, row) => acc + (Number(row.weight) || 0), 0).toFixed(3)}
+            </div>
+            <input
+              value={overrideSource}
+              onChange={(event) => setOverrideSource(event.target.value)}
+              placeholder="Källa (valfri)"
+            />
+            <input
+              value={overrideNote}
+              onChange={(event) => setOverrideNote(event.target.value)}
+              placeholder="Notering (valfri)"
+            />
+            <button type="button" onClick={() => void saveCommodityOverride()}>
+              Spara commodity override
+            </button>
+          </div>
         </div>
 
         <div className="sector-card">
@@ -1322,6 +1607,53 @@ export default function SectorDashboard() {
           )}
         </div>
       </div>
+      {debugMode ? (
+        <details className="sector-coverage-debug" open>
+          <summary>Sector mapping debug</summary>
+          <div className="sector-coverage-debug-grid">
+            <div>
+              <strong>Canonical sector (id)</strong>: {sector || "n/a"}
+            </div>
+            <div>
+              <strong>Canonical subsector (id)</strong>: {subsector || "n/a"}
+            </div>
+            <div>
+              <strong>Mapping source</strong>: company_sector_map
+            </div>
+            <div>
+              <strong>Provider sector</strong>: FMP (metadata only)
+            </div>
+            <div>
+              <strong>Selected company</strong>: {selectedCompany?.ticker ?? "none"}
+            </div>
+            <div>
+              <strong>Override validation issues</strong>: {overrideValidationIssues.join(", ") || "none"}
+            </div>
+            <div>
+              <strong>Commodity exposure samples</strong>:
+              {(overview?.commodityExposure?.sampleProfiles ?? []).length === 0 ? (
+                " none"
+              ) : null}
+            </div>
+            {(overview?.commodityExposure?.sampleProfiles ?? []).slice(0, 6).map((profile) => (
+              <div key={`debug-exp-${profile.companyId}`}>
+                {profile.ticker ?? profile.companyId}: sector={profile.canonicalSectorId}, subsector={profile.canonicalSubsectorId ?? "n/a"}, diversified={String(profile.isDiversified)}, basis={profile.basis}
+                {profile.source ? `, source=${profile.source}` : ""}
+                {profile.note ? `, note=${profile.note}` : ""}
+                {profile.defaultProfile.exposures.length > 0
+                  ? `, default=${profile.defaultProfile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)} (${exposure.evidence}, c=${exposure.confidence.toFixed(2)})`).join(" | ")}`
+                  : ", default=none"}
+                {profile.manualOverrideProfile?.exposures?.length
+                  ? `, manual=${profile.manualOverrideProfile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)}`).join(" | ")}`
+                  : ", manual=none"}
+                {profile.finalProfile.exposures.length > 0
+                  ? `, final=${profile.finalProfile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)}`).join(" | ")}`
+                  : ", final=none"}
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
