@@ -11,12 +11,14 @@ type CompanyPickerProps = {
   onSelect: (company: CompanyOption) => void;
   placeholder?: string;
   label?: string;
+  staticOptions?: CompanyOption[];
 };
 
 export default function CompanyPicker({
   onSelect,
   placeholder = "Sök bolagsnamn",
   label = "Bolag",
+  staticOptions,
 }: CompanyPickerProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CompanyOption[]>([]);
@@ -48,6 +50,19 @@ export default function CompanyPicker({
       }
 
       const key = text.toLowerCase();
+      if (Array.isArray(staticOptions)) {
+        const next = staticOptions
+          .filter((item) =>
+            item.symbol.toLowerCase().includes(key) || item.name.toLowerCase().includes(key)
+          )
+          .slice(0, 20);
+        setResults(next);
+        setOpen(next.length > 0);
+        setHighlightedIndex(0);
+        setLoading(false);
+        return;
+      }
+
       const cached = cacheRef.current.get(key);
       if (cached && cached.expiresAt > Date.now()) {
         setResults(cached.value);
@@ -97,7 +112,7 @@ export default function CompanyPicker({
       window.clearTimeout(timeout);
       abortRef.current?.abort();
     };
-  }, [query]);
+  }, [query, staticOptions]);
 
   const topMatch = useMemo(() => results[0] ?? null, [results]);
 
