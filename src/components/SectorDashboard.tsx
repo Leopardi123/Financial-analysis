@@ -29,6 +29,27 @@ type OverviewPayload = {
   computedMetrics?: Array<{ metric: string; value: number; sampleSize?: number }>;
   missingMetrics?: string[];
   suggestedFmpEndpoints?: string[];
+  commodityExposure?: {
+    mappedCompanies: number;
+    companiesWithExposure: number;
+    sampleProfiles: Array<{
+      companyId: string;
+      ticker: string | null;
+      primaryCommodity: string | null;
+      basis: string;
+      isDiversified: boolean;
+      note: string | null;
+      canonicalSectorId: string;
+      canonicalSubsectorId: string | null;
+      exposures: Array<{
+        commodity: string;
+        weight: number;
+        evidence: string;
+        confidence: number;
+        notes?: string;
+      }>;
+    }>;
+  };
 };
 
 type MacroOverlay = { score: number | null };
@@ -1051,6 +1072,28 @@ export default function SectorDashboard() {
           >
             Spara mapping
           </button>
+          <div className="metric-list">
+            <h4>Commodity exposure</h4>
+            <div>
+              <strong>Coverage:</strong>{" "}
+              {(overview?.commodityExposure?.companiesWithExposure ?? 0)}/
+              {(overview?.commodityExposure?.mappedCompanies ?? 0)} bolag med inferred exposure.
+            </div>
+            <div>
+              <strong>Basis:</strong> canonical sektor/undersektor (v1 inference)
+            </div>
+            {(overview?.commodityExposure?.sampleProfiles ?? []).slice(0, 4).map((profile) => (
+              <div key={`exp-${profile.companyId}`}>
+                {profile.ticker ?? profile.companyId}: primary={profile.primaryCommodity ?? "n/a"},{" "}
+                basis={profile.basis}, confidence=
+                {profile.exposures.length > 0
+                  ? Math.round(
+                    (profile.exposures.reduce((acc, exposure) => acc + exposure.confidence, 0) / profile.exposures.length) * 100
+                  )
+                  : 0}%
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="sector-card">
@@ -1342,6 +1385,21 @@ export default function SectorDashboard() {
             <div>
               <strong>Provider sector</strong>: FMP (metadata only)
             </div>
+            <div>
+              <strong>Commodity exposure samples</strong>:
+              {(overview?.commodityExposure?.sampleProfiles ?? []).length === 0 ? (
+                " none"
+              ) : null}
+            </div>
+            {(overview?.commodityExposure?.sampleProfiles ?? []).slice(0, 6).map((profile) => (
+              <div key={`debug-exp-${profile.companyId}`}>
+                {profile.ticker ?? profile.companyId}: sector={profile.canonicalSectorId}, subsector={profile.canonicalSubsectorId ?? "n/a"}, diversified={String(profile.isDiversified)}, basis={profile.basis}
+                {profile.note ? `, note=${profile.note}` : ""}
+                {profile.exposures.length > 0
+                  ? `, exposures=${profile.exposures.map((exposure) => `${exposure.commodity}:${exposure.weight.toFixed(2)} (${exposure.evidence}, c=${exposure.confidence.toFixed(2)})`).join(" | ")}`
+                  : ", exposures=none"}
+              </div>
+            ))}
           </div>
         </details>
       ) : null}

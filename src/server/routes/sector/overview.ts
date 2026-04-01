@@ -1,6 +1,7 @@
 import { execute, query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
 import { ensureCanonicalSelectionRows, listCanonicalTaxonomy } from "./canonicalTaxonomy.js";
+import { computeCompanyCommodityExposureBatch } from "../../../lib/commodities/computeCompanyCommodityExposure.js";
 
 function normalizeName(value: unknown) {
   if (typeof value !== "string") {
@@ -193,13 +194,36 @@ export default async function handler(req: any, res: any) {
     const resolvedRows = await ensureCanonicalSelectionRows(sectorName, subsectorName || null);
 
     const companyRows = await query(
-      `SELECT company_id
-       FROM ${tables.companySectorMap}
+      `SELECT map.company_id, map.sector_id, map.subsector_id, companies.ticker
+       FROM ${tables.companySectorMap} map
+       LEFT JOIN ${tables.companiesV2} companies ON companies.id = map.company_id
        WHERE sector_id = ? AND (subsector_id IS ? OR subsector_id = ?)`,
       [resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, resolvedRows.subsector?.id ?? null]
     );
     const companyIds = companyRows.map((row: any) => Number(row.company_id)).filter(Boolean);
     const computed = await computeSectorMetrics(companyIds, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null);
+    const exposureProfiles = computeCompanyCommodityExposureBatch(
+      companyRows
+        .map((row: any) => ({
+          companyId: String(row.company_id ?? ""),
+          sectorId: String(row.sector_id ?? ""),
+          subsectorId: row.subsector_id ? String(row.subsector_id) : null,
+          ticker: row.ticker ? String(row.ticker) : null,
+        }))
+        .filter((row) => row.companyId && row.sectorId)
+    );
+    const exposureWithSignals = exposureProfiles.filter((item) => item.profile.exposures.length > 0).length;
+    const exposureSamples = exposureProfiles.slice(0, 10).map((item) => ({
+      companyId: item.profile.companyId,
+      ticker: item.mapping.ticker ?? null,
+      primaryCommodity: item.profile.primaryCommodity ?? null,
+      basis: item.profile.basis,
+      isDiversified: item.profile.isDiversified,
+      exposures: item.profile.exposures,
+      note: item.note ?? null,
+      canonicalSectorId: item.mapping.sectorId,
+      canonicalSubsectorId: item.mapping.subsectorId ?? null,
+    }));
 
     const metrics = await query(
       `SELECT metric, period, value, source, as_of
@@ -217,6 +241,11 @@ export default async function handler(req: any, res: any) {
       metrics,
       computedMetrics: computed.metrics,
       missingMetrics: computed.missing,
+      commodityExposure: {
+        mappedCompanies: exposureProfiles.length,
+        companiesWithExposure: exposureWithSignals,
+        sampleProfiles: exposureSamples,
+      },
       suggestedFmpEndpoints: FMP_SUGGESTED_ENDPOINTS,
       todo: [
         "Pull/refresh latest annual fundamentals for mapped companies.",
