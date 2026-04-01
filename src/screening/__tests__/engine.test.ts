@@ -58,11 +58,11 @@ const snapshot: CompanySnapshot = {
       ...snapshot,
       profile: { mktCap: 1000 },
       reportedQuarterlyBalance: { cashAndCashEquivalents: [null, 300] },
-      corporateSnapshot: { MarketCap_TargetCurrency: 1000 },
+      corporateSnapshot: { MarketCap_TargetCurrency: 10_000_000, shares_post_financing: 999999999 },
     },
     screen: corporateCashScreen,
   });
-  assert(corporateCashResult.ruleResults[0]?.value === 0.3, "expected corp cash / market cap to use reported quarterly cash");
+  assert(corporateCashResult.ruleResults[0]?.value === 0.3, "expected corp cash / market cap to use reported quarterly cash and current profile market cap");
 
   const drawdown252Screen: ScreenDefinition = {
     ...screen,

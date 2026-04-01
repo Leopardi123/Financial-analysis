@@ -60,13 +60,6 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
   const ratio = (num: number | null, den: number | null) =>
     num !== null && den !== null && den !== 0 ? num / den : null;
   const latestSeriesValue = (series: Array<number | null> | undefined): number | null => latest(series);
-  const marketCapFromInputs = (() => {
-    const price = readFiniteFromPaths("price_current_TargetCurrency", "market.price_current_TargetCurrency");
-    const shares = readFiniteFromPaths("shares_current", "market.shares_current");
-    if (price === null || shares === null) return null;
-    return price * shares;
-  })();
-
   switch (fieldKey) {
     case "return_5d":
     case "return_20d":
@@ -115,11 +108,18 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
       const reportedCorporateCash = latestSeriesValue(reportedQuarterlyBalance.cashAndCashEquivalents)
         ?? latestSeriesValue(reportedQuarterlyBalance.cashAndShortTermInvestments)
         ?? latestSeriesValue(reportedQuarterlyBalance.cashAndCashEquivalentsAndShortTermInvestments);
-      const profileMarketCapRaw = Number(profile.mktCap);
-      const profileMarketCap = Number.isFinite(profileMarketCapRaw) && profileMarketCapRaw > 0 ? profileMarketCapRaw : null;
-      const marketCap = readFiniteFromPaths("MarketCap_TargetCurrency", "marketValue.MarketCap_TargetCurrency")
-        ?? profileMarketCap
-        ?? marketCapFromInputs;
+      const profileMarketCapCandidates = [profile.mktCap, profile.marketCap];
+      const profileMarketCap = profileMarketCapCandidates
+        .map((value) => Number(value))
+        .find((value) => Number.isFinite(value) && value > 0) ?? null;
+      const profilePriceRaw = Number(profile.price);
+      const profilePrice = Number.isFinite(profilePriceRaw) && profilePriceRaw > 0 ? profilePriceRaw : null;
+      const profileSharesRaw = Number(profile.sharesOutstanding);
+      const profileShares = Number.isFinite(profileSharesRaw) && profileSharesRaw > 0 ? profileSharesRaw : null;
+      const marketCapFromCurrentProfileInputs = profilePrice !== null && profileShares !== null
+        ? profilePrice * profileShares
+        : null;
+      const marketCap = profileMarketCap ?? marketCapFromCurrentProfileInputs;
       if (reportedCorporateCash === null || marketCap === null || marketCap <= 0) return null;
       return ratio(reportedCorporateCash, marketCap);
     }

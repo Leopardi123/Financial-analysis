@@ -144,18 +144,86 @@ function readPathValue(source: Record<string, unknown>, path: string): unknown {
 }
 
 function resolveCorporateDebugMetric(snapshot: Record<string, unknown> | null | undefined, field: string) {
+  if (field === "corp_cash_over_market_cap") {
+    const cashCandidates = [
+      "reportedQuarterlyBalance.cashAndCashEquivalents",
+      "reportedQuarterlyBalance.cashAndShortTermInvestments",
+      "reportedQuarterlyBalance.cashAndCashEquivalentsAndShortTermInvestments",
+    ];
+    const marketCapCandidates = [
+      "profile.mktCap",
+      "profile.marketCap",
+      "profile.price * profile.sharesOutstanding",
+    ];
+    if (!snapshot) {
+      return {
+        resolvedPath: `${cashCandidates[0]} / ${marketCapCandidates[0]}`,
+        sourceObject: "screeningPayload",
+        rawValue: null,
+        normalizedValue: null,
+        missingReason: "corporateSnapshot saknas i payload",
+        cashSourcePathUsed: null,
+        marketCapSourcePathUsed: null,
+        usedReportedQuarterlyCash: false,
+        usedModeledMarketCap: false,
+        usedPostFinancingShares: false,
+      };
+    }
+
+    let cashValue: number | null = null;
+    let cashSourcePathUsed: string | null = null;
+    for (const path of cashCandidates) {
+      const raw = readPathValue(snapshot, path);
+      if (!Array.isArray(raw)) continue;
+      for (let i = raw.length - 1; i >= 0; i -= 1) {
+        const value = raw[i];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          cashValue = value;
+          cashSourcePathUsed = path;
+          break;
+        }
+      }
+      if (cashSourcePathUsed) break;
+    }
+
+    const profileMktCap = Number(readPathValue(snapshot, "profile.mktCap"));
+    const profileMarketCap = Number(readPathValue(snapshot, "profile.marketCap"));
+    const profilePrice = Number(readPathValue(snapshot, "profile.price"));
+    const profileShares = Number(readPathValue(snapshot, "profile.sharesOutstanding"));
+    const marketCapFromPriceShares = Number.isFinite(profilePrice) && profilePrice > 0 && Number.isFinite(profileShares) && profileShares > 0
+      ? profilePrice * profileShares
+      : null;
+
+    const marketCapResolved = Number.isFinite(profileMktCap) && profileMktCap > 0
+      ? { value: profileMktCap, path: "profile.mktCap" }
+      : (Number.isFinite(profileMarketCap) && profileMarketCap > 0
+        ? { value: profileMarketCap, path: "profile.marketCap" }
+        : (marketCapFromPriceShares !== null
+          ? { value: marketCapFromPriceShares, path: "profile.price * profile.sharesOutstanding" }
+          : null));
+
+    const normalizedValue = cashValue !== null && marketCapResolved && marketCapResolved.value > 0
+      ? cashValue / marketCapResolved.value
+      : null;
+
+    return {
+      resolvedPath: `${cashSourcePathUsed ?? cashCandidates.join(" | ")} / ${marketCapResolved?.path ?? marketCapCandidates.join(" | ")}`,
+      sourceObject: "screeningPayload",
+      rawValue: normalizedValue,
+      normalizedValue,
+      missingReason: normalizedValue === null ? "cash eller current market cap saknas/ogiltig" : null,
+      cashSourcePathUsed,
+      marketCapSourcePathUsed: marketCapResolved?.path ?? null,
+      usedReportedQuarterlyCash: cashSourcePathUsed !== null,
+      usedModeledMarketCap: false,
+      usedPostFinancingShares: false,
+    };
+  }
+
   const candidatesByField: Record<string, string[]> = {
     corp_ev_over_nav: ["EV_over_NAV", "marketValue.EV_over_NAV", "marketValue.ev_over_nav"],
     corp_ev_over_npv: ["EV_over_NPV", "marketValue.EV_over_NPV", "marketValue.ev_over_npv"],
     corp_p_over_nav: ["P_over_NAV", "marketValue.P_over_NAV", "marketValue.p_over_nav"],
-    corp_cash_over_market_cap: [
-      "reportedQuarterlyBalance.cashAndCashEquivalents",
-      "reportedQuarterlyBalance.cashAndShortTermInvestments",
-      "reportedQuarterlyBalance.cashAndCashEquivalentsAndShortTermInvestments",
-      "MarketCap_TargetCurrency",
-      "marketValue.MarketCap_TargetCurrency",
-      "profile.mktCap",
-    ],
   };
   const candidates = candidatesByField[field] ?? [];
   if (!snapshot) {
@@ -452,8 +520,11 @@ export default function ScreeningDashboard() {
             }
             : null;
           const debug = resolveCorporateDebugMetric(debugSource as Record<string, unknown> | null | undefined, corporateField);
+          const extra = corporateField === "corp_cash_over_market_cap"
+            ? ` cashSourcePathUsed=${String((debug as { cashSourcePathUsed?: string | null }).cashSourcePathUsed ?? "null")} marketCapSourcePathUsed=${String((debug as { marketCapSourcePathUsed?: string | null }).marketCapSourcePathUsed ?? "null")} usedReportedQuarterlyCash=${String((debug as { usedReportedQuarterlyCash?: boolean }).usedReportedQuarterlyCash ?? false)} usedModeledMarketCap=${String((debug as { usedModeledMarketCap?: boolean }).usedModeledMarketCap ?? false)} usedPostFinancingShares=${String((debug as { usedPostFinancingShares?: boolean }).usedPostFinancingShares ?? false)}`
+            : "";
           notes.push(
-            `[corp-debug] field=${corporateField} source=${debug.sourceObject} path=${debug.resolvedPath} raw=${debug.rawValue === null ? "null" : String(debug.rawValue)} normalized=${debug.normalizedValue === null ? "null" : String(debug.normalizedValue)} reason=${debug.missingReason ?? "ok"}`,
+            `[corp-debug] field=${corporateField} source=${debug.sourceObject} path=${debug.resolvedPath} raw=${debug.rawValue === null ? "null" : String(debug.rawValue)} normalized=${debug.normalizedValue === null ? "null" : String(debug.normalizedValue)} reason=${debug.missingReason ?? "ok"}${extra}`,
           );
         }
       }
