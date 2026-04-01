@@ -14,6 +14,7 @@ import { buildCopperInterpretation } from "../lib/sector/commodityProfiles/coppe
 import { buildGoldInterpretation } from "../lib/sector/commodityProfiles/goldInterpretation";
 import DirectionalSpine from "./DirectionalSpine";
 import CommodityTrendSwipeSection from "./CommodityTrendSwipeSection";
+import CompanyPicker from "./CompanyPicker";
 
 type ManualInput = {
   input_type: string;
@@ -451,9 +452,7 @@ export default function SectorDashboard() {
   const [overrideSource, setOverrideSource] = useState("");
   const [overrideNote, setOverrideNote] = useState("");
   const [overviewReloadNonce, setOverviewReloadNonce] = useState(0);
-  const [companySearchText, setCompanySearchText] = useState("");
-  const [companyList, setCompanyList] = useState<string[]>([]);
-  const [companySearchResults, setCompanySearchResults] = useState<string[]>([]);
+  const [availableTickers, setAvailableTickers] = useState<string[]>([]);
   const [activeCompanyTicker, setActiveCompanyTicker] = useState("");
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [commoditySnapshot, setCommoditySnapshot] = useState<CommoditySnapshotPayload | null>(null);
@@ -692,7 +691,7 @@ export default function SectorDashboard() {
       const response = await fetch("/api/company/list");
       const payload = await response.json();
       if (active && response.ok) {
-        setCompanyList(Array.isArray(payload.tickers) ? payload.tickers.map((ticker: unknown) => String(ticker)) : []);
+        setAvailableTickers(Array.isArray(payload.tickers) ? payload.tickers.map((ticker: unknown) => String(ticker)) : []);
       }
     }
     void loadCompanyList();
@@ -700,37 +699,6 @@ export default function SectorDashboard() {
       active = false;
     };
   }, []);
-
-  useEffect(() => {
-    const q = companySearchText.trim();
-    if (q.length < 2) {
-      const localMatches = companyList
-        .filter((ticker) => ticker.toLowerCase().includes(q.toLowerCase()))
-        .slice(0, 25);
-      setCompanySearchResults(localMatches);
-      return;
-    }
-    let active = true;
-    async function searchCompanies() {
-      const response = await fetch(`/api/companies/search?q=${encodeURIComponent(q)}`);
-      const payload = await response.json();
-      if (!active) return;
-      const apiMatches = Array.isArray(payload.results)
-        ? payload.results
-          .map((row: any) => String(row.symbol ?? "").toUpperCase())
-          .filter(Boolean)
-        : [];
-      const localMatches = companyList
-        .filter((ticker) => ticker.toLowerCase().includes(q.toLowerCase()))
-        .slice(0, 25);
-      const merged = Array.from(new Set([...apiMatches, ...localMatches])).slice(0, 25);
-      setCompanySearchResults(merged);
-    }
-    void searchCompanies();
-    return () => {
-      active = false;
-    };
-  }, [companyList, companySearchText]);
 
   useEffect(() => {
     if (!sector || !subsector) {
@@ -1147,12 +1115,10 @@ export default function SectorDashboard() {
           <p className="bread">
             Välj ett bolag en gång och använd samma val för både mapping och manuell commodity override.
           </p>
-          <label htmlFor="company-search">Sök bolag (lokal lista)</label>
-          <input
-            id="company-search"
-            value={companySearchText}
-            onChange={(event) => setCompanySearchText(event.target.value)}
-            placeholder="Sök ticker eller namn"
+          <CompanyPicker
+            label="Sök bolag"
+            placeholder="T.ex. Apple"
+            onSelect={(company) => applyActiveCompanyTicker(company.symbol)}
           />
           <label htmlFor="company-select">Välj bolag</label>
           <select
@@ -1161,7 +1127,7 @@ export default function SectorDashboard() {
             onChange={(event) => applyActiveCompanyTicker(event.target.value)}
           >
             <option value="">Inga alternativ</option>
-            {companySearchResults.map((ticker) => (
+            {availableTickers.map((ticker) => (
               <option key={`ticker-${ticker}`} value={ticker}>
                 {ticker}
               </option>
