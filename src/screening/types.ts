@@ -44,6 +44,7 @@ export type CompanySnapshot = {
   manual?: Record<string, number>;
   price?: Record<string, unknown> | null;
   corporateSnapshot?: Record<string, unknown> | null;
+  corpCashOverMarketCapDebug?: Record<string, unknown> | null;
 };
 
 export type RuleOperator = ">" | ">=" | "<" | "<=" | "==" | "!=" | "in";

@@ -105,6 +105,10 @@ export function resolveFieldValue(snapshot: CompanySnapshot, fieldKey: string): 
     case "corp_market_cap_over_nav":
       return ratio(readFinite("MarketCap_TargetCurrency"), readFinite("NAV_today_TargetCurrency"));
     case "corp_cash_over_market_cap": {
+      const precomputed = snapshot.corpCashOverMarketCapDebug as { finalRatioValue?: unknown; missingReason?: unknown } | undefined;
+      if (typeof precomputed?.finalRatioValue === "number" && Number.isFinite(precomputed.finalRatioValue)) {
+        return precomputed.finalRatioValue;
+      }
       const reportedCorporateCash = latestSeriesValue(reportedQuarterlyBalance.cashAndCashEquivalents)
         ?? latestSeriesValue(reportedQuarterlyBalance.cashAndShortTermInvestments)
         ?? latestSeriesValue(reportedQuarterlyBalance.cashAndCashEquivalentsAndShortTermInvestments);

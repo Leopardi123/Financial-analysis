@@ -59,10 +59,11 @@ const snapshot: CompanySnapshot = {
       profile: { mktCap: 1000 },
       reportedQuarterlyBalance: { cashAndCashEquivalents: [null, 300] },
       corporateSnapshot: { MarketCap_TargetCurrency: 10_000_000, shares_post_financing: 999999999 },
+      corpCashOverMarketCapDebug: { finalRatioValue: 0.42, missingReason: null },
     },
     screen: corporateCashScreen,
   });
-  assert(corporateCashResult.ruleResults[0]?.value === 0.3, "expected corp cash / market cap to use reported quarterly cash and current profile market cap");
+  assert(corporateCashResult.ruleResults[0]?.value === 0.42, "expected corp cash / market cap to prefer currency-aligned precomputed ratio");
 
   const drawdown252Screen: ScreenDefinition = {
     ...screen,

@@ -83,6 +83,19 @@ function isStale(value: string | null, days: number) {
   return Date.now() - date.getTime() > days * DAY_MS;
 }
 
+function parseReportedCurrencyFromReport(row: { data_json?: unknown } | null | undefined): string | null {
+  if (!row?.data_json) return null;
+  try {
+    const parsed = JSON.parse(String(row.data_json)) as Record<string, unknown>;
+    const raw = parsed.reportedCurrency;
+    if (typeof raw !== "string") return null;
+    const normalized = raw.trim().toUpperCase();
+    return normalized ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(req: any, res: any) {
   try {
     await ensureSchema();
@@ -206,6 +219,18 @@ export default async function handler(req: any, res: any) {
       .map((fiscalDate) => Number(fiscalDate.slice(0, 4)))
       .filter((year) => !Number.isNaN(year));
 
+    const latestBalanceReportRows = await query(
+      `SELECT data_json
+       FROM ${tables.financialReports}
+       WHERE company_id = ? AND statement = 'balance' AND period = ?
+       ORDER BY fiscal_date DESC
+       LIMIT 3`,
+      [company.id, period]
+    );
+    const reportedCurrency = latestBalanceReportRows
+      .map((row) => parseReportedCurrencyFromReport(row as { data_json?: unknown }))
+      .find((value): value is string => typeof value === "string") ?? null;
+
     let marketPrice: number | null = null;
     let marketCap: number | null = null;
     let sharesOutstanding: number | null = null;
@@ -254,6 +279,7 @@ export default async function handler(req: any, res: any) {
       },
       rr_overlay: rrOverlay,
       meta: {
+        reportedCurrency,
         lastAnnualFetchAt: company?.last_fy_fetch_at ?? null,
         lastQuarterlyFetchAt: company?.last_q_fetch_at ?? null,
         staleAnnual: isStale(company?.last_fy_fetch_at ?? null, 365),
