@@ -20,7 +20,8 @@ export default async function handler(req: any, res: any) {
     const sectorName = normalizeName(req.body?.sector);
     const subsectorName = normalizeName(req.body?.subsector);
     const tickers = Array.isArray(req.body?.tickers) ? req.body.tickers : [];
-    // Non-canonical metadata only. Must not drive stage/exposure logic.
+    // category is non-canonical metadata.
+    // Do NOT use for stage, exposure, or sector classification.
     const categoryMetadata = normalizeName(req.body?.category);
 
     if (!sectorName || tickers.length === 0) {
