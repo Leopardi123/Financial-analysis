@@ -270,7 +270,8 @@ async function loadSnapshot(
   const [companyPayload, quarterlyPayload, profilePayload, pricePayload, priceNowPayload] = await Promise.all([
     fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=fy`).catch(() => null),
     includeQuarterlyReportedCash
-      ? fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=quarterly`).catch(() => null)
+      ? fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=q`)
+        .catch(() => fetchJson(`/api/company?ticker=${encodeURIComponent(normalizedTicker)}&period=quarterly`).catch(() => null))
       : Promise.resolve(null),
     fetchJson(`/api/company/profile?ticker=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
     fetchJson(`/api/screening/price-snapshot?symbol=${encodeURIComponent(normalizedTicker)}`).catch(() => null),
