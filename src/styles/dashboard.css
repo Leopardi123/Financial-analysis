@@ -417,6 +417,23 @@
   letter-spacing: 1px;
 }
 
+.sector-admin-collapsible > summary {
+  cursor: pointer;
+  font-family: "Josefin Sans", sans-serif;
+  letter-spacing: 1px;
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.sector-admin-collapsible:not([open]) > summary {
+  margin-bottom: 0;
+}
+
+.sector-admin-collapsible > summary::marker {
+  color: #334155;
+}
+
 .todo-list {
   margin: 0;
   padding-left: 18px;
@@ -691,6 +708,21 @@
 
 .single-stock-search-card .stock-selector {
   gap: 6px;
+}
+
+.single-stock-filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 10px;
+  align-items: end;
+}
+
+.single-stock-filter-debug {
+  font-size: 11px;
+  padding: 6px 8px;
+  border: 1px dashed #94a3b8;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.6);
 }
 
 .single-stock-header-card .subrub {
