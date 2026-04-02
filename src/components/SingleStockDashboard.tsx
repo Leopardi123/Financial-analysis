@@ -1254,6 +1254,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [availableTickers, setAvailableTickers] = useState<string[]>([]);
   const [mappedCompanies, setMappedCompanies] = useState<CompanySectorMappingOption[]>([]);
   const [mappedCompaniesError, setMappedCompaniesError] = useState<string | null>(null);
+  const [mappedCompaniesDiagnostics, setMappedCompaniesDiagnostics] = useState<{ categoryColumnAvailable: boolean | null; mappedCompaniesCount: number | null }>({ categoryColumnAvailable: null, mappedCompaniesCount: null });
   const [selectedMappedSector, setSelectedMappedSector] = useState("");
   const [selectedMappedSubsector, setSelectedMappedSubsector] = useState("");
   const [selectedSpecificMapping, setSelectedSpecificMapping] = useState("");
@@ -1506,7 +1507,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const loadMappedCompanies = async () => {
     try {
       setMappedCompaniesError(null);
-      const response = await fetch("/api/sector/company-mapping");
+      const response = await fetch(`/api/sector/company-mapping${debugEnabled ? "?debug=1" : ""}`);
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error ?? "Failed to load mapped companies.");
@@ -1526,8 +1527,14 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         }))
         .filter((row: CompanySectorMappingOption) => Boolean(row.companyId && row.ticker && row.sectorId));
       setMappedCompanies(normalized);
+      const diagnosticsRaw = payload?.diagnostics;
+      setMappedCompaniesDiagnostics({
+        categoryColumnAvailable: typeof diagnosticsRaw?.categoryColumnAvailable === "boolean" ? diagnosticsRaw.categoryColumnAvailable : null,
+        mappedCompaniesCount: typeof diagnosticsRaw?.mappedCompaniesCount === "number" ? diagnosticsRaw.mappedCompaniesCount : normalized.length,
+      });
     } catch (error) {
       setMappedCompanies([]);
+      setMappedCompaniesDiagnostics({ categoryColumnAvailable: null, mappedCompaniesCount: null });
       setMappedCompaniesError(normalizeClientErrorMessage((error as Error).message, "Failed to load mapped companies."));
       console.error("Failed to load mapped companies", error);
     }
@@ -4608,6 +4615,8 @@ Capital Available: ${availableLabel}`,
                 <div><strong>filters:</strong> sector={selectedMappedSector || "all"}, undersektor={selectedMappedSubsector || "all"}, specific={selectedSpecificMapping || "all"}, majorJunior={selectedMappedCategory || "all"}</div>
                 <div><strong>matching companies:</strong> {filteredMappedTickers.length}</div>
                 <div><strong>source:</strong> mapped company list (company_sector_map + commodity overrides + category metadata)</div>
+                <div><strong>mapped rows fetched:</strong> {mappedCompaniesDiagnostics.mappedCompaniesCount ?? "n/a"}</div>
+                <div><strong>category column:</strong> {mappedCompaniesDiagnostics.categoryColumnAvailable === null ? "unknown" : (mappedCompaniesDiagnostics.categoryColumnAvailable ? "available" : "missing (fallback: null category)")}</div>
                 <div><strong>specific mapping filter:</strong> {specificMappingOptions.length > 0 ? "active/available" : "unavailable in current context"}</div>
               </div>
             )}

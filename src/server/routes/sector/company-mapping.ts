@@ -16,14 +16,29 @@ function normalizeText(value: unknown): string {
   return value.trim();
 }
 
-export default async function handler(_req: any, res: any) {
+let companySectorMapHasCategoryColumn: boolean | null = null;
+
+async function detectCategoryColumnSupport() {
+  if (companySectorMapHasCategoryColumn !== null) {
+    return companySectorMapHasCategoryColumn;
+  }
+  const tableInfo = await query(`PRAGMA table_info(${tables.companySectorMap})`);
+  companySectorMapHasCategoryColumn = (tableInfo as Array<{ name?: unknown }>).some((column) =>
+    String(column?.name ?? "").toLowerCase() === "category"
+  );
+  return companySectorMapHasCategoryColumn;
+}
+
+export default async function handler(req: any, res: any) {
   try {
     await ensureSchema();
+    const canReadCategory = await detectCategoryColumnSupport();
+    const categorySelectSql = canReadCategory ? "map.category AS category," : "NULL AS category,";
     const rows = await query(
       `SELECT map.company_id,
               v2.ticker,
               COALESCE(c.name, v2.ticker) AS company_name,
-              map.category,
+              ${categorySelectSql}
               s.name AS sector_name,
               ss.name AS subsector_name,
               o.commodity
@@ -85,7 +100,20 @@ export default async function handler(_req: any, res: any) {
       specificMappings: entry.specificMappings.sort((a, b) => a.localeCompare(b)),
     }));
 
-    res.status(200).json({ ok: true, mappings });
+    const debugMode = String(req.query?.debug ?? "") === "1";
+    res.status(200).json({
+      ok: true,
+      mappings,
+      ...(debugMode
+        ? {
+          diagnostics: {
+            categoryColumnAvailable: canReadCategory,
+            sourceTable: tables.companySectorMap,
+            mappedCompaniesCount: mappings.length,
+          },
+        }
+        : {}),
+    });
   } catch (error) {
     res.status(500).json({ ok: false, error: (error as Error).message });
   }
