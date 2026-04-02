@@ -1132,74 +1132,77 @@ export default function SectorDashboard() {
         </div>
 
         <div className="sector-card">
-          <h3>Manual inputs</h3>
-          <p className="bread">
-            Manuella inputs är ett valfritt analystlager som kompletterar den automatiska
-            commodity-bedömningen. Alla svar sparas med tidsstämpel och kopplas till
-            sektor/undersektor.
-          </p>
-          <div className="manual-inputs">
-            {questions.map((question) => (
-              <div key={question.inputType} className="manual-input-row">
-                <div>
-                  <label htmlFor={question.inputType}>{question.label}</label>
-                  <select
-                    id={question.inputType}
-                    value={inputValues[question.inputType] ?? ""}
-                    onChange={(event) =>
-                      setInputValues((prev) => ({
-                        ...prev,
-                        [question.inputType]: event.target.value,
-                      }))
+          <details className="sector-admin-collapsible">
+            <summary>Manual inputs</summary>
+            <p className="bread">
+              Manuella inputs är ett valfritt analystlager som kompletterar den automatiska
+              commodity-bedömningen. Alla svar sparas med tidsstämpel och kopplas till
+              sektor/undersektor.
+            </p>
+            <div className="manual-inputs">
+              {questions.map((question) => (
+                <div key={question.inputType} className="manual-input-row">
+                  <div>
+                    <label htmlFor={question.inputType}>{question.label}</label>
+                    <select
+                      id={question.inputType}
+                      value={inputValues[question.inputType] ?? ""}
+                      onChange={(event) =>
+                        setInputValues((prev) => ({
+                          ...prev,
+                          [question.inputType]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Välj</option>
+                      {question.options.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void submitInput(question.inputType, inputValues[question.inputType] ?? "")
                     }
                   >
-                    <option value="">Välj</option>
-                    {question.options.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                    Spara
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void submitInput(question.inputType, inputValues[question.inputType] ?? "")
-                  }
-                >
-                  Spara
-                </button>
+              ))}
+            </div>
+            <div className="manual-meta">
+              <div>
+                <label htmlFor="manual-source">Källa</label>
+                <input
+                  id="manual-source"
+                  value={inputSource}
+                  onChange={(event) => setInputSource(event.target.value)}
+                  placeholder="LBMA, OPEC, årsredovisning ..."
+                />
               </div>
-            ))}
-          </div>
-          <div className="manual-meta">
-            <div>
-              <label htmlFor="manual-source">Källa</label>
-              <input
-                id="manual-source"
-                value={inputSource}
-                onChange={(event) => setInputSource(event.target.value)}
-                placeholder="LBMA, OPEC, årsredovisning ..."
-              />
+              <div>
+                <label htmlFor="manual-note">Kommentar</label>
+                <input
+                  id="manual-note"
+                  value={inputNote}
+                  onChange={(event) => setInputNote(event.target.value)}
+                  placeholder="Kort notering"
+                />
+              </div>
             </div>
-            <div>
-              <label htmlFor="manual-note">Kommentar</label>
-              <input
-                id="manual-note"
-                value={inputNote}
-                onChange={(event) => setInputNote(event.target.value)}
-                placeholder="Kort notering"
-              />
-            </div>
-          </div>
-          {manualStatus && <div className="status">{manualStatus}</div>}
+            {manualStatus && <div className="status">{manualStatus}</div>}
+          </details>
         </div>
 
         <div className="sector-card">
-          <h3>Map companies</h3>
-          <p className="bread">
-            Company mapping gäller hela canonical sektor/subsektor-modellen. Commodity override är en separat Materials-funktion.
-          </p>
+          <details className="sector-admin-collapsible">
+            <summary>Map companies</summary>
+            <p className="bread">
+              Company mapping gäller hela canonical sektor/subsektor-modellen. Commodity override är en separat Materials-funktion.
+            </p>
           <label htmlFor="sector-admin-secret">Admin-lösenord (krävs vid save)</label>
           <input
             id="sector-admin-secret"
@@ -1465,6 +1468,7 @@ export default function SectorDashboard() {
             </div>
           )}
           {mapStatus && <div className="status">{mapStatus}</div>}
+          </details>
         </div>
 
         <div className="sector-card">
