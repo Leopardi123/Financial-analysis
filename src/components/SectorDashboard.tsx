@@ -440,6 +440,7 @@ function resolveSectorMacroTagWithPath(
 }
 
 export default function SectorDashboard() {
+  type CompanyDirectoryEntry = { ticker: string; name: string };
   const [sector, setSector] = useState(SECTORS[0]?.id ?? "");
   const [subsector, setSubsector] = useState(SECTORS[0]?.subsectors[0]?.id ?? "");
   const [manualInputs, setManualInputs] = useState<ManualInput[]>([]);
@@ -447,7 +448,8 @@ export default function SectorDashboard() {
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [inputSource, setInputSource] = useState("");
   const [inputNote, setInputNote] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
+  const [manualStatus, setManualStatus] = useState<string | null>(null);
+  const [mapStatus, setMapStatus] = useState<string | null>(null);
   const [mappingTickers, setMappingTickers] = useState("");
   const [mappingCategory, setMappingCategory] = useState(COMPANY_CATEGORIES[0]);
   const [adminSecretInput, setAdminSecretInput] = useState("");
@@ -459,9 +461,12 @@ export default function SectorDashboard() {
   const [overrideNote, setOverrideNote] = useState("");
   const [overviewReloadNonce, setOverviewReloadNonce] = useState(0);
   const [companySearchText, setCompanySearchText] = useState("");
-  const [companyList, setCompanyList] = useState<string[]>([]);
-  const [companySearchResults, setCompanySearchResults] = useState<string[]>([]);
+  const [companyList, setCompanyList] = useState<CompanyDirectoryEntry[]>([]);
+  const [companySearchResults, setCompanySearchResults] = useState<CompanyDirectoryEntry[]>([]);
   const [activeCompanyTicker, setActiveCompanyTicker] = useState("");
+  const [activeCompanyName, setActiveCompanyName] = useState("");
+  const [mappingSector, setMappingSector] = useState(SECTORS[0]?.id ?? "");
+  const [mappingSubsector, setMappingSubsector] = useState(SECTORS[0]?.subsectors[0]?.id ?? "");
   const [lastMappingDebug, setLastMappingDebug] = useState<any | null>(null);
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [commoditySnapshot, setCommoditySnapshot] = useState<CommoditySnapshotPayload | null>(null);
@@ -617,6 +622,9 @@ export default function SectorDashboard() {
       return true;
     });
   }, [filteredSectorOptions, macroLens, macroStrength, macroTagBySector, sector]);
+  const mappingSubsectors = useMemo(() => {
+    return SECTORS.find((item) => item.id === mappingSector)?.subsectors ?? [];
+  }, [mappingSector]);
 
   const questions = useMemo(() => {
     if (sector === "materials" && subsector === "gold_miners") {
@@ -635,7 +643,7 @@ export default function SectorDashboard() {
   const selectedCommodity = isGoldCommodityView ? "gold" : isCopperCommodityView ? "copper" : null;
   const isCommoditySnapshotView = selectedCommodity !== null;
   const debugMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
-  const isMaterialsSector = sector === "materials";
+  const isMaterialsSector = mappingSector === "materials";
   const commodityOverrideReason = isMaterialsSector
     ? "enabled"
     : "disabled: selected sector is not Materials";
@@ -697,6 +705,15 @@ export default function SectorDashboard() {
       setSubsector(subsectors[0]?.id ?? "");
     }
   }, [subsector, subsectors]);
+  useEffect(() => {
+    if (!SECTORS.some((item) => item.id === mappingSector)) {
+      setMappingSector(SECTORS[0]?.id ?? "");
+      return;
+    }
+    if (!mappingSubsectors.some((item) => item.id === mappingSubsector)) {
+      setMappingSubsector(mappingSubsectors[0]?.id ?? "");
+    }
+  }, [mappingSector, mappingSubsector, mappingSubsectors]);
 
   useEffect(() => {
     let active = true;
@@ -704,7 +721,21 @@ export default function SectorDashboard() {
       const response = await fetch("/api/company/list");
       const payload = await response.json();
       if (active && response.ok) {
-        setCompanyList(Array.isArray(payload.tickers) ? payload.tickers.map((ticker: unknown) => String(ticker)) : []);
+        const tickers = Array.isArray(payload.tickers)
+          ? payload.tickers.map((ticker: unknown) => String(ticker).toUpperCase())
+          : [];
+        const byTicker = new Map<string, CompanyDirectoryEntry>();
+        if (Array.isArray(payload.companies)) {
+          for (const row of payload.companies as Array<{ ticker?: unknown; name?: unknown }>) {
+            const ticker = String(row?.ticker ?? "").trim().toUpperCase();
+            if (!ticker) continue;
+            byTicker.set(ticker, {
+              ticker,
+              name: String(row?.name ?? ticker).trim() || ticker,
+            });
+          }
+        }
+        setCompanyList(tickers.map((ticker: string) => byTicker.get(ticker) ?? { ticker, name: ticker }));
       }
     }
     void loadCompanyList();
@@ -715,8 +746,20 @@ export default function SectorDashboard() {
 
   useEffect(() => {
     const q = companySearchText.trim();
+    const normalized = q.toLowerCase();
     const localMatches = companyList
-      .filter((ticker) => ticker.toLowerCase().includes(q.toLowerCase()))
+      .filter((item) => {
+        if (!normalized) return true;
+        const nameMatch = item.name.toLowerCase().includes(normalized);
+        const tickerMatch = item.ticker.toLowerCase().includes(normalized);
+        return nameMatch || tickerMatch;
+      })
+      .sort((left, right) => {
+        const leftStarts = left.name.toLowerCase().startsWith(normalized) ? 0 : 1;
+        const rightStarts = right.name.toLowerCase().startsWith(normalized) ? 0 : 1;
+        if (leftStarts !== rightStarts) return leftStarts - rightStarts;
+        return left.name.localeCompare(right.name, "sv");
+      })
       .slice(0, 25);
     setCompanySearchResults(localMatches);
   }, [companyList, companySearchText]);
@@ -801,10 +844,10 @@ export default function SectorDashboard() {
 
   async function submitInput(inputType: string, value: string) {
     if (!value) {
-      setStatus("Välj ett värde innan du sparar.");
+      setManualStatus("Välj ett värde innan du sparar.");
       return;
     }
-    setStatus("Sparar...");
+    setManualStatus("Sparar...");
     const response = await fetch("/api/sector/manual-input", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -819,10 +862,10 @@ export default function SectorDashboard() {
     });
     const payload = await response.json();
     if (!response.ok) {
-      setStatus(payload.error ?? "Misslyckades att spara.");
+      setManualStatus(payload.error ?? "Misslyckades att spara.");
       return;
     }
-    setStatus("Sparad.");
+    setManualStatus("Sparad.");
     setManualInputs((prev) => [
       {
         input_type: inputType,
@@ -837,21 +880,20 @@ export default function SectorDashboard() {
 
   async function saveCommodityOverride() {
     if (!isMaterialsSector) {
-      setStatus("Commodity override är endast tillgänglig för Materials-sektorn.");
+      setMapStatus("Commodity override är endast tillgänglig för Materials-sektorn.");
       return;
     }
     if (!adminSecretInput.trim()) {
-      setStatus("Admin-lösenord krävs för att spara commodity override.");
+      setMapStatus("Admin-lösenord krävs för att spara commodity override.");
       return;
     }
     const tickerCandidate = overrideTicker.trim()
       || activeCompanyTicker.trim()
-      || companySearchText.trim()
       || mappingTickers.split(",")[0]?.trim()
       || "";
     const ticker = tickerCandidate.toUpperCase();
     if (!ticker) {
-      setStatus("Ange ticker för manuell commodity override.");
+      setMapStatus("Ange ticker för manuell commodity override.");
       return;
     }
     setOverrideTicker(ticker);
@@ -862,10 +904,10 @@ export default function SectorDashboard() {
       }))
       .filter((item) => item.commodity && Number.isFinite(item.weight) && item.weight > 0);
     if (parsed.length === 0) {
-      setStatus("Ange minst en commodity-rad med vikt > 0.");
+      setMapStatus("Ange minst en commodity-rad med vikt > 0.");
       return;
     }
-    setStatus("Sparar commodity override...");
+    setMapStatus("Sparar commodity override...");
     const response = await fetch("/api/sector/company-commodity-override", {
       method: "POST",
       headers: {
@@ -881,16 +923,18 @@ export default function SectorDashboard() {
     });
     const payload = await response.json();
     if (!response.ok) {
-      setStatus(payload.error ?? "Misslyckades att spara override.");
+      setMapStatus(payload.error ?? "Misslyckades att spara override.");
       return;
     }
-    setStatus(`Commodity override sparad för ${payload.ticker} (${new Date().toLocaleTimeString()}).`);
+    setMapStatus(`Commodity override sparad för ${payload.ticker} (${new Date().toLocaleTimeString()}).`);
     setOverviewReloadNonce((prev) => prev + 1);
   }
 
   function applyActiveCompanyTicker(ticker: string) {
     const normalized = ticker.trim().toUpperCase();
+    const match = companyList.find((item) => item.ticker === normalized) ?? null;
     setActiveCompanyTicker(normalized);
+    setActiveCompanyName(match?.name ?? "");
     setOverrideTicker(normalized);
   }
 
@@ -1148,7 +1192,7 @@ export default function SectorDashboard() {
               />
             </div>
           </div>
-          {status && <div className="status">{status}</div>}
+          {manualStatus && <div className="status">{manualStatus}</div>}
         </div>
 
         <div className="sector-card">
@@ -1169,20 +1213,20 @@ export default function SectorDashboard() {
             id="company-search"
             value={companySearchText}
             onChange={(event) => setCompanySearchText(event.target.value)}
-            placeholder="Sök ticker eller namn"
+            placeholder="Sök bolagsnamn"
           />
           {companySearchText.trim().length > 0 && companySearchResults.length > 0 && (
             <div className="metric-list">
-              {companySearchResults.slice(0, 8).map((ticker) => (
+              {companySearchResults.slice(0, 8).map((company) => (
                 <button
-                  key={`company-search-hit-${ticker}`}
+                  key={`company-search-hit-${company.ticker}`}
                   type="button"
                   onClick={() => {
-                    setCompanySearchText(ticker);
-                    applyActiveCompanyTicker(ticker);
+                    setCompanySearchText(company.name);
+                    applyActiveCompanyTicker(company.ticker);
                   }}
                 >
-                  {ticker}
+                  {company.name} ({company.ticker})
                 </button>
               ))}
             </div>
@@ -1194,13 +1238,29 @@ export default function SectorDashboard() {
             onChange={(event) => applyActiveCompanyTicker(event.target.value)}
           >
             <option value="">Inga alternativ</option>
-            {companySearchResults.map((ticker) => (
-              <option key={`ticker-${ticker}`} value={ticker}>
-                {ticker}
+            {companySearchResults.map((company) => (
+              <option key={`ticker-${company.ticker}`} value={company.ticker}>
+                {company.name} ({company.ticker})
               </option>
             ))}
           </select>
-          <div><strong>Aktivt bolag:</strong> {activeCompanyTicker || "Inget valt"}</div>
+          <div><strong>Aktivt bolag:</strong> {activeCompanyName ? `${activeCompanyName} (${activeCompanyTicker})` : "Inget valt"}</div>
+          <label htmlFor="mapping-sector-select">Sektor</label>
+          <select id="mapping-sector-select" value={mappingSector} onChange={(event) => setMappingSector(event.target.value)}>
+            {SECTORS.map((sectorItem) => (
+              <option key={`mapping-sector-${sectorItem.id}`} value={sectorItem.id}>
+                {sectorItem.title}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="mapping-subsector-select">Undersektor</label>
+          <select id="mapping-subsector-select" value={mappingSubsector} onChange={(event) => setMappingSubsector(event.target.value)}>
+            {mappingSubsectors.map((subsectorItem) => (
+              <option key={`mapping-subsector-${subsectorItem.id}`} value={subsectorItem.id}>
+                {subsectorItem.title}
+              </option>
+            ))}
+          </select>
           <div className="metric-list">
             <h4>1) Company mapping (all sectors)</h4>
             <div className="bread">
@@ -1237,25 +1297,26 @@ export default function SectorDashboard() {
                 )
               );
               if (tickers.length === 0) {
-                setStatus("Ange minst en ticker.");
+                setMapStatus("Ange minst en ticker.");
                 return;
               }
               if (!adminSecretInput.trim()) {
-                setStatus("Admin-lösenord krävs för att spara mapping.");
+                setMapStatus("Admin-lösenord krävs för att spara mapping.");
                 return;
               }
-              setStatus("Sparar mappings...");
+              setMapStatus("Sparar mappings...");
               const requestPayload = {
-                sector,
-                subsector,
+                sector: mappingSector,
+                subsector: mappingSubsector,
                 category: mappingCategory,
                 tickers,
               };
               if (debugMode) {
                 setLastMappingDebug({
-                  selectedCompany: activeCompanyTicker || null,
-                  selectedSector: sector,
-                  selectedSubsector: subsector,
+                  selectedCompany: activeCompanyName || null,
+                  selectedTicker: activeCompanyTicker || null,
+                  selectedSector: mappingSector,
+                  selectedSubsector: mappingSubsector,
                   mappingPayload: requestPayload,
                   commodityOverride: {
                     enabled: isMaterialsSector,
@@ -1283,10 +1344,10 @@ export default function SectorDashboard() {
                 }));
               }
               if (!response.ok) {
-                setStatus(payload.error ?? "Misslyckades att spara mappings.");
+                setMapStatus(payload.error ?? "Misslyckades att spara mappings.");
                 return;
               }
-              setStatus(`Mappade ${payload.mapped} tickers.`);
+              setMapStatus(`Mappade ${payload.mapped} tickers.`);
             }}
           >
             Spara mapping
@@ -1393,15 +1454,17 @@ export default function SectorDashboard() {
           {debugMode && (
             <div className="metric-list">
               <h4>Debug mapping context</h4>
-              <div><strong>selected company:</strong> {activeCompanyTicker || "none"}</div>
-              <div><strong>selected sector:</strong> {sector || "none"}</div>
-              <div><strong>selected subsector:</strong> {subsector || "none"}</div>
+              <div><strong>selected company name:</strong> {activeCompanyName || "none"}</div>
+              <div><strong>selected ticker:</strong> {activeCompanyTicker || "none"}</div>
+              <div><strong>selected sector:</strong> {mappingSector || "none"}</div>
+              <div><strong>selected subsector:</strong> {mappingSubsector || "none"}</div>
               <div><strong>canonical resolution result:</strong> {JSON.stringify(lastMappingDebug?.canonicalResolution ?? null)}</div>
               <div><strong>mapping payload sent:</strong> {JSON.stringify(lastMappingDebug?.mappingPayload ?? null)}</div>
               <div><strong>commodity override enabled:</strong> {isMaterialsSector ? "true" : "false"}</div>
               <div><strong>commodity override reason:</strong> {commodityOverrideReason}</div>
             </div>
           )}
+          {mapStatus && <div className="status">{mapStatus}</div>}
         </div>
 
         <div className="sector-card">
