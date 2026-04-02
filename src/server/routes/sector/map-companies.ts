@@ -1,5 +1,6 @@
 import { execute, query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { assertAdminSecret } from "../../../../api/_auth.js";
 import { ensureCanonicalSelectionRows } from "./canonicalTaxonomy.js";
 
 function normalizeName(value: unknown) {
@@ -29,6 +30,7 @@ export default async function handler(req: any, res: any) {
       res.status(405).json({ ok: false, error: "Method not allowed" });
       return;
     }
+    assertAdminSecret(req);
 
     const sectorName = normalizeName(req.body?.sector);
     const subsectorName = normalizeName(req.body?.subsector);
@@ -86,7 +88,8 @@ export default async function handler(req: any, res: any) {
     });
   } catch (error) {
     const message = (error as Error).message;
-    const status = /Unknown canonical|is not part of sector/.test(message) ? 400 : 500;
+    const authStatus = Number((error as Error & { status?: number }).status ?? 0);
+    const status = authStatus || (/Unknown canonical|is not part of sector/.test(message) ? 400 : 500);
     res.status(status).json({ ok: false, error: message });
   }
 }

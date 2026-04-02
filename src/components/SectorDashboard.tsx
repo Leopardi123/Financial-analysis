@@ -715,33 +715,10 @@ export default function SectorDashboard() {
 
   useEffect(() => {
     const q = companySearchText.trim();
-    if (q.length < 2) {
-      const localMatches = companyList
-        .filter((ticker) => ticker.toLowerCase().includes(q.toLowerCase()))
-        .slice(0, 25);
-      setCompanySearchResults(localMatches);
-      return;
-    }
-    let active = true;
-    async function searchCompanies() {
-      const response = await fetch(`/api/companies/search?q=${encodeURIComponent(q)}`);
-      const payload = await response.json();
-      if (!active) return;
-      const apiMatches = Array.isArray(payload.results)
-        ? payload.results
-          .map((row: any) => String(row.symbol ?? "").toUpperCase())
-          .filter(Boolean)
-        : [];
-      const localMatches = companyList
-        .filter((ticker) => ticker.toLowerCase().includes(q.toLowerCase()))
-        .slice(0, 25);
-      const merged = Array.from(new Set([...apiMatches, ...localMatches])).slice(0, 25);
-      setCompanySearchResults(merged);
-    }
-    void searchCompanies();
-    return () => {
-      active = false;
-    };
+    const localMatches = companyList
+      .filter((ticker) => ticker.toLowerCase().includes(q.toLowerCase()))
+      .slice(0, 25);
+    setCompanySearchResults(localMatches);
   }, [companyList, companySearchText]);
 
   useEffect(() => {
@@ -861,6 +838,10 @@ export default function SectorDashboard() {
   async function saveCommodityOverride() {
     if (!isMaterialsSector) {
       setStatus("Commodity override är endast tillgänglig för Materials-sektorn.");
+      return;
+    }
+    if (!adminSecretInput.trim()) {
+      setStatus("Admin-lösenord krävs för att spara commodity override.");
       return;
     }
     const tickerCandidate = overrideTicker.trim()
@@ -1190,6 +1171,22 @@ export default function SectorDashboard() {
             onChange={(event) => setCompanySearchText(event.target.value)}
             placeholder="Sök ticker eller namn"
           />
+          {companySearchText.trim().length > 0 && companySearchResults.length > 0 && (
+            <div className="metric-list">
+              {companySearchResults.slice(0, 8).map((ticker) => (
+                <button
+                  key={`company-search-hit-${ticker}`}
+                  type="button"
+                  onClick={() => {
+                    setCompanySearchText(ticker);
+                    applyActiveCompanyTicker(ticker);
+                  }}
+                >
+                  {ticker}
+                </button>
+              ))}
+            </div>
+          )}
           <label htmlFor="company-select">Välj bolag</label>
           <select
             id="company-select"
@@ -1241,6 +1238,10 @@ export default function SectorDashboard() {
               );
               if (tickers.length === 0) {
                 setStatus("Ange minst en ticker.");
+                return;
+              }
+              if (!adminSecretInput.trim()) {
+                setStatus("Admin-lösenord krävs för att spara mapping.");
                 return;
               }
               setStatus("Sparar mappings...");
