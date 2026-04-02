@@ -1238,10 +1238,27 @@ type SingleStockDashboardProps = {
   onTickerChange?: (ticker: string) => void;
 };
 
+type CompanySectorMappingOption = {
+  companyId: string;
+  ticker: string;
+  companyName: string | null;
+  sectorId: string;
+  subsectorId: string | null;
+  category: string | null;
+  specificMappings: string[];
+};
+
 export default function SingleStockDashboard({ onTickerChange }: SingleStockDashboardProps = {}) {
   const { ticker, data, loading, error, fetchCompany } = useCompanyData("");
   const [quarterlyData, setQuarterlyData] = useState<CompanyResponse | null>(null);
   const [availableTickers, setAvailableTickers] = useState<string[]>([]);
+  const [mappedCompanies, setMappedCompanies] = useState<CompanySectorMappingOption[]>([]);
+  const [mappedCompaniesError, setMappedCompaniesError] = useState<string | null>(null);
+  const [mappedCompaniesDiagnostics, setMappedCompaniesDiagnostics] = useState<{ categoryColumnAvailable: boolean | null; mappedCompaniesCount: number | null }>({ categoryColumnAvailable: null, mappedCompaniesCount: null });
+  const [selectedMappedSector, setSelectedMappedSector] = useState("");
+  const [selectedMappedSubsector, setSelectedMappedSubsector] = useState("");
+  const [selectedSpecificMapping, setSelectedSpecificMapping] = useState("");
+  const [selectedMappedCategory, setSelectedMappedCategory] = useState("");
   const [tickersError, setTickersError] = useState<string | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [priceData, setPriceData] = useState<{
@@ -1487,8 +1504,45 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     }
   };
 
+  const loadMappedCompanies = async () => {
+    try {
+      setMappedCompaniesError(null);
+      const response = await fetch(`/api/sector/company-mapping${debugEnabled ? "?debug=1" : ""}`);
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load mapped companies.");
+      }
+      const rows = Array.isArray(payload.mappings) ? payload.mappings : [];
+      const normalized = rows
+        .map((row: any) => ({
+          companyId: String(row.companyId ?? ""),
+          ticker: String(row.ticker ?? "").trim().toUpperCase(),
+          companyName: typeof row.companyName === "string" && row.companyName.trim() ? row.companyName.trim() : null,
+          sectorId: String(row.sectorId ?? "").trim(),
+          subsectorId: typeof row.subsectorId === "string" && row.subsectorId.trim() ? row.subsectorId.trim() : null,
+          category: typeof row.category === "string" && row.category.trim() ? row.category.trim() : null,
+          specificMappings: Array.isArray(row.specificMappings)
+            ? row.specificMappings.map((item: unknown) => String(item ?? "").trim().toLowerCase()).filter(Boolean)
+            : [],
+        }))
+        .filter((row: CompanySectorMappingOption) => Boolean(row.companyId && row.ticker && row.sectorId));
+      setMappedCompanies(normalized);
+      const diagnosticsRaw = payload?.diagnostics;
+      setMappedCompaniesDiagnostics({
+        categoryColumnAvailable: typeof diagnosticsRaw?.categoryColumnAvailable === "boolean" ? diagnosticsRaw.categoryColumnAvailable : null,
+        mappedCompaniesCount: typeof diagnosticsRaw?.mappedCompaniesCount === "number" ? diagnosticsRaw.mappedCompaniesCount : normalized.length,
+      });
+    } catch (error) {
+      setMappedCompanies([]);
+      setMappedCompaniesDiagnostics({ categoryColumnAvailable: null, mappedCompaniesCount: null });
+      setMappedCompaniesError(normalizeClientErrorMessage((error as Error).message, "Failed to load mapped companies."));
+      console.error("Failed to load mapped companies", error);
+    }
+  };
+
   useEffect(() => {
     void loadTickers();
+    void loadMappedCompanies();
   }, []);
 
 
@@ -4373,6 +4427,77 @@ Capital Available: ${availableLabel}`,
     statementCurrency,
     mixedCurrencyNote,
   };
+  const mappedSectorOptions = useMemo(() => {
+    return Array.from(new Set(mappedCompanies.map((item) => item.sectorId).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  }, [mappedCompanies]);
+  const mappedSubsectorOptions = useMemo(() => {
+    if (!selectedMappedSector) return [];
+    return Array.from(
+      new Set(
+        mappedCompanies
+          .filter((item) => item.sectorId === selectedMappedSector)
+          .map((item) => item.subsectorId)
+          .filter((item): item is string => Boolean(item))
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }, [mappedCompanies, selectedMappedSector]);
+  const mappedRowsForSpecificOptions = useMemo(() => {
+    return mappedCompanies.filter((item) =>
+      (!selectedMappedSector || item.sectorId === selectedMappedSector)
+      && (!selectedMappedSubsector || item.subsectorId === selectedMappedSubsector)
+    );
+  }, [mappedCompanies, selectedMappedSector, selectedMappedSubsector]);
+  const specificMappingOptions = useMemo(() => {
+    const options = new Set<string>();
+    for (const row of mappedRowsForSpecificOptions) {
+      for (const mapping of row.specificMappings) {
+        options.add(mapping);
+      }
+    }
+    return Array.from(options).sort((a, b) => a.localeCompare(b));
+  }, [mappedRowsForSpecificOptions]);
+  const mappedCategoryOptions = useMemo(() => {
+    const candidates = mappedRowsForSpecificOptions.filter((item) =>
+      !selectedSpecificMapping || item.specificMappings.includes(selectedSpecificMapping)
+    );
+    return Array.from(new Set(candidates.map((item) => item.category).filter((item): item is string => Boolean(item)))).sort((a, b) => a.localeCompare(b));
+  }, [mappedRowsForSpecificOptions, selectedSpecificMapping]);
+  const filteredMappedRows = useMemo(() => {
+    return mappedCompanies.filter((item) =>
+      (!selectedMappedSector || item.sectorId === selectedMappedSector)
+      && (!selectedMappedSubsector || item.subsectorId === selectedMappedSubsector)
+      && (!selectedSpecificMapping || item.specificMappings.includes(selectedSpecificMapping))
+      && (!selectedMappedCategory || item.category === selectedMappedCategory)
+    );
+  }, [mappedCompanies, selectedMappedCategory, selectedMappedSector, selectedMappedSubsector, selectedSpecificMapping]);
+  const filteredMappedTickers = useMemo(() => {
+    return Array.from(new Set(filteredMappedRows.map((item) => item.ticker))).sort((a, b) => a.localeCompare(b));
+  }, [filteredMappedRows]);
+  const anyMappingFilterActive = Boolean(selectedMappedSector || selectedMappedSubsector || selectedSpecificMapping || selectedMappedCategory);
+  const tickerOptions = anyMappingFilterActive ? filteredMappedTickers : availableTickers;
+  const mappedTickerSetForPicker = anyMappingFilterActive ? filteredMappedTickers : [];
+
+  useEffect(() => {
+    if (!selectedMappedSubsector) return;
+    if (!mappedSubsectorOptions.includes(selectedMappedSubsector)) {
+      setSelectedMappedSubsector("");
+    }
+  }, [mappedSubsectorOptions, selectedMappedSubsector]);
+
+  useEffect(() => {
+    if (!selectedSpecificMapping) return;
+    if (!specificMappingOptions.includes(selectedSpecificMapping)) {
+      setSelectedSpecificMapping("");
+    }
+  }, [selectedSpecificMapping, specificMappingOptions]);
+
+  useEffect(() => {
+    if (!selectedMappedCategory) return;
+    if (!mappedCategoryOptions.includes(selectedMappedCategory)) {
+      setSelectedMappedCategory("");
+    }
+  }, [mappedCategoryOptions, selectedMappedCategory]);
+
   const selectedTickerLabel = data?.ticker ?? ticker;
   const companyHeaderTitle = profile?.companyName
     ? `${profile.companyName}${selectedTickerLabel ? ` (${selectedTickerLabel})` : ""}`
@@ -4389,6 +4514,7 @@ Capital Available: ${availableLabel}`,
               <CompanyPicker
                 label="Sök bolagsnamn"
                 placeholder="T.ex. Apple"
+                allowedSymbols={mappedTickerSetForPicker}
                 onSelect={(company) => {
                   onTickerChange?.(company.symbol);
                   void fetchCompany(company.symbol);
@@ -4405,7 +4531,7 @@ Capital Available: ${availableLabel}`,
                 }}
               >
                 <option value="Välj En Aktie">Välj En Aktie</option>
-                {availableTickers.map((item) => (
+                {tickerOptions.map((item) => (
                   <option key={item} value={item}>
                     {item}
                   </option>
@@ -4419,7 +4545,81 @@ Capital Available: ${availableLabel}`,
                 {showAdmin ? "Dölj admin" : "Visa admin"}
               </button>
             </div>
+            <div className="single-stock-filter-row">
+              <label htmlFor="single-stock-filter-sector">Sector</label>
+              <select
+                id="single-stock-filter-sector"
+                value={selectedMappedSector}
+                onChange={(event) => {
+                  setSelectedMappedSector(event.target.value);
+                  setSelectedMappedSubsector("");
+                  setSelectedSpecificMapping("");
+                  setSelectedMappedCategory("");
+                }}
+              >
+                <option value="">All</option>
+                {mappedSectorOptions.map((option) => (
+                  <option key={`single-stock-sector-${option}`} value={option}>{option}</option>
+                ))}
+              </select>
+              <label htmlFor="single-stock-filter-subsector">Undersektor</label>
+              <select
+                id="single-stock-filter-subsector"
+                value={selectedMappedSubsector}
+                onChange={(event) => {
+                  setSelectedMappedSubsector(event.target.value);
+                  setSelectedSpecificMapping("");
+                  setSelectedMappedCategory("");
+                }}
+                disabled={!selectedMappedSector}
+              >
+                <option value="">All</option>
+                {mappedSubsectorOptions.map((option) => (
+                  <option key={`single-stock-subsector-${option}`} value={option}>{option}</option>
+                ))}
+              </select>
+              {specificMappingOptions.length > 0 && (
+                <>
+                  <label htmlFor="single-stock-filter-specific">Specific mapping</label>
+                  <select
+                    id="single-stock-filter-specific"
+                    value={selectedSpecificMapping}
+                    onChange={(event) => setSelectedSpecificMapping(event.target.value)}
+                  >
+                    <option value="">All</option>
+                    {specificMappingOptions.map((option) => (
+                      <option key={`single-stock-specific-${option}`} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+              <label htmlFor="single-stock-filter-category">Major/Junior list</label>
+              <select
+                id="single-stock-filter-category"
+                value={selectedMappedCategory}
+                onChange={(event) => setSelectedMappedCategory(event.target.value)}
+              >
+                <option value="">All</option>
+                {mappedCategoryOptions.map((option) => (
+                  <option key={`single-stock-category-${option}`} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
+            {anyMappingFilterActive && filteredMappedTickers.length === 0 && (
+              <p className="status empty">No mapped companies matched this filter combination.</p>
+            )}
             {tickersError && <p className="status error">{tickersError}</p>}
+            {mappedCompaniesError && <p className="status error">{mappedCompaniesError}</p>}
+            {debugEnabled && (
+              <div className="single-stock-filter-debug">
+                <div><strong>filters:</strong> sector={selectedMappedSector || "all"}, undersektor={selectedMappedSubsector || "all"}, specific={selectedSpecificMapping || "all"}, majorJunior={selectedMappedCategory || "all"}</div>
+                <div><strong>matching companies:</strong> {filteredMappedTickers.length}</div>
+                <div><strong>source:</strong> mapped company list (company_sector_map + commodity overrides + category metadata)</div>
+                <div><strong>mapped rows fetched:</strong> {mappedCompaniesDiagnostics.mappedCompaniesCount ?? "n/a"}</div>
+                <div><strong>category column:</strong> {mappedCompaniesDiagnostics.categoryColumnAvailable === null ? "unknown" : (mappedCompaniesDiagnostics.categoryColumnAvailable ? "available" : "missing (fallback: null category)")}</div>
+                <div><strong>specific mapping filter:</strong> {specificMappingOptions.length > 0 ? "active/available" : "unavailable in current context"}</div>
+              </div>
+            )}
             {loading && <p className="status">Fetching company…</p>}
             {error && <p className="status error">{error}</p>}
           </div>
