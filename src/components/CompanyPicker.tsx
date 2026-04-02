@@ -11,12 +11,14 @@ type CompanyPickerProps = {
   onSelect: (company: CompanyOption) => void;
   placeholder?: string;
   label?: string;
+  allowedSymbols?: string[];
 };
 
 export default function CompanyPicker({
   onSelect,
   placeholder = "Sök bolagsnamn",
   label = "Bolag",
+  allowedSymbols,
 }: CompanyPickerProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CompanyOption[]>([]);
@@ -99,7 +101,15 @@ export default function CompanyPicker({
     };
   }, [query]);
 
-  const topMatch = useMemo(() => results[0] ?? null, [results]);
+  const filteredResults = useMemo(() => {
+    if (!Array.isArray(allowedSymbols) || allowedSymbols.length === 0) {
+      return results;
+    }
+    const allowedSet = new Set(allowedSymbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean));
+    return results.filter((item) => allowedSet.has(item.symbol.toUpperCase()));
+  }, [allowedSymbols, results]);
+
+  const topMatch = useMemo(() => filteredResults[0] ?? null, [filteredResults]);
 
   function choose(item: CompanyOption) {
     onSelect(item);
@@ -108,7 +118,7 @@ export default function CompanyPicker({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (!open || results.length === 0) {
+    if (!open || filteredResults.length === 0) {
       if (event.key === "Enter" && topMatch) {
         event.preventDefault();
         choose(topMatch);
@@ -118,7 +128,7 @@ export default function CompanyPicker({
 
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setHighlightedIndex((prev) => Math.min(prev + 1, results.length - 1));
+      setHighlightedIndex((prev) => Math.min(prev + 1, filteredResults.length - 1));
       return;
     }
 
@@ -130,7 +140,7 @@ export default function CompanyPicker({
 
     if (event.key === "Enter") {
       event.preventDefault();
-      const choice = results[highlightedIndex] ?? topMatch;
+      const choice = filteredResults[highlightedIndex] ?? topMatch;
       if (choice) {
         choose(choice);
       }
@@ -150,14 +160,14 @@ export default function CompanyPicker({
           value={query}
           placeholder={placeholder}
           onChange={(event) => setQuery(event.target.value)}
-          onFocus={() => setOpen(results.length > 0)}
+          onFocus={() => setOpen(filteredResults.length > 0)}
           onKeyDown={onKeyDown}
         />
         {loading && <div className="company-picker-loading">Söker…</div>}
       </div>
-      {open && results.length > 0 && (
+      {open && filteredResults.length > 0 && (
         <ul className="company-picker-results">
-          {results.map((item, index) => (
+          {filteredResults.map((item, index) => (
             <li
               key={`${item.symbol}-${item.name}`}
               className={index === highlightedIndex ? "active" : ""}
