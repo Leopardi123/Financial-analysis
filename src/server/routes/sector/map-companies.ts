@@ -9,6 +9,19 @@ function normalizeName(value: unknown) {
   return value.trim();
 }
 
+let companySectorMapHasCategoryColumn: boolean | null = null;
+
+async function detectCategoryColumnSupport() {
+  if (companySectorMapHasCategoryColumn !== null) {
+    return companySectorMapHasCategoryColumn;
+  }
+  const tableInfo = await query(`PRAGMA table_info(${tables.companySectorMap})`);
+  companySectorMapHasCategoryColumn = (tableInfo as Array<{ name?: unknown }>).some((column) =>
+    String(column?.name ?? "").toLowerCase() === "category"
+  );
+  return companySectorMapHasCategoryColumn;
+}
+
 export default async function handler(req: any, res: any) {
   try {
     await ensureSchema();
@@ -30,6 +43,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const resolvedRows = await ensureCanonicalSelectionRows(sectorName, subsectorName || null);
+    const canPersistCategory = await detectCategoryColumnSupport();
 
     const results: Array<{ ticker: string; status: string }> = [];
     const now = new Date().toISOString();
@@ -45,11 +59,19 @@ export default async function handler(req: any, res: any) {
         results.push({ ticker, status: "missing_company" });
         continue;
       }
-      await execute(
-        `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, category, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [companyId, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, categoryMetadata || null, now]
-      );
+      if (canPersistCategory) {
+        await execute(
+          `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, category, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          [companyId, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, categoryMetadata || null, now]
+        );
+      } else {
+        await execute(
+          `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, created_at)
+           VALUES (?, ?, ?, ?)`,
+          [companyId, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, now]
+        );
+      }
       results.push({ ticker, status: "mapped" });
     }
 
@@ -58,6 +80,7 @@ export default async function handler(req: any, res: any) {
       sector: resolvedRows.sector,
       subsector: resolvedRows.subsector,
       canonical: resolvedRows.canonical,
+      categoryPersisted: canPersistCategory,
       mapped: results.filter((result) => result.status === "mapped").length,
       results,
     });

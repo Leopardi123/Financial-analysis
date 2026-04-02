@@ -125,6 +125,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),
   "sector/global-macro": () => import("../src/server/routes/sector/global-macro.js"),
   "sector/commodity-snapshot": () => import("../src/server/routes/sector/commodity-snapshot.js"),
+  "sector/company-commodity-override": () => import("../src/server/routes/sector/company-commodity-override.js"),
   "screening/price-snapshot": () => import("../src/server/routes/screening/price-snapshot.js"),
 };
 

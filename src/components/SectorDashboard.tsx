@@ -462,6 +462,7 @@ export default function SectorDashboard() {
   const [companyList, setCompanyList] = useState<string[]>([]);
   const [companySearchResults, setCompanySearchResults] = useState<string[]>([]);
   const [activeCompanyTicker, setActiveCompanyTicker] = useState("");
+  const [lastMappingDebug, setLastMappingDebug] = useState<any | null>(null);
   const [macroSnapshot, setMacroSnapshot] = useState<MacroSnapshotPayload | null>(null);
   const [commoditySnapshot, setCommoditySnapshot] = useState<CommoditySnapshotPayload | null>(null);
   const [macroLens, setMacroLens] = useState<MacroToneFilter>("all");
@@ -634,6 +635,10 @@ export default function SectorDashboard() {
   const selectedCommodity = isGoldCommodityView ? "gold" : isCopperCommodityView ? "copper" : null;
   const isCommoditySnapshotView = selectedCommodity !== null;
   const debugMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
+  const isMaterialsSector = sector === "materials";
+  const commodityOverrideReason = isMaterialsSector
+    ? "enabled"
+    : "disabled: selected sector is not Materials";
   const manualInputStatus = manualInputs.length > 0 ? "available" : "none";
   const copperInterpretation = useMemo(() => {
     if (selectedCommodity !== "copper" || !commoditySnapshot?.snapshot) return null;
@@ -854,6 +859,10 @@ export default function SectorDashboard() {
   }
 
   async function saveCommodityOverride() {
+    if (!isMaterialsSector) {
+      setStatus("Commodity override är endast tillgänglig för Materials-sektorn.");
+      return;
+    }
     const tickerCandidate = overrideTicker.trim()
       || activeCompanyTicker.trim()
       || companySearchText.trim()
@@ -901,7 +910,6 @@ export default function SectorDashboard() {
   function applyActiveCompanyTicker(ticker: string) {
     const normalized = ticker.trim().toUpperCase();
     setActiveCompanyTicker(normalized);
-    setMappingTickers(normalized);
     setOverrideTicker(normalized);
   }
 
@@ -1165,7 +1173,7 @@ export default function SectorDashboard() {
         <div className="sector-card">
           <h3>Map companies</h3>
           <p className="bread">
-            Välj ett bolag en gång och använd samma val för både mapping och manuell commodity override.
+            Company mapping gäller hela canonical sektor/subsektor-modellen. Commodity override är en separat Materials-funktion.
           </p>
           <label htmlFor="sector-admin-secret">Admin-lösenord (krävs vid save)</label>
           <input
@@ -1196,48 +1204,83 @@ export default function SectorDashboard() {
             ))}
           </select>
           <div><strong>Aktivt bolag:</strong> {activeCompanyTicker || "Inget valt"}</div>
-          <label htmlFor="mapping-category">Kategori (ej klassificering)</label>
-          <select
-            id="mapping-category"
-            value={mappingCategory}
-            onChange={(event) => setMappingCategory(event.target.value)}
-          >
-            {COMPANY_CATEGORIES.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </select>
-          <input
-            value={mappingTickers}
-            onChange={(event) => setMappingTickers(event.target.value)}
-            placeholder="AAPL, MSFT, ... "
-          />
+          <div className="metric-list">
+            <h4>1) Company mapping (all sectors)</h4>
+            <div className="bread">
+              Sparar vald bolagsticker till vald canonical sektor/subsektor. Extra tickers kan läggas till valfritt.
+            </div>
+            <label htmlFor="mapping-category">Kategori (valfri metadata, ej klassificering)</label>
+            <select
+              id="mapping-category"
+              value={mappingCategory}
+              onChange={(event) => setMappingCategory(event.target.value)}
+            >
+              {COMPANY_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="mapping-extra-tickers">Extra tickers (valfritt, kommaseparerat)</label>
+            <input
+              id="mapping-extra-tickers"
+              value={mappingTickers}
+              onChange={(event) => setMappingTickers(event.target.value)}
+              placeholder="AAPL, MSFT, ... "
+            />
+          </div>
           <button
             type="button"
             onClick={async () => {
-              if (!mappingTickers.trim()) {
+              const tickers = Array.from(
+                new Set(
+                  [activeCompanyTicker, ...mappingTickers.split(",")]
+                    .map((ticker) => ticker.trim().toUpperCase())
+                    .filter(Boolean)
+                )
+              );
+              if (tickers.length === 0) {
                 setStatus("Ange minst en ticker.");
                 return;
               }
               setStatus("Sparar mappings...");
+              const requestPayload = {
+                sector,
+                subsector,
+                category: mappingCategory,
+                tickers,
+              };
+              if (debugMode) {
+                setLastMappingDebug({
+                  selectedCompany: activeCompanyTicker || null,
+                  selectedSector: sector,
+                  selectedSubsector: subsector,
+                  mappingPayload: requestPayload,
+                  commodityOverride: {
+                    enabled: isMaterialsSector,
+                    reason: commodityOverrideReason,
+                  },
+                });
+              }
               const response = await fetch("/api/sector/map-companies", {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
                   ...(adminSecretInput.trim() ? { "x-admin-secret": adminSecretInput.trim() } : {}),
                 },
-                body: JSON.stringify({
-                  sector,
-                  subsector,
-                  category: mappingCategory,
-                  tickers: mappingTickers
-                    .split(",")
-                    .map((ticker) => ticker.trim().toUpperCase())
-                    .filter(Boolean),
-                }),
+                body: JSON.stringify(requestPayload),
               });
               const payload = await response.json();
+              if (debugMode) {
+                setLastMappingDebug((prev: any) => ({
+                  ...(prev ?? {}),
+                  responseOk: response.ok,
+                  responseStatus: response.status,
+                  responsePayload: payload,
+                  canonicalResolution: payload?.canonical ?? null,
+                  categoryPersisted: payload?.categoryPersisted ?? null,
+                }));
+              }
               if (!response.ok) {
                 setStatus(payload.error ?? "Misslyckades att spara mappings.");
                 return;
@@ -1268,73 +1311,96 @@ export default function SectorDashboard() {
             ))}
           </div>
           <div className="metric-list">
-            <h4>Manual commodity override (admin/dev)</h4>
-            <input
-              value={overrideTicker}
-              onChange={(event) => setOverrideTicker(event.target.value)}
-              placeholder="Ticker (ex. CCJ)"
-            />
-            {overrideRows.map((row, index) => (
-              <div key={`override-row-${index}`} className="manual-input-row">
-                <select
-                  value={row.commodity}
-                  onChange={(event) =>
-                    setOverrideRows((prev) =>
-                      prev.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, commodity: event.target.value } : item
-                      )
-                    )
-                  }
-                >
-                  {COMMODITY_OPTIONS.map((commodity) => (
-                    <option key={`commodity-${commodity}`} value={commodity}>
-                      {commodity}
-                    </option>
-                  ))}
-                </select>
+            <h4>2) Commodity override (Materials only)</h4>
+            {!isMaterialsSector ? (
+              <div className="bread">
+                Commodity override är inaktiverad: välj sektor <strong>Materials</strong> för att aktivera denna funktion.
+              </div>
+            ) : (
+              <>
+                <div className="bread">
+                  Materials-specifik manuell override för valt bolag ({activeCompanyTicker || overrideTicker || "ingen ticker vald"}).
+                </div>
                 <input
-                  value={row.weight}
-                  onChange={(event) =>
-                    setOverrideRows((prev) =>
-                      prev.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, weight: event.target.value } : item
-                      )
-                    )
-                  }
-                  placeholder="Vikt (0..1)"
+                  value={overrideTicker}
+                  onChange={(event) => setOverrideTicker(event.target.value)}
+                  placeholder="Ticker (ex. CCJ)"
                 />
+                {overrideRows.map((row, index) => (
+                  <div key={`override-row-${index}`} className="manual-input-row">
+                    <select
+                      value={row.commodity}
+                      onChange={(event) =>
+                        setOverrideRows((prev) =>
+                          prev.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, commodity: event.target.value } : item
+                          )
+                        )
+                      }
+                    >
+                      {COMMODITY_OPTIONS.map((commodity) => (
+                        <option key={`commodity-${commodity}`} value={commodity}>
+                          {commodity}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={row.weight}
+                      onChange={(event) =>
+                        setOverrideRows((prev) =>
+                          prev.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, weight: event.target.value } : item
+                          )
+                        )
+                      }
+                      placeholder="Vikt (0..1)"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOverrideRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, itemIndex) => itemIndex !== index)))
+                      }
+                      disabled={overrideRows.length <= 1}
+                    >
+                      Ta bort
+                    </button>
+                  </div>
+                ))}
                 <button
                   type="button"
-                  onClick={() =>
-                    setOverrideRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, itemIndex) => itemIndex !== index)))
-                  }
-                  disabled={overrideRows.length <= 1}
+                  onClick={() => setOverrideRows((prev) => [...prev, { commodity: "gold", weight: "0.0" }])}
                 >
-                  Ta bort
+                  Lägg till rad
                 </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setOverrideRows((prev) => [...prev, { commodity: "gold", weight: "0.0" }])}
-            >
-              Lägg till rad
-            </button>
-            <div><strong>Total vikt:</strong> {overrideTotalWeight.toFixed(3)}</div>
-            <input
-              value={overrideSource}
-              onChange={(event) => setOverrideSource(event.target.value)}
-              placeholder="Källa (valfri)"
-            />
-            <input
-              value={overrideNote}
-              onChange={(event) => setOverrideNote(event.target.value)}
-              placeholder="Notering (valfri)"
-            />
-            <button type="button" onClick={() => void saveCommodityOverride()}>
-              Spara commodity override
-            </button>
+                <div><strong>Total vikt:</strong> {overrideTotalWeight.toFixed(3)}</div>
+                <input
+                  value={overrideSource}
+                  onChange={(event) => setOverrideSource(event.target.value)}
+                  placeholder="Källa (valfri)"
+                />
+                <input
+                  value={overrideNote}
+                  onChange={(event) => setOverrideNote(event.target.value)}
+                  placeholder="Notering (valfri)"
+                />
+                <button type="button" onClick={() => void saveCommodityOverride()}>
+                  Spara commodity override
+                </button>
+              </>
+            )}
           </div>
+          {debugMode && (
+            <div className="metric-list">
+              <h4>Debug mapping context</h4>
+              <div><strong>selected company:</strong> {activeCompanyTicker || "none"}</div>
+              <div><strong>selected sector:</strong> {sector || "none"}</div>
+              <div><strong>selected subsector:</strong> {subsector || "none"}</div>
+              <div><strong>canonical resolution result:</strong> {JSON.stringify(lastMappingDebug?.canonicalResolution ?? null)}</div>
+              <div><strong>mapping payload sent:</strong> {JSON.stringify(lastMappingDebug?.mappingPayload ?? null)}</div>
+              <div><strong>commodity override enabled:</strong> {isMaterialsSector ? "true" : "false"}</div>
+              <div><strong>commodity override reason:</strong> {commodityOverrideReason}</div>
+            </div>
+          )}
         </div>
 
         <div className="sector-card">
