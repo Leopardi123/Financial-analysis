@@ -1,5 +1,6 @@
 import { execute, query } from "../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../api/_migrate.js";
+import { assertAdminSecret } from "../../../../api/_auth.js";
 import { ensureCanonicalSelectionRows } from "./canonicalTaxonomy.js";
 
 function normalizeName(value: unknown) {
@@ -9,6 +10,19 @@ function normalizeName(value: unknown) {
   return value.trim();
 }
 
+let companySectorMapHasCategoryColumn: boolean | null = null;
+
+async function detectCategoryColumnSupport() {
+  if (companySectorMapHasCategoryColumn !== null) {
+    return companySectorMapHasCategoryColumn;
+  }
+  const tableInfo = await query(`PRAGMA table_info(${tables.companySectorMap})`);
+  companySectorMapHasCategoryColumn = (tableInfo as Array<{ name?: unknown }>).some((column) =>
+    String(column?.name ?? "").toLowerCase() === "category"
+  );
+  return companySectorMapHasCategoryColumn;
+}
+
 export default async function handler(req: any, res: any) {
   try {
     await ensureSchema();
@@ -16,6 +30,7 @@ export default async function handler(req: any, res: any) {
       res.status(405).json({ ok: false, error: "Method not allowed" });
       return;
     }
+    assertAdminSecret(req);
 
     const sectorName = normalizeName(req.body?.sector);
     const subsectorName = normalizeName(req.body?.subsector);
@@ -30,6 +45,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const resolvedRows = await ensureCanonicalSelectionRows(sectorName, subsectorName || null);
+    const canPersistCategory = await detectCategoryColumnSupport();
 
     const results: Array<{ ticker: string; status: string }> = [];
     const now = new Date().toISOString();
@@ -45,11 +61,19 @@ export default async function handler(req: any, res: any) {
         results.push({ ticker, status: "missing_company" });
         continue;
       }
-      await execute(
-        `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, category, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [companyId, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, categoryMetadata || null, now]
-      );
+      if (canPersistCategory) {
+        await execute(
+          `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, category, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          [companyId, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, categoryMetadata || null, now]
+        );
+      } else {
+        await execute(
+          `INSERT OR IGNORE INTO ${tables.companySectorMap} (company_id, sector_id, subsector_id, created_at)
+           VALUES (?, ?, ?, ?)`,
+          [companyId, resolvedRows.sector.id, resolvedRows.subsector?.id ?? null, now]
+        );
+      }
       results.push({ ticker, status: "mapped" });
     }
 
@@ -58,12 +82,14 @@ export default async function handler(req: any, res: any) {
       sector: resolvedRows.sector,
       subsector: resolvedRows.subsector,
       canonical: resolvedRows.canonical,
+      categoryPersisted: canPersistCategory,
       mapped: results.filter((result) => result.status === "mapped").length,
       results,
     });
   } catch (error) {
     const message = (error as Error).message;
-    const status = /Unknown canonical|is not part of sector/.test(message) ? 400 : 500;
+    const authStatus = Number((error as Error & { status?: number }).status ?? 0);
+    const status = authStatus || (/Unknown canonical|is not part of sector/.test(message) ? 400 : 500);
     res.status(status).json({ ok: false, error: message });
   }
 }
