@@ -22,13 +22,14 @@ export default async function handler(_req: any, res: any) {
     const rows = await query(
       `SELECT map.company_id,
               c.ticker,
-              c.name AS company_name,
+              cm.name AS company_name,
               map.category,
               s.name AS sector_name,
               ss.name AS subsector_name,
               o.commodity
        FROM ${tables.companySectorMap} map
        LEFT JOIN ${tables.companiesV2} c ON c.id = map.company_id
+       LEFT JOIN companies cm ON cm.symbol = c.ticker
        LEFT JOIN ${tables.sectors} s ON s.id = map.sector_id
        LEFT JOIN ${tables.subsectors} ss ON ss.id = map.subsector_id
        LEFT JOIN ${tables.companyCommodityOverride} o ON o.company_id = map.company_id
