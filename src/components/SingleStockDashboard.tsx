@@ -1294,7 +1294,27 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [goldModeDroppedPoints, setGoldModeDroppedPoints] = useState(0);
   const [goldSampleRows, setGoldSampleRows] = useState<Array<{ date: string; sharePrice: number; goldPriceLocal: number; goldOz: number }>>([]);
   const [goldAdjustedPriceData, setGoldAdjustedPriceData] = useState<PriceDataBlock | null>(null);
-  const priceHistorySwipeRef = useRef<HTMLDivElement | null>(null);
+  const priceHistorySwipeShellRef = useRef<HTMLDivElement | null>(null);
+  const currencyPanelRef = useRef<HTMLDivElement | null>(null);
+  const goldPanelRef = useRef<HTMLDivElement | null>(null);
+  const swipeTouchStartXRef = useRef<number | null>(null);
+  const [priceLayoutDebug, setPriceLayoutDebug] = useState<{
+    viewportWidth: number | null;
+    boxWidth: number | null;
+    currencyPanelWidth: number | null;
+    goldPanelWidth: number | null;
+    chartRenderedWidth: number | null;
+    overflowDetected: boolean;
+    overflowSource: string | null;
+  }>({
+    viewportWidth: null,
+    boxWidth: null,
+    currencyPanelWidth: null,
+    goldPanelWidth: null,
+    chartRenderedWidth: null,
+    overflowDetected: false,
+    overflowSource: null,
+  });
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const [primaryView, setPrimaryView] = useState<PrimaryView>(() => readPrimaryViewFromUrl());
@@ -1455,9 +1475,6 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
 
   useEffect(() => {
     setPriceHistoryMode("currency");
-    if (priceHistorySwipeRef.current) {
-      priceHistorySwipeRef.current.scrollTo({ left: 0, behavior: "auto" });
-    }
   }, [ticker]);
 
   useEffect(() => {
@@ -1614,6 +1631,45 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       cancelled = true;
     };
   }, [marketCurrencyForPrice, priceData]);
+
+  useEffect(() => {
+    const measure = () => {
+      const viewportWidth = typeof window !== "undefined" ? window.innerWidth : null;
+      const boxWidth = priceHistorySwipeShellRef.current?.getBoundingClientRect().width ?? null;
+      const currencyPanelWidth = currencyPanelRef.current?.getBoundingClientRect().width ?? null;
+      const goldPanelWidth = goldPanelRef.current?.getBoundingClientRect().width ?? null;
+      const chartCards = (priceHistorySwipeShellRef.current?.querySelectorAll(".chart-card") ?? []);
+      const chartRenderedWidth = chartCards.length > 0
+        ? Math.max(...Array.from(chartCards).map((node) => (node as HTMLElement).getBoundingClientRect().width))
+        : null;
+      const overflowSource =
+        (typeof viewportWidth === "number" && typeof boxWidth === "number" && boxWidth > viewportWidth + 1) ? "price_history_box"
+          : (typeof boxWidth === "number" && typeof currencyPanelWidth === "number" && currencyPanelWidth > boxWidth + 1) ? "currency_panel"
+            : (typeof boxWidth === "number" && typeof goldPanelWidth === "number" && goldPanelWidth > boxWidth + 1) ? "gold_panel"
+              : (typeof boxWidth === "number" && typeof chartRenderedWidth === "number" && chartRenderedWidth > boxWidth + 1) ? "chart_card"
+                : null;
+      setPriceLayoutDebug({
+        viewportWidth,
+        boxWidth,
+        currencyPanelWidth,
+        goldPanelWidth,
+        chartRenderedWidth,
+        overflowDetected: overflowSource !== null,
+        overflowSource,
+      });
+    };
+    measure();
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", measure);
+    const observer = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => measure())
+      : null;
+    if (observer && priceHistorySwipeShellRef.current) observer.observe(priceHistorySwipeShellRef.current);
+    return () => {
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [priceHistoryMode, priceData, goldAdjustedPriceData]);
 
   useEffect(() => {
     setCorporateProjectEquityPct((prev) => {
@@ -4919,36 +4975,43 @@ Capital Available: ${availableLabel}`,
                     <button
                       type="button"
                       className={`single-stock-price-toggle ${priceHistoryMode === "currency" ? "is-active" : ""}`}
-                      onClick={() => {
-                        setPriceHistoryMode("currency");
-                        priceHistorySwipeRef.current?.scrollTo({ left: 0, behavior: "smooth" });
-                      }}
+                      onClick={() => setPriceHistoryMode("currency")}
                     >
                       Currency
                     </button>
                     <button
                       type="button"
                       className={`single-stock-price-toggle ${priceHistoryMode === "gold_oz" ? "is-active" : ""}`}
-                      onClick={() => {
-                        setPriceHistoryMode("gold_oz");
-                        const width = priceHistorySwipeRef.current?.clientWidth ?? 0;
-                        priceHistorySwipeRef.current?.scrollTo({ left: width, behavior: "smooth" });
-                      }}
+                      onClick={() => setPriceHistoryMode("gold_oz")}
                     >
                       Gold oz
                     </button>
                   </div>
                 </div>
                 <div
-                  className="single-stock-price-swipe-track"
-                  ref={priceHistorySwipeRef}
-                  onScroll={(event) => {
-                    const container = event.currentTarget;
-                    const width = container.clientWidth || 1;
-                    const index = Math.round(container.scrollLeft / width);
-                    setPriceHistoryMode(index >= 1 ? "gold_oz" : "currency");
+                  className="single-stock-price-swipe-shell"
+                  ref={priceHistorySwipeShellRef}
+                  onTouchStart={(event) => {
+                    swipeTouchStartXRef.current = event.touches[0]?.clientX ?? null;
+                  }}
+                  onTouchEnd={(event) => {
+                    const startX = swipeTouchStartXRef.current;
+                    const endX = event.changedTouches[0]?.clientX ?? null;
+                    swipeTouchStartXRef.current = null;
+                    if (startX === null || endX === null) return;
+                    const delta = endX - startX;
+                    if (Math.abs(delta) < 40) return;
+                    if (delta < 0) {
+                      setPriceHistoryMode("gold_oz");
+                      return;
+                    }
+                    setPriceHistoryMode("currency");
                   }}
                 >
+                  <div
+                    className="single-stock-price-swipe-track"
+                    style={{ transform: `translateX(-${priceHistoryMode === "gold_oz" ? 100 : 0}%)` }}
+                  >
                   {(["currency", "gold_oz"] as const).map((mode) => {
                     const modeData = mode === "gold_oz" ? goldAdjustedPriceData : priceData;
                     const longData = combinePriceAndVolumeSeries(modeData?.long?.price ?? null, modeData?.long?.volume ?? null, false);
@@ -4957,7 +5020,11 @@ Capital Available: ${availableLabel}`,
                     const isGold = mode === "gold_oz";
                     const accentColor = isGold ? "#b45309" : PRICE_SERIES_COLORS.close;
                     return (
-                      <div className={`single-stock-price-swipe-page ${isGold ? "is-gold" : "is-currency"}`} key={`price-history-mode-${mode}`}>
+                      <div
+                        className={`single-stock-price-swipe-page ${isGold ? "is-gold" : "is-currency"}`}
+                        key={`price-history-mode-${mode}`}
+                        ref={isGold ? goldPanelRef : currencyPanelRef}
+                      >
                         <div className="chartcontainerdoublecolumn single-stock-price-charts">
                           <ReportedChart reportedChartContext={reportedChartContext}
                             fiscalYearEndMonth={fiscalYearEndMonth}
@@ -5024,6 +5091,7 @@ Capital Available: ${availableLabel}`,
                     );
                   })}
                 </div>
+                </div>
                 {valueIntervalDebugVisible && (
                   <details style={{ marginTop: 10 }}>
                     <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug: Price history Currency ↔ Gold oz</summary>
@@ -5033,6 +5101,13 @@ Capital Available: ${availableLabel}`,
                       <div><strong>guldserie som används:</strong> {goldPriceSeriesUsed ?? "—"}</div>
                       <div><strong>FX-serie:</strong> {fxSeriesUsed ?? "—"}</div>
                       <div><strong>formel:</strong> price_in_gold_oz(t) = share_price(t) / gold_price_per_oz(t)</div>
+                      <div><strong>viewport width:</strong> {priceLayoutDebug.viewportWidth ?? "—"}</div>
+                      <div><strong>box width:</strong> {priceLayoutDebug.boxWidth ?? "—"}</div>
+                      <div><strong>panel width (currency):</strong> {priceLayoutDebug.currencyPanelWidth ?? "—"}</div>
+                      <div><strong>panel width (gold):</strong> {priceLayoutDebug.goldPanelWidth ?? "—"}</div>
+                      <div><strong>grafens renderade width:</strong> {priceLayoutDebug.chartRenderedWidth ?? "—"}</div>
+                      <div><strong>overflow sker:</strong> {String(priceLayoutDebug.overflowDetected)}</div>
+                      <div><strong>overflow-element:</strong> {priceLayoutDebug.overflowSource ?? "none"}</div>
                       <div><strong>antal droppade datapunkter:</strong> {goldModeDroppedPoints}</div>
                       <div><strong>fallback-logik:</strong> {goldModeFallbackReason ?? "none"}</div>
                       {goldSampleRows.map((row, index) => (
