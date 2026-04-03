@@ -754,6 +754,55 @@
   margin-top: 6px;
 }
 
+.single-stock-price-swipe-shell {
+  margin-top: 8px;
+}
+
+.single-stock-price-swipe-track {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.single-stock-price-swipe-track::-webkit-scrollbar {
+  display: none;
+}
+
+.single-stock-price-swipe-panel {
+  flex: 0 0 100%;
+  min-width: 100%;
+  scroll-snap-align: start;
+}
+
+.single-stock-price-swipe-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.single-stock-price-swipe-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(71, 85, 105, 0.3);
+  transition: all 0.2s ease;
+}
+
+.single-stock-price-swipe-dots span.is-active {
+  width: 18px;
+  background: rgba(30, 64, 175, 0.7);
+}
+
+.single-stock-price-debug {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #334155;
+}
+
 .single-stock-tasks-card {
   background: #f4efd8;
   border-color: rgba(124, 102, 48, 0.35);
