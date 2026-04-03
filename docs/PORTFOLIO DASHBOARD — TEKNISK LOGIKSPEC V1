@@ -1,0 +1,838 @@
+PORTFOLIO DASHBOARD — TEKNISK LOGIKSPEC V1
+
+PORTFOLIO DASHBOARD — TEKNISK LOGIKSPEC V1
+Status: första tekniska logikspec för implementation av Portfolio Dashboard
+Syfte: översätta master-spec V1 till deterministiska regler för viktstatus, trendstatus, riskstatus, hedge-status, dry powder-status och graceful degradation
+Princip: hellre enkel, förklarbar och robust V1-logik än överoptimerad pseudoexakt modell
+Arkitekturprincip: denna logikspec får använda portfolio admin-data, portföljvikter, prisserier, macro regime och sector regime som inputs, men får inte skriva tillbaka till andra lager
+
+====================================================
+0. INPUTS OCH GRUNDDEFINITIONER
+====================================================
+
+Obligatoriska input-objekt i V1:
+
+A. Portfolio admin metadata
+Per portfölj:
+- portfolioId
+- portfolioType
+- active
+- includedInTotalPortfolio
+- targetWeightPct
+- minWeightPct
+- maxWeightPct
+- strategicRiskLevel
+- hedgingAllowed
+- allowedHedgeTypes[]
+- maxHedgePct
+- hedgePurpose[]
+- rebalanceMode
+- maxSinglePositionPct optional
+- maxSectorConcentrationPct optional
+- maxCommodityConcentrationPct optional
+- maxJuniorExposurePct optional
+- maxIlliquidExposurePct optional
+
+B. Portfolio weights / values
+Per portfölj:
+- currentMarketValue
+- actualWeightPct
+
+C. Historical performance / price series
+Per portfölj:
+- daily total return index OR daily market value history
+Minimum recommended for full trend signal:
+- 200 trading days history
+
+D. Optional but preferred position breakdown
+Per portfölj:
+- holdings[]
+- position weights
+- sector tags
+- commodity tags
+- liquidity flags
+- junior/pre-revenue flags
+
+E. Macro / Sector inputs
+- macroRegime optional
+- sectorRegime per relevant portfolio optional
+
+F. Cash / dry powder inputs
+- opportunistic portfolio current weight if included
+- or explicit cash allocation if modeled within opportunistic
+
+====================================================
+1. GLOBALA DOMÄNREGLER
+====================================================
+
+1.1 Only active portfolios may receive operational status
+- if active = false → portfolio excluded from status calculations
+
+1.2 Only includedInTotalPortfolio = true count toward total allocation logic
+- portfolios visible in UI but not included in total shall not affect total weights
+
+1.3 Missing values
+- null or non-finite values must never silently generate “healthy” signal
+- missing data must degrade signal to partial or unavailable
+
+1.4 Classification precedence
+When multiple negative conditions apply, the more severe status wins.
+
+Example:
+critical_overweight overrides overweight
+hedge_urgent overrides hedge_recommended
+critical risk overrides elevated risk
+
+====================================================
+2. VALIDATION-REGLER
+====================================================
+
+2.1 Target weight sum validation
+Compute:
+SUM(targetWeightPct) across portfolios where:
+- active = true
+- includedInTotalPortfolio = true
+
+Rules:
+- if sum = 100.0 exactly or within tolerance ±0.10 pp → valid
+- if abs(sum - 100.0) > 0.10 pp and <= 1.00 pp → warning
+- if abs(sum - 100.0) > 1.00 pp → error
+
+Recommended output:
+- weightPlanValidationStatus:
+  - valid
+  - warning
+  - error
+
+2.2 Individual band validation
+Per included active portfolio:
+- minWeightPct must be <= targetWeightPct
+- targetWeightPct must be <= maxWeightPct
+- if violated → admin validation error
+
+2.3 Negative or absurd values
+- target/min/max weights < 0 not allowed
+- maxWeightPct > 100 not allowed
+- actualWeightPct < 0 not allowed
+
+====================================================
+3. WEIGHTSTATUS-LOGIK
+====================================================
+
+Definitioner:
+- bandWidthPct = maxWeightPct - minWeightPct
+- distanceToNearestBandEdgePct = min(
+    abs(actualWeightPct - minWeightPct),
+    abs(maxWeightPct - actualWeightPct)
+  )
+
+Prerequisite:
+- actualWeightPct, minWeightPct, maxWeightPct must be available
+
+If prerequisites missing:
+- weightStatus = unavailable
+- rebalanceStatus = unavailable
+
+3.1 Core band states
+- if actualWeightPct < minWeightPct → underweight
+- if actualWeightPct > maxWeightPct → overweight
+- if minWeightPct <= actualWeightPct <= maxWeightPct → candidate within_band/watch
+
+3.2 Watch rule
+Within band, portfolio becomes watch if near either edge.
+
+V1 watch threshold:
+- watch if distanceToNearestBandEdgePct <= max(1.0 pp, 0.25 * bandWidthPct)
+
+Otherwise:
+- within_band
+
+3.3 Critical band break rule
+Under/overweight becomes critical if break exceeds threshold.
+
+Define:
+- lowerBreakPct = minWeightPct - actualWeightPct
+- upperBreakPct = actualWeightPct - maxWeightPct
+
+V1 critical threshold:
+- critical if break > max(2.0 pp, 0.33 * bandWidthPct)
+
+Thus:
+- if actualWeightPct < minWeightPct:
+    - if lowerBreakPct > criticalThreshold → critical_underweight
+    - else → underweight
+
+- if actualWeightPct > maxWeightPct:
+    - if upperBreakPct > criticalThreshold → critical_overweight
+    - else → overweight
+
+3.4 WeightStatus enum
+Allowed outputs:
+- within_band
+- watch
+- underweight
+- overweight
+- critical_underweight
+- critical_overweight
+- unavailable
+
+====================================================
+4. REBALANCESTATUS-LOGIK
+====================================================
+
+rebalancing should be driven primarily by weightStatus,
+secondarily by rebalanceMode,
+optionally by trend/risk overlays later.
+
+4.1 Base mapping from weightStatus
+- within_band → no_action
+- watch → monitor
+- underweight → rebalance_soon
+- overweight → rebalance_soon
+- critical_underweight → rebalance_now
+- critical_overweight → rebalance_now
+- unavailable → unavailable
+
+4.2 rebalanceMode modifier
+If rebalanceMode = soft:
+- watch stays monitor
+- under/overweight stays rebalance_soon
+- critical stays rebalance_now
+
+If rebalanceMode = standard:
+- same as base mapping
+
+If rebalanceMode = strict:
+- watch escalates from monitor → rebalance_soon
+- under/overweight stays rebalance_soon
+- critical stays rebalance_now
+
+4.3 Optional future overlay
+Risk/trend may later influence urgency, but not in V1 core unless explicitly added.
+
+Allowed outputs:
+- no_action
+- monitor
+- rebalance_soon
+- rebalance_now
+- unavailable
+
+====================================================
+5. TRENDSTATUS-LOGIK
+====================================================
+
+Trend signal must be deterministic but simple in V1.
+
+5.1 Required daily history for full trend signal
+Need at least:
+- 200 trading days history for full short/medium/long model
+
+If available history:
+- >= 200 days → full
+- >= 65 and < 200 → partial
+- < 65 → unavailable
+
+5.2 V1 trend horizons
+Use fixed lookbacks for V1:
+- short trend = 20 trading days
+- medium trend = 65 trading days
+- long trend = 200 trading days
+
+5.3 Trend measures
+For each available horizon H:
+- return_H = total return over lookback H
+
+Direction per horizon:
+- positive if return_H > +2.0%
+- negative if return_H < -2.0%
+- neutral otherwise
+
+Threshold rationale:
+- avoids noise around zero in portfolio-level signals
+
+5.4 Relative strength
+If at least 2 active included portfolios have valid same-horizon return data:
+- compute percentile rank of each portfolio by medium-term return (65d)
+- top 30% = strong relative
+- bottom 30% = weak relative
+- otherwise neutral relative
+
+If insufficient comparable portfolios:
+- relative strength unavailable, do not block core trendStatus
+
+5.5 Core trendStatus classification
+Use available horizons with preference to longer trend.
+
+A. strong_uptrend
+- long positive
+- medium positive
+- short positive or neutral
+
+B. improving
+- medium positive
+- short positive
+- long neutral or unavailable or modestly negative
+
+C. neutral
+- mixed signals without clear deterioration or improvement
+- OR all available horizons neutral
+
+D. weakening
+- medium negative
+- short negative
+- long neutral or unavailable
+
+E. downtrend
+- long negative
+- medium negative
+- short negative or neutral
+
+Fallback partial logic:
+If only short+medium available:
+- strong_uptrend if both positive
+- downtrend if both negative
+- improving if short positive and medium neutral/positive
+- weakening if short negative and medium neutral/negative
+- else neutral
+
+If only medium available:
+- positive → improving
+- negative → weakening
+- neutral → neutral
+
+5.6 trendStatus outputs
+- strong_uptrend
+- improving
+- neutral
+- weakening
+- downtrend
+- unavailable
+
+5.7 Supporting trend diagnostics
+Recommended debug fields:
+- return_20d
+- return_65d
+- return_200d
+- shortDirection
+- mediumDirection
+- longDirection
+- relativeStrengthBucket optional
+
+====================================================
+6. MOMENTUM/BREDD — V1 REGLER
+====================================================
+
+V1 should keep internal breadth optional, not blocking.
+
+6.1 Internal breadth applicability
+If holdings data exists and portfolio has >= 5 holdings:
+- breadth may be computed
+Else:
+- breadth unavailable
+
+6.2 Simple breadth definition
+- breadthPct = % of holdings with positive 65d return
+
+Interpretation:
+- broad_strength if breadthPct >= 65%
+- broad_weakness if breadthPct <= 35%
+- mixed otherwise
+
+6.3 V1 usage
+Breadth is supporting information only in V1.
+It should not override trendStatus.
+It may be shown in debug or supplementary UI if available.
+
+====================================================
+7. RISKSTATUS-LOGIK
+====================================================
+
+RiskStatus in V1 should be score-based and explainable.
+Use 4 components where possible:
+- volatility
+- drawdown
+- concentration
+- cyclicality/speculation
+
+If some components missing, degrade gracefully.
+
+7.1 Scoring scale per component
+Each component gets score:
+- 0 = calm
+- 1 = elevated
+- 2 = high
+- 3 = critical
+
+Total score:
+riskScore = average of available component scores
+
+Map average score to riskStatus:
+- < 0.75 → calm
+- >= 0.75 and < 1.50 → elevated
+- >= 1.50 and < 2.25 → high
+- >= 2.25 → critical
+
+Minimum requirement:
+- at least 2 components available for full riskStatus
+- if only 1 component available → partial riskStatus
+- if 0 components available → unavailable
+
+----------------------------------------------------
+7.2 Volatility component
+Prerequisite:
+- at least 65 trading days of return history
+
+Metric:
+- annualized volatility from last 65 daily returns
+
+Thresholds:
+- vol < 15% → score 0
+- 15% to < 25% → score 1
+- 25% to < 40% → score 2
+- >= 40% → score 3
+
+----------------------------------------------------
+7.3 Drawdown component
+Prerequisite:
+- at least 200 trading days preferred, 65 minimum partial
+
+Metric:
+- current drawdown from trailing 200d peak
+If 200d not available but 65d available:
+- use trailing available peak and flag partial
+
+Thresholds:
+- drawdown < 8% → score 0
+- 8% to < 15% → score 1
+- 15% to < 25% → score 2
+- >= 25% → score 3
+
+----------------------------------------------------
+7.4 Concentration component
+Use holdings data if available.
+
+Primary metric:
+- top holding weight
+
+Secondary optional metric:
+- sum of top 3 holdings
+
+Thresholds using top holding:
+- top holding < 12% → score 0
+- 12% to < 20% → score 1
+- 20% to < 30% → score 2
+- >= 30% → score 3
+
+If holdings unavailable:
+- component unavailable
+
+----------------------------------------------------
+7.5 Cyclicality / speculation component
+This is portfolio-type-aware.
+
+Base scores by portfolioType:
+- stable_income → 0
+- growth → 1
+- commodity_majors → 1
+- commodity_junior → 2
+- opportunistic → 0
+
+Escalation rules if data available:
+- if commodity_junior actualWeightPct > targetWeightPct and trendStatus = downtrend → +1 score cap at 3
+- if opportunistic weight very low relative to total risk and total risk high/critical → this affects dry powder, not this component directly
+- if holdings data shows junior/pre-revenue exposure within non-junior portfolio above allowed policy → +1 score cap at 3
+
+If no extra data:
+- use base score
+
+----------------------------------------------------
+7.6 Strategic risk cross-check
+Strategic risk does not set actual riskStatus directly,
+but can generate mismatch flag.
+
+Map strategicRiskLevel to expected max normal score:
+- low → expected <= 1
+- medium → expected <= 1.5
+- high → expected <= 2
+- extreme → expected <= 3
+
+If actual riskScore materially exceeds strategic expectation by >0.75:
+- set riskMismatchFlag = true
+
+7.7 riskStatus outputs
+- calm
+- elevated
+- high
+- critical
+- unavailable
+
+====================================================
+8. TOTAL PORTFOLIO RISKSTATUS
+====================================================
+
+Total portfolio risk should be computed separately from per-portfolio risk.
+
+8.1 Inputs
+Use included active portfolios only.
+
+8.2 Weighted portfolio risk score
+- totalRiskScore = weighted average of per-portfolio riskScore
+  weighted by actualWeightPct
+
+8.3 Escalation conditions
+Escalate total risk by +0.25 score equivalent if any of:
+- commodity_junior actualWeightPct > its maxWeightPct
+- top single portfolio actualWeightPct > 55% of total
+- 2 or more risky portfolios (riskStatus high/critical) together exceed 50%
+- dry powder insufficient while total risk already high/critical
+
+Then remap to status thresholds from section 7.1.
+
+8.4 Outputs
+- calm
+- elevated
+- high
+- critical
+- unavailable
+
+====================================================
+9. HEDGESTATUS-LOGIK
+====================================================
+
+Hedge signal in V1 is recommendation logic, not execution logic.
+
+9.1 Inputs
+Per portfolio:
+- riskStatus
+- trendStatus
+- hedgingAllowed
+- allowedHedgeTypes[]
+- hedgePurpose[]
+- actualWeightPct vs band
+- optional macroRegime
+- optional sectorRegime
+
+9.2 Base hedge need score per portfolio
+Start at 0 and add:
+
+A. Risk contribution
+- riskStatus calm → +0
+- elevated → +1
+- high → +2
+- critical → +3
+
+B. Trend contribution
+- strong_uptrend → +0
+- improving → +0
+- neutral → +1
+- weakening → +2
+- downtrend → +3
+
+C. Weight stress contribution
+- within_band → +0
+- watch → +0
+- under/overweight → +1
+- critical under/overweight → +2
+
+D. Macro/sector overlay contribution (if available)
+Suggested V1 mapping:
+- if macroRegime indicates broad risk-off / contraction / stress → +1
+- if relevant sectorRegime deteriorating for that portfolio → +1
+
+Max base score not capped until mapping stage.
+
+9.3 Hedge need mapping
+Per portfolio:
+- score 0–2 → hedge_not_needed
+- score 3–4 → consider_hedge
+- score 5–6 → hedge_recommended
+- score >= 7 → hedge_urgent
+
+9.4 Policy filter
+If hedgingAllowed = true and allowedHedgeTypes non-empty:
+- keep hedgeStatus as above
+- recommended hedge type must come from allowed list
+
+If hedgingAllowed = false OR no allowed direct hedge types:
+- convert status to fallback defensive action:
+  - consider_hedge → reduce_exposure
+  - hedge_recommended → rebalance_to_cash
+  - hedge_urgent → increase_dry_powder OR rotate_to_defensive_bucket
+- never emit direct hedge recommendation in violation of policy
+
+9.5 Hedge type suggestion hierarchy
+If direct hedge allowed, suggested type may follow purpose:
+
+For general market drawdown:
+- prefer index_put
+- else index_short
+- else inverse_etf
+- else cash
+
+For inflation / monetary stress:
+- prefer gold
+- else commodity-linked hedge if policy allows
+- else cash
+
+For USD strength:
+- prefer usd
+
+For commodity-specific downturn:
+- prefer commodity_put
+- else producer_pair_hedge
+- else reduce exposure
+
+If multiple allowed, prefer lowest-complexity liquid hedge:
+index_put > inverse_etf > index_short is debatable in practice,
+but V1 recommendation:
+- prefer simplest liquid implementable allowed instrument
+Exact order can be implementation-configurable.
+
+9.6 Hedge outputs
+Direct outputs:
+- hedge_not_needed
+- consider_hedge
+- hedge_recommended
+- hedge_urgent
+
+Fallback policy-bound outputs:
+- reduce_exposure
+- rebalance_to_cash
+- increase_dry_powder
+- rotate_to_defensive_bucket
+
+9.7 Total hedge signal
+Compute from included active portfolios.
+
+Method:
+- choose highest severity across portfolios, weighted by actualWeightPct
+- practical rule:
+  - if any portfolio >20% weight has hedge_urgent → total = hedge_urgent
+  - else if weighted average hedge need score >= 5 → total = hedge_recommended
+  - else if weighted average hedge need score >= 3 → total = consider_hedge
+  - else → hedge_not_needed
+
+Policy conflict rule:
+- total signal may not override per-portfolio policy
+- if total hedge needed but no meaningful direct hedge permitted anywhere:
+  emit total fallback:
+  - increase_dry_powder
+  - rebalance_to_defensive_bucket
+
+====================================================
+10. DRY POWDER STATUS-LOGIK
+====================================================
+
+Dry powder in V1 should be tied to opportunistic allocation and total risk environment.
+
+10.1 Inputs
+- opportunistic actualWeightPct if active and included
+- totalPortfolio riskStatus
+- optional cash value if modeled separately inside opportunistic
+
+10.2 Required minimum dry powder by risk environment
+V1 baseline thresholds:
+- total risk calm → minimum 5%
+- elevated → minimum 8%
+- high → minimum 12%
+- critical → minimum 15%
+
+These are intentionally moderate V1 defaults, not eternal truths.
+
+10.3 Classification
+Let DP = opportunistic actualWeightPct
+
+For current total risk environment minimum = M
+
+- if DP < M → insufficient_dry_powder
+- if DP >= M and DP < M + 5 pp → adequate_dry_powder
+- if DP >= M + 5 pp and DP < M + 12 pp → deployable_cash_available
+- if DP >= M + 12 pp → elevated_cash_buffer
+
+If opportunistic portfolio absent or not included and no explicit cash proxy:
+- dryPowderStatus = unavailable
+
+10.4 Total override interaction
+If total hedge fallback requires increase_dry_powder:
+- and dryPowderStatus = insufficient_dry_powder
+  confirm strong defensive signal
+
+====================================================
+11. TOTAL SIGNALS — AGGREGATION
+====================================================
+
+The overview should produce top-level signals.
+
+11.1 Allocation plan status
+- if all included active portfolios within_band or watch → within_allocation_plan
+- if any overweight/underweight → outside_allocation_plan
+- if any critical band break → materially_outside_allocation_plan
+
+11.2 Drawdown concentration
+If position data by portfolio values available:
+- identify contribution to total drawdown by portfolio
+
+V1 simple rule:
+- if one portfolio contributes >50% of total portfolio drawdown over 65d window
+  → drawdown_concentration = true
+
+If unavailable:
+- drawdown_concentration = unavailable
+
+11.3 Excessive junior/speculative exposure
+V1 simple rule:
+- if commodity_junior actualWeightPct > maxWeightPct
+  OR
+  if commodity_junior actualWeightPct > 15% of total
+  → excessive_junior_exposure = true
+
+Else false
+
+11.4 Excessive commodity cyclicality
+V1 simple rule:
+- commodity exposure = commodity_majors + commodity_junior actual weights
+- if combined commodity exposure > 40% AND total risk high/critical
+  → excessive_commodity_cyclicality = true
+Else false
+
+This is a diagnostic signal only, not an allocation constraint.
+
+====================================================
+12. GRACEFUL DEGRADATION — DETERMINISTISK V1
+====================================================
+
+Each signal family should have explicit dependency minimums.
+
+12.1 WeightStatus / RebalanceStatus
+Requires:
+- actualWeightPct
+- minWeightPct
+- maxWeightPct
+If any missing → unavailable
+
+12.2 TrendStatus
+- full requires >= 200d history
+- partial requires >= 65d history
+- unavailable if < 65d
+
+12.3 RiskStatus
+- full requires at least 2 valid components
+- partial if exactly 1 component valid
+- unavailable if 0 components valid
+
+If partial:
+- status may still be shown but flagged partial
+- severity should not be auto-escalated only because of missing data
+
+12.4 HedgeStatus
+Requires minimum:
+- riskStatus not unavailable
+- trendStatus not unavailable
+- hedge policy fields present
+
+If macro/sector unavailable:
+- hedge may still be computed without overlay
+- mark as partial if overlay absent
+
+If risk or trend unavailable:
+- hedgeStatus = insufficient_data_for_hedge_signal
+
+12.5 DryPowderStatus
+Requires:
+- opportunistic actualWeightPct or equivalent cash proxy
+- total riskStatus
+
+If total risk unavailable but opportunistic weight available:
+- use calm baseline minimum and flag partial
+
+If both missing:
+- unavailable
+
+====================================================
+13. DEBUG / EXPLAINABILITY FIELDS
+====================================================
+
+Per portfolio recommended debug payload:
+- actualWeightPct
+- targetWeightPct
+- minWeightPct
+- maxWeightPct
+- weightStatus
+- rebalanceStatus
+- return_20d
+- return_65d
+- return_200d
+- trendStatus
+- annualizedVol65d
+- currentDrawdownPct
+- concentrationTopHoldingPct
+- cyclicalityScore
+- riskScore
+- riskStatus
+- hedgeNeedScore
+- hedgeStatus
+- hedgePolicyApplied
+- signalCompleteness:
+  - full
+  - partial
+  - unavailable
+
+Total portfolio debug:
+- totalRiskScore
+- totalRiskStatus
+- totalHedgeSignal
+- dryPowderStatus
+- allocationPlanStatus
+- targetWeightSumValidation
+- major warnings array
+
+====================================================
+14. IMPLEMENTATION PRIORITY — V1
+====================================================
+
+Build order should be:
+
+Fas 1
+- validation rules
+- weightStatus
+- rebalanceStatus
+
+Fas 2
+- trendStatus using 20/65/200d returns
+- basic debug payload
+
+Fas 3
+- riskStatus using:
+  - volatility
+  - drawdown
+  - concentration if available
+  - cyclicality/speculation base score
+
+Fas 4
+- total risk aggregation
+- dry powder status
+
+Fas 5
+- hedgeStatus
+- total hedge signal
+- graceful degradation polish
+
+====================================================
+15. EXPLICIT V1-GRÄNS
+====================================================
+
+The following are intentionally simplified in V1 and may förbättras later:
+- trend via simple horizon returns rather than richer technical model
+- risk via additive score rather than optimized multifactor model
+- hedge mapping via policy + risk/trend + optional overlay
+- dry powder via threshold table tied to total risk
+- concentration mainly via top holding weight
+- cyclicality via portfolioType-aware heuristics
+
+This is acceptable because V1 prioritizes:
+- determinism
+- explainability
+- implementation safety
+- low guess-risk for Codex
+
+SLUT PÅ TEKNISK LOGIKSPEC V1
