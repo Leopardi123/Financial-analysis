@@ -1051,6 +1051,13 @@ function formatMarketCapValue(value: number | null) {
   return value.toLocaleString("en-US", { maximumFractionDigits: 0, useGrouping: true });
 }
 
+function formatSharesValue(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
 function parseChartDate(rawDate: unknown): Date | null {
   if (rawDate instanceof Date) {
     return Number.isNaN(rawDate.getTime()) ? null : rawDate;
@@ -4664,7 +4671,7 @@ Capital Available: ${availableLabel}`,
                   </div>
                   <div className="compact-metric-row">
                     <span className="compact-metric-label">Antal aktier</span>
-                    <span className="compact-metric-value">{sharesValue !== null ? sharesValue.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}</span>
+                    <span className="compact-metric-value">{formatSharesValue(sharesValue)}</span>
                   </div>
                 </div>
                 {debugEnabled && (
@@ -5531,7 +5538,11 @@ Capital Available: ${availableLabel}`,
                           <div key={`corporate-market-${metric.label}`} className="compact-metric-row">
                             <span className="compact-metric-label">{metric.label}</span>
                             <span className="compact-metric-dots" />
-                            <span className="compact-metric-value">{formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}</span>
+                            <span className="compact-metric-value">
+                              {metric.kind === "integer"
+                                ? formatSharesValue(metric.value.value)
+                                : formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -5993,7 +6004,9 @@ Capital Available: ${availableLabel}`,
                             </span>
                             <span className="compact-metric-dots" />
                             <span className="compact-metric-value">
-                              {formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}
+                              {metric.kind === "integer"
+                                ? formatSharesValue(metric.value.value)
+                                : formatMetricValue(metric.value, metric.kind, metric.kind === "money" ? lockedTargetCurrency : undefined)}
                               {metric.value.value === null && <span style={{ display: "block", fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatMetricNullReason(metric.value)}</span>}
                             </span>
                           </div>
