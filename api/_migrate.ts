@@ -27,6 +27,7 @@ const TABLES = {
   dailyPriceHistory: "daily_price_history",
   priceScreenSnapshot: "price_screen_snapshot",
   screeningPriceRefreshState: "screening_price_refresh_state",
+  portfolioAdminConfig: "portfolio_admin_config",
 };
 
 export async function ensureSchema() {
@@ -347,6 +348,41 @@ export async function ensureSchema() {
   );
 
   await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioAdminConfig} (
+      portfolio_id TEXT PRIMARY KEY,
+      portfolio_name TEXT NOT NULL,
+      portfolio_type TEXT NOT NULL,
+      active INTEGER NOT NULL,
+      visible_in_overview INTEGER NOT NULL,
+      included_in_total_portfolio INTEGER NOT NULL,
+      sort_order INTEGER NOT NULL,
+      target_weight_pct REAL NOT NULL,
+      min_weight_pct REAL NOT NULL,
+      max_weight_pct REAL NOT NULL,
+      strategic_risk_level TEXT NOT NULL,
+      hedging_allowed INTEGER NOT NULL,
+      max_hedge_pct REAL,
+      rebalance_mode TEXT NOT NULL,
+      role_description TEXT NOT NULL,
+      long_term_purpose TEXT,
+      notes TEXT,
+      allowed_hedge_types_json TEXT NOT NULL,
+      hedge_purpose_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      rebalance_priority INTEGER,
+      max_single_position_pct REAL,
+      max_sector_concentration_pct REAL,
+      max_commodity_concentration_pct REAL,
+      max_junior_exposure_pct REAL,
+      max_illiquid_exposure_pct REAL,
+      analyst_override_allowed INTEGER,
+      analyst_override_note TEXT,
+      override_expiry_date TEXT
+    )`
+  );
+
+  await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.priceScreenSnapshot} (
       symbol TEXT PRIMARY KEY,
       as_of_date TEXT NOT NULL,
@@ -489,6 +525,14 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_company_projects_symbol_project
             ON ${TABLES.companyProjects} (symbol, project_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_admin_sort_order
+            ON ${TABLES.portfolioAdminConfig} (sort_order, portfolio_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_admin_active_included
+            ON ${TABLES.portfolioAdminConfig} (active, included_in_total_portfolio)`,
     },
   ]);
 
