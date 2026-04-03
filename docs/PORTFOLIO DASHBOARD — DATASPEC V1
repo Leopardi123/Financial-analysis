@@ -1,0 +1,733 @@
+PORTFOLIO DASHBOARD — DATASPEC V1
+
+PORTFOLIO DASHBOARD — DATASPEC V1
+Status: första dataspec för Portfolio Dashboard
+Syfte: definiera minsta robusta datamodell för att Portfolio Dashboard ska kunna implementeras utan att Codex gissar struktur, fält eller datakällor
+Princip: enkel, normaliserad och förklarbar modell i V1; stöd för graceful degradation; inga dolda antaganden om full data
+Arkitekturprincip: Portfolio Dashboard läser från egna portföljtabeller + pris/historik + valfria macro/sector-regime inputs, men skriver inte tillbaka till andra lager
+
+====================================================
+0. ÖVERGRIPANDE DESIGNPRINCIPER
+====================================================
+
+V1 ska skilja på följande datanivåer:
+
+1. Admin-konfiguration
+- vilka portföljer som finns
+- målvikter, band, risknivå, hedgepolicy
+
+2. Portföljinnehav / positionsdata
+- vilka bolag eller instrument som ligger i varje portfölj
+- positionernas marknadsvärde, vikt, sektor etc.
+
+3. Portföljsnapshot
+- dagsfärsk aggregerad status per portfölj
+- market value, actual weight, cash, statusfält
+
+4. Portföljhistorik
+- tidsserie för portföljvärde / total return / drawdown / viktutveckling
+
+5. Regime-inputs
+- macro regime
+- sector regime
+
+Systemet ska fungera i tre datalägen:
+- full
+- partial
+- unavailable
+
+Systemet ska inte implicit anta:
+- att alla portföljer har positionsdata
+- att alla portföljer har 200 dagars historik
+- att macro/sector-regime alltid finns
+- att opportunistic alltid är ren cash
+
+====================================================
+1. KÄRNOBJEKT / TABELLER I V1
+====================================================
+
+Följande objekt rekommenderas i V1:
+
+A. portfolio_admin_config
+B. portfolio_positions
+C. portfolio_snapshots
+D. portfolio_history_daily
+E. total_portfolio_history_daily
+F. macro_regime_input
+G. sector_regime_input
+H. price_history_daily (om ej redan finns i systemet)
+I. company_master reference (om ej redan finns i systemet)
+
+Om delar redan finns i systemet ska de återanvändas, men fältnamnen nedan ska mappas tydligt.
+
+====================================================
+2. portfolio_admin_config
+====================================================
+
+Syfte:
+Lagra den strukturella admin-konfigurationen per portfölj.
+
+Primärnyckel:
+- portfolio_id
+
+Obligatoriska fält:
+- portfolio_id : string
+- portfolio_name : string
+- portfolio_type : enum
+- active : boolean
+- visible_in_overview : boolean
+- included_in_total_portfolio : boolean
+- sort_order : integer
+
+- target_weight_pct : number
+- min_weight_pct : number
+- max_weight_pct : number
+
+- strategic_risk_level : enum(low, medium, high, extreme)
+
+- hedging_allowed : boolean
+- max_hedge_pct : number nullable
+
+- rebalance_mode : enum(soft, standard, strict)
+
+- role_description : string
+- long_term_purpose : string nullable
+- notes : string nullable
+
+- created_at : datetime
+- updated_at : datetime
+
+Obligatoriska enum-värden för portfolio_type:
+- stable_income
+- growth
+- commodity_majors
+- commodity_junior
+- opportunistic
+
+Optional / rekommenderade fält:
+- rebalance_priority : integer nullable
+- max_single_position_pct : number nullable
+- max_sector_concentration_pct : number nullable
+- max_commodity_concentration_pct : number nullable
+- max_junior_exposure_pct : number nullable
+- max_illiquid_exposure_pct : number nullable
+
+- analyst_override_allowed : boolean nullable
+- analyst_override_note : string nullable
+- override_expiry_date : date nullable
+
+Struktur för listfält:
+Eftersom allowedHedgeTypes och hedgePurpose är multi-value bör de lagras som JSON-array eller normaliseras till egna child-tabeller.
+
+Minsta V1-lösning:
+- allowed_hedge_types_json : json
+- hedge_purpose_json : json
+
+Exempel:
+allowed_hedge_types_json = ["index_put","gold","cash"]
+hedge_purpose_json = ["market_drawdown","inflation_shock"]
+
+Valideringsregler:
+- portfolio_type måste vara ett av låsta enum-värden
+- target_weight_pct, min_weight_pct, max_weight_pct får ej vara negativa
+- min_weight_pct <= target_weight_pct <= max_weight_pct
+- max_hedge_pct nullable om hedging_allowed = false
+- om hedging_allowed = true bör allowed_hedge_types_json finnas, men får vara tom om fallback-strategi används
+
+====================================================
+3. portfolio_positions
+====================================================
+
+Syfte:
+Lagra innehav per portfölj för aktuell eller historisk dag.
+
+Primärnyckel:
+- composite recommended:
+  portfolio_id + as_of_date + instrument_id
+
+Obligatoriska fält:
+- portfolio_id : string
+- as_of_date : date
+- instrument_id : string
+
+- instrument_type : enum
+- quantity : number nullable
+- market_value : number
+- weight_pct : number nullable
+
+Optional men starkt rekommenderade:
+- company_id : string nullable
+- symbol : string nullable
+- display_name : string nullable
+- currency : string nullable
+
+- sector_id : string nullable
+- subsector_id : string nullable
+- commodity_id : string nullable
+
+- is_junior : boolean nullable
+- is_pre_revenue : boolean nullable
+- is_illiquid : boolean nullable
+
+- price_source : string nullable
+- notes : string nullable
+
+Enum-förslag för instrument_type:
+- equity
+- cash
+- etf
+- hedge_instrument
+- option
+- future
+- fund
+- other
+
+Viktig regel:
+- opportunistic-portföljen får innehålla cash som instrument_type = cash
+- om opportunistic är blandad portfölj ska även andra instrumenttyper kunna förekomma
+
+Beräkningsregel:
+- weight_pct kan antingen lagras explicit eller beräknas som:
+  market_value / total_portfolio_market_value_that_day
+- rekommendation i V1:
+  lagra market_value
+  beräkna vikt i snapshot-lager om möjligt
+  men tillåt även att weight_pct lagras för debug och precomputed use
+
+Graceful degradation:
+- om positionsdata saknas för viss portfölj ska portföljen ändå kunna existera i overview via snapshot/history
+- men concentration och breadth blir partial/unavailable
+
+====================================================
+4. portfolio_snapshots
+====================================================
+
+Syfte:
+Lagra dagsfärsk aggregerad status per portfölj.
+Denna tabell är central för snabb rendering av dashboarden.
+
+Primärnyckel:
+- portfolio_id + as_of_date
+
+Obligatoriska fält:
+- portfolio_id : string
+- as_of_date : date
+
+- market_value : number
+- actual_weight_pct : number nullable
+- target_weight_pct : number nullable
+- min_weight_pct : number nullable
+- max_weight_pct : number nullable
+
+- cash_value : number nullable
+- cash_weight_pct : number nullable
+
+- signal_completeness : enum(full, partial, unavailable)
+
+Optional men starkt rekommenderade statusfält:
+- weight_status : string nullable
+- rebalance_status : string nullable
+- trend_status : string nullable
+- risk_status : string nullable
+- hedge_status : string nullable
+- dry_powder_status : string nullable
+
+Optional diagnostik:
+- return_20d : number nullable
+- return_65d : number nullable
+- return_200d : number nullable
+- annualized_vol_65d : number nullable
+- current_drawdown_pct : number nullable
+- top_holding_weight_pct : number nullable
+- breadth_pct_65d : number nullable
+- risk_score : number nullable
+- hedge_need_score : number nullable
+
+Optional metadata:
+- macro_regime_used : string nullable
+- sector_regime_used : string nullable
+- data_quality_flags_json : json nullable
+- debug_payload_json : json nullable
+
+Designregel:
+- portfolio_snapshots ska kunna beräknas från underliggande data, men får lagras materialiserat för snabb UI-rendering
+- denna tabell är alltså ett read-optimized lager
+
+====================================================
+5. portfolio_history_daily
+====================================================
+
+Syfte:
+Lagra tidsserie per portfölj för trend, drawdown, performance charts och historisk analys.
+
+Primärnyckel:
+- portfolio_id + as_of_date
+
+Obligatoriska fält:
+- portfolio_id : string
+- as_of_date : date
+
+Minst ett av följande måste finnas:
+- total_return_index : number
+ELLER
+- market_value : number
+
+Rekommenderade fält:
+- daily_return_pct : number nullable
+- cumulative_return_pct : number nullable
+- drawdown_pct : number nullable
+
+- gross_exposure_pct : number nullable
+- net_exposure_pct : number nullable
+- cash_weight_pct : number nullable
+
+- data_source : string nullable
+- data_quality : enum(full, partial, estimated) nullable
+
+Viktig regel:
+- om total_return_index finns är trend/logik enklare och bör föredras
+- om bara market_value finns kan avkastning approximeras, men cash flows måste då hanteras försiktigt
+
+V1-princip:
+- om exakta time-weighted return-serier inte finns ännu, tillåt enkel market value-baserad historik som första steg
+- men markera data_quality tydligt
+
+====================================================
+6. total_portfolio_history_daily
+====================================================
+
+Syfte:
+Lagra aggregerad tidsserie för alla inkluderade portföljer sammanlagt.
+
+Primärnyckel:
+- as_of_date
+
+Obligatoriska fält:
+- as_of_date : date
+
+Minst ett av följande:
+- total_return_index : number
+ELLER
+- market_value : number
+
+Rekommenderade fält:
+- daily_return_pct : number nullable
+- cumulative_return_pct : number nullable
+- drawdown_pct : number nullable
+
+- total_cash_value : number nullable
+- total_cash_weight_pct : number nullable
+
+- included_portfolio_count : integer nullable
+- data_quality : enum(full, partial, estimated) nullable
+
+Systemregel:
+- totalportfölj ska bara inkludera portföljer där:
+  active = true
+  AND included_in_total_portfolio = true
+
+====================================================
+7. macro_regime_input
+====================================================
+
+Syfte:
+Lagra macro regime som input till hedge- och risksignaler.
+Detta är inputdata, inte härledd i Portfolio Dashboard.
+
+Primärnyckel:
+- as_of_date
+Alternativt:
+- regime_date + region if needed later
+
+Obligatoriska fält:
+- as_of_date : date
+- macro_regime : string
+
+Rekommenderade fält:
+- macro_regime_confidence : number nullable
+- macro_regime_source : string nullable
+- macro_regime_notes : string nullable
+
+Tillåtna exempelvärden i V1:
+- expansion
+- slowdown
+- contraction
+- disinflation
+- inflation_stress
+- stagflation
+- risk_off
+- neutral
+
+Viktig regel:
+- exakt enum kan låsas centralt i Macro Layer om det redan finns där
+- Portfolio Dashboard ska inte definiera egen parallell makrotaxonomi om sådan redan existerar
+
+Graceful degradation:
+- om macro_regime_input saknas ska hedge/risk kunna köras utan macro overlay men markeras partial
+
+====================================================
+8. sector_regime_input
+====================================================
+
+Syfte:
+Lagra sector/commodity regime som input till relevanta portföljer.
+
+Primärnyckel:
+- as_of_date + sector_id
+eller
+- as_of_date + portfolio_type if mapped directly
+
+Obligatoriska fält:
+- as_of_date : date
+- sector_id OR regime_key : string
+- sector_regime : string
+
+Rekommenderade fält:
+- sector_regime_confidence : number nullable
+- source : string nullable
+- notes : string nullable
+
+Exempel:
+- sector_id = gold
+- sector_regime = late_cycle
+
+eller:
+- sector_id = commodities_broad
+- sector_regime = weakening
+
+Viktig regel:
+- sector_regime_input bör mappa tydligt till portfolio_type eller commodity exposure
+- exakt mapping definieras i logik/implementation, inte genom gissning
+
+Graceful degradation:
+- om sector_regime saknas påverkas bara overlay-delen; core trend/risk får fortfarande fungera
+
+====================================================
+9. price_history_daily
+====================================================
+
+Syfte:
+Lagra daglig pris- eller total return-data för instrument/bolag som används i portföljerna.
+Om systemet redan har sådan tabell ska den återanvändas.
+
+Primärnyckel:
+- instrument_id + as_of_date
+eller
+- symbol + as_of_date
+
+Obligatoriska fält:
+- instrument_id : string
+- as_of_date : date
+- close_price : number
+
+Starkt rekommenderade:
+- adjusted_close_price : number nullable
+- total_return_factor : number nullable
+- currency : string nullable
+- source : string nullable
+- volume : number nullable
+
+Viktig regel:
+- trendlogik ska i första hand använda justerad prisserie eller total return-serie om sådan finns
+- annars används close_price med tydlig begränsning
+
+====================================================
+10. company_master / instrument_master REFERENS
+====================================================
+
+Syfte:
+Ge stabil referens till bolag/instrument i portföljerna.
+
+Om systemet redan har Company Master ska den återanvändas.
+
+Minst följande fält ska kunna mappas:
+- company_id
+- instrument_id
+- symbol
+- display_name
+- sector_id
+- subsector_id
+- exchange
+- currency
+
+För råvaruportföljer är det även värdefullt med:
+- primary_commodity
+- is_junior
+- is_royalty
+- is_producer
+- is_pre_revenue
+
+Dessa fält får ligga i Company Master eller derived mapping-lager.
+
+====================================================
+11. OBLIGATORISKA VS OPTIONAL DATA I V1
+====================================================
+
+11.1 Minimikrav för att en portfölj ska kunna visas i overview
+Måste finnas:
+- portfolio_admin_config
+- portfolio_snapshots ELLER tillräckligt underlag för att bygga snapshot
+
+Minst:
+- portfolio_id
+- portfolio_name
+- portfolio_type
+- active
+- included_in_total_portfolio
+- market_value
+- actual_weight_pct eller underlag att räkna fram det
+
+11.2 Minimikrav för Allocation Health
+Måste finnas:
+- actual_weight_pct
+- target_weight_pct
+- min_weight_pct
+- max_weight_pct
+
+11.3 Minimikrav för Trend & Momentum
+Måste finnas:
+- minst 65 handelsdagars historik i portfolio_history_daily eller härledd från positionsvärden
+eller
+- precomputed return_20d / return_65d i snapshot
+
+11.4 Minimikrav för Risk Status
+Måste finnas:
+- minst 2 användbara komponenter
+T.ex.:
+- vol + drawdown
+eller
+- drawdown + concentration
+
+11.5 Minimikrav för Hedge Signal
+Måste finnas:
+- hedge policy fields
+- riskStatus
+- trendStatus
+
+11.6 Minimikrav för Dry Powder
+Måste finnas:
+- opportunistic market_value/weight eller explicit cash proxy
+- total portfolio risk status
+
+====================================================
+12. DATAKVALITET OCH COMPLETENESS
+====================================================
+
+Varje signal eller snapshot ska kunna märkas med:
+
+- full
+- partial
+- unavailable
+
+Rekommenderad modell:
+- signal_completeness på snapshot-nivå
+- plus data_quality_flags_json för detaljförklaring
+
+Exempel på data_quality_flags_json:
+{
+  "missing_positions": false,
+  "missing_macro_regime": true,
+  "missing_sector_regime": true,
+  "history_lt_200d": true,
+  "concentration_unavailable": false
+}
+
+Viktig regel:
+- partial betyder inte fel
+- unavailable betyder att signal inte ska visas som om den vore frisk eller neutral
+
+====================================================
+13. OPPORTUNISTIC / DRY POWDER — DATAMODELL
+====================================================
+
+V1 måste stödja två sätt att modellera dry powder:
+
+A. Explicit opportunistic portfolio
+- rekommenderat default
+- portfolio_type = opportunistic
+- market value och ev cash-innehav ligger där
+
+B. Opportunistic as mixed bucket
+- portföljen kan innehålla cash + korta instrument + taktiska innehav
+
+Systemet ska inte kräva att opportunistic = 100% cash.
+Därför behövs:
+- cash_value
+- cash_weight_pct
+på snapshot-nivå när möjligt
+
+Om cash ej kan särskiljas från övrigt opportunistic-innehåll:
+- dry powder bedöms från opportunistic actual weight som proxy
+- markeras som partial om ren cash-nivå saknas
+
+====================================================
+14. HISTORIK OCH CASH FLOWS — V1-FÖRENKLING
+====================================================
+
+Det finns två möjliga datamodeller för portföljhistorik:
+
+A. Ren total return-historik
+- bäst
+- stödjer korrekt trend/performance-logik
+
+B. Market value-historik
+- enklare
+- men påverkas av insättningar/uttag/rebalanseringar
+
+V1-regel:
+- om time-weighted eller total_return_index finns, använd den
+- om endast market_value finns, tillåt användning för första versionen
+- men märk data_quality = estimated eller partial där relevant
+
+Systemet ska inte låtsas att market value-serie alltid är samma sak som sann avkastningsserie.
+
+====================================================
+15. REKOMMENDERADE JSON-/API-FORMAT
+====================================================
+
+15.1 Portfolio admin config example
+{
+  "portfolio_id": "p_stable",
+  "portfolio_name": "Stabil utdelningsportfölj",
+  "portfolio_type": "stable_income",
+  "active": true,
+  "visible_in_overview": true,
+  "included_in_total_portfolio": true,
+  "sort_order": 1,
+  "target_weight_pct": 45,
+  "min_weight_pct": 40,
+  "max_weight_pct": 50,
+  "strategic_risk_level": "low",
+  "hedging_allowed": true,
+  "allowed_hedge_types_json": ["index_put","cash"],
+  "hedge_purpose_json": ["market_drawdown"],
+  "max_hedge_pct": 15,
+  "rebalance_mode": "standard",
+  "role_description": "Stabil bas och drawdown-dämpare",
+  "long_term_purpose": "Defensiv kärna",
+  "notes": null
+}
+
+15.2 Portfolio snapshot example
+{
+  "portfolio_id": "p_stable",
+  "as_of_date": "2026-04-03",
+  "market_value": 1250000,
+  "actual_weight_pct": 46.2,
+  "target_weight_pct": 45.0,
+  "min_weight_pct": 40.0,
+  "max_weight_pct": 50.0,
+  "cash_value": 25000,
+  "cash_weight_pct": 2.0,
+  "weight_status": "within_band",
+  "rebalance_status": "no_action",
+  "trend_status": "improving",
+  "risk_status": "elevated",
+  "hedge_status": "consider_hedge",
+  "signal_completeness": "full",
+  "return_20d": 1.8,
+  "return_65d": 4.5,
+  "return_200d": 9.2,
+  "annualized_vol_65d": 18.3,
+  "current_drawdown_pct": 7.1
+}
+
+15.3 Portfolio position example
+{
+  "portfolio_id": "p_commod_jr",
+  "as_of_date": "2026-04-03",
+  "instrument_id": "omai_us",
+  "instrument_type": "equity",
+  "company_id": "co_omai",
+  "symbol": "OMG.V",
+  "display_name": "Omai Gold",
+  "market_value": 85000,
+  "weight_pct": 9.5,
+  "sector_id": "materials",
+  "subsector_id": "gold_junior",
+  "commodity_id": "gold",
+  "is_junior": true,
+  "is_pre_revenue": true,
+  "is_illiquid": false
+}
+
+====================================================
+16. MATERIALISERING / BERÄKNINGSLAGER
+====================================================
+
+V1 bör använda följande princip:
+
+Raw / source layers:
+- portfolio_admin_config
+- portfolio_positions
+- price_history_daily
+- macro_regime_input
+- sector_regime_input
+
+Derived / materialized layers:
+- portfolio_snapshots
+- portfolio_history_daily
+- total_portfolio_history_daily
+
+Skäl:
+- snabb UI-rendering
+- enklare debug
+- stabilare signalproduktion
+- mindre risk att dashboarden räknar om tung logik live varje render
+
+====================================================
+17. REFRESH / UPPDATERINGSFREKVENS — V1
+====================================================
+
+Rekommenderad V1-ordning:
+
+1. uppdatera prisdata
+2. uppdatera portfolio_positions eller ingest av marknadsvärden
+3. bygg portfolio_history_daily
+4. bygg portfolio_snapshots
+5. bygg total_portfolio_history_daily
+
+Frekvens:
+- daglig räcker för V1
+- intradag är inte krav
+
+Om vissa inputs kommer senare samma dag:
+- snapshot får märkas partial tills allt finns
+
+====================================================
+18. EXPLICIT GRÄNS FÖR DATASPEC V1
+====================================================
+
+Denna dataspec låser:
+- vilka kärnobjekt som behövs
+- minimifält
+- relationen mellan admin, positionsdata, snapshots, historik och regime-inputs
+- hur full/partial/unavailable ska kunna uttryckas
+
+Denna dataspec låser INTE:
+- exakt SQL-schema eller ORM-implementation
+- exakt API-design
+- exakt refresh-infrastruktur
+- exakt storage engine
+- exakt time-weighted return-motor
+- exakt mapping från sector_id till regime_key
+
+Sådant får definieras i implementation, men endast inom ramen för denna modell.
+
+====================================================
+19. REKOMMENDERAT NÄSTA STEG
+====================================================
+
+Efter denna dataspec bör nästa dokument vara:
+
+PORTFOLIO DASHBOARD — CODEX IMPLEMENTATION PROMPT V1
+
+Den prompten bör vara fasad:
+- Fas 1: admin config + validation
+- Fas 2: snapshots + allocation health
+- Fas 3: history + trend
+- Fas 4: risk
+- Fas 5: hedge + dry powder
+- Fas 6: debug + explainability
+
+SLUT PÅ DATASPEC V1
