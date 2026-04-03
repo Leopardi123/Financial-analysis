@@ -30,6 +30,8 @@ const TABLES = {
   portfolioAdminConfig: "portfolio_admin_config",
   portfolioSnapshots: "portfolio_snapshots",
   portfolioPositions: "portfolio_positions",
+  portfolioHistoryDaily: "portfolio_history_daily",
+  totalPortfolioHistoryDaily: "total_portfolio_history_daily",
 };
 
 export async function ensureSchema() {
@@ -404,6 +406,37 @@ export async function ensureSchema() {
   );
 
   await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioHistoryDaily} (
+      portfolio_id TEXT NOT NULL,
+      as_of_date TEXT NOT NULL,
+      total_return_index REAL,
+      market_value REAL,
+      daily_return_pct REAL,
+      cumulative_return_pct REAL,
+      drawdown_pct REAL,
+      cash_weight_pct REAL,
+      data_source TEXT,
+      data_quality TEXT,
+      PRIMARY KEY (portfolio_id, as_of_date)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.totalPortfolioHistoryDaily} (
+      as_of_date TEXT PRIMARY KEY,
+      total_return_index REAL,
+      market_value REAL,
+      daily_return_pct REAL,
+      cumulative_return_pct REAL,
+      drawdown_pct REAL,
+      total_cash_value REAL,
+      total_cash_weight_pct REAL,
+      included_portfolio_count INTEGER,
+      data_quality TEXT
+    )`
+  );
+
+  await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.priceScreenSnapshot} (
       symbol TEXT PRIMARY KEY,
       as_of_date TEXT NOT NULL,
@@ -559,7 +592,24 @@ export async function ensureSchema() {
       sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_as_of_date
             ON ${TABLES.portfolioSnapshots} (as_of_date DESC, portfolio_id)`,
     },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_history_daily_portfolio_date
+            ON ${TABLES.portfolioHistoryDaily} (portfolio_id, as_of_date DESC)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_total_portfolio_history_daily_date
+            ON ${TABLES.totalPortfolioHistoryDaily} (as_of_date DESC)`,
+    },
   ]);
+
+  await ensureColumnExists(TABLES.portfolioSnapshots, "return_20d", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "return_65d", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "return_200d", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "short_direction", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "medium_direction", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "long_direction", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "trend_status", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "relative_strength_bucket", "TEXT");
 
   try {
     await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN fiscal_year_end TEXT`);
