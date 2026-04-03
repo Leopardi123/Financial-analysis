@@ -1,0 +1,645 @@
+PORTFOLIO DASHBOARD
+
+PORTFOLIO DASHBOARD — KRAVSPEC V1
+Status: omskriven och konsoliderad V1
+Syfte: definiera Portfolio Dashboard som en verklig systemdel med låst struktur för portföljtyper, adminfält, viktlogik, översiktssignaler och grundläggande hedge-/riskramverk
+Princip: tydlig separation mellan strategisk allokering, faktisk portföljstatus, aktuell riskstatus, trend/momentum och hedge-signal
+Arkitekturprincip: Portfolio Dashboard får läsa från Macro Layer, Sector Layer, price/history och portföljdata, men får inte skriva tillbaka till underliggande matematik eller skapa cirkularitet
+
+====================================================
+0. ÖVERGRIPANDE MÅL
+====================================================
+
+Portfolio Dashboard ska:
+- fungera som ett överordnat lager ovanpå flera definierade portföljer
+- visa total utveckling för alla portföljer sammanlagt
+- övervaka att faktisk vikt per portfölj håller sig inom tillåtna ramar
+- signalera trend, momentum, risk och hedgebehov
+- stödja en adminvy där portföljstruktur, målvikter och regler kan styras
+- vara robust även om vissa delar saknar data
+- vara förklarbar: varje viktig signal ska kunna motiveras
+
+Portfolio Dashboard ska INTE:
+- ändra underliggande project/corporate-matematik
+- implicit gissa hedgeinstrument utanför definierad policy
+- blanda strategisk risknivå med aktuell riskstatus
+- kräva att alla portföljer alltid är fullinvesterade
+- låsa detaljerad scoring- eller signalmatematik i denna master-spec om det hör hemma i separat teknisk logikspec
+
+====================================================
+1. PORTFÖLJER SOM SKA FINNAS I V1
+====================================================
+
+Systemet ska i V1 stödja exakt följande portfolioType-enum:
+
+- stable_income
+- growth
+- commodity_majors
+- commodity_junior
+- opportunistic
+
+Rekommenderade UI-namn:
+
+1. stable_income
+UI-namn: Stabil utdelningsportfölj
+Beskrivning:
+- stor vikt i totalallokeringen
+- sektorspridd
+- fokus på kvalitet, kassaflöde, uthållighet, utdelning, rimlig värdering
+- primär roll: stabil bas, defensiv ryggrad, drawdown-dämpare
+- köps framför allt aggressivt vid skarpa breda fall, typ 2022-lägen
+
+2. growth
+UI-namn: Tillväxtportfölj
+Beskrivning:
+- ungefär 1/3 av utdelningsportföljens vikt som utgångspunkt
+- fokus på kvalitativ tillväxt, längre duration, högre multipel- och sentimentrisk
+- primär roll: compounders och strukturell tillväxt
+
+3. commodity_majors
+UI-namn: Råvaror — majors/royalty
+Beskrivning:
+- stor råvaruportfölj
+- endast majors, större producenter eller royalty/streamingbolag
+- primär roll: real asset-exponering, inflationsskydd, råvarucykler med högre kvalitet
+
+4. commodity_junior
+UI-namn: Råvaror — junior/yolo
+Beskrivning:
+- juniorer, hög risk, asymmetrisk uppsida
+- primär roll: discoveries, rerating, M&A, hög optionalitet
+
+5. opportunistic
+UI-namn: Opportunistisk / dry powder
+Beskrivning:
+- liten till medelstor portfölj eller allokeringsficka
+- kan innehålla kassa, mycket kort exponering eller taktisk reserv
+- primär roll: handlingsutrymme vid panik, rebalansering, parkering efter trimning, ammunition för skarpa fall
+
+Systemet ska stödja att portföljer kan vara:
+- aktiva
+- inaktiva
+- synliga i UI men exkluderade från totalportfölj om så väljs i admin
+
+Viktig regel:
+- commodity_majors och commodity_junior är separata portföljer i V1
+- ingen inbördes viktrelation mellan dem är låst i denna spec
+- inget gemensamt bucket-tak för råvaror låses i denna V1
+
+====================================================
+2. ADMINDEL — OBLIGATORISKA FÄLT PER PORTFÖLJ
+====================================================
+
+Varje portfölj ska i admin ha följande definierbara fält:
+
+A. Identitet
+- portfolioId
+- portfolioName
+- portfolioType
+- active true/false
+- sortOrder
+- visibleInOverview true/false
+- includedInTotalPortfolio true/false
+
+B. Strategisk funktion
+- roleDescription
+- longTermPurpose
+- notes
+
+Exempel:
+- stabil bas
+- tillväxtmotor
+- råvaruskydd
+- asymmetrisk uppsida
+- dry powder
+
+C. Viktregler
+- targetWeightPct
+- minWeightPct
+- maxWeightPct
+
+Systemregel:
+- targetWeightPct får inte ensamt styra varningar
+- varningar ska utgå från faktisk vikt relativt tillåtet band
+- band måste därför finnas explicit
+
+D. Strategisk risknivå
+- strategicRiskLevel
+
+Tillåtna värden:
+- low
+- medium
+- high
+- extreme
+
+Denna nivå beskriver mandatet, inte dagsformen.
+
+E. Hedgepolicy
+- hedgingAllowed true/false
+- allowedHedgeTypes[]
+- maxHedgePct
+- hedgePurpose[]
+
+Exempel på hedgePurpose:
+- market_drawdown
+- cyclical_downturn
+- inflation_shock
+- deflationary_stress
+- usd_strength
+- commodity_downturn
+- duration_risk
+
+Exempel på allowedHedgeTypes:
+- index_put
+- index_short
+- inverse_etf
+- gold
+- cash
+- usd
+- commodity_put
+- producer_pair_hedge
+- no_direct_hedge_use_position_reduction
+
+Systemregel:
+- hedgeförslag får endast genereras inom ramen för denna policy
+
+F. Rebalanseringsinställningar
+- rebalancePriority optional
+- rebalanceMode
+
+Tillåtna exempel för rebalanceMode:
+- soft
+- standard
+- strict
+
+Kommentar:
+- exakt semantik för rebalancePriority och konfliktordning kan definieras i senare teknisk spec
+- fältet får finnas i V1 men behöver inte bära full logik ännu
+
+G. Riskgränser och koncentration
+- maxSinglePositionPct
+- maxSectorConcentrationPct
+- maxCommodityConcentrationPct
+- maxJuniorExposurePct
+- maxIlliquidExposurePct
+
+H. Kommentarer / override
+- analystOverrideAllowed true/false
+- analystOverrideNote
+- overrideExpiryDate optional
+
+====================================================
+3. VIKTLOGIK — REGLER FÖR TOTALPORTFÖLJEN
+====================================================
+
+Systemet ska kunna beräkna:
+- faktisk vikt per portfölj
+- avvikelse mot målvikt
+- avvikelse mot tillåtet band
+- total vikt för alla aktiva portföljer
+- eventuell över-/undervikt i total struktur
+
+Definitioner:
+- actualWeightPct = aktuell portföljandel av totalportföljen
+- targetWeightPct = strategisk målvikt
+- weightDriftPct = actualWeightPct - targetWeightPct
+
+Bandregler:
+- inom band = minWeightPct <= actualWeightPct <= maxWeightPct
+- övervikt = actualWeightPct > maxWeightPct
+- undervikt = actualWeightPct < minWeightPct
+
+Valideringsregel:
+- SUM(targetWeightPct) för portföljer där:
+  active = true
+  AND includedInTotalPortfolio = true
+  ska normalt vara 100%
+
+Systembeteende:
+- om summan inte är 100% ska systemet generera tydlig validation warning/error i admin
+- denna regel gäller endast för portföljer som faktiskt inkluderas i totalportföljen
+- opportunistic är inte implicit alltid inkluderad; det styrs explicit av includedInTotalPortfolio
+
+====================================================
+4. VIKTSTATUS — KLASSIFICERING
+====================================================
+
+Varje portfölj ska klassificeras i en weightStatus:
+
+1. within_band
+- faktisk vikt ligger inom tillåtet band
+
+2. watch
+- nära gräns, men fortfarande inom band
+- syfte: tidig signal
+
+3. overweight
+- faktisk vikt över maxvikt
+
+4. underweight
+- faktisk vikt under minvikt
+
+5. critical_overweight
+- faktisk vikt klart över maxvikt och bör åtgärdas
+
+6. critical_underweight
+- faktisk vikt klart under minvikt och bör åtgärdas
+
+Systemregel:
+- watch och critical måste bygga på explicita tröskelregler
+- exakt tröskelmatematik definieras i separat teknisk logikspec, inte i denna master-spec
+
+Systemet ska även generera en separat:
+- rebalanceStatus
+
+Tillåtna värden:
+- no_action
+- monitor
+- rebalance_soon
+- rebalance_now
+
+====================================================
+5. RISKMODELL — DELA ALLTID UPP I TVÅ NIVÅER
+====================================================
+
+Systemet måste skilja på:
+
+A. Strategisk risknivå
+- hämtas från admin
+- beskriver portföljens mandat
+
+B. Aktuell riskstatus
+- beräknad från faktisk data
+- beskriver nuvarande riskläge
+
+Aktuell riskstatus ska kunna ta värden som:
+- calm
+- elevated
+- high
+- critical
+
+Aktuell riskstatus ska kunna bygga på flera komponenter, t.ex.:
+- volatilitet
+- drawdown
+- koncentration
+- korrelation mot övriga portföljer
+- likviditet
+- cyklisk exponering
+- råvaru-/sektorkoncentration
+- optionalitet / pre-revenue-tyngd där relevant
+
+Systemregel:
+- strategisk risk och aktuell risk får aldrig slås ihop till en enda etikett
+
+Viktig gränsdragning:
+- detaljerad scoringmodell, viktning, formler och minimumhistorik hör hemma i separat teknisk risk-/dataspec
+- denna V1 låser att aktuell riskstatus ska finnas och vara multikomponent, men inte full matematik
+
+====================================================
+6. PORTFOLIO OVERVIEW — OBLIGATORISKA DELAR
+====================================================
+
+Portfolio Overview ska i V1 innehålla följande huvudblock:
+
+1. Total Portfolio Performance
+- visa utvecklingen för alla portföljer sammanlagt
+- totalportföljens tidsserie
+- möjlighet att se ackumulerad utveckling
+
+2. Allocation Health
+- visa faktisk vikt vs målvikt per portfölj
+- varna om någon portfölj överskrider sitt band
+- visa rebalanseringsstatus
+
+3. Trend & Momentum
+- signalera vilka portföljer som har momentum och trend
+- detta ska göras per portfölj, inte bara på totalnivå
+
+4. Risk Dashboard
+- visa aktuell riskstatus per portfölj
+- visa totalportföljens riskstatus
+- signalera om totalportföljen blivit för aggressiv eller för cyklisk relativt sin design
+
+5. Hedge Signal
+- signalera om hedge bör införas
+- signalera vilken hedge som är tillåten/rekommenderad
+- signalen måste vara policybunden och motiverad
+
+6. Dry Powder / Liquidity Status
+- visa om opportunistisk portfölj eller kassaandel är tillräcklig
+- signalera om handlingsutrymmet inför större fall är för lågt
+
+====================================================
+7. TREND OCH MOMENTUM — KRAV
+====================================================
+
+Systemet ska inte ha en enda vag momentumindikator.
+Trend/momentum ska delas upp i minst följande lager:
+
+A. Kort trend
+- kortsiktig riktning
+
+B. Medellång trend
+- mellanhorisont
+
+C. Lång trend
+- övergripande riktning
+
+D. Relativ styrka mellan portföljer
+- vilka portföljer som utvecklas starkare/svagare än övriga
+
+E. Intern bredd
+- om tillgängligt: hur bred styrkan/svagheten är inom portföljen
+- särskilt viktigt för bredare portföljer
+
+Varje portfölj ska kunna få en sammanfattande signal som t.ex.:
+- strong_uptrend
+- improving
+- neutral
+- weakening
+- downtrend
+
+Viktig regel:
+- trendhorisonter måste vara explicit definierade i implementation/teknisk logikspec
+- denna master-spec låser att kort, medellång och lång trend inte får lämnas odefinierade
+- exakta lookback-fönster eller tekniska metoder låses inte här
+
+====================================================
+8. HEDGE-SIGNAL — KRAV OCH LOGIK
+====================================================
+
+Systemet ska kunna svara på:
+- bör hedge införas?
+- varför?
+- i vilken portfölj?
+- vilken hedge är tillåten?
+- hur stark är signalen?
+
+Hedge-signalen ska kunna bero på:
+- portföljens hedgepolicy
+- totalportföljens riskläge
+- macro regime
+- sector regime
+- trend/momentum
+- koncentration och drawdown-risk
+
+Exempel på utdata:
+- hedge_not_needed
+- consider_hedge
+- hedge_recommended
+- hedge_urgent
+
+Exempel på motiveringar:
+- totalportföljen är för cyklisk i förhållande till nuvarande makroregim
+- yolo-portföljen har blivit för stor relativt mandat
+- tillväxtportföljen har negativ trend och hög durationrisk
+- råvaruportföljen har ökad drawdown-risk i försvagad råvaruregim
+
+Konfliktregel:
+- total hedge-signal får aldrig kringgå per-portföljers hedgepolicy
+- total hedge-signal ska därför tolkas som en aggregerad behovssignal, begränsad av respektive portföljs tillåtna policy
+
+Om hedge behövs men ingen relevant portfölj tillåter direkt hedge ska systemet istället kunna signalera:
+- reduce_exposure
+- rebalance_to_cash
+- increase_dry_powder
+- rotate_to_defensive_bucket
+
+Viktig gränsdragning:
+- exakt mapping från macro/sector regime till hedge-signal definieras i separat teknisk logikspec eller overlay-spec
+- denna V1 låser att macro/sector får vara inputs, men inte full IF/THEN-motor
+
+====================================================
+9. DRY POWDER / OPPORTUNISTISK PORTFÖLJ — KRAV
+====================================================
+
+Den opportunistiska portföljen ska finnas som egen definierad portföljtyp i V1.
+
+Systemet ska kunna:
+- visa dess vikt
+- avgöra om den är tillräcklig relativt total riskmiljö
+- signalera om dry powder är för låg eller för hög
+
+Exempelstatus:
+- insufficient_dry_powder
+- adequate_dry_powder
+- elevated_cash_buffer
+- deployable_cash_available
+
+Systemregel:
+- systemet ska inte implicit anta att kassa måste ligga i andra portföljer
+- opportunistisk portfölj är en explicit del av strukturen
+
+Viktig gränsdragning:
+- dry powder-status ska bedömas relativt riskmiljö
+- exakta procentsatser eller tröskelvärden låses inte i denna master-spec
+
+====================================================
+10. TOTALPORTFÖLJ — SIGNALER SOM OCKSÅ SKA FINNAS
+====================================================
+
+Utöver per-portfölj-signaler ska totalöversikten kunna signalera:
+
+- total portfolio within allocation plan / outside allocation plan
+- total risk above intended structure
+- drawdown concentration in one portfolio
+- excessive correlation across portfolios
+- insufficient defensive ballast
+- insufficient dry powder
+- excessive junior / speculative exposure
+- excessive commodity cyclicality
+- hedge recommended at total level
+
+====================================================
+11. GRACEFUL DEGRADATION
+====================================================
+
+Portfolio Dashboard måste fungera även om vissa data saknas.
+
+Minimum behavior:
+- om full momentumdata saknas: visa begränsad trendsignal
+- om full riskmodell saknas: visa only basic risk flags
+- om hedgeunderlag saknas: visa insufficient_data_for_hedge_signal
+- om vissa portföljer saknar tillräcklig historik: exkludera inte hela dashboarden
+
+Systemet ska därför stödja:
+- full signal
+- partial signal
+- unavailable
+
+UI ska vara tydlig med skillnaden.
+
+Viktig gränsdragning:
+- detaljerad beroendekarta för varje signal kan definieras i separat teknisk logikspec
+- denna V1 låser att graceful degradation måste finnas, men inte full dependency matrix
+
+====================================================
+12. FÖRKLARBARHET / DEBUG / TRANSPARENS
+====================================================
+
+Alla viktiga signaler ska vara förklarbara.
+
+Det ska i debug eller expanderbar informationsvy gå att se:
+- faktisk vikt
+- målvikt
+- tillåtet band
+- varför viktvarning utlösts
+- vilka komponenter som drev riskstatus
+- vilka komponenter som drev trend/momentum
+- varför hedge rekommenderas eller inte rekommenderas
+- om signal bygger på full eller partiell data
+
+Signaltext utan motivering ska undvikas.
+
+====================================================
+13. DATA OCH INTEGRATION — STRUKTURELLT KRAV
+====================================================
+
+Portfolio Dashboard kräver i implementation:
+- prisdata / historik
+- positions- eller viktdatabas per portfölj
+- portföljmetadata från admin
+- eventuellt macro regime / sector regime inputs
+
+Viktig regel:
+- detaljerad dataspec för datakällor, format, uppdateringsfrekvens och fallback definieras separat
+- denna V1 master-spec låser att sådan dataspec måste finnas, men innehåller inte den fulla integrationsdetaljen
+
+====================================================
+14. V1 — REKOMMENDERAD STARTUPPDELNING
+====================================================
+
+Fas 1
+- definiera portföljmodellen i admin
+- lägg in de fem låsta portföljtyperna
+- stöd för target/min/max weight
+- strategisk risknivå
+- hedgepolicy
+- roleDescription
+- validation-regel för targetWeightPct-summa
+
+Fas 2
+- bygg Portfolio Overview med:
+  - total utveckling
+  - faktisk vikt vs mål
+  - viktvarningar
+  - rebalanseringsstatus
+
+Fas 3
+- lägg till trend/momentum-signaler per portfölj
+
+Fas 4
+- lägg till aktuell riskstatus
+
+Fas 5
+- lägg till hedge-signal + dry powder-logik
+
+====================================================
+15. V1 — MINIMIKRAV SOM SKA LÅSAS NU
+====================================================
+
+Följande ska betraktas som låsta kärnkrav i V1:
+
+- systemet ska ha exakt 5 portfolioType-enum:
+  1. stable_income
+  2. growth
+  3. commodity_majors
+  4. commodity_junior
+  5. opportunistic
+
+- varje portfölj ska ha:
+  - targetWeightPct
+  - minWeightPct
+  - maxWeightPct
+  - strategicRiskLevel
+  - hedgepolicy
+  - roleDescription
+
+- overview ska:
+  - visa alla portföljer sammanlagt
+  - varna om portfölj överskrider tillåtet viktband
+  - signalera trend/momentum
+  - signalera hedgebehov
+  - signalera dry powder-status
+
+- systemet ska skilja på:
+  - strategisk risknivå
+  - aktuell riskstatus
+
+- systemet ska klassificera:
+  - weightStatus
+  - rebalanceStatus
+  - riskStatus
+  - trendStatus
+  - hedgeStatus
+
+- systemet ska ha validation-regel för:
+  - SUM(targetWeightPct) över aktiva portföljer som ingår i totalportföljen
+
+- systemet ska ha konfliktregel för:
+  - total hedge-signal vs per-portfölj hedgepolicy
+
+====================================================
+16. NAMNREKOMMENDATIONER I UI
+====================================================
+
+Rekommenderade namn i UI:
+
+- Portfolio Overview
+- Total Portfolio
+- Allocation Health
+- Trend & Momentum
+- Risk Status
+- Hedge Signal
+- Dry Powder
+- Selected Portfolio
+
+Portföljnamn:
+- Stabil utdelningsportfölj
+- Tillväxtportfölj
+- Råvaror — majors/royalty
+- Råvaror — junior/yolo
+- Opportunistisk / dry powder
+
+====================================================
+17. VIKTIG DESIGNPRINCIP
+====================================================
+
+Portfolio Dashboard ska inte bara vara en performancevy.
+
+Den ska vara:
+- allokeringskontroll
+- riskskärm
+- trendfilter
+- hedge/defensiv signalmotor
+- handlingsyta inför fallande marknad
+
+Kort sagt:
+Portfolio Dashboard ska svara på fyra frågor:
+1. Är portföljstrukturen som den ska vara?
+2. Är någon portfölj för stor, för liten eller för riskabel?
+3. Vilka portföljer har styrka/svaghet just nu?
+4. Behöver jag hedge, rebalansering eller mer dry powder?
+
+====================================================
+18. EXPLICIT GRÄNS FÖR DENNA V1-SPEC
+====================================================
+
+Följande hör hemma i separat teknisk logikspec / dataspec och är därför inte full-låsta här:
+- exakta watch- och critical-trösklar
+- exakta trendlookbacks och metodval
+- detaljerad riskscoring och viktning
+- exakt macro/sector → hedge-mapping
+- full dependency matrix för graceful degradation
+- minimumhistorik för korrelationer och liknande
+- full datakällespec och refresh-arkitektur
+
+Denna master-spec låser:
+- struktur
+- obligatoriska fält
+- signalfamiljer
+- separationsprinciper
+- valideringsprinciper
+- policygränser
+
+SLUT PÅ KRAVSPEC V1
