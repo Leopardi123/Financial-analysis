@@ -124,6 +124,8 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "portfolio/admin/create": () => import("../src/server/routes/portfolio/admin/create.js"),
   "portfolio/admin/update": () => import("../src/server/routes/portfolio/admin/update.js"),
   "portfolio/admin/validate": () => import("../src/server/routes/portfolio/admin/validate.js"),
+  "portfolio/snapshots/build": () => import("../src/server/routes/portfolio/snapshots/build.js"),
+  "portfolio/snapshots/latest": () => import("../src/server/routes/portfolio/snapshots/latest.js"),
   "sector/manual-input": () => import("../src/server/routes/sector/manual-input.js"),
   "sector/map-companies": () => import("../src/server/routes/sector/map-companies.js"),
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),

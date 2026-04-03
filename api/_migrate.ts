@@ -28,6 +28,8 @@ const TABLES = {
   priceScreenSnapshot: "price_screen_snapshot",
   screeningPriceRefreshState: "screening_price_refresh_state",
   portfolioAdminConfig: "portfolio_admin_config",
+  portfolioSnapshots: "portfolio_snapshots",
+  portfolioPositions: "portfolio_positions",
 };
 
 export async function ensureSchema() {
@@ -383,6 +385,25 @@ export async function ensureSchema() {
   );
 
   await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioSnapshots} (
+      portfolio_id TEXT NOT NULL,
+      as_of_date TEXT NOT NULL,
+      market_value REAL,
+      actual_weight_pct REAL,
+      target_weight_pct REAL NOT NULL,
+      min_weight_pct REAL NOT NULL,
+      max_weight_pct REAL NOT NULL,
+      weight_status TEXT NOT NULL,
+      rebalance_status TEXT NOT NULL,
+      signal_completeness TEXT NOT NULL,
+      cash_value REAL,
+      cash_weight_pct REAL,
+      debug_payload_json TEXT,
+      PRIMARY KEY (portfolio_id, as_of_date)
+    )`
+  );
+
+  await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.priceScreenSnapshot} (
       symbol TEXT PRIMARY KEY,
       as_of_date TEXT NOT NULL,
@@ -533,6 +554,10 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_admin_active_included
             ON ${TABLES.portfolioAdminConfig} (active, included_in_total_portfolio)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_as_of_date
+            ON ${TABLES.portfolioSnapshots} (as_of_date DESC, portfolio_id)`,
     },
   ]);
 
