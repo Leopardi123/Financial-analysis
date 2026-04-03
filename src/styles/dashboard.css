@@ -754,6 +754,69 @@
   margin-top: 6px;
 }
 
+.single-stock-price-mode-chip {
+  font-size: 11px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: #334155;
+  background: #f8fafc;
+}
+
+.single-stock-price-mode-description {
+  margin-top: 4px !important;
+}
+
+.single-stock-price-swipe-indicator {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.single-stock-price-toggle-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.single-stock-price-toggle {
+  border: 1px solid rgba(100, 116, 139, 0.45);
+  background: #f8fafc;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.single-stock-price-toggle.is-active {
+  border-color: #1e293b;
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.single-stock-price-swipe-track {
+  margin-top: 8px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 100%;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+
+.single-stock-price-swipe-page {
+  scroll-snap-align: start;
+  padding-bottom: 2px;
+}
+
+.single-stock-price-swipe-page.is-gold {
+  border-top: 2px solid rgba(180, 83, 9, 0.45);
+}
+
 .single-stock-tasks-card {
   background: #f4efd8;
   border-color: rgba(124, 102, 48, 0.35);
