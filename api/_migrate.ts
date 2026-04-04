@@ -387,6 +387,36 @@ export async function ensureSchema() {
   );
 
   await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioPositions} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      portfolio_id TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      company_id INTEGER,
+      instrument_id TEXT,
+      display_name TEXT,
+      shares REAL NOT NULL,
+      avg_cost REAL,
+      entry_date TEXT,
+      asset_type TEXT NOT NULL,
+      thesis TEXT,
+      notes TEXT,
+      manual_sector_id INTEGER,
+      manual_subsector_id INTEGER,
+      manual_commodity_id TEXT,
+      mapping_source TEXT NOT NULL DEFAULT 'inherited',
+      mapping_override_active INTEGER NOT NULL DEFAULT 0,
+      active_position INTEGER NOT NULL DEFAULT 1,
+      exited_at TEXT,
+      manual_price REAL,
+      currency TEXT,
+      market_value REAL,
+      as_of_date TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`
+  );
+
+  await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioSnapshots} (
       portfolio_id TEXT NOT NULL,
       as_of_date TEXT NOT NULL,
@@ -461,6 +491,26 @@ export async function ensureSchema() {
   );
   await ensureColumnExists(TABLES.priceScreenSnapshot, "high_252d", "REAL");
   await ensureColumnExists(TABLES.priceScreenSnapshot, "drawdown_252d", "REAL");
+  await ensureColumnExists(TABLES.portfolioPositions, "company_id", "INTEGER");
+  await ensureColumnExists(TABLES.portfolioPositions, "instrument_id", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "display_name", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "shares", "REAL");
+  await ensureColumnExists(TABLES.portfolioPositions, "avg_cost", "REAL");
+  await ensureColumnExists(TABLES.portfolioPositions, "entry_date", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "asset_type", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "thesis", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "notes", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "manual_sector_id", "INTEGER");
+  await ensureColumnExists(TABLES.portfolioPositions, "manual_subsector_id", "INTEGER");
+  await ensureColumnExists(TABLES.portfolioPositions, "manual_commodity_id", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "mapping_source", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "mapping_override_active", "INTEGER");
+  await ensureColumnExists(TABLES.portfolioPositions, "active_position", "INTEGER");
+  await ensureColumnExists(TABLES.portfolioPositions, "exited_at", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "manual_price", "REAL");
+  await ensureColumnExists(TABLES.portfolioPositions, "currency", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "created_at", "TEXT");
+  await ensureColumnExists(TABLES.portfolioPositions, "updated_at", "TEXT");
 
   await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.companyProjects} (
@@ -587,6 +637,14 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_admin_active_included
             ON ${TABLES.portfolioAdminConfig} (active, included_in_total_portfolio)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_positions_portfolio
+            ON ${TABLES.portfolioPositions} (portfolio_id, active_position, updated_at DESC)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_positions_symbol
+            ON ${TABLES.portfolioPositions} (symbol)`,
     },
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_as_of_date

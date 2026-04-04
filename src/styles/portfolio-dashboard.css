@@ -230,6 +230,36 @@
   width: 100%;
 }
 
+.portfolio-positions-admin .portfolio-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.82rem;
+}
+
+.portfolio-positions-admin .portfolio-form-grid label > span {
+  display: block;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.portfolio-positions-admin .portfolio-form-grid .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.portfolio-positions-admin .portfolio-form-grid .checkbox-label input[type="checkbox"] {
+  width: auto;
+}
+
+.portfolio-positions-admin .portfolio-form-grid input,
+.portfolio-positions-admin .portfolio-form-grid select,
+.portfolio-positions-admin .portfolio-form-grid textarea {
+  width: 100%;
+  min-width: 0;
+}
+
 .multi-select-block {
   border: 1px solid #e2ece7;
   border-radius: 6px;

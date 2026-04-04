@@ -3,6 +3,7 @@ import { normalizeName } from "../../../../api/_company_master.js";
 
 type SearchRow = {
   symbol?: unknown;
+  company_id?: unknown;
   ticker?: unknown;
   name?: unknown;
   exchange?: unknown;
@@ -11,7 +12,7 @@ type SearchRow = {
 
 type CachedEntry = {
   expiresAt: number;
-  results: Array<{ symbol: string; name: string; exchange: string | null; type: string | null }>;
+  results: Array<{ symbol: string; name: string; exchange: string | null; type: string | null; company_id: number | null }>;
 };
 
 const CACHE_TTL_MS = 60_000;
@@ -79,17 +80,22 @@ export default async function handler(req: any, res: any) {
     tDbConnectMs = Date.now() - dbConnectStart;
 
     const dbQueryStart = Date.now();
+    const upperText = text.toUpperCase();
+    const containsNormalized = `%${cacheKey}%`;
+    const containsText = `%${text.toLowerCase()}%`;
+    const containsUpper = `%${upperText}%`;
     const rows = await db.execute({
-      sql: `SELECT symbol, name, exchange, type, NULL as ticker
+      sql: `SELECT c.symbol, c.name, c.exchange, c.type, NULL as ticker, v2.id AS company_id
             FROM companies
-            WHERE normalized_name LIKE ? OR symbol LIKE ?
+            LEFT JOIN companies_v2 v2 ON v2.ticker = c.symbol
+            WHERE normalized_name LIKE ? OR LOWER(c.name) LIKE ? OR UPPER(c.symbol) LIKE ?
             UNION
-            SELECT ticker AS symbol, ticker AS name, NULL as exchange, NULL as type, ticker
+            SELECT ticker AS symbol, ticker AS name, NULL as exchange, NULL as type, ticker, id AS company_id
             FROM companies_v2
-            WHERE ticker LIKE ?
+            WHERE UPPER(ticker) LIKE ?
             ORDER BY symbol ASC
             LIMIT 20`,
-      args: [`${cacheKey}%`, `%${text.toUpperCase()}%`, `%${text.toUpperCase()}%`],
+      args: [containsNormalized, containsText, containsUpper, containsUpper],
     });
     tDbQueryMs = Date.now() - dbQueryStart;
 
@@ -98,6 +104,7 @@ export default async function handler(req: any, res: any) {
       name: String(row.name ?? row.ticker ?? ""),
       exchange: row.exchange ? String(row.exchange) : null,
       type: row.type ? String(row.type) : null,
+      company_id: Number.isInteger(Number(row.company_id ?? NaN)) ? Number(row.company_id) : null,
     })).filter((row) => row.symbol.length > 0);
 
     setCache(cacheKey, { results, expiresAt: Date.now() + CACHE_TTL_MS });

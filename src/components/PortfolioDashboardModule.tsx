@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "../styles/portfolio-dashboard.css";
+import PortfolioPositionsAdmin from "./PortfolioPositionsAdmin";
 
 type NullableNumber = number | null;
 
-type SetupState = "no_config" | "configured_no_data" | "partial" | "live";
+type SetupState = "no_config" | "configured_no_data" | "configured_positions_no_snapshot" | "partial" | "live";
 
 type PortfolioRecord = {
   portfolio_id: string;
@@ -405,6 +406,13 @@ export default function PortfolioDashboardModule() {
         </div>
       )}
 
+      {!loading && !error && setupState === "configured_positions_no_snapshot" && (
+        <div className="portfolio-empty-state">
+          <h4>Positions added, awaiting first snapshot build.</h4>
+          <p>Run portfolio snapshot/history build to begin populating overview metrics.</p>
+        </div>
+      )}
+
       {!loading && !error && (setupState === "partial" || setupState === "live") && overview && (
         <>
           <div className="portfolio-kpi-row">
@@ -449,6 +457,13 @@ export default function PortfolioDashboardModule() {
             ))}
           </div>
         </>
+      )}
+
+      {!loading && !error && adminList.length > 0 && (
+        <PortfolioPositionsAdmin portfolios={adminList.map((item) => ({
+          portfolio_id: item.portfolio_id,
+          portfolio_name: item.portfolio_name,
+        }))} />
       )}
 
       <details className="portfolio-admin-wrap" open={showAdmin}>
