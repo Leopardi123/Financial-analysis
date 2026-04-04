@@ -18,6 +18,28 @@ const PORTFOLIO_TYPES: PortfolioType[] = [
 const STRATEGIC_RISK_LEVELS: StrategicRiskLevel[] = ["low", "medium", "high", "extreme"];
 const REBALANCE_MODES: RebalanceMode[] = ["soft", "standard", "strict"];
 
+const ALLOWED_HEDGE_TYPES = [
+  "index_put",
+  "index_short",
+  "inverse_etf",
+  "gold",
+  "cash",
+  "usd",
+  "commodity_put",
+  "producer_pair_hedge",
+  "no_direct_hedge_use_position_reduction",
+];
+
+const ALLOWED_HEDGE_PURPOSES = [
+  "market_drawdown",
+  "cyclical_downturn",
+  "inflation_shock",
+  "deflationary_stress",
+  "usd_strength",
+  "commodity_downturn",
+  "duration_risk",
+];
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -150,6 +172,14 @@ export function validatePortfolioConfig(config: Partial<PortfolioAdminConfig>, m
     errors.push("max_weight_pct must be <= 100");
   }
 
+  if (config.max_hedge_pct !== undefined && config.max_hedge_pct !== null && !isFiniteNumber(config.max_hedge_pct)) {
+    errors.push("max_hedge_pct must be a finite number or null");
+  }
+
+  if (isFiniteNumber(config.max_hedge_pct) && (config.max_hedge_pct < 0 || config.max_hedge_pct > 100)) {
+    errors.push("max_hedge_pct must be between 0 and 100");
+  }
+
   if (
     isFiniteNumber(config.min_weight_pct)
     && isFiniteNumber(config.target_weight_pct)
@@ -164,6 +194,12 @@ export function validatePortfolioConfig(config: Partial<PortfolioAdminConfig>, m
     const parsed = toJsonArrayText(config.allowed_hedge_types_json);
     if (!parsed.ok) {
       errors.push(`allowed_hedge_types_json ${parsed.error}`);
+    } else {
+      const values = JSON.parse(parsed.value);
+      const invalid = values.filter((value: unknown) => typeof value !== "string" || !ALLOWED_HEDGE_TYPES.includes(value));
+      if (invalid.length > 0) {
+        errors.push("allowed_hedge_types_json contains invalid value");
+      }
     }
   }
 
@@ -171,6 +207,12 @@ export function validatePortfolioConfig(config: Partial<PortfolioAdminConfig>, m
     const parsed = toJsonArrayText(config.hedge_purpose_json);
     if (!parsed.ok) {
       errors.push(`hedge_purpose_json ${parsed.error}`);
+    } else {
+      const values = JSON.parse(parsed.value);
+      const invalid = values.filter((value: unknown) => typeof value !== "string" || !ALLOWED_HEDGE_PURPOSES.includes(value));
+      if (invalid.length > 0) {
+        errors.push("hedge_purpose_json contains invalid value");
+      }
     }
   }
 

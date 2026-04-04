@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "../styles/portfolio-dashboard.css";
 
 type NullableNumber = number | null;
@@ -249,7 +249,9 @@ export default function PortfolioDashboardModule() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>>({});
   const debugMode = debugEnabled();
 
   const loadAll = async () => {
@@ -294,6 +296,7 @@ export default function PortfolioDashboardModule() {
     setShowAdmin(true);
     setShowAdvanced(false);
     setFormErrors([]);
+    setFieldErrors({});
     setSaveMsg(null);
   };
 
@@ -303,6 +306,7 @@ export default function PortfolioDashboardModule() {
     setShowAdmin(true);
     setShowAdvanced(false);
     setFormErrors([]);
+    setFieldErrors({});
     setSaveMsg(null);
   };
 
@@ -315,6 +319,7 @@ export default function PortfolioDashboardModule() {
 
   const saveAdmin = async () => {
     setFormErrors([]);
+    setFieldErrors({});
     setSaveMsg(null);
     const payload = formToPayload(form);
     const endpoint = editingId ? "/api/portfolio/admin/update" : "/api/portfolio/admin/create";
@@ -325,15 +330,37 @@ export default function PortfolioDashboardModule() {
       body: JSON.stringify(payload),
     });
 
-    const json = (await res.json()) as { ok: boolean; error?: string; errors?: string[] };
+    const json = (await res.json()) as {
+      ok: boolean;
+      error?: string | { type?: string; message?: string; fieldErrors?: Record<string, string>; formErrors?: string[] };
+      errors?: string[];
+    };
     if (!res.ok || !json.ok) {
-      setFormErrors(json.errors ?? [json.error ?? "Save failed"]);
+      if (typeof json.error === "object" && json.error !== null) {
+        const nextFieldErrors = json.error.fieldErrors ?? {};
+        setFieldErrors(nextFieldErrors);
+        setFormErrors(json.error.formErrors ?? [json.error.message ?? "Please correct the highlighted fields"]);
+        const firstInvalidField = Object.keys(nextFieldErrors)[0];
+        const firstInput = firstInvalidField ? fieldRefs.current[firstInvalidField] : null;
+        if (firstInput) {
+          firstInput.scrollIntoView({ behavior: "smooth", block: "center" });
+          firstInput.focus();
+        }
+      } else {
+        setFormErrors(json.errors ?? [typeof json.error === "string" ? json.error : "Save failed"]);
+      }
       return;
     }
 
+    setFieldErrors({});
     setSaveMsg(editingId ? "Portfolio updated." : "Portfolio created.");
     await loadAll();
   };
+
+  const inputClassName = (field: string) => (fieldErrors[field] ? "field-invalid" : "");
+  const renderFieldError = (field: string) => fieldErrors[field]
+    ? <span className="field-error-text">{fieldErrors[field]}</span>
+    : null;
 
   return (
     <div className="portfolio-inline-module">
@@ -442,18 +469,22 @@ export default function PortfolioDashboardModule() {
             <h5>Basic identity</h5>
             <div className="portfolio-form-grid">
               <label>Portfolio ID *
-                <input value={form.portfolio_id} disabled={Boolean(editingId)} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_id: e.target.value }))} />
+                <input ref={(el) => { fieldRefs.current.portfolio_id = el; }} className={inputClassName("portfolio_id")} value={form.portfolio_id} disabled={Boolean(editingId)} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_id: e.target.value }))} />
+                {renderFieldError("portfolio_id")}
               </label>
               <label>Portfolio name *
-                <input value={form.portfolio_name} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_name: e.target.value }))} />
+                <input ref={(el) => { fieldRefs.current.portfolio_name = el; }} className={inputClassName("portfolio_name")} value={form.portfolio_name} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_name: e.target.value }))} />
+                {renderFieldError("portfolio_name")}
               </label>
               <label>Portfolio type *
-                <select value={form.portfolio_type} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_type: e.target.value }))}>
+                <select ref={(el) => { fieldRefs.current.portfolio_type = el; }} className={inputClassName("portfolio_type")} value={form.portfolio_type} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_type: e.target.value }))}>
                   {PORTFOLIO_TYPES.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                 </select>
+                {renderFieldError("portfolio_type")}
               </label>
               <label>Sort order *
-                <input value={form.sort_order} onChange={(e) => setForm((prev) => ({ ...prev, sort_order: e.target.value }))} />
+                <input ref={(el) => { fieldRefs.current.sort_order = el; }} className={inputClassName("sort_order")} value={form.sort_order} onChange={(e) => setForm((prev) => ({ ...prev, sort_order: e.target.value }))} />
+                {renderFieldError("sort_order")}
               </label>
             </div>
           </section>
@@ -461,9 +492,9 @@ export default function PortfolioDashboardModule() {
           <section>
             <h5>Allocation</h5>
             <div className="portfolio-form-grid">
-              <label>Target weight % *<input value={form.target_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, target_weight_pct: e.target.value }))} /></label>
-              <label>Min weight % *<input value={form.min_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, min_weight_pct: e.target.value }))} /></label>
-              <label>Max weight % *<input value={form.max_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, max_weight_pct: e.target.value }))} /></label>
+              <label>Target weight % *<input ref={(el) => { fieldRefs.current.target_weight_pct = el; }} className={inputClassName("target_weight_pct")} value={form.target_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, target_weight_pct: e.target.value }))} />{renderFieldError("target_weight_pct")}</label>
+              <label>Min weight % *<input ref={(el) => { fieldRefs.current.min_weight_pct = el; }} className={inputClassName("min_weight_pct")} value={form.min_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, min_weight_pct: e.target.value }))} />{renderFieldError("min_weight_pct")}</label>
+              <label>Max weight % *<input ref={(el) => { fieldRefs.current.max_weight_pct = el; }} className={inputClassName("max_weight_pct")} value={form.max_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, max_weight_pct: e.target.value }))} />{renderFieldError("max_weight_pct")}</label>
             </div>
           </section>
 
@@ -471,17 +502,20 @@ export default function PortfolioDashboardModule() {
             <h5>Strategy</h5>
             <div className="portfolio-form-grid">
               <label>Strategic risk level *
-                <select value={form.strategic_risk_level} onChange={(e) => setForm((prev) => ({ ...prev, strategic_risk_level: e.target.value }))}>
+                <select ref={(el) => { fieldRefs.current.strategic_risk_level = el; }} className={inputClassName("strategic_risk_level")} value={form.strategic_risk_level} onChange={(e) => setForm((prev) => ({ ...prev, strategic_risk_level: e.target.value }))}>
                   {RISK_LEVELS.map((value) => <option key={value} value={value}>{label(value)}</option>)}
                 </select>
+                {renderFieldError("strategic_risk_level")}
               </label>
               <label>Rebalance mode *
-                <select value={form.rebalance_mode} onChange={(e) => setForm((prev) => ({ ...prev, rebalance_mode: e.target.value }))}>
+                <select ref={(el) => { fieldRefs.current.rebalance_mode = el; }} className={inputClassName("rebalance_mode")} value={form.rebalance_mode} onChange={(e) => setForm((prev) => ({ ...prev, rebalance_mode: e.target.value }))}>
                   {REBALANCE_MODES.map((value) => <option key={value} value={value}>{label(value)}</option>)}
                 </select>
+                {renderFieldError("rebalance_mode")}
               </label>
               <label>Role description <span className="optional-tag">Optional</span>
-                <input value={form.role_description} onChange={(e) => setForm((prev) => ({ ...prev, role_description: e.target.value }))} placeholder="What is this portfolio's role?" />
+                <input ref={(el) => { fieldRefs.current.role_description = el; }} className={inputClassName("role_description")} value={form.role_description} onChange={(e) => setForm((prev) => ({ ...prev, role_description: e.target.value }))} placeholder="What is this portfolio's role?" />
+                {renderFieldError("role_description")}
               </label>
               <label>Long-term purpose <span className="optional-tag">Optional</span>
                 <input value={form.long_term_purpose} onChange={(e) => setForm((prev) => ({ ...prev, long_term_purpose: e.target.value }))} placeholder="Optional" />
@@ -505,6 +539,7 @@ export default function PortfolioDashboardModule() {
             </div>
             <div className={`multi-select-block ${!form.hedging_allowed ? "disabled" : ""}`}>
               <p>Allowed hedge types</p>
+              {renderFieldError("allowed_hedge_types_json")}
               <div className="chip-grid">
                 {HEDGE_TYPE_OPTIONS.map((option) => (
                   <label key={option.value} className="chip-checkbox">
@@ -522,6 +557,7 @@ export default function PortfolioDashboardModule() {
 
             <div className={`multi-select-block ${!form.hedging_allowed ? "disabled" : ""}`}>
               <p>Hedge purpose</p>
+              {renderFieldError("hedge_purpose_json")}
               <div className="chip-grid">
                 {HEDGE_PURPOSE_OPTIONS.map((option) => (
                   <label key={option.value} className="chip-checkbox">
@@ -539,11 +575,14 @@ export default function PortfolioDashboardModule() {
 
             <label>Max hedge % <span className="optional-tag">Optional</span>
               <input
+                ref={(el) => { fieldRefs.current.max_hedge_pct = el; }}
+                className={inputClassName("max_hedge_pct")}
                 value={form.max_hedge_pct}
                 disabled={!form.hedging_allowed}
                 placeholder={form.hedging_allowed ? "Optional" : "Disabled when hedging is off"}
                 onChange={(e) => setForm((prev) => ({ ...prev, max_hedge_pct: e.target.value }))}
               />
+              {renderFieldError("max_hedge_pct")}
             </label>
           </section>
 

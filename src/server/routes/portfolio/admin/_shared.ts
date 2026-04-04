@@ -6,11 +6,63 @@ import {
   validatePortfolioConfig,
 } from "../../../../lib/portfolio-admin/validation.js";
 
+type ValidationPayload = {
+  type: "validation_error";
+  message: string;
+  fieldErrors: Record<string, string>;
+  formErrors: string[];
+};
+
+const FRIENDLY_FIELD_LABELS: Record<string, string> = {
+  portfolio_id: "Portfolio ID",
+  portfolio_name: "Portfolio name",
+  portfolio_type: "Portfolio type",
+  sort_order: "Sort order",
+  target_weight_pct: "Target weight %",
+  min_weight_pct: "Min weight %",
+  max_weight_pct: "Max weight %",
+  strategic_risk_level: "Strategic risk level",
+  rebalance_mode: "Rebalance mode",
+  max_hedge_pct: "Max hedge %",
+  allowed_hedge_types_json: "Allowed hedge types",
+  hedge_purpose_json: "Hedge purpose",
+  role_description: "Role description",
+};
+
 export function parseRequestBody(req: any): any {
   if (typeof req.body === "string") {
     return JSON.parse(req.body);
   }
   return req.body ?? {};
+}
+
+export function buildValidationPayload(errors: string[], fallbackMessage = "Please correct the highlighted fields"): ValidationPayload {
+  const fieldErrors: Record<string, string> = {};
+  const formErrors: string[] = [];
+
+  for (const err of errors) {
+    const field = Object.keys(FRIENDLY_FIELD_LABELS).find((key) => err.startsWith(`${key} `) || err.startsWith(`${key} must`) || err.includes(key));
+    if (field) {
+      const friendlyLabel = FRIENDLY_FIELD_LABELS[field];
+      const normalized = err.replace(`${field} `, "").replace(`${field} `, "");
+      fieldErrors[field] = normalized.startsWith("must") || normalized.startsWith("contains")
+        ? `${friendlyLabel} ${normalized}`
+        : `${friendlyLabel}: ${normalized}`;
+    } else {
+      formErrors.push(err);
+    }
+  }
+
+  if (Object.keys(fieldErrors).length > 0 && formErrors.length === 0) {
+    formErrors.push(fallbackMessage);
+  }
+
+  return {
+    type: "validation_error",
+    message: "Validation failed",
+    fieldErrors,
+    formErrors,
+  };
 }
 
 export function buildDiagnostics(portfolios: PortfolioAdminConfig[]) {
