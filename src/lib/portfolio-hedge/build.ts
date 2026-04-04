@@ -10,9 +10,9 @@ type HedgeSignal =
   | "reduce_exposure"
   | "rebalance_to_cash"
   | "increase_dry_powder"
+  | "rebalance_to_defensive_bucket"
   | "rotate_to_defensive_bucket"
-  | "insufficient_data_for_hedge_signal"
-  | "rebalance_to_defensive_bucket";
+  | "insufficient_data_for_hedge_signal";
 
 type DryPowderStatus =
   | "insufficient_dry_powder"

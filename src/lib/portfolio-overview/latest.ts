@@ -136,7 +136,12 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
 
   const allocationPlanStatus = computeAllocationPlanStatus(portfolioRows as any[]);
   const included = (portfolioRows as any[]).filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1);
-  const totalMarketValue = included.reduce((sum, row) => sum + (asNum(row.market_value) ?? 0), 0);
+  const includedMarketValues = included
+    .map((row) => asNum(row.market_value))
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const totalMarketValue = includedMarketValues.length > 0
+    ? includedMarketValues.reduce((sum, value) => sum + value, 0)
+    : null;
 
   const totalRiskStatus = riskPayload.total.total_risk_status;
   const totalRiskScore = riskPayload.total.total_risk_score;
@@ -171,7 +176,7 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
   }).length;
 
   if (unavailableCount > 0 && partialCount > 0) majorWarnings.push("data_partial");
-  if ((portfolioRows as any[]).length > 0 && unavailableCount === (portfolioRows as any[]).length) majorWarnings.push("data_unavailable");
+  if ((portfolioRows as any[]).length === 0 || unavailableCount === (portfolioRows as any[]).length) majorWarnings.push("data_unavailable");
 
   const portfolios = (portfolioRows as any[]).map((row) => ({
     portfolio_id: String(row.portfolio_id ?? ""),
