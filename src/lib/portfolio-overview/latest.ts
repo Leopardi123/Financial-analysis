@@ -215,10 +215,12 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
   const portfoliosConfiguredCount = adminConfigs.length;
   const portfoliosWithSnapshotsCount = snapshotIds.size;
   const hasAnyPositions = await tableHasRows(tables.portfolioPositions);
+  const hasAnySnapshots = await tableHasRows(tables.portfolioSnapshots);
+  const hasBuiltOverviewData = hasAnySnapshots || historyAvailableDays > 0;
   const setupState: "no_config" | "configured_no_data" | "configured_positions_no_snapshot" | "partial" | "live" = portfoliosConfiguredCount === 0
     ? "no_config"
     : portfoliosWithSnapshotsCount === 0
-      ? (hasAnyPositions ? "configured_positions_no_snapshot" : "configured_no_data")
+      ? (hasAnyPositions ? (hasBuiltOverviewData ? "partial" : "configured_positions_no_snapshot") : "configured_no_data")
       : (majorWarnings.includes("data_partial") || majorWarnings.includes("data_unavailable"))
         ? "partial"
         : "live";
@@ -259,7 +261,7 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
   const debugPayload = {
     build_sources: {
       admin_config: adminConfigs.length > 0,
-      snapshots: await tableHasRows(tables.portfolioSnapshots),
+      snapshots: hasAnySnapshots,
       history: await tableHasRows(tables.totalPortfolioHistoryDaily),
       risk: portfolios.some((row) => row.risk_status !== null),
       hedge: portfolios.some((row) => row.hedge_status !== null),
