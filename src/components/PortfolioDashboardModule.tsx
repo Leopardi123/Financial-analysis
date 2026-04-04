@@ -238,6 +238,13 @@ function formToPayload(form: AdminFormState) {
   };
 }
 
+function nextPortfolioId(existing: PortfolioConfig[]): string {
+  const ids = new Set(existing.map((item) => item.portfolio_id));
+  let idx = 0;
+  while (ids.has(`portf${idx}`)) idx += 1;
+  return `portf${idx}`;
+}
+
 export default function PortfolioDashboardModule() {
   const [overview, setOverview] = useState<PortfolioOverviewResponse | null>(null);
   const [adminList, setAdminList] = useState<PortfolioConfig[]>([]);
@@ -292,7 +299,7 @@ export default function PortfolioDashboardModule() {
 
   const onCreate = () => {
     setEditingId(null);
-    setForm({ ...emptyForm, sort_order: String(adminList.length + 1) });
+    setForm({ ...emptyForm, portfolio_id: nextPortfolioId(adminList), sort_order: String(adminList.length + 1) });
     setShowAdmin(true);
     setShowAdvanced(false);
     setFormErrors([]);
@@ -469,7 +476,13 @@ export default function PortfolioDashboardModule() {
             <h5>Basic identity</h5>
             <div className="portfolio-form-grid">
               <label>Portfolio ID *
-                <input ref={(el) => { fieldRefs.current.portfolio_id = el; }} className={inputClassName("portfolio_id")} value={form.portfolio_id} disabled={Boolean(editingId)} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_id: e.target.value }))} />
+                <input
+                  ref={(el) => { fieldRefs.current.portfolio_id = el; }}
+                  className={inputClassName("portfolio_id")}
+                  value={form.portfolio_id}
+                  disabled
+                  onChange={(e) => setForm((prev) => ({ ...prev, portfolio_id: e.target.value }))}
+                />
                 {renderFieldError("portfolio_id")}
               </label>
               <label>Portfolio name *

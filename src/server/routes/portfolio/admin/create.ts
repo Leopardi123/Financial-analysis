@@ -17,10 +17,16 @@ export default async function handler(req: any, res: any) {
 
     await ensureSchema();
     const payload = parseRequestBody(req);
-    const portfolioId = String(payload?.portfolio_id ?? "").trim();
+    let portfolioId = String(payload?.portfolio_id ?? "").trim();
     if (!portfolioId) {
-      res.status(400).json({ ok: false, error: buildValidationPayload(["portfolio_id is required"]) });
-      return;
+      const allConfigs = await listPortfolioConfigs();
+      const existingIds = new Set(allConfigs.map((item) => item.portfolio_id));
+      let idx = 0;
+      while (existingIds.has(`portf${idx}`)) {
+        idx += 1;
+      }
+      portfolioId = `portf${idx}`;
+      payload.portfolio_id = portfolioId;
     }
 
     const existing = await getPortfolioConfig(portfolioId);
