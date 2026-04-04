@@ -135,9 +135,10 @@ async function loadPortfolioHistorySeries(portfolioId: string): Promise<{ source
 
   if (hasPositions) {
     const positionRows = await query(
-      `SELECT as_of_date, SUM(market_value) AS market_value
+      `SELECT as_of_date,
+              SUM(COALESCE(market_value, shares * COALESCE(manual_price, avg_cost))) AS market_value
        FROM ${tables.portfolioPositions}
-       WHERE portfolio_id = ?
+       WHERE portfolio_id = ? AND active_position = 1
        GROUP BY as_of_date
        ORDER BY as_of_date ASC`,
       [portfolioId]

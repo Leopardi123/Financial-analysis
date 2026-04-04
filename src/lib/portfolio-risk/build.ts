@@ -167,13 +167,13 @@ async function concentrationFromPositions(
   const latestDateRows = await query(
     `SELECT MAX(as_of_date) AS as_of_date
      FROM ${tables.portfolioPositions}
-     WHERE portfolio_id = ? AND as_of_date <= ?`,
+     WHERE portfolio_id = ? AND active_position = 1 AND as_of_date <= ?`,
     [portfolioId, snapshotDate]
   );
   let latestDate = String(latestDateRows[0]?.as_of_date ?? "").trim();
   if (!latestDate) {
     const fallbackRows = await query(
-      `SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioPositions} WHERE portfolio_id = ?`,
+      `SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioPositions} WHERE portfolio_id = ? AND active_position = 1`,
       [portfolioId]
     );
     latestDate = String(fallbackRows[0]?.as_of_date ?? "").trim();
@@ -188,9 +188,9 @@ async function concentrationFromPositions(
   const hasPreRevenue = positionColumns.has("is_pre_revenue");
 
   const rows = await query(
-    `SELECT market_value${hasWeight ? ", weight_pct" : ""}${hasJunior ? ", is_junior" : ""}${hasPreRevenue ? ", is_pre_revenue" : ""}
+    `SELECT COALESCE(market_value, shares * COALESCE(manual_price, avg_cost)) AS market_value${hasWeight ? ", weight_pct" : ""}${hasJunior ? ", is_junior" : ""}${hasPreRevenue ? ", is_pre_revenue" : ""}
      FROM ${tables.portfolioPositions}
-     WHERE portfolio_id = ? AND as_of_date = ?`,
+     WHERE portfolio_id = ? AND as_of_date = ? AND active_position = 1`,
     [portfolioId, latestDate]
   );
 

@@ -1,0 +1,23 @@
+import { ensureSchema } from "../../../../../api/_migrate.js";
+import { deactivatePortfolioPosition } from "../../../../lib/portfolio-positions/repository.js";
+
+export default async function handler(req: any, res: any) {
+  try {
+    if (req.method !== "POST") {
+      res.status(405).json({ ok: false, error: "Method not allowed" });
+      return;
+    }
+    await ensureSchema();
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body ?? {});
+    const id = Number(body.id ?? NaN);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ ok: false, error: "id is required" });
+      return;
+    }
+
+    await deactivatePortfolioPosition(id);
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+}
