@@ -23,6 +23,10 @@ const FRIENDLY_FIELD_LABELS: Record<string, string> = {
   max_weight_pct: "Max weight %",
   strategic_risk_level: "Strategic risk level",
   rebalance_mode: "Rebalance mode",
+  active: "Active",
+  visible_in_overview: "Visible in overview",
+  included_in_total_portfolio: "Included in total portfolio",
+  hedging_allowed: "Hedging allowed",
   max_hedge_pct: "Max hedge %",
   allowed_hedge_types_json: "Allowed hedge types",
   hedge_purpose_json: "Hedge purpose",
@@ -67,6 +71,47 @@ export function buildValidationPayload(errors: string[], fallbackMessage = "Plea
     fieldErrors,
     formErrors,
   };
+}
+
+function parseNumberish(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(",", ".").trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+export function inferFieldErrorsFromPayload(payload: Record<string, unknown>): Record<string, string> {
+  const fieldErrors: Record<string, string> = {};
+
+  const requiredNumeric = ["sort_order", "target_weight_pct", "min_weight_pct", "max_weight_pct"];
+  for (const field of requiredNumeric) {
+    if (payload[field] !== undefined && parseNumberish(payload[field]) === null) {
+      fieldErrors[field] = `${FRIENDLY_FIELD_LABELS[field]} must be a valid number`;
+    }
+  }
+
+  if (payload.max_hedge_pct !== undefined && payload.max_hedge_pct !== null && parseNumberish(payload.max_hedge_pct) === null) {
+    fieldErrors.max_hedge_pct = "Max hedge % must be a valid number or empty";
+  }
+
+  const boolFields = ["active", "visible_in_overview", "included_in_total_portfolio", "hedging_allowed"];
+  for (const field of boolFields) {
+    if (payload[field] !== undefined && typeof payload[field] !== "boolean") {
+      fieldErrors[field] = `${FRIENDLY_FIELD_LABELS[field] ?? field} must be true or false`;
+    }
+  }
+
+  for (const field of ["allowed_hedge_types_json", "hedge_purpose_json"]) {
+    if (payload[field] === undefined) continue;
+    const parsed = toJsonArrayText(payload[field]);
+    if (!parsed.ok) {
+      fieldErrors[field] = `${FRIENDLY_FIELD_LABELS[field]} must be a valid list`;
+    }
+  }
+
+  return fieldErrors;
 }
 
 export function buildDiagnostics(portfolios: PortfolioAdminConfig[]) {
