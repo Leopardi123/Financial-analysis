@@ -102,11 +102,22 @@ async function tableExists(tableName: string): Promise<boolean> {
 type PositionValuationDebug = {
   portfolio_id: string;
   positions_found_count: number;
+  positions_active_count: number;
   positions_valued_count: number;
-  positions_excluded_count: number;
+  positions_unvalued_count: number;
   included_market_value: number;
-  excluded_positions_reasons: Array<{ position_id: number; symbol: string; reason: string }>;
-  snapshot_market_value_components: Array<{ position_id: number; symbol: string; market_value: number }>;
+  positions: Array<{
+    position_id: number;
+    symbol: string;
+    shares: number | null;
+    manual_price: number | null;
+    resolved_live_price: number | null;
+    valuation_method_used: "explicit_market_value" | "manual_price" | "live_price" | "unresolved";
+    market_value_contribution: number | null;
+    inclusion_status: "included" | "excluded" | "unvalued";
+    exclusion_reason: string | null;
+    unvalued_reason: string | null;
+  }>;
 };
 
 async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio: Map<string, number>; valuationDebugByPortfolio: Map<string, PositionValuationDebug> }> {
@@ -117,11 +128,26 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
             p.active_position,
             p.market_value,
             p.shares,
-            p.manual_price,
-            p.avg_cost
-     FROM ${tables.portfolioPositions} p
-     WHERE p.active_position = 1`
+            p.manual_price
+     FROM ${tables.portfolioPositions} p`
   );
+  const latestPrices = await query(
+    `SELECT d.symbol, COALESCE(d.adjusted_close, d.close) AS live_price
+     FROM ${tables.dailyPriceHistory} d
+     INNER JOIN (
+       SELECT symbol, MAX(price_date) AS latest_price_date
+       FROM ${tables.dailyPriceHistory}
+       GROUP BY symbol
+     ) latest ON latest.symbol = d.symbol AND latest.latest_price_date = d.price_date`
+  );
+  const livePriceBySymbol = new Map<string, number>();
+  for (const row of latestPrices as Array<{ symbol?: unknown; live_price?: unknown }>) {
+    const symbol = String(row.symbol ?? "").trim().toUpperCase();
+    const livePrice = Number(row.live_price ?? NaN);
+    if (symbol && Number.isFinite(livePrice) && livePrice > 0) {
+      livePriceBySymbol.set(symbol, livePrice);
+    }
+  }
 
   const marketValueByPortfolio = new Map<string, number>();
   const valuationDebugByPortfolio = new Map<string, PositionValuationDebug>();
@@ -132,39 +158,100 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
 
     const positionId = Number(row.id ?? NaN);
     const symbol = String(row.symbol ?? "").trim() || "(unknown)";
+    const activePosition = Number(row.active_position ?? 0) === 1;
     const directMarketValue = Number(row.market_value ?? NaN);
     const shares = Number(row.shares ?? NaN);
     const manualPrice = Number(row.manual_price ?? NaN);
-    const avgCost = Number(row.avg_cost ?? NaN);
-    const fallbackUnitPrice = Number.isFinite(manualPrice) ? manualPrice : avgCost;
-    const fallbackMarketValue = Number.isFinite(shares) && Number.isFinite(fallbackUnitPrice) ? shares * fallbackUnitPrice : NaN;
-    const derivedMarketValue = Number.isFinite(directMarketValue) ? directMarketValue : fallbackMarketValue;
+    const normalizedSymbol = symbol.toUpperCase();
+    const livePrice = livePriceBySymbol.get(normalizedSymbol) ?? null;
 
     const bucket = valuationDebugByPortfolio.get(portfolioId) ?? {
       portfolio_id: portfolioId,
       positions_found_count: 0,
+      positions_active_count: 0,
       positions_valued_count: 0,
-      positions_excluded_count: 0,
+      positions_unvalued_count: 0,
       included_market_value: 0,
-      excluded_positions_reasons: [],
-      snapshot_market_value_components: [],
+      positions: [],
     };
 
     bucket.positions_found_count += 1;
-    if (Number.isFinite(derivedMarketValue)) {
-      bucket.positions_valued_count += 1;
-      bucket.included_market_value += derivedMarketValue;
-      bucket.snapshot_market_value_components.push({
+    if (!activePosition) {
+      bucket.positions.push({
         position_id: Number.isFinite(positionId) ? positionId : -1,
         symbol,
-        market_value: derivedMarketValue,
+        shares: Number.isFinite(shares) ? shares : null,
+        manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
+        resolved_live_price: livePrice,
+        valuation_method_used: "unresolved",
+        market_value_contribution: null,
+        inclusion_status: "excluded",
+        exclusion_reason: "Position inactive",
+        unvalued_reason: null,
+      });
+      valuationDebugByPortfolio.set(portfolioId, bucket);
+      continue;
+    }
+
+    bucket.positions_active_count += 1;
+    const hasShares = Number.isFinite(shares) && shares > 0;
+    const hasExplicitMarketValue = Number.isFinite(directMarketValue) && directMarketValue >= 0;
+    const hasManualPrice = Number.isFinite(manualPrice) && manualPrice > 0;
+    const hasLivePrice = typeof livePrice === "number" && Number.isFinite(livePrice) && livePrice > 0;
+
+    let valuationMethod: "explicit_market_value" | "manual_price" | "live_price" | "unresolved" = "unresolved";
+    let marketValueContribution: number | null = null;
+    let unvaluedReason: string | null = null;
+
+    if (hasExplicitMarketValue) {
+      valuationMethod = "explicit_market_value";
+      marketValueContribution = directMarketValue;
+    } else if (hasManualPrice && hasShares) {
+      valuationMethod = "manual_price";
+      marketValueContribution = shares * manualPrice;
+    } else if (hasLivePrice && hasShares) {
+      valuationMethod = "live_price";
+      marketValueContribution = shares * livePrice;
+    } else {
+      if (!hasShares) {
+        unvaluedReason = "Missing or invalid shares";
+      } else if (Number.isFinite(manualPrice) && manualPrice === 0) {
+        unvaluedReason = "manual_price is 0 and treated as missing pricing input";
+      } else if (!hasLivePrice) {
+        unvaluedReason = "No live price available for symbol";
+      } else {
+        unvaluedReason = "Position saved but valuation method could not be resolved";
+      }
+    }
+
+    if (marketValueContribution !== null) {
+      bucket.positions_valued_count += 1;
+      bucket.included_market_value += marketValueContribution;
+      bucket.positions.push({
+        position_id: Number.isFinite(positionId) ? positionId : -1,
+        symbol,
+        shares: Number.isFinite(shares) ? shares : null,
+        manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
+        resolved_live_price: livePrice,
+        valuation_method_used: valuationMethod,
+        market_value_contribution: marketValueContribution,
+        inclusion_status: "included",
+        exclusion_reason: null,
+        unvalued_reason: null,
       });
     } else {
-      bucket.positions_excluded_count += 1;
-      bucket.excluded_positions_reasons.push({
+      bucket.positions_unvalued_count += 1;
+      bucket.positions.push({
         position_id: Number.isFinite(positionId) ? positionId : -1,
         symbol,
-        reason: "Position saved but market value could not be derived (missing market_value and shares×(manual_price or avg_cost)).",
+        shares: Number.isFinite(shares) ? shares : null,
+        manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
+        resolved_live_price: livePrice,
+        valuation_method_used: valuationMethod,
+        market_value_contribution: null,
+        inclusion_status: "unvalued",
+        exclusion_reason: null,
+        unvalued_reason: unvaluedReason,
       });
     }
 
@@ -172,7 +259,7 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
   }
 
   for (const [portfolioId, debug] of valuationDebugByPortfolio.entries()) {
-    if (debug.positions_valued_count > 0) {
+    if (debug.positions_valued_count > 0 && Number.isFinite(debug.included_market_value)) {
       marketValueByPortfolio.set(portfolioId, debug.included_market_value);
     }
   }
@@ -223,9 +310,13 @@ export async function buildPortfolioSnapshots() {
   const totalMarketValue = includedWithMarketValue.reduce((sum, item) => sum + (marketValueByPortfolio.get(item.portfolio_id) ?? 0), 0);
 
   let signalCompleteness: SignalCompleteness = "full";
+  const hasAnyUnvaluedIncludedPositions = included.some((portfolio) => {
+    const valuationDebug = valuationDebugByPortfolio.get(portfolio.portfolio_id);
+    return (valuationDebug?.positions_unvalued_count ?? 0) > 0;
+  });
   if (includedWithMarketValue.length === 0 || totalMarketValue <= 0) {
     signalCompleteness = "unavailable";
-  } else if (includedWithMarketValue.length < included.length) {
+  } else if (includedWithMarketValue.length < included.length || hasAnyUnvaluedIncludedPositions) {
     signalCompleteness = "partial";
   }
 
@@ -263,13 +354,13 @@ export async function buildPortfolioSnapshots() {
       weight_status: weightEval.weightStatus,
       rebalance_status: rebalanceStatus,
       positions_found_count: valuationDebug?.positions_found_count ?? 0,
+      positions_active_count: valuationDebug?.positions_active_count ?? 0,
       positions_valued_count: valuationDebug?.positions_valued_count ?? 0,
-      positions_excluded_count: valuationDebug?.positions_excluded_count ?? 0,
-      excluded_positions_reasons: valuationDebug?.excluded_positions_reasons ?? [],
-      snapshot_market_value_components: valuationDebug?.snapshot_market_value_components ?? [],
+      positions_unvalued_count: valuationDebug?.positions_unvalued_count ?? 0,
+      position_valuation_details: valuationDebug?.positions ?? [],
       valuation_state: valuationDebug
         ? (valuationDebug.positions_valued_count > 0
-          ? (valuationDebug.positions_excluded_count > 0 ? "partial" : "full")
+          ? (valuationDebug.positions_unvalued_count > 0 ? "partial" : "full")
           : "configured_but_unvalued")
         : "no_active_positions",
     };

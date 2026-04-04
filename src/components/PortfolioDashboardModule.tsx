@@ -32,6 +32,11 @@ type PortfolioRecord = {
   hedge_status: string | null;
   hedge_policy_applied: string | null;
   signal_completeness: string | null;
+  valuation_state?: string | null;
+  positions_found_count?: NullableNumber;
+  positions_active_count?: NullableNumber;
+  positions_valued_count?: NullableNumber;
+  positions_unvalued_count?: NullableNumber;
 };
 
 type PortfolioConfig = {
@@ -470,6 +475,10 @@ export default function PortfolioDashboardModule() {
                   <div>Hedge status: {label(portfolio.hedge_status)}</div>
                   <div>Hedge policy: {label(portfolio.hedge_policy_applied)}</div>
                   <div>Signal completeness: {label(portfolio.signal_completeness)}</div>
+                  {portfolio.valuation_state && <div>Valuation state: {label(portfolio.valuation_state)}</div>}
+                  {portfolio.positions_active_count && portfolio.positions_valued_count === 0 && (
+                    <div>Positions exist but current market value could not be resolved.</div>
+                  )}
                   {portfolio.suggested_hedge_type && <div>Suggested hedge: {portfolio.suggested_hedge_type}</div>}
                 </div>
               </details>

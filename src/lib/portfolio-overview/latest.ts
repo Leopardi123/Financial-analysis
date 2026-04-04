@@ -251,8 +251,31 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
   if ((portfolioRows as any[]).length === 0 || unavailableCount === (portfolioRows as any[]).length) {
     pushWarning({ code: "data_unavailable", title: "Portfolio data unavailable", detail: "No complete portfolio snapshot data is currently available.", severity: "warning" });
   }
+  const unvaluedPortfolio = (portfolioRows as any[]).find((row) => {
+    const snapshotDebug = parseJson(row.debug_payload_json);
+    return Number(snapshotDebug?.positions_active_count ?? 0) > 0 && Number(snapshotDebug?.positions_valued_count ?? 0) === 0;
+  });
+  if (unvaluedPortfolio) {
+    pushWarning({
+      code: "positions_unvalued",
+      title: "Portfolio has unvalued positions",
+      detail: `${String(unvaluedPortfolio.portfolio_name ?? unvaluedPortfolio.portfolio_id)} has active positions but no resolvable market value.`,
+      severity: "warning",
+      portfolio_id: String(unvaluedPortfolio.portfolio_id ?? ""),
+    });
+  }
 
   const portfolios = (portfolioRows as any[]).map((row) => ({
+    ...(function () {
+      const snapshotDebug = parseJson(row.debug_payload_json);
+      return {
+        positions_found_count: asNum(snapshotDebug?.positions_found_count),
+        positions_active_count: asNum(snapshotDebug?.positions_active_count),
+        positions_valued_count: asNum(snapshotDebug?.positions_valued_count),
+        positions_unvalued_count: asNum(snapshotDebug?.positions_unvalued_count),
+        valuation_state: snapshotDebug?.valuation_state == null ? null : String(snapshotDebug.valuation_state),
+      };
+    })(),
     portfolio_id: String(row.portfolio_id ?? ""),
     portfolio_name: String(row.portfolio_name ?? ""),
     portfolio_type: String(row.portfolio_type ?? ""),

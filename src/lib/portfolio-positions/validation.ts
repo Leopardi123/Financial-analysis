@@ -36,6 +36,7 @@ export function normalizePositionPayload(payload: Record<string, unknown>) {
   const symbol = String(payload.symbol ?? "").trim().toUpperCase();
   const shares = parseNumber(payload.shares);
   const avgCost = parseNumber(payload.avg_cost);
+  const explicitMarketValue = parseNumber(payload.market_value);
   const entryDate = parseDateOrNull(payload.entry_date);
   const assetType = String(payload.asset_type ?? "").trim() as PortfolioAssetType;
   const mappingSource = String(payload.mapping_source ?? "inherited") as MappingSource;
@@ -49,6 +50,7 @@ export function normalizePositionPayload(payload: Record<string, unknown>) {
     errors.push("entry_date must be a valid date (YYYY-MM-DD)");
   }
   if (avgCost !== null && avgCost < 0) errors.push("avg_cost must be numeric >= 0");
+  if (explicitMarketValue !== null && explicitMarketValue < 0) errors.push("market_value must be numeric >= 0");
   if (!MAPPING_SOURCES.includes(mappingSource)) errors.push("mapping_source is invalid");
 
   const manualSectorId = parseIntOrNull(payload.manual_sector_id);
@@ -78,6 +80,7 @@ export function normalizePositionPayload(payload: Record<string, unknown>) {
       display_name: payload.display_name == null || payload.display_name === "" ? null : String(payload.display_name).trim(),
       shares: shares as number,
       avg_cost: avgCost,
+      market_value: explicitMarketValue,
       entry_date: entryDate,
       asset_type: assetType,
       thesis: payload.thesis == null || payload.thesis === "" ? null : String(payload.thesis),
