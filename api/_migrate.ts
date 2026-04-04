@@ -610,6 +610,18 @@ export async function ensureSchema() {
   await ensureColumnExists(TABLES.portfolioSnapshots, "long_direction", "TEXT");
   await ensureColumnExists(TABLES.portfolioSnapshots, "trend_status", "TEXT");
   await ensureColumnExists(TABLES.portfolioSnapshots, "relative_strength_bucket", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "annualized_vol_65d", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "current_drawdown_pct", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "top_holding_weight_pct", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "cyclicality_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "volatility_component_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "drawdown_component_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "concentration_component_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "cyclicality_component_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "risk_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "risk_status", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "risk_mismatch_flag", "INTEGER");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "risk_debug_json", "TEXT");
 
   try {
     await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN fiscal_year_end TEXT`);
