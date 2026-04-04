@@ -83,6 +83,78 @@
   margin: 0 0 6px;
 }
 
+.portfolio-admin-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.portfolio-admin-section {
+  border: 1px solid #e4ece8;
+  border-radius: 6px;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.portfolio-admin-section h5 {
+  margin: 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+  color: #334155;
+}
+
+.portfolio-field-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.portfolio-field {
+  display: grid;
+  gap: 4px;
+}
+
+.portfolio-field label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.portfolio-field input,
+.portfolio-field select,
+.portfolio-field textarea {
+  width: 100%;
+  border: 1px solid #c8d4cf;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 0.84rem;
+  box-sizing: border-box;
+}
+
+.portfolio-field textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.portfolio-toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.portfolio-toggle-field input {
+  margin: 0;
+}
+
+@media (min-width: 900px) {
+  .portfolio-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .warning-pill {
   display: inline-block;
   margin: 2px 4px 2px 0;
