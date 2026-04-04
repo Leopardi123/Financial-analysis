@@ -99,30 +99,84 @@ async function tableExists(tableName: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-async function getMarketValuesFromPositions(): Promise<Map<string, number>> {
+type PositionValuationDebug = {
+  portfolio_id: string;
+  positions_found_count: number;
+  positions_valued_count: number;
+  positions_excluded_count: number;
+  included_market_value: number;
+  excluded_positions_reasons: Array<{ position_id: number; symbol: string; reason: string }>;
+  snapshot_market_value_components: Array<{ position_id: number; symbol: string; market_value: number }>;
+};
+
+async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio: Map<string, number>; valuationDebugByPortfolio: Map<string, PositionValuationDebug> }> {
   const rows = await query(
-    `SELECT p.portfolio_id,
-            SUM(COALESCE(p.market_value, p.shares * COALESCE(p.manual_price, p.avg_cost))) AS market_value
+    `SELECT p.id,
+            p.portfolio_id,
+            p.symbol,
+            p.active_position,
+            p.market_value,
+            p.shares,
+            p.manual_price,
+            p.avg_cost
      FROM ${tables.portfolioPositions} p
-     INNER JOIN (
-       SELECT portfolio_id, MAX(as_of_date) AS latest_as_of_date
-       FROM ${tables.portfolioPositions}
-       WHERE active_position = 1
-       GROUP BY portfolio_id
-     ) latest ON latest.portfolio_id = p.portfolio_id AND latest.latest_as_of_date = p.as_of_date
-     WHERE p.active_position = 1
-     GROUP BY p.portfolio_id`
+     WHERE p.active_position = 1`
   );
 
-  const out = new Map<string, number>();
-  for (const row of rows as Array<{ portfolio_id?: unknown; market_value?: unknown }>) {
-    const id = String(row.portfolio_id ?? "").trim();
-    const value = Number(row.market_value ?? NaN);
-    if (id && Number.isFinite(value)) {
-      out.set(id, value);
+  const marketValueByPortfolio = new Map<string, number>();
+  const valuationDebugByPortfolio = new Map<string, PositionValuationDebug>();
+
+  for (const row of rows as Array<Record<string, unknown>>) {
+    const portfolioId = String(row.portfolio_id ?? "").trim();
+    if (!portfolioId) continue;
+
+    const positionId = Number(row.id ?? NaN);
+    const symbol = String(row.symbol ?? "").trim() || "(unknown)";
+    const directMarketValue = Number(row.market_value ?? NaN);
+    const shares = Number(row.shares ?? NaN);
+    const manualPrice = Number(row.manual_price ?? NaN);
+    const avgCost = Number(row.avg_cost ?? NaN);
+    const fallbackUnitPrice = Number.isFinite(manualPrice) ? manualPrice : avgCost;
+    const fallbackMarketValue = Number.isFinite(shares) && Number.isFinite(fallbackUnitPrice) ? shares * fallbackUnitPrice : NaN;
+    const derivedMarketValue = Number.isFinite(directMarketValue) ? directMarketValue : fallbackMarketValue;
+
+    const bucket = valuationDebugByPortfolio.get(portfolioId) ?? {
+      portfolio_id: portfolioId,
+      positions_found_count: 0,
+      positions_valued_count: 0,
+      positions_excluded_count: 0,
+      included_market_value: 0,
+      excluded_positions_reasons: [],
+      snapshot_market_value_components: [],
+    };
+
+    bucket.positions_found_count += 1;
+    if (Number.isFinite(derivedMarketValue)) {
+      bucket.positions_valued_count += 1;
+      bucket.included_market_value += derivedMarketValue;
+      bucket.snapshot_market_value_components.push({
+        position_id: Number.isFinite(positionId) ? positionId : -1,
+        symbol,
+        market_value: derivedMarketValue,
+      });
+    } else {
+      bucket.positions_excluded_count += 1;
+      bucket.excluded_positions_reasons.push({
+        position_id: Number.isFinite(positionId) ? positionId : -1,
+        symbol,
+        reason: "Position saved but market value could not be derived (missing market_value and shares×(manual_price or avg_cost)).",
+      });
+    }
+
+    valuationDebugByPortfolio.set(portfolioId, bucket);
+  }
+
+  for (const [portfolioId, debug] of valuationDebugByPortfolio.entries()) {
+    if (debug.positions_valued_count > 0) {
+      marketValueByPortfolio.set(portfolioId, debug.included_market_value);
     }
   }
-  return out;
+  return { marketValueByPortfolio, valuationDebugByPortfolio };
 }
 
 async function getMarketValuesFromLatestSnapshots(): Promise<Map<string, number>> {
@@ -152,9 +206,15 @@ export async function buildPortfolioSnapshots() {
   const portfolios = await listPortfolioConfigs();
 
   const hasPositionsTable = await tableExists(tables.portfolioPositions);
-  const marketValueByPortfolio = hasPositionsTable
-    ? await getMarketValuesFromPositions()
-    : await getMarketValuesFromLatestSnapshots();
+  let marketValueByPortfolio = new Map<string, number>();
+  let valuationDebugByPortfolio = new Map<string, PositionValuationDebug>();
+  if (hasPositionsTable) {
+    const fromPositions = await getMarketValuesFromPositions();
+    marketValueByPortfolio = fromPositions.marketValueByPortfolio;
+    valuationDebugByPortfolio = fromPositions.valuationDebugByPortfolio;
+  } else {
+    marketValueByPortfolio = await getMarketValuesFromLatestSnapshots();
+  }
 
   const included = portfolios.filter((item) => item.active && item.included_in_total_portfolio);
   const includedIds = new Set(included.map((item) => item.portfolio_id));
@@ -193,6 +253,7 @@ export async function buildPortfolioSnapshots() {
       ? computeRebalanceStatus(weightEval.weightStatus, portfolio.rebalance_mode)
       : "unavailable";
 
+    const valuationDebug = valuationDebugByPortfolio.get(portfolio.portfolio_id) ?? null;
     const debugPayload = {
       portfolio_id: portfolio.portfolio_id,
       market_value: marketValue,
@@ -201,6 +262,16 @@ export async function buildPortfolioSnapshots() {
       distanceToEdge: weightEval.distanceToEdge,
       weight_status: weightEval.weightStatus,
       rebalance_status: rebalanceStatus,
+      positions_found_count: valuationDebug?.positions_found_count ?? 0,
+      positions_valued_count: valuationDebug?.positions_valued_count ?? 0,
+      positions_excluded_count: valuationDebug?.positions_excluded_count ?? 0,
+      excluded_positions_reasons: valuationDebug?.excluded_positions_reasons ?? [],
+      snapshot_market_value_components: valuationDebug?.snapshot_market_value_components ?? [],
+      valuation_state: valuationDebug
+        ? (valuationDebug.positions_valued_count > 0
+          ? (valuationDebug.positions_excluded_count > 0 ? "partial" : "full")
+          : "configured_but_unvalued")
+        : "no_active_positions",
     };
 
     debugRows.push(debugPayload);

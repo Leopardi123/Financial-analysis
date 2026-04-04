@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import CompanyPicker, { type CompanyOption } from "./CompanyPicker";
 import { fetchUniverseSymbols } from "../lib/client/companyUniverse.ts";
 
-type PortfolioConfig = { portfolio_id: string; portfolio_name: string };
+type PortfolioConfig = { portfolio_id: string; portfolio_name: string; portfolio_type: string };
 type PositionRow = {
   id: number;
   portfolio_id: string;
@@ -11,6 +11,7 @@ type PositionRow = {
   company_id: number | null;
   shares: number;
   avg_cost: number | null;
+  manual_price: number | null;
   entry_date: string | null;
   asset_type: string;
   thesis: string | null;
@@ -37,6 +38,7 @@ type FormState = {
   company_id: number | null;
   shares: string;
   avg_cost: string;
+  manual_price: string;
   entry_date: string;
   asset_type: string;
   thesis: string;
@@ -56,6 +58,7 @@ const EMPTY_FORM: FormState = {
   company_id: null,
   shares: "",
   avg_cost: "",
+  manual_price: "",
   entry_date: "",
   asset_type: "major",
   thesis: "",
@@ -88,6 +91,11 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [sectorRows, setSectorRows] = useState<Array<{ id: number; name: string }>>([]);
   const [subsectorRows, setSubsectorRows] = useState<Array<{ id: number; name: string; sector_id: number }>>([]);
+  const selectedPortfolio = useMemo(
+    () => portfolios.find((item) => item.portfolio_id === selectedPortfolioId) ?? null,
+    [portfolios, selectedPortfolioId]
+  );
+  const isOpportunisticPortfolio = selectedPortfolio?.portfolio_type === "opportunistic";
 
   useEffect(() => {
     if (!selectedPortfolioId) return;
@@ -148,6 +156,7 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
       company_id: row.company_id,
       shares: String(row.shares),
       avg_cost: row.avg_cost == null ? "" : String(row.avg_cost),
+      manual_price: row.manual_price == null ? "" : String(row.manual_price),
       entry_date: row.entry_date ?? "",
       asset_type: row.asset_type,
       thesis: row.thesis ?? "",
@@ -166,9 +175,13 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
     const payload = {
       ...form,
       portfolio_id: form.portfolio_id || selectedPortfolioId,
+      symbol: (isOpportunisticPortfolio ? (form.symbol || "CASH") : form.symbol).toUpperCase(),
+      display_name: isOpportunisticPortfolio ? (form.display_name || "Dry Powder Cash") : form.display_name,
       avg_cost: form.avg_cost === "" ? null : Number(form.avg_cost),
-      shares: Number(form.shares),
+      manual_price: form.manual_price === "" ? null : Number(form.manual_price),
+      shares: isOpportunisticPortfolio ? 1 : Number(form.shares),
       entry_date: form.entry_date || null,
+      asset_type: isOpportunisticPortfolio ? "cash_proxy" : form.asset_type,
       manual_sector_id: form.manual_sector_id ? Number(form.manual_sector_id) : null,
       manual_subsector_id: form.manual_subsector_id ? Number(form.manual_subsector_id) : null,
       manual_commodity_id: form.manual_commodity_id || null,
@@ -203,6 +216,21 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
     await loadPositions(selectedPortfolioId);
   }
 
+  function addCashPositionTemplate() {
+    setForm({
+      ...EMPTY_FORM,
+      portfolio_id: selectedPortfolioId,
+      symbol: "CASH",
+      display_name: "Dry Powder Cash",
+      company_id: null,
+      shares: "1",
+      manual_price: "",
+      asset_type: "cash_proxy",
+      thesis: "Cash reserve / dry powder",
+      mapping_source: "portfolio_completed",
+    });
+  }
+
   return (
     <div className="portfolio-panel" style={{ marginTop: 12 }}>
       <h4>Portfolio positions admin</h4>
@@ -221,6 +249,11 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
             allowedSymbols={universeSymbols}
             onSelect={selectCompany}
           />
+          {isOpportunisticPortfolio && (
+            <div className="portfolio-actions-row">
+              <button type="button" onClick={addCashPositionTemplate}>Add cash amount</button>
+            </div>
+          )}
         </section>
 
         <section className="portfolio-admin-section">
@@ -243,6 +276,10 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
               <input id="portfolio-position-avg-cost" type="number" min="0" step="any" value={form.avg_cost} onChange={(e) => setForm((prev) => ({ ...prev, avg_cost: e.target.value }))} />
             </div>
             <div className="portfolio-field">
+              <label htmlFor="portfolio-position-manual-price">{isOpportunisticPortfolio ? "Cash amount (USD) *" : "Manual price"}</label>
+              <input id="portfolio-position-manual-price" type="number" min="0" step="any" value={form.manual_price} onChange={(e) => setForm((prev) => ({ ...prev, manual_price: e.target.value }))} />
+            </div>
+            <div className="portfolio-field">
               <label htmlFor="portfolio-position-entry-date">Entry date</label>
               <input id="portfolio-position-entry-date" type="date" value={form.entry_date} onChange={(e) => setForm((prev) => ({ ...prev, entry_date: e.target.value }))} />
             </div>
@@ -253,7 +290,7 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
           <h5>Classification</h5>
           <div className="portfolio-field">
             <label htmlFor="portfolio-position-asset-type">Asset type *</label>
-            <select id="portfolio-position-asset-type" value={form.asset_type} onChange={(e) => setForm((prev) => ({ ...prev, asset_type: e.target.value }))}>
+            <select id="portfolio-position-asset-type" value={form.asset_type} onChange={(e) => setForm((prev) => ({ ...prev, asset_type: e.target.value }))} disabled={isOpportunisticPortfolio}>
               {ASSET_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </div>
@@ -325,7 +362,7 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
               <div key={row.id} className="portfolio-config-row">
                 <strong>{row.symbol}</strong> · {row.display_name ?? row.symbol} · shares {row.shares} · {row.asset_type} · map {row.mapping_source} · {row.active_position ? "active" : "inactive"}
                 <div style={{ marginTop: 6 }}>
-                  entry {row.entry_date ?? "—"} · avg cost {row.avg_cost ?? "—"} · final sector/subsector/commodity {row.final_sector_id ?? "—"}/{row.final_subsector_id ?? "—"}/{row.final_commodity_id ?? "—"}
+                  entry {row.entry_date ?? "—"} · avg cost {row.avg_cost ?? "—"} · manual price {row.manual_price ?? "—"} · final sector/subsector/commodity {row.final_sector_id ?? "—"}/{row.final_subsector_id ?? "—"}/{row.final_commodity_id ?? "—"}
                 </div>
                 <div className="portfolio-actions-row" style={{ marginTop: 6 }}>
                   <button type="button" onClick={() => startEdit(row)}>Edit</button>

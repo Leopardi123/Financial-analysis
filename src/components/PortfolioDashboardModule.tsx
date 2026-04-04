@@ -68,6 +68,13 @@ type PortfolioOverviewResponse = {
     dry_powder_status: string | null;
     included_portfolio_count: number;
     major_warnings: string[];
+    major_warning_details?: Array<{
+      code: string;
+      title: string;
+      detail: string;
+      severity: "warning" | "critical";
+      portfolio_id?: string;
+    }>;
   };
   performance: {
     daily_return_pct: NullableNumber;
@@ -369,6 +376,14 @@ export default function PortfolioDashboardModule() {
   const renderFieldError = (field: string) => fieldErrors[field]
     ? <span className="field-error-text">{fieldErrors[field]}</span>
     : null;
+  const warningItems: Array<{ code: string; title: string; detail: string; severity: "warning" | "critical"; portfolio_id?: string }> = overview?.total.major_warning_details?.length
+    ? overview.total.major_warning_details
+    : (overview?.total.major_warnings ?? []).map((warning) => ({
+      code: warning,
+      title: label(warning),
+      detail: "",
+      severity: "warning" as const,
+    }));
 
   return (
     <div className="portfolio-inline-module">
@@ -425,7 +440,18 @@ export default function PortfolioDashboardModule() {
             <div className="portfolio-panel">
               <h4>Major warnings</h4>
               {overview.total.major_warnings.length > 0
-                ? overview.total.major_warnings.map((warning) => <span key={warning} className="warning-pill">{label(warning)}</span>)
+                ? (
+                  <div className="warning-list">
+                    {warningItems.map((warning) => (
+                      <details key={`${warning.code}-${warning.portfolio_id ?? "global"}`} className={`warning-card warning-${warning.severity}`}>
+                        <summary>
+                          <span className="warning-pill">{warning.title}</span>
+                        </summary>
+                        <p>{warning.detail || "No additional detail available."}</p>
+                      </details>
+                    ))}
+                  </div>
+                )
                 : <p className="bread">No major warnings.</p>}
             </div>
           </div>
@@ -456,6 +482,7 @@ export default function PortfolioDashboardModule() {
         <PortfolioPositionsAdmin portfolios={adminList.map((item) => ({
           portfolio_id: item.portfolio_id,
           portfolio_name: item.portfolio_name,
+          portfolio_type: item.portfolio_type,
         }))} />
       )}
 
