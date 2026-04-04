@@ -27,12 +27,10 @@ type PortfolioRecord = {
   top_holding_weight_pct: NullableNumber;
   risk_score: NullableNumber;
   risk_status: string | null;
-  risk_mismatch_flag: boolean | null;
-  hedge_status: string | null;
   suggested_hedge_type: string | null;
+  hedge_status: string | null;
   hedge_policy_applied: string | null;
   signal_completeness: string | null;
-  data_quality_flags: Record<string, boolean> | null;
 };
 
 type PortfolioConfig = {
@@ -67,8 +65,6 @@ type PortfolioOverviewResponse = {
     total_risk_status: string | null;
     total_hedge_signal: string | null;
     dry_powder_status: string | null;
-    opportunistic_weight_pct: NullableNumber;
-    required_min_dry_powder_pct: NullableNumber;
     included_portfolio_count: number;
     major_warnings: string[];
   };
@@ -77,33 +73,16 @@ type PortfolioOverviewResponse = {
     cumulative_return_pct: NullableNumber;
     drawdown_pct: NullableNumber;
     history_available_days: number;
-    data_quality: string | null;
   };
   portfolios: PortfolioRecord[];
-  setup?: {
-    setup_state: SetupState;
-    portfolios_configured_count: number;
-    portfolios_with_snapshots_count: number;
-    history_available_days: number;
-  };
+  setup?: { setup_state: SetupState };
   debug?: unknown;
   error?: string;
-};
-
-type TotalSeriesResponse = {
-  ok: boolean;
-  series: Array<{ as_of_date: string; market_value: NullableNumber }>;
-};
-
-type AdminListResponse = {
-  ok: boolean;
-  portfolios: PortfolioConfig[];
 };
 
 type AdminValidateResponse = {
   ok: boolean;
   global: { status: string; sum: number; deviation: number };
-  perPortfolio: Array<{ portfolio_id: string; errors: string[] }>;
 };
 
 type AdminFormState = {
@@ -123,10 +102,43 @@ type AdminFormState = {
   role_description: string;
   long_term_purpose: string;
   notes: string;
-  allowed_hedge_types_json: string;
-  hedge_purpose_json: string;
+  allowed_hedge_types: string[];
+  hedge_purposes: string[];
   max_hedge_pct: string;
 };
+
+const PORTFOLIO_TYPES = [
+  { value: "stable_income", label: "Stabil utdelningsportfölj" },
+  { value: "growth", label: "Tillväxtportfölj" },
+  { value: "commodity_majors", label: "Råvaror — majors/royalty" },
+  { value: "commodity_junior", label: "Råvaror — junior/yolo" },
+  { value: "opportunistic", label: "Opportunistisk / dry powder" },
+];
+
+const RISK_LEVELS = ["low", "medium", "high", "extreme"];
+const REBALANCE_MODES = ["soft", "standard", "strict"];
+
+const HEDGE_TYPE_OPTIONS = [
+  { value: "index_put", label: "Index put" },
+  { value: "index_short", label: "Index short" },
+  { value: "inverse_etf", label: "Inverse ETF" },
+  { value: "gold", label: "Gold" },
+  { value: "cash", label: "Cash" },
+  { value: "usd", label: "USD" },
+  { value: "commodity_put", label: "Commodity put" },
+  { value: "producer_pair_hedge", label: "Producer pair hedge" },
+  { value: "no_direct_hedge_use_position_reduction", label: "No direct hedge (use position reduction)" },
+];
+
+const HEDGE_PURPOSE_OPTIONS = [
+  { value: "market_drawdown", label: "Market drawdown" },
+  { value: "cyclical_downturn", label: "Cyclical downturn" },
+  { value: "inflation_shock", label: "Inflation shock" },
+  { value: "deflationary_stress", label: "Deflationary stress" },
+  { value: "usd_strength", label: "USD strength" },
+  { value: "commodity_downturn", label: "Commodity downturn" },
+  { value: "duration_risk", label: "Duration risk" },
+];
 
 const emptyForm: AdminFormState = {
   portfolio_id: "",
@@ -136,22 +148,38 @@ const emptyForm: AdminFormState = {
   visible_in_overview: true,
   included_in_total_portfolio: true,
   sort_order: "1",
-  target_weight_pct: "0",
-  min_weight_pct: "0",
-  max_weight_pct: "100",
+  target_weight_pct: "",
+  min_weight_pct: "",
+  max_weight_pct: "",
   strategic_risk_level: "medium",
   hedging_allowed: true,
   rebalance_mode: "standard",
   role_description: "",
   long_term_purpose: "",
   notes: "",
-  allowed_hedge_types_json: "[]",
-  hedge_purpose_json: "[]",
+  allowed_hedge_types: [],
+  hedge_purposes: [],
   max_hedge_pct: "",
 };
 
+function parseJsonArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
 function debugEnabled(): boolean {
   return new URLSearchParams(window.location.search).get("debug") === "1";
+}
+
+function label(value: string | null): string {
+  if (!value) return "Unavailable";
+  return value.replace(/_/g, " ");
 }
 
 function formatPct(value: NullableNumber): string {
@@ -160,11 +188,6 @@ function formatPct(value: NullableNumber): string {
 
 function formatMoney(value: NullableNumber): string {
   return value === null ? "Unavailable" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
-}
-
-function label(value: string | null): string {
-  if (!value) return "Unavailable";
-  return value.replace(/_/g, " ");
 }
 
 function formFromConfig(config: PortfolioConfig): AdminFormState {
@@ -185,8 +208,8 @@ function formFromConfig(config: PortfolioConfig): AdminFormState {
     role_description: config.role_description,
     long_term_purpose: config.long_term_purpose ?? "",
     notes: config.notes ?? "",
-    allowed_hedge_types_json: config.allowed_hedge_types_json,
-    hedge_purpose_json: config.hedge_purpose_json,
+    allowed_hedge_types: parseJsonArray(config.allowed_hedge_types_json),
+    hedge_purposes: parseJsonArray(config.hedge_purpose_json),
     max_hedge_pct: config.max_hedge_pct === null ? "" : String(config.max_hedge_pct),
   };
 }
@@ -209,18 +232,18 @@ function formToPayload(form: AdminFormState) {
     role_description: form.role_description.trim(),
     long_term_purpose: form.long_term_purpose.trim() || null,
     notes: form.notes.trim() || null,
-    allowed_hedge_types_json: form.allowed_hedge_types_json.trim(),
-    hedge_purpose_json: form.hedge_purpose_json.trim(),
+    allowed_hedge_types_json: JSON.stringify(form.allowed_hedge_types),
+    hedge_purpose_json: JSON.stringify(form.hedge_purposes),
     max_hedge_pct: form.max_hedge_pct.trim() === "" ? null : Number(form.max_hedge_pct),
   };
 }
 
 export default function PortfolioDashboardModule() {
   const [overview, setOverview] = useState<PortfolioOverviewResponse | null>(null);
-  const [series, setSeries] = useState<TotalSeriesResponse["series"]>([]);
   const [adminList, setAdminList] = useState<PortfolioConfig[]>([]);
   const [adminValidation, setAdminValidation] = useState<AdminValidateResponse | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AdminFormState>(emptyForm);
   const [loading, setLoading] = useState(true);
@@ -231,34 +254,23 @@ export default function PortfolioDashboardModule() {
 
   const loadAll = async () => {
     setLoading(true);
-    setError(null);
     const [overviewRes, adminRes, validateRes] = await Promise.all([
       fetch(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`),
-      fetch(`/api/portfolio/admin/list${debugMode ? "?debug=1" : ""}`),
-      fetch(`/api/portfolio/admin/validate${debugMode ? "?debug=1" : ""}`),
+      fetch(`/api/portfolio/admin/list`),
+      fetch(`/api/portfolio/admin/validate`),
     ]);
+
     const overviewJson = (await overviewRes.json()) as PortfolioOverviewResponse;
-    const adminJson = (await adminRes.json()) as AdminListResponse;
+    const adminJson = (await adminRes.json()) as { ok: boolean; portfolios: PortfolioConfig[] };
     const validateJson = (await validateRes.json()) as AdminValidateResponse;
+
     if (!overviewRes.ok || !overviewJson.ok) throw new Error(overviewJson.error ?? "Failed to load overview");
     if (!adminRes.ok || !adminJson.ok) throw new Error("Failed to load portfolio admin list");
-    if (!validateRes.ok || !validateJson.ok) throw new Error("Failed to load validation");
+    if (!validateRes.ok || !validateJson.ok) throw new Error("Failed to load portfolio validation");
 
     setOverview(overviewJson);
     setAdminList(adminJson.portfolios);
     setAdminValidation(validateJson);
-
-    if (overviewJson.performance.history_available_days > 1) {
-      const totalSeriesRes = await fetch(`/api/portfolio/history/series/total${debugMode ? "?debug=1" : ""}`);
-      const totalSeriesJson = (await totalSeriesRes.json()) as TotalSeriesResponse;
-      if (totalSeriesRes.ok && totalSeriesJson.ok) {
-        setSeries(totalSeriesJson.series);
-      } else {
-        setSeries([]);
-      }
-    } else {
-      setSeries([]);
-    }
     setLoading(false);
   };
 
@@ -269,46 +281,36 @@ export default function PortfolioDashboardModule() {
     });
   }, [debugMode]);
 
-  const setupState: SetupState = useMemo(() => {
+  const setupState = useMemo<SetupState>(() => {
     if (overview?.setup?.setup_state) return overview.setup.setup_state;
     if (adminList.length === 0) return "no_config";
-    if (overview?.portfolios.length) {
-      if (overview.total.major_warnings.includes("data_partial")) return "partial";
-      if (overview.total.major_warnings.includes("data_unavailable")) return "configured_no_data";
-      return "live";
-    }
-    return "configured_no_data";
+    if (!overview?.portfolios.length) return "configured_no_data";
+    return overview.total.major_warnings.includes("data_partial") ? "partial" : "live";
   }, [overview, adminList]);
-
-  const chartPoints = useMemo(() => {
-    if (!series.length) return "";
-    const values = series.filter((item) => typeof item.market_value === "number").map((item) => item.market_value as number);
-    if (values.length < 2) return "";
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    return values
-      .map((value, idx) => {
-        const x = (idx / (values.length - 1)) * 100;
-        const y = max === min ? 30 : 60 - ((value - min) / (max - min)) * 50;
-        return `${x},${y}`;
-      })
-      .join(" ");
-  }, [series]);
-
-  const onEdit = (config: PortfolioConfig) => {
-    setEditingId(config.portfolio_id);
-    setForm(formFromConfig(config));
-    setShowAdmin(true);
-    setFormErrors([]);
-    setSaveMsg(null);
-  };
 
   const onCreate = () => {
     setEditingId(null);
     setForm({ ...emptyForm, sort_order: String(adminList.length + 1) });
     setShowAdmin(true);
+    setShowAdvanced(false);
     setFormErrors([]);
     setSaveMsg(null);
+  };
+
+  const onEdit = (config: PortfolioConfig) => {
+    setEditingId(config.portfolio_id);
+    setForm(formFromConfig(config));
+    setShowAdmin(true);
+    setShowAdvanced(false);
+    setFormErrors([]);
+    setSaveMsg(null);
+  };
+
+  const toggleArrayValue = (field: "allowed_hedge_types" | "hedge_purposes", value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      [field]: prev[field].includes(value) ? prev[field].filter((item) => item !== value) : [...prev[field], value],
+    }));
   };
 
   const saveAdmin = async () => {
@@ -316,56 +318,53 @@ export default function PortfolioDashboardModule() {
     setSaveMsg(null);
     const payload = formToPayload(form);
     const endpoint = editingId ? "/api/portfolio/admin/update" : "/api/portfolio/admin/create";
+
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const json = (await res.json()) as { ok: boolean; errors?: string[]; error?: string };
+
+    const json = (await res.json()) as { ok: boolean; error?: string; errors?: string[] };
     if (!res.ok || !json.ok) {
-      setFormErrors(json.errors ?? [json.error ?? "Failed to save portfolio"]);
+      setFormErrors(json.errors ?? [json.error ?? "Save failed"]);
       return;
     }
+
     setSaveMsg(editingId ? "Portfolio updated." : "Portfolio created.");
     await loadAll();
   };
 
-  const statusHeader = (
-    <div className="portfolio-inline-header">
-      <div>
-        <h3>Portfolio Dashboard</h3>
-        <p className="bread">Backend-driven portfolio overview, warnings and diagnostics.</p>
-      </div>
-      <div className="portfolio-actions-row">
-        <button type="button" onClick={onCreate}>Create portfolio</button>
-        <button type="button" onClick={() => setShowAdmin((current) => !current)}>Manage portfolios</button>
-      </div>
-    </div>
-  );
-
   return (
     <div className="portfolio-inline-module">
-      {statusHeader}
+      <div className="portfolio-inline-header">
+        <div>
+          <h3>Portfolio Dashboard</h3>
+          <p className="bread">Inline portfolio overview and admin controls.</p>
+        </div>
+        <div className="portfolio-actions-row">
+          <button type="button" onClick={onCreate}>Create portfolio</button>
+          <button type="button" onClick={() => setShowAdmin((current) => !current)}>Manage portfolios</button>
+        </div>
+      </div>
+
       {loading && <p className="bread">Loading portfolio dashboard…</p>}
-      {error && <p className="bread portfolio-error">Error: {error}</p>}
+      {error && <p className="portfolio-error">{error}</p>}
 
       {!loading && !error && setupState === "no_config" && (
         <div className="portfolio-empty-state">
           <h4>No portfolios configured yet.</h4>
           <p>Create portfolios in Portfolio Admin to begin.</p>
-          <p>After portfolios are created and populated, overview, warnings and debug will appear here.</p>
-          <button type="button" onClick={onCreate}>Open Portfolio Admin</button>
         </div>
       )}
 
       {!loading && !error && setupState === "configured_no_data" && (
         <div className="portfolio-empty-state">
           <h4>Portfolios configured, awaiting holdings / snapshot data.</h4>
-          <p>Admin config exists, but there is no usable snapshot/history data yet.</p>
           <div className="portfolio-config-list">
             {adminList.map((item) => (
               <div key={item.portfolio_id} className="portfolio-config-row">
-                <strong>{item.portfolio_name}</strong> ({item.portfolio_type}) — target {item.target_weight_pct.toFixed(1)}%
+                <strong>{item.portfolio_name}</strong> · {item.portfolio_type} · target {item.target_weight_pct.toFixed(1)}%
               </div>
             ))}
           </div>
@@ -373,82 +372,61 @@ export default function PortfolioDashboardModule() {
       )}
 
       {!loading && !error && (setupState === "partial" || setupState === "live") && overview && (
-        <div className="portfolio-live-wrap">
+        <>
           <div className="portfolio-kpi-row">
             <span>As of: {overview.as_of_date ?? "Unavailable"}</span>
             <span>Total market value: {formatMoney(overview.total.market_value)}</span>
             <span>Included portfolios: {overview.total.included_portfolio_count}</span>
-            <span>Data state: {setupState === "partial" ? "Partial portfolio data available" : "Portfolio overview active"}</span>
           </div>
-
           <div className="portfolio-summary-grid">
             <div className="portfolio-panel">
-              <h4>Total summary</h4>
-              <div><strong>Allocation:</strong> {label(overview.total.allocation_plan_status)}</div>
-              <div><strong>Total risk score:</strong> {overview.total.total_risk_score ?? "Unavailable"}</div>
-              <div><strong>Total risk status:</strong> {label(overview.total.total_risk_status)}</div>
-              <div><strong>Total hedge signal:</strong> {label(overview.total.total_hedge_signal)}</div>
-              <div><strong>Dry powder status:</strong> {label(overview.total.dry_powder_status)}</div>
+              <h4>Overview</h4>
+              <div>Allocation: {label(overview.total.allocation_plan_status)}</div>
+              <div>Risk: {label(overview.total.total_risk_status)} ({overview.total.total_risk_score ?? "n/a"})</div>
+              <div>Hedge: {label(overview.total.total_hedge_signal)}</div>
+              <div>Dry powder: {label(overview.total.dry_powder_status)}</div>
+              <div>Daily return: {formatPct(overview.performance.daily_return_pct)}</div>
             </div>
             <div className="portfolio-panel">
               <h4>Major warnings</h4>
-              {overview.total.major_warnings.length ? overview.total.major_warnings.map((item) => (
-                <span className="warning-pill" key={item}>{label(item)}</span>
-              )) : <p className="bread">No major warnings.</p>}
-            </div>
-            <div className="portfolio-panel">
-              <h4>Performance</h4>
-              <div><strong>Daily:</strong> {formatPct(overview.performance.daily_return_pct)}</div>
-              <div><strong>Cumulative:</strong> {formatPct(overview.performance.cumulative_return_pct)}</div>
-              <div><strong>Drawdown:</strong> {formatPct(overview.performance.drawdown_pct)}</div>
-              {chartPoints ? (
-                <svg viewBox="0 0 100 65" className="portfolio-mini-chart" role="img" aria-label="Total portfolio chart">
-                  <polyline points={chartPoints} fill="none" stroke="#0f766e" strokeWidth="2" />
-                </svg>
-              ) : (
-                <p className="bread">History chart unavailable.</p>
-              )}
+              {overview.total.major_warnings.length > 0
+                ? overview.total.major_warnings.map((warning) => <span key={warning} className="warning-pill">{label(warning)}</span>)
+                : <p className="bread">No major warnings.</p>}
             </div>
           </div>
 
           <div className="portfolio-list">
             {overview.portfolios.map((portfolio) => (
-              <details key={portfolio.portfolio_id} className="portfolio-card" open={setupState === "partial"}>
+              <details key={portfolio.portfolio_id} className="portfolio-card">
                 <summary>{portfolio.portfolio_name} ({portfolio.portfolio_type})</summary>
                 <div className="portfolio-card-grid">
-                  <div><strong>Market value:</strong> {formatMoney(portfolio.market_value)}</div>
-                  <div><strong>Actual weight:</strong> {formatPct(portfolio.actual_weight_pct)}</div>
-                  <div><strong>Target / min / max:</strong> {formatPct(portfolio.target_weight_pct)} / {formatPct(portfolio.min_weight_pct)} / {formatPct(portfolio.max_weight_pct)}</div>
-                  <div><strong>Weight status:</strong> {label(portfolio.weight_status)}</div>
-                  <div><strong>Rebalance status:</strong> {label(portfolio.rebalance_status)}</div>
-                  <div><strong>Trend status:</strong> {label(portfolio.trend_status)}</div>
-                  <div><strong>Relative strength:</strong> {label(portfolio.relative_strength_bucket)}</div>
-                  <div><strong>Risk score:</strong> {portfolio.risk_score ?? "Unavailable"}</div>
-                  <div><strong>Risk status:</strong> {label(portfolio.risk_status)}</div>
-                  <div><strong>Hedge status:</strong> {label(portfolio.hedge_status)}</div>
-                  <div><strong>20d / 65d / 200d:</strong> {formatPct(portfolio.return_20d)} / {formatPct(portfolio.return_65d)} / {formatPct(portfolio.return_200d)}</div>
-                  <div><strong>Annualized vol 65d:</strong> {formatPct(portfolio.annualized_vol_65d)}</div>
-                  <div><strong>Current drawdown:</strong> {formatPct(portfolio.current_drawdown_pct)}</div>
-                  <div><strong>Top holding weight:</strong> {formatPct(portfolio.top_holding_weight_pct)}</div>
-                  <div><strong>Hedge policy:</strong> {label(portfolio.hedge_policy_applied)}</div>
-                  <div><strong>Signal completeness:</strong> {label(portfolio.signal_completeness)}</div>
-                  {portfolio.suggested_hedge_type ? <div><strong>Suggested hedge:</strong> {portfolio.suggested_hedge_type}</div> : null}
+                  <div>Market value: {formatMoney(portfolio.market_value)}</div>
+                  <div>Actual weight: {formatPct(portfolio.actual_weight_pct)}</div>
+                  <div>Target / min / max: {formatPct(portfolio.target_weight_pct)} / {formatPct(portfolio.min_weight_pct)} / {formatPct(portfolio.max_weight_pct)}</div>
+                  <div>Weight status: {label(portfolio.weight_status)}</div>
+                  <div>Trend status: {label(portfolio.trend_status)}</div>
+                  <div>Risk status: {label(portfolio.risk_status)}</div>
+                  <div>Hedge status: {label(portfolio.hedge_status)}</div>
+                  <div>Hedge policy: {label(portfolio.hedge_policy_applied)}</div>
+                  <div>Signal completeness: {label(portfolio.signal_completeness)}</div>
+                  {portfolio.suggested_hedge_type && <div>Suggested hedge: {portfolio.suggested_hedge_type}</div>}
                 </div>
               </details>
             ))}
           </div>
-        </div>
+        </>
       )}
 
       <details className="portfolio-admin-wrap" open={showAdmin}>
         <summary>Portfolio Admin</summary>
+
         {adminValidation && (
-          <p className="bread">Global target weight validation: <strong>{adminValidation.global.status}</strong> (sum {adminValidation.global.sum.toFixed(2)}%)</p>
+          <p className="bread">Global target weight validation: <strong>{adminValidation.global.status}</strong> ({adminValidation.global.sum.toFixed(2)}%)</p>
         )}
 
         <div className="portfolio-admin-list">
           {adminList.map((item) => (
-            <div className="portfolio-admin-row" key={item.portfolio_id}>
+            <div key={item.portfolio_id} className="portfolio-admin-row">
               <div>
                 <strong>{item.portfolio_name}</strong> <span>({item.portfolio_id})</span>
               </div>
@@ -459,43 +437,137 @@ export default function PortfolioDashboardModule() {
 
         <div className="portfolio-admin-form">
           <h4>{editingId ? `Edit ${editingId}` : "Create portfolio"}</h4>
-          <div className="portfolio-form-grid">
-            <label>portfolio_id<input value={form.portfolio_id} onChange={(e) => setForm((p) => ({ ...p, portfolio_id: e.target.value }))} disabled={Boolean(editingId)} /></label>
-            <label>portfolio_name<input value={form.portfolio_name} onChange={(e) => setForm((p) => ({ ...p, portfolio_name: e.target.value }))} /></label>
-            <label>portfolio_type<input value={form.portfolio_type} onChange={(e) => setForm((p) => ({ ...p, portfolio_type: e.target.value }))} /></label>
-            <label>sort_order<input value={form.sort_order} onChange={(e) => setForm((p) => ({ ...p, sort_order: e.target.value }))} /></label>
-            <label>target_weight_pct<input value={form.target_weight_pct} onChange={(e) => setForm((p) => ({ ...p, target_weight_pct: e.target.value }))} /></label>
-            <label>min_weight_pct<input value={form.min_weight_pct} onChange={(e) => setForm((p) => ({ ...p, min_weight_pct: e.target.value }))} /></label>
-            <label>max_weight_pct<input value={form.max_weight_pct} onChange={(e) => setForm((p) => ({ ...p, max_weight_pct: e.target.value }))} /></label>
-            <label>strategic_risk_level<input value={form.strategic_risk_level} onChange={(e) => setForm((p) => ({ ...p, strategic_risk_level: e.target.value }))} /></label>
-            <label>rebalance_mode<input value={form.rebalance_mode} onChange={(e) => setForm((p) => ({ ...p, rebalance_mode: e.target.value }))} /></label>
-            <label>max_hedge_pct<input value={form.max_hedge_pct} onChange={(e) => setForm((p) => ({ ...p, max_hedge_pct: e.target.value }))} /></label>
-            <label>role_description<input value={form.role_description} onChange={(e) => setForm((p) => ({ ...p, role_description: e.target.value }))} /></label>
-            <label>long_term_purpose<input value={form.long_term_purpose} onChange={(e) => setForm((p) => ({ ...p, long_term_purpose: e.target.value }))} /></label>
-            <label>notes<input value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} /></label>
-            <label>allowed_hedge_types_json<input value={form.allowed_hedge_types_json} onChange={(e) => setForm((p) => ({ ...p, allowed_hedge_types_json: e.target.value }))} /></label>
-            <label>hedge_purpose_json<input value={form.hedge_purpose_json} onChange={(e) => setForm((p) => ({ ...p, hedge_purpose_json: e.target.value }))} /></label>
-          </div>
-          <div className="portfolio-form-toggles">
-            <label><input type="checkbox" checked={form.active} onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))} /> active</label>
-            <label><input type="checkbox" checked={form.visible_in_overview} onChange={(e) => setForm((p) => ({ ...p, visible_in_overview: e.target.checked }))} /> visible_in_overview</label>
-            <label><input type="checkbox" checked={form.included_in_total_portfolio} onChange={(e) => setForm((p) => ({ ...p, included_in_total_portfolio: e.target.checked }))} /> included_in_total_portfolio</label>
-            <label><input type="checkbox" checked={form.hedging_allowed} onChange={(e) => setForm((p) => ({ ...p, hedging_allowed: e.target.checked }))} /> hedging_allowed</label>
-          </div>
+
+          <section>
+            <h5>Basic identity</h5>
+            <div className="portfolio-form-grid">
+              <label>Portfolio ID *
+                <input value={form.portfolio_id} disabled={Boolean(editingId)} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_id: e.target.value }))} />
+              </label>
+              <label>Portfolio name *
+                <input value={form.portfolio_name} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_name: e.target.value }))} />
+              </label>
+              <label>Portfolio type *
+                <select value={form.portfolio_type} onChange={(e) => setForm((prev) => ({ ...prev, portfolio_type: e.target.value }))}>
+                  {PORTFOLIO_TYPES.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+              </label>
+              <label>Sort order *
+                <input value={form.sort_order} onChange={(e) => setForm((prev) => ({ ...prev, sort_order: e.target.value }))} />
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <h5>Allocation</h5>
+            <div className="portfolio-form-grid">
+              <label>Target weight % *<input value={form.target_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, target_weight_pct: e.target.value }))} /></label>
+              <label>Min weight % *<input value={form.min_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, min_weight_pct: e.target.value }))} /></label>
+              <label>Max weight % *<input value={form.max_weight_pct} onChange={(e) => setForm((prev) => ({ ...prev, max_weight_pct: e.target.value }))} /></label>
+            </div>
+          </section>
+
+          <section>
+            <h5>Strategy</h5>
+            <div className="portfolio-form-grid">
+              <label>Strategic risk level *
+                <select value={form.strategic_risk_level} onChange={(e) => setForm((prev) => ({ ...prev, strategic_risk_level: e.target.value }))}>
+                  {RISK_LEVELS.map((value) => <option key={value} value={value}>{label(value)}</option>)}
+                </select>
+              </label>
+              <label>Rebalance mode *
+                <select value={form.rebalance_mode} onChange={(e) => setForm((prev) => ({ ...prev, rebalance_mode: e.target.value }))}>
+                  {REBALANCE_MODES.map((value) => <option key={value} value={value}>{label(value)}</option>)}
+                </select>
+              </label>
+              <label>Role description <span className="optional-tag">Optional</span>
+                <input value={form.role_description} onChange={(e) => setForm((prev) => ({ ...prev, role_description: e.target.value }))} placeholder="What is this portfolio's role?" />
+              </label>
+              <label>Long-term purpose <span className="optional-tag">Optional</span>
+                <input value={form.long_term_purpose} onChange={(e) => setForm((prev) => ({ ...prev, long_term_purpose: e.target.value }))} placeholder="Optional" />
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <h5>Visibility / inclusion</h5>
+            <div className="portfolio-form-toggles">
+              <label><input type="checkbox" checked={form.active} onChange={(e) => setForm((prev) => ({ ...prev, active: e.target.checked }))} /> active</label>
+              <label><input type="checkbox" checked={form.visible_in_overview} onChange={(e) => setForm((prev) => ({ ...prev, visible_in_overview: e.target.checked }))} /> visible in overview</label>
+              <label><input type="checkbox" checked={form.included_in_total_portfolio} onChange={(e) => setForm((prev) => ({ ...prev, included_in_total_portfolio: e.target.checked }))} /> included in total portfolio</label>
+            </div>
+          </section>
+
+          <section>
+            <h5>Hedge settings</h5>
+            <div className="portfolio-form-toggles">
+              <label><input type="checkbox" checked={form.hedging_allowed} onChange={(e) => setForm((prev) => ({ ...prev, hedging_allowed: e.target.checked }))} /> hedging allowed</label>
+            </div>
+            <div className={`multi-select-block ${!form.hedging_allowed ? "disabled" : ""}`}>
+              <p>Allowed hedge types</p>
+              <div className="chip-grid">
+                {HEDGE_TYPE_OPTIONS.map((option) => (
+                  <label key={option.value} className="chip-checkbox">
+                    <input
+                      type="checkbox"
+                      disabled={!form.hedging_allowed}
+                      checked={form.allowed_hedge_types.includes(option.value)}
+                      onChange={() => toggleArrayValue("allowed_hedge_types", option.value)}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className={`multi-select-block ${!form.hedging_allowed ? "disabled" : ""}`}>
+              <p>Hedge purpose</p>
+              <div className="chip-grid">
+                {HEDGE_PURPOSE_OPTIONS.map((option) => (
+                  <label key={option.value} className="chip-checkbox">
+                    <input
+                      type="checkbox"
+                      disabled={!form.hedging_allowed}
+                      checked={form.hedge_purposes.includes(option.value)}
+                      onChange={() => toggleArrayValue("hedge_purposes", option.value)}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <label>Max hedge % <span className="optional-tag">Optional</span>
+              <input
+                value={form.max_hedge_pct}
+                disabled={!form.hedging_allowed}
+                placeholder={form.hedging_allowed ? "Optional" : "Disabled when hedging is off"}
+                onChange={(e) => setForm((prev) => ({ ...prev, max_hedge_pct: e.target.value }))}
+              />
+            </label>
+          </section>
+
+          <details open={showAdvanced} onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}>
+            <summary>Optional notes / advanced</summary>
+            <label>Notes <span className="optional-tag">Optional</span>
+              <textarea value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Optional notes" />
+            </label>
+          </details>
+
           {formErrors.length > 0 && <div className="portfolio-error">{formErrors.map((item) => <div key={item}>{item}</div>)}</div>}
           {saveMsg && <p className="bread">{saveMsg}</p>}
+
           <div className="portfolio-actions-row">
             <button type="button" onClick={saveAdmin}>{editingId ? "Save changes" : "Create portfolio"}</button>
             <button type="button" onClick={onCreate}>Reset for new</button>
           </div>
-          <p className="bread">Next step: after config creation, add holdings/positions via ingest/snapshot pipeline to populate metrics and history.</p>
         </div>
       </details>
 
       {debugMode && (
         <details className="portfolio-debug-wrap">
           <summary>Debug payload</summary>
-          <pre>{JSON.stringify({ setupState, adminCount: adminList.length, overviewDebug: overview?.debug ?? null }, null, 2)}</pre>
+          <pre>{JSON.stringify({ setupState, adminCount: adminList.length, debug: overview?.debug ?? null }, null, 2)}</pre>
         </details>
       )}
     </div>

@@ -198,3 +198,68 @@
   border-radius: 6px;
   font-size: 0.75rem;
 }
+
+
+.portfolio-admin-form section {
+  border-top: 1px solid #e5eeea;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.portfolio-admin-form h5 {
+  margin: 0 0 6px;
+  font-size: 0.86rem;
+}
+
+.optional-tag {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.portfolio-form-grid select,
+.portfolio-admin-form textarea {
+  border: 1px solid #c8d4cf;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.portfolio-admin-form textarea {
+  min-height: 80px;
+  width: 100%;
+}
+
+.multi-select-block {
+  border: 1px solid #e2ece7;
+  border-radius: 6px;
+  padding: 6px;
+  margin: 6px 0;
+}
+
+.multi-select-block.disabled {
+  opacity: 0.6;
+}
+
+.multi-select-block p {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-checkbox {
+  border: 1px solid #cfdad5;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #f8fbf9;
+  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
