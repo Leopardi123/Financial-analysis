@@ -95,6 +95,31 @@ export function normalizePortfolioPayload(
     merged.portfolio_id = merged.portfolio_id.trim();
   }
 
+  const numericFields: Array<keyof PortfolioAdminConfig> = [
+    "sort_order",
+    "target_weight_pct",
+    "min_weight_pct",
+    "max_weight_pct",
+  ];
+  for (const field of numericFields) {
+    const value = merged[field];
+    if (typeof value === "string") {
+      const parsed = Number(value.replace(",", ".").trim());
+      merged[field] = Number.isFinite(parsed) ? parsed as any : value as any;
+    }
+  }
+
+  const maxHedgeRaw = merged.max_hedge_pct as unknown;
+  if (typeof maxHedgeRaw === "string") {
+    const cleaned = maxHedgeRaw.replace(",", ".").trim();
+    if (cleaned === "") {
+      merged.max_hedge_pct = null;
+    } else {
+      const parsed = Number(cleaned);
+      merged.max_hedge_pct = Number.isFinite(parsed) ? parsed : (merged.max_hedge_pct as any);
+    }
+  }
+
   if (payload.allowed_hedge_types_json !== undefined) {
     const parsed = toJsonArrayText(payload.allowed_hedge_types_json);
     if (parsed.ok) {

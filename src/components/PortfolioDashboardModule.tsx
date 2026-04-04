@@ -590,6 +590,9 @@ export default function PortfolioDashboardModule() {
               <input
                 ref={(el) => { fieldRefs.current.max_hedge_pct = el; }}
                 className={inputClassName("max_hedge_pct")}
+                type="number"
+                inputMode="decimal"
+                step="0.1"
                 value={form.max_hedge_pct}
                 disabled={!form.hedging_allowed}
                 placeholder={form.hedging_allowed ? "Optional" : "Disabled when hedging is off"}
