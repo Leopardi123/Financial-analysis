@@ -32,6 +32,11 @@ type PortfolioRecord = {
   hedge_status: string | null;
   hedge_policy_applied: string | null;
   signal_completeness: string | null;
+  valuation_state?: string | null;
+  positions_found_count?: NullableNumber;
+  positions_active_count?: NullableNumber;
+  positions_valued_count?: NullableNumber;
+  positions_unvalued_count?: NullableNumber;
 };
 
 type PortfolioConfig = {
@@ -68,6 +73,13 @@ type PortfolioOverviewResponse = {
     dry_powder_status: string | null;
     included_portfolio_count: number;
     major_warnings: string[];
+    major_warning_details?: Array<{
+      code: string;
+      title: string;
+      detail: string;
+      severity: "warning" | "critical";
+      portfolio_id?: string;
+    }>;
   };
   performance: {
     daily_return_pct: NullableNumber;
@@ -78,7 +90,7 @@ type PortfolioOverviewResponse = {
   portfolios: PortfolioRecord[];
   setup?: { setup_state: SetupState };
   debug?: unknown;
-  error?: string;
+  error?: string | { type?: string; message?: string; debugMessage?: string };
 };
 
 type AdminValidateResponse = {
@@ -274,7 +286,12 @@ export default function PortfolioDashboardModule() {
     const adminJson = (await adminRes.json()) as { ok: boolean; portfolios: PortfolioConfig[] };
     const validateJson = (await validateRes.json()) as AdminValidateResponse;
 
-    if (!overviewRes.ok || !overviewJson.ok) throw new Error(overviewJson.error ?? "Failed to load overview");
+    if (!overviewRes.ok || !overviewJson.ok) {
+      const errorMessage = typeof overviewJson.error === "string"
+        ? overviewJson.error
+        : (debugMode ? overviewJson.error?.debugMessage : overviewJson.error?.message);
+      throw new Error(errorMessage ?? "Failed to load overview");
+    }
     if (!adminRes.ok || !adminJson.ok) throw new Error("Failed to load portfolio admin list");
     if (!validateRes.ok || !validateJson.ok) throw new Error("Failed to load portfolio validation");
 
@@ -369,6 +386,14 @@ export default function PortfolioDashboardModule() {
   const renderFieldError = (field: string) => fieldErrors[field]
     ? <span className="field-error-text">{fieldErrors[field]}</span>
     : null;
+  const warningItems: Array<{ code: string; title: string; detail: string; severity: "warning" | "critical"; portfolio_id?: string }> = overview?.total.major_warning_details?.length
+    ? overview.total.major_warning_details
+    : (overview?.total.major_warnings ?? []).map((warning) => ({
+      code: warning,
+      title: label(warning),
+      detail: "",
+      severity: "warning" as const,
+    }));
 
   return (
     <div className="portfolio-inline-module">
@@ -425,7 +450,18 @@ export default function PortfolioDashboardModule() {
             <div className="portfolio-panel">
               <h4>Major warnings</h4>
               {overview.total.major_warnings.length > 0
-                ? overview.total.major_warnings.map((warning) => <span key={warning} className="warning-pill">{label(warning)}</span>)
+                ? (
+                  <div className="warning-list">
+                    {warningItems.map((warning) => (
+                      <details key={`${warning.code}-${warning.portfolio_id ?? "global"}`} className={`warning-card warning-${warning.severity}`}>
+                        <summary>
+                          <span className="warning-pill">{warning.title}</span>
+                        </summary>
+                        <p>{warning.detail || "No additional detail available."}</p>
+                      </details>
+                    ))}
+                  </div>
+                )
                 : <p className="bread">No major warnings.</p>}
             </div>
           </div>
@@ -444,6 +480,10 @@ export default function PortfolioDashboardModule() {
                   <div>Hedge status: {label(portfolio.hedge_status)}</div>
                   <div>Hedge policy: {label(portfolio.hedge_policy_applied)}</div>
                   <div>Signal completeness: {label(portfolio.signal_completeness)}</div>
+                  {portfolio.valuation_state && <div>Valuation state: {label(portfolio.valuation_state)}</div>}
+                  {portfolio.positions_active_count && portfolio.positions_valued_count === 0 && (
+                    <div>Positions exist but current market value could not be resolved.</div>
+                  )}
                   {portfolio.suggested_hedge_type && <div>Suggested hedge: {portfolio.suggested_hedge_type}</div>}
                 </div>
               </details>
@@ -456,6 +496,7 @@ export default function PortfolioDashboardModule() {
         <PortfolioPositionsAdmin portfolios={adminList.map((item) => ({
           portfolio_id: item.portfolio_id,
           portfolio_name: item.portfolio_name,
+          portfolio_type: item.portfolio_type,
         }))} />
       )}
 

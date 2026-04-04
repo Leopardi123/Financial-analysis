@@ -167,6 +167,34 @@
   text-transform: capitalize;
 }
 
+.warning-list {
+  display: grid;
+  gap: 6px;
+}
+
+.warning-card {
+  border: 1px solid #f2b8b8;
+  border-radius: 6px;
+  background: #fff8f8;
+  padding: 6px;
+}
+
+.warning-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.warning-card p {
+  margin: 6px 0 0;
+  color: #7f1d1d;
+  font-size: 0.8rem;
+}
+
+.warning-card.warning-critical {
+  border-color: #d14343;
+  background: #ffecec;
+}
+
 .portfolio-mini-chart {
   width: 100%;
   height: 90px;

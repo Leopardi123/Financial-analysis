@@ -115,6 +115,15 @@ export default async function handler(req: any, res: any) {
         : {}),
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: (error as Error).message });
+    const debugMode = String(req.query?.debug ?? "") === "1";
+    const debugMessage = (error as Error).message;
+    res.status(500).json({
+      ok: false,
+      error: {
+        type: "data_access_error",
+        message: "Company mapping data is temporarily unavailable.",
+        ...(debugMode ? { debugMessage } : {}),
+      },
+    });
   }
 }

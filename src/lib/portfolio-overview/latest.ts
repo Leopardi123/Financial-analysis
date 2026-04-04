@@ -99,6 +99,14 @@ function buildDataQualityFlags(row: any) {
   };
 }
 
+type WarningDetail = {
+  code: string;
+  title: string;
+  detail: string;
+  severity: "warning" | "critical";
+  portfolio_id?: string;
+};
+
 export async function getPortfolioOverviewLatest(debug: boolean) {
   const latestRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
   const asOfDate = String(latestRows[0]?.as_of_date ?? "").trim() || null;
@@ -112,10 +120,10 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
 
   const portfolioRows = asOfDate
     ? await query(
-      `SELECT s.*, a.portfolio_name, a.portfolio_type, a.sort_order, a.active, a.included_in_total_portfolio
+      `SELECT s.*, a.portfolio_name, a.portfolio_type, a.sort_order, a.active, a.visible_in_overview, a.included_in_total_portfolio
        FROM ${tables.portfolioSnapshots} s
        LEFT JOIN ${tables.portfolioAdminConfig} a ON a.portfolio_id = s.portfolio_id
-       WHERE s.as_of_date = ?
+       WHERE s.as_of_date = ? AND COALESCE(a.visible_in_overview, 1) = 1
        ORDER BY a.sort_order ASC, s.portfolio_id ASC`,
       [asOfDate]
     )
@@ -149,24 +157,86 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
   const dryPowderStatus = hedgePayload.total.dry_powder_status;
 
   const majorWarnings: string[] = [];
+  const warningDetails: WarningDetail[] = [];
+  const pushWarning = (warning: WarningDetail) => {
+    if (majorWarnings.includes(warning.code)) return;
+    majorWarnings.push(warning.code);
+    warningDetails.push(warning);
+  };
   if (adminConfigs.length > 0) {
-    if (globalValidation.status !== "valid") majorWarnings.push("target_weight_sum_warning");
-    if (allocationPlanStatus === "outside_allocation_plan") majorWarnings.push("allocation_outside_plan");
-    if (allocationPlanStatus === "materially_outside_allocation_plan") majorWarnings.push("allocation_materially_outside_plan");
+    if (globalValidation.status !== "valid") {
+      pushWarning({
+        code: "target_weight_sum_warning",
+        title: "Target weights do not sum to 100%",
+        detail: `Current target sum is ${globalValidation.sum.toFixed(1)}%, deviation ${globalValidation.deviation >= 0 ? "+" : ""}${globalValidation.deviation.toFixed(1)}%.`,
+        severity: "warning",
+      });
+    }
+    if (allocationPlanStatus === "outside_allocation_plan" || allocationPlanStatus === "materially_outside_allocation_plan") {
+      const offender = included.find((row) => {
+        const actual = asNum(row.actual_weight_pct);
+        const min = asNum(row.min_weight_pct);
+        const max = asNum(row.max_weight_pct);
+        return actual !== null && ((min !== null && actual < min) || (max !== null && actual > max));
+      });
+      if (offender) {
+        const actual = asNum(offender.actual_weight_pct) ?? 0;
+        const min = asNum(offender.min_weight_pct);
+        const max = asNum(offender.max_weight_pct);
+        const isUnder = min !== null && actual < min;
+        pushWarning({
+          code: allocationPlanStatus === "materially_outside_allocation_plan"
+            ? "allocation_materially_outside_plan"
+            : "allocation_outside_plan",
+          title: "Allocation outside plan",
+          detail: `${String(offender.portfolio_name ?? offender.portfolio_id)} is ${actual.toFixed(1)}% vs ${isUnder ? `min ${min?.toFixed(1)}%` : `max ${max?.toFixed(1)}%`}.`,
+          severity: allocationPlanStatus === "materially_outside_allocation_plan" ? "critical" : "warning",
+          portfolio_id: String(offender.portfolio_id ?? ""),
+        });
+      }
+    }
   }
-  if (totalRiskStatus === "high") majorWarnings.push("total_risk_high");
-  if (totalRiskStatus === "critical") majorWarnings.push("total_risk_critical");
-  if (totalHedgeSignal === "hedge_recommended") majorWarnings.push("hedge_recommended");
-  if (totalHedgeSignal === "hedge_urgent") majorWarnings.push("hedge_urgent");
-  if (dryPowderStatus === "insufficient_dry_powder") majorWarnings.push("insufficient_dry_powder");
+  if (totalRiskStatus === "high") pushWarning({ code: "total_risk_high", title: "Total risk is high", detail: "Portfolio risk status is high.", severity: "warning" });
+  if (totalRiskStatus === "critical") pushWarning({ code: "total_risk_critical", title: "Total risk is critical", detail: "Portfolio risk status is critical.", severity: "critical" });
+  if (totalHedgeSignal === "hedge_recommended") pushWarning({ code: "hedge_recommended", title: "Hedge recommended", detail: "Current hedge model recommends adding protection.", severity: "warning" });
+  if (totalHedgeSignal === "hedge_urgent") pushWarning({ code: "hedge_urgent", title: "Hedge urgent", detail: "Current hedge model flags urgent need for protection.", severity: "critical" });
+  if (dryPowderStatus === "insufficient_dry_powder") {
+    const oppWeight = asNum(hedgePayload.total.opportunistic_weight_pct);
+    const required = asNum(hedgePayload.total.required_min_dry_powder_pct);
+    pushWarning({
+      code: "insufficient_dry_powder",
+      title: "Dry powder below minimum",
+      detail: `Opportunistic weight is ${oppWeight?.toFixed(1) ?? "n/a"}% vs required minimum ${required?.toFixed(1) ?? "n/a"}%.`,
+      severity: "warning",
+    });
+  }
 
   const drawdownConcentration = computeDrawdownConcentration(portfolioRows as any[]);
   const excessiveJuniorExposure = computeExcessiveJuniorExposure(portfolioRows as any[]);
   const excessiveCommodityCyclicality = computeExcessiveCommodityCyclicality(portfolioRows as any[], totalRiskStatus);
 
-  if (drawdownConcentration === true) majorWarnings.push("drawdown_concentration");
-  if (excessiveJuniorExposure === true) majorWarnings.push("excessive_junior_exposure");
-  if (excessiveCommodityCyclicality === true) majorWarnings.push("excessive_commodity_cyclicality");
+  if (drawdownConcentration === true) pushWarning({ code: "drawdown_concentration", title: "Drawdown concentration risk", detail: "One portfolio contributes over 50% of total drawdown pressure.", severity: "warning" });
+  if (excessiveJuniorExposure === true) {
+    const junior = included.find((row) => String(row.portfolio_type ?? "") === "commodity_junior");
+    pushWarning({
+      code: "excessive_junior_exposure",
+      title: "Junior exposure above threshold",
+      detail: `Junior allocation is ${asNum(junior?.actual_weight_pct)?.toFixed(1) ?? "n/a"}% (max ${asNum(junior?.max_weight_pct)?.toFixed(1) ?? "n/a"}%).`,
+      severity: "warning",
+      portfolio_id: junior ? String(junior.portfolio_id ?? "") : undefined,
+    });
+  }
+  if (excessiveCommodityCyclicality === true) {
+    const commodityWeight = included
+      .filter((row) => ["commodity_majors", "commodity_junior"].includes(String(row.portfolio_type ?? "")))
+      .reduce((sum, row) => sum + (asNum(row.actual_weight_pct) ?? 0), 0);
+    pushWarning({
+      code: "excessive_commodity_cyclicality",
+      title: "Commodity cyclicality is high",
+      detail: `Commodity-linked portfolios are ${commodityWeight.toFixed(1)}% while risk state is ${String(totalRiskStatus ?? "unknown")}.`,
+      severity: "warning",
+    });
+  }
 
   const unavailableCount = (portfolioRows as any[]).filter((row) => {
     const flags = buildDataQualityFlags(row);
@@ -177,10 +247,35 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
     return !flags.weight_unavailable || !flags.trend_unavailable || !flags.risk_unavailable || !flags.hedge_unavailable;
   }).length;
 
-  if (unavailableCount > 0 && partialCount > 0) majorWarnings.push("data_partial");
-  if ((portfolioRows as any[]).length === 0 || unavailableCount === (portfolioRows as any[]).length) majorWarnings.push("data_unavailable");
+  if (unavailableCount > 0 && partialCount > 0) pushWarning({ code: "data_partial", title: "Portfolio data is partial", detail: "Some portfolios have incomplete valuation or signal data.", severity: "warning" });
+  if ((portfolioRows as any[]).length === 0 || unavailableCount === (portfolioRows as any[]).length) {
+    pushWarning({ code: "data_unavailable", title: "Portfolio data unavailable", detail: "No complete portfolio snapshot data is currently available.", severity: "warning" });
+  }
+  const unvaluedPortfolio = (portfolioRows as any[]).find((row) => {
+    const snapshotDebug = parseJson(row.debug_payload_json);
+    return Number(snapshotDebug?.positions_active_count ?? 0) > 0 && Number(snapshotDebug?.positions_valued_count ?? 0) === 0;
+  });
+  if (unvaluedPortfolio) {
+    pushWarning({
+      code: "positions_unvalued",
+      title: "Portfolio has unvalued positions",
+      detail: `${String(unvaluedPortfolio.portfolio_name ?? unvaluedPortfolio.portfolio_id)} has active positions but no resolvable market value.`,
+      severity: "warning",
+      portfolio_id: String(unvaluedPortfolio.portfolio_id ?? ""),
+    });
+  }
 
   const portfolios = (portfolioRows as any[]).map((row) => ({
+    ...(function () {
+      const snapshotDebug = parseJson(row.debug_payload_json);
+      return {
+        positions_found_count: asNum(snapshotDebug?.positions_found_count),
+        positions_active_count: asNum(snapshotDebug?.positions_active_count),
+        positions_valued_count: asNum(snapshotDebug?.positions_valued_count),
+        positions_unvalued_count: asNum(snapshotDebug?.positions_unvalued_count),
+        valuation_state: snapshotDebug?.valuation_state == null ? null : String(snapshotDebug.valuation_state),
+      };
+    })(),
     portfolio_id: String(row.portfolio_id ?? ""),
     portfolio_name: String(row.portfolio_name ?? ""),
     portfolio_type: String(row.portfolio_type ?? ""),
@@ -236,6 +331,7 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
       required_min_dry_powder_pct: hedgePayload.total.required_min_dry_powder_pct,
       included_portfolio_count: included.length,
       major_warnings: Array.from(new Set(majorWarnings)),
+      major_warning_details: warningDetails,
     },
     performance: {
       daily_return_pct: asNum(totalHistoryRow?.daily_return_pct),

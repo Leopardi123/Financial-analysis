@@ -10,6 +10,7 @@ type PositionInput = {
   display_name: string | null;
   shares: number;
   avg_cost: number | null;
+  market_value: number | null;
   entry_date: string | null;
   asset_type: string;
   thesis: string | null;
@@ -125,7 +126,7 @@ export async function createPortfolioPosition(input: PositionInput): Promise<voi
       input.currency,
       now,
       now,
-      input.manual_price !== null ? input.manual_price * input.shares : null,
+      input.market_value ?? (input.manual_price !== null && input.manual_price > 0 ? input.manual_price * input.shares : null),
       now.slice(0, 10),
     ]
   );
@@ -180,7 +181,7 @@ export async function updatePortfolioPosition(id: number, input: PositionInput):
       input.exited_at,
       input.manual_price,
       input.currency,
-      input.manual_price !== null ? input.manual_price * input.shares : null,
+      input.market_value ?? (input.manual_price !== null && input.manual_price > 0 ? input.manual_price * input.shares : null),
       now.slice(0, 10),
       now,
       id,

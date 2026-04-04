@@ -1499,7 +1499,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const loadTickers = async () => {
     try {
       setTickersError(null);
-      const list = await fetchUniverseSymbols();
+      const list = await fetchUniverseSymbols({ limit: 250 });
       setAvailableTickers(list);
     } catch (error) {
       setTickersError(normalizeClientErrorMessage((error as Error).message, "Failed to load tickers."));
@@ -1513,7 +1513,11 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       const response = await fetch(`/api/sector/company-mapping${debugEnabled ? "?debug=1" : ""}`);
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to load mapped companies.");
+        const fallback = "Failed to load mapped companies.";
+        const message = typeof payload?.error === "string"
+          ? payload.error
+          : (debugEnabled ? payload?.error?.debugMessage : payload?.error?.message);
+        throw new Error(message ?? fallback);
       }
       const rows = Array.isArray(payload.mappings) ? payload.mappings : [];
       const normalized = rows
@@ -1530,6 +1534,9 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         }))
         .filter((row: CompanySectorMappingOption) => Boolean(row.companyId && row.ticker && row.sectorId));
       setMappedCompanies(normalized);
+      const mappedTickerSet = new Set<string>(normalized.map((item: CompanySectorMappingOption) => item.ticker));
+      const mappedTickers = [...mappedTickerSet].sort((a, b) => a.localeCompare(b));
+      setAvailableTickers(mappedTickers);
       const diagnosticsRaw = payload?.diagnostics;
       setMappedCompaniesDiagnostics({
         categoryColumnAvailable: typeof diagnosticsRaw?.categoryColumnAvailable === "boolean" ? diagnosticsRaw.categoryColumnAvailable : null,
@@ -1544,7 +1551,6 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   };
 
   useEffect(() => {
-    void loadTickers();
     void loadMappedCompanies();
   }, []);
 
