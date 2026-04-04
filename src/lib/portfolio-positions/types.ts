@@ -1,0 +1,34 @@
+export type PortfolioAssetType = "major" | "royalty" | "junior" | "growth" | "defensive" | "cash_proxy";
+export type MappingSource = "inherited" | "portfolio_override" | "portfolio_completed";
+
+export type PortfolioPositionRecord = {
+  id: number;
+  portfolio_id: string;
+  symbol: string;
+  company_id: number | null;
+  instrument_id: string | null;
+  display_name: string | null;
+  shares: number;
+  avg_cost: number | null;
+  entry_date: string | null;
+  asset_type: PortfolioAssetType;
+  thesis: string | null;
+  notes: string | null;
+  manual_sector_id: number | null;
+  manual_subsector_id: number | null;
+  manual_commodity_id: string | null;
+  mapping_source: MappingSource;
+  mapping_override_active: boolean;
+  active_position: boolean;
+  exited_at: string | null;
+  manual_price: number | null;
+  currency: string | null;
+  created_at: string;
+  updated_at: string;
+  inferred_sector_id: number | null;
+  inferred_subsector_id: number | null;
+  inferred_commodity_id: string | null;
+  final_sector_id: number | null;
+  final_subsector_id: number | null;
+  final_commodity_id: string | null;
+};

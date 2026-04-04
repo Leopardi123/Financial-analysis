@@ -5,6 +5,7 @@ export type CompanyOption = {
   name: string;
   exchange: string | null;
   type: string | null;
+  company_id?: number | null;
 };
 
 type CompanyPickerProps = {

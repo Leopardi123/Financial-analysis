@@ -23,6 +23,7 @@ import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import { getManualMetalPriceStore, saveManualMetalPrice } from "../lib/engine/pricing/manualMetalPriceStore.ts";
 import { collectDashboardTasks } from "../lib/engine/pricing/collectDashboardTasks.ts";
+import { fetchUniverseSymbols } from "../lib/client/companyUniverse.ts";
 import {
   buildSeries,
   buildSeriesData,
@@ -1498,12 +1499,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const loadTickers = async () => {
     try {
       setTickersError(null);
-      const response = await fetch("/api/company/list");
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to load tickers.");
-      }
-      const list = Array.isArray(payload.tickers) ? payload.tickers : [];
+      const list = await fetchUniverseSymbols();
       setAvailableTickers(list);
     } catch (error) {
       setTickersError(normalizeClientErrorMessage((error as Error).message, "Failed to load tickers."));

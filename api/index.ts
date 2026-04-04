@@ -124,6 +124,10 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "portfolio/admin/create": () => import("../src/server/routes/portfolio/admin/create.js"),
   "portfolio/admin/update": () => import("../src/server/routes/portfolio/admin/update.js"),
   "portfolio/admin/validate": () => import("../src/server/routes/portfolio/admin/validate.js"),
+  "portfolio/positions/list": () => import("../src/server/routes/portfolio/positions/list.js"),
+  "portfolio/positions/create": () => import("../src/server/routes/portfolio/positions/create.js"),
+  "portfolio/positions/update": () => import("../src/server/routes/portfolio/positions/update.js"),
+  "portfolio/positions/deactivate": () => import("../src/server/routes/portfolio/positions/deactivate.js"),
   "portfolio/snapshots/build": () => import("../src/server/routes/portfolio/snapshots/build.js"),
   "portfolio/snapshots/latest": () => import("../src/server/routes/portfolio/snapshots/latest.js"),
   "portfolio/history/build": () => import("../src/server/routes/portfolio/history/build.js"),
@@ -142,6 +146,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "sector/commodity-snapshot": () => import("../src/server/routes/sector/commodity-snapshot.js"),
   "sector/company-commodity-override": () => import("../src/server/routes/sector/company-commodity-override.js"),
   "sector/company-mapping": () => import("../src/server/routes/sector/company-mapping.js"),
+  "sector/canonical-taxonomy": () => import("../src/server/routes/sector/canonical-taxonomy.js"),
   "screening/price-snapshot": () => import("../src/server/routes/screening/price-snapshot.js"),
 };
 

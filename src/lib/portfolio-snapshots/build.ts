@@ -101,13 +101,16 @@ async function tableExists(tableName: string): Promise<boolean> {
 
 async function getMarketValuesFromPositions(): Promise<Map<string, number>> {
   const rows = await query(
-    `SELECT p.portfolio_id, SUM(p.market_value) AS market_value
+    `SELECT p.portfolio_id,
+            SUM(COALESCE(p.market_value, p.shares * COALESCE(p.manual_price, p.avg_cost))) AS market_value
      FROM ${tables.portfolioPositions} p
      INNER JOIN (
        SELECT portfolio_id, MAX(as_of_date) AS latest_as_of_date
        FROM ${tables.portfolioPositions}
+       WHERE active_position = 1
        GROUP BY portfolio_id
      ) latest ON latest.portfolio_id = p.portfolio_id AND latest.latest_as_of_date = p.as_of_date
+     WHERE p.active_position = 1
      GROUP BY p.portfolio_id`
   );
 
