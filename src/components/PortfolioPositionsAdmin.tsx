@@ -206,68 +206,109 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   return (
     <div className="portfolio-panel" style={{ marginTop: 12 }}>
       <h4>Portfolio positions admin</h4>
-      <div className="portfolio-admin-grid" style={{ gap: 12 }}>
-        <label>
-          Portfolio
-          <select value={selectedPortfolioId} onChange={(e) => setSelectedPortfolioId(e.target.value)}>
-            {portfolios.map((item) => <option key={item.portfolio_id} value={item.portfolio_id}>{item.portfolio_name}</option>)}
-          </select>
-        </label>
-
-        <CompanyPicker
-          label="Company search (symbol/name)"
-          placeholder="AAPL, Apple..."
-          allowedSymbols={universeSymbols}
-          onSelect={selectCompany}
-        />
-
-        <label>Symbol<input value={form.symbol} onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value.toUpperCase() }))} /></label>
-        <label>Name<input value={form.display_name} onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))} /></label>
-        <label>Shares *<input type="number" min="0" step="any" value={form.shares} onChange={(e) => setForm((prev) => ({ ...prev, shares: e.target.value }))} /></label>
-        <label>Avg cost<input type="number" min="0" step="any" value={form.avg_cost} onChange={(e) => setForm((prev) => ({ ...prev, avg_cost: e.target.value }))} /></label>
-        <label>Entry date<input type="date" value={form.entry_date} onChange={(e) => setForm((prev) => ({ ...prev, entry_date: e.target.value }))} /></label>
-
-        <label>
-          Asset type *
-          <select value={form.asset_type} onChange={(e) => setForm((prev) => ({ ...prev, asset_type: e.target.value }))}>
-            {ASSET_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-        </label>
-
-        <label>
-          <input
-            type="checkbox"
-            checked={form.mapping_override_active}
-            onChange={(e) => setForm((prev) => ({ ...prev, mapping_override_active: e.target.checked }))}
+      <div className="portfolio-admin-grid">
+        <section className="portfolio-admin-section">
+          <h5>Company</h5>
+          <div className="portfolio-field">
+            <label htmlFor="portfolio-position-selector">Portfolio</label>
+            <select id="portfolio-position-selector" value={selectedPortfolioId} onChange={(e) => setSelectedPortfolioId(e.target.value)}>
+              {portfolios.map((item) => <option key={item.portfolio_id} value={item.portfolio_id}>{item.portfolio_name}</option>)}
+            </select>
+          </div>
+          <CompanyPicker
+            label="Company search (symbol/name)"
+            placeholder="AAPL, Apple..."
+            allowedSymbols={universeSymbols}
+            onSelect={selectCompany}
           />
-          Edit mapping for this position
-        </label>
+        </section>
 
-        {form.mapping_override_active && (
-          <>
-            <label>Sector override
-              <select value={form.manual_sector_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_sector_id: e.target.value, manual_subsector_id: "" }))}>
-                <option value="">None</option>
-                {sectorRows.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-              </select>
-            </label>
-            <label>Subsector override
-              <select value={form.manual_subsector_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_subsector_id: e.target.value }))}>
-                <option value="">None</option>
-                {availableSubsectors.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-              </select>
-            </label>
-            <label>Commodity override
-              <select value={form.manual_commodity_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_commodity_id: e.target.value }))}>
-                <option value="">None</option>
-                {COMMODITY_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-            </label>
-          </>
-        )}
+        <section className="portfolio-admin-section">
+          <h5>Position details</h5>
+          <div className="portfolio-field-grid">
+            <div className="portfolio-field">
+              <label htmlFor="portfolio-position-symbol">Symbol</label>
+              <input id="portfolio-position-symbol" value={form.symbol} onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value.toUpperCase() }))} />
+            </div>
+            <div className="portfolio-field">
+              <label htmlFor="portfolio-position-name">Name</label>
+              <input id="portfolio-position-name" value={form.display_name} onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))} />
+            </div>
+            <div className="portfolio-field">
+              <label htmlFor="portfolio-position-shares">Shares *</label>
+              <input id="portfolio-position-shares" type="number" min="0" step="any" value={form.shares} onChange={(e) => setForm((prev) => ({ ...prev, shares: e.target.value }))} />
+            </div>
+            <div className="portfolio-field">
+              <label htmlFor="portfolio-position-avg-cost">Avg cost</label>
+              <input id="portfolio-position-avg-cost" type="number" min="0" step="any" value={form.avg_cost} onChange={(e) => setForm((prev) => ({ ...prev, avg_cost: e.target.value }))} />
+            </div>
+            <div className="portfolio-field">
+              <label htmlFor="portfolio-position-entry-date">Entry date</label>
+              <input id="portfolio-position-entry-date" type="date" value={form.entry_date} onChange={(e) => setForm((prev) => ({ ...prev, entry_date: e.target.value }))} />
+            </div>
+          </div>
+        </section>
 
-        <label>Thesis<textarea value={form.thesis} onChange={(e) => setForm((prev) => ({ ...prev, thesis: e.target.value }))} /></label>
-        <label>Notes<textarea value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
+        <section className="portfolio-admin-section">
+          <h5>Classification</h5>
+          <div className="portfolio-field">
+            <label htmlFor="portfolio-position-asset-type">Asset type *</label>
+            <select id="portfolio-position-asset-type" value={form.asset_type} onChange={(e) => setForm((prev) => ({ ...prev, asset_type: e.target.value }))}>
+              {ASSET_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </div>
+        </section>
+
+        <section className="portfolio-admin-section">
+          <h5>Mapping</h5>
+          <label className="portfolio-toggle-field" htmlFor="portfolio-position-mapping-toggle">
+            <input
+              id="portfolio-position-mapping-toggle"
+              type="checkbox"
+              checked={form.mapping_override_active}
+              onChange={(e) => setForm((prev) => ({ ...prev, mapping_override_active: e.target.checked }))}
+            />
+            <span>Edit mapping for this position</span>
+          </label>
+
+          {form.mapping_override_active && (
+            <div className="portfolio-field-grid">
+              <div className="portfolio-field">
+                <label htmlFor="portfolio-position-sector">Sector override</label>
+                <select id="portfolio-position-sector" value={form.manual_sector_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_sector_id: e.target.value, manual_subsector_id: "" }))}>
+                  <option value="">None</option>
+                  {sectorRows.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                </select>
+              </div>
+              <div className="portfolio-field">
+                <label htmlFor="portfolio-position-subsector">Subsector override</label>
+                <select id="portfolio-position-subsector" value={form.manual_subsector_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_subsector_id: e.target.value }))}>
+                  <option value="">None</option>
+                  {availableSubsectors.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                </select>
+              </div>
+              <div className="portfolio-field">
+                <label htmlFor="portfolio-position-commodity">Commodity override</label>
+                <select id="portfolio-position-commodity" value={form.manual_commodity_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_commodity_id: e.target.value }))}>
+                  <option value="">None</option>
+                  {COMMODITY_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="portfolio-admin-section">
+          <h5>Optional notes</h5>
+          <div className="portfolio-field">
+            <label htmlFor="portfolio-position-thesis">Thesis</label>
+            <textarea id="portfolio-position-thesis" value={form.thesis} onChange={(e) => setForm((prev) => ({ ...prev, thesis: e.target.value }))} />
+          </div>
+          <div className="portfolio-field">
+            <label htmlFor="portfolio-position-notes">Notes</label>
+            <textarea id="portfolio-position-notes" value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
+          </div>
+        </section>
       </div>
 
       <div className="portfolio-actions-row" style={{ marginTop: 8 }}>

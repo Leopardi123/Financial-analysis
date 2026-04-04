@@ -390,19 +390,28 @@ export async function searchCompaniesByName(queryText: string) {
   }
 
   const normalized = normalizeName(q);
+  const symbolUpper = q.toUpperCase();
   const namePrefix = `${q.toLowerCase()}%`;
   const normalizedPrefix = `${normalized}%`;
+  const symbolPrefix = `${symbolUpper}%`;
+  const symbolContains = `%${symbolUpper}%`;
 
   const rows = await query(
     `SELECT symbol, name, exchange, type
      FROM companies
-     WHERE lower(name) LIKE ? OR normalized_name LIKE ?
+     WHERE
+       UPPER(symbol) LIKE ?
+       OR UPPER(symbol) LIKE ?
+       OR lower(name) LIKE ?
+       OR normalized_name LIKE ?
      ORDER BY
+       CASE WHEN UPPER(symbol) = ? THEN 0 ELSE 1 END,
+       CASE WHEN UPPER(symbol) LIKE ? THEN 0 ELSE 1 END,
        CASE WHEN lower(name) LIKE ? THEN 0 ELSE 1 END,
        CASE WHEN normalized_name LIKE ? THEN 0 ELSE 1 END,
        name ASC
      LIMIT 20`,
-    [namePrefix, normalizedPrefix, namePrefix, normalizedPrefix]
+    [symbolPrefix, symbolContains, namePrefix, normalizedPrefix, symbolUpper, symbolPrefix, namePrefix, normalizedPrefix]
   );
 
   return rows.map((row) => ({

@@ -406,14 +406,7 @@ export default function PortfolioDashboardModule() {
         </div>
       )}
 
-      {!loading && !error && setupState === "configured_positions_no_snapshot" && (
-        <div className="portfolio-empty-state">
-          <h4>Positions added, awaiting first snapshot build.</h4>
-          <p>Run portfolio snapshot/history build to begin populating overview metrics.</p>
-        </div>
-      )}
-
-      {!loading && !error && (setupState === "partial" || setupState === "live") && overview && (
+      {!loading && !error && (setupState === "configured_positions_no_snapshot" || setupState === "partial" || setupState === "live") && overview && (
         <>
           <div className="portfolio-kpi-row">
             <span>As of: {overview.as_of_date ?? "Unavailable"}</span>
