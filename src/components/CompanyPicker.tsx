@@ -13,6 +13,7 @@ type CompanyPickerProps = {
   placeholder?: string;
   label?: string;
   allowedSymbols?: string[];
+  searchEndpoint?: string;
 };
 
 export default function CompanyPicker({
@@ -20,6 +21,7 @@ export default function CompanyPicker({
   placeholder = "Sök bolagsnamn",
   label = "Bolag",
   allowedSymbols,
+  searchEndpoint = "/api/companies/search",
 }: CompanyPickerProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CompanyOption[]>([]);
@@ -65,7 +67,8 @@ export default function CompanyPicker({
 
       setLoading(true);
       try {
-        const response = await fetch(`/api/companies/search?q=${encodeURIComponent(text)}`, {
+        const separator = searchEndpoint.includes("?") ? "&" : "?";
+        const response = await fetch(`${searchEndpoint}${separator}q=${encodeURIComponent(text)}`, {
           signal: controller.signal,
         });
         const payload = await response.json();
