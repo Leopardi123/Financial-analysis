@@ -52,7 +52,7 @@ export default async function handler(req: any, res: any) {
     if (message.includes("Unsupported type of value")) {
       res.status(400).json({
         ok: false,
-        error: buildValidationPayload(["max_hedge_pct must be a finite number or null"], "Please verify numeric inputs"),
+        error: buildValidationPayload([], "Could not save portfolio due to invalid input format. Please review numeric fields."),
       });
       return;
     }

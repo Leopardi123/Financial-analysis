@@ -40,6 +40,10 @@ export function buildValidationPayload(errors: string[], fallbackMessage = "Plea
   const fieldErrors: Record<string, string> = {};
   const formErrors: string[] = [];
 
+  if (errors.length === 0) {
+    formErrors.push(fallbackMessage);
+  }
+
   for (const err of errors) {
     const field = Object.keys(FRIENDLY_FIELD_LABELS).find((key) => err.startsWith(`${key} `) || err.startsWith(`${key} must`) || err.includes(key));
     if (field) {
