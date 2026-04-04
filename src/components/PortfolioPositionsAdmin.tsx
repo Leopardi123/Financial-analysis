@@ -211,18 +211,18 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   }
 
   return (
-    <div className="portfolio-panel" style={{ marginTop: 12 }}>
+    <div className="portfolio-panel portfolio-positions-admin" style={{ marginTop: 12 }}>
       <h4>Portfolio positions admin</h4>
-      <div className="portfolio-admin-grid" style={{ gap: 12 }}>
+      <div className="portfolio-form-grid" style={{ gap: 12 }}>
         <label>
-          Portfolio
+          <span>Portfolio</span>
           <select value={selectedPortfolioId} onChange={(e) => setSelectedPortfolioId(e.target.value)}>
             {portfolios.map((item) => <option key={item.portfolio_id} value={item.portfolio_id}>{item.portfolio_name}</option>)}
           </select>
         </label>
 
         <label>
-          Company search (symbol/name)
+          <span>Company search (symbol/name)</span>
           <input value={companyQuery} onChange={(e) => void searchCompany(e.target.value)} placeholder="AAPL, Apple..." />
         </label>
         {companyResults.length > 0 && (
@@ -235,43 +235,43 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
           </div>
         )}
 
-        <label>Symbol<input value={form.symbol} onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value.toUpperCase() }))} /></label>
-        <label>Name<input value={form.display_name} onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))} /></label>
-        <label>Shares *<input type="number" min="0" step="any" value={form.shares} onChange={(e) => setForm((prev) => ({ ...prev, shares: e.target.value }))} /></label>
-        <label>Avg cost<input type="number" min="0" step="any" value={form.avg_cost} onChange={(e) => setForm((prev) => ({ ...prev, avg_cost: e.target.value }))} /></label>
-        <label>Entry date<input type="date" value={form.entry_date} onChange={(e) => setForm((prev) => ({ ...prev, entry_date: e.target.value }))} /></label>
+        <label><span>Symbol</span><input value={form.symbol} onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value.toUpperCase() }))} /></label>
+        <label><span>Name</span><input value={form.display_name} onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))} /></label>
+        <label><span>Shares *</span><input type="number" min="0" step="any" value={form.shares} onChange={(e) => setForm((prev) => ({ ...prev, shares: e.target.value }))} /></label>
+        <label><span>Avg cost</span><input type="number" min="0" step="any" value={form.avg_cost} onChange={(e) => setForm((prev) => ({ ...prev, avg_cost: e.target.value }))} /></label>
+        <label><span>Entry date</span><input type="date" value={form.entry_date} onChange={(e) => setForm((prev) => ({ ...prev, entry_date: e.target.value }))} /></label>
 
         <label>
-          Asset type *
+          <span>Asset type *</span>
           <select value={form.asset_type} onChange={(e) => setForm((prev) => ({ ...prev, asset_type: e.target.value }))}>
             {ASSET_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
 
-        <label>
+        <label className="checkbox-label">
           <input
             type="checkbox"
             checked={form.mapping_override_active}
             onChange={(e) => setForm((prev) => ({ ...prev, mapping_override_active: e.target.checked }))}
           />
-          Edit mapping for this position
+          <span>Edit mapping for this position</span>
         </label>
 
         {form.mapping_override_active && (
           <>
-            <label>Sector override
+            <label><span>Sector override</span>
               <select value={form.manual_sector_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_sector_id: e.target.value, manual_subsector_id: "" }))}>
                 <option value="">None</option>
                 {sectorRows.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
               </select>
             </label>
-            <label>Subsector override
+            <label><span>Subsector override</span>
               <select value={form.manual_subsector_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_subsector_id: e.target.value }))}>
                 <option value="">None</option>
                 {availableSubsectors.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
               </select>
             </label>
-            <label>Commodity override
+            <label><span>Commodity override</span>
               <select value={form.manual_commodity_id} onChange={(e) => setForm((prev) => ({ ...prev, manual_commodity_id: e.target.value }))}>
                 <option value="">None</option>
                 {COMMODITY_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -280,8 +280,8 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
           </>
         )}
 
-        <label>Thesis<textarea value={form.thesis} onChange={(e) => setForm((prev) => ({ ...prev, thesis: e.target.value }))} /></label>
-        <label>Notes<textarea value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
+        <label><span>Thesis</span><textarea value={form.thesis} onChange={(e) => setForm((prev) => ({ ...prev, thesis: e.target.value }))} /></label>
+        <label><span>Notes</span><textarea value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
       </div>
 
       <div className="portfolio-actions-row" style={{ marginTop: 8 }}>

@@ -80,18 +80,22 @@ export default async function handler(req: any, res: any) {
     tDbConnectMs = Date.now() - dbConnectStart;
 
     const dbQueryStart = Date.now();
+    const upperText = text.toUpperCase();
+    const containsNormalized = `%${cacheKey}%`;
+    const containsText = `%${text.toLowerCase()}%`;
+    const containsUpper = `%${upperText}%`;
     const rows = await db.execute({
       sql: `SELECT c.symbol, c.name, c.exchange, c.type, NULL as ticker, v2.id AS company_id
             FROM companies
             LEFT JOIN companies_v2 v2 ON v2.ticker = c.symbol
-            WHERE normalized_name LIKE ? OR symbol LIKE ?
+            WHERE normalized_name LIKE ? OR LOWER(c.name) LIKE ? OR UPPER(c.symbol) LIKE ?
             UNION
             SELECT ticker AS symbol, ticker AS name, NULL as exchange, NULL as type, ticker, id AS company_id
             FROM companies_v2
-            WHERE ticker LIKE ?
+            WHERE UPPER(ticker) LIKE ?
             ORDER BY symbol ASC
             LIMIT 20`,
-      args: [`${cacheKey}%`, `%${text.toUpperCase()}%`, `%${text.toUpperCase()}%`],
+      args: [containsNormalized, containsText, containsUpper, containsUpper],
     });
     tDbQueryMs = Date.now() - dbQueryStart;
 
