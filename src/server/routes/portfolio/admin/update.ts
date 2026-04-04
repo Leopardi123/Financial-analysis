@@ -6,7 +6,7 @@ import {
 } from "../../../../lib/portfolio-admin/repository.js";
 import type { PortfolioAdminConfig } from "../../../../lib/portfolio-admin/types.js";
 import { validateGlobalTargetWeight } from "../../../../lib/portfolio-admin/validation.js";
-import { buildDiagnostics, normalizePortfolioPayload, parseRequestBody } from "./_shared.js";
+import { buildDiagnostics, buildValidationPayload, inferFieldErrorsFromPayload, normalizePortfolioPayload, parseRequestBody } from "./_shared.js";
 
 export default async function handler(req: any, res: any) {
   try {
@@ -19,7 +19,7 @@ export default async function handler(req: any, res: any) {
     const payload = parseRequestBody(req);
     const portfolioId = String(payload?.portfolio_id ?? "").trim();
     if (!portfolioId) {
-      res.status(400).json({ ok: false, error: "validation_error", errors: ["portfolio_id is required"] });
+      res.status(400).json({ ok: false, error: buildValidationPayload(["portfolio_id is required"]) });
       return;
     }
 
@@ -31,7 +31,7 @@ export default async function handler(req: any, res: any) {
 
     const normalized = normalizePortfolioPayload(payload, existing, "update");
     if (!normalized.ok) {
-      res.status(400).json({ ok: false, error: "validation_error", errors: normalized.errors });
+      res.status(400).json({ ok: false, error: buildValidationPayload(normalized.errors) });
       return;
     }
 
@@ -48,6 +48,23 @@ export default async function handler(req: any, res: any) {
       ...(debug ? { diagnostics: buildDiagnostics(portfolios) } : {}),
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: (error as Error).message });
+    const message = (error as Error).message || "Unexpected error";
+    if (message.includes("Unsupported type of value")) {
+      const payload = parseRequestBody(req);
+      const fieldErrors = inferFieldErrorsFromPayload(payload);
+      res.status(400).json({
+        ok: false,
+        error: {
+          ...buildValidationPayload([], "Could not save portfolio. See invalid fields below."),
+          fieldErrors,
+          formErrors: [
+            ...Object.values(fieldErrors),
+            ...(Object.keys(fieldErrors).length === 0 ? ["Could not save portfolio due to invalid input format."] : []),
+          ],
+        },
+      });
+      return;
+    }
+    res.status(500).json({ ok: false, error: message });
   }
 }

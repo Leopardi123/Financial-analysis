@@ -7,6 +7,7 @@ import GlobalMacroDashboard from "../components/GlobalMacroDashboard";
 import ScreeningDashboard from "../components/ScreeningDashboard";
 import MacroRegimeValidationLab from "../components/MacroRegimeValidationLab";
 import ErrorBoundary from "../components/ErrorBoundary";
+import PortfolioDashboardModule from "../components/PortfolioDashboardModule";
 import "../styles/dashboard.css";
 
 export default function Dashboard() {
@@ -82,8 +83,7 @@ export default function Dashboard() {
           background="#d7eae8"
         >
           <div className="breadcontainerdoublecolumn">
-            <div className="subrub">Vald Portfölj</div>
-            <p className="bread">Här visas portföljens instrumentbräda.</p>
+            <PortfolioDashboardModule />
           </div>
         </Section>
 
