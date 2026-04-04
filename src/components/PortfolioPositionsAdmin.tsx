@@ -91,11 +91,16 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [sectorRows, setSectorRows] = useState<Array<{ id: number; name: string }>>([]);
   const [subsectorRows, setSubsectorRows] = useState<Array<{ id: number; name: string; sector_id: number }>>([]);
+  const [opportunisticMode, setOpportunisticMode] = useState<"cash" | "company">("cash");
   const selectedPortfolio = useMemo(
     () => portfolios.find((item) => item.portfolio_id === selectedPortfolioId) ?? null,
     [portfolios, selectedPortfolioId]
   );
   const isOpportunisticPortfolio = selectedPortfolio?.portfolio_type === "opportunistic";
+
+  useEffect(() => {
+    setOpportunisticMode(isOpportunisticPortfolio ? "cash" : "company");
+  }, [isOpportunisticPortfolio, selectedPortfolioId]);
 
   useEffect(() => {
     if (!selectedPortfolioId) return;
@@ -116,7 +121,7 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   }, []);
 
   useEffect(() => {
-    void fetchUniverseSymbols()
+    void fetchUniverseSymbols({ limit: 500 })
       .then((symbols) => setUniverseSymbols(symbols))
       .catch(() => setUniverseSymbols([]));
   }, []);
@@ -172,16 +177,26 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   async function save() {
     setError(null);
     setSaveMsg(null);
+    if (isOpportunisticPortfolio && opportunisticMode === "cash") {
+      const cashAmount = Number(form.manual_price);
+      if (!Number.isFinite(cashAmount) || cashAmount <= 0) {
+        setError("Cash amount must be a number > 0.");
+        return;
+      }
+    }
     const payload = {
       ...form,
       portfolio_id: form.portfolio_id || selectedPortfolioId,
-      symbol: (isOpportunisticPortfolio ? (form.symbol || "CASH") : form.symbol).toUpperCase(),
-      display_name: isOpportunisticPortfolio ? (form.display_name || "Dry Powder Cash") : form.display_name,
+      symbol: (isOpportunisticPortfolio && opportunisticMode === "cash" ? "CASH" : form.symbol).toUpperCase(),
+      display_name: isOpportunisticPortfolio && opportunisticMode === "cash" ? (form.display_name || "Cash") : form.display_name,
       avg_cost: form.avg_cost === "" ? null : Number(form.avg_cost),
       manual_price: form.manual_price === "" ? null : Number(form.manual_price),
-      shares: isOpportunisticPortfolio ? 1 : Number(form.shares),
+      shares: isOpportunisticPortfolio && opportunisticMode === "cash" ? 1 : Number(form.shares),
+      market_value: isOpportunisticPortfolio && opportunisticMode === "cash"
+        ? Number(form.manual_price)
+        : null,
       entry_date: form.entry_date || null,
-      asset_type: isOpportunisticPortfolio ? "cash_proxy" : form.asset_type,
+      asset_type: isOpportunisticPortfolio && opportunisticMode === "cash" ? "cash_proxy" : form.asset_type,
       manual_sector_id: form.manual_sector_id ? Number(form.manual_sector_id) : null,
       manual_subsector_id: form.manual_subsector_id ? Number(form.manual_subsector_id) : null,
       manual_commodity_id: form.manual_commodity_id || null,
@@ -229,6 +244,7 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
       thesis: "Cash reserve / dry powder",
       mapping_source: "portfolio_completed",
     });
+    setOpportunisticMode("cash");
   }
 
   return (
@@ -243,12 +259,20 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
               {portfolios.map((item) => <option key={item.portfolio_id} value={item.portfolio_id}>{item.portfolio_name}</option>)}
             </select>
           </div>
-          <CompanyPicker
-            label="Company search (symbol/name)"
-            placeholder="AAPL, Apple..."
-            allowedSymbols={universeSymbols}
-            onSelect={selectCompany}
-          />
+          {isOpportunisticPortfolio && (
+            <div className="portfolio-actions-row">
+              <button type="button" onClick={() => setOpportunisticMode("cash")}>Add cash / dry powder</button>
+              <button type="button" onClick={() => setOpportunisticMode("company")}>Add company position</button>
+            </div>
+          )}
+          {(!isOpportunisticPortfolio || opportunisticMode === "company") && (
+            <CompanyPicker
+              label="Company search (symbol/name)"
+              placeholder="AAPL, Apple..."
+              allowedSymbols={universeSymbols}
+              onSelect={selectCompany}
+            />
+          )}
           {isOpportunisticPortfolio && (
             <div className="portfolio-actions-row">
               <button type="button" onClick={addCashPositionTemplate}>Add cash amount</button>
@@ -259,22 +283,32 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
         <section className="portfolio-admin-section">
           <h5>Position details</h5>
           <div className="portfolio-field-grid">
-            <div className="portfolio-field">
-              <label htmlFor="portfolio-position-symbol">Symbol</label>
-              <input id="portfolio-position-symbol" value={form.symbol} onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value.toUpperCase() }))} />
-            </div>
-            <div className="portfolio-field">
-              <label htmlFor="portfolio-position-name">Name</label>
-              <input id="portfolio-position-name" value={form.display_name} onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))} />
-            </div>
-            <div className="portfolio-field">
-              <label htmlFor="portfolio-position-shares">Shares *</label>
-              <input id="portfolio-position-shares" type="number" min="0" step="any" value={form.shares} onChange={(e) => setForm((prev) => ({ ...prev, shares: e.target.value }))} />
-            </div>
-            <div className="portfolio-field">
-              <label htmlFor="portfolio-position-avg-cost">Avg cost</label>
-              <input id="portfolio-position-avg-cost" type="number" min="0" step="any" value={form.avg_cost} onChange={(e) => setForm((prev) => ({ ...prev, avg_cost: e.target.value }))} />
-            </div>
+            {(!isOpportunisticPortfolio || opportunisticMode === "company") && (
+              <>
+                <div className="portfolio-field">
+                  <label htmlFor="portfolio-position-symbol">Symbol</label>
+                  <input id="portfolio-position-symbol" value={form.symbol} onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value.toUpperCase() }))} />
+                </div>
+                <div className="portfolio-field">
+                  <label htmlFor="portfolio-position-name">Name</label>
+                  <input id="portfolio-position-name" value={form.display_name} onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))} />
+                </div>
+                <div className="portfolio-field">
+                  <label htmlFor="portfolio-position-shares">Shares *</label>
+                  <input id="portfolio-position-shares" type="number" min="0" step="any" value={form.shares} onChange={(e) => setForm((prev) => ({ ...prev, shares: e.target.value }))} />
+                </div>
+                <div className="portfolio-field">
+                  <label htmlFor="portfolio-position-avg-cost">Avg cost</label>
+                  <input id="portfolio-position-avg-cost" type="number" min="0" step="any" value={form.avg_cost} onChange={(e) => setForm((prev) => ({ ...prev, avg_cost: e.target.value }))} />
+                </div>
+              </>
+            )}
+            {isOpportunisticPortfolio && opportunisticMode === "cash" && (
+              <div className="portfolio-field">
+                <label htmlFor="portfolio-position-name">Cash label</label>
+                <input id="portfolio-position-name" value={form.display_name} onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))} placeholder="Cash" />
+              </div>
+            )}
             <div className="portfolio-field">
               <label htmlFor="portfolio-position-manual-price">{isOpportunisticPortfolio ? "Cash amount (USD) *" : "Manual price"}</label>
               <input id="portfolio-position-manual-price" type="number" min="0" step="any" value={form.manual_price} onChange={(e) => setForm((prev) => ({ ...prev, manual_price: e.target.value }))} />
@@ -290,7 +324,7 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
           <h5>Classification</h5>
           <div className="portfolio-field">
             <label htmlFor="portfolio-position-asset-type">Asset type *</label>
-            <select id="portfolio-position-asset-type" value={form.asset_type} onChange={(e) => setForm((prev) => ({ ...prev, asset_type: e.target.value }))} disabled={isOpportunisticPortfolio}>
+            <select id="portfolio-position-asset-type" value={form.asset_type} onChange={(e) => setForm((prev) => ({ ...prev, asset_type: e.target.value }))} disabled={isOpportunisticPortfolio && opportunisticMode === "cash"}>
               {ASSET_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </div>

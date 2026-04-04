@@ -109,6 +109,8 @@ type PositionValuationDebug = {
   positions: Array<{
     position_id: number;
     symbol: string;
+    display_name: string | null;
+    instrument_type: string | null;
     shares: number | null;
     manual_price: number | null;
     resolved_live_price: number | null;
@@ -125,6 +127,8 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
     `SELECT p.id,
             p.portfolio_id,
             p.symbol,
+            p.display_name,
+            p.asset_type,
             p.active_position,
             p.market_value,
             p.shares,
@@ -159,6 +163,8 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
     const positionId = Number(row.id ?? NaN);
     const symbol = String(row.symbol ?? "").trim() || "(unknown)";
     const activePosition = Number(row.active_position ?? 0) === 1;
+    const displayName = typeof row.display_name === "string" && row.display_name.trim() ? row.display_name.trim() : null;
+    const instrumentType = typeof row.asset_type === "string" && row.asset_type.trim() ? row.asset_type.trim() : null;
     const directMarketValue = Number(row.market_value ?? NaN);
     const shares = Number(row.shares ?? NaN);
     const manualPrice = Number(row.manual_price ?? NaN);
@@ -180,6 +186,8 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
       bucket.positions.push({
         position_id: Number.isFinite(positionId) ? positionId : -1,
         symbol,
+        display_name: displayName,
+        instrument_type: instrumentType,
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
@@ -230,6 +238,8 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
       bucket.positions.push({
         position_id: Number.isFinite(positionId) ? positionId : -1,
         symbol,
+        display_name: displayName,
+        instrument_type: instrumentType,
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
@@ -244,6 +254,8 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
       bucket.positions.push({
         position_id: Number.isFinite(positionId) ? positionId : -1,
         symbol,
+        display_name: displayName,
+        instrument_type: instrumentType,
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
@@ -347,6 +359,7 @@ export async function buildPortfolioSnapshots() {
     const valuationDebug = valuationDebugByPortfolio.get(portfolio.portfolio_id) ?? null;
     const debugPayload = {
       portfolio_id: portfolio.portfolio_id,
+      snapshot_market_value: marketValue,
       market_value: marketValue,
       actual_weight_pct: actualWeightPct,
       bandWidth: weightEval.bandWidth,
