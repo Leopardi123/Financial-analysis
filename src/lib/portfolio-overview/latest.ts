@@ -149,9 +149,11 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
   const dryPowderStatus = hedgePayload.total.dry_powder_status;
 
   const majorWarnings: string[] = [];
-  if (globalValidation.status !== "valid") majorWarnings.push("target_weight_sum_warning");
-  if (allocationPlanStatus === "outside_allocation_plan") majorWarnings.push("allocation_outside_plan");
-  if (allocationPlanStatus === "materially_outside_allocation_plan") majorWarnings.push("allocation_materially_outside_plan");
+  if (adminConfigs.length > 0) {
+    if (globalValidation.status !== "valid") majorWarnings.push("target_weight_sum_warning");
+    if (allocationPlanStatus === "outside_allocation_plan") majorWarnings.push("allocation_outside_plan");
+    if (allocationPlanStatus === "materially_outside_allocation_plan") majorWarnings.push("allocation_materially_outside_plan");
+  }
   if (totalRiskStatus === "high") majorWarnings.push("total_risk_high");
   if (totalRiskStatus === "critical") majorWarnings.push("total_risk_critical");
   if (totalHedgeSignal === "hedge_recommended") majorWarnings.push("hedge_recommended");
@@ -209,6 +211,17 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
     data_quality_flags: buildDataQualityFlags(row),
   }));
 
+  const snapshotIds = new Set((portfolioRows as any[]).map((row) => String(row.portfolio_id ?? "")).filter((id) => id.length > 0));
+  const portfoliosConfiguredCount = adminConfigs.length;
+  const portfoliosWithSnapshotsCount = snapshotIds.size;
+  const setupState: "no_config" | "configured_no_data" | "partial" | "live" = portfoliosConfiguredCount === 0
+    ? "no_config"
+    : portfoliosWithSnapshotsCount === 0
+      ? "configured_no_data"
+      : (majorWarnings.includes("data_partial") || majorWarnings.includes("data_unavailable"))
+        ? "partial"
+        : "live";
+
   const basePayload = {
     as_of_date: asOfDate,
     total: {
@@ -231,6 +244,12 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
       data_quality: totalHistoryRow?.data_quality == null ? "unavailable" : String(totalHistoryRow.data_quality),
     },
     portfolios,
+    setup: {
+      setup_state: setupState,
+      portfolios_configured_count: portfoliosConfiguredCount,
+      portfolios_with_snapshots_count: portfoliosWithSnapshotsCount,
+      history_available_days: historyAvailableDays,
+    },
   };
 
   if (!debug) return basePayload;
