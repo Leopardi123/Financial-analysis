@@ -1040,7 +1040,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       <details open style={{ marginBottom: 12 }}>
         <summary><strong>Ticker management</strong></summary>
         <p className="bread">Används för att lägga till eller uppdatera enskilda tickers.</p>
-        <CompanyPicker label="Lägg till bolag via namn" placeholder="T.ex. Microsoft" onSelect={(company) => appendTicker(company.symbol)} />
+        <CompanyPicker
+          label="Lägg till bolag via namn"
+          placeholder="T.ex. Microsoft"
+          searchEndpoint="/api/companies"
+          onSelect={(company) => appendTicker(company.symbol)}
+        />
         <label htmlFor="tickers">Tickers (comma-separated)</label>
         <input id="tickers" value={tickers} onChange={(event) => setTickers(event.target.value)} />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>

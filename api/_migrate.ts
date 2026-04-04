@@ -588,6 +588,10 @@ export async function ensureSchema() {
             ON ${TABLES.companySectorMap} (company_id)`,
     },
     {
+      sql: `CREATE INDEX IF NOT EXISTS idx_company_commodity_override_company
+            ON ${TABLES.companyCommodityOverride} (company_id)`,
+    },
+    {
       sql: `CREATE INDEX IF NOT EXISTS idx_daily_price_history_symbol_date_desc
             ON ${TABLES.dailyPriceHistory} (symbol, price_date DESC)`,
     },
