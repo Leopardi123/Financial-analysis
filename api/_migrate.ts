@@ -27,6 +27,11 @@ const TABLES = {
   dailyPriceHistory: "daily_price_history",
   priceScreenSnapshot: "price_screen_snapshot",
   screeningPriceRefreshState: "screening_price_refresh_state",
+  portfolioAdminConfig: "portfolio_admin_config",
+  portfolioSnapshots: "portfolio_snapshots",
+  portfolioPositions: "portfolio_positions",
+  portfolioHistoryDaily: "portfolio_history_daily",
+  totalPortfolioHistoryDaily: "total_portfolio_history_daily",
 };
 
 export async function ensureSchema() {
@@ -347,6 +352,91 @@ export async function ensureSchema() {
   );
 
   await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioAdminConfig} (
+      portfolio_id TEXT PRIMARY KEY,
+      portfolio_name TEXT NOT NULL,
+      portfolio_type TEXT NOT NULL,
+      active INTEGER NOT NULL,
+      visible_in_overview INTEGER NOT NULL,
+      included_in_total_portfolio INTEGER NOT NULL,
+      sort_order INTEGER NOT NULL,
+      target_weight_pct REAL NOT NULL,
+      min_weight_pct REAL NOT NULL,
+      max_weight_pct REAL NOT NULL,
+      strategic_risk_level TEXT NOT NULL,
+      hedging_allowed INTEGER NOT NULL,
+      max_hedge_pct REAL,
+      rebalance_mode TEXT NOT NULL,
+      role_description TEXT NOT NULL,
+      long_term_purpose TEXT,
+      notes TEXT,
+      allowed_hedge_types_json TEXT NOT NULL,
+      hedge_purpose_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      rebalance_priority INTEGER,
+      max_single_position_pct REAL,
+      max_sector_concentration_pct REAL,
+      max_commodity_concentration_pct REAL,
+      max_junior_exposure_pct REAL,
+      max_illiquid_exposure_pct REAL,
+      analyst_override_allowed INTEGER,
+      analyst_override_note TEXT,
+      override_expiry_date TEXT
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioSnapshots} (
+      portfolio_id TEXT NOT NULL,
+      as_of_date TEXT NOT NULL,
+      market_value REAL,
+      actual_weight_pct REAL,
+      target_weight_pct REAL NOT NULL,
+      min_weight_pct REAL NOT NULL,
+      max_weight_pct REAL NOT NULL,
+      weight_status TEXT NOT NULL,
+      rebalance_status TEXT NOT NULL,
+      signal_completeness TEXT NOT NULL,
+      cash_value REAL,
+      cash_weight_pct REAL,
+      debug_payload_json TEXT,
+      PRIMARY KEY (portfolio_id, as_of_date)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioHistoryDaily} (
+      portfolio_id TEXT NOT NULL,
+      as_of_date TEXT NOT NULL,
+      total_return_index REAL,
+      market_value REAL,
+      daily_return_pct REAL,
+      cumulative_return_pct REAL,
+      drawdown_pct REAL,
+      cash_weight_pct REAL,
+      data_source TEXT,
+      data_quality TEXT,
+      PRIMARY KEY (portfolio_id, as_of_date)
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.totalPortfolioHistoryDaily} (
+      as_of_date TEXT PRIMARY KEY,
+      total_return_index REAL,
+      market_value REAL,
+      daily_return_pct REAL,
+      cumulative_return_pct REAL,
+      drawdown_pct REAL,
+      total_cash_value REAL,
+      total_cash_weight_pct REAL,
+      included_portfolio_count INTEGER,
+      data_quality TEXT
+    )`
+  );
+
+  await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.priceScreenSnapshot} (
       symbol TEXT PRIMARY KEY,
       as_of_date TEXT NOT NULL,
@@ -490,7 +580,53 @@ export async function ensureSchema() {
       sql: `CREATE INDEX IF NOT EXISTS idx_company_projects_symbol_project
             ON ${TABLES.companyProjects} (symbol, project_id)`,
     },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_admin_sort_order
+            ON ${TABLES.portfolioAdminConfig} (sort_order, portfolio_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_admin_active_included
+            ON ${TABLES.portfolioAdminConfig} (active, included_in_total_portfolio)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_as_of_date
+            ON ${TABLES.portfolioSnapshots} (as_of_date DESC, portfolio_id)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_history_daily_portfolio_date
+            ON ${TABLES.portfolioHistoryDaily} (portfolio_id, as_of_date DESC)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_total_portfolio_history_daily_date
+            ON ${TABLES.totalPortfolioHistoryDaily} (as_of_date DESC)`,
+    },
   ]);
+
+  await ensureColumnExists(TABLES.portfolioSnapshots, "return_20d", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "return_65d", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "return_200d", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "short_direction", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "medium_direction", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "long_direction", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "trend_status", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "relative_strength_bucket", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "annualized_vol_65d", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "current_drawdown_pct", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "top_holding_weight_pct", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "cyclicality_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "volatility_component_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "drawdown_component_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "concentration_component_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "cyclicality_component_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "risk_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "risk_status", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "risk_mismatch_flag", "INTEGER");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "risk_debug_json", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "hedge_need_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "hedge_status", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "suggested_hedge_type", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "hedge_policy_applied", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "hedge_debug_json", "TEXT");
 
   try {
     await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN fiscal_year_end TEXT`);
