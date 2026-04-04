@@ -82,8 +82,9 @@ export default function Dashboard() {
           background="#d7eae8"
         >
           <div className="breadcontainerdoublecolumn">
-            <div className="subrub">Vald Portfölj</div>
-            <p className="bread">Här visas portföljens instrumentbräda.</p>
+            <div className="subrub">Portfolio Dashboard V1</div>
+            <p className="bread">Öppna den dedikerade portföljsidan för översikt, varningar och debug.</p>
+            <p className="bread"><a href="/portfolio">Go to /portfolio</a></p>
           </div>
         </Section>
 

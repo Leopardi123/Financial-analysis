@@ -4,6 +4,7 @@ import SelfTestPage from './pages/dev/SelfTestPage';
 import PlaygroundSnapshot from './pages/PlaygroundSnapshot';
 import CompanyProjectsEditorPage from './pages/CompanyProjectsEditorPage';
 import ProjectsPage from './pages/ProjectsPage';
+import PortfolioDashboardPage from './pages/PortfolioDashboardPage';
 
 export default function App() {
   const pathname = window.location.pathname.replace(/\/$/, '') || '/';
@@ -26,6 +27,10 @@ export default function App() {
 
   if (pathname === '/projects' || /^\/projects\/[^/]+\/?$/i.test(pathname)) {
     return <ProjectsPage />;
+  }
+
+  if (pathname === '/portfolio') {
+    return <PortfolioDashboardPage />;
   }
 
   return <Dashboard />;
