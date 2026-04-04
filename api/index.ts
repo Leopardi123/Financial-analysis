@@ -132,6 +132,8 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "portfolio/history/series/total": () => import("../src/server/routes/portfolio/history/series-total.js"),
   "portfolio/risk/build": () => import("../src/server/routes/portfolio/risk/build.js"),
   "portfolio/risk/latest": () => import("../src/server/routes/portfolio/risk/latest.js"),
+  "portfolio/hedge/build": () => import("../src/server/routes/portfolio/hedge/build.js"),
+  "portfolio/hedge/latest": () => import("../src/server/routes/portfolio/hedge/latest.js"),
   "sector/manual-input": () => import("../src/server/routes/sector/manual-input.js"),
   "sector/map-companies": () => import("../src/server/routes/sector/map-companies.js"),
   "sector/overview": () => import("../src/server/routes/sector/overview.js"),

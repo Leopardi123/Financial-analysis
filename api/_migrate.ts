@@ -622,6 +622,11 @@ export async function ensureSchema() {
   await ensureColumnExists(TABLES.portfolioSnapshots, "risk_status", "TEXT");
   await ensureColumnExists(TABLES.portfolioSnapshots, "risk_mismatch_flag", "INTEGER");
   await ensureColumnExists(TABLES.portfolioSnapshots, "risk_debug_json", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "hedge_need_score", "REAL");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "hedge_status", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "suggested_hedge_type", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "hedge_policy_applied", "TEXT");
+  await ensureColumnExists(TABLES.portfolioSnapshots, "hedge_debug_json", "TEXT");
 
   try {
     await execute(`ALTER TABLE ${TABLES.companiesV2} ADD COLUMN fiscal_year_end TEXT`);
