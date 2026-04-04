@@ -1,6 +1,20 @@
 import { createClient, type Client, type InStatement } from "@libsql/client";
 
 let cachedClient: Client | null = null;
+function shouldReconnect(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /connection not opened|SQLITE_UNKNOWN|SQLITE_CANTOPEN/i.test(message);
+}
+
+async function withReconnectRetry<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!shouldReconnect(error)) throw error;
+    cachedClient = null;
+    return operation();
+  }
+}
 
 export function getDb() {
   if (cachedClient) {
@@ -25,14 +39,14 @@ export function getDb() {
 }
 
 export async function execute(sql: string, params: Array<string | number | null> = []) {
-  return getDb().execute({ sql, args: params });
+  return withReconnectRetry(() => getDb().execute({ sql, args: params }));
 }
 
 export async function query(sql: string, params: Array<string | number | null> = []) {
-  const result = await getDb().execute({ sql, args: params });
+  const result = await withReconnectRetry(() => getDb().execute({ sql, args: params }));
   return result.rows;
 }
 
 export async function batch(statements: InStatement[]) {
-  return getDb().batch(statements);
+  return withReconnectRetry(() => getDb().batch(statements));
 }

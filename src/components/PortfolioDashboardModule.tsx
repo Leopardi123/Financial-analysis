@@ -90,7 +90,7 @@ type PortfolioOverviewResponse = {
   portfolios: PortfolioRecord[];
   setup?: { setup_state: SetupState };
   debug?: unknown;
-  error?: string;
+  error?: string | { type?: string; message?: string; debugMessage?: string };
 };
 
 type AdminValidateResponse = {
@@ -286,7 +286,12 @@ export default function PortfolioDashboardModule() {
     const adminJson = (await adminRes.json()) as { ok: boolean; portfolios: PortfolioConfig[] };
     const validateJson = (await validateRes.json()) as AdminValidateResponse;
 
-    if (!overviewRes.ok || !overviewJson.ok) throw new Error(overviewJson.error ?? "Failed to load overview");
+    if (!overviewRes.ok || !overviewJson.ok) {
+      const errorMessage = typeof overviewJson.error === "string"
+        ? overviewJson.error
+        : (debugMode ? overviewJson.error?.debugMessage : overviewJson.error?.message);
+      throw new Error(errorMessage ?? "Failed to load overview");
+    }
     if (!adminRes.ok || !adminJson.ok) throw new Error("Failed to load portfolio admin list");
     if (!validateRes.ok || !validateJson.ok) throw new Error("Failed to load portfolio validation");
 
