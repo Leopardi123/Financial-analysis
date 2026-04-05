@@ -280,9 +280,19 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     });
   }
 
-  const totalHistoryLatestRows = await runStage("history_loaded", async () =>
-    query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`)
-  );
+  const includedConfigIds = adminConfigs
+    .filter((row) => row.active && row.included_in_total_portfolio)
+    .map((row) => row.portfolio_id);
+  const includedPlaceholders = includedConfigIds.map(() => "?").join(", ");
+  const totalHistoryLatestRows = includedConfigIds.length > 0
+    ? await runStage("history_loaded", async () =>
+      query(
+        `SELECT MAX(as_of_date) AS as_of_date
+         FROM ${tables.portfolioHistoryDaily}
+         WHERE portfolio_id IN (${includedPlaceholders})`,
+        includedConfigIds
+      ))
+    : [];
   const latestTotalHistoryDate = String(totalHistoryLatestRows[0]?.as_of_date ?? "").trim();
   const totalHistoryRow = latestTotalHistoryDate
     ? (await query(
@@ -292,6 +302,22 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       [latestTotalHistoryDate]
     ))[0]
     : null;
+  const contributingRows = latestTotalHistoryDate && includedConfigIds.length > 0
+    ? await query(
+      `SELECT portfolio_id, market_value
+       FROM ${tables.portfolioHistoryDaily}
+       WHERE as_of_date = ? AND portfolio_id IN (${includedPlaceholders}) AND market_value IS NOT NULL`,
+      [latestTotalHistoryDate, ...includedConfigIds]
+    )
+    : [];
+  const contributingPortfolioIds = (contributingRows as any[])
+    .map((row) => String(row.portfolio_id ?? ""))
+    .filter((id) => id.length > 0)
+    .sort((a, b) => a.localeCompare(b));
+  const recomputedTotalMarketValue = (contributingRows as any[])
+    .map((row) => Number(row.market_value ?? NaN))
+    .filter((value) => Number.isFinite(value))
+    .reduce((sum, value) => sum + value, 0);
   const totalHistoryCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`);
   const historyAvailableDays = Number(totalHistoryCountRows[0]?.count ?? 0);
   const snapshotCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioSnapshots}`);
@@ -308,7 +334,8 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
      LIMIT 1`
   );
   const lastSnapshotBuild = String(lastSnapshotBuildRows[0]?.as_of_date ?? "").trim() || null;
-  const lastHistoryBuild = String(lastHistoryBuildRows[0]?.last_success_at ?? "").trim() || null;
+  const lastHistoryBuild = String(lastHistoryBuildRows[0]?.last_success_at ?? "").trim()
+    || (latestTotalHistoryDate ? `${latestTotalHistoryDate}T00:00:00.000Z` : null);
 
   const allocationPlanStatus = computeAllocationPlanStatus(portfolioRows as any[]);
   const included = (portfolioRows as any[]).filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1);
@@ -527,7 +554,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const basePayload = await runStage("response_assembled", async () => ({
     as_of_date: asOfDate,
     total: {
-      market_value: totalMarketValue,
+      market_value: contributingPortfolioIds.length > 0 ? recomputedTotalMarketValue : totalMarketValue,
       allocation_plan_status: allocationPlanStatus,
       total_risk_score: totalRiskScore,
       total_risk_status: totalRiskStatus,
@@ -535,7 +562,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       dry_powder_status: dryPowderStatus,
       opportunistic_weight_pct: hedgePayload.total.opportunistic_weight_pct,
       required_min_dry_powder_pct: hedgePayload.total.required_min_dry_powder_pct,
-      included_portfolio_count: included.length,
+      included_portfolio_count: contributingPortfolioIds.length > 0 ? contributingPortfolioIds.length : included.length,
       major_warnings: Array.from(new Set(majorWarnings)),
       major_warning_details: warningDetails,
     },
@@ -561,6 +588,8 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       positions_count: activePositionsCount,
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
+      total_date_used: latestTotalHistoryDate || null,
+      contributing_portfolio_ids: contributingPortfolioIds,
     },
   }));
 
@@ -583,6 +612,8 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       positions_count: activePositionsCount,
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
+      total_date_used: latestTotalHistoryDate || null,
+      contributing_portfolio_ids: contributingPortfolioIds,
     },
     global_validation: {
       target_weight_sum_status: globalValidation.status,

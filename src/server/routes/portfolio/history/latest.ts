@@ -76,6 +76,9 @@ export default async function handler(req: any, res: any) {
 
     const configs = await listPortfolioConfigs();
     const portfolioIds = configs.map((row) => row.portfolio_id);
+    const includedPortfolioIds = configs
+      .filter((row) => row.active && row.included_in_total_portfolio)
+      .map((row) => row.portfolio_id);
     const placeholders = portfolioIds.map(() => "?").join(", ");
     const historyRows = portfolioIds.length > 0
       ? await query(
@@ -144,8 +147,34 @@ export default async function handler(req: any, res: any) {
       };
     });
 
-    const totalDateRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`);
-    const latestTotalDate = String(totalDateRows[0]?.as_of_date ?? "").trim();
+    const includedPlaceholders = includedPortfolioIds.map(() => "?").join(", ");
+    const latestTotalDateRows = includedPortfolioIds.length > 0
+      ? await query(
+        `SELECT MAX(as_of_date) AS as_of_date
+         FROM ${tables.portfolioHistoryDaily}
+         WHERE portfolio_id IN (${includedPlaceholders})`,
+        includedPortfolioIds
+      )
+      : [];
+    const latestTotalDate = String(latestTotalDateRows[0]?.as_of_date ?? "").trim();
+
+    const contributorRows = latestTotalDate && includedPortfolioIds.length > 0
+      ? await query(
+        `SELECT portfolio_id, market_value
+         FROM ${tables.portfolioHistoryDaily}
+         WHERE as_of_date = ? AND portfolio_id IN (${includedPlaceholders}) AND market_value IS NOT NULL`,
+        [latestTotalDate, ...includedPortfolioIds]
+      )
+      : [];
+    const contributingPortfolioIds = (contributorRows as any[])
+      .map((row) => String(row.portfolio_id ?? ""))
+      .filter((id) => id.length > 0)
+      .sort((a, b) => a.localeCompare(b));
+    const recomputedTotalMarketValue = (contributorRows as any[])
+      .map((row) => Number(row.market_value ?? NaN))
+      .filter((value) => Number.isFinite(value))
+      .reduce((sum, value) => sum + value, 0);
+    const recomputedIncludedCount = contributingPortfolioIds.length;
 
     const totalRows = latestTotalDate
       ? await query(
@@ -165,7 +194,8 @@ export default async function handler(req: any, res: any) {
        WHERE pipeline_name = 'history'
        LIMIT 1`
     );
-    const lastHistoryBuild = String(lastBuildRows[0]?.last_success_at ?? "").trim() || null;
+    const lastHistoryBuild = String(lastBuildRows[0]?.last_success_at ?? "").trim()
+      || (latestTotalDate ? `${latestTotalDate}T00:00:00.000Z` : null);
 
     res.status(200).json({
       ok: true,
@@ -185,7 +215,9 @@ export default async function handler(req: any, res: any) {
       })),
       total: {
         as_of_date: latestTotalDate || null,
-        market_value: total?.market_value == null ? null : Number(total.market_value),
+        market_value: recomputedIncludedCount > 0
+          ? recomputedTotalMarketValue
+          : (total?.market_value == null ? null : Number(total.market_value)),
         daily_return_pct: total?.daily_return_pct == null ? null : Number(total.daily_return_pct),
         cumulative_return_pct: total?.cumulative_return_pct == null ? null : Number(total.cumulative_return_pct),
         drawdown_pct: total?.drawdown_pct == null ? null : Number(total.drawdown_pct),
@@ -228,11 +260,12 @@ export default async function handler(req: any, res: any) {
               cumulative_return_pct: total?.cumulative_return_pct == null ? null : Number(total.cumulative_return_pct),
               drawdown_pct: total?.drawdown_pct == null ? null : Number(total.drawdown_pct),
               data_quality: total?.data_quality ?? null,
-              included_portfolio_count: total?.included_portfolio_count ?? null,
+              included_portfolio_count: recomputedIncludedCount > 0
+                ? recomputedIncludedCount
+                : (total?.included_portfolio_count ?? null),
               last_history_build: lastHistoryBuild,
-              contributing_portfolio_ids: portfolios
-                .filter((row: any) => String(row.as_of_date ?? "") === latestTotalDate)
-                .map((row: any) => String(row.portfolio_id ?? "")),
+              total_date_used: latestTotalDate || null,
+              contributing_portfolio_ids: contributingPortfolioIds,
             },
           },
         }
