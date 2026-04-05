@@ -28,6 +28,9 @@ export type PortfolioPositionRecord = {
   inferred_sector_id: number | null;
   inferred_subsector_id: number | null;
   inferred_commodity_id: string | null;
+  inferred_sector_map_created_at: string | null;
+  inferred_commodity_updated_at: string | null;
+  inferred_commodity_weight: number | null;
   final_sector_id: number | null;
   final_subsector_id: number | null;
   final_commodity_id: string | null;

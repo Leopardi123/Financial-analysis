@@ -19,6 +19,9 @@ type PositionRow = {
   inferred_sector_id: number | null;
   inferred_subsector_id: number | null;
   inferred_commodity_id: string | null;
+  inferred_sector_map_created_at: string | null;
+  inferred_commodity_updated_at: string | null;
+  inferred_commodity_weight: number | null;
   manual_sector_id: number | null;
   manual_subsector_id: number | null;
   manual_commodity_id: string | null;
@@ -28,6 +31,18 @@ type PositionRow = {
   mapping_source: "inherited" | "portfolio_override" | "portfolio_completed";
   mapping_override_active: boolean;
   active_position: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type PositionDiagnostics = {
+  portfolio_id: string;
+  rendered_row_count: number;
+  stored_row_count: number;
+  raw_row_id_count: number;
+  rendered_duplicate_row_ids: number[];
+  old_join_row_count: number;
+  same_symbol_rows: Array<{ symbol: string; duplicate_count: number; ids: string }>;
 };
 
 type FormState = {
@@ -92,6 +107,11 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   const [sectorRows, setSectorRows] = useState<Array<{ id: number; name: string }>>([]);
   const [subsectorRows, setSubsectorRows] = useState<Array<{ id: number; name: string; sector_id: number }>>([]);
   const [opportunisticMode, setOpportunisticMode] = useState<"cash" | "company">("cash");
+  const [debugDiagnostics, setDebugDiagnostics] = useState<PositionDiagnostics | null>(null);
+  const [debugMode, setDebugMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("positionsDebug") === "1";
+  });
   const selectedPortfolio = useMemo(
     () => portfolios.find((item) => item.portfolio_id === selectedPortfolioId) ?? null,
     [portfolios, selectedPortfolioId]
@@ -105,7 +125,7 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   useEffect(() => {
     if (!selectedPortfolioId) return;
     void loadPositions(selectedPortfolioId);
-  }, [selectedPortfolioId]);
+  }, [selectedPortfolioId, debugMode]);
 
   useEffect(() => {
     void fetch("/api/sector/canonical-taxonomy")
@@ -135,11 +155,14 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   async function loadPositions(portfolioId: string) {
     setLoading(true);
     setError(null);
+    setDebugDiagnostics(null);
     try {
-      const res = await fetch(`/api/portfolio/positions/list?portfolio_id=${encodeURIComponent(portfolioId)}`);
+      const debugQuery = debugMode ? "&debug=1" : "";
+      const res = await fetch(`/api/portfolio/positions/list?portfolio_id=${encodeURIComponent(portfolioId)}${debugQuery}`);
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error ?? "Failed loading positions");
       setPositions(json.positions);
+      setDebugDiagnostics(json.diagnostics ?? null);
       setForm((prev) => ({ ...prev, portfolio_id: portfolioId }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed loading positions");
@@ -250,6 +273,10 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
   return (
     <div className="portfolio-panel" style={{ marginTop: 12 }}>
       <h4>Portfolio positions admin</h4>
+      <label className="portfolio-toggle-field" style={{ marginBottom: 8 }}>
+        <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />
+        <span>Debug mode (position identity + duplicate diagnostics)</span>
+      </label>
       <div className="portfolio-admin-grid">
         <section className="portfolio-admin-section">
           <h5>Company</h5>
@@ -398,6 +425,11 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
                 <div style={{ marginTop: 6 }}>
                   entry {row.entry_date ?? "—"} · avg cost {row.avg_cost ?? "—"} · manual price {row.manual_price ?? "—"} · final sector/subsector/commodity {row.final_sector_id ?? "—"}/{row.final_subsector_id ?? "—"}/{row.final_commodity_id ?? "—"}
                 </div>
+                {debugMode && (
+                  <div style={{ marginTop: 4, fontSize: 12, opacity: 0.8 }}>
+                    id {row.id} · portfolio {row.portfolio_id} · company_id {row.company_id ?? "—"} · created {row.created_at} · updated {row.updated_at} · map row created {row.inferred_sector_map_created_at ?? "—"} · commodity override {row.inferred_commodity_id ?? "—"} ({row.inferred_commodity_weight ?? "—"}) @ {row.inferred_commodity_updated_at ?? "—"}
+                  </div>
+                )}
                 <div className="portfolio-actions-row" style={{ marginTop: 6 }}>
                   <button type="button" onClick={() => startEdit(row)}>Edit</button>
                   {row.active_position && <button type="button" onClick={() => void deactivate(row.id)}>Deactivate</button>}
@@ -406,6 +438,11 @@ export default function PortfolioPositionsAdmin({ portfolios }: { portfolios: Po
             ))}
           </div>
         )
+      )}
+      {debugMode && debugDiagnostics && (
+        <pre style={{ marginTop: 8, fontSize: 12, whiteSpace: "pre-wrap" }}>
+          {JSON.stringify(debugDiagnostics, null, 2)}
+        </pre>
       )}
     </div>
   );
