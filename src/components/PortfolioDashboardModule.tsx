@@ -21,6 +21,9 @@ type PortfolioRecord = {
   return_20d: NullableNumber;
   return_65d: NullableNumber;
   return_200d: NullableNumber;
+  short_direction?: string | null;
+  medium_direction?: string | null;
+  long_direction?: string | null;
   trend_status: string | null;
   relative_strength_bucket: string | null;
   annualized_vol_65d: NullableNumber;
@@ -86,6 +89,7 @@ type PortfolioOverviewResponse = {
     cumulative_return_pct: NullableNumber;
     drawdown_pct: NullableNumber;
     history_available_days: number;
+    data_quality?: string | null;
   };
   portfolios: PortfolioRecord[];
   setup?: { setup_state: SetupState };
@@ -249,6 +253,36 @@ function formatPct(value: NullableNumber): string {
 
 function formatMoney(value: NullableNumber): string {
   return value === null ? "Unavailable" : new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 0 }).format(value);
+}
+
+function toneClassForTrend(status: string | null): string {
+  switch (status) {
+    case "strong_uptrend":
+      return "trend-strong-up";
+    case "improving":
+      return "trend-improving";
+    case "neutral":
+      return "trend-neutral";
+    case "weakening":
+      return "trend-weakening";
+    case "downtrend":
+      return "trend-down";
+    default:
+      return "trend-unavailable";
+  }
+}
+
+function toneClassForRelativeStrength(bucket: string | null): string {
+  switch (bucket) {
+    case "strong":
+      return "rs-strong";
+    case "weak":
+      return "rs-weak";
+    case "neutral":
+      return "rs-neutral";
+    default:
+      return "rs-unavailable";
+  }
 }
 
 function formFromConfig(config: PortfolioConfig): AdminFormState {
@@ -553,12 +587,16 @@ export default function PortfolioDashboardModule() {
           </div>
           <div className="portfolio-summary-grid">
             <div className="portfolio-panel">
-              <h4>Overview</h4>
+              <h4>Total performance</h4>
               <div>Allocation: {label(overview.total.allocation_plan_status)}</div>
               <div>Risk: {label(overview.total.total_risk_status)} ({overview.total.total_risk_score ?? "n/a"})</div>
               <div>Hedge: {label(overview.total.total_hedge_signal)}</div>
               <div>Dry powder: {label(overview.total.dry_powder_status)}</div>
               <div>Daily return: {formatPct(overview.performance.daily_return_pct)}</div>
+              <div>Cumulative return: {formatPct(overview.performance.cumulative_return_pct)}</div>
+              <div>Drawdown: {formatPct(overview.performance.drawdown_pct)}</div>
+              <div>History available days: {overview.performance.history_available_days}</div>
+              <div>History data quality: {label(overview.performance.data_quality ?? null)}</div>
             </div>
             <div className="portfolio-panel">
               <h4>Major warnings</h4>
@@ -582,13 +620,32 @@ export default function PortfolioDashboardModule() {
           <div className="portfolio-list">
             {overview.portfolios.map((portfolio) => (
               <details key={portfolio.portfolio_id} className="portfolio-card">
-                <summary>{portfolio.portfolio_name} ({portfolio.portfolio_type})</summary>
+                <summary>
+                  <div className="portfolio-card-summary">
+                    <div>
+                      <div className="portfolio-card-title">{portfolio.portfolio_name}</div>
+                      <div className="portfolio-card-subtitle">{portfolio.portfolio_type}</div>
+                    </div>
+                    <div className="portfolio-card-badges">
+                      <span className={`status-pill ${toneClassForTrend(portfolio.trend_status)}`}>
+                        Trend: {portfolio.trend_status === "unavailable" ? "Trend unavailable" : label(portfolio.trend_status)}
+                      </span>
+                      {portfolio.signal_completeness === "partial" && (
+                        <span className="status-pill completeness-partial">Partial</span>
+                      )}
+                      {portfolio.signal_completeness === "unavailable" && (
+                        <span className="status-pill completeness-unavailable">Incomplete</span>
+                      )}
+                    </div>
+                  </div>
+                </summary>
+                <div className="portfolio-card-top-metrics">
+                  <div>Market value: <strong>{formatMoney(portfolio.market_value)}</strong></div>
+                  <div>Actual weight: <strong>{formatPct(portfolio.actual_weight_pct)}</strong></div>
+                  <div>Weight status: <strong>{label(portfolio.weight_status)}</strong></div>
+                </div>
                 <div className="portfolio-card-grid">
-                  <div>Market value (SEK): {formatMoney(portfolio.market_value)}</div>
-                  <div>Actual weight: {formatPct(portfolio.actual_weight_pct)}</div>
                   <div>Target / min / max: {formatPct(portfolio.target_weight_pct)} / {formatPct(portfolio.min_weight_pct)} / {formatPct(portfolio.max_weight_pct)}</div>
-                  <div>Weight status: {label(portfolio.weight_status)}</div>
-                  <div>Trend status: {label(portfolio.trend_status)}</div>
                   <div>Risk status: {label(portfolio.risk_status)}</div>
                   <div>Hedge status: {label(portfolio.hedge_status)}</div>
                   <div>Hedge policy: {label(portfolio.hedge_policy_applied)}</div>
@@ -599,6 +656,24 @@ export default function PortfolioDashboardModule() {
                   )}
                   {portfolio.suggested_hedge_type && <div>Suggested hedge: {portfolio.suggested_hedge_type}</div>}
                 </div>
+                <details className="portfolio-trend-details">
+                  <summary>Trend details</summary>
+                  <div className="portfolio-trend-grid">
+                    <div>20d return: {formatPct(portfolio.return_20d)}</div>
+                    <div>65d return: {formatPct(portfolio.return_65d)}</div>
+                    <div>200d return: {formatPct(portfolio.return_200d)}</div>
+                    <div>Short direction: {label(portfolio.short_direction ?? "unavailable")}</div>
+                    <div>Medium direction: {label(portfolio.medium_direction ?? "unavailable")}</div>
+                    <div>Long direction: {label(portfolio.long_direction ?? "unavailable")}</div>
+                    <div>
+                      Relative strength:
+                      <span className={`status-pill rs-pill ${toneClassForRelativeStrength(portfolio.relative_strength_bucket)}`}>
+                        {label(portfolio.relative_strength_bucket)}
+                      </span>
+                    </div>
+                    <div>Trend completeness: {label(portfolio.signal_completeness)}</div>
+                  </div>
+                </details>
               </details>
             ))}
           </div>
