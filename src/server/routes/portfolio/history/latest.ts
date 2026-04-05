@@ -38,6 +38,12 @@ function computeCompleteness(availableDays: number): "full" | "partial" | "unava
   return "unavailable";
 }
 
+function dateToUtcMs(date: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const ms = Date.parse(`${date}T00:00:00.000Z`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function buildUnavailableTrendDebugFromMetrics(metrics: {
   available_days: number;
   return_20d: number | null;
@@ -147,38 +153,67 @@ export default async function handler(req: any, res: any) {
       };
     });
 
-    const includedPlaceholders = includedPortfolioIds.map(() => "?").join(", ");
-    const latestTotalDateRows = includedPortfolioIds.length > 0
-      ? await query(
-        `SELECT MAX(as_of_date) AS as_of_date
-         FROM ${tables.portfolioHistoryDaily}
-         WHERE portfolio_id IN (${includedPlaceholders})`,
-        includedPortfolioIds
-      )
-      : [];
-    const latestTotalDate = String(latestTotalDateRows[0]?.as_of_date ?? "").trim();
+    const includedHistoryRows = (historyRows as any[])
+      .map((row) => ({
+        portfolio_id: String(row.portfolio_id ?? ""),
+        as_of_date: String(row.as_of_date ?? ""),
+        market_value: Number(row.market_value ?? NaN),
+      }))
+      .filter((row) => includedPortfolioIds.includes(row.portfolio_id) && row.as_of_date && Number.isFinite(row.market_value) && row.market_value > 0);
+    const newestIncludedDateMs = includedHistoryRows
+      .map((row) => dateToUtcMs(row.as_of_date))
+      .filter((value): value is number => value !== null)
+      .reduce((max, value) => Math.max(max, value), Number.NEGATIVE_INFINITY);
+    const recentCutoffMs = Number.isFinite(newestIncludedDateMs) ? newestIncludedDateMs - (30 * 24 * 60 * 60 * 1000) : null;
 
-    const contributorRows = latestTotalDate && includedPortfolioIds.length > 0
-      ? await query(
-        `SELECT portfolio_id, market_value
-         FROM ${tables.portfolioHistoryDaily}
-         WHERE as_of_date = ? AND portfolio_id IN (${includedPlaceholders}) AND market_value IS NOT NULL`,
-        [latestTotalDate, ...includedPortfolioIds]
-      )
-      : [];
-    const contributingPortfolioIds = (contributorRows as any[])
-      .map((row) => String(row.portfolio_id ?? ""))
-      .filter((id) => id.length > 0)
-      .sort((a, b) => a.localeCompare(b));
-    const recomputedTotalMarketValue = (contributorRows as any[])
-      .map((row) => Number(row.market_value ?? NaN))
-      .filter((value) => Number.isFinite(value))
-      .reduce((sum, value) => sum + value, 0);
+    const contributorsByDate = new Map<string, Set<string>>();
+    const valueByPortfolioDate = new Map<string, number>();
+    for (const row of includedHistoryRows) {
+      const key = `${row.portfolio_id}__${row.as_of_date}`;
+      valueByPortfolioDate.set(key, row.market_value);
+      const bucket = contributorsByDate.get(row.as_of_date) ?? new Set<string>();
+      bucket.add(row.portfolio_id);
+      contributorsByDate.set(row.as_of_date, bucket);
+    }
+
+    const dateCandidates = Array.from(contributorsByDate.entries())
+      .filter(([date]) => {
+        if (recentCutoffMs === null) return true;
+        const dateMs = dateToUtcMs(date);
+        return dateMs !== null && dateMs >= recentCutoffMs;
+      });
+    const scoredCandidates = (dateCandidates.length > 0 ? dateCandidates : Array.from(contributorsByDate.entries()))
+      .map(([date, ids]) => ({ date, contributor_count: ids.size }));
+    scoredCandidates.sort((a, b) => {
+      if (b.contributor_count !== a.contributor_count) return b.contributor_count - a.contributor_count;
+      return b.date.localeCompare(a.date);
+    });
+    const latestTotalDate = scoredCandidates[0]?.date ?? "";
+    const contributingPortfolioIds = Array.from(contributorsByDate.get(latestTotalDate) ?? []).sort((a, b) => a.localeCompare(b));
     const recomputedIncludedCount = contributingPortfolioIds.length;
+    const recomputedTotalMarketValue = contributingPortfolioIds
+      .map((portfolioId) => valueByPortfolioDate.get(`${portfolioId}__${latestTotalDate}`) ?? 0)
+      .reduce((sum, value) => sum + value, 0);
 
+    const commonDateSeries = Array.from(contributorsByDate.entries())
+      .filter(([date, ids]) => date <= latestTotalDate && contributingPortfolioIds.every((id) => ids.has(id)))
+      .map(([date]) => ({
+        as_of_date: date,
+        market_value: contributingPortfolioIds
+          .map((id) => valueByPortfolioDate.get(`${id}__${date}`) ?? 0)
+          .reduce((sum, value) => sum + value, 0),
+      }))
+      .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+    const seriesIndex = commonDateSeries.findIndex((row) => row.as_of_date === latestTotalDate);
+    const prev = seriesIndex > 0 ? commonDateSeries[seriesIndex - 1] : null;
+    const first = commonDateSeries[0] ?? null;
+    const latest = seriesIndex >= 0 ? commonDateSeries[seriesIndex] : null;
+    const runningPeak = commonDateSeries
+      .slice(0, Math.max(seriesIndex + 1, 0))
+      .reduce((peak, row) => Math.max(peak, row.market_value), Number.NEGATIVE_INFINITY);
     const totalRows = latestTotalDate
       ? await query(
-        `SELECT as_of_date, market_value, daily_return_pct, cumulative_return_pct, drawdown_pct, included_portfolio_count, data_quality
+        `SELECT data_quality
          FROM ${tables.totalPortfolioHistoryDaily}
          WHERE as_of_date = ?
          LIMIT 1`,
@@ -218,9 +253,15 @@ export default async function handler(req: any, res: any) {
         market_value: recomputedIncludedCount > 0
           ? recomputedTotalMarketValue
           : (total?.market_value == null ? null : Number(total.market_value)),
-        daily_return_pct: total?.daily_return_pct == null ? null : Number(total.daily_return_pct),
-        cumulative_return_pct: total?.cumulative_return_pct == null ? null : Number(total.cumulative_return_pct),
-        drawdown_pct: total?.drawdown_pct == null ? null : Number(total.drawdown_pct),
+        daily_return_pct: latest && prev && prev.market_value !== 0
+          ? ((latest.market_value / prev.market_value) - 1) * 100
+          : null,
+        cumulative_return_pct: latest && first && first.market_value !== 0
+          ? ((latest.market_value / first.market_value) - 1) * 100
+          : null,
+        drawdown_pct: latest && Number.isFinite(runningPeak) && runningPeak !== 0
+          ? ((latest.market_value / runningPeak) - 1) * 100
+          : null,
       },
       ...(debug
         ? {
@@ -255,17 +296,37 @@ export default async function handler(req: any, res: any) {
             total: {
               included_portfolios: null,
               history_days_available: Number((await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`))[0]?.count ?? 0),
-              aggregation_source: "portfolio_history_daily_aggregation",
-              daily_return_pct: total?.daily_return_pct == null ? null : Number(total.daily_return_pct),
-              cumulative_return_pct: total?.cumulative_return_pct == null ? null : Number(total.cumulative_return_pct),
-              drawdown_pct: total?.drawdown_pct == null ? null : Number(total.drawdown_pct),
-              data_quality: total?.data_quality ?? null,
+              aggregation_source: "portfolio_history_daily_aligned_read",
+              daily_return_pct: latest && prev && prev.market_value !== 0
+                ? ((latest.market_value / prev.market_value) - 1) * 100
+                : null,
+              cumulative_return_pct: latest && first && first.market_value !== 0
+                ? ((latest.market_value / first.market_value) - 1) * 100
+                : null,
+              drawdown_pct: latest && Number.isFinite(runningPeak) && runningPeak !== 0
+                ? ((latest.market_value / runningPeak) - 1) * 100
+                : null,
+              data_quality: recomputedIncludedCount === includedPortfolioIds.length ? "full" : "partial",
               included_portfolio_count: recomputedIncludedCount > 0
                 ? recomputedIncludedCount
                 : (total?.included_portfolio_count ?? null),
               last_history_build: lastHistoryBuild,
               total_date_used: latestTotalDate || null,
+              total_date_rule_used: "latest_recent_date_max_contributors_then_latest",
               contributing_portfolio_ids: contributingPortfolioIds,
+              excluded_portfolio_ids: includedPortfolioIds.filter((id) => !contributingPortfolioIds.includes(id)),
+              excluded_portfolio_reasons: includedPortfolioIds
+                .filter((id) => !contributingPortfolioIds.includes(id))
+                .map((id) => {
+                  const rowsForId = includedHistoryRows.filter((row) => row.portfolio_id === id);
+                  if (rowsForId.length === 0) return { portfolio_id: id, reason: "no_history_rows" };
+                  const latestForId = rowsForId[rowsForId.length - 1]?.as_of_date ?? null;
+                  return {
+                    portfolio_id: id,
+                    reason: latestForId && latestForId < latestTotalDate ? "no_row_on_total_date" : "excluded_by_alignment_rule",
+                    latest_history_date: latestForId,
+                  };
+                }),
             },
           },
         }

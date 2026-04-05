@@ -105,6 +105,12 @@ function computeLookbackReturn(values: number[], lookbackDays: number): number |
   return ((latest / past) - 1) * 100;
 }
 
+function dateToUtcMs(date: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const ms = Date.parse(`${date}T00:00:00.000Z`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function computeAllocationPlanStatus(rows: any[]): "within_allocation_plan" | "outside_allocation_plan" | "materially_outside_allocation_plan" {
   const statuses = rows
     .filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1)
@@ -283,41 +289,60 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const includedConfigIds = adminConfigs
     .filter((row) => row.active && row.included_in_total_portfolio)
     .map((row) => row.portfolio_id);
-  const includedPlaceholders = includedConfigIds.map(() => "?").join(", ");
-  const totalHistoryLatestRows = includedConfigIds.length > 0
-    ? await runStage("history_loaded", async () =>
-      query(
-        `SELECT MAX(as_of_date) AS as_of_date
-         FROM ${tables.portfolioHistoryDaily}
-         WHERE portfolio_id IN (${includedPlaceholders})`,
-        includedConfigIds
-      ))
-    : [];
-  const latestTotalHistoryDate = String(totalHistoryLatestRows[0]?.as_of_date ?? "").trim();
-  const totalHistoryRow = latestTotalHistoryDate
-    ? (await query(
-      `SELECT as_of_date, market_value, daily_return_pct, cumulative_return_pct, drawdown_pct, data_quality
-       FROM ${tables.totalPortfolioHistoryDaily}
-       WHERE as_of_date = ? LIMIT 1`,
-      [latestTotalHistoryDate]
-    ))[0]
-    : null;
-  const contributingRows = latestTotalHistoryDate && includedConfigIds.length > 0
-    ? await query(
-      `SELECT portfolio_id, market_value
-       FROM ${tables.portfolioHistoryDaily}
-       WHERE as_of_date = ? AND portfolio_id IN (${includedPlaceholders}) AND market_value IS NOT NULL`,
-      [latestTotalHistoryDate, ...includedConfigIds]
-    )
-    : [];
-  const contributingPortfolioIds = (contributingRows as any[])
-    .map((row) => String(row.portfolio_id ?? ""))
-    .filter((id) => id.length > 0)
-    .sort((a, b) => a.localeCompare(b));
-  const recomputedTotalMarketValue = (contributingRows as any[])
-    .map((row) => Number(row.market_value ?? NaN))
-    .filter((value) => Number.isFinite(value))
+  const includedHistoryRows = (historyTrendRows as any[])
+    .map((row) => ({
+      portfolio_id: String(row.portfolio_id ?? ""),
+      as_of_date: String(row.as_of_date ?? ""),
+      market_value: Number(row.market_value ?? NaN),
+    }))
+    .filter((row) => includedConfigIds.includes(row.portfolio_id) && row.as_of_date && Number.isFinite(row.market_value) && row.market_value > 0);
+  const newestIncludedDateMs = includedHistoryRows
+    .map((row) => dateToUtcMs(row.as_of_date))
+    .filter((value): value is number => value !== null)
+    .reduce((max, value) => Math.max(max, value), Number.NEGATIVE_INFINITY);
+  const recentCutoffMs = Number.isFinite(newestIncludedDateMs) ? newestIncludedDateMs - (30 * 24 * 60 * 60 * 1000) : null;
+  const contributorsByDate = new Map<string, Set<string>>();
+  const valueByPortfolioDate = new Map<string, number>();
+  for (const row of includedHistoryRows) {
+    const key = `${row.portfolio_id}__${row.as_of_date}`;
+    valueByPortfolioDate.set(key, row.market_value);
+    const bucket = contributorsByDate.get(row.as_of_date) ?? new Set<string>();
+    bucket.add(row.portfolio_id);
+    contributorsByDate.set(row.as_of_date, bucket);
+  }
+  const dateCandidates = Array.from(contributorsByDate.entries())
+    .filter(([date]) => {
+      if (recentCutoffMs === null) return true;
+      const ms = dateToUtcMs(date);
+      return ms !== null && ms >= recentCutoffMs;
+    });
+  const scoredCandidates = (dateCandidates.length > 0 ? dateCandidates : Array.from(contributorsByDate.entries()))
+    .map(([date, ids]) => ({ date, contributor_count: ids.size }))
+    .sort((a, b) => {
+      if (b.contributor_count !== a.contributor_count) return b.contributor_count - a.contributor_count;
+      return b.date.localeCompare(a.date);
+    });
+  const latestTotalHistoryDate = scoredCandidates[0]?.date ?? "";
+  const contributingPortfolioIds = Array.from(contributorsByDate.get(latestTotalHistoryDate) ?? []).sort((a, b) => a.localeCompare(b));
+  const recomputedTotalMarketValue = contributingPortfolioIds
+    .map((id) => valueByPortfolioDate.get(`${id}__${latestTotalHistoryDate}`) ?? 0)
     .reduce((sum, value) => sum + value, 0);
+  const commonDateSeries = Array.from(contributorsByDate.entries())
+    .filter(([date, ids]) => date <= latestTotalHistoryDate && contributingPortfolioIds.every((id) => ids.has(id)))
+    .map(([date]) => ({
+      as_of_date: date,
+      market_value: contributingPortfolioIds
+        .map((id) => valueByPortfolioDate.get(`${id}__${date}`) ?? 0)
+        .reduce((sum, value) => sum + value, 0),
+    }))
+    .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+  const totalSeriesIndex = commonDateSeries.findIndex((row) => row.as_of_date === latestTotalHistoryDate);
+  const totalLatest = totalSeriesIndex >= 0 ? commonDateSeries[totalSeriesIndex] : null;
+  const totalPrev = totalSeriesIndex > 0 ? commonDateSeries[totalSeriesIndex - 1] : null;
+  const totalFirst = commonDateSeries[0] ?? null;
+  const totalRunningPeak = commonDateSeries
+    .slice(0, Math.max(totalSeriesIndex + 1, 0))
+    .reduce((peak, row) => Math.max(peak, row.market_value), Number.NEGATIVE_INFINITY);
   const totalHistoryCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`);
   const historyAvailableDays = Number(totalHistoryCountRows[0]?.count ?? 0);
   const snapshotCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioSnapshots}`);
@@ -567,11 +592,17 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       major_warning_details: warningDetails,
     },
     performance: {
-      daily_return_pct: asNum(totalHistoryRow?.daily_return_pct),
-      cumulative_return_pct: asNum(totalHistoryRow?.cumulative_return_pct),
-      drawdown_pct: asNum(totalHistoryRow?.drawdown_pct),
+      daily_return_pct: totalLatest && totalPrev && totalPrev.market_value !== 0
+        ? ((totalLatest.market_value / totalPrev.market_value) - 1) * 100
+        : null,
+      cumulative_return_pct: totalLatest && totalFirst && totalFirst.market_value !== 0
+        ? ((totalLatest.market_value / totalFirst.market_value) - 1) * 100
+        : null,
+      drawdown_pct: totalLatest && Number.isFinite(totalRunningPeak) && totalRunningPeak !== 0
+        ? ((totalLatest.market_value / totalRunningPeak) - 1) * 100
+        : null,
       history_available_days: historyAvailableDays,
-      data_quality: totalHistoryRow?.data_quality == null ? "unavailable" : String(totalHistoryRow.data_quality),
+      data_quality: contributingPortfolioIds.length === includedConfigIds.length ? "full" : "partial",
     },
     portfolios,
     setup: {
@@ -589,7 +620,9 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
       total_date_used: latestTotalHistoryDate || null,
+      total_date_rule_used: "latest_recent_date_max_contributors_then_latest",
       contributing_portfolio_ids: contributingPortfolioIds,
+      excluded_portfolio_ids: includedConfigIds.filter((id) => !contributingPortfolioIds.includes(id)),
     },
   }));
 
@@ -613,7 +646,9 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
       total_date_used: latestTotalHistoryDate || null,
+      total_date_rule_used: "latest_recent_date_max_contributors_then_latest",
       contributing_portfolio_ids: contributingPortfolioIds,
+      excluded_portfolio_ids: includedConfigIds.filter((id) => !contributingPortfolioIds.includes(id)),
     },
     global_validation: {
       target_weight_sum_status: globalValidation.status,
