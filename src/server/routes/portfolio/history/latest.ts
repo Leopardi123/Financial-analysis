@@ -1,6 +1,21 @@
 import { query } from "../../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../../api/_migrate.js";
 
+function parseTrendMeta(debugPayloadJson: unknown): { trend_explanation: string | null; coverage_summary: Record<string, unknown> | null } {
+  if (typeof debugPayloadJson !== "string" || !debugPayloadJson.trim()) {
+    return { trend_explanation: null, coverage_summary: null };
+  }
+  try {
+    const parsed = JSON.parse(debugPayloadJson);
+    return {
+      trend_explanation: parsed?.trend?.trend_explanation ?? null,
+      coverage_summary: parsed?.trend?.coverage_summary ?? null,
+    };
+  } catch {
+    return { trend_explanation: null, coverage_summary: null };
+  }
+}
+
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "GET") {
@@ -44,6 +59,7 @@ export default async function handler(req: any, res: any) {
     res.status(200).json({
       ok: true,
       portfolios: portfolios.map((row: any) => ({
+        ...parseTrendMeta(row.debug_payload_json),
         portfolio_id: String(row.portfolio_id ?? ""),
         as_of_date: String(row.as_of_date ?? ""),
         return_20d: row.return_20d == null ? null : Number(row.return_20d),
