@@ -9,6 +9,7 @@ type SignalCompleteness = "full" | "partial" | "unavailable";
 type RelativeStrengthBucket = "strong" | "neutral" | "weak" | "unavailable";
 type DataQuality = "full" | "partial" | "estimated";
 type HistorySource = "positions_price_history" | "positions_snapshots" | "snapshots" | "unavailable";
+type CoverageMissingReason = "unresolved_symbol" | "no_history_rows" | "insufficient_20d" | "insufficient_65d" | "insufficient_200d" | "ok";
 
 type Point = { as_of_date: string; market_value: number; data_quality: DataQuality };
 
@@ -26,6 +27,36 @@ type TrendMetrics = {
   data_quality: DataQuality;
   relative_strength_rank: number | null;
   relative_strength_bucket: RelativeStrengthBucket;
+};
+
+type PositionCoverageDiagnostic = {
+  portfolio_id: string;
+  raw_symbol: string;
+  resolved_symbol: string | null;
+  history_symbol_used: string | null;
+  has_daily_price_history: boolean;
+  history_row_count: number;
+  first_history_date: string | null;
+  last_history_date: string | null;
+  enough_20d: boolean;
+  enough_65d: boolean;
+  enough_200d: boolean;
+  has_screen_snapshot: boolean;
+  missing_reason: CoverageMissingReason;
+};
+
+type PortfolioCoverageDiagnostic = {
+  positions_total: number;
+  positions_with_resolved_symbol: number;
+  positions_with_history: number;
+  positions_without_history: number;
+  positions_enough_20d: number;
+  positions_enough_65d: number;
+  positions_enough_200d: number;
+  coverage_ratio_20d: number;
+  coverage_ratio_65d: number;
+  coverage_ratio_200d: number;
+  trend_explanation: string;
 };
 
 function computeDirection(returnPct: number | null): Direction {
@@ -144,28 +175,53 @@ function isValidDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: string): Promise<Point[]> {
+async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: string): Promise<{
+  rows: Point[];
+  position_diagnostics: PositionCoverageDiagnostic[];
+  portfolio_coverage: PortfolioCoverageDiagnostic;
+}> {
   const positionsRows = await query(
-    `SELECT id, symbol, shares, entry_date, exited_at
+    `SELECT id, symbol, resolved_symbol, shares, entry_date, exited_at
      FROM ${tables.portfolioPositions}
      WHERE portfolio_id = ? AND COALESCE(shares, 0) > 0 AND symbol IS NOT NULL AND TRIM(symbol) <> ''`,
     [portfolioId]
-  ) as Array<{ symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown }>;
-
-  if (positionsRows.length === 0) return [];
+  ) as Array<{ symbol?: unknown; resolved_symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown }>;
 
   const positions = positionsRows
     .map((row) => ({
       symbol: String(row.symbol ?? "").trim().toUpperCase(),
+      resolved_symbol: String(row.resolved_symbol ?? "").trim().toUpperCase() || null,
       shares: Number(row.shares ?? NaN),
       entry_date: isValidDate(row.entry_date) ? row.entry_date.trim() : null,
       exited_at: isValidDate(row.exited_at) ? row.exited_at.trim() : null,
     }))
     .filter((row) => row.symbol && Number.isFinite(row.shares) && row.shares > 0);
 
-  if (positions.length === 0) return [];
+  if (positions.length === 0) {
+    return {
+      rows: [],
+      position_diagnostics: [],
+      portfolio_coverage: {
+        positions_total: 0,
+        positions_with_resolved_symbol: 0,
+        positions_with_history: 0,
+        positions_without_history: 0,
+        positions_enough_20d: 0,
+        positions_enough_65d: 0,
+        positions_enough_200d: 0,
+        coverage_ratio_20d: 0,
+        coverage_ratio_65d: 0,
+        coverage_ratio_200d: 0,
+        trend_explanation: "Trend unavailable: no active positions with valid symbol + shares.",
+      },
+    };
+  }
 
-  const symbols = Array.from(new Set(positions.map((p) => p.symbol)));
+  const symbols = Array.from(
+    new Set(
+      positions.flatMap((p) => (p.resolved_symbol && p.resolved_symbol !== p.symbol ? [p.resolved_symbol, p.symbol] : [p.symbol]))
+    )
+  );
   const placeholders = symbols.map(() => "?").join(", ");
   const prices = await query(
     `SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price
@@ -174,8 +230,6 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
      ORDER BY price_date ASC`,
     symbols
   ) as Array<{ symbol?: unknown; price_date?: unknown; close_price?: unknown }>;
-
-  if (prices.length === 0) return [];
 
   const bySymbol = new Map<string, Array<{ price_date: string; close_price: number }>>();
   for (const row of prices) {
@@ -189,9 +243,47 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
   }
 
   const aggregate = new Map<string, { market_value: number; contributors: number; expected: number }>();
+  const snapshotRows = symbols.length > 0
+    ? await query(`SELECT symbol FROM ${tables.priceScreenSnapshot} WHERE symbol IN (${placeholders})`, symbols)
+    : [];
+  const snapshotSymbolSet = new Set(snapshotRows.map((row: any) => String(row.symbol ?? "").trim().toUpperCase()).filter(Boolean));
+  const positionDiagnostics: PositionCoverageDiagnostic[] = [];
 
   for (const position of positions) {
-    const series = bySymbol.get(position.symbol) ?? [];
+    const historySymbolUsed = position.resolved_symbol ?? position.symbol;
+    const series = bySymbol.get(historySymbolUsed) ?? bySymbol.get(position.symbol) ?? [];
+    const hasHistory = series.length > 0;
+    const firstHistoryDate = hasHistory ? series[0]?.price_date ?? null : null;
+    const lastHistoryDate = hasHistory ? series[series.length - 1]?.price_date ?? null : null;
+    const enough20d = series.length >= 21;
+    const enough65d = series.length >= 66;
+    const enough200d = series.length >= 201;
+
+    const missingReason: CoverageMissingReason = (() => {
+      if (!position.resolved_symbol && !hasHistory) return "unresolved_symbol";
+      if (!hasHistory) return "no_history_rows";
+      if (!enough20d) return "insufficient_20d";
+      if (!enough65d) return "insufficient_65d";
+      if (!enough200d) return "insufficient_200d";
+      return "ok";
+    })();
+
+    positionDiagnostics.push({
+      portfolio_id: portfolioId,
+      raw_symbol: position.symbol,
+      resolved_symbol: position.resolved_symbol,
+      history_symbol_used: historySymbolUsed,
+      has_daily_price_history: hasHistory,
+      history_row_count: series.length,
+      first_history_date: firstHistoryDate,
+      last_history_date: lastHistoryDate,
+      enough_20d: enough20d,
+      enough_65d: enough65d,
+      enough_200d: enough200d,
+      has_screen_snapshot: snapshotSymbolSet.has(historySymbolUsed) || snapshotSymbolSet.has(position.symbol),
+      missing_reason: missingReason,
+    });
+
     if (series.length === 0) continue;
 
     for (const point of series) {
@@ -206,7 +298,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     }
   }
 
-  return Array.from(aggregate.entries())
+  const outputRows = Array.from(aggregate.entries())
     .map(([as_of_date, value]) => ({
       as_of_date,
       market_value: value.market_value,
@@ -214,6 +306,36 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     }))
     .filter((row) => Number.isFinite(row.market_value) && row.market_value > 0)
     .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+
+  const totals = {
+    positions_total: positionDiagnostics.length,
+    positions_with_resolved_symbol: positionDiagnostics.filter((row) => row.resolved_symbol !== null).length,
+    positions_with_history: positionDiagnostics.filter((row) => row.has_daily_price_history).length,
+    positions_without_history: positionDiagnostics.filter((row) => !row.has_daily_price_history).length,
+    positions_enough_20d: positionDiagnostics.filter((row) => row.enough_20d).length,
+    positions_enough_65d: positionDiagnostics.filter((row) => row.enough_65d).length,
+    positions_enough_200d: positionDiagnostics.filter((row) => row.enough_200d).length,
+  };
+  const denominator = totals.positions_total > 0 ? totals.positions_total : 1;
+  const coverage65 = totals.positions_enough_65d / denominator;
+  const coverage200 = totals.positions_enough_200d / denominator;
+  const explanation = coverage65 === 0
+    ? `Trend unavailable: ${totals.positions_enough_65d}/${totals.positions_total} positions have ≥65 days history.`
+    : coverage200 < 1
+      ? `Trend partial: ${totals.positions_with_resolved_symbol}/${totals.positions_total} positions resolved, ${totals.positions_enough_200d}/${totals.positions_total} positions have ≥200 days history.`
+      : `Trend coverage OK: ${totals.positions_with_history}/${totals.positions_total} positions have daily price history.`;
+
+  return {
+    rows: outputRows,
+    position_diagnostics: positionDiagnostics,
+    portfolio_coverage: {
+      ...totals,
+      coverage_ratio_20d: totals.positions_enough_20d / denominator,
+      coverage_ratio_65d: coverage65,
+      coverage_ratio_200d: coverage200,
+      trend_explanation: explanation,
+    },
+  };
 }
 
 async function loadPortfolioHistorySeriesFromPositionsSnapshots(portfolioId: string): Promise<Point[]> {
@@ -254,17 +376,35 @@ async function loadPortfolioHistorySeriesFromSnapshots(portfolioId: string): Pro
     .filter((row) => isValidDate(row.as_of_date) && Number.isFinite(row.market_value) && row.market_value > 0);
 }
 
-async function loadPortfolioHistorySeries(portfolioId: string): Promise<{ source: HistorySource; rows: Point[] }> {
+async function loadPortfolioHistorySeries(portfolioId: string): Promise<{
+  source: HistorySource;
+  rows: Point[];
+  position_diagnostics: PositionCoverageDiagnostic[];
+  portfolio_coverage: PortfolioCoverageDiagnostic | null;
+}> {
   const hasPositions = await tableExists(tables.portfolioPositions);
+  let positionsCoverage: { position_diagnostics: PositionCoverageDiagnostic[]; portfolio_coverage: PortfolioCoverageDiagnostic | null } = {
+    position_diagnostics: [],
+    portfolio_coverage: null,
+  };
   if (hasPositions) {
-    const priceHistoryRows = await loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId);
-    if (priceHistoryRows.length > 0) {
-      return { source: "positions_price_history", rows: priceHistoryRows };
+    const priceHistoryLoaded = await loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId);
+    positionsCoverage = {
+      position_diagnostics: priceHistoryLoaded.position_diagnostics,
+      portfolio_coverage: priceHistoryLoaded.portfolio_coverage,
+    };
+    if (priceHistoryLoaded.rows.length > 0) {
+      return { source: "positions_price_history", ...priceHistoryLoaded };
     }
 
     const positionSnapshotRows = await loadPortfolioHistorySeriesFromPositionsSnapshots(portfolioId);
     if (positionSnapshotRows.length > 0) {
-      return { source: "positions_snapshots", rows: positionSnapshotRows };
+      return {
+        source: "positions_snapshots",
+        rows: positionSnapshotRows,
+        position_diagnostics: priceHistoryLoaded.position_diagnostics,
+        portfolio_coverage: priceHistoryLoaded.portfolio_coverage,
+      };
     }
   }
 
@@ -272,11 +412,11 @@ async function loadPortfolioHistorySeries(portfolioId: string): Promise<{ source
   if (hasSnapshots) {
     const snapshotRows = await loadPortfolioHistorySeriesFromSnapshots(portfolioId);
     if (snapshotRows.length > 0) {
-      return { source: "snapshots", rows: snapshotRows };
+      return { source: "snapshots", rows: snapshotRows, ...positionsCoverage };
     }
   }
 
-  return { source: "unavailable", rows: [] };
+  return { source: "unavailable", rows: [], ...positionsCoverage };
 }
 
 function computeTrendMetrics(series: Point[]): TrendMetrics {
@@ -359,6 +499,8 @@ export async function buildPortfolioHistory() {
   const portfolios = await listPortfolioConfigs();
   const byPortfolioSeries = new Map<string, Point[]>();
   const sourceByPortfolio = new Map<string, HistorySource>();
+  const coverageByPortfolio = new Map<string, PortfolioCoverageDiagnostic | null>();
+  const positionCoverageByPortfolio = new Map<string, PositionCoverageDiagnostic[]>();
 
   const trendItems: Array<{ portfolio: PortfolioAdminConfig; metrics: TrendMetrics }> = [];
 
@@ -366,6 +508,8 @@ export async function buildPortfolioHistory() {
     const loaded = await loadPortfolioHistorySeries(portfolio.portfolio_id);
     sourceByPortfolio.set(portfolio.portfolio_id, loaded.source);
     byPortfolioSeries.set(portfolio.portfolio_id, loaded.rows);
+    coverageByPortfolio.set(portfolio.portfolio_id, loaded.portfolio_coverage);
+    positionCoverageByPortfolio.set(portfolio.portfolio_id, loaded.position_diagnostics);
 
     await execute(`DELETE FROM ${tables.portfolioHistoryDaily} WHERE portfolio_id = ?`, [portfolio.portfolio_id]);
 
@@ -496,6 +640,12 @@ export async function buildPortfolioHistory() {
 
       debugPayload.trend = {
         history_source: sourceByPortfolio.get(item.portfolio.portfolio_id) ?? "unavailable",
+        coverage: coverageByPortfolio.get(item.portfolio.portfolio_id) ?? null,
+        positions: positionCoverageByPortfolio.get(item.portfolio.portfolio_id) ?? [],
+        trend_explanation: coverageByPortfolio.get(item.portfolio.portfolio_id)?.trend_explanation
+          ?? (item.metrics.trend_status === "unavailable"
+            ? "Trend unavailable: insufficient portfolio history."
+            : "Trend available from portfolio history."),
         available_days: item.metrics.available_days,
         return_20d: item.metrics.return_20d,
         return_65d: item.metrics.return_65d,
@@ -546,6 +696,12 @@ export async function buildPortfolioHistory() {
     portfolios: trendItems.map((item) => ({
       portfolio_id: item.portfolio.portfolio_id,
       history_source: sourceByPortfolio.get(item.portfolio.portfolio_id) ?? "unavailable",
+      coverage: coverageByPortfolio.get(item.portfolio.portfolio_id) ?? null,
+      positions: positionCoverageByPortfolio.get(item.portfolio.portfolio_id) ?? [],
+      trend_explanation: coverageByPortfolio.get(item.portfolio.portfolio_id)?.trend_explanation
+        ?? (item.metrics.trend_status === "unavailable"
+          ? "Trend unavailable: insufficient portfolio history."
+          : "Trend available from portfolio history."),
       ...item.metrics,
     })),
     total: {
