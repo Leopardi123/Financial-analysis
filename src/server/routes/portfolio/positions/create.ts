@@ -3,6 +3,7 @@ import { createPortfolioPosition } from "../../../../lib/portfolio-positions/rep
 import { normalizePositionPayload } from "../../../../lib/portfolio-positions/validation.js";
 import { buildPortfolioSnapshots } from "../../../../lib/portfolio-snapshots/build.js";
 import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
+import { resolvePositionSymbol } from "../../../../lib/portfolio-positions/symbolResolution.js";
 
 export default async function handler(req: any, res: any) {
   try {
@@ -18,10 +19,17 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    const symbolResolution = await resolvePositionSymbol(normalized.value.symbol);
+    normalized.value.resolved_symbol = symbolResolution.resolved_symbol;
+
     await createPortfolioPosition(normalized.value);
     await buildPortfolioSnapshots();
     await buildPortfolioHistory();
-    res.status(200).json({ ok: true });
+    res.status(200).json({
+      ok: true,
+      symbol_resolution: symbolResolution,
+      warnings: symbolResolution.warnings,
+    });
   } catch (error) {
     res.status(500).json({ ok: false, error: (error as Error).message });
   }

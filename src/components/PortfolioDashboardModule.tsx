@@ -25,6 +25,7 @@ type PortfolioRecord = {
   medium_direction?: string | null;
   long_direction?: string | null;
   trend_status: string | null;
+  trend_completeness?: string | null;
   relative_strength_bucket: string | null;
   annualized_vol_65d: NullableNumber;
   current_drawdown_pct: NullableNumber;
@@ -40,6 +41,22 @@ type PortfolioRecord = {
   positions_active_count?: NullableNumber;
   positions_valued_count?: NullableNumber;
   positions_unvalued_count?: NullableNumber;
+  trend_debug?: {
+    attempted?: boolean;
+    available_days?: NullableNumber;
+    required_days_for_partial?: number;
+    required_days_for_full?: number;
+    return_20d?: NullableNumber;
+    return_65d?: NullableNumber;
+    return_200d?: NullableNumber;
+    short_direction?: string | null;
+    medium_direction?: string | null;
+    long_direction?: string | null;
+    trend_status?: string | null;
+    trend_completeness?: string | null;
+    reason?: string | null;
+    trend_explanation?: string | null;
+  } | null;
 };
 
 type PortfolioConfig = {
@@ -210,6 +227,7 @@ function debugEnabled(): boolean {
 
 type LoadErrorDetail = {
   message: string;
+  type?: string;
   debugMessage?: string;
   stage?: string;
   trace?: Array<{ stage: string; ok: boolean; duration_ms: number; error?: string }>;
@@ -220,6 +238,14 @@ function normalizeClientErrorMessage(message: string | null | undefined, fallbac
   if (!normalized) return fallback;
   if (normalized.includes("did not match the expected pattern")) return fallback;
   return normalized;
+}
+
+function toUserFacingPortfolioErrorMessage(message: string | null | undefined): string {
+  const normalized = (message ?? "").trim();
+  if (!normalized) return "Portfolio dashboard could not be loaded.";
+  if (normalized.includes("portfolio_dashboard_timeout_")) return "Portfolio dashboard timed out before completion.";
+  if (normalized.toLowerCase().includes("failed to fetch")) return "Portfolio dashboard could not be loaded. Try again.";
+  return "Portfolio dashboard could not be loaded.";
 }
 
 async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<T> {
@@ -349,7 +375,7 @@ export default function PortfolioDashboardModule() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AdminFormState>(emptyForm);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [fatalError, setFatalError] = useState<LoadErrorDetail | null>(null);
   const [overviewError, setOverviewError] = useState<LoadErrorDetail | null>(null);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -360,7 +386,7 @@ export default function PortfolioDashboardModule() {
 
   const loadAll = async () => {
     setLoading(true);
-    setError(null);
+    setFatalError(null);
     setOverviewError(null);
 
     const [overviewResult, adminResult, validateResult] = await Promise.allSettled([
@@ -395,6 +421,7 @@ export default function PortfolioDashboardModule() {
       const timeout = String(rawMessage).includes("portfolio_dashboard_timeout_");
       setOverviewError({
         message: timeout ? "Portfolio dashboard timed out before completion." : "Portfolio dashboard could not be loaded.",
+        type: serverError?.type,
         debugMessage: serverError?.debugMessage ?? normalizeClientErrorMessage(rawMessage, "Portfolio dashboard could not be loaded."),
         stage: serverError?.stage,
         trace: serverError?.trace,
@@ -407,7 +434,13 @@ export default function PortfolioDashboardModule() {
   useEffect(() => {
     void loadAll().catch((loadErr) => {
       const raw = loadErr instanceof Error ? loadErr.message : String(loadErr ?? "");
-      setError(normalizeClientErrorMessage(raw, "Portfolio dashboard could not be loaded."));
+      setFatalError({
+        message: toUserFacingPortfolioErrorMessage(raw),
+        type: "portfolio_overview_load_error",
+        debugMessage: normalizeClientErrorMessage(raw, "Portfolio dashboard could not be loaded."),
+        stage: undefined,
+        trace: [],
+      });
       setLoading(false);
     });
   }, [debugMode]);
@@ -488,14 +521,20 @@ export default function PortfolioDashboardModule() {
 
   const buildPortfolioData = async () => {
     setBuildingData(true);
-    setError(null);
+    setFatalError(null);
     setOverviewError(null);
     try {
       await fetchJsonWithTimeout<{ ok: boolean }>(`/api/portfolio/snapshots/build${debugMode ? "?debug=1" : ""}`, 15_000);
       await loadAll();
     } catch (buildErr) {
       const raw = buildErr instanceof Error ? buildErr.message : String(buildErr ?? "");
-      setError(normalizeClientErrorMessage(raw, "Portfolio data build failed."));
+      setFatalError({
+        message: "Portfolio data build failed. Try again.",
+        type: "portfolio_build_error",
+        debugMessage: normalizeClientErrorMessage(raw, "Portfolio data build failed."),
+        stage: undefined,
+        trace: [],
+      });
     } finally {
       setBuildingData(false);
     }
@@ -528,29 +567,49 @@ export default function PortfolioDashboardModule() {
       </div>
 
       {loading && <p className="bread">Loading portfolio dashboard…</p>}
-      {error && <p className="portfolio-error">{error}</p>}
-      {!error && overviewError && (
+      {fatalError && (
+        <div className="portfolio-error">
+          <p>{fatalError.message}</p>
+          <button type="button" onClick={() => { void loadAll(); }}>Retry</button>
+          {debugMode && (
+            <details className="portfolio-debug-wrap">
+              <summary>Debug details</summary>
+              <div className="portfolio-debug-grid">
+                <div><strong>type:</strong> {fatalError.type ?? "n/a"}</div>
+                <div><strong>stage:</strong> {fatalError.stage ?? "n/a"}</div>
+                <div><strong>debugMessage:</strong> {fatalError.debugMessage ?? "n/a"}</div>
+              </div>
+              <pre>{JSON.stringify({ trace: fatalError.trace ?? [] }, null, 2)}</pre>
+            </details>
+          )}
+        </div>
+      )}
+      {!fatalError && overviewError && (
         <div className="portfolio-error">
           <p>{overviewError.message}</p>
           <button type="button" onClick={() => { void loadAll(); }}>Retry</button>
           {debugMode && (
-            <pre>{JSON.stringify({
-              stage: overviewError.stage ?? null,
-              debugMessage: overviewError.debugMessage ?? null,
-              trace: overviewError.trace ?? [],
-            }, null, 2)}</pre>
+            <details className="portfolio-debug-wrap">
+              <summary>Debug details</summary>
+              <div className="portfolio-debug-grid">
+                <div><strong>type:</strong> {overviewError.type ?? "n/a"}</div>
+                <div><strong>stage:</strong> {overviewError.stage ?? "n/a"}</div>
+                <div><strong>debugMessage:</strong> {overviewError.debugMessage ?? "n/a"}</div>
+              </div>
+              <pre>{JSON.stringify({ trace: overviewError.trace ?? [] }, null, 2)}</pre>
+            </details>
           )}
         </div>
       )}
 
-      {!loading && !error && setupState === "no_config" && (
+      {!loading && !fatalError && setupState === "no_config" && (
         <div className="portfolio-empty-state">
           <h4>No portfolios configured yet.</h4>
           <p>Create portfolios in Portfolio Admin to begin.</p>
         </div>
       )}
 
-      {!loading && !error && setupState === "configured_no_data" && (
+      {!loading && !fatalError && setupState === "configured_no_data" && (
         <div className="portfolio-empty-state">
           <h4>Portfolios configured, awaiting holdings / snapshot data.</h4>
           <p>Portfolio data not yet built.</p>
@@ -567,7 +626,7 @@ export default function PortfolioDashboardModule() {
         </div>
       )}
 
-      {!loading && !error && !overview && adminList.length > 0 && (
+      {!loading && !fatalError && !overview && adminList.length > 0 && (
         <div className="portfolio-empty-state">
           <h4>Portfolio dashboard temporarily unavailable.</h4>
           <p>Admin controls are still available below.</p>
@@ -578,7 +637,7 @@ export default function PortfolioDashboardModule() {
         </div>
       )}
 
-      {!loading && !error && (setupState === "configured_positions_no_snapshot" || setupState === "partial" || setupState === "live") && overview && (
+      {!loading && !fatalError && (setupState === "configured_positions_no_snapshot" || setupState === "partial" || setupState === "live") && overview && (
         <>
           <div className="portfolio-kpi-row">
             <span>As of: {overview.as_of_date ?? "Unavailable"}</span>
@@ -671,7 +730,12 @@ export default function PortfolioDashboardModule() {
                         {label(portfolio.relative_strength_bucket)}
                       </span>
                     </div>
-                    <div>Trend completeness: {label(portfolio.signal_completeness)}</div>
+                    <div>Trend completeness: {label(portfolio.trend_completeness ?? portfolio.signal_completeness)}</div>
+                    {portfolio.trend_debug?.trend_explanation
+                      ? <div>Trend reason: {portfolio.trend_debug.trend_explanation}</div>
+                      : portfolio.trend_debug?.reason
+                        ? <div>Trend reason: {label(portfolio.trend_debug.reason)}</div>
+                        : null}
                   </div>
                 </details>
               </details>
@@ -680,7 +744,7 @@ export default function PortfolioDashboardModule() {
         </>
       )}
 
-      {!loading && !error && adminList.length > 0 && (
+      {!loading && !fatalError && adminList.length > 0 && (
         <PortfolioPositionsAdmin portfolios={adminList.map((item) => ({
           portfolio_id: item.portfolio_id,
           portfolio_name: item.portfolio_name,

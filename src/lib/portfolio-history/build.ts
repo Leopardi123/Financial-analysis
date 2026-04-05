@@ -11,6 +11,35 @@ type DataQuality = "full" | "partial" | "estimated";
 type HistorySource = "positions_price_history" | "positions_snapshots" | "snapshots" | "unavailable";
 
 type Point = { as_of_date: string; market_value: number; data_quality: DataQuality };
+type MissingReason = "unresolved_symbol" | "no_history_rows" | "insufficient_20d" | "insufficient_65d" | "insufficient_200d" | "ok";
+type PositionCoverageDiagnostic = {
+  portfolio_id: string;
+  raw_symbol: string;
+  resolved_symbol: string | null;
+  history_symbol_used: string | null;
+  has_daily_price_history: boolean;
+  has_screen_snapshot: boolean;
+  history_row_count: number;
+  first_history_date: string | null;
+  last_history_date: string | null;
+  enough_20d: boolean;
+  enough_65d: boolean;
+  enough_200d: boolean;
+  missing_reason: MissingReason;
+};
+
+type PortfolioCoverageSummary = {
+  positions_total: number;
+  positions_with_resolved_symbol: number;
+  positions_with_history: number;
+  positions_without_history: number;
+  positions_enough_20d: number;
+  positions_enough_65d: number;
+  positions_enough_200d: number;
+  coverage_ratio_20d: number | null;
+  coverage_ratio_65d: number | null;
+  coverage_ratio_200d: number | null;
+};
 
 type TrendMetrics = {
   available_days: number;
@@ -144,29 +173,74 @@ function isValidDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: string): Promise<Point[]> {
+function ratio(numerator: number, denominator: number): number | null {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return null;
+  return numerator / denominator;
+}
+
+function summarizeCoverage(rows: PositionCoverageDiagnostic[]): PortfolioCoverageSummary {
+  const total = rows.length;
+  const positionsWithHistory = rows.filter((row) => row.has_daily_price_history).length;
+  const positionsWithResolved = rows.filter((row) => !!row.resolved_symbol).length;
+  const enough20 = rows.filter((row) => row.enough_20d).length;
+  const enough65 = rows.filter((row) => row.enough_65d).length;
+  const enough200 = rows.filter((row) => row.enough_200d).length;
+  return {
+    positions_total: total,
+    positions_with_resolved_symbol: positionsWithResolved,
+    positions_with_history: positionsWithHistory,
+    positions_without_history: Math.max(0, total - positionsWithHistory),
+    positions_enough_20d: enough20,
+    positions_enough_65d: enough65,
+    positions_enough_200d: enough200,
+    coverage_ratio_20d: ratio(enough20, total),
+    coverage_ratio_65d: ratio(enough65, total),
+    coverage_ratio_200d: ratio(enough200, total),
+  };
+}
+
+function buildCoverageExplanation(coverage: PortfolioCoverageSummary, trendCompleteness: SignalCompleteness): string {
+  if (coverage.positions_total === 0) return "Trend unavailable: no active positions found.";
+  if (trendCompleteness === "unavailable") {
+    return `Trend unavailable: ${coverage.positions_enough_65d}/${coverage.positions_total} positions have ≥65 days history.`;
+  }
+  if (trendCompleteness === "partial") {
+    return `Trend partial: ${coverage.positions_with_resolved_symbol}/${coverage.positions_total} positions resolved, ${coverage.positions_enough_200d}/${coverage.positions_total} positions have ≥200 days history.`;
+  }
+  return `Trend full: ${coverage.positions_enough_200d}/${coverage.positions_total} positions have ≥200 days history coverage.`;
+}
+
+async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: string): Promise<{ rows: Point[]; coverage: PositionCoverageDiagnostic[]; coverage_summary: PortfolioCoverageSummary }> {
   const positionsRows = await query(
-    `SELECT id, symbol, shares, entry_date, exited_at
+    `SELECT id, symbol, resolved_symbol, shares, entry_date, exited_at
      FROM ${tables.portfolioPositions}
      WHERE portfolio_id = ? AND COALESCE(shares, 0) > 0 AND symbol IS NOT NULL AND TRIM(symbol) <> ''`,
     [portfolioId]
-  ) as Array<{ symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown }>;
+  ) as Array<{ symbol?: unknown; resolved_symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown }>;
 
-  if (positionsRows.length === 0) return [];
+  if (positionsRows.length === 0) {
+    return { rows: [], coverage: [], coverage_summary: summarizeCoverage([]) };
+  }
 
   const positions = positionsRows
     .map((row) => ({
       symbol: String(row.symbol ?? "").trim().toUpperCase(),
+      resolved_symbol: row.resolved_symbol == null ? null : String(row.resolved_symbol).trim().toUpperCase(),
       shares: Number(row.shares ?? NaN),
       entry_date: isValidDate(row.entry_date) ? row.entry_date.trim() : null,
       exited_at: isValidDate(row.exited_at) ? row.exited_at.trim() : null,
     }))
     .filter((row) => row.symbol && Number.isFinite(row.shares) && row.shares > 0);
 
-  if (positions.length === 0) return [];
+  if (positions.length === 0) {
+    return { rows: [], coverage: [], coverage_summary: summarizeCoverage([]) };
+  }
 
-  const symbols = Array.from(new Set(positions.map((p) => p.symbol)));
+  const symbols = Array.from(new Set(positions.map((p) => p.resolved_symbol ?? p.symbol).filter(Boolean)));
   const placeholders = symbols.map(() => "?").join(", ");
+  if (!placeholders) {
+    return { rows: [], coverage: [], coverage_summary: summarizeCoverage([]) };
+  }
   const prices = await query(
     `SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price
      FROM ${tables.dailyPriceHistory}
@@ -174,8 +248,6 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
      ORDER BY price_date ASC`,
     symbols
   ) as Array<{ symbol?: unknown; price_date?: unknown; close_price?: unknown }>;
-
-  if (prices.length === 0) return [];
 
   const bySymbol = new Map<string, Array<{ price_date: string; close_price: number }>>();
   for (const row of prices) {
@@ -188,10 +260,58 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     bySymbol.set(symbol, bucket);
   }
 
+  const snapshotRows = await query(
+    `SELECT symbol
+     FROM ${tables.priceScreenSnapshot}
+     WHERE symbol IN (${placeholders})`,
+    symbols,
+  ) as Array<{ symbol?: unknown }>;
+  const hasSnapshotBySymbol = new Set(
+    snapshotRows
+      .map((row) => String(row.symbol ?? "").trim().toUpperCase())
+      .filter(Boolean),
+  );
+
+  const coverage: PositionCoverageDiagnostic[] = positions.map((position) => {
+    const historySymbolUsed = position.resolved_symbol ?? position.symbol;
+    const series = bySymbol.get(historySymbolUsed) ?? [];
+    const rowCount = series.length;
+    const enough20 = rowCount >= 21;
+    const enough65 = rowCount >= 66;
+    const enough200 = rowCount >= 201;
+    const missingReason: MissingReason = !position.resolved_symbol
+      ? "unresolved_symbol"
+      : rowCount <= 0
+        ? "no_history_rows"
+        : !enough20
+          ? "insufficient_20d"
+          : !enough65
+            ? "insufficient_65d"
+            : !enough200
+              ? "insufficient_200d"
+              : "ok";
+    return {
+      portfolio_id: portfolioId,
+      raw_symbol: position.symbol,
+      resolved_symbol: position.resolved_symbol,
+      history_symbol_used: historySymbolUsed,
+      has_daily_price_history: rowCount > 0,
+      has_screen_snapshot: hasSnapshotBySymbol.has(historySymbolUsed),
+      history_row_count: rowCount,
+      first_history_date: series[0]?.price_date ?? null,
+      last_history_date: series[rowCount - 1]?.price_date ?? null,
+      enough_20d: enough20,
+      enough_65d: enough65,
+      enough_200d: enough200,
+      missing_reason: missingReason,
+    };
+  });
+
   const aggregate = new Map<string, { market_value: number; contributors: number; expected: number }>();
 
   for (const position of positions) {
-    const series = bySymbol.get(position.symbol) ?? [];
+    const historySymbol = position.resolved_symbol ?? position.symbol;
+    const series = bySymbol.get(historySymbol) ?? [];
     if (series.length === 0) continue;
 
     for (const point of series) {
@@ -206,7 +326,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     }
   }
 
-  return Array.from(aggregate.entries())
+  const rows = Array.from(aggregate.entries())
     .map(([as_of_date, value]) => ({
       as_of_date,
       market_value: value.market_value,
@@ -214,6 +334,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     }))
     .filter((row) => Number.isFinite(row.market_value) && row.market_value > 0)
     .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+  return { rows, coverage, coverage_summary: summarizeCoverage(coverage) };
 }
 
 async function loadPortfolioHistorySeriesFromPositionsSnapshots(portfolioId: string): Promise<Point[]> {
@@ -254,17 +375,27 @@ async function loadPortfolioHistorySeriesFromSnapshots(portfolioId: string): Pro
     .filter((row) => isValidDate(row.as_of_date) && Number.isFinite(row.market_value) && row.market_value > 0);
 }
 
-async function loadPortfolioHistorySeries(portfolioId: string): Promise<{ source: HistorySource; rows: Point[] }> {
+async function loadPortfolioHistorySeries(portfolioId: string): Promise<{
+  source: HistorySource;
+  rows: Point[];
+  coverage: PositionCoverageDiagnostic[];
+  coverage_summary: PortfolioCoverageSummary;
+}> {
   const hasPositions = await tableExists(tables.portfolioPositions);
   if (hasPositions) {
     const priceHistoryRows = await loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId);
-    if (priceHistoryRows.length > 0) {
-      return { source: "positions_price_history", rows: priceHistoryRows };
+    if (priceHistoryRows.rows.length > 0) {
+      return { source: "positions_price_history", ...priceHistoryRows };
     }
 
     const positionSnapshotRows = await loadPortfolioHistorySeriesFromPositionsSnapshots(portfolioId);
     if (positionSnapshotRows.length > 0) {
-      return { source: "positions_snapshots", rows: positionSnapshotRows };
+      return {
+        source: "positions_snapshots",
+        rows: positionSnapshotRows,
+        coverage: priceHistoryRows.coverage,
+        coverage_summary: priceHistoryRows.coverage_summary,
+      };
     }
   }
 
@@ -272,11 +403,16 @@ async function loadPortfolioHistorySeries(portfolioId: string): Promise<{ source
   if (hasSnapshots) {
     const snapshotRows = await loadPortfolioHistorySeriesFromSnapshots(portfolioId);
     if (snapshotRows.length > 0) {
-      return { source: "snapshots", rows: snapshotRows };
+      return {
+        source: "snapshots",
+        rows: snapshotRows,
+        coverage: [],
+        coverage_summary: summarizeCoverage([]),
+      };
     }
   }
 
-  return { source: "unavailable", rows: [] };
+  return { source: "unavailable", rows: [], coverage: [], coverage_summary: summarizeCoverage([]) };
 }
 
 function computeTrendMetrics(series: Point[]): TrendMetrics {
@@ -360,7 +496,13 @@ export async function buildPortfolioHistory() {
   const byPortfolioSeries = new Map<string, Point[]>();
   const sourceByPortfolio = new Map<string, HistorySource>();
 
-  const trendItems: Array<{ portfolio: PortfolioAdminConfig; metrics: TrendMetrics }> = [];
+  const trendItems: Array<{
+    portfolio: PortfolioAdminConfig;
+    metrics: TrendMetrics;
+    coverage: PositionCoverageDiagnostic[];
+    coverage_summary: PortfolioCoverageSummary;
+    trend_explanation: string;
+  }> = [];
 
   for (const portfolio of portfolios) {
     const loaded = await loadPortfolioHistorySeries(portfolio.portfolio_id);
@@ -392,7 +534,14 @@ export async function buildPortfolioHistory() {
     }
 
     const metrics = computeTrendMetrics(loaded.rows);
-    trendItems.push({ portfolio, metrics });
+    const trendExplanation = buildCoverageExplanation(loaded.coverage_summary, metrics.trend_completeness);
+    trendItems.push({
+      portfolio,
+      metrics,
+      coverage: loaded.coverage,
+      coverage_summary: loaded.coverage_summary,
+      trend_explanation: trendExplanation,
+    });
   }
 
   applyRelativeStrength(
@@ -473,6 +622,27 @@ export async function buildPortfolioHistory() {
   }
 
   const totalMetrics = computeTrendMetrics(totalSeries);
+  const historyLatestDate = totalEnriched.length > 0 ? totalEnriched[totalEnriched.length - 1].as_of_date : null;
+  const builtAtIso = new Date().toISOString();
+
+  await execute(
+    `INSERT INTO ${tables.portfolioHistoryBuildState}
+      (scope, last_built_at, latest_history_date, history_days_available, built_portfolio_count, updated_at)
+     VALUES ('default', ?, ?, ?, ?, ?)
+     ON CONFLICT(scope) DO UPDATE SET
+      last_built_at = excluded.last_built_at,
+      latest_history_date = excluded.latest_history_date,
+      history_days_available = excluded.history_days_available,
+      built_portfolio_count = excluded.built_portfolio_count,
+      updated_at = excluded.updated_at`,
+    [
+      builtAtIso,
+      historyLatestDate,
+      totalSeries.length,
+      portfolios.length,
+      builtAtIso,
+    ]
+  );
 
   const latestSnapshotDateRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
   const latestSnapshotDate = String(latestSnapshotDateRows[0]?.as_of_date ?? "").trim();
@@ -509,6 +679,9 @@ export async function buildPortfolioHistory() {
         trend_completeness: item.metrics.trend_completeness,
         signal_completeness: item.metrics.signal_completeness,
         data_quality: item.metrics.data_quality,
+        trend_explanation: item.trend_explanation,
+        coverage_summary: item.coverage_summary,
+        positions: item.coverage,
       };
 
       await execute(
@@ -546,6 +719,9 @@ export async function buildPortfolioHistory() {
     portfolios: trendItems.map((item) => ({
       portfolio_id: item.portfolio.portfolio_id,
       history_source: sourceByPortfolio.get(item.portfolio.portfolio_id) ?? "unavailable",
+      trend_explanation: item.trend_explanation,
+      coverage_summary: item.coverage_summary,
+      positions: item.coverage,
       ...item.metrics,
     })),
     total: {
@@ -566,6 +742,8 @@ export async function buildPortfolioHistory() {
       trend_status: totalMetrics.trend_status,
       trend_completeness: totalMetrics.trend_completeness,
       data_quality: totalMetrics.data_quality,
+      last_built_at: builtAtIso,
+      latest_history_date: historyLatestDate,
     },
   };
 }
