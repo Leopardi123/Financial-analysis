@@ -90,7 +90,13 @@ type PortfolioOverviewResponse = {
   portfolios: PortfolioRecord[];
   setup?: { setup_state: SetupState };
   debug?: unknown;
-  error?: string | { type?: string; message?: string; debugMessage?: string };
+  error?: string | {
+    type?: string;
+    message?: string;
+    debugMessage?: string;
+    stage?: string;
+    trace?: Array<{ stage: string; ok: boolean; duration_ms: number; error?: string }>;
+  };
 };
 
 type AdminValidateResponse = {
@@ -190,6 +196,40 @@ function debugEnabled(): boolean {
   return new URLSearchParams(window.location.search).get("debug") === "1";
 }
 
+type LoadErrorDetail = {
+  message: string;
+  debugMessage?: string;
+  stage?: string;
+  trace?: Array<{ stage: string; ok: boolean; duration_ms: number; error?: string }>;
+};
+
+function normalizeClientErrorMessage(message: string | null | undefined, fallback: string): string {
+  const normalized = (message ?? "").trim();
+  if (!normalized) return fallback;
+  if (normalized.includes("did not match the expected pattern")) return fallback;
+  return normalized;
+}
+
+async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const json = (await response.json()) as T;
+    if (!response.ok) {
+      throw { response, json };
+    }
+    return json;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`portfolio_dashboard_timeout_${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function label(value: string | null): string {
   if (!value) return "Unavailable";
   return value.replace(/_/g, " ");
@@ -268,6 +308,7 @@ export default function PortfolioDashboardModule() {
   const [form, setForm] = useState<AdminFormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [overviewError, setOverviewError] = useState<LoadErrorDetail | null>(null);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
@@ -276,34 +317,54 @@ export default function PortfolioDashboardModule() {
 
   const loadAll = async () => {
     setLoading(true);
-    const [overviewRes, adminRes, validateRes] = await Promise.all([
-      fetch(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`),
-      fetch(`/api/portfolio/admin/list`),
-      fetch(`/api/portfolio/admin/validate`),
+    setError(null);
+    setOverviewError(null);
+
+    const [overviewResult, adminResult, validateResult] = await Promise.allSettled([
+      fetchJsonWithTimeout<PortfolioOverviewResponse>(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`, 12_000),
+      fetchJsonWithTimeout<{ ok: boolean; portfolios: PortfolioConfig[] }>(`/api/portfolio/admin/list`, 8_000),
+      fetchJsonWithTimeout<AdminValidateResponse>(`/api/portfolio/admin/validate`, 8_000),
     ]);
 
-    const overviewJson = (await overviewRes.json()) as PortfolioOverviewResponse;
-    const adminJson = (await adminRes.json()) as { ok: boolean; portfolios: PortfolioConfig[] };
-    const validateJson = (await validateRes.json()) as AdminValidateResponse;
-
-    if (!overviewRes.ok || !overviewJson.ok) {
-      const errorMessage = typeof overviewJson.error === "string"
-        ? overviewJson.error
-        : (debugMode ? overviewJson.error?.debugMessage : overviewJson.error?.message);
-      throw new Error(errorMessage ?? "Failed to load overview");
+    if (adminResult.status === "fulfilled" && adminResult.value.ok) {
+      setAdminList(adminResult.value.portfolios);
+    } else {
+      throw new Error("Failed to load portfolio admin list.");
     }
-    if (!adminRes.ok || !adminJson.ok) throw new Error("Failed to load portfolio admin list");
-    if (!validateRes.ok || !validateJson.ok) throw new Error("Failed to load portfolio validation");
 
-    setOverview(overviewJson);
-    setAdminList(adminJson.portfolios);
-    setAdminValidation(validateJson);
+    if (validateResult.status === "fulfilled" && validateResult.value.ok) {
+      setAdminValidation(validateResult.value);
+    } else {
+      throw new Error("Failed to load portfolio validation.");
+    }
+
+    if (overviewResult.status === "fulfilled" && overviewResult.value.ok) {
+      setOverview(overviewResult.value);
+      setOverviewError(null);
+    } else {
+      setOverview(null);
+      const reason = overviewResult.status === "rejected" ? overviewResult.reason : overviewResult.value;
+      const maybePayload = (reason as any)?.json as PortfolioOverviewResponse | undefined;
+      const serverError = maybePayload?.error && typeof maybePayload.error === "object" ? maybePayload.error : undefined;
+      const rawMessage = reason instanceof Error
+        ? reason.message
+        : (serverError?.debugMessage ?? serverError?.message ?? "Failed to load overview");
+      const timeout = String(rawMessage).includes("portfolio_dashboard_timeout_");
+      setOverviewError({
+        message: timeout ? "Portfolio dashboard timed out before completion." : "Portfolio dashboard could not be loaded.",
+        debugMessage: serverError?.debugMessage ?? normalizeClientErrorMessage(rawMessage, "Portfolio dashboard could not be loaded."),
+        stage: serverError?.stage,
+        trace: serverError?.trace,
+      });
+    }
+
     setLoading(false);
   };
 
   useEffect(() => {
     void loadAll().catch((loadErr) => {
-      setError(loadErr instanceof Error ? loadErr.message : "Failed to load portfolio dashboard");
+      const raw = loadErr instanceof Error ? loadErr.message : String(loadErr ?? "");
+      setError(normalizeClientErrorMessage(raw, "Portfolio dashboard could not be loaded."));
       setLoading(false);
     });
   }, [debugMode]);
@@ -410,6 +471,19 @@ export default function PortfolioDashboardModule() {
 
       {loading && <p className="bread">Loading portfolio dashboard…</p>}
       {error && <p className="portfolio-error">{error}</p>}
+      {!error && overviewError && (
+        <div className="portfolio-error">
+          <p>{overviewError.message}</p>
+          <button type="button" onClick={() => { void loadAll(); }}>Retry</button>
+          {debugMode && (
+            <pre>{JSON.stringify({
+              stage: overviewError.stage ?? null,
+              debugMessage: overviewError.debugMessage ?? null,
+              trace: overviewError.trace ?? [],
+            }, null, 2)}</pre>
+          )}
+        </div>
+      )}
 
       {!loading && !error && setupState === "no_config" && (
         <div className="portfolio-empty-state">
@@ -428,6 +502,13 @@ export default function PortfolioDashboardModule() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {!loading && !error && !overview && adminList.length > 0 && (
+        <div className="portfolio-empty-state">
+          <h4>Portfolio dashboard temporarily unavailable.</h4>
+          <p>Admin controls are still available below.</p>
         </div>
       )}
 
