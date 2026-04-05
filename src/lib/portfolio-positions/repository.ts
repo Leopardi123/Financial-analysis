@@ -67,6 +67,9 @@ function rowToPosition(row: any): PortfolioPositionRecord {
     inferred_sector_id: inferredSector,
     inferred_subsector_id: inferredSubsector,
     inferred_commodity_id: inferredCommodity,
+    inferred_sector_map_created_at: row.inferred_sector_map_created_at == null ? null : String(row.inferred_sector_map_created_at),
+    inferred_commodity_updated_at: row.inferred_commodity_updated_at == null ? null : String(row.inferred_commodity_updated_at),
+    inferred_commodity_weight: toNullableNumber(row.inferred_commodity_weight),
     final_sector_id: overrideActive ? (manualSector ?? inferredSector) : inferredSector,
     final_subsector_id: overrideActive ? (manualSubsector ?? inferredSubsector) : inferredSubsector,
     final_commodity_id: overrideActive ? (manualCommodity ?? inferredCommodity) : inferredCommodity,
@@ -75,13 +78,38 @@ function rowToPosition(row: any): PortfolioPositionRecord {
 
 export async function listPortfolioPositions(portfolioId: string): Promise<PortfolioPositionRecord[]> {
   const rows = await query(
-    `SELECT p.*,
+    `WITH ranked_sector_map AS (
+        SELECT company_id,
+               sector_id,
+               subsector_id,
+               created_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY company_id
+                 ORDER BY datetime(created_at) DESC, sector_id DESC, subsector_id DESC
+               ) AS row_rank
+        FROM ${tables.companySectorMap}
+      ),
+      ranked_commodity AS (
+        SELECT company_id,
+               commodity,
+               weight,
+               updated_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY company_id
+                 ORDER BY weight DESC, datetime(updated_at) DESC, commodity ASC
+               ) AS row_rank
+        FROM ${tables.companyCommodityOverride}
+      )
+      SELECT p.*,
             map.sector_id AS inferred_sector_id,
             map.subsector_id AS inferred_subsector_id,
-            commodity.commodity AS inferred_commodity_id
+            map.created_at AS inferred_sector_map_created_at,
+            commodity.commodity AS inferred_commodity_id,
+            commodity.updated_at AS inferred_commodity_updated_at,
+            commodity.weight AS inferred_commodity_weight
      FROM ${tables.portfolioPositions} p
-     LEFT JOIN ${tables.companySectorMap} map ON map.company_id = p.company_id
-     LEFT JOIN ${tables.companyCommodityOverride} commodity ON commodity.company_id = p.company_id
+     LEFT JOIN ranked_sector_map map ON map.company_id = p.company_id AND map.row_rank = 1
+     LEFT JOIN ranked_commodity commodity ON commodity.company_id = p.company_id AND commodity.row_rank = 1
      WHERE p.portfolio_id = ?
      ORDER BY p.active_position DESC, p.updated_at DESC, p.id DESC`,
     [portfolioId]
