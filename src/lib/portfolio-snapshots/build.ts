@@ -1,7 +1,9 @@
 import { execute, query } from "../../../api/_db.js";
+import { fetchApiV3Json } from "../../../api/_fmp.js";
 import { tables } from "../../../api/_migrate.js";
 import { listPortfolioConfigs } from "../portfolio-admin/repository.js";
 import type { PortfolioAdminConfig } from "../portfolio-admin/types.js";
+import { resolveFxUSDToTarget } from "../prices/fx/resolveFx.ts";
 import type {
   AllocationPlanStatus,
   RebalanceStatus,
@@ -105,7 +107,8 @@ type PositionValuationDebug = {
   positions_active_count: number;
   positions_valued_count: number;
   positions_unvalued_count: number;
-  included_market_value: number;
+  included_market_value_sek: number;
+  positions_excluded_due_to_currency_or_fx: Array<{ position_id: number; symbol: string; reason: string }>;
   positions: Array<{
     position_id: number;
     symbol: string;
@@ -114,8 +117,16 @@ type PositionValuationDebug = {
     shares: number | null;
     manual_price: number | null;
     resolved_live_price: number | null;
+    native_price: number | null;
+    native_currency: string | null;
+    native_market_value: number | null;
+    fx_to_sek: number | null;
+    market_value_sek: number | null;
+    price_source: "explicit_market_value" | "manual_price" | "live_price" | "unresolved";
+    fx_source: string | null;
     valuation_method_used: "explicit_market_value" | "manual_price" | "live_price" | "unresolved";
     market_value_contribution: number | null;
+    valuation_state: "included" | "excluded" | "unvalued";
     inclusion_status: "included" | "excluded" | "unvalued";
     exclusion_reason: string | null;
     unvalued_reason: string | null;
@@ -132,11 +143,12 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
             p.active_position,
             p.market_value,
             p.shares,
-            p.manual_price
+            p.manual_price,
+            p.currency
      FROM ${tables.portfolioPositions} p`
   );
   const latestPrices = await query(
-    `SELECT d.symbol, COALESCE(d.adjusted_close, d.close) AS live_price
+    `SELECT d.symbol, COALESCE(d.adjusted_close, d.close) AS live_price, d.currency
      FROM ${tables.dailyPriceHistory} d
      INNER JOIN (
        SELECT symbol, MAX(price_date) AS latest_price_date
@@ -144,13 +156,88 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
        GROUP BY symbol
      ) latest ON latest.symbol = d.symbol AND latest.latest_price_date = d.price_date`
   );
-  const livePriceBySymbol = new Map<string, number>();
-  for (const row of latestPrices as Array<{ symbol?: unknown; live_price?: unknown }>) {
+  const livePriceBySymbol = new Map<string, { live_price: number; currency: string | null }>();
+  for (const row of latestPrices as Array<{ symbol?: unknown; live_price?: unknown; currency?: unknown }>) {
     const symbol = String(row.symbol ?? "").trim().toUpperCase();
     const livePrice = Number(row.live_price ?? NaN);
+    const liveCurrency = typeof row.currency === "string" && row.currency.trim()
+      ? row.currency.trim().toUpperCase()
+      : null;
     if (symbol && Number.isFinite(livePrice) && livePrice > 0) {
-      livePriceBySymbol.set(symbol, livePrice);
+      livePriceBySymbol.set(symbol, { live_price: livePrice, currency: liveCurrency });
     }
+  }
+
+  function normalizeCurrency(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim().toUpperCase().replace(/[^A-Z]/g, "");
+    if (!normalized || normalized.length !== 3) return null;
+    return normalized;
+  }
+
+  const profileCurrencyBySymbol = new Map<string, string | null>();
+  async function resolveProfileCurrency(symbol: string): Promise<string | null> {
+    if (profileCurrencyBySymbol.has(symbol)) return profileCurrencyBySymbol.get(symbol) ?? null;
+    try {
+      const payload = await fetchApiV3Json<Array<Record<string, unknown>>>(`profile/${encodeURIComponent(symbol)}`);
+      const profile = Array.isArray(payload) ? payload[0] ?? null : null;
+      const currency = normalizeCurrency(profile?.currency);
+      profileCurrencyBySymbol.set(symbol, currency);
+      return currency;
+    } catch {
+      profileCurrencyBySymbol.set(symbol, null);
+      return null;
+    }
+  }
+
+  const fxToSekByCurrency = new Map<string, { fx_to_sek: number | null; fx_source: string | null; fx_warning: string | null }>();
+  async function resolveFxToSek(currency: string, anchorDateUtc: string): Promise<{ fx_to_sek: number | null; fx_source: string | null; fx_warning: string | null }> {
+    if (currency === "SEK") {
+      return { fx_to_sek: 1, fx_source: "identity:SEK", fx_warning: null };
+    }
+    const cacheKey = `${currency}|${anchorDateUtc}`;
+    const cached = fxToSekByCurrency.get(cacheKey);
+    if (cached) return cached;
+
+    if (currency === "USD") {
+      const usdToSek = await resolveFxUSDToTarget({
+        targetCurrency: "SEK",
+        anchorDateUtc,
+        scenario: { mode: "spot" },
+        allowRefresh: false,
+      });
+      const out = {
+        fx_to_sek: usdToSek.fx,
+        fx_source: usdToSek.fx === null ? null : "resolveFxUSDToTarget(USD→SEK, spot)",
+        fx_warning: usdToSek.warnings[0] ?? null,
+      };
+      fxToSekByCurrency.set(cacheKey, out);
+      return out;
+    }
+
+    const [usdToNative, usdToSek] = await Promise.all([
+      resolveFxUSDToTarget({
+        targetCurrency: currency,
+        anchorDateUtc,
+        scenario: { mode: "spot" },
+        allowRefresh: false,
+      }),
+      resolveFxUSDToTarget({
+        targetCurrency: "SEK",
+        anchorDateUtc,
+        scenario: { mode: "spot" },
+        allowRefresh: false,
+      }),
+    ]);
+    const fx = usdToNative.fx && usdToSek.fx ? usdToSek.fx / usdToNative.fx : null;
+    const warning = [usdToNative.warnings[0], usdToSek.warnings[0]].filter(Boolean).join(" | ") || null;
+    const out = {
+      fx_to_sek: fx,
+      fx_source: fx === null ? null : `cross_via_usd: (USD→SEK)/(USD→${currency})`,
+      fx_warning: warning,
+    };
+    fxToSekByCurrency.set(cacheKey, out);
+    return out;
   }
 
   const marketValueByPortfolio = new Map<string, number>();
@@ -168,8 +255,11 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
     const directMarketValue = Number(row.market_value ?? NaN);
     const shares = Number(row.shares ?? NaN);
     const manualPrice = Number(row.manual_price ?? NaN);
+    const positionCurrency = normalizeCurrency(row.currency);
     const normalizedSymbol = symbol.toUpperCase();
-    const livePrice = livePriceBySymbol.get(normalizedSymbol) ?? null;
+    const livePriceRow = livePriceBySymbol.get(normalizedSymbol) ?? null;
+    const livePrice = livePriceRow?.live_price ?? null;
+    const livePriceCurrency = normalizeCurrency(livePriceRow?.currency);
 
     const bucket = valuationDebugByPortfolio.get(portfolioId) ?? {
       portfolio_id: portfolioId,
@@ -177,7 +267,8 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
       positions_active_count: 0,
       positions_valued_count: 0,
       positions_unvalued_count: 0,
-      included_market_value: 0,
+      included_market_value_sek: 0,
+      positions_excluded_due_to_currency_or_fx: [],
       positions: [],
     };
 
@@ -191,8 +282,16 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
+        native_price: null,
+        native_currency: null,
+        native_market_value: null,
+        fx_to_sek: null,
+        market_value_sek: null,
+        price_source: "unresolved",
+        fx_source: null,
         valuation_method_used: "unresolved",
         market_value_contribution: null,
+        valuation_state: "excluded",
         inclusion_status: "excluded",
         exclusion_reason: "Position inactive",
         unvalued_reason: null,
@@ -208,18 +307,26 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
     const hasLivePrice = typeof livePrice === "number" && Number.isFinite(livePrice) && livePrice > 0;
 
     let valuationMethod: "explicit_market_value" | "manual_price" | "live_price" | "unresolved" = "unresolved";
+    let nativePrice: number | null = null;
+    let nativeMarketValue: number | null = null;
     let marketValueContribution: number | null = null;
+    let priceSource: "explicit_market_value" | "manual_price" | "live_price" | "unresolved" = "unresolved";
     let unvaluedReason: string | null = null;
 
     if (hasExplicitMarketValue) {
       valuationMethod = "explicit_market_value";
-      marketValueContribution = directMarketValue;
+      priceSource = "explicit_market_value";
+      nativeMarketValue = directMarketValue;
     } else if (hasManualPrice && hasShares) {
       valuationMethod = "manual_price";
-      marketValueContribution = shares * manualPrice;
+      priceSource = "manual_price";
+      nativePrice = manualPrice;
+      nativeMarketValue = shares * manualPrice;
     } else if (hasLivePrice && hasShares) {
       valuationMethod = "live_price";
-      marketValueContribution = shares * livePrice;
+      priceSource = "live_price";
+      nativePrice = livePrice;
+      nativeMarketValue = shares * livePrice;
     } else {
       if (!hasShares) {
         unvaluedReason = "Missing or invalid shares";
@@ -232,9 +339,32 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
       }
     }
 
-    if (marketValueContribution !== null) {
+    const profileCurrency = (!positionCurrency && !livePriceCurrency) ? await resolveProfileCurrency(normalizedSymbol) : null;
+    const currencyFallbackForCash = (normalizedSymbol === "CASH" || instrumentType === "cash_proxy") ? "SEK" : null;
+    const nativeCurrency = positionCurrency ?? livePriceCurrency ?? profileCurrency ?? currencyFallbackForCash;
+
+    let fxToSek: number | null = null;
+    let fxSource: string | null = null;
+    let fxWarning: string | null = null;
+    if (nativeMarketValue !== null) {
+      if (!nativeCurrency) {
+        unvaluedReason = unvaluedReason ?? "Missing native trading currency (no position currency, price metadata currency, or profile currency)";
+      } else {
+        const fxResolution = await resolveFxToSek(nativeCurrency, utcDateString());
+        fxToSek = fxResolution.fx_to_sek;
+        fxSource = fxResolution.fx_source;
+        fxWarning = fxResolution.fx_warning;
+        if (fxToSek === null) {
+          unvaluedReason = unvaluedReason ?? `Missing FX conversion path ${nativeCurrency}→SEK`;
+        } else {
+          marketValueContribution = nativeMarketValue * fxToSek;
+        }
+      }
+    }
+
+    if (marketValueContribution !== null && Number.isFinite(marketValueContribution)) {
       bucket.positions_valued_count += 1;
-      bucket.included_market_value += marketValueContribution;
+      bucket.included_market_value_sek += marketValueContribution;
       bucket.positions.push({
         position_id: Number.isFinite(positionId) ? positionId : -1,
         symbol,
@@ -243,14 +373,29 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
+        native_price: nativePrice,
+        native_currency: nativeCurrency,
+        native_market_value: nativeMarketValue,
+        fx_to_sek: fxToSek,
+        market_value_sek: marketValueContribution,
+        price_source: priceSource,
+        fx_source: fxSource,
         valuation_method_used: valuationMethod,
         market_value_contribution: marketValueContribution,
+        valuation_state: "included",
         inclusion_status: "included",
         exclusion_reason: null,
         unvalued_reason: null,
       });
     } else {
       bucket.positions_unvalued_count += 1;
+      if (unvaluedReason && (unvaluedReason.includes("currency") || unvaluedReason.includes("FX"))) {
+        bucket.positions_excluded_due_to_currency_or_fx.push({
+          position_id: Number.isFinite(positionId) ? positionId : -1,
+          symbol,
+          reason: unvaluedReason,
+        });
+      }
       bucket.positions.push({
         position_id: Number.isFinite(positionId) ? positionId : -1,
         symbol,
@@ -259,11 +404,19 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
+        native_price: nativePrice,
+        native_currency: nativeCurrency,
+        native_market_value: nativeMarketValue,
+        fx_to_sek: fxToSek,
+        market_value_sek: null,
+        price_source: priceSource,
+        fx_source: fxSource,
         valuation_method_used: valuationMethod,
         market_value_contribution: null,
+        valuation_state: "unvalued",
         inclusion_status: "unvalued",
         exclusion_reason: null,
-        unvalued_reason: unvaluedReason,
+        unvalued_reason: fxWarning ? `${unvaluedReason}${unvaluedReason ? " | " : ""}${fxWarning}` : unvaluedReason,
       });
     }
 
@@ -271,8 +424,8 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
   }
 
   for (const [portfolioId, debug] of valuationDebugByPortfolio.entries()) {
-    if (debug.positions_valued_count > 0 && Number.isFinite(debug.included_market_value)) {
-      marketValueByPortfolio.set(portfolioId, debug.included_market_value);
+    if (debug.positions_valued_count > 0 && Number.isFinite(debug.included_market_value_sek)) {
+      marketValueByPortfolio.set(portfolioId, debug.included_market_value_sek);
     }
   }
   return { marketValueByPortfolio, valuationDebugByPortfolio };
@@ -359,7 +512,8 @@ export async function buildPortfolioSnapshots() {
     const valuationDebug = valuationDebugByPortfolio.get(portfolio.portfolio_id) ?? null;
     const debugPayload = {
       portfolio_id: portfolio.portfolio_id,
-      snapshot_market_value: marketValue,
+      snapshot_market_value_sek: marketValue,
+      market_value_sek: marketValue,
       market_value: marketValue,
       actual_weight_pct: actualWeightPct,
       bandWidth: weightEval.bandWidth,
@@ -370,6 +524,8 @@ export async function buildPortfolioSnapshots() {
       positions_active_count: valuationDebug?.positions_active_count ?? 0,
       positions_valued_count: valuationDebug?.positions_valued_count ?? 0,
       positions_unvalued_count: valuationDebug?.positions_unvalued_count ?? 0,
+      portfolio_market_value_sek: valuationDebug?.included_market_value_sek ?? marketValue ?? null,
+      excluded_due_to_currency_or_fx: valuationDebug?.positions_excluded_due_to_currency_or_fx ?? [],
       position_valuation_details: valuationDebug?.positions ?? [],
       valuation_state: valuationDebug
         ? (valuationDebug.positions_valued_count > 0
@@ -451,6 +607,7 @@ export async function buildPortfolioSnapshots() {
     total_market_value: totalMarketValue,
     allocation_plan_status: computeAllocationPlanStatus(includedStatuses),
     debug: {
+      total_market_value_sek: totalMarketValue,
       total_market_value: totalMarketValue,
       included_portfolios: included.map((item) => item.portfolio_id),
       excluded_portfolios: portfolios

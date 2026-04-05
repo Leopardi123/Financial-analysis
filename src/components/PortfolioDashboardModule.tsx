@@ -200,7 +200,7 @@ function formatPct(value: NullableNumber): string {
 }
 
 function formatMoney(value: NullableNumber): string {
-  return value === null ? "Unavailable" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  return value === null ? "Unavailable" : new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 0 }).format(value);
 }
 
 function formFromConfig(config: PortfolioConfig): AdminFormState {
@@ -435,7 +435,7 @@ export default function PortfolioDashboardModule() {
         <>
           <div className="portfolio-kpi-row">
             <span>As of: {overview.as_of_date ?? "Unavailable"}</span>
-            <span>Total market value: {formatMoney(overview.total.market_value)}</span>
+            <span>Total market value (SEK): {formatMoney(overview.total.market_value)}</span>
             <span>Included portfolios: {overview.total.included_portfolio_count}</span>
           </div>
           <div className="portfolio-summary-grid">
@@ -471,7 +471,7 @@ export default function PortfolioDashboardModule() {
               <details key={portfolio.portfolio_id} className="portfolio-card">
                 <summary>{portfolio.portfolio_name} ({portfolio.portfolio_type})</summary>
                 <div className="portfolio-card-grid">
-                  <div>Market value: {formatMoney(portfolio.market_value)}</div>
+                  <div>Market value (SEK): {formatMoney(portfolio.market_value)}</div>
                   <div>Actual weight: {formatPct(portfolio.actual_weight_pct)}</div>
                   <div>Target / min / max: {formatPct(portfolio.target_weight_pct)} / {formatPct(portfolio.min_weight_pct)} / {formatPct(portfolio.max_weight_pct)}</div>
                   <div>Weight status: {label(portfolio.weight_status)}</div>
