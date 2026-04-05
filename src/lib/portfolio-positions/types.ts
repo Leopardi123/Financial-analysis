@@ -5,6 +5,7 @@ export type PortfolioPositionRecord = {
   id: number;
   portfolio_id: string;
   symbol: string;
+  resolved_symbol: string | null;
   company_id: number | null;
   instrument_id: string | null;
   display_name: string | null;
