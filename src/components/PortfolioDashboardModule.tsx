@@ -25,6 +25,7 @@ type PortfolioRecord = {
   medium_direction?: string | null;
   long_direction?: string | null;
   trend_status: string | null;
+  trend_completeness?: string | null;
   relative_strength_bucket: string | null;
   annualized_vol_65d: NullableNumber;
   current_drawdown_pct: NullableNumber;
@@ -40,6 +41,22 @@ type PortfolioRecord = {
   positions_active_count?: NullableNumber;
   positions_valued_count?: NullableNumber;
   positions_unvalued_count?: NullableNumber;
+  trend_debug?: {
+    attempted?: boolean;
+    available_days?: NullableNumber;
+    required_days_for_partial?: number;
+    required_days_for_full?: number;
+    return_20d?: NullableNumber;
+    return_65d?: NullableNumber;
+    return_200d?: NullableNumber;
+    short_direction?: string | null;
+    medium_direction?: string | null;
+    long_direction?: string | null;
+    trend_status?: string | null;
+    trend_completeness?: string | null;
+    reason?: string | null;
+    trend_explanation?: string | null;
+  } | null;
 };
 
 type PortfolioConfig = {
@@ -671,7 +688,12 @@ export default function PortfolioDashboardModule() {
                         {label(portfolio.relative_strength_bucket)}
                       </span>
                     </div>
-                    <div>Trend completeness: {label(portfolio.signal_completeness)}</div>
+                    <div>Trend completeness: {label(portfolio.trend_completeness ?? portfolio.signal_completeness)}</div>
+                    {portfolio.trend_debug?.trend_explanation
+                      ? <div>Trend reason: {portfolio.trend_debug.trend_explanation}</div>
+                      : portfolio.trend_debug?.reason
+                        ? <div>Trend reason: {label(portfolio.trend_debug.reason)}</div>
+                        : null}
                   </div>
                 </details>
               </details>

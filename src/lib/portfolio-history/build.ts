@@ -622,6 +622,27 @@ export async function buildPortfolioHistory() {
   }
 
   const totalMetrics = computeTrendMetrics(totalSeries);
+  const historyLatestDate = totalEnriched.length > 0 ? totalEnriched[totalEnriched.length - 1].as_of_date : null;
+  const builtAtIso = new Date().toISOString();
+
+  await execute(
+    `INSERT INTO ${tables.portfolioHistoryBuildState}
+      (scope, last_built_at, latest_history_date, history_days_available, built_portfolio_count, updated_at)
+     VALUES ('default', ?, ?, ?, ?, ?)
+     ON CONFLICT(scope) DO UPDATE SET
+      last_built_at = excluded.last_built_at,
+      latest_history_date = excluded.latest_history_date,
+      history_days_available = excluded.history_days_available,
+      built_portfolio_count = excluded.built_portfolio_count,
+      updated_at = excluded.updated_at`,
+    [
+      builtAtIso,
+      historyLatestDate,
+      totalSeries.length,
+      portfolios.length,
+      builtAtIso,
+    ]
+  );
 
   const latestSnapshotDateRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
   const latestSnapshotDate = String(latestSnapshotDateRows[0]?.as_of_date ?? "").trim();
@@ -721,6 +742,8 @@ export async function buildPortfolioHistory() {
       trend_status: totalMetrics.trend_status,
       trend_completeness: totalMetrics.trend_completeness,
       data_quality: totalMetrics.data_quality,
+      last_built_at: builtAtIso,
+      latest_history_date: historyLatestDate,
     },
   };
 }

@@ -32,6 +32,7 @@ const TABLES = {
   portfolioPositions: "portfolio_positions",
   portfolioHistoryDaily: "portfolio_history_daily",
   totalPortfolioHistoryDaily: "total_portfolio_history_daily",
+  portfolioHistoryBuildState: "portfolio_history_build_state",
 };
 
 export async function ensureSchema() {
@@ -464,6 +465,17 @@ export async function ensureSchema() {
       total_cash_weight_pct REAL,
       included_portfolio_count INTEGER,
       data_quality TEXT
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioHistoryBuildState} (
+      scope TEXT PRIMARY KEY,
+      last_built_at TEXT NOT NULL,
+      latest_history_date TEXT,
+      history_days_available INTEGER,
+      built_portfolio_count INTEGER,
+      updated_at TEXT NOT NULL
     )`
   );
 

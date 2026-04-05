@@ -16,6 +16,25 @@ function parseTrendMeta(debugPayloadJson: unknown): { trend_explanation: string 
   }
 }
 
+function trendDebugFallback(row: any, parsedTrend: any) {
+  if (parsedTrend && typeof parsedTrend === "object") return parsedTrend;
+  return {
+    attempted: true,
+    available_days: 0,
+    required_days_for_partial: 65,
+    required_days_for_full: 200,
+    return_20d: row.return_20d == null ? null : Number(row.return_20d),
+    return_65d: row.return_65d == null ? null : Number(row.return_65d),
+    return_200d: row.return_200d == null ? null : Number(row.return_200d),
+    short_direction: String(row.short_direction ?? "unavailable"),
+    medium_direction: String(row.medium_direction ?? "unavailable"),
+    long_direction: String(row.long_direction ?? "unavailable"),
+    trend_status: String(row.trend_status ?? "unavailable"),
+    trend_completeness: row.return_200d != null ? "full" : row.return_65d != null ? "partial" : "unavailable",
+    reason: row.return_65d == null ? "insufficient_history" : "missing_debug_payload",
+  };
+}
+
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "GET") {
@@ -93,7 +112,7 @@ export default async function handler(req: any, res: any) {
               }
               return {
                 portfolio_id: String(row.portfolio_id ?? ""),
-                ...(trendDebug ?? {}),
+                ...trendDebugFallback(row, trendDebug),
               };
             }),
             total: {

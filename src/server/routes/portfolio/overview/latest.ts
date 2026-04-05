@@ -64,7 +64,12 @@ function shouldAttemptFallbackBuild(payload: any): boolean {
   const noSnapshots = !payload.as_of_date;
   const noHistory = Number(payload?.performance?.history_available_days ?? 0) <= 0;
   const setupState = String(payload?.setup?.setup_state ?? "");
-  return noSnapshots || noHistory || setupState === "configured_positions_no_snapshot";
+  const snapshotBuild = String(payload?.pipeline_status?.last_snapshot_build ?? "");
+  const historyBuild = String(payload?.pipeline_status?.last_history_build ?? "");
+  const snapshotMs = Number.isNaN(Date.parse(snapshotBuild)) ? null : Date.parse(snapshotBuild);
+  const historyMs = Number.isNaN(Date.parse(historyBuild)) ? null : Date.parse(historyBuild);
+  const staleHistory = snapshotMs !== null && (historyMs === null || historyMs < snapshotMs);
+  return noSnapshots || noHistory || setupState === "configured_positions_no_snapshot" || staleHistory;
 }
 
 async function runFallbackBuild(trace: PortfolioOverviewTraceRow[]) {
