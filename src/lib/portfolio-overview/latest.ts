@@ -45,6 +45,47 @@ function parseJson(value: unknown): any | null {
   }
 }
 
+function deriveTrendDebug(row: any, snapshotDebug: any) {
+  const trendFromSnapshot = snapshotDebug?.trend ?? null;
+  const availableDays = Number(trendFromSnapshot?.available_days ?? NaN);
+  const normalizedAvailableDays = Number.isFinite(availableDays) ? availableDays : 0;
+  const trendCompleteness = String(
+    trendFromSnapshot?.trend_completeness
+    ?? trendFromSnapshot?.signal_completeness
+    ?? (row.return_200d != null ? "full" : row.return_65d != null ? "partial" : "unavailable")
+  );
+  const reason = trendFromSnapshot?.trend_explanation
+    ?? (normalizedAvailableDays < 65
+      ? "insufficient_history"
+      : (String(row.trend_status ?? "unavailable") === "unavailable" ? "classification_unavailable" : "ok"));
+
+  return {
+    attempted: true,
+    available_days: trendFromSnapshot?.available_days ?? normalizedAvailableDays,
+    required_days_for_partial: 65,
+    required_days_for_full: 200,
+    history_source: trendFromSnapshot?.history_source ?? null,
+    return_20d: trendFromSnapshot?.return_20d ?? asNum(row.return_20d),
+    return_65d: trendFromSnapshot?.return_65d ?? asNum(row.return_65d),
+    return_200d: trendFromSnapshot?.return_200d ?? asNum(row.return_200d),
+    short_direction: trendFromSnapshot?.short_direction ?? String(row.short_direction ?? "unavailable"),
+    medium_direction: trendFromSnapshot?.medium_direction ?? String(row.medium_direction ?? "unavailable"),
+    long_direction: trendFromSnapshot?.long_direction ?? String(row.long_direction ?? "unavailable"),
+    trend_status: trendFromSnapshot?.trend_status ?? String(row.trend_status ?? "unavailable"),
+    relative_strength_rank: trendFromSnapshot?.relative_strength_rank ?? null,
+    relative_strength_bucket: trendFromSnapshot?.relative_strength_bucket ?? (row.relative_strength_bucket == null ? null : String(row.relative_strength_bucket)),
+    trend_completeness: trendCompleteness,
+    data_quality: trendFromSnapshot?.data_quality ?? null,
+    reason,
+    trend_explanation: trendFromSnapshot?.trend_explanation
+      ?? (normalizedAvailableDays < 65
+        ? `Trend unavailable: ${normalizedAvailableDays} available days (<65 required for partial).`
+        : null),
+    coverage_summary: trendFromSnapshot?.coverage_summary ?? null,
+    positions: Array.isArray(trendFromSnapshot?.positions) ? trendFromSnapshot.positions : [],
+  };
+}
+
 function computeAllocationPlanStatus(rows: any[]): "within_allocation_plan" | "outside_allocation_plan" | "materially_outside_allocation_plan" {
   const statuses = rows
     .filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1)
@@ -170,9 +211,23 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const positionsCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioPositions} WHERE active_position = 1`);
   const activePositionsCount = Number(positionsCountRows[0]?.count ?? 0);
   const lastSnapshotBuildRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
-  const lastHistoryBuildRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`);
+  let lastHistoryBuildRows: any[] = [];
+  try {
+    lastHistoryBuildRows = await query(
+      `SELECT last_built_at, latest_history_date
+       FROM ${tables.portfolioHistoryBuildState}
+       WHERE scope = 'default'
+       LIMIT 1`
+    );
+  } catch {
+    lastHistoryBuildRows = [];
+  }
+  const historyBuildState = lastHistoryBuildRows[0] as { last_built_at?: unknown; latest_history_date?: unknown } | undefined;
+  const fallbackHistoryDateRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`);
   const lastSnapshotBuild = String(lastSnapshotBuildRows[0]?.as_of_date ?? "").trim() || null;
-  const lastHistoryBuild = String(lastHistoryBuildRows[0]?.as_of_date ?? "").trim() || null;
+  const lastHistoryBuild = historyBuildState?.last_built_at
+    ? String(historyBuildState.last_built_at)
+    : (String(fallbackHistoryDateRows[0]?.as_of_date ?? "").trim() || null);
 
   const allocationPlanStatus = computeAllocationPlanStatus(portfolioRows as any[]);
   const included = (portfolioRows as any[]).filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1);
@@ -331,12 +386,15 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const portfolios = (portfolioRows as any[]).map((row) => ({
     ...(function () {
       const snapshotDebug = parseJson(row.debug_payload_json);
+      const trendDebug = deriveTrendDebug(row, snapshotDebug);
       return {
         positions_found_count: asNum(snapshotDebug?.positions_found_count),
         positions_active_count: asNum(snapshotDebug?.positions_active_count),
         positions_valued_count: asNum(snapshotDebug?.positions_valued_count),
         positions_unvalued_count: asNum(snapshotDebug?.positions_unvalued_count),
         valuation_state: snapshotDebug?.valuation_state == null ? null : String(snapshotDebug.valuation_state),
+        trend_debug: trendDebug,
+        trend_completeness: trendDebug.trend_completeness,
       };
     })(),
     portfolio_id: String(row.portfolio_id ?? ""),
@@ -369,6 +427,10 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     suggested_hedge_type: row.suggested_hedge_type == null ? null : String(row.suggested_hedge_type),
     hedge_policy_applied: row.hedge_policy_applied == null ? null : String(row.hedge_policy_applied),
     signal_completeness: row.signal_completeness == null ? null : String(row.signal_completeness),
+    trend_completeness: (function() {
+      const snapshotDebug = parseJson(row.debug_payload_json);
+      return deriveTrendDebug(row, snapshotDebug).trend_completeness;
+    })(),
     data_quality_flags: buildDataQualityFlags(row),
   }));
 
@@ -464,7 +526,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     portfolios: portfolios.map((row) => {
       const raw = (portfolioRows as any[]).find((source) => String(source.portfolio_id ?? "") === row.portfolio_id) ?? {};
       const snapshotDebug = parseJson(raw.debug_payload_json);
-      const trendDebug = snapshotDebug?.trend ?? null;
+      const trendDebug = deriveTrendDebug(raw, snapshotDebug);
       const riskDebug = parseJson(raw.risk_debug_json);
       const hedgeDebug = parseJson(raw.hedge_debug_json);
 
@@ -477,23 +539,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
           weight_status: row.weight_status,
           rebalance_status: row.rebalance_status,
         },
-        trend_debug: trendDebug
-          ? {
-            available_days: trendDebug.available_days ?? null,
-            history_source: trendDebug.history_source ?? null,
-            return_20d: trendDebug.return_20d ?? null,
-            return_65d: trendDebug.return_65d ?? null,
-            return_200d: trendDebug.return_200d ?? null,
-            short_direction: trendDebug.short_direction ?? null,
-            medium_direction: trendDebug.medium_direction ?? null,
-            long_direction: trendDebug.long_direction ?? null,
-            trend_status: trendDebug.trend_status ?? null,
-            relative_strength_rank: trendDebug.relative_strength_rank ?? null,
-            relative_strength_bucket: trendDebug.relative_strength_bucket ?? null,
-            trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null,
-            data_quality: trendDebug.data_quality ?? null,
-          }
-          : null,
+        trend_debug: trendDebug,
         risk_debug: riskDebug
           ? {
             annualized_vol_65d: riskDebug?.volatility_component?.annualized_vol_65d ?? null,

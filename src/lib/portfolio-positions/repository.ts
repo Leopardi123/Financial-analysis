@@ -5,6 +5,7 @@ import type { MappingSource, PortfolioPositionRecord } from "./types.js";
 type PositionInput = {
   portfolio_id: string;
   symbol: string;
+  resolved_symbol: string | null;
   company_id: number | null;
   instrument_id: string | null;
   display_name: string | null;
@@ -44,6 +45,7 @@ function rowToPosition(row: any): PortfolioPositionRecord {
     id: Number(row.id ?? 0),
     portfolio_id: String(row.portfolio_id ?? ""),
     symbol: String(row.symbol ?? "").toUpperCase(),
+    resolved_symbol: row.resolved_symbol == null ? null : String(row.resolved_symbol).toUpperCase(),
     company_id: toNullableNumber(row.company_id),
     instrument_id: row.instrument_id == null ? null : String(row.instrument_id),
     display_name: row.display_name == null ? null : String(row.display_name),
@@ -121,7 +123,7 @@ export async function createPortfolioPosition(input: PositionInput): Promise<voi
   const now = new Date().toISOString();
   await execute(
     `INSERT INTO ${tables.portfolioPositions} (
-      portfolio_id, symbol, company_id, instrument_id, display_name,
+      portfolio_id, symbol, resolved_symbol, company_id, instrument_id, display_name,
       shares, avg_cost, entry_date, asset_type,
       thesis, notes,
       manual_sector_id, manual_subsector_id, manual_commodity_id,
@@ -130,10 +132,11 @@ export async function createPortfolioPosition(input: PositionInput): Promise<voi
       manual_price, currency,
       created_at, updated_at,
       market_value, as_of_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.portfolio_id,
       input.symbol.toUpperCase(),
+      input.resolved_symbol?.toUpperCase() ?? null,
       input.company_id,
       input.instrument_id,
       input.display_name,
@@ -166,6 +169,7 @@ export async function updatePortfolioPosition(id: number, input: PositionInput):
     `UPDATE ${tables.portfolioPositions}
      SET portfolio_id = ?,
          symbol = ?,
+         resolved_symbol = ?,
          company_id = ?,
          instrument_id = ?,
          display_name = ?,
@@ -191,6 +195,7 @@ export async function updatePortfolioPosition(id: number, input: PositionInput):
     [
       input.portfolio_id,
       input.symbol.toUpperCase(),
+      input.resolved_symbol?.toUpperCase() ?? null,
       input.company_id,
       input.instrument_id,
       input.display_name,

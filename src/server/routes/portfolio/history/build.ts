@@ -26,6 +26,8 @@ export default async function handler(req: any, res: any) {
         long_direction: row.long_direction,
         trend_status: row.trend_status,
         trend_completeness: row.trend_completeness,
+        trend_explanation: row.trend_explanation,
+        coverage_summary: row.coverage_summary,
         relative_strength_rank: row.relative_strength_rank,
         relative_strength_bucket: row.relative_strength_bucket,
         data_quality: row.data_quality,
