@@ -1,6 +1,7 @@
 import { ensureSchema } from "../../../../../api/_migrate.js";
 import { getPortfolioOverviewLatest } from "../../../../lib/portfolio-overview/latest.js";
 import { buildPortfolioSnapshots } from "../../../../lib/portfolio-snapshots/build.js";
+import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
 
 export default async function handler(req: any, res: any) {
   try {
@@ -11,6 +12,7 @@ export default async function handler(req: any, res: any) {
 
     await ensureSchema();
     await buildPortfolioSnapshots();
+    await buildPortfolioHistory();
     const debug = String(req.query?.debug ?? "") === "1";
     const payload = await getPortfolioOverviewLatest(debug);
     res.status(200).json({ ok: true, ...payload });

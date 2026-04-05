@@ -82,8 +82,11 @@ export default async function handler(req: any, res: any) {
             }),
             total: {
               included_portfolios: null,
-              history_days_available: null,
-              aggregation_source: null,
+              history_days_available: Number((await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`))[0]?.count ?? 0),
+              aggregation_source: "portfolio_history_daily_aggregation",
+              daily_return_pct: total?.daily_return_pct == null ? null : Number(total.daily_return_pct),
+              cumulative_return_pct: total?.cumulative_return_pct == null ? null : Number(total.cumulative_return_pct),
+              drawdown_pct: total?.drawdown_pct == null ? null : Number(total.drawdown_pct),
               data_quality: total?.data_quality ?? null,
               included_portfolio_count: total?.included_portfolio_count ?? null,
             },

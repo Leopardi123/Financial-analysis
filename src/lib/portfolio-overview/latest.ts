@@ -290,6 +290,9 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
     return_20d: asNum(row.return_20d),
     return_65d: asNum(row.return_65d),
     return_200d: asNum(row.return_200d),
+    short_direction: row.short_direction == null ? null : String(row.short_direction),
+    medium_direction: row.medium_direction == null ? null : String(row.medium_direction),
+    long_direction: row.long_direction == null ? null : String(row.long_direction),
     trend_status: row.trend_status == null ? null : String(row.trend_status),
     relative_strength_bucket: row.relative_strength_bucket == null ? null : String(row.relative_strength_bucket),
     annualized_vol_65d: asNum(row.annualized_vol_65d),
@@ -398,6 +401,7 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
         trend_debug: trendDebug
           ? {
             available_days: trendDebug.available_days ?? null,
+            history_source: trendDebug.history_source ?? null,
             return_20d: trendDebug.return_20d ?? null,
             return_65d: trendDebug.return_65d ?? null,
             return_200d: trendDebug.return_200d ?? null,
@@ -407,6 +411,8 @@ export async function getPortfolioOverviewLatest(debug: boolean) {
             trend_status: trendDebug.trend_status ?? null,
             relative_strength_rank: trendDebug.relative_strength_rank ?? null,
             relative_strength_bucket: trendDebug.relative_strength_bucket ?? null,
+            trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null,
+            data_quality: trendDebug.data_quality ?? null,
           }
           : null,
         risk_debug: riskDebug

@@ -7,8 +7,10 @@ type Direction = "positive" | "neutral" | "negative" | "unavailable";
 type TrendStatus = "strong_uptrend" | "improving" | "neutral" | "weakening" | "downtrend" | "unavailable";
 type SignalCompleteness = "full" | "partial" | "unavailable";
 type RelativeStrengthBucket = "strong" | "neutral" | "weak" | "unavailable";
+type DataQuality = "full" | "partial" | "estimated";
+type HistorySource = "positions_price_history" | "positions_snapshots" | "snapshots" | "unavailable";
 
-type Point = { as_of_date: string; market_value: number };
+type Point = { as_of_date: string; market_value: number; data_quality: DataQuality };
 
 type TrendMetrics = {
   available_days: number;
@@ -20,7 +22,8 @@ type TrendMetrics = {
   long_direction: Direction;
   trend_status: TrendStatus;
   signal_completeness: SignalCompleteness;
-  data_quality: "full" | "partial" | "estimated";
+  trend_completeness: SignalCompleteness;
+  data_quality: DataQuality;
   relative_strength_rank: number | null;
   relative_strength_bucket: RelativeStrengthBucket;
 };
@@ -40,10 +43,17 @@ function computeLookbackReturn(series: Point[], lookbackDays: number): number | 
   return ((latest / past) - 1) * 100;
 }
 
-function computeTrendStatus(shortDirection: Direction, mediumDirection: Direction, longDirection: Direction): TrendStatus {
+function computeTrendStatus(args: {
+  shortDirection: Direction;
+  mediumDirection: Direction;
+  longDirection: Direction;
+  longReturn: number | null;
+}): TrendStatus {
+  const { shortDirection, mediumDirection, longDirection, longReturn } = args;
   const hasShort = shortDirection !== "unavailable";
   const hasMedium = mediumDirection !== "unavailable";
   const hasLong = longDirection !== "unavailable";
+  const longIsModestlyNegative = typeof longReturn === "number" && longReturn > -5.0 && longReturn < 0;
 
   if (!hasMedium && !hasShort && !hasLong) {
     return "unavailable";
@@ -55,7 +65,7 @@ function computeTrendStatus(shortDirection: Direction, mediumDirection: Directio
     }
 
     if (mediumDirection === "positive" && shortDirection === "positive"
-      && (longDirection === "neutral" || longDirection === "negative")) {
+      && (longDirection === "neutral" || longIsModestlyNegative)) {
       return "improving";
     }
 
@@ -63,7 +73,7 @@ function computeTrendStatus(shortDirection: Direction, mediumDirection: Directio
       return "downtrend";
     }
 
-    if (mediumDirection === "negative" && shortDirection === "negative" && longDirection === "neutral") {
+    if (mediumDirection === "negative" && shortDirection === "negative" && (longDirection === "neutral" || !hasLong)) {
       return "weakening";
     }
 
@@ -130,51 +140,139 @@ async function tableExists(name: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-async function loadPortfolioHistorySeries(portfolioId: string): Promise<{ source: "positions" | "snapshots" | "unavailable"; rows: Point[] }> {
+function isValidDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: string): Promise<Point[]> {
+  const positionsRows = await query(
+    `SELECT id, symbol, shares, entry_date, exited_at
+     FROM ${tables.portfolioPositions}
+     WHERE portfolio_id = ? AND COALESCE(shares, 0) > 0 AND symbol IS NOT NULL AND TRIM(symbol) <> ''`,
+    [portfolioId]
+  ) as Array<{ symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown }>;
+
+  if (positionsRows.length === 0) return [];
+
+  const positions = positionsRows
+    .map((row) => ({
+      symbol: String(row.symbol ?? "").trim().toUpperCase(),
+      shares: Number(row.shares ?? NaN),
+      entry_date: isValidDate(row.entry_date) ? row.entry_date.trim() : null,
+      exited_at: isValidDate(row.exited_at) ? row.exited_at.trim() : null,
+    }))
+    .filter((row) => row.symbol && Number.isFinite(row.shares) && row.shares > 0);
+
+  if (positions.length === 0) return [];
+
+  const symbols = Array.from(new Set(positions.map((p) => p.symbol)));
+  const placeholders = symbols.map(() => "?").join(", ");
+  const prices = await query(
+    `SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price
+     FROM ${tables.dailyPriceHistory}
+     WHERE symbol IN (${placeholders}) AND COALESCE(adjusted_close, close) IS NOT NULL
+     ORDER BY price_date ASC`,
+    symbols
+  ) as Array<{ symbol?: unknown; price_date?: unknown; close_price?: unknown }>;
+
+  if (prices.length === 0) return [];
+
+  const bySymbol = new Map<string, Array<{ price_date: string; close_price: number }>>();
+  for (const row of prices) {
+    const symbol = String(row.symbol ?? "").trim().toUpperCase();
+    const priceDate = String(row.price_date ?? "").trim();
+    const closePrice = Number(row.close_price ?? NaN);
+    if (!symbol || !isValidDate(priceDate) || !Number.isFinite(closePrice) || closePrice <= 0) continue;
+    const bucket = bySymbol.get(symbol) ?? [];
+    bucket.push({ price_date: priceDate, close_price: closePrice });
+    bySymbol.set(symbol, bucket);
+  }
+
+  const aggregate = new Map<string, { market_value: number; contributors: number; expected: number }>();
+
+  for (const position of positions) {
+    const series = bySymbol.get(position.symbol) ?? [];
+    if (series.length === 0) continue;
+
+    for (const point of series) {
+      if (position.entry_date && point.price_date < position.entry_date) continue;
+      if (position.exited_at && point.price_date > position.exited_at) continue;
+
+      const existing = aggregate.get(point.price_date) ?? { market_value: 0, contributors: 0, expected: 0 };
+      existing.market_value += position.shares * point.close_price;
+      existing.contributors += 1;
+      existing.expected += 1;
+      aggregate.set(point.price_date, existing);
+    }
+  }
+
+  return Array.from(aggregate.entries())
+    .map(([as_of_date, value]) => ({
+      as_of_date,
+      market_value: value.market_value,
+      data_quality: (value.contributors === value.expected ? "full" : "partial") as DataQuality,
+    }))
+    .filter((row) => Number.isFinite(row.market_value) && row.market_value > 0)
+    .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+}
+
+async function loadPortfolioHistorySeriesFromPositionsSnapshots(portfolioId: string): Promise<Point[]> {
+  const rows = await query(
+    `SELECT as_of_date,
+            SUM(COALESCE(market_value, shares * COALESCE(manual_price, avg_cost))) AS market_value
+     FROM ${tables.portfolioPositions}
+     WHERE portfolio_id = ? AND active_position = 1
+     GROUP BY as_of_date
+     ORDER BY as_of_date ASC`,
+    [portfolioId]
+  ) as Array<{ as_of_date?: unknown; market_value?: unknown }>;
+
+  return rows
+    .map((row) => ({
+      as_of_date: String(row.as_of_date ?? "").trim(),
+      market_value: Number(row.market_value ?? NaN),
+      data_quality: "estimated" as DataQuality,
+    }))
+    .filter((row) => isValidDate(row.as_of_date) && Number.isFinite(row.market_value) && row.market_value > 0);
+}
+
+async function loadPortfolioHistorySeriesFromSnapshots(portfolioId: string): Promise<Point[]> {
+  const rows = await query(
+    `SELECT as_of_date, market_value
+     FROM ${tables.portfolioSnapshots}
+     WHERE portfolio_id = ? AND market_value IS NOT NULL
+     ORDER BY as_of_date ASC`,
+    [portfolioId]
+  ) as Array<{ as_of_date?: unknown; market_value?: unknown }>;
+
+  return rows
+    .map((row) => ({
+      as_of_date: String(row.as_of_date ?? "").trim(),
+      market_value: Number(row.market_value ?? NaN),
+      data_quality: "estimated" as DataQuality,
+    }))
+    .filter((row) => isValidDate(row.as_of_date) && Number.isFinite(row.market_value) && row.market_value > 0);
+}
+
+async function loadPortfolioHistorySeries(portfolioId: string): Promise<{ source: HistorySource; rows: Point[] }> {
   const hasPositions = await tableExists(tables.portfolioPositions);
-
   if (hasPositions) {
-    const positionRows = await query(
-      `SELECT as_of_date,
-              SUM(COALESCE(market_value, shares * COALESCE(manual_price, avg_cost))) AS market_value
-       FROM ${tables.portfolioPositions}
-       WHERE portfolio_id = ? AND active_position = 1
-       GROUP BY as_of_date
-       ORDER BY as_of_date ASC`,
-      [portfolioId]
-    );
+    const priceHistoryRows = await loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId);
+    if (priceHistoryRows.length > 0) {
+      return { source: "positions_price_history", rows: priceHistoryRows };
+    }
 
-    const rows = (positionRows as Array<{ as_of_date?: unknown; market_value?: unknown }>)
-      .map((row) => ({
-        as_of_date: String(row.as_of_date ?? ""),
-        market_value: Number(row.market_value ?? NaN),
-      }))
-      .filter((row) => row.as_of_date && Number.isFinite(row.market_value));
-
-    if (rows.length > 0) {
-      return { source: "positions", rows };
+    const positionSnapshotRows = await loadPortfolioHistorySeriesFromPositionsSnapshots(portfolioId);
+    if (positionSnapshotRows.length > 0) {
+      return { source: "positions_snapshots", rows: positionSnapshotRows };
     }
   }
 
   const hasSnapshots = await tableExists(tables.portfolioSnapshots);
   if (hasSnapshots) {
-    const snapshotRows = await query(
-      `SELECT as_of_date, market_value
-       FROM ${tables.portfolioSnapshots}
-       WHERE portfolio_id = ? AND market_value IS NOT NULL
-       ORDER BY as_of_date ASC`,
-      [portfolioId]
-    );
-
-    const rows = (snapshotRows as Array<{ as_of_date?: unknown; market_value?: unknown }>)
-      .map((row) => ({
-        as_of_date: String(row.as_of_date ?? ""),
-        market_value: Number(row.market_value ?? NaN),
-      }))
-      .filter((row) => row.as_of_date && Number.isFinite(row.market_value));
-
-    if (rows.length > 0) {
-      return { source: "snapshots", rows };
+    const snapshotRows = await loadPortfolioHistorySeriesFromSnapshots(portfolioId);
+    if (snapshotRows.length > 0) {
+      return { source: "snapshots", rows: snapshotRows };
     }
   }
 
@@ -191,10 +289,20 @@ function computeTrendMetrics(series: Point[]): TrendMetrics {
   const mediumDirection = computeDirection(return65);
   const longDirection = computeDirection(return200);
 
-  const signalCompleteness = computeSignalCompleteness(availableDays);
-  const trendStatus = signalCompleteness === "unavailable"
+  const trendCompleteness = computeSignalCompleteness(availableDays);
+  const trendStatus = trendCompleteness === "unavailable"
     ? "unavailable"
-    : computeTrendStatus(shortDirection, mediumDirection, longDirection);
+    : computeTrendStatus({
+      shortDirection,
+      mediumDirection,
+      longDirection,
+      longReturn: return200,
+    });
+
+  const qualityPriority: Record<DataQuality, number> = { partial: 0, estimated: 1, full: 2 };
+  const data_quality = series.reduce<DataQuality>((acc, row) => {
+    return qualityPriority[row.data_quality] < qualityPriority[acc] ? row.data_quality : acc;
+  }, "full");
 
   return {
     available_days: availableDays,
@@ -205,8 +313,9 @@ function computeTrendMetrics(series: Point[]): TrendMetrics {
     medium_direction: mediumDirection,
     long_direction: longDirection,
     trend_status: trendStatus,
-    signal_completeness: signalCompleteness,
-    data_quality: "estimated",
+    signal_completeness: trendCompleteness,
+    trend_completeness: trendCompleteness,
+    data_quality,
     relative_strength_rank: null,
     relative_strength_bucket: "unavailable",
   };
@@ -249,7 +358,7 @@ function applyRelativeStrength(
 export async function buildPortfolioHistory() {
   const portfolios = await listPortfolioConfigs();
   const byPortfolioSeries = new Map<string, Point[]>();
-  const sourceByPortfolio = new Map<string, "positions" | "snapshots" | "unavailable">();
+  const sourceByPortfolio = new Map<string, HistorySource>();
 
   const trendItems: Array<{ portfolio: PortfolioAdminConfig; metrics: TrendMetrics }> = [];
 
@@ -257,6 +366,8 @@ export async function buildPortfolioHistory() {
     const loaded = await loadPortfolioHistorySeries(portfolio.portfolio_id);
     sourceByPortfolio.set(portfolio.portfolio_id, loaded.source);
     byPortfolioSeries.set(portfolio.portfolio_id, loaded.rows);
+
+    await execute(`DELETE FROM ${tables.portfolioHistoryDaily} WHERE portfolio_id = ?`, [portfolio.portfolio_id]);
 
     const enrichedSeries = enrichSeriesReturns(loaded.rows);
 
@@ -266,15 +377,7 @@ export async function buildPortfolioHistory() {
           portfolio_id, as_of_date, total_return_index, market_value,
           daily_return_pct, cumulative_return_pct, drawdown_pct,
           cash_weight_pct, data_source, data_quality
-        ) VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?)
-        ON CONFLICT(portfolio_id, as_of_date)
-        DO UPDATE SET
-          market_value = excluded.market_value,
-          daily_return_pct = excluded.daily_return_pct,
-          cumulative_return_pct = excluded.cumulative_return_pct,
-          drawdown_pct = excluded.drawdown_pct,
-          data_source = excluded.data_source,
-          data_quality = excluded.data_quality`,
+        ) VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?)`,
         [
           portfolio.portfolio_id,
           row.as_of_date,
@@ -283,7 +386,7 @@ export async function buildPortfolioHistory() {
           row.cumulative_return_pct,
           row.drawdown_pct,
           loaded.source,
-          "estimated",
+          row.data_quality,
         ]
       );
     }
@@ -302,51 +405,61 @@ export async function buildPortfolioHistory() {
   );
 
   const included = portfolios.filter((item) => item.active && item.included_in_total_portfolio);
-  const allDates = new Set<string>();
+  const dates = new Set<string>();
+  const seriesMapByPortfolio = new Map<string, Map<string, Point>>();
+
   for (const portfolio of included) {
-    for (const row of byPortfolioSeries.get(portfolio.portfolio_id) ?? []) {
-      allDates.add(row.as_of_date);
+    const series = byPortfolioSeries.get(portfolio.portfolio_id) ?? [];
+    const byDate = new Map<string, Point>();
+    for (const row of series) {
+      dates.add(row.as_of_date);
+      byDate.set(row.as_of_date, row);
     }
+    seriesMapByPortfolio.set(portfolio.portfolio_id, byDate);
   }
 
-  const sortedDates = Array.from(allDates).sort((a, b) => a.localeCompare(b));
+  const sortedDates = Array.from(dates).sort((a, b) => a.localeCompare(b));
   const totalSeries: Point[] = [];
 
   for (const date of sortedDates) {
     let sum = 0;
     let contributors = 0;
+    let fullContributors = 0;
+
     for (const portfolio of included) {
-      const row = (byPortfolioSeries.get(portfolio.portfolio_id) ?? []).find((item) => item.as_of_date === date);
+      const row = seriesMapByPortfolio.get(portfolio.portfolio_id)?.get(date);
       if (!row) continue;
       sum += row.market_value;
       contributors += 1;
+      if (row.data_quality === "full") fullContributors += 1;
     }
+
     if (contributors > 0) {
-      totalSeries.push({ as_of_date: date, market_value: sum });
+      const dataQuality: DataQuality = contributors < included.length
+        ? "partial"
+        : fullContributors === included.length
+          ? "full"
+          : "estimated";
+      totalSeries.push({ as_of_date: date, market_value: sum, data_quality: dataQuality });
     }
   }
 
+  await execute(`DELETE FROM ${tables.totalPortfolioHistoryDaily}`);
+
   const totalEnriched = enrichSeriesReturns(totalSeries);
   for (const row of totalEnriched) {
-    const contributors = included
-      .map((portfolio) => (byPortfolioSeries.get(portfolio.portfolio_id) ?? []).some((point) => point.as_of_date === row.as_of_date))
-      .filter(Boolean).length;
-
-    const dataQuality = contributors === included.length ? "estimated" : "partial";
+    let contributors = 0;
+    for (const portfolio of included) {
+      if (seriesMapByPortfolio.get(portfolio.portfolio_id)?.has(row.as_of_date)) {
+        contributors += 1;
+      }
+    }
 
     await execute(
       `INSERT INTO ${tables.totalPortfolioHistoryDaily} (
         as_of_date, total_return_index, market_value, daily_return_pct, cumulative_return_pct,
         drawdown_pct, total_cash_value, total_cash_weight_pct, included_portfolio_count, data_quality
-      ) VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?)
-      ON CONFLICT(as_of_date)
-      DO UPDATE SET
-        market_value = excluded.market_value,
-        daily_return_pct = excluded.daily_return_pct,
-        cumulative_return_pct = excluded.cumulative_return_pct,
-        drawdown_pct = excluded.drawdown_pct,
-        included_portfolio_count = excluded.included_portfolio_count,
-        data_quality = excluded.data_quality`,
+      ) VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
       [
         row.as_of_date,
         row.market_value,
@@ -354,10 +467,12 @@ export async function buildPortfolioHistory() {
         row.cumulative_return_pct,
         row.drawdown_pct,
         contributors,
-        dataQuality,
+        row.data_quality,
       ]
     );
   }
+
+  const totalMetrics = computeTrendMetrics(totalSeries);
 
   const latestSnapshotDateRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
   const latestSnapshotDate = String(latestSnapshotDateRows[0]?.as_of_date ?? "").trim();
@@ -391,6 +506,7 @@ export async function buildPortfolioHistory() {
         trend_status: item.metrics.trend_status,
         relative_strength_rank: item.metrics.relative_strength_rank,
         relative_strength_bucket: item.metrics.relative_strength_bucket,
+        trend_completeness: item.metrics.trend_completeness,
         signal_completeness: item.metrics.signal_completeness,
         data_quality: item.metrics.data_quality,
       };
@@ -435,8 +551,21 @@ export async function buildPortfolioHistory() {
     total: {
       included_portfolios: included.map((item) => item.portfolio_id),
       history_days_available: totalSeries.length,
-      aggregation_source: (await tableExists(tables.portfolioPositions)) ? "positions" : "snapshots",
-      data_quality: totalSeries.length > 0 ? "estimated" : "partial",
+      aggregation_source: included.some((item) => sourceByPortfolio.get(item.portfolio_id) === "positions_price_history")
+        ? "positions_price_history"
+        : "snapshots",
+      daily_return_pct: totalEnriched.length > 0 ? totalEnriched[totalEnriched.length - 1].daily_return_pct : null,
+      cumulative_return_pct: totalEnriched.length > 0 ? totalEnriched[totalEnriched.length - 1].cumulative_return_pct : null,
+      drawdown_pct: totalEnriched.length > 0 ? totalEnriched[totalEnriched.length - 1].drawdown_pct : null,
+      return_20d: totalMetrics.return_20d,
+      return_65d: totalMetrics.return_65d,
+      return_200d: totalMetrics.return_200d,
+      short_direction: totalMetrics.short_direction,
+      medium_direction: totalMetrics.medium_direction,
+      long_direction: totalMetrics.long_direction,
+      trend_status: totalMetrics.trend_status,
+      trend_completeness: totalMetrics.trend_completeness,
+      data_quality: totalMetrics.data_quality,
     },
   };
 }
