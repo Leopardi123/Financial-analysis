@@ -45,6 +45,55 @@ function parseJson(value: unknown): any | null {
   }
 }
 
+function sanitizeTrendReturn(value: unknown): number | null {
+  const num = asNum(value);
+  return num;
+}
+
+function buildStructuredUnavailableTrendDebug(row: any) {
+  return {
+    attempted: true,
+    available_days: null,
+    return_20d: sanitizeTrendReturn(row?.return_20d),
+    return_65d: sanitizeTrendReturn(row?.return_65d),
+    return_200d: sanitizeTrendReturn(row?.return_200d),
+    short_direction: row?.short_direction == null ? "unavailable" : String(row.short_direction),
+    medium_direction: row?.medium_direction == null ? "unavailable" : String(row.medium_direction),
+    long_direction: row?.long_direction == null ? "unavailable" : String(row.long_direction),
+    trend_status: row?.trend_status == null ? "unavailable" : String(row.trend_status),
+    trend_completeness: row?.signal_completeness == null ? "unavailable" : String(row.signal_completeness),
+    reason: "insufficient_history",
+  };
+}
+
+function normalizeTrendFields(row: any) {
+  const trendStatus = row?.trend_status == null ? "unavailable" : String(row.trend_status);
+  const shortDirection = row?.short_direction == null ? "unavailable" : String(row.short_direction);
+  const mediumDirection = row?.medium_direction == null ? "unavailable" : String(row.medium_direction);
+  const longDirection = row?.long_direction == null ? "unavailable" : String(row.long_direction);
+  const return20d = asNum(row?.return_20d);
+  const return65d = asNum(row?.return_65d);
+  const return200d = asNum(row?.return_200d);
+  const looksLikePlaceholder = trendStatus === "unavailable"
+    && shortDirection === "unavailable"
+    && mediumDirection === "unavailable"
+    && longDirection === "unavailable"
+    && return20d === 0
+    && return65d === 0
+    && return200d === 0;
+  return {
+    return_20d: looksLikePlaceholder ? null : return20d,
+    return_65d: looksLikePlaceholder ? null : return65d,
+    return_200d: looksLikePlaceholder ? null : return200d,
+    short_direction: shortDirection,
+    medium_direction: mediumDirection,
+    long_direction: longDirection,
+    trend_status: trendStatus,
+    relative_strength_bucket: row?.relative_strength_bucket == null ? null : String(row.relative_strength_bucket),
+    signal_completeness: row?.signal_completeness == null ? null : String(row.signal_completeness),
+  };
+}
+
 function computeAllocationPlanStatus(rows: any[]): "within_allocation_plan" | "outside_allocation_plan" | "materially_outside_allocation_plan" {
   const statuses = rows
     .filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1)
@@ -149,6 +198,30 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       ))
     : [];
 
+  const historyTrendRows = asOfDate
+    ? await runStage("history_trend_loaded", async () => query(
+      `SELECT portfolio_id, return_20d, return_65d, return_200d,
+              short_direction, medium_direction, long_direction,
+              trend_status, relative_strength_bucket, signal_completeness, debug_payload_json
+       FROM ${tables.portfolioSnapshots}
+       WHERE as_of_date = ?`,
+      [asOfDate]
+    ))
+    : [];
+  const historyTrendByPortfolioId = new Map(
+    (historyTrendRows as any[]).map((row) => {
+      const parsed = parseJson(row.debug_payload_json);
+      const trendDebug = parsed?.trend ?? null;
+      return [
+        String(row.portfolio_id ?? ""),
+        {
+          metrics: normalizeTrendFields(row),
+          trend_debug: trendDebug ?? buildStructuredUnavailableTrendDebug(row),
+        },
+      ] as const;
+    })
+  );
+
   const totalHistoryLatestRows = await runStage("history_loaded", async () =>
     query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`)
   );
@@ -170,9 +243,14 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const positionsCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioPositions} WHERE active_position = 1`);
   const activePositionsCount = Number(positionsCountRows[0]?.count ?? 0);
   const lastSnapshotBuildRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
-  const lastHistoryBuildRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`);
+  const lastHistoryBuildRows = await query(
+    `SELECT last_success_at
+     FROM ${tables.portfolioBuildMeta}
+     WHERE pipeline_name = 'history'
+     LIMIT 1`
+  );
   const lastSnapshotBuild = String(lastSnapshotBuildRows[0]?.as_of_date ?? "").trim() || null;
-  const lastHistoryBuild = String(lastHistoryBuildRows[0]?.as_of_date ?? "").trim() || null;
+  const lastHistoryBuild = String(lastHistoryBuildRows[0]?.last_success_at ?? "").trim() || null;
 
   const allocationPlanStatus = computeAllocationPlanStatus(portfolioRows as any[]);
   const included = (portfolioRows as any[]).filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1);
@@ -328,7 +406,10 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     };
   });
 
-  const portfolios = (portfolioRows as any[]).map((row) => ({
+  const portfolios = (portfolioRows as any[]).map((row) => {
+    const trendSource = historyTrendByPortfolioId.get(String(row.portfolio_id ?? ""));
+    const trendMetrics = trendSource?.metrics ?? normalizeTrendFields(row);
+    return ({
     ...(function () {
       const snapshotDebug = parseJson(row.debug_payload_json);
       return {
@@ -350,14 +431,14 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     max_weight_pct: asNum(row.max_weight_pct),
     weight_status: row.weight_status == null ? null : String(row.weight_status),
     rebalance_status: row.rebalance_status == null ? null : String(row.rebalance_status),
-    return_20d: asNum(row.return_20d),
-    return_65d: asNum(row.return_65d),
-    return_200d: asNum(row.return_200d),
-    short_direction: row.short_direction == null ? null : String(row.short_direction),
-    medium_direction: row.medium_direction == null ? null : String(row.medium_direction),
-    long_direction: row.long_direction == null ? null : String(row.long_direction),
-    trend_status: row.trend_status == null ? null : String(row.trend_status),
-    relative_strength_bucket: row.relative_strength_bucket == null ? null : String(row.relative_strength_bucket),
+    return_20d: trendMetrics.return_20d,
+    return_65d: trendMetrics.return_65d,
+    return_200d: trendMetrics.return_200d,
+    short_direction: trendMetrics.short_direction,
+    medium_direction: trendMetrics.medium_direction,
+    long_direction: trendMetrics.long_direction,
+    trend_status: trendMetrics.trend_status,
+    relative_strength_bucket: trendMetrics.relative_strength_bucket,
     annualized_vol_65d: asNum(row.annualized_vol_65d),
     current_drawdown_pct: asNum(row.current_drawdown_pct),
     top_holding_weight_pct: asNum(row.top_holding_weight_pct),
@@ -368,9 +449,10 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     hedge_status: row.hedge_status == null ? null : String(row.hedge_status),
     suggested_hedge_type: row.suggested_hedge_type == null ? null : String(row.suggested_hedge_type),
     hedge_policy_applied: row.hedge_policy_applied == null ? null : String(row.hedge_policy_applied),
-    signal_completeness: row.signal_completeness == null ? null : String(row.signal_completeness),
-    data_quality_flags: buildDataQualityFlags(row),
-  }));
+    signal_completeness: trendMetrics.signal_completeness,
+    data_quality_flags: buildDataQualityFlags({ ...row, trend_status: trendMetrics.trend_status, return_65d: trendMetrics.return_65d }),
+  });
+  });
 
   const snapshotIds = new Set((portfolioRows as any[]).map((row) => String(row.portfolio_id ?? "")).filter((id) => id.length > 0));
   const portfoliosConfiguredCount = adminConfigs.length;
@@ -464,7 +546,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     portfolios: portfolios.map((row) => {
       const raw = (portfolioRows as any[]).find((source) => String(source.portfolio_id ?? "") === row.portfolio_id) ?? {};
       const snapshotDebug = parseJson(raw.debug_payload_json);
-      const trendDebug = snapshotDebug?.trend ?? null;
+      const trendDebug = historyTrendByPortfolioId.get(row.portfolio_id)?.trend_debug ?? snapshotDebug?.trend ?? buildStructuredUnavailableTrendDebug(raw);
       const riskDebug = parseJson(raw.risk_debug_json);
       const hedgeDebug = parseJson(raw.hedge_debug_json);
 
@@ -477,23 +559,23 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
           weight_status: row.weight_status,
           rebalance_status: row.rebalance_status,
         },
-        trend_debug: trendDebug
-          ? {
-            available_days: trendDebug.available_days ?? null,
-            history_source: trendDebug.history_source ?? null,
-            return_20d: trendDebug.return_20d ?? null,
-            return_65d: trendDebug.return_65d ?? null,
-            return_200d: trendDebug.return_200d ?? null,
-            short_direction: trendDebug.short_direction ?? null,
-            medium_direction: trendDebug.medium_direction ?? null,
-            long_direction: trendDebug.long_direction ?? null,
-            trend_status: trendDebug.trend_status ?? null,
-            relative_strength_rank: trendDebug.relative_strength_rank ?? null,
-            relative_strength_bucket: trendDebug.relative_strength_bucket ?? null,
-            trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null,
-            data_quality: trendDebug.data_quality ?? null,
-          }
-          : null,
+        trend_debug: {
+          attempted: trendDebug.attempted ?? true,
+          available_days: trendDebug.available_days ?? null,
+          history_source: trendDebug.history_source ?? null,
+          return_20d: trendDebug.return_20d ?? null,
+          return_65d: trendDebug.return_65d ?? null,
+          return_200d: trendDebug.return_200d ?? null,
+          short_direction: trendDebug.short_direction ?? "unavailable",
+          medium_direction: trendDebug.medium_direction ?? "unavailable",
+          long_direction: trendDebug.long_direction ?? "unavailable",
+          trend_status: trendDebug.trend_status ?? "unavailable",
+          relative_strength_rank: trendDebug.relative_strength_rank ?? null,
+          relative_strength_bucket: trendDebug.relative_strength_bucket ?? null,
+          trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? "unavailable",
+          data_quality: trendDebug.data_quality ?? null,
+          reason: trendDebug.reason ?? (trendDebug.return_65d == null ? "insufficient_history" : "ok"),
+        },
         risk_debug: riskDebug
           ? {
             annualized_vol_65d: riskDebug?.volatility_component?.annualized_vol_65d ?? null,

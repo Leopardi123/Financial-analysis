@@ -617,6 +617,7 @@ export async function buildPortfolioHistory() {
   }
 
   const totalMetrics = computeTrendMetrics(totalSeries);
+  const builtAt = new Date().toISOString();
 
   const latestSnapshotDateRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
   const latestSnapshotDate = String(latestSnapshotDateRows[0]?.as_of_date ?? "").trim();
@@ -692,6 +693,13 @@ export async function buildPortfolioHistory() {
     }
   }
 
+  await execute(
+    `INSERT INTO ${tables.portfolioBuildMeta} (pipeline_name, last_success_at)
+     VALUES ('history', ?)
+     ON CONFLICT(pipeline_name) DO UPDATE SET last_success_at = excluded.last_success_at`,
+    [builtAt]
+  );
+
   return {
     portfolios: trendItems.map((item) => ({
       portfolio_id: item.portfolio.portfolio_id,
@@ -722,6 +730,7 @@ export async function buildPortfolioHistory() {
       trend_status: totalMetrics.trend_status,
       trend_completeness: totalMetrics.trend_completeness,
       data_quality: totalMetrics.data_quality,
+      last_history_build: builtAt,
     },
   };
 }

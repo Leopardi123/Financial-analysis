@@ -32,6 +32,7 @@ const TABLES = {
   portfolioPositions: "portfolio_positions",
   portfolioHistoryDaily: "portfolio_history_daily",
   totalPortfolioHistoryDaily: "total_portfolio_history_daily",
+  portfolioBuildMeta: "portfolio_build_meta",
 };
 
 export async function ensureSchema() {
@@ -464,6 +465,13 @@ export async function ensureSchema() {
       total_cash_weight_pct REAL,
       included_portfolio_count INTEGER,
       data_quality TEXT
+    )`
+  );
+
+  await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioBuildMeta} (
+      pipeline_name TEXT PRIMARY KEY,
+      last_success_at TEXT NOT NULL
     )`
   );
 

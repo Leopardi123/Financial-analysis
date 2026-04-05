@@ -1,6 +1,27 @@
 import { query } from "../../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../../api/_migrate.js";
 
+function buildUnavailableTrendDebugFromRow(row: any) {
+  const return20d = row?.return_20d == null ? null : Number(row.return_20d);
+  const return65d = row?.return_65d == null ? null : Number(row.return_65d);
+  const return200d = row?.return_200d == null ? null : Number(row.return_200d);
+  const availableDays = [return20d, return65d, return200d].some((value) => typeof value === "number") ? null : 0;
+  const reason = return65d === null ? "insufficient_history" : "trend_debug_unavailable";
+  return {
+    attempted: true,
+    available_days: availableDays,
+    return_20d: return20d,
+    return_65d: return65d,
+    return_200d: return200d,
+    short_direction: String(row?.short_direction ?? "unavailable"),
+    medium_direction: String(row?.medium_direction ?? "unavailable"),
+    long_direction: String(row?.long_direction ?? "unavailable"),
+    trend_status: String(row?.trend_status ?? "unavailable"),
+    trend_completeness: row?.signal_completeness == null ? "unavailable" : String(row.signal_completeness),
+    reason,
+  };
+}
+
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "GET") {
@@ -40,6 +61,13 @@ export default async function handler(req: any, res: any) {
 
     const total = totalRows[0] as any;
     const debug = String(req.query?.debug ?? "") === "1";
+    const lastBuildRows = await query(
+      `SELECT last_success_at
+       FROM ${tables.portfolioBuildMeta}
+       WHERE pipeline_name = 'history'
+       LIMIT 1`
+    );
+    const lastHistoryBuild = String(lastBuildRows[0]?.last_success_at ?? "").trim() || null;
 
     res.status(200).json({
       ok: true,
@@ -77,7 +105,7 @@ export default async function handler(req: any, res: any) {
               }
               return {
                 portfolio_id: String(row.portfolio_id ?? ""),
-                ...(trendDebug ?? {}),
+                ...(trendDebug ?? buildUnavailableTrendDebugFromRow(row)),
               };
             }),
             total: {
@@ -89,6 +117,7 @@ export default async function handler(req: any, res: any) {
               drawdown_pct: total?.drawdown_pct == null ? null : Number(total.drawdown_pct),
               data_quality: total?.data_quality ?? null,
               included_portfolio_count: total?.included_portfolio_count ?? null,
+              last_history_build: lastHistoryBuild,
             },
           },
         }
