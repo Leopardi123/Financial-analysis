@@ -51,9 +51,12 @@ function sanitizeTrendReturn(value: unknown): number | null {
 }
 
 function buildStructuredUnavailableTrendDebug(row: any) {
+  const availableDaysRaw = Number(row?.available_days ?? NaN);
+  const availableDays = Number.isFinite(availableDaysRaw) ? availableDaysRaw : 0;
+  const trendCompleteness = availableDays >= 200 ? "full" : availableDays >= 65 ? "partial" : "unavailable";
   return {
     attempted: true,
-    available_days: null,
+    available_days: availableDays,
     return_20d: sanitizeTrendReturn(row?.return_20d),
     return_65d: sanitizeTrendReturn(row?.return_65d),
     return_200d: sanitizeTrendReturn(row?.return_200d),
@@ -61,8 +64,8 @@ function buildStructuredUnavailableTrendDebug(row: any) {
     medium_direction: row?.medium_direction == null ? "unavailable" : String(row.medium_direction),
     long_direction: row?.long_direction == null ? "unavailable" : String(row.long_direction),
     trend_status: row?.trend_status == null ? "unavailable" : String(row.trend_status),
-    trend_completeness: row?.signal_completeness == null ? "unavailable" : String(row.signal_completeness),
-    reason: "insufficient_history",
+    trend_completeness: trendCompleteness,
+    reason: availableDays < 65 ? "insufficient_history" : "trend_debug_unavailable",
   };
 }
 
@@ -92,6 +95,14 @@ function normalizeTrendFields(row: any) {
     relative_strength_bucket: row?.relative_strength_bucket == null ? null : String(row.relative_strength_bucket),
     signal_completeness: row?.signal_completeness == null ? null : String(row.signal_completeness),
   };
+}
+
+function computeLookbackReturn(values: number[], lookbackDays: number): number | null {
+  if (values.length <= lookbackDays) return null;
+  const latest = values[values.length - 1];
+  const past = values[values.length - 1 - lookbackDays];
+  if (!Number.isFinite(latest) || !Number.isFinite(past) || past === 0) return null;
+  return ((latest / past) - 1) * 100;
 }
 
 function computeAllocationPlanStatus(rows: any[]): "within_allocation_plan" | "outside_allocation_plan" | "materially_outside_allocation_plan" {
@@ -200,27 +211,74 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
 
   const historyTrendRows = asOfDate
     ? await runStage("history_trend_loaded", async () => query(
-      `SELECT portfolio_id, return_20d, return_65d, return_200d,
-              short_direction, medium_direction, long_direction,
-              trend_status, relative_strength_bucket, signal_completeness, debug_payload_json
-       FROM ${tables.portfolioSnapshots}
-       WHERE as_of_date = ?`,
-      [asOfDate]
+      `SELECT portfolio_id, as_of_date, market_value
+       FROM ${tables.portfolioHistoryDaily}
+       WHERE market_value IS NOT NULL
+       ORDER BY portfolio_id ASC, as_of_date ASC`
     ))
     : [];
-  const historyTrendByPortfolioId = new Map(
-    (historyTrendRows as any[]).map((row) => {
-      const parsed = parseJson(row.debug_payload_json);
-      const trendDebug = parsed?.trend ?? null;
-      return [
-        String(row.portfolio_id ?? ""),
-        {
-          metrics: normalizeTrendFields(row),
-          trend_debug: trendDebug ?? buildStructuredUnavailableTrendDebug(row),
-        },
-      ] as const;
-    })
-  );
+  const seriesByPortfolio = new Map<string, Array<{ as_of_date: string; market_value: number }>>();
+  for (const row of historyTrendRows as any[]) {
+    const portfolioId = String(row.portfolio_id ?? "");
+    const marketValue = Number(row.market_value ?? NaN);
+    const asOfDate = String(row.as_of_date ?? "");
+    if (!portfolioId || !Number.isFinite(marketValue) || marketValue <= 0 || !asOfDate) continue;
+    const bucket = seriesByPortfolio.get(portfolioId) ?? [];
+    bucket.push({ as_of_date: asOfDate, market_value: marketValue });
+    seriesByPortfolio.set(portfolioId, bucket);
+  }
+  const historyTrendByPortfolioId = new Map<string, { metrics: ReturnType<typeof normalizeTrendFields> & { signal_completeness: string | null }; trend_debug: any }>();
+  for (const [portfolioId, series] of seriesByPortfolio.entries()) {
+    const values = series.map((point) => point.market_value);
+    const availableDays = series.length;
+    const return20d = computeLookbackReturn(values, 20);
+    const return65d = computeLookbackReturn(values, 65);
+    const return200d = computeLookbackReturn(values, 200);
+    const shortDirection = return20d === null ? "unavailable" : return20d > 2 ? "positive" : return20d < -2 ? "negative" : "neutral";
+    const mediumDirection = return65d === null ? "unavailable" : return65d > 2 ? "positive" : return65d < -2 ? "negative" : "neutral";
+    const longDirection = return200d === null ? "unavailable" : return200d > 2 ? "positive" : return200d < -2 ? "negative" : "neutral";
+    const trendCompleteness = availableDays >= 200 ? "full" : availableDays >= 65 ? "partial" : "unavailable";
+    const trendStatus = trendCompleteness === "unavailable"
+      ? "unavailable"
+      : longDirection === "positive" && mediumDirection === "positive" && (shortDirection === "positive" || shortDirection === "neutral")
+        ? "strong_uptrend"
+        : longDirection === "negative" && mediumDirection === "negative" && (shortDirection === "negative" || shortDirection === "neutral")
+          ? "downtrend"
+          : shortDirection === "positive" && (mediumDirection === "positive" || mediumDirection === "neutral")
+            ? "improving"
+            : shortDirection === "negative" && (mediumDirection === "negative" || mediumDirection === "neutral")
+              ? "weakening"
+              : "neutral";
+    const metrics = normalizeTrendFields({
+      return_20d: return20d,
+      return_65d: return65d,
+      return_200d: return200d,
+      short_direction: shortDirection,
+      medium_direction: mediumDirection,
+      long_direction: longDirection,
+      trend_status: trendStatus,
+      signal_completeness: trendCompleteness,
+    });
+    historyTrendByPortfolioId.set(portfolioId, {
+      metrics: {
+        ...metrics,
+        signal_completeness: trendCompleteness,
+      },
+      trend_debug: {
+        attempted: true,
+        available_days: availableDays,
+        return_20d: metrics.return_20d,
+        return_65d: metrics.return_65d,
+        return_200d: metrics.return_200d,
+        short_direction: metrics.short_direction,
+        medium_direction: metrics.medium_direction,
+        long_direction: metrics.long_direction,
+        trend_status: metrics.trend_status,
+        trend_completeness: trendCompleteness,
+        reason: availableDays < 65 ? "insufficient_history" : "ok",
+      },
+    });
+  }
 
   const totalHistoryLatestRows = await runStage("history_loaded", async () =>
     query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`)
