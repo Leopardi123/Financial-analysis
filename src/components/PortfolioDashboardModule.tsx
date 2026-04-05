@@ -89,6 +89,14 @@ type PortfolioOverviewResponse = {
   };
   portfolios: PortfolioRecord[];
   setup?: { setup_state: SetupState };
+  pipeline_status?: {
+    snapshot_exists: boolean;
+    history_exists: boolean;
+    history_days_available: number;
+    positions_count: number;
+    last_snapshot_build: string | null;
+    last_history_build: string | null;
+  };
   debug?: unknown;
   error?: string | {
     type?: string;
@@ -312,6 +320,7 @@ export default function PortfolioDashboardModule() {
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [buildingData, setBuildingData] = useState(false);
   const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>>({});
   const debugMode = debugEnabled();
 
@@ -443,6 +452,21 @@ export default function PortfolioDashboardModule() {
     await loadAll();
   };
 
+  const buildPortfolioData = async () => {
+    setBuildingData(true);
+    setError(null);
+    setOverviewError(null);
+    try {
+      await fetchJsonWithTimeout<{ ok: boolean }>(`/api/portfolio/snapshots/build${debugMode ? "?debug=1" : ""}`, 15_000);
+      await loadAll();
+    } catch (buildErr) {
+      const raw = buildErr instanceof Error ? buildErr.message : String(buildErr ?? "");
+      setError(normalizeClientErrorMessage(raw, "Portfolio data build failed."));
+    } finally {
+      setBuildingData(false);
+    }
+  };
+
   const inputClassName = (field: string) => (fieldErrors[field] ? "field-invalid" : "");
   const renderFieldError = (field: string) => fieldErrors[field]
     ? <span className="field-error-text">{fieldErrors[field]}</span>
@@ -495,6 +519,10 @@ export default function PortfolioDashboardModule() {
       {!loading && !error && setupState === "configured_no_data" && (
         <div className="portfolio-empty-state">
           <h4>Portfolios configured, awaiting holdings / snapshot data.</h4>
+          <p>Portfolio data not yet built.</p>
+          <button type="button" disabled={buildingData} onClick={() => { void buildPortfolioData(); }}>
+            {buildingData ? "Building…" : "Build portfolio data"}
+          </button>
           <div className="portfolio-config-list">
             {adminList.map((item) => (
               <div key={item.portfolio_id} className="portfolio-config-row">
@@ -509,6 +537,10 @@ export default function PortfolioDashboardModule() {
         <div className="portfolio-empty-state">
           <h4>Portfolio dashboard temporarily unavailable.</h4>
           <p>Admin controls are still available below.</p>
+          <p>Portfolio data not yet built.</p>
+          <button type="button" disabled={buildingData} onClick={() => { void buildPortfolioData(); }}>
+            {buildingData ? "Building…" : "Build portfolio data"}
+          </button>
         </div>
       )}
 
@@ -752,7 +784,12 @@ export default function PortfolioDashboardModule() {
       {debugMode && (
         <details className="portfolio-debug-wrap">
           <summary>Debug payload</summary>
-          <pre>{JSON.stringify({ setupState, adminCount: adminList.length, debug: overview?.debug ?? null }, null, 2)}</pre>
+          <pre>{JSON.stringify({
+            setupState,
+            adminCount: adminList.length,
+            pipeline_status: overview?.pipeline_status ?? null,
+            debug: overview?.debug ?? null,
+          }, null, 2)}</pre>
         </details>
       )}
     </div>

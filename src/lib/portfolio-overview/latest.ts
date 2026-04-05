@@ -163,6 +163,16 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     : null;
   const totalHistoryCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`);
   const historyAvailableDays = Number(totalHistoryCountRows[0]?.count ?? 0);
+  const snapshotCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioSnapshots}`);
+  const snapshotRowsCount = Number(snapshotCountRows[0]?.count ?? 0);
+  const snapshotExists = snapshotRowsCount > 0;
+  const historyExists = historyAvailableDays > 0;
+  const positionsCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioPositions} WHERE active_position = 1`);
+  const activePositionsCount = Number(positionsCountRows[0]?.count ?? 0);
+  const lastSnapshotBuildRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
+  const lastHistoryBuildRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`);
+  const lastSnapshotBuild = String(lastSnapshotBuildRows[0]?.as_of_date ?? "").trim() || null;
+  const lastHistoryBuild = String(lastHistoryBuildRows[0]?.as_of_date ?? "").trim() || null;
 
   const allocationPlanStatus = computeAllocationPlanStatus(portfolioRows as any[]);
   const included = (portfolioRows as any[]).filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1);
@@ -293,6 +303,21 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
         portfolio_id: String(unvaluedPortfolio.portfolio_id ?? ""),
       });
     }
+    const zeroMarketValueWithPositions = (portfolioRows as any[]).find((row) => {
+      const snapshotDebug = parseJson(row.debug_payload_json);
+      const activeCount = Number(snapshotDebug?.positions_active_count ?? 0);
+      const marketValue = asNum(row.market_value) ?? 0;
+      return activeCount > 0 && marketValue <= 0;
+    });
+    if (zeroMarketValueWithPositions) {
+      pushWarning({
+        code: "positions_with_zero_market_value",
+        title: "Positions exist but market value is zero",
+        detail: `${String(zeroMarketValueWithPositions.portfolio_name ?? zeroMarketValueWithPositions.portfolio_id)} has active positions but zero portfolio market value.`,
+        severity: "critical",
+        portfolio_id: String(zeroMarketValueWithPositions.portfolio_id ?? ""),
+      });
+    }
 
     return {
       majorWarnings: majorWarningsInner,
@@ -389,6 +414,14 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       positions_available: hasAnyPositions,
       history_available_days: historyAvailableDays,
     },
+    pipeline_status: {
+      snapshot_exists: snapshotExists,
+      history_exists: historyExists,
+      history_days_available: historyAvailableDays,
+      positions_count: activePositionsCount,
+      last_snapshot_build: lastSnapshotBuild,
+      last_history_build: lastHistoryBuild,
+    },
   }));
 
   if (!debug) return basePayload;
@@ -402,6 +435,14 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       hedge: portfolios.some((row) => row.hedge_status !== null),
       macro_regime: await tableExists("macro_regime_input"),
       sector_regime: await tableExists("sector_regime_input"),
+    },
+    pipeline_status: {
+      snapshot_exists: snapshotExists,
+      history_exists: historyExists,
+      history_days_available: historyAvailableDays,
+      positions_count: activePositionsCount,
+      last_snapshot_build: lastSnapshotBuild,
+      last_history_build: lastHistoryBuild,
     },
     global_validation: {
       target_weight_sum_status: globalValidation.status,
