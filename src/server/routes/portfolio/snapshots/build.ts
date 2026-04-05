@@ -1,5 +1,6 @@
 import { ensureSchema } from "../../../../../api/_migrate.js";
 import { buildPortfolioSnapshots } from "../../../../lib/portfolio-snapshots/build.js";
+import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
 
 export default async function handler(req: any, res: any) {
   try {
@@ -10,6 +11,7 @@ export default async function handler(req: any, res: any) {
 
     await ensureSchema();
     const result = await buildPortfolioSnapshots();
+    const historyResult = await buildPortfolioHistory();
     const debug = String(req.query?.debug ?? "") === "1";
 
     res.status(200).json({
@@ -29,7 +31,7 @@ export default async function handler(req: any, res: any) {
         total_market_value: result.total_market_value,
         allocation_plan_status: result.allocation_plan_status,
       },
-      ...(debug ? { diagnostics: result.debug } : {}),
+      ...(debug ? { diagnostics: { snapshots: result.debug, history: historyResult } } : {}),
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: (error as Error).message });

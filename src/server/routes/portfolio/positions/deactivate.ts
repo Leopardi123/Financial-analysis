@@ -1,6 +1,7 @@
 import { ensureSchema } from "../../../../../api/_migrate.js";
 import { deactivatePortfolioPosition } from "../../../../lib/portfolio-positions/repository.js";
 import { buildPortfolioSnapshots } from "../../../../lib/portfolio-snapshots/build.js";
+import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
 
 export default async function handler(req: any, res: any) {
   try {
@@ -18,6 +19,7 @@ export default async function handler(req: any, res: any) {
 
     await deactivatePortfolioPosition(id);
     await buildPortfolioSnapshots();
+    await buildPortfolioHistory();
     res.status(200).json({ ok: true });
   } catch (error) {
     res.status(500).json({ ok: false, error: (error as Error).message });

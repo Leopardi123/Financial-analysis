@@ -21,6 +21,9 @@ type PortfolioRecord = {
   return_20d: NullableNumber;
   return_65d: NullableNumber;
   return_200d: NullableNumber;
+  short_direction?: string | null;
+  medium_direction?: string | null;
+  long_direction?: string | null;
   trend_status: string | null;
   relative_strength_bucket: string | null;
   annualized_vol_65d: NullableNumber;
@@ -86,11 +89,26 @@ type PortfolioOverviewResponse = {
     cumulative_return_pct: NullableNumber;
     drawdown_pct: NullableNumber;
     history_available_days: number;
+    data_quality?: string | null;
   };
   portfolios: PortfolioRecord[];
   setup?: { setup_state: SetupState };
+  pipeline_status?: {
+    snapshot_exists: boolean;
+    history_exists: boolean;
+    history_days_available: number;
+    positions_count: number;
+    last_snapshot_build: string | null;
+    last_history_build: string | null;
+  };
   debug?: unknown;
-  error?: string | { type?: string; message?: string; debugMessage?: string };
+  error?: string | {
+    type?: string;
+    message?: string;
+    debugMessage?: string;
+    stage?: string;
+    trace?: Array<{ stage: string; ok: boolean; duration_ms: number; error?: string }>;
+  };
 };
 
 type AdminValidateResponse = {
@@ -190,6 +208,40 @@ function debugEnabled(): boolean {
   return new URLSearchParams(window.location.search).get("debug") === "1";
 }
 
+type LoadErrorDetail = {
+  message: string;
+  debugMessage?: string;
+  stage?: string;
+  trace?: Array<{ stage: string; ok: boolean; duration_ms: number; error?: string }>;
+};
+
+function normalizeClientErrorMessage(message: string | null | undefined, fallback: string): string {
+  const normalized = (message ?? "").trim();
+  if (!normalized) return fallback;
+  if (normalized.includes("did not match the expected pattern")) return fallback;
+  return normalized;
+}
+
+async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const json = (await response.json()) as T;
+    if (!response.ok) {
+      throw { response, json };
+    }
+    return json;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`portfolio_dashboard_timeout_${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function label(value: string | null): string {
   if (!value) return "Unavailable";
   return value.replace(/_/g, " ");
@@ -201,6 +253,36 @@ function formatPct(value: NullableNumber): string {
 
 function formatMoney(value: NullableNumber): string {
   return value === null ? "Unavailable" : new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 0 }).format(value);
+}
+
+function toneClassForTrend(status: string | null): string {
+  switch (status) {
+    case "strong_uptrend":
+      return "trend-strong-up";
+    case "improving":
+      return "trend-improving";
+    case "neutral":
+      return "trend-neutral";
+    case "weakening":
+      return "trend-weakening";
+    case "downtrend":
+      return "trend-down";
+    default:
+      return "trend-unavailable";
+  }
+}
+
+function toneClassForRelativeStrength(bucket: string | null): string {
+  switch (bucket) {
+    case "strong":
+      return "rs-strong";
+    case "weak":
+      return "rs-weak";
+    case "neutral":
+      return "rs-neutral";
+    default:
+      return "rs-unavailable";
+  }
 }
 
 function formFromConfig(config: PortfolioConfig): AdminFormState {
@@ -268,42 +350,64 @@ export default function PortfolioDashboardModule() {
   const [form, setForm] = useState<AdminFormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [overviewError, setOverviewError] = useState<LoadErrorDetail | null>(null);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [buildingData, setBuildingData] = useState(false);
   const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>>({});
   const debugMode = debugEnabled();
 
   const loadAll = async () => {
     setLoading(true);
-    const [overviewRes, adminRes, validateRes] = await Promise.all([
-      fetch(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`),
-      fetch(`/api/portfolio/admin/list`),
-      fetch(`/api/portfolio/admin/validate`),
+    setError(null);
+    setOverviewError(null);
+
+    const [overviewResult, adminResult, validateResult] = await Promise.allSettled([
+      fetchJsonWithTimeout<PortfolioOverviewResponse>(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`, 12_000),
+      fetchJsonWithTimeout<{ ok: boolean; portfolios: PortfolioConfig[] }>(`/api/portfolio/admin/list`, 8_000),
+      fetchJsonWithTimeout<AdminValidateResponse>(`/api/portfolio/admin/validate`, 8_000),
     ]);
 
-    const overviewJson = (await overviewRes.json()) as PortfolioOverviewResponse;
-    const adminJson = (await adminRes.json()) as { ok: boolean; portfolios: PortfolioConfig[] };
-    const validateJson = (await validateRes.json()) as AdminValidateResponse;
-
-    if (!overviewRes.ok || !overviewJson.ok) {
-      const errorMessage = typeof overviewJson.error === "string"
-        ? overviewJson.error
-        : (debugMode ? overviewJson.error?.debugMessage : overviewJson.error?.message);
-      throw new Error(errorMessage ?? "Failed to load overview");
+    if (adminResult.status === "fulfilled" && adminResult.value.ok) {
+      setAdminList(adminResult.value.portfolios);
+    } else {
+      throw new Error("Failed to load portfolio admin list.");
     }
-    if (!adminRes.ok || !adminJson.ok) throw new Error("Failed to load portfolio admin list");
-    if (!validateRes.ok || !validateJson.ok) throw new Error("Failed to load portfolio validation");
 
-    setOverview(overviewJson);
-    setAdminList(adminJson.portfolios);
-    setAdminValidation(validateJson);
+    if (validateResult.status === "fulfilled" && validateResult.value.ok) {
+      setAdminValidation(validateResult.value);
+    } else {
+      throw new Error("Failed to load portfolio validation.");
+    }
+
+    if (overviewResult.status === "fulfilled" && overviewResult.value.ok) {
+      setOverview(overviewResult.value);
+      setOverviewError(null);
+    } else {
+      setOverview(null);
+      const reason = overviewResult.status === "rejected" ? overviewResult.reason : overviewResult.value;
+      const maybePayload = (reason as any)?.json as PortfolioOverviewResponse | undefined;
+      const serverError = maybePayload?.error && typeof maybePayload.error === "object" ? maybePayload.error : undefined;
+      const rawMessage = reason instanceof Error
+        ? reason.message
+        : (serverError?.debugMessage ?? serverError?.message ?? "Failed to load overview");
+      const timeout = String(rawMessage).includes("portfolio_dashboard_timeout_");
+      setOverviewError({
+        message: timeout ? "Portfolio dashboard timed out before completion." : "Portfolio dashboard could not be loaded.",
+        debugMessage: serverError?.debugMessage ?? normalizeClientErrorMessage(rawMessage, "Portfolio dashboard could not be loaded."),
+        stage: serverError?.stage,
+        trace: serverError?.trace,
+      });
+    }
+
     setLoading(false);
   };
 
   useEffect(() => {
     void loadAll().catch((loadErr) => {
-      setError(loadErr instanceof Error ? loadErr.message : "Failed to load portfolio dashboard");
+      const raw = loadErr instanceof Error ? loadErr.message : String(loadErr ?? "");
+      setError(normalizeClientErrorMessage(raw, "Portfolio dashboard could not be loaded."));
       setLoading(false);
     });
   }, [debugMode]);
@@ -382,6 +486,21 @@ export default function PortfolioDashboardModule() {
     await loadAll();
   };
 
+  const buildPortfolioData = async () => {
+    setBuildingData(true);
+    setError(null);
+    setOverviewError(null);
+    try {
+      await fetchJsonWithTimeout<{ ok: boolean }>(`/api/portfolio/snapshots/build${debugMode ? "?debug=1" : ""}`, 15_000);
+      await loadAll();
+    } catch (buildErr) {
+      const raw = buildErr instanceof Error ? buildErr.message : String(buildErr ?? "");
+      setError(normalizeClientErrorMessage(raw, "Portfolio data build failed."));
+    } finally {
+      setBuildingData(false);
+    }
+  };
+
   const inputClassName = (field: string) => (fieldErrors[field] ? "field-invalid" : "");
   const renderFieldError = (field: string) => fieldErrors[field]
     ? <span className="field-error-text">{fieldErrors[field]}</span>
@@ -410,6 +529,19 @@ export default function PortfolioDashboardModule() {
 
       {loading && <p className="bread">Loading portfolio dashboard…</p>}
       {error && <p className="portfolio-error">{error}</p>}
+      {!error && overviewError && (
+        <div className="portfolio-error">
+          <p>{overviewError.message}</p>
+          <button type="button" onClick={() => { void loadAll(); }}>Retry</button>
+          {debugMode && (
+            <pre>{JSON.stringify({
+              stage: overviewError.stage ?? null,
+              debugMessage: overviewError.debugMessage ?? null,
+              trace: overviewError.trace ?? [],
+            }, null, 2)}</pre>
+          )}
+        </div>
+      )}
 
       {!loading && !error && setupState === "no_config" && (
         <div className="portfolio-empty-state">
@@ -421,6 +553,10 @@ export default function PortfolioDashboardModule() {
       {!loading && !error && setupState === "configured_no_data" && (
         <div className="portfolio-empty-state">
           <h4>Portfolios configured, awaiting holdings / snapshot data.</h4>
+          <p>Portfolio data not yet built.</p>
+          <button type="button" disabled={buildingData} onClick={() => { void buildPortfolioData(); }}>
+            {buildingData ? "Building…" : "Build portfolio data"}
+          </button>
           <div className="portfolio-config-list">
             {adminList.map((item) => (
               <div key={item.portfolio_id} className="portfolio-config-row">
@@ -428,6 +564,17 @@ export default function PortfolioDashboardModule() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {!loading && !error && !overview && adminList.length > 0 && (
+        <div className="portfolio-empty-state">
+          <h4>Portfolio dashboard temporarily unavailable.</h4>
+          <p>Admin controls are still available below.</p>
+          <p>Portfolio data not yet built.</p>
+          <button type="button" disabled={buildingData} onClick={() => { void buildPortfolioData(); }}>
+            {buildingData ? "Building…" : "Build portfolio data"}
+          </button>
         </div>
       )}
 
@@ -440,12 +587,16 @@ export default function PortfolioDashboardModule() {
           </div>
           <div className="portfolio-summary-grid">
             <div className="portfolio-panel">
-              <h4>Overview</h4>
+              <h4>Total performance</h4>
               <div>Allocation: {label(overview.total.allocation_plan_status)}</div>
               <div>Risk: {label(overview.total.total_risk_status)} ({overview.total.total_risk_score ?? "n/a"})</div>
               <div>Hedge: {label(overview.total.total_hedge_signal)}</div>
               <div>Dry powder: {label(overview.total.dry_powder_status)}</div>
               <div>Daily return: {formatPct(overview.performance.daily_return_pct)}</div>
+              <div>Cumulative return: {formatPct(overview.performance.cumulative_return_pct)}</div>
+              <div>Drawdown: {formatPct(overview.performance.drawdown_pct)}</div>
+              <div>History available days: {overview.performance.history_available_days}</div>
+              <div>History data quality: {label(overview.performance.data_quality ?? null)}</div>
             </div>
             <div className="portfolio-panel">
               <h4>Major warnings</h4>
@@ -469,13 +620,32 @@ export default function PortfolioDashboardModule() {
           <div className="portfolio-list">
             {overview.portfolios.map((portfolio) => (
               <details key={portfolio.portfolio_id} className="portfolio-card">
-                <summary>{portfolio.portfolio_name} ({portfolio.portfolio_type})</summary>
+                <summary>
+                  <div className="portfolio-card-summary">
+                    <div>
+                      <div className="portfolio-card-title">{portfolio.portfolio_name}</div>
+                      <div className="portfolio-card-subtitle">{portfolio.portfolio_type}</div>
+                    </div>
+                    <div className="portfolio-card-badges">
+                      <span className={`status-pill ${toneClassForTrend(portfolio.trend_status)}`}>
+                        Trend: {portfolio.trend_status === "unavailable" ? "Trend unavailable" : label(portfolio.trend_status)}
+                      </span>
+                      {portfolio.signal_completeness === "partial" && (
+                        <span className="status-pill completeness-partial">Partial</span>
+                      )}
+                      {portfolio.signal_completeness === "unavailable" && (
+                        <span className="status-pill completeness-unavailable">Incomplete</span>
+                      )}
+                    </div>
+                  </div>
+                </summary>
+                <div className="portfolio-card-top-metrics">
+                  <div>Market value: <strong>{formatMoney(portfolio.market_value)}</strong></div>
+                  <div>Actual weight: <strong>{formatPct(portfolio.actual_weight_pct)}</strong></div>
+                  <div>Weight status: <strong>{label(portfolio.weight_status)}</strong></div>
+                </div>
                 <div className="portfolio-card-grid">
-                  <div>Market value (SEK): {formatMoney(portfolio.market_value)}</div>
-                  <div>Actual weight: {formatPct(portfolio.actual_weight_pct)}</div>
                   <div>Target / min / max: {formatPct(portfolio.target_weight_pct)} / {formatPct(portfolio.min_weight_pct)} / {formatPct(portfolio.max_weight_pct)}</div>
-                  <div>Weight status: {label(portfolio.weight_status)}</div>
-                  <div>Trend status: {label(portfolio.trend_status)}</div>
                   <div>Risk status: {label(portfolio.risk_status)}</div>
                   <div>Hedge status: {label(portfolio.hedge_status)}</div>
                   <div>Hedge policy: {label(portfolio.hedge_policy_applied)}</div>
@@ -486,6 +656,24 @@ export default function PortfolioDashboardModule() {
                   )}
                   {portfolio.suggested_hedge_type && <div>Suggested hedge: {portfolio.suggested_hedge_type}</div>}
                 </div>
+                <details className="portfolio-trend-details">
+                  <summary>Trend details</summary>
+                  <div className="portfolio-trend-grid">
+                    <div>20d return: {formatPct(portfolio.return_20d)}</div>
+                    <div>65d return: {formatPct(portfolio.return_65d)}</div>
+                    <div>200d return: {formatPct(portfolio.return_200d)}</div>
+                    <div>Short direction: {label(portfolio.short_direction ?? "unavailable")}</div>
+                    <div>Medium direction: {label(portfolio.medium_direction ?? "unavailable")}</div>
+                    <div>Long direction: {label(portfolio.long_direction ?? "unavailable")}</div>
+                    <div>
+                      Relative strength:
+                      <span className={`status-pill rs-pill ${toneClassForRelativeStrength(portfolio.relative_strength_bucket)}`}>
+                        {label(portfolio.relative_strength_bucket)}
+                      </span>
+                    </div>
+                    <div>Trend completeness: {label(portfolio.signal_completeness)}</div>
+                  </div>
+                </details>
               </details>
             ))}
           </div>
@@ -671,7 +859,12 @@ export default function PortfolioDashboardModule() {
       {debugMode && (
         <details className="portfolio-debug-wrap">
           <summary>Debug payload</summary>
-          <pre>{JSON.stringify({ setupState, adminCount: adminList.length, debug: overview?.debug ?? null }, null, 2)}</pre>
+          <pre>{JSON.stringify({
+            setupState,
+            adminCount: adminList.length,
+            pipeline_status: overview?.pipeline_status ?? null,
+            debug: overview?.debug ?? null,
+          }, null, 2)}</pre>
         </details>
       )}
     </div>
