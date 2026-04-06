@@ -132,6 +132,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "portfolio/snapshots/latest": () => import("../src/server/routes/portfolio/snapshots/latest.js"),
   "portfolio/history/build": () => import("../src/server/routes/portfolio/history/build.js"),
   "portfolio/history/latest": () => import("../src/server/routes/portfolio/history/latest.js"),
+  "portfolio/history/trace": () => import("../src/server/routes/portfolio/history/trace.js"),
   "portfolio/history/series": () => import("../src/server/routes/portfolio/history/series.js"),
   "portfolio/history/series/total": () => import("../src/server/routes/portfolio/history/series-total.js"),
   "portfolio/risk/build": () => import("../src/server/routes/portfolio/risk/build.js"),
