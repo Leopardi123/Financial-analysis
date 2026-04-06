@@ -147,86 +147,116 @@ function detectRuntimeEnv(): "preview" | "production" | "unknown" {
 
 export async function loadPortfolioConfigsForHistoryBuild(): Promise<{
   portfolios: PortfolioAdminConfig[];
-  source_table_used: string;
-  query_used: string;
+  source_table_used: string | null;
+  query_used: string | null;
   db_url_masked: string | null;
-  runtime_env: "preview" | "production" | "unknown";
+  runtime_env: "preview" | "production" | "unknown" | null;
   filters_applied: string[];
+  error: string | null;
 }> {
-  const dbUrlMasked = maskDatabaseUrl(process.env.TURSO_DATABASE_URL);
-  const runtimeEnv = detectRuntimeEnv();
-  const adminConfigs = await listPortfolioConfigs();
-  if (adminConfigs.length > 0) {
-    return {
-      portfolios: adminConfigs,
-      source_table_used: tables.portfolioAdminConfig,
-      query_used: `SELECT * FROM ${tables.portfolioAdminConfig} ORDER BY sort_order ASC, portfolio_id ASC`,
-      db_url_masked: dbUrlMasked,
-      runtime_env: runtimeEnv,
-      filters_applied: ["none (all rows from portfolio_admin_config, ordered by sort_order)"],
-    };
+  let configs: PortfolioAdminConfig[] | null = null;
+  const diagnostics: {
+    portfolios: PortfolioAdminConfig[];
+    source_table_used: string | null;
+    query_used: string | null;
+    db_url_masked: string | null;
+    runtime_env: "preview" | "production" | "unknown" | null;
+    filters_applied: string[];
+    error: string | null;
+  } = {
+    portfolios: [],
+    source_table_used: null,
+    query_used: null,
+    db_url_masked: maskDatabaseUrl(process.env.TURSO_DATABASE_URL),
+    runtime_env: detectRuntimeEnv(),
+    filters_applied: [],
+    error: null,
+  };
+
+  try {
+    configs = await listPortfolioConfigs();
+    diagnostics.source_table_used = tables.portfolioAdminConfig;
+    diagnostics.query_used = `SELECT * FROM ${tables.portfolioAdminConfig} ORDER BY sort_order ASC, portfolio_id ASC`;
+    diagnostics.filters_applied = ["none (all rows from portfolio_admin_config, ordered by sort_order)"];
+  } catch {
+    diagnostics.error = "admin_config_failed";
+    configs = null;
   }
 
-  const fallbackRows = await query(
-    `SELECT portfolio_id FROM (
-      SELECT DISTINCT portfolio_id FROM ${tables.portfolioSnapshots}
-      UNION
-      SELECT DISTINCT portfolio_id FROM ${tables.portfolioPositions}
-      UNION
-      SELECT DISTINCT portfolio_id FROM ${tables.portfolioHistoryDaily}
-    ) ids
-    WHERE portfolio_id IS NOT NULL AND TRIM(portfolio_id) <> ''
-    ORDER BY portfolio_id ASC`
-  ) as Array<{ portfolio_id?: unknown }>;
+  if (!configs || configs.length === 0) {
+    try {
+      const fallbackRows = await query(
+        `SELECT portfolio_id FROM (
+          SELECT DISTINCT portfolio_id FROM ${tables.portfolioSnapshots}
+          UNION
+          SELECT DISTINCT portfolio_id FROM ${tables.portfolioPositions}
+          UNION
+          SELECT DISTINCT portfolio_id FROM ${tables.portfolioHistoryDaily}
+        ) ids
+        WHERE portfolio_id IS NOT NULL AND TRIM(portfolio_id) <> ''
+        ORDER BY portfolio_id ASC`
+      ) as Array<{ portfolio_id?: unknown }>;
 
-  const fallbackPortfolios: PortfolioAdminConfig[] = fallbackRows
-    .map((row) => String(row.portfolio_id ?? "").trim())
-    .filter(Boolean)
-    .map((portfolioId, index) => ({
-      portfolio_id: portfolioId,
-      portfolio_name: portfolioId,
-      portfolio_type: "opportunistic",
-      active: true,
-      visible_in_overview: true,
-      included_in_total_portfolio: true,
-      sort_order: index + 1,
-      target_weight_pct: 0,
-      min_weight_pct: 0,
-      max_weight_pct: 100,
-      strategic_risk_level: "medium",
-      hedging_allowed: true,
-      max_hedge_pct: null,
-      rebalance_mode: "standard",
-      role_description: "Derived fallback portfolio configuration for history rebuild.",
-      long_term_purpose: null,
-      notes: "Generated fallback config because portfolio_admin_config was empty.",
-      allowed_hedge_types_json: "[]",
-      hedge_purpose_json: "[]",
-      created_at: new Date(0).toISOString(),
-      updated_at: new Date(0).toISOString(),
-      rebalance_priority: null,
-      max_single_position_pct: null,
-      max_sector_concentration_pct: null,
-      max_commodity_concentration_pct: null,
-      max_junior_exposure_pct: null,
-      max_illiquid_exposure_pct: null,
-      analyst_override_allowed: null,
-      analyst_override_note: null,
-      override_expiry_date: null,
-    }));
+      configs = fallbackRows
+        .map((row) => String(row.portfolio_id ?? "").trim())
+        .filter(Boolean)
+        .map((portfolioId, index) => ({
+          portfolio_id: portfolioId,
+          portfolio_name: portfolioId,
+          portfolio_type: "opportunistic",
+          active: true,
+          visible_in_overview: true,
+          included_in_total_portfolio: true,
+          sort_order: index + 1,
+          target_weight_pct: 0,
+          min_weight_pct: 0,
+          max_weight_pct: 100,
+          strategic_risk_level: "medium",
+          hedging_allowed: true,
+          max_hedge_pct: null,
+          rebalance_mode: "standard",
+          role_description: "Derived fallback portfolio configuration for history rebuild.",
+          long_term_purpose: null,
+          notes: "Generated fallback config because portfolio_admin_config was empty.",
+          allowed_hedge_types_json: "[]",
+          hedge_purpose_json: "[]",
+          created_at: new Date(0).toISOString(),
+          updated_at: new Date(0).toISOString(),
+          rebalance_priority: null,
+          max_single_position_pct: null,
+          max_sector_concentration_pct: null,
+          max_commodity_concentration_pct: null,
+          max_junior_exposure_pct: null,
+          max_illiquid_exposure_pct: null,
+          analyst_override_allowed: null,
+          analyst_override_note: null,
+          override_expiry_date: null,
+        }));
+      diagnostics.source_table_used = "fallback";
+      diagnostics.query_used = "fallback_union_query";
+      diagnostics.filters_applied = ["fallback enabled when portfolio_admin_config has 0 rows or failed"];
+      if (diagnostics.error === null) {
+        diagnostics.error = "admin_config_empty";
+      }
+    } catch {
+      diagnostics.error = "fallback_failed";
+      configs = [];
+    }
+  }
 
-  const out = {
-    portfolios: fallbackPortfolios,
-    source_table_used: "fallback",
-    query_used: `SELECT DISTINCT portfolio_id FROM (${tables.portfolioSnapshots} UNION ${tables.portfolioPositions} UNION ${tables.portfolioHistoryDaily})`,
-    db_url_masked: dbUrlMasked,
-    runtime_env: runtimeEnv,
-    filters_applied: ["fallback enabled when portfolio_admin_config has 0 rows"],
-  };
-  if (out.portfolios.length === 0) {
+  diagnostics.portfolios = configs ?? [];
+  if (diagnostics.portfolios.length === 0) {
     throw new Error("NO_PORTFOLIOS_FOUND_IN_ANY_SOURCE");
   }
-  return out;
+  return {
+    portfolios: diagnostics.portfolios,
+    source_table_used: diagnostics.source_table_used,
+    query_used: diagnostics.query_used,
+    db_url_masked: diagnostics.db_url_masked,
+    runtime_env: diagnostics.runtime_env,
+    filters_applied: diagnostics.filters_applied,
+    error: diagnostics.error,
+  };
 }
 
 async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: string): Promise<{
