@@ -2,6 +2,7 @@ import { execute, query } from "../../../api/_db.js";
 import { tables } from "../../../api/_migrate.js";
 import { listPortfolioConfigs } from "../portfolio-admin/repository.js";
 import type { PortfolioAdminConfig } from "../portfolio-admin/types.js";
+import { normalizeCurrency, resolveNativeCurrency } from "./currency.js";
 import { computeTrendMetricsFromSeries } from "./metrics.js";
 
 type Direction = "positive" | "neutral" | "negative" | "unavailable";
@@ -16,6 +17,8 @@ type Point = { as_of_date: string; market_value: number; data_quality: DataQuali
 type PositionContributionDebug = {
   symbol: string;
   native_currency: string | null;
+  native_currency_source?: string;
+  native_currency_warning?: string | null;
   native_price: number;
   fx_to_sek: number;
   value_native: number;
@@ -183,12 +186,6 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     symbols
   ) as Array<{ symbol?: unknown; price_date?: unknown; close_price?: unknown; currency?: unknown }>;
 
-  function normalizeCurrency(value: unknown): string | null {
-    if (typeof value !== "string") return null;
-    const normalized = value.trim().toUpperCase().replace(/[^A-Z]/g, "");
-    return normalized.length === 3 ? normalized : null;
-  }
-
   const bySymbol = new Map<string, Array<{ price_date: string; close_price: number; currency: string | null }>>();
   for (const row of prices) {
     const symbol = String(row.symbol ?? "").trim().toUpperCase();
@@ -199,6 +196,22 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     const bucket = bySymbol.get(symbol) ?? [];
     bucket.push({ price_date: priceDate, close_price: closePrice, currency });
     bySymbol.set(symbol, bucket);
+  }
+
+  const companyExchangeRows = symbols.length > 0
+    ? await query(
+      `SELECT symbol, exchange
+       FROM ${tables.companies}
+       WHERE symbol IN (${placeholders})`,
+      symbols
+    )
+    : [];
+  const companyExchangeBySymbol = new Map<string, string | null>();
+  for (const row of companyExchangeRows as Array<{ symbol?: unknown; exchange?: unknown }>) {
+    const symbol = String(row.symbol ?? "").trim().toUpperCase();
+    const exchange = typeof row.exchange === "string" && row.exchange.trim() ? row.exchange.trim() : null;
+    if (!symbol) continue;
+    companyExchangeBySymbol.set(symbol, exchange);
   }
 
   const fxToSekCache = new Map<string, number | null>();
@@ -219,7 +232,8 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
 
   function resolveFxToSek(date: string, currency: string | null): number | null {
     const normalized = normalizeCurrency(currency);
-    if (!normalized || normalized === "SEK") return 1;
+    if (!normalized) return null;
+    if (normalized === "SEK") return 1;
     const cacheKey = `${date}|${normalized}`;
     if (fxToSekCache.has(cacheKey)) return fxToSekCache.get(cacheKey) ?? null;
 
@@ -304,7 +318,14 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       if (position.entry_date && point.price_date < position.entry_date) continue;
       if (position.exited_at && point.price_date > position.exited_at) continue;
 
-      const nativeCurrency = point.currency ?? position.currency;
+      const nativeCurrencyResolution = resolveNativeCurrency({
+        positionCurrency: position.currency,
+        priceCurrency: point.currency,
+        historySymbol: historySymbolUsed,
+        rawSymbol: position.symbol,
+        companyExchangeBySymbol,
+      });
+      const nativeCurrency = nativeCurrencyResolution.currency;
       const fxToSek = resolveFxToSek(point.price_date, nativeCurrency);
       if (!fxToSek || !Number.isFinite(fxToSek) || fxToSek <= 0) continue;
       const valueNative = position.shares * point.close_price;
@@ -321,6 +342,8 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       debugBucket.push({
         symbol: historySymbolUsed,
         native_currency: nativeCurrency,
+        native_currency_source: nativeCurrencyResolution.source,
+        native_currency_warning: nativeCurrencyResolution.warning,
         native_price: point.close_price,
         fx_to_sek: fxToSek,
         value_native: valueNative,

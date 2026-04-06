@@ -1,5 +1,6 @@
 import { query } from "../../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../../api/_migrate.js";
+import { normalizeCurrency, resolveNativeCurrency } from "../../../../lib/portfolio-history/currency.js";
 import { computeTrendMetricsFromSeries } from "../../../../lib/portfolio-history/metrics.js";
 
 type PositionRow = {
@@ -21,12 +22,6 @@ type FxPoint = { price_date: string; close_price: number };
 
 function isValidDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
-}
-
-function normalizeCurrency(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toUpperCase().replace(/[^A-Z]/g, "");
-  return normalized.length === 3 ? normalized : null;
 }
 
 function subtractUtcDays(date: string, days: number): string | null {
@@ -147,6 +142,22 @@ export default async function handler(req: any, res: any) {
       priceBySymbol.set(symbol, bucket);
     }
 
+    const companyExchangeRows = priceSymbols.length > 0
+      ? await query(
+        `SELECT symbol, exchange
+         FROM ${tables.companies}
+         WHERE symbol IN (${priceSymbols.map(() => "?").join(",")})`,
+        priceSymbols,
+      )
+      : [];
+    const companyExchangeBySymbol = new Map<string, string | null>();
+    for (const row of companyExchangeRows as any[]) {
+      const symbol = String(row.symbol ?? "").trim().toUpperCase();
+      const exchange = typeof row.exchange === "string" && row.exchange.trim() ? row.exchange.trim() : null;
+      if (!symbol) continue;
+      companyExchangeBySymbol.set(symbol, exchange);
+    }
+
     const currencies = Array.from(new Set(
       activePositions
         .flatMap((position) => {
@@ -193,7 +204,9 @@ export default async function handler(req: any, res: any) {
     function resolveFxToSek(date: string, currency: string | null): { fx_to_sek: number | null; source: string | null; note: string | null } {
       const normalized = normalizeCurrency(currency);
       if (!normalized || normalized === "SEK") {
-        return { fx_to_sek: 1, source: "identity", note: normalized === "SEK" ? "already_in_sek" : "missing_currency_metadata_assume_sek" };
+        return normalized === "SEK"
+          ? { fx_to_sek: 1, source: "identity", note: "already_in_sek" }
+          : { fx_to_sek: null, source: null, note: "missing_native_currency_metadata" };
       }
       const cacheKey = `${date}|${normalized}`;
       const cached = fxCache.get(cacheKey);
@@ -281,6 +294,10 @@ export default async function handler(req: any, res: any) {
         exclusion_reason: string | null;
         native_price: number | null;
         native_currency: string | null;
+        native_currency_source: string | null;
+        company_exchange_used: string | null;
+        native_currency_fallback_used: boolean;
+        native_currency_warning: string | null;
         fx_to_sek: number | null;
         fx_source: string | null;
         fx_note: string | null;
@@ -300,6 +317,10 @@ export default async function handler(req: any, res: any) {
         exclusion_reason: string | null;
         native_price: number | null;
         native_currency: string | null;
+        native_currency_source: string | null;
+        company_exchange_used: string | null;
+        native_currency_fallback_used: boolean;
+        native_currency_warning: string | null;
         fx_to_sek: number | null;
         fx_source: string | null;
         fx_note: string | null;
@@ -321,6 +342,10 @@ export default async function handler(req: any, res: any) {
             exclusion_reason: "before_entry_date",
             native_price: null,
             native_currency: position.currency,
+            native_currency_source: position.currency ? "position_currency" : null,
+            company_exchange_used: companyExchangeBySymbol.get(historySymbol) ?? companyExchangeBySymbol.get(position.symbol) ?? null,
+            native_currency_fallback_used: false,
+            native_currency_warning: position.currency ? null : "native_currency_unresolved",
             fx_to_sek: null,
             fx_source: null,
             fx_note: null,
@@ -338,6 +363,10 @@ export default async function handler(req: any, res: any) {
             exclusion_reason: "after_exit_date",
             native_price: null,
             native_currency: position.currency,
+            native_currency_source: position.currency ? "position_currency" : null,
+            company_exchange_used: companyExchangeBySymbol.get(historySymbol) ?? companyExchangeBySymbol.get(position.symbol) ?? null,
+            native_currency_fallback_used: false,
+            native_currency_warning: position.currency ? null : "native_currency_unresolved",
             fx_to_sek: null,
             fx_source: null,
             fx_note: null,
@@ -355,6 +384,10 @@ export default async function handler(req: any, res: any) {
             exclusion_reason: (position.resolved_symbol == null && series.length === 0) ? "unresolved_symbol" : "no_price_for_date",
             native_price: null,
             native_currency: position.currency,
+            native_currency_source: position.currency ? "position_currency" : null,
+            company_exchange_used: companyExchangeBySymbol.get(historySymbol) ?? companyExchangeBySymbol.get(position.symbol) ?? null,
+            native_currency_fallback_used: false,
+            native_currency_warning: position.currency ? null : "native_currency_unresolved",
             fx_to_sek: null,
             fx_source: null,
             fx_note: null,
@@ -364,7 +397,14 @@ export default async function handler(req: any, res: any) {
           continue;
         }
 
-        const nativeCurrency = exact.currency ?? position.currency;
+        const nativeCurrencyResolution = resolveNativeCurrency({
+          positionCurrency: position.currency,
+          priceCurrency: exact.currency,
+          historySymbol,
+          rawSymbol: position.symbol,
+          companyExchangeBySymbol,
+        });
+        const nativeCurrency = nativeCurrencyResolution.currency;
         const fx = resolveFxToSek(date, nativeCurrency);
         if (!fx.fx_to_sek || !Number.isFinite(fx.fx_to_sek) || fx.fx_to_sek <= 0) {
           dayPositions.push({
@@ -372,9 +412,13 @@ export default async function handler(req: any, res: any) {
             symbol: position.symbol,
             resolved_symbol: position.resolved_symbol,
             included: false,
-            exclusion_reason: "no_fx_rate",
+            exclusion_reason: nativeCurrencyResolution.source === "unresolved" ? "unresolved_native_currency" : "no_fx_rate",
             native_price: exact.close_price,
             native_currency: nativeCurrency,
+            native_currency_source: nativeCurrencyResolution.source,
+            company_exchange_used: nativeCurrencyResolution.company_exchange_used,
+            native_currency_fallback_used: nativeCurrencyResolution.fallback_used,
+            native_currency_warning: nativeCurrencyResolution.warning,
             fx_to_sek: null,
             fx_source: fx.source,
             fx_note: fx.note,
@@ -394,6 +438,10 @@ export default async function handler(req: any, res: any) {
             exclusion_reason: "invalid_valuation",
             native_price: exact.close_price,
             native_currency: nativeCurrency,
+            native_currency_source: nativeCurrencyResolution.source,
+            company_exchange_used: nativeCurrencyResolution.company_exchange_used,
+            native_currency_fallback_used: nativeCurrencyResolution.fallback_used,
+            native_currency_warning: nativeCurrencyResolution.warning,
             fx_to_sek: fx.fx_to_sek,
             fx_source: fx.source,
             fx_note: fx.note,
@@ -413,6 +461,10 @@ export default async function handler(req: any, res: any) {
           exclusion_reason: null,
           native_price: exact.close_price,
           native_currency: nativeCurrency,
+          native_currency_source: nativeCurrencyResolution.source,
+          company_exchange_used: nativeCurrencyResolution.company_exchange_used,
+          native_currency_fallback_used: nativeCurrencyResolution.fallback_used,
+          native_currency_warning: nativeCurrencyResolution.warning,
           fx_to_sek: fx.fx_to_sek,
           fx_source: fx.source,
           fx_note: fx.note,
@@ -434,6 +486,10 @@ export default async function handler(req: any, res: any) {
                 included: row.included,
                 exclusion_reason: row.exclusion_reason,
                 native_currency: row.native_currency,
+                native_currency_source: row.native_currency_source,
+                company_exchange_used: row.company_exchange_used,
+                native_currency_fallback_used: row.native_currency_fallback_used,
+                native_currency_warning: row.native_currency_warning,
                 fx_to_sek: row.fx_to_sek,
                 value_in_base_currency: row.value_in_base_currency,
               })) as any
@@ -521,6 +577,7 @@ export default async function handler(req: any, res: any) {
         avg_cost: row.avg_cost,
         manual_price: row.manual_price,
         currency: row.currency,
+        company_exchange: companyExchangeBySymbol.get(row.resolved_symbol ?? row.symbol) ?? companyExchangeBySymbol.get(row.symbol) ?? null,
       })),
       history_coverage: historyCoverage,
       daily_portfolio_series: dailySeries,
