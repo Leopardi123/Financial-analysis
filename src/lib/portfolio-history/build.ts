@@ -12,15 +12,27 @@ type DataQuality = "full" | "partial" | "estimated";
 type HistorySource = "positions_price_history" | "positions_snapshots" | "snapshots" | "unavailable";
 type CoverageMissingReason = "unresolved_symbol" | "no_history_rows" | "insufficient_20d" | "insufficient_65d" | "insufficient_200d" | "ok";
 
-type Point = { as_of_date: string; market_value: number; data_quality: DataQuality; contributor_count: number };
+type Point = { as_of_date: string; market_value: number; data_quality: DataQuality; contributor_count: number; currency_basis?: string };
+type PositionContributionDebug = {
+  symbol: string;
+  native_currency: string | null;
+  native_price: number;
+  fx_to_sek: number;
+  value_native: number;
+  value_sek: number;
+};
 
 type TrendMetrics = {
   available_days: number;
   first_history_date: string | null;
   last_history_date: string | null;
+  latest_value: number | null;
   return_20d: number | null;
   return_65d: number | null;
   return_200d: number | null;
+  anchor_20d_date: string | null;
+  anchor_65d_date: string | null;
+  anchor_200d_date: string | null;
   value_at_20d_anchor: number | null;
   value_at_65d_anchor: number | null;
   value_at_200d_anchor: number | null;
@@ -116,13 +128,14 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
   rows: Point[];
   position_diagnostics: PositionCoverageDiagnostic[];
   portfolio_coverage: PortfolioCoverageDiagnostic;
+  contribution_debug_by_date: Record<string, PositionContributionDebug[]>;
 }> {
   const positionsRows = await query(
-    `SELECT id, symbol, resolved_symbol, shares, entry_date, exited_at
+    `SELECT id, symbol, resolved_symbol, shares, entry_date, exited_at, currency
      FROM ${tables.portfolioPositions}
      WHERE portfolio_id = ? AND COALESCE(shares, 0) > 0 AND symbol IS NOT NULL AND TRIM(symbol) <> ''`,
     [portfolioId]
-  ) as Array<{ symbol?: unknown; resolved_symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown }>;
+  ) as Array<{ symbol?: unknown; resolved_symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown; currency?: unknown }>;
 
   const positions = positionsRows
     .map((row) => ({
@@ -131,6 +144,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       shares: Number(row.shares ?? NaN),
       entry_date: isValidDate(row.entry_date) ? row.entry_date.trim() : null,
       exited_at: isValidDate(row.exited_at) ? row.exited_at.trim() : null,
+      currency: typeof row.currency === "string" ? row.currency.trim().toUpperCase() : null,
     }))
     .filter((row) => row.symbol && Number.isFinite(row.shares) && row.shares > 0);
 
@@ -151,6 +165,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
         coverage_ratio_200d: 0,
         trend_explanation: "Trend unavailable: no active positions with valid symbol + shares.",
       },
+      contribution_debug_by_date: {},
     };
   }
 
@@ -161,25 +176,74 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
   );
   const placeholders = symbols.map(() => "?").join(", ");
   const prices = await query(
-    `SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price
+    `SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price, currency
      FROM ${tables.dailyPriceHistory}
      WHERE symbol IN (${placeholders}) AND COALESCE(adjusted_close, close) IS NOT NULL
      ORDER BY price_date ASC`,
     symbols
-  ) as Array<{ symbol?: unknown; price_date?: unknown; close_price?: unknown }>;
+  ) as Array<{ symbol?: unknown; price_date?: unknown; close_price?: unknown; currency?: unknown }>;
 
-  const bySymbol = new Map<string, Array<{ price_date: string; close_price: number }>>();
+  function normalizeCurrency(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim().toUpperCase().replace(/[^A-Z]/g, "");
+    return normalized.length === 3 ? normalized : null;
+  }
+
+  const bySymbol = new Map<string, Array<{ price_date: string; close_price: number; currency: string | null }>>();
   for (const row of prices) {
     const symbol = String(row.symbol ?? "").trim().toUpperCase();
     const priceDate = String(row.price_date ?? "").trim();
     const closePrice = Number(row.close_price ?? NaN);
+    const currency = normalizeCurrency(row.currency);
     if (!symbol || !isValidDate(priceDate) || !Number.isFinite(closePrice) || closePrice <= 0) continue;
     const bucket = bySymbol.get(symbol) ?? [];
-    bucket.push({ price_date: priceDate, close_price: closePrice });
+    bucket.push({ price_date: priceDate, close_price: closePrice, currency });
     bySymbol.set(symbol, bucket);
   }
 
-  const aggregate = new Map<string, { market_value: number; contributors: number; expected: number }>();
+  const fxToSekCache = new Map<string, number | null>();
+  const fxDirectSymbolCandidates = (from: string, to: string): Array<{ symbol: string; invert: boolean }> => [
+    { symbol: `${from}${to}`, invert: false },
+    { symbol: `${to}${from}`, invert: true },
+  ];
+
+  function resolveFxFromSeries(series: Array<{ price_date: string; close_price: number }>, date: string, invert: boolean): number | null {
+    let latest: number | null = null;
+    for (const row of series) {
+      if (row.price_date > date) break;
+      latest = row.close_price;
+    }
+    if (!Number.isFinite(latest) || latest == null || latest <= 0) return null;
+    return invert ? 1 / latest : latest;
+  }
+
+  function resolveFxToSek(date: string, currency: string | null): number | null {
+    const normalized = normalizeCurrency(currency);
+    if (!normalized || normalized === "SEK") return 1;
+    const cacheKey = `${date}|${normalized}`;
+    if (fxToSekCache.has(cacheKey)) return fxToSekCache.get(cacheKey) ?? null;
+
+    for (const candidate of fxDirectSymbolCandidates(normalized, "SEK")) {
+      const series = bySymbol.get(candidate.symbol);
+      if (!series || series.length === 0) continue;
+      const fx = resolveFxFromSeries(series, date, candidate.invert);
+      if (fx && Number.isFinite(fx) && fx > 0) {
+        fxToSekCache.set(cacheKey, fx);
+        return fx;
+      }
+    }
+
+    const usdToSek = resolveFxFromSeries(bySymbol.get("USDSEK") ?? [], date, false)
+      ?? resolveFxFromSeries(bySymbol.get("SEKUSD") ?? [], date, true);
+    const usdToNative = resolveFxFromSeries(bySymbol.get(`USD${normalized}`) ?? [], date, false)
+      ?? resolveFxFromSeries(bySymbol.get(`${normalized}USD`) ?? [], date, true);
+    const cross = usdToSek && usdToNative ? usdToSek / usdToNative : null;
+    fxToSekCache.set(cacheKey, cross && Number.isFinite(cross) && cross > 0 ? cross : null);
+    return fxToSekCache.get(cacheKey) ?? null;
+  }
+
+  const aggregate = new Map<string, { market_value: number; contributors: number; expected: number; fx_basis_consistent: boolean }>();
+  const contributionDebugByDate = new Map<string, PositionContributionDebug[]>();
   const snapshotRows = symbols.length > 0
     ? await query(`SELECT symbol FROM ${tables.priceScreenSnapshot} WHERE symbol IN (${placeholders})`, symbols)
     : [];
@@ -240,11 +304,29 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       if (position.entry_date && point.price_date < position.entry_date) continue;
       if (position.exited_at && point.price_date > position.exited_at) continue;
 
-      const existing = aggregate.get(point.price_date) ?? { market_value: 0, contributors: 0, expected: 0 };
-      existing.market_value += position.shares * point.close_price;
+      const nativeCurrency = point.currency ?? position.currency;
+      const fxToSek = resolveFxToSek(point.price_date, nativeCurrency);
+      if (!fxToSek || !Number.isFinite(fxToSek) || fxToSek <= 0) continue;
+      const valueNative = position.shares * point.close_price;
+      const valueSek = valueNative * fxToSek;
+      if (!Number.isFinite(valueSek) || valueSek <= 0) continue;
+      const existing = aggregate.get(point.price_date) ?? { market_value: 0, contributors: 0, expected: 0, fx_basis_consistent: true };
+      existing.market_value += valueSek;
       existing.contributors += 1;
       existing.expected += 1;
+      existing.fx_basis_consistent = existing.fx_basis_consistent && true;
       aggregate.set(point.price_date, existing);
+
+      const debugBucket = contributionDebugByDate.get(point.price_date) ?? [];
+      debugBucket.push({
+        symbol: historySymbolUsed,
+        native_currency: nativeCurrency,
+        native_price: point.close_price,
+        fx_to_sek: fxToSek,
+        value_native: valueNative,
+        value_sek: valueSek,
+      });
+      contributionDebugByDate.set(point.price_date, debugBucket);
     }
   }
 
@@ -254,6 +336,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       market_value: value.market_value,
       data_quality: (value.contributors === value.expected ? "full" : "partial") as DataQuality,
       contributor_count: value.contributors,
+      currency_basis: "SEK",
     }))
     .filter((row) => Number.isFinite(row.market_value) && row.market_value > 0)
     .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
@@ -286,6 +369,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       coverage_ratio_200d: coverage200,
       trend_explanation: explanation,
     },
+    contribution_debug_by_date: Object.fromEntries(contributionDebugByDate.entries()),
   };
 }
 
@@ -334,17 +418,24 @@ async function loadPortfolioHistorySeries(portfolioId: string): Promise<{
   rows: Point[];
   position_diagnostics: PositionCoverageDiagnostic[];
   portfolio_coverage: PortfolioCoverageDiagnostic | null;
+  contribution_debug_by_date: Record<string, PositionContributionDebug[]>;
 }> {
   const hasPositions = await tableExists(tables.portfolioPositions);
-  let positionsCoverage: { position_diagnostics: PositionCoverageDiagnostic[]; portfolio_coverage: PortfolioCoverageDiagnostic | null } = {
+  let positionsCoverage: {
+    position_diagnostics: PositionCoverageDiagnostic[];
+    portfolio_coverage: PortfolioCoverageDiagnostic | null;
+    contribution_debug_by_date: Record<string, PositionContributionDebug[]>;
+  } = {
     position_diagnostics: [],
     portfolio_coverage: null,
+    contribution_debug_by_date: {},
   };
   if (hasPositions) {
     const priceHistoryLoaded = await loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId);
     positionsCoverage = {
       position_diagnostics: priceHistoryLoaded.position_diagnostics,
       portfolio_coverage: priceHistoryLoaded.portfolio_coverage,
+      contribution_debug_by_date: priceHistoryLoaded.contribution_debug_by_date,
     };
     if (priceHistoryLoaded.rows.length > 0) {
       return { source: "positions_price_history", ...priceHistoryLoaded };
@@ -357,6 +448,7 @@ async function loadPortfolioHistorySeries(portfolioId: string): Promise<{
         rows: positionSnapshotRows,
         position_diagnostics: priceHistoryLoaded.position_diagnostics,
         portfolio_coverage: priceHistoryLoaded.portfolio_coverage,
+        contribution_debug_by_date: {},
       };
     }
   }
@@ -377,6 +469,7 @@ function computeTrendMetrics(series: Point[]): TrendMetrics {
     as_of_date: row.as_of_date,
     market_value: row.market_value,
     contributor_count: row.contributor_count,
+    currency_basis: row.currency_basis ?? "SEK",
   })));
 
   const qualityPriority: Record<DataQuality, number> = { partial: 0, estimated: 1, full: 2 };
@@ -388,9 +481,13 @@ function computeTrendMetrics(series: Point[]): TrendMetrics {
     available_days: computed.available_days,
     first_history_date: computed.first_history_date,
     last_history_date: computed.last_history_date,
+    latest_value: computed.latest_value,
     return_20d: computed.return_20d,
     return_65d: computed.return_65d,
     return_200d: computed.return_200d,
+    anchor_20d_date: computed.anchor_20d_date,
+    anchor_65d_date: computed.anchor_65d_date,
+    anchor_200d_date: computed.anchor_200d_date,
     value_at_20d_anchor: computed.value_at_20d_anchor,
     value_at_65d_anchor: computed.value_at_65d_anchor,
     value_at_200d_anchor: computed.value_at_200d_anchor,
@@ -452,6 +549,7 @@ export async function buildPortfolioHistory() {
   const sourceByPortfolio = new Map<string, HistorySource>();
   const coverageByPortfolio = new Map<string, PortfolioCoverageDiagnostic | null>();
   const positionCoverageByPortfolio = new Map<string, PositionCoverageDiagnostic[]>();
+  const contributionDebugByPortfolio = new Map<string, Record<string, PositionContributionDebug[]>>();
 
   const trendItems: Array<{ portfolio: PortfolioAdminConfig; metrics: TrendMetrics }> = [];
 
@@ -461,6 +559,7 @@ export async function buildPortfolioHistory() {
     byPortfolioSeries.set(portfolio.portfolio_id, loaded.rows);
     coverageByPortfolio.set(portfolio.portfolio_id, loaded.portfolio_coverage);
     positionCoverageByPortfolio.set(portfolio.portfolio_id, loaded.position_diagnostics);
+    contributionDebugByPortfolio.set(portfolio.portfolio_id, loaded.contribution_debug_by_date);
 
     await execute(`DELETE FROM ${tables.portfolioHistoryDaily} WHERE portfolio_id = ?`, [portfolio.portfolio_id]);
 
@@ -601,12 +700,23 @@ export async function buildPortfolioHistory() {
         available_days: item.metrics.available_days,
         first_history_date: item.metrics.first_history_date,
         last_history_date: item.metrics.last_history_date,
+        latest_date: item.metrics.last_history_date,
+        latest_value_sek: item.metrics.latest_value,
         return_20d: item.metrics.return_20d,
         return_65d: item.metrics.return_65d,
         return_200d: item.metrics.return_200d,
+        anchor_20d_date: item.metrics.anchor_20d_date,
+        anchor_20d_value_sek: item.metrics.value_at_20d_anchor,
+        anchor_65d_date: item.metrics.anchor_65d_date,
+        anchor_65d_value_sek: item.metrics.value_at_65d_anchor,
+        anchor_200d_date: item.metrics.anchor_200d_date,
+        anchor_200d_value_sek: item.metrics.value_at_200d_anchor,
         value_at_20d_anchor: item.metrics.value_at_20d_anchor,
         value_at_65d_anchor: item.metrics.value_at_65d_anchor,
         value_at_200d_anchor: item.metrics.value_at_200d_anchor,
+        anchor_65d_contributing_positions: (
+          contributionDebugByPortfolio.get(item.portfolio.portfolio_id)?.[item.metrics.anchor_65d_date ?? ""] ?? []
+        ),
         return_20d_valid: item.metrics.return_20d_valid,
         return_65d_valid: item.metrics.return_65d_valid,
         return_200d_valid: item.metrics.return_200d_valid,

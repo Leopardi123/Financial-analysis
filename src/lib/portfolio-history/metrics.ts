@@ -6,9 +6,11 @@ export type TrendSeriesPoint = {
   as_of_date: string;
   market_value: number;
   contributor_count?: number;
+  currency_basis?: string;
 };
 
 export type TrendWindowDiagnostics = {
+  anchor_date: string | null;
   value_at_anchor: number | null;
   valid: boolean;
   invalid_reasons: string[];
@@ -18,9 +20,13 @@ export type TrendComputationResult = {
   available_days: number;
   first_history_date: string | null;
   last_history_date: string | null;
+  latest_value: number | null;
   return_20d: number | null;
   return_65d: number | null;
   return_200d: number | null;
+  anchor_20d_date: string | null;
+  anchor_65d_date: string | null;
+  anchor_200d_date: string | null;
   return_20d_valid: boolean;
   return_65d_valid: boolean;
   return_200d_valid: boolean;
@@ -70,6 +76,7 @@ function computeWindowReturn(series: TrendSeriesPoint[], lookbackDays: number): 
     return {
       value: null,
       diagnostics: {
+        anchor_date: null,
         value_at_anchor: null,
         valid: false,
         invalid_reasons: ["insufficient_window_coverage"],
@@ -96,11 +103,17 @@ function computeWindowReturn(series: TrendSeriesPoint[], lookbackDays: number): 
       reasons.push("composition_discontinuity");
     }
   }
+  const latestBasis = typeof latest?.currency_basis === "string" ? latest.currency_basis.trim().toUpperCase() : "";
+  const anchorBasis = typeof anchor?.currency_basis === "string" ? anchor.currency_basis.trim().toUpperCase() : "";
+  if (latestBasis && anchorBasis && latestBasis !== anchorBasis) {
+    reasons.push("currency_basis_inconsistent");
+  }
 
   if (reasons.length > 0) {
     return {
       value: null,
       diagnostics: {
+        anchor_date: anchor?.as_of_date ?? null,
         value_at_anchor: Number.isFinite(anchorValue) ? anchorValue : null,
         valid: false,
         invalid_reasons: reasons,
@@ -111,6 +124,7 @@ function computeWindowReturn(series: TrendSeriesPoint[], lookbackDays: number): 
   return {
     value: ((latestValue / anchorValue) - 1) * 100,
     diagnostics: {
+      anchor_date: anchor?.as_of_date ?? null,
       value_at_anchor: anchorValue,
       valid: true,
       invalid_reasons: [],
@@ -123,6 +137,7 @@ export function computeTrendMetricsFromSeries(seriesRaw: TrendSeriesPoint[]): Tr
   const availableDays = series.length;
   const firstHistoryDate = series[0]?.as_of_date ?? null;
   const lastHistoryDate = series[series.length - 1]?.as_of_date ?? null;
+  const latestValue = Number(series[series.length - 1]?.market_value ?? NaN);
 
   const win20 = computeWindowReturn(series, 20);
   const win65 = computeWindowReturn(series, 65);
@@ -141,9 +156,13 @@ export function computeTrendMetricsFromSeries(seriesRaw: TrendSeriesPoint[]): Tr
     available_days: availableDays,
     first_history_date: firstHistoryDate,
     last_history_date: lastHistoryDate,
+    latest_value: Number.isFinite(latestValue) ? latestValue : null,
     return_20d: win20.value,
     return_65d: win65.value,
     return_200d: win200.value,
+    anchor_20d_date: win20.diagnostics.anchor_date,
+    anchor_65d_date: win65.diagnostics.anchor_date,
+    anchor_200d_date: win200.diagnostics.anchor_date,
     return_20d_valid: win20.diagnostics.valid,
     return_65d_valid: win65.diagnostics.valid,
     return_200d_valid: win200.diagnostics.valid,
