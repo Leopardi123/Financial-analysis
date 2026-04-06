@@ -200,6 +200,22 @@ type ScreeningAttempt = {
   debug: ScreeningDebugPayload;
 };
 
+type FxIngestResult = {
+  ok?: boolean;
+  status?: "success" | "error";
+  symbol?: string;
+  mode?: "latest" | "recent" | "full";
+  rows_inserted?: number;
+  rows_updated?: number;
+  rows_unchanged?: number;
+  earliest_date_loaded?: string | null;
+  latest_date_loaded?: string | null;
+  source?: string;
+  table?: string;
+  next_step?: string;
+  error?: string;
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -248,6 +264,11 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("admin.debugParamEnabled") === "1";
   });
+  const [fxSymbolInput, setFxSymbolInput] = useState("CADSEK");
+  const [fxMode, setFxMode] = useState<"latest" | "recent" | "full">("recent");
+  const [fxFrom, setFxFrom] = useState("");
+  const [fxTo, setFxTo] = useState("");
+  const [fxIngestResult, setFxIngestResult] = useState<FxIngestResult | null>(null);
 
   const autoRefreshRunningRef = useRef(false);
   const autoRefreshPausedRef = useRef(false);
@@ -378,6 +399,21 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     } finally {
       setLoadingKey(null);
     }
+  }
+
+  async function runFxIngest() {
+    const symbol = fxSymbolInput.trim().toUpperCase();
+    if (!symbol) {
+      updateLog("FX ingest", "error", "ERROR: FX symbol is required.");
+      return;
+    }
+    const payload = await postJson("FX Ingest", "/api/admin/fx/ingest", {
+      symbol,
+      mode: fxMode,
+      from: fxFrom.trim() || undefined,
+      to: fxTo.trim() || undefined,
+    });
+    setFxIngestResult(payload as unknown as FxIngestResult);
   }
 
   function startScreeningAttempt(offset: number, batchSize: number) {
@@ -1237,6 +1273,60 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <p className="bread">No debug steps yet. Run a screening batch to populate debug details.</p>
           )}
         </details>
+      </details>
+
+      <details open style={{ marginBottom: 12 }}>
+        <summary><strong>FX ingest / backfill</strong></summary>
+        <p className="bread">Manual ingest for FX historical series into <code>daily_price_history</code> (used by portfolio history FX normalization).</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+          <label>
+            FX symbol
+            <input
+              value={fxSymbolInput}
+              onChange={(event) => setFxSymbolInput(event.target.value.toUpperCase())}
+              placeholder="CADSEK"
+            />
+          </label>
+          <label>
+            Mode
+            <select value={fxMode} onChange={(event) => setFxMode(event.target.value as "latest" | "recent" | "full")}>
+              <option value="latest">Latest only</option>
+              <option value="recent">Recent backfill</option>
+              <option value="full">Full backfill</option>
+            </select>
+          </label>
+          <label>
+            From (optional)
+            <input value={fxFrom} onChange={(event) => setFxFrom(event.target.value)} placeholder="YYYY-MM-DD" />
+          </label>
+          <label>
+            To (optional)
+            <input value={fxTo} onChange={(event) => setFxTo(event.target.value)} placeholder="YYYY-MM-DD" />
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button type="button" onClick={() => setFxSymbolInput("USDSEK")} disabled={loadingKey !== null}>USDSEK</button>
+          <button type="button" onClick={() => setFxSymbolInput("CADSEK")} disabled={loadingKey !== null}>CADSEK</button>
+          <button type="button" onClick={() => setFxSymbolInput("EURSEK")} disabled={loadingKey !== null}>EURSEK</button>
+          <button type="button" onClick={() => void runFxIngest()} disabled={!secretReady || loadingKey !== null}>
+            {loadingKey === "FX Ingest" ? "Running FX ingest..." : "Run FX ingest"}
+          </button>
+        </div>
+        {fxIngestResult && (
+          <div className="bread" style={{ marginTop: 8 }}>
+            <strong>FX symbol:</strong> {String(fxIngestResult.symbol ?? "—")}<br />
+            <strong>Status:</strong> {fxIngestResult.ok ? "success" : "failed"}<br />
+            <strong>Mode:</strong> {String(fxIngestResult.mode ?? "—")}<br />
+            <strong>Rows inserted:</strong> {Number(fxIngestResult.rows_inserted ?? 0)}<br />
+            <strong>Rows updated:</strong> {Number(fxIngestResult.rows_updated ?? 0)}<br />
+            <strong>Rows unchanged:</strong> {Number(fxIngestResult.rows_unchanged ?? 0)}<br />
+            <strong>Loaded range:</strong> {String(fxIngestResult.earliest_date_loaded ?? "—")} → {String(fxIngestResult.latest_date_loaded ?? "—")}<br />
+            <strong>Source:</strong> {String(fxIngestResult.source ?? "—")}<br />
+            <strong>Table:</strong> {String(fxIngestResult.table ?? "—")}<br />
+            {fxIngestResult.error ? <><strong>Error:</strong> {fxIngestResult.error}<br /></> : null}
+            <strong>Hint:</strong> {String(fxIngestResult.next_step ?? "Next step: rebuild portfolio history.")}
+          </div>
+        )}
       </details>
 
       <details open style={{ marginBottom: 12 }}>

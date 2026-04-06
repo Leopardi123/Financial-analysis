@@ -81,6 +81,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/companies": () => import("../src/server/routes/admin/companies.js"),
   "admin/init-db": () => import("../src/server/routes/admin/init-db.js"),
   "admin/refresh-companies": () => import("../src/server/routes/admin/refresh-companies.js"),
+  "admin/fx/ingest": () => import("../src/server/routes/admin/fx-ingest.js"),
   "admin/macro/ingest": () => import("../src/server/routes/admin/macro-ingest.js"),
   "admin/macro/run-engine": () => import("../src/server/routes/admin/macro-run-engine.js"),
   "admin/rebuild-macro-snapshot": () => import("../src/server/routes/admin/rebuild-macro-snapshot.js"),
