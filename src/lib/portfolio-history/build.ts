@@ -214,6 +214,54 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     companyExchangeBySymbol.set(symbol, exchange);
   }
 
+  const currenciesNeeded = Array.from(new Set(
+    positions
+      .flatMap((position) => {
+        const historySymbol = position.resolved_symbol ?? position.symbol;
+        const series = bySymbol.get(historySymbol) ?? bySymbol.get(position.symbol) ?? [];
+        const perRowCurrencies = series.map((point) => normalizeCurrency(point.currency));
+        const inferred = resolveNativeCurrency({
+          positionCurrency: position.currency,
+          priceCurrency: null,
+          historySymbol,
+          rawSymbol: position.symbol,
+          companyExchangeBySymbol,
+        }).currency;
+        return [position.currency, inferred, ...perRowCurrencies];
+      })
+      .map((value) => normalizeCurrency(value))
+      .filter((value): value is string => Boolean(value) && value !== "SEK")
+  ));
+  const fxSymbols = Array.from(new Set(
+    currenciesNeeded.flatMap((currency) => [
+      `${currency}SEK`,
+      `SEK${currency}`,
+      `USD${currency}`,
+      `${currency}USD`,
+      "USDSEK",
+      "SEKUSD",
+    ])
+  ));
+  const fxRows = fxSymbols.length > 0
+    ? await query(
+      `SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price
+       FROM ${tables.dailyPriceHistory}
+       WHERE symbol IN (${fxSymbols.map(() => "?").join(",")}) AND COALESCE(adjusted_close, close) IS NOT NULL
+       ORDER BY symbol ASC, price_date ASC`,
+      fxSymbols
+    )
+    : [];
+  const fxBySymbol = new Map<string, Array<{ price_date: string; close_price: number }>>();
+  for (const row of fxRows as Array<{ symbol?: unknown; price_date?: unknown; close_price?: unknown }>) {
+    const symbol = String(row.symbol ?? "").trim().toUpperCase();
+    const priceDate = String(row.price_date ?? "").trim();
+    const closePrice = Number(row.close_price ?? NaN);
+    if (!symbol || !isValidDate(priceDate) || !Number.isFinite(closePrice) || closePrice <= 0) continue;
+    const bucket = fxBySymbol.get(symbol) ?? [];
+    bucket.push({ price_date: priceDate, close_price: closePrice });
+    fxBySymbol.set(symbol, bucket);
+  }
+
   const fxToSekCache = new Map<string, number | null>();
   const fxDirectSymbolCandidates = (from: string, to: string): Array<{ symbol: string; invert: boolean }> => [
     { symbol: `${from}${to}`, invert: false },
@@ -238,7 +286,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     if (fxToSekCache.has(cacheKey)) return fxToSekCache.get(cacheKey) ?? null;
 
     for (const candidate of fxDirectSymbolCandidates(normalized, "SEK")) {
-      const series = bySymbol.get(candidate.symbol);
+      const series = fxBySymbol.get(candidate.symbol);
       if (!series || series.length === 0) continue;
       const fx = resolveFxFromSeries(series, date, candidate.invert);
       if (fx && Number.isFinite(fx) && fx > 0) {
@@ -247,10 +295,10 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       }
     }
 
-    const usdToSek = resolveFxFromSeries(bySymbol.get("USDSEK") ?? [], date, false)
-      ?? resolveFxFromSeries(bySymbol.get("SEKUSD") ?? [], date, true);
-    const usdToNative = resolveFxFromSeries(bySymbol.get(`USD${normalized}`) ?? [], date, false)
-      ?? resolveFxFromSeries(bySymbol.get(`${normalized}USD`) ?? [], date, true);
+    const usdToSek = resolveFxFromSeries(fxBySymbol.get("USDSEK") ?? [], date, false)
+      ?? resolveFxFromSeries(fxBySymbol.get("SEKUSD") ?? [], date, true);
+    const usdToNative = resolveFxFromSeries(fxBySymbol.get(`USD${normalized}`) ?? [], date, false)
+      ?? resolveFxFromSeries(fxBySymbol.get(`${normalized}USD`) ?? [], date, true);
     const cross = usdToSek && usdToNative ? usdToSek / usdToNative : null;
     fxToSekCache.set(cacheKey, cross && Number.isFinite(cross) && cross > 0 ? cross : null);
     return fxToSekCache.get(cacheKey) ?? null;

@@ -164,7 +164,14 @@ export default async function handler(req: any, res: any) {
           const historySymbol = position.resolved_symbol ?? position.symbol;
           const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
           const fromSeries = Array.from(new Set(series.map((row) => normalizeCurrency(row.currency)).filter((value): value is string => Boolean(value))));
-          return [position.currency, ...fromSeries];
+          const inferred = resolveNativeCurrency({
+            positionCurrency: position.currency,
+            priceCurrency: null,
+            historySymbol,
+            rawSymbol: position.symbol,
+            companyExchangeBySymbol,
+          }).currency;
+          return [position.currency, inferred, ...fromSeries];
         })
         .map((value) => normalizeCurrency(value))
         .filter((value): value is string => Boolean(value) && value !== "SEK"),
