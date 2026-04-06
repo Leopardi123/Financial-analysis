@@ -2,24 +2,6 @@ import { query } from "../../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../../api/_migrate.js";
 import { buildPortfolioHistory, loadPortfolioConfigsForHistoryBuild } from "../../../../lib/portfolio-history/build.js";
 
-function maskDatabaseUrl(raw: string | undefined): string | null {
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const host = url.hostname || "unknown";
-    return `${url.protocol}//***@${host}${url.pathname}`;
-  } catch {
-    return "***";
-  }
-}
-
-function detectRuntimeEnvironment(): string {
-  const vercelEnv = String(process.env.VERCEL_ENV ?? "").trim();
-  if (vercelEnv) return `vercel:${vercelEnv}`;
-  const nodeEnv = String(process.env.NODE_ENV ?? "").trim();
-  return nodeEnv ? `node:${nodeEnv}` : "unknown";
-}
-
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") {
@@ -75,9 +57,9 @@ export default async function handler(req: any, res: any) {
       portfolios_found_before_filter: portfoliosBeforeFilter.length,
       portfolios_after_filter: portfoliosAfterFilter.length,
       source_table_used: portfolioSource.source_table_used,
-      query_used: `SELECT * FROM ${portfolioSource.source_table_used}`,
-      database_url: maskDatabaseUrl(process.env.TURSO_DATABASE_URL),
-      runtime_environment: detectRuntimeEnvironment(),
+      query_used: portfolioSource.query_used,
+      database_url: portfolioSource.db_url_masked,
+      runtime_environment: portfolioSource.runtime_env,
       filters_applied: portfolioSource.filters_applied,
       history_rows_written: Number(historyStats?.rows_written ?? 0),
       total_rows_written: Number(totalStats?.rows_written ?? 0),

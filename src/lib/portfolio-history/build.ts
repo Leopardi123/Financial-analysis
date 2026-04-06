@@ -127,16 +127,42 @@ function isValidDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
+function maskDatabaseUrl(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname || "unknown";
+    return `${url.protocol}//***@${host}${url.pathname}`;
+  } catch {
+    return "***";
+  }
+}
+
+function detectRuntimeEnv(): "preview" | "production" | "unknown" {
+  const vercelEnv = String(process.env.VERCEL_ENV ?? "").trim().toLowerCase();
+  if (vercelEnv === "preview") return "preview";
+  if (vercelEnv === "production") return "production";
+  return "unknown";
+}
+
 export async function loadPortfolioConfigsForHistoryBuild(): Promise<{
   portfolios: PortfolioAdminConfig[];
   source_table_used: string;
+  query_used: string;
+  db_url_masked: string | null;
+  runtime_env: "preview" | "production" | "unknown";
   filters_applied: string[];
 }> {
+  const dbUrlMasked = maskDatabaseUrl(process.env.TURSO_DATABASE_URL);
+  const runtimeEnv = detectRuntimeEnv();
   const adminConfigs = await listPortfolioConfigs();
   if (adminConfigs.length > 0) {
     return {
       portfolios: adminConfigs,
       source_table_used: tables.portfolioAdminConfig,
+      query_used: `SELECT * FROM ${tables.portfolioAdminConfig} ORDER BY sort_order ASC, portfolio_id ASC`,
+      db_url_masked: dbUrlMasked,
+      runtime_env: runtimeEnv,
       filters_applied: ["none (all rows from portfolio_admin_config, ordered by sort_order)"],
     };
   }
@@ -189,11 +215,18 @@ export async function loadPortfolioConfigsForHistoryBuild(): Promise<{
       override_expiry_date: null,
     }));
 
-  return {
+  const out = {
     portfolios: fallbackPortfolios,
-    source_table_used: "portfolio_admin_config_fallback(portfolio_snapshots|portfolio_positions|portfolio_history_daily)",
+    source_table_used: "fallback",
+    query_used: `SELECT DISTINCT portfolio_id FROM (${tables.portfolioSnapshots} UNION ${tables.portfolioPositions} UNION ${tables.portfolioHistoryDaily})`,
+    db_url_masked: dbUrlMasked,
+    runtime_env: runtimeEnv,
     filters_applied: ["fallback enabled when portfolio_admin_config has 0 rows"],
   };
+  if (out.portfolios.length === 0) {
+    throw new Error("NO_PORTFOLIOS_FOUND_IN_ANY_SOURCE");
+  }
+  return out;
 }
 
 async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: string): Promise<{
