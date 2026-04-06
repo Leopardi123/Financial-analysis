@@ -4,6 +4,7 @@ import { listPortfolioConfigs } from "../portfolio-admin/repository.js";
 import { buildPerPortfolioValidationIssues, validateGlobalTargetWeight } from "../portfolio-admin/validation.js";
 import { getLatestPortfolioRisk } from "../portfolio-risk/build.js";
 import { getLatestPortfolioHedgeAndDryPowder } from "../portfolio-hedge/build.js";
+import { computeTrendMetricsFromSeries } from "../portfolio-history/metrics.js";
 
 export type PortfolioOverviewTraceRow = {
   stage: string;
@@ -95,14 +96,6 @@ function normalizeTrendFields(row: any) {
     relative_strength_bucket: row?.relative_strength_bucket == null ? null : String(row.relative_strength_bucket),
     signal_completeness: row?.signal_completeness == null ? null : String(row.signal_completeness),
   };
-}
-
-function computeLookbackReturn(values: number[], lookbackDays: number): number | null {
-  if (values.length <= lookbackDays) return null;
-  const latest = values[values.length - 1];
-  const past = values[values.length - 1 - lookbackDays];
-  if (!Number.isFinite(latest) || !Number.isFinite(past) || past === 0) return null;
-  return ((latest / past) - 1) * 100;
 }
 
 function dateToUtcMs(date: string): number | null {
@@ -235,53 +228,48 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   }
   const historyTrendByPortfolioId = new Map<string, { metrics: ReturnType<typeof normalizeTrendFields> & { signal_completeness: string | null }; trend_debug: any }>();
   for (const [portfolioId, series] of seriesByPortfolio.entries()) {
-    const values = series.map((point) => point.market_value);
-    const availableDays = series.length;
-    const return20d = computeLookbackReturn(values, 20);
-    const return65d = computeLookbackReturn(values, 65);
-    const return200d = computeLookbackReturn(values, 200);
-    const shortDirection = return20d === null ? "unavailable" : return20d > 2 ? "positive" : return20d < -2 ? "negative" : "neutral";
-    const mediumDirection = return65d === null ? "unavailable" : return65d > 2 ? "positive" : return65d < -2 ? "negative" : "neutral";
-    const longDirection = return200d === null ? "unavailable" : return200d > 2 ? "positive" : return200d < -2 ? "negative" : "neutral";
-    const trendCompleteness = availableDays >= 200 ? "full" : availableDays >= 65 ? "partial" : "unavailable";
-    const trendStatus = trendCompleteness === "unavailable"
-      ? "unavailable"
-      : longDirection === "positive" && mediumDirection === "positive" && (shortDirection === "positive" || shortDirection === "neutral")
-        ? "strong_uptrend"
-        : longDirection === "negative" && mediumDirection === "negative" && (shortDirection === "negative" || shortDirection === "neutral")
-          ? "downtrend"
-          : shortDirection === "positive" && (mediumDirection === "positive" || mediumDirection === "neutral")
-            ? "improving"
-            : shortDirection === "negative" && (mediumDirection === "negative" || mediumDirection === "neutral")
-              ? "weakening"
-              : "neutral";
+    const computed = computeTrendMetricsFromSeries(series.map((point) => ({
+      as_of_date: point.as_of_date,
+      market_value: point.market_value,
+    })));
     const metrics = normalizeTrendFields({
-      return_20d: return20d,
-      return_65d: return65d,
-      return_200d: return200d,
-      short_direction: shortDirection,
-      medium_direction: mediumDirection,
-      long_direction: longDirection,
-      trend_status: trendStatus,
-      signal_completeness: trendCompleteness,
+      return_20d: computed.return_20d,
+      return_65d: computed.return_65d,
+      return_200d: computed.return_200d,
+      short_direction: computed.short_direction,
+      medium_direction: computed.medium_direction,
+      long_direction: computed.long_direction,
+      trend_status: computed.trend_status,
+      signal_completeness: computed.trend_completeness,
     });
     historyTrendByPortfolioId.set(portfolioId, {
       metrics: {
         ...metrics,
-        signal_completeness: trendCompleteness,
+        signal_completeness: computed.trend_completeness,
       },
       trend_debug: {
         attempted: true,
-        available_days: availableDays,
+        available_days: computed.available_days,
+        first_history_date: computed.first_history_date,
+        last_history_date: computed.last_history_date,
         return_20d: metrics.return_20d,
         return_65d: metrics.return_65d,
         return_200d: metrics.return_200d,
+        value_at_20d_anchor: computed.value_at_20d_anchor,
+        value_at_65d_anchor: computed.value_at_65d_anchor,
+        value_at_200d_anchor: computed.value_at_200d_anchor,
+        return_20d_valid: computed.return_20d_valid,
+        return_65d_valid: computed.return_65d_valid,
+        return_200d_valid: computed.return_200d_valid,
+        invalid_reasons_20d: computed.invalid_reasons_20d,
+        invalid_reasons_65d: computed.invalid_reasons_65d,
+        invalid_reasons_200d: computed.invalid_reasons_200d,
         short_direction: metrics.short_direction,
         medium_direction: metrics.medium_direction,
         long_direction: metrics.long_direction,
         trend_status: metrics.trend_status,
-        trend_completeness: trendCompleteness,
-        reason: availableDays < 65 ? "insufficient_history" : "ok",
+        trend_completeness: computed.trend_completeness,
+        reason: computed.available_days < 65 ? "insufficient_history" : "ok",
       },
     });
   }
@@ -686,10 +674,21 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
         trend_debug: {
           attempted: trendDebug.attempted ?? true,
           available_days: trendDebug.available_days ?? null,
+          first_history_date: trendDebug.first_history_date ?? null,
+          last_history_date: trendDebug.last_history_date ?? null,
           history_source: trendDebug.history_source ?? null,
           return_20d: trendDebug.return_20d ?? null,
           return_65d: trendDebug.return_65d ?? null,
           return_200d: trendDebug.return_200d ?? null,
+          value_at_20d_anchor: trendDebug.value_at_20d_anchor ?? null,
+          value_at_65d_anchor: trendDebug.value_at_65d_anchor ?? null,
+          value_at_200d_anchor: trendDebug.value_at_200d_anchor ?? null,
+          return_20d_valid: trendDebug.return_20d_valid ?? false,
+          return_65d_valid: trendDebug.return_65d_valid ?? false,
+          return_200d_valid: trendDebug.return_200d_valid ?? false,
+          invalid_reasons_20d: trendDebug.invalid_reasons_20d ?? [],
+          invalid_reasons_65d: trendDebug.invalid_reasons_65d ?? [],
+          invalid_reasons_200d: trendDebug.invalid_reasons_200d ?? [],
           short_direction: trendDebug.short_direction ?? "unavailable",
           medium_direction: trendDebug.medium_direction ?? "unavailable",
           long_direction: trendDebug.long_direction ?? "unavailable",

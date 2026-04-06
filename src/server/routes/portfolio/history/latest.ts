@@ -1,42 +1,7 @@
 import { query } from "../../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../../api/_migrate.js";
 import { listPortfolioConfigs } from "../../../../lib/portfolio-admin/repository.js";
-
-function computeLookbackReturn(values: number[], lookbackDays: number): number | null {
-  if (values.length <= lookbackDays) return null;
-  const latest = values[values.length - 1];
-  const past = values[values.length - 1 - lookbackDays];
-  if (!Number.isFinite(latest) || !Number.isFinite(past) || past === 0) return null;
-  return ((latest / past) - 1) * 100;
-}
-
-function computeDirection(returnPct: number | null): string {
-  if (typeof returnPct !== "number" || !Number.isFinite(returnPct)) return "unavailable";
-  if (returnPct > 2.0) return "positive";
-  if (returnPct < -2.0) return "negative";
-  return "neutral";
-}
-
-function computeTrendStatus(shortDirection: string, mediumDirection: string, longDirection: string): string {
-  if (shortDirection === "unavailable" && mediumDirection === "unavailable" && longDirection === "unavailable") {
-    return "unavailable";
-  }
-  if (longDirection === "positive" && mediumDirection === "positive" && (shortDirection === "positive" || shortDirection === "neutral")) {
-    return "strong_uptrend";
-  }
-  if (longDirection === "negative" && mediumDirection === "negative" && (shortDirection === "negative" || shortDirection === "neutral")) {
-    return "downtrend";
-  }
-  if (shortDirection === "positive" && (mediumDirection === "positive" || mediumDirection === "neutral")) return "improving";
-  if (shortDirection === "negative" && (mediumDirection === "negative" || mediumDirection === "neutral")) return "weakening";
-  return "neutral";
-}
-
-function computeCompleteness(availableDays: number): "full" | "partial" | "unavailable" {
-  if (availableDays >= 200) return "full";
-  if (availableDays >= 65) return "partial";
-  return "unavailable";
-}
+import { computeTrendMetricsFromSeries } from "../../../../lib/portfolio-history/metrics.js";
 
 function dateToUtcMs(date: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
@@ -54,6 +19,15 @@ function buildUnavailableTrendDebugFromMetrics(metrics: {
   long_direction: string;
   trend_status: string;
   trend_completeness: string;
+  value_at_20d_anchor?: number | null;
+  value_at_65d_anchor?: number | null;
+  value_at_200d_anchor?: number | null;
+  return_20d_valid?: boolean;
+  return_65d_valid?: boolean;
+  return_200d_valid?: boolean;
+  invalid_reasons_20d?: string[];
+  invalid_reasons_65d?: string[];
+  invalid_reasons_200d?: string[];
 }) {
   const reason = metrics.available_days < 65 ? "insufficient_history" : "trend_debug_unavailable";
   return {
@@ -67,6 +41,15 @@ function buildUnavailableTrendDebugFromMetrics(metrics: {
     long_direction: metrics.long_direction,
     trend_status: metrics.trend_status,
     trend_completeness: metrics.trend_completeness,
+    value_at_20d_anchor: metrics.value_at_20d_anchor ?? null,
+    value_at_65d_anchor: metrics.value_at_65d_anchor ?? null,
+    value_at_200d_anchor: metrics.value_at_200d_anchor ?? null,
+    return_20d_valid: metrics.return_20d_valid ?? false,
+    return_65d_valid: metrics.return_65d_valid ?? false,
+    return_200d_valid: metrics.return_200d_valid ?? false,
+    invalid_reasons_20d: metrics.invalid_reasons_20d ?? [],
+    invalid_reasons_65d: metrics.invalid_reasons_65d ?? [],
+    invalid_reasons_200d: metrics.invalid_reasons_200d ?? [],
     reason,
   };
 }
@@ -121,35 +104,36 @@ export default async function handler(req: any, res: any) {
 
     const portfolios = portfolioIds.map((portfolioId) => {
       const series = byPortfolio.get(portfolioId) ?? [];
-      const values = series.map((point) => point.market_value);
-      const availableDays = series.length;
-      const return20d = computeLookbackReturn(values, 20);
-      const return65d = computeLookbackReturn(values, 65);
-      const return200d = computeLookbackReturn(values, 200);
-      const shortDirection = computeDirection(return20d);
-      const mediumDirection = computeDirection(return65d);
-      const longDirection = computeDirection(return200d);
-      const trendCompleteness = computeCompleteness(availableDays);
-      const trendStatus = trendCompleteness === "unavailable"
-        ? "unavailable"
-        : computeTrendStatus(shortDirection, mediumDirection, longDirection);
+      const metrics = computeTrendMetricsFromSeries(series.map((point) => ({
+        as_of_date: point.as_of_date,
+        market_value: point.market_value,
+      })));
       const snapshotRow = snapshotByPortfolio.get(portfolioId) as any;
       return {
         portfolio_id: portfolioId,
         as_of_date: series.length > 0 ? series[series.length - 1]?.as_of_date ?? "" : "",
-        available_days: availableDays,
-        return_20d: return20d,
-        return_65d: return65d,
-        return_200d: return200d,
-        short_direction: shortDirection,
-        medium_direction: mediumDirection,
-        long_direction: longDirection,
-        trend_status: trendStatus,
-        trend_completeness: trendCompleteness,
+        available_days: metrics.available_days,
+        return_20d: metrics.return_20d,
+        return_65d: metrics.return_65d,
+        return_200d: metrics.return_200d,
+        short_direction: metrics.short_direction,
+        medium_direction: metrics.medium_direction,
+        long_direction: metrics.long_direction,
+        trend_status: metrics.trend_status,
+        trend_completeness: metrics.trend_completeness,
+        value_at_20d_anchor: metrics.value_at_20d_anchor,
+        value_at_65d_anchor: metrics.value_at_65d_anchor,
+        value_at_200d_anchor: metrics.value_at_200d_anchor,
+        return_20d_valid: metrics.return_20d_valid,
+        return_65d_valid: metrics.return_65d_valid,
+        return_200d_valid: metrics.return_200d_valid,
+        invalid_reasons_20d: metrics.invalid_reasons_20d,
+        invalid_reasons_65d: metrics.invalid_reasons_65d,
+        invalid_reasons_200d: metrics.invalid_reasons_200d,
         relative_strength_bucket: snapshotRow?.relative_strength_bucket == null ? "unavailable" : String(snapshotRow.relative_strength_bucket),
         debug_payload_json: snapshotRow?.debug_payload_json ?? null,
-        first_history_date: series.length > 0 ? series[0]?.as_of_date ?? null : null,
-        last_history_date: series.length > 0 ? series[series.length - 1]?.as_of_date ?? null : null,
+        first_history_date: metrics.first_history_date,
+        last_history_date: metrics.last_history_date,
       };
     });
 
@@ -247,6 +231,12 @@ export default async function handler(req: any, res: any) {
         relative_strength_bucket: String(row.relative_strength_bucket ?? "unavailable"),
         trend_completeness: String(row.trend_completeness ?? "unavailable"),
         available_days: Number(row.available_days ?? 0),
+        value_at_20d_anchor: row.value_at_20d_anchor == null ? null : Number(row.value_at_20d_anchor),
+        value_at_65d_anchor: row.value_at_65d_anchor == null ? null : Number(row.value_at_65d_anchor),
+        value_at_200d_anchor: row.value_at_200d_anchor == null ? null : Number(row.value_at_200d_anchor),
+        return_20d_valid: Boolean(row.return_20d_valid),
+        return_65d_valid: Boolean(row.return_65d_valid),
+        return_200d_valid: Boolean(row.return_200d_valid),
       })),
       total: {
         as_of_date: latestTotalDate || null,
@@ -288,9 +278,27 @@ export default async function handler(req: any, res: any) {
                   long_direction: String(row.long_direction ?? "unavailable"),
                   trend_status: String(row.trend_status ?? "unavailable"),
                   trend_completeness: String(row.trend_completeness ?? "unavailable"),
+                  value_at_20d_anchor: row.value_at_20d_anchor == null ? null : Number(row.value_at_20d_anchor),
+                  value_at_65d_anchor: row.value_at_65d_anchor == null ? null : Number(row.value_at_65d_anchor),
+                  value_at_200d_anchor: row.value_at_200d_anchor == null ? null : Number(row.value_at_200d_anchor),
+                  return_20d_valid: Boolean(row.return_20d_valid),
+                  return_65d_valid: Boolean(row.return_65d_valid),
+                  return_200d_valid: Boolean(row.return_200d_valid),
+                  invalid_reasons_20d: Array.isArray(row.invalid_reasons_20d) ? row.invalid_reasons_20d : [],
+                  invalid_reasons_65d: Array.isArray(row.invalid_reasons_65d) ? row.invalid_reasons_65d : [],
+                  invalid_reasons_200d: Array.isArray(row.invalid_reasons_200d) ? row.invalid_reasons_200d : [],
                 })),
                 first_history_date: row.first_history_date ?? null,
                 last_history_date: row.last_history_date ?? null,
+                value_at_20d_anchor: row.value_at_20d_anchor ?? null,
+                value_at_65d_anchor: row.value_at_65d_anchor ?? null,
+                value_at_200d_anchor: row.value_at_200d_anchor ?? null,
+                return_20d_valid: row.return_20d_valid ?? false,
+                return_65d_valid: row.return_65d_valid ?? false,
+                return_200d_valid: row.return_200d_valid ?? false,
+                invalid_reasons_20d: row.invalid_reasons_20d ?? [],
+                invalid_reasons_65d: row.invalid_reasons_65d ?? [],
+                invalid_reasons_200d: row.invalid_reasons_200d ?? [],
               };
             }),
             total: {

@@ -2,6 +2,7 @@ import { execute, query } from "../../../api/_db.js";
 import { tables } from "../../../api/_migrate.js";
 import { listPortfolioConfigs } from "../portfolio-admin/repository.js";
 import type { PortfolioAdminConfig } from "../portfolio-admin/types.js";
+import { computeTrendMetricsFromSeries } from "./metrics.js";
 
 type Direction = "positive" | "neutral" | "negative" | "unavailable";
 type TrendStatus = "strong_uptrend" | "improving" | "neutral" | "weakening" | "downtrend" | "unavailable";
@@ -11,13 +12,24 @@ type DataQuality = "full" | "partial" | "estimated";
 type HistorySource = "positions_price_history" | "positions_snapshots" | "snapshots" | "unavailable";
 type CoverageMissingReason = "unresolved_symbol" | "no_history_rows" | "insufficient_20d" | "insufficient_65d" | "insufficient_200d" | "ok";
 
-type Point = { as_of_date: string; market_value: number; data_quality: DataQuality };
+type Point = { as_of_date: string; market_value: number; data_quality: DataQuality; contributor_count: number };
 
 type TrendMetrics = {
   available_days: number;
+  first_history_date: string | null;
+  last_history_date: string | null;
   return_20d: number | null;
   return_65d: number | null;
   return_200d: number | null;
+  value_at_20d_anchor: number | null;
+  value_at_65d_anchor: number | null;
+  value_at_200d_anchor: number | null;
+  return_20d_valid: boolean;
+  return_65d_valid: boolean;
+  return_200d_valid: boolean;
+  invalid_reasons_20d: string[];
+  invalid_reasons_65d: string[];
+  invalid_reasons_200d: string[];
   short_direction: Direction;
   medium_direction: Direction;
   long_direction: Direction;
@@ -43,6 +55,10 @@ type PositionCoverageDiagnostic = {
   enough_200d: boolean;
   has_screen_snapshot: boolean;
   missing_reason: CoverageMissingReason;
+  effective_start_date_used: string | null;
+  effective_end_date_used: string | null;
+  entry_date_source: "entry_date" | "first_price_date";
+  excluded_pre_entry_days: number;
 };
 
 type PortfolioCoverageDiagnostic = {
@@ -58,85 +74,6 @@ type PortfolioCoverageDiagnostic = {
   coverage_ratio_200d: number;
   trend_explanation: string;
 };
-
-function computeDirection(returnPct: number | null): Direction {
-  if (typeof returnPct !== "number" || !Number.isFinite(returnPct)) return "unavailable";
-  if (returnPct > 2.0) return "positive";
-  if (returnPct < -2.0) return "negative";
-  return "neutral";
-}
-
-function computeLookbackReturn(series: Point[], lookbackDays: number): number | null {
-  if (series.length <= lookbackDays) return null;
-  const latest = series[series.length - 1]?.market_value;
-  const past = series[series.length - 1 - lookbackDays]?.market_value;
-  if (!Number.isFinite(latest) || !Number.isFinite(past) || past === 0) return null;
-  return ((latest / past) - 1) * 100;
-}
-
-function computeTrendStatus(args: {
-  shortDirection: Direction;
-  mediumDirection: Direction;
-  longDirection: Direction;
-  longReturn: number | null;
-}): TrendStatus {
-  const { shortDirection, mediumDirection, longDirection, longReturn } = args;
-  const hasShort = shortDirection !== "unavailable";
-  const hasMedium = mediumDirection !== "unavailable";
-  const hasLong = longDirection !== "unavailable";
-  const longIsModestlyNegative = typeof longReturn === "number" && longReturn > -5.0 && longReturn < 0;
-
-  if (!hasMedium && !hasShort && !hasLong) {
-    return "unavailable";
-  }
-
-  if (hasLong) {
-    if (longDirection === "positive" && mediumDirection === "positive" && (shortDirection === "positive" || shortDirection === "neutral")) {
-      return "strong_uptrend";
-    }
-
-    if (mediumDirection === "positive" && shortDirection === "positive"
-      && (longDirection === "neutral" || longIsModestlyNegative)) {
-      return "improving";
-    }
-
-    if (longDirection === "negative" && mediumDirection === "negative" && (shortDirection === "negative" || shortDirection === "neutral")) {
-      return "downtrend";
-    }
-
-    if (mediumDirection === "negative" && shortDirection === "negative" && (longDirection === "neutral" || !hasLong)) {
-      return "weakening";
-    }
-
-    if (shortDirection === "neutral" && mediumDirection === "neutral" && longDirection === "neutral") {
-      return "neutral";
-    }
-
-    return "neutral";
-  }
-
-  if (hasShort && hasMedium) {
-    if (shortDirection === "positive" && mediumDirection === "positive") return "strong_uptrend";
-    if (shortDirection === "negative" && mediumDirection === "negative") return "downtrend";
-    if (shortDirection === "positive" && (mediumDirection === "neutral" || mediumDirection === "positive")) return "improving";
-    if (shortDirection === "negative" && (mediumDirection === "neutral" || mediumDirection === "negative")) return "weakening";
-    return "neutral";
-  }
-
-  if (hasMedium) {
-    if (mediumDirection === "positive") return "improving";
-    if (mediumDirection === "negative") return "weakening";
-    return "neutral";
-  }
-
-  return "unavailable";
-}
-
-function computeSignalCompleteness(availableDays: number): SignalCompleteness {
-  if (availableDays >= 200) return "full";
-  if (availableDays >= 65) return "partial";
-  return "unavailable";
-}
 
 function enrichSeriesReturns(series: Point[]) {
   const out: Array<Point & { daily_return_pct: number | null; cumulative_return_pct: number | null; drawdown_pct: number | null }> = [];
@@ -253,6 +190,15 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     const historySymbolUsed = position.resolved_symbol ?? position.symbol;
     const series = bySymbol.get(historySymbolUsed) ?? bySymbol.get(position.symbol) ?? [];
     const hasHistory = series.length > 0;
+    const firstSeriesDate = hasHistory ? series[0]?.price_date ?? null : null;
+    const effectiveStartDate = position.entry_date ?? firstSeriesDate;
+    const effectiveEndDate = position.exited_at ?? (hasHistory ? series[series.length - 1]?.price_date ?? null : null);
+    const excludedPreEntryDays = position.entry_date
+      ? series.filter((point) => {
+        const entryDate = position.entry_date as string;
+        return point.price_date < entryDate;
+      }).length
+      : 0;
     const firstHistoryDate = hasHistory ? series[0]?.price_date ?? null : null;
     const lastHistoryDate = hasHistory ? series[series.length - 1]?.price_date ?? null : null;
     const enough20d = series.length >= 21;
@@ -282,6 +228,10 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       enough_200d: enough200d,
       has_screen_snapshot: snapshotSymbolSet.has(historySymbolUsed) || snapshotSymbolSet.has(position.symbol),
       missing_reason: missingReason,
+      effective_start_date_used: effectiveStartDate,
+      effective_end_date_used: effectiveEndDate,
+      entry_date_source: position.entry_date ? "entry_date" : "first_price_date",
+      excluded_pre_entry_days: excludedPreEntryDays,
     });
 
     if (series.length === 0) continue;
@@ -303,6 +253,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       as_of_date,
       market_value: value.market_value,
       data_quality: (value.contributors === value.expected ? "full" : "partial") as DataQuality,
+      contributor_count: value.contributors,
     }))
     .filter((row) => Number.isFinite(row.market_value) && row.market_value > 0)
     .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
@@ -354,6 +305,7 @@ async function loadPortfolioHistorySeriesFromPositionsSnapshots(portfolioId: str
       as_of_date: String(row.as_of_date ?? "").trim(),
       market_value: Number(row.market_value ?? NaN),
       data_quality: "estimated" as DataQuality,
+      contributor_count: 0,
     }))
     .filter((row) => isValidDate(row.as_of_date) && Number.isFinite(row.market_value) && row.market_value > 0);
 }
@@ -372,6 +324,7 @@ async function loadPortfolioHistorySeriesFromSnapshots(portfolioId: string): Pro
       as_of_date: String(row.as_of_date ?? "").trim(),
       market_value: Number(row.market_value ?? NaN),
       data_quality: "estimated" as DataQuality,
+      contributor_count: 0,
     }))
     .filter((row) => isValidDate(row.as_of_date) && Number.isFinite(row.market_value) && row.market_value > 0);
 }
@@ -420,24 +373,11 @@ async function loadPortfolioHistorySeries(portfolioId: string): Promise<{
 }
 
 function computeTrendMetrics(series: Point[]): TrendMetrics {
-  const availableDays = series.length;
-  const return20 = computeLookbackReturn(series, 20);
-  const return65 = computeLookbackReturn(series, 65);
-  const return200 = computeLookbackReturn(series, 200);
-
-  const shortDirection = computeDirection(return20);
-  const mediumDirection = computeDirection(return65);
-  const longDirection = computeDirection(return200);
-
-  const trendCompleteness = computeSignalCompleteness(availableDays);
-  const trendStatus = trendCompleteness === "unavailable"
-    ? "unavailable"
-    : computeTrendStatus({
-      shortDirection,
-      mediumDirection,
-      longDirection,
-      longReturn: return200,
-    });
+  const computed = computeTrendMetricsFromSeries(series.map((row) => ({
+    as_of_date: row.as_of_date,
+    market_value: row.market_value,
+    contributor_count: row.contributor_count,
+  })));
 
   const qualityPriority: Record<DataQuality, number> = { partial: 0, estimated: 1, full: 2 };
   const data_quality = series.reduce<DataQuality>((acc, row) => {
@@ -445,16 +385,27 @@ function computeTrendMetrics(series: Point[]): TrendMetrics {
   }, "full");
 
   return {
-    available_days: availableDays,
-    return_20d: return20,
-    return_65d: return65,
-    return_200d: return200,
-    short_direction: shortDirection,
-    medium_direction: mediumDirection,
-    long_direction: longDirection,
-    trend_status: trendStatus,
-    signal_completeness: trendCompleteness,
-    trend_completeness: trendCompleteness,
+    available_days: computed.available_days,
+    first_history_date: computed.first_history_date,
+    last_history_date: computed.last_history_date,
+    return_20d: computed.return_20d,
+    return_65d: computed.return_65d,
+    return_200d: computed.return_200d,
+    value_at_20d_anchor: computed.value_at_20d_anchor,
+    value_at_65d_anchor: computed.value_at_65d_anchor,
+    value_at_200d_anchor: computed.value_at_200d_anchor,
+    return_20d_valid: computed.return_20d_valid,
+    return_65d_valid: computed.return_65d_valid,
+    return_200d_valid: computed.return_200d_valid,
+    invalid_reasons_20d: computed.invalid_reasons_20d,
+    invalid_reasons_65d: computed.invalid_reasons_65d,
+    invalid_reasons_200d: computed.invalid_reasons_200d,
+    short_direction: computed.short_direction,
+    medium_direction: computed.medium_direction,
+    long_direction: computed.long_direction,
+    trend_status: computed.trend_status,
+    signal_completeness: computed.trend_completeness,
+    trend_completeness: computed.trend_completeness,
     data_quality,
     relative_strength_rank: null,
     relative_strength_bucket: "unavailable",
@@ -584,7 +535,7 @@ export async function buildPortfolioHistory() {
         : fullContributors === included.length
           ? "full"
           : "estimated";
-      totalSeries.push({ as_of_date: date, market_value: sum, data_quality: dataQuality });
+      totalSeries.push({ as_of_date: date, market_value: sum, data_quality: dataQuality, contributor_count: contributors });
     }
   }
 
@@ -648,9 +599,20 @@ export async function buildPortfolioHistory() {
             ? "Trend unavailable: insufficient portfolio history."
             : "Trend available from portfolio history."),
         available_days: item.metrics.available_days,
+        first_history_date: item.metrics.first_history_date,
+        last_history_date: item.metrics.last_history_date,
         return_20d: item.metrics.return_20d,
         return_65d: item.metrics.return_65d,
         return_200d: item.metrics.return_200d,
+        value_at_20d_anchor: item.metrics.value_at_20d_anchor,
+        value_at_65d_anchor: item.metrics.value_at_65d_anchor,
+        value_at_200d_anchor: item.metrics.value_at_200d_anchor,
+        return_20d_valid: item.metrics.return_20d_valid,
+        return_65d_valid: item.metrics.return_65d_valid,
+        return_200d_valid: item.metrics.return_200d_valid,
+        invalid_reasons_20d: item.metrics.invalid_reasons_20d,
+        invalid_reasons_65d: item.metrics.invalid_reasons_65d,
+        invalid_reasons_200d: item.metrics.invalid_reasons_200d,
         short_direction: item.metrics.short_direction,
         medium_direction: item.metrics.medium_direction,
         long_direction: item.metrics.long_direction,
