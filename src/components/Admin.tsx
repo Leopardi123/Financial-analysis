@@ -216,6 +216,19 @@ type FxIngestResult = {
   error?: string;
 };
 
+type PortfolioHistoryRebuildResult = {
+  ok?: boolean;
+  status?: string;
+  portfolios_processed?: number;
+  history_rows_written?: number;
+  total_rows_written?: number;
+  earliest_date?: string | null;
+  latest_date?: string | null;
+  last_history_build?: string | null;
+  warnings?: string[];
+  error?: string;
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -269,6 +282,7 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
   const [fxFrom, setFxFrom] = useState("");
   const [fxTo, setFxTo] = useState("");
   const [fxIngestResult, setFxIngestResult] = useState<FxIngestResult | null>(null);
+  const [historyRebuildResult, setHistoryRebuildResult] = useState<PortfolioHistoryRebuildResult | null>(null);
 
   const autoRefreshRunningRef = useRef(false);
   const autoRefreshPausedRef = useRef(false);
@@ -414,6 +428,11 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
       to: fxTo.trim() || undefined,
     });
     setFxIngestResult(payload as unknown as FxIngestResult);
+  }
+
+  async function runPortfolioHistoryRebuild() {
+    const payload = await postJson("Rebuild Portfolio History", "/api/portfolio/history/build", {});
+    setHistoryRebuildResult(payload as unknown as PortfolioHistoryRebuildResult);
   }
 
   function startScreeningAttempt(offset: number, batchSize: number) {
@@ -1325,6 +1344,24 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <strong>Table:</strong> {String(fxIngestResult.table ?? "—")}<br />
             {fxIngestResult.error ? <><strong>Error:</strong> {fxIngestResult.error}<br /></> : null}
             <strong>Hint:</strong> {String(fxIngestResult.next_step ?? "Next step: rebuild portfolio history.")}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          <button type="button" onClick={() => void runPortfolioHistoryRebuild()} disabled={!secretReady || loadingKey !== null}>
+            {loadingKey === "Rebuild Portfolio History" ? "Rebuilding history..." : "Rebuild portfolio history"}
+          </button>
+        </div>
+        {historyRebuildResult && (
+          <div className="bread" style={{ marginTop: 8 }}>
+            <strong>Rebuild status:</strong> {historyRebuildResult.ok ? "success" : "failed"}<br />
+            <strong>Portfolios processed:</strong> {Number(historyRebuildResult.portfolios_processed ?? 0)}<br />
+            <strong>History rows written:</strong> {Number(historyRebuildResult.history_rows_written ?? 0)}<br />
+            <strong>Total rows written:</strong> {Number(historyRebuildResult.total_rows_written ?? 0)}<br />
+            <strong>Date range:</strong> {String(historyRebuildResult.earliest_date ?? "—")} → {String(historyRebuildResult.latest_date ?? "—")}<br />
+            <strong>Last history build:</strong> {String(historyRebuildResult.last_history_build ?? "—")}<br />
+            <strong>Cron behavior:</strong> Manual action required (cron does not invoke this rebuild route automatically).<br />
+            {historyRebuildResult.error ? <><strong>Error:</strong> {historyRebuildResult.error}<br /></> : null}
+            <strong>Verification:</strong> Check <code>/api/portfolio/history/latest?debug=1</code> and <code>/api/portfolio/history/trace?portfolio_id=portf2</code>.
           </div>
         )}
       </details>

@@ -1,4 +1,5 @@
-import { ensureSchema } from "../../../../../api/_migrate.js";
+import { query } from "../../../../../api/_db.js";
+import { ensureSchema, tables } from "../../../../../api/_migrate.js";
 import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
 
 export default async function handler(req: any, res: any) {
@@ -11,9 +12,47 @@ export default async function handler(req: any, res: any) {
     await ensureSchema();
     const result = await buildPortfolioHistory();
     const debug = String(req.query?.debug ?? "") === "1";
+    const [historyStatsRows, totalStatsRows, lastBuildRows] = await Promise.all([
+      query(
+        `SELECT COUNT(*) AS rows_written,
+                MIN(as_of_date) AS earliest_date,
+                MAX(as_of_date) AS latest_date
+         FROM ${tables.portfolioHistoryDaily}`
+      ),
+      query(
+        `SELECT COUNT(*) AS rows_written,
+                MIN(as_of_date) AS earliest_date,
+                MAX(as_of_date) AS latest_date
+         FROM ${tables.totalPortfolioHistoryDaily}`
+      ),
+      query(
+        `SELECT last_success_at
+         FROM ${tables.portfolioBuildMeta}
+         WHERE pipeline_name = 'history'
+         LIMIT 1`
+      ),
+    ]);
+    const historyStats = historyStatsRows[0] as any;
+    const totalStats = totalStatsRows[0] as any;
+    const lastHistoryBuild = String(lastBuildRows[0]?.last_success_at ?? "").trim() || null;
+    const earliestDate = [String(historyStats?.earliest_date ?? "").trim(), String(totalStats?.earliest_date ?? "").trim()]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))[0] ?? null;
+    const latestDate = [String(historyStats?.latest_date ?? "").trim(), String(totalStats?.latest_date ?? "").trim()]
+      .filter(Boolean)
+      .sort((a, b) => b.localeCompare(a))[0] ?? null;
 
     res.status(200).json({
       ok: true,
+      status: "success",
+      route: "/api/portfolio/history/build",
+      portfolios_processed: result.portfolios.length,
+      history_rows_written: Number(historyStats?.rows_written ?? 0),
+      total_rows_written: Number(totalStats?.rows_written ?? 0),
+      earliest_date: earliestDate,
+      latest_date: latestDate,
+      last_history_build: lastHistoryBuild,
+      warnings: [],
       portfolios: result.portfolios.map((row) => ({
         portfolio_id: row.portfolio_id,
         available_days: row.available_days,
@@ -31,6 +70,10 @@ export default async function handler(req: any, res: any) {
         data_quality: row.data_quality,
       })),
       total: result.total,
+      notes: {
+        manual_rebuild_executed: true,
+        cron_invokes_history_build: false,
+      },
       ...(debug ? { diagnostics: result } : {}),
     });
   } catch (error) {
