@@ -1,6 +1,18 @@
 import { query } from "../../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../../api/_migrate.js";
+import { listPortfolioConfigs } from "../../../../lib/portfolio-admin/repository.js";
 import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
+
+function maskDatabaseUrl(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname || "unknown";
+    return `${url.protocol}//***@${host}${url.pathname}`;
+  } catch {
+    return "***";
+  }
+}
 
 export default async function handler(req: any, res: any) {
   try {
@@ -10,6 +22,8 @@ export default async function handler(req: any, res: any) {
     }
 
     await ensureSchema();
+    const portfoliosBeforeFilter = await listPortfolioConfigs();
+    const portfoliosAfterFilter = portfoliosBeforeFilter;
     const result = await buildPortfolioHistory();
     const debug = String(req.query?.debug ?? "") === "1";
     const [historyStatsRows, totalStatsRows, lastBuildRows] = await Promise.all([
@@ -35,6 +49,10 @@ export default async function handler(req: any, res: any) {
     const historyStats = historyStatsRows[0] as any;
     const totalStats = totalStatsRows[0] as any;
     const lastHistoryBuild = String(lastBuildRows[0]?.last_success_at ?? "").trim() || null;
+    const warnings: string[] = [];
+    if (portfoliosAfterFilter.length > 0 && result.portfolios.length === 0) {
+      warnings.push("portfolio_processing_mismatch: portfolio_admin_config has rows but build returned 0 processed portfolios");
+    }
     const earliestDate = [String(historyStats?.earliest_date ?? "").trim(), String(totalStats?.earliest_date ?? "").trim()]
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b))[0] ?? null;
@@ -47,12 +65,17 @@ export default async function handler(req: any, res: any) {
       status: "success",
       route: "/api/portfolio/history/build",
       portfolios_processed: result.portfolios.length,
+      portfolios_found_before_filter: portfoliosBeforeFilter.length,
+      portfolios_after_filter: portfoliosAfterFilter.length,
+      source_table_used: tables.portfolioAdminConfig,
+      database_url: maskDatabaseUrl(process.env.TURSO_DATABASE_URL),
+      filters_applied: ["none (all rows from portfolio_admin_config, ordered by sort_order)"],
       history_rows_written: Number(historyStats?.rows_written ?? 0),
       total_rows_written: Number(totalStats?.rows_written ?? 0),
       earliest_date: earliestDate,
       latest_date: latestDate,
       last_history_build: lastHistoryBuild,
-      warnings: [],
+      warnings,
       portfolios: result.portfolios.map((row) => ({
         portfolio_id: row.portfolio_id,
         available_days: row.available_days,

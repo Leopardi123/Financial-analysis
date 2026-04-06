@@ -219,6 +219,11 @@ type FxIngestResult = {
 type PortfolioHistoryRebuildResult = {
   ok?: boolean;
   status?: string;
+  portfolios_found_before_filter?: number;
+  portfolios_after_filter?: number;
+  source_table_used?: string;
+  database_url?: string | null;
+  filters_applied?: string[];
   portfolios_processed?: number;
   history_rows_written?: number;
   total_rows_written?: number;
@@ -1354,11 +1359,15 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
         {historyRebuildResult && (
           <div className="bread" style={{ marginTop: 8 }}>
             <strong>Rebuild status:</strong> {historyRebuildResult.ok ? "success" : "failed"}<br />
+            <strong>Portfolios found before filter:</strong> {Number(historyRebuildResult.portfolios_found_before_filter ?? 0)}<br />
+            <strong>Portfolios after filter:</strong> {Number(historyRebuildResult.portfolios_after_filter ?? 0)}<br />
             <strong>Portfolios processed:</strong> {Number(historyRebuildResult.portfolios_processed ?? 0)}<br />
             <strong>History rows written:</strong> {Number(historyRebuildResult.history_rows_written ?? 0)}<br />
             <strong>Total rows written:</strong> {Number(historyRebuildResult.total_rows_written ?? 0)}<br />
             <strong>Date range:</strong> {String(historyRebuildResult.earliest_date ?? "—")} → {String(historyRebuildResult.latest_date ?? "—")}<br />
             <strong>Last history build:</strong> {String(historyRebuildResult.last_history_build ?? "—")}<br />
+            <strong>Source table:</strong> {String(historyRebuildResult.source_table_used ?? "—")}<br />
+            <strong>DB (masked):</strong> {String(historyRebuildResult.database_url ?? "—")}<br />
             <strong>Cron behavior:</strong> Manual action required (cron does not invoke this rebuild route automatically).<br />
             {historyRebuildResult.error ? <><strong>Error:</strong> {historyRebuildResult.error}<br /></> : null}
             <strong>Verification:</strong> Check <code>/api/portfolio/history/latest?debug=1</code> and <code>/api/portfolio/history/trace?portfolio_id=portf2</code>.
