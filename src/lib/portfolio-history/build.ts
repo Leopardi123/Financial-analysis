@@ -127,6 +127,75 @@ function isValidDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
+export async function loadPortfolioConfigsForHistoryBuild(): Promise<{
+  portfolios: PortfolioAdminConfig[];
+  source_table_used: string;
+  filters_applied: string[];
+}> {
+  const adminConfigs = await listPortfolioConfigs();
+  if (adminConfigs.length > 0) {
+    return {
+      portfolios: adminConfigs,
+      source_table_used: tables.portfolioAdminConfig,
+      filters_applied: ["none (all rows from portfolio_admin_config, ordered by sort_order)"],
+    };
+  }
+
+  const fallbackRows = await query(
+    `SELECT portfolio_id FROM (
+      SELECT DISTINCT portfolio_id FROM ${tables.portfolioSnapshots}
+      UNION
+      SELECT DISTINCT portfolio_id FROM ${tables.portfolioPositions}
+      UNION
+      SELECT DISTINCT portfolio_id FROM ${tables.portfolioHistoryDaily}
+    ) ids
+    WHERE portfolio_id IS NOT NULL AND TRIM(portfolio_id) <> ''
+    ORDER BY portfolio_id ASC`
+  ) as Array<{ portfolio_id?: unknown }>;
+
+  const fallbackPortfolios: PortfolioAdminConfig[] = fallbackRows
+    .map((row) => String(row.portfolio_id ?? "").trim())
+    .filter(Boolean)
+    .map((portfolioId, index) => ({
+      portfolio_id: portfolioId,
+      portfolio_name: portfolioId,
+      portfolio_type: "opportunistic",
+      active: true,
+      visible_in_overview: true,
+      included_in_total_portfolio: true,
+      sort_order: index + 1,
+      target_weight_pct: 0,
+      min_weight_pct: 0,
+      max_weight_pct: 100,
+      strategic_risk_level: "medium",
+      hedging_allowed: true,
+      max_hedge_pct: null,
+      rebalance_mode: "standard",
+      role_description: "Derived fallback portfolio configuration for history rebuild.",
+      long_term_purpose: null,
+      notes: "Generated fallback config because portfolio_admin_config was empty.",
+      allowed_hedge_types_json: "[]",
+      hedge_purpose_json: "[]",
+      created_at: new Date(0).toISOString(),
+      updated_at: new Date(0).toISOString(),
+      rebalance_priority: null,
+      max_single_position_pct: null,
+      max_sector_concentration_pct: null,
+      max_commodity_concentration_pct: null,
+      max_junior_exposure_pct: null,
+      max_illiquid_exposure_pct: null,
+      analyst_override_allowed: null,
+      analyst_override_note: null,
+      override_expiry_date: null,
+    }));
+
+  return {
+    portfolios: fallbackPortfolios,
+    source_table_used: "portfolio_admin_config_fallback(portfolio_snapshots|portfolio_positions|portfolio_history_daily)",
+    filters_applied: ["fallback enabled when portfolio_admin_config has 0 rows"],
+  };
+}
+
 async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: string): Promise<{
   rows: Point[];
   position_diagnostics: PositionCoverageDiagnostic[];
@@ -615,7 +684,7 @@ function applyRelativeStrength(
 }
 
 export async function buildPortfolioHistory() {
-  const portfolios = await listPortfolioConfigs();
+  const { portfolios } = await loadPortfolioConfigsForHistoryBuild();
   const byPortfolioSeries = new Map<string, Point[]>();
   const sourceByPortfolio = new Map<string, HistorySource>();
   const coverageByPortfolio = new Map<string, PortfolioCoverageDiagnostic | null>();

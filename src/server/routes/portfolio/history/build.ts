@@ -1,7 +1,6 @@
 import { query } from "../../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../../api/_migrate.js";
-import { listPortfolioConfigs } from "../../../../lib/portfolio-admin/repository.js";
-import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
+import { buildPortfolioHistory, loadPortfolioConfigsForHistoryBuild } from "../../../../lib/portfolio-history/build.js";
 
 function maskDatabaseUrl(raw: string | undefined): string | null {
   if (!raw) return null;
@@ -14,6 +13,13 @@ function maskDatabaseUrl(raw: string | undefined): string | null {
   }
 }
 
+function detectRuntimeEnvironment(): string {
+  const vercelEnv = String(process.env.VERCEL_ENV ?? "").trim();
+  if (vercelEnv) return `vercel:${vercelEnv}`;
+  const nodeEnv = String(process.env.NODE_ENV ?? "").trim();
+  return nodeEnv ? `node:${nodeEnv}` : "unknown";
+}
+
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") {
@@ -22,8 +28,9 @@ export default async function handler(req: any, res: any) {
     }
 
     await ensureSchema();
-    const portfoliosBeforeFilter = await listPortfolioConfigs();
-    const portfoliosAfterFilter = portfoliosBeforeFilter;
+    const portfolioSource = await loadPortfolioConfigsForHistoryBuild();
+    const portfoliosBeforeFilter = portfolioSource.portfolios;
+    const portfoliosAfterFilter = portfolioSource.portfolios;
     const result = await buildPortfolioHistory();
     const debug = String(req.query?.debug ?? "") === "1";
     const [historyStatsRows, totalStatsRows, lastBuildRows] = await Promise.all([
@@ -67,9 +74,11 @@ export default async function handler(req: any, res: any) {
       portfolios_processed: result.portfolios.length,
       portfolios_found_before_filter: portfoliosBeforeFilter.length,
       portfolios_after_filter: portfoliosAfterFilter.length,
-      source_table_used: tables.portfolioAdminConfig,
+      source_table_used: portfolioSource.source_table_used,
+      query_used: `SELECT * FROM ${portfolioSource.source_table_used}`,
       database_url: maskDatabaseUrl(process.env.TURSO_DATABASE_URL),
-      filters_applied: ["none (all rows from portfolio_admin_config, ordered by sort_order)"],
+      runtime_environment: detectRuntimeEnvironment(),
+      filters_applied: portfolioSource.filters_applied,
       history_rows_written: Number(historyStats?.rows_written ?? 0),
       total_rows_written: Number(totalStats?.rows_written ?? 0),
       earliest_date: earliestDate,
