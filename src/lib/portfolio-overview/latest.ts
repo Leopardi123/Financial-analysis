@@ -6,6 +6,8 @@ import { getLatestPortfolioRisk } from "../portfolio-risk/build.js";
 import { getLatestPortfolioHedgeAndDryPowder } from "../portfolio-hedge/build.js";
 import { computeTrendMetricsFromSeries } from "../portfolio-history/metrics.js";
 
+const REBUILT_HISTORY_SOURCES = new Set(["positions_price_history", "positions_snapshots", "snapshots", "unavailable"]);
+
 export type PortfolioOverviewTraceRow = {
   stage: string;
   ok: boolean;
@@ -102,6 +104,10 @@ function dateToUtcMs(date: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const ms = Date.parse(`${date}T00:00:00.000Z`);
   return Number.isFinite(ms) ? ms : null;
+}
+
+function isValidDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
 function computeAllocationPlanStatus(rows: any[]): "within_allocation_plan" | "outside_allocation_plan" | "materially_outside_allocation_plan" {
@@ -210,21 +216,32 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
 
   const historyTrendRows = asOfDate
     ? await runStage("history_trend_loaded", async () => query(
-      `SELECT portfolio_id, as_of_date, market_value
+      `SELECT portfolio_id, as_of_date, market_value, data_source
        FROM ${tables.portfolioHistoryDaily}
        WHERE market_value IS NOT NULL
        ORDER BY portfolio_id ASC, as_of_date ASC`
     ))
     : [];
-  const seriesByPortfolio = new Map<string, Array<{ as_of_date: string; market_value: number }>>();
+  const seriesByPortfolioRaw = new Map<string, Array<{ as_of_date: string; market_value: number; data_source: string | null }>>();
   for (const row of historyTrendRows as any[]) {
     const portfolioId = String(row.portfolio_id ?? "");
     const marketValue = Number(row.market_value ?? NaN);
-    const asOfDate = String(row.as_of_date ?? "");
-    if (!portfolioId || !Number.isFinite(marketValue) || marketValue <= 0 || !asOfDate) continue;
-    const bucket = seriesByPortfolio.get(portfolioId) ?? [];
-    bucket.push({ as_of_date: asOfDate, market_value: marketValue });
-    seriesByPortfolio.set(portfolioId, bucket);
+    const asOfDate = String(row.as_of_date ?? "").trim();
+    const dataSource = String(row.data_source ?? "").trim() || null;
+    if (!portfolioId || !Number.isFinite(marketValue) || marketValue <= 0 || !isValidDate(asOfDate)) continue;
+    const bucket = seriesByPortfolioRaw.get(portfolioId) ?? [];
+    bucket.push({ as_of_date: asOfDate, market_value: marketValue, data_source: dataSource });
+    seriesByPortfolioRaw.set(portfolioId, bucket);
+  }
+  for (const rows of seriesByPortfolioRaw.values()) {
+    rows.sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+  }
+  const seriesByPortfolio = new Map<string, Array<{ as_of_date: string; market_value: number }>>();
+  for (const [portfolioId, rows] of seriesByPortfolioRaw.entries()) {
+    const rebuiltRows = rows.filter((row) => row.data_source !== null && REBUILT_HISTORY_SOURCES.has(row.data_source));
+    const legacyRows = rows.filter((row) => !(row.data_source !== null && REBUILT_HISTORY_SOURCES.has(row.data_source)));
+    const selectedRows = rebuiltRows.length > 0 ? rebuiltRows : legacyRows;
+    seriesByPortfolio.set(portfolioId, selectedRows.map((row) => ({ as_of_date: row.as_of_date, market_value: row.market_value })));
   }
   const historyTrendByPortfolioId = new Map<string, { metrics: ReturnType<typeof normalizeTrendFields> & { signal_completeness: string | null }; trend_debug: any }>();
   for (const [portfolioId, series] of seriesByPortfolio.entries()) {
@@ -288,13 +305,13 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const includedConfigIds = adminConfigs
     .filter((row) => row.active && row.included_in_total_portfolio)
     .map((row) => row.portfolio_id);
-  const includedHistoryRows = (historyTrendRows as any[])
-    .map((row) => ({
-      portfolio_id: String(row.portfolio_id ?? ""),
-      as_of_date: String(row.as_of_date ?? ""),
-      market_value: Number(row.market_value ?? NaN),
+  const includedHistoryRows = includedConfigIds.flatMap((portfolioId) =>
+    (seriesByPortfolio.get(portfolioId) ?? []).map((row) => ({
+      portfolio_id: portfolioId,
+      as_of_date: row.as_of_date,
+      market_value: row.market_value,
     }))
-    .filter((row) => includedConfigIds.includes(row.portfolio_id) && row.as_of_date && Number.isFinite(row.market_value) && row.market_value > 0);
+  );
   const newestIncludedDateMs = includedHistoryRows
     .map((row) => dateToUtcMs(row.as_of_date))
     .filter((value): value is number => value !== null)
