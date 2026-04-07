@@ -258,6 +258,7 @@ export default async function handler(req: any, res: any) {
       const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
       const firstPriceDate = series[0]?.price_date ?? null;
       const lastPriceDate = series[series.length - 1]?.price_date ?? null;
+      const effectiveExitedAt = position.active_position ? null : position.exited_at;
       return {
         position_id: position.id,
         raw_symbol: position.symbol,
@@ -268,7 +269,7 @@ export default async function handler(req: any, res: any) {
         row_count: series.length,
         has_screen_snapshot: snapshotSymbolSet.has(historySymbol) || snapshotSymbolSet.has(position.symbol),
         effective_start_date_used: position.entry_date ?? firstPriceDate,
-        effective_end_date_used: position.exited_at ?? lastPriceDate,
+        effective_end_date_used: effectiveExitedAt ?? lastPriceDate,
       };
     });
 
@@ -276,9 +277,10 @@ export default async function handler(req: any, res: any) {
     for (const position of activePositions) {
       const historySymbol = position.resolved_symbol ?? position.symbol;
       const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
+      const effectiveExitedAt = position.active_position ? null : position.exited_at;
       for (const point of series) {
         if (position.entry_date && point.price_date < position.entry_date) continue;
-        if (position.exited_at && point.price_date > position.exited_at) continue;
+        if (effectiveExitedAt && point.price_date > effectiveExitedAt) continue;
         tradingDateSet.add(point.price_date);
       }
     }
@@ -338,6 +340,7 @@ export default async function handler(req: any, res: any) {
       for (const position of activePositions) {
         const historySymbol = position.resolved_symbol ?? position.symbol;
         const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
+        const effectiveExitedAt = position.active_position ? null : position.exited_at;
         const exact = series.find((row) => row.price_date === date) ?? null;
 
         if (position.entry_date && date < position.entry_date) {
@@ -361,7 +364,7 @@ export default async function handler(req: any, res: any) {
           });
           continue;
         }
-        if (position.exited_at && date > position.exited_at) {
+        if (effectiveExitedAt && date > effectiveExitedAt) {
           dayPositions.push({
             position_id: position.id,
             symbol: position.symbol,
@@ -519,6 +522,59 @@ export default async function handler(req: any, res: any) {
     const metricByDate = new Map(metricSeries.map((row) => [row.as_of_date, row.market_value]));
     const latestDate = trend.last_history_date;
     const latestValue = trend.latest_value;
+    const latestPortfolioDateCandidate = tracedDates[tracedDates.length - 1] ?? null;
+    const dailyByDate = new Map(dailySeries.map((row) => [row.date, row]));
+    const latestRow = latestDate ? dailyByDate.get(latestDate) ?? null : null;
+    const candidateRow = latestPortfolioDateCandidate ? dailyByDate.get(latestPortfolioDateCandidate) ?? null : null;
+    const referenceDate = "2026-04-02";
+    const referenceRow = dailyByDate.get(referenceDate) ?? null;
+
+    const perPositionCutoffDiagnostics = activePositions.map((position) => {
+      const historySymbol = position.resolved_symbol ?? position.symbol;
+      const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
+      const latestSeriesPoint = series[series.length - 1] ?? null;
+      const nativeCurrencyResolution = resolveNativeCurrency({
+        positionCurrency: position.currency,
+        priceCurrency: latestSeriesPoint?.currency ?? null,
+        historySymbol,
+        rawSymbol: position.symbol,
+        companyExchangeBySymbol,
+      });
+      const nativeCurrency = nativeCurrencyResolution.currency;
+      const fxCoverageDates = nativeCurrency && nativeCurrency !== "SEK"
+        ? series
+          .map((point) => point.price_date)
+          .filter((date) => {
+            const fx = resolveFxToSek(date, nativeCurrency);
+            return Number.isFinite(fx.fx_to_sek) && (fx.fx_to_sek ?? 0) > 0;
+          })
+        : [];
+      const includedDates = dailySeries
+        .filter((row) => row.positions.some((p) => p.position_id === position.id && p.included))
+        .map((row) => row.date);
+      const droppedAfterDate = includedDates.length > 0
+        ? (includedDates[includedDates.length - 1] ?? null)
+        : null;
+      const latestExclusion = latestPortfolioDateCandidate
+        ? candidateRow?.positions.find((p) => p.position_id === position.id && !p.included)?.exclusion_reason ?? null
+        : null;
+
+      return {
+        position_id: position.id,
+        raw_symbol: position.symbol,
+        resolved_symbol: position.resolved_symbol,
+        native_currency: nativeCurrency,
+        first_date_with_price: series[0]?.price_date ?? null,
+        last_date_with_price: series[series.length - 1]?.price_date ?? null,
+        first_date_with_fx_if_needed: fxCoverageDates[0] ?? (nativeCurrency === "SEK" ? series[0]?.price_date ?? null : null),
+        last_date_with_fx_if_needed: fxCoverageDates[fxCoverageDates.length - 1] ?? (nativeCurrency === "SEK" ? series[series.length - 1]?.price_date ?? null : null),
+        included_on_latest_portfolio_date: latestDate
+          ? Boolean(latestRow?.positions.find((p) => p.position_id === position.id)?.included)
+          : false,
+        dropped_after_date: droppedAfterDate,
+        latest_exclusion_reason: latestExclusion,
+      };
+    });
 
     const windows = [20, 65, 200].map((lookbackDays) => {
       const key = `${lookbackDays}d` as "20d" | "65d" | "200d";
@@ -589,6 +645,7 @@ export default async function handler(req: any, res: any) {
         currency: row.currency,
         company_exchange: companyExchangeBySymbol.get(row.resolved_symbol ?? row.symbol) ?? companyExchangeBySymbol.get(row.symbol) ?? null,
       })),
+      position_cutoff_diagnostics: perPositionCutoffDiagnostics,
       history_coverage: historyCoverage,
       daily_portfolio_series: dailySeries,
       return_windows: windows,
@@ -608,6 +665,23 @@ export default async function handler(req: any, res: any) {
         source_mode: "direct_compute",
         db_write_attempted: false,
         materialization_triggered: false,
+        latest_portfolio_date_candidate: latestPortfolioDateCandidate,
+        final_latest_date_used: latestDate,
+        final_latest_date_reason: latestDate === latestPortfolioDateCandidate
+          ? "latest_trading_date_has_contributors"
+          : "latest_trading_date_has_no_contributors_or_no_valid_valuations",
+        contributing_positions_on_final_latest_date: latestRow?.contributing_positions_count ?? 0,
+        contributing_positions_on_2026_04_02: referenceRow?.contributing_positions_count ?? 0,
+        missing_symbols_or_fx_on_2026_04_02: (referenceRow?.positions ?? [])
+          .filter((row) => row.included === false && ["no_price_for_date", "unresolved_symbol", "unresolved_native_currency", "no_fx_rate"].includes(String(row.exclusion_reason ?? "")))
+          .map((row) => ({
+            position_id: row.position_id,
+            symbol: row.symbol,
+            resolved_symbol: row.resolved_symbol,
+            exclusion_reason: row.exclusion_reason,
+            native_currency: row.native_currency,
+            fx_source: row.fx_source,
+          })),
         trace_date_count: dailySeries.length,
         total_metric_points_used_for_returns: metricSeries.length,
       },

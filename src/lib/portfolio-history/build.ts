@@ -266,11 +266,11 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
   contribution_debug_by_date: Record<string, PositionContributionDebug[]>;
 }> {
   const positionsRows = await query(
-    `SELECT id, symbol, resolved_symbol, shares, entry_date, exited_at, currency
+    `SELECT id, symbol, resolved_symbol, shares, entry_date, exited_at, active_position, currency
      FROM ${tables.portfolioPositions}
      WHERE portfolio_id = ? AND COALESCE(shares, 0) > 0 AND symbol IS NOT NULL AND TRIM(symbol) <> ''`,
     [portfolioId]
-  ) as Array<{ symbol?: unknown; resolved_symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown; currency?: unknown }>;
+  ) as Array<{ symbol?: unknown; resolved_symbol?: unknown; shares?: unknown; entry_date?: unknown; exited_at?: unknown; active_position?: unknown; currency?: unknown }>;
 
   const positions = positionsRows
     .map((row) => ({
@@ -279,6 +279,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
       shares: Number(row.shares ?? NaN),
       entry_date: isValidDate(row.entry_date) ? row.entry_date.trim() : null,
       exited_at: isValidDate(row.exited_at) ? row.exited_at.trim() : null,
+      active_position: Number(row.active_position ?? 0) === 1,
       currency: typeof row.currency === "string" ? row.currency.trim().toUpperCase() : null,
     }))
     .filter((row) => row.symbol && Number.isFinite(row.shares) && row.shares > 0);
@@ -449,8 +450,9 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
     const series = bySymbol.get(historySymbolUsed) ?? bySymbol.get(position.symbol) ?? [];
     const hasHistory = series.length > 0;
     const firstSeriesDate = hasHistory ? series[0]?.price_date ?? null : null;
+    const effectiveExitedAt = position.active_position ? null : position.exited_at;
     const effectiveStartDate = position.entry_date ?? firstSeriesDate;
-    const effectiveEndDate = position.exited_at ?? (hasHistory ? series[series.length - 1]?.price_date ?? null : null);
+    const effectiveEndDate = effectiveExitedAt ?? (hasHistory ? series[series.length - 1]?.price_date ?? null : null);
     const excludedPreEntryDays = position.entry_date
       ? series.filter((point) => {
         const entryDate = position.entry_date as string;
@@ -496,7 +498,7 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
 
     for (const point of series) {
       if (position.entry_date && point.price_date < position.entry_date) continue;
-      if (position.exited_at && point.price_date > position.exited_at) continue;
+      if (effectiveExitedAt && point.price_date > effectiveExitedAt) continue;
 
       const nativeCurrencyResolution = resolveNativeCurrency({
         positionCurrency: position.currency,
