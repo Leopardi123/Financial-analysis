@@ -15,6 +15,13 @@ function dateToUtcMs(date: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function compareDatesAsc(a: string | null, b: string | null): number {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  return a.localeCompare(b);
+}
+
 function buildUnavailableTrendDebugFromMetrics(metrics: {
   available_days: number;
   return_20d: number | null;
@@ -137,8 +144,10 @@ export default async function handler(req: any, res: any) {
       stale_row_conflict_detected: boolean;
       stale_row_conflict_reason: string | null;
       value_origin: "rebuilt" | "legacy" | "none";
+      cohort_choice_rule: "prefer_newest_cohort" | "single_cohort_only" | "none";
       rebuilt_row_count: number;
       legacy_row_count: number;
+      current_row_count: number;
       total_row_count: number;
     }>();
 
@@ -146,24 +155,34 @@ export default async function handler(req: any, res: any) {
       const rows = byPortfolioRaw.get(portfolioId) ?? [];
       const rebuiltRows = rows.filter((row) => row.data_source !== null && REBUILT_HISTORY_SOURCES.has(row.data_source));
       const legacyRows = rows.filter((row) => !(row.data_source !== null && REBUILT_HISTORY_SOURCES.has(row.data_source)));
-      const selectedRows = rebuiltRows.length > 0 ? rebuiltRows : legacyRows;
-      const selectedLatest = selectedRows[selectedRows.length - 1] ?? null;
       const rebuiltLatest = rebuiltRows[rebuiltRows.length - 1] ?? null;
       const legacyLatest = legacyRows[legacyRows.length - 1] ?? null;
-      const staleConflict = Boolean(
-        rebuiltLatest
-        && legacyLatest
-        && legacyLatest.as_of_date < rebuiltLatest.as_of_date
-      );
+      const selectedRows = (() => {
+        if (rebuiltRows.length === 0 && legacyRows.length === 0) return [] as typeof rows;
+        if (rebuiltRows.length === 0) return legacyRows;
+        if (legacyRows.length === 0) return rebuiltRows;
+        return compareDatesAsc(rebuiltLatest?.as_of_date ?? null, legacyLatest?.as_of_date ?? null) >= 0
+          ? rebuiltRows
+          : legacyRows;
+      })();
+      const selectedLatest = selectedRows[selectedRows.length - 1] ?? null;
+      const staleConflict = Boolean(rebuiltLatest && legacyLatest && rebuiltLatest.as_of_date !== legacyLatest.as_of_date);
+      const staleReason = !staleConflict
+        ? null
+        : compareDatesAsc(rebuiltLatest?.as_of_date ?? null, legacyLatest?.as_of_date ?? null) > 0
+          ? "legacy_rows_older_than_rebuilt_rows_coexist"
+          : "legacy_rows_newer_than_rebuilt_rows_coexist";
+      const selectedFromRebuilt = selectedRows === rebuiltRows && selectedRows.length > 0;
+      const currentRows = selectedRows;
 
       effectiveSeriesByPortfolio.set(
         portfolioId,
-        selectedRows.map((row) => ({ as_of_date: row.as_of_date, market_value: row.market_value })),
+        currentRows.map((row) => ({ as_of_date: row.as_of_date, market_value: row.market_value })),
       );
       historyDiagnosticsByPortfolio.set(portfolioId, {
-        source_path_used: selectedRows.length === 0
+        source_path_used: currentRows.length === 0
           ? "none"
-          : rebuiltRows.length > 0
+          : selectedFromRebuilt
             ? "rebuilt_portfolio_history_daily"
             : "legacy_portfolio_history_daily",
         selected_latest_row_date: selectedLatest?.as_of_date ?? null,
@@ -171,10 +190,14 @@ export default async function handler(req: any, res: any) {
         rebuilt_latest_row_date: rebuiltLatest?.as_of_date ?? null,
         legacy_latest_row_date: legacyLatest?.as_of_date ?? null,
         stale_row_conflict_detected: staleConflict,
-        stale_row_conflict_reason: staleConflict ? "legacy_rows_older_than_rebuilt_rows_coexist" : null,
-        value_origin: selectedRows.length === 0 ? "none" : (rebuiltRows.length > 0 ? "rebuilt" : "legacy"),
+        stale_row_conflict_reason: staleReason,
+        value_origin: currentRows.length === 0 ? "none" : (selectedFromRebuilt ? "rebuilt" : "legacy"),
+        cohort_choice_rule: currentRows.length === 0
+          ? "none"
+          : (rebuiltRows.length > 0 && legacyRows.length > 0 ? "prefer_newest_cohort" : "single_cohort_only"),
         rebuilt_row_count: rebuiltRows.length,
         legacy_row_count: legacyRows.length,
+        current_row_count: currentRows.length,
         total_row_count: rows.length,
       });
     }
@@ -224,6 +247,8 @@ export default async function handler(req: any, res: any) {
         legacy_latest_row_date: historyDiagnostics?.legacy_latest_row_date ?? null,
         rebuilt_row_count: historyDiagnostics?.rebuilt_row_count ?? 0,
         legacy_row_count: historyDiagnostics?.legacy_row_count ?? 0,
+        current_row_count: historyDiagnostics?.current_row_count ?? 0,
+        cohort_choice_rule: historyDiagnostics?.cohort_choice_rule ?? "none",
       };
     });
 
@@ -364,6 +389,8 @@ export default async function handler(req: any, res: any) {
                 stale_row_conflict_reason: row.stale_row_conflict_reason ?? null,
                 rebuilt_row_count: Number(row.rebuilt_row_count ?? 0),
                 legacy_row_count: Number(row.legacy_row_count ?? 0),
+                current_row_count: Number(row.current_row_count ?? 0),
+                cohort_choice_rule: row.cohort_choice_rule ?? "none",
                 ...(trendDebug ?? buildUnavailableTrendDebugFromMetrics({
                   available_days: Number(row.available_days ?? 0),
                   return_20d: row.return_20d == null ? null : Number(row.return_20d),
@@ -409,6 +436,7 @@ export default async function handler(req: any, res: any) {
               };
             }),
             total: {
+              source_table_used: tables.portfolioHistoryDaily,
               included_portfolios: null,
               history_days_available: Number((await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`))[0]?.count ?? 0),
               aggregation_source: "portfolio_history_daily_aligned_read",

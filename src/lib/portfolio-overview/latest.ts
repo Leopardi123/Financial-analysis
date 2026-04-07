@@ -106,6 +106,13 @@ function dateToUtcMs(date: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function compareDatesAsc(a: string | null, b: string | null): number {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  return a.localeCompare(b);
+}
+
 function isValidDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
@@ -240,7 +247,16 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   for (const [portfolioId, rows] of seriesByPortfolioRaw.entries()) {
     const rebuiltRows = rows.filter((row) => row.data_source !== null && REBUILT_HISTORY_SOURCES.has(row.data_source));
     const legacyRows = rows.filter((row) => !(row.data_source !== null && REBUILT_HISTORY_SOURCES.has(row.data_source)));
-    const selectedRows = rebuiltRows.length > 0 ? rebuiltRows : legacyRows;
+    const rebuiltLatest = rebuiltRows[rebuiltRows.length - 1] ?? null;
+    const legacyLatest = legacyRows[legacyRows.length - 1] ?? null;
+    const selectedRows = (() => {
+      if (rebuiltRows.length === 0 && legacyRows.length === 0) return [] as typeof rows;
+      if (rebuiltRows.length === 0) return legacyRows;
+      if (legacyRows.length === 0) return rebuiltRows;
+      return compareDatesAsc(rebuiltLatest?.as_of_date ?? null, legacyLatest?.as_of_date ?? null) >= 0
+        ? rebuiltRows
+        : legacyRows;
+    })();
     seriesByPortfolio.set(portfolioId, selectedRows.map((row) => ({ as_of_date: row.as_of_date, market_value: row.market_value })));
   }
   const historyTrendByPortfolioId = new Map<string, { metrics: ReturnType<typeof normalizeTrendFields> & { signal_completeness: string | null }; trend_debug: any }>();
