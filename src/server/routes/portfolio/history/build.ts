@@ -3,17 +3,29 @@ import { ensureSchema, tables } from "../../../../../api/_migrate.js";
 import { buildPortfolioHistory, loadPortfolioConfigsForHistoryBuild } from "../../../../lib/portfolio-history/build.js";
 
 export default async function handler(req: any, res: any) {
+  let stage:
+    | "start_stage"
+    | "schema_stage"
+    | "load_config_stage"
+    | "write_stage"
+    | "completion_stage"
+    | "timeout_stage"
+    | "error_stage" = "start_stage";
   try {
     if (req.method !== "POST") {
       res.status(405).json({ ok: false, error: "Method not allowed" });
       return;
     }
 
+    stage = "schema_stage";
     await ensureSchema();
+    stage = "load_config_stage";
     const portfolioSource = await loadPortfolioConfigsForHistoryBuild();
     const portfoliosBeforeFilter = portfolioSource.portfolios;
     const portfoliosAfterFilter = portfolioSource.portfolios;
+    stage = "write_stage";
     const result = await buildPortfolioHistory();
+    stage = "completion_stage";
     const debug = String(req.query?.debug ?? "") === "1";
     const [historyStatsRows, totalStatsRows, lastBuildRows] = await Promise.all([
       query(
@@ -88,9 +100,33 @@ export default async function handler(req: any, res: any) {
         manual_rebuild_executed: true,
         cron_invokes_history_build: false,
       },
-      ...(debug ? { diagnostics: result } : {}),
+      ...(debug
+        ? {
+          diagnostics: {
+            ...result,
+            route_debug: {
+              start_stage: "start_stage",
+              write_stage: "write_stage",
+              completion_stage: "completion_stage",
+              current_stage: stage,
+              timeout_stage: null,
+            },
+          },
+        }
+        : {}),
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: (error as Error).message });
+    stage = (error as Error).message.includes("timeout") ? "timeout_stage" : "error_stage";
+    res.status(500).json({
+      ok: false,
+      error: (error as Error).message,
+      route_debug: {
+        start_stage: "start_stage",
+        write_stage: "write_stage",
+        completion_stage: "completion_stage",
+        current_stage: stage,
+        timeout_stage: stage === "timeout_stage" ? "timeout_stage" : null,
+      },
+    });
   }
 }

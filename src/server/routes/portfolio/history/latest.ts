@@ -326,6 +326,9 @@ export default async function handler(req: any, res: any) {
 
     res.status(200).json({
       ok: true,
+      source_mode: "persisted" as const,
+      db_write_attempted: false,
+      materialization_triggered: false,
       portfolios: portfolios.map((row: any) => ({
         portfolio_id: String(row.portfolio_id ?? ""),
         as_of_date: String(row.as_of_date ?? ""),
@@ -368,6 +371,12 @@ export default async function handler(req: any, res: any) {
       ...(debug
         ? {
           diagnostics: {
+            read_path: {
+              source_mode: "persisted" as const,
+              db_write_attempted: false,
+              materialization_triggered: false,
+              source_table_used: tables.portfolioHistoryDaily,
+            },
             portfolios: portfolios.map((row: any) => {
               let trendDebug = null;
               if (typeof row.debug_payload_json === "string" && row.debug_payload_json.trim()) {

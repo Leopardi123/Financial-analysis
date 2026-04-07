@@ -557,6 +557,9 @@ export default async function handler(req: any, res: any) {
     res.status(200).json({
       ok: true,
       endpoint: "/api/portfolio/history/trace",
+      source_mode: "direct_compute" as const,
+      db_write_attempted: false,
+      materialization_triggered: false,
       parameters: {
         portfolio_id: portfolioId,
         include_positions: includePositions,
@@ -602,6 +605,9 @@ export default async function handler(req: any, res: any) {
       notes: {
         read_only: true,
         mutation_performed: false,
+        source_mode: "direct_compute",
+        db_write_attempted: false,
+        materialization_triggered: false,
         trace_date_count: dailySeries.length,
         total_metric_points_used_for_returns: metricSeries.length,
       },
