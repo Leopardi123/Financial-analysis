@@ -75,6 +75,42 @@ function buildUnavailableTrendDebugFromMetrics(metrics: {
   };
 }
 
+function diffCalendarDays(a: string, b: string): number | null {
+  const aMs = dateToUtcMs(a);
+  const bMs = dateToUtcMs(b);
+  if (aMs == null || bMs == null) return null;
+  return Math.round((bMs - aMs) / (24 * 60 * 60 * 1000));
+}
+
+function analyzeSeriesDates(datesAsc: string[]) {
+  const unique = Array.from(new Set(datesAsc)).sort((a, b) => a.localeCompare(b));
+  const gapsOver5TradingDays: Array<{ from: string; to: string; approx_calendar_days: number }> = [];
+  const gapsOver30CalendarDays: Array<{ from: string; to: string; calendar_days: number }> = [];
+  for (let i = 1; i < unique.length; i += 1) {
+    const days = diffCalendarDays(unique[i - 1], unique[i]);
+    if (days == null) continue;
+    if (days > 7) {
+      gapsOver5TradingDays.push({ from: unique[i - 1], to: unique[i], approx_calendar_days: days });
+    }
+    if (days > 30) {
+      gapsOver30CalendarDays.push({ from: unique[i - 1], to: unique[i], calendar_days: days });
+    }
+  }
+  const firstMajorBreak = gapsOver30CalendarDays[0]?.from ?? null;
+  const lastContinuousRunStart = gapsOver30CalendarDays.length > 0
+    ? (gapsOver30CalendarDays[gapsOver30CalendarDays.length - 1]?.to ?? unique[0] ?? null)
+    : (unique[0] ?? null);
+  const lastContinuousRunEnd = unique[unique.length - 1] ?? null;
+  return {
+    gaps_over_5_trading_days: gapsOver5TradingDays,
+    gaps_over_30_calendar_days: gapsOver30CalendarDays,
+    first_major_break_date: firstMajorBreak,
+    last_continuous_run_start: lastContinuousRunStart,
+    last_continuous_run_end: lastContinuousRunEnd,
+    continuous_into_2026: Boolean(lastContinuousRunEnd && lastContinuousRunEnd >= "2026-01-01"),
+  };
+}
+
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "GET") {
@@ -149,6 +185,33 @@ export default async function handler(req: any, res: any) {
       legacy_row_count: number;
       current_row_count: number;
       total_row_count: number;
+      source_inventory: {
+        source_name: string;
+        source_role: string;
+        row_count_for_portfolio: number;
+        min_date: string | null;
+        max_date: string | null;
+        date_span_days: number | null;
+        distinct_date_count: number;
+        duplicate_date_count: number;
+        latest_10_dates: string[];
+        earliest_10_dates: string[];
+      }[];
+      series_variant_diagnostics: {
+        candidate_series_count: number;
+        variants: Array<{ variant_label: string; row_count: number; min_date: string | null; max_date: string | null; overlaps_with_other: boolean }>;
+        variants_disagree_on_latest_date: boolean;
+      };
+      date_break_gap_diagnostics: ReturnType<typeof analyzeSeriesDates>;
+      final_selection_trace: {
+        candidate_rows_considered: number;
+        grouping_keys: string[];
+        ordering_keys: string[];
+        tie_break_rules: string[];
+        selected_latest_date: string | null;
+        selected_row_identity: string | null;
+        rejected_candidates: Array<{ variant_label: string; rejection_reason: string }>;
+      };
     }>();
 
     for (const portfolioId of portfolioIds) {
@@ -174,6 +237,19 @@ export default async function handler(req: any, res: any) {
           : "legacy_rows_newer_than_rebuilt_rows_coexist";
       const selectedFromRebuilt = selectedRows === rebuiltRows && selectedRows.length > 0;
       const currentRows = selectedRows;
+      const selectedDates = currentRows.map((row) => row.as_of_date).sort((a, b) => a.localeCompare(b));
+      const minDate = rows[0]?.as_of_date ?? null;
+      const maxDate = rows[rows.length - 1]?.as_of_date ?? null;
+      const distinctDates = Array.from(new Set(rows.map((row) => row.as_of_date)));
+      const dateSpanDays = minDate && maxDate ? diffCalendarDays(minDate, maxDate) : null;
+      const hasRebuilt = rebuiltRows.length > 0;
+      const hasLegacy = legacyRows.length > 0;
+      const variants = [
+        { label: "rebuilt", rows: rebuiltRows },
+        { label: "legacy", rows: legacyRows },
+      ].filter((item) => item.rows.length > 0);
+      const latestByVariant = variants.map((item) => item.rows[item.rows.length - 1]?.as_of_date ?? null).filter((d): d is string => Boolean(d));
+      const selectedIdentity = selectedLatest ? `${portfolioId}|${selectedLatest.as_of_date}|${selectedFromRebuilt ? "rebuilt" : "legacy"}` : null;
 
       effectiveSeriesByPortfolio.set(
         portfolioId,
@@ -199,6 +275,60 @@ export default async function handler(req: any, res: any) {
         legacy_row_count: legacyRows.length,
         current_row_count: currentRows.length,
         total_row_count: rows.length,
+        source_inventory: [
+          {
+            source_name: tables.portfolioHistoryDaily,
+            source_role: "portfolio_history_rows_for_selector",
+            row_count_for_portfolio: rows.length,
+            min_date: minDate,
+            max_date: maxDate,
+            date_span_days: dateSpanDays,
+            distinct_date_count: distinctDates.length,
+            duplicate_date_count: Math.max(0, rows.length - distinctDates.length),
+            latest_10_dates: distinctDates.slice(-10),
+            earliest_10_dates: distinctDates.slice(0, 10),
+          },
+          {
+            source_name: tables.portfolioSnapshots,
+            source_role: "snapshot_debug_context_only",
+            row_count_for_portfolio: snapshotByPortfolio.has(portfolioId) ? 1 : 0,
+            min_date: latestSnapshotDate || null,
+            max_date: latestSnapshotDate || null,
+            date_span_days: 0,
+            distinct_date_count: snapshotByPortfolio.has(portfolioId) ? 1 : 0,
+            duplicate_date_count: 0,
+            latest_10_dates: latestSnapshotDate ? [latestSnapshotDate] : [],
+            earliest_10_dates: latestSnapshotDate ? [latestSnapshotDate] : [],
+          },
+        ],
+        series_variant_diagnostics: {
+          candidate_series_count: variants.length,
+          variants: variants.map((item) => ({
+            variant_label: item.label,
+            row_count: item.rows.length,
+            min_date: item.rows[0]?.as_of_date ?? null,
+            max_date: item.rows[item.rows.length - 1]?.as_of_date ?? null,
+            overlaps_with_other: hasRebuilt && hasLegacy,
+          })),
+          variants_disagree_on_latest_date: new Set(latestByVariant).size > 1,
+        },
+        date_break_gap_diagnostics: analyzeSeriesDates(selectedDates),
+        final_selection_trace: {
+          candidate_rows_considered: rows.length,
+          grouping_keys: ["portfolio_id", "variant_label(rebuilt|legacy)"],
+          ordering_keys: ["as_of_date ASC", "selected cohort latest date DESC"],
+          tie_break_rules: [
+            "if only one cohort exists select it",
+            "if both cohorts exist select cohort with latest max(as_of_date)",
+            "if equal latest dates prefer rebuilt cohort",
+          ],
+          selected_latest_date: selectedLatest?.as_of_date ?? null,
+          selected_row_identity: selectedIdentity,
+          rejected_candidates: [
+            ...(selectedFromRebuilt || !hasLegacy ? [] : [{ variant_label: "rebuilt", rejection_reason: "older_latest_date_than_legacy" }]),
+            ...((selectedFromRebuilt && hasLegacy) ? [{ variant_label: "legacy", rejection_reason: "older_latest_date_than_rebuilt_or_tie_break_lost" }] : []),
+          ],
+        },
       });
     }
 
@@ -400,6 +530,10 @@ export default async function handler(req: any, res: any) {
                 legacy_row_count: Number(row.legacy_row_count ?? 0),
                 current_row_count: Number(row.current_row_count ?? 0),
                 cohort_choice_rule: row.cohort_choice_rule ?? "none",
+                source_inventory: row.source_inventory ?? [],
+                series_variant_diagnostics: row.series_variant_diagnostics ?? null,
+                date_break_gap_diagnostics: row.date_break_gap_diagnostics ?? null,
+                final_selection_trace: row.final_selection_trace ?? null,
                 ...(trendDebug ?? buildUnavailableTrendDebugFromMetrics({
                   available_days: Number(row.available_days ?? 0),
                   return_20d: row.return_20d == null ? null : Number(row.return_20d),
