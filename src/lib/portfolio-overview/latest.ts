@@ -4,6 +4,9 @@ import { listPortfolioConfigs } from "../portfolio-admin/repository.js";
 import { buildPerPortfolioValidationIssues, validateGlobalTargetWeight } from "../portfolio-admin/validation.js";
 import { getLatestPortfolioRisk } from "../portfolio-risk/build.js";
 import { getLatestPortfolioHedgeAndDryPowder } from "../portfolio-hedge/build.js";
+import { computeTrendMetricsFromSeries } from "../portfolio-history/metrics.js";
+
+const REBUILT_HISTORY_SOURCES = new Set(["positions_price_history", "positions_snapshots", "snapshots", "unavailable"]);
 
 export type PortfolioOverviewTraceRow = {
   stage: string;
@@ -43,6 +46,75 @@ function parseJson(value: unknown): any | null {
   } catch {
     return null;
   }
+}
+
+function sanitizeTrendReturn(value: unknown): number | null {
+  const num = asNum(value);
+  return num;
+}
+
+function buildStructuredUnavailableTrendDebug(row: any) {
+  const availableDaysRaw = Number(row?.available_days ?? NaN);
+  const availableDays = Number.isFinite(availableDaysRaw) ? availableDaysRaw : 0;
+  const trendCompleteness = availableDays >= 200 ? "full" : availableDays >= 65 ? "partial" : "unavailable";
+  return {
+    attempted: true,
+    available_days: availableDays,
+    return_20d: sanitizeTrendReturn(row?.return_20d),
+    return_65d: sanitizeTrendReturn(row?.return_65d),
+    return_200d: sanitizeTrendReturn(row?.return_200d),
+    short_direction: row?.short_direction == null ? "unavailable" : String(row.short_direction),
+    medium_direction: row?.medium_direction == null ? "unavailable" : String(row.medium_direction),
+    long_direction: row?.long_direction == null ? "unavailable" : String(row.long_direction),
+    trend_status: row?.trend_status == null ? "unavailable" : String(row.trend_status),
+    trend_completeness: trendCompleteness,
+    reason: availableDays < 65 ? "insufficient_history" : "trend_debug_unavailable",
+  };
+}
+
+function normalizeTrendFields(row: any) {
+  const trendStatus = row?.trend_status == null ? "unavailable" : String(row.trend_status);
+  const shortDirection = row?.short_direction == null ? "unavailable" : String(row.short_direction);
+  const mediumDirection = row?.medium_direction == null ? "unavailable" : String(row.medium_direction);
+  const longDirection = row?.long_direction == null ? "unavailable" : String(row.long_direction);
+  const return20d = asNum(row?.return_20d);
+  const return65d = asNum(row?.return_65d);
+  const return200d = asNum(row?.return_200d);
+  const looksLikePlaceholder = trendStatus === "unavailable"
+    && shortDirection === "unavailable"
+    && mediumDirection === "unavailable"
+    && longDirection === "unavailable"
+    && return20d === 0
+    && return65d === 0
+    && return200d === 0;
+  return {
+    return_20d: looksLikePlaceholder ? null : return20d,
+    return_65d: looksLikePlaceholder ? null : return65d,
+    return_200d: looksLikePlaceholder ? null : return200d,
+    short_direction: shortDirection,
+    medium_direction: mediumDirection,
+    long_direction: longDirection,
+    trend_status: trendStatus,
+    relative_strength_bucket: row?.relative_strength_bucket == null ? null : String(row.relative_strength_bucket),
+    signal_completeness: row?.signal_completeness == null ? null : String(row.signal_completeness),
+  };
+}
+
+function dateToUtcMs(date: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const ms = Date.parse(`${date}T00:00:00.000Z`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function compareDatesAsc(a: string | null, b: string | null): number {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  return a.localeCompare(b);
+}
+
+function isValidDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
 function computeAllocationPlanStatus(rows: any[]): "within_allocation_plan" | "outside_allocation_plan" | "materially_outside_allocation_plan" {
@@ -149,18 +221,160 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       ))
     : [];
 
-  const totalHistoryLatestRows = await runStage("history_loaded", async () =>
-    query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`)
+  const historyTrendRows = asOfDate
+    ? await runStage("history_trend_loaded", async () => query(
+      `SELECT portfolio_id, as_of_date, market_value, data_source
+       FROM ${tables.portfolioHistoryDaily}
+       WHERE market_value IS NOT NULL
+       ORDER BY portfolio_id ASC, as_of_date ASC`
+    ))
+    : [];
+  const seriesByPortfolioRaw = new Map<string, Array<{ as_of_date: string; market_value: number; data_source: string | null }>>();
+  for (const row of historyTrendRows as any[]) {
+    const portfolioId = String(row.portfolio_id ?? "");
+    const marketValue = Number(row.market_value ?? NaN);
+    const asOfDate = String(row.as_of_date ?? "").trim();
+    const dataSource = String(row.data_source ?? "").trim() || null;
+    if (!portfolioId || !Number.isFinite(marketValue) || marketValue <= 0 || !isValidDate(asOfDate)) continue;
+    const bucket = seriesByPortfolioRaw.get(portfolioId) ?? [];
+    bucket.push({ as_of_date: asOfDate, market_value: marketValue, data_source: dataSource });
+    seriesByPortfolioRaw.set(portfolioId, bucket);
+  }
+  for (const rows of seriesByPortfolioRaw.values()) {
+    rows.sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+  }
+  const seriesByPortfolio = new Map<string, Array<{ as_of_date: string; market_value: number }>>();
+  for (const [portfolioId, rows] of seriesByPortfolioRaw.entries()) {
+    const rebuiltRows = rows.filter((row) => row.data_source !== null && REBUILT_HISTORY_SOURCES.has(row.data_source));
+    const legacyRows = rows.filter((row) => !(row.data_source !== null && REBUILT_HISTORY_SOURCES.has(row.data_source)));
+    const rebuiltLatest = rebuiltRows[rebuiltRows.length - 1] ?? null;
+    const legacyLatest = legacyRows[legacyRows.length - 1] ?? null;
+    const selectedRows = (() => {
+      if (rebuiltRows.length === 0 && legacyRows.length === 0) return [] as typeof rows;
+      if (rebuiltRows.length === 0) return legacyRows;
+      if (legacyRows.length === 0) return rebuiltRows;
+      return compareDatesAsc(rebuiltLatest?.as_of_date ?? null, legacyLatest?.as_of_date ?? null) >= 0
+        ? rebuiltRows
+        : legacyRows;
+    })();
+    seriesByPortfolio.set(portfolioId, selectedRows.map((row) => ({ as_of_date: row.as_of_date, market_value: row.market_value })));
+  }
+  const historyTrendByPortfolioId = new Map<string, { metrics: ReturnType<typeof normalizeTrendFields> & { signal_completeness: string | null }; trend_debug: any }>();
+  for (const [portfolioId, series] of seriesByPortfolio.entries()) {
+    const computed = computeTrendMetricsFromSeries(series.map((point) => ({
+      as_of_date: point.as_of_date,
+      market_value: point.market_value,
+    })));
+    const metrics = normalizeTrendFields({
+      return_20d: computed.return_20d,
+      return_65d: computed.return_65d,
+      return_200d: computed.return_200d,
+      short_direction: computed.short_direction,
+      medium_direction: computed.medium_direction,
+      long_direction: computed.long_direction,
+      trend_status: computed.trend_status,
+      signal_completeness: computed.trend_completeness,
+    });
+    historyTrendByPortfolioId.set(portfolioId, {
+      metrics: {
+        ...metrics,
+        signal_completeness: computed.trend_completeness,
+      },
+      trend_debug: {
+        attempted: true,
+        available_days: computed.available_days,
+        first_history_date: computed.first_history_date,
+        last_history_date: computed.last_history_date,
+        latest_date: computed.last_history_date,
+        latest_value_sek: computed.latest_value,
+        return_20d: metrics.return_20d,
+        return_65d: metrics.return_65d,
+        return_200d: metrics.return_200d,
+        anchor_20d_date: computed.anchor_20d_date,
+        anchor_65d_date: computed.anchor_65d_date,
+        anchor_200d_date: computed.anchor_200d_date,
+        anchor_20d_value_sek: computed.value_at_20d_anchor,
+        anchor_65d_value_sek: computed.value_at_65d_anchor,
+        anchor_200d_value_sek: computed.value_at_200d_anchor,
+        value_at_20d_anchor: computed.value_at_20d_anchor,
+        value_at_65d_anchor: computed.value_at_65d_anchor,
+        value_at_200d_anchor: computed.value_at_200d_anchor,
+        return_20d_valid: computed.return_20d_valid,
+        return_65d_valid: computed.return_65d_valid,
+        return_200d_valid: computed.return_200d_valid,
+        invalid_reasons_20d: computed.invalid_reasons_20d,
+        invalid_reasons_65d: computed.invalid_reasons_65d,
+        invalid_reasons_200d: computed.invalid_reasons_200d,
+        invalid_reason_20d: computed.invalid_reasons_20d[0] ?? null,
+        invalid_reason_65d: computed.invalid_reasons_65d[0] ?? null,
+        invalid_reason_200d: computed.invalid_reasons_200d[0] ?? null,
+        short_direction: metrics.short_direction,
+        medium_direction: metrics.medium_direction,
+        long_direction: metrics.long_direction,
+        trend_status: metrics.trend_status,
+        trend_completeness: computed.trend_completeness,
+        reason: computed.available_days < 65 ? "insufficient_history" : "ok",
+      },
+    });
+  }
+
+  const includedConfigIds = adminConfigs
+    .filter((row) => row.active && row.included_in_total_portfolio)
+    .map((row) => row.portfolio_id);
+  const includedHistoryRows = includedConfigIds.flatMap((portfolioId) =>
+    (seriesByPortfolio.get(portfolioId) ?? []).map((row) => ({
+      portfolio_id: portfolioId,
+      as_of_date: row.as_of_date,
+      market_value: row.market_value,
+    }))
   );
-  const latestTotalHistoryDate = String(totalHistoryLatestRows[0]?.as_of_date ?? "").trim();
-  const totalHistoryRow = latestTotalHistoryDate
-    ? (await query(
-      `SELECT as_of_date, market_value, daily_return_pct, cumulative_return_pct, drawdown_pct, data_quality
-       FROM ${tables.totalPortfolioHistoryDaily}
-       WHERE as_of_date = ? LIMIT 1`,
-      [latestTotalHistoryDate]
-    ))[0]
-    : null;
+  const newestIncludedDateMs = includedHistoryRows
+    .map((row) => dateToUtcMs(row.as_of_date))
+    .filter((value): value is number => value !== null)
+    .reduce((max, value) => Math.max(max, value), Number.NEGATIVE_INFINITY);
+  const recentCutoffMs = Number.isFinite(newestIncludedDateMs) ? newestIncludedDateMs - (30 * 24 * 60 * 60 * 1000) : null;
+  const contributorsByDate = new Map<string, Set<string>>();
+  const valueByPortfolioDate = new Map<string, number>();
+  for (const row of includedHistoryRows) {
+    const key = `${row.portfolio_id}__${row.as_of_date}`;
+    valueByPortfolioDate.set(key, row.market_value);
+    const bucket = contributorsByDate.get(row.as_of_date) ?? new Set<string>();
+    bucket.add(row.portfolio_id);
+    contributorsByDate.set(row.as_of_date, bucket);
+  }
+  const dateCandidates = Array.from(contributorsByDate.entries())
+    .filter(([date]) => {
+      if (recentCutoffMs === null) return true;
+      const ms = dateToUtcMs(date);
+      return ms !== null && ms >= recentCutoffMs;
+    });
+  const scoredCandidates = (dateCandidates.length > 0 ? dateCandidates : Array.from(contributorsByDate.entries()))
+    .map(([date, ids]) => ({ date, contributor_count: ids.size }))
+    .sort((a, b) => {
+      if (b.contributor_count !== a.contributor_count) return b.contributor_count - a.contributor_count;
+      return b.date.localeCompare(a.date);
+    });
+  const latestTotalHistoryDate = scoredCandidates[0]?.date ?? "";
+  const contributingPortfolioIds = Array.from(contributorsByDate.get(latestTotalHistoryDate) ?? []).sort((a, b) => a.localeCompare(b));
+  const recomputedTotalMarketValue = contributingPortfolioIds
+    .map((id) => valueByPortfolioDate.get(`${id}__${latestTotalHistoryDate}`) ?? 0)
+    .reduce((sum, value) => sum + value, 0);
+  const commonDateSeries = Array.from(contributorsByDate.entries())
+    .filter(([date, ids]) => date <= latestTotalHistoryDate && contributingPortfolioIds.every((id) => ids.has(id)))
+    .map(([date]) => ({
+      as_of_date: date,
+      market_value: contributingPortfolioIds
+        .map((id) => valueByPortfolioDate.get(`${id}__${date}`) ?? 0)
+        .reduce((sum, value) => sum + value, 0),
+    }))
+    .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+  const totalSeriesIndex = commonDateSeries.findIndex((row) => row.as_of_date === latestTotalHistoryDate);
+  const totalLatest = totalSeriesIndex >= 0 ? commonDateSeries[totalSeriesIndex] : null;
+  const totalPrev = totalSeriesIndex > 0 ? commonDateSeries[totalSeriesIndex - 1] : null;
+  const totalFirst = commonDateSeries[0] ?? null;
+  const totalRunningPeak = commonDateSeries
+    .slice(0, Math.max(totalSeriesIndex + 1, 0))
+    .reduce((peak, row) => Math.max(peak, row.market_value), Number.NEGATIVE_INFINITY);
   const totalHistoryCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`);
   const historyAvailableDays = Number(totalHistoryCountRows[0]?.count ?? 0);
   const snapshotCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioSnapshots}`);
@@ -170,9 +384,15 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const positionsCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioPositions} WHERE active_position = 1`);
   const activePositionsCount = Number(positionsCountRows[0]?.count ?? 0);
   const lastSnapshotBuildRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.portfolioSnapshots}`);
-  const lastHistoryBuildRows = await query(`SELECT MAX(as_of_date) AS as_of_date FROM ${tables.totalPortfolioHistoryDaily}`);
+  const lastHistoryBuildRows = await query(
+    `SELECT last_success_at
+     FROM ${tables.portfolioBuildMeta}
+     WHERE pipeline_name = 'history'
+     LIMIT 1`
+  );
   const lastSnapshotBuild = String(lastSnapshotBuildRows[0]?.as_of_date ?? "").trim() || null;
-  const lastHistoryBuild = String(lastHistoryBuildRows[0]?.as_of_date ?? "").trim() || null;
+  const lastHistoryBuild = String(lastHistoryBuildRows[0]?.last_success_at ?? "").trim()
+    || (latestTotalHistoryDate ? `${latestTotalHistoryDate}T00:00:00.000Z` : null);
 
   const allocationPlanStatus = computeAllocationPlanStatus(portfolioRows as any[]);
   const included = (portfolioRows as any[]).filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1);
@@ -328,7 +548,10 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     };
   });
 
-  const portfolios = (portfolioRows as any[]).map((row) => ({
+  const portfolios = (portfolioRows as any[]).map((row) => {
+    const trendSource = historyTrendByPortfolioId.get(String(row.portfolio_id ?? ""));
+    const trendMetrics = trendSource?.metrics ?? normalizeTrendFields(row);
+    return ({
     ...(function () {
       const snapshotDebug = parseJson(row.debug_payload_json);
       return {
@@ -350,14 +573,14 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     max_weight_pct: asNum(row.max_weight_pct),
     weight_status: row.weight_status == null ? null : String(row.weight_status),
     rebalance_status: row.rebalance_status == null ? null : String(row.rebalance_status),
-    return_20d: asNum(row.return_20d),
-    return_65d: asNum(row.return_65d),
-    return_200d: asNum(row.return_200d),
-    short_direction: row.short_direction == null ? null : String(row.short_direction),
-    medium_direction: row.medium_direction == null ? null : String(row.medium_direction),
-    long_direction: row.long_direction == null ? null : String(row.long_direction),
-    trend_status: row.trend_status == null ? null : String(row.trend_status),
-    relative_strength_bucket: row.relative_strength_bucket == null ? null : String(row.relative_strength_bucket),
+    return_20d: trendMetrics.return_20d,
+    return_65d: trendMetrics.return_65d,
+    return_200d: trendMetrics.return_200d,
+    short_direction: trendMetrics.short_direction,
+    medium_direction: trendMetrics.medium_direction,
+    long_direction: trendMetrics.long_direction,
+    trend_status: trendMetrics.trend_status,
+    relative_strength_bucket: trendMetrics.relative_strength_bucket,
     annualized_vol_65d: asNum(row.annualized_vol_65d),
     current_drawdown_pct: asNum(row.current_drawdown_pct),
     top_holding_weight_pct: asNum(row.top_holding_weight_pct),
@@ -368,9 +591,10 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     hedge_status: row.hedge_status == null ? null : String(row.hedge_status),
     suggested_hedge_type: row.suggested_hedge_type == null ? null : String(row.suggested_hedge_type),
     hedge_policy_applied: row.hedge_policy_applied == null ? null : String(row.hedge_policy_applied),
-    signal_completeness: row.signal_completeness == null ? null : String(row.signal_completeness),
-    data_quality_flags: buildDataQualityFlags(row),
-  }));
+    signal_completeness: trendMetrics.signal_completeness,
+    data_quality_flags: buildDataQualityFlags({ ...row, trend_status: trendMetrics.trend_status, return_65d: trendMetrics.return_65d }),
+  });
+  });
 
   const snapshotIds = new Set((portfolioRows as any[]).map((row) => String(row.portfolio_id ?? "")).filter((id) => id.length > 0));
   const portfoliosConfiguredCount = adminConfigs.length;
@@ -387,7 +611,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const basePayload = await runStage("response_assembled", async () => ({
     as_of_date: asOfDate,
     total: {
-      market_value: totalMarketValue,
+      market_value: contributingPortfolioIds.length > 0 ? recomputedTotalMarketValue : totalMarketValue,
       allocation_plan_status: allocationPlanStatus,
       total_risk_score: totalRiskScore,
       total_risk_status: totalRiskStatus,
@@ -395,16 +619,22 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       dry_powder_status: dryPowderStatus,
       opportunistic_weight_pct: hedgePayload.total.opportunistic_weight_pct,
       required_min_dry_powder_pct: hedgePayload.total.required_min_dry_powder_pct,
-      included_portfolio_count: included.length,
+      included_portfolio_count: contributingPortfolioIds.length > 0 ? contributingPortfolioIds.length : included.length,
       major_warnings: Array.from(new Set(majorWarnings)),
       major_warning_details: warningDetails,
     },
     performance: {
-      daily_return_pct: asNum(totalHistoryRow?.daily_return_pct),
-      cumulative_return_pct: asNum(totalHistoryRow?.cumulative_return_pct),
-      drawdown_pct: asNum(totalHistoryRow?.drawdown_pct),
+      daily_return_pct: totalLatest && totalPrev && totalPrev.market_value !== 0
+        ? ((totalLatest.market_value / totalPrev.market_value) - 1) * 100
+        : null,
+      cumulative_return_pct: totalLatest && totalFirst && totalFirst.market_value !== 0
+        ? ((totalLatest.market_value / totalFirst.market_value) - 1) * 100
+        : null,
+      drawdown_pct: totalLatest && Number.isFinite(totalRunningPeak) && totalRunningPeak !== 0
+        ? ((totalLatest.market_value / totalRunningPeak) - 1) * 100
+        : null,
       history_available_days: historyAvailableDays,
-      data_quality: totalHistoryRow?.data_quality == null ? "unavailable" : String(totalHistoryRow.data_quality),
+      data_quality: contributingPortfolioIds.length === includedConfigIds.length ? "full" : "partial",
     },
     portfolios,
     setup: {
@@ -421,6 +651,10 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       positions_count: activePositionsCount,
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
+      total_date_used: latestTotalHistoryDate || null,
+      total_date_rule_used: "latest_recent_date_max_contributors_then_latest",
+      contributing_portfolio_ids: contributingPortfolioIds,
+      excluded_portfolio_ids: includedConfigIds.filter((id) => !contributingPortfolioIds.includes(id)),
     },
   }));
 
@@ -443,6 +677,10 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       positions_count: activePositionsCount,
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
+      total_date_used: latestTotalHistoryDate || null,
+      total_date_rule_used: "latest_recent_date_max_contributors_then_latest",
+      contributing_portfolio_ids: contributingPortfolioIds,
+      excluded_portfolio_ids: includedConfigIds.filter((id) => !contributingPortfolioIds.includes(id)),
     },
     global_validation: {
       target_weight_sum_status: globalValidation.status,
@@ -464,7 +702,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     portfolios: portfolios.map((row) => {
       const raw = (portfolioRows as any[]).find((source) => String(source.portfolio_id ?? "") === row.portfolio_id) ?? {};
       const snapshotDebug = parseJson(raw.debug_payload_json);
-      const trendDebug = snapshotDebug?.trend ?? null;
+      const trendDebug = historyTrendByPortfolioId.get(row.portfolio_id)?.trend_debug ?? snapshotDebug?.trend ?? buildStructuredUnavailableTrendDebug(raw);
       const riskDebug = parseJson(raw.risk_debug_json);
       const hedgeDebug = parseJson(raw.hedge_debug_json);
 
@@ -477,23 +715,45 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
           weight_status: row.weight_status,
           rebalance_status: row.rebalance_status,
         },
-        trend_debug: trendDebug
-          ? {
-            available_days: trendDebug.available_days ?? null,
-            history_source: trendDebug.history_source ?? null,
-            return_20d: trendDebug.return_20d ?? null,
-            return_65d: trendDebug.return_65d ?? null,
-            return_200d: trendDebug.return_200d ?? null,
-            short_direction: trendDebug.short_direction ?? null,
-            medium_direction: trendDebug.medium_direction ?? null,
-            long_direction: trendDebug.long_direction ?? null,
-            trend_status: trendDebug.trend_status ?? null,
-            relative_strength_rank: trendDebug.relative_strength_rank ?? null,
-            relative_strength_bucket: trendDebug.relative_strength_bucket ?? null,
-            trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null,
-            data_quality: trendDebug.data_quality ?? null,
-          }
-          : null,
+        trend_debug: {
+          attempted: trendDebug.attempted ?? true,
+          available_days: trendDebug.available_days ?? null,
+          first_history_date: trendDebug.first_history_date ?? null,
+          last_history_date: trendDebug.last_history_date ?? null,
+          latest_date: trendDebug.latest_date ?? trendDebug.last_history_date ?? null,
+          latest_value_sek: trendDebug.latest_value_sek ?? null,
+          history_source: trendDebug.history_source ?? null,
+          return_20d: trendDebug.return_20d ?? null,
+          return_65d: trendDebug.return_65d ?? null,
+          return_200d: trendDebug.return_200d ?? null,
+          anchor_20d_date: trendDebug.anchor_20d_date ?? null,
+          anchor_65d_date: trendDebug.anchor_65d_date ?? null,
+          anchor_200d_date: trendDebug.anchor_200d_date ?? null,
+          anchor_20d_value_sek: trendDebug.anchor_20d_value_sek ?? trendDebug.value_at_20d_anchor ?? null,
+          anchor_65d_value_sek: trendDebug.anchor_65d_value_sek ?? trendDebug.value_at_65d_anchor ?? null,
+          anchor_200d_value_sek: trendDebug.anchor_200d_value_sek ?? trendDebug.value_at_200d_anchor ?? null,
+          value_at_20d_anchor: trendDebug.value_at_20d_anchor ?? null,
+          value_at_65d_anchor: trendDebug.value_at_65d_anchor ?? null,
+          value_at_200d_anchor: trendDebug.value_at_200d_anchor ?? null,
+          return_20d_valid: trendDebug.return_20d_valid ?? false,
+          return_65d_valid: trendDebug.return_65d_valid ?? false,
+          return_200d_valid: trendDebug.return_200d_valid ?? false,
+          invalid_reasons_20d: trendDebug.invalid_reasons_20d ?? [],
+          invalid_reasons_65d: trendDebug.invalid_reasons_65d ?? [],
+          invalid_reasons_200d: trendDebug.invalid_reasons_200d ?? [],
+          invalid_reason_20d: trendDebug.invalid_reason_20d ?? (Array.isArray(trendDebug.invalid_reasons_20d) ? trendDebug.invalid_reasons_20d[0] : null) ?? null,
+          invalid_reason_65d: trendDebug.invalid_reason_65d ?? (Array.isArray(trendDebug.invalid_reasons_65d) ? trendDebug.invalid_reasons_65d[0] : null) ?? null,
+          invalid_reason_200d: trendDebug.invalid_reason_200d ?? (Array.isArray(trendDebug.invalid_reasons_200d) ? trendDebug.invalid_reasons_200d[0] : null) ?? null,
+          short_direction: trendDebug.short_direction ?? "unavailable",
+          medium_direction: trendDebug.medium_direction ?? "unavailable",
+          long_direction: trendDebug.long_direction ?? "unavailable",
+          trend_status: trendDebug.trend_status ?? "unavailable",
+          relative_strength_rank: trendDebug.relative_strength_rank ?? null,
+          relative_strength_bucket: trendDebug.relative_strength_bucket ?? null,
+          trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? "unavailable",
+          data_quality: trendDebug.data_quality ?? null,
+          reason: trendDebug.reason ?? (trendDebug.return_65d == null ? "insufficient_history" : "ok"),
+        },
         risk_debug: riskDebug
           ? {
             annualized_vol_65d: riskDebug?.volatility_component?.annualized_vol_65d ?? null,

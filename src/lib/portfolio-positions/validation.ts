@@ -75,6 +75,7 @@ export function normalizePositionPayload(payload: Record<string, unknown>) {
     value: {
       portfolio_id: portfolioId,
       symbol,
+      resolved_symbol: null,
       company_id: parseIntOrNull(payload.company_id),
       instrument_id: payload.instrument_id == null || payload.instrument_id === "" ? null : String(payload.instrument_id).trim(),
       display_name: payload.display_name == null || payload.display_name === "" ? null : String(payload.display_name).trim(),

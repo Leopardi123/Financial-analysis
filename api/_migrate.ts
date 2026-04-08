@@ -32,6 +32,7 @@ const TABLES = {
   portfolioPositions: "portfolio_positions",
   portfolioHistoryDaily: "portfolio_history_daily",
   totalPortfolioHistoryDaily: "total_portfolio_history_daily",
+  portfolioBuildMeta: "portfolio_build_meta",
 };
 
 export async function ensureSchema() {
@@ -391,6 +392,7 @@ export async function ensureSchema() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       portfolio_id TEXT NOT NULL,
       symbol TEXT NOT NULL,
+      resolved_symbol TEXT,
       company_id INTEGER,
       instrument_id TEXT,
       display_name TEXT,
@@ -467,6 +469,13 @@ export async function ensureSchema() {
   );
 
   await execute(
+    `CREATE TABLE IF NOT EXISTS ${TABLES.portfolioBuildMeta} (
+      pipeline_name TEXT PRIMARY KEY,
+      last_success_at TEXT NOT NULL
+    )`
+  );
+
+  await execute(
     `CREATE TABLE IF NOT EXISTS ${TABLES.priceScreenSnapshot} (
       symbol TEXT PRIMARY KEY,
       as_of_date TEXT NOT NULL,
@@ -491,6 +500,7 @@ export async function ensureSchema() {
   );
   await ensureColumnExists(TABLES.priceScreenSnapshot, "high_252d", "REAL");
   await ensureColumnExists(TABLES.priceScreenSnapshot, "drawdown_252d", "REAL");
+  await ensureColumnExists(TABLES.portfolioPositions, "resolved_symbol", "TEXT");
   await ensureColumnExists(TABLES.portfolioPositions, "company_id", "INTEGER");
   await ensureColumnExists(TABLES.portfolioPositions, "instrument_id", "TEXT");
   await ensureColumnExists(TABLES.portfolioPositions, "display_name", "TEXT");
@@ -649,6 +659,10 @@ export async function ensureSchema() {
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_positions_symbol
             ON ${TABLES.portfolioPositions} (symbol)`,
+    },
+    {
+      sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_positions_resolved_symbol
+            ON ${TABLES.portfolioPositions} (resolved_symbol)`,
     },
     {
       sql: `CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_as_of_date

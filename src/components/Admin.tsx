@@ -200,6 +200,42 @@ type ScreeningAttempt = {
   debug: ScreeningDebugPayload;
 };
 
+type FxIngestResult = {
+  ok?: boolean;
+  status?: "success" | "error";
+  symbol?: string;
+  mode?: "latest" | "recent" | "full";
+  rows_inserted?: number;
+  rows_updated?: number;
+  rows_unchanged?: number;
+  earliest_date_loaded?: string | null;
+  latest_date_loaded?: string | null;
+  source?: string;
+  table?: string;
+  next_step?: string;
+  error?: string;
+};
+
+type PortfolioHistoryRebuildResult = {
+  ok?: boolean;
+  status?: string;
+  portfolios_found_before_filter?: number;
+  portfolios_after_filter?: number;
+  source_table_used?: string;
+  query_used?: string;
+  database_url?: string | null;
+  runtime_environment?: string;
+  filters_applied?: string[];
+  portfolios_processed?: number;
+  history_rows_written?: number;
+  total_rows_written?: number;
+  earliest_date?: string | null;
+  latest_date?: string | null;
+  last_history_build?: string | null;
+  warnings?: string[];
+  error?: string;
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -248,6 +284,12 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("admin.debugParamEnabled") === "1";
   });
+  const [fxSymbolInput, setFxSymbolInput] = useState("CADSEK");
+  const [fxMode, setFxMode] = useState<"latest" | "recent" | "full">("recent");
+  const [fxFrom, setFxFrom] = useState("");
+  const [fxTo, setFxTo] = useState("");
+  const [fxIngestResult, setFxIngestResult] = useState<FxIngestResult | null>(null);
+  const [historyRebuildResult, setHistoryRebuildResult] = useState<PortfolioHistoryRebuildResult | null>(null);
 
   const autoRefreshRunningRef = useRef(false);
   const autoRefreshPausedRef = useRef(false);
@@ -378,6 +420,26 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
     } finally {
       setLoadingKey(null);
     }
+  }
+
+  async function runFxIngest() {
+    const symbol = fxSymbolInput.trim().toUpperCase();
+    if (!symbol) {
+      updateLog("FX ingest", "error", "ERROR: FX symbol is required.");
+      return;
+    }
+    const payload = await postJson("FX Ingest", "/api/admin/fx/ingest", {
+      symbol,
+      mode: fxMode,
+      from: fxFrom.trim() || undefined,
+      to: fxTo.trim() || undefined,
+    });
+    setFxIngestResult(payload as unknown as FxIngestResult);
+  }
+
+  async function runPortfolioHistoryRebuild() {
+    const payload = await postJson("Rebuild Portfolio History", "/api/portfolio/history/build", {});
+    setHistoryRebuildResult(payload as unknown as PortfolioHistoryRebuildResult);
   }
 
   function startScreeningAttempt(offset: number, batchSize: number) {
@@ -1237,6 +1299,84 @@ export default function Admin({ onTickersUpserted }: AdminProps) {
             <p className="bread">No debug steps yet. Run a screening batch to populate debug details.</p>
           )}
         </details>
+      </details>
+
+      <details open style={{ marginBottom: 12 }}>
+        <summary><strong>FX ingest / backfill</strong></summary>
+        <p className="bread">Manual ingest for FX historical series into <code>daily_price_history</code> (used by portfolio history FX normalization).</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+          <label>
+            FX symbol
+            <input
+              value={fxSymbolInput}
+              onChange={(event) => setFxSymbolInput(event.target.value.toUpperCase())}
+              placeholder="CADSEK"
+            />
+          </label>
+          <label>
+            Mode
+            <select value={fxMode} onChange={(event) => setFxMode(event.target.value as "latest" | "recent" | "full")}>
+              <option value="latest">Latest only</option>
+              <option value="recent">Recent backfill</option>
+              <option value="full">Full backfill</option>
+            </select>
+          </label>
+          <label>
+            From (optional)
+            <input value={fxFrom} onChange={(event) => setFxFrom(event.target.value)} placeholder="YYYY-MM-DD" />
+          </label>
+          <label>
+            To (optional)
+            <input value={fxTo} onChange={(event) => setFxTo(event.target.value)} placeholder="YYYY-MM-DD" />
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button type="button" onClick={() => setFxSymbolInput("USDSEK")} disabled={loadingKey !== null}>USDSEK</button>
+          <button type="button" onClick={() => setFxSymbolInput("CADSEK")} disabled={loadingKey !== null}>CADSEK</button>
+          <button type="button" onClick={() => setFxSymbolInput("EURSEK")} disabled={loadingKey !== null}>EURSEK</button>
+          <button type="button" onClick={() => void runFxIngest()} disabled={!secretReady || loadingKey !== null}>
+            {loadingKey === "FX Ingest" ? "Running FX ingest..." : "Run FX ingest"}
+          </button>
+        </div>
+        {fxIngestResult && (
+          <div className="bread" style={{ marginTop: 8 }}>
+            <strong>FX symbol:</strong> {String(fxIngestResult.symbol ?? "—")}<br />
+            <strong>Status:</strong> {fxIngestResult.ok ? "success" : "failed"}<br />
+            <strong>Mode:</strong> {String(fxIngestResult.mode ?? "—")}<br />
+            <strong>Rows inserted:</strong> {Number(fxIngestResult.rows_inserted ?? 0)}<br />
+            <strong>Rows updated:</strong> {Number(fxIngestResult.rows_updated ?? 0)}<br />
+            <strong>Rows unchanged:</strong> {Number(fxIngestResult.rows_unchanged ?? 0)}<br />
+            <strong>Loaded range:</strong> {String(fxIngestResult.earliest_date_loaded ?? "—")} → {String(fxIngestResult.latest_date_loaded ?? "—")}<br />
+            <strong>Source:</strong> {String(fxIngestResult.source ?? "—")}<br />
+            <strong>Table:</strong> {String(fxIngestResult.table ?? "—")}<br />
+            {fxIngestResult.error ? <><strong>Error:</strong> {fxIngestResult.error}<br /></> : null}
+            <strong>Hint:</strong> {String(fxIngestResult.next_step ?? "Next step: rebuild portfolio history.")}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          <button type="button" onClick={() => void runPortfolioHistoryRebuild()} disabled={!secretReady || loadingKey !== null}>
+            {loadingKey === "Rebuild Portfolio History" ? "Rebuilding history..." : "Rebuild portfolio history"}
+          </button>
+        </div>
+        {historyRebuildResult && (
+          <div className="bread" style={{ marginTop: 8 }}>
+            <strong>Rebuild status:</strong> {historyRebuildResult.ok ? "success" : "failed"}<br />
+            <strong>Portfolios found before filter:</strong> {Number(historyRebuildResult.portfolios_found_before_filter ?? 0)}<br />
+            <strong>Portfolios after filter:</strong> {Number(historyRebuildResult.portfolios_after_filter ?? 0)}<br />
+            <strong>Portfolios processed:</strong> {Number(historyRebuildResult.portfolios_processed ?? 0)}<br />
+            <strong>History rows written:</strong> {Number(historyRebuildResult.history_rows_written ?? 0)}<br />
+            <strong>Total rows written:</strong> {Number(historyRebuildResult.total_rows_written ?? 0)}<br />
+            <strong>Date range:</strong> {String(historyRebuildResult.earliest_date ?? "—")} → {String(historyRebuildResult.latest_date ?? "—")}<br />
+            <strong>Last history build:</strong> {String(historyRebuildResult.last_history_build ?? "—")}<br />
+            <strong>Source table:</strong> {String(historyRebuildResult.source_table_used ?? "—")}<br />
+            <strong>Query used:</strong> {String(historyRebuildResult.query_used ?? "—")}<br />
+            <strong>Runtime env:</strong> {String(historyRebuildResult.runtime_environment ?? "—")}<br />
+            <strong>DB (masked):</strong> {String(historyRebuildResult.database_url ?? "—")}<br />
+            <strong>Cron behavior:</strong> Manual action required (cron does not invoke this rebuild route automatically).<br />
+            {historyRebuildResult.error ? <><strong>Error:</strong> {historyRebuildResult.error}<br /></> : null}
+            <strong>Verification:</strong> Check <code>/api/portfolio/history/latest?debug=1</code> and <code>/api/portfolio/history/trace?portfolio_id=portf2</code>.
+          </div>
+        )}
       </details>
 
       <details open style={{ marginBottom: 12 }}>

@@ -24,6 +24,15 @@ type PositionInput = {
   exited_at: string | null;
   manual_price: number | null;
   currency: string | null;
+  resolved_symbol: string | null;
+};
+
+export type PositionSymbolResolution = {
+  raw_symbol: string;
+  resolved_symbol: string | null;
+  canonical_match: boolean;
+  has_daily_price_history: boolean;
+  warnings: string[];
 };
 
 function toNullableNumber(value: unknown): number | null {
@@ -44,6 +53,7 @@ function rowToPosition(row: any): PortfolioPositionRecord {
     id: Number(row.id ?? 0),
     portfolio_id: String(row.portfolio_id ?? ""),
     symbol: String(row.symbol ?? "").toUpperCase(),
+    resolved_symbol: row.resolved_symbol == null ? null : String(row.resolved_symbol ?? "").toUpperCase(),
     company_id: toNullableNumber(row.company_id),
     instrument_id: row.instrument_id == null ? null : String(row.instrument_id),
     display_name: row.display_name == null ? null : String(row.display_name),
@@ -73,6 +83,39 @@ function rowToPosition(row: any): PortfolioPositionRecord {
     final_sector_id: overrideActive ? (manualSector ?? inferredSector) : inferredSector,
     final_subsector_id: overrideActive ? (manualSubsector ?? inferredSubsector) : inferredSubsector,
     final_commodity_id: overrideActive ? (manualCommodity ?? inferredCommodity) : inferredCommodity,
+  };
+}
+
+export async function resolvePositionSymbol(symbolRaw: string): Promise<PositionSymbolResolution> {
+  const rawSymbol = String(symbolRaw ?? "").trim().toUpperCase();
+  const companyMatchRows = rawSymbol
+    ? await query(`SELECT ticker FROM ${tables.companiesV2} WHERE ticker = ? LIMIT 1`, [rawSymbol])
+    : [];
+  const resolvedSymbol = companyMatchRows.length > 0 ? String(companyMatchRows[0]?.ticker ?? "").trim().toUpperCase() : null;
+  const symbolForHistory = resolvedSymbol ?? rawSymbol;
+  const historyRows = symbolForHistory
+    ? await query(
+      `SELECT COUNT(*) AS count
+       FROM ${tables.dailyPriceHistory}
+       WHERE symbol = ?`,
+      [symbolForHistory]
+    )
+    : [];
+  const hasHistory = Number(historyRows[0]?.count ?? 0) > 0;
+
+  const warnings: string[] = [];
+  if (!resolvedSymbol) {
+    warnings.push("Symbol not matched to canonical company universe; trend/history coverage may fail.");
+  } else if (!hasHistory) {
+    warnings.push("Symbol matched, but no price history exists yet; trend may be unavailable until history is ingested.");
+  }
+
+  return {
+    raw_symbol: rawSymbol,
+    resolved_symbol: resolvedSymbol,
+    canonical_match: resolvedSymbol !== null,
+    has_daily_price_history: hasHistory,
+    warnings,
   };
 }
 
@@ -122,6 +165,7 @@ export async function createPortfolioPosition(input: PositionInput): Promise<voi
   await execute(
     `INSERT INTO ${tables.portfolioPositions} (
       portfolio_id, symbol, company_id, instrument_id, display_name,
+      resolved_symbol,
       shares, avg_cost, entry_date, asset_type,
       thesis, notes,
       manual_sector_id, manual_subsector_id, manual_commodity_id,
@@ -130,13 +174,14 @@ export async function createPortfolioPosition(input: PositionInput): Promise<voi
       manual_price, currency,
       created_at, updated_at,
       market_value, as_of_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.portfolio_id,
       input.symbol.toUpperCase(),
       input.company_id,
       input.instrument_id,
       input.display_name,
+      input.resolved_symbol,
       input.shares,
       input.avg_cost,
       input.entry_date,
@@ -169,6 +214,7 @@ export async function updatePortfolioPosition(id: number, input: PositionInput):
          company_id = ?,
          instrument_id = ?,
          display_name = ?,
+         resolved_symbol = ?,
          shares = ?,
          avg_cost = ?,
          entry_date = ?,
@@ -194,6 +240,7 @@ export async function updatePortfolioPosition(id: number, input: PositionInput):
       input.company_id,
       input.instrument_id,
       input.display_name,
+      input.resolved_symbol,
       input.shares,
       input.avg_cost,
       input.entry_date,
