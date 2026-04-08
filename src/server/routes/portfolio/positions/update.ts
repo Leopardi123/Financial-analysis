@@ -1,5 +1,5 @@
 import { ensureSchema } from "../../../../../api/_migrate.js";
-import { updatePortfolioPosition } from "../../../../lib/portfolio-positions/repository.js";
+import { resolvePositionSymbol, updatePortfolioPosition } from "../../../../lib/portfolio-positions/repository.js";
 import { normalizePositionPayload } from "../../../../lib/portfolio-positions/validation.js";
 import { buildPortfolioSnapshots } from "../../../../lib/portfolio-snapshots/build.js";
 import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
@@ -24,10 +24,18 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    await updatePortfolioPosition(id, normalized.value);
+    const resolution = await resolvePositionSymbol(normalized.value.symbol);
+    await updatePortfolioPosition(id, {
+      ...normalized.value,
+      resolved_symbol: resolution.resolved_symbol,
+    });
     await buildPortfolioSnapshots();
     await buildPortfolioHistory();
-    res.status(200).json({ ok: true });
+    res.status(200).json({
+      ok: true,
+      symbol_resolution: resolution,
+      warnings: resolution.warnings,
+    });
   } catch (error) {
     res.status(500).json({ ok: false, error: (error as Error).message });
   }

@@ -40,6 +40,13 @@ type PortfolioRecord = {
   positions_active_count?: NullableNumber;
   positions_valued_count?: NullableNumber;
   positions_unvalued_count?: NullableNumber;
+  trend_source_endpoint?: string;
+  trend_return_20d_valid?: boolean;
+  trend_return_65d_valid?: boolean;
+  trend_return_200d_valid?: boolean;
+  trend_invalid_reason_20d?: string | null;
+  trend_invalid_reason_65d?: string | null;
+  trend_invalid_reason_200d?: string | null;
 };
 
 type PortfolioConfig = {
@@ -108,6 +115,30 @@ type PortfolioOverviewResponse = {
     debugMessage?: string;
     stage?: string;
     trace?: Array<{ stage: string; ok: boolean; duration_ms: number; error?: string }>;
+  };
+};
+
+type PortfolioHistoryLatestResponse = {
+  ok: boolean;
+  portfolios: Array<{
+    portfolio_id: string;
+    return_20d: NullableNumber;
+    return_65d: NullableNumber;
+    return_200d: NullableNumber;
+    return_20d_valid?: boolean;
+    return_65d_valid?: boolean;
+    return_200d_valid?: boolean;
+  }>;
+  diagnostics?: {
+    portfolios?: Array<{
+      portfolio_id: string;
+      invalid_reason_20d?: string | null;
+      invalid_reason_65d?: string | null;
+      invalid_reason_200d?: string | null;
+      return_20d?: NullableNumber;
+      return_65d?: NullableNumber;
+      return_200d?: NullableNumber;
+    }>;
   };
 };
 
@@ -251,6 +282,13 @@ function formatPct(value: NullableNumber): string {
   return value === null ? "Unavailable" : `${value.toFixed(2)}%`;
 }
 
+function renderTrendReturn(value: NullableNumber, valid: boolean | undefined, invalidReason: string | null | undefined): string {
+  if (value === null) return "Unavailable";
+  if (invalidReason) return "Unavailable";
+  if (valid === false) return "Unavailable";
+  return formatPct(value);
+}
+
 function formatMoney(value: NullableNumber): string {
   return value === null ? "Unavailable" : new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 0 }).format(value);
 }
@@ -363,10 +401,11 @@ export default function PortfolioDashboardModule() {
     setError(null);
     setOverviewError(null);
 
-    const [overviewResult, adminResult, validateResult] = await Promise.allSettled([
+    const [overviewResult, adminResult, validateResult, latestTrendResult] = await Promise.allSettled([
       fetchJsonWithTimeout<PortfolioOverviewResponse>(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`, 12_000),
       fetchJsonWithTimeout<{ ok: boolean; portfolios: PortfolioConfig[] }>(`/api/portfolio/admin/list`, 8_000),
       fetchJsonWithTimeout<AdminValidateResponse>(`/api/portfolio/admin/validate`, 8_000),
+      fetchJsonWithTimeout<PortfolioHistoryLatestResponse>(`/api/portfolio/history/latest?debug=1`, 12_000),
     ]);
 
     if (adminResult.status === "fulfilled" && adminResult.value.ok) {
@@ -381,8 +420,38 @@ export default function PortfolioDashboardModule() {
       throw new Error("Failed to load portfolio validation.");
     }
 
+    const latestTrendPayload = latestTrendResult.status === "fulfilled" && latestTrendResult.value.ok
+      ? latestTrendResult.value
+      : null;
+    const latestTrendById = new Map(
+      (latestTrendPayload?.portfolios ?? []).map((row) => [String(row.portfolio_id ?? ""), row]),
+    );
+    const latestTrendDiagById = new Map(
+      (latestTrendPayload?.diagnostics?.portfolios ?? []).map((row) => [String(row.portfolio_id ?? ""), row]),
+    );
+
     if (overviewResult.status === "fulfilled" && overviewResult.value.ok) {
-      setOverview(overviewResult.value);
+      const mergedOverview: PortfolioOverviewResponse = {
+        ...overviewResult.value,
+        portfolios: overviewResult.value.portfolios.map((portfolio) => {
+          const trend = latestTrendById.get(portfolio.portfolio_id);
+          const trendDiag = latestTrendDiagById.get(portfolio.portfolio_id);
+          return {
+            ...portfolio,
+            return_20d: trend?.return_20d ?? null,
+            return_65d: trend?.return_65d ?? null,
+            return_200d: trend?.return_200d ?? null,
+            trend_return_20d_valid: trend?.return_20d_valid ?? undefined,
+            trend_return_65d_valid: trend?.return_65d_valid ?? undefined,
+            trend_return_200d_valid: trend?.return_200d_valid ?? undefined,
+            trend_invalid_reason_20d: trendDiag?.invalid_reason_20d ?? null,
+            trend_invalid_reason_65d: trendDiag?.invalid_reason_65d ?? null,
+            trend_invalid_reason_200d: trendDiag?.invalid_reason_200d ?? null,
+            trend_source_endpoint: "/api/portfolio/history/latest?debug=1",
+          };
+        }),
+      };
+      setOverview(mergedOverview);
       setOverviewError(null);
     } else {
       setOverview(null);
@@ -659,9 +728,9 @@ export default function PortfolioDashboardModule() {
                 <details className="portfolio-trend-details">
                   <summary>Trend details</summary>
                   <div className="portfolio-trend-grid">
-                    <div>20d return: {formatPct(portfolio.return_20d)}</div>
-                    <div>65d return: {formatPct(portfolio.return_65d)}</div>
-                    <div>200d return: {formatPct(portfolio.return_200d)}</div>
+                    <div>20d return: {renderTrendReturn(portfolio.return_20d, portfolio.trend_return_20d_valid, portfolio.trend_invalid_reason_20d)}</div>
+                    <div>65d return: {renderTrendReturn(portfolio.return_65d, portfolio.trend_return_65d_valid, portfolio.trend_invalid_reason_65d)}</div>
+                    <div>200d return: {renderTrendReturn(portfolio.return_200d, portfolio.trend_return_200d_valid, portfolio.trend_invalid_reason_200d)}</div>
                     <div>Short direction: {label(portfolio.short_direction ?? "unavailable")}</div>
                     <div>Medium direction: {label(portfolio.medium_direction ?? "unavailable")}</div>
                     <div>Long direction: {label(portfolio.long_direction ?? "unavailable")}</div>
@@ -673,6 +742,19 @@ export default function PortfolioDashboardModule() {
                     </div>
                     <div>Trend completeness: {label(portfolio.signal_completeness)}</div>
                   </div>
+                  {debugMode && (
+                    <pre>{JSON.stringify({
+                      title: "Portfolio Trend Debug",
+                      portfolio_id: portfolio.portfolio_id,
+                      source_endpoint_used: portfolio.trend_source_endpoint ?? "/api/portfolio/history/latest?debug=1",
+                      raw_return_20d: portfolio.return_20d,
+                      raw_return_65d: portfolio.return_65d,
+                      raw_return_200d: portfolio.return_200d,
+                      invalid_reason: portfolio.trend_invalid_reason_65d ?? null,
+                      rendered_value_65d: renderTrendReturn(portfolio.return_65d, portfolio.trend_return_65d_valid, portfolio.trend_invalid_reason_65d),
+                      fallback_used: false,
+                    }, null, 2)}</pre>
+                  )}
                 </details>
               </details>
             ))}
