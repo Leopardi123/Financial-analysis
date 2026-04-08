@@ -445,9 +445,25 @@ async function loadPortfolioHistorySeriesFromPositionsPriceHistory(portfolioId: 
   const snapshotSymbolSet = new Set(snapshotRows.map((row: any) => String(row.symbol ?? "").trim().toUpperCase()).filter(Boolean));
   const positionDiagnostics: PositionCoverageDiagnostic[] = [];
 
+  function selectHistorySeries(position: { symbol: string; resolved_symbol: string | null }) {
+    const rawSeries = bySymbol.get(position.symbol) ?? [];
+    const resolvedSeries = position.resolved_symbol ? (bySymbol.get(position.resolved_symbol) ?? []) : [];
+    const rawLast = rawSeries[rawSeries.length - 1]?.price_date ?? null;
+    const resolvedLast = resolvedSeries[resolvedSeries.length - 1]?.price_date ?? null;
+    const useResolved = Boolean(
+      position.resolved_symbol
+      && resolvedSeries.length > 0
+      && (!rawLast || (resolvedLast !== null && resolvedLast >= rawLast))
+    );
+    return useResolved
+      ? { historySymbolUsed: position.resolved_symbol as string, series: resolvedSeries }
+      : { historySymbolUsed: position.symbol, series: rawSeries };
+  }
+
   for (const position of positions) {
-    const historySymbolUsed = position.resolved_symbol ?? position.symbol;
-    const series = bySymbol.get(historySymbolUsed) ?? bySymbol.get(position.symbol) ?? [];
+    const selectedSeries = selectHistorySeries(position);
+    const historySymbolUsed = selectedSeries.historySymbolUsed;
+    const series = selectedSeries.series;
     const hasHistory = series.length > 0;
     const firstSeriesDate = hasHistory ? series[0]?.price_date ?? null : null;
     const effectiveExitedAt = position.active_position ? null : position.exited_at;

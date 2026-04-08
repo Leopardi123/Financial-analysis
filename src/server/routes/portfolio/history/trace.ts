@@ -253,9 +253,25 @@ export default async function handler(req: any, res: any) {
       : [];
     const snapshotSymbolSet = new Set((snapshotRows as any[]).map((row) => String(row.symbol ?? "").trim().toUpperCase()).filter(Boolean));
 
+    function selectHistorySeries(position: PositionRow): { historySymbol: string; series: PricePoint[]; raw_last_date: string | null; resolved_last_date: string | null } {
+      const rawSeries = priceBySymbol.get(position.symbol) ?? [];
+      const resolvedSeries = position.resolved_symbol ? (priceBySymbol.get(position.resolved_symbol) ?? []) : [];
+      const rawLast = rawSeries[rawSeries.length - 1]?.price_date ?? null;
+      const resolvedLast = resolvedSeries[resolvedSeries.length - 1]?.price_date ?? null;
+      const useResolved = Boolean(
+        position.resolved_symbol
+        && resolvedSeries.length > 0
+        && (!rawLast || (resolvedLast !== null && resolvedLast >= rawLast))
+      );
+      return useResolved
+        ? { historySymbol: position.resolved_symbol as string, series: resolvedSeries, raw_last_date: rawLast, resolved_last_date: resolvedLast }
+        : { historySymbol: position.symbol, series: rawSeries, raw_last_date: rawLast, resolved_last_date: resolvedLast };
+    }
+
     const historyCoverage = activePositions.map((position) => {
-      const historySymbol = position.resolved_symbol ?? position.symbol;
-      const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
+      const selectedSeries = selectHistorySeries(position);
+      const historySymbol = selectedSeries.historySymbol;
+      const series = selectedSeries.series;
       const firstPriceDate = series[0]?.price_date ?? null;
       const lastPriceDate = series[series.length - 1]?.price_date ?? null;
       const effectiveExitedAt = position.active_position ? null : position.exited_at;
@@ -275,8 +291,8 @@ export default async function handler(req: any, res: any) {
 
     const tradingDateSet = new Set<string>();
     for (const position of activePositions) {
-      const historySymbol = position.resolved_symbol ?? position.symbol;
-      const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
+      const selectedSeries = selectHistorySeries(position);
+      const series = selectedSeries.series;
       const effectiveExitedAt = position.active_position ? null : position.exited_at;
       for (const point of series) {
         if (position.entry_date && point.price_date < position.entry_date) continue;
@@ -338,8 +354,9 @@ export default async function handler(req: any, res: any) {
       }> = [];
 
       for (const position of activePositions) {
-        const historySymbol = position.resolved_symbol ?? position.symbol;
-        const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
+        const selectedSeries = selectHistorySeries(position);
+        const historySymbol = selectedSeries.historySymbol;
+        const series = selectedSeries.series;
         const effectiveExitedAt = position.active_position ? null : position.exited_at;
         const exact = series.find((row) => row.price_date === date) ?? null;
 
@@ -530,8 +547,9 @@ export default async function handler(req: any, res: any) {
     const referenceRow = dailyByDate.get(referenceDate) ?? null;
 
     const perPositionCutoffDiagnostics = activePositions.map((position) => {
-      const historySymbol = position.resolved_symbol ?? position.symbol;
-      const series = priceBySymbol.get(historySymbol) ?? priceBySymbol.get(position.symbol) ?? [];
+      const selectedSeries = selectHistorySeries(position);
+      const historySymbol = selectedSeries.historySymbol;
+      const series = selectedSeries.series;
       const latestSeriesPoint = series[series.length - 1] ?? null;
       const nativeCurrencyResolution = resolveNativeCurrency({
         positionCurrency: position.currency,
@@ -564,6 +582,9 @@ export default async function handler(req: any, res: any) {
         raw_symbol: position.symbol,
         resolved_symbol: position.resolved_symbol,
         native_currency: nativeCurrency,
+        selected_history_symbol: historySymbol,
+        raw_symbol_last_price_date: selectedSeries.raw_last_date,
+        resolved_symbol_last_price_date: selectedSeries.resolved_last_date,
         first_date_with_price: series[0]?.price_date ?? null,
         last_date_with_price: series[series.length - 1]?.price_date ?? null,
         first_date_with_fx_if_needed: fxCoverageDates[0] ?? (nativeCurrency === "SEK" ? series[0]?.price_date ?? null : null),
