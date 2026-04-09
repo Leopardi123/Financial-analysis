@@ -45,6 +45,8 @@ export type CanonicalPortfolioHistoryResult = {
   long_direction: Direction;
   trend_status: TrendStatus;
   trend_completeness: TrendCompleteness;
+  canonical_contract_error: boolean;
+  canonical_contract_reason: string | null;
   cumulative_return_pct: number | null;
   drawdown_pct: number | null;
   data_quality: DataQuality;
@@ -143,6 +145,68 @@ function resolveFxFromSeries(series: Array<{ price_date: string; close_price: nu
   }
   if (!Number.isFinite(latest) || latest == null || latest <= 0) return null;
   return invert ? 1 / latest : latest;
+}
+
+function isFiniteReturn(value: number | null): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function computeDirectionFromReturn(value: number | null): Direction {
+  if (!isFiniteReturn(value)) return "unavailable";
+  if (value > 2.0) return "positive";
+  if (value < -2.0) return "negative";
+  return "neutral";
+}
+
+function computeTrendStatusFromDirections(shortDirection: Direction, mediumDirection: Direction, longDirection: Direction, completeness: TrendCompleteness): TrendStatus {
+  if (completeness === "unavailable") return "unavailable";
+  if (shortDirection === "unavailable" && mediumDirection === "unavailable" && longDirection === "unavailable") return "unavailable";
+  if (longDirection === "positive" && mediumDirection === "positive" && (shortDirection === "positive" || shortDirection === "neutral")) return "strong_uptrend";
+  if (longDirection === "negative" && mediumDirection === "negative" && (shortDirection === "negative" || shortDirection === "neutral")) return "downtrend";
+  if (shortDirection === "positive" && (mediumDirection === "positive" || mediumDirection === "neutral")) return "improving";
+  if (shortDirection === "negative" && (mediumDirection === "negative" || mediumDirection === "neutral")) return "weakening";
+  return "neutral";
+}
+
+function computeCompletenessFromReturns(returns: { return_20d: number | null; return_65d: number | null; return_200d: number | null }): TrendCompleteness {
+  const has20 = isFiniteReturn(returns.return_20d);
+  const has65 = isFiniteReturn(returns.return_65d);
+  const has200 = isFiniteReturn(returns.return_200d);
+  if (has20 && has65 && has200) return "full";
+  if (has20 || has65 || has200) return "partial";
+  return "unavailable";
+}
+
+function resolveTrendContract(raw: {
+  return_20d: number | null;
+  return_65d: number | null;
+  return_200d: number | null;
+  trend_completeness: TrendCompleteness;
+}) {
+  const reasons: string[] = [];
+  if (raw.trend_completeness === "full") {
+    if (!isFiniteReturn(raw.return_20d)) reasons.push("full_requires_finite_return_20d");
+    if (!isFiniteReturn(raw.return_65d)) reasons.push("full_requires_finite_return_65d");
+    if (!isFiniteReturn(raw.return_200d)) reasons.push("full_requires_finite_return_200d");
+  }
+  const resolvedCompleteness = computeCompletenessFromReturns(raw);
+  if (resolvedCompleteness !== raw.trend_completeness) reasons.push(`completeness_downgraded:${raw.trend_completeness}->${resolvedCompleteness}`);
+  const shortDirection = computeDirectionFromReturn(raw.return_20d);
+  const mediumDirection = computeDirectionFromReturn(raw.return_65d);
+  const longDirection = computeDirectionFromReturn(raw.return_200d);
+  const trendStatus = computeTrendStatusFromDirections(shortDirection, mediumDirection, longDirection, resolvedCompleteness);
+  return {
+    return_20d: raw.return_20d,
+    return_65d: raw.return_65d,
+    return_200d: raw.return_200d,
+    short_direction: shortDirection,
+    medium_direction: mediumDirection,
+    long_direction: longDirection,
+    trend_status: trendStatus,
+    trend_completeness: resolvedCompleteness,
+    canonical_contract_error: reasons.length > 0,
+    canonical_contract_reason: reasons.length > 0 ? reasons.join("|") : null,
+  };
 }
 
 export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle> {
@@ -344,6 +408,17 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
       if (filteredSeries[i - 1].composition_hash !== filteredSeries[i].composition_hash) compositionBreakDates.push(filteredSeries[i].date);
     }
 
+    const resolvedReturns = {
+      return_20d: invalid20.length ? null : metrics.return_20d,
+      return_65d: invalid65.length ? null : metrics.return_65d,
+      return_200d: invalid200.length ? null : metrics.return_200d,
+      trend_completeness: metrics.trend_completeness,
+    };
+    const trendContract = resolveTrendContract(resolvedReturns);
+    if (trendContract.canonical_contract_error && process.env.PORTFOLIO_CONTRACT_STRICT_DEBUG === "1") {
+      throw new Error(`canonical_contract_violation:${config.portfolio_id}:${trendContract.canonical_contract_reason ?? "unknown"}`);
+    }
+
     const portfolioResult: CanonicalPortfolioHistoryResult = {
       portfolio_id: config.portfolio_id,
       portfolio_name: config.portfolio_name,
@@ -352,9 +427,9 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
       last_history_date: latest?.date ?? null,
       latest_value_sek: latest?.market_value_sek ?? null,
       daily_series: filteredSeries,
-      return_20d: invalid20.length ? null : metrics.return_20d,
-      return_65d: invalid65.length ? null : metrics.return_65d,
-      return_200d: invalid200.length ? null : metrics.return_200d,
+      return_20d: trendContract.return_20d,
+      return_65d: trendContract.return_65d,
+      return_200d: trendContract.return_200d,
       anchor_20d_date: metrics.anchor_20d_date,
       anchor_65d_date: metrics.anchor_65d_date,
       anchor_200d_date: metrics.anchor_200d_date,
@@ -367,11 +442,13 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
       invalid_reason_20d: invalid20[0] ?? null,
       invalid_reason_65d: invalid65[0] ?? null,
       invalid_reason_200d: invalid200[0] ?? null,
-      short_direction: metrics.short_direction,
-      medium_direction: metrics.medium_direction,
-      long_direction: metrics.long_direction,
-      trend_status: metrics.trend_status,
-      trend_completeness: metrics.trend_completeness,
+      short_direction: trendContract.short_direction,
+      medium_direction: trendContract.medium_direction,
+      long_direction: trendContract.long_direction,
+      trend_status: trendContract.trend_status,
+      trend_completeness: trendContract.trend_completeness,
+      canonical_contract_error: trendContract.canonical_contract_error,
+      canonical_contract_reason: trendContract.canonical_contract_reason,
       cumulative_return_pct,
       drawdown_pct,
       data_quality: filteredSeries.every((d) => d.excluded_position_count === 0) ? "full" : (filteredSeries.some((d) => d.included_position_count === 0) ? "estimated" : "partial"),

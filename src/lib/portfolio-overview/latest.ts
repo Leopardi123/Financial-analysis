@@ -53,6 +53,46 @@ function sanitizeTrendReturn(value: unknown): number | null {
   return num;
 }
 
+function isFiniteTrendReturn(value: number | null): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function normalizeAdapterTrendContract(trend: {
+  return_20d: number | null;
+  return_65d: number | null;
+  return_200d: number | null;
+  short_direction: string;
+  medium_direction: string;
+  long_direction: string;
+  trend_status: string;
+  signal_completeness: string | null;
+  relative_strength_bucket?: string | null;
+  [key: string]: unknown;
+}) {
+  const reasons: string[] = [];
+  const hasAll = isFiniteTrendReturn(trend.return_20d) && isFiniteTrendReturn(trend.return_65d) && isFiniteTrendReturn(trend.return_200d);
+  if (trend.signal_completeness === "full" && !hasAll) {
+    reasons.push("adapter_contract_violation_full_without_returns");
+  }
+  const downgradedCompleteness = hasAll
+    ? "full"
+    : (isFiniteTrendReturn(trend.return_20d) || isFiniteTrendReturn(trend.return_65d) || isFiniteTrendReturn(trend.return_200d) ? "partial" : "unavailable");
+  if (trend.signal_completeness !== downgradedCompleteness) {
+    reasons.push(`adapter_completeness_downgraded:${trend.signal_completeness ?? "null"}->${downgradedCompleteness}`);
+  }
+  const forceUnavailable = downgradedCompleteness !== "full";
+  return {
+    ...trend,
+    signal_completeness: downgradedCompleteness,
+    short_direction: forceUnavailable ? "unavailable" : trend.short_direction,
+    medium_direction: forceUnavailable ? "unavailable" : trend.medium_direction,
+    long_direction: forceUnavailable ? "unavailable" : trend.long_direction,
+    trend_status: forceUnavailable ? "unavailable" : trend.trend_status,
+    adapter_contract_error: reasons.length > 0,
+    adapter_contract_reason: reasons.length > 0 ? reasons.join("|") : null,
+  };
+}
+
 function buildStructuredUnavailableTrendDebug(row: any) {
   const availableDaysRaw = Number(row?.available_days ?? NaN);
   const availableDays = Number.isFinite(availableDaysRaw) ? availableDaysRaw : 0;
@@ -525,7 +565,17 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
 
   const portfolios = (portfolioRows as any[]).map((row) => {
     const trendSource = historyTrendByPortfolioId.get(String(row.portfolio_id ?? ""));
-    const trendMetrics = trendSource?.metrics ?? normalizeTrendFields(row);
+    const rawTrendMetrics = trendSource?.metrics ?? normalizeTrendFields(row);
+    const trendMetrics = normalizeAdapterTrendContract({
+      return_20d: rawTrendMetrics.return_20d,
+      return_65d: rawTrendMetrics.return_65d,
+      return_200d: rawTrendMetrics.return_200d,
+      short_direction: rawTrendMetrics.short_direction,
+      medium_direction: rawTrendMetrics.medium_direction,
+      long_direction: rawTrendMetrics.long_direction,
+      trend_status: rawTrendMetrics.trend_status,
+      signal_completeness: rawTrendMetrics.signal_completeness,
+    });
     return ({
     ...(function () {
       const snapshotDebug = parseJson(row.debug_payload_json);
@@ -567,6 +617,8 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     suggested_hedge_type: row.suggested_hedge_type == null ? null : String(row.suggested_hedge_type),
     hedge_policy_applied: row.hedge_policy_applied == null ? null : String(row.hedge_policy_applied),
     signal_completeness: trendMetrics.signal_completeness,
+    trend_contract_error: trendMetrics.adapter_contract_error,
+    trend_contract_reason: trendMetrics.adapter_contract_reason,
     data_quality_flags: buildDataQualityFlags({ ...row, trend_status: trendMetrics.trend_status, return_65d: trendMetrics.return_65d }),
   });
   });
@@ -722,6 +774,34 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
           trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? "unavailable",
           data_quality: trendDebug.data_quality ?? null,
           reason: trendDebug.reason ?? (trendDebug.return_65d == null ? "insufficient_history" : "ok"),
+        },
+        contract_debug: {
+          canonical_return_20d: trendDebug.return_20d ?? null,
+          canonical_return_65d: trendDebug.return_65d ?? null,
+          canonical_return_200d: trendDebug.return_200d ?? null,
+          canonical_trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null,
+          canonical_short_direction: trendDebug.short_direction ?? null,
+          canonical_medium_direction: trendDebug.medium_direction ?? null,
+          canonical_long_direction: trendDebug.long_direction ?? null,
+          latest_payload_return_20d: null,
+          latest_payload_return_65d: null,
+          latest_payload_return_200d: null,
+          latest_payload_trend_completeness: null,
+          latest_payload_short_direction: null,
+          latest_payload_medium_direction: null,
+          latest_payload_long_direction: null,
+          dashboard_adapter_return_20d: row.return_20d ?? null,
+          dashboard_adapter_return_65d: row.return_65d ?? null,
+          dashboard_adapter_return_200d: row.return_200d ?? null,
+          dashboard_adapter_trend_completeness: row.signal_completeness ?? null,
+          dashboard_adapter_short_direction: row.short_direction ?? null,
+          dashboard_adapter_medium_direction: row.medium_direction ?? null,
+          dashboard_adapter_long_direction: row.long_direction ?? null,
+          contract_match_canonical_to_latest: null,
+          contract_match_latest_to_adapter: null,
+          contract_match_adapter_to_ui: null,
+          mismatch_stage: row.trend_contract_error ? "dashboard_adapter" : null,
+          mismatch_reason: row.trend_contract_reason ?? null,
         },
         risk_debug: riskDebug
           ? {
