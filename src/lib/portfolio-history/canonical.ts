@@ -103,6 +103,63 @@ export type CanonicalBundle = {
   total_aggregation_rule: "include_portfolio_if_value_present_on_date_no_carry_forward";
   portfolios: CanonicalPortfolioHistoryResult[];
   total: CanonicalTotalHistoryResult;
+  runtime_audit?: CanonicalRuntimeAudit;
+};
+
+export type CanonicalRuntimeStageName =
+  | "portfolio_config_load_started"
+  | "portfolio_config_load_finished"
+  | "positions_load_started"
+  | "positions_load_finished"
+  | "price_history_load_started"
+  | "price_history_load_finished"
+  | "fx_history_load_started"
+  | "fx_history_load_finished"
+  | "canonical_series_build_started"
+  | "canonical_series_build_finished"
+  | "portfolio_metric_compute_started"
+  | "portfolio_metric_compute_finished"
+  | "total_aggregation_started"
+  | "total_aggregation_finished";
+
+export type CanonicalRuntimeStageTrace = {
+  stage: CanonicalRuntimeStageName;
+  started_at: string;
+  ended_at: string;
+  duration_ms: number;
+  ok: boolean;
+  portfolio_id?: string;
+  row_count?: number;
+  portfolio_count?: number;
+  date_count?: number;
+  reason?: string;
+};
+
+export type CanonicalBuildAuditOptions = {
+  portfolio_id?: string | null;
+  max_portfolios?: number | null;
+  limit_days?: number | null;
+  include_positions?: boolean;
+  compact_mode?: boolean;
+  skip_total?: boolean;
+  skip_trace?: boolean;
+  skip_db_evidence?: boolean;
+  skip_consistency_checks?: boolean;
+  skip_debug_sections?: boolean;
+};
+
+export type CanonicalRuntimeAudit = {
+  started_at: string;
+  finished_at: string;
+  duration_ms: number;
+  runtime_stage_trace: CanonicalRuntimeStageTrace[];
+  scope_flags_used: Required<CanonicalBuildAuditOptions>;
+  portfolios_loaded_count: number;
+  positions_loaded_count: number;
+  history_row_count: number;
+  fx_row_count: number;
+  series_days_count: number;
+  last_completed_stage: CanonicalRuntimeStageName | null;
 };
 
 function isValidDate(value: unknown): value is string {
@@ -145,6 +202,21 @@ function resolveFxFromSeries(series: Array<{ price_date: string; close_price: nu
   }
   if (!Number.isFinite(latest) || latest == null || latest <= 0) return null;
   return invert ? 1 / latest : latest;
+}
+
+function resolveAuditOptions(options?: CanonicalBuildAuditOptions): Required<CanonicalBuildAuditOptions> {
+  return {
+    portfolio_id: (options?.portfolio_id ?? null) || null,
+    max_portfolios: Number.isFinite(Number(options?.max_portfolios)) ? Math.max(1, Number(options?.max_portfolios)) : null,
+    limit_days: Number.isFinite(Number(options?.limit_days)) ? Math.max(1, Number(options?.limit_days)) : null,
+    include_positions: options?.include_positions !== false,
+    compact_mode: options?.compact_mode === true,
+    skip_total: options?.skip_total === true,
+    skip_trace: options?.skip_trace === true || options?.compact_mode === true,
+    skip_db_evidence: options?.skip_db_evidence === true || options?.compact_mode === true,
+    skip_consistency_checks: options?.skip_consistency_checks === true,
+    skip_debug_sections: options?.skip_debug_sections === true || options?.compact_mode === true,
+  };
 }
 
 function isFiniteReturn(value: number | null): value is number {
@@ -209,18 +281,50 @@ function resolveTrendContract(raw: {
   };
 }
 
-export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle> {
-  const configs = await listPortfolioConfigs();
-  const active = configs.filter((c) => c.active);
+export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAuditOptions): Promise<CanonicalBundle> {
+  const startedAt = Date.now();
+  const resolvedAudit = resolveAuditOptions(options);
+  const runtimeStageTrace: CanonicalRuntimeStageTrace[] = [];
+  let lastCompletedStage: CanonicalRuntimeStageName | null = null;
+  const pushStage = (stage: CanonicalRuntimeStageName, stageStartedMs: number, ok: boolean, extras?: Omit<CanonicalRuntimeStageTrace, "stage" | "started_at" | "ended_at" | "duration_ms" | "ok">) => {
+    const endedAtMs = Date.now();
+    runtimeStageTrace.push({
+      stage,
+      started_at: new Date(stageStartedMs).toISOString(),
+      ended_at: new Date(endedAtMs).toISOString(),
+      duration_ms: endedAtMs - stageStartedMs,
+      ok,
+      ...extras,
+    });
+    if (ok) lastCompletedStage = stage;
+  };
+
+  const configLoadStarted = Date.now();
+  let configs = await listPortfolioConfigs();
+  pushStage("portfolio_config_load_started", configLoadStarted, true);
+  if (resolvedAudit.portfolio_id) {
+    configs = configs.filter((c) => c.portfolio_id === resolvedAudit.portfolio_id);
+  }
+  let active = configs.filter((c) => c.active);
+  if (resolvedAudit.max_portfolios != null) {
+    active = active.slice(0, resolvedAudit.max_portfolios);
+  }
+  pushStage("portfolio_config_load_finished", configLoadStarted, true, { portfolio_count: active.length });
   const portfolios: CanonicalPortfolioHistoryResult[] = [];
+  let positionsLoadedCount = 0;
+  let historyRowCount = 0;
+  let fxRowCount = 0;
+  let seriesDaysCount = 0;
 
   for (const config of active) {
+    const positionsStageStarted = Date.now();
+    pushStage("positions_load_started", positionsStageStarted, true, { portfolio_id: config.portfolio_id });
     const positionsRows = await query(
       `SELECT id, symbol, resolved_symbol, shares, entry_date, exited_at, active_position, currency FROM ${tables.portfolioPositions} WHERE portfolio_id = ? AND COALESCE(shares,0) > 0`,
       [config.portfolio_id],
     ) as Array<any>;
 
-    const positions = positionsRows
+    const positions = (resolvedAudit.include_positions ? positionsRows : [])
       .map((row) => ({
         id: Number(row.id ?? NaN),
         symbol: String(row.symbol ?? "").trim().toUpperCase(),
@@ -232,11 +336,17 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
         currency: normalizeCurrency(row.currency),
       }))
       .filter((p) => p.symbol && Number.isFinite(p.shares) && p.shares > 0);
+    positionsLoadedCount += positions.length;
+    pushStage("positions_load_finished", positionsStageStarted, true, { portfolio_id: config.portfolio_id, row_count: positions.length });
 
     const symbols = Array.from(new Set(positions.flatMap((p) => p.resolved_symbol ? [p.symbol, p.resolved_symbol] : [p.symbol])));
+    const priceStageStarted = Date.now();
+    pushStage("price_history_load_started", priceStageStarted, true, { portfolio_id: config.portfolio_id });
     const priceRows = symbols.length > 0
       ? await query(`SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price, currency FROM ${tables.dailyPriceHistory} WHERE symbol IN (${symbols.map(() => "?").join(",")}) ORDER BY symbol ASC, price_date ASC`, symbols)
       : [];
+    historyRowCount += priceRows.length;
+    pushStage("price_history_load_finished", priceStageStarted, true, { portfolio_id: config.portfolio_id, row_count: priceRows.length });
     const pricesBySymbol = new Map<string, Array<{ price_date: string; close_price: number; currency: string | null }>>();
     let firstDbPriceDate: string | null = null;
     let lastDbPriceDate: string | null = null;
@@ -279,9 +389,13 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
       .filter((c): c is string => Boolean(c) && c !== "SEK")));
 
     const fxSymbols = Array.from(new Set(currencies.flatMap((c) => [`${c}SEK`, `SEK${c}`, `USD${c}`, `${c}USD`, "USDSEK", "SEKUSD"])));
+    const fxStageStarted = Date.now();
+    pushStage("fx_history_load_started", fxStageStarted, true, { portfolio_id: config.portfolio_id });
     const fxRows = fxSymbols.length > 0
       ? await query(`SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price FROM ${tables.dailyPriceHistory} WHERE symbol IN (${fxSymbols.map(() => "?").join(",")}) ORDER BY symbol ASC, price_date ASC`, fxSymbols)
       : [];
+    fxRowCount += fxRows.length;
+    pushStage("fx_history_load_finished", fxStageStarted, true, { portfolio_id: config.portfolio_id, row_count: fxRows.length });
     const fxBySymbol = new Map<string, Array<{ price_date: string; close_price: number }>>();
     let firstDbFxDate: string | null = null;
     let lastDbFxDate: string | null = null;
@@ -315,7 +429,10 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
       }
     }
 
-    const sortedDates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+    const sortedDatesRaw = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+    const sortedDates = resolvedAudit.limit_days != null ? sortedDatesRaw.slice(-resolvedAudit.limit_days) : sortedDatesRaw;
+    const seriesStageStarted = Date.now();
+    pushStage("canonical_series_build_started", seriesStageStarted, true, { portfolio_id: config.portfolio_id, date_count: sortedDates.length });
     const dailySeries: CanonicalDailyPoint[] = [];
     const excludedByReason: Record<string, number> = {};
     const includedSymbols = new Set<string>();
@@ -386,8 +503,12 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
       else if (includedOnDate.length < positions.length) partialDates.push(date);
       else fullDates.push(date);
     }
+    pushStage("canonical_series_build_finished", seriesStageStarted, true, { portfolio_id: config.portfolio_id, date_count: dailySeries.length });
 
     const filteredSeries = dailySeries.filter((d) => Number.isFinite(d.market_value_sek) && d.market_value_sek > 0);
+    seriesDaysCount += filteredSeries.length;
+    const metricStageStarted = Date.now();
+    pushStage("portfolio_metric_compute_started", metricStageStarted, true, { portfolio_id: config.portfolio_id, date_count: filteredSeries.length });
     const trendInput = filteredSeries.map((d) => ({ as_of_date: d.date, market_value: d.market_value_sek, contributor_count: d.included_position_count }));
     const { metrics, cumulative_return_pct, drawdown_pct } = summarizeReturns(trendInput);
     const latest = filteredSeries[filteredSeries.length - 1] ?? null;
@@ -399,9 +520,9 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
     const invalid65 = [...metrics.invalid_reasons_65d];
     const invalid20 = [...metrics.invalid_reasons_20d];
     const invalid200 = [...metrics.invalid_reasons_200d];
-    if (latestHash && anchor20Hash && latestHash !== anchor20Hash) invalid20.push("composition_hash_mismatch");
-    if (latestHash && anchor65Hash && latestHash !== anchor65Hash) invalid65.push("composition_hash_mismatch");
-    if (latestHash && anchor200Hash && latestHash !== anchor200Hash) invalid200.push("composition_hash_mismatch");
+    if (!resolvedAudit.skip_consistency_checks && latestHash && anchor20Hash && latestHash !== anchor20Hash) invalid20.push("composition_hash_mismatch");
+    if (!resolvedAudit.skip_consistency_checks && latestHash && anchor65Hash && latestHash !== anchor65Hash) invalid65.push("composition_hash_mismatch");
+    if (!resolvedAudit.skip_consistency_checks && latestHash && anchor200Hash && latestHash !== anchor200Hash) invalid200.push("composition_hash_mismatch");
 
     const compositionBreakDates: string[] = [];
     for (let i = 1; i < filteredSeries.length; i += 1) {
@@ -418,6 +539,7 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
     if (trendContract.canonical_contract_error && process.env.PORTFOLIO_CONTRACT_STRICT_DEBUG === "1") {
       throw new Error(`canonical_contract_violation:${config.portfolio_id}:${trendContract.canonical_contract_reason ?? "unknown"}`);
     }
+    pushStage("portfolio_metric_compute_finished", metricStageStarted, true, { portfolio_id: config.portfolio_id });
 
     const portfolioResult: CanonicalPortfolioHistoryResult = {
       portfolio_id: config.portfolio_id,
@@ -452,31 +574,50 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
       cumulative_return_pct,
       drawdown_pct,
       data_quality: filteredSeries.every((d) => d.excluded_position_count === 0) ? "full" : (filteredSeries.some((d) => d.included_position_count === 0) ? "estimated" : "partial"),
-      inclusion_debug: {
-        positions_included: Array.from(includedSymbols).sort((a, b) => a.localeCompare(b)),
-        positions_excluded: Array.from(excludedSymbols).sort((a, b) => a.localeCompare(b)),
-        exclusion_reasons: excludedByReason,
-      },
-      db_evidence: {
-        positions_found_in_db: positions.length,
-        price_rows_found_in_db: priceRows.length,
-        fx_rows_found_in_db: fxRows.length,
-        first_db_price_date: firstDbPriceDate,
-        last_db_price_date: lastDbPriceDate,
-        first_db_fx_date: firstDbFxDate,
-        last_db_fx_date: lastDbFxDate,
-        dates_with_zero_included_positions: zeroIncludedDates,
-        dates_with_partial_positions: partialDates,
-        dates_with_full_positions: fullDates,
-        composition_break_dates: compositionBreakDates,
-        excluded_positions_by_reason_count: excludedByReason,
-      },
+      inclusion_debug: resolvedAudit.skip_trace
+        ? { positions_included: [], positions_excluded: [], exclusion_reasons: {} }
+        : {
+          positions_included: Array.from(includedSymbols).sort((a, b) => a.localeCompare(b)),
+          positions_excluded: Array.from(excludedSymbols).sort((a, b) => a.localeCompare(b)),
+          exclusion_reasons: excludedByReason,
+        },
+      db_evidence: resolvedAudit.skip_db_evidence
+        ? {
+          positions_found_in_db: positions.length,
+          price_rows_found_in_db: priceRows.length,
+          fx_rows_found_in_db: fxRows.length,
+          first_db_price_date: null,
+          last_db_price_date: null,
+          first_db_fx_date: null,
+          last_db_fx_date: null,
+          dates_with_zero_included_positions: [],
+          dates_with_partial_positions: [],
+          dates_with_full_positions: [],
+          composition_break_dates: [],
+          excluded_positions_by_reason_count: {},
+        }
+        : {
+          positions_found_in_db: positions.length,
+          price_rows_found_in_db: priceRows.length,
+          fx_rows_found_in_db: fxRows.length,
+          first_db_price_date: firstDbPriceDate,
+          last_db_price_date: lastDbPriceDate,
+          first_db_fx_date: firstDbFxDate,
+          last_db_fx_date: lastDbFxDate,
+          dates_with_zero_included_positions: zeroIncludedDates,
+          dates_with_partial_positions: partialDates,
+          dates_with_full_positions: fullDates,
+          composition_break_dates: compositionBreakDates,
+          excluded_positions_by_reason_count: excludedByReason,
+        },
       consistency_hash: hashString(`${config.portfolio_id}|${latest?.date ?? "null"}|${latest?.market_value_sek ?? 0}|${latestHash ?? "none"}`),
     };
 
     portfolios.push(portfolioResult);
   }
 
+  const totalStageStarted = Date.now();
+  pushStage("total_aggregation_started", totalStageStarted, true, { portfolio_count: portfolios.length });
   const includedPortfolios = active.filter((c) => c.included_in_total_portfolio).map((c) => c.portfolio_id);
   const byId = new Map(portfolios.map((p) => [p.portfolio_id, p]));
   const totalDateSet = new Set<string>();
@@ -514,7 +655,31 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
     if (peak > 0) minDrawdown = Math.min(minDrawdown, ((row.total_market_value_sek / peak) - 1) * 100);
   }
 
-  const total: CanonicalTotalHistoryResult = {
+  const total: CanonicalTotalHistoryResult = resolvedAudit.skip_total
+    ? {
+      as_of_date: null,
+      total_market_value_sek: null,
+      included_portfolio_ids: includedPortfolios,
+      excluded_portfolio_ids: active.map((c) => c.portfolio_id).filter((id) => !includedPortfolios.includes(id)),
+      total_series: [],
+      daily_return_pct: null,
+      cumulative_return_pct: null,
+      drawdown_pct: null,
+      history_days_available: 0,
+      data_quality: "partial",
+      date_rule_used: "observation_union_no_carry_forward_include_if_present",
+      consistency_hash: hashString(`skip_total|${includedPortfolios.join(",")}`),
+      db_evidence: {
+        portfolio_rows_found_by_portfolio_id: rowsById,
+        total_dates_considered: 0,
+        included_portfolio_count_by_date: {},
+        excluded_portfolio_count_by_date: {},
+        common_date_coverage_summary: { min: 0, max: 0, avg: 0 },
+        total_date_used: null,
+        total_date_why: "skipped_by_audit_flag",
+      },
+    }
+    : {
     as_of_date: tLatest?.date ?? null,
     total_market_value_sek: tLatest?.total_market_value_sek ?? null,
     included_portfolio_ids: includedPortfolios,
@@ -540,6 +705,22 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
       total_date_used: tLatest?.date ?? null,
       total_date_why: "latest canonical total series date",
     },
+    };
+  pushStage("total_aggregation_finished", totalStageStarted, true, { date_count: total.total_series.length });
+
+  const finishedAtMs = Date.now();
+  const runtimeAudit: CanonicalRuntimeAudit = {
+    started_at: new Date(startedAt).toISOString(),
+    finished_at: new Date(finishedAtMs).toISOString(),
+    duration_ms: finishedAtMs - startedAt,
+    runtime_stage_trace: runtimeStageTrace,
+    scope_flags_used: resolvedAudit,
+    portfolios_loaded_count: active.length,
+    positions_loaded_count: positionsLoadedCount,
+    history_row_count: historyRowCount,
+    fx_row_count: fxRowCount,
+    series_days_count: seriesDaysCount,
+    last_completed_stage: lastCompletedStage,
   };
 
   return {
@@ -549,6 +730,7 @@ export async function buildPortfolioHistoryCanonical(): Promise<CanonicalBundle>
     total_aggregation_rule: "include_portfolio_if_value_present_on_date_no_carry_forward",
     portfolios,
     total,
+    runtime_audit: runtimeAudit,
   };
 }
 
@@ -600,12 +782,12 @@ export async function materializePortfolioHistoryCanonical(bundle?: CanonicalBun
   return result;
 }
 
-export async function readPortfolioHistoryCanonicalLatest() {
-  return buildPortfolioHistoryCanonical();
+export async function readPortfolioHistoryCanonicalLatest(options?: CanonicalBuildAuditOptions) {
+  return buildPortfolioHistoryCanonical(options);
 }
 
 export async function readPortfolioHistoryCanonicalTrace(portfolioId: string) {
-  const bundle = await buildPortfolioHistoryCanonical();
+  const bundle = await buildPortfolioHistoryCanonical({ portfolio_id: portfolioId });
   const portfolio = bundle.portfolios.find((p) => p.portfolio_id === portfolioId) ?? null;
   return { bundle, portfolio };
 }
