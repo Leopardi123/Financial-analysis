@@ -1,5 +1,5 @@
 import { ensureSchema } from "../../../../../api/_migrate.js";
-import { readPortfolioHistoryCanonicalLatest } from "../../../../lib/portfolio-history/canonical.js";
+import { CanonicalBuildTimeoutError, readPortfolioHistoryCanonicalLatest } from "../../../../lib/portfolio-history/canonical.js";
 
 type RouteStageName =
   | "request_received"
@@ -128,7 +128,9 @@ export default async function handler(req: any, res: any) {
       skip_db_evidence: parseBool(req.query?.skip_db_evidence),
       skip_consistency_checks: parseBool(req.query?.skip_consistency_checks),
       skip_debug_sections: parseBool(req.query?.skip_debug_sections),
+      max_runtime_ms: parseNum(req.query?.max_runtime_ms),
     };
+    const runMatrix = parseBool(req.query?.run_matrix);
     const canonical = await readPortfolioHistoryCanonicalLatest(canonicalAuditFlags);
     for (const stage of canonical.runtime_audit?.runtime_stage_trace ?? []) {
       routeTrace.push({
@@ -270,6 +272,9 @@ export default async function handler(req: any, res: any) {
     pushStage("response_serialize_started", serializeStarted, true);
     const payload: any = {
       ok: true,
+      did_timeout: false,
+      last_completed_stage: "response_serialize_started",
+      did_engine_finish_all_stages: false,
       canonical_source_version: canonical.canonical_source_version,
       date_rule: canonical.date_rule,
       continuity_rule: canonical.continuity_rule,
@@ -278,11 +283,14 @@ export default async function handler(req: any, res: any) {
       total: canonical.total,
     };
     if (debug && diagnosticsPayload) payload.diagnostics = diagnosticsPayload;
+    const serializeDurationMs = Date.now() - serializeStarted;
     payload.runtime_audit = {
       runtime_stage_trace: routeTrace,
       total_runtime_ms: Date.now() - routeStart,
       last_completed_stage: lastCompletedStage ?? canonical.runtime_audit?.last_completed_stage ?? null,
       timed_out_stage: null,
+      did_timeout: false,
+      did_engine_finish_all_stages: false,
       portfolios_loaded_count: canonical.runtime_audit?.portfolios_loaded_count ?? canonical.portfolios.length,
       positions_loaded_count: canonical.runtime_audit?.positions_loaded_count ?? null,
       history_row_count: canonical.runtime_audit?.history_row_count ?? null,
@@ -290,10 +298,100 @@ export default async function handler(req: any, res: any) {
       series_days_count: canonical.runtime_audit?.series_days_count ?? null,
       response_payload_size_proxy: JSON.stringify({ portfolios: payload.portfolios?.length ?? 0, diagnostics: debug }).length,
       scope_flags_used: canonical.runtime_audit?.scope_flags_used ?? canonicalAuditFlags,
+      compute_time_ms: canonical.runtime_audit?.compute_time_ms ?? null,
+      serialization_time_ms: serializeDurationMs,
+      operations_count: canonical.runtime_audit?.operations_count ?? null,
+      rows_processed: canonical.runtime_audit?.rows_processed ?? null,
+      portfolios_processed: canonical.runtime_audit?.portfolios_processed ?? null,
+      days_processed: canonical.runtime_audit?.days_processed ?? null,
+      work_units_estimate: canonical.runtime_audit?.work_units_estimate ?? null,
     };
     pushStage("response_serialize_finished", serializeStarted, true);
+    payload.runtime_audit.did_engine_finish_all_stages = true;
+    payload.runtime_audit.last_completed_stage = "response_serialize_finished";
+    payload.last_completed_stage = "response_serialize_finished";
+    payload.did_engine_finish_all_stages = true;
+
+    if (runMatrix) {
+      const cases: Array<{ case: string; options: any; portfolios: string; days: string }> = [
+        { case: "CASE_1", options: { portfolio_id: "portf0", limit_days: 30, skip_total: true, compact_mode: true }, portfolios: "1", days: "30" },
+        { case: "CASE_2", options: { portfolio_id: "portf0", skip_total: true, compact_mode: true }, portfolios: "1", days: "full" },
+        { case: "CASE_3", options: { compact_mode: true, skip_trace: true, skip_db_evidence: true }, portfolios: "all", days: "full" },
+        { case: "CASE_4", options: {}, portfolios: "all", days: "full" },
+        { case: "CASE_5", options: { skip_total: true, compact_mode: true }, portfolios: "all", days: "full" },
+      ];
+      const results: Array<any> = [];
+      for (const item of cases) {
+        const started = Date.now();
+        try {
+          const r = await readPortfolioHistoryCanonicalLatest({ ...item.options, max_runtime_ms: canonicalAuditFlags.max_runtime_ms ?? null });
+          const correctness = r.portfolios.every((p) =>
+            p.trend_completeness !== "full"
+            || (isFiniteNumber(p.return_20d) && isFiniteNumber(p.return_65d) && isFiniteNumber(p.return_200d)))
+            ? "valid"
+            : "invalid";
+          results.push({
+            case: item.case,
+            portfolios: item.portfolios,
+            days: item.days,
+            success: true,
+            timeout: false,
+            total_runtime_ms: Date.now() - started,
+            correctness,
+          });
+        } catch (matrixError) {
+          const timeout = matrixError instanceof CanonicalBuildTimeoutError;
+          results.push({
+            case: item.case,
+            portfolios: item.portfolios,
+            days: item.days,
+            success: false,
+            timeout,
+            total_runtime_ms: Date.now() - started,
+            correctness: "invalid",
+          });
+        }
+      }
+      payload.runtime_vs_logic_table = results;
+    }
     res.status(200).json(payload);
   } catch (error) {
+    if (error instanceof CanonicalBuildTimeoutError) {
+      const partial = error.partial_bundle;
+      res.status(200).json({
+        ok: false,
+        error: error.message,
+        did_timeout: true,
+        last_completed_stage: partial.runtime_audit?.last_completed_stage ?? lastCompletedStage,
+        did_engine_finish_all_stages: false,
+        canonical_source_version: partial.canonical_source_version,
+        portfolios: partial.portfolios,
+        total: partial.total,
+        partial_snapshot: {
+          canonical_series: partial.portfolios.map((p) => ({ portfolio_id: p.portfolio_id, daily_series: p.daily_series })),
+          computed_returns: partial.portfolios.map((p) => ({
+            portfolio_id: p.portfolio_id,
+            return_20d: p.return_20d,
+            return_65d: p.return_65d,
+            return_200d: p.return_200d,
+          })),
+          counts: {
+            portfolios_loaded_count: partial.runtime_audit?.portfolios_loaded_count ?? partial.portfolios.length,
+            positions_loaded_count: partial.runtime_audit?.positions_loaded_count ?? null,
+            history_row_count: partial.runtime_audit?.history_row_count ?? null,
+            fx_row_count: partial.runtime_audit?.fx_row_count ?? null,
+            series_days_count: partial.runtime_audit?.series_days_count ?? null,
+          },
+        },
+        runtime_audit: {
+          ...partial.runtime_audit,
+          runtime_stage_trace: routeTrace.concat(partial.runtime_audit?.runtime_stage_trace ?? []),
+          total_runtime_ms: Date.now() - routeStart,
+          timed_out_stage: partial.runtime_audit?.timed_out_stage ?? partial.runtime_audit?.last_completed_stage ?? null,
+        },
+      });
+      return;
+    }
     res.status(500).json({
       ok: false,
       error: (error as Error).message,
@@ -302,6 +400,8 @@ export default async function handler(req: any, res: any) {
         total_runtime_ms: Date.now() - routeStart,
         last_completed_stage: lastCompletedStage,
         timed_out_stage: String((error as Error).message ?? "").includes("timeout") ? lastCompletedStage : null,
+        did_timeout: String((error as Error).message ?? "").includes("timeout"),
+        did_engine_finish_all_stages: false,
       },
     });
   }

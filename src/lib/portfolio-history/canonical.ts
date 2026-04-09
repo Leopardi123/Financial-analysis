@@ -146,6 +146,7 @@ export type CanonicalBuildAuditOptions = {
   skip_db_evidence?: boolean;
   skip_consistency_checks?: boolean;
   skip_debug_sections?: boolean;
+  max_runtime_ms?: number | null;
 };
 
 export type CanonicalRuntimeAudit = {
@@ -160,6 +161,16 @@ export type CanonicalRuntimeAudit = {
   fx_row_count: number;
   series_days_count: number;
   last_completed_stage: CanonicalRuntimeStageName | null;
+  did_timeout: boolean;
+  did_engine_finish_all_stages: boolean;
+  timed_out_stage: CanonicalRuntimeStageName | null;
+  compute_time_ms: number;
+  serialization_time_ms: number;
+  operations_count: number;
+  rows_processed: number;
+  portfolios_processed: number;
+  days_processed: number;
+  work_units_estimate: number;
 };
 
 function isValidDate(value: unknown): value is string {
@@ -216,6 +227,7 @@ function resolveAuditOptions(options?: CanonicalBuildAuditOptions): Required<Can
     skip_db_evidence: options?.skip_db_evidence === true || options?.compact_mode === true,
     skip_consistency_checks: options?.skip_consistency_checks === true,
     skip_debug_sections: options?.skip_debug_sections === true || options?.compact_mode === true,
+    max_runtime_ms: Number.isFinite(Number(options?.max_runtime_ms)) ? Math.max(1, Number(options?.max_runtime_ms)) : null,
   };
 }
 
@@ -281,11 +293,26 @@ function resolveTrendContract(raw: {
   };
 }
 
+export class CanonicalBuildTimeoutError extends Error {
+  partial_bundle: CanonicalBundle;
+  constructor(message: string, partialBundle: CanonicalBundle) {
+    super(message);
+    this.name = "CanonicalBuildTimeoutError";
+    this.partial_bundle = partialBundle;
+  }
+}
+
 export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAuditOptions): Promise<CanonicalBundle> {
   const startedAt = Date.now();
   const resolvedAudit = resolveAuditOptions(options);
   const runtimeStageTrace: CanonicalRuntimeStageTrace[] = [];
   let lastCompletedStage: CanonicalRuntimeStageName | null = null;
+  let timedOutStage: CanonicalRuntimeStageName | null = null;
+  let operationsCount = 0;
+  let rowsProcessed = 0;
+  let portfoliosProcessed = 0;
+  let daysProcessed = 0;
+  const computeStartAtMs = Date.now();
   const pushStage = (stage: CanonicalRuntimeStageName, stageStartedMs: number, ok: boolean, extras?: Omit<CanonicalRuntimeStageTrace, "stage" | "started_at" | "ended_at" | "duration_ms" | "ok">) => {
     const endedAtMs = Date.now();
     runtimeStageTrace.push({
@@ -298,6 +325,7 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
     });
     if (ok) lastCompletedStage = stage;
   };
+  const timeoutReached = () => resolvedAudit.max_runtime_ms != null && (Date.now() - startedAt) > resolvedAudit.max_runtime_ms;
 
   const configLoadStarted = Date.now();
   let configs = await listPortfolioConfigs();
@@ -316,13 +344,81 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
   let fxRowCount = 0;
   let seriesDaysCount = 0;
 
+  const buildPartialTotal = (partialPortfolios: CanonicalPortfolioHistoryResult[]): CanonicalTotalHistoryResult => ({
+    as_of_date: null,
+    total_market_value_sek: null,
+    included_portfolio_ids: partialPortfolios.map((p) => p.portfolio_id),
+    excluded_portfolio_ids: [],
+    total_series: [],
+    daily_return_pct: null,
+    cumulative_return_pct: null,
+    drawdown_pct: null,
+    history_days_available: 0,
+    data_quality: "partial",
+    date_rule_used: "observation_union_no_carry_forward_include_if_present",
+    consistency_hash: hashString(`partial_timeout|${partialPortfolios.length}`),
+    db_evidence: {
+      portfolio_rows_found_by_portfolio_id: Object.fromEntries(partialPortfolios.map((p) => [p.portfolio_id, p.daily_series.length])),
+      total_dates_considered: 0,
+      included_portfolio_count_by_date: {},
+      excluded_portfolio_count_by_date: {},
+      common_date_coverage_summary: { min: 0, max: 0, avg: 0 },
+      total_date_used: null,
+      total_date_why: "partial_timeout_snapshot",
+    },
+  });
+
+  const buildRuntimeAudit = (didTimeout: boolean, didFinishAllStages: boolean): CanonicalRuntimeAudit => {
+    const finishedAtMs = Date.now();
+    return {
+      started_at: new Date(startedAt).toISOString(),
+      finished_at: new Date(finishedAtMs).toISOString(),
+      duration_ms: finishedAtMs - startedAt,
+      runtime_stage_trace: runtimeStageTrace,
+      scope_flags_used: resolvedAudit,
+      portfolios_loaded_count: active.length,
+      positions_loaded_count: positionsLoadedCount,
+      history_row_count: historyRowCount,
+      fx_row_count: fxRowCount,
+      series_days_count: seriesDaysCount,
+      last_completed_stage: lastCompletedStage,
+      did_timeout: didTimeout,
+      did_engine_finish_all_stages: didFinishAllStages,
+      timed_out_stage: timedOutStage,
+      compute_time_ms: Math.max(0, Date.now() - computeStartAtMs),
+      serialization_time_ms: 0,
+      operations_count: operationsCount,
+      rows_processed: rowsProcessed,
+      portfolios_processed: portfoliosProcessed,
+      days_processed: daysProcessed,
+      work_units_estimate: portfoliosProcessed * Math.max(daysProcessed, 0),
+    };
+  };
+
+  const throwTimeout = (stage: CanonicalRuntimeStageName) => {
+    timedOutStage = stage;
+    const partialBundle: CanonicalBundle = {
+      canonical_source_version: "portfolio-history-canonical-v2",
+      date_rule: "observation_count_lookback",
+      continuity_rule: "strict_composition_hash_match",
+      total_aggregation_rule: "include_portfolio_if_value_present_on_date_no_carry_forward",
+      portfolios: [...portfolios],
+      total: buildPartialTotal(portfolios),
+      runtime_audit: buildRuntimeAudit(true, false),
+    };
+    throw new CanonicalBuildTimeoutError(`canonical_timeout_at_${stage}`, partialBundle);
+  };
+
   for (const config of active) {
+    if (timeoutReached()) throwTimeout("positions_load_started");
     const positionsStageStarted = Date.now();
     pushStage("positions_load_started", positionsStageStarted, true, { portfolio_id: config.portfolio_id });
     const positionsRows = await query(
       `SELECT id, symbol, resolved_symbol, shares, entry_date, exited_at, active_position, currency FROM ${tables.portfolioPositions} WHERE portfolio_id = ? AND COALESCE(shares,0) > 0`,
       [config.portfolio_id],
     ) as Array<any>;
+    operationsCount += 1;
+    rowsProcessed += positionsRows.length;
 
     const positions = (resolvedAudit.include_positions ? positionsRows : [])
       .map((row) => ({
@@ -345,7 +441,9 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
     const priceRows = symbols.length > 0
       ? await query(`SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price, currency FROM ${tables.dailyPriceHistory} WHERE symbol IN (${symbols.map(() => "?").join(",")}) ORDER BY symbol ASC, price_date ASC`, symbols)
       : [];
+    operationsCount += 1;
     historyRowCount += priceRows.length;
+    rowsProcessed += priceRows.length;
     pushStage("price_history_load_finished", priceStageStarted, true, { portfolio_id: config.portfolio_id, row_count: priceRows.length });
     const pricesBySymbol = new Map<string, Array<{ price_date: string; close_price: number; currency: string | null }>>();
     let firstDbPriceDate: string | null = null;
@@ -394,7 +492,9 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
     const fxRows = fxSymbols.length > 0
       ? await query(`SELECT symbol, price_date, COALESCE(adjusted_close, close) AS close_price FROM ${tables.dailyPriceHistory} WHERE symbol IN (${fxSymbols.map(() => "?").join(",")}) ORDER BY symbol ASC, price_date ASC`, fxSymbols)
       : [];
+    operationsCount += 1;
     fxRowCount += fxRows.length;
+    rowsProcessed += fxRows.length;
     pushStage("fx_history_load_finished", fxStageStarted, true, { portfolio_id: config.portfolio_id, row_count: fxRows.length });
     const fxBySymbol = new Map<string, Array<{ price_date: string; close_price: number }>>();
     let firstDbFxDate: string | null = null;
@@ -459,6 +559,8 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
     };
 
     for (const date of sortedDates) {
+      operationsCount += 1;
+      daysProcessed += 1;
       let value = 0;
       const includedOnDate: string[] = [];
       let excludedCount = 0;
@@ -504,6 +606,7 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
       else fullDates.push(date);
     }
     pushStage("canonical_series_build_finished", seriesStageStarted, true, { portfolio_id: config.portfolio_id, date_count: dailySeries.length });
+    if (timeoutReached()) throwTimeout("canonical_series_build_finished");
 
     const filteredSeries = dailySeries.filter((d) => Number.isFinite(d.market_value_sek) && d.market_value_sek > 0);
     seriesDaysCount += filteredSeries.length;
@@ -540,6 +643,7 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
       throw new Error(`canonical_contract_violation:${config.portfolio_id}:${trendContract.canonical_contract_reason ?? "unknown"}`);
     }
     pushStage("portfolio_metric_compute_finished", metricStageStarted, true, { portfolio_id: config.portfolio_id });
+    portfoliosProcessed += 1;
 
     const portfolioResult: CanonicalPortfolioHistoryResult = {
       portfolio_id: config.portfolio_id,
@@ -617,6 +721,7 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
   }
 
   const totalStageStarted = Date.now();
+  if (timeoutReached()) throwTimeout("total_aggregation_started");
   pushStage("total_aggregation_started", totalStageStarted, true, { portfolio_count: portfolios.length });
   const includedPortfolios = active.filter((c) => c.included_in_total_portfolio).map((c) => c.portfolio_id);
   const byId = new Map(portfolios.map((p) => [p.portfolio_id, p]));
@@ -707,21 +812,7 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
     },
     };
   pushStage("total_aggregation_finished", totalStageStarted, true, { date_count: total.total_series.length });
-
-  const finishedAtMs = Date.now();
-  const runtimeAudit: CanonicalRuntimeAudit = {
-    started_at: new Date(startedAt).toISOString(),
-    finished_at: new Date(finishedAtMs).toISOString(),
-    duration_ms: finishedAtMs - startedAt,
-    runtime_stage_trace: runtimeStageTrace,
-    scope_flags_used: resolvedAudit,
-    portfolios_loaded_count: active.length,
-    positions_loaded_count: positionsLoadedCount,
-    history_row_count: historyRowCount,
-    fx_row_count: fxRowCount,
-    series_days_count: seriesDaysCount,
-    last_completed_stage: lastCompletedStage,
-  };
+  const runtimeAudit = buildRuntimeAudit(false, true);
 
   return {
     canonical_source_version: "portfolio-history-canonical-v2",
