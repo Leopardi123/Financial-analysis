@@ -1,6 +1,7 @@
 import { query } from "../../../../../api/_db.js";
 import { ensureSchema, tables } from "../../../../../api/_migrate.js";
-import { buildPortfolioHistory, loadPortfolioConfigsForHistoryBuild } from "../../../../lib/portfolio-history/build.js";
+import { loadPortfolioConfigsForHistoryBuild } from "../../../../lib/portfolio-history/build.js";
+import { materializePortfolioHistoryCanonical } from "../../../../lib/portfolio-history/canonical.js";
 
 export default async function handler(req: any, res: any) {
   let stage:
@@ -24,7 +25,7 @@ export default async function handler(req: any, res: any) {
     const portfoliosBeforeFilter = portfolioSource.portfolios;
     const portfoliosAfterFilter = portfolioSource.portfolios;
     stage = "write_stage";
-    const result = await buildPortfolioHistory();
+    const result = await materializePortfolioHistoryCanonical();
     stage = "completion_stage";
     const debug = String(req.query?.debug ?? "") === "1";
     const [historyStatsRows, totalStatsRows, lastBuildRows] = await Promise.all([
@@ -81,8 +82,8 @@ export default async function handler(req: any, res: any) {
       warnings,
       portfolios: result.portfolios.map((row) => ({
         portfolio_id: row.portfolio_id,
-        available_days: row.available_days,
-        history_source: row.history_source,
+        available_days: row.daily_series.length,
+        history_source: "canonical_v2",
         return_20d: row.return_20d,
         return_65d: row.return_65d,
         return_200d: row.return_200d,
@@ -91,8 +92,8 @@ export default async function handler(req: any, res: any) {
         long_direction: row.long_direction,
         trend_status: row.trend_status,
         trend_completeness: row.trend_completeness,
-        relative_strength_rank: row.relative_strength_rank,
-        relative_strength_bucket: row.relative_strength_bucket,
+        relative_strength_rank: null,
+        relative_strength_bucket: null,
         data_quality: row.data_quality,
       })),
       total: result.total,

@@ -4,7 +4,7 @@ import { listPortfolioConfigs } from "../portfolio-admin/repository.js";
 import { buildPerPortfolioValidationIssues, validateGlobalTargetWeight } from "../portfolio-admin/validation.js";
 import { getLatestPortfolioRisk } from "../portfolio-risk/build.js";
 import { getLatestPortfolioHedgeAndDryPowder } from "../portfolio-hedge/build.js";
-import { computeTrendMetricsFromSeries } from "../portfolio-history/metrics.js";
+import { readPortfolioHistoryCanonicalLatest } from "../portfolio-history/canonical.js";
 
 const REBUILT_HISTORY_SOURCES = new Set(["positions_price_history", "positions_snapshots", "snapshots", "unavailable"]);
 
@@ -208,6 +208,8 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
 
   const riskPayload = await runStage("risk_loaded", async () => getLatestPortfolioRisk());
   const hedgePayload = await runStage("hedge_loaded", async () => getLatestPortfolioHedgeAndDryPowder());
+  const canonicalLatest = await runStage("canonical_history_loaded", async () => readPortfolioHistoryCanonicalLatest());
+  const canonicalByPortfolioId = new Map(canonicalLatest.portfolios.map((item) => [item.portfolio_id, item]));
 
   const portfolioRows = asOfDate
     ? await runStage("snapshots_loaded", async () =>
@@ -260,60 +262,49 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     seriesByPortfolio.set(portfolioId, selectedRows.map((row) => ({ as_of_date: row.as_of_date, market_value: row.market_value })));
   }
   const historyTrendByPortfolioId = new Map<string, { metrics: ReturnType<typeof normalizeTrendFields> & { signal_completeness: string | null }; trend_debug: any }>();
-  for (const [portfolioId, series] of seriesByPortfolio.entries()) {
-    const computed = computeTrendMetricsFromSeries(series.map((point) => ({
-      as_of_date: point.as_of_date,
-      market_value: point.market_value,
-    })));
+  for (const [portfolioId, canonical] of canonicalByPortfolioId.entries()) {
     const metrics = normalizeTrendFields({
-      return_20d: computed.return_20d,
-      return_65d: computed.return_65d,
-      return_200d: computed.return_200d,
-      short_direction: computed.short_direction,
-      medium_direction: computed.medium_direction,
-      long_direction: computed.long_direction,
-      trend_status: computed.trend_status,
-      signal_completeness: computed.trend_completeness,
+      return_20d: canonical.return_20d,
+      return_65d: canonical.return_65d,
+      return_200d: canonical.return_200d,
+      short_direction: canonical.short_direction,
+      medium_direction: canonical.medium_direction,
+      long_direction: canonical.long_direction,
+      trend_status: canonical.trend_status,
+      signal_completeness: canonical.trend_completeness,
     });
     historyTrendByPortfolioId.set(portfolioId, {
       metrics: {
         ...metrics,
-        signal_completeness: computed.trend_completeness,
+        signal_completeness: canonical.trend_completeness,
       },
       trend_debug: {
         attempted: true,
-        available_days: computed.available_days,
-        first_history_date: computed.first_history_date,
-        last_history_date: computed.last_history_date,
-        latest_date: computed.last_history_date,
-        latest_value_sek: computed.latest_value,
-        return_20d: metrics.return_20d,
-        return_65d: metrics.return_65d,
-        return_200d: metrics.return_200d,
-        anchor_20d_date: computed.anchor_20d_date,
-        anchor_65d_date: computed.anchor_65d_date,
-        anchor_200d_date: computed.anchor_200d_date,
-        anchor_20d_value_sek: computed.value_at_20d_anchor,
-        anchor_65d_value_sek: computed.value_at_65d_anchor,
-        anchor_200d_value_sek: computed.value_at_200d_anchor,
-        value_at_20d_anchor: computed.value_at_20d_anchor,
-        value_at_65d_anchor: computed.value_at_65d_anchor,
-        value_at_200d_anchor: computed.value_at_200d_anchor,
-        return_20d_valid: computed.return_20d_valid,
-        return_65d_valid: computed.return_65d_valid,
-        return_200d_valid: computed.return_200d_valid,
-        invalid_reasons_20d: computed.invalid_reasons_20d,
-        invalid_reasons_65d: computed.invalid_reasons_65d,
-        invalid_reasons_200d: computed.invalid_reasons_200d,
-        invalid_reason_20d: computed.invalid_reasons_20d[0] ?? null,
-        invalid_reason_65d: computed.invalid_reasons_65d[0] ?? null,
-        invalid_reason_200d: computed.invalid_reasons_200d[0] ?? null,
-        short_direction: metrics.short_direction,
-        medium_direction: metrics.medium_direction,
-        long_direction: metrics.long_direction,
-        trend_status: metrics.trend_status,
-        trend_completeness: computed.trend_completeness,
-        reason: computed.available_days < 65 ? "insufficient_history" : "ok",
+        available_days: canonical.daily_series.length,
+        first_history_date: canonical.first_history_date,
+        last_history_date: canonical.last_history_date,
+        latest_date: canonical.last_history_date,
+        latest_value_sek: canonical.latest_value_sek,
+        return_20d: canonical.return_20d,
+        return_65d: canonical.return_65d,
+        return_200d: canonical.return_200d,
+        anchor_20d_date: canonical.anchor_20d_date,
+        anchor_65d_date: canonical.anchor_65d_date,
+        anchor_200d_date: canonical.anchor_200d_date,
+        anchor_20d_value_sek: canonical.anchor_20d_value_sek,
+        anchor_65d_value_sek: canonical.anchor_65d_value_sek,
+        anchor_200d_value_sek: canonical.anchor_200d_value_sek,
+        return_20d_valid: canonical.return_20d_valid,
+        return_65d_valid: canonical.return_65d_valid,
+        return_200d_valid: canonical.return_200d_valid,
+        invalid_reason_20d: canonical.invalid_reason_20d,
+        invalid_reason_65d: canonical.invalid_reason_65d,
+        invalid_reason_200d: canonical.invalid_reason_200d,
+        short_direction: canonical.short_direction,
+        medium_direction: canonical.medium_direction,
+        long_direction: canonical.long_direction,
+        trend_status: canonical.trend_status,
+        trend_completeness: canonical.trend_completeness,
       },
     });
   }
@@ -354,27 +345,11 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       if (b.contributor_count !== a.contributor_count) return b.contributor_count - a.contributor_count;
       return b.date.localeCompare(a.date);
     });
-  const latestTotalHistoryDate = scoredCandidates[0]?.date ?? "";
+  const latestTotalHistoryDate = canonicalLatest.total.as_of_date ?? scoredCandidates[0]?.date ?? "";
   const contributingPortfolioIds = Array.from(contributorsByDate.get(latestTotalHistoryDate) ?? []).sort((a, b) => a.localeCompare(b));
-  const recomputedTotalMarketValue = contributingPortfolioIds
+  const recomputedTotalMarketValue = canonicalLatest.total.total_market_value_sek ?? contributingPortfolioIds
     .map((id) => valueByPortfolioDate.get(`${id}__${latestTotalHistoryDate}`) ?? 0)
     .reduce((sum, value) => sum + value, 0);
-  const commonDateSeries = Array.from(contributorsByDate.entries())
-    .filter(([date, ids]) => date <= latestTotalHistoryDate && contributingPortfolioIds.every((id) => ids.has(id)))
-    .map(([date]) => ({
-      as_of_date: date,
-      market_value: contributingPortfolioIds
-        .map((id) => valueByPortfolioDate.get(`${id}__${date}`) ?? 0)
-        .reduce((sum, value) => sum + value, 0),
-    }))
-    .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
-  const totalSeriesIndex = commonDateSeries.findIndex((row) => row.as_of_date === latestTotalHistoryDate);
-  const totalLatest = totalSeriesIndex >= 0 ? commonDateSeries[totalSeriesIndex] : null;
-  const totalPrev = totalSeriesIndex > 0 ? commonDateSeries[totalSeriesIndex - 1] : null;
-  const totalFirst = commonDateSeries[0] ?? null;
-  const totalRunningPeak = commonDateSeries
-    .slice(0, Math.max(totalSeriesIndex + 1, 0))
-    .reduce((peak, row) => Math.max(peak, row.market_value), Number.NEGATIVE_INFINITY);
   const totalHistoryCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`);
   const historyAvailableDays = Number(totalHistoryCountRows[0]?.count ?? 0);
   const snapshotCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioSnapshots}`);
@@ -566,7 +541,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     portfolio_name: String(row.portfolio_name ?? ""),
     portfolio_type: String(row.portfolio_type ?? ""),
     sort_order: Number(row.sort_order ?? 0),
-    market_value: asNum(row.market_value),
+    market_value: canonicalByPortfolioId.get(String(row.portfolio_id ?? ""))?.latest_value_sek ?? asNum(row.market_value),
     actual_weight_pct: asNum(row.actual_weight_pct),
     target_weight_pct: asNum(row.target_weight_pct),
     min_weight_pct: asNum(row.min_weight_pct),
@@ -624,17 +599,11 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       major_warning_details: warningDetails,
     },
     performance: {
-      daily_return_pct: totalLatest && totalPrev && totalPrev.market_value !== 0
-        ? ((totalLatest.market_value / totalPrev.market_value) - 1) * 100
-        : null,
-      cumulative_return_pct: totalLatest && totalFirst && totalFirst.market_value !== 0
-        ? ((totalLatest.market_value / totalFirst.market_value) - 1) * 100
-        : null,
-      drawdown_pct: totalLatest && Number.isFinite(totalRunningPeak) && totalRunningPeak !== 0
-        ? ((totalLatest.market_value / totalRunningPeak) - 1) * 100
-        : null,
-      history_available_days: historyAvailableDays,
-      data_quality: contributingPortfolioIds.length === includedConfigIds.length ? "full" : "partial",
+      daily_return_pct: canonicalLatest.total.daily_return_pct,
+      cumulative_return_pct: canonicalLatest.total.cumulative_return_pct,
+      drawdown_pct: canonicalLatest.total.drawdown_pct,
+      history_available_days: canonicalLatest.total.history_days_available,
+      data_quality: canonicalLatest.total.data_quality,
     },
     portfolios,
     setup: {
