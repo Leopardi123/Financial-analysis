@@ -91,6 +91,27 @@ function normalizeAdapterTrendContract(trend: {
   };
 }
 
+function windowKeyToDays(window: "20d" | "65d" | "200d"): 20 | 65 | 200 {
+  if (window === "20d") return 20;
+  if (window === "65d") return 65;
+  return 200;
+}
+
+function formatUiPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "Unavailable";
+  return `${value.toFixed(2)}%`;
+}
+
+function classifyDisplay(rawReturn: number | null, uiDisplay: string): "legitimate_numeric" | "rounded_to_zero" | "null_coerced_to_zero" | "fallback_placeholder" | "legitimate_exact_zero" {
+  if (uiDisplay === "Unavailable") return "fallback_placeholder";
+  if (uiDisplay === "0.00%") {
+    if (rawReturn === null || !Number.isFinite(rawReturn)) return "null_coerced_to_zero";
+    if (rawReturn === 0) return "legitimate_exact_zero";
+    return "rounded_to_zero";
+  }
+  return "legitimate_numeric";
+}
+
 function buildStructuredUnavailableTrendDebug(row: any) {
   const availableDaysRaw = Number(row?.available_days ?? NaN);
   const availableDays = Number.isFinite(availableDaysRaw) ? availableDaysRaw : 0;
@@ -725,6 +746,55 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       const trendDebug = historyTrendByPortfolioId.get(row.portfolio_id)?.trend_debug ?? snapshotDebug?.trend ?? buildStructuredUnavailableTrendDebug(raw);
       const riskDebug = parseJson(raw.risk_debug_json);
       const hedgeDebug = parseJson(raw.hedge_debug_json);
+      const canonicalLatestValue = asNum(trendDebug.latest_value_sek);
+      const buildWindowProof = (window: "20d" | "65d" | "200d") => {
+        const days = windowKeyToDays(window);
+        const anchorValue = asNum(trendDebug[`anchor_${days}d_value_sek`] ?? trendDebug[`value_at_${days}d_anchor`]);
+        const anchorDate = (trendDebug[`anchor_${days}d_date`] ?? null) as string | null;
+        const rawUnrounded = (canonicalLatestValue !== null && anchorValue !== null && anchorValue > 0)
+          ? ((canonicalLatestValue / anchorValue) - 1) * 100
+          : null;
+        const finalizedReturn = asNum(trendDebug[`return_${days}d`]);
+        const latestReturn = asNum(row[`return_${days}d` as "return_20d" | "return_65d" | "return_200d"]);
+        const uiDisplay = formatUiPercent(latestReturn);
+        return {
+          latest_value_raw: canonicalLatestValue,
+          anchor_value_raw: anchorValue,
+          anchor_date: anchorDate,
+          raw_return_unrounded: rawUnrounded,
+          raw_return_is_finite: Number.isFinite(rawUnrounded),
+          raw_return_invalid_reason: trendDebug[`invalid_reason_${days}d`] ?? null,
+          window_valid: Boolean(trendDebug[`return_${days}d_valid`]),
+          finalized_return_value: finalizedReturn,
+          finalized_direction: trendDebug[days === 20 ? "short_direction" : days === 65 ? "medium_direction" : "long_direction"] ?? "unavailable",
+          finalized_trend_status: trendDebug.trend_status ?? "unavailable",
+          finalized_trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? "unavailable",
+          finalized_contract_error: Boolean(row.trend_contract_error),
+          finalized_contract_reason: row.trend_contract_reason ?? null,
+          serialized_return_value: latestReturn,
+          serialized_return_type: latestReturn === null ? "null" : typeof latestReturn,
+          serialized_direction: row[days === 20 ? "short_direction" : days === 65 ? "medium_direction" : "long_direction"] ?? "unavailable",
+          serialized_trend_status: row.trend_status ?? "unavailable",
+          serialized_trend_completeness: row.signal_completeness ?? "unavailable",
+          serializer_applied_rounding: false,
+          serializer_null_coercion: false,
+          adapter_return_value: latestReturn,
+          adapter_return_type: latestReturn === null ? "null" : typeof latestReturn,
+          adapter_direction: row[days === 20 ? "short_direction" : days === 65 ? "medium_direction" : "long_direction"] ?? "unavailable",
+          adapter_status: row.trend_status ?? "unavailable",
+          adapter_completeness: row.signal_completeness ?? "unavailable",
+          adapter_used_fallback: false,
+          adapter_fallback_reason: "none",
+          ui_input_return_value: latestReturn,
+          ui_input_return_type: latestReturn === null ? "null" : typeof latestReturn,
+          ui_display_string: uiDisplay,
+          ui_display_mode: uiDisplay === "Unavailable" ? "unavailable" : "numeric_percent",
+          ui_formatter_rounding_precision: 2,
+          ui_null_to_zero_coercion: latestReturn === null && uiDisplay === "0.00%",
+          ui_source_field_name: `return_${days}d`,
+          conclusion: classifyDisplay(rawUnrounded, uiDisplay),
+        };
+      };
 
       return {
         portfolio_id: row.portfolio_id,
@@ -848,6 +918,16 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
           contract_match_adapter_to_ui: null,
           mismatch_stage: row.trend_contract_error ? "adapter" : (((trendDebug.latest_date ?? trendDebug.last_history_date ?? null) !== (basePayload.as_of_date ?? null)) ? "overview" : "none"),
           mismatch_reason: row.trend_contract_reason ?? (((trendDebug.latest_date ?? trendDebug.last_history_date ?? null) !== (basePayload.as_of_date ?? null)) ? "date_mismatch" : "none"),
+        },
+        return_proof_debug: {
+          portfolio_label: row.portfolio_type ?? row.portfolio_name ?? row.portfolio_id,
+          portfolio_id: row.portfolio_id,
+          mapped_slug: row.portfolio_type ?? null,
+          windows: {
+            "20d": buildWindowProof("20d"),
+            "65d": buildWindowProof("65d"),
+            "200d": buildWindowProof("200d"),
+          },
         },
         risk_debug: riskDebug
           ? {
