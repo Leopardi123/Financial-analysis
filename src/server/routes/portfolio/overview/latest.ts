@@ -1,4 +1,5 @@
 import { ensureSchema } from "../../../../../api/_migrate.js";
+import { getDbDebugState } from "../../../../../api/_db.js";
 import {
   getPortfolioOverviewLatest,
   type PortfolioOverviewTraceRecorder,
@@ -106,6 +107,7 @@ export default async function handler(req: any, res: any) {
             materialized_read_ms: materializedReadMs,
             serialization_ms: serializationMs,
             total_ms: Date.now() - requestStartedMs,
+            ...getDbDebugState(),
           },
         }
         : {}),
@@ -147,6 +149,7 @@ export default async function handler(req: any, res: any) {
                 materialized_read_ms: materializedReadMs,
                 serialization_ms: serializationMs,
                 total_ms: Date.now() - requestStartedMs,
+                ...getDbDebugState(),
               },
             }
             : {}),
@@ -169,6 +172,7 @@ export default async function handler(req: any, res: any) {
         debugMessage: errorMessage,
         stage: failedStage,
         trace,
+        db_debug: getDbDebugState(),
         ...(debug ? { debug: true } : {}),
       },
     });
