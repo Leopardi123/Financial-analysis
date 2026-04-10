@@ -20,6 +20,11 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function asNullableFiniteNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function computeWeightStatus(actualWeightPct: number | null, minWeightPct: number, maxWeightPct: number): {
   weightStatus: WeightStatus;
   bandWidth: number | null;
@@ -117,6 +122,7 @@ type PositionValuationDebug = {
     shares: number | null;
     manual_price: number | null;
     resolved_live_price: number | null;
+    resolved_live_price_date: string | null;
     native_price: number | null;
     native_currency: string | null;
     native_market_value: number | null;
@@ -148,7 +154,7 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
      FROM ${tables.portfolioPositions} p`
   );
   const latestPrices = await query(
-    `SELECT d.symbol, COALESCE(d.adjusted_close, d.close) AS live_price, d.currency
+    `SELECT d.symbol, COALESCE(d.adjusted_close, d.close) AS live_price, d.currency, d.price_date
      FROM ${tables.dailyPriceHistory} d
      INNER JOIN (
        SELECT symbol, MAX(price_date) AS latest_price_date
@@ -156,15 +162,16 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
        GROUP BY symbol
      ) latest ON latest.symbol = d.symbol AND latest.latest_price_date = d.price_date`
   );
-  const livePriceBySymbol = new Map<string, { live_price: number; currency: string | null }>();
-  for (const row of latestPrices as Array<{ symbol?: unknown; live_price?: unknown; currency?: unknown }>) {
+  const livePriceBySymbol = new Map<string, { live_price: number; currency: string | null; price_date: string | null }>();
+  for (const row of latestPrices as Array<{ symbol?: unknown; live_price?: unknown; currency?: unknown; price_date?: unknown }>) {
     const symbol = String(row.symbol ?? "").trim().toUpperCase();
     const livePrice = Number(row.live_price ?? NaN);
     const liveCurrency = typeof row.currency === "string" && row.currency.trim()
       ? row.currency.trim().toUpperCase()
       : null;
+    const livePriceDate = typeof row.price_date === "string" && row.price_date.trim() ? row.price_date.trim() : null;
     if (symbol && Number.isFinite(livePrice) && livePrice > 0) {
-      livePriceBySymbol.set(symbol, { live_price: livePrice, currency: liveCurrency });
+      livePriceBySymbol.set(symbol, { live_price: livePrice, currency: liveCurrency, price_date: livePriceDate });
     }
   }
 
@@ -260,6 +267,7 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
     const livePriceRow = livePriceBySymbol.get(normalizedSymbol) ?? null;
     const livePrice = livePriceRow?.live_price ?? null;
     const livePriceCurrency = normalizeCurrency(livePriceRow?.currency);
+    const livePriceDate = livePriceRow?.price_date ?? null;
 
     const bucket = valuationDebugByPortfolio.get(portfolioId) ?? {
       portfolio_id: portfolioId,
@@ -282,6 +290,7 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
+        resolved_live_price_date: livePriceDate,
         native_price: null,
         native_currency: null,
         native_market_value: null,
@@ -302,7 +311,7 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
 
     bucket.positions_active_count += 1;
     const hasShares = Number.isFinite(shares) && shares > 0;
-    const hasExplicitMarketValue = Number.isFinite(directMarketValue) && directMarketValue >= 0;
+    const hasExplicitMarketValue = Number.isFinite(directMarketValue) && directMarketValue > 0;
     const hasManualPrice = Number.isFinite(manualPrice) && manualPrice > 0;
     const hasLivePrice = typeof livePrice === "number" && Number.isFinite(livePrice) && livePrice > 0;
 
@@ -332,6 +341,8 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
         unvaluedReason = "Missing or invalid shares";
       } else if (Number.isFinite(manualPrice) && manualPrice === 0) {
         unvaluedReason = "manual_price is 0 and treated as missing pricing input";
+      } else if (Number.isFinite(directMarketValue) && directMarketValue === 0) {
+        unvaluedReason = "explicit market_value is 0 and treated as missing pricing input";
       } else if (!hasLivePrice) {
         unvaluedReason = "No live price available for symbol";
       } else {
@@ -373,6 +384,7 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
+        resolved_live_price_date: livePriceDate,
         native_price: nativePrice,
         native_currency: nativeCurrency,
         native_market_value: nativeMarketValue,
@@ -404,6 +416,7 @@ async function getMarketValuesFromPositions(): Promise<{ marketValueByPortfolio:
         shares: Number.isFinite(shares) ? shares : null,
         manual_price: Number.isFinite(manualPrice) ? manualPrice : null,
         resolved_live_price: livePrice,
+        resolved_live_price_date: livePriceDate,
         native_price: nativePrice,
         native_currency: nativeCurrency,
         native_market_value: nativeMarketValue,
@@ -510,11 +523,21 @@ export async function buildPortfolioSnapshots() {
       : "unavailable";
 
     const valuationDebug = valuationDebugByPortfolio.get(portfolio.portfolio_id) ?? null;
+    const includedPositions = (valuationDebug?.positions ?? []).filter((p) => p.inclusion_status === "included");
+    const excludedOrUnvaluedPositions = (valuationDebug?.positions ?? []).filter((p) => p.inclusion_status !== "included");
+    const computedIncludedSum = includedPositions
+      .map((p) => Number(p.market_value_contribution ?? NaN))
+      .filter((value) => Number.isFinite(value))
+      .reduce((sum, value) => sum + value, 0);
+    const storedSnapshotSum = asNullableFiniteNumber(marketValue);
+    const reconciliationDiff = storedSnapshotSum === null ? null : computedIncludedSum - storedSnapshotSum;
     const debugPayload = {
       portfolio_id: portfolio.portfolio_id,
       snapshot_market_value_sek: marketValue,
       market_value_sek: marketValue,
       market_value: marketValue,
+      snapshot_row_exists: marketValue !== null,
+      snapshot_as_of_date: asOfDate,
       actual_weight_pct: actualWeightPct,
       bandWidth: weightEval.bandWidth,
       distanceToEdge: weightEval.distanceToEdge,
@@ -524,9 +547,37 @@ export async function buildPortfolioSnapshots() {
       positions_active_count: valuationDebug?.positions_active_count ?? 0,
       positions_valued_count: valuationDebug?.positions_valued_count ?? 0,
       positions_unvalued_count: valuationDebug?.positions_unvalued_count ?? 0,
+      holdings_count_expected: valuationDebug?.positions_active_count ?? 0,
+      holdings_count_included: includedPositions.length,
+      holdings_count_excluded: excludedOrUnvaluedPositions.length,
+      db_evidence: {
+        snapshot_row_count_for_portfolio_as_of_date: 1,
+        latest_snapshot_timestamp_used: asOfDate,
+        latest_holdings_rows_used: valuationDebug?.positions_active_count ?? 0,
+        latest_price_rows_used: Array.from(new Set((valuationDebug?.positions ?? [])
+          .map((p) => p.resolved_live_price_date)
+          .filter((value): value is string => typeof value === "string" && value.length > 0))).length,
+        latest_fx_rows_used: (valuationDebug?.positions ?? []).filter((p) => typeof p.fx_source === "string" && p.fx_source.length > 0).length,
+      },
       portfolio_market_value_sek: valuationDebug?.included_market_value_sek ?? marketValue ?? null,
       excluded_due_to_currency_or_fx: valuationDebug?.positions_excluded_due_to_currency_or_fx ?? [],
+      excluded_positions: excludedOrUnvaluedPositions.map((p) => ({
+        symbol: p.symbol,
+        reason: p.exclusion_reason ?? p.unvalued_reason ?? "unvalued_unknown",
+        inclusion_status: p.inclusion_status,
+      })),
       position_valuation_details: valuationDebug?.positions ?? [],
+      valuation_reconciliation: {
+        formula: "market_value_portfolio = sum(included_position_values) + sum(zero_or_missing_positions_as_0)",
+        computed_sum: computedIncludedSum,
+        stored_snapshot_sum: storedSnapshotSum,
+        diff: reconciliationDiff,
+        diff_reason: reconciliationDiff === null
+          ? "snapshot_market_value_missing"
+          : Math.abs(reconciliationDiff) < 1e-6
+            ? null
+            : "snapshot_sum_mismatch_requires_investigation",
+      },
       valuation_state: valuationDebug
         ? (valuationDebug.positions_valued_count > 0
           ? (valuationDebug.positions_unvalued_count > 0 ? "partial" : "full")
