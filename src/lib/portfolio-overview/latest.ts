@@ -5,6 +5,7 @@ import { buildPerPortfolioValidationIssues, validateGlobalTargetWeight } from ".
 import { getLatestPortfolioRisk } from "../portfolio-risk/build.js";
 import { getLatestPortfolioHedgeAndDryPowder } from "../portfolio-hedge/build.js";
 import { readPortfolioHistoryCanonicalLatest } from "../portfolio-history/canonical.js";
+import { normalizePortfolioTrendContract } from "../portfolio-history/contract.js";
 
 const REBUILT_HISTORY_SOURCES = new Set(["positions_price_history", "positions_snapshots", "snapshots", "unavailable"]);
 
@@ -53,10 +54,6 @@ function sanitizeTrendReturn(value: unknown): number | null {
   return num;
 }
 
-function isFiniteTrendReturn(value: number | null): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
 function normalizeAdapterTrendContract(trend: {
   return_20d: number | null;
   return_65d: number | null;
@@ -69,27 +66,28 @@ function normalizeAdapterTrendContract(trend: {
   relative_strength_bucket?: string | null;
   [key: string]: unknown;
 }) {
-  const reasons: string[] = [];
-  const hasAll = isFiniteTrendReturn(trend.return_20d) && isFiniteTrendReturn(trend.return_65d) && isFiniteTrendReturn(trend.return_200d);
-  if (trend.signal_completeness === "full" && !hasAll) {
-    reasons.push("adapter_contract_violation_full_without_returns");
-  }
-  const downgradedCompleteness = hasAll
-    ? "full"
-    : (isFiniteTrendReturn(trend.return_20d) || isFiniteTrendReturn(trend.return_65d) || isFiniteTrendReturn(trend.return_200d) ? "partial" : "unavailable");
-  if (trend.signal_completeness !== downgradedCompleteness) {
-    reasons.push(`adapter_completeness_downgraded:${trend.signal_completeness ?? "null"}->${downgradedCompleteness}`);
-  }
-  const forceUnavailable = downgradedCompleteness !== "full";
+  const normalized = normalizePortfolioTrendContract({
+    return_20d: trend.return_20d,
+    return_65d: trend.return_65d,
+    return_200d: trend.return_200d,
+    trend_completeness: trend.signal_completeness,
+    short_direction: trend.short_direction,
+    medium_direction: trend.medium_direction,
+    long_direction: trend.long_direction,
+    trend_status: trend.trend_status,
+  });
   return {
     ...trend,
-    signal_completeness: downgradedCompleteness,
-    short_direction: forceUnavailable ? "unavailable" : trend.short_direction,
-    medium_direction: forceUnavailable ? "unavailable" : trend.medium_direction,
-    long_direction: forceUnavailable ? "unavailable" : trend.long_direction,
-    trend_status: forceUnavailable ? "unavailable" : trend.trend_status,
-    adapter_contract_error: reasons.length > 0,
-    adapter_contract_reason: reasons.length > 0 ? reasons.join("|") : null,
+    return_20d: normalized.return_20d,
+    return_65d: normalized.return_65d,
+    return_200d: normalized.return_200d,
+    signal_completeness: normalized.trend_completeness,
+    short_direction: normalized.short_direction,
+    medium_direction: normalized.medium_direction,
+    long_direction: normalized.long_direction,
+    trend_status: normalized.trend_status,
+    adapter_contract_error: normalized.contract_error,
+    adapter_contract_reason: normalized.contract_reason,
   };
 }
 
@@ -387,9 +385,6 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     });
   const latestTotalHistoryDate = canonicalLatest.total.as_of_date ?? scoredCandidates[0]?.date ?? "";
   const contributingPortfolioIds = Array.from(contributorsByDate.get(latestTotalHistoryDate) ?? []).sort((a, b) => a.localeCompare(b));
-  const recomputedTotalMarketValue = canonicalLatest.total.total_market_value_sek ?? contributingPortfolioIds
-    .map((id) => valueByPortfolioDate.get(`${id}__${latestTotalHistoryDate}`) ?? 0)
-    .reduce((sum, value) => sum + value, 0);
   const totalHistoryCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`);
   const historyAvailableDays = Number(totalHistoryCountRows[0]?.count ?? 0);
   const snapshotCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioSnapshots}`);
@@ -617,11 +612,15 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     suggested_hedge_type: row.suggested_hedge_type == null ? null : String(row.suggested_hedge_type),
     hedge_policy_applied: row.hedge_policy_applied == null ? null : String(row.hedge_policy_applied),
     signal_completeness: trendMetrics.signal_completeness,
+    trend_completeness: trendMetrics.signal_completeness,
     trend_contract_error: trendMetrics.adapter_contract_error,
     trend_contract_reason: trendMetrics.adapter_contract_reason,
     data_quality_flags: buildDataQualityFlags({ ...row, trend_status: trendMetrics.trend_status, return_65d: trendMetrics.return_65d }),
   });
   });
+  const finalRowTotalMarketValue = portfolios
+    .filter((row) => contributingPortfolioIds.includes(row.portfolio_id))
+    .reduce((sum, row) => sum + (asNum(row.market_value) ?? 0), 0);
 
   const snapshotIds = new Set((portfolioRows as any[]).map((row) => String(row.portfolio_id ?? "")).filter((id) => id.length > 0));
   const portfoliosConfiguredCount = adminConfigs.length;
@@ -638,7 +637,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const basePayload = await runStage("response_assembled", async () => ({
     as_of_date: asOfDate,
     total: {
-      market_value: contributingPortfolioIds.length > 0 ? recomputedTotalMarketValue : totalMarketValue,
+      market_value: contributingPortfolioIds.length > 0 ? finalRowTotalMarketValue : totalMarketValue,
       allocation_plan_status: allocationPlanStatus,
       total_risk_score: totalRiskScore,
       total_risk_status: totalRiskStatus,
@@ -776,20 +775,50 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
           reason: trendDebug.reason ?? (trendDebug.return_65d == null ? "insufficient_history" : "ok"),
         },
         contract_debug: {
+          canonical_row_exists: true,
+          latest_row_exists: true,
+          overview_row_exists: true,
+          ui_row_exists: null,
+          canonical_market_value: trendDebug.latest_value_sek ?? null,
+          latest_market_value: row.market_value ?? null,
+          overview_market_value: row.market_value ?? null,
+          ui_market_value: null,
           canonical_return_20d: trendDebug.return_20d ?? null,
+          latest_return_20d: row.return_20d ?? null,
+          overview_return_20d: row.return_20d ?? null,
+          ui_return_20d: null,
           canonical_return_65d: trendDebug.return_65d ?? null,
+          latest_return_65d: row.return_65d ?? null,
+          overview_return_65d: row.return_65d ?? null,
+          ui_return_65d: null,
           canonical_return_200d: trendDebug.return_200d ?? null,
+          latest_return_200d: row.return_200d ?? null,
+          overview_return_200d: row.return_200d ?? null,
+          ui_return_200d: null,
           canonical_trend_completeness: trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null,
+          latest_trend_completeness: row.signal_completeness ?? null,
+          overview_trend_completeness: row.signal_completeness ?? null,
+          ui_trend_completeness: null,
           canonical_short_direction: trendDebug.short_direction ?? null,
+          latest_short_direction: row.short_direction ?? null,
+          overview_short_direction: row.short_direction ?? null,
+          ui_short_direction: null,
           canonical_medium_direction: trendDebug.medium_direction ?? null,
+          latest_medium_direction: row.medium_direction ?? null,
+          overview_medium_direction: row.medium_direction ?? null,
+          ui_medium_direction: null,
           canonical_long_direction: trendDebug.long_direction ?? null,
-          latest_payload_return_20d: null,
-          latest_payload_return_65d: null,
-          latest_payload_return_200d: null,
-          latest_payload_trend_completeness: null,
-          latest_payload_short_direction: null,
-          latest_payload_medium_direction: null,
-          latest_payload_long_direction: null,
+          latest_long_direction: row.long_direction ?? null,
+          overview_long_direction: row.long_direction ?? null,
+          ui_long_direction: null,
+          canonical_trend_status: trendDebug.trend_status ?? null,
+          latest_trend_status: row.trend_status ?? null,
+          overview_trend_status: row.trend_status ?? null,
+          ui_trend_status: null,
+          canonical_as_of_date: trendDebug.latest_date ?? trendDebug.last_history_date ?? null,
+          latest_as_of_date: basePayload.as_of_date ?? null,
+          overview_as_of_date: basePayload.as_of_date ?? null,
+          ui_as_of_date: null,
           dashboard_adapter_return_20d: row.return_20d ?? null,
           dashboard_adapter_return_65d: row.return_65d ?? null,
           dashboard_adapter_return_200d: row.return_200d ?? null,
@@ -797,11 +826,28 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
           dashboard_adapter_short_direction: row.short_direction ?? null,
           dashboard_adapter_medium_direction: row.medium_direction ?? null,
           dashboard_adapter_long_direction: row.long_direction ?? null,
-          contract_match_canonical_to_latest: null,
-          contract_match_latest_to_adapter: null,
+          contract_match_market_value: (trendDebug.latest_value_sek ?? null) === (row.market_value ?? null),
+          contract_match_returns: (trendDebug.return_20d ?? null) === (row.return_20d ?? null)
+            && (trendDebug.return_65d ?? null) === (row.return_65d ?? null)
+            && (trendDebug.return_200d ?? null) === (row.return_200d ?? null),
+          contract_match_directions: (trendDebug.short_direction ?? null) === (row.short_direction ?? null)
+            && (trendDebug.medium_direction ?? null) === (row.medium_direction ?? null)
+            && (trendDebug.long_direction ?? null) === (row.long_direction ?? null),
+          contract_match_status: (trendDebug.trend_status ?? null) === (row.trend_status ?? null),
+          contract_match_completeness: (trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null) === (row.signal_completeness ?? null),
+          contract_match_dates: (trendDebug.latest_date ?? trendDebug.last_history_date ?? null) === (basePayload.as_of_date ?? null),
+          contract_match_canonical_to_latest: (trendDebug.return_20d ?? null) === (row.return_20d ?? null)
+            && (trendDebug.return_65d ?? null) === (row.return_65d ?? null)
+            && (trendDebug.return_200d ?? null) === (row.return_200d ?? null)
+            && (trendDebug.trend_status ?? null) === (row.trend_status ?? null)
+            && (trendDebug.short_direction ?? null) === (row.short_direction ?? null)
+            && (trendDebug.medium_direction ?? null) === (row.medium_direction ?? null)
+            && (trendDebug.long_direction ?? null) === (row.long_direction ?? null)
+            && (trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null) === (row.signal_completeness ?? null),
+          contract_match_latest_to_adapter: true,
           contract_match_adapter_to_ui: null,
-          mismatch_stage: row.trend_contract_error ? "dashboard_adapter" : null,
-          mismatch_reason: row.trend_contract_reason ?? null,
+          mismatch_stage: row.trend_contract_error ? "adapter" : (((trendDebug.latest_date ?? trendDebug.last_history_date ?? null) !== (basePayload.as_of_date ?? null)) ? "overview" : "none"),
+          mismatch_reason: row.trend_contract_reason ?? (((trendDebug.latest_date ?? trendDebug.last_history_date ?? null) !== (basePayload.as_of_date ?? null)) ? "date_mismatch" : "none"),
         },
         risk_debug: riskDebug
           ? {

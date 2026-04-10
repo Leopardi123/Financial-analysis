@@ -35,6 +35,7 @@ type PortfolioRecord = {
   hedge_status: string | null;
   hedge_policy_applied: string | null;
   signal_completeness: string | null;
+  trend_completeness?: string | null;
   valuation_state?: string | null;
   positions_found_count?: NullableNumber;
   positions_active_count?: NullableNumber;
@@ -118,44 +119,6 @@ type PortfolioOverviewResponse = {
     debugMessage?: string;
     stage?: string;
     trace?: Array<{ stage: string; ok: boolean; duration_ms: number; error?: string }>;
-  };
-};
-
-type PortfolioHistoryLatestResponse = {
-  ok: boolean;
-  portfolios: Array<{
-    portfolio_id: string;
-    return_20d: NullableNumber;
-    return_65d: NullableNumber;
-    return_200d: NullableNumber;
-    short_direction?: string | null;
-    medium_direction?: string | null;
-    long_direction?: string | null;
-    trend_status?: string | null;
-    trend_completeness?: string | null;
-    serialization_contract_error?: boolean;
-    serialization_contract_reason?: string | null;
-    return_20d_valid?: boolean;
-    return_65d_valid?: boolean;
-    return_200d_valid?: boolean;
-  }>;
-  diagnostics?: {
-    portfolios?: Array<{
-      portfolio_id: string;
-      invalid_reason_20d?: string | null;
-      invalid_reason_65d?: string | null;
-      invalid_reason_200d?: string | null;
-      return_20d?: NullableNumber;
-      return_65d?: NullableNumber;
-      return_200d?: NullableNumber;
-      trend_completeness?: string | null;
-      short_direction?: string | null;
-      medium_direction?: string | null;
-      long_direction?: string | null;
-      serialization_contract_error?: boolean;
-      serialization_contract_reason?: string | null;
-      contract_debug?: Record<string, unknown> | null;
-    }>;
   };
 };
 
@@ -425,11 +388,10 @@ export default function PortfolioDashboardModule() {
     setError(null);
     setOverviewError(null);
 
-    const [overviewResult, adminResult, validateResult, latestTrendResult] = await Promise.allSettled([
+    const [overviewResult, adminResult, validateResult] = await Promise.allSettled([
       fetchJsonWithTimeout<PortfolioOverviewResponse>(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`, 12_000),
       fetchJsonWithTimeout<{ ok: boolean; portfolios: PortfolioConfig[] }>(`/api/portfolio/admin/list`, 8_000),
       fetchJsonWithTimeout<AdminValidateResponse>(`/api/portfolio/admin/validate`, 8_000),
-      fetchJsonWithTimeout<PortfolioHistoryLatestResponse>(`/api/portfolio/history/latest?debug=1`, 12_000),
     ]);
 
     if (adminResult.status === "fulfilled" && adminResult.value.ok) {
@@ -444,90 +406,41 @@ export default function PortfolioDashboardModule() {
       throw new Error("Failed to load portfolio validation.");
     }
 
-    const latestTrendPayload = latestTrendResult.status === "fulfilled" && latestTrendResult.value.ok
-      ? latestTrendResult.value
-      : null;
-    const latestTrendById = new Map(
-      (latestTrendPayload?.portfolios ?? []).map((row) => [String(row.portfolio_id ?? ""), row]),
-    );
-    const latestTrendDiagById = new Map(
-      (latestTrendPayload?.diagnostics?.portfolios ?? []).map((row) => [String(row.portfolio_id ?? ""), row]),
-    );
-
     if (overviewResult.status === "fulfilled" && overviewResult.value.ok) {
+      const overviewDebugById = new Map<string, any>(
+        ((overviewResult.value as any)?.debug?.portfolios ?? []).map((row: any) => [String(row?.portfolio_id ?? ""), row]),
+      );
       const mergedOverview: PortfolioOverviewResponse = {
         ...overviewResult.value,
         portfolios: overviewResult.value.portfolios.map((portfolio) => {
-          const trend = latestTrendById.get(portfolio.portfolio_id);
-          const trendDiag = latestTrendDiagById.get(portfolio.portfolio_id);
-          const mergedPortfolio: PortfolioRecord = {
-            ...portfolio,
-            return_20d: trend?.return_20d ?? null,
-            return_65d: trend?.return_65d ?? null,
-            return_200d: trend?.return_200d ?? null,
-            short_direction: trend?.short_direction ?? portfolio.short_direction ?? "unavailable",
-            medium_direction: trend?.medium_direction ?? portfolio.medium_direction ?? "unavailable",
-            long_direction: trend?.long_direction ?? portfolio.long_direction ?? "unavailable",
-            trend_status: trend?.trend_status ?? portfolio.trend_status ?? "unavailable",
-            signal_completeness: trend?.trend_completeness ?? portfolio.signal_completeness ?? "unavailable",
-            trend_return_20d_valid: trend?.return_20d_valid ?? undefined,
-            trend_return_65d_valid: trend?.return_65d_valid ?? undefined,
-            trend_return_200d_valid: trend?.return_200d_valid ?? undefined,
-            trend_invalid_reason_20d: trendDiag?.invalid_reason_20d ?? null,
-            trend_invalid_reason_65d: trendDiag?.invalid_reason_65d ?? null,
-            trend_invalid_reason_200d: trendDiag?.invalid_reason_200d ?? null,
-            trend_contract_error: trend?.serialization_contract_error ?? trendDiag?.serialization_contract_error ?? false,
-            trend_contract_reason: trend?.serialization_contract_reason ?? trendDiag?.serialization_contract_reason ?? null,
-            trend_source_endpoint: "/api/portfolio/history/latest?debug=1",
-            contract_debug: trendDiag?.contract_debug ?? null,
-          };
-          const fallback20 = trendFallbackReason(mergedPortfolio.return_20d, mergedPortfolio.trend_return_20d_valid, mergedPortfolio.trend_invalid_reason_20d);
-          const fallback65 = trendFallbackReason(mergedPortfolio.return_65d, mergedPortfolio.trend_return_65d_valid, mergedPortfolio.trend_invalid_reason_65d);
-          const fallback200 = trendFallbackReason(mergedPortfolio.return_200d, mergedPortfolio.trend_return_200d_valid, mergedPortfolio.trend_invalid_reason_200d);
-          const uiViolation = mergedPortfolio.signal_completeness === "full" && Boolean(fallback20 || fallback65 || fallback200);
-          const safeCompleteness = uiViolation ? "unavailable" : mergedPortfolio.signal_completeness;
+          const debugRow = overviewDebugById.get(portfolio.portfolio_id);
+          const fallback20 = trendFallbackReason(portfolio.return_20d, portfolio.trend_return_20d_valid, portfolio.trend_invalid_reason_20d);
+          const fallback65 = trendFallbackReason(portfolio.return_65d, portfolio.trend_return_65d_valid, portfolio.trend_invalid_reason_65d);
+          const fallback200 = trendFallbackReason(portfolio.return_200d, portfolio.trend_return_200d_valid, portfolio.trend_invalid_reason_200d);
           return {
-            ...mergedPortfolio,
-            signal_completeness: safeCompleteness,
-            short_direction: uiViolation ? "unavailable" : mergedPortfolio.short_direction,
-            medium_direction: uiViolation ? "unavailable" : mergedPortfolio.medium_direction,
-            long_direction: uiViolation ? "unavailable" : mergedPortfolio.long_direction,
-            trend_status: uiViolation ? "unavailable" : mergedPortfolio.trend_status,
-            trend_contract_error: mergedPortfolio.trend_contract_error || uiViolation,
-            trend_contract_reason: mergedPortfolio.trend_contract_reason ?? (uiViolation ? "ui_contract_violation_full_with_unavailable_return" : null),
+            ...portfolio,
+            trend_source_endpoint: "/api/portfolio/overview/latest?debug=1",
+            trend_contract_error: portfolio.trend_contract_error ?? false,
+            trend_contract_reason: portfolio.trend_contract_reason ?? null,
             contract_debug: {
-              ...(mergedPortfolio.contract_debug ?? {}),
-              latest_payload_return_20d: mergedPortfolio.return_20d,
-              latest_payload_return_65d: mergedPortfolio.return_65d,
-              latest_payload_return_200d: mergedPortfolio.return_200d,
-              latest_payload_trend_completeness: trend?.trend_completeness ?? null,
-              latest_payload_short_direction: trend?.short_direction ?? null,
-              latest_payload_medium_direction: trend?.medium_direction ?? null,
-              latest_payload_long_direction: trend?.long_direction ?? null,
-              dashboard_adapter_return_20d: mergedPortfolio.return_20d,
-              dashboard_adapter_return_65d: mergedPortfolio.return_65d,
-              dashboard_adapter_return_200d: mergedPortfolio.return_200d,
-              dashboard_adapter_trend_completeness: mergedPortfolio.signal_completeness,
-              dashboard_adapter_short_direction: mergedPortfolio.short_direction ?? null,
-              dashboard_adapter_medium_direction: mergedPortfolio.medium_direction ?? null,
-              dashboard_adapter_long_direction: mergedPortfolio.long_direction ?? null,
-              ui_render_return_20d_raw: mergedPortfolio.return_20d,
-              ui_render_return_65d_raw: mergedPortfolio.return_65d,
-              ui_render_return_200d_raw: mergedPortfolio.return_200d,
+              ...(debugRow?.contract_debug ?? {}),
+              latest_row_exists: debugRow?.contract_debug?.latest_row_exists ?? true,
+              overview_row_exists: true,
+              ui_row_exists: true,
+              ui_market_value: portfolio.market_value ?? null,
+              ui_return_20d: portfolio.return_20d ?? null,
+              ui_return_65d: portfolio.return_65d ?? null,
+              ui_return_200d: portfolio.return_200d ?? null,
+              ui_short_direction: portfolio.short_direction ?? null,
+              ui_medium_direction: portfolio.medium_direction ?? null,
+              ui_long_direction: portfolio.long_direction ?? null,
+              ui_trend_status: portfolio.trend_status ?? null,
+              ui_trend_completeness: portfolio.signal_completeness ?? null,
+              ui_as_of_date: overviewResult.value.as_of_date ?? null,
               ui_render_fallback_reason_20d: fallback20,
               ui_render_fallback_reason_65d: fallback65,
               ui_render_fallback_reason_200d: fallback200,
-              contract_match_latest_to_adapter:
-                (trend?.return_20d ?? null) === mergedPortfolio.return_20d
-                && (trend?.return_65d ?? null) === mergedPortfolio.return_65d
-                && (trend?.return_200d ?? null) === mergedPortfolio.return_200d
-                && (trend?.trend_completeness ?? null) === mergedPortfolio.signal_completeness
-                && (trend?.short_direction ?? null) === (mergedPortfolio.short_direction ?? null)
-                && (trend?.medium_direction ?? null) === (mergedPortfolio.medium_direction ?? null)
-                && (trend?.long_direction ?? null) === (mergedPortfolio.long_direction ?? null),
-              contract_match_adapter_to_ui: !uiViolation,
-              mismatch_stage: uiViolation ? "ui_render" : (mergedPortfolio.trend_contract_error ? "latest_payload" : null),
-              mismatch_reason: mergedPortfolio.trend_contract_reason ?? (uiViolation ? "render_fallback_triggered_while_full" : null),
+              contract_match_adapter_to_ui: true,
             },
           };
         }),

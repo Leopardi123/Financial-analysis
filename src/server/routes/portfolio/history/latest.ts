@@ -1,5 +1,6 @@
 import { ensureSchema } from "../../../../../api/_migrate.js";
 import { CanonicalBuildTimeoutError, readPortfolioHistoryCanonicalLatest } from "../../../../lib/portfolio-history/canonical.js";
+import { normalizePortfolioTrendContract } from "../../../../lib/portfolio-history/contract.js";
 
 type RouteStageName =
   | "request_received"
@@ -54,40 +55,6 @@ function parseNum(value: unknown): number | null {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-function normalizeLatestContractRow(row: {
-  return_20d: number | null;
-  return_65d: number | null;
-  return_200d: number | null;
-  short_direction: string;
-  medium_direction: string;
-  long_direction: string;
-  trend_status: string;
-  trend_completeness: string;
-}) {
-  const reasons: string[] = [];
-  const hasAllReturns = isFiniteNumber(row.return_20d) && isFiniteNumber(row.return_65d) && isFiniteNumber(row.return_200d);
-  if (row.trend_completeness === "full" && !hasAllReturns) {
-    reasons.push("latest_contract_violation_full_without_all_returns");
-  }
-  const downgradedCompleteness = hasAllReturns
-    ? "full"
-    : (isFiniteNumber(row.return_20d) || isFiniteNumber(row.return_65d) || isFiniteNumber(row.return_200d) ? "partial" : "unavailable");
-  if (row.trend_completeness !== downgradedCompleteness) {
-    reasons.push(`latest_completeness_downgraded:${row.trend_completeness}->${downgradedCompleteness}`);
-  }
-  const forceUnavailableDirections = downgradedCompleteness !== "full";
-  return {
-    ...row,
-    trend_completeness: downgradedCompleteness,
-    short_direction: forceUnavailableDirections ? "unavailable" : row.short_direction,
-    medium_direction: forceUnavailableDirections ? "unavailable" : row.medium_direction,
-    long_direction: forceUnavailableDirections ? "unavailable" : row.long_direction,
-    trend_status: forceUnavailableDirections ? "unavailable" : row.trend_status,
-    contract_error: reasons.length > 0,
-    contract_reason: reasons.length > 0 ? reasons.join("|") : null,
-  };
 }
 
 export default async function handler(req: any, res: any) {
@@ -160,15 +127,15 @@ export default async function handler(req: any, res: any) {
     }
 
     const portfolioDiagnostics = canonical.portfolios.map((p) => {
-      const latestContract = normalizeLatestContractRow({
+      const latestContract = normalizePortfolioTrendContract({
         return_20d: p.return_20d,
         return_65d: p.return_65d,
         return_200d: p.return_200d,
+        trend_completeness: p.trend_completeness,
         short_direction: p.short_direction,
         medium_direction: p.medium_direction,
         long_direction: p.long_direction,
         trend_status: p.trend_status,
-        trend_completeness: p.trend_completeness,
       });
       return {
         portfolio_id: p.portfolio_id,
@@ -238,20 +205,60 @@ export default async function handler(req: any, res: any) {
           serialization_contract_error: latest_contract.contract_error,
           serialization_contract_reason: latest_contract.contract_reason,
           contract_debug: {
+            canonical_row_exists: true,
+            latest_row_exists: true,
+            overview_row_exists: null,
+            ui_row_exists: null,
+            canonical_market_value: p.latest_value_sek,
+            latest_market_value: p.latest_value_sek,
+            overview_market_value: null,
+            ui_market_value: null,
             canonical_return_20d: p.return_20d,
+            latest_return_20d: latest_contract.return_20d,
+            overview_return_20d: null,
+            ui_return_20d: null,
             canonical_return_65d: p.return_65d,
+            latest_return_65d: latest_contract.return_65d,
+            overview_return_65d: null,
+            ui_return_65d: null,
             canonical_return_200d: p.return_200d,
+            latest_return_200d: latest_contract.return_200d,
+            overview_return_200d: null,
+            ui_return_200d: null,
             canonical_trend_completeness: p.trend_completeness,
+            latest_trend_completeness: latest_contract.trend_completeness,
+            overview_trend_completeness: null,
+            ui_trend_completeness: null,
             canonical_short_direction: p.short_direction,
+            latest_short_direction: latest_contract.short_direction,
+            overview_short_direction: null,
+            ui_short_direction: null,
             canonical_medium_direction: p.medium_direction,
+            latest_medium_direction: latest_contract.medium_direction,
+            overview_medium_direction: null,
+            ui_medium_direction: null,
             canonical_long_direction: p.long_direction,
-            latest_payload_return_20d: latest_contract.return_20d,
-            latest_payload_return_65d: latest_contract.return_65d,
-            latest_payload_return_200d: latest_contract.return_200d,
-            latest_payload_trend_completeness: latest_contract.trend_completeness,
-            latest_payload_short_direction: latest_contract.short_direction,
-            latest_payload_medium_direction: latest_contract.medium_direction,
-            latest_payload_long_direction: latest_contract.long_direction,
+            latest_long_direction: latest_contract.long_direction,
+            overview_long_direction: null,
+            ui_long_direction: null,
+            canonical_trend_status: p.trend_status,
+            latest_trend_status: latest_contract.trend_status,
+            overview_trend_status: null,
+            ui_trend_status: null,
+            canonical_as_of_date: p.as_of_date,
+            latest_as_of_date: p.as_of_date,
+            overview_as_of_date: null,
+            ui_as_of_date: null,
+            contract_match_market_value: p.latest_value_sek === p.latest_value_sek,
+            contract_match_returns: p.return_20d === latest_contract.return_20d
+              && p.return_65d === latest_contract.return_65d
+              && p.return_200d === latest_contract.return_200d,
+            contract_match_directions: p.short_direction === latest_contract.short_direction
+              && p.medium_direction === latest_contract.medium_direction
+              && p.long_direction === latest_contract.long_direction,
+            contract_match_status: p.trend_status === latest_contract.trend_status,
+            contract_match_completeness: p.trend_completeness === latest_contract.trend_completeness,
+            contract_match_dates: p.as_of_date === p.as_of_date,
             contract_match_canonical_to_latest:
               p.return_20d === latest_contract.return_20d
               && p.return_65d === latest_contract.return_65d
@@ -260,8 +267,10 @@ export default async function handler(req: any, res: any) {
               && p.short_direction === latest_contract.short_direction
               && p.medium_direction === latest_contract.medium_direction
               && p.long_direction === latest_contract.long_direction,
-            mismatch_stage: latest_contract.contract_error ? "latest_payload" : null,
-            mismatch_reason: latest_contract.contract_reason,
+            contract_match_latest_to_adapter: null,
+            contract_match_adapter_to_ui: null,
+            mismatch_stage: latest_contract.contract_error ? "latest" : "none",
+            mismatch_reason: latest_contract.contract_reason ?? "none",
           },
         })),
       }
