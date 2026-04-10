@@ -40,6 +40,9 @@ export type CanonicalPortfolioHistoryResult = {
   invalid_reason_20d: string | null;
   invalid_reason_65d: string | null;
   invalid_reason_200d: string | null;
+  composition_changed_20d: boolean;
+  composition_changed_65d: boolean;
+  composition_changed_200d: boolean;
   short_direction: Direction;
   medium_direction: Direction;
   long_direction: Direction;
@@ -99,7 +102,7 @@ export type CanonicalTotalHistoryResult = {
 export type CanonicalBundle = {
   canonical_source_version: "portfolio-history-canonical-v2";
   date_rule: "observation_count_lookback";
-  continuity_rule: "strict_composition_hash_match";
+  continuity_rule: "composition_change_tracked_not_invalidating";
   total_aggregation_rule: "include_portfolio_if_value_present_on_date_no_carry_forward";
   portfolios: CanonicalPortfolioHistoryResult[];
   total: CanonicalTotalHistoryResult;
@@ -400,7 +403,7 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
     const partialBundle: CanonicalBundle = {
       canonical_source_version: "portfolio-history-canonical-v2",
       date_rule: "observation_count_lookback",
-      continuity_rule: "strict_composition_hash_match",
+      continuity_rule: "composition_change_tracked_not_invalidating",
       total_aggregation_rule: "include_portfolio_if_value_present_on_date_no_carry_forward",
       portfolios: [...portfolios],
       total: buildPartialTotal(portfolios),
@@ -623,9 +626,9 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
     const invalid65 = [...metrics.invalid_reasons_65d];
     const invalid20 = [...metrics.invalid_reasons_20d];
     const invalid200 = [...metrics.invalid_reasons_200d];
-    if (!resolvedAudit.skip_consistency_checks && latestHash && anchor20Hash && latestHash !== anchor20Hash) invalid20.push("composition_hash_mismatch");
-    if (!resolvedAudit.skip_consistency_checks && latestHash && anchor65Hash && latestHash !== anchor65Hash) invalid65.push("composition_hash_mismatch");
-    if (!resolvedAudit.skip_consistency_checks && latestHash && anchor200Hash && latestHash !== anchor200Hash) invalid200.push("composition_hash_mismatch");
+    const composition_changed_20d = Boolean(latestHash && anchor20Hash && latestHash !== anchor20Hash);
+    const composition_changed_65d = Boolean(latestHash && anchor65Hash && latestHash !== anchor65Hash);
+    const composition_changed_200d = Boolean(latestHash && anchor200Hash && latestHash !== anchor200Hash);
 
     const compositionBreakDates: string[] = [];
     for (let i = 1; i < filteredSeries.length; i += 1) {
@@ -668,6 +671,9 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
       invalid_reason_20d: invalid20[0] ?? null,
       invalid_reason_65d: invalid65[0] ?? null,
       invalid_reason_200d: invalid200[0] ?? null,
+      composition_changed_20d,
+      composition_changed_65d,
+      composition_changed_200d,
       short_direction: trendContract.short_direction,
       medium_direction: trendContract.medium_direction,
       long_direction: trendContract.long_direction,
@@ -817,7 +823,7 @@ export async function buildPortfolioHistoryCanonical(options?: CanonicalBuildAud
   return {
     canonical_source_version: "portfolio-history-canonical-v2",
     date_rule: "observation_count_lookback",
-    continuity_rule: "strict_composition_hash_match",
+    continuity_rule: "composition_change_tracked_not_invalidating",
     total_aggregation_rule: "include_portfolio_if_value_present_on_date_no_carry_forward",
     portfolios,
     total,
