@@ -4,14 +4,8 @@ import {
   type PortfolioOverviewTraceRecorder,
   type PortfolioOverviewTraceRow,
 } from "../../../../lib/portfolio-overview/latest.js";
-import { buildPortfolioSnapshots } from "../../../../lib/portfolio-snapshots/build.js";
-import { buildPortfolioHistory } from "../../../../lib/portfolio-history/build.js";
 
 const OVERVIEW_TIMEOUT_MS = 10_000;
-const FALLBACK_BUILD_TIMEOUT_MS = 6_000;
-const FALLBACK_BUILD_COOLDOWN_MS = 30_000;
-let fallbackBuildInFlight: Promise<void> | null = null;
-let lastFallbackBuildAtMs = 0;
 
 function nowIso() {
   return new Date().toISOString();
@@ -59,48 +53,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 }
 
-function shouldAttemptFallbackBuild(payload: any): boolean {
-  if (!payload) return true;
-  const noSnapshots = !payload.as_of_date;
-  const noHistory = Number(payload?.performance?.history_available_days ?? 0) <= 0;
-  const setupState = String(payload?.setup?.setup_state ?? "");
-  return noSnapshots || noHistory || setupState === "configured_positions_no_snapshot";
-}
-
-async function runFallbackBuild(trace: PortfolioOverviewTraceRow[]) {
-  const nowMs = Date.now();
-  if (fallbackBuildInFlight) {
-    await fallbackBuildInFlight;
-    return;
-  }
-  if (nowMs - lastFallbackBuildAtMs < FALLBACK_BUILD_COOLDOWN_MS) {
-    trace.push({
-      stage: "fallback_build_skipped_cooldown",
-      ok: true,
-      started_at: nowIso(),
-      duration_ms: 0,
-    });
-    return;
-  }
-
-  fallbackBuildInFlight = (async () => {
-    await runStage(trace, "fallback_snapshot_build", async () => {
-      await withTimeout(buildPortfolioSnapshots(), FALLBACK_BUILD_TIMEOUT_MS);
-    });
-    await runStage(trace, "fallback_history_build", async () => {
-      await withTimeout(buildPortfolioHistory(), FALLBACK_BUILD_TIMEOUT_MS);
-    });
-    lastFallbackBuildAtMs = Date.now();
-  })();
-
-  try {
-    await fallbackBuildInFlight;
-  } finally {
-    fallbackBuildInFlight = null;
-  }
-}
-
 export default async function handler(req: any, res: any) {
+  const requestStartedMs = Date.now();
   const trace: PortfolioOverviewTraceRow[] = [
     { stage: "request_received", ok: true, duration_ms: 0, started_at: nowIso() },
   ];
@@ -119,26 +73,89 @@ export default async function handler(req: any, res: any) {
       await ensureSchema();
     });
     const debug = String(req.query?.debug ?? "") === "1";
+    let didTimeout = false;
+    let didFallbackToMaterialized = false;
+    let fallbackReason: string | null = null;
+    let readPathMode: "materialized_only" | "inline_compute" | "fallback_stale" = "materialized_only";
     let payload = await runStage(trace, "overview_load", async () =>
       withTimeout(getPortfolioOverviewLatest(debug, traceRecorder), OVERVIEW_TIMEOUT_MS)
     );
-    if (shouldAttemptFallbackBuild(payload)) {
-      await runStage(trace, "fallback_build_guarded", async () => {
-        await runFallbackBuild(trace);
-      });
-      payload = await runStage(trace, "overview_reload_after_fallback", async () =>
-        withTimeout(getPortfolioOverviewLatest(debug, traceRecorder), OVERVIEW_TIMEOUT_MS)
-      );
-    }
+    const responseAssembleStartedMs = Date.now();
     trace.push({ stage: "response_sent", ok: true, duration_ms: 0, started_at: nowIso() });
+    const dbConnectionMs = trace.find((row) => row.stage === "db_connection_acquired")?.duration_ms ?? 0;
+    const materializedReadMs = trace.find((row) => row.stage === "overview_load")?.duration_ms ?? 0;
+    const serializationMs = Math.max(0, Date.now() - responseAssembleStartedMs);
     res.status(200).json({
       ok: true,
       ...payload,
-      ...(debug ? { trace } : {}),
+      ...(debug
+        ? {
+          trace,
+          read_path_debug: {
+            read_path_mode: readPathMode,
+            materialized_source_table: "portfolio_snapshots,portfolio_history_daily,total_portfolio_history_daily",
+            materialized_as_of_date: payload?.as_of_date ?? null,
+            materialized_last_build: payload?.pipeline_status?.last_history_build ?? null,
+            inline_compute_attempted: false,
+            inline_compute_skipped_reason: "overview_route_materialized_read_path_only",
+            timeout_budget_ms: OVERVIEW_TIMEOUT_MS,
+            did_timeout: didTimeout,
+            did_fallback_to_materialized: didFallbackToMaterialized,
+            fallback_reason: fallbackReason,
+            db_connection_ms: dbConnectionMs,
+            materialized_read_ms: materializedReadMs,
+            serialization_ms: serializationMs,
+            total_ms: Date.now() - requestStartedMs,
+          },
+        }
+        : {}),
     });
   } catch (error) {
     const debug = String(req.query?.debug ?? "") === "1";
     const errorMessage = (error as Error).message;
+    if (errorMessage.includes("overview_timeout_")) {
+      try {
+        const fallbackPayload = await getPortfolioOverviewLatest(debug, traceRecorder);
+        const responseAssembleStartedMs = Date.now();
+        trace.push({ stage: "overview_timeout_fallback_materialized", ok: true, duration_ms: 0, started_at: nowIso() });
+        trace.push({ stage: "response_sent", ok: true, duration_ms: 0, started_at: nowIso() });
+        const dbConnectionMs = trace.find((row) => row.stage === "db_connection_acquired")?.duration_ms ?? 0;
+        const materializedReadMs = trace.find((row) => row.stage === "overview_load")?.duration_ms ?? OVERVIEW_TIMEOUT_MS;
+        const serializationMs = Math.max(0, Date.now() - responseAssembleStartedMs);
+        res.status(200).json({
+          ok: true,
+          ...fallbackPayload,
+          warning: {
+            type: "timed_out_live_refresh",
+            message: "Live refresh timed out, showing latest completed build.",
+          },
+          ...(debug
+            ? {
+              trace,
+              read_path_debug: {
+                read_path_mode: "fallback_stale",
+                materialized_source_table: "portfolio_snapshots,portfolio_history_daily,total_portfolio_history_daily",
+                materialized_as_of_date: fallbackPayload?.as_of_date ?? null,
+                materialized_last_build: fallbackPayload?.pipeline_status?.last_history_build ?? null,
+                inline_compute_attempted: false,
+                inline_compute_skipped_reason: "overview_route_materialized_read_path_only",
+                timeout_budget_ms: OVERVIEW_TIMEOUT_MS,
+                did_timeout: true,
+                did_fallback_to_materialized: true,
+                fallback_reason: "overview_timeout_budget_exceeded",
+                db_connection_ms: dbConnectionMs,
+                materialized_read_ms: materializedReadMs,
+                serialization_ms: serializationMs,
+                total_ms: Date.now() - requestStartedMs,
+              },
+            }
+            : {}),
+        });
+        return;
+      } catch {
+        // Fall through to error response when fallback materialized read is unavailable.
+      }
+    }
     const failedStage = [...trace].reverse().find((row) => row.ok === false)?.stage
       ?? (errorMessage.includes("overview_timeout_") ? "overview_load" : "unknown");
     const userMessage = errorMessage.includes("overview_timeout_")

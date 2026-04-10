@@ -883,6 +883,170 @@ export async function readPortfolioHistoryCanonicalLatest(options?: CanonicalBui
   return buildPortfolioHistoryCanonical(options);
 }
 
+export async function readPortfolioHistoryCanonicalMaterializedLatest(): Promise<CanonicalBundle> {
+  const configs = (await listPortfolioConfigs()).filter((cfg) => cfg.active);
+  const historyRows = await query(
+    `SELECT portfolio_id, as_of_date, market_value, data_quality
+     FROM ${tables.portfolioHistoryDaily}
+     WHERE market_value IS NOT NULL
+     ORDER BY portfolio_id ASC, as_of_date ASC`
+  ) as unknown as Array<{ portfolio_id: string; as_of_date: string; market_value: number; data_quality?: string | null }>;
+  const totalRows = await query(
+    `SELECT as_of_date, market_value, daily_return_pct, cumulative_return_pct, drawdown_pct, included_portfolio_count, data_quality
+     FROM ${tables.totalPortfolioHistoryDaily}
+     WHERE market_value IS NOT NULL
+     ORDER BY as_of_date ASC`
+  ) as unknown as Array<{
+    as_of_date: string;
+    market_value: number;
+    daily_return_pct?: number | null;
+    cumulative_return_pct?: number | null;
+    drawdown_pct?: number | null;
+    included_portfolio_count?: number | null;
+    data_quality?: string | null;
+  }>;
+
+  const rowsByPortfolio = new Map<string, Array<{ date: string; market_value_sek: number; data_quality: DataQuality }>>();
+  for (const row of historyRows) {
+    const portfolioId = String(row.portfolio_id ?? "").trim();
+    const date = String(row.as_of_date ?? "").trim();
+    const value = Number(row.market_value ?? NaN);
+    if (!portfolioId || !isValidDate(date) || !Number.isFinite(value) || value <= 0) continue;
+    const bucket = rowsByPortfolio.get(portfolioId) ?? [];
+    bucket.push({
+      date,
+      market_value_sek: value,
+      data_quality: row.data_quality === "full" || row.data_quality === "partial" || row.data_quality === "estimated"
+        ? row.data_quality
+        : "partial",
+    });
+    rowsByPortfolio.set(portfolioId, bucket);
+  }
+
+  const portfolios: CanonicalPortfolioHistoryResult[] = configs.map((config) => {
+    const seriesRows = rowsByPortfolio.get(config.portfolio_id) ?? [];
+    const trendInput = seriesRows.map((row) => ({ as_of_date: row.date, market_value: row.market_value_sek, contributor_count: 0 }));
+    const { metrics, cumulative_return_pct, drawdown_pct } = summarizeReturns(trendInput);
+    const invalid20 = [...metrics.invalid_reasons_20d];
+    const invalid65 = [...metrics.invalid_reasons_65d];
+    const invalid200 = [...metrics.invalid_reasons_200d];
+    const resolvedReturns = {
+      return_20d: invalid20.length ? null : metrics.return_20d,
+      return_65d: invalid65.length ? null : metrics.return_65d,
+      return_200d: invalid200.length ? null : metrics.return_200d,
+      trend_completeness: metrics.trend_completeness,
+    };
+    const trendContract = resolveTrendContract(resolvedReturns);
+    const first = seriesRows[0] ?? null;
+    const latest = seriesRows[seriesRows.length - 1] ?? null;
+    return {
+      portfolio_id: config.portfolio_id,
+      portfolio_name: config.portfolio_name,
+      as_of_date: latest?.date ?? null,
+      first_history_date: first?.date ?? null,
+      last_history_date: latest?.date ?? null,
+      latest_value_sek: latest?.market_value_sek ?? null,
+      daily_series: seriesRows.map((row) => ({
+        date: row.date,
+        market_value_sek: row.market_value_sek,
+        included_position_count: 0,
+        excluded_position_count: 0,
+        composition_hash: "materialized_unknown",
+      })),
+      return_20d: trendContract.return_20d,
+      return_65d: trendContract.return_65d,
+      return_200d: trendContract.return_200d,
+      anchor_20d_date: metrics.anchor_20d_date,
+      anchor_65d_date: metrics.anchor_65d_date,
+      anchor_200d_date: metrics.anchor_200d_date,
+      anchor_20d_value_sek: metrics.value_at_20d_anchor,
+      anchor_65d_value_sek: metrics.value_at_65d_anchor,
+      anchor_200d_value_sek: metrics.value_at_200d_anchor,
+      return_20d_valid: invalid20.length === 0 && metrics.return_20d_valid,
+      return_65d_valid: invalid65.length === 0 && metrics.return_65d_valid,
+      return_200d_valid: invalid200.length === 0 && metrics.return_200d_valid,
+      invalid_reason_20d: invalid20[0] ?? null,
+      invalid_reason_65d: invalid65[0] ?? null,
+      invalid_reason_200d: invalid200[0] ?? null,
+      composition_changed_20d: false,
+      composition_changed_65d: false,
+      composition_changed_200d: false,
+      short_direction: trendContract.short_direction,
+      medium_direction: trendContract.medium_direction,
+      long_direction: trendContract.long_direction,
+      trend_status: trendContract.trend_status,
+      trend_completeness: trendContract.trend_completeness,
+      canonical_contract_error: trendContract.canonical_contract_error,
+      canonical_contract_reason: trendContract.canonical_contract_reason,
+      cumulative_return_pct,
+      drawdown_pct,
+      data_quality: latest?.data_quality ?? "partial",
+      inclusion_debug: { positions_included: [], positions_excluded: [], exclusion_reasons: {} },
+      db_evidence: {
+        positions_found_in_db: 0,
+        price_rows_found_in_db: 0,
+        fx_rows_found_in_db: 0,
+        first_db_price_date: first?.date ?? null,
+        last_db_price_date: latest?.date ?? null,
+        first_db_fx_date: null,
+        last_db_fx_date: null,
+        dates_with_zero_included_positions: [],
+        dates_with_partial_positions: [],
+        dates_with_full_positions: [],
+        composition_break_dates: [],
+        excluded_positions_by_reason_count: {},
+      },
+      consistency_hash: hashString(`${config.portfolio_id}|${latest?.date ?? "null"}|${latest?.market_value_sek ?? 0}|materialized`),
+    };
+  });
+
+  const totalSeries = totalRows
+    .map((row) => ({
+      date: String(row.as_of_date ?? "").trim(),
+      total_market_value_sek: Number(row.market_value ?? NaN),
+      included_portfolio_count: Number(row.included_portfolio_count ?? 0),
+      data_quality: row.data_quality,
+      daily_return_pct: Number(row.daily_return_pct ?? NaN),
+      cumulative_return_pct: Number(row.cumulative_return_pct ?? NaN),
+      drawdown_pct: Number(row.drawdown_pct ?? NaN),
+    }))
+    .filter((row) => isValidDate(row.date) && Number.isFinite(row.total_market_value_sek) && row.total_market_value_sek > 0);
+  const totalLatest = totalSeries[totalSeries.length - 1] ?? null;
+
+  return {
+    canonical_source_version: "portfolio-history-canonical-v2",
+    date_rule: "observation_count_lookback",
+    continuity_rule: "composition_change_tracked_not_invalidating",
+    total_aggregation_rule: "include_portfolio_if_value_present_on_date_no_carry_forward",
+    portfolios,
+    total: {
+      as_of_date: totalLatest?.date ?? null,
+      total_market_value_sek: totalLatest?.total_market_value_sek ?? null,
+      included_portfolio_ids: configs.filter((cfg) => cfg.included_in_total_portfolio).map((cfg) => cfg.portfolio_id),
+      excluded_portfolio_ids: configs.filter((cfg) => !cfg.included_in_total_portfolio).map((cfg) => cfg.portfolio_id),
+      total_series: totalSeries.map((row) => ({ date: row.date, total_market_value_sek: row.total_market_value_sek, included_portfolio_count: row.included_portfolio_count })),
+      daily_return_pct: totalLatest && Number.isFinite(totalLatest.daily_return_pct) ? totalLatest.daily_return_pct : null,
+      cumulative_return_pct: totalLatest && Number.isFinite(totalLatest.cumulative_return_pct) ? totalLatest.cumulative_return_pct : null,
+      drawdown_pct: totalLatest && Number.isFinite(totalLatest.drawdown_pct) ? totalLatest.drawdown_pct : null,
+      history_days_available: totalSeries.length,
+      data_quality: totalLatest?.data_quality === "full" || totalLatest?.data_quality === "partial" || totalLatest?.data_quality === "estimated"
+        ? totalLatest.data_quality
+        : "partial",
+      date_rule_used: "observation_union_no_carry_forward_include_if_present",
+      consistency_hash: hashString(`${totalLatest?.date ?? "none"}|${totalLatest?.total_market_value_sek ?? 0}|materialized`),
+      db_evidence: {
+        portfolio_rows_found_by_portfolio_id: {},
+        total_dates_considered: totalSeries.length,
+        included_portfolio_count_by_date: {},
+        excluded_portfolio_count_by_date: {},
+        common_date_coverage_summary: { min: 0, max: 0, avg: 0 },
+        total_date_used: totalLatest?.date ?? null,
+        total_date_why: "latest materialized total series date",
+      },
+    },
+  };
+}
+
 export async function readPortfolioHistoryCanonicalTrace(portfolioId: string) {
   const bundle = await buildPortfolioHistoryCanonical({ portfolio_id: portfolioId });
   const portfolio = bundle.portfolios.find((p) => p.portfolio_id === portfolioId) ?? null;

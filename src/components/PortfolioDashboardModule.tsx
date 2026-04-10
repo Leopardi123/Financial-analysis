@@ -104,6 +104,10 @@ type PortfolioOverviewResponse = {
   };
   portfolios: PortfolioRecord[];
   setup?: { setup_state: SetupState };
+  warning?: {
+    type?: string;
+    message?: string;
+  } | null;
   pipeline_status?: {
     snapshot_exists: boolean;
     history_exists: boolean;
@@ -643,6 +647,11 @@ export default function PortfolioDashboardModule() {
 
       {!loading && !error && (setupState === "configured_positions_no_snapshot" || setupState === "partial" || setupState === "live") && overview && (
         <>
+          {overview.warning?.type === "timed_out_live_refresh" && (
+            <div className="portfolio-error">
+              <p>{overview.warning.message ?? "Live refresh timed out, showing latest completed build."}</p>
+            </div>
+          )}
           <div className="portfolio-kpi-row">
             <span>As of: {overview.as_of_date ?? "Unavailable"}</span>
             <span>Total market value (SEK): {formatMoney(overview.total.market_value)}</span>

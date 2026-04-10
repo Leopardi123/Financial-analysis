@@ -4,7 +4,7 @@ import { listPortfolioConfigs } from "../portfolio-admin/repository.js";
 import { buildPerPortfolioValidationIssues, validateGlobalTargetWeight } from "../portfolio-admin/validation.js";
 import { getLatestPortfolioRisk } from "../portfolio-risk/build.js";
 import { getLatestPortfolioHedgeAndDryPowder } from "../portfolio-hedge/build.js";
-import { readPortfolioHistoryCanonicalLatest } from "../portfolio-history/canonical.js";
+import { readPortfolioHistoryCanonicalMaterializedLatest } from "../portfolio-history/canonical.js";
 import { normalizePortfolioTrendContract } from "../portfolio-history/contract.js";
 
 const REBUILT_HISTORY_SOURCES = new Set(["positions_price_history", "positions_snapshots", "snapshots", "unavailable"]);
@@ -274,7 +274,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
 
   const riskPayload = await runStage("risk_loaded", async () => getLatestPortfolioRisk());
   const hedgePayload = await runStage("hedge_loaded", async () => getLatestPortfolioHedgeAndDryPowder());
-  const canonicalLatest = await runStage("canonical_history_loaded", async () => readPortfolioHistoryCanonicalLatest());
+  const canonicalLatest = await runStage("canonical_history_materialized_loaded", async () => readPortfolioHistoryCanonicalMaterializedLatest());
   const canonicalByPortfolioId = new Map(canonicalLatest.portfolios.map((item) => [item.portfolio_id, item]));
 
   const portfolioRows = asOfDate
