@@ -26,6 +26,13 @@ function asNum(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function asNullableFiniteNum(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 async function tableHasRows(tableName: string): Promise<boolean> {
   try {
     const rows = await query(`SELECT 1 AS x FROM ${tableName} LIMIT 1`);
@@ -50,7 +57,7 @@ function parseJson(value: unknown): any | null {
 }
 
 function sanitizeTrendReturn(value: unknown): number | null {
-  const num = asNum(value);
+  const num = asNullableFiniteNum(value);
   return num;
 }
 
@@ -136,9 +143,9 @@ function normalizeTrendFields(row: any) {
   const shortDirection = row?.short_direction == null ? "unavailable" : String(row.short_direction);
   const mediumDirection = row?.medium_direction == null ? "unavailable" : String(row.medium_direction);
   const longDirection = row?.long_direction == null ? "unavailable" : String(row.long_direction);
-  const return20d = asNum(row?.return_20d);
-  const return65d = asNum(row?.return_65d);
-  const return200d = asNum(row?.return_200d);
+  const return20d = asNullableFiniteNum(row?.return_20d);
+  const return65d = asNullableFiniteNum(row?.return_65d);
+  const return200d = asNullableFiniteNum(row?.return_200d);
   const looksLikePlaceholder = trendStatus === "unavailable"
     && shortDirection === "unavailable"
     && mediumDirection === "unavailable"
@@ -746,16 +753,16 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       const trendDebug = historyTrendByPortfolioId.get(row.portfolio_id)?.trend_debug ?? snapshotDebug?.trend ?? buildStructuredUnavailableTrendDebug(raw);
       const riskDebug = parseJson(raw.risk_debug_json);
       const hedgeDebug = parseJson(raw.hedge_debug_json);
-      const canonicalLatestValue = asNum(trendDebug.latest_value_sek);
+      const canonicalLatestValue = asNullableFiniteNum(trendDebug.latest_value_sek);
       const buildWindowProof = (window: "20d" | "65d" | "200d") => {
         const days = windowKeyToDays(window);
-        const anchorValue = asNum(trendDebug[`anchor_${days}d_value_sek`] ?? trendDebug[`value_at_${days}d_anchor`]);
+        const anchorValue = asNullableFiniteNum(trendDebug[`anchor_${days}d_value_sek`] ?? trendDebug[`value_at_${days}d_anchor`]);
         const anchorDate = (trendDebug[`anchor_${days}d_date`] ?? null) as string | null;
         const rawUnrounded = (canonicalLatestValue !== null && anchorValue !== null && anchorValue > 0)
           ? ((canonicalLatestValue / anchorValue) - 1) * 100
           : null;
-        const finalizedReturn = asNum(trendDebug[`return_${days}d`]);
-        const latestReturn = asNum(row[`return_${days}d` as "return_20d" | "return_65d" | "return_200d"]);
+        const finalizedReturn = asNullableFiniteNum(trendDebug[`return_${days}d`]);
+        const latestReturn = asNullableFiniteNum(row[`return_${days}d` as "return_20d" | "return_65d" | "return_200d"]);
         const uiDisplay = formatUiPercent(latestReturn);
         return {
           latest_value_raw: canonicalLatestValue,
