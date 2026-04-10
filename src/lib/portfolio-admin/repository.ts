@@ -4,6 +4,17 @@ import type { PortfolioAdminConfig } from "./types.js";
 
 const TABLE = tables.portfolioAdminConfig;
 
+function maskDatabaseUrl(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname || "unknown";
+    return `${url.protocol}//***@${host}${url.pathname}`;
+  } catch {
+    return "***";
+  }
+}
+
 function asBool(value: unknown): boolean {
   return Number(value ?? 0) === 1;
 }
@@ -57,6 +68,22 @@ export function rowToPortfolioConfig(row: any): PortfolioAdminConfig {
 export async function listPortfolioConfigs(): Promise<PortfolioAdminConfig[]> {
   const rows = await query(`SELECT * FROM ${TABLE} ORDER BY sort_order ASC, portfolio_id ASC`);
   return rows.map((row) => rowToPortfolioConfig(row));
+}
+
+export async function loadPortfolioConfigSourceOfTruth() {
+  const rows = await query(`SELECT * FROM ${TABLE} ORDER BY sort_order ASC, portfolio_id ASC`);
+  const portfolios = rows.map((row) => rowToPortfolioConfig(row));
+  return {
+    portfolios,
+    diagnostics: {
+      function_name: "loadPortfolioConfigSourceOfTruth",
+      database_url_masked: maskDatabaseUrl(process.env.TURSO_DATABASE_URL),
+      source_table_names: [TABLE],
+      query_purpose: "load_configured_portfolios_for_admin_and_overview",
+      rows_found: rows.length,
+      portfolio_ids_returned: portfolios.map((row) => row.portfolio_id),
+    },
+  };
 }
 
 export async function getPortfolioConfig(portfolioId: string): Promise<PortfolioAdminConfig | null> {

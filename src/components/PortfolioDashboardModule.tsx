@@ -35,6 +35,7 @@ type PortfolioRecord = {
   hedge_status: string | null;
   hedge_policy_applied: string | null;
   signal_completeness: string | null;
+  trend_completeness?: string | null;
   valuation_state?: string | null;
   positions_found_count?: NullableNumber;
   positions_active_count?: NullableNumber;
@@ -47,6 +48,9 @@ type PortfolioRecord = {
   trend_invalid_reason_20d?: string | null;
   trend_invalid_reason_65d?: string | null;
   trend_invalid_reason_200d?: string | null;
+  trend_contract_error?: boolean;
+  trend_contract_reason?: string | null;
+  contract_debug?: Record<string, unknown> | null;
 };
 
 type PortfolioConfig = {
@@ -100,6 +104,10 @@ type PortfolioOverviewResponse = {
   };
   portfolios: PortfolioRecord[];
   setup?: { setup_state: SetupState };
+  warning?: {
+    type?: string;
+    message?: string;
+  } | null;
   pipeline_status?: {
     snapshot_exists: boolean;
     history_exists: boolean;
@@ -115,30 +123,6 @@ type PortfolioOverviewResponse = {
     debugMessage?: string;
     stage?: string;
     trace?: Array<{ stage: string; ok: boolean; duration_ms: number; error?: string }>;
-  };
-};
-
-type PortfolioHistoryLatestResponse = {
-  ok: boolean;
-  portfolios: Array<{
-    portfolio_id: string;
-    return_20d: NullableNumber;
-    return_65d: NullableNumber;
-    return_200d: NullableNumber;
-    return_20d_valid?: boolean;
-    return_65d_valid?: boolean;
-    return_200d_valid?: boolean;
-  }>;
-  diagnostics?: {
-    portfolios?: Array<{
-      portfolio_id: string;
-      invalid_reason_20d?: string | null;
-      invalid_reason_65d?: string | null;
-      invalid_reason_200d?: string | null;
-      return_20d?: NullableNumber;
-      return_65d?: NullableNumber;
-      return_200d?: NullableNumber;
-    }>;
   };
 };
 
@@ -257,7 +241,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { signal: controller.signal, cache: "no-store" });
     const json = (await response.json()) as T;
     if (!response.ok) {
       throw { response, json };
@@ -287,6 +271,13 @@ function renderTrendReturn(value: NullableNumber, valid: boolean | undefined, in
   if (invalidReason) return "Unavailable";
   if (valid === false) return "Unavailable";
   return formatPct(value);
+}
+
+function trendFallbackReason(value: NullableNumber, valid: boolean | undefined, invalidReason: string | null | undefined): string | null {
+  if (value === null) return "value_null";
+  if (invalidReason) return `invalid_reason:${invalidReason}`;
+  if (valid === false) return "invalid_flag_false";
+  return null;
 }
 
 function formatMoney(value: NullableNumber): string {
@@ -389,6 +380,7 @@ export default function PortfolioDashboardModule() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overviewError, setOverviewError] = useState<LoadErrorDetail | null>(null);
+  const [adminLoadError, setAdminLoadError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
@@ -400,54 +392,63 @@ export default function PortfolioDashboardModule() {
     setLoading(true);
     setError(null);
     setOverviewError(null);
+    setAdminLoadError(null);
 
-    const [overviewResult, adminResult, validateResult, latestTrendResult] = await Promise.allSettled([
+    const [overviewResult, adminResult, validateResult] = await Promise.allSettled([
       fetchJsonWithTimeout<PortfolioOverviewResponse>(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`, 12_000),
-      fetchJsonWithTimeout<{ ok: boolean; portfolios: PortfolioConfig[] }>(`/api/portfolio/admin/list`, 8_000),
+      fetchJsonWithTimeout<{ ok: boolean; portfolios: PortfolioConfig[]; diagnostics?: unknown }>(`/api/portfolio/admin/list${debugMode ? "?debug=1" : ""}`, 8_000),
       fetchJsonWithTimeout<AdminValidateResponse>(`/api/portfolio/admin/validate`, 8_000),
-      fetchJsonWithTimeout<PortfolioHistoryLatestResponse>(`/api/portfolio/history/latest?debug=1`, 12_000),
     ]);
 
     if (adminResult.status === "fulfilled" && adminResult.value.ok) {
       setAdminList(adminResult.value.portfolios);
     } else {
-      throw new Error("Failed to load portfolio admin list.");
+      setAdminList([]);
+      setAdminLoadError("Portfolio admin list could not be loaded.");
     }
 
     if (validateResult.status === "fulfilled" && validateResult.value.ok) {
       setAdminValidation(validateResult.value);
     } else {
-      throw new Error("Failed to load portfolio validation.");
+      setAdminValidation(null);
     }
 
-    const latestTrendPayload = latestTrendResult.status === "fulfilled" && latestTrendResult.value.ok
-      ? latestTrendResult.value
-      : null;
-    const latestTrendById = new Map(
-      (latestTrendPayload?.portfolios ?? []).map((row) => [String(row.portfolio_id ?? ""), row]),
-    );
-    const latestTrendDiagById = new Map(
-      (latestTrendPayload?.diagnostics?.portfolios ?? []).map((row) => [String(row.portfolio_id ?? ""), row]),
-    );
-
     if (overviewResult.status === "fulfilled" && overviewResult.value.ok) {
+      const overviewDebugById = new Map<string, any>(
+        ((overviewResult.value as any)?.debug?.portfolios ?? []).map((row: any) => [String(row?.portfolio_id ?? ""), row]),
+      );
       const mergedOverview: PortfolioOverviewResponse = {
         ...overviewResult.value,
         portfolios: overviewResult.value.portfolios.map((portfolio) => {
-          const trend = latestTrendById.get(portfolio.portfolio_id);
-          const trendDiag = latestTrendDiagById.get(portfolio.portfolio_id);
+          const debugRow = overviewDebugById.get(portfolio.portfolio_id);
+          const fallback20 = trendFallbackReason(portfolio.return_20d, portfolio.trend_return_20d_valid, portfolio.trend_invalid_reason_20d);
+          const fallback65 = trendFallbackReason(portfolio.return_65d, portfolio.trend_return_65d_valid, portfolio.trend_invalid_reason_65d);
+          const fallback200 = trendFallbackReason(portfolio.return_200d, portfolio.trend_return_200d_valid, portfolio.trend_invalid_reason_200d);
           return {
             ...portfolio,
-            return_20d: trend?.return_20d ?? null,
-            return_65d: trend?.return_65d ?? null,
-            return_200d: trend?.return_200d ?? null,
-            trend_return_20d_valid: trend?.return_20d_valid ?? undefined,
-            trend_return_65d_valid: trend?.return_65d_valid ?? undefined,
-            trend_return_200d_valid: trend?.return_200d_valid ?? undefined,
-            trend_invalid_reason_20d: trendDiag?.invalid_reason_20d ?? null,
-            trend_invalid_reason_65d: trendDiag?.invalid_reason_65d ?? null,
-            trend_invalid_reason_200d: trendDiag?.invalid_reason_200d ?? null,
-            trend_source_endpoint: "/api/portfolio/history/latest?debug=1",
+            trend_source_endpoint: "/api/portfolio/overview/latest?debug=1",
+            trend_contract_error: portfolio.trend_contract_error ?? false,
+            trend_contract_reason: portfolio.trend_contract_reason ?? null,
+            contract_debug: {
+              ...(debugRow?.contract_debug ?? {}),
+              latest_row_exists: debugRow?.contract_debug?.latest_row_exists ?? true,
+              overview_row_exists: true,
+              ui_row_exists: true,
+              ui_market_value: portfolio.market_value ?? null,
+              ui_return_20d: portfolio.return_20d ?? null,
+              ui_return_65d: portfolio.return_65d ?? null,
+              ui_return_200d: portfolio.return_200d ?? null,
+              ui_short_direction: portfolio.short_direction ?? null,
+              ui_medium_direction: portfolio.medium_direction ?? null,
+              ui_long_direction: portfolio.long_direction ?? null,
+              ui_trend_status: portfolio.trend_status ?? null,
+              ui_trend_completeness: portfolio.signal_completeness ?? null,
+              ui_as_of_date: overviewResult.value.as_of_date ?? null,
+              ui_render_fallback_reason_20d: fallback20,
+              ui_render_fallback_reason_65d: fallback65,
+              ui_render_fallback_reason_200d: fallback200,
+              contract_match_adapter_to_ui: true,
+            },
           };
         }),
       };
@@ -611,6 +612,11 @@ export default function PortfolioDashboardModule() {
           )}
         </div>
       )}
+      {!error && !overviewError && adminLoadError && (
+        <div className="portfolio-error">
+          <p>{adminLoadError}</p>
+        </div>
+      )}
 
       {!loading && !error && setupState === "no_config" && (
         <div className="portfolio-empty-state">
@@ -649,6 +655,11 @@ export default function PortfolioDashboardModule() {
 
       {!loading && !error && (setupState === "configured_positions_no_snapshot" || setupState === "partial" || setupState === "live") && overview && (
         <>
+          {overview.warning?.type === "timed_out_live_refresh" && (
+            <div className="portfolio-error">
+              <p>{overview.warning.message ?? "Live refresh timed out, showing latest completed build."}</p>
+            </div>
+          )}
           <div className="portfolio-kpi-row">
             <span>As of: {overview.as_of_date ?? "Unavailable"}</span>
             <span>Total market value (SEK): {formatMoney(overview.total.market_value)}</span>
@@ -705,6 +716,9 @@ export default function PortfolioDashboardModule() {
                       {portfolio.signal_completeness === "unavailable" && (
                         <span className="status-pill completeness-unavailable">Incomplete</span>
                       )}
+                      {debugMode && portfolio.trend_contract_error && (
+                        <span className="status-pill completeness-unavailable">Contract violation</span>
+                      )}
                     </div>
                   </div>
                 </summary>
@@ -752,7 +766,9 @@ export default function PortfolioDashboardModule() {
                       raw_return_200d: portfolio.return_200d,
                       invalid_reason: portfolio.trend_invalid_reason_65d ?? null,
                       rendered_value_65d: renderTrendReturn(portfolio.return_65d, portfolio.trend_return_65d_valid, portfolio.trend_invalid_reason_65d),
-                      fallback_used: false,
+                      trend_contract_error: portfolio.trend_contract_error ?? false,
+                      trend_contract_reason: portfolio.trend_contract_reason ?? null,
+                      contract_debug: portfolio.contract_debug ?? null,
                     }, null, 2)}</pre>
                   )}
                 </details>
