@@ -1,6 +1,6 @@
 import { query } from "../../../api/_db.js";
 import { tables } from "../../../api/_migrate.js";
-import { listPortfolioConfigs } from "../portfolio-admin/repository.js";
+import { loadPortfolioConfigSourceOfTruth } from "../portfolio-admin/repository.js";
 import { buildPerPortfolioValidationIssues, validateGlobalTargetWeight } from "../portfolio-admin/validation.js";
 import { getLatestPortfolioRisk } from "../portfolio-risk/build.js";
 import { getLatestPortfolioHedgeAndDryPowder } from "../portfolio-hedge/build.js";
@@ -269,7 +269,8 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   );
   const asOfDate = String(latestRows[0]?.as_of_date ?? "").trim() || null;
 
-  const adminConfigs = await runStage("admin_config_loaded", async () => listPortfolioConfigs());
+  const configSource = await runStage("admin_config_loaded", async () => loadPortfolioConfigSourceOfTruth());
+  const adminConfigs = configSource.portfolios;
   const globalValidation = validateGlobalTargetWeight(adminConfigs);
   const validationById = new Map(buildPerPortfolioValidationIssues(adminConfigs).map((item) => [item.portfolio_id, item]));
 
@@ -788,6 +789,18 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   if (!debug) return basePayload;
 
   const debugPayload = {
+    config_source_debug: {
+      endpoint_name: "/api/portfolio/overview/latest",
+      route_file: "src/server/routes/portfolio/overview/latest.ts",
+      function_name: configSource.diagnostics.function_name,
+      database_url_masked: configSource.diagnostics.database_url_masked,
+      source_table_names: configSource.diagnostics.source_table_names,
+      exact_query_purpose: configSource.diagnostics.query_purpose,
+      rows_found: configSource.diagnostics.rows_found,
+      setup_state_returned: setupState,
+      portfolio_ids_returned: configSource.diagnostics.portfolio_ids_returned,
+      zero_rows_reason: configSource.diagnostics.rows_found > 0 ? null : "portfolio_admin_config_query_returned_zero_rows",
+    },
     build_sources: {
       admin_config: adminConfigs.length > 0,
       snapshots: await tableHasRows(tables.portfolioSnapshots),

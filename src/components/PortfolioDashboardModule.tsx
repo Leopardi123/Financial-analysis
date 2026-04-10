@@ -241,7 +241,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { signal: controller.signal, cache: "no-store" });
     const json = (await response.json()) as T;
     if (!response.ok) {
       throw { response, json };
@@ -380,6 +380,7 @@ export default function PortfolioDashboardModule() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overviewError, setOverviewError] = useState<LoadErrorDetail | null>(null);
+  const [adminLoadError, setAdminLoadError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
@@ -391,23 +392,25 @@ export default function PortfolioDashboardModule() {
     setLoading(true);
     setError(null);
     setOverviewError(null);
+    setAdminLoadError(null);
 
     const [overviewResult, adminResult, validateResult] = await Promise.allSettled([
       fetchJsonWithTimeout<PortfolioOverviewResponse>(`/api/portfolio/overview/latest${debugMode ? "?debug=1" : ""}`, 12_000),
-      fetchJsonWithTimeout<{ ok: boolean; portfolios: PortfolioConfig[] }>(`/api/portfolio/admin/list`, 8_000),
+      fetchJsonWithTimeout<{ ok: boolean; portfolios: PortfolioConfig[]; diagnostics?: unknown }>(`/api/portfolio/admin/list${debugMode ? "?debug=1" : ""}`, 8_000),
       fetchJsonWithTimeout<AdminValidateResponse>(`/api/portfolio/admin/validate`, 8_000),
     ]);
 
     if (adminResult.status === "fulfilled" && adminResult.value.ok) {
       setAdminList(adminResult.value.portfolios);
     } else {
-      throw new Error("Failed to load portfolio admin list.");
+      setAdminList([]);
+      setAdminLoadError("Portfolio admin list could not be loaded.");
     }
 
     if (validateResult.status === "fulfilled" && validateResult.value.ok) {
       setAdminValidation(validateResult.value);
     } else {
-      throw new Error("Failed to load portfolio validation.");
+      setAdminValidation(null);
     }
 
     if (overviewResult.status === "fulfilled" && overviewResult.value.ok) {
@@ -607,6 +610,11 @@ export default function PortfolioDashboardModule() {
               trace: overviewError.trace ?? [],
             }, null, 2)}</pre>
           )}
+        </div>
+      )}
+      {!error && !overviewError && adminLoadError && (
+        <div className="portfolio-error">
+          <p>{adminLoadError}</p>
         </div>
       )}
 
