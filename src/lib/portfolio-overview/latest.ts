@@ -8,6 +8,7 @@ import { readPortfolioHistoryCanonicalMaterializedLatest } from "../portfolio-hi
 import { normalizePortfolioTrendContract } from "../portfolio-history/contract.js";
 
 const REBUILT_HISTORY_SOURCES = new Set(["positions_price_history", "positions_snapshots", "snapshots", "unavailable"]);
+const TOTAL_INCLUSION_FALLBACK_MAX_AGE_DAYS = 30;
 
 export type PortfolioOverviewTraceRow = {
   stage: string;
@@ -415,7 +416,77 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       return b.date.localeCompare(a.date);
     });
   const latestTotalHistoryDate = canonicalLatest.total.as_of_date ?? scoredCandidates[0]?.date ?? "";
-  const contributingPortfolioIds = Array.from(contributorsByDate.get(latestTotalHistoryDate) ?? []).sort((a, b) => a.localeCompare(b));
+  const totalDateMs = dateToUtcMs(latestTotalHistoryDate);
+  const perPortfolioTotalInclusion = includedConfigIds.map((portfolioId) => {
+    const series = seriesByPortfolio.get(portfolioId) ?? [];
+    const latestSeriesRow = series[series.length - 1] ?? null;
+    const exactDateRow = series.find((row) => row.as_of_date === latestTotalHistoryDate) ?? null;
+    const fallbackCandidates = series
+      .filter((row) => row.as_of_date <= latestTotalHistoryDate)
+      .sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+    const fallbackRow = fallbackCandidates[fallbackCandidates.length - 1] ?? null;
+    const marketValueCandidate = asNullableFiniteNum(exactDateRow?.market_value ?? fallbackRow?.market_value ?? null);
+    const marketValueFinite = marketValueCandidate !== null && Number.isFinite(marketValueCandidate);
+    const marketValuePositive = marketValueFinite && marketValueCandidate > 0;
+    const exactDateMatch = Boolean(exactDateRow);
+    const fallbackAllowed = true;
+    const fallbackDateUsed = exactDateMatch ? null : (fallbackRow?.as_of_date ?? null);
+    const fallbackDateMs = fallbackDateUsed ? dateToUtcMs(fallbackDateUsed) : null;
+    const fallbackAgeDays = (totalDateMs !== null && fallbackDateMs !== null)
+      ? Math.max(0, Math.floor((totalDateMs - fallbackDateMs) / (24 * 60 * 60 * 1000)))
+      : null;
+    const fallbackAgeAccepted = fallbackAgeDays === null ? false : fallbackAgeDays <= TOTAL_INCLUSION_FALLBACK_MAX_AGE_DAYS;
+    const passesTotalDateRule = exactDateMatch || (fallbackAllowed && fallbackRow !== null && fallbackAgeAccepted);
+    const passesQualityRule = marketValuePositive;
+    const passesInclusionRule = passesTotalDateRule && passesQualityRule;
+    const excludedReason = !passesTotalDateRule
+      ? (fallbackRow ? "fallback_date_too_old" : "missing_row_on_or_before_total_date")
+      : !passesQualityRule
+        ? (marketValueCandidate === null ? "market_value_missing_or_non_finite" : "market_value_non_positive")
+        : "included";
+    const excludedStage = !passesTotalDateRule
+      ? "total_date_rule"
+      : !passesQualityRule
+        ? "market_value_rule"
+        : "included";
+    return {
+      portfolio_id: portfolioId,
+      candidate_for_total: true,
+      included_in_total: passesInclusionRule,
+      excluded_reason_exact: excludedReason,
+      excluded_stage_exact: excludedStage,
+      total_date_used: latestTotalHistoryDate || null,
+      portfolio_latest_available_date: latestSeriesRow?.as_of_date ?? null,
+      portfolio_canonical_as_of_date: canonicalByPortfolioId.get(portfolioId)?.as_of_date ?? null,
+      portfolio_latest_as_of_date: latestSeriesRow?.as_of_date ?? null,
+      portfolio_overview_as_of_date: asOfDate,
+      market_value_used_for_total: passesInclusionRule ? marketValueCandidate : null,
+      market_value_rejected_reason: passesQualityRule ? null : excludedReason,
+      trend_required_for_total: false,
+      date_match_required_for_total: true,
+      exact_date_match_result: exactDateMatch,
+      fallback_date_allowed: fallbackAllowed,
+      fallback_date_used: fallbackDateUsed,
+      null_finite_checks_used: {
+        has_market_value: marketValueCandidate !== null,
+        market_value_finite: marketValueFinite,
+        market_value_positive: marketValuePositive,
+      },
+      boolean_chain: {
+        has_market_value: marketValueCandidate !== null,
+        market_value_finite: marketValueFinite,
+        has_row_on_total_date: exactDateMatch,
+        passes_total_date_rule: passesTotalDateRule,
+        passes_quality_rule: passesQualityRule,
+        passes_inclusion_rule: passesInclusionRule,
+        final_included: passesInclusionRule,
+      },
+    };
+  });
+  const contributingPortfolioIds = perPortfolioTotalInclusion
+    .filter((item) => item.included_in_total)
+    .map((item) => item.portfolio_id)
+    .sort((a, b) => a.localeCompare(b));
   const totalHistoryCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.totalPortfolioHistoryDaily}`);
   const historyAvailableDays = Number(totalHistoryCountRows[0]?.count ?? 0);
   const snapshotCountRows = await query(`SELECT COUNT(*) AS count FROM ${tables.portfolioSnapshots}`);
@@ -443,6 +514,11 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const totalMarketValue = includedMarketValues.length > 0
     ? includedMarketValues.reduce((sum, value) => sum + value, 0)
     : null;
+  const totalMarketValueFromDateRule = perPortfolioTotalInclusion
+    .filter((item) => item.included_in_total)
+    .map((item) => asNullableFiniteNum(item.market_value_used_for_total))
+    .filter((value): value is number => value !== null && Number.isFinite(value))
+    .reduce((sum, value) => sum + value, 0);
 
   const totalRiskStatus = riskPayload.total.total_risk_status;
   const totalRiskScore = riskPayload.total.total_risk_score;
@@ -668,7 +744,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const basePayload = await runStage("response_assembled", async () => ({
     as_of_date: asOfDate,
     total: {
-      market_value: contributingPortfolioIds.length > 0 ? finalRowTotalMarketValue : totalMarketValue,
+      market_value: contributingPortfolioIds.length > 0 ? totalMarketValueFromDateRule : totalMarketValue,
       allocation_plan_status: allocationPlanStatus,
       total_risk_score: totalRiskScore,
       total_risk_status: totalRiskStatus,
@@ -703,9 +779,9 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
       total_date_used: latestTotalHistoryDate || null,
-      total_date_rule_used: "latest_recent_date_max_contributors_then_latest",
+      total_date_rule_used: "canonical_latest_date_then_portfolio_exact_or_recent_fallback_30d",
       contributing_portfolio_ids: contributingPortfolioIds,
-      excluded_portfolio_ids: includedConfigIds.filter((id) => !contributingPortfolioIds.includes(id)),
+      excluded_portfolio_ids: perPortfolioTotalInclusion.filter((item) => !item.included_in_total).map((item) => item.portfolio_id),
     },
   }));
 
@@ -729,9 +805,16 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
       total_date_used: latestTotalHistoryDate || null,
-      total_date_rule_used: "latest_recent_date_max_contributors_then_latest",
+      total_date_rule_used: "canonical_latest_date_then_portfolio_exact_or_recent_fallback_30d",
       contributing_portfolio_ids: contributingPortfolioIds,
-      excluded_portfolio_ids: includedConfigIds.filter((id) => !contributingPortfolioIds.includes(id)),
+      excluded_portfolio_ids: perPortfolioTotalInclusion.filter((item) => !item.included_in_total).map((item) => item.portfolio_id),
+    },
+    total_inclusion_debug: {
+      total_date_used: latestTotalHistoryDate || null,
+      market_value_source: contributingPortfolioIds.length > 0 ? "date_rule_sum" : "snapshot_fallback_sum",
+      total_market_value_before: finalRowTotalMarketValue,
+      total_market_value_after: contributingPortfolioIds.length > 0 ? totalMarketValueFromDateRule : totalMarketValue,
+      per_portfolio: perPortfolioTotalInclusion,
     },
     global_validation: {
       target_weight_sum_status: globalValidation.status,
