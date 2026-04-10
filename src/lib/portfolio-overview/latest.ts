@@ -509,17 +509,6 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
 
   const allocationPlanStatus = computeAllocationPlanStatus(portfolioRows as any[]);
   const included = (portfolioRows as any[]).filter((row) => Number(row.active ?? 0) === 1 && Number(row.included_in_total_portfolio ?? 0) === 1);
-  const includedMarketValues = included
-    .map((row) => asNum(row.market_value))
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  const totalMarketValue = includedMarketValues.length > 0
-    ? includedMarketValues.reduce((sum, value) => sum + value, 0)
-    : null;
-  const totalMarketValueFromDateRule = perPortfolioTotalInclusion
-    .filter((item) => item.included_in_total)
-    .map((item) => asNullableFiniteNum(item.market_value_used_for_total))
-    .filter((value): value is number => value !== null && Number.isFinite(value))
-    .reduce((sum, value) => sum + value, 0);
 
   const totalRiskStatus = riskPayload.total.total_risk_status;
   const totalRiskScore = riskPayload.total.total_risk_score;
@@ -694,7 +683,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     portfolio_name: String(row.portfolio_name ?? ""),
     portfolio_type: String(row.portfolio_type ?? ""),
     sort_order: Number(row.sort_order ?? 0),
-    market_value: canonicalByPortfolioId.get(String(row.portfolio_id ?? ""))?.latest_value_sek ?? asNum(row.market_value),
+    market_value: asNum(row.market_value),
     actual_weight_pct: asNum(row.actual_weight_pct),
     target_weight_pct: asNum(row.target_weight_pct),
     min_weight_pct: asNum(row.min_weight_pct),
@@ -726,11 +715,47 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     data_quality_flags: buildDataQualityFlags({ ...row, trend_status: trendMetrics.trend_status, return_65d: trendMetrics.return_65d }),
   });
   });
-  const finalRowTotalMarketValue = portfolios
-    .filter((row) => contributingPortfolioIds.includes(row.portfolio_id))
-    .reduce((sum, row) => sum + (asNum(row.market_value) ?? 0), 0);
-
   const snapshotIds = new Set((portfolioRows as any[]).map((row) => String(row.portfolio_id ?? "")).filter((id) => id.length > 0));
+  const snapshotMetaById = new Map((portfolioRows as any[]).map((row) => ([
+    String(row.portfolio_id ?? ""),
+    {
+      active: Number(row.active ?? 0) === 1,
+      included_in_total_portfolio: Number(row.included_in_total_portfolio ?? 0) === 1,
+    },
+  ])));
+  const valuationPerPortfolio = portfolios.map((row) => {
+    const snapshotMeta = snapshotMetaById.get(row.portfolio_id) ?? { active: false, included_in_total_portfolio: false };
+    const snapshotMarketValue = asNum(row.market_value);
+    const usedForTotal = snapshotMeta.active && snapshotMeta.included_in_total_portfolio && snapshotMarketValue !== null && Number.isFinite(snapshotMarketValue);
+    return {
+      portfolio_id: row.portfolio_id,
+      snapshot_row_exists_for_as_of_date: snapshotIds.has(row.portfolio_id),
+      snapshot_market_value: snapshotMarketValue,
+      canonical_market_value: canonicalByPortfolioId.get(row.portfolio_id)?.latest_value_sek ?? null,
+      market_value_used_by_overview: usedForTotal ? snapshotMarketValue : null,
+      date_used_for_market_value: usedForTotal ? asOfDate : null,
+      used_for_total: usedForTotal,
+      exclusion_reason: usedForTotal ? null : (
+        !snapshotMeta.active
+          ? "portfolio_inactive"
+          : !snapshotMeta.included_in_total_portfolio
+            ? "not_included_in_total_portfolio"
+            : snapshotMarketValue === null
+              ? "snapshot_market_value_missing_or_non_finite"
+              : null
+      ),
+    };
+  });
+  const valuationIncludedPortfolioIds = valuationPerPortfolio.filter((p) => p.used_for_total).map((p) => p.portfolio_id);
+  const valuationTotalMarketValue = valuationPerPortfolio
+    .filter((p) => p.used_for_total)
+    .reduce((sum, p) => sum + (p.market_value_used_by_overview ?? 0), 0);
+  const valuationTotalEqualsSum = Math.abs(
+    valuationTotalMarketValue - portfolios
+      .filter((row) => valuationIncludedPortfolioIds.includes(row.portfolio_id))
+      .reduce((sum, row) => sum + (asNum(row.market_value) ?? 0), 0)
+  ) < 1e-6;
+
   const portfoliosConfiguredCount = adminConfigs.length;
   const portfoliosWithSnapshotsCount = snapshotIds.size;
   const hasAnyPositions = await tableHasRows(tables.portfolioPositions);
@@ -745,7 +770,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
   const basePayload = await runStage("response_assembled", async () => ({
     as_of_date: asOfDate,
     total: {
-      market_value: contributingPortfolioIds.length > 0 ? totalMarketValueFromDateRule : totalMarketValue,
+      market_value: valuationTotalMarketValue,
       allocation_plan_status: allocationPlanStatus,
       total_risk_score: totalRiskScore,
       total_risk_status: totalRiskStatus,
@@ -753,7 +778,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       dry_powder_status: dryPowderStatus,
       opportunistic_weight_pct: hedgePayload.total.opportunistic_weight_pct,
       required_min_dry_powder_pct: hedgePayload.total.required_min_dry_powder_pct,
-      included_portfolio_count: contributingPortfolioIds.length > 0 ? contributingPortfolioIds.length : included.length,
+      included_portfolio_count: valuationIncludedPortfolioIds.length,
       major_warnings: Array.from(new Set(majorWarnings)),
       major_warning_details: warningDetails,
     },
@@ -779,10 +804,12 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       positions_count: activePositionsCount,
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
-      total_date_used: latestTotalHistoryDate || null,
-      total_date_rule_used: "canonical_latest_date_then_portfolio_exact_or_recent_fallback_30d",
-      contributing_portfolio_ids: contributingPortfolioIds,
-      excluded_portfolio_ids: perPortfolioTotalInclusion.filter((item) => !item.included_in_total).map((item) => item.portfolio_id),
+      total_date_used: asOfDate,
+      total_date_rule_used: "snapshot_exact_as_of_date",
+      contributing_portfolio_ids: valuationIncludedPortfolioIds,
+      excluded_portfolio_ids: valuationPerPortfolio.filter((item) => !item.used_for_total).map((item) => item.portfolio_id),
+      trend_date_used: latestTotalHistoryDate || null,
+      trend_contributing_portfolio_ids: contributingPortfolioIds,
     },
   }));
 
@@ -817,16 +844,28 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       positions_count: activePositionsCount,
       last_snapshot_build: lastSnapshotBuild,
       last_history_build: lastHistoryBuild,
-      total_date_used: latestTotalHistoryDate || null,
-      total_date_rule_used: "canonical_latest_date_then_portfolio_exact_or_recent_fallback_30d",
-      contributing_portfolio_ids: contributingPortfolioIds,
-      excluded_portfolio_ids: perPortfolioTotalInclusion.filter((item) => !item.included_in_total).map((item) => item.portfolio_id),
+      total_date_used: asOfDate,
+      total_date_rule_used: "snapshot_exact_as_of_date",
+      contributing_portfolio_ids: valuationIncludedPortfolioIds,
+      excluded_portfolio_ids: valuationPerPortfolio.filter((item) => !item.used_for_total).map((item) => item.portfolio_id),
+      trend_date_used: latestTotalHistoryDate || null,
+      trend_contributing_portfolio_ids: contributingPortfolioIds,
+    },
+    valuation_contract_debug: {
+      valuation_source_mode: "snapshot_as_of_date_strict",
+      valuation_as_of_date: asOfDate,
+      valuation_source_table: tables.portfolioSnapshots,
+      total_market_value_source: "sum(snapshot.market_value for active+included portfolios on valuation_as_of_date)",
+      total_market_value_sum_check: valuationTotalMarketValue,
+      per_portfolio: valuationPerPortfolio,
+      contract_ok_valuation_date_alignment: valuationPerPortfolio.every((p) => !p.used_for_total || p.date_used_for_market_value === asOfDate),
+      contract_ok_total_equals_sum: valuationTotalEqualsSum,
     },
     total_inclusion_debug: {
       total_date_used: latestTotalHistoryDate || null,
-      market_value_source: contributingPortfolioIds.length > 0 ? "date_rule_sum" : "snapshot_fallback_sum",
-      total_market_value_before: finalRowTotalMarketValue,
-      total_market_value_after: contributingPortfolioIds.length > 0 ? totalMarketValueFromDateRule : totalMarketValue,
+      market_value_source: "trend_history_debug_only_not_used_for_overview_valuation",
+      total_market_value_before: null,
+      total_market_value_after: null,
       per_portfolio: perPortfolioTotalInclusion,
     },
     global_validation: {
