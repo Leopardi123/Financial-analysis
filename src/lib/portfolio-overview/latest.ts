@@ -693,8 +693,10 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     const displayedMarketValueSource = "portfolio_snapshots.market_value";
     const displayedCompositionHash = buildCompositionHash("snapshot_basis", portfolioId, displayedDate);
 
-    const seriesForReturns = historySeries.map((point) => ({ as_of_date: point.as_of_date, market_value: point.market_value, contributor_count: 1 }));
-    let terminalValueSource = "portfolio_history_daily.market_value";
+    const boundedHistorySeries = displayedDate
+      ? historySeries.filter((point) => point.as_of_date <= displayedDate)
+      : historySeries;
+    const seriesForReturns = boundedHistorySeries.map((point) => ({ as_of_date: point.as_of_date, market_value: point.market_value, contributor_count: 1 }));
     if (displayedDate && displayedMarketValue !== null && displayedMarketValue > 0) {
       const existingIdx = seriesForReturns.findIndex((point) => point.as_of_date === displayedDate);
       if (existingIdx >= 0) {
@@ -703,7 +705,6 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
         seriesForReturns.push({ as_of_date: displayedDate, market_value: displayedMarketValue, contributor_count: 1 });
         seriesForReturns.sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
       }
-      terminalValueSource = "portfolio_snapshots.market_value";
     }
 
     const computed = computeTrendMetricsFromSeries(seriesForReturns);
@@ -719,6 +720,9 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     });
     const terminalDate = computed.last_history_date;
     const terminalValue = computed.latest_value;
+    const terminalValueSource = terminalDate === displayedDate && approximatelyEqual(terminalValue, displayedMarketValue)
+      ? "portfolio_snapshots.market_value"
+      : "portfolio_history_daily.market_value";
     const terminalCompositionHash = buildCompositionHash(
       terminalValueSource === "portfolio_snapshots.market_value" ? "snapshot_basis" : "history_basis",
       portfolioId,
