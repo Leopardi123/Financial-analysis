@@ -6,6 +6,7 @@ import { getLatestPortfolioRisk } from "../portfolio-risk/build.js";
 import { getLatestPortfolioHedgeAndDryPowder } from "../portfolio-hedge/build.js";
 import { readPortfolioHistoryCanonicalMaterializedLatest } from "../portfolio-history/canonical.js";
 import { normalizePortfolioTrendContract } from "../portfolio-history/contract.js";
+import { computeTrendMetricsFromSeries } from "../portfolio-history/metrics.js";
 
 const REBUILT_HISTORY_SOURCES = new Set(["positions_price_history", "positions_snapshots", "snapshots", "unavailable"]);
 const TOTAL_INCLUSION_FALLBACK_MAX_AGE_DAYS = 30;
@@ -248,6 +249,16 @@ function buildDataQualityFlags(row: any) {
     hedge_unavailable: String(row.hedge_status ?? "") === "insufficient_data_for_hedge_signal",
     partial_signal: String(row.signal_completeness ?? "") === "partial",
   };
+}
+
+function buildCompositionHash(source: string, portfolioId: string, asOfDate: string | null): string | null {
+  if (!source || !portfolioId || !asOfDate) return null;
+  return `${source}:${portfolioId}:${asOfDate}`;
+}
+
+function approximatelyEqual(left: number | null, right: number | null): boolean {
+  if (left === null || right === null) return false;
+  return Math.abs(left - right) < 1e-6;
 }
 
 type WarningDetail = {
@@ -655,8 +666,141 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
     };
   });
 
+  const trendBasisByPortfolioId = new Map<string, {
+    metrics: ReturnType<typeof normalizeTrendFields> & { signal_completeness: string | null };
+    trend_debug: any;
+    terminal_value_used_for_returns: number | null;
+    terminal_value_source: string;
+    displayed_market_value_source: string;
+    terminal_value_matches_displayed_market_value: boolean;
+    terminal_date_used_for_returns: string | null;
+    displayed_as_of_date: string | null;
+    terminal_date_matches_displayed_date: boolean;
+    terminal_composition_hash: string | null;
+    displayed_composition_hash: string | null;
+    terminal_composition_matches_displayed: boolean;
+    mixed_source_row_detected: boolean;
+    mismatch_reason: string | null;
+  }>();
+  for (const row of (portfolioRows as any[])) {
+    const portfolioId = String(row.portfolio_id ?? "");
+    if (!portfolioId) continue;
+    const canonical = canonicalByPortfolioId.get(portfolioId);
+    const canonicalTrendDebug = historyTrendByPortfolioId.get(portfolioId)?.trend_debug ?? null;
+    const historySeries = [...(seriesByPortfolio.get(portfolioId) ?? [])].sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+    const displayedMarketValue = asNullableFiniteNum(row.market_value);
+    const displayedDate = asOfDate;
+    const displayedMarketValueSource = "portfolio_snapshots.market_value";
+    const displayedCompositionHash = buildCompositionHash("snapshot_basis", portfolioId, displayedDate);
+
+    const boundedHistorySeries = displayedDate
+      ? historySeries.filter((point) => point.as_of_date <= displayedDate)
+      : historySeries;
+    const seriesForReturns = boundedHistorySeries.map((point) => ({ as_of_date: point.as_of_date, market_value: point.market_value, contributor_count: 1 }));
+    if (displayedDate && displayedMarketValue !== null && displayedMarketValue > 0) {
+      const existingIdx = seriesForReturns.findIndex((point) => point.as_of_date === displayedDate);
+      if (existingIdx >= 0) {
+        seriesForReturns[existingIdx] = { ...seriesForReturns[existingIdx], market_value: displayedMarketValue };
+      } else {
+        seriesForReturns.push({ as_of_date: displayedDate, market_value: displayedMarketValue, contributor_count: 1 });
+        seriesForReturns.sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+      }
+    }
+
+    const computed = computeTrendMetricsFromSeries(seriesForReturns);
+    const computedTrend = normalizeTrendFields({
+      return_20d: computed.return_20d_valid ? computed.return_20d : null,
+      return_65d: computed.return_65d_valid ? computed.return_65d : null,
+      return_200d: computed.return_200d_valid ? computed.return_200d : null,
+      short_direction: computed.short_direction,
+      medium_direction: computed.medium_direction,
+      long_direction: computed.long_direction,
+      trend_status: computed.trend_status,
+      signal_completeness: computed.trend_completeness,
+    });
+    const terminalDate = computed.last_history_date;
+    const terminalValue = computed.latest_value;
+    const terminalValueSource = terminalDate === displayedDate && approximatelyEqual(terminalValue, displayedMarketValue)
+      ? "portfolio_snapshots.market_value"
+      : "portfolio_history_daily.market_value";
+    const terminalCompositionHash = buildCompositionHash(
+      terminalValueSource === "portfolio_snapshots.market_value" ? "snapshot_basis" : "history_basis",
+      portfolioId,
+      terminalDate,
+    );
+    const terminalValueMatchesDisplayed = approximatelyEqual(terminalValue, displayedMarketValue);
+    const terminalDateMatchesDisplayed = terminalDate !== null && displayedDate !== null && terminalDate === displayedDate;
+    const terminalCompositionMatchesDisplayed = terminalCompositionHash !== null
+      && displayedCompositionHash !== null
+      && terminalCompositionHash === displayedCompositionHash;
+    const mixedSourceRowDetected = !(terminalValueMatchesDisplayed && terminalDateMatchesDisplayed && terminalCompositionMatchesDisplayed);
+
+    const trendUnavailable = {
+      ...computedTrend,
+      return_20d: null,
+      return_65d: null,
+      return_200d: null,
+      short_direction: "unavailable",
+      medium_direction: "unavailable",
+      long_direction: "unavailable",
+      trend_status: "unavailable",
+      signal_completeness: "unavailable",
+    };
+    const chosenMetrics = mixedSourceRowDetected ? trendUnavailable : computedTrend;
+    trendBasisByPortfolioId.set(portfolioId, {
+      metrics: {
+        ...chosenMetrics,
+        signal_completeness: chosenMetrics.signal_completeness,
+      },
+      trend_debug: {
+        attempted: true,
+        available_days: computed.available_days,
+        first_history_date: computed.first_history_date,
+        last_history_date: computed.last_history_date,
+        latest_date: computed.last_history_date,
+        latest_value_sek: computed.latest_value,
+        history_source: terminalValueSource,
+        return_20d: chosenMetrics.return_20d,
+        return_65d: chosenMetrics.return_65d,
+        return_200d: chosenMetrics.return_200d,
+        anchor_20d_date: computed.anchor_20d_date,
+        anchor_65d_date: computed.anchor_65d_date,
+        anchor_200d_date: computed.anchor_200d_date,
+        anchor_20d_value_sek: computed.value_at_20d_anchor,
+        anchor_65d_value_sek: computed.value_at_65d_anchor,
+        anchor_200d_value_sek: computed.value_at_200d_anchor,
+        return_20d_valid: !mixedSourceRowDetected && computed.return_20d_valid,
+        return_65d_valid: !mixedSourceRowDetected && computed.return_65d_valid,
+        return_200d_valid: !mixedSourceRowDetected && computed.return_200d_valid,
+        invalid_reason_20d: mixedSourceRowDetected ? "terminal_value_source_mismatch" : (computed.invalid_reasons_20d[0] ?? null),
+        invalid_reason_65d: mixedSourceRowDetected ? "terminal_value_source_mismatch" : (computed.invalid_reasons_65d[0] ?? null),
+        invalid_reason_200d: mixedSourceRowDetected ? "terminal_value_source_mismatch" : (computed.invalid_reasons_200d[0] ?? null),
+        short_direction: chosenMetrics.short_direction,
+        medium_direction: chosenMetrics.medium_direction,
+        long_direction: chosenMetrics.long_direction,
+        trend_status: chosenMetrics.trend_status,
+        trend_completeness: chosenMetrics.signal_completeness,
+        canonical_latest_value_sek: canonical?.latest_value_sek ?? null,
+        canonical_latest_date: canonical?.last_history_date ?? null,
+        canonical_history_source: canonicalTrendDebug?.history_source ?? "materialized_portfolio_history_daily",
+      },
+      terminal_value_used_for_returns: terminalValue,
+      terminal_value_source: terminalValueSource,
+      displayed_market_value_source: displayedMarketValueSource,
+      terminal_value_matches_displayed_market_value: terminalValueMatchesDisplayed,
+      terminal_date_used_for_returns: terminalDate,
+      displayed_as_of_date: displayedDate,
+      terminal_date_matches_displayed_date: terminalDateMatchesDisplayed,
+      terminal_composition_hash: terminalCompositionHash,
+      displayed_composition_hash: displayedCompositionHash,
+      terminal_composition_matches_displayed: terminalCompositionMatchesDisplayed,
+      mixed_source_row_detected: mixedSourceRowDetected,
+      mismatch_reason: mixedSourceRowDetected ? "terminal_value_source_mismatch" : null,
+    });
+  }
+
   const portfolios = (portfolioRows as any[]).map((row) => {
-    const trendSource = historyTrendByPortfolioId.get(String(row.portfolio_id ?? ""));
+    const trendSource = trendBasisByPortfolioId.get(String(row.portfolio_id ?? "")) ?? historyTrendByPortfolioId.get(String(row.portfolio_id ?? ""));
     const rawTrendMetrics = trendSource?.metrics ?? normalizeTrendFields(row);
     const trendMetrics = normalizeAdapterTrendContract({
       return_20d: rawTrendMetrics.return_20d,
@@ -779,6 +923,7 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
       opportunistic_weight_pct: hedgePayload.total.opportunistic_weight_pct,
       required_min_dry_powder_pct: hedgePayload.total.required_min_dry_powder_pct,
       included_portfolio_count: valuationIncludedPortfolioIds.length,
+      rows_with_terminal_source_mismatch: portfolios.filter((row) => trendBasisByPortfolioId.get(row.portfolio_id)?.mixed_source_row_detected === true).length,
       major_warnings: Array.from(new Set(majorWarnings)),
       major_warning_details: warningDetails,
     },
@@ -1061,8 +1206,23 @@ export async function getPortfolioOverviewLatest(debug: boolean, trace?: Portfol
             && (trendDebug.trend_completeness ?? trendDebug.signal_completeness ?? null) === (row.signal_completeness ?? null),
           contract_match_latest_to_adapter: true,
           contract_match_adapter_to_ui: null,
+          terminal_value_used_for_returns: trendBasisByPortfolioId.get(row.portfolio_id)?.terminal_value_used_for_returns ?? (trendDebug.latest_value_sek ?? null),
+          terminal_value_source: trendBasisByPortfolioId.get(row.portfolio_id)?.terminal_value_source ?? (trendDebug.history_source ?? "unknown"),
+          displayed_market_value_source: trendBasisByPortfolioId.get(row.portfolio_id)?.displayed_market_value_source ?? "portfolio_snapshots.market_value",
+          terminal_value_matches_displayed_market_value: trendBasisByPortfolioId.get(row.portfolio_id)?.terminal_value_matches_displayed_market_value
+            ?? ((trendDebug.latest_value_sek ?? null) === (row.market_value ?? null)),
+          terminal_date_used_for_returns: trendBasisByPortfolioId.get(row.portfolio_id)?.terminal_date_used_for_returns ?? (trendDebug.latest_date ?? trendDebug.last_history_date ?? null),
+          displayed_as_of_date: trendBasisByPortfolioId.get(row.portfolio_id)?.displayed_as_of_date ?? (basePayload.as_of_date ?? null),
+          terminal_date_matches_displayed_date: trendBasisByPortfolioId.get(row.portfolio_id)?.terminal_date_matches_displayed_date
+            ?? ((trendDebug.latest_date ?? trendDebug.last_history_date ?? null) === (basePayload.as_of_date ?? null)),
+          terminal_composition_hash: trendBasisByPortfolioId.get(row.portfolio_id)?.terminal_composition_hash ?? null,
+          displayed_composition_hash: trendBasisByPortfolioId.get(row.portfolio_id)?.displayed_composition_hash ?? null,
+          terminal_composition_matches_displayed: trendBasisByPortfolioId.get(row.portfolio_id)?.terminal_composition_matches_displayed ?? false,
+          mixed_source_row_detected: trendBasisByPortfolioId.get(row.portfolio_id)?.mixed_source_row_detected ?? false,
           mismatch_stage: row.trend_contract_error ? "adapter" : (((trendDebug.latest_date ?? trendDebug.last_history_date ?? null) !== (basePayload.as_of_date ?? null)) ? "overview" : "none"),
-          mismatch_reason: row.trend_contract_reason ?? (((trendDebug.latest_date ?? trendDebug.last_history_date ?? null) !== (basePayload.as_of_date ?? null)) ? "date_mismatch" : "none"),
+          mismatch_reason: trendBasisByPortfolioId.get(row.portfolio_id)?.mismatch_reason
+            ?? row.trend_contract_reason
+            ?? (((trendDebug.latest_date ?? trendDebug.last_history_date ?? null) !== (basePayload.as_of_date ?? null)) ? "date_mismatch" : "none"),
         },
         return_proof_debug: {
           portfolio_label: row.portfolio_type ?? row.portfolio_name ?? row.portfolio_id,
