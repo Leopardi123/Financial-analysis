@@ -1366,6 +1366,8 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [corporateSnapshotData, setCorporateSnapshotData] = useState<Record<string, unknown> | null>(null);
   const [corporateDiagnostics, setCorporateDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [corporateProjectEquityPct, setCorporateProjectEquityPct] = useState<Record<string, number>>({});
+  const [corporateUseQuarterlyCash, setCorporateUseQuarterlyCash] = useState(false);
+  const [corporateCashUsedPct, setCorporateCashUsedPct] = useState(100);
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
   const [scenarioPercentileInput] = useState("50");
@@ -1846,10 +1848,11 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return {
       equity_fraction: equityFraction,
       debt_fraction: 1 - equityFraction,
-      use_cash_first: true,
+      use_cash_first: corporateUseQuarterlyCash,
+      cash_use_percent: corporateCashUsedPct / 100,
       financingPlanByProject,
     };
-  }, [companyProjects, corporateProjectEquityPct]);
+  }, [companyProjects, corporateProjectEquityPct, corporateUseQuarterlyCash, corporateCashUsedPct]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1873,6 +1876,8 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         ? profile.sharesOutstanding
         : undefined;
       const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding ?? 1;
+      const quarterlyCashSeries = getFieldSeries(data, "balance", "cashAndCashEquivalents");
+      const latestQuarterlyCash = [...quarterlyCashSeries].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
       const profilePriceCurrent = typeof profile?.price === "number" && Number.isFinite(profile.price) && profile.price > 0
         ? profile.price
         : 1;
@@ -1891,6 +1896,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
               shares_current: sharesCurrent,
               price_current_TargetCurrency: profilePriceCurrent,
             },
+            balanceSheet: { cash_t0_TargetCurrency: latestQuarterlyCash },
             financingPlan: corporateFinancingPlan,
             financingPlanByProject: corporateFinancingPlan?.financingPlanByProject,
             scenario: { mode: "spot" },
@@ -5584,6 +5590,11 @@ Capital Available: ${availableLabel}`,
                   <details className="producer-core-section project-collapsible-card" open>
                     <summary><h2 className="subrub small">C CORPORATE FINANCING</h2></summary>
                     <div className="rr-input-row" style={{ marginTop: 8 }}>
+                      <label>
+                        <input type="checkbox" checked={corporateUseQuarterlyCash} onChange={(event) => setCorporateUseQuarterlyCash(event.target.checked)} />
+                        Använd senaste kvartalets Cash &amp; Cash Equivalents som finansiering
+                      </label>
+                      <label>Cash Used {corporateCashUsedPct}%<input type="range" min="0" max="100" value={corporateCashUsedPct} onChange={(event) => setCorporateCashUsedPct(Number(event.target.value))} /></label>
                       {companyProjects.map((project) => {
                         const hasFinancing = !!((corporateSnapshotData?.financing ?? null) as Record<string, unknown> | null);
                         const currentEquity = corporateProjectEquityPct[project.project_id] ?? 100;
@@ -5609,6 +5620,13 @@ Capital Available: ${availableLabel}`,
                         );
                       })}
                     </div>
+                    {(() => {
+                      const financing = (corporateSnapshotData?.financing ?? {}) as Record<string, unknown>;
+                      const fields = [
+                        ["Latest Quarterly Cash", financing.latest_quarterly_cash_TargetCurrency], ["Cash Used %", typeof financing.cash_used_percent === "number" ? financing.cash_used_percent * 100 : null], ["Cash Used", financing.cash_used_for_build_TargetCurrency], ["Remaining Funding Need", financing.remaining_funding_need_TargetCurrency], ["Debt Added", financing.new_debt_TargetCurrency], ["Equity Raise", financing.equity_raised_TargetCurrency], ["New Shares", financing.new_shares], ["Closing Corporate Cash", financing.closing_corporate_cash_TargetCurrency],
+                      ];
+                      return <div className="compact-metrics-grid">{fields.map(([label, raw]) => <div className="compact-metric-row" key={String(label)}><span className="compact-metric-label">{String(label)}</span><span className="compact-metric-dots"/><span className="compact-metric-value">{typeof raw === "number" ? raw.toLocaleString() : "n/a"}</span></div>)}</div>;
+                    })()}
                     <p className="bread" style={{ marginTop: 8 }}>
                       {(() => {
                         const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;

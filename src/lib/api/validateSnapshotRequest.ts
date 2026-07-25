@@ -38,6 +38,8 @@ export type SnapshotRequest = {
     debt_fraction?: number | null;
     equity_fraction?: number | null;
     use_cash_first?: boolean | null;
+    cash_use_percent?: number | null;
+    minimum_cash_reserve_TargetCurrency?: number | null;
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
   };

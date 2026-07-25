@@ -5,6 +5,7 @@ import { computeProjectEngineFullProductionV1 } from '../project/engineFullProdu
 import { resolveProjectPricesToEngineInput, type MetalPriceDiagnostic } from '../project/jsonv1/resolvePrices.ts';
 import { aggregateProjectsCorporateV1 } from '../corporate/aggregateProjects.ts';
 import { computeCorporateFinancing } from '../corporate/financing/compute.ts';
+import { computeCorporateCashWaterfall } from '../corporate/financing/cashWaterfall.ts';
 import { deriveBuildFundingNeedUSD } from '../corporate/financing/deriveBuildFundingNeed.ts';
 import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnapshot.ts';
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
@@ -2248,18 +2249,50 @@ export async function runCorporateSnapshotPipeline(args: {
       })();
     }
 
+    // The waterfall is the sole cash allocator. computeCorporateFinancing receives
+    // only its residual external need and cash-first is disabled there.
+    const cashWaterfall = fxRate === null ? null : computeCorporateCashWaterfall({
+      yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+      latestQuarterlyCash: (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) / fxRate,
+      useLatestQuarterlyCash: input.financingPlan?.use_cash_first ?? true,
+      cashUsedPercent: input.financingPlan?.cash_use_percent ?? 1,
+      minimumCashReserve: (input.financingPlan?.minimum_cash_reserve_TargetCurrency ?? 0) / fxRate,
+      debtPercent: input.financingPlan?.debt_fraction ?? 0,
+      projects: projectsForBuildFunding.map((project) => {
+        const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
+        const productionYear = project.yearsByPeriod[project.productionStartPeriod];
+        const constructionStartPeriod = aggregationEffective.corporateYearsByPeriod.findIndex((year) => {
+          const local = project.yearsByPeriod.indexOf(year);
+          return local >= 0 && local < project.productionStartPeriod && (context?.economics.capexUSD[local] ?? 0) > 0;
+        });
+        return {
+          projectId: project.projectId,
+          constructionStartPeriod: constructionStartPeriod < 0 ? aggregationEffective.corporateYearsByPeriod.indexOf(productionYear) : constructionStartPeriod,
+          fcffIncludesConstructionCapex: true,
+          capexNeedByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
+            const local = project.yearsByPeriod.indexOf(year);
+            return local >= 0 && local < project.productionStartPeriod ? Math.max(0, context?.economics.capexUSD[local] ?? 0) : 0;
+          }),
+          fcffByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
+            const local = project.yearsByPeriod.indexOf(year);
+            return local < 0 ? 0 : context?.economics.fcffUSD[local] ?? 0;
+          }),
+        };
+      }),
+    });
+
     const financingEffective = fxRate === null
       ? financing
       : computeCorporateFinancing({
           NPV_today_USD: aggregationEffective.NPV_today_USD,
           targetCurrency: input.targetCurrency,
           fx_USD_to_TargetCurrency: fxRate,
-          cash_t0_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? null,
+          cash_t0_TargetCurrency: 0,
           debt_t0_TargetCurrency: input.balanceSheet?.debt_t0_TargetCurrency ?? null,
           shares_current: marketInput.shares_current,
           price_current_TargetCurrency: marketInput.price_current_TargetCurrency,
-          financingPlan: input.financingPlan,
-          buildFundingNeed_USD: buildFundingNeedUSD,
+          financingPlan: { ...input.financingPlan, use_cash_first: false, cash_use_percent: 0 },
+          buildFundingNeed_USD: cashWaterfall?.remainingExternalFundingNeed ?? buildFundingNeedUSD,
         });
 
     const perProjectNewShares = projectsForBuildFunding.map((project) => {
@@ -2368,13 +2401,20 @@ export async function runCorporateSnapshotPipeline(args: {
     });
 
     const hasUnavailableProjectShares = perProjectNewShares.some((project) => project.newShares === null);
-    const totalNewShares = hasUnavailableProjectShares
+    let totalNewShares = hasUnavailableProjectShares
       ? null
       : perProjectNewShares.reduce((sum: number, project) => sum + (project.newShares as number), 0);
     const hasUnavailableProjectDebt = perProjectNewShares.some((project) => project.debtAmount_USD === null);
-    const totalDebt_USD = hasUnavailableProjectDebt
+    let totalDebt_USD = hasUnavailableProjectDebt
       ? null
       : perProjectNewShares.reduce((sum: number, project) => sum + (project.debtAmount_USD as number), 0);
+    if (cashWaterfall && fxRate !== null) {
+      totalDebt_USD = cashWaterfall.debtAdded;
+      const raisePrice = input.financingPlan?.equity_raise_price_TargetCurrency ?? marketInput.price_current_TargetCurrency;
+      totalNewShares = typeof raisePrice === 'number' && Number.isFinite(raisePrice) && raisePrice > 0
+        ? (cashWaterfall.equityRaised * fxRate) / raisePrice
+        : cashWaterfall.equityRaised === 0 ? 0 : null;
+    }
     const totalDebt_TargetCurrency =
       totalDebt_USD !== null
       && fxRate !== null
@@ -2413,13 +2453,19 @@ export async function runCorporateSnapshotPipeline(args: {
         ? sharesPostFinancingForSnapshot + totalFdExtraShares
         : null;
 
+    const cashAfterInitialFundingTarget = cashWaterfall && fxRate !== null
+      ? (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) - cashWaterfall.totalInitialCashUsed * fxRate
+      : financingEffective.cash_t0_post_TargetCurrency;
+    const waterfallNavTarget = financingEffective.NPV_today_TargetCurrency === null || cashAfterInitialFundingTarget === null || debtPostTarget === null
+      ? navTodayTarget
+      : financingEffective.NPV_today_TargetCurrency + cashAfterInitialFundingTarget - debtPostTarget;
+
     const financingSnapshot = {
       ...financingEffective,
-      new_debt_TargetCurrency: totalDebt_TargetCurrency ?? financingEffective.new_debt_TargetCurrency,
       debt_t0_post_TargetCurrency: debtPostTarget,
       debt_TargetCurrency_t0: debtPostTarget,
-      NAV_today_TargetCurrency: navTodayTarget,
-      navToday_TargetCurrency: navTodayTarget,
+      NAV_today_TargetCurrency: waterfallNavTarget,
+      navToday_TargetCurrency: waterfallNavTarget,
       netCash_TargetCurrency_t0:
         financingEffective.cash_t0_post_TargetCurrency === null || debtPostTarget === null
           ? financingEffective.netCash_TargetCurrency_t0
@@ -2429,6 +2475,17 @@ export async function runCorporateSnapshotPipeline(args: {
           ? financingEffective.evAdditive_Component_TargetCurrency_t0
           : debtPostTarget - financingEffective.cash_t0_post_TargetCurrency,
       shares_post_financing: sharesPostFinancingForSnapshot,
+      latest_quarterly_cash_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? 0,
+      cash_used_percent: input.financingPlan?.cash_use_percent ?? 1,
+      cash_used_for_build_TargetCurrency: cashWaterfall ? cashWaterfall.totalInitialCashUsed * (fxRate as number) : financingEffective.cash_used_for_build_TargetCurrency,
+      internally_generated_cash_used_TargetCurrency: cashWaterfall ? cashWaterfall.totalInternallyGeneratedCashUsed * (fxRate as number) : null,
+      total_internal_cash_used_TargetCurrency: cashWaterfall ? cashWaterfall.totalInternalCashUsed * (fxRate as number) : financingEffective.cash_used_for_build_TargetCurrency,
+      remaining_funding_need_TargetCurrency: cashWaterfall ? cashWaterfall.remainingExternalFundingNeed * (fxRate as number) : financingEffective.remaining_funding_need_TargetCurrency,
+      new_debt_TargetCurrency: cashWaterfall ? cashWaterfall.debtAdded * (fxRate as number) : (totalDebt_TargetCurrency ?? financingEffective.new_debt_TargetCurrency),
+      equity_raised_TargetCurrency: cashWaterfall ? cashWaterfall.equityRaised * (fxRate as number) : financingEffective.equity_raised_TargetCurrency,
+      cash_t0_post_TargetCurrency: cashAfterInitialFundingTarget,
+      closing_corporate_cash_TargetCurrency: cashWaterfall ? cashWaterfall.closingCorporateCash * (fxRate as number) : financingEffective.cash_t0_post_TargetCurrency,
+      corporate_cash_waterfall: cashWaterfall,
     };
 
     if (debug) {

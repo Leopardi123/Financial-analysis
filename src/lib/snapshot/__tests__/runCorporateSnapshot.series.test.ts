@@ -712,9 +712,11 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   if (!result.ok) return;
 
   const totalCapexToFinanceUSD = (200000000 + 120000000) + (100000000 + 50000000);
-  const expectedDebtUSD = totalCapexToFinanceUSD * 0.5;
   const fx = (body.fx as Record<string, unknown>).manual_fx_USD_to_TargetCurrency as number;
-  const expectedNewShares = (totalCapexToFinanceUSD * 0.5 * fx) / 1;
+  const initialCashUSD = ((body.balanceSheet as Record<string, number>).cash_t0_TargetCurrency ?? 0) / fx;
+  const expectedExternalNeedUSD = totalCapexToFinanceUSD - initialCashUSD;
+  const expectedDebtUSD = expectedExternalNeedUSD * 0.5;
+  const expectedNewShares = (expectedExternalNeedUSD * 0.5 * fx) / 1;
 
   const financingDebug = result.diagnostics.meta.corporateFinancingDebug;
   assert.ok(financingDebug);
@@ -722,6 +724,28 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(financingDebug?.totalNewShares !== null);
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
+});
+
+test('corporate snapshot applies latest-quarter cash exactly once before debt/equity', async () => {
+  const body = await loadFixture();
+  const raw = ((body.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>);
+  const series = raw.series as Record<string, unknown>;
+  const capex = series.capexUSD as number[];
+  series.capexUSD = capex.map((_, index) => index === 0 ? 300_000_000 : 0);
+  body.balanceSheet = { cash_t0_TargetCurrency: 100_000_000, debt_t0_TargetCurrency: 0 };
+  body.fx = { source: 'manual', anchor: 'today', manual_fx_USD_to_TargetCurrency: 1, scenario: { mode: 'spot' } };
+  body.financingPlan = { use_cash_first: true, cash_use_percent: 1, debt_fraction: .5, equity_fraction: .5, equity_raise_price_TargetCurrency: 1 };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const financing = result.snapshot.financing;
+  assert.equal(financing.cash_used_for_build_TargetCurrency, 100_000_000);
+  assert.equal(financing.remaining_funding_need_TargetCurrency, 200_000_000);
+  assert.equal(financing.new_debt_TargetCurrency, 100_000_000);
+  assert.equal(financing.equity_raised_TargetCurrency, 100_000_000);
+  assert.equal(financing.corporate_cash_waterfall?.totalInitialCashUsed, 100_000_000);
+  assert.equal(financing.corporate_cash_waterfall?.remainingExternalFundingNeed, 200_000_000);
 });
 
 test('corporate modeled milestones exclude tp=0 projects and include future tp>0 projects', async () => {
