@@ -3058,6 +3058,12 @@ Capital Available: ${availableLabel}`,
     };
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  useEffect(() => {
+    if (!debugEnabled) return;
+    if (projectViewMetrics) console.table(projectViewMetrics.diagnostics.valuation_metric_audit.map((row) => ({ scope: "project", ...row })));
+    if (corporateViewMetrics) console.table(corporateViewMetrics.diagnostics.valuation_metric_audit.map((row) => ({ scope: "corporate", ...row })));
+  }, [debugEnabled, projectViewMetrics, corporateViewMetrics]);
+
   const corporateLista3Debug = useMemo(() => {
     const corporateSection = ((corporateSnapshotData?.corporate ?? null) as {
       lista3Debug?: {

@@ -115,6 +115,7 @@ export type ProjectViewMetrics = {
       ROI_10Y: { cf_10y_usd: number | null; initial_capex_abs: number | null; multiple: number | null; displayValue: string | null; unit: 'multiple'; failure_reason: string | null };
     };
     ui_unit_meta: Record<string, { unitType: 'percent' | 'multiple' | 'multiple_per_year' | 'currency'; renderSuffix: string }>;
+    valuation_metric_audit: Array<{ metric: string; absoluteValue: number | null; sharesUsed: number | null; formula: string; result: number | null }>;
     npv10_trace: {
       input: {
         projectId: string | null;
@@ -1029,6 +1030,16 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
                 : (roi10yNumerator === null ? 'Missing finite fcfUSD in 10Y window' : 'Denominator is 0'))),
         },
       },
+      valuation_metric_audit: [
+        ['NPV', npvTarget, sharesPf, 'absolute', npvTarget], ['NPV/share', npvTarget, sharesPf, 'NPV / sharesPF', safeRatio(npvTarget, sharesPf).value],
+        ['NAV', navTarget, sharesPf, 'NPV + cash_t0_post - debt_t0_post', navTarget], ['NAV/share', navTarget, sharesPf, 'NAV / sharesPF', safeRatio(navTarget, sharesPf).value],
+        ['NPV prod start', npvProdStartTarget, sharesPf, 'DCF prod start - Initial CAPEX', npvProdStartTarget], ['NPV prod start/share', npvProdStartTarget, sharesPf, 'NPV prod start / sharesPF', safeRatio(npvProdStartTarget, sharesPf).value],
+        ['NAV prod start', navProdStartTarget, sharesPf, 'NPV prod start + cash_t0_post - debt_t0_post', navProdStartTarget], ['NAV prod start/share', navProdStartTarget, sharesPf, 'NAV prod start / sharesPF', safeRatio(navProdStartTarget, sharesPf).value],
+        ['DCF prod start', dcfTarget, sharesPf, 'fx × discounted FCFF from tp', dcfTarget], ['DCF prod start/share', dcfTarget, sharesPf, 'DCF prod start / sharesPF', safeRatio(dcfTarget, sharesPf).value],
+        ['DCF prod start present', dcfTargetDiscounted, sharesPf, 'DCF prod start / (1+r)^tp', dcfTargetDiscounted], ['DCF prod start present/share', dcfTargetDiscounted, sharesPf, 'DCF prod start present / sharesPF', safeRatio(dcfTargetDiscounted, sharesPf).value],
+        ['CF LOM', cfLomTarget, sharesPf, 'fx × sum(FCFF)', cfLomTarget], ['CF LOM/share', cfLomTarget, sharesPf, 'CF LOM / sharesPF', safeRatio(cfLomTarget, sharesPf).value],
+        ['EV/NPV', evTarget, sharesPf, 'EV / NPV', safeRatio(evTarget, npvTarget).value], ['EV/NAV', evTarget, sharesPf, 'EV / NAV', safeRatio(evTarget, navTarget).value], ['P/NAV', marketCapCurrent, sharesCurrent, 'MarketCap current / NAV', safeRatio(marketCapCurrent, navTarget).value],
+      ].map(([metric, absoluteValue, sharesUsed, formula, result]) => ({ metric: metric as string, absoluteValue: absoluteValue as number | null, sharesUsed: sharesUsed as number | null, formula: formula as string, result: result as number | null })),
       ui_unit_meta: {
         ROI_10Y: { unitType: 'multiple', renderSuffix: 'x' },
         LOM_avg_EBIT_ROCE: { unitType: 'percent', renderSuffix: '%' },

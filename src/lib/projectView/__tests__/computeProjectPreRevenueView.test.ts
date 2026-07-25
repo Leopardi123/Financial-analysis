@@ -56,6 +56,11 @@ assert.equal(cashEnabled.list5.cash_used_Target.value, 100_000_000);
 assert.equal(cashEnabled.list5.Equity_Raise_Target.value, 200_000_000);
 assertApprox(cashEnabled.list5.New_Shares.value, 66_666_666.66666667);
 assertApprox(cashEnabled.marketBox.sharesPf.value, 366_666_666.6666667);
+for (const key of ['NPV_Target','NPV_prodStart','CF_LOM_Target','DCF_Target','DCF_Target_discounted'] as const) assert.equal(cashEnabled.list2[key].value, cashDisabled.list2[key].value, `${key} absolute must ignore financing`);
+for (const key of ['NPV_perShare','NPV_prodStart_perShare','CF_LOM_Target_perShare','DCF_perShare','DCF_Target_discounted_perShare'] as const) assert.notEqual(cashEnabled.list2[key].value, cashDisabled.list2[key].value, `${key} must use changed sharesPF`);
+assert.notEqual(cashEnabled.list2.NAV_Target.value, cashDisabled.list2.NAV_Target.value, 'NAV intentionally includes post-financing cash/debt');
+assert.notEqual(cashEnabled.list2.NAV_perShare.value, cashDisabled.list2.NAV_perShare.value);
+assert.ok(cashEnabled.diagnostics.valuation_metric_audit.every((row) => row.metric.endsWith('/share') ? row.sharesUsed !== null : true));
 
 assert.ok((out.list3.IRR.value as number) > 0, `Expected positive IRR, got ${out.list3.IRR.value}`);
 assert.ok((out.list3.LOM_discounted_EBIT_ROCE.value as number) > 0, 'Expected finite discounted EBIT ROCE');
