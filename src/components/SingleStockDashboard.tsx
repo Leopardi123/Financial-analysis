@@ -3063,6 +3063,13 @@ Capital Available: ${availableLabel}`,
     if (!debugEnabled) return;
     if (projectViewMetrics) console.table(projectViewMetrics.diagnostics.valuation_metric_audit.map((row) => ({ scope: "project", ...row })));
     if (corporateViewMetrics) console.table(corporateViewMetrics.diagnostics.valuation_metric_audit.map((row) => ({ scope: "corporate", ...row })));
+    const logTableGraphParity = (scope: string, view: typeof projectViewMetrics) => {
+      if (!view) return;
+      const keys = ["NPV_perShare", "NAV_perShare", "NPV_prodStart_perShare", "NAV_prodStart_perShare", "DCF_perShare", "DCF_Target_discounted_perShare", "CF_LOM_Target_perShare"];
+      console.table(keys.map((key) => ({ scope, metric: key, TABLE: view.list2[key]?.value ?? null, GRAPH: view.list2[key]?.value ?? null, sharesCurrent: view.marketBox.sharesCurrent.value, sharesPf: view.marketBox.sharesPf.value })));
+    };
+    logTableGraphParity("project", projectViewMetrics);
+    logTableGraphParity("corporate", corporateViewMetrics);
   }, [debugEnabled, projectViewMetrics, corporateViewMetrics]);
 
   const corporateLista3Debug = useMemo(() => {
@@ -5538,7 +5545,7 @@ Capital Available: ${availableLabel}`,
 
               {corporateViewMetrics && (() => {
                 try {
-                  const yearsByPeriod = requireYearsByPeriod(corporateSnapshotData?.series);
+                  requireYearsByPeriod(corporateSnapshotData?.series);
                   return (
                 <>
                   <div className="producer-core-compact-card">
@@ -5667,39 +5674,12 @@ Capital Available: ${availableLabel}`,
                       {sectionKey === "list2" && (
                         <>
                         <ValueRangeSnapshotCard
+                          metrics={corporateViewMetrics.list2}
                           priceToday={
                             corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0
                               ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
                               : null
                           }
-                          npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
-                          npvHigh={
-                            (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency)
-                              ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency
-                              : null)
-                          }
-                          tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
-                          tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
-                          tpMarkers={(() => {
-                            const modeledTimeline = (corporateSnapshotData?.modeledValuationTimeline ?? null) as {
-                              markers?: Array<{
-                                tp: number;
-                                corporateTpIndexUsed?: number | null;
-                                value_high: number | null;
-                                value_low: number | null;
-                              }>;
-                            } | null;
-                            if (!modeledTimeline || !Array.isArray(modeledTimeline.markers)) return undefined;
-                            return modeledTimeline.markers.map((marker) => {
-                              const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
-                              return {
-                                tp: marker.tp,
-                                high: marker.value_high,
-                                low: marker.value_low,
-                                yearLabelUsed: yearLabel(yearsByPeriod, tIndex),
-                              };
-                            });
-                          })()}
                           currencyCode={lockedTargetCurrency}
                         />
                         {debugEnabled && corporateTimelineDebug && (
@@ -6055,16 +6035,8 @@ Capital Available: ${availableLabel}`,
                       <details className="producer-core-section project-collapsible-card" open={projectSectionsOpen.list2} onToggle={(event) => { const open = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false; setProjectSectionsOpen((prev) => ({ ...prev, list2: open })); }}>
                         <summary><h2 className="subrub small">FINANSIELLA NYCKELTAL OCH VÄRDERING</h2></summary>
                         <ValueRangeSnapshotCard
-                          mode="project"
+                          metrics={projectViewMetrics.list2}
                           priceToday={typeof profile?.price === "number" && Number.isFinite(profile.price) ? profile.price : null}
-                          npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
-                          npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
-                          tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
-                          tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
-                          chartFlows={(() => {
-                            const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
-                            return projectPayload?.chartFlows ?? null;
-                          })()}
                           projectDebug={(() => {
                             const snapshotSeries = (projectSnapshotData?.series ?? null) as { fcffUSD?: Array<number | null>; yearsByPeriod?: Array<number | null> } | null;
                             const inputs = getProjectInputs({ snapshot: (projectSnapshotData ?? null) as Record<string, unknown> | null, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });

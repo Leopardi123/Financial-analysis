@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Chart } from "react-google-charts";
 import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
+import { resolveValuationChartMetrics, type ValuationMetricMap } from "./valuationChartMetrics";
 
 type TpMarker = {
   tp: number;
@@ -10,6 +11,8 @@ type TpMarker = {
 };
 
 type ValueRangeSnapshotCardProps = {
+  /** Canonical List 2 object used by the table. When supplied, chart points read it directly. */
+  metrics?: ValuationMetricMap;
   mode?: "corporate" | "project";
   priceToday?: number | null;
   npvLow?: number | null;
@@ -152,7 +155,12 @@ function computeCorrectDcfAt(args: { fcffSeries: Array<number | null>; discountR
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode, projectDebug } = props;
+  const { metrics, mode = "corporate", priceToday, tpMarkers, chartFlows, currentYear, tpYear, currencyCode, projectDebug } = props;
+  const canonical = resolveValuationChartMetrics(metrics);
+  const npvLow = metrics ? canonical.npvLow : props.npvLow;
+  const npvHigh = metrics ? canonical.npvHigh : props.npvHigh;
+  const tpLow = metrics ? canonical.tpLow : props.tpLow;
+  const tpHigh = metrics ? canonical.tpHigh : props.tpHigh;
   const isProjectMode = mode === "project";
 
   const projectChartModel = useMemo(() => {
