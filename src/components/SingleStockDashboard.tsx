@@ -5675,12 +5675,8 @@ Capital Available: ${availableLabel}`,
                         <>
                         <ValueRangeSnapshotCard
                           metrics={corporateViewMetrics.list2}
-                          priceToday={
-                            corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0
-                              ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
-                              : null
-                          }
                           currencyCode={lockedTargetCurrency}
+                          debugEnabled={debugEnabled}
                         />
                         {debugEnabled && corporateTimelineDebug && (
                           <details style={{ marginTop: 8 }}>
@@ -6036,36 +6032,8 @@ Capital Available: ${availableLabel}`,
                         <summary><h2 className="subrub small">FINANSIELLA NYCKELTAL OCH VÄRDERING</h2></summary>
                         <ValueRangeSnapshotCard
                           metrics={projectViewMetrics.list2}
-                          priceToday={typeof profile?.price === "number" && Number.isFinite(profile.price) ? profile.price : null}
-                          projectDebug={(() => {
-                            const snapshotSeries = (projectSnapshotData?.series ?? null) as { fcffUSD?: Array<number | null>; yearsByPeriod?: Array<number | null> } | null;
-                            const inputs = getProjectInputs({ snapshot: (projectSnapshotData ?? null) as Record<string, unknown> | null, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
-                            return {
-                              yearsByPeriod: Array.isArray(snapshotSeries?.yearsByPeriod) ? snapshotSeries?.yearsByPeriod : null,
-                              fcffProductionTableSeries: Array.isArray(snapshotSeries?.fcffUSD) ? snapshotSeries.fcffUSD : null,
-                              fcffNpvSeries: Array.isArray(inputs.series.fcfUSD) ? inputs.series.fcfUSD : null,
-                              discountRate: inputs.r,
-                              tpPeriod: inputs.tp,
-                              debugEnabled,
-                              fxUsdToTarget: inputs.fx,
-                              sharesPostFinancing: inputs.sharesPostFinancing,
-                              netCashTarget: (inputs.cash0 !== null && inputs.debt0 !== null) ? (inputs.cash0 - inputs.debt0) : null,
-                              capexSeries: Array.isArray(inputs.series.capexUSD) ? inputs.series.capexUSD : null,
-                            };
-                          })()}
-                          currentYear={(() => {
-                            const series = (projectSnapshotData?.series ?? null) as { yearsByPeriod?: number[] } | null;
-                            const firstYear = Array.isArray(series?.yearsByPeriod) ? series?.yearsByPeriod[0] : null;
-                            return typeof firstYear === "number" && Number.isFinite(firstYear) ? firstYear : null;
-                          })()}
-                          tpYear={(() => {
-                            const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
-                              ? selectedProjectRawJson.time as Record<string, unknown>
-                              : null;
-                            const value = time?.productionStartYear;
-                            return typeof value === "number" && Number.isFinite(value) ? value : null;
-                          })()}
                           currencyCode={lockedTargetCurrency}
+                          debugEnabled={debugEnabled}
                         />
                         <div className="compact-metrics-grid">
                           {(projectSectionMetricOrder.list2
