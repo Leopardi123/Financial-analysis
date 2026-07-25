@@ -3307,9 +3307,7 @@ export async function runCorporateSnapshotPipeline(args: {
           && ctx.spotRangeRevenueByScenario !== undefined,
       );
 
-    if (projects.length === 1) {
-      const fxForRange = typeof fxRate === 'number' && Number.isFinite(fxRate) ? fxRate : null;
-      const chartFlows = (() => {
+    const chartFlows = (() => {
         if (tpEff === null || tpEff < 0 || tpEff > aggregationEffective.corporateMasterN) {
           return {
             dcfProdstartPresentPerShareSeries: [] as Array<number | null>,
@@ -3338,7 +3336,11 @@ export async function runCorporateSnapshotPipeline(args: {
           dcfProdstartPresentPerShareSeries,
           navProdstartPerShareSeries,
         };
-      })();
+    })();
+    (snapshot as Record<string, unknown>).corporateChartFlows = chartFlows;
+
+    if (projects.length === 1) {
+      const fxForRange = typeof fxRate === 'number' && Number.isFinite(fxRate) ? fxRate : null;
 
       const buildNpvRangeSeries = (fcffUSD: Array<number | null>): NpvSpotRangeSeries => {
         const npvSeriesUSD = computeNpvSeriesFromFcff({

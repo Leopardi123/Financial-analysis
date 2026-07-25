@@ -5667,6 +5667,7 @@ Capital Available: ${availableLabel}`,
                       {sectionKey === "list2" && (
                         <>
                         <ValueRangeSnapshotCard
+                          mode="project"
                           priceToday={
                             corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0
                               ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
@@ -5676,26 +5677,11 @@ Capital Available: ${availableLabel}`,
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
-                          tpMarkers={(() => {
-                            const modeledTimeline = (corporateSnapshotData?.modeledValuationTimeline ?? null) as {
-                              markers?: Array<{
-                                tp: number;
-                                corporateTpIndexUsed?: number | null;
-                                value_high: number | null;
-                                value_low: number | null;
-                              }>;
-                            } | null;
-                            if (!modeledTimeline || !Array.isArray(modeledTimeline.markers)) return undefined;
-                            return modeledTimeline.markers.map((marker) => {
-                              const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
-                              return {
-                                tp: marker.tp,
-                                high: marker.value_high,
-                                low: marker.value_low,
-                                yearLabelUsed: yearLabel(yearsByPeriod, tIndex),
-                              };
-                            });
-                          })()}
+                          chartFlows={(corporateSnapshotData?.corporateChartFlows ?? null) as { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null}
+                          canonicalSharesPostFinancing={corporateViewMetrics.marketBox.sharesPf.value}
+                          projectDebug={{ sharesPostFinancing: corporateViewMetrics.marketBox.sharesPf.value, debugEnabled }}
+                          currentYear={yearsByPeriod[0] ?? null}
+                          tpYear={yearsByPeriod[corporateSnapshotData?.aggregation && typeof (corporateSnapshotData.aggregation as Record<string, unknown>).productionStartPeriod === "number" ? (corporateSnapshotData.aggregation as Record<string, number>).productionStartPeriod : 0] ?? null}
                           currencyCode={lockedTargetCurrency}
                         />
                         {debugEnabled && corporateTimelineDebug && (

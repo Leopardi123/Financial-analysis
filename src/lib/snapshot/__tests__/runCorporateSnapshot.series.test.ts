@@ -724,6 +724,9 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(financingDebug?.totalNewShares !== null);
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
+  const corporateChartFlows = (result.snapshot as unknown as { corporateChartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } }).corporateChartFlows;
+  assert.ok((corporateChartFlows?.dcfProdstartPresentPerShareSeries?.length ?? 0) > 0, 'corporate view must receive the restored time-series high curve');
+  assert.ok((corporateChartFlows?.navProdstartPerShareSeries?.length ?? 0) > 0, 'corporate view must receive the restored time-series low curve');
 });
 
 test('corporate snapshot applies latest-quarter cash exactly once before debt/equity', async () => {
