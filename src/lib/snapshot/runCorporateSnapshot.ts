@@ -3337,7 +3337,39 @@ export async function runCorporateSnapshotPipeline(args: {
           navProdstartPerShareSeries,
         };
     })();
-    (snapshot as Record<string, unknown>).corporateChartFlows = chartFlows;
+    const corporateValuationTimeSeries = {
+      rows: aggregationEffective.corporateYearsByPeriod.map((year, period) => {
+        const metricsAtPeriod = computeLista2CfDcfMetrics({
+          fcfUSD_total: aggregationEffective.fcffUSD_total,
+          capexUSD_total: aggregationEffective.capexUSD_total,
+          masterN: aggregationEffective.corporateMasterN,
+          productionStartPeriod: period,
+          discountRate: input.discountRate,
+          shares_post_financing: shares_post_financing_fd_effective,
+          fx_USD_to_TargetCurrency: fxRate,
+          npvToday_USD: aggregationEffective.NPV_today_USD,
+          netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+        }).metrics;
+        return {
+          period, year,
+          dcfAbsolute: metricsAtPeriod.DCF_prodStart_present_TargetCurrency,
+          navAbsolute: metricsAtPeriod.NAV_prodStart_TargetCurrency,
+          dcfPerShare: metricsAtPeriod.DCF_prodStart_present_perShare_TargetCurrency,
+          navPerShare: metricsAtPeriod.NAV_prodStart_perShare_TargetCurrency,
+          sharesPf: shares_post_financing_fd_effective,
+        };
+      }),
+      projectMarkers: projectsForBuildFunding.map((project) => {
+        const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
+        const productionYear = project.yearsByPeriod[project.productionStartPeriod] ?? null;
+        const productionCorporatePeriod = productionYear === null ? null : aggregationEffective.corporateYearsByPeriod.indexOf(productionYear);
+        const constructionLocalPeriod = context?.economics.capexUSD.findIndex((value, index) => index < project.productionStartPeriod && typeof value === 'number' && value > 0) ?? -1;
+        const constructionYear = constructionLocalPeriod >= 0 ? project.yearsByPeriod[constructionLocalPeriod] ?? null : null;
+        const contributionPeriods = aggregationEffective.corporateYearsByPeriod.map((year, period) => ({ period, local: project.yearsByPeriod.indexOf(year) })).filter(({ local }) => local >= 0 && typeof context?.economics.fcffUSD[local] === 'number' && context.economics.fcffUSD[local] !== 0).map(({ period }) => period);
+        return { projectId: project.projectId, projectName: project.projectName, constructionStartPeriod: constructionYear === null ? null : aggregationEffective.corporateYearsByPeriod.indexOf(constructionYear), constructionStartYear: constructionYear, productionStartPeriod: productionCorporatePeriod, productionStartYear: productionYear, firstContributionPeriod: contributionPeriods[0] ?? null, lastContributionPeriod: contributionPeriods.length ? contributionPeriods[contributionPeriods.length - 1] : null };
+      }),
+    };
+    (snapshot as Record<string, unknown>).corporateValuationTimeSeries = corporateValuationTimeSeries;
 
     if (projects.length === 1) {
       const fxForRange = typeof fxRate === 'number' && Number.isFinite(fxRate) ? fxRate : null;

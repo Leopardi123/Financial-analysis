@@ -695,7 +695,26 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   (secondRaw.meta as Record<string, unknown>).projectName = 'Abra Minimal 2';
   ((secondRaw.series as Record<string, unknown>).capexUSD as number[])[0] = 100000000;
   ((secondRaw.series as Record<string, unknown>).capexUSD as number[])[1] = 50000000;
+  const shiftProductionSeries = (record: Record<string, unknown>, shift: number) => { for (const [key, value] of Object.entries(record)) if (Array.isArray(value)) record[key] = value.map((_, index) => index < 2 + shift ? 0 : value[index - shift] ?? 0); };
+  const secondTime = secondRaw.time as Record<string, unknown>;
+  secondTime.productionStartPeriod = 3;
+  secondTime.productionStartYear = new Date().getUTCFullYear() + 3;
+  shiftProductionSeries(secondRaw.operations as Record<string, unknown>, 1);
+  shiftProductionSeries((secondRaw.metals as Record<string, unknown>).payableQtyByMetal as Record<string, unknown>, 1);
   (body.projects as Array<Record<string, unknown>>).push(secondProject);
+  const thirdProject = JSON.parse(JSON.stringify((body.projects as Array<Record<string, unknown>>)[0])) as Record<string, unknown>;
+  thirdProject.projectId = 'ABRA_MINIMAL_3';
+  const thirdRaw = thirdProject.rawJson as Record<string, unknown>;
+  (thirdRaw.meta as Record<string, unknown>).projectId = 'ABRA_MINIMAL_3';
+  (thirdRaw.meta as Record<string, unknown>).projectName = 'Abra Minimal 3';
+  const thirdTime = thirdRaw.time as Record<string, unknown>;
+  thirdTime.productionStartPeriod = 4;
+  thirdTime.productionStartYear = new Date().getUTCFullYear() + 4;
+  ((thirdRaw.series as Record<string, unknown>).capexUSD as number[])[0] = 100000000;
+  ((thirdRaw.series as Record<string, unknown>).capexUSD as number[])[1] = 50000000;
+  shiftProductionSeries(thirdRaw.operations as Record<string, unknown>, 2);
+  shiftProductionSeries((thirdRaw.metals as Record<string, unknown>).payableQtyByMetal as Record<string, unknown>, 2);
+  (body.projects as Array<Record<string, unknown>>).push(thirdProject);
 
   body.financingPlan = {
     equity_fraction: 0.5,
@@ -705,13 +724,14 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   body.financingPlanByProject = {
     ABRA_MINIMAL: { equity_fraction: 0.5, debt_fraction: 0.5 },
     ABRA_MINIMAL_2: { equity_fraction: 0.5, debt_fraction: 0.5 },
+    ABRA_MINIMAL_3: { equity_fraction: 0.5, debt_fraction: 0.5 },
   };
 
   const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  const totalCapexToFinanceUSD = (200000000 + 120000000) + (100000000 + 50000000);
+  const totalCapexToFinanceUSD = (200000000 + 120000000) + 2 * (100000000 + 50000000);
   const fx = (body.fx as Record<string, unknown>).manual_fx_USD_to_TargetCurrency as number;
   const initialCashUSD = ((body.balanceSheet as Record<string, number>).cash_t0_TargetCurrency ?? 0) / fx;
   const expectedExternalNeedUSD = totalCapexToFinanceUSD - initialCashUSD;
@@ -724,9 +744,14 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(financingDebug?.totalNewShares !== null);
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
-  const corporateChartFlows = (result.snapshot as unknown as { corporateChartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } }).corporateChartFlows;
-  assert.ok((corporateChartFlows?.dcfProdstartPresentPerShareSeries?.length ?? 0) > 0, 'corporate view must receive the restored time-series high curve');
-  assert.ok((corporateChartFlows?.navProdstartPerShareSeries?.length ?? 0) > 0, 'corporate view must receive the restored time-series low curve');
+  const corporateTimeSeries = (result.snapshot as unknown as { corporateValuationTimeSeries?: { rows: Array<{ year: number; sharesPf: number | null; dcfAbsolute: number | null; dcfPerShare: number | null }>; projectMarkers: Array<{ projectId: string; constructionStartPeriod: number | null; productionStartPeriod: number | null; productionStartYear: number | null; firstContributionPeriod: number | null }> } }).corporateValuationTimeSeries;
+  assert.equal(corporateTimeSeries?.rows.length, result.snapshot.series?.yearsByPeriod.length);
+  assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.projectId).sort(), ['ABRA_MINIMAL','ABRA_MINIMAL_2','ABRA_MINIMAL_3']);
+  assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.productionStartPeriod).sort(), [2,3,4]);
+  assert.equal(new Set(corporateTimeSeries?.rows.map((row) => row.sharesPf)).size, 1);
+  for (const marker of corporateTimeSeries?.projectMarkers ?? []) assert.ok(corporateTimeSeries?.rows.some((row) => row.year === marker.productionStartYear));
+  for (const marker of corporateTimeSeries?.projectMarkers ?? []) assert.equal(marker.firstContributionPeriod, marker.constructionStartPeriod);
+  for (const row of corporateTimeSeries?.rows ?? []) if (row.dcfAbsolute !== null && row.sharesPf !== null) assert.ok(Math.abs((row.dcfPerShare ?? 0) - row.dcfAbsolute / row.sharesPf) < 1e-9);
 });
 
 test('corporate snapshot applies latest-quarter cash exactly once before debt/equity', async () => {

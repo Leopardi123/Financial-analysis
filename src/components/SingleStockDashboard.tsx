@@ -5538,7 +5538,7 @@ Capital Available: ${availableLabel}`,
 
               {corporateViewMetrics && (() => {
                 try {
-                  const yearsByPeriod = requireYearsByPeriod(corporateSnapshotData?.series);
+                  requireYearsByPeriod(corporateSnapshotData?.series);
                   return (
                 <>
                   <div className="producer-core-compact-card">
@@ -5667,7 +5667,6 @@ Capital Available: ${availableLabel}`,
                       {sectionKey === "list2" && (
                         <>
                         <ValueRangeSnapshotCard
-                          mode="project"
                           priceToday={
                             corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0
                               ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
@@ -5677,11 +5676,7 @@ Capital Available: ${availableLabel}`,
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
-                          chartFlows={(corporateSnapshotData?.corporateChartFlows ?? null) as { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null}
-                          canonicalSharesPostFinancing={corporateViewMetrics.marketBox.sharesPf.value}
-                          projectDebug={{ sharesPostFinancing: corporateViewMetrics.marketBox.sharesPf.value, debugEnabled }}
-                          currentYear={yearsByPeriod[0] ?? null}
-                          tpYear={yearsByPeriod[corporateSnapshotData?.aggregation && typeof (corporateSnapshotData.aggregation as Record<string, unknown>).productionStartPeriod === "number" ? (corporateSnapshotData.aggregation as Record<string, number>).productionStartPeriod : 0] ?? null}
+                          corporateTimeSeries={(corporateSnapshotData?.corporateValuationTimeSeries ?? null) as { rows: Array<{ period: number; year: number; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>; projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }> } | null}
                           currencyCode={lockedTargetCurrency}
                         />
                         {debugEnabled && corporateTimelineDebug && (
