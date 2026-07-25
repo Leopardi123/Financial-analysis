@@ -147,7 +147,8 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     }
 
     const nopatAtT = nopatUSD[t] as number;
-    const fcffValue = nopatAtT + dep - (totalCapexUSD[t] as number) - dWC - rec;
+    // Reclamation is already included in EBITDA/EBIT above and must not be deducted twice in FCFF.
+    const fcffValue = nopatAtT + dep - (totalCapexUSD[t] as number) - dWC;
     fcffUSD[t] = Number.isFinite(fcffValue) ? fcffValue : null;
   }
 

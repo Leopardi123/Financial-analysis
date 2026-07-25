@@ -28,6 +28,16 @@ export type Lista3DebugMetric = {
   };
 };
 
+export type IrrSolveResult = {
+  value: number | null;
+  roots: number[];
+  selectedRoot: number | null;
+  selectionReason: string | null;
+  residual: number | null;
+  signChangeCount: number;
+  reason: string | null;
+};
+
 export type Lista3DebugPayload = {
   scope?: 'corporate' | 'project';
   sourcePath?: string;
@@ -52,8 +62,23 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-function computeIrr(cashFlows: Array<number | null>): { value: number | null; signChangeCount: number; reason: string | null } {
-  if (cashFlows.length === 0 || cashFlows.some((v) => !finite(v))) return { value: null, signChangeCount: 0, reason: 'solver failed' };
+const IRR_SCAN_MIN = -0.999;
+const IRR_SCAN_MAX = 10;
+const IRR_SCAN_STEPS = 20_000;
+const IRR_BISECTION_ITERATIONS = 200;
+const IRR_ROOT_DEDUP_TOLERANCE = 1e-9;
+
+export function computeIrr(cashFlows: Array<number | null>, discountRate: number): IrrSolveResult {
+  const emptyResult = (reason: string, signChangeCount = 0): IrrSolveResult => ({
+    value: null,
+    roots: [],
+    selectedRoot: null,
+    selectionReason: null,
+    residual: null,
+    signChangeCount,
+    reason,
+  });
+  if (cashFlows.length === 0 || cashFlows.some((v) => !finite(v))) return emptyResult('solver failed');
   const asFinite = cashFlows as number[];
   let signChangeCount = 0;
   for (let i = 1; i < asFinite.length; i += 1) {
@@ -63,8 +88,7 @@ function computeIrr(cashFlows: Array<number | null>): { value: number | null; si
   }
   const hasPositive = asFinite.some((v) => v > 0);
   const hasNegative = asFinite.some((v) => v < 0);
-  if (!hasPositive || !hasNegative) return { value: null, signChangeCount, reason: 'solver failed' };
-  if (signChangeCount >= 2) return { value: null, signChangeCount, reason: 'ambiguous: multiple sign changes' };
+  if (!hasPositive || !hasNegative) return emptyResult('IRR requires valid sign change', signChangeCount);
 
   const npv = (rate: number): number => {
     if (rate <= -1) return Number.NaN;
@@ -75,46 +99,78 @@ function computeIrr(cashFlows: Array<number | null>): { value: number | null; si
     return sum;
   };
 
-  const rLow = -0.99;
-  const npvLow = npv(rLow);
-  if (!Number.isFinite(npvLow)) return { value: null, signChangeCount, reason: 'solver failed' };
-  if (npvLow === 0) return { value: rLow, signChangeCount, reason: null };
-
-  const highCandidates = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
-  let low = rLow;
-  let high = 10.0;
-  let lowVal = npvLow;
-  let highVal = Number.NaN;
-  let bracketFound = false;
-
-  for (const candidate of highCandidates) {
-    const candidateNpv = npv(candidate);
-    if (!Number.isFinite(candidateNpv)) continue;
-    if (candidateNpv === 0) return { value: candidate, signChangeCount, reason: null };
-    if (lowVal * candidateNpv < 0) {
-      high = candidate;
-      highVal = candidateNpv;
-      bracketFound = true;
-      break;
+  const roots: number[] = [];
+  const addRoot = (root: number): void => {
+    if (!Number.isFinite(root) || root < IRR_SCAN_MIN || root > IRR_SCAN_MAX) return;
+    if (roots.some((existing) => Math.abs(existing - root) <= IRR_ROOT_DEDUP_TOLERANCE)) return;
+    roots.push(root);
+  };
+  const solveBracket = (initialLow: number, initialHigh: number, initialLowValue: number): number => {
+    let low = initialLow;
+    let high = initialHigh;
+    let lowValue = initialLowValue;
+    let bestRate = Math.abs(initialLowValue) <= Math.abs(npv(initialHigh)) ? initialLow : initialHigh;
+    let bestResidual = Math.abs(npv(bestRate));
+    for (let iteration = 0; iteration < IRR_BISECTION_ITERATIONS; iteration += 1) {
+      const mid = (low + high) / 2;
+      const midValue = npv(mid);
+      const residual = Math.abs(midValue);
+      if (residual < bestResidual) {
+        bestRate = mid;
+        bestResidual = residual;
+      }
+      if (mid === low || mid === high) break;
+      if (lowValue * midValue <= 0) {
+        high = mid;
+      } else {
+        low = mid;
+        lowValue = midValue;
+      }
     }
-  }
+    return bestRate;
+  };
 
-  if (!bracketFound || !Number.isFinite(highVal)) return { value: null, signChangeCount, reason: 'no root bracketed' };
-
-  for (let i = 0; i < 100; i += 1) {
-    const mid = (low + high) / 2;
-    const midVal = npv(mid);
-    if (!Number.isFinite(midVal)) return { value: null, signChangeCount, reason: 'solver failed' };
-    if (Math.abs(midVal) < 1e-8 || Math.abs(high - low) < 1e-12) return { value: mid, signChangeCount, reason: null };
-    if (lowVal * midVal < 0) {
-      high = mid;
-      highVal = midVal;
-    } else {
-      low = mid;
-      lowVal = midVal;
+  const step = (IRR_SCAN_MAX - IRR_SCAN_MIN) / IRR_SCAN_STEPS;
+  let scanLeft = IRR_SCAN_MIN;
+  let scanLeftValue = npv(scanLeft);
+  if (!Number.isFinite(scanLeftValue)) return emptyResult('solver failed', signChangeCount);
+  if (scanLeftValue === 0) addRoot(scanLeft);
+  for (let index = 1; index <= IRR_SCAN_STEPS; index += 1) {
+    const scanRight = index === IRR_SCAN_STEPS ? IRR_SCAN_MAX : IRR_SCAN_MIN + (step * index);
+    const scanRightValue = npv(scanRight);
+    if (!Number.isFinite(scanRightValue)) {
+      scanLeft = scanRight;
+      scanLeftValue = scanRightValue;
+      continue;
     }
+    if (scanRightValue === 0) addRoot(scanRight);
+    if (Number.isFinite(scanLeftValue) && scanLeftValue * scanRightValue < 0) {
+      addRoot(solveBracket(scanLeft, scanRight, scanLeftValue));
+    }
+    scanLeft = scanRight;
+    scanLeftValue = scanRightValue;
   }
-  return { value: (low + high) / 2, signChangeCount, reason: null };
+  roots.sort((a, b) => a - b);
+
+  const discountThreshold = finite(discountRate) ? discountRate : 0;
+  const positiveRootsAboveDiscountRate = roots
+    .filter((root) => root > discountThreshold + IRR_ROOT_DEDUP_TOLERANCE)
+    .sort((a, b) => a - b);
+  const nonNegativeRoots = roots.filter((root) => root >= 0).sort((a, b) => a - b);
+  const selectedRoot = positiveRootsAboveDiscountRate[0] ?? nonNegativeRoots[0] ?? null;
+  const selectionReason = positiveRootsAboveDiscountRate[0] !== undefined
+    ? 'positive root above project discount rate'
+    : (nonNegativeRoots[0] !== undefined ? 'lowest non-negative root' : null);
+  const residual = selectedRoot === null ? null : Math.abs(npv(selectedRoot));
+  return {
+    value: selectedRoot,
+    roots,
+    selectedRoot,
+    selectionReason,
+    residual,
+    signChangeCount,
+    reason: selectedRoot === null ? 'no economically relevant non-negative root found' : null,
+  };
 }
 
 
@@ -123,6 +179,7 @@ type Lista3Args = {
   tp: number | null;
   fcfUSD: Array<number | null>;
   initialCapexUSD: number | null;
+  discountRate?: number | null;
   strictRoi10Y?: boolean;
   roiAsRatio?: boolean;
   paybackRealUseInitialCapex?: boolean;
@@ -191,21 +248,6 @@ export function computeLista3(args: Lista3Args, options?: Lista3DebugOptions): L
   };
 
   const { masterN, tp, initialCapexUSD } = args;
-  if (!Number.isInteger(tp) || tp === null || tp < 0 || tp > masterN) {
-    debugData.perMetric.Payback_approx.missingInputs.push('tp_main');
-    debugData.perMetric.Payback_real.missingInputs.push('tp_main');
-    debugData.perMetric.ROI_10Y.missingInputs.push('tp_main');
-    debugData.perMetric.Payback_approx.intermediates.invalid_tp = true;
-    debugData.perMetric.Payback_real.intermediates.invalid_tp = true;
-    debugData.perMetric.ROI_10Y.intermediates.invalid_tp = true;
-    return options?.debug ? { metrics: out, debug: debugData } : out;
-  }
-  if (!finite(initialCapexUSD) || initialCapexUSD === 0) {
-    debugData.perMetric.Payback_approx.missingInputs.push('Initial_CAPEX_USD');
-    debugData.perMetric.Payback_real.missingInputs.push('Initial_CAPEX_USD');
-    debugData.perMetric.ROI_10Y.missingInputs.push('Initial_CAPEX_USD');
-    return options?.debug ? { metrics: out, debug: debugData } : out;
-  }
   if (args.fcfUSD.length < masterN + 1) {
     debugData.perMetric.Payback_approx.missingInputs.push('fcfUSD_total');
     debugData.perMetric.Payback_real.missingInputs.push('fcfUSD_total');
@@ -223,9 +265,37 @@ export function computeLista3(args: Lista3Args, options?: Lista3DebugOptions): L
     return options?.debug ? { metrics: out, debug: debugData } : out;
   }
 
+  const irrResult = computeIrr(enterpriseCashflows, finite(args.discountRate) ? args.discountRate : 0);
+  out.IRR = irrResult.value;
+  debugData.perMetric.IRR.inputs.fcfUSD_total = enterpriseCashflows;
+  debugData.perMetric.IRR.intermediates.solver = 'bracket+bisection';
+  debugData.perMetric.IRR.intermediates.signChangeCount = irrResult.signChangeCount;
+  debugData.perMetric.IRR.intermediates.roots = irrResult.roots;
+  debugData.perMetric.IRR.intermediates.selectedRoot = irrResult.selectedRoot;
+  debugData.perMetric.IRR.intermediates.selectionReason = irrResult.selectionReason;
+  debugData.perMetric.IRR.intermediates.residual = irrResult.residual;
+  debugData.perMetric.IRR.intermediates.discountRate = finite(args.discountRate) ? args.discountRate : null;
+  if (irrResult.reason) debugData.perMetric.IRR.intermediates.reason = irrResult.reason;
+  debugData.perMetric.IRR.output.value = out.IRR;
+
+  if (!Number.isInteger(tp) || tp === null || tp < 0 || tp > masterN) {
+    debugData.perMetric.Payback_approx.missingInputs.push('tp_main');
+    debugData.perMetric.Payback_real.missingInputs.push('tp_main');
+    debugData.perMetric.ROI_10Y.missingInputs.push('tp_main');
+    debugData.perMetric.Payback_approx.intermediates.invalid_tp = true;
+    debugData.perMetric.Payback_real.intermediates.invalid_tp = true;
+    debugData.perMetric.ROI_10Y.intermediates.invalid_tp = true;
+    return options?.debug ? { metrics: out, debug: debugData } : out;
+  }
+  if (!finite(initialCapexUSD) || initialCapexUSD === 0) {
+    debugData.perMetric.Payback_approx.missingInputs.push('Initial_CAPEX_USD');
+    debugData.perMetric.Payback_real.missingInputs.push('Initial_CAPEX_USD');
+    debugData.perMetric.ROI_10Y.missingInputs.push('Initial_CAPEX_USD');
+    return options?.debug ? { metrics: out, debug: debugData } : out;
+  }
+
   debugData.perMetric.Payback_approx.inputs.LOM_periods = enterpriseCashflows.length - tp;
   debugData.perMetric.Payback_real.inputs.fcfUSD_total_slice = enterpriseCashflows.slice(tp, masterN + 1);
-  debugData.perMetric.IRR.inputs.fcfUSD_total = enterpriseCashflows;
 
   const fcffSumLom = (enterpriseCashflows as number[]).slice(tp).reduce((sum, v) => sum + v, 0);
   const annualAvgFcff = enterpriseCashflows.length - tp > 0 ? fcffSumLom / (enterpriseCashflows.length - tp) : null;
@@ -283,12 +353,6 @@ export function computeLista3(args: Lista3Args, options?: Lista3DebugOptions): L
     debugData.perMetric.Payback_real.intermediates.cumulativeSeries = cumulativeSeries;
   }
   debugData.perMetric.Payback_real.intermediates.investmentAbs = investmentAbs;
-
-  const irrResult = computeIrr(enterpriseCashflows);
-  out.IRR = irrResult.value;
-  debugData.perMetric.IRR.intermediates.solver = 'bracket+bisection';
-  debugData.perMetric.IRR.intermediates.signChangeCount = irrResult.signChangeCount;
-  if (irrResult.reason) debugData.perMetric.IRR.intermediates.reason = irrResult.reason;
 
   const roiEnd = tp + 9;
   if (roiEnd <= masterN || !args.strictRoi10Y) {
