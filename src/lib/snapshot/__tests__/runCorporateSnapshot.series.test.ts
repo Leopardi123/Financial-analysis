@@ -744,14 +744,17 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(financingDebug?.totalNewShares !== null);
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
-  const corporateTimeSeries = (result.snapshot as unknown as { corporateValuationTimeSeries?: { rows: Array<{ year: number; sharesPf: number | null; dcfAbsolute: number | null; dcfPerShare: number | null }>; projectMarkers: Array<{ projectId: string; constructionStartPeriod: number | null; productionStartPeriod: number | null; productionStartYear: number | null; firstContributionPeriod: number | null }> } }).corporateValuationTimeSeries;
+  const corporateTimeSeries = (result.snapshot as unknown as { corporateValuationTimeSeries?: { rows: Array<{ year: number; sharesPf: number | null; npvAbsolute: number | null; npvPerShare: number | null; dcfAbsolute: number | null; dcfPerShare: number | null }>; projectMarkers: Array<{ projectId: string; constructionStartPeriod: number | null; productionStartPeriod: number | null; productionStartYear: number | null; firstContributionPeriod: number | null }> } }).corporateValuationTimeSeries;
   assert.equal(corporateTimeSeries?.rows.length, result.snapshot.series?.yearsByPeriod.length);
   assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.projectId).sort(), ['ABRA_MINIMAL','ABRA_MINIMAL_2','ABRA_MINIMAL_3']);
   assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.productionStartPeriod).sort(), [2,3,4]);
   assert.equal(new Set(corporateTimeSeries?.rows.map((row) => row.sharesPf)).size, 1);
   for (const marker of corporateTimeSeries?.projectMarkers ?? []) assert.ok(corporateTimeSeries?.rows.some((row) => row.year === marker.productionStartYear));
   for (const marker of corporateTimeSeries?.projectMarkers ?? []) assert.equal(marker.firstContributionPeriod, marker.constructionStartPeriod);
-  for (const row of corporateTimeSeries?.rows ?? []) if (row.dcfAbsolute !== null && row.sharesPf !== null) assert.ok(Math.abs((row.dcfPerShare ?? 0) - row.dcfAbsolute / row.sharesPf) < 1e-9);
+  for (const row of corporateTimeSeries?.rows ?? []) {
+    if (row.npvAbsolute !== null && row.sharesPf !== null) assert.ok(Math.abs((row.npvPerShare ?? 0) - row.npvAbsolute / row.sharesPf) < 1e-9);
+    if (row.dcfAbsolute !== null && row.sharesPf !== null) assert.ok(Math.abs((row.dcfPerShare ?? 0) - row.dcfAbsolute / row.sharesPf) < 1e-9);
+  }
 });
 
 test('corporate snapshot applies latest-quarter cash exactly once before debt/equity', async () => {

@@ -3354,8 +3354,10 @@ export async function runCorporateSnapshotPipeline(args: {
           period, year,
           dcfAbsolute: metricsAtPeriod.DCF_prodStart_present_TargetCurrency,
           navAbsolute: metricsAtPeriod.NAV_prodStart_TargetCurrency,
+          npvAbsolute: metricsAtPeriod.NPV_prodStart_TargetCurrency,
           dcfPerShare: metricsAtPeriod.DCF_prodStart_present_perShare_TargetCurrency,
           navPerShare: metricsAtPeriod.NAV_prodStart_perShare_TargetCurrency,
+          npvPerShare: metricsAtPeriod.NPV_prodStart_perShare_TargetCurrency,
           sharesPf: shares_post_financing_fd_effective,
         };
       }),

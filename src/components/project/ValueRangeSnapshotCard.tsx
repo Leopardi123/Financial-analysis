@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Chart } from "react-google-charts";
 import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
 import { rescalePerShareSeries } from "./chartDenominator";
+import { buildCorporateChartRows, type CorporateChartInput } from "./corporateChartRows";
 
 type TpMarker = {
   tp: number;
@@ -28,9 +29,10 @@ type ValueRangeSnapshotCardProps = {
   /** Canonical denominator used by the List 2 table after cash-first financing. */
   canonicalSharesPostFinancing?: number | null;
   corporateTimeSeries?: {
-    rows: Array<{ period: number; year: number; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>;
+    rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>;
     projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
   } | null;
+  navToday?: number | null;
   projectDebug?: {
     yearsByPeriod?: Array<number | null> | null;
     fcffProductionTableSeries?: Array<number | null> | null;
@@ -159,7 +161,7 @@ function computeCorrectDcfAt(args: { fcffSeries: Array<number | null>; discountR
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode, projectDebug, canonicalSharesPostFinancing, corporateTimeSeries } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode, projectDebug, canonicalSharesPostFinancing, corporateTimeSeries, navToday } = props;
   const isProjectMode = mode === "project";
 
   const projectChartModel = useMemo(() => {
@@ -494,18 +496,12 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
 
   const corporateChartModel = useMemo(() => {
     if (!corporateTimeSeries?.rows?.length) return null;
-    const markersByYear = new Map<number, string[]>();
-    for (const marker of corporateTimeSeries.projectMarkers) if (isFiniteNumber(marker.productionStartYear)) markersByYear.set(marker.productionStartYear, [...(markersByYear.get(marker.productionStartYear) ?? []), marker.projectName]);
-    const rows = corporateTimeSeries.rows.map((row) => {
-      const low = isFiniteNumber(row.navPerShare) && isFiniteNumber(row.dcfPerShare) ? Math.min(row.navPerShare, row.dcfPerShare) : row.navPerShare;
-      const high = isFiniteNumber(row.navPerShare) && isFiniteNumber(row.dcfPerShare) ? Math.max(row.navPerShare, row.dcfPerShare) : row.dcfPerShare;
-      return [row.year, low, low !== null && high !== null ? high - low : null, low, high, markersByYear.has(row.year) ? high : null, markersByYear.get(row.year)?.join(" / ") ?? null];
-    });
-    return { data: [["Year", "Low", "Band", "NAV/share", "DCF/share", "Production start", { role: "annotation", type: "string" }], ...rows], ticks: corporateTimeSeries.rows.map((row) => row.year) };
-  }, [corporateTimeSeries]);
+    const rows = buildCorporateChartRows(corporateTimeSeries as CorporateChartInput, { npv: isFiniteNumber(npvLow) ? npvLow : null, nav: isFiniteNumber(navToday) ? navToday : null, dcf: isFiniteNumber(npvHigh) ? npvHigh : null });
+    return { data: [["Year", "Low", "Band", "NPV/share", { role: "annotation", type: "string" }, "NAV/share", { role: "annotation", type: "string" }, "DCF/share", { role: "annotation", type: "string" }, "Production start", { role: "annotation", type: "string" }], ...rows], ticks: corporateTimeSeries.rows.map((row) => row.year) };
+  }, [corporateTimeSeries, navToday, npvHigh, npvLow]);
 
   if (!isProjectMode && corporateChartModel) {
-    return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><Chart chartType="ComboChart" width="100%" height="220px" data={corporateChartModel.data as never} options={{ backgroundColor: "#e0e9ce", legend: { position: "none" }, isStacked: true, areaOpacity: 0.32, chartArea: { left: 64, right: 56, top: 14, bottom: 30, width: "100%", height: "68%" }, hAxis: { textStyle: { color: "#1f2937", fontSize: 11 }, gridlines: { color: "transparent" }, baselineColor: "transparent", ticks: corporateChartModel.ticks }, vAxis: { title: currencyCode ?? "", textPosition: "none", gridlines: { color: "transparent" }, baselineColor: "transparent" }, tooltip: { trigger: "none" }, annotations: { alwaysOutside: true, textStyle: { color: "#111827", fontSize: 9 }, stem: { color: "#64748b", length: 8 } }, colors: ["transparent", "#A8C686", "#2C3E50", "#2C3E50", "#be123c"], seriesType: "line", series: { 0: { type: "area", lineWidth: 0, pointSize: 0 }, 1: { type: "area", lineWidth: 0, pointSize: 0 }, 2: { type: "line", lineWidth: .62, pointSize: 0 }, 3: { type: "line", lineWidth: .62, pointSize: 0 }, 4: { type: "scatter", pointSize: 7, lineWidth: 0 } } }} /></div>;
+    return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><Chart chartType="ComboChart" width="100%" height="220px" data={corporateChartModel.data as never} options={{ backgroundColor: "#e0e9ce", legend: { position: "bottom" }, isStacked: true, areaOpacity: 0.22, chartArea: { left: 64, right: 72, top: 28, bottom: 42, width: "100%", height: "64%" }, hAxis: { textStyle: { color: "#1f2937", fontSize: 11 }, gridlines: { color: "transparent" }, baselineColor: "transparent", ticks: corporateChartModel.ticks }, vAxis: { title: currencyCode ?? "", textPosition: "out", gridlines: { color: "#d8e1d1" }, baselineColor: "transparent" }, tooltip: { trigger: "focus" }, annotations: { alwaysOutside: true, textStyle: { color: "#111827", fontSize: 8 }, stem: { color: "#64748b", length: 7 } }, colors: ["transparent", "#A8C686", "#2563eb", "#059669", "#7c3aed", "#be123c"], seriesType: "line", series: { 0: { type: "area", lineWidth: 0, pointSize: 0 }, 1: { type: "area", lineWidth: 0, pointSize: 0 }, 2: { type: "line", lineWidth: 1.5, pointSize: 2 }, 3: { type: "line", lineWidth: 1.5, pointSize: 2 }, 4: { type: "line", lineWidth: 1.5, pointSize: 2 }, 5: { type: "scatter", pointSize: 7, lineWidth: 0 } } }} /></div>;
   }
 
   if (isProjectMode) {
