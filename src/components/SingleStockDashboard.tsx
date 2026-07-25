@@ -1308,7 +1308,8 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [stressEdgeCases, setStressEdgeCases] = useState<string[]>([]);
   const [projectEquityPct, setProjectEquityPct] = useState("100");
   const [projectDebtPct, setProjectDebtPct] = useState("0");
-  const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
+  const [projectUseQuarterlyCash, setProjectUseQuarterlyCash] = useState(false);
+  const [projectCashUsedPct, setProjectCashUsedPct] = useState(100);
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
   const [npvTracePersistResult, setNpvTracePersistResult] = useState<{ url: string | null; fileName: string | null; savedAtUtc: string | null; error: string | null }>({ url: null, fileName: null, savedAtUtc: null, error: null });
   const [manualPriceStoreVersion, setManualPriceStoreVersion] = useState(0);
@@ -2925,6 +2926,8 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
+    const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
+      .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
 
     return computeProjectViewMetrics({
       meta: { projectId: selectedProjectId },
@@ -2935,7 +2938,7 @@ Capital Available: ${availableLabel}`,
       sharesCurrent: inputs.sharesCurrent,
       sharesPostFinancingInput: inputs.sharesPostFinancing,
       priceCurrentTarget: inputs.price,
-      cashCurrentTarget: inputs.cash0,
+      cashCurrentTarget: latestQuarterlyCash,
       debtCurrentTarget: inputs.debt0,
       enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
       fcfUSD: asSeries(inputs.series.fcfUSD),
@@ -2954,10 +2957,12 @@ Capital Available: ${availableLabel}`,
       financing: {
         equityPct: toInputNumber(projectEquityPct) ?? 100,
         debtPct: toInputNumber(projectDebtPct) ?? 0,
-        cashUsedInput: toInputNumber(projectCashUsedTarget) ?? 0,
+        latestQuarterlyCashTarget: latestQuarterlyCash,
+        useCashFirst: projectUseQuarterlyCash,
+        cashUsePercent: projectCashUsedPct / 100,
       },
     });
-  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const corporateViewMetrics = useMemo(() => {
     if (!corporateSnapshotData) return null;
@@ -3000,7 +3005,7 @@ Capital Available: ${availableLabel}`,
       financing: {
         equityPct: 100,
         debtPct: 0,
-        cashUsedInput: 0,
+        usePrecomputedFinancing: true,
       },
     });
     const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
@@ -5623,9 +5628,14 @@ Capital Available: ${availableLabel}`,
                     {(() => {
                       const financing = (corporateSnapshotData?.financing ?? {}) as Record<string, unknown>;
                       const fields = [
-                        ["Latest Quarterly Cash", financing.latest_quarterly_cash_TargetCurrency], ["Cash Used %", typeof financing.cash_used_percent === "number" ? financing.cash_used_percent * 100 : null], ["Cash Used", financing.cash_used_for_build_TargetCurrency], ["Remaining Funding Need", financing.remaining_funding_need_TargetCurrency], ["Debt Added", financing.new_debt_TargetCurrency], ["Equity Raise", financing.equity_raised_TargetCurrency], ["New Shares", financing.new_shares], ["Closing Corporate Cash", financing.closing_corporate_cash_TargetCurrency],
+                        ["Latest Quarterly Cash", financing.latest_quarterly_cash_TargetCurrency], ["Cash Used %", typeof financing.cash_used_percent === "number" ? financing.cash_used_percent * 100 : null], ["Initial Cash Used", financing.cash_used_for_build_TargetCurrency], ["Internally Generated Cash Used", financing.internally_generated_cash_used_TargetCurrency], ["Total Internal Cash Used", financing.total_internal_cash_used_TargetCurrency], ["Remaining Funding Need", financing.remaining_funding_need_TargetCurrency], ["Debt Added", financing.new_debt_TargetCurrency], ["Equity Raise", financing.equity_raised_TargetCurrency], ["New Shares", financing.new_shares], ["Shares PF", financing.shares_post_financing], ["Closing Corporate Cash", financing.closing_corporate_cash_TargetCurrency],
                       ];
                       return <div className="compact-metrics-grid">{fields.map(([label, raw]) => <div className="compact-metric-row" key={String(label)}><span className="compact-metric-label">{String(label)}</span><span className="compact-metric-dots"/><span className="compact-metric-value">{typeof raw === "number" ? raw.toLocaleString() : "n/a"}</span></div>)}</div>;
+                    })()}
+                    {(() => {
+                      const waterfall = ((corporateSnapshotData?.financing as Record<string, unknown> | undefined)?.corporate_cash_waterfall ?? null) as { rows?: Array<Record<string, unknown>> } | null;
+                      if (!waterfall?.rows?.length) return null;
+                      return <details style={{ marginTop: 10 }}><summary>Corporate cash waterfall per period</summary><div style={{ overflowX: "auto" }}><table className="compact-debug-table"><thead><tr>{["Period","Year","Opening Cash","Operating Cash Generated","Construction CAPEX","Internal Cash Used","Debt Added","Equity Raised","Closing Cash"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{waterfall.rows.map((row,index)=><tr key={index}>{[row.period,row.year,row.openingCash,row.operatingCashGenerated,row.projectCapexNeed,row.internalCashUsed,row.debtAdded,row.equityRaised,row.closingCash].map((v,i)=><td key={i}>{typeof v === "number" ? v.toLocaleString() : "n/a"}</td>)}</tr>)}</tbody></table></div></details>;
                     })()}
                     <p className="bread" style={{ marginTop: 8 }}>
                       {(() => {
@@ -6155,7 +6165,8 @@ Capital Available: ${availableLabel}`,
                                   financeInputs: {
                                     projectEquityPct,
                                     projectDebtPct,
-                                    projectCashUsedTarget,
+                                    projectUseQuarterlyCash,
+                                    projectCashUsedPct,
                                     riskAdjustedDiscountRatePctInput,
                                   },
                                   list2Metrics: projectViewMetrics.list2,
@@ -6553,9 +6564,15 @@ Capital Available: ${availableLabel}`,
                           style={{ width: "100%" }}
                         />
                       </label>
-                      <label>Cash Used ({lockedTargetCurrency})<input value={projectCashUsedTarget} onChange={(event) => setProjectCashUsedTarget(event.target.value)} /></label>
+                      <label>
+                        <input type="checkbox" checked={projectUseQuarterlyCash} onChange={(event) => setProjectUseQuarterlyCash(event.target.checked)} />
+                        Använd senaste kvartalets Cash &amp; Cash Equivalents
+                      </label>
+                      <label>Cash Used {projectCashUsedPct}%<input type="range" min="0" max="100" value={projectCashUsedPct} onChange={(event) => setProjectCashUsedPct(Number(event.target.value))} /></label>
                     </div>
                     <div className="compact-metrics-grid">
+                      <div className="compact-metric-row"><span className="compact-metric-label">Latest Quarterly Cash</span><span className="compact-metric-dots"/><span className="compact-metric-value">{([...getFieldSeries(data, "balance", "cashAndCashEquivalents")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0).toLocaleString()}</span></div>
+                      <div className="compact-metric-row"><span className="compact-metric-label">Shares PF</span><span className="compact-metric-dots"/><span className="compact-metric-value">{projectViewMetrics.marketBox.sharesPf.value?.toLocaleString() ?? "n/a"}</span></div>
                       {Object.entries(projectViewMetrics.list5).map(([key, value]) => (
                         <div key={key} className="compact-metric-row">
                           <span className="compact-metric-label-wrap">

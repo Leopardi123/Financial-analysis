@@ -38,6 +38,25 @@ assertApprox(out.list2.NPV_prodStart_perShare.value, 8.22364, 1e-4);
 assertApprox(out.list2.NAV_prodStart_perShare.value, 8.48005, 1e-4);
 assert.equal(out.marketBox.marketCapCurrent.reason, null);
 
+const cashFirstBase = {
+  targetCurrency: 'CAD', fxUSDToTarget: 1, discountRate: .1, masterN: 2,
+  sharesCurrent: 300_000_000, priceCurrentTarget: 3, cashCurrentTarget: 100_000_000,
+  debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [-300_000_000, 0, 400_000_000], capexUSD: [300_000_000, 0, 0],
+  grossRevenueUSD: [0, 0, 500_000_000], ebitUSD: [0, 0, 400_000_000],
+  payableAuEqOz: [0, 0, 1], sustainingCostUSD: [0, 0, 1], productionStartPeriod: 1,
+};
+const cashDisabled = computeProjectViewMetrics({ ...cashFirstBase, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 100_000_000, useCashFirst: false, cashUsePercent: 1 } });
+const cashEnabled = computeProjectViewMetrics({ ...cashFirstBase, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 100_000_000, useCashFirst: true, cashUsePercent: 1 } });
+assert.equal(cashDisabled.list5.cash_used_Target.value, 0);
+assert.equal(cashDisabled.list5.Equity_Raise_Target.value, 300_000_000);
+assert.equal(cashDisabled.list5.New_Shares.value, 100_000_000);
+assert.equal(cashDisabled.marketBox.sharesPf.value, 400_000_000);
+assert.equal(cashEnabled.list5.cash_used_Target.value, 100_000_000);
+assert.equal(cashEnabled.list5.Equity_Raise_Target.value, 200_000_000);
+assertApprox(cashEnabled.list5.New_Shares.value, 66_666_666.66666667);
+assertApprox(cashEnabled.marketBox.sharesPf.value, 366_666_666.6666667);
+
 assert.ok((out.list3.IRR.value as number) > 0, `Expected positive IRR, got ${out.list3.IRR.value}`);
 assert.ok((out.list3.LOM_discounted_EBIT_ROCE.value as number) > 0, 'Expected finite discounted EBIT ROCE');
 assert.ok((out.list3.LOM_avg_NOPAT_ROIC.value as number) > 0, 'Expected finite avg NOPAT ROIC');

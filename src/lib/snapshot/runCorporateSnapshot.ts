@@ -2269,6 +2269,7 @@ export async function runCorporateSnapshotPipeline(args: {
           projectId: project.projectId,
           constructionStartPeriod: constructionStartPeriod < 0 ? aggregationEffective.corporateYearsByPeriod.indexOf(productionYear) : constructionStartPeriod,
           fcffIncludesConstructionCapex: true,
+          debtPercent: input.financingPlanByProject?.[project.projectId]?.debt_fraction ?? input.financingPlan?.debt_fraction ?? 0,
           capexNeedByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
             const local = project.yearsByPeriod.indexOf(year);
             return local >= 0 && local < project.productionStartPeriod ? Math.max(0, context?.economics.capexUSD[local] ?? 0) : 0;
@@ -2410,10 +2411,12 @@ export async function runCorporateSnapshotPipeline(args: {
       : perProjectNewShares.reduce((sum: number, project) => sum + (project.debtAmount_USD as number), 0);
     if (cashWaterfall && fxRate !== null) {
       totalDebt_USD = cashWaterfall.debtAdded;
-      const raisePrice = input.financingPlan?.equity_raise_price_TargetCurrency ?? marketInput.price_current_TargetCurrency;
-      totalNewShares = typeof raisePrice === 'number' && Number.isFinite(raisePrice) && raisePrice > 0
-        ? (cashWaterfall.equityRaised * fxRate) / raisePrice
-        : cashWaterfall.equityRaised === 0 ? 0 : null;
+      totalNewShares = projectsForBuildFunding.reduce<number | null>((sum, project) => {
+        if (sum === null) return null;
+        const equityUSD = cashWaterfall.equityRaisedByProject[project.projectId] ?? 0;
+        const raisePrice = input.financingPlanByProject?.[project.projectId]?.equity_raise_price_TargetCurrency ?? input.financingPlan?.equity_raise_price_TargetCurrency ?? marketInput.price_current_TargetCurrency;
+        return equityUSD === 0 ? sum : (typeof raisePrice === 'number' && Number.isFinite(raisePrice) && raisePrice > 0 ? sum + equityUSD * fxRate / raisePrice : null);
+      }, 0);
     }
     const totalDebt_TargetCurrency =
       totalDebt_USD !== null
@@ -2467,13 +2470,13 @@ export async function runCorporateSnapshotPipeline(args: {
       NAV_today_TargetCurrency: waterfallNavTarget,
       navToday_TargetCurrency: waterfallNavTarget,
       netCash_TargetCurrency_t0:
-        financingEffective.cash_t0_post_TargetCurrency === null || debtPostTarget === null
+        cashAfterInitialFundingTarget === null || debtPostTarget === null
           ? financingEffective.netCash_TargetCurrency_t0
-          : financingEffective.cash_t0_post_TargetCurrency - debtPostTarget,
+          : cashAfterInitialFundingTarget - debtPostTarget,
       evAdditive_Component_TargetCurrency_t0:
-        financingEffective.cash_t0_post_TargetCurrency === null || debtPostTarget === null
+        cashAfterInitialFundingTarget === null || debtPostTarget === null
           ? financingEffective.evAdditive_Component_TargetCurrency_t0
-          : debtPostTarget - financingEffective.cash_t0_post_TargetCurrency,
+          : debtPostTarget - cashAfterInitialFundingTarget,
       shares_post_financing: sharesPostFinancingForSnapshot,
       latest_quarterly_cash_TargetCurrency: input.balanceSheet?.cash_t0_TargetCurrency ?? 0,
       cash_used_percent: input.financingPlan?.cash_use_percent ?? 1,
@@ -2483,6 +2486,7 @@ export async function runCorporateSnapshotPipeline(args: {
       remaining_funding_need_TargetCurrency: cashWaterfall ? cashWaterfall.remainingExternalFundingNeed * (fxRate as number) : financingEffective.remaining_funding_need_TargetCurrency,
       new_debt_TargetCurrency: cashWaterfall ? cashWaterfall.debtAdded * (fxRate as number) : (totalDebt_TargetCurrency ?? financingEffective.new_debt_TargetCurrency),
       equity_raised_TargetCurrency: cashWaterfall ? cashWaterfall.equityRaised * (fxRate as number) : financingEffective.equity_raised_TargetCurrency,
+      new_shares: totalNewShares,
       cash_t0_post_TargetCurrency: cashAfterInitialFundingTarget,
       closing_corporate_cash_TargetCurrency: cashWaterfall ? cashWaterfall.closingCorporateCash * (fxRate as number) : financingEffective.cash_t0_post_TargetCurrency,
       corporate_cash_waterfall: cashWaterfall,

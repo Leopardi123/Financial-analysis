@@ -7,7 +7,14 @@ type Series = Array<number | null>;
 type FinancingInput = {
   equityPct: number;
   debtPct: number;
-  cashUsedInput: number;
+  /** Latest reported quarterly cash; cash usage is derived, never manually entered. */
+  latestQuarterlyCashTarget?: number;
+  useCashFirst?: boolean;
+  cashUsePercent?: number;
+  /** Legacy test/caller compatibility. Prefer latestQuarterlyCashTarget. */
+  cashUsedInput?: number;
+  /** Corporate snapshots already contain the canonical financing result. */
+  usePrecomputedFinancing?: boolean;
 };
 
 export type ProjectViewInputs = {
@@ -347,18 +354,25 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const initialCapexUSD = capexInit.value;
   const initialCapexTarget = initialCapexUSD !== null && fx !== null ? initialCapexUSD * fx : null;
 
-  const cashUsedTarget = initialCapexTarget !== null && cashCurrent !== null
-    ? Math.min(Math.max(0, input.financing.cashUsedInput), cashCurrent)
-    : 0;
-  const remainingNeedTarget = initialCapexTarget !== null ? Math.max(0, initialCapexTarget - cashUsedTarget) : null;
-  const debtAddedTarget = remainingNeedTarget !== null ? remainingNeedTarget * normDebtFrac : 0;
-  const equityRaiseTarget = remainingNeedTarget !== null ? remainingNeedTarget * equityFrac : 0;
+  const latestQuarterlyCash = finite(input.financing.latestQuarterlyCashTarget)
+    ? Math.max(0, input.financing.latestQuarterlyCashTarget as number)
+    : cashCurrent;
+  const cashUsePercent = Math.max(0, Math.min(1, input.financing.cashUsePercent ?? 1));
+  const requestedCash = input.financing.latestQuarterlyCashTarget !== undefined
+    ? ((input.financing.useCashFirst ?? false) ? (latestQuarterlyCash ?? 0) * cashUsePercent : 0)
+    : Math.max(0, input.financing.cashUsedInput ?? 0);
+  const cashUsedTarget = input.financing.usePrecomputedFinancing
+    ? 0
+    : initialCapexTarget !== null ? Math.min(requestedCash, initialCapexTarget) : 0;
+  const remainingNeedTarget = input.financing.usePrecomputedFinancing ? 0 : (initialCapexTarget !== null ? Math.max(0, initialCapexTarget - cashUsedTarget) : null);
+  const debtAddedTarget = input.financing.usePrecomputedFinancing ? 0 : (remainingNeedTarget !== null ? remainingNeedTarget * normDebtFrac : 0);
+  const equityRaiseTarget = input.financing.usePrecomputedFinancing ? 0 : (remainingNeedTarget !== null ? remainingNeedTarget * equityFrac : 0);
   const newShares = priceCurrent !== null && priceCurrent > 0 ? equityRaiseTarget / priceCurrent : null;
   const sharesPostFinancingInput = finite(input.sharesPostFinancingInput) && (input.sharesPostFinancingInput as number) > 0
     ? input.sharesPostFinancingInput as number
     : null;
   const sharesPfComputed = sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null;
-  const sharesPf = sharesPfComputed ?? sharesPostFinancingInput;
+  const sharesPf = input.financing.usePrecomputedFinancing ? sharesPostFinancingInput : (sharesPfComputed ?? sharesPostFinancingInput);
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
 

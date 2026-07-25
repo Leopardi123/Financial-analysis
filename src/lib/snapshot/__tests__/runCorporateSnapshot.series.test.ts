@@ -734,7 +734,18 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   series.capexUSD = capex.map((_, index) => index === 0 ? 300_000_000 : 0);
   body.balanceSheet = { cash_t0_TargetCurrency: 100_000_000, debt_t0_TargetCurrency: 0 };
   body.fx = { source: 'manual', anchor: 'today', manual_fx_USD_to_TargetCurrency: 1, scenario: { mode: 'spot' } };
-  body.financingPlan = { use_cash_first: true, cash_use_percent: 1, debt_fraction: .5, equity_fraction: .5, equity_raise_price_TargetCurrency: 1 };
+  body.market = { shares_current: 300_000_000, price_current_TargetCurrency: 3 };
+  body.financingPlan = { use_cash_first: false, cash_use_percent: 1, debt_fraction: 0, equity_fraction: 1, equity_raise_price_TargetCurrency: 3 };
+
+  const disabled = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(disabled.ok, true);
+  if (!disabled.ok) return;
+  assert.equal(disabled.snapshot.financing.cash_used_for_build_TargetCurrency, 0);
+  assert.equal(disabled.snapshot.financing.equity_raised_TargetCurrency, 300_000_000);
+  assert.equal(disabled.snapshot.financing.new_shares, 100_000_000);
+  assert.equal(disabled.snapshot.financing.shares_post_financing, 400_000_000);
+
+  body.financingPlan = { use_cash_first: true, cash_use_percent: 1, debt_fraction: 0, equity_fraction: 1, equity_raise_price_TargetCurrency: 3 };
 
   const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
   assert.equal(result.ok, true);
@@ -742,10 +753,15 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   const financing = result.snapshot.financing;
   assert.equal(financing.cash_used_for_build_TargetCurrency, 100_000_000);
   assert.equal(financing.remaining_funding_need_TargetCurrency, 200_000_000);
-  assert.equal(financing.new_debt_TargetCurrency, 100_000_000);
-  assert.equal(financing.equity_raised_TargetCurrency, 100_000_000);
+  assert.equal(financing.new_debt_TargetCurrency, 0);
+  assert.equal(financing.equity_raised_TargetCurrency, 200_000_000);
+  assert.ok(Math.abs((financing.new_shares ?? 0) - 66_666_666.66666667) < 1e-6);
+  assert.ok(Math.abs((financing.shares_post_financing ?? 0) - 366_666_666.6666667) < 1e-6);
   assert.equal(financing.corporate_cash_waterfall?.totalInitialCashUsed, 100_000_000);
   assert.equal(financing.corporate_cash_waterfall?.remainingExternalFundingNeed, 200_000_000);
+  assert.equal(result.snapshot.financing.NPV_today_TargetCurrency, disabled.snapshot.financing.NPV_today_TargetCurrency);
+  assert.equal(result.snapshot.DCF_prodStart_exCapex_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_TargetCurrency);
+  assert.notEqual(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency);
 });
 
 test('corporate modeled milestones exclude tp=0 projects and include future tp>0 projects', async () => {
