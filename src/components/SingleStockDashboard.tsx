@@ -2976,6 +2976,7 @@ Capital Available: ${availableLabel}`,
       targetCurrency: lockedTargetCurrency,
     });
     const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
+    const corporateFinancing = (corporateSnapshotData.financing ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
     const computed = computeProjectViewMetrics({
       meta: { projectId: "corporate" },
@@ -2986,7 +2987,7 @@ Capital Available: ${availableLabel}`,
       sharesCurrent: inputs.sharesCurrent,
       sharesPostFinancingInput: inputs.sharesPostFinancing,
       priceCurrentTarget: inputs.price,
-      cashCurrentTarget: inputs.cash0,
+      cashCurrentTarget: asNum(corporateFinancing.cash_for_nav_TargetCurrency) ?? inputs.cash0,
       debtCurrentTarget: inputs.debt0,
       enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
       fcfUSD: asSeries(inputs.series.fcfUSD),

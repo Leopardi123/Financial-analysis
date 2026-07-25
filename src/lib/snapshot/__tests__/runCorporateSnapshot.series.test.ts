@@ -760,6 +760,7 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   assert.equal(financing.corporate_cash_waterfall?.totalInitialCashUsed, 100_000_000);
   assert.equal(financing.corporate_cash_waterfall?.remainingExternalFundingNeed, 200_000_000);
   assert.equal(result.snapshot.financing.NPV_today_TargetCurrency, disabled.snapshot.financing.NPV_today_TargetCurrency);
+  assert.equal(result.snapshot.financing.NAV_today_TargetCurrency, disabled.snapshot.financing.NAV_today_TargetCurrency);
   assert.equal(result.snapshot.DCF_prodStart_exCapex_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_TargetCurrency);
   assert.notEqual(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency);
 });

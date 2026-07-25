@@ -2459,9 +2459,12 @@ export async function runCorporateSnapshotPipeline(args: {
     const cashAfterInitialFundingTarget = cashWaterfall && fxRate !== null
       ? (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) - cashWaterfall.totalInitialCashUsed * fxRate
       : financingEffective.cash_t0_post_TargetCurrency;
-    const waterfallNavTarget = financingEffective.NPV_today_TargetCurrency === null || cashAfterInitialFundingTarget === null || debtPostTarget === null
+    // Project FCFF already contains the full construction CAPEX. Use reported cash
+    // in NAV so cash allocated to that CAPEX is not deducted a second time.
+    const cashForNavTarget = input.balanceSheet?.cash_t0_TargetCurrency ?? 0;
+    const waterfallNavTarget = financingEffective.NPV_today_TargetCurrency === null || debtPostTarget === null
       ? navTodayTarget
-      : financingEffective.NPV_today_TargetCurrency + cashAfterInitialFundingTarget - debtPostTarget;
+      : financingEffective.NPV_today_TargetCurrency + cashForNavTarget - debtPostTarget;
 
     const financingSnapshot = {
       ...financingEffective,
@@ -2488,6 +2491,7 @@ export async function runCorporateSnapshotPipeline(args: {
       equity_raised_TargetCurrency: cashWaterfall ? cashWaterfall.equityRaised * (fxRate as number) : financingEffective.equity_raised_TargetCurrency,
       new_shares: totalNewShares,
       cash_t0_post_TargetCurrency: cashAfterInitialFundingTarget,
+      cash_for_nav_TargetCurrency: cashForNavTarget,
       closing_corporate_cash_TargetCurrency: cashWaterfall ? cashWaterfall.closingCorporateCash * (fxRate as number) : financingEffective.cash_t0_post_TargetCurrency,
       corporate_cash_waterfall: cashWaterfall,
     };

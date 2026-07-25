@@ -33,9 +33,9 @@ assert.equal(out.list5.cash_used_Target.value, 50);
 assert.equal(out.list4.InSitu_10Y_USD.value, 1000);
 assertApprox(out.list2.DCF_Target.value, 2603.60953, 1e-4);
 assertApprox(out.list2.NPV_prodStart.value, 1603.60953, 1e-4);
-assertApprox(out.list2.NAV_prodStart.value, 1653.60953, 1e-4);
+assertApprox(out.list2.NAV_prodStart.value, 1703.60953, 1e-4);
 assertApprox(out.list2.NPV_prodStart_perShare.value, 8.22364, 1e-4);
-assertApprox(out.list2.NAV_prodStart_perShare.value, 8.48005, 1e-4);
+assertApprox(out.list2.NAV_prodStart_perShare.value, 8.73646, 1e-4);
 assert.equal(out.marketBox.marketCapCurrent.reason, null);
 
 const cashFirstBase = {
@@ -58,7 +58,8 @@ assertApprox(cashEnabled.list5.New_Shares.value, 66_666_666.66666667);
 assertApprox(cashEnabled.marketBox.sharesPf.value, 366_666_666.6666667);
 for (const key of ['NPV_Target','NPV_prodStart','CF_LOM_Target','DCF_Target','DCF_Target_discounted'] as const) assert.equal(cashEnabled.list2[key].value, cashDisabled.list2[key].value, `${key} absolute must ignore financing`);
 for (const key of ['NPV_perShare','NPV_prodStart_perShare','CF_LOM_Target_perShare','DCF_perShare','DCF_Target_discounted_perShare'] as const) assert.notEqual(cashEnabled.list2[key].value, cashDisabled.list2[key].value, `${key} must use changed sharesPF`);
-assert.notEqual(cashEnabled.list2.NAV_Target.value, cashDisabled.list2.NAV_Target.value, 'NAV intentionally includes post-financing cash/debt');
+assert.equal(cashEnabled.list2.NAV_Target.value, cashDisabled.list2.NAV_Target.value, 'NAV must not deduct cash used for CAPEX already included in FCFF');
+assert.equal(cashEnabled.list2.NAV_prodStart.value, cashDisabled.list2.NAV_prodStart.value, 'production-start NAV must use the same no-double-count rule');
 assert.notEqual(cashEnabled.list2.NAV_perShare.value, cashDisabled.list2.NAV_perShare.value);
 assert.ok(cashEnabled.diagnostics.valuation_metric_audit.every((row) => row.metric.endsWith('/share') ? row.sharesUsed !== null : true));
 

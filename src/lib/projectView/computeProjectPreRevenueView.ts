@@ -376,6 +376,10 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const sharesPf = input.financing.usePrecomputedFinancing ? sharesPostFinancingInput : (sharesPfComputed ?? sharesPostFinancingInput);
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
+  // FCFF already deducts the complete construction CAPEX. Deducting cash used for
+  // that same CAPEX from NAV would count the investment twice. NAV therefore adds
+  // the reported balance-sheet cash once; cashT0 remains the post-funding liquidity metric.
+  const cashForNav = cashCurrent;
 
   const marketCapCurrent = sharesCurrent !== null && priceCurrent !== null ? sharesCurrent * priceCurrent : null;
   const evTarget = marketCapCurrent !== null && debtT0 !== null && cashT0 !== null
@@ -393,7 +397,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   })() : null;
 
   const npvTarget = npvTodayUSD !== null && fx !== null ? npvTodayUSD * fx : null;
-  const navTarget = npvTarget !== null && cashT0 !== null && debtT0 !== null ? npvTarget + (cashT0 - debtT0) : null;
+  const navTarget = npvTarget !== null && cashForNav !== null && debtT0 !== null ? npvTarget + (cashForNav - debtT0) : null;
   const cfLomUSD = input.fcfUSD.length > 0 ? sumRange(input.fcfUSD, 0, input.fcfUSD.length - 1) : null;
   const cfLomTarget = cfLomUSD !== null && fx !== null ? cfLomUSD * fx : null;
 
@@ -413,8 +417,8 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     ? dcfProdStartExCapexUSD - Math.abs(initialCapexUSD)
     : null;
   const npvProdStartTarget = npvProdStartUSD !== null && fx !== null ? npvProdStartUSD * fx : null;
-  const navProdStartTarget = npvProdStartTarget !== null && cashT0 !== null && debtT0 !== null
-    ? npvProdStartTarget + (cashT0 - debtT0)
+  const navProdStartTarget = npvProdStartTarget !== null && cashForNav !== null && debtT0 !== null
+    ? npvProdStartTarget + (cashForNav - debtT0)
     : null;
 
   const dcfProdStartPresentUSD = dcfProdStartExCapexUSD !== null && tp !== null && r !== null
@@ -1032,9 +1036,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       },
       valuation_metric_audit: [
         ['NPV', npvTarget, sharesPf, 'absolute', npvTarget], ['NPV/share', npvTarget, sharesPf, 'NPV / sharesPF', safeRatio(npvTarget, sharesPf).value],
-        ['NAV', navTarget, sharesPf, 'NPV + cash_t0_post - debt_t0_post', navTarget], ['NAV/share', navTarget, sharesPf, 'NAV / sharesPF', safeRatio(navTarget, sharesPf).value],
+        ['NAV', navTarget, sharesPf, 'NPV + reported cash - debt_t0_post (CAPEX already in FCFF)', navTarget], ['NAV/share', navTarget, sharesPf, 'NAV / sharesPF', safeRatio(navTarget, sharesPf).value],
         ['NPV prod start', npvProdStartTarget, sharesPf, 'DCF prod start - Initial CAPEX', npvProdStartTarget], ['NPV prod start/share', npvProdStartTarget, sharesPf, 'NPV prod start / sharesPF', safeRatio(npvProdStartTarget, sharesPf).value],
-        ['NAV prod start', navProdStartTarget, sharesPf, 'NPV prod start + cash_t0_post - debt_t0_post', navProdStartTarget], ['NAV prod start/share', navProdStartTarget, sharesPf, 'NAV prod start / sharesPF', safeRatio(navProdStartTarget, sharesPf).value],
+        ['NAV prod start', navProdStartTarget, sharesPf, 'NPV prod start + reported cash - debt_t0_post (CAPEX already in FCFF)', navProdStartTarget], ['NAV prod start/share', navProdStartTarget, sharesPf, 'NAV prod start / sharesPF', safeRatio(navProdStartTarget, sharesPf).value],
         ['DCF prod start', dcfTarget, sharesPf, 'fx × discounted FCFF from tp', dcfTarget], ['DCF prod start/share', dcfTarget, sharesPf, 'DCF prod start / sharesPF', safeRatio(dcfTarget, sharesPf).value],
         ['DCF prod start present', dcfTargetDiscounted, sharesPf, 'DCF prod start / (1+r)^tp', dcfTargetDiscounted], ['DCF prod start present/share', dcfTargetDiscounted, sharesPf, 'DCF prod start present / sharesPF', safeRatio(dcfTargetDiscounted, sharesPf).value],
         ['CF LOM', cfLomTarget, sharesPf, 'fx × sum(FCFF)', cfLomTarget], ['CF LOM/share', cfLomTarget, sharesPf, 'CF LOM / sharesPF', safeRatio(cfLomTarget, sharesPf).value],

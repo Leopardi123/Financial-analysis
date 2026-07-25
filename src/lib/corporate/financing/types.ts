@@ -34,6 +34,7 @@ export type CorporateFinancingOutput = {
   internally_generated_cash_used_TargetCurrency?: number | null;
   total_internal_cash_used_TargetCurrency?: number | null;
   closing_corporate_cash_TargetCurrency?: number | null;
+  cash_for_nav_TargetCurrency?: number | null;
   cash_used_for_build_TargetCurrency: number | null;
   cash_t0_post_TargetCurrency: number | null;
 
