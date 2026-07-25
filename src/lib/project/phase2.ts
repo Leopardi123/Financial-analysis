@@ -1,10 +1,5 @@
 import type { ProjectPhase2Input, ProjectPhase2Output } from './types.ts';
-
-const IRR_MIN_RATE = -0.9;
-const IRR_MAX_RATE = 5;
-const IRR_SCAN_STEPS = 1000;
-const IRR_TOLERANCE = 1e-9;
-const IRR_MAX_ITERATIONS = 200;
+import { computeIrr } from '../metrics/lista3.ts';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -38,84 +33,6 @@ function computeDfToToday(masterN: number, discountRate: number): number[] {
     dfToToday[t] = 1 / (1 + discountRate) ** t;
   }
   return dfToToday;
-}
-
-function npvAtRate(cashflows: number[], rate: number): number {
-  let total = 0;
-  for (let t = 0; t < cashflows.length; t += 1) {
-    total += cashflows[t] / (1 + rate) ** t;
-  }
-  return total;
-}
-
-function solveIrr(cashflows: number[]): number | null {
-  const hasPositive = cashflows.some((value) => value > 0);
-  const hasNegative = cashflows.some((value) => value < 0);
-  if (!hasPositive || !hasNegative) {
-    return null;
-  }
-
-  let left = IRR_MIN_RATE;
-  let right = IRR_MAX_RATE;
-  let fLeft = npvAtRate(cashflows, left);
-  let fRight = npvAtRate(cashflows, right);
-
-  if (fLeft === 0) {
-    return left;
-  }
-
-  if (fRight === 0) {
-    return right;
-  }
-
-  if (fLeft * fRight > 0) {
-    const step = (IRR_MAX_RATE - IRR_MIN_RATE) / IRR_SCAN_STEPS;
-    let scanLeft = IRR_MIN_RATE;
-    let scanValueLeft = npvAtRate(cashflows, scanLeft);
-
-    for (let i = 1; i <= IRR_SCAN_STEPS; i += 1) {
-      const scanRight = IRR_MIN_RATE + step * i;
-      const scanValueRight = npvAtRate(cashflows, scanRight);
-
-      if (scanValueLeft === 0) {
-        return scanLeft;
-      }
-
-      if (scanValueLeft * scanValueRight <= 0) {
-        left = scanLeft;
-        right = scanRight;
-        fLeft = scanValueLeft;
-        fRight = scanValueRight;
-        break;
-      }
-
-      scanLeft = scanRight;
-      scanValueLeft = scanValueRight;
-    }
-
-    if (fLeft * fRight > 0) {
-      return null;
-    }
-  }
-
-  for (let iteration = 0; iteration < IRR_MAX_ITERATIONS; iteration += 1) {
-    const mid = (left + right) / 2;
-    const fMid = npvAtRate(cashflows, mid);
-
-    if (Math.abs(fMid) <= IRR_TOLERANCE || Math.abs(right - left) <= IRR_TOLERANCE) {
-      return mid;
-    }
-
-    if (fLeft * fMid <= 0) {
-      right = mid;
-      fRight = fMid;
-    } else {
-      left = mid;
-      fLeft = fMid;
-    }
-  }
-
-  return null;
 }
 
 export function computeProjectPhase2(input: ProjectPhase2Input): ProjectPhase2Output {
@@ -164,7 +81,7 @@ export function computeProjectPhase2(input: ProjectPhase2Input): ProjectPhase2Ou
 
   let irr: number | null = null;
   if (allFcffFinite) {
-    irr = solveIrr(fcffUSD as number[]);
+    irr = computeIrr(fcffUSD, discountRate).selectedRoot;
   }
 
   let npv_over_etlv: number | null = null;

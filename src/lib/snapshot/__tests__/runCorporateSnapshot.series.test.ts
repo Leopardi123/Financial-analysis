@@ -568,7 +568,7 @@ test('tax chain uses EBIT=EBITDA-depreciation and taxRate null yields null tax',
 });
 
 
-test('project FCFF identity uses total capex plus reclamation cash outflow', async () => {
+test('project FCFF identity counts reclamation once through EBIT', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;
   const rawJson = projects[0].rawJson as Record<string, unknown>;
@@ -600,8 +600,7 @@ test('project FCFF identity uses total capex plus reclamation cash outflow', asy
 
   const last = (outSeries?.fcffUSD.length ?? 1) - 1;
   const priorAtLast = (outSeries?.ebitUSD[last] as number) - (outSeries?.taxUSD[last] as number) + (outSeries?.depreciationUSD?.[last] as number) - (outSeries?.capexUSD[last] as number) - (outSeries?.workingCapitalDeltaUSD?.[last] as number) - (outSeries?.sustainingCapexUSD[last] as number);
-  const reclamationAtLast = outSeries?.reclamationUSD[last] as number;
-  assert.equal((outSeries?.fcffUSD[last] as number) - priorAtLast, -reclamationAtLast);
+  assert.equal((outSeries?.fcffUSD[last] as number) - priorAtLast, 0);
 
   assert.equal(outSeries?.totalCapexUSD[t], (outSeries?.capexUSD[t] as number) + (outSeries?.sustainingCapexUSD[t] as number));
 });
@@ -875,7 +874,7 @@ test('corporate prod-start markers apply incremental initial capex windows to NP
       assert.notEqual(dcf, npv);
     }
     assert.ok(Math.abs((dcf - npv) - initialCapex) <= 0.01);
-    const netCash0 = result.snapshot.financing.netCash_TargetCurrency_t0;
+    const netCash0: number | null = result.snapshot.financing.netCash_TargetCurrency_t0;
     assert.notEqual(netCash0, null);
     assert.ok(Math.abs(nav - (npv + (netCash0 as number))) <= 0.01);
   }

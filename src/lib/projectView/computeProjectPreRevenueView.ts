@@ -80,6 +80,10 @@ export type ProjectViewMetrics = {
       solver: 'bracket+bisection';
       irr_value: number | null;
       failure_reason: string | null;
+      roots: number[];
+      selected_root: number | null;
+      selection_reason: string | null;
+      residual: number | null;
     };
     lista3_inputs_debug: {
       has_ebit_series: boolean;
@@ -205,28 +209,13 @@ function buildCanonicalEnterpriseCashflows(args: {
   return cashflows as number[];
 }
 
-type IrrSolveResult = {
-  value: number | null;
-  reason: string | null;
-  bracketFound: boolean;
-  signChangePattern: number[];
-};
-
-function computeIrr(cashFlows: Array<number | null>): IrrSolveResult {
-  if (cashFlows.length === 0) {
-    return { value: null, reason: 'Invalid cashflow series', bracketFound: false, signChangePattern: [] };
-  }
-
-  if (cashFlows.some((v) => !finite(v))) {
-    return { value: null, reason: 'Invalid cashflow series', bracketFound: false, signChangePattern: [] };
-  }
-
-
-  const asFinite = cashFlows as number[];
+function signChangePattern(cashFlows: Array<number | null> | null): number[] {
+  if (cashFlows === null) return [];
   const signChangePattern: number[] = [];
   let prevSign: number | null = null;
-  for (let t = 0; t < asFinite.length; t += 1) {
-    const cf = asFinite[t];
+  for (let t = 0; t < cashFlows.length; t += 1) {
+    const cf = cashFlows[t];
+    if (!finite(cf)) continue;
     const sign = cf > 0 ? 1 : (cf < 0 ? -1 : 0);
     if (sign === 0) continue;
     if (prevSign !== null && prevSign !== sign) {
@@ -234,81 +223,7 @@ function computeIrr(cashFlows: Array<number | null>): IrrSolveResult {
     }
     prevSign = sign;
   }
-  const hasPositive = asFinite.some((v) => v > 0);
-  const hasNegative = asFinite.some((v) => v < 0);
-  if (!hasPositive || !hasNegative) {
-    return { value: null, reason: 'IRR requires valid sign change', bracketFound: false, signChangePattern };
-  }
-
-  const npv = (rate: number): number => {
-    if (rate <= -1) return Number.NaN;
-    let sum = 0;
-    for (let t = 0; t < asFinite.length; t += 1) {
-      const cashflow = asFinite[t];
-      const denom = (1 + rate) ** t;
-      if (!Number.isFinite(denom)) {
-        continue;
-      }
-      sum += cashflow / denom;
-    }
-    return sum;
-  };
-
-  const rLow = -0.99;
-  const npvLow = npv(rLow);
-  if (!Number.isFinite(npvLow)) {
-    return { value: null, reason: 'Invalid cashflow series', bracketFound: false, signChangePattern: [] };
-  }
-  if (npvLow === 0) {
-    return { value: rLow, reason: null, bracketFound: true, signChangePattern };
-  }
-
-  const highCandidates = [0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
-  let low = rLow;
-  let high = 10.0;
-  let lowVal = npvLow;
-  let highVal = Number.NaN;
-  let bracketFound = false;
-
-  for (const candidate of highCandidates) {
-    const candidateNpv = npv(candidate);
-    if (!Number.isFinite(candidateNpv)) {
-      continue;
-    }
-    if (candidateNpv === 0) {
-      return { value: candidate, reason: null, bracketFound: true, signChangePattern };
-    }
-    if (lowVal * candidateNpv < 0) {
-      high = candidate;
-      highVal = candidateNpv;
-      bracketFound = true;
-      break;
-    }
-  }
-
-  if (!bracketFound || !Number.isFinite(highVal)) {
-    return { value: null, reason: 'IRR not bracketed up to 1000%', bracketFound: false, signChangePattern };
-  }
-
-  for (let i = 0; i < 100; i += 1) {
-    const mid = (low + high) / 2;
-    const midVal = npv(mid);
-    if (!Number.isFinite(midVal)) {
-      return { value: null, reason: 'Invalid cashflow series', bracketFound: true, signChangePattern };
-    }
-    if (Math.abs(midVal) < 1e-8 || Math.abs(high - low) < 1e-12) {
-      return { value: mid, reason: null, bracketFound: true, signChangePattern };
-    }
-    if (lowVal * midVal < 0) {
-      high = mid;
-      highVal = midVal;
-    } else {
-      low = mid;
-      lowVal = midVal;
-    }
-  }
-
-  return { value: (low + high) / 2, reason: null, bracketFound: true, signChangePattern };
+  return signChangePattern;
 }
 
 function discountToToday(t: number, discountRate: number): number {
@@ -570,15 +485,17 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const auEq10YReason = auEq10YValidation.ok ? null : auEq10YValidation.reason;
   const evUsd = evTarget !== null && fx !== null ? evTarget / fx : null;
 
-  const sharedLista3 = masterN !== null
+  const sharedLista3Result = masterN !== null
     ? computeLista3({
       masterN,
       tp,
       fcfUSD: input.fcfUSD,
       initialCapexUSD,
+      discountRate: r,
       strictRoi10Y: false,
-    })
+    }, { debug: true })
     : null;
+  const sharedLista3 = sharedLista3Result?.metrics ?? null;
 
   const paybackApprox = sharedLista3?.Payback_approx_years ?? null;
 
@@ -689,14 +606,13 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const hasIrrSignChange = irrSeries !== null
     && irrSeries.some((v) => v < 0)
     && irrSeries.some((v) => v > 0);
-  const irrSolve = irrSeries !== null ? computeIrr(irrSeries) : {
-    value: null,
-    reason: 'Missing series fcfUSD',
-    bracketFound: false,
-    signChangePattern: [],
-  };
-  let irr = sharedLista3?.IRR ?? irrSolve.value;
-  let irrReason = irrSolve.reason;
+  const irr = sharedLista3?.IRR ?? null;
+  const sharedIrrDebug = sharedLista3Result?.debug.perMetric.IRR;
+  const irrReason = irr === null
+    ? (typeof sharedIrrDebug?.intermediates.reason === 'string'
+      ? sharedIrrDebug.intermediates.reason
+      : 'IRR could not be solved')
+    : null;
 
   const irrDebug = {
     fcff_used: (masterN !== null
@@ -706,10 +622,22 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       })
       : [] as Array<number | null>),
     has_valid_sign_change: hasIrrSignChange,
-    sign_change_pattern: irrSolve.signChangePattern,
+    sign_change_pattern: signChangePattern(irrSeries),
     solver: 'bracket+bisection' as const,
     irr_value: irr,
     failure_reason: irrReason,
+    roots: Array.isArray(sharedIrrDebug?.intermediates.roots)
+      ? sharedIrrDebug.intermediates.roots as number[]
+      : [],
+    selected_root: typeof sharedIrrDebug?.intermediates.selectedRoot === 'number'
+      ? sharedIrrDebug.intermediates.selectedRoot
+      : null,
+    selection_reason: typeof sharedIrrDebug?.intermediates.selectionReason === 'string'
+      ? sharedIrrDebug.intermediates.selectionReason
+      : null,
+    residual: typeof sharedIrrDebug?.intermediates.residual === 'number'
+      ? sharedIrrDebug.intermediates.residual
+      : null,
   };
 
   let roi10yNumerator: number | null = null;
@@ -773,7 +701,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       first6Cashflows: debugSeries.slice(0, 6),
       minCashflow,
       maxCashflow,
-      bracketFound: irrSolve.bracketFound,
+      roots: irrDebug.roots,
     });
   }
 

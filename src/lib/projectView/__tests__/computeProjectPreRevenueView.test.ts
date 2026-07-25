@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { computeProjectViewMetrics } from '../computeProjectPreRevenueView.ts';
+import { computeLista3 } from '../../metrics/lista3.ts';
 
 function assertApprox(actual: number | null, expected: number, tolerance = 1e-6): void {
   assert.ok(typeof actual === 'number', `Expected number, got ${actual}`);
@@ -122,7 +123,42 @@ const multiSignChange = computeProjectViewMetrics({
   financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
 });
 assert.equal(multiSignChange.list3.IRR.value, null);
-assert.equal(multiSignChange.list3.IRR.reason, 'IRR not bracketed up to 1000%');
+assert.equal(multiSignChange.list3.IRR.reason, 'no economically relevant non-negative root found');
+
+const actualMultipleRootCashflows = [-90.144, -90.144, 125.414, 299.793, 299.793, 299.793, 299.793, 299.793, 299.793, -34.065, -29.520];
+const actualMultipleRootProject = computeProjectViewMetrics({
+  targetCurrency: 'USD',
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 10,
+  sharesCurrent: 10,
+  priceCurrentTarget: 5,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: actualMultipleRootCashflows,
+  capexUSD: [90.144, 90.144, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  grossRevenueUSD: new Array(11).fill(1),
+  ebitUSD: new Array(11).fill(1),
+  payableAuEqOz: new Array(11).fill(1),
+  sustainingCostUSD: new Array(11).fill(1),
+  productionStartPeriod: 2,
+  financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
+});
+const actualMultipleRootCorporate = computeLista3({
+  masterN: 10,
+  tp: 2,
+  fcfUSD: actualMultipleRootCashflows,
+  initialCapexUSD: 180.288,
+  discountRate: 0.1,
+  strictRoi10Y: false,
+});
+assertApprox(actualMultipleRootProject.list3.IRR.value, 0.84169, 1e-5);
+assertApprox(actualMultipleRootCorporate.IRR, 0.84169, 1e-5);
+assertApprox(actualMultipleRootProject.list3.IRR.value, actualMultipleRootCorporate.IRR as number, 1e-12);
+assert.equal(actualMultipleRootProject.diagnostics.irr_debug.roots.length, 2);
+assert.equal(actualMultipleRootProject.diagnostics.irr_debug.selection_reason, 'positive root above project discount rate');
+assert.ok((actualMultipleRootProject.diagnostics.irr_debug.residual as number) < 1e-6);
 
 
 const noSignChange = computeProjectViewMetrics({
@@ -168,7 +204,7 @@ const notBracketed = computeProjectViewMetrics({
   financing: { equityPct: 100, debtPct: 0, cashUsedInput: 0 },
 });
 assert.equal(notBracketed.list3.IRR.value, null);
-assert.equal(notBracketed.list3.IRR.reason, 'IRR not bracketed up to 1000%');
+assert.equal(notBracketed.list3.IRR.reason, 'no economically relevant non-negative root found');
 
 
 const consistencyGuard = computeProjectViewMetrics({
@@ -194,7 +230,7 @@ assert.equal(consistencyGuard.list3.Payback_real.value, null);
 assert.equal(consistencyGuard.list3.Payback_real.reason, 'investment_abs <= 0');
 assert.ok((consistencyGuard.list3.ROI_10Y.value as number) > 0);
 assert.equal(consistencyGuard.list3.IRR.value, null);
-assert.equal(consistencyGuard.list3.IRR.reason, 'IRR not bracketed up to 1000%');
+assert.equal(consistencyGuard.list3.IRR.reason, 'no economically relevant non-negative root found');
 
 
 const noDiscount = computeProjectViewMetrics({

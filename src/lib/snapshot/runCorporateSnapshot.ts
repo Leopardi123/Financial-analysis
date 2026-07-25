@@ -539,7 +539,6 @@ function validateProjectIdentities(input: {
     const fcffActual = toFiniteOrNull(input.fcffUSD[t]);
     const totalCapex = toFiniteOrNull(input.totalCapexUSD[t]);
     const wc = toFiniteOrNull(input.workingCapitalDeltaUSD[t]);
-    const recl = toFiniteOrNull(input.reclamationUSD[t]);
     const tax = toFiniteOrNull(input.taxUSD[t]);
     if (
       ebitActual !== null
@@ -547,10 +546,9 @@ function validateProjectIdentities(input: {
       && dep !== null
       && totalCapex !== null
       && wc !== null
-      && recl !== null
       && fcffActual !== null
     ) {
-      const expected = ebitActual - tax + dep - totalCapex - wc - recl;
+      const expected = ebitActual - tax + dep - totalCapex - wc;
       if (Math.abs(expected - fcffActual) > EPS_USD) {
         diagnostics.push(formatFail(t, 'FCFF identity', expected, fcffActual));
         checks.fcff = 'fail';
@@ -1839,8 +1837,8 @@ export async function runCorporateSnapshotPipeline(args: {
             const sc = sustainingCapexUSD[t] ?? 0;
             const cx = capexUSD_used[t] ?? 0;
             const dWC = workingCapitalDeltaUSD_effective[t] ?? 0;
-            const rec = reclamationUSD[t] ?? 0;
-            return ebit - tax + dep - sc - cx - dWC - rec;
+            // Reclamation is already included in EBITDA/EBIT and must not be deducted twice in FCFF.
+            return ebit - tax + dep - sc - cx - dWC;
           });
           const usesTaxRateRule = taxRate !== null;
           const taxExpectedFromCentralEbit = ebitUSD.map((ebit) => (ebit === null || taxRate === null ? null : Math.max(0, ebit) * taxRate));
@@ -1856,7 +1854,7 @@ export async function runCorporateSnapshotPipeline(args: {
           diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
           diagnostics.warnings.push(`[${projectId}] totalRevenue source path=grossRevenueForRoyalties (${grossRevenueSourceForRoyalties})`);
           diagnostics.warnings.push(`[${projectId}] ebit source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits - depreciation`);
-          diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - sustainingCapex - capex - workingCapitalDelta - reclamation`);
+          diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - sustainingCapex - capex - workingCapitalDelta (reclamation already included in EBIT)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] sameEbitSource=true`);
@@ -2641,6 +2639,7 @@ export async function runCorporateSnapshotPipeline(args: {
       tp: tp_main,
       fcfUSD: aggregationEffective.fcffUSD_total,
       initialCapexUSD: initialCapexUSD_main,
+      discountRate: input.discountRate,
       strictRoi10Y: true,
       roiAsRatio: true,
       paybackRealUseInitialCapex: true,
@@ -3329,6 +3328,7 @@ export async function runCorporateSnapshotPipeline(args: {
           tp: tp_main,
           fcfUSD: fcffUSD,
           initialCapexUSD: initialCapexUSD_main,
+          discountRate: input.discountRate,
           strictRoi10Y: true,
           roiAsRatio: true,
           paybackRealUseInitialCapex: true,
