@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInput, valueRangeChartHeader } from '../corporateChartRows.ts';
 import { buildValueRangeChartOptions } from '../valueRangeChartOptions.ts';
+import { buildValueRangeCurve } from '../valueRangeCurve.ts';
 
 test('corporate rows use Project chart columns and annotate only today and project starts', () => {
   const rows = buildCorporateChartRows({
@@ -23,7 +24,7 @@ test('corporate rows use Project chart columns and annotate only today and proje
   assert.equal(valueRangeChartHeader.length, 15);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
-  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.5, '4,5\u00a0\u00a0\u00a0\u00a0', 5.5, '\u00a0\u00a0\u00a0\u00a05,5']);
+  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.5, '4,5\u00a0\u00a0\u00a0\u00a0', 5.7, '\u00a0\u00a0\u00a0\u00a05,7']);
   assert.deepEqual(rows[2].slice(5), [null, null, null, null, null, null, null, null, null, null]);
   assert.equal(rows[1][12], '4,9\u00a0\u00a0\u00a0\u00a0');
   assert.equal(rows[1][14], '\u00a0\u00a0\u00a0\u00a05,7');
@@ -93,6 +94,18 @@ test('Project and Corporate charts share one visual options builder', () => {
   assert.deepEqual(buildValueRangeChartOptions(args), buildValueRangeChartOptions(args));
   assert.equal(buildValueRangeChartOptions(args).legend.position, 'none');
   assert.equal(buildValueRangeChartOptions(args).series[2].lineWidth, 0.62);
+});
+
+test('single-project Corporate rows use the exact canonical Project curve generator', () => {
+  const input = {
+    rows: [2026, 2027, 2028, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 2, navPerShare: 3 + period, dcfPerShare: 4 + period * 0.4, sharesPf: 100 })),
+    projectMarkers: [{ projectId: 'one', projectName: 'One', productionStartYear: 2028 }],
+  };
+  const curveInput = { totalLen: 5, tpOffset: 2, lowToday: 2.5, highToday: 4, lowTp: 5, highTp: 7, navSeriesRaw: [5, 6, 7], dcfPresentSeriesRaw: [4.8, 5.2, 5.6] };
+  const projectCurve = buildValueRangeCurve(curveInput);
+  const corporateRows = buildCorporateChartRows(input, { low: 2.5, high: 4, price: 1, tpLow: 5, tpHigh: 7 });
+  assert.deepEqual(corporateRows.map((row) => row[1]), projectCurve.low.map((low, index) => low !== null && projectCurve.high[index] !== null ? Math.min(low, projectCurve.high[index] as number) : low));
+  assert.deepEqual(corporateRows.map((row) => row[4]), projectCurve.high.map((high, index) => high !== null && projectCurve.low[index] !== null ? Math.max(high, projectCurve.low[index] as number) : high));
 });
 
 const timeline = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, period) => ({ period, year: first + period, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, sharesPf: 100 }));

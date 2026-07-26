@@ -4,6 +4,7 @@ import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
 import { rescalePerShareSeries } from "./chartDenominator";
 import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInput, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
 import { buildValueRangeChartOptions } from "./valueRangeChartOptions";
+import { buildValueRangeCurve } from "./valueRangeCurve";
 
 type TpMarker = {
   tp: number;
@@ -187,68 +188,25 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const lowTp = isFiniteNumber(tpLow) ? tpLow : (isFiniteNumber(navSeriesRaw[0]) ? navSeriesRaw[0] : null);
     const lowToday = isFiniteNumber(npvLow) ? npvLow : null;
 
-    const dcfFlowTpPresent0 = isFiniteNumber(dcfSeriesRaw[0]) ? dcfSeriesRaw[0] : null;
-    const inferredRate = (() => {
-      if (tpOffset <= 0 || highTp === null || dcfFlowTpPresent0 === null || dcfFlowTpPresent0 === 0 || highTp <= 0 || dcfFlowTpPresent0 <= 0) return null;
-      const ratio = highTp / dcfFlowTpPresent0;
-      if (!Number.isFinite(ratio) || ratio <= 0) return null;
-      const r = ratio ** (1 / tpOffset) - 1;
-      return Number.isFinite(r) && r > -1 ? r : null;
-    })();
-
-    const highByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
-    const lowByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
+    const curve = buildValueRangeCurve({ totalLen, tpOffset, lowToday, highToday: isFiniteNumber(npvHigh) ? npvHigh : null, lowTp, highTp, navSeriesRaw, dcfPresentSeriesRaw: dcfSeriesRaw });
+    const inferredRate = curve.inferredRate;
+    const highByIndex = curve.high;
+    const lowByIndex = curve.low;
     const highBeforeFixByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
     const highExponentBeforeByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
     const highExponentAfterByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
 
-    for (let idx = 0; idx < totalLen; idx += 1) {
-      if (idx <= tpOffset) {
-        if (highTp !== null) {
-          if (inferredRate !== null) {
-            highByIndex[idx] = highTp / ((1 + inferredRate) ** (tpOffset - idx));
-          } else {
-            const start = isFiniteNumber(npvHigh) ? npvHigh : highTp;
-            const t = tpOffset === 0 ? 1 : idx / tpOffset;
-            highByIndex[idx] = start + (highTp - start) * t;
-          }
-        }
-
-        if (lowTp !== null) {
-          if (lowToday !== null) {
-            if (lowToday > 0 && lowTp > 0) {
-              const g = (lowTp / lowToday) ** (1 / tpOffset) - 1;
-              lowByIndex[idx] = lowToday * ((1 + g) ** idx);
-            } else {
-              const t = tpOffset === 0 ? 1 : idx / tpOffset;
-              lowByIndex[idx] = lowToday + (lowTp - lowToday) * t;
-            }
-          } else {
-            lowByIndex[idx] = lowTp;
-          }
-        }
-      } else {
-        const flowIndex = idx - tpOffset;
-        const navAtIdx = isFiniteNumber(navSeriesRaw[flowIndex]) ? navSeriesRaw[flowIndex] : null;
-        const dcfPresentAtIdx = isFiniteNumber(dcfSeriesRaw[flowIndex]) ? dcfSeriesRaw[flowIndex] : null;
-        lowByIndex[idx] = navAtIdx;
-        if (dcfPresentAtIdx !== null) {
-          if (inferredRate !== null) {
-            highBeforeFixByIndex[idx] = dcfPresentAtIdx * ((1 + inferredRate) ** idx);
-            highExponentBeforeByIndex[idx] = idx;
-            highByIndex[idx] = dcfPresentAtIdx * ((1 + inferredRate) ** flowIndex);
-            highExponentAfterByIndex[idx] = flowIndex;
-          } else {
-            highBeforeFixByIndex[idx] = dcfPresentAtIdx;
-            highByIndex[idx] = dcfPresentAtIdx;
-          }
-        }
+    for (let idx = tpOffset; idx < totalLen; idx += 1) {
+      const flowIndex = idx - tpOffset;
+      const dcfPresentAtIdx = isFiniteNumber(dcfSeriesRaw[flowIndex]) ? dcfSeriesRaw[flowIndex] : null;
+      if (dcfPresentAtIdx !== null) {
+        highBeforeFixByIndex[idx] = inferredRate !== null ? dcfPresentAtIdx * ((1 + inferredRate) ** idx) : dcfPresentAtIdx;
+        highExponentBeforeByIndex[idx] = inferredRate !== null ? idx : null;
+        highExponentAfterByIndex[idx] = inferredRate !== null ? flowIndex : null;
       }
     }
 
-    if (lowTp !== null) lowByIndex[tpOffset] = lowTp;
     if (highTp !== null) {
-      highByIndex[tpOffset] = highTp;
       highBeforeFixByIndex[tpOffset] = highTp;
       highExponentBeforeByIndex[tpOffset] = 0;
       highExponentAfterByIndex[tpOffset] = 0;
@@ -498,14 +456,14 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     if (!corporateTimeSeries?.rows?.length) return null;
     const chartWindow = clipCorporateChartInput(corporateTimeSeries as CorporateChartInput);
     const renderedInput = chartWindow.input;
-    const rows = buildCorporateChartRows(renderedInput, { low: isFiniteNumber(npvLow) ? npvLow : null, high: isFiniteNumber(npvHigh) ? npvHigh : null, price: isFiniteNumber(priceToday) ? priceToday : null });
+    const rows = buildCorporateChartRows(renderedInput, { low: isFiniteNumber(npvLow) ? npvLow : null, high: isFiniteNumber(npvHigh) ? npvHigh : null, price: isFiniteNumber(priceToday) ? priceToday : null, tpLow: isFiniteNumber(tpLow) ? tpLow : null, tpHigh: isFiniteNumber(tpHigh) ? tpHigh : null });
     const domainValues = rows.flatMap((row) => [row[1], row[4], row[5]]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
     const years = renderedInput.rows.map((row) => row.year);
     const ticks = buildCorporateYearTicks(renderedInput);
     return { data: [valueRangeChartHeader, ...rows], ticks, valueWindow, yearMin: years[0] - 1, yearMax: chartWindow.effectiveChartEndYear ?? years[years.length - 1] };
-  }, [corporateTimeSeries, npvHigh, npvLow, priceToday]);
+  }, [corporateTimeSeries, npvHigh, npvLow, priceToday, tpHigh, tpLow]);
 
   if (!isProjectMode && corporateChartModel) {
     return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><Chart chartType="ComboChart" width="100%" height="220px" data={corporateChartModel.data as never} options={buildValueRangeChartOptions({ currencyCode, ticks: corporateChartModel.ticks, yearMin: corporateChartModel.yearMin, yearMax: corporateChartModel.yearMax, valueWindow: corporateChartModel.valueWindow })} /></div>;

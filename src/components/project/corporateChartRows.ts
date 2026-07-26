@@ -1,3 +1,5 @@
+import { buildValueRangeCurve } from './valueRangeCurve.ts';
+
 export type CorporateChartInput = {
   rows: Array<{ period: number; year: number; npvPerShare: number | null; navPerShare: number | null; dcfPerShare: number | null; sharesPf: number | null }>;
   projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
@@ -52,7 +54,7 @@ export function clipCorporateChartInput(input: CorporateChartInput): CorporateCh
 /** Builds the Project-chart row shape; TP columns are reused for every corporate project-start year. */
 export function buildCorporateChartRows(
   input: CorporateChartInput,
-  today: { low: number | null; high: number | null; price: number | null },
+  today: { low: number | null; high: number | null; price: number | null; tpLow?: number | null; tpHigh?: number | null },
 ) {
   const productionStartYears = new Set<number>();
   for (const marker of input.projectMarkers) {
@@ -61,9 +63,22 @@ export function buildCorporateChartRows(
     }
   }
 
+  const firstStartIndex = input.rows.findIndex((row) => productionStartYears.has(row.year));
+  const tpOffset = firstStartIndex > 0 ? firstStartIndex : 0;
+  const curve = buildValueRangeCurve({
+    totalLen: input.rows.length,
+    tpOffset,
+    lowToday: today.low,
+    highToday: today.high,
+    lowTp: today.tpLow ?? input.rows[tpOffset]?.navPerShare ?? null,
+    highTp: today.tpHigh ?? input.rows[tpOffset]?.dcfPerShare ?? null,
+    navSeriesRaw: input.rows.slice(tpOffset).map((row) => row.navPerShare),
+    dcfPresentSeriesRaw: input.rows.slice(tpOffset).map((row) => row.dcfPerShare),
+  });
+
   return input.rows.map((row, index) => {
-    const low = index === 0 && today.low !== null ? today.low : row.navPerShare;
-    const high = index === 0 && today.high !== null ? today.high : row.dcfPerShare;
+    const low = curve.low[index];
+    const high = curve.high[index];
     const orderedLow = low !== null && high !== null ? Math.min(low, high) : low;
     const orderedHigh = low !== null && high !== null ? Math.max(low, high) : high;
     const isStart = productionStartYears.has(row.year);
