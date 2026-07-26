@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Chart } from "react-google-charts";
 import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
 import { rescalePerShareSeries } from "./chartDenominator";
-import { buildCorporateChartRows, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
+import { buildCorporateChartRows, buildCorporateYearTicks, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
 import { buildValueRangeChartOptions } from "./valueRangeChartOptions";
 
 type TpMarker = {
@@ -501,7 +501,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
     const years = corporateTimeSeries.rows.map((row) => row.year);
-    const ticks = years.filter((_, index) => index === 0 || index === years.length - 1 || corporateTimeSeries.projectMarkers.some((marker) => marker.productionStartYear === years[index]));
+    const ticks = buildCorporateYearTicks(corporateTimeSeries as CorporateChartInput);
     return { data: [valueRangeChartHeader, ...rows], ticks, valueWindow, yearMin: years[0] - 1, yearMax: years[years.length - 1] + 1 };
   }, [corporateTimeSeries, npvHigh, npvLow, priceToday]);
 

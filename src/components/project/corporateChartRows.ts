@@ -3,6 +3,8 @@ export type CorporateChartInput = {
   projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
 };
 
+export type CorporateYearTick = { v: number; f: string };
+
 export const valueRangeChartHeader = [
   'Index', 'Low', 'Band', 'Low boundary', 'High boundary',
   'Current', { role: 'annotation', type: 'string' },
@@ -19,10 +21,10 @@ export function buildCorporateChartRows(
   input: CorporateChartInput,
   today: { low: number | null; high: number | null; price: number | null },
 ) {
-  const markers = new Map<number, string[]>();
+  const productionStartYears = new Set<number>();
   for (const marker of input.projectMarkers) {
     if (typeof marker.productionStartYear === 'number') {
-      markers.set(marker.productionStartYear, [...(markers.get(marker.productionStartYear) ?? []), marker.projectName]);
+      productionStartYears.add(marker.productionStartYear);
     }
   }
 
@@ -31,8 +33,7 @@ export function buildCorporateChartRows(
     const high = index === 0 && today.high !== null ? today.high : row.dcfPerShare;
     const orderedLow = low !== null && high !== null ? Math.min(low, high) : low;
     const orderedHigh = low !== null && high !== null ? Math.max(low, high) : high;
-    const isStart = markers.has(row.year);
-    const names = markers.get(row.year)?.join(' / ') ?? null;
+    const isStart = productionStartYears.has(row.year);
     return [
       row.year,
       orderedLow,
@@ -48,7 +49,18 @@ export function buildCorporateChartRows(
       isStart ? orderedLow : null,
       isStart && orderedLow !== null ? `      ${label(orderedLow)}` : null,
       isStart ? orderedHigh : null,
-      isStart && orderedHigh !== null ? `${names ?? ''}\n      ${label(orderedHigh)}` : null,
+      isStart && orderedHigh !== null ? `      ${label(orderedHigh)}` : null,
     ];
   });
+}
+
+/** Explicit formatted ticks prevent Google Charts from localizing years as e.g. 2,029. */
+export function buildCorporateYearTicks(input: CorporateChartInput): CorporateYearTick[] {
+  const years = input.rows.map((row) => row.year);
+  const required = new Set<number>([
+    years[0],
+    years[years.length - 1],
+    ...input.projectMarkers.map((marker) => marker.productionStartYear).filter((year): year is number => typeof year === 'number'),
+  ]);
+  return years.filter((year) => required.has(year)).map((year) => ({ v: year, f: String(year) }));
 }
