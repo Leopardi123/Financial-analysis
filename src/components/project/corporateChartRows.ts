@@ -1,4 +1,4 @@
-import { buildValueRangeCurve } from './valueRangeCurve.ts';
+import { buildValueRangeChartRow, buildValueRangeCurve } from './valueRangeCurve.ts';
 
 export type CorporateChartInput = {
   rows: Array<{ period: number; year: number; npvPerShare: number | null; navPerShare: number | null; dcfPerShare: number | null; sharesPf: number | null }>;
@@ -25,8 +25,6 @@ export const valueRangeChartHeader = [
 ] as const;
 
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const lowLabel = (value: number) => `${label(value)}\u00a0\u00a0\u00a0\u00a0`;
-const highLabel = (value: number) => `\u00a0\u00a0\u00a0\u00a0${label(value)}`;
 
 /** Clips presentation rows by calendar year; the complete snapshot time series remains untouched. */
 export function clipCorporateChartInput(input: CorporateChartInput): CorporateChartWindow {
@@ -79,26 +77,7 @@ export function buildCorporateChartRows(
   return input.rows.map((row, index) => {
     const low = curve.low[index];
     const high = curve.high[index];
-    const orderedLow = low !== null && high !== null ? Math.min(low, high) : low;
-    const orderedHigh = low !== null && high !== null ? Math.max(low, high) : high;
-    const isStart = productionStartYears.has(row.year);
-    return [
-      row.year,
-      orderedLow,
-      orderedLow !== null && orderedHigh !== null ? orderedHigh - orderedLow : null,
-      orderedLow,
-      orderedHigh,
-      index === 0 ? today.price : null,
-      index === 0 && today.price !== null ? `      ${label(today.price)}` : null,
-      index === 0 ? orderedLow : null,
-      index === 0 && orderedLow !== null ? lowLabel(orderedLow) : null,
-      index === 0 ? orderedHigh : null,
-      index === 0 && orderedHigh !== null ? highLabel(orderedHigh) : null,
-      isStart ? orderedLow : null,
-      isStart && orderedLow !== null ? lowLabel(orderedLow) : null,
-      isStart ? orderedHigh : null,
-      isStart && orderedHigh !== null ? highLabel(orderedHigh) : null,
-    ];
+    return buildValueRangeChartRow({ year: row.year, low, high, currentPrice: today.price, annotateCurrent: index === 0, annotateProductionStart: productionStartYears.has(row.year), format: label });
   });
 }
 

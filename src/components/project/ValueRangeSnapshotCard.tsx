@@ -4,7 +4,7 @@ import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
 import { rescalePerShareSeries } from "./chartDenominator";
 import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInput, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
 import { buildValueRangeChartOptions } from "./valueRangeChartOptions";
-import { buildValueRangeCurve } from "./valueRangeCurve";
+import { buildValueRangeChartRow, buildValueRangeCurve } from "./valueRangeCurve";
 
 type TpMarker = {
   tp: number;
@@ -228,7 +228,6 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       const high = highByIndex[idx];
       const orderedLow = low !== null && high !== null ? Math.min(low, high) : low;
       const orderedHigh = low !== null && high !== null ? Math.max(low, high) : high;
-      const band = orderedLow !== null && orderedHigh !== null ? orderedHigh - orderedLow : null;
       const currentMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
       const tpLowMarker = idx === tpOffset && lowTp !== null ? lowTp : null;
       const tpHighMarker = idx === tpOffset && highTp !== null ? highTp : null;
@@ -237,26 +236,11 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         if (typeof value === 'number' && Number.isFinite(value)) domainValues.push(value);
       }
 
-      const currentLowMarker = idx === 0 ? orderedLow : null;
-      const currentHighMarker = idx === 0 ? orderedHigh : null;
-
-      rows.push([
-        yearNow + idx,
-        orderedLow,
-        band,
-        orderedLow,
-        orderedHigh,
-        currentMarker,
-        currentMarker !== null && !suppressCurrentPriceLabel ? `      ${formatPerShareValue(currentMarker)}` : null,
-        currentLowMarker,
-        currentLowMarker !== null ? `      ${formatPerShareValue(currentLowMarker)}` : null,
-        currentHighMarker,
-        currentHighMarker !== null ? `      ${formatPerShareValue(currentHighMarker)}` : null,
-        tpLowMarker,
-        tpLowMarker !== null ? `      ${formatPerShareValue(tpLowMarker)}` : null,
-        tpHighMarker,
-        tpHighMarker !== null ? `      ${formatPerShareValue(tpHighMarker)}` : null,
-      ]);
+      rows.push(buildValueRangeChartRow({
+        year: yearNow + idx, low, high, currentPrice: currentMarker, annotateCurrent: idx === 0,
+        annotateProductionStart: idx === tpOffset, format: formatPerShareValue,
+        currentPriceAnnotation: currentMarker !== null && !suppressCurrentPriceLabel ? `      ${formatPerShareValue(currentMarker)}` : null,
+      }));
     }
 
     if (domainValues.length < 1) return null;

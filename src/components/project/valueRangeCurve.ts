@@ -48,3 +48,27 @@ export function buildValueRangeCurve(input: ValueRangeCurveInput) {
   if (input.highTp !== null) high[input.tpOffset] = input.highTp;
   return { low, high, inferredRate };
 }
+
+export function buildValueRangeChartRow(input: {
+  year: number;
+  low: number | null;
+  high: number | null;
+  currentPrice: number | null;
+  annotateCurrent: boolean;
+  annotateProductionStart: boolean;
+  format: (value: number) => string;
+  currentPriceAnnotation?: string | null;
+}) {
+  const orderedLow = input.low !== null && input.high !== null ? Math.min(input.low, input.high) : input.low;
+  const orderedHigh = input.low !== null && input.high !== null ? Math.max(input.low, input.high) : input.high;
+  const annotation = (value: number | null) => value === null ? null : `      ${input.format(value)}`;
+  const current = input.annotateCurrent ? input.currentPrice : null;
+  return [
+    input.year, orderedLow, orderedLow !== null && orderedHigh !== null ? orderedHigh - orderedLow : null, orderedLow, orderedHigh,
+    current, current === null ? null : input.currentPriceAnnotation === undefined ? annotation(current) : input.currentPriceAnnotation,
+    input.annotateCurrent ? orderedLow : null, input.annotateCurrent ? annotation(orderedLow) : null,
+    input.annotateCurrent ? orderedHigh : null, input.annotateCurrent ? annotation(orderedHigh) : null,
+    input.annotateProductionStart ? input.low : null, input.annotateProductionStart ? annotation(input.low) : null,
+    input.annotateProductionStart ? input.high : null, input.annotateProductionStart ? annotation(input.high) : null,
+  ];
+}

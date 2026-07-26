@@ -24,10 +24,10 @@ test('corporate rows use Project chart columns and annotate only today and proje
   assert.equal(valueRangeChartHeader.length, 15);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
-  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.5, '4,5\u00a0\u00a0\u00a0\u00a0', 5.7, '\u00a0\u00a0\u00a0\u00a05,7']);
+  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.5, '      4,5', 5.7, '      5,7']);
   assert.deepEqual(rows[2].slice(5), [null, null, null, null, null, null, null, null, null, null]);
-  assert.equal(rows[1][12], '4,9\u00a0\u00a0\u00a0\u00a0');
-  assert.equal(rows[1][14], '\u00a0\u00a0\u00a0\u00a05,7');
+  assert.equal(rows[1][12], '      4,9');
+  assert.equal(rows[1][14], '      5,7');
   assert.equal(rows.filter((row) => row[5] !== null).length, 1);
   assert.equal(rows.filter((row) => row[11] !== null).length, 3);
   assert.equal(rows.flat().some((value) => typeof value === 'string' && value.includes('Project')), false);
@@ -42,9 +42,7 @@ test('one production start always has separate low and high point/annotation col
     projectMarkers: [{ projectId: 'only', projectName: 'Never rendered', productionStartYear: 2030 }],
   }, { low: 3, high: 5, price: 2 });
   const start = rows[1];
-  assert.deepEqual([start[11], start[13]], [5.2, 6.4]);
-  assert.equal(typeof start[12], 'string');
-  assert.equal(typeof start[14], 'string');
+  assert.deepEqual(start, [2030, 5.2, 6.4 - 5.2, 5.2, 6.4, null, null, null, null, null, null, 5.2, '      5,2', 6.4, '      6,4']);
 });
 
 test('two production starts each have separate low and high annotations', () => {
@@ -68,7 +66,7 @@ test('equal rounded low and high retain two values, series columns, and annotati
   assert.deepEqual([row[11], row[13]], [5.21, 5.24]);
   assert.equal((row[12] as string).trim(), '5,2');
   assert.equal((row[14] as string).trim(), '5,2');
-  assert.notEqual(row[12], row[14]);
+  assert.equal(row[12], row[14]);
   assert.equal(valueRangeChartHeader[11], 'TP Low');
   assert.equal(valueRangeChartHeader[13], 'TP High');
 });
