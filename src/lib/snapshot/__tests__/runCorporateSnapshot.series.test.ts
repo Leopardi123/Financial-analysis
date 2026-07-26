@@ -831,6 +831,28 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   }
 });
 
+test('reported debt changes NAV but cannot alter the corporate cash waterfall or High absolute', async () => {
+  const body = await loadFixture();
+  body.balanceSheet = { cash_t0_TargetCurrency: 100_000_000, debt_t0_TargetCurrency: 0 };
+  body.fx = { source: 'manual', anchor: 'today', manual_fx_USD_to_TargetCurrency: 1, scenario: { mode: 'spot' } };
+  body.financingPlan = { use_cash_first: false, cash_use_percent: 1, debt_fraction: 0, equity_fraction: 1, equity_raise_price_TargetCurrency: 3 };
+  const debtFree = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(debtFree.ok, true);
+  if (!debtFree.ok) return;
+  body.balanceSheet = { cash_t0_TargetCurrency: 100_000_000, debt_t0_TargetCurrency: 50_000_000 };
+  const indebted = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(indebted.ok, true);
+  if (!indebted.ok) return;
+  assert.deepEqual(indebted.snapshot.financing.corporate_cash_waterfall, debtFree.snapshot.financing.corporate_cash_waterfall);
+  assert.equal(indebted.snapshot.DCF_prodStart_exCapex_TargetCurrency, debtFree.snapshot.DCF_prodStart_exCapex_TargetCurrency);
+  const debtFreeNav = (debtFree.snapshot as unknown as { NAV_prodStart_TargetCurrency: number }).NAV_prodStart_TargetCurrency;
+  const indebtedNav = (indebted.snapshot as unknown as { NAV_prodStart_TargetCurrency: number }).NAV_prodStart_TargetCurrency;
+  assert.equal(
+    debtFreeNav - indebtedNav,
+    50_000_000,
+  );
+});
+
 test('corporate modeled milestones exclude tp=0 projects and include future tp>0 projects', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;
