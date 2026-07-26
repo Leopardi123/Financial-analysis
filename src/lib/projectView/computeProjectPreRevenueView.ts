@@ -7,7 +7,14 @@ type Series = Array<number | null>;
 type FinancingInput = {
   equityPct: number;
   debtPct: number;
-  cashUsedInput: number;
+  /** Latest reported quarterly cash; cash usage is derived, never manually entered. */
+  latestQuarterlyCashTarget?: number;
+  useCashFirst?: boolean;
+  cashUsePercent?: number;
+  /** Legacy test/caller compatibility. Prefer latestQuarterlyCashTarget. */
+  cashUsedInput?: number;
+  /** Corporate snapshots already contain the canonical financing result. */
+  usePrecomputedFinancing?: boolean;
 };
 
 export type ProjectViewInputs = {
@@ -108,6 +115,7 @@ export type ProjectViewMetrics = {
       ROI_10Y: { cf_10y_usd: number | null; initial_capex_abs: number | null; multiple: number | null; displayValue: string | null; unit: 'multiple'; failure_reason: string | null };
     };
     ui_unit_meta: Record<string, { unitType: 'percent' | 'multiple' | 'multiple_per_year' | 'currency'; renderSuffix: string }>;
+    valuation_metric_audit: Array<{ metric: string; absoluteValue: number | null; sharesUsed: number | null; formula: string; result: number | null }>;
     npv10_trace: {
       input: {
         projectId: string | null;
@@ -347,20 +355,31 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const initialCapexUSD = capexInit.value;
   const initialCapexTarget = initialCapexUSD !== null && fx !== null ? initialCapexUSD * fx : null;
 
-  const cashUsedTarget = initialCapexTarget !== null && cashCurrent !== null
-    ? Math.min(Math.max(0, input.financing.cashUsedInput), cashCurrent)
-    : 0;
-  const remainingNeedTarget = initialCapexTarget !== null ? Math.max(0, initialCapexTarget - cashUsedTarget) : null;
-  const debtAddedTarget = remainingNeedTarget !== null ? remainingNeedTarget * normDebtFrac : 0;
-  const equityRaiseTarget = remainingNeedTarget !== null ? remainingNeedTarget * equityFrac : 0;
+  const latestQuarterlyCash = finite(input.financing.latestQuarterlyCashTarget)
+    ? Math.max(0, input.financing.latestQuarterlyCashTarget as number)
+    : cashCurrent;
+  const cashUsePercent = Math.max(0, Math.min(1, input.financing.cashUsePercent ?? 1));
+  const requestedCash = input.financing.latestQuarterlyCashTarget !== undefined
+    ? ((input.financing.useCashFirst ?? false) ? (latestQuarterlyCash ?? 0) * cashUsePercent : 0)
+    : Math.max(0, input.financing.cashUsedInput ?? 0);
+  const cashUsedTarget = input.financing.usePrecomputedFinancing
+    ? 0
+    : initialCapexTarget !== null ? Math.min(requestedCash, initialCapexTarget) : 0;
+  const remainingNeedTarget = input.financing.usePrecomputedFinancing ? 0 : (initialCapexTarget !== null ? Math.max(0, initialCapexTarget - cashUsedTarget) : null);
+  const debtAddedTarget = input.financing.usePrecomputedFinancing ? 0 : (remainingNeedTarget !== null ? remainingNeedTarget * normDebtFrac : 0);
+  const equityRaiseTarget = input.financing.usePrecomputedFinancing ? 0 : (remainingNeedTarget !== null ? remainingNeedTarget * equityFrac : 0);
   const newShares = priceCurrent !== null && priceCurrent > 0 ? equityRaiseTarget / priceCurrent : null;
   const sharesPostFinancingInput = finite(input.sharesPostFinancingInput) && (input.sharesPostFinancingInput as number) > 0
     ? input.sharesPostFinancingInput as number
     : null;
   const sharesPfComputed = sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null;
-  const sharesPf = sharesPfComputed ?? sharesPostFinancingInput;
+  const sharesPf = input.financing.usePrecomputedFinancing ? sharesPostFinancingInput : (sharesPfComputed ?? sharesPostFinancingInput);
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
+  // FCFF already deducts the complete construction CAPEX. Deducting cash used for
+  // that same CAPEX from NAV would count the investment twice. NAV therefore adds
+  // the reported balance-sheet cash once; cashT0 remains the post-funding liquidity metric.
+  const cashForNav = cashCurrent;
 
   const marketCapCurrent = sharesCurrent !== null && priceCurrent !== null ? sharesCurrent * priceCurrent : null;
   const evTarget = marketCapCurrent !== null && debtT0 !== null && cashT0 !== null
@@ -378,7 +397,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   })() : null;
 
   const npvTarget = npvTodayUSD !== null && fx !== null ? npvTodayUSD * fx : null;
-  const navTarget = npvTarget !== null && cashT0 !== null && debtT0 !== null ? npvTarget + (cashT0 - debtT0) : null;
+  const navTarget = npvTarget !== null && cashForNav !== null && debtT0 !== null ? npvTarget + (cashForNav - debtT0) : null;
   const cfLomUSD = input.fcfUSD.length > 0 ? sumRange(input.fcfUSD, 0, input.fcfUSD.length - 1) : null;
   const cfLomTarget = cfLomUSD !== null && fx !== null ? cfLomUSD * fx : null;
 
@@ -398,8 +417,8 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     ? dcfProdStartExCapexUSD - Math.abs(initialCapexUSD)
     : null;
   const npvProdStartTarget = npvProdStartUSD !== null && fx !== null ? npvProdStartUSD * fx : null;
-  const navProdStartTarget = npvProdStartTarget !== null && cashT0 !== null && debtT0 !== null
-    ? npvProdStartTarget + (cashT0 - debtT0)
+  const navProdStartTarget = npvProdStartTarget !== null && cashForNav !== null && debtT0 !== null
+    ? npvProdStartTarget + (cashForNav - debtT0)
     : null;
 
   const dcfProdStartPresentUSD = dcfProdStartExCapexUSD !== null && tp !== null && r !== null
@@ -1015,6 +1034,16 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
                 : (roi10yNumerator === null ? 'Missing finite fcfUSD in 10Y window' : 'Denominator is 0'))),
         },
       },
+      valuation_metric_audit: [
+        ['NPV', npvTarget, sharesPf, 'absolute', npvTarget], ['NPV/share', npvTarget, sharesPf, 'NPV / sharesPF', safeRatio(npvTarget, sharesPf).value],
+        ['NAV', navTarget, sharesPf, 'NPV + reported cash - debt_t0_post (CAPEX already in FCFF)', navTarget], ['NAV/share', navTarget, sharesPf, 'NAV / sharesPF', safeRatio(navTarget, sharesPf).value],
+        ['NPV prod start', npvProdStartTarget, sharesPf, 'DCF prod start - Initial CAPEX', npvProdStartTarget], ['NPV prod start/share', npvProdStartTarget, sharesPf, 'NPV prod start / sharesPF', safeRatio(npvProdStartTarget, sharesPf).value],
+        ['NAV prod start', navProdStartTarget, sharesPf, 'NPV prod start + reported cash - debt_t0_post (CAPEX already in FCFF)', navProdStartTarget], ['NAV prod start/share', navProdStartTarget, sharesPf, 'NAV prod start / sharesPF', safeRatio(navProdStartTarget, sharesPf).value],
+        ['DCF prod start', dcfTarget, sharesPf, 'fx × discounted FCFF from tp', dcfTarget], ['DCF prod start/share', dcfTarget, sharesPf, 'DCF prod start / sharesPF', safeRatio(dcfTarget, sharesPf).value],
+        ['DCF prod start present', dcfTargetDiscounted, sharesPf, 'DCF prod start / (1+r)^tp', dcfTargetDiscounted], ['DCF prod start present/share', dcfTargetDiscounted, sharesPf, 'DCF prod start present / sharesPF', safeRatio(dcfTargetDiscounted, sharesPf).value],
+        ['CF LOM', cfLomTarget, sharesPf, 'fx × sum(FCFF)', cfLomTarget], ['CF LOM/share', cfLomTarget, sharesPf, 'CF LOM / sharesPF', safeRatio(cfLomTarget, sharesPf).value],
+        ['EV/NPV', evTarget, sharesPf, 'EV / NPV', safeRatio(evTarget, npvTarget).value], ['EV/NAV', evTarget, sharesPf, 'EV / NAV', safeRatio(evTarget, navTarget).value], ['P/NAV', marketCapCurrent, sharesCurrent, 'MarketCap current / NAV', safeRatio(marketCapCurrent, navTarget).value],
+      ].map(([metric, absoluteValue, sharesUsed, formula, result]) => ({ metric: metric as string, absoluteValue: absoluteValue as number | null, sharesUsed: sharesUsed as number | null, formula: formula as string, result: result as number | null })),
       ui_unit_meta: {
         ROI_10Y: { unitType: 'multiple', renderSuffix: 'x' },
         LOM_avg_EBIT_ROCE: { unitType: 'percent', renderSuffix: '%' },

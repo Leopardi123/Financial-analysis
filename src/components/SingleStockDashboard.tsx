@@ -224,6 +224,20 @@ function resolveProjectMetricLabel(metricKey: string, discountRateTag: string): 
   return metricLabels[metricKey] ?? metricKey;
 }
 
+function resolveCorporateMetricLabel(metricKey: string, discountRateTag: string): string {
+  const labels: Record<string, string> = {
+    NPV_prodStart: "Corporate NPV vid projektstartåret",
+    NPV_prodStart_perShare: "Corporate NPV vid projektstartåret/aktie",
+    NAV_prodStart: "Corporate NAV vid projektstartåret",
+    NAV_prodStart_perShare: "Corporate NAV vid projektstartåret/aktie",
+    DCF_Target: "Corporate DCF vid projektstartåret",
+    DCF_perShare: "Corporate DCF vid projektstartåret/aktie",
+    DCF_Target_discounted: "Corporate DCF vid projektstartåret, nuvärde",
+    DCF_Target_discounted_perShare: "Corporate DCF vid projektstartåret, nuvärde/aktie",
+  };
+  return labels[metricKey] ?? resolveProjectMetricLabel(metricKey, discountRateTag);
+}
+
 type ProdStartDebugData = {
   npvToday: number | null;
   npvTodayPerShare: number | null;
@@ -1308,7 +1322,8 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [stressEdgeCases, setStressEdgeCases] = useState<string[]>([]);
   const [projectEquityPct, setProjectEquityPct] = useState("100");
   const [projectDebtPct, setProjectDebtPct] = useState("0");
-  const [projectCashUsedTarget, setProjectCashUsedTarget] = useState("0");
+  const [projectUseQuarterlyCash, setProjectUseQuarterlyCash] = useState(false);
+  const [projectCashUsedPct, setProjectCashUsedPct] = useState(100);
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
   const [npvTracePersistResult, setNpvTracePersistResult] = useState<{ url: string | null; fileName: string | null; savedAtUtc: string | null; error: string | null }>({ url: null, fileName: null, savedAtUtc: null, error: null });
   const [manualPriceStoreVersion, setManualPriceStoreVersion] = useState(0);
@@ -1366,6 +1381,8 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [corporateSnapshotData, setCorporateSnapshotData] = useState<Record<string, unknown> | null>(null);
   const [corporateDiagnostics, setCorporateDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [corporateProjectEquityPct, setCorporateProjectEquityPct] = useState<Record<string, number>>({});
+  const [corporateUseQuarterlyCash, setCorporateUseQuarterlyCash] = useState(false);
+  const [corporateCashUsedPct, setCorporateCashUsedPct] = useState(100);
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
   const [scenarioPercentileInput] = useState("50");
@@ -1846,10 +1863,11 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return {
       equity_fraction: equityFraction,
       debt_fraction: 1 - equityFraction,
-      use_cash_first: true,
+      use_cash_first: corporateUseQuarterlyCash,
+      cash_use_percent: corporateCashUsedPct / 100,
       financingPlanByProject,
     };
-  }, [companyProjects, corporateProjectEquityPct]);
+  }, [companyProjects, corporateProjectEquityPct, corporateUseQuarterlyCash, corporateCashUsedPct]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1873,6 +1891,8 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         ? profile.sharesOutstanding
         : undefined;
       const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding ?? 1;
+      const quarterlyCashSeries = getFieldSeries(data, "balance", "cashAndCashEquivalents");
+      const latestQuarterlyCash = [...quarterlyCashSeries].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
       const profilePriceCurrent = typeof profile?.price === "number" && Number.isFinite(profile.price) && profile.price > 0
         ? profile.price
         : 1;
@@ -1891,6 +1911,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
               shares_current: sharesCurrent,
               price_current_TargetCurrency: profilePriceCurrent,
             },
+            balanceSheet: { cash_t0_TargetCurrency: latestQuarterlyCash },
             financingPlan: corporateFinancingPlan,
             financingPlanByProject: corporateFinancingPlan?.financingPlanByProject,
             scenario: { mode: "spot" },
@@ -2919,6 +2940,8 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
+    const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
+      .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
 
     return computeProjectViewMetrics({
       meta: { projectId: selectedProjectId },
@@ -2929,7 +2952,7 @@ Capital Available: ${availableLabel}`,
       sharesCurrent: inputs.sharesCurrent,
       sharesPostFinancingInput: inputs.sharesPostFinancing,
       priceCurrentTarget: inputs.price,
-      cashCurrentTarget: inputs.cash0,
+      cashCurrentTarget: latestQuarterlyCash,
       debtCurrentTarget: inputs.debt0,
       enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
       fcfUSD: asSeries(inputs.series.fcfUSD),
@@ -2948,10 +2971,12 @@ Capital Available: ${availableLabel}`,
       financing: {
         equityPct: toInputNumber(projectEquityPct) ?? 100,
         debtPct: toInputNumber(projectDebtPct) ?? 0,
-        cashUsedInput: toInputNumber(projectCashUsedTarget) ?? 0,
+        latestQuarterlyCashTarget: latestQuarterlyCash,
+        useCashFirst: projectUseQuarterlyCash,
+        cashUsePercent: projectCashUsedPct / 100,
       },
     });
-  }, [projectCashUsedTarget, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const corporateViewMetrics = useMemo(() => {
     if (!corporateSnapshotData) return null;
@@ -2965,6 +2990,7 @@ Capital Available: ${availableLabel}`,
       targetCurrency: lockedTargetCurrency,
     });
     const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
+    const corporateFinancing = (corporateSnapshotData.financing ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
     const computed = computeProjectViewMetrics({
       meta: { projectId: "corporate" },
@@ -2975,7 +3001,7 @@ Capital Available: ${availableLabel}`,
       sharesCurrent: inputs.sharesCurrent,
       sharesPostFinancingInput: inputs.sharesPostFinancing,
       priceCurrentTarget: inputs.price,
-      cashCurrentTarget: inputs.cash0,
+      cashCurrentTarget: asNum(corporateFinancing.cash_for_nav_TargetCurrency) ?? inputs.cash0,
       debtCurrentTarget: inputs.debt0,
       enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
       fcfUSD: asSeries(inputs.series.fcfUSD),
@@ -2994,7 +3020,7 @@ Capital Available: ${availableLabel}`,
       financing: {
         equityPct: 100,
         debtPct: 0,
-        cashUsedInput: 0,
+        usePrecomputedFinancing: true,
       },
     });
     const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
@@ -3046,6 +3072,12 @@ Capital Available: ${availableLabel}`,
       },
     };
   }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+
+  useEffect(() => {
+    if (!debugEnabled) return;
+    if (projectViewMetrics) console.table(projectViewMetrics.diagnostics.valuation_metric_audit.map((row) => ({ scope: "project", ...row })));
+    if (corporateViewMetrics) console.table(corporateViewMetrics.diagnostics.valuation_metric_audit.map((row) => ({ scope: "corporate", ...row })));
+  }, [debugEnabled, projectViewMetrics, corporateViewMetrics]);
 
   const corporateLista3Debug = useMemo(() => {
     const corporateSection = ((corporateSnapshotData?.corporate ?? null) as {
@@ -3289,6 +3321,24 @@ Capital Available: ${availableLabel}`,
     () => new Set<string>(["DCF_Target", "DCF_perShare"]),
     [],
   );
+
+  const corporateChartTimeSeries = useMemo(() => {
+    const source = corporateSnapshotData?.corporateValuationTimeSeries as {
+      rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>;
+      projectMarkers?: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
+    } | null | undefined;
+    if (!source?.rows || !source.projectMarkers) return null;
+    const navByYear = new Map((corporateProdStartMarkerValuesByKey.NAV_prodStart_perShare ?? []).map((row) => [Number(row.year), row.value]));
+    const dcfByYear = new Map((corporateProdStartMarkerValuesByKey.DCF_perShare ?? []).map((row) => [Number(row.year), row.value]));
+    return {
+      rows: source.rows,
+      projectMarkers: source.projectMarkers.map((marker) => ({
+        ...marker,
+        navPerShare: marker.productionStartYear === null ? null : navByYear.get(marker.productionStartYear) ?? null,
+        dcfPerShare: marker.productionStartYear === null ? null : dcfByYear.get(marker.productionStartYear) ?? null,
+      })),
+    };
+  }, [corporateProdStartMarkerValuesByKey, corporateSnapshotData]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
@@ -5520,7 +5570,7 @@ Capital Available: ${availableLabel}`,
 
               {corporateViewMetrics && (() => {
                 try {
-                  const yearsByPeriod = requireYearsByPeriod(corporateSnapshotData?.series);
+                  requireYearsByPeriod(corporateSnapshotData?.series);
                   return (
                 <>
                   <div className="producer-core-compact-card">
@@ -5584,6 +5634,11 @@ Capital Available: ${availableLabel}`,
                   <details className="producer-core-section project-collapsible-card" open>
                     <summary><h2 className="subrub small">C CORPORATE FINANCING</h2></summary>
                     <div className="rr-input-row" style={{ marginTop: 8 }}>
+                      <label>
+                        <input type="checkbox" checked={corporateUseQuarterlyCash} onChange={(event) => setCorporateUseQuarterlyCash(event.target.checked)} />
+                        Använd senaste kvartalets Cash &amp; Cash Equivalents som finansiering
+                      </label>
+                      <label>Cash Used {corporateCashUsedPct}%<input type="range" min="0" max="100" value={corporateCashUsedPct} onChange={(event) => setCorporateCashUsedPct(Number(event.target.value))} /></label>
                       {companyProjects.map((project) => {
                         const hasFinancing = !!((corporateSnapshotData?.financing ?? null) as Record<string, unknown> | null);
                         const currentEquity = corporateProjectEquityPct[project.project_id] ?? 100;
@@ -5609,6 +5664,18 @@ Capital Available: ${availableLabel}`,
                         );
                       })}
                     </div>
+                    {(() => {
+                      const financing = (corporateSnapshotData?.financing ?? {}) as Record<string, unknown>;
+                      const fields = [
+                        ["Latest Quarterly Cash", financing.latest_quarterly_cash_TargetCurrency], ["Cash Used %", typeof financing.cash_used_percent === "number" ? financing.cash_used_percent * 100 : null], ["Initial Cash Used", financing.cash_used_for_build_TargetCurrency], ["Internally Generated Cash Used", financing.internally_generated_cash_used_TargetCurrency], ["Total Internal Cash Used", financing.total_internal_cash_used_TargetCurrency], ["Remaining Funding Need", financing.remaining_funding_need_TargetCurrency], ["Debt Added", financing.new_debt_TargetCurrency], ["Equity Raise", financing.equity_raised_TargetCurrency], ["New Shares", financing.new_shares], ["Shares PF", financing.shares_post_financing], ["Closing Corporate Cash", financing.closing_corporate_cash_TargetCurrency],
+                      ];
+                      return <div className="compact-metrics-grid">{fields.map(([label, raw]) => <div className="compact-metric-row" key={String(label)}><span className="compact-metric-label">{String(label)}</span><span className="compact-metric-dots"/><span className="compact-metric-value">{typeof raw === "number" ? raw.toLocaleString() : "n/a"}</span></div>)}</div>;
+                    })()}
+                    {(() => {
+                      const waterfall = ((corporateSnapshotData?.financing as Record<string, unknown> | undefined)?.corporate_cash_waterfall ?? null) as { rows?: Array<Record<string, unknown>> } | null;
+                      if (!waterfall?.rows?.length) return null;
+                      return <details style={{ marginTop: 10 }}><summary>Corporate cash waterfall per period</summary><div style={{ overflowX: "auto" }}><table className="compact-debug-table"><thead><tr>{["Period","Year","Opening Cash","Operating Cash Generated","Construction CAPEX","Internal Cash Used","Debt Added","Equity Raised","Closing Cash"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{waterfall.rows.map((row,index)=><tr key={index}>{[row.period,row.year,row.openingCash,row.operatingCashGenerated,row.projectCapexNeed,row.internalCashUsed,row.debtAdded,row.equityRaised,row.closingCash].map((v,i)=><td key={i}>{typeof v === "number" ? v.toLocaleString() : "n/a"}</td>)}</tr>)}</tbody></table></div></details>;
+                    })()}
                     <p className="bread" style={{ marginTop: 8 }}>
                       {(() => {
                         const diagnosticsMeta = (corporateDiagnostics?.meta ?? {}) as Record<string, unknown>;
@@ -5638,33 +5705,10 @@ Capital Available: ${availableLabel}`,
                               : null
                           }
                           npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
-                          npvHigh={
-                            (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency)
-                              ? corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency
-                              : null)
-                          }
+                          npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
-                          tpMarkers={(() => {
-                            const modeledTimeline = (corporateSnapshotData?.modeledValuationTimeline ?? null) as {
-                              markers?: Array<{
-                                tp: number;
-                                corporateTpIndexUsed?: number | null;
-                                value_high: number | null;
-                                value_low: number | null;
-                              }>;
-                            } | null;
-                            if (!modeledTimeline || !Array.isArray(modeledTimeline.markers)) return undefined;
-                            return modeledTimeline.markers.map((marker) => {
-                              const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
-                              return {
-                                tp: marker.tp,
-                                high: marker.value_high,
-                                low: marker.value_low,
-                                yearLabelUsed: yearLabel(yearsByPeriod, tIndex),
-                              };
-                            });
-                          })()}
+                          corporateTimeSeries={corporateChartTimeSeries}
                           currencyCode={lockedTargetCurrency}
                         />
                         {debugEnabled && corporateTimelineDebug && (
@@ -5678,7 +5722,7 @@ Capital Available: ${availableLabel}`,
                       <div className="compact-metrics-grid">
                         {Object.entries(metrics).map(([key, value]) => (
                           <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
-                            <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
+                            <span className="compact-metric-label">{resolveCorporateMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                             <span className="compact-metric-dots" />
                             <span className="compact-metric-value">{
                               (() => {
@@ -6026,6 +6070,7 @@ Capital Available: ${availableLabel}`,
                           npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
+                          canonicalSharesPostFinancing={projectViewMetrics.marketBox.sharesPf.value}
                           chartFlows={(() => {
                             const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
                             return projectPayload?.chartFlows ?? null;
@@ -6137,7 +6182,8 @@ Capital Available: ${availableLabel}`,
                                   financeInputs: {
                                     projectEquityPct,
                                     projectDebtPct,
-                                    projectCashUsedTarget,
+                                    projectUseQuarterlyCash,
+                                    projectCashUsedPct,
                                     riskAdjustedDiscountRatePctInput,
                                   },
                                   list2Metrics: projectViewMetrics.list2,
@@ -6535,9 +6581,15 @@ Capital Available: ${availableLabel}`,
                           style={{ width: "100%" }}
                         />
                       </label>
-                      <label>Cash Used ({lockedTargetCurrency})<input value={projectCashUsedTarget} onChange={(event) => setProjectCashUsedTarget(event.target.value)} /></label>
+                      <label>
+                        <input type="checkbox" checked={projectUseQuarterlyCash} onChange={(event) => setProjectUseQuarterlyCash(event.target.checked)} />
+                        Använd senaste kvartalets Cash &amp; Cash Equivalents
+                      </label>
+                      <label>Cash Used {projectCashUsedPct}%<input type="range" min="0" max="100" value={projectCashUsedPct} onChange={(event) => setProjectCashUsedPct(Number(event.target.value))} /></label>
                     </div>
                     <div className="compact-metrics-grid">
+                      <div className="compact-metric-row"><span className="compact-metric-label">Latest Quarterly Cash</span><span className="compact-metric-dots"/><span className="compact-metric-value">{([...getFieldSeries(data, "balance", "cashAndCashEquivalents")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0).toLocaleString()}</span></div>
+                      <div className="compact-metric-row"><span className="compact-metric-label">Shares PF</span><span className="compact-metric-dots"/><span className="compact-metric-value">{projectViewMetrics.marketBox.sharesPf.value?.toLocaleString() ?? "n/a"}</span></div>
                       {Object.entries(projectViewMetrics.list5).map(([key, value]) => (
                         <div key={key} className="compact-metric-row">
                           <span className="compact-metric-label-wrap">

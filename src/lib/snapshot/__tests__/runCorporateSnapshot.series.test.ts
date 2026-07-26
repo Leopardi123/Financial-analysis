@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { computeEarliestMilestoneDcfPresentScalars, computeRoyaltiesFromRevenueSeries, runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
+import { computeProjectViewMetrics } from '../../projectView/computeProjectPreRevenueView.ts';
 
 async function loadFixture(): Promise<Record<string, unknown>> {
   const fixturePath = path.resolve('scripts/fixtures/snapshot-requests/abra_minimal.json');
@@ -695,7 +696,26 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   (secondRaw.meta as Record<string, unknown>).projectName = 'Abra Minimal 2';
   ((secondRaw.series as Record<string, unknown>).capexUSD as number[])[0] = 100000000;
   ((secondRaw.series as Record<string, unknown>).capexUSD as number[])[1] = 50000000;
+  const shiftProductionSeries = (record: Record<string, unknown>, shift: number) => { for (const [key, value] of Object.entries(record)) if (Array.isArray(value)) record[key] = value.map((_, index) => index < 2 + shift ? 0 : value[index - shift] ?? 0); };
+  const secondTime = secondRaw.time as Record<string, unknown>;
+  secondTime.productionStartPeriod = 3;
+  secondTime.productionStartYear = new Date().getUTCFullYear() + 3;
+  shiftProductionSeries(secondRaw.operations as Record<string, unknown>, 1);
+  shiftProductionSeries((secondRaw.metals as Record<string, unknown>).payableQtyByMetal as Record<string, unknown>, 1);
   (body.projects as Array<Record<string, unknown>>).push(secondProject);
+  const thirdProject = JSON.parse(JSON.stringify((body.projects as Array<Record<string, unknown>>)[0])) as Record<string, unknown>;
+  thirdProject.projectId = 'ABRA_MINIMAL_3';
+  const thirdRaw = thirdProject.rawJson as Record<string, unknown>;
+  (thirdRaw.meta as Record<string, unknown>).projectId = 'ABRA_MINIMAL_3';
+  (thirdRaw.meta as Record<string, unknown>).projectName = 'Abra Minimal 3';
+  const thirdTime = thirdRaw.time as Record<string, unknown>;
+  thirdTime.productionStartPeriod = 4;
+  thirdTime.productionStartYear = new Date().getUTCFullYear() + 4;
+  ((thirdRaw.series as Record<string, unknown>).capexUSD as number[])[0] = 100000000;
+  ((thirdRaw.series as Record<string, unknown>).capexUSD as number[])[1] = 50000000;
+  shiftProductionSeries(thirdRaw.operations as Record<string, unknown>, 2);
+  shiftProductionSeries((thirdRaw.metals as Record<string, unknown>).payableQtyByMetal as Record<string, unknown>, 2);
+  (body.projects as Array<Record<string, unknown>>).push(thirdProject);
 
   body.financingPlan = {
     equity_fraction: 0.5,
@@ -705,16 +725,19 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   body.financingPlanByProject = {
     ABRA_MINIMAL: { equity_fraction: 0.5, debt_fraction: 0.5 },
     ABRA_MINIMAL_2: { equity_fraction: 0.5, debt_fraction: 0.5 },
+    ABRA_MINIMAL_3: { equity_fraction: 0.5, debt_fraction: 0.5 },
   };
 
   const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  const totalCapexToFinanceUSD = (200000000 + 120000000) + (100000000 + 50000000);
-  const expectedDebtUSD = totalCapexToFinanceUSD * 0.5;
+  const totalCapexToFinanceUSD = (200000000 + 120000000) + 2 * (100000000 + 50000000);
   const fx = (body.fx as Record<string, unknown>).manual_fx_USD_to_TargetCurrency as number;
-  const expectedNewShares = (totalCapexToFinanceUSD * 0.5 * fx) / 1;
+  const initialCashUSD = ((body.balanceSheet as Record<string, number>).cash_t0_TargetCurrency ?? 0) / fx;
+  const expectedExternalNeedUSD = totalCapexToFinanceUSD - initialCashUSD;
+  const expectedDebtUSD = expectedExternalNeedUSD * 0.5;
+  const expectedNewShares = (expectedExternalNeedUSD * 0.5 * fx) / 1;
 
   const financingDebug = result.diagnostics.meta.corporateFinancingDebug;
   assert.ok(financingDebug);
@@ -722,6 +745,74 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(financingDebug?.totalNewShares !== null);
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
+  const corporateTimeSeries = (result.snapshot as unknown as { corporateValuationTimeSeries?: { rows: Array<{ year: number; sharesPf: number | null; npvAbsolute: number | null; npvPerShare: number | null; dcfAbsolute: number | null; dcfPerShare: number | null }>; projectMarkers: Array<{ projectId: string; constructionStartPeriod: number | null; productionStartPeriod: number | null; productionStartYear: number | null; firstContributionPeriod: number | null }> } }).corporateValuationTimeSeries;
+  assert.equal(corporateTimeSeries?.rows.length, result.snapshot.series?.yearsByPeriod.length);
+  assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.projectId).sort(), ['ABRA_MINIMAL','ABRA_MINIMAL_2','ABRA_MINIMAL_3']);
+  assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.productionStartPeriod).sort(), [2,3,4]);
+  assert.equal(new Set(corporateTimeSeries?.rows.map((row) => row.sharesPf)).size, 1);
+  for (const marker of corporateTimeSeries?.projectMarkers ?? []) assert.ok(corporateTimeSeries?.rows.some((row) => row.year === marker.productionStartYear));
+  for (const marker of corporateTimeSeries?.projectMarkers ?? []) assert.equal(marker.firstContributionPeriod, marker.constructionStartPeriod);
+  for (const row of corporateTimeSeries?.rows ?? []) {
+    if (row.npvAbsolute !== null && row.sharesPf !== null) assert.ok(Math.abs((row.npvPerShare ?? 0) - row.npvAbsolute / row.sharesPf) < 1e-9);
+    if (row.dcfAbsolute !== null && row.sharesPf !== null) assert.ok(Math.abs((row.dcfPerShare ?? 0) - row.dcfAbsolute / row.sharesPf) < 1e-9);
+  }
+});
+
+test('corporate snapshot applies latest-quarter cash exactly once before debt/equity', async () => {
+  const body = await loadFixture();
+  const raw = ((body.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>);
+  const series = raw.series as Record<string, unknown>;
+  const capex = series.capexUSD as number[];
+  series.capexUSD = capex.map((_, index) => index === 0 ? 300_000_000 : 0);
+  body.balanceSheet = { cash_t0_TargetCurrency: 100_000_000, debt_t0_TargetCurrency: 0 };
+  body.fx = { source: 'manual', anchor: 'today', manual_fx_USD_to_TargetCurrency: 1, scenario: { mode: 'spot' } };
+  body.market = { shares_current: 300_000_000, price_current_TargetCurrency: 3 };
+  body.financingPlan = { use_cash_first: false, cash_use_percent: 1, debt_fraction: 0, equity_fraction: 1, equity_raise_price_TargetCurrency: 3 };
+
+  const disabled = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(disabled.ok, true);
+  if (!disabled.ok) return;
+  assert.equal(disabled.snapshot.financing.cash_used_for_build_TargetCurrency, 0);
+  assert.equal(disabled.snapshot.financing.equity_raised_TargetCurrency, 300_000_000);
+  assert.equal(disabled.snapshot.financing.new_shares, 100_000_000);
+  assert.equal(disabled.snapshot.financing.shares_post_financing, 400_000_000);
+
+  body.financingPlan = { use_cash_first: true, cash_use_percent: 1, debt_fraction: 0, equity_fraction: 1, equity_raise_price_TargetCurrency: 3 };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const financing = result.snapshot.financing;
+  assert.equal(financing.cash_used_for_build_TargetCurrency, 100_000_000);
+  assert.equal(financing.remaining_funding_need_TargetCurrency, 200_000_000);
+  assert.equal(financing.new_debt_TargetCurrency, 0);
+  assert.equal(financing.equity_raised_TargetCurrency, 200_000_000);
+  assert.ok(Math.abs((financing.new_shares ?? 0) - 66_666_666.66666667) < 1e-6);
+  assert.ok(Math.abs((financing.shares_post_financing ?? 0) - 366_666_666.6666667) < 1e-6);
+  assert.equal(financing.corporate_cash_waterfall?.totalInitialCashUsed, 100_000_000);
+  assert.equal(financing.corporate_cash_waterfall?.remainingExternalFundingNeed, 200_000_000);
+  assert.equal(result.snapshot.financing.NPV_today_TargetCurrency, disabled.snapshot.financing.NPV_today_TargetCurrency);
+  assert.equal(result.snapshot.financing.NAV_today_TargetCurrency, disabled.snapshot.financing.NAV_today_TargetCurrency);
+  assert.equal(result.snapshot.DCF_prodStart_exCapex_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_TargetCurrency);
+  const corporateProdStart = result.snapshot as unknown as { NAV_prodStart_TargetCurrency: number | null; NAV_prodStart_perShare_TargetCurrency: number | null };
+  const disabledProdStart = disabled.snapshot as unknown as { NAV_prodStart_TargetCurrency: number | null };
+  assert.equal(corporateProdStart.NAV_prodStart_TargetCurrency, disabledProdStart.NAV_prodStart_TargetCurrency);
+  assert.notEqual(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency);
+
+  const snapshotSeries = result.snapshot.series as { fcffUSD: Array<number | null>; capexUSD: Array<number | null>; totalRevenue_USD: Array<number | null>; ebitUSD: Array<number | null> };
+  const productionStartPeriod = ((raw.time as Record<string, unknown>).productionStartPeriod as number);
+  const projectEquivalent = computeProjectViewMetrics({
+    targetCurrency: 'CAD', fxUSDToTarget: 1, discountRate: body.discountRate as number, masterN: snapshotSeries.fcffUSD.length - 1,
+    sharesCurrent: 300_000_000, sharesPostFinancingInput: financing.shares_post_financing, priceCurrentTarget: 3,
+    cashCurrentTarget: 100_000_000, debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
+    fcfUSD: snapshotSeries.fcffUSD, capexUSD: snapshotSeries.capexUSD, grossRevenueUSD: snapshotSeries.totalRevenue_USD,
+    ebitUSD: snapshotSeries.ebitUSD, payableAuEqOz: new Array(snapshotSeries.fcffUSD.length).fill(1), sustainingCostUSD: new Array(snapshotSeries.fcffUSD.length).fill(0),
+    productionStartPeriod, financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+  });
+  assert.equal(corporateProdStart.NAV_prodStart_TargetCurrency, projectEquivalent.list2.NAV_prodStart.value);
+  assert.equal(result.snapshot.DCF_prodStart_exCapex_TargetCurrency, projectEquivalent.list2.DCF_Target.value);
+  assert.equal(corporateProdStart.NAV_prodStart_perShare_TargetCurrency, projectEquivalent.list2.NAV_prodStart_perShare.value);
+  assert.equal(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, projectEquivalent.list2.DCF_perShare.value);
 });
 
 test('corporate modeled milestones exclude tp=0 projects and include future tp>0 projects', async () => {
@@ -874,9 +965,11 @@ test('corporate prod-start markers apply incremental initial capex windows to NP
       assert.notEqual(dcf, npv);
     }
     assert.ok(Math.abs((dcf - npv) - initialCapex) <= 0.01);
-    const netCash0: number | null = result.snapshot.financing.netCash_TargetCurrency_t0;
-    assert.notEqual(netCash0, null);
-    assert.ok(Math.abs(nav - (npv + (netCash0 as number))) <= 0.01);
+    const cashForNav: number | null = result.snapshot.financing.cash_for_nav_TargetCurrency ?? null;
+    const debtPost: number | null = result.snapshot.financing.debt_t0_post_TargetCurrency;
+    assert.notEqual(cashForNav, null);
+    assert.notEqual(debtPost, null);
+    assert.ok(Math.abs(nav - (npv + (cashForNav as number) - (debtPost as number))) <= 0.01);
   }
 });
 

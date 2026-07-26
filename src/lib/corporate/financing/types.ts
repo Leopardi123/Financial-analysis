@@ -11,6 +11,9 @@ export type CorporateFinancingInput = {
     debt_fraction?: number | null;
     equity_fraction?: number | null;
     use_cash_first?: boolean | null;
+    /** Fraction (0..1) of the latest quarterly cash balance made available. */
+    cash_use_percent?: number | null;
+    minimum_cash_reserve_TargetCurrency?: number | null;
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
   } | null;
@@ -24,6 +27,14 @@ export type CorporateFinancingInput = {
 };
 
 export type CorporateFinancingOutput = {
+  latest_quarterly_cash_TargetCurrency?: number;
+  cash_used_percent?: number;
+  remaining_funding_need_TargetCurrency?: number | null;
+  corporate_cash_waterfall?: import('./cashWaterfall.ts').CashWaterfallResult | null;
+  internally_generated_cash_used_TargetCurrency?: number | null;
+  total_internal_cash_used_TargetCurrency?: number | null;
+  closing_corporate_cash_TargetCurrency?: number | null;
+  cash_for_nav_TargetCurrency?: number | null;
   cash_used_for_build_TargetCurrency: number | null;
   cash_t0_post_TargetCurrency: number | null;
 

@@ -33,10 +33,35 @@ assert.equal(out.list5.cash_used_Target.value, 50);
 assert.equal(out.list4.InSitu_10Y_USD.value, 1000);
 assertApprox(out.list2.DCF_Target.value, 2603.60953, 1e-4);
 assertApprox(out.list2.NPV_prodStart.value, 1603.60953, 1e-4);
-assertApprox(out.list2.NAV_prodStart.value, 1653.60953, 1e-4);
+assertApprox(out.list2.NAV_prodStart.value, 1703.60953, 1e-4);
 assertApprox(out.list2.NPV_prodStart_perShare.value, 8.22364, 1e-4);
-assertApprox(out.list2.NAV_prodStart_perShare.value, 8.48005, 1e-4);
+assertApprox(out.list2.NAV_prodStart_perShare.value, 8.73646, 1e-4);
 assert.equal(out.marketBox.marketCapCurrent.reason, null);
+
+const cashFirstBase = {
+  targetCurrency: 'CAD', fxUSDToTarget: 1, discountRate: .1, masterN: 2,
+  sharesCurrent: 300_000_000, priceCurrentTarget: 3, cashCurrentTarget: 100_000_000,
+  debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [-300_000_000, 0, 400_000_000], capexUSD: [300_000_000, 0, 0],
+  grossRevenueUSD: [0, 0, 500_000_000], ebitUSD: [0, 0, 400_000_000],
+  payableAuEqOz: [0, 0, 1], sustainingCostUSD: [0, 0, 1], productionStartPeriod: 1,
+};
+const cashDisabled = computeProjectViewMetrics({ ...cashFirstBase, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 100_000_000, useCashFirst: false, cashUsePercent: 1 } });
+const cashEnabled = computeProjectViewMetrics({ ...cashFirstBase, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 100_000_000, useCashFirst: true, cashUsePercent: 1 } });
+assert.equal(cashDisabled.list5.cash_used_Target.value, 0);
+assert.equal(cashDisabled.list5.Equity_Raise_Target.value, 300_000_000);
+assert.equal(cashDisabled.list5.New_Shares.value, 100_000_000);
+assert.equal(cashDisabled.marketBox.sharesPf.value, 400_000_000);
+assert.equal(cashEnabled.list5.cash_used_Target.value, 100_000_000);
+assert.equal(cashEnabled.list5.Equity_Raise_Target.value, 200_000_000);
+assertApprox(cashEnabled.list5.New_Shares.value, 66_666_666.66666667);
+assertApprox(cashEnabled.marketBox.sharesPf.value, 366_666_666.6666667);
+for (const key of ['NPV_Target','NPV_prodStart','CF_LOM_Target','DCF_Target','DCF_Target_discounted'] as const) assert.equal(cashEnabled.list2[key].value, cashDisabled.list2[key].value, `${key} absolute must ignore financing`);
+for (const key of ['NPV_perShare','NPV_prodStart_perShare','CF_LOM_Target_perShare','DCF_perShare','DCF_Target_discounted_perShare'] as const) assert.notEqual(cashEnabled.list2[key].value, cashDisabled.list2[key].value, `${key} must use changed sharesPF`);
+assert.equal(cashEnabled.list2.NAV_Target.value, cashDisabled.list2.NAV_Target.value, 'NAV must not deduct cash used for CAPEX already included in FCFF');
+assert.equal(cashEnabled.list2.NAV_prodStart.value, cashDisabled.list2.NAV_prodStart.value, 'production-start NAV must use the same no-double-count rule');
+assert.notEqual(cashEnabled.list2.NAV_perShare.value, cashDisabled.list2.NAV_perShare.value);
+assert.ok(cashEnabled.diagnostics.valuation_metric_audit.every((row) => row.metric.endsWith('/share') ? row.sharesUsed !== null : true));
 
 assert.ok((out.list3.IRR.value as number) > 0, `Expected positive IRR, got ${out.list3.IRR.value}`);
 assert.ok((out.list3.LOM_discounted_EBIT_ROCE.value as number) > 0, 'Expected finite discounted EBIT ROCE');

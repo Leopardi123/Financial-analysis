@@ -38,12 +38,15 @@ export type SnapshotRequest = {
     debt_fraction?: number | null;
     equity_fraction?: number | null;
     use_cash_first?: boolean | null;
+    cash_use_percent?: number | null;
+    minimum_cash_reserve_TargetCurrency?: number | null;
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
   };
   financingPlanByProject?: Record<string, {
     debt_fraction?: number | null;
     equity_fraction?: number | null;
+    equity_raise_price_TargetCurrency?: number | null;
   }>;
   buildFundingNeed_USD?: number | null;
   fx: SnapshotFxConfig;
@@ -270,6 +273,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
       }
       const equityFraction = readNullableFiniteNumber(planRaw.equity_fraction);
       const debtFraction = readNullableFiniteNumber(planRaw.debt_fraction);
+      const raisePrice = readNullableFiniteNumber(planRaw.equity_raise_price_TargetCurrency);
       if (planRaw.equity_fraction !== undefined && equityFraction === null && planRaw.equity_fraction !== null) {
         errors.push(`financingPlanByProject.${projectId}.equity_fraction must be finite when provided`);
       }
@@ -285,6 +289,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
       financingPlanByProject[projectId] = {
         equity_fraction: equityFraction,
         debt_fraction: debtFraction,
+        equity_raise_price_TargetCurrency: raisePrice,
       };
     }
   }

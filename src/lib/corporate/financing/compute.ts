@@ -40,6 +40,8 @@ export function computeCorporateFinancing(input: CorporateFinancingInput): Corpo
   const debt_fraction = debtFractionRaw ?? 0;
   const equity_fraction = equityFractionRaw ?? 1;
   const use_cash_first = input.financingPlan?.use_cash_first ?? true;
+  const cashUsedPercent = input.financingPlan?.cash_use_percent ?? 1;
+  validateFraction('cash_use_percent', cashUsedPercent);
 
   const raisePriceRaw =
     input.financingPlan?.equity_raise_price_TargetCurrency ?? input.price_current_TargetCurrency;
@@ -61,6 +63,9 @@ export function computeCorporateFinancing(input: CorporateFinancingInput): Corpo
         : null;
 
     return {
+      latest_quarterly_cash_TargetCurrency: cashT0,
+      cash_used_percent: cashUsedPercent,
+      remaining_funding_need_TargetCurrency: null,
       cash_used_for_build_TargetCurrency: null,
       cash_t0_post_TargetCurrency: null,
       new_debt_TargetCurrency: null,
@@ -87,7 +92,8 @@ export function computeCorporateFinancing(input: CorporateFinancingInput): Corpo
   const buildNeed_TargetCurrency = buildFundingNeedUSD * input.fx_USD_to_TargetCurrency;
 
   const cash_available = cashT0;
-  const cash_cap = input.financingPlan?.cash_use_cap_TargetCurrency ?? cash_available;
+  const percentageCap = cash_available * cashUsedPercent;
+  const cash_cap = Math.min(input.financingPlan?.cash_use_cap_TargetCurrency ?? cash_available, percentageCap);
   const cash_usable = Math.min(cash_available, cash_cap);
 
   const legacyCashUsed = input.cashUsedForProjectFinancing_TargetCurrency_t0;
@@ -140,6 +146,9 @@ export function computeCorporateFinancing(input: CorporateFinancingInput): Corpo
     equity_now !== null && equity_now > 0 ? debt_t0_post_TargetCurrency / equity_now : null;
 
   return {
+    latest_quarterly_cash_TargetCurrency: cash_available,
+    cash_used_percent: cashUsedPercent,
+    remaining_funding_need_TargetCurrency: remainingNeed,
     cash_used_for_build_TargetCurrency,
     cash_t0_post_TargetCurrency,
     new_debt_TargetCurrency,
