@@ -5674,7 +5674,6 @@ Capital Available: ${availableLabel}`,
                           }
                           npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
-                          navToday={corporateViewMetrics.list2.NAV_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
                           corporateTimeSeries={(corporateSnapshotData?.corporateValuationTimeSeries ?? null) as { rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>; projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }> } | null}

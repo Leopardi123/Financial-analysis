@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import { Chart } from "react-google-charts";
 import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
 import { rescalePerShareSeries } from "./chartDenominator";
-import { buildCorporateChartRows, type CorporateChartInput } from "./corporateChartRows";
+import { buildCorporateChartRows, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
+import { buildValueRangeChartOptions } from "./valueRangeChartOptions";
 
 type TpMarker = {
   tp: number;
@@ -32,7 +33,6 @@ type ValueRangeSnapshotCardProps = {
     rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>;
     projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
   } | null;
-  navToday?: number | null;
   projectDebug?: {
     yearsByPeriod?: Array<number | null> | null;
     fcffProductionTableSeries?: Array<number | null> | null;
@@ -161,7 +161,7 @@ function computeCorrectDcfAt(args: { fcffSeries: Array<number | null>; discountR
 }
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode, projectDebug, canonicalSharesPostFinancing, corporateTimeSeries, navToday } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currentYear, tpYear, currencyCode, projectDebug, canonicalSharesPostFinancing, corporateTimeSeries } = props;
   const isProjectMode = mode === "project";
 
   const projectChartModel = useMemo(() => {
@@ -496,12 +496,17 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
 
   const corporateChartModel = useMemo(() => {
     if (!corporateTimeSeries?.rows?.length) return null;
-    const rows = buildCorporateChartRows(corporateTimeSeries as CorporateChartInput, { npv: isFiniteNumber(npvLow) ? npvLow : null, nav: isFiniteNumber(navToday) ? navToday : null, dcf: isFiniteNumber(npvHigh) ? npvHigh : null });
-    return { data: [["Year", "Low", "Band", "NPV/share", { role: "annotation", type: "string" }, "NAV/share", { role: "annotation", type: "string" }, "DCF/share", { role: "annotation", type: "string" }, "Production start", { role: "annotation", type: "string" }], ...rows], ticks: corporateTimeSeries.rows.map((row) => row.year) };
-  }, [corporateTimeSeries, navToday, npvHigh, npvLow]);
+    const rows = buildCorporateChartRows(corporateTimeSeries as CorporateChartInput, { low: isFiniteNumber(npvLow) ? npvLow : null, high: isFiniteNumber(npvHigh) ? npvHigh : null, price: isFiniteNumber(priceToday) ? priceToday : null });
+    const domainValues = rows.flatMap((row) => [row[1], row[4], row[5]]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const valueWindow = computeViewWindow(domainValues);
+    if (!valueWindow) return null;
+    const years = corporateTimeSeries.rows.map((row) => row.year);
+    const ticks = years.filter((_, index) => index === 0 || index === years.length - 1 || corporateTimeSeries.projectMarkers.some((marker) => marker.productionStartYear === years[index]));
+    return { data: [valueRangeChartHeader, ...rows], ticks, valueWindow, yearMin: years[0] - 1, yearMax: years[years.length - 1] + 1 };
+  }, [corporateTimeSeries, npvHigh, npvLow, priceToday]);
 
   if (!isProjectMode && corporateChartModel) {
-    return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><Chart chartType="ComboChart" width="100%" height="220px" data={corporateChartModel.data as never} options={{ backgroundColor: "#e0e9ce", legend: { position: "bottom" }, isStacked: true, areaOpacity: 0.22, chartArea: { left: 64, right: 72, top: 28, bottom: 42, width: "100%", height: "64%" }, hAxis: { textStyle: { color: "#1f2937", fontSize: 11 }, gridlines: { color: "transparent" }, baselineColor: "transparent", ticks: corporateChartModel.ticks }, vAxis: { title: currencyCode ?? "", textPosition: "out", gridlines: { color: "#d8e1d1" }, baselineColor: "transparent" }, tooltip: { trigger: "focus" }, annotations: { alwaysOutside: true, textStyle: { color: "#111827", fontSize: 8 }, stem: { color: "#64748b", length: 7 } }, colors: ["transparent", "#A8C686", "#2563eb", "#059669", "#7c3aed", "#be123c"], seriesType: "line", series: { 0: { type: "area", lineWidth: 0, pointSize: 0 }, 1: { type: "area", lineWidth: 0, pointSize: 0 }, 2: { type: "line", lineWidth: 1.5, pointSize: 2 }, 3: { type: "line", lineWidth: 1.5, pointSize: 2 }, 4: { type: "line", lineWidth: 1.5, pointSize: 2 }, 5: { type: "scatter", pointSize: 7, lineWidth: 0 } } }} /></div>;
+    return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><Chart chartType="ComboChart" width="100%" height="220px" data={corporateChartModel.data as never} options={buildValueRangeChartOptions({ currencyCode, ticks: corporateChartModel.ticks, yearMin: corporateChartModel.yearMin, yearMax: corporateChartModel.yearMax, valueWindow: corporateChartModel.valueWindow })} /></div>;
   }
 
   if (isProjectMode) {
@@ -515,51 +520,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
           width="100%"
           height="220px"
           data={projectChartModel.data}
-          options={{
-            backgroundColor: "#e0e9ce",
-            legend: { position: "none" },
-            isStacked: true,
-            areaOpacity: 0.32,
-            chartArea: { left: 64, right: 56, top: 14, bottom: 30, width: "100%", height: "68%" },
-            hAxis: {
-              textStyle: { color: "#1f2937", fontSize: 11 },
-              gridlines: { color: "transparent", count: 0 },
-              baselineColor: "transparent",
-              viewWindowMode: "explicit",
-              viewWindow: { min: projectChartModel.yearNow - 1, max: projectChartModel.yearNow + Math.max(1, (projectChartModel.data.length - 2) as number) },
-              ticks: projectChartModel.ticks,
-            },
-            vAxis: {
-              title: currencyCode ?? "",
-              textPosition: "none",
-              titleTextStyle: { color: "#1f2937", italic: false },
-              gridlines: { color: "transparent", count: 0 },
-              minorGridlines: { color: "transparent", count: 0 },
-              baselineColor: "transparent",
-              viewWindowMode: "explicit",
-              viewWindow: projectChartModel.valueWindow,
-            },
-            tooltip: { trigger: "none" },
-            interpolateNulls: false,
-            annotations: {
-              alwaysOutside: true,
-              textStyle: { color: "#111827", fontSize: 9 },
-              stem: { color: "transparent", length: 10 },
-            },
-            colors: ["transparent", "#A8C686", "#2C3E50", "#2C3E50", "#be123c", "#111111", "#111111", "#111111", "#111111"],
-            seriesType: "line",
-            series: {
-              0: { type: "area", lineWidth: 0, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
-              1: { type: "area", lineWidth: 0, pointSize: 0, visibleInLegend: false },
-              2: { type: "line", lineWidth: 0.62, pointSize: 0, visibleInLegend: false },
-              3: { type: "line", lineWidth: 0.62, pointSize: 0, visibleInLegend: false },
-              4: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
-              5: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
-              6: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
-              7: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
-              8: { type: "scatter", pointShape: "circle", pointSize: 7, lineWidth: 0, visibleInLegend: false },
-            },
-          }}
+          options={buildValueRangeChartOptions({ currencyCode, ticks: projectChartModel.ticks, yearMin: projectChartModel.yearNow - 1, yearMax: projectChartModel.yearNow + Math.max(1, projectChartModel.data.length - 2), valueWindow: projectChartModel.valueWindow })}
         />
         <details style={{ marginTop: 8 }}>
           <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>debugg fallande graf</summary>

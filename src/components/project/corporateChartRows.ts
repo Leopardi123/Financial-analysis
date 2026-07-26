@@ -3,17 +3,52 @@ export type CorporateChartInput = {
   projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
 };
 
-export function buildCorporateChartRows(input: CorporateChartInput, today: { npv: number | null; nav: number | null; dcf: number | null }) {
+export const valueRangeChartHeader = [
+  'Index', 'Low', 'Band', 'Low boundary', 'High boundary',
+  'Current', { role: 'annotation', type: 'string' },
+  'Current Low', { role: 'annotation', type: 'string' },
+  'Current High', { role: 'annotation', type: 'string' },
+  'TP Low', { role: 'annotation', type: 'string' },
+  'TP High', { role: 'annotation', type: 'string' },
+] as const;
+
+const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** Builds the Project-chart row shape; TP columns are reused for every corporate project-start year. */
+export function buildCorporateChartRows(
+  input: CorporateChartInput,
+  today: { low: number | null; high: number | null; price: number | null },
+) {
   const markers = new Map<number, string[]>();
-  for (const marker of input.projectMarkers) if (typeof marker.productionStartYear === 'number') markers.set(marker.productionStartYear, [...(markers.get(marker.productionStartYear) ?? []), marker.projectName]);
+  for (const marker of input.projectMarkers) {
+    if (typeof marker.productionStartYear === 'number') {
+      markers.set(marker.productionStartYear, [...(markers.get(marker.productionStartYear) ?? []), marker.projectName]);
+    }
+  }
+
   return input.rows.map((row, index) => {
-    const npv = index === 0 && today.npv !== null ? today.npv : row.npvPerShare;
-    const nav = index === 0 && today.nav !== null ? today.nav : row.navPerShare;
-    const dcf = index === 0 && today.dcf !== null ? today.dcf : row.dcfPerShare;
-    const values = [npv, nav, dcf].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-    const low = values.length ? Math.min(...values) : null;
-    const high = values.length ? Math.max(...values) : null;
-    const annotate = index === 0 || index === input.rows.length - 1 || markers.has(row.year);
-    return [row.year, low, low !== null && high !== null ? high - low : null, npv, annotate && npv !== null ? `NPV ${npv.toFixed(1)}` : null, nav, annotate && nav !== null ? `NAV ${nav.toFixed(1)}` : null, dcf, annotate && dcf !== null ? `DCF ${dcf.toFixed(1)}` : null, markers.has(row.year) ? high : null, markers.get(row.year)?.join(' / ') ?? null];
+    const low = index === 0 && today.low !== null ? today.low : row.navPerShare;
+    const high = index === 0 && today.high !== null ? today.high : row.dcfPerShare;
+    const orderedLow = low !== null && high !== null ? Math.min(low, high) : low;
+    const orderedHigh = low !== null && high !== null ? Math.max(low, high) : high;
+    const isStart = markers.has(row.year);
+    const names = markers.get(row.year)?.join(' / ') ?? null;
+    return [
+      row.year,
+      orderedLow,
+      orderedLow !== null && orderedHigh !== null ? orderedHigh - orderedLow : null,
+      orderedLow,
+      orderedHigh,
+      index === 0 ? today.price : null,
+      index === 0 && today.price !== null ? `      ${label(today.price)}` : null,
+      index === 0 ? orderedLow : null,
+      index === 0 && orderedLow !== null ? `      ${label(orderedLow)}` : null,
+      index === 0 ? orderedHigh : null,
+      index === 0 && orderedHigh !== null ? `      ${label(orderedHigh)}` : null,
+      isStart ? orderedLow : null,
+      isStart && orderedLow !== null ? `      ${label(orderedLow)}` : null,
+      isStart ? orderedHigh : null,
+      isStart && orderedHigh !== null ? `${names ?? ''}\n      ${label(orderedHigh)}` : null,
+    ];
   });
 }
