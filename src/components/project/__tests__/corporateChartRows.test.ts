@@ -45,6 +45,35 @@ test('one production start always has separate low and high point/annotation col
   assert.deepEqual(start, [2030, 5.2, 6.4 - 5.2, 5.2, 6.4, null, null, null, null, null, null, 5.2, '      5,2', 6.4, '      6,4']);
 });
 
+test('canonical Corporate marker DCF maps to High even when the scalar fallback equals NAV', () => {
+  const rows = buildCorporateChartRows({
+    rows: [
+      { period: 0, year: 2028, npvPerShare: 1.5, navPerShare: 1.5, dcfPerShare: 1.9, sharesPf: 100 },
+      { period: 1, year: 2029, npvPerShare: 1.7, navPerShare: 1.7, dcfPerShare: 2.0, sharesPf: 100 },
+      { period: 2, year: 2030, npvPerShare: 1.9, navPerShare: 1.9, dcfPerShare: 1.9, sharesPf: 100 },
+    ],
+    projectMarkers: [{ projectId: 'only', projectName: 'Hidden', productionStartYear: 2030, navPerShare: 1.9, dcfPerShare: 2.3 }],
+  }, { low: 1.5, high: 1.9, price: 1, tpLow: 1.9, tpHigh: 1.9 });
+  const start = rows.find((row) => row[0] === 2030);
+  assert.ok(start);
+  assert.equal(start[11], 1.9);
+  assert.equal((start[12] as string).trim(), '1,9');
+  assert.equal(start[13], 2.3);
+  assert.equal((start[14] as string).trim(), '2,3');
+});
+
+test('each Corporate production-start year maps its own NAV to Low and DCF to High', () => {
+  const input = {
+    rows: [2028, 2029, 2030, 2031, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 1.5, dcfPerShare: 1.8, sharesPf: 100 })),
+    projectMarkers: [
+      { projectId: 'a', projectName: 'A', productionStartYear: 2030, navPerShare: 1.9, dcfPerShare: 2.3 },
+      { projectId: 'b', projectName: 'B', productionStartYear: 2032, navPerShare: 2.4, dcfPerShare: 3.1 },
+    ],
+  };
+  const rows = buildCorporateChartRows(input, { low: 1.5, high: 1.9, price: 1 });
+  assert.deepEqual(rows.filter((row) => row[0] === 2030 || row[0] === 2032).map((row) => [row[0], row[11], row[13]]), [[2030, 1.9, 2.3], [2032, 2.4, 3.1]]);
+});
+
 test('two production starts each have separate low and high annotations', () => {
   const rows = buildCorporateChartRows({
     rows: [2026, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 3, navPerShare: 4 + period, dcfPerShare: 5 + period, sharesPf: 100 })),

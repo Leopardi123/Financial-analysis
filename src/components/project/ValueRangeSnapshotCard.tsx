@@ -32,7 +32,7 @@ type ValueRangeSnapshotCardProps = {
   canonicalSharesPostFinancing?: number | null;
   corporateTimeSeries?: {
     rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>;
-    projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
+    projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null; navPerShare?: number | null; dcfPerShare?: number | null }>;
   } | null;
   projectDebug?: {
     yearsByPeriod?: Array<number | null> | null;

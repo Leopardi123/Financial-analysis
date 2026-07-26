@@ -3322,6 +3322,24 @@ Capital Available: ${availableLabel}`,
     [],
   );
 
+  const corporateChartTimeSeries = useMemo(() => {
+    const source = corporateSnapshotData?.corporateValuationTimeSeries as {
+      rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>;
+      projectMarkers?: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
+    } | null | undefined;
+    if (!source?.rows || !source.projectMarkers) return null;
+    const navByYear = new Map((corporateProdStartMarkerValuesByKey.NAV_prodStart_perShare ?? []).map((row) => [Number(row.year), row.value]));
+    const dcfByYear = new Map((corporateProdStartMarkerValuesByKey.DCF_perShare ?? []).map((row) => [Number(row.year), row.value]));
+    return {
+      rows: source.rows,
+      projectMarkers: source.projectMarkers.map((marker) => ({
+        ...marker,
+        navPerShare: marker.productionStartYear === null ? null : navByYear.get(marker.productionStartYear) ?? null,
+        dcfPerShare: marker.productionStartYear === null ? null : dcfByYear.get(marker.productionStartYear) ?? null,
+      })),
+    };
+  }, [corporateProdStartMarkerValuesByKey, corporateSnapshotData]);
+
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
     const inputs = getProjectInputs({ snapshot: projectSnapshotData, parsedProject: parsedSelectedProject, discountRateInput: riskAdjustedDiscountRatePctInput, targetCurrency: lockedTargetCurrency });
@@ -5690,7 +5708,7 @@ Capital Available: ${availableLabel}`,
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
-                          corporateTimeSeries={(corporateSnapshotData?.corporateValuationTimeSeries ?? null) as { rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>; projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }> } | null}
+                          corporateTimeSeries={corporateChartTimeSeries}
                           currencyCode={lockedTargetCurrency}
                         />
                         {debugEnabled && corporateTimelineDebug && (

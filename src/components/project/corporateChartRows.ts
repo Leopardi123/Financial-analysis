@@ -2,7 +2,7 @@ import { buildValueRangeChartRow, buildValueRangeCurve } from './valueRangeCurve
 
 export type CorporateChartInput = {
   rows: Array<{ period: number; year: number; npvPerShare: number | null; navPerShare: number | null; dcfPerShare: number | null; sharesPf: number | null }>;
-  projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
+  projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null; navPerShare?: number | null; dcfPerShare?: number | null }>;
 };
 
 export type CorporateYearTick = { v: number; f: string };
@@ -63,20 +63,22 @@ export function buildCorporateChartRows(
 
   const firstStartIndex = input.rows.findIndex((row) => productionStartYears.has(row.year));
   const tpOffset = firstStartIndex > 0 ? firstStartIndex : 0;
+  const firstStartMarker = input.projectMarkers.find((marker) => marker.productionStartYear === input.rows[tpOffset]?.year);
   const curve = buildValueRangeCurve({
     totalLen: input.rows.length,
     tpOffset,
     lowToday: today.low,
     highToday: today.high,
-    lowTp: today.tpLow ?? input.rows[tpOffset]?.navPerShare ?? null,
-    highTp: today.tpHigh ?? input.rows[tpOffset]?.dcfPerShare ?? null,
+    lowTp: firstStartMarker?.navPerShare ?? today.tpLow ?? input.rows[tpOffset]?.navPerShare ?? null,
+    highTp: firstStartMarker?.dcfPerShare ?? today.tpHigh ?? input.rows[tpOffset]?.dcfPerShare ?? null,
     navSeriesRaw: input.rows.slice(tpOffset).map((row) => row.navPerShare),
     dcfPresentSeriesRaw: input.rows.slice(tpOffset).map((row) => row.dcfPerShare),
   });
 
   return input.rows.map((row, index) => {
-    const low = curve.low[index];
-    const high = curve.high[index];
+    const startMarker = input.projectMarkers.find((marker) => marker.productionStartYear === row.year);
+    const low = startMarker?.navPerShare ?? curve.low[index];
+    const high = startMarker?.dcfPerShare ?? curve.high[index];
     return buildValueRangeChartRow({ year: row.year, low, high, currentPrice: today.price, annotateCurrent: index === 0, annotateProductionStart: productionStartYears.has(row.year), format: label });
   });
 }
