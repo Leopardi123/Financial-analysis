@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Chart } from "react-google-charts";
 import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
 import { rescalePerShareSeries } from "./chartDenominator";
-import { buildCorporateChartRows, buildCorporateYearTicks, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
+import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInput, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
 import { buildValueRangeChartOptions } from "./valueRangeChartOptions";
 
 type TpMarker = {
@@ -496,13 +496,15 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
 
   const corporateChartModel = useMemo(() => {
     if (!corporateTimeSeries?.rows?.length) return null;
-    const rows = buildCorporateChartRows(corporateTimeSeries as CorporateChartInput, { low: isFiniteNumber(npvLow) ? npvLow : null, high: isFiniteNumber(npvHigh) ? npvHigh : null, price: isFiniteNumber(priceToday) ? priceToday : null });
+    const chartWindow = clipCorporateChartInput(corporateTimeSeries as CorporateChartInput);
+    const renderedInput = chartWindow.input;
+    const rows = buildCorporateChartRows(renderedInput, { low: isFiniteNumber(npvLow) ? npvLow : null, high: isFiniteNumber(npvHigh) ? npvHigh : null, price: isFiniteNumber(priceToday) ? priceToday : null });
     const domainValues = rows.flatMap((row) => [row[1], row[4], row[5]]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
-    const years = corporateTimeSeries.rows.map((row) => row.year);
-    const ticks = buildCorporateYearTicks(corporateTimeSeries as CorporateChartInput);
-    return { data: [valueRangeChartHeader, ...rows], ticks, valueWindow, yearMin: years[0] - 1, yearMax: years[years.length - 1] + 1 };
+    const years = renderedInput.rows.map((row) => row.year);
+    const ticks = buildCorporateYearTicks(renderedInput);
+    return { data: [valueRangeChartHeader, ...rows], ticks, valueWindow, yearMin: years[0] - 1, yearMax: chartWindow.effectiveChartEndYear ?? years[years.length - 1] };
   }, [corporateTimeSeries, npvHigh, npvLow, priceToday]);
 
   if (!isProjectMode && corporateChartModel) {

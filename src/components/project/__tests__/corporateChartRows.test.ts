@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCorporateChartRows, buildCorporateYearTicks, valueRangeChartHeader } from '../corporateChartRows.ts';
+import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInput, valueRangeChartHeader } from '../corporateChartRows.ts';
 import { buildValueRangeChartOptions } from '../valueRangeChartOptions.ts';
 
 test('corporate rows use Project chart columns and annotate only today and project starts', () => {
@@ -93,4 +93,47 @@ test('Project and Corporate charts share one visual options builder', () => {
   assert.deepEqual(buildValueRangeChartOptions(args), buildValueRangeChartOptions(args));
   assert.equal(buildValueRangeChartOptions(args).legend.position, 'none');
   assert.equal(buildValueRangeChartOptions(args).series[2].lineWidth, 0.62);
+});
+
+const timeline = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, period) => ({ period, year: first + period, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, sharesPf: 100 }));
+
+test('one 2030 production start clips rendered rows at 2035 without mutating full LOM rows', () => {
+  const input = { rows: timeline(2026, 2045), projectMarkers: [{ projectId: 'a', projectName: 'A', productionStartYear: 2030 }] };
+  const window = clipCorporateChartInput(input);
+  assert.equal(window.lastProductionStartYear, 2030);
+  assert.equal(window.chartEndYear, 2035);
+  assert.equal(window.effectiveChartEndYear, 2035);
+  assert.equal(window.input.rows[window.input.rows.length - 1]?.year, 2035);
+  assert.equal(window.input.rows.some((row) => row.year > 2035), false);
+  assert.equal(input.rows.length, 20);
+});
+
+test('latest of three production starts controls the five-year chart window and retains all anchors', () => {
+  const input = { rows: timeline(2026, 2045), projectMarkers: [2027, 2029, 2032].map((year) => ({ projectId: String(year), projectName: String(year), productionStartYear: year })) };
+  const window = clipCorporateChartInput(input);
+  assert.equal(window.lastProductionStartYear, 2032);
+  assert.equal(window.input.rows[window.input.rows.length - 1]?.year, 2037);
+  assert.deepEqual(buildCorporateYearTicks(window.input).filter((tick) => [2027, 2029, 2032].includes(tick.v)).map((tick) => tick.v), [2027, 2029, 2032]);
+  const rows = buildCorporateChartRows(window.input, { low: 1, high: 3, price: 1 });
+  assert.equal(rows.filter((row) => row[12] !== null).length, 3);
+  assert.equal(rows.filter((row) => row[14] !== null).length, 3);
+});
+
+test('shorter LOM ends at its last available year and does not synthesize rows', () => {
+  const input = { rows: timeline(2026, 2035), projectMarkers: [{ projectId: 'a', projectName: 'A', productionStartYear: 2032 }] };
+  const window = clipCorporateChartInput(input);
+  assert.equal(window.chartEndYear, 2037);
+  assert.equal(window.lastAvailableCorporateYear, 2035);
+  assert.equal(window.effectiveChartEndYear, 2035);
+  assert.equal(window.input.rows, input.rows);
+  assert.equal(window.input.rows.some((row) => row.year > 2035), false);
+});
+
+test('missing production starts preserves the complete corporate timeline fallback', () => {
+  const input = { rows: timeline(2026, 2045), projectMarkers: [{ projectId: 'a', projectName: 'A', productionStartYear: null }] };
+  const window = clipCorporateChartInput(input);
+  assert.equal(window.lastProductionStartYear, null);
+  assert.equal(window.chartEndYear, null);
+  assert.equal(window.effectiveChartEndYear, 2045);
+  assert.equal(window.input.rows, input.rows);
 });

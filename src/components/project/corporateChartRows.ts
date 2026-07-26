@@ -5,6 +5,14 @@ export type CorporateChartInput = {
 
 export type CorporateYearTick = { v: number; f: string };
 
+export type CorporateChartWindow = {
+  input: CorporateChartInput;
+  lastProductionStartYear: number | null;
+  lastAvailableCorporateYear: number | null;
+  chartEndYear: number | null;
+  effectiveChartEndYear: number | null;
+};
+
 export const valueRangeChartHeader = [
   'Index', 'Low', 'Band', 'Low boundary', 'High boundary',
   'Current', { role: 'annotation', type: 'string' },
@@ -17,6 +25,29 @@ export const valueRangeChartHeader = [
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const lowLabel = (value: number) => `${label(value)}\u00a0\u00a0\u00a0\u00a0`;
 const highLabel = (value: number) => `\u00a0\u00a0\u00a0\u00a0${label(value)}`;
+
+/** Clips presentation rows by calendar year; the complete snapshot time series remains untouched. */
+export function clipCorporateChartInput(input: CorporateChartInput): CorporateChartWindow {
+  const productionStartYears = input.projectMarkers
+    .map((marker) => marker.productionStartYear)
+    .filter((year): year is number => typeof year === 'number' && Number.isFinite(year));
+  const lastProductionStartYear = productionStartYears.length ? Math.max(...productionStartYears) : null;
+  const availableYears = input.rows.map((row) => row.year).filter(Number.isFinite);
+  const lastAvailableCorporateYear = availableYears.length ? Math.max(...availableYears) : null;
+  const chartEndYear = lastProductionStartYear === null ? null : lastProductionStartYear + 5;
+  const effectiveChartEndYear = chartEndYear === null || lastAvailableCorporateYear === null
+    ? lastAvailableCorporateYear
+    : Math.min(chartEndYear, lastAvailableCorporateYear);
+  return {
+    input: chartEndYear === null || effectiveChartEndYear === null || effectiveChartEndYear === lastAvailableCorporateYear
+      ? input
+      : { ...input, rows: input.rows.filter((row) => row.year <= effectiveChartEndYear) },
+    lastProductionStartYear,
+    lastAvailableCorporateYear,
+    chartEndYear,
+    effectiveChartEndYear,
+  };
+}
 
 /** Builds the Project-chart row shape; TP columns are reused for every corporate project-start year. */
 export function buildCorporateChartRows(
