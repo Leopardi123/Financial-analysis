@@ -2462,6 +2462,7 @@ export async function runCorporateSnapshotPipeline(args: {
     // Project FCFF already contains the full construction CAPEX. Use reported cash
     // in NAV so cash allocated to that CAPEX is not deducted a second time.
     const cashForNavTarget = input.balanceSheet?.cash_t0_TargetCurrency ?? 0;
+    const netCashForNavTarget = debtPostTarget === null ? null : cashForNavTarget - debtPostTarget;
     const waterfallNavTarget = financingEffective.NPV_today_TargetCurrency === null || debtPostTarget === null
       ? navTodayTarget
       : financingEffective.NPV_today_TargetCurrency + cashForNavTarget - debtPostTarget;
@@ -2575,7 +2576,7 @@ export async function runCorporateSnapshotPipeline(args: {
         shares_post_financing: shares_post_financing_fd_effective,
         fx_USD_to_TargetCurrency: fxRate,
         npvToday_USD: aggregationEffective.NPV_today_USD,
-        netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+        netCash_t0_post_TargetCurrency: netCashForNavTarget,
       });
     diagnostics.warnings.push(...lista2.warnings);
     diagnostics.errors.push(...lista2.errors);
@@ -3208,7 +3209,7 @@ export async function runCorporateSnapshotPipeline(args: {
             shares_post_financing: shares_post_financing_fd_effective,
             fx_USD_to_TargetCurrency: fxRate,
             npvToday_USD: aggregationEffective.NPV_today_USD,
-            netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+            netCash_t0_post_TargetCurrency: netCashForNavTarget,
           });
           diagnostics.warnings.push(...tpMetrics.warnings);
           diagnostics.errors.push(...tpMetrics.errors);
@@ -3217,7 +3218,7 @@ export async function runCorporateSnapshotPipeline(args: {
           const npvCheck = tpMetrics.metrics.NPV_prodStart_TargetCurrency;
           const navCheck = tpMetrics.metrics.NAV_prodStart_TargetCurrency;
           const initialCapexCheck = tpMetrics.metrics.InitialCAPEX_incremental_TargetCurrency;
-          const netCashCheck = financingSnapshot.netCash_TargetCurrency_t0;
+          const netCashCheck = netCashForNavTarget;
           if (
             dcfCheck !== null && npvCheck !== null && initialCapexCheck !== null
             && Number.isFinite(dcfCheck) && Number.isFinite(npvCheck) && Number.isFinite(initialCapexCheck)
@@ -3327,7 +3328,7 @@ export async function runCorporateSnapshotPipeline(args: {
             shares_post_financing: shares_post_financing_fd_effective,
             fx_USD_to_TargetCurrency: fxRate,
             npvToday_USD: aggregationEffective.NPV_today_USD,
-            netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+            netCash_t0_post_TargetCurrency: netCashForNavTarget,
           });
           dcfProdstartPresentPerShareSeries.push(metricsAtTp.metrics.DCF_prodStart_present_perShare_TargetCurrency);
           navProdstartPerShareSeries.push(metricsAtTp.metrics.NAV_prodStart_perShare_TargetCurrency);
@@ -3348,7 +3349,7 @@ export async function runCorporateSnapshotPipeline(args: {
           shares_post_financing: shares_post_financing_fd_effective,
           fx_USD_to_TargetCurrency: fxRate,
           npvToday_USD: aggregationEffective.NPV_today_USD,
-          netCash_t0_post_TargetCurrency: financingSnapshot.netCash_TargetCurrency_t0,
+          netCash_t0_post_TargetCurrency: netCashForNavTarget,
         }).metrics;
         return {
           period, year,

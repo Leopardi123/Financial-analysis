@@ -224,6 +224,20 @@ function resolveProjectMetricLabel(metricKey: string, discountRateTag: string): 
   return metricLabels[metricKey] ?? metricKey;
 }
 
+function resolveCorporateMetricLabel(metricKey: string, discountRateTag: string): string {
+  const labels: Record<string, string> = {
+    NPV_prodStart: "Corporate NPV vid projektstartåret",
+    NPV_prodStart_perShare: "Corporate NPV vid projektstartåret/aktie",
+    NAV_prodStart: "Corporate NAV vid projektstartåret",
+    NAV_prodStart_perShare: "Corporate NAV vid projektstartåret/aktie",
+    DCF_Target: "Corporate DCF vid projektstartåret",
+    DCF_perShare: "Corporate DCF vid projektstartåret/aktie",
+    DCF_Target_discounted: "Corporate DCF vid projektstartåret, nuvärde",
+    DCF_Target_discounted_perShare: "Corporate DCF vid projektstartåret, nuvärde/aktie",
+  };
+  return labels[metricKey] ?? resolveProjectMetricLabel(metricKey, discountRateTag);
+}
+
 type ProdStartDebugData = {
   npvToday: number | null;
   npvTodayPerShare: number | null;
@@ -5690,7 +5704,7 @@ Capital Available: ${availableLabel}`,
                       <div className="compact-metrics-grid">
                         {Object.entries(metrics).map(([key, value]) => (
                           <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
-                            <span className="compact-metric-label">{resolveProjectMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
+                            <span className="compact-metric-label">{resolveCorporateMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
                             <span className="compact-metric-dots" />
                             <span className="compact-metric-value">{
                               (() => {

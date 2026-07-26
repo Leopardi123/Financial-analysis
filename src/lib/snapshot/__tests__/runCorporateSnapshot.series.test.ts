@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { computeEarliestMilestoneDcfPresentScalars, computeRoyaltiesFromRevenueSeries, runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
+import { computeProjectViewMetrics } from '../../projectView/computeProjectPreRevenueView.ts';
 
 async function loadFixture(): Promise<Record<string, unknown>> {
   const fixturePath = path.resolve('scripts/fixtures/snapshot-requests/abra_minimal.json');
@@ -793,7 +794,25 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   assert.equal(result.snapshot.financing.NPV_today_TargetCurrency, disabled.snapshot.financing.NPV_today_TargetCurrency);
   assert.equal(result.snapshot.financing.NAV_today_TargetCurrency, disabled.snapshot.financing.NAV_today_TargetCurrency);
   assert.equal(result.snapshot.DCF_prodStart_exCapex_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_TargetCurrency);
+  const corporateProdStart = result.snapshot as unknown as { NAV_prodStart_TargetCurrency: number | null; NAV_prodStart_perShare_TargetCurrency: number | null };
+  const disabledProdStart = disabled.snapshot as unknown as { NAV_prodStart_TargetCurrency: number | null };
+  assert.equal(corporateProdStart.NAV_prodStart_TargetCurrency, disabledProdStart.NAV_prodStart_TargetCurrency);
   assert.notEqual(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency);
+
+  const snapshotSeries = result.snapshot.series as { fcffUSD: Array<number | null>; capexUSD: Array<number | null>; totalRevenue_USD: Array<number | null>; ebitUSD: Array<number | null> };
+  const productionStartPeriod = ((raw.time as Record<string, unknown>).productionStartPeriod as number);
+  const projectEquivalent = computeProjectViewMetrics({
+    targetCurrency: 'CAD', fxUSDToTarget: 1, discountRate: body.discountRate as number, masterN: snapshotSeries.fcffUSD.length - 1,
+    sharesCurrent: 300_000_000, sharesPostFinancingInput: financing.shares_post_financing, priceCurrentTarget: 3,
+    cashCurrentTarget: 100_000_000, debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
+    fcfUSD: snapshotSeries.fcffUSD, capexUSD: snapshotSeries.capexUSD, grossRevenueUSD: snapshotSeries.totalRevenue_USD,
+    ebitUSD: snapshotSeries.ebitUSD, payableAuEqOz: new Array(snapshotSeries.fcffUSD.length).fill(1), sustainingCostUSD: new Array(snapshotSeries.fcffUSD.length).fill(0),
+    productionStartPeriod, financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+  });
+  assert.equal(corporateProdStart.NAV_prodStart_TargetCurrency, projectEquivalent.list2.NAV_prodStart.value);
+  assert.equal(result.snapshot.DCF_prodStart_exCapex_TargetCurrency, projectEquivalent.list2.DCF_Target.value);
+  assert.equal(corporateProdStart.NAV_prodStart_perShare_TargetCurrency, projectEquivalent.list2.NAV_prodStart_perShare.value);
+  assert.equal(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, projectEquivalent.list2.DCF_perShare.value);
 });
 
 test('corporate modeled milestones exclude tp=0 projects and include future tp>0 projects', async () => {
@@ -946,9 +965,11 @@ test('corporate prod-start markers apply incremental initial capex windows to NP
       assert.notEqual(dcf, npv);
     }
     assert.ok(Math.abs((dcf - npv) - initialCapex) <= 0.01);
-    const netCash0: number | null = result.snapshot.financing.netCash_TargetCurrency_t0;
-    assert.notEqual(netCash0, null);
-    assert.ok(Math.abs(nav - (npv + (netCash0 as number))) <= 0.01);
+    const cashForNav: number | null = result.snapshot.financing.cash_for_nav_TargetCurrency ?? null;
+    const debtPost: number | null = result.snapshot.financing.debt_t0_post_TargetCurrency;
+    assert.notEqual(cashForNav, null);
+    assert.notEqual(debtPost, null);
+    assert.ok(Math.abs(nav - (npv + (cashForNav as number) - (debtPost as number))) <= 0.01);
   }
 });
 
