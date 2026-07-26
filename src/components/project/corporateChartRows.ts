@@ -15,6 +15,8 @@ export const valueRangeChartHeader = [
 ] as const;
 
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const lowLabel = (value: number) => `${label(value)}\u00a0\u00a0\u00a0\u00a0`;
+const highLabel = (value: number) => `\u00a0\u00a0\u00a0\u00a0${label(value)}`;
 
 /** Builds the Project-chart row shape; TP columns are reused for every corporate project-start year. */
 export function buildCorporateChartRows(
@@ -43,13 +45,13 @@ export function buildCorporateChartRows(
       index === 0 ? today.price : null,
       index === 0 && today.price !== null ? `      ${label(today.price)}` : null,
       index === 0 ? orderedLow : null,
-      index === 0 && orderedLow !== null ? `      ${label(orderedLow)}` : null,
+      index === 0 && orderedLow !== null ? lowLabel(orderedLow) : null,
       index === 0 ? orderedHigh : null,
-      index === 0 && orderedHigh !== null ? `      ${label(orderedHigh)}` : null,
+      index === 0 && orderedHigh !== null ? highLabel(orderedHigh) : null,
       isStart ? orderedLow : null,
-      isStart && orderedLow !== null ? `      ${label(orderedLow)}` : null,
+      isStart && orderedLow !== null ? lowLabel(orderedLow) : null,
       isStart ? orderedHigh : null,
-      isStart && orderedHigh !== null ? `      ${label(orderedHigh)}` : null,
+      isStart && orderedHigh !== null ? highLabel(orderedHigh) : null,
     ];
   });
 }
