@@ -7,11 +7,11 @@ import { buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from '../v
 test('corporate rows use Project chart columns and annotate only today and project starts', () => {
   const rows = buildCorporateChartRows({
     rows: [
-      { period: 0, year: 2026, npvPerShare: 4.4, navPerShare: 4.7, dcfPerShare: 5.4, sharesPf: 400 },
-      { period: 1, year: 2027, npvPerShare: 4.6, navPerShare: 4.9, dcfPerShare: 5.7, sharesPf: 400 },
-      { period: 2, year: 2028, npvPerShare: 4.8, navPerShare: 5.0, dcfPerShare: 5.9, sharesPf: 400 },
-      { period: 3, year: 2029, npvPerShare: 5.0, navPerShare: 5.2, dcfPerShare: 6.1, sharesPf: 400 },
-      { period: 4, year: 2032, npvPerShare: 5.4, navPerShare: 5.6, dcfPerShare: 6.5, sharesPf: 400 },
+      { period: 0, year: 2026, npvPerShare: 4.4, navPerShare: 4.7, dcfPerShare: 5.4, dcfExCapexPerShare: 5.4, sharesPf: 400 },
+      { period: 1, year: 2027, npvPerShare: 4.6, navPerShare: 4.9, dcfPerShare: 5.7, dcfExCapexPerShare: 5.7, sharesPf: 400 },
+      { period: 2, year: 2028, npvPerShare: 4.8, navPerShare: 5.0, dcfPerShare: 5.9, dcfExCapexPerShare: 5.9, sharesPf: 400 },
+      { period: 3, year: 2029, npvPerShare: 5.0, navPerShare: 5.2, dcfPerShare: 6.1, dcfExCapexPerShare: 6.1, sharesPf: 400 },
+      { period: 4, year: 2032, npvPerShare: 5.4, navPerShare: 5.6, dcfPerShare: 6.5, dcfExCapexPerShare: 6.5, sharesPf: 400 },
     ],
     projectMarkers: [
       { projectId: 'a', projectName: 'Project A', productionStartYear: 2027 },
@@ -24,7 +24,7 @@ test('corporate rows use Project chart columns and annotate only today and proje
   assert.equal(valueRangeChartHeader.length, 21);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
-  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.5, '      4,5', 5.7, '      5,7']);
+  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.7 / 1.1, '      5,2']);
   assert.deepEqual(rows[2].slice(5, 15), [null, null, null, null, null, null, null, null, null, null]);
   assert.equal(rows[1][12], '      4,9');
   assert.equal(rows[1][14], '      5,7');
@@ -36,15 +36,14 @@ test('corporate rows use Project chart columns and annotate only today and proje
 test('one production start always has separate low and high point/annotation columns', () => {
   const rows = buildCorporateChartRows({
     rows: [
-      { period: 0, year: 2026, npvPerShare: 3, navPerShare: 4, dcfPerShare: 5, sharesPf: 100 },
-      { period: 1, year: 2030, npvPerShare: 4, navPerShare: 5.2, dcfPerShare: 6.4, sharesPf: 100 },
+      { period: 0, year: 2026, npvPerShare: 3, navPerShare: 4, dcfPerShare: 5, dcfExCapexPerShare: 5, sharesPf: 100 },
+      { period: 1, year: 2030, npvPerShare: 4, navPerShare: 5.2, dcfPerShare: 6.4, dcfExCapexPerShare: 6.4, sharesPf: 100 },
     ],
     projectMarkers: [{ projectId: 'only', projectName: 'Never rendered', productionStartYear: 2030 }],
   }, { low: 3, high: 5, price: 2 });
   const start = rows[1];
   assert.deepEqual(start.slice(0, 15), [2030, 5.2, 6.4 - 5.2, 5.2, 6.4, null, null, null, null, null, null, 5.2, '      5,2', 6.4, '      6,4']);
-  assert.deepEqual(start.slice(15), [null, null, null, null, null, null]);
-  assert.deepEqual(rows[0].slice(15), [3, '      3,0', 'År: 2026\nHigh: 6,4\nLow: 3,0', 6.4, '      6,4', 'År: 2026\nHigh: 6,4\nLow: 3,0']);
+  assert.deepEqual(start.slice(15), [5.2, '      5,2', 'År: 2030\nHigh: 6,4\nLow: 5,2', 6.4, '      6,4', 'År: 2030\nHigh: 6,4\nLow: 5,2']);
 });
 
 test('peak helper selects the first equal maximum and formats both values with currency', () => {
@@ -61,9 +60,9 @@ test('peak helper selects the first equal maximum and formats both values with c
 test('canonical Corporate marker DCF maps to High even when the scalar fallback equals NAV', () => {
   const rows = buildCorporateChartRows({
     rows: [
-      { period: 0, year: 2028, npvPerShare: 1.5, navPerShare: 1.5, dcfPerShare: 1.9, sharesPf: 100 },
-      { period: 1, year: 2029, npvPerShare: 1.7, navPerShare: 1.7, dcfPerShare: 2.0, sharesPf: 100 },
-      { period: 2, year: 2030, npvPerShare: 1.9, navPerShare: 1.9, dcfPerShare: 1.9, sharesPf: 100 },
+      { period: 0, year: 2028, npvPerShare: 1.5, navPerShare: 1.5, dcfPerShare: 1.9, dcfExCapexPerShare: 1.9, sharesPf: 100 },
+      { period: 1, year: 2029, npvPerShare: 1.7, navPerShare: 1.7, dcfPerShare: 2.0, dcfExCapexPerShare: 2.0, sharesPf: 100 },
+      { period: 2, year: 2030, npvPerShare: 1.9, navPerShare: 1.9, dcfPerShare: 1.9, dcfExCapexPerShare: 1.9, sharesPf: 100 },
     ],
     projectMarkers: [{ projectId: 'only', projectName: 'Hidden', productionStartYear: 2030, navPerShare: 1.9, dcfPerShare: 2.3 }],
   }, { low: 1.5, high: 1.9, price: 1, tpLow: 1.9, tpHigh: 1.9 });
@@ -77,7 +76,7 @@ test('canonical Corporate marker DCF maps to High even when the scalar fallback 
 
 test('each Corporate production-start year maps its own NAV to Low and DCF to High', () => {
   const input = {
-    rows: [2028, 2029, 2030, 2031, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 1.5, dcfPerShare: 1.8, sharesPf: 100 })),
+    rows: [2028, 2029, 2030, 2031, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 1.5, dcfPerShare: 1.8, dcfExCapexPerShare: 1.8, sharesPf: 100 })),
     projectMarkers: [
       { projectId: 'a', projectName: 'A', productionStartYear: 2030, navPerShare: 1.9, dcfPerShare: 2.3 },
       { projectId: 'b', projectName: 'B', productionStartYear: 2032, navPerShare: 2.4, dcfPerShare: 3.1 },
@@ -89,7 +88,7 @@ test('each Corporate production-start year maps its own NAV to Low and DCF to Hi
 
 test('two production starts each have separate low and high annotations', () => {
   const rows = buildCorporateChartRows({
-    rows: [2026, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 3, navPerShare: 4 + period, dcfPerShare: 5 + period, sharesPf: 100 })),
+    rows: [2026, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 3, navPerShare: 4 + period, dcfPerShare: 5 + period, dcfExCapexPerShare: 5 + period, sharesPf: 100 })),
     projectMarkers: [
       { projectId: 'a', projectName: 'Never rendered A', productionStartYear: 2029 },
       { projectId: 'b', projectName: 'Never rendered B', productionStartYear: 2030 },
@@ -101,7 +100,7 @@ test('two production starts each have separate low and high annotations', () => 
 
 test('equal rounded low and high retain two values, series columns, and annotations', () => {
   const rows = buildCorporateChartRows({
-    rows: [{ period: 0, year: 2030, npvPerShare: 5, navPerShare: 5.21, dcfPerShare: 5.24, sharesPf: 100 }],
+    rows: [{ period: 0, year: 2030, npvPerShare: 5, navPerShare: 5.21, dcfPerShare: 5.24, dcfExCapexPerShare: 5.24, sharesPf: 100 }],
     projectMarkers: [{ projectId: 'a', projectName: 'Never rendered', productionStartYear: 2030 }],
   }, { low: 5.21, high: 5.24, price: 2 });
   const row = rows[0];
@@ -115,7 +114,7 @@ test('equal rounded low and high retain two values, series columns, and annotati
 
 test('corporate x-axis ticks contain today, every unique production start, and the final year', () => {
   const input = {
-    rows: [2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, sharesPf: 100 })),
+    rows: [2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, dcfExCapexPerShare: 3, sharesPf: 100 })),
     projectMarkers: [
       { projectId: 'a', projectName: 'Hidden A', productionStartYear: 2027 },
       { projectId: 'b', projectName: 'Hidden B', productionStartYear: 2029 },
@@ -138,17 +137,44 @@ test('Project and Corporate charts share one visual options builder', () => {
 
 test('single-project Corporate rows use the exact canonical Project curve generator', () => {
   const input = {
-    rows: [2026, 2027, 2028, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 2, navPerShare: 3 + period, dcfPerShare: 4 + period * 0.4, sharesPf: 100 })),
+    rows: [2026, 2027, 2028, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 2, navPerShare: 3 + period, dcfPerShare: 4 + period * 0.4, dcfExCapexPerShare: 4 + period * 0.4, sharesPf: 100 })),
     projectMarkers: [{ projectId: 'one', projectName: 'One', productionStartYear: 2028 }],
   };
-  const curveInput = { totalLen: 5, tpOffset: 2, lowToday: 2.5, highToday: 4, lowTp: 5, highTp: 7, navSeriesRaw: [5, 6, 7], dcfPresentSeriesRaw: [4.8, 5.2, 5.6] };
+  const curveInput = { totalLen: 5, tpOffset: 2, discountRate: 0.1, lowTp: 5, highTp: 7, navSeriesRaw: [3, 4, 5, 6, 7], dcfExCapexSeriesRaw: [4, 4.4, 4.8, 5.2, 5.6] };
   const projectCurve = buildValueRangeCurve(curveInput);
   const corporateRows = buildCorporateChartRows(input, { low: 2.5, high: 4, price: 1, tpLow: 5, tpHigh: 7 });
-  assert.deepEqual(corporateRows.map((row) => row[1]), projectCurve.low.map((low, index) => low !== null && projectCurve.high[index] !== null ? Math.min(low, projectCurve.high[index] as number) : low));
-  assert.deepEqual(corporateRows.map((row) => row[4]), projectCurve.high.map((high, index) => high !== null && projectCurve.low[index] !== null ? Math.max(high, projectCurve.low[index] as number) : high));
+  assert.deepEqual(corporateRows.map((row) => row[1]), projectCurve.low);
+  assert.deepEqual(corporateRows.map((row) => row[4]), projectCurve.high);
 });
 
-const timeline = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, period) => ({ period, year: first + period, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, sharesPf: 100 }));
+test('canonical period mapping and actual discount rate drive pre-production High', () => {
+  const years = [2025, 2026, 2027, 2028];
+  const curve = buildValueRangeCurve({
+    totalLen: years.length, tpOffset: 2, discountRate: 0.1,
+    lowTp: 8, highTp: 121,
+    navSeriesRaw: [6, 7, 8, 9], dcfExCapexSeriesRaw: [null, null, 121, 100],
+  });
+  assert.deepEqual(years.map((year, period) => ({ year, period })), [
+    { year: 2025, period: 0 }, { year: 2026, period: 1 }, { year: 2027, period: 2 }, { year: 2028, period: 3 },
+  ]);
+  assert.ok(Math.abs((curve.high[0] as number) - 100) < 1e-12);
+  assert.ok(Math.abs((curve.high[1] as number) - 110) < 1e-12);
+  assert.equal(curve.high[2], 121);
+  assert.equal(curve.high[3], 100, 'post-TP High must use direct rolling ex-CAPEX DCF without re-accretion');
+  assert.deepEqual(curve.low, [6, 7, 8, 9]);
+  assert.equal('inferredRate' in curve, false);
+});
+
+test('High and Low keep semantic identity when the series cross', () => {
+  const row = buildCorporateChartRows({
+    rows: [{ period: 0, year: 2027, npvPerShare: 12, navPerShare: 12, dcfPerShare: 10, dcfExCapexPerShare: 10, sharesPf: 100 }],
+    projectMarkers: [],
+  }, { low: 12, high: 10, price: null }, 0.1)[0];
+  assert.equal(row[1], 12);
+  assert.equal(row[4], 10);
+});
+
+const timeline = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, period) => ({ period, year: first + period, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, dcfExCapexPerShare: 3, sharesPf: 100 }));
 
 test('one 2030 production start clips rendered rows at 2035 without mutating full LOM rows', () => {
   const input = { rows: timeline(2026, 2045), projectMarkers: [{ projectId: 'a', projectName: 'A', productionStartYear: 2030 }] };

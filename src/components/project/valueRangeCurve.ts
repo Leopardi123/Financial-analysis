@@ -1,52 +1,30 @@
 export type ValueRangeCurveInput = {
   totalLen: number;
   tpOffset: number;
-  lowToday: number | null;
-  highToday: number | null;
+  discountRate: number;
   lowTp: number | null;
   highTp: number | null;
+  /** Rolling NAV values aligned to economic period 0..N. */
   navSeriesRaw: Array<number | null>;
-  dcfPresentSeriesRaw: Array<number | null>;
+  /** Rolling ex-CAPEX DCF values aligned to economic period 0..N. */
+  dcfExCapexSeriesRaw: Array<number | null>;
 };
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
 /** Canonical Project chart curve generation, shared verbatim by Corporate presentation. */
 export function buildValueRangeCurve(input: ValueRangeCurveInput) {
-  const dcfAtTp = finite(input.dcfPresentSeriesRaw[0]) ? input.dcfPresentSeriesRaw[0] : null;
-  const inferredRate = (() => {
-    if (input.tpOffset <= 0 || input.highTp === null || dcfAtTp === null || dcfAtTp <= 0 || input.highTp <= 0) return null;
-    const rate = (input.highTp / dcfAtTp) ** (1 / input.tpOffset) - 1;
-    return Number.isFinite(rate) && rate > -1 ? rate : null;
-  })();
   const high: Array<number | null> = Array.from({ length: input.totalLen }, () => null);
   const low: Array<number | null> = Array.from({ length: input.totalLen }, () => null);
   for (let index = 0; index < input.totalLen; index += 1) {
-    if (index <= input.tpOffset) {
-      if (input.highTp !== null) {
-        if (inferredRate !== null) high[index] = input.highTp / ((1 + inferredRate) ** (input.tpOffset - index));
-        else {
-          const start = input.highToday ?? input.highTp;
-          high[index] = start + (input.highTp - start) * (index / Math.max(1, input.tpOffset));
-        }
-      }
-      if (input.lowTp !== null) {
-        if (input.lowToday !== null && input.lowToday > 0 && input.lowTp > 0) {
-          const growth = (input.lowTp / input.lowToday) ** (1 / Math.max(1, input.tpOffset)) - 1;
-          low[index] = input.lowToday * ((1 + growth) ** index);
-        } else if (input.lowToday !== null) low[index] = input.lowToday + (input.lowTp - input.lowToday) * (index / Math.max(1, input.tpOffset));
-        else low[index] = input.lowTp;
-      }
-    } else {
-      const flowIndex = index - input.tpOffset;
-      low[index] = finite(input.navSeriesRaw[flowIndex]) ? input.navSeriesRaw[flowIndex] : null;
-      const dcf = finite(input.dcfPresentSeriesRaw[flowIndex]) ? input.dcfPresentSeriesRaw[flowIndex] : null;
-      high[index] = dcf === null ? null : inferredRate === null ? dcf : dcf * ((1 + inferredRate) ** flowIndex);
-    }
+    low[index] = finite(input.navSeriesRaw[index]) ? input.navSeriesRaw[index] : null;
+    if (index < input.tpOffset) {
+      high[index] = input.highTp === null ? null : input.highTp / ((1 + input.discountRate) ** (input.tpOffset - index));
+    } else high[index] = finite(input.dcfExCapexSeriesRaw[index]) ? input.dcfExCapexSeriesRaw[index] : null;
   }
   if (input.lowTp !== null) low[input.tpOffset] = input.lowTp;
   if (input.highTp !== null) high[input.tpOffset] = input.highTp;
-  return { low, high, inferredRate };
+  return { low, high };
 }
 
 export function buildValueRangeChartRow(input: {
@@ -61,8 +39,8 @@ export function buildValueRangeChartRow(input: {
   highlightPeak?: boolean;
   peakTooltip?: string | null;
 }) {
-  const orderedLow = input.low !== null && input.high !== null ? Math.min(input.low, input.high) : input.low;
-  const orderedHigh = input.low !== null && input.high !== null ? Math.max(input.low, input.high) : input.high;
+  const orderedLow = input.low;
+  const orderedHigh = input.high;
   const annotation = (value: number | null) => value === null ? null : `      ${input.format(value)}`;
   const current = input.annotateCurrent ? input.currentPrice : null;
   return [

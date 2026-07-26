@@ -1,7 +1,7 @@
 import { buildValueRangeChartRow, buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from './valueRangeCurve.ts';
 
 export type CorporateChartInput = {
-  rows: Array<{ period: number; year: number; npvPerShare: number | null; navPerShare: number | null; dcfPerShare: number | null; sharesPf: number | null }>;
+  rows: Array<{ period: number; year: number; npvPerShare: number | null; navPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; sharesPf: number | null }>;
   projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null; navPerShare?: number | null; dcfPerShare?: number | null }>;
 };
 
@@ -55,6 +55,7 @@ export function clipCorporateChartInput(input: CorporateChartInput): CorporateCh
 export function buildCorporateChartRows(
   input: CorporateChartInput,
   today: { low: number | null; high: number | null; price: number | null; tpLow?: number | null; tpHigh?: number | null },
+  discountRate = 0.1,
   currencyCode?: string,
 ) {
   const productionStartYears = new Set<number>();
@@ -70,12 +71,11 @@ export function buildCorporateChartRows(
   const curve = buildValueRangeCurve({
     totalLen: input.rows.length,
     tpOffset,
-    lowToday: today.low,
-    highToday: today.high,
+    discountRate,
     lowTp: firstStartMarker?.navPerShare ?? today.tpLow ?? input.rows[tpOffset]?.navPerShare ?? null,
     highTp: firstStartMarker?.dcfPerShare ?? today.tpHigh ?? input.rows[tpOffset]?.dcfPerShare ?? null,
-    navSeriesRaw: input.rows.slice(tpOffset).map((row) => row.navPerShare),
-    dcfPresentSeriesRaw: input.rows.slice(tpOffset).map((row) => row.dcfPerShare),
+    navSeriesRaw: input.rows.map((row) => row.navPerShare),
+    dcfExCapexSeriesRaw: input.rows.map((row) => row.dcfExCapexPerShare ?? null),
   });
 
   const values = input.rows.map((row, index) => {

@@ -3355,7 +3355,7 @@ Capital Available: ${availableLabel}`,
 
   const corporateChartTimeSeries = useMemo(() => {
     const source = corporateSnapshotData?.corporateValuationTimeSeries as {
-      rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>;
+      rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null }>;
       projectMarkers?: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
     } | null | undefined;
     if (!source?.rows || !source.projectMarkers) return null;
@@ -3371,6 +3371,7 @@ Capital Available: ${availableLabel}`,
         npvPerShare: row.npvPerShare === null ? null : row.npvPerShare * scale,
         navPerShare: row.navPerShare === null ? null : row.navPerShare * scale,
         dcfPerShare: row.dcfPerShare === null ? null : row.dcfPerShare * scale,
+        dcfExCapexPerShare: row.dcfExCapexPerShare == null ? null : row.dcfExCapexPerShare * scale,
       })),
       projectMarkers: source.projectMarkers.map((marker) => ({
         ...marker,
@@ -5753,6 +5754,7 @@ Capital Available: ${availableLabel}`,
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
                           corporateTimeSeries={corporateChartTimeSeries}
+                          discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
                           currencyCode={lockedTargetCurrency}
                         />
                         {debugEnabled && corporateTimelineDebug && (
@@ -6120,7 +6122,7 @@ Capital Available: ${availableLabel}`,
                           tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
                           canonicalSharesPostFinancing={projectViewMetrics.marketBox.sharesPf.value}
                           chartFlows={(() => {
-                            const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
+                            const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null>; dcfProdstartExCapexPerShareSeries?: Array<number | null>; navByPeriodPerShareSeries?: Array<number | null>; yearsByPeriod?: Array<number | null>; productionStartPeriod?: number | null; discountRate?: number | null } | null } | null;
                             return projectPayload?.chartFlows ?? null;
                           })()}
                           projectDebug={(() => {
