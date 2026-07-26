@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInput, valueRangeChartHeader } from '../corporateChartRows.ts';
 import { buildValueRangeChartOptions } from '../valueRangeChartOptions.ts';
-import { buildValueRangeCurve } from '../valueRangeCurve.ts';
+import { buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from '../valueRangeCurve.ts';
 
 test('corporate rows use Project chart columns and annotate only today and project starts', () => {
   const rows = buildCorporateChartRows({
@@ -21,11 +21,11 @@ test('corporate rows use Project chart columns and annotate only today and proje
     ],
   }, { low: 4.5, high: 5.5, price: 2.1 });
 
-  assert.equal(valueRangeChartHeader.length, 15);
+  assert.equal(valueRangeChartHeader.length, 21);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
   assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.5, '      4,5', 5.7, '      5,7']);
-  assert.deepEqual(rows[2].slice(5), [null, null, null, null, null, null, null, null, null, null]);
+  assert.deepEqual(rows[2].slice(5, 15), [null, null, null, null, null, null, null, null, null, null]);
   assert.equal(rows[1][12], '      4,9');
   assert.equal(rows[1][14], '      5,7');
   assert.equal(rows.filter((row) => row[5] !== null).length, 1);
@@ -42,7 +42,20 @@ test('one production start always has separate low and high point/annotation col
     projectMarkers: [{ projectId: 'only', projectName: 'Never rendered', productionStartYear: 2030 }],
   }, { low: 3, high: 5, price: 2 });
   const start = rows[1];
-  assert.deepEqual(start, [2030, 5.2, 6.4 - 5.2, 5.2, 6.4, null, null, null, null, null, null, 5.2, '      5,2', 6.4, '      6,4']);
+  assert.deepEqual(start.slice(0, 15), [2030, 5.2, 6.4 - 5.2, 5.2, 6.4, null, null, null, null, null, null, 5.2, '      5,2', 6.4, '      6,4']);
+  assert.deepEqual(start.slice(15), [null, null, null, null, null, null]);
+  assert.deepEqual(rows[0].slice(15), [3, '      3,0', 'År: 2026\nHigh: 6,4\nLow: 3,0', 6.4, '      6,4', 'År: 2026\nHigh: 6,4\nLow: 3,0']);
+});
+
+test('peak helper selects the first equal maximum and formats both values with currency', () => {
+  const peak = findFirstHighPeak([
+    { year: 2028, high: 4, low: 2 },
+    { year: 2029, high: 7, low: 3 },
+    { year: 2030, high: 7, low: 3.5 },
+  ]);
+  assert.deepEqual(peak, { index: 1, year: 2029, high: 7, low: 3 });
+  assert.equal(formatPeakTooltip(peak!, (value) => value.toFixed(1), 'CAD'), 'År: 2029\nHigh: 7.0 CAD\nLow: 3.0 CAD');
+  assert.deepEqual(buildCorporateYearTicks({ rows: timeline(2028, 2031), projectMarkers: [] }, 2030).map((tick) => tick.v), [2028, 2030, 2031]);
 });
 
 test('canonical Corporate marker DCF maps to High even when the scalar fallback equals NAV', () => {

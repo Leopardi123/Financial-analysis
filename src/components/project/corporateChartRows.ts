@@ -1,4 +1,4 @@
-import { buildValueRangeChartRow, buildValueRangeCurve } from './valueRangeCurve.ts';
+import { buildValueRangeChartRow, buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from './valueRangeCurve.ts';
 
 export type CorporateChartInput = {
   rows: Array<{ period: number; year: number; npvPerShare: number | null; navPerShare: number | null; dcfPerShare: number | null; sharesPf: number | null }>;
@@ -22,6 +22,8 @@ export const valueRangeChartHeader = [
   'Current High', { role: 'annotation', type: 'string' },
   'TP Low', { role: 'annotation', type: 'string' },
   'TP High', { role: 'annotation', type: 'string' },
+  'Peak Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  'Peak High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
 ] as const;
 
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -53,6 +55,7 @@ export function clipCorporateChartInput(input: CorporateChartInput): CorporateCh
 export function buildCorporateChartRows(
   input: CorporateChartInput,
   today: { low: number | null; high: number | null; price: number | null; tpLow?: number | null; tpHigh?: number | null },
+  currencyCode?: string,
 ) {
   const productionStartYears = new Set<number>();
   for (const marker of input.projectMarkers) {
@@ -75,21 +78,27 @@ export function buildCorporateChartRows(
     dcfPresentSeriesRaw: input.rows.slice(tpOffset).map((row) => row.dcfPerShare),
   });
 
-  return input.rows.map((row, index) => {
+  const values = input.rows.map((row, index) => {
     const startMarker = input.projectMarkers.find((marker) => marker.productionStartYear === row.year);
-    const low = startMarker?.navPerShare ?? curve.low[index];
-    const high = startMarker?.dcfPerShare ?? curve.high[index];
-    return buildValueRangeChartRow({ year: row.year, low, high, currentPrice: today.price, annotateCurrent: index === 0, annotateProductionStart: productionStartYears.has(row.year), format: label });
+    return { year: row.year, low: startMarker?.navPerShare ?? curve.low[index], high: startMarker?.dcfPerShare ?? curve.high[index] };
   });
+  const peak = findFirstHighPeak(values);
+  return values.map(({ year, low, high }, index) => buildValueRangeChartRow({
+    year, low, high, currentPrice: today.price, annotateCurrent: index === 0,
+    annotateProductionStart: productionStartYears.has(year), format: label,
+    highlightPeak: index === peak?.index,
+    peakTooltip: peak ? formatPeakTooltip(peak, label, currencyCode) : null,
+  }));
 }
 
 /** Explicit formatted ticks prevent Google Charts from localizing years as e.g. 2,029. */
-export function buildCorporateYearTicks(input: CorporateChartInput): CorporateYearTick[] {
+export function buildCorporateYearTicks(input: CorporateChartInput, peakYear?: number): CorporateYearTick[] {
   const years = input.rows.map((row) => row.year);
   const required = new Set<number>([
     years[0],
     years[years.length - 1],
     ...input.projectMarkers.map((marker) => marker.productionStartYear).filter((year): year is number => typeof year === 'number'),
+    ...(typeof peakYear === 'number' ? [peakYear] : []),
   ]);
   return years.filter((year) => required.has(year)).map((year) => ({ v: year, f: String(year) }));
 }

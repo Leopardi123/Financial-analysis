@@ -58,6 +58,8 @@ export function buildValueRangeChartRow(input: {
   annotateProductionStart: boolean;
   format: (value: number) => string;
   currentPriceAnnotation?: string | null;
+  highlightPeak?: boolean;
+  peakTooltip?: string | null;
 }) {
   const orderedLow = input.low !== null && input.high !== null ? Math.min(input.low, input.high) : input.low;
   const orderedHigh = input.low !== null && input.high !== null ? Math.max(input.low, input.high) : input.high;
@@ -70,5 +72,25 @@ export function buildValueRangeChartRow(input: {
     input.annotateCurrent ? orderedHigh : null, input.annotateCurrent ? annotation(orderedHigh) : null,
     input.annotateProductionStart ? input.low : null, input.annotateProductionStart ? annotation(input.low) : null,
     input.annotateProductionStart ? input.high : null, input.annotateProductionStart ? annotation(input.high) : null,
+    input.highlightPeak ? orderedLow : null, input.highlightPeak ? annotation(orderedLow) : null, input.highlightPeak ? input.peakTooltip ?? null : null,
+    input.highlightPeak ? orderedHigh : null, input.highlightPeak ? annotation(orderedHigh) : null, input.highlightPeak ? input.peakTooltip ?? null : null,
   ];
+}
+
+export type ValueRangePeak = { index: number; year: number; high: number; low: number | null };
+
+/** Finds the first maximum High value. Keeping this here gives both chart modes identical peak semantics. */
+export function findFirstHighPeak(rows: Array<{ year: number; high: number | null; low: number | null }>): ValueRangePeak | null {
+  let peak: ValueRangePeak | null = null;
+  rows.forEach((row, index) => {
+    if (!finite(row.high)) return;
+    if (peak === null || row.high > peak.high) peak = { index, year: row.year, high: row.high, low: finite(row.low) ? row.low : null };
+  });
+  return peak;
+}
+
+export function formatPeakTooltip(peak: Pick<ValueRangePeak, 'year' | 'high' | 'low'>, format: (value: number) => string, currencyCode?: string): string {
+  const unit = currencyCode ? ` ${currencyCode}` : '';
+  const value = (number: number | null) => number === null ? 'n/a' : `${format(number)}${unit}`;
+  return `År: ${peak.year}\nHigh: ${value(peak.high)}\nLow: ${value(peak.low)}`;
 }

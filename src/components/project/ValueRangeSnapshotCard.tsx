@@ -1,10 +1,9 @@
 import { useMemo } from "react";
-import { Chart } from "react-google-charts";
 import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
 import { rescalePerShareSeries } from "./chartDenominator";
 import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInput, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
-import { buildValueRangeChartOptions } from "./valueRangeChartOptions";
-import { buildValueRangeChartRow, buildValueRangeCurve } from "./valueRangeCurve";
+import ValueRangeChart from "./ValueRangeChart";
+import { buildValueRangeChartRow, buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from "./valueRangeCurve";
 
 type TpMarker = {
   tp: number;
@@ -130,7 +129,7 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
 
 function isProjectChartDataTypeSafe(data: Array<Array<string | number | null | { role: string; type?: string }>>): boolean {
   if (!Array.isArray(data) || data.length < 2) return false;
-  const numericColumns = new Set([0, 1, 2, 3, 4, 5, 7, 9, 11, 13]);
+  const numericColumns = new Set([0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 18]);
   for (let rowIndex = 1; rowIndex < data.length; rowIndex += 1) {
     const row = data[rowIndex];
     if (!Array.isArray(row)) return false;
@@ -174,24 +173,26 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const rawLen = Math.max(dcfSeriesRawAll.length, navSeriesRawAll.length);
     if (rawLen < 1) return null;
 
-    const flowLen = Math.max(1, rawLen - 3);
-    const dcfSeriesRaw = dcfSeriesRawAll.slice(0, flowLen);
-    const navSeriesRaw = navSeriesRawAll.slice(0, flowLen);
+    const defaultFlowLen = Math.max(1, rawLen - 3);
 
     const yearNow = new Date().getUTCFullYear();
     const rawTpYear = Number.isInteger(tpYear) ? (tpYear as number) : (Number.isInteger(currentYear) ? (currentYear as number) + 1 : yearNow + 1);
     const yearTp = Math.max(yearNow + 1, rawTpYear);
     const tpOffset = Math.max(1, yearTp - yearNow);
-    const totalLen = tpOffset + flowLen;
-
-    const highTp = isFiniteNumber(tpHigh) ? tpHigh : (isFiniteNumber(dcfSeriesRaw[0]) ? dcfSeriesRaw[0] : null);
-    const lowTp = isFiniteNumber(tpLow) ? tpLow : (isFiniteNumber(navSeriesRaw[0]) ? navSeriesRaw[0] : null);
+    const highTp = isFiniteNumber(tpHigh) ? tpHigh : (isFiniteNumber(dcfSeriesRawAll[0]) ? dcfSeriesRawAll[0] : null);
+    const lowTp = isFiniteNumber(tpLow) ? tpLow : (isFiniteNumber(navSeriesRawAll[0]) ? navSeriesRawAll[0] : null);
     const lowToday = isFiniteNumber(npvLow) ? npvLow : null;
-
+    const fullCurve = buildValueRangeCurve({ totalLen: tpOffset + rawLen, tpOffset, lowToday, highToday: isFiniteNumber(npvHigh) ? npvHigh : null, lowTp, highTp, navSeriesRaw: navSeriesRawAll, dcfPresentSeriesRaw: dcfSeriesRawAll });
+    const fullPeak = findFirstHighPeak(fullCurve.high.map((high, index) => ({ year: yearNow + index, high, low: fullCurve.low[index] })));
+    const flowLen = Math.max(defaultFlowLen, fullPeak && fullPeak.index >= tpOffset ? fullPeak.index - tpOffset + 1 : 0);
+    const totalLen = tpOffset + flowLen;
+    const dcfSeriesRaw = dcfSeriesRawAll.slice(0, flowLen);
+    const navSeriesRaw = navSeriesRawAll.slice(0, flowLen);
     const curve = buildValueRangeCurve({ totalLen, tpOffset, lowToday, highToday: isFiniteNumber(npvHigh) ? npvHigh : null, lowTp, highTp, navSeriesRaw, dcfPresentSeriesRaw: dcfSeriesRaw });
     const inferredRate = curve.inferredRate;
     const highByIndex = curve.high;
     const lowByIndex = curve.low;
+    const peak = findFirstHighPeak(highByIndex.map((high, index) => ({ year: yearNow + index, high, low: lowByIndex[index] })));
     const highBeforeFixByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
     const highExponentBeforeByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
     const highExponentAfterByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
@@ -240,6 +241,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         year: yearNow + idx, low, high, currentPrice: currentMarker, annotateCurrent: idx === 0,
         annotateProductionStart: idx === tpOffset, format: formatPerShareValue,
         currentPriceAnnotation: currentMarker !== null && !suppressCurrentPriceLabel ? `      ${formatPerShareValue(currentMarker)}` : null,
+        highlightPeak: idx === peak?.index,
+        peakTooltip: peak ? formatPeakTooltip(peak, formatPerShareValue, currencyCode) : null,
       }));
     }
 
@@ -247,23 +250,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
     const data = [
-        [
-          'Index',
-          'Low',
-          'Band',
-          'Low boundary',
-          'High boundary',
-          'Current',
-          { role: 'annotation', type: 'string' },
-          'Current Low',
-          { role: 'annotation', type: 'string' },
-          'Current High',
-          { role: 'annotation', type: 'string' },
-          'TP Low',
-          { role: 'annotation', type: 'string' },
-          'TP High',
-          { role: 'annotation', type: 'string' },
-        ],
+        [...valueRangeChartHeader],
         ...rows,
       ] as (string | number | null | { role: string; type?: string })[][];
 
@@ -306,7 +293,9 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         { v: yearNow - 1, f: "" },
         { v: yearNow, f: String(yearNow) },
         { v: yearTp, f: String(yearTp) },
+        ...(peak ? [{ v: peak.year, f: String(peak.year) }] : []),
       ],
+      peakYear: peak?.year ?? yearNow,
       valueWindow,
       inferredRate,
       tpOffset,
@@ -318,7 +307,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         navSeriesRaw,
       },
     };
-  }, [canonicalSharesPostFinancing, chartFlows, currentYear, isProjectMode, npvHigh, npvLow, priceToday, projectDebug?.sharesPostFinancing, tpHigh, tpLow, tpYear]);
+  }, [canonicalSharesPostFinancing, chartFlows, currencyCode, currentYear, isProjectMode, npvHigh, npvLow, priceToday, projectDebug?.sharesPostFinancing, tpHigh, tpLow, tpYear]);
 
   const projectCurveDiagnosis = useMemo(() => {
     if (!projectChartModel) return null;
@@ -439,18 +428,23 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
   const corporateChartModel = useMemo(() => {
     if (!corporateTimeSeries?.rows?.length) return null;
     const chartWindow = clipCorporateChartInput(corporateTimeSeries as CorporateChartInput);
-    const renderedInput = chartWindow.input;
-    const rows = buildCorporateChartRows(renderedInput, { low: isFiniteNumber(npvLow) ? npvLow : null, high: isFiniteNumber(npvHigh) ? npvHigh : null, price: isFiniteNumber(priceToday) ? priceToday : null, tpLow: isFiniteNumber(tpLow) ? tpLow : null, tpHigh: isFiniteNumber(tpHigh) ? tpHigh : null });
+    const today = { low: isFiniteNumber(npvLow) ? npvLow : null, high: isFiniteNumber(npvHigh) ? npvHigh : null, price: isFiniteNumber(priceToday) ? priceToday : null, tpLow: isFiniteNumber(tpLow) ? tpLow : null, tpHigh: isFiniteNumber(tpHigh) ? tpHigh : null };
+    const fullRows = buildCorporateChartRows(corporateTimeSeries as CorporateChartInput, today, currencyCode);
+    const peak = findFirstHighPeak(fullRows.map((row) => ({ year: row[0] as number, low: row[1] as number | null, high: row[4] as number | null })));
+    const baselineEnd = chartWindow.effectiveChartEndYear ?? chartWindow.lastAvailableCorporateYear;
+    const effectiveEnd = peak && baselineEnd !== null ? Math.max(baselineEnd, peak.year) : baselineEnd;
+    const renderedInput = effectiveEnd === null ? chartWindow.input : { ...(corporateTimeSeries as CorporateChartInput), rows: corporateTimeSeries.rows.filter((row) => row.year <= effectiveEnd) };
+    const rows = buildCorporateChartRows(renderedInput, today, currencyCode);
     const domainValues = rows.flatMap((row) => [row[1], row[4], row[5]]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
     const years = renderedInput.rows.map((row) => row.year);
-    const ticks = buildCorporateYearTicks(renderedInput);
-    return { data: [valueRangeChartHeader, ...rows], ticks, valueWindow, yearMin: years[0] - 1, yearMax: chartWindow.effectiveChartEndYear ?? years[years.length - 1] };
-  }, [corporateTimeSeries, npvHigh, npvLow, priceToday, tpHigh, tpLow]);
+    const ticks = buildCorporateYearTicks(renderedInput, peak?.year);
+    return { data: [[...valueRangeChartHeader], ...rows], ticks, valueWindow, peakYear: peak?.year ?? years[0], yearMin: years[0] - 1, yearMax: effectiveEnd ?? years[years.length - 1] };
+  }, [corporateTimeSeries, currencyCode, npvHigh, npvLow, priceToday, tpHigh, tpLow]);
 
   if (!isProjectMode && corporateChartModel) {
-    return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><Chart chartType="ComboChart" width="100%" height="220px" data={corporateChartModel.data as never} options={buildValueRangeChartOptions({ currencyCode, ticks: corporateChartModel.ticks, yearMin: corporateChartModel.yearMin, yearMax: corporateChartModel.yearMax, valueWindow: corporateChartModel.valueWindow })} /></div>;
+    return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><ValueRangeChart {...corporateChartModel} currencyCode={currencyCode} /></div>;
   }
 
   if (isProjectMode) {
@@ -459,12 +453,14 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     }
     return (
       <div className="spot-range-chart-guard" style={{ marginTop: 8 }}>
-        <Chart
-          chartType="ComboChart"
-          width="100%"
-          height="220px"
+        <ValueRangeChart
           data={projectChartModel.data}
-          options={buildValueRangeChartOptions({ currencyCode, ticks: projectChartModel.ticks, yearMin: projectChartModel.yearNow - 1, yearMax: projectChartModel.yearNow + Math.max(1, projectChartModel.data.length - 2), valueWindow: projectChartModel.valueWindow })}
+          ticks={projectChartModel.ticks}
+          yearMin={projectChartModel.yearNow - 1}
+          yearMax={projectChartModel.yearNow + Math.max(1, projectChartModel.data.length - 2)}
+          peakYear={projectChartModel.peakYear}
+          valueWindow={projectChartModel.valueWindow}
+          currencyCode={currencyCode}
         />
         <details style={{ marginTop: 8 }}>
           <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>debugg fallande graf</summary>
