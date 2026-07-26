@@ -549,6 +549,8 @@ function buildProjectsSnapshotRequest(args: {
     shares_current: number;
     price_current_TargetCurrency: number;
   };
+  balanceSheet?: SnapshotRequest["balanceSheet"];
+  financingPlan?: SnapshotRequest["financingPlan"];
   manualMetalPrices?: SnapshotRequest["manualMetalPrices"];
   stressOptions?: SnapshotRequest["stressOptions"];
 }): SnapshotRequest {
@@ -559,6 +561,8 @@ function buildProjectsSnapshotRequest(args: {
     scenario: args.scenario,
     fx: args.fx,
     market: args.market,
+    balanceSheet: args.balanceSheet,
+    financingPlan: args.financingPlan,
     projects: args.projects,
     manualMetalPrices: args.manualMetalPrices,
     stressOptions: args.stressOptions,
@@ -570,6 +574,13 @@ function toInputNumber(value: string): number | undefined {
   if (!trimmed) return undefined;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function normalizedFinancingFractions(equityPctInput: string, debtPctInput: string): { equity: number; debt: number } {
+  const equity = Math.max(0, Math.min(100, toInputNumber(equityPctInput) ?? 100));
+  const debt = Math.max(0, Math.min(100, toInputNumber(debtPctInput) ?? 0));
+  const total = equity + debt;
+  return total > 0 ? { equity: equity / total, debt: debt / total } : { equity: 1, debt: 0 };
 }
 
 type AnalysisMode = "revenue" | "prerevenue";
@@ -1687,6 +1698,11 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding;
     const profilePriceCurrent = typeof profile?.price === "number" ? profile.price : undefined;
     const marketWarnings: string[] = [];
+    const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
+      .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+    const latestQuarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")]
+      .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+    const projectFinancingFractions = normalizedFinancingFractions(projectEquityPct, projectDebtPct);
     const marketFromProfile =
       isPositiveFinite(sharesCurrent) && isPositiveFinite(profilePriceCurrent)
         ? {
@@ -1762,6 +1778,18 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         },
         projects: projectsPayload,
         market: marketFromProfile,
+        balanceSheet: {
+          cash_t0_TargetCurrency: latestQuarterlyCash,
+          debt_t0_TargetCurrency: latestQuarterlyDebt,
+        },
+        financingPlan: {
+          use_cash_first: projectUseQuarterlyCash,
+          cash_use_percent: projectCashUsedPct / 100,
+          equity_fraction: projectFinancingFractions.equity,
+          debt_fraction: projectFinancingFractions.debt,
+          minimum_cash_reserve_TargetCurrency: 0,
+          equity_raise_price_TargetCurrency: profilePriceCurrent,
+        },
         manualMetalPrices,
       });
 
@@ -1819,6 +1847,11 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
           : undefined;
         const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding;
         const profilePriceCurrent = typeof profile?.price === "number" ? profile.price : undefined;
+        const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
+          .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+        const latestQuarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")]
+          .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+        const projectFinancingFractions = normalizedFinancingFractions(projectEquityPct, projectDebtPct);
         const marketFromProfile =
           isPositiveFinite(sharesCurrent) && isPositiveFinite(profilePriceCurrent)
             ? {
@@ -1838,6 +1871,15 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
           },
           projects: [{ projectId: selectedProjectId, rawJson: selectedProjectRawJson }],
           market: marketFromProfile,
+          balanceSheet: { cash_t0_TargetCurrency: latestQuarterlyCash, debt_t0_TargetCurrency: latestQuarterlyDebt },
+          financingPlan: {
+            use_cash_first: projectUseQuarterlyCash,
+            cash_use_percent: projectCashUsedPct / 100,
+            equity_fraction: projectFinancingFractions.equity,
+            debt_fraction: projectFinancingFractions.debt,
+            minimum_cash_reserve_TargetCurrency: 0,
+            equity_raise_price_TargetCurrency: profilePriceCurrent,
+          },
           manualMetalPrices,
         });
         const result = await postCorporateSnapshot({ ...request, stressOptions }, { refresh: lockedTargetCurrency !== "USD" });
@@ -1867,7 +1909,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return () => {
       cancelled = true;
     };
-  }, [selectedProjectId, selectedProjectRawJson, stressOptions, riskAdjustedDiscountRatePctInput, data?.balance, data?.income, profile, lockedTargetCurrency, fxSource, manualFxInput, manualMetalPrices]);
+  }, [selectedProjectId, selectedProjectRawJson, stressOptions, riskAdjustedDiscountRatePctInput, data?.balance, data?.income, profile, lockedTargetCurrency, fxSource, manualFxInput, manualMetalPrices, projectUseQuarterlyCash, projectCashUsedPct, projectEquityPct, projectDebtPct]);
 
   const corporateFinancingPlan = useMemo(() => {
     if (companyProjects.length === 0) return undefined;
@@ -1917,6 +1959,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding ?? 1;
       const quarterlyCashSeries = getFieldSeries(data, "balance", "cashAndCashEquivalents");
       const latestQuarterlyCash = [...quarterlyCashSeries].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+      const latestQuarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
       const profilePriceCurrent = typeof profile?.price === "number" && Number.isFinite(profile.price) && profile.price > 0
         ? profile.price
         : 1;
@@ -1935,7 +1978,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
               shares_current: sharesCurrent,
               price_current_TargetCurrency: profilePriceCurrent,
             },
-            balanceSheet: { cash_t0_TargetCurrency: latestQuarterlyCash },
+            balanceSheet: { cash_t0_TargetCurrency: latestQuarterlyCash, debt_t0_TargetCurrency: latestQuarterlyDebt },
             financingPlan: corporateFinancingPlan,
             financingPlanByProject: corporateFinancingPlan?.financingPlanByProject,
             scenario: { mode: "spot" },
@@ -3355,7 +3398,7 @@ Capital Available: ${availableLabel}`,
 
   const corporateChartTimeSeries = useMemo(() => {
     const source = corporateSnapshotData?.corporateValuationTimeSeries as {
-      rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; navPerShare: number | null; sharesPf: number | null }>;
+      rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null }>;
       projectMarkers?: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
     } | null | undefined;
     if (!source?.rows || !source.projectMarkers) return null;
@@ -3371,6 +3414,7 @@ Capital Available: ${availableLabel}`,
         npvPerShare: row.npvPerShare === null ? null : row.npvPerShare * scale,
         navPerShare: row.navPerShare === null ? null : row.navPerShare * scale,
         dcfPerShare: row.dcfPerShare === null ? null : row.dcfPerShare * scale,
+        dcfExCapexPerShare: row.dcfExCapexPerShare == null ? null : row.dcfExCapexPerShare * scale,
       })),
       projectMarkers: source.projectMarkers.map((marker) => ({
         ...marker,
@@ -5753,6 +5797,7 @@ Capital Available: ${availableLabel}`,
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
                           corporateTimeSeries={corporateChartTimeSeries}
+                          discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
                           currencyCode={lockedTargetCurrency}
                         />
                         {debugEnabled && corporateTimelineDebug && (
@@ -6120,7 +6165,7 @@ Capital Available: ${availableLabel}`,
                           tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
                           canonicalSharesPostFinancing={projectViewMetrics.marketBox.sharesPf.value}
                           chartFlows={(() => {
-                            const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null> } | null } | null;
+                            const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null>; dcfProdstartExCapexPerShareSeries?: Array<number | null>; navByPeriodPerShareSeries?: Array<number | null>; yearsByPeriod?: Array<number | null>; productionStartPeriod?: number | null; discountRate?: number | null } | null } | null;
                             return projectPayload?.chartFlows ?? null;
                           })()}
                           projectDebug={(() => {

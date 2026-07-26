@@ -3318,6 +3318,23 @@ export async function runCorporateSnapshotPipeline(args: {
         const rangeEnd = Math.min(aggregationEffective.corporateMasterN, tpEff + 5);
         const dcfProdstartPresentPerShareSeries: Array<number | null> = [];
         const navProdstartPerShareSeries: Array<number | null> = [];
+        const dcfProdstartExCapexPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
+        const navByPeriodPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
+        for (let period = 0; period <= rangeEnd; period += 1) {
+          const periodMetrics = computeLista2CfDcfMetrics({
+            fcfUSD_total: aggregationEffective.fcffUSD_total,
+            capexUSD_total: aggregationEffective.capexUSD_total,
+            masterN: aggregationEffective.corporateMasterN,
+            productionStartPeriod: period,
+            discountRate: input.discountRate,
+            shares_post_financing: shares_post_financing_fd_effective,
+            fx_USD_to_TargetCurrency: fxRate,
+            npvToday_USD: aggregationEffective.NPV_today_USD,
+            netCash_t0_post_TargetCurrency: netCashForNavTarget,
+          }).metrics;
+          dcfProdstartExCapexPerShareSeries[period] = periodMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
+          navByPeriodPerShareSeries[period] = periodMetrics.NAV_prodStart_perShare_TargetCurrency;
+        }
         for (let tp = tpEff; tp <= rangeEnd; tp += 1) {
           const metricsAtTp = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
@@ -3336,6 +3353,11 @@ export async function runCorporateSnapshotPipeline(args: {
         return {
           dcfProdstartPresentPerShareSeries,
           navProdstartPerShareSeries,
+          dcfProdstartExCapexPerShareSeries,
+          navByPeriodPerShareSeries,
+          yearsByPeriod: aggregationEffective.corporateYearsByPeriod.slice(0, rangeEnd + 1),
+          productionStartPeriod: tpEff,
+          discountRate: input.discountRate,
         };
     })();
     const corporateValuationTimeSeries = {
@@ -3357,6 +3379,8 @@ export async function runCorporateSnapshotPipeline(args: {
           navAbsolute: metricsAtPeriod.NAV_prodStart_TargetCurrency,
           npvAbsolute: metricsAtPeriod.NPV_prodStart_TargetCurrency,
           dcfPerShare: metricsAtPeriod.DCF_prodStart_present_perShare_TargetCurrency,
+          dcfExCapexAbsolute: metricsAtPeriod.DCF_prodStart_exCapex_TargetCurrency,
+          dcfExCapexPerShare: metricsAtPeriod.DCF_prodStart_exCapex_perShare_TargetCurrency,
           navPerShare: metricsAtPeriod.NAV_prodStart_perShare_TargetCurrency,
           npvPerShare: metricsAtPeriod.NPV_prodStart_perShare_TargetCurrency,
           sharesPf: shares_post_financing_fd_effective,
