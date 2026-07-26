@@ -14,6 +14,7 @@ import { getCompanyProject, getCompanyProjectsBySymbol, type CompanyProjectSumma
 import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
+import { EXTRA_SHARES_HELP, extraSharesStorageKey, formatExtraSharesInput, parseExtraShares } from "../lib/market/extraShares.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
 import { rowHasDisplayValue } from "../lib/project/rowDisplayValue.ts";
 import { extractFailingMetals, extractFallbackOrFailingPriceMetals, rowHasMetalRevenueFailure } from "./projectMetalRevenueDiagnostics.ts";
@@ -1324,6 +1325,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectDebtPct, setProjectDebtPct] = useState("0");
   const [projectUseQuarterlyCash, setProjectUseQuarterlyCash] = useState(false);
   const [projectCashUsedPct, setProjectCashUsedPct] = useState(100);
+  const [projectExtraSharesInput, setProjectExtraSharesInput] = useState("0");
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
   const [npvTracePersistResult, setNpvTracePersistResult] = useState<{ url: string | null; fileName: string | null; savedAtUtc: string | null; error: string | null }>({ url: null, fileName: null, savedAtUtc: null, error: null });
   const [manualPriceStoreVersion, setManualPriceStoreVersion] = useState(0);
@@ -1383,6 +1385,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [corporateProjectEquityPct, setCorporateProjectEquityPct] = useState<Record<string, number>>({});
   const [corporateUseQuarterlyCash, setCorporateUseQuarterlyCash] = useState(false);
   const [corporateCashUsedPct, setCorporateCashUsedPct] = useState(100);
+  const [corporateExtraSharesInput, setCorporateExtraSharesInput] = useState("0");
   const [scenarioMode] = useState<"spot" | "percentile" | "fixed">("spot");
   const [scenarioLookbackYearsInput] = useState("10");
   const [scenarioPercentileInput] = useState("50");
@@ -1391,6 +1394,27 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [manualFxInput] = useState("");
   const debugEnabled = isDebugEnabledInClient();
   const valueIntervalDebugVisible = isDebugEnabledByQueryParam();
+
+  useEffect(() => {
+    if (!ticker || !selectedProjectId) return;
+    setProjectExtraSharesInput(window.localStorage.getItem(extraSharesStorageKey('project', ticker, selectedProjectId)) ?? '0');
+  }, [ticker, selectedProjectId]);
+
+  useEffect(() => {
+    if (!ticker) return;
+    setCorporateExtraSharesInput(window.localStorage.getItem(extraSharesStorageKey('corporate', ticker)) ?? '0');
+  }, [ticker]);
+
+  const updateExtraShares = (scope: 'project' | 'corporate', raw: string) => {
+    const digits = raw.replace(/\D/g, '');
+    if (scope === 'project') {
+      setProjectExtraSharesInput(digits);
+      if (ticker && selectedProjectId) window.localStorage.setItem(extraSharesStorageKey(scope, ticker, selectedProjectId), digits || '0');
+    } else {
+      setCorporateExtraSharesInput(digits);
+      if (ticker) window.localStorage.setItem(extraSharesStorageKey(scope, ticker), digits || '0');
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -2951,6 +2975,7 @@ Capital Available: ${availableLabel}`,
       masterN: inputs.masterN,
       sharesCurrent: inputs.sharesCurrent,
       sharesPostFinancingInput: inputs.sharesPostFinancing,
+      extraShares: parseExtraShares(projectExtraSharesInput),
       priceCurrentTarget: inputs.price,
       cashCurrentTarget: latestQuarterlyCash,
       debtCurrentTarget: inputs.debt0,
@@ -2976,7 +3001,7 @@ Capital Available: ${availableLabel}`,
         cashUsePercent: projectCashUsedPct / 100,
       },
     });
-  }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   const corporateViewMetrics = useMemo(() => {
     if (!corporateSnapshotData) return null;
@@ -3000,6 +3025,7 @@ Capital Available: ${availableLabel}`,
       masterN: inputs.masterN,
       sharesCurrent: inputs.sharesCurrent,
       sharesPostFinancingInput: inputs.sharesPostFinancing,
+      extraShares: parseExtraShares(corporateExtraSharesInput),
       priceCurrentTarget: inputs.price,
       cashCurrentTarget: asNum(corporateFinancing.cash_for_nav_TargetCurrency) ?? inputs.cash0,
       debtCurrentTarget: inputs.debt0,
@@ -3071,7 +3097,7 @@ Capital Available: ${availableLabel}`,
         Kapitalavkastning_per_Year: toMetricValue(corporateLista3.Kapitalavkastning_per_Year, "Missing corporate.lista3Metrics.Kapitalavkastning_per_Year"),
       },
     };
-  }, [corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [corporateExtraSharesInput, corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
   useEffect(() => {
     if (!debugEnabled) return;
@@ -3194,6 +3220,7 @@ Capital Available: ${availableLabel}`,
     const sharesPf = typeof financing.shares_post_financing === "number" && Number.isFinite(financing.shares_post_financing) && financing.shares_post_financing > 0
       ? financing.shares_post_financing
       : null;
+    const sharesPfAdjusted = sharesPf === null ? null : sharesPf + parseExtraShares(corporateExtraSharesInput);
     const cashT0 = typeof financing.cash_t0_post_TargetCurrency === "number" && Number.isFinite(financing.cash_t0_post_TargetCurrency)
       ? financing.cash_t0_post_TargetCurrency
       : null;
@@ -3244,10 +3271,10 @@ Capital Available: ${availableLabel}`,
           : null;
 
         const value = (() => {
-          if (metricKey === "NPV_prodStart_perShare") return npvProdStartPerShare;
+          if (metricKey === "NPV_prodStart_perShare") return npvProdStart !== null && sharesPfAdjusted ? npvProdStart / sharesPfAdjusted : npvProdStartPerShare;
           if (metricKey === "NPV_prodStart") return npvProdStart;
-          if (metricKey === "NAV_prodStart_perShare") return navProdStartPerShare;
-          if (metricKey === "DCF_perShare") return dcfProdStartPerShare;
+          if (metricKey === "NAV_prodStart_perShare") return navProdStart !== null && sharesPfAdjusted ? navProdStart / sharesPfAdjusted : navProdStartPerShare;
+          if (metricKey === "DCF_perShare") return dcfProdStart !== null && sharesPfAdjusted ? dcfProdStart / sharesPfAdjusted : dcfProdStartPerShare;
           if (metricKey === "DCF_Target") return dcfProdStart;
           return navProdStart;
         })();
@@ -3289,7 +3316,7 @@ Capital Available: ${availableLabel}`,
     }
 
     return result;
-  }, [corporateSnapshotData, debugEnabled, lockedTargetCurrency]);
+  }, [corporateExtraSharesInput, corporateSnapshotData, debugEnabled, lockedTargetCurrency]);
 
   const corporateProdStartMarkerTextByKey = useMemo(() => {
     return Object.fromEntries(
@@ -3306,16 +3333,20 @@ Capital Available: ${availableLabel}`,
       && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_TargetCurrency)
       ? formatMetricValue({ value: corporateSnapshotData.DCF_prodStart_present_TargetCurrency, reason: null }, "money", lockedTargetCurrency)
       : null;
-    const discountedPerShare = typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number"
-      && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
-      ? formatMetricValue({ value: corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency, reason: null }, "money", lockedTargetCurrency)
+    const adjustedShares = corporateViewMetrics?.marketBox.sharesPf.value ?? null;
+    const discountedPerShareValue = typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number" && adjustedShares !== null && adjustedShares > 0
+      ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency / adjustedShares
+      : corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency;
+    const discountedPerShare = typeof discountedPerShareValue === "number"
+      && Number.isFinite(discountedPerShareValue)
+      ? formatMetricValue({ value: discountedPerShareValue, reason: null }, "money", lockedTargetCurrency)
       : null;
 
     return {
       DCF_Target_discounted: discounted,
       DCF_Target_discounted_perShare: discountedPerShare,
     } as const;
-  }, [corporateSnapshotData, lockedTargetCurrency]);
+  }, [corporateSnapshotData, corporateViewMetrics, lockedTargetCurrency]);
 
   const corporateAlwaysMarkerMetricKeys = useMemo(
     () => new Set<string>(["DCF_Target", "DCF_perShare"]),
@@ -3330,15 +3361,24 @@ Capital Available: ${availableLabel}`,
     if (!source?.rows || !source.projectMarkers) return null;
     const navByYear = new Map((corporateProdStartMarkerValuesByKey.NAV_prodStart_perShare ?? []).map((row) => [Number(row.year), row.value]));
     const dcfByYear = new Map((corporateProdStartMarkerValuesByKey.DCF_perShare ?? []).map((row) => [Number(row.year), row.value]));
+    const calculatedShares = source.rows.find((row) => typeof row.sharesPf === 'number' && row.sharesPf > 0)?.sharesPf ?? null;
+    const adjustedShares = calculatedShares === null ? null : calculatedShares + parseExtraShares(corporateExtraSharesInput);
+    const scale = calculatedShares !== null && adjustedShares !== null && adjustedShares > 0 ? calculatedShares / adjustedShares : 1;
     return {
-      rows: source.rows,
+      rows: source.rows.map((row) => ({
+        ...row,
+        sharesPf: adjustedShares ?? row.sharesPf,
+        npvPerShare: row.npvPerShare === null ? null : row.npvPerShare * scale,
+        navPerShare: row.navPerShare === null ? null : row.navPerShare * scale,
+        dcfPerShare: row.dcfPerShare === null ? null : row.dcfPerShare * scale,
+      })),
       projectMarkers: source.projectMarkers.map((marker) => ({
         ...marker,
         navPerShare: marker.productionStartYear === null ? null : navByYear.get(marker.productionStartYear) ?? null,
         dcfPerShare: marker.productionStartYear === null ? null : dcfByYear.get(marker.productionStartYear) ?? null,
       })),
     };
-  }, [corporateProdStartMarkerValuesByKey, corporateSnapshotData]);
+  }, [corporateExtraSharesInput, corporateProdStartMarkerValuesByKey, corporateSnapshotData]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
@@ -5596,6 +5636,10 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
+                      <label className="rr-input-row" style={{ marginTop: 10, display: "grid", gap: 4 }}>
+                        <span className="compact-metric-label-wrap"><span>Extra aktier</span><InfoPopover id="corporate-extra-shares" openId={openInfoId} onToggle={(id) => setOpenInfoId((prev) => prev === id ? null : id)} onClose={() => setOpenInfoId(null)} title="Extra aktier" sections={[{ heading: "Info", lines: [EXTRA_SHARES_HELP] }]} /></span>
+                        <input aria-label="Extra aktier" inputMode="numeric" pattern="[0-9 ]*" value={formatExtraSharesInput(corporateExtraSharesInput)} onChange={(event) => updateExtraShares('corporate', event.target.value)} onBlur={() => { if (!corporateExtraSharesInput) updateExtraShares('corporate', '0'); }} />
+                      </label>
                     </section>
                   </div>
 
@@ -6056,6 +6100,10 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
+                      <label className="rr-input-row" style={{ marginTop: 10, display: "grid", gap: 4 }}>
+                        <span className="compact-metric-label-wrap"><span>Extra aktier</span><InfoPopover id="project-extra-shares" openId={openInfoId} onToggle={(id) => setOpenInfoId((prev) => prev === id ? null : id)} onClose={() => setOpenInfoId(null)} title="Extra aktier" sections={[{ heading: "Info", lines: [EXTRA_SHARES_HELP] }]} /></span>
+                        <input aria-label="Extra aktier" inputMode="numeric" pattern="[0-9 ]*" value={formatExtraSharesInput(projectExtraSharesInput)} onChange={(event) => updateExtraShares('project', event.target.value)} onBlur={() => { if (!projectExtraSharesInput) updateExtraShares('project', '0'); }} />
+                      </label>
                     </section>
                   </div>
 

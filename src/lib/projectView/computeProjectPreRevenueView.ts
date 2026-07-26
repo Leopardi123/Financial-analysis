@@ -27,6 +27,8 @@ export type ProjectViewInputs = {
   masterN: number | null;
   sharesCurrent: NullableNumber;
   sharesPostFinancingInput?: NullableNumber;
+  /** A user-controlled increment applied after, without mutating, financing. */
+  extraShares?: number;
   priceCurrentTarget: NullableNumber;
   cashCurrentTarget: NullableNumber;
   debtCurrentTarget: NullableNumber;
@@ -373,7 +375,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     ? input.sharesPostFinancingInput as number
     : null;
   const sharesPfComputed = sharesCurrent !== null ? sharesCurrent + (newShares ?? 0) : null;
-  const sharesPf = input.financing.usePrecomputedFinancing ? sharesPostFinancingInput : (sharesPfComputed ?? sharesPostFinancingInput);
+  const sharesPfCalculated = input.financing.usePrecomputedFinancing ? sharesPostFinancingInput : (sharesPfComputed ?? sharesPostFinancingInput);
+  const extraShares = finite(input.extraShares) ? Math.max(0, Math.floor(input.extraShares as number)) : 0;
+  const sharesPf = sharesPfCalculated !== null ? sharesPfCalculated + extraShares : null;
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
   // FCFF already deducts the complete construction CAPEX. Deducting cash used for
