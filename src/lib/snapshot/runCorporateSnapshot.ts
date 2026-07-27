@@ -7,6 +7,7 @@ import { aggregateProjectsCorporateV1 } from '../corporate/aggregateProjects.ts'
 import { computeCorporateFinancing } from '../corporate/financing/compute.ts';
 import { computeCorporateCashWaterfall } from '../corporate/financing/cashWaterfall.ts';
 import { resolveCashForNav } from '../corporate/financing/navCashBridge.ts';
+import { buildCanonicalHighSeries } from './highSeries.ts';
 import { deriveBuildFundingNeedUSD } from '../corporate/financing/deriveBuildFundingNeed.ts';
 import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnapshot.ts';
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
@@ -3359,6 +3360,11 @@ export async function runCorporateSnapshotPipeline(args: {
           dcfProdstartExCapexPerShareSeries[period - valuationStartPeriod] = periodMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
           navByPeriodPerShareSeries[period - valuationStartPeriod] = periodMetrics.NAV_prodStart_perShare_TargetCurrency;
         }
+        const canonicalHigh = buildCanonicalHighSeries({
+          rollingDcfSeries: dcfProdstartExCapexPerShareSeries,
+          productionStartPeriod: Math.max(0, tpEff - valuationStartPeriod),
+          discountRate: input.discountRate,
+        });
         for (let tp = Math.max(tpEff, valuationStartPeriod); tp <= rangeEnd; tp += 1) {
           const metricsAtTp = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
@@ -3377,15 +3383,14 @@ export async function runCorporateSnapshotPipeline(args: {
         return {
           dcfProdstartPresentPerShareSeries,
           navProdstartPerShareSeries,
-          dcfProdstartExCapexPerShareSeries,
+          dcfProdstartExCapexPerShareSeries: canonicalHigh,
           navByPeriodPerShareSeries,
           yearsByPeriod: aggregationEffective.corporateYearsByPeriod.slice(valuationStartPeriod, rangeEnd + 1),
           productionStartPeriod: tpEff === null ? null : Math.max(0, tpEff - valuationStartPeriod),
           discountRate: input.discountRate,
         };
     })();
-    const corporateValuationTimeSeries = {
-      rows: aggregationEffective.corporateYearsByPeriod.slice(valuationStartPeriod).map((year, displayPeriod) => {
+    const corporateRows = aggregationEffective.corporateYearsByPeriod.slice(valuationStartPeriod).map((year, displayPeriod) => {
         const period = displayPeriod + valuationStartPeriod;
         const metricsAtPeriod = computeLista2CfDcfMetrics({
           fcfUSD_total: aggregationEffective.fcffUSD_total,
@@ -3410,7 +3415,23 @@ export async function runCorporateSnapshotPipeline(args: {
           npvPerShare: metricsAtPeriod.NPV_prodStart_perShare_TargetCurrency,
           sharesPf: shares_post_financing_fd_effective,
         };
-      }),
+      });
+    const corporateHighAbsolute = buildCanonicalHighSeries({
+      rollingDcfSeries: corporateRows.map((row) => row.dcfExCapexAbsolute),
+      productionStartPeriod: Math.max(0, (tpEff ?? valuationStartPeriod) - valuationStartPeriod),
+      discountRate: input.discountRate,
+    });
+    const corporateHighPerShare = buildCanonicalHighSeries({
+      rollingDcfSeries: corporateRows.map((row) => row.dcfExCapexPerShare),
+      productionStartPeriod: Math.max(0, (tpEff ?? valuationStartPeriod) - valuationStartPeriod),
+      discountRate: input.discountRate,
+    });
+    corporateRows.forEach((row, index) => {
+      row.dcfExCapexAbsolute = corporateHighAbsolute[index];
+      row.dcfExCapexPerShare = corporateHighPerShare[index];
+    });
+    const corporateValuationTimeSeries = {
+      rows: corporateRows,
       projectMarkers: projectsForBuildFunding.map((project) => {
         const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
         const productionYear = project.yearsByPeriod[project.productionStartPeriod] ?? null;

@@ -36,17 +36,25 @@ test('Viscaria supplied v2 arrays reproduce canonical FCFF period by period', ()
   assert.equal(explicitNetRevenue[3], 237_158_835, 'base FCFF uses supplied total net revenue without re-adding by-product credits');
 });
 
-test('rolling Viscaria DCF, High and NAV use remaining rather than historical CAPEX', () => {
+test('Viscaria High uses the production-start anchor before TP and rolling DCF from TP', () => {
+  const rolling = expectedFcff.map((_, t) => expectedFcff.slice(t).reduce((sum, value, offset) => sum + value / 1.1 ** offset, 0));
+  const high = rolling.map((value, t) => t < productionStartPeriod
+    ? rolling[productionStartPeriod] / 1.1 ** (productionStartPeriod - t)
+    : value);
   for (let t = 0; t <= masterN; t += 1) {
     const metrics = computeLista2CfDcfMetrics({ fcfUSD_total: phase1.fcffUSD, capexUSD_total: capex, masterN, productionStartPeriod: t, discountRate: 0.1, shares_post_financing: 1, fx_USD_to_TargetCurrency: 1, npvToday_USD: 0, netCash_t0_post_TargetCurrency: 0 }).metrics;
     const dcfControl = expectedFcff.slice(t).reduce((sum, value, offset) => sum + value / 1.1 ** offset, 0);
-    const remainingCapex = capex.slice(t).reduce((sum, value) => sum + value, 0);
     const historicalCapex = capex.slice(0, t).reduce((sum, value) => sum + value, 0);
     assert.ok(Math.abs((metrics.NPV_prodStart_USD as number) - dcfControl) < 0.02, `rolling NPV t=${t}`);
-    assert.ok(Math.abs((metrics.DCF_prodStart_exCapex_USD as number) - (dcfControl + remainingCapex)) < 0.02, `High t=${t}`);
+    if (t >= productionStartPeriod) assert.ok(Math.abs((metrics.DCF_prodStart_exCapex_USD as number) - high[t]) < 0.02, `rolling High t=${t}`);
     assert.ok(Math.abs((metrics.NAV_prodStart_TargetCurrency as number) - dcfControl) < 0.02, `NAV t=${t}`);
     if (historicalCapex > 0) assert.notEqual(metrics.NAV_prodStart_TargetCurrency, dcfControl - historicalCapex);
   }
+  assert.ok(Math.abs(high[0] - rolling[productionStartPeriod] / 1.1 ** 2) < 0.02);
+  assert.ok(Math.abs(high[1] - rolling[productionStartPeriod] / 1.1) < 0.02);
+  assert.equal(high[productionStartPeriod], rolling[productionStartPeriod]);
+  assert.equal(high[productionStartPeriod + 1], rolling[productionStartPeriod + 1]);
+  assert.notEqual(high[productionStartPeriod], rolling[productionStartPeriod] + capex[productionStartPeriod]);
 });
 
 test('Viscaria funding window excludes 2025, includes current 2026 and first-production 2027 CAPEX', () => {

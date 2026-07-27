@@ -187,14 +187,10 @@ export function computeLista2CfDcfMetrics(input: Input): {
   if (remainingInitialCapexUSD === null) {
     warnings.push('Lista2 CF+DCF rolling metrics set to null: missing remaining capexUSD_total from valuation period');
   }
-  // FCFF already contains all remaining initial CAPEX. Gross it up only for the
-  // explicitly ex-initial-CAPEX High series; rolling project NPV remains FCFF DCF.
-  const dcfProdStartExInitialCapexUSD = remainingInitialCapexUSD === null
-    ? null
-    : dcfProdStart_exCapex + remainingInitialCapexUSD;
-  const dcfProdStartPresentExInitialCapexUSD = dcfProdStartExInitialCapexUSD === null
-    ? null
-    : dcfProdStartExInitialCapexUSD * dfToToday_tp;
+  // Canonical High anchor: the DCF at the supplied production-start period.
+  // Initial CAPEX is never added back period by period. Callers that render a
+  // pre-production curve discount this single anchor back from the real TP.
+  const dcfProdStartPresentUSD = dcfProdStart_exCapex * dfToToday_tp;
   const NPV_prodStart_USD =
     Number.isFinite(dcfProdStart_exCapex) ? dcfProdStart_exCapex : null;
   const NPV_prodStart_TargetCurrency = toTarget(NPV_prodStart_USD, fx);
@@ -219,17 +215,17 @@ export function computeLista2CfDcfMetrics(input: Input): {
       CF_LOM_USD: cfLom,
       CF_LOM_perShare_USD,
       CF_LOM_prodStart_perShare_USD: CF_LOM_perShare_USD,
-      DCF_prodStart_exCapex_USD: dcfProdStartExInitialCapexUSD,
-      DCF_prodStart_exCapex_perShare_USD: toPerShare(dcfProdStartExInitialCapexUSD, shares),
-      DCF_prodStart_present_USD: dcfProdStartPresentExInitialCapexUSD,
-      DCF_prodStart_present_perShare_USD: toPerShare(dcfProdStartPresentExInitialCapexUSD, shares),
+      DCF_prodStart_exCapex_USD: dcfProdStart_exCapex,
+      DCF_prodStart_exCapex_perShare_USD: toPerShare(dcfProdStart_exCapex, shares),
+      DCF_prodStart_present_USD: dcfProdStartPresentUSD,
+      DCF_prodStart_present_perShare_USD: toPerShare(dcfProdStartPresentUSD, shares),
       CF_LOM_TargetCurrency,
       CF_LOM_perShare_TargetCurrency,
       CF_LOM_prodStart_perShare_TargetCurrency: CF_LOM_perShare_TargetCurrency,
-      DCF_prodStart_exCapex_TargetCurrency: toTarget(dcfProdStartExInitialCapexUSD, fx),
-      DCF_prodStart_exCapex_perShare_TargetCurrency: toTarget(toPerShare(dcfProdStartExInitialCapexUSD, shares), fx),
-      DCF_prodStart_present_TargetCurrency: toTarget(dcfProdStartPresentExInitialCapexUSD, fx),
-      DCF_prodStart_present_perShare_TargetCurrency: toTarget(toPerShare(dcfProdStartPresentExInitialCapexUSD, shares), fx),
+      DCF_prodStart_exCapex_TargetCurrency: toTarget(dcfProdStart_exCapex, fx),
+      DCF_prodStart_exCapex_perShare_TargetCurrency: toTarget(toPerShare(dcfProdStart_exCapex, shares), fx),
+      DCF_prodStart_present_TargetCurrency: toTarget(dcfProdStartPresentUSD, fx),
+      DCF_prodStart_present_perShare_TargetCurrency: toTarget(toPerShare(dcfProdStartPresentUSD, shares), fx),
       NAV_prodStart_TargetCurrency,
       NAV_prodStart_perShare_TargetCurrency,
       NPV_prodStart_USD,
@@ -241,8 +237,8 @@ export function computeLista2CfDcfMetrics(input: Input): {
         cfDenominator !== null && input.npvToday_USD !== null && Number.isFinite(input.npvToday_USD)
           ? input.npvToday_USD / cfDenominator
           : null,
-      DCF_present_over_ETLV: cfDenominator !== null && dcfProdStartPresentExInitialCapexUSD !== null ? dcfProdStartPresentExInitialCapexUSD / cfDenominator : null,
-      DCF_prodStart_over_ETLV: cfDenominator !== null && dcfProdStartExInitialCapexUSD !== null ? dcfProdStartExInitialCapexUSD / cfDenominator : null,
+      DCF_present_over_ETLV: cfDenominator !== null ? dcfProdStartPresentUSD / cfDenominator : null,
+      DCF_prodStart_over_ETLV: cfDenominator !== null ? dcfProdStart_exCapex / cfDenominator : null,
     },
     warnings,
     errors,

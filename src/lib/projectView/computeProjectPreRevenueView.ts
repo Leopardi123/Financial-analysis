@@ -430,9 +430,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     return sum;
   })() : null;
   const remainingInitialCapexUSD = tp !== null ? sumRange(input.capexUSD, tp, input.capexUSD.length - 1) : null;
-  const dcfProdStartExCapexUSD = rollingFcffDcfUSD !== null && remainingInitialCapexUSD !== null
-    ? rollingFcffDcfUSD + Math.abs(remainingInitialCapexUSD)
-    : null;
+  // High is the production-start DCF anchor, not rolling FCFF plus a CAPEX
+  // add-back. The pre-production chart discounts this anchor backwards.
+  const dcfProdStartExCapexUSD = rollingFcffDcfUSD;
 
   const dcfTarget = dcfProdStartExCapexUSD !== null && fx !== null ? dcfProdStartExCapexUSD * fx : null;
 

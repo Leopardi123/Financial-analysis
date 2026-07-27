@@ -918,6 +918,12 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   assert.equal(chartFlows.productionStartPeriod, productionStartPeriod);
   assert.equal(chartFlows.discountRate, body.discountRate);
   assert.equal(chartFlows.yearsByPeriod[productionStartPeriod] - chartFlows.yearsByPeriod[0], productionStartPeriod);
+  const highAtProduction = chartFlows.dcfProdstartExCapexPerShareSeries[productionStartPeriod] as number;
+  for (let period = 0; period < productionStartPeriod; period += 1) {
+    const expected = highAtProduction / (1 + (body.discountRate as number)) ** (productionStartPeriod - period);
+    assert.ok(Math.abs((chartFlows.dcfProdstartExCapexPerShareSeries[period] as number) - expected) < 1e-12);
+  }
+  assert.equal(highAtProduction, result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency);
   const corporateRows = (result.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ dcfExCapexPerShare: number | null; navPerShare: number | null }> } }).corporateValuationTimeSeries.rows;
   for (let period = 0; period < chartFlows.dcfProdstartExCapexPerShareSeries.length; period += 1) {
     assert.equal(chartFlows.dcfProdstartExCapexPerShareSeries[period], corporateRows[period].dcfExCapexPerShare);
@@ -999,7 +1005,7 @@ test('corporate modeled milestones exclude tp=0 projects and include future tp>0
 });
 
 
-test('corporate prod-start markers apply incremental initial capex windows to NPV and NAV', async () => {
+test('corporate prod-start markers keep High independent of incremental CAPEX and bridge NAV from NPV', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;
   const template = JSON.parse(JSON.stringify(projects[0])) as Record<string, unknown>;
@@ -1093,10 +1099,8 @@ test('corporate prod-start markers apply incremental initial capex windows to NP
     const nav = metrics?.NAV_prodStart_TargetCurrency as number;
     const initialCapex = metrics?.InitialCAPEX_incremental_TargetCurrency as number;
 
-    if (initialCapex > 0) {
-      assert.notEqual(dcf, npv);
-    }
-    assert.ok(Math.abs((dcf - npv) - initialCapex) <= 0.01);
+    assert.ok(initialCapex >= 0);
+    assert.ok(Math.abs(dcf - npv) <= 0.01, 'High must not add the informational CAPEX window back');
     const cashForNav: number | null = result.snapshot.financing.cash_for_nav_TargetCurrency ?? null;
     const debtPost: number | null = result.snapshot.financing.debt_t0_post_TargetCurrency;
     assert.notEqual(cashForNav, null);
