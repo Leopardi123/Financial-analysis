@@ -16,6 +16,8 @@ export type CorporateFinancingInput = {
     minimum_cash_reserve_TargetCurrency?: number | null;
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
+    /** Defaults to reported_t0; this choice must not affect the funding waterfall. */
+    nav_cash_definition?: 'reported_t0' | 'pro_forma_after_funding';
   } | null;
   buildFundingNeed_USD?: number | null;
 
@@ -35,6 +37,7 @@ export type CorporateFinancingOutput = {
   total_internal_cash_used_TargetCurrency?: number | null;
   closing_corporate_cash_TargetCurrency?: number | null;
   cash_for_nav_TargetCurrency?: number | null;
+  nav_cash_definition?: 'reported_t0' | 'pro_forma_after_funding';
   cash_used_for_build_TargetCurrency: number | null;
   cash_t0_post_TargetCurrency: number | null;
 

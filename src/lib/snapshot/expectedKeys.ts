@@ -1,6 +1,7 @@
 export const EXPECTED_SNAPSHOT_KEYS: string[] = [
   'NPV_today_TargetCurrency',
   'NAV_today_TargetCurrency',
+  'NAV_today_perShare_TargetCurrency',
   'CF_LOM_USD',
   'CF_LOM_perShare_USD',
   'CF_LOM_prodStart_perShare_USD',

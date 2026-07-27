@@ -721,6 +721,8 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
     equity_fraction: 0.5,
     debt_fraction: 0.5,
     equity_raise_price_TargetCurrency: 1,
+    use_cash_first: true,
+    nav_cash_definition: 'reported_t0',
   };
   body.financingPlanByProject = {
     ABRA_MINIMAL: { equity_fraction: 0.5, debt_fraction: 0.5 },
@@ -745,7 +747,7 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(financingDebug?.totalNewShares !== null);
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
-  const corporateTimeSeries = (result.snapshot as unknown as { corporateValuationTimeSeries?: { rows: Array<{ year: number; sharesPf: number | null; npvAbsolute: number | null; npvPerShare: number | null; dcfAbsolute: number | null; dcfPerShare: number | null }>; projectMarkers: Array<{ projectId: string; constructionStartPeriod: number | null; productionStartPeriod: number | null; productionStartYear: number | null; firstContributionPeriod: number | null }> } }).corporateValuationTimeSeries;
+  const corporateTimeSeries = (result.snapshot as unknown as { corporateValuationTimeSeries?: { rows: Array<{ year: number; sharesPf: number | null; npvAbsolute: number | null; npvPerShare: number | null; navAbsolute: number | null; navPerShare: number | null; dcfAbsolute: number | null; dcfPerShare: number | null }>; projectMarkers: Array<{ projectId: string; constructionStartPeriod: number | null; productionStartPeriod: number | null; productionStartYear: number | null; firstContributionPeriod: number | null }> } }).corporateValuationTimeSeries;
   assert.equal(corporateTimeSeries?.rows.length, result.snapshot.series?.yearsByPeriod.length);
   assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.projectId).sort(), ['ABRA_MINIMAL','ABRA_MINIMAL_2','ABRA_MINIMAL_3']);
   assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.productionStartPeriod).sort(), [2,3,4]);
@@ -756,6 +758,26 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
     if (row.npvAbsolute !== null && row.sharesPf !== null) assert.ok(Math.abs((row.npvPerShare ?? 0) - row.npvAbsolute / row.sharesPf) < 1e-9);
     if (row.dcfAbsolute !== null && row.sharesPf !== null) assert.ok(Math.abs((row.dcfPerShare ?? 0) - row.dcfAbsolute / row.sharesPf) < 1e-9);
   }
+
+  body.financingPlan = { ...(body.financingPlan as Record<string, unknown>), nav_cash_definition: 'pro_forma_after_funding' };
+  const proForma = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(proForma.ok, true);
+  if (!proForma.ok) return;
+  const proFormaTimeSeries = (proForma.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ navAbsolute: number | null; navPerShare: number | null; npvAbsolute: number | null; dcfAbsolute: number | null; sharesPf: number | null }> } }).corporateValuationTimeSeries;
+  const usedInitialCash = result.snapshot.financing.cash_used_for_build_TargetCurrency ?? 0;
+  for (let period = 0; period < (corporateTimeSeries?.rows.length ?? 0); period += 1) {
+    const reportedRow: { navAbsolute: number | null; navPerShare: number | null; npvAbsolute: number | null; dcfAbsolute: number | null; sharesPf: number | null } = corporateTimeSeries!.rows[period];
+    const proFormaRow = proFormaTimeSeries.rows[period];
+    assert.equal(reportedRow.dcfAbsolute, proFormaRow.dcfAbsolute);
+    assert.equal(reportedRow.npvAbsolute, proFormaRow.npvAbsolute);
+    assert.equal((reportedRow.navAbsolute ?? 0) - (proFormaRow.navAbsolute ?? 0), usedInitialCash);
+    assert.equal(reportedRow.sharesPf, proFormaRow.sharesPf);
+    assert.ok(Math.abs(((reportedRow.navPerShare ?? 0) - (proFormaRow.navPerShare ?? 0)) - usedInitialCash / (reportedRow.sharesPf as number)) < 1e-12);
+  }
+  assert.deepEqual(proForma.snapshot.series, result.snapshot.series);
+  assert.deepEqual(proForma.snapshot.financing.corporate_cash_waterfall, result.snapshot.financing.corporate_cash_waterfall);
+  assert.equal(proForma.snapshot.financing.internally_generated_cash_used_TargetCurrency, result.snapshot.financing.internally_generated_cash_used_TargetCurrency);
+  assert.equal(proForma.snapshot.financing.cash_for_nav_TargetCurrency, ((body.balanceSheet as Record<string, number>).cash_t0_TargetCurrency ?? 0) - usedInitialCash);
 });
 
 test('corporate snapshot applies latest-quarter cash exactly once before debt/equity', async () => {
@@ -799,6 +821,76 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   assert.equal(corporateProdStart.NAV_prodStart_TargetCurrency, disabledProdStart.NAV_prodStart_TargetCurrency);
   assert.notEqual(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency);
 
+  // Changing the NAV cash convention must leave project economics and the
+  // funding waterfall untouched, while removing only cash actually used at t0.
+  body.financingPlan = {
+    use_cash_first: true,
+    cash_use_percent: 1,
+    debt_fraction: 0,
+    equity_fraction: 1,
+    equity_raise_price_TargetCurrency: 3,
+    nav_cash_definition: 'pro_forma_after_funding',
+  };
+  const proForma = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(proForma.ok, true);
+  if (!proForma.ok) return;
+  assert.equal(proForma.snapshot.financing.nav_cash_definition, 'pro_forma_after_funding');
+  assert.equal(proForma.snapshot.financing.cash_for_nav_TargetCurrency, 0);
+  assert.equal(
+    (result.snapshot.financing.NAV_today_TargetCurrency ?? 0) - (proForma.snapshot.financing.NAV_today_TargetCurrency ?? 0),
+    100_000_000,
+  );
+  assert.equal(proForma.snapshot.financing.NPV_today_TargetCurrency, result.snapshot.financing.NPV_today_TargetCurrency);
+  assert.equal(proForma.snapshot.DCF_prodStart_exCapex_TargetCurrency, result.snapshot.DCF_prodStart_exCapex_TargetCurrency);
+  assert.deepEqual(proForma.snapshot.series, result.snapshot.series);
+  assert.deepEqual(proForma.snapshot.financing.corporate_cash_waterfall, result.snapshot.financing.corporate_cash_waterfall);
+  assert.equal(proForma.snapshot.financing.remaining_funding_need_TargetCurrency, result.snapshot.financing.remaining_funding_need_TargetCurrency);
+  assert.equal(proForma.snapshot.financing.equity_raised_TargetCurrency, result.snapshot.financing.equity_raised_TargetCurrency);
+  assert.equal(proForma.snapshot.financing.new_shares, result.snapshot.financing.new_shares);
+  assert.notEqual(proForma.snapshot.NAV_today_TargetCurrency, result.snapshot.NAV_today_TargetCurrency);
+  assert.notEqual(proForma.snapshot.NAV_today_perShare_TargetCurrency, result.snapshot.NAV_today_perShare_TargetCurrency);
+  assert.notEqual(proForma.snapshot.P_over_NAV, result.snapshot.P_over_NAV);
+  assert.notEqual(proForma.snapshot.EV_over_NAV, result.snapshot.EV_over_NAV);
+  assert.notEqual(1 - (proForma.snapshot.P_over_NAV ?? 0), 1 - (result.snapshot.P_over_NAV ?? 0), 'discount to NAV / market discount must change');
+  assert.equal(proForma.snapshot.EV_TargetCurrency, result.snapshot.EV_TargetCurrency, 'enterprise value must not use selectable NAV cash');
+  assert.equal(proForma.snapshot.NPV_today_TargetCurrency, result.snapshot.NPV_today_TargetCurrency);
+  assert.equal(proForma.snapshot.DCF_prodStart_present_TargetCurrency, result.snapshot.DCF_prodStart_present_TargetCurrency);
+  assert.equal(proForma.snapshot.corporate?.lista3Metrics.IRR, result.snapshot.corporate?.lista3Metrics.IRR);
+  assert.equal(proForma.snapshot.corporate?.lista3Metrics.Payback_real_years, result.snapshot.corporate?.lista3Metrics.Payback_real_years);
+  assert.deepEqual(proForma.snapshot.corporate?.lista3Metrics, result.snapshot.corporate?.lista3Metrics, 'IRR, payback and EBITDA-based efficiency metrics must be identical');
+  const reportedRows = (result.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ navAbsolute: number | null; navPerShare: number | null; dcfAbsolute: number | null; npvAbsolute: number | null }> } }).corporateValuationTimeSeries.rows;
+  const proFormaRows = (proForma.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ navAbsolute: number | null; navPerShare: number | null; dcfAbsolute: number | null; npvAbsolute: number | null }> } }).corporateValuationTimeSeries.rows;
+  assert.ok(reportedRows.some((row, index) => row.navAbsolute !== proFormaRows[index]?.navAbsolute), 'Low valuation series must follow NAV definition');
+  assert.ok(reportedRows.some((row, index) => row.navPerShare !== proFormaRows[index]?.navPerShare), 'NAV/share graph series must follow NAV definition');
+  assert.deepEqual(reportedRows.map((row) => row.dcfAbsolute), proFormaRows.map((row) => row.dcfAbsolute), 'High absolute must be identical');
+  assert.deepEqual(reportedRows.map((row) => row.npvAbsolute), proFormaRows.map((row) => row.npvAbsolute), 'NPV series must be identical');
+  const navCashDifference = (result.snapshot.financing.cash_for_nav_TargetCurrency ?? 0) - (proForma.snapshot.financing.cash_for_nav_TargetCurrency ?? 0);
+  const sharesPf = result.snapshot.financing.shares_post_financing as number;
+  for (let period = 0; period < reportedRows.length; period += 1) {
+    assert.equal((reportedRows[period].navAbsolute ?? 0) - (proFormaRows[period].navAbsolute ?? 0), navCashDifference, `NAV bridge delta at t=${period}`);
+    assert.ok(Math.abs(((reportedRows[period].navPerShare ?? 0) - (proFormaRows[period].navPerShare ?? 0)) - navCashDifference / sharesPf) < 1e-9, `NAV/share bridge delta at t=${period}`);
+  }
+  const firstPeakIndex = (rows: typeof reportedRows) => rows.reduce((peak, row, index) => row.dcfAbsolute !== null && (peak < 0 || row.dcfAbsolute > (rows[peak].dcfAbsolute as number)) ? index : peak, -1);
+  const reportedPeak = firstPeakIndex(reportedRows);
+  const proFormaPeak = firstPeakIndex(proFormaRows);
+  assert.equal(reportedPeak, proFormaPeak);
+  assert.equal(reportedRows[reportedPeak].dcfAbsolute, proFormaRows[proFormaPeak].dcfAbsolute, 'DisplayedHigh must be HighSeries[peakIndex]');
+  assert.equal((reportedRows[reportedPeak].navAbsolute ?? 0) - (proFormaRows[proFormaPeak].navAbsolute ?? 0), navCashDifference, 'DisplayedLow must be LowSeries[peakIndex]');
+
+  const reserveBody = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
+  reserveBody.financingPlan = { ...(reserveBody.financingPlan as Record<string, unknown>), minimum_cash_reserve_TargetCurrency: 25_000_000, nav_cash_definition: 'reported_t0' };
+  const reserveReported = await runCorporateSnapshotPipeline({ body: reserveBody, refresh: false });
+  reserveBody.financingPlan = { ...(reserveBody.financingPlan as Record<string, unknown>), nav_cash_definition: 'pro_forma_after_funding' };
+  const reserveProForma = await runCorporateSnapshotPipeline({ body: reserveBody, refresh: false });
+  assert.equal(reserveReported.ok, true);
+  assert.equal(reserveProForma.ok, true);
+  if (reserveReported.ok && reserveProForma.ok) {
+    assert.equal(reserveReported.snapshot.financing.cash_used_for_build_TargetCurrency, 75_000_000);
+    const reserveReportedRows = (reserveReported.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ navAbsolute: number | null }> } }).corporateValuationTimeSeries.rows;
+    const reserveProFormaRows = (reserveProForma.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ navAbsolute: number | null }> } }).corporateValuationTimeSeries.rows;
+    reserveReportedRows.forEach((row, period) => assert.equal((row.navAbsolute ?? 0) - (reserveProFormaRows[period].navAbsolute ?? 0), 75_000_000));
+  }
+
   const snapshotSeries = result.snapshot.series as { fcffUSD: Array<number | null>; capexUSD: Array<number | null>; totalRevenue_USD: Array<number | null>; ebitUSD: Array<number | null> };
   const productionStartPeriod = ((raw.time as Record<string, unknown>).productionStartPeriod as number);
   const projectEquivalent = computeProjectViewMetrics({
@@ -821,6 +913,8 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
     discountRate: number;
   } } }).project?.chartFlows;
   assert.ok(chartFlows);
+  assert.equal(chartFlows.dcfProdstartExCapexPerShareSeries.length, snapshotSeries.fcffUSD.length, 'Project chart series must cover masterN + 1');
+  assert.equal(chartFlows.navByPeriodPerShareSeries.length, snapshotSeries.fcffUSD.length, 'Project NAV series must cover masterN + 1');
   assert.equal(chartFlows.productionStartPeriod, productionStartPeriod);
   assert.equal(chartFlows.discountRate, body.discountRate);
   assert.equal(chartFlows.yearsByPeriod[productionStartPeriod] - chartFlows.yearsByPeriod[0], productionStartPeriod);

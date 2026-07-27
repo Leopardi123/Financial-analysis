@@ -70,6 +70,38 @@ assert.equal(cashEnabled.list2.NAV_prodStart.value, cashDisabled.list2.NAV_prodS
 assert.notEqual(cashEnabled.list2.NAV_perShare.value, cashDisabled.list2.NAV_perShare.value);
 assert.ok(cashEnabled.diagnostics.valuation_metric_audit.every((row) => row.metric.endsWith('/share') ? row.sharesUsed !== null : true));
 
+const reportedNavView = computeProjectViewMetrics({
+  ...cashFirstBase,
+  cashCurrentTarget: 0,
+  cashForNavTarget: 100_000_000,
+  sharesPostFinancingInput: 400_000_000,
+  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+});
+const proFormaNavView = computeProjectViewMetrics({
+  ...cashFirstBase,
+  cashCurrentTarget: 0,
+  cashForNavTarget: 0,
+  sharesPostFinancingInput: 400_000_000,
+  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+});
+for (const key of ['NAV_Target', 'NAV_perShare', 'NAV_prodStart', 'NAV_prodStart_perShare', 'P_over_NAV', 'EV_over_NAV'] as const) {
+  assert.notEqual(reportedNavView.list2[key].value, proFormaNavView.list2[key].value, `${key} must follow selected NAV cash`);
+}
+assert.notEqual(
+  1 - (reportedNavView.list2.P_over_NAV.value as number),
+  1 - (proFormaNavView.list2.P_over_NAV.value as number),
+  'discount to NAV / market discount must follow P/NAV',
+);
+assert.notEqual(reportedNavView.list2.NAV_prodStart_perShare.value, proFormaNavView.list2.NAV_prodStart_perShare.value, 'Low valuation must follow production-start NAV/share');
+for (const key of ['NPV_Target', 'NPV_perShare', 'NPV_prodStart', 'NPV_prodStart_perShare', 'CF_LOM_Target', 'DCF_Target', 'DCF_Target_discounted', 'EV_over_NPV'] as const) {
+  assert.equal(reportedNavView.list2[key].value, proFormaNavView.list2[key].value, `${key} must ignore NAV definition`);
+}
+for (const key of ['IRR', 'Payback_approx', 'Payback_real', 'LOM_avg_EBIT_ROCE'] as const) {
+  assert.equal(reportedNavView.list3[key].value, proFormaNavView.list3[key].value, `${key} must ignore NAV definition`);
+}
+assert.equal(reportedNavView.marketBox.evCurrent.value, proFormaNavView.marketBox.evCurrent.value, 'EV must retain post-funding liquidity cash');
+assert.deepEqual(reportedNavView.diagnostics.npv10_trace.steps.slice(0, 4), proFormaNavView.diagnostics.npv10_trace.steps.slice(0, 4), 'NPV and DCF trace must be identical');
+
 assert.ok((out.list3.IRR.value as number) > 0, `Expected positive IRR, got ${out.list3.IRR.value}`);
 assert.ok((out.list3.LOM_discounted_EBIT_ROCE.value as number) > 0, 'Expected finite discounted EBIT ROCE');
 assert.ok((out.list3.LOM_avg_NOPAT_ROIC.value as number) > 0, 'Expected finite avg NOPAT ROIC');

@@ -6,6 +6,7 @@ import { resolveProjectPricesToEngineInput, type MetalPriceDiagnostic } from '..
 import { aggregateProjectsCorporateV1 } from '../corporate/aggregateProjects.ts';
 import { computeCorporateFinancing } from '../corporate/financing/compute.ts';
 import { computeCorporateCashWaterfall } from '../corporate/financing/cashWaterfall.ts';
+import { resolveCashForNav } from '../corporate/financing/navCashBridge.ts';
 import { deriveBuildFundingNeedUSD } from '../corporate/financing/deriveBuildFundingNeed.ts';
 import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnapshot.ts';
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
@@ -2459,9 +2460,17 @@ export async function runCorporateSnapshotPipeline(args: {
     const cashAfterInitialFundingTarget = cashWaterfall && fxRate !== null
       ? (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) - cashWaterfall.totalInitialCashUsed * fxRate
       : financingEffective.cash_t0_post_TargetCurrency;
-    // Project FCFF already contains the full construction CAPEX. Use reported cash
-    // in NAV so cash allocated to that CAPEX is not deducted a second time.
-    const cashForNavTarget = input.balanceSheet?.cash_t0_TargetCurrency ?? 0;
+    // This convention changes only the equity bridge. Project FCFF (and therefore
+    // enterprise value) continues to contain construction CAPEX exactly once.
+    // Only reported cash actually allocated by the waterfall is removed in the
+    // pro-forma view; future internally generated FCFF is never added to NAV cash.
+    const navCashDefinition = input.financingPlan?.nav_cash_definition ?? 'reported_t0';
+    const cashForNavTarget = resolveCashForNav({
+      definition: navCashDefinition,
+      reportedCash: input.balanceSheet?.cash_t0_TargetCurrency ?? 0,
+      initialCashUsedForFunding: cashWaterfall && fxRate !== null ? cashWaterfall.totalInitialCashUsed * fxRate : 0,
+      minimumCashReserve: input.financingPlan?.minimum_cash_reserve_TargetCurrency,
+    });
     const netCashForNavTarget = debtPostTarget === null ? null : cashForNavTarget - debtPostTarget;
     const waterfallNavTarget = financingEffective.NPV_today_TargetCurrency === null || debtPostTarget === null
       ? navTodayTarget
@@ -2493,6 +2502,7 @@ export async function runCorporateSnapshotPipeline(args: {
       new_shares: totalNewShares,
       cash_t0_post_TargetCurrency: cashAfterInitialFundingTarget,
       cash_for_nav_TargetCurrency: cashForNavTarget,
+      nav_cash_definition: navCashDefinition,
       closing_corporate_cash_TargetCurrency: cashWaterfall ? cashWaterfall.closingCorporateCash * (fxRate as number) : financingEffective.cash_t0_post_TargetCurrency,
       corporate_cash_waterfall: cashWaterfall,
     };
@@ -3315,7 +3325,9 @@ export async function runCorporateSnapshotPipeline(args: {
             navProdstartPerShareSeries: [] as Array<number | null>,
           };
         }
-        const rangeEnd = Math.min(aggregationEffective.corporateMasterN, tpEff + 5);
+        // Preserve the complete economic timeline in the snapshot. Presentation
+        // may clip its window, but peak selection must inspect every period.
+        const rangeEnd = aggregationEffective.corporateMasterN;
         const dcfProdstartPresentPerShareSeries: Array<number | null> = [];
         const navProdstartPerShareSeries: Array<number | null> = [];
         const dcfProdstartExCapexPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);

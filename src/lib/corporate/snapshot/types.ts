@@ -118,6 +118,7 @@ export type CorporateSnapshot = {
   // Convenience
   NPV_today_TargetCurrency: number | null;
   NAV_today_TargetCurrency: number | null;
+  NAV_today_perShare_TargetCurrency: number | null;
 
   CF_LOM_USD: number | null;
   CF_LOM_perShare_USD: number | null;

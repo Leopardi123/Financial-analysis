@@ -24,7 +24,7 @@ test('corporate rows use Project chart columns and annotate only today and proje
   assert.equal(valueRangeChartHeader.length, 21);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
-  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.7 / 1.1, '      5,2']);
+  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.4, '      5,4']);
   assert.deepEqual(rows[2].slice(5, 15), [null, null, null, null, null, null, null, null, null, null]);
   assert.equal(rows[1][12], '      4,9');
   assert.equal(rows[1][14], '      5,7');
@@ -57,7 +57,7 @@ test('peak helper selects the first equal maximum and formats both values with c
   assert.deepEqual(buildCorporateYearTicks({ rows: timeline(2028, 2031), projectMarkers: [] }, 2030).map((tick) => tick.v), [2028, 2030, 2031]);
 });
 
-test('canonical Corporate marker DCF maps to High even when the scalar fallback equals NAV', () => {
+test('Corporate marker cannot override the period-aligned NAV and DCF series', () => {
   const rows = buildCorporateChartRows({
     rows: [
       { period: 0, year: 2028, npvPerShare: 1.5, navPerShare: 1.5, dcfPerShare: 1.9, dcfExCapexPerShare: 1.9, sharesPf: 100 },
@@ -70,11 +70,11 @@ test('canonical Corporate marker DCF maps to High even when the scalar fallback 
   assert.ok(start);
   assert.equal(start[11], 1.9);
   assert.equal((start[12] as string).trim(), '1,9');
-  assert.equal(start[13], 2.3);
-  assert.equal((start[14] as string).trim(), '2,3');
+  assert.equal(start[13], 1.9);
+  assert.equal((start[14] as string).trim(), '1,9');
 });
 
-test('each Corporate production-start year maps its own NAV to Low and DCF to High', () => {
+test('each Corporate production-start annotation uses the full period series', () => {
   const input = {
     rows: [2028, 2029, 2030, 2031, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 1.5, dcfPerShare: 1.8, dcfExCapexPerShare: 1.8, sharesPf: 100 })),
     projectMarkers: [
@@ -83,7 +83,7 @@ test('each Corporate production-start year maps its own NAV to Low and DCF to Hi
     ],
   };
   const rows = buildCorporateChartRows(input, { low: 1.5, high: 1.9, price: 1 });
-  assert.deepEqual(rows.filter((row) => row[0] === 2030 || row[0] === 2032).map((row) => [row[0], row[11], row[13]]), [[2030, 1.9, 2.3], [2032, 2.4, 3.1]]);
+  assert.deepEqual(rows.filter((row) => row[0] === 2030 || row[0] === 2032).map((row) => [row[0], row[11], row[13]]), [[2030, 1.5, 1.8], [2032, 1.5, 1.8]]);
 });
 
 test('two production starts each have separate low and high annotations', () => {
@@ -140,30 +140,49 @@ test('single-project Corporate rows use the exact canonical Project curve genera
     rows: [2026, 2027, 2028, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 2, navPerShare: 3 + period, dcfPerShare: 4 + period * 0.4, dcfExCapexPerShare: 4 + period * 0.4, sharesPf: 100 })),
     projectMarkers: [{ projectId: 'one', projectName: 'One', productionStartYear: 2028 }],
   };
-  const curveInput = { totalLen: 5, tpOffset: 2, discountRate: 0.1, lowTp: 5, highTp: 7, navSeriesRaw: [3, 4, 5, 6, 7], dcfExCapexSeriesRaw: [4, 4.4, 4.8, 5.2, 5.6] };
+  const curveInput = { totalLen: 5, navSeriesRaw: [3, 4, 5, 6, 7], dcfExCapexSeriesRaw: [4, 4.4, 4.8, 5.2, 5.6] };
   const projectCurve = buildValueRangeCurve(curveInput);
   const corporateRows = buildCorporateChartRows(input, { low: 2.5, high: 4, price: 1, tpLow: 5, tpHigh: 7 });
   assert.deepEqual(corporateRows.map((row) => row[1]), projectCurve.low);
   assert.deepEqual(corporateRows.map((row) => row[4]), projectCurve.high);
 });
 
-test('canonical period mapping and actual discount rate drive pre-production High', () => {
+test('canonical period mapping uses the direct High snapshot series before and after production', () => {
   const years = [2025, 2026, 2027, 2028];
   const curve = buildValueRangeCurve({
-    totalLen: years.length, tpOffset: 2, discountRate: 0.1,
-    lowTp: 8, highTp: 121,
-    navSeriesRaw: [6, 7, 8, 9], dcfExCapexSeriesRaw: [null, null, 121, 100],
+    totalLen: years.length,
+    navSeriesRaw: [6, 7, 8, 9], dcfExCapexSeriesRaw: [95, 110, 121, 100],
   });
   assert.deepEqual(years.map((year, period) => ({ year, period })), [
     { year: 2025, period: 0 }, { year: 2026, period: 1 }, { year: 2027, period: 2 }, { year: 2028, period: 3 },
   ]);
-  assert.ok(Math.abs((curve.high[0] as number) - 100) < 1e-12);
-  assert.ok(Math.abs((curve.high[1] as number) - 110) < 1e-12);
+  assert.equal(curve.high[0], 95);
+  assert.equal(curve.high[1], 110);
   assert.equal(curve.high[2], 121);
   assert.equal(curve.high[3], 100, 'post-TP High must use direct rolling ex-CAPEX DCF without re-accretion');
   assert.deepEqual(curve.low, [6, 7, 8, 9]);
   assert.equal('inferredRate' in curve, false);
 });
+
+for (const scenario of [
+  { label: 'before production', tp: 2, high: [9, 7, 6, 5] },
+  { label: 'after production', tp: 1, high: [5, 7, 9, 6] },
+  { label: 'last period', tp: 1, high: [5, 7, 9, 12] },
+] as const) {
+  test(`peak Low is NAV at the same index when peak is ${scenario.label}`, () => {
+    const reportedNav = [20, 21, 22, 23];
+    const proFormaNav = reportedNav.map((value) => value - 4);
+    const reportedCurve = buildValueRangeCurve({ totalLen: 4, navSeriesRaw: reportedNav, dcfExCapexSeriesRaw: [...scenario.high] });
+    const proFormaCurve = buildValueRangeCurve({ totalLen: 4, navSeriesRaw: proFormaNav, dcfExCapexSeriesRaw: [...scenario.high] });
+    const reportedPeak = findFirstHighPeak(reportedCurve.high.map((high, index) => ({ year: 2030 + index, high, low: reportedCurve.low[index] })));
+    const proFormaPeak = findFirstHighPeak(proFormaCurve.high.map((high, index) => ({ year: 2030 + index, high, low: proFormaCurve.low[index] })));
+    assert.equal(reportedPeak?.index, proFormaPeak?.index);
+    assert.equal(reportedPeak?.high, proFormaPeak?.high);
+    assert.equal(reportedPeak?.low, reportedNav[reportedPeak!.index]);
+    assert.equal(proFormaPeak?.low, proFormaNav[proFormaPeak!.index]);
+    assert.equal((reportedPeak?.low as number) - (proFormaPeak?.low as number), 4);
+  });
+}
 
 test('High and Low keep semantic identity when the series cross', () => {
   const row = buildCorporateChartRows({

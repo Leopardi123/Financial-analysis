@@ -129,7 +129,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   assertEqual(resolved.spotPriceUSDByMetal.Au[0], expectedSpotAu, 'spot mode uses today UTC anchor at t0');
   assertEqual(resolved.spotPriceUSDByMetal.Au[1], expectedSpotAu, 'spot mode replicates anchor value at t1');
   assertEqual(resolved.spotPriceUSDByMetal.Au[2], expectedSpotAu, 'spot mode replicates anchor value at t2');
-  assertEqual(resolved.diagnostics?.metalPriceDiagnostics?.Au?.priceSourceUsed, 'live', 'Au should use live price source when available');
+  assertEqual(resolved.diagnostics?.metalPriceDiagnostics?.Au?.priceSourceUsed, 'fmp', 'Au should identify the live FMP source when available');
 
   const expectedLb = 2204.6226218487757;
   const gotLb = resolved.payableQtyByMetal.Cu[1];
@@ -243,8 +243,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       }),
     },
   );
-  assertEqual(pbFallbackResolved.spotPriceUSDByMetal.Pb[0], 1.23, 'Pb should use JSON fallback when live is missing');
-  assertEqual(pbFallbackResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'json-fallback', 'Pb should be marked as json-fallback');
+  assertEqual(pbFallbackResolved.spotPriceUSDByMetal.Pb[0], null, 'embedded JSON prices must not silently replace a missing live price');
+  assertEqual(pbFallbackResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'missing', 'Pb should be marked missing without an explicit manual fallback');
 
   const pbFailureBase = JSON.parse(JSON.stringify(pbFallbackBase));
   delete pbFailureBase.metals.spotPriceUSDByMetal;
@@ -255,7 +255,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       resolvePriceSeriesFn: async ({ anchorDatesUtc }) => ({ values: anchorDatesUtc.map(() => null), warnings: [] }),
     },
   );
-  assertEqual(pbFailureResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'failure', 'Pb should be marked as failure when both live and JSON fallback are missing');
+  assertEqual(pbFailureResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'missing', 'Pb should be marked missing when live and manual prices are absent');
 
   const znSuspectBase = getProjectJsonV1Template();
   znSuspectBase.economicsBreakdown = null;
@@ -291,8 +291,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       }),
     },
   );
-  assertEqual(znSuspectResolved.spotPriceUSDByMetal.Zn[0], 1.4, 'Zn should fall back to JSON when live price is outside sanity band');
-  assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'json-fallback', 'Zn suspect live should be rejected and fallback should be used');
+  assertEqual(znSuspectResolved.spotPriceUSDByMetal.Zn[0], null, 'Zn must reject a suspect live price without an explicit manual fallback');
+  assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'missing', 'Zn suspect live should be marked missing without a manual fallback');
   assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.sanityPass, false, 'Zn suspect live should fail sanity check');
 
   const znSuspectNoFallbackBase = JSON.parse(JSON.stringify(znSuspectBase));
@@ -307,7 +307,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
       }),
     },
   );
-  assertEqual(znSuspectNoFallbackResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'failure', 'Zn suspect live without fallback should fail');
+  assertEqual(znSuspectNoFallbackResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'missing', 'Zn suspect live without fallback should be missing');
   assertEqual(znSuspectNoFallbackResolved.spotPriceUSDByMetal.Zn[0], null, 'Zn suspect live without fallback should produce null price');
 
   const withOverrides = {
@@ -329,8 +329,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     },
   );
 
-  assertEqual(overridden.spotPriceUSDByMetal.Au[0], 1, 'override spot prices should win');
-  assertEqual(overridden.aisc.auPriceUSDPerOz[2], 9, 'override au prices should win');
+  assertEqual(overridden.spotPriceUSDByMetal.Au[0], expectedSpotAu, 'canonical resolved prices should not be replaced by embedded overrides');
+  assertEqual(overridden.aisc.auPriceUSDPerOz[2], 9, 'the explicit AISC gold-price override should remain local to AISC');
 
 
   const percentileResolved = await resolveProjectPricesToEngineInput(

@@ -55,7 +55,7 @@ export function clipCorporateChartInput(input: CorporateChartInput): CorporateCh
 export function buildCorporateChartRows(
   input: CorporateChartInput,
   today: { low: number | null; high: number | null; price: number | null; tpLow?: number | null; tpHigh?: number | null },
-  discountRate = 0.1,
+  _discountRate = 0.1,
   currencyCode?: string,
 ) {
   const productionStartYears = new Set<number>();
@@ -65,23 +65,13 @@ export function buildCorporateChartRows(
     }
   }
 
-  const firstStartIndex = input.rows.findIndex((row) => productionStartYears.has(row.year));
-  const tpOffset = firstStartIndex > 0 ? firstStartIndex : 0;
-  const firstStartMarker = input.projectMarkers.find((marker) => marker.productionStartYear === input.rows[tpOffset]?.year);
   const curve = buildValueRangeCurve({
     totalLen: input.rows.length,
-    tpOffset,
-    discountRate,
-    lowTp: firstStartMarker?.navPerShare ?? today.tpLow ?? input.rows[tpOffset]?.navPerShare ?? null,
-    highTp: firstStartMarker?.dcfPerShare ?? today.tpHigh ?? input.rows[tpOffset]?.dcfPerShare ?? null,
     navSeriesRaw: input.rows.map((row) => row.navPerShare),
     dcfExCapexSeriesRaw: input.rows.map((row) => row.dcfExCapexPerShare ?? null),
   });
 
-  const values = input.rows.map((row, index) => {
-    const startMarker = input.projectMarkers.find((marker) => marker.productionStartYear === row.year);
-    return { year: row.year, low: startMarker?.navPerShare ?? curve.low[index], high: startMarker?.dcfPerShare ?? curve.high[index] };
-  });
+  const values = input.rows.map((row, index) => ({ year: row.year, low: curve.low[index], high: curve.high[index] }));
   const peak = findFirstHighPeak(values);
   return values.map(({ year, low, high }, index) => buildValueRangeChartRow({
     year, low, high, currentPrice: today.price, annotateCurrent: index === 0,

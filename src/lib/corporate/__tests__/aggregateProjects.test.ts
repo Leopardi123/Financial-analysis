@@ -47,8 +47,8 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     {
       discountRate: 0.1,
       projects: [
-        { projectId: 'A', rawJson: {} },
-        { projectId: 'B', rawJson: {} },
+        { projectId: 'A', rawJson: { version: 'project_json_v2', time: { masterN: 2, productionStartPeriod: 0, productionStartYear: 2024 } } },
+        { projectId: 'B', rawJson: { version: 'project_json_v2', time: { masterN: 2, productionStartPeriod: 0, productionStartYear: 2024 } } },
       ],
     },
     makeDepsByProjectId({
@@ -85,8 +85,8 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     {
       discountRate: 0.1,
       projects: [
-        { projectId: 'A', rawJson: {} },
-        { projectId: 'B', rawJson: {} },
+        { projectId: 'A', rawJson: { version: 'project_json_v2', time: { masterN: 1, productionStartPeriod: 0, productionStartYear: 2024 } } },
+        { projectId: 'B', rawJson: { version: 'project_json_v2', time: { masterN: 1, productionStartPeriod: 0, productionStartYear: 2025 } } },
       ],
     },
     makeDepsByProjectId({
@@ -119,8 +119,8 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
     {
       discountRate: 0.1,
       projects: [
-        { projectId: 'A', rawJson: {} },
-        { projectId: 'B', rawJson: {} },
+        { projectId: 'A', rawJson: { version: 'project_json_v2', time: { masterN: 1, productionStartPeriod: 0, productionStartYear: 2024 } } },
+        { projectId: 'B', rawJson: { version: 'project_json_v2', time: { masterN: 1, productionStartPeriod: 0, productionStartYear: 2024 } } },
       ],
     },
     makeDepsByProjectId({
@@ -153,7 +153,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
       aggregateProjectsCorporateV1(
         {
           discountRate: 0.1,
-          projects: [{ projectId: 'missing-dates', rawJson: {} }],
+          projects: [{ projectId: 'missing-dates', rawJson: ({ version: 'project_json_v2', time: { masterN: 2, productionStartPeriod: 0 } } as any) }],
         },
         {
           parseProject: (() => ({
@@ -279,7 +279,7 @@ function makeDepsByProjectId(records: Record<string, CorporateProjectEngineSnaps
           },
         }),
       ),
-    /Corporate v2 invalid project time inputs.*bad-v2/s,
+    /Invalid v2 time for project bad-v2.*productionStartYear=undefined/s,
     'v2 invalid project time should include projectId in clear error',
   );
 
