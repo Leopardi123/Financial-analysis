@@ -46,11 +46,11 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   });
 
   assertDeepEqual(happyPath.sustainingCostUSD, [12, 12, 51, 51], 'happy path sustainingCostUSD');
-  assertDeepEqual(happyPath.ebitUSD, [-12, -12, 49, 49], 'happy path ebitUSD');
-  assertDeepEqual(happyPath.taxUSD, [0, 0, 14.7, 14.7], 'happy path taxUSD');
-  assertDeepEqual(happyPath.nopatUSD, [-12, -12, 34.3, 34.3], 'happy path nopatUSD');
+  assertDeepEqual(happyPath.ebitUSD, [-12, -12, 54, 54], 'happy path ebitUSD');
+  assertDeepEqual(happyPath.taxUSD, [0, 0, 16.2, 16.2], 'happy path taxUSD');
+  assertDeepEqual(happyPath.nopatUSD, [-12, -12, 37.8, 37.8], 'happy path nopatUSD');
   assertDeepEqual(happyPath.totalCapexUSD, [50, 20, 5, 5], 'happy path totalCapexUSD');
-  assertDeepEqual(happyPath.fcffUSD, [-62, -32, 29.299999999999997, 29.299999999999997], 'happy path fcffUSD counts reclamation once through EBIT');
+  assertDeepEqual(happyPath.fcffUSD, [-62, -32, 32.8, 32.8], 'happy path FCFF deducts sustaining CAPEX once');
   assertDeepEqual(happyPath.workingCapitalDeltaUSD_effective, [0, 0, 0, 0], 'happy path defaults working capital delta to zero');
   assert((happyPath.ebitUSD[0] as number) < 0, 'pre-production ebit at t=0 should be negative');
   assert((happyPath.ebitUSD[1] as number) < 0, 'pre-production ebit at t=1 should be negative');
@@ -74,11 +74,11 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   });
 
   assertEqual(nonFiniteInput.sustainingCostUSD[2], 11, 'non-finite op at t=2 should become 0 in sustaining cost');
-  assertEqual(nonFiniteInput.ebitUSD[2], 89, 'non-finite op at t=2 should become 0 in ebit');
-  assertEqual(nonFiniteInput.taxUSD[2], 26.7, 'tax at t=2 after non-finite op normalization');
-  assertEqual(nonFiniteInput.nopatUSD[2], 62.3, 'nopat at t=2 after non-finite op normalization');
+  assertEqual(nonFiniteInput.ebitUSD[2], 94, 'non-finite op at t=2 should become 0 in ebit');
+  assertEqual(nonFiniteInput.taxUSD[2], 28.2, 'tax at t=2 after non-finite op normalization');
+  assertEqual(nonFiniteInput.nopatUSD[2], 65.8, 'nopat at t=2 after non-finite op normalization');
   assertEqual(nonFiniteInput.totalCapexUSD[2], 5, 'total capex at t=2 after non-finite op normalization');
-  assertEqual(nonFiniteInput.fcffUSD[2], 57.3, 'fcff at t=2 after non-finite op normalization');
+  assertEqual(nonFiniteInput.fcffUSD[2], 60.8, 'fcff at t=2 after non-finite op normalization');
 
   assertThrows(
     () =>
@@ -110,8 +110,8 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
     taxRate: 0.3,
   });
 
-  assertEqual(nullCapex.ebitUSD[1], 81, 'ebit should still compute when capex is null');
-  assertEqual(nullCapex.nopatUSD[1], 56.7, 'nopat should still compute when capex is null');
+  assertEqual(nullCapex.ebitUSD[1], 86, 'ebit should still compute when capex is null');
+  assertEqual(nullCapex.nopatUSD[1], 60.2, 'nopat should still compute when capex is null');
   assertEqual(nullCapex.fcffUSD[1], null, 'fcff should be null when capex is null');
 
 

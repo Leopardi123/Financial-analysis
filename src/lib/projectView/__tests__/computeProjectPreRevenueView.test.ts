@@ -32,10 +32,10 @@ assert.equal(out.marketBox.marketCapCurrent.value, 1000);
 assert.equal(out.list5.cash_used_Target.value, 50);
 assert.equal(out.list4.InSitu_10Y_USD.value, 1000);
 assertApprox(out.list2.DCF_Target.value, 2603.60953, 1e-4);
-assertApprox(out.list2.NPV_prodStart.value, 1603.60953, 1e-4);
-assertApprox(out.list2.NAV_prodStart.value, 1703.60953, 1e-4);
-assertApprox(out.list2.NPV_prodStart_perShare.value, 8.22364, 1e-4);
-assertApprox(out.list2.NAV_prodStart_perShare.value, 8.73646, 1e-4);
+assertApprox(out.list2.NPV_prodStart.value, 2603.60953, 1e-4);
+assertApprox(out.list2.NAV_prodStart.value, 2703.60953, 1e-4);
+assertApprox(out.list2.NPV_prodStart_perShare.value, 13.35184, 1e-4);
+assertApprox(out.list2.NAV_prodStart_perShare.value, 13.86466, 1e-4);
 assert.equal(out.marketBox.marketCapCurrent.reason, null);
 
 const cashFirstBase = {
@@ -69,6 +69,60 @@ assert.equal(cashEnabled.list2.NAV_Target.value, cashDisabled.list2.NAV_Target.v
 assert.equal(cashEnabled.list2.NAV_prodStart.value, cashDisabled.list2.NAV_prodStart.value, 'production-start NAV must use the same no-double-count rule');
 assert.notEqual(cashEnabled.list2.NAV_perShare.value, cashDisabled.list2.NAV_perShare.value);
 assert.ok(cashEnabled.diagnostics.valuation_metric_audit.every((row) => row.metric.endsWith('/share') ? row.sharesUsed !== null : true));
+
+const reportedNavView = computeProjectViewMetrics({
+  ...cashFirstBase,
+  cashCurrentTarget: 0,
+  cashForNavTarget: 100_000_000,
+  sharesPostFinancingInput: 400_000_000,
+  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+});
+const proFormaNavView = computeProjectViewMetrics({
+  ...cashFirstBase,
+  cashCurrentTarget: 0,
+  cashForNavTarget: 0,
+  sharesPostFinancingInput: 400_000_000,
+  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+});
+const precomputedFundingView = computeProjectViewMetrics({
+  ...cashFirstBase,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 30_000_000,
+  sharesPostFinancingInput: 410_000_000,
+  financing: {
+    equityPct: 100, debtPct: 0, usePrecomputedFinancing: true,
+    precomputedEligibleFundingTarget: 300_000_000,
+    precomputedCashUsedTarget: 100_000_000,
+    precomputedRemainingNeedTarget: 200_000_000,
+    precomputedDebtAddedTarget: 30_000_000,
+    precomputedEquityRaiseTarget: 170_000_000,
+    precomputedNewShares: 10_000_000,
+  },
+});
+assert.equal(precomputedFundingView.list5.Initial_CAPEX_Target.value, 300_000_000);
+assert.equal(precomputedFundingView.list5.cash_used_Target.value, 100_000_000);
+assert.equal(precomputedFundingView.list5.remaining_need_Target.value, 200_000_000);
+assert.equal(precomputedFundingView.list5.Debt_Added_Target.value, 30_000_000);
+assert.equal(precomputedFundingView.list5.Equity_Raise_Target.value, 170_000_000);
+assert.equal(precomputedFundingView.list5.New_Shares.value, 10_000_000);
+assert.equal(precomputedFundingView.list5.debt_t0.value, 30_000_000, 'post-financing debt must not add precomputed debt twice');
+for (const key of ['NAV_Target', 'NAV_perShare', 'NAV_prodStart', 'NAV_prodStart_perShare', 'P_over_NAV', 'EV_over_NAV'] as const) {
+  assert.notEqual(reportedNavView.list2[key].value, proFormaNavView.list2[key].value, `${key} must follow selected NAV cash`);
+}
+assert.notEqual(
+  1 - (reportedNavView.list2.P_over_NAV.value as number),
+  1 - (proFormaNavView.list2.P_over_NAV.value as number),
+  'discount to NAV / market discount must follow P/NAV',
+);
+assert.notEqual(reportedNavView.list2.NAV_prodStart_perShare.value, proFormaNavView.list2.NAV_prodStart_perShare.value, 'Low valuation must follow production-start NAV/share');
+for (const key of ['NPV_Target', 'NPV_perShare', 'NPV_prodStart', 'NPV_prodStart_perShare', 'CF_LOM_Target', 'DCF_Target', 'DCF_Target_discounted', 'EV_over_NPV'] as const) {
+  assert.equal(reportedNavView.list2[key].value, proFormaNavView.list2[key].value, `${key} must ignore NAV definition`);
+}
+for (const key of ['IRR', 'Payback_approx', 'Payback_real', 'LOM_avg_EBIT_ROCE'] as const) {
+  assert.equal(reportedNavView.list3[key].value, proFormaNavView.list3[key].value, `${key} must ignore NAV definition`);
+}
+assert.equal(reportedNavView.marketBox.evCurrent.value, proFormaNavView.marketBox.evCurrent.value, 'EV must retain post-funding liquidity cash');
+assert.deepEqual(reportedNavView.diagnostics.npv10_trace.steps.slice(0, 4), proFormaNavView.diagnostics.npv10_trace.steps.slice(0, 4), 'NPV and DCF trace must be identical');
 
 assert.ok((out.list3.IRR.value as number) > 0, `Expected positive IRR, got ${out.list3.IRR.value}`);
 assert.ok((out.list3.LOM_discounted_EBIT_ROCE.value as number) > 0, 'Expected finite discounted EBIT ROCE');

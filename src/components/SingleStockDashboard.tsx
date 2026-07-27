@@ -1336,6 +1336,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [projectDebtPct, setProjectDebtPct] = useState("0");
   const [projectUseQuarterlyCash, setProjectUseQuarterlyCash] = useState(false);
   const [projectCashUsedPct, setProjectCashUsedPct] = useState(100);
+  const [navCashDefinition, setNavCashDefinition] = useState<'reported_t0' | 'pro_forma_after_funding'>('reported_t0');
   const [projectExtraSharesInput, setProjectExtraSharesInput] = useState("0");
   const [projectSectionsOpen, setProjectSectionsOpen] = useState(PROJECT_SECTION_DEFAULT_OPEN);
   const [npvTracePersistResult, setNpvTracePersistResult] = useState<{ url: string | null; fileName: string | null; savedAtUtc: string | null; error: string | null }>({ url: null, fileName: null, savedAtUtc: null, error: null });
@@ -1788,6 +1789,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
           equity_fraction: projectFinancingFractions.equity,
           debt_fraction: projectFinancingFractions.debt,
           minimum_cash_reserve_TargetCurrency: 0,
+          nav_cash_definition: navCashDefinition,
           equity_raise_price_TargetCurrency: profilePriceCurrent,
         },
         manualMetalPrices,
@@ -1878,6 +1880,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
             equity_fraction: projectFinancingFractions.equity,
             debt_fraction: projectFinancingFractions.debt,
             minimum_cash_reserve_TargetCurrency: 0,
+            nav_cash_definition: navCashDefinition,
             equity_raise_price_TargetCurrency: profilePriceCurrent,
           },
           manualMetalPrices,
@@ -1909,7 +1912,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return () => {
       cancelled = true;
     };
-  }, [selectedProjectId, selectedProjectRawJson, stressOptions, riskAdjustedDiscountRatePctInput, data?.balance, data?.income, profile, lockedTargetCurrency, fxSource, manualFxInput, manualMetalPrices, projectUseQuarterlyCash, projectCashUsedPct, projectEquityPct, projectDebtPct]);
+  }, [selectedProjectId, selectedProjectRawJson, stressOptions, riskAdjustedDiscountRatePctInput, data?.balance, data?.income, profile, lockedTargetCurrency, fxSource, manualFxInput, manualMetalPrices, projectUseQuarterlyCash, projectCashUsedPct, projectEquityPct, projectDebtPct, navCashDefinition]);
 
   const corporateFinancingPlan = useMemo(() => {
     if (companyProjects.length === 0) return undefined;
@@ -1931,9 +1934,10 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       debt_fraction: 1 - equityFraction,
       use_cash_first: corporateUseQuarterlyCash,
       cash_use_percent: corporateCashUsedPct / 100,
+      nav_cash_definition: navCashDefinition,
       financingPlanByProject,
     };
-  }, [companyProjects, corporateProjectEquityPct, corporateUseQuarterlyCash, corporateCashUsedPct]);
+  }, [companyProjects, corporateProjectEquityPct, corporateUseQuarterlyCash, corporateCashUsedPct, navCashDefinition]);
 
   useEffect(() => {
     let isMounted = true;
@@ -3006,6 +3010,7 @@ Capital Available: ${availableLabel}`,
       targetCurrency: lockedTargetCurrency,
     });
     const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
+    const projectFinancing = (projectSnapshotData.financing ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
     const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
       .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
@@ -3020,8 +3025,9 @@ Capital Available: ${availableLabel}`,
       sharesPostFinancingInput: inputs.sharesPostFinancing,
       extraShares: parseExtraShares(projectExtraSharesInput),
       priceCurrentTarget: inputs.price,
-      cashCurrentTarget: latestQuarterlyCash,
-      debtCurrentTarget: inputs.debt0,
+      cashCurrentTarget: asNum(projectFinancing.cash_t0_post_TargetCurrency) ?? latestQuarterlyCash,
+      cashForNavTarget: asNum(projectFinancing.cash_for_nav_TargetCurrency),
+      debtCurrentTarget: asNum(projectFinancing.debt_t0_post_TargetCurrency) ?? inputs.debt0,
       enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
       fcfUSD: asSeries(inputs.series.fcfUSD),
       capexUSD: asSeries(inputs.series.capexUSD),
@@ -3037,11 +3043,19 @@ Capital Available: ${availableLabel}`,
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
       financing: {
-        equityPct: toInputNumber(projectEquityPct) ?? 100,
-        debtPct: toInputNumber(projectDebtPct) ?? 0,
-        latestQuarterlyCashTarget: latestQuarterlyCash,
-        useCashFirst: projectUseQuarterlyCash,
-        cashUsePercent: projectCashUsedPct / 100,
+        equityPct: 100,
+        debtPct: 0,
+        usePrecomputedFinancing: true,
+        precomputedEligibleFundingTarget: (() => {
+          const cashUsed = asNum(projectFinancing.cash_used_for_build_TargetCurrency);
+          const remaining = asNum(projectFinancing.remaining_funding_need_TargetCurrency);
+          return cashUsed !== null && remaining !== null ? cashUsed + remaining : null;
+        })(),
+        precomputedCashUsedTarget: asNum(projectFinancing.cash_used_for_build_TargetCurrency),
+        precomputedRemainingNeedTarget: asNum(projectFinancing.remaining_funding_need_TargetCurrency),
+        precomputedDebtAddedTarget: asNum(projectFinancing.new_debt_TargetCurrency),
+        precomputedEquityRaiseTarget: asNum(projectFinancing.equity_raised_TargetCurrency),
+        precomputedNewShares: asNum(projectFinancing.new_shares),
       },
     });
   }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
@@ -3070,7 +3084,8 @@ Capital Available: ${availableLabel}`,
       sharesPostFinancingInput: inputs.sharesPostFinancing,
       extraShares: parseExtraShares(corporateExtraSharesInput),
       priceCurrentTarget: inputs.price,
-      cashCurrentTarget: asNum(corporateFinancing.cash_for_nav_TargetCurrency) ?? inputs.cash0,
+      cashCurrentTarget: asNum(corporateFinancing.cash_t0_post_TargetCurrency) ?? inputs.cash0,
+      cashForNavTarget: asNum(corporateFinancing.cash_for_nav_TargetCurrency),
       debtCurrentTarget: inputs.debt0,
       enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
       fcfUSD: asSeries(inputs.series.fcfUSD),
@@ -3090,6 +3105,16 @@ Capital Available: ${availableLabel}`,
         equityPct: 100,
         debtPct: 0,
         usePrecomputedFinancing: true,
+        precomputedEligibleFundingTarget: (() => {
+          const cashUsed = asNum(corporateFinancing.cash_used_for_build_TargetCurrency);
+          const remaining = asNum(corporateFinancing.remaining_funding_need_TargetCurrency);
+          return cashUsed !== null && remaining !== null ? cashUsed + remaining : null;
+        })(),
+        precomputedCashUsedTarget: asNum(corporateFinancing.cash_used_for_build_TargetCurrency),
+        precomputedRemainingNeedTarget: asNum(corporateFinancing.remaining_funding_need_TargetCurrency),
+        precomputedDebtAddedTarget: asNum(corporateFinancing.new_debt_TargetCurrency),
+        precomputedEquityRaiseTarget: asNum(corporateFinancing.equity_raised_TargetCurrency),
+        precomputedNewShares: asNum(corporateFinancing.new_shares),
       },
     });
     const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
@@ -5727,6 +5752,12 @@ Capital Available: ${availableLabel}`,
                         Använd senaste kvartalets Cash &amp; Cash Equivalents som finansiering
                       </label>
                       <label>Cash Used {corporateCashUsedPct}%<input type="range" min="0" max="100" value={corporateCashUsedPct} onChange={(event) => setCorporateCashUsedPct(Number(event.target.value))} /></label>
+                      <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
+                        <legend title="Valet ändrar endast vilken rapporterad kassa som ingår i NAV-bryggan. Projektens DCF och finansieringsstrategi ändras inte.">NAV-definition ⓘ</legend>
+                        <label><input type="radio" name="corporate-nav-definition" value="reported_t0" checked={navCashDefinition === 'reported_t0'} onChange={() => setNavCashDefinition('reported_t0')} /> Rapporterad balansräkning (senaste kvartalet)</label>
+                        <label><input type="radio" name="corporate-nav-definition" value="pro_forma_after_funding" checked={navCashDefinition === 'pro_forma_after_funding'} onChange={() => setNavCashDefinition('pro_forma_after_funding')} /> Balansräkning efter vald finansiering (pro forma)</label>
+                        <small title="Endast rapporterad kassa som faktiskt används för projektfinansiering dras bort.">Påverkar NAV-bryggan, inte DCF eller finansieringsvalet.</small>
+                      </fieldset>
                       {companyProjects.map((project) => {
                         const hasFinancing = !!((corporateSnapshotData?.financing ?? null) as Record<string, unknown> | null);
                         const currentEquity = corporateProjectEquityPct[project.project_id] ?? 100;
@@ -6679,6 +6710,12 @@ Capital Available: ${availableLabel}`,
                         Använd senaste kvartalets Cash &amp; Cash Equivalents
                       </label>
                       <label>Cash Used {projectCashUsedPct}%<input type="range" min="0" max="100" value={projectCashUsedPct} onChange={(event) => setProjectCashUsedPct(Number(event.target.value))} /></label>
+                      <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
+                        <legend title="Valet ändrar endast vilken rapporterad kassa som ingår i NAV-bryggan. Projektets DCF och finansieringsstrategi ändras inte.">NAV-definition ⓘ</legend>
+                        <label><input type="radio" name="project-nav-definition" value="reported_t0" checked={navCashDefinition === 'reported_t0'} onChange={() => setNavCashDefinition('reported_t0')} /> Rapporterad balansräkning (senaste kvartalet)</label>
+                        <label><input type="radio" name="project-nav-definition" value="pro_forma_after_funding" checked={navCashDefinition === 'pro_forma_after_funding'} onChange={() => setNavCashDefinition('pro_forma_after_funding')} /> Balansräkning efter vald finansiering (pro forma)</label>
+                        <small title="Endast rapporterad kassa som faktiskt används för projektfinansiering dras bort.">Påverkar NAV-bryggan, inte DCF eller finansieringsvalet.</small>
+                      </fieldset>
                     </div>
                     <div className="compact-metrics-grid">
                       <div className="compact-metric-row"><span className="compact-metric-label">Latest Quarterly Cash</span><span className="compact-metric-dots"/><span className="compact-metric-value">{([...getFieldSeries(data, "balance", "cashAndCashEquivalents")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0).toLocaleString()}</span></div>

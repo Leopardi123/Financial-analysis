@@ -6,6 +6,8 @@ import { resolveProjectPricesToEngineInput, type MetalPriceDiagnostic } from '..
 import { aggregateProjectsCorporateV1 } from '../corporate/aggregateProjects.ts';
 import { computeCorporateFinancing } from '../corporate/financing/compute.ts';
 import { computeCorporateCashWaterfall } from '../corporate/financing/cashWaterfall.ts';
+import { resolveCashForNav } from '../corporate/financing/navCashBridge.ts';
+import { buildCanonicalHighSeries } from './highSeries.ts';
 import { deriveBuildFundingNeedUSD } from '../corporate/financing/deriveBuildFundingNeed.ts';
 import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnapshot.ts';
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
@@ -1630,6 +1632,13 @@ export async function runCorporateSnapshotPipeline(args: {
           const grossRevenueSourceForRoyalties: 'outPreRoyalties.revenue.grossRevenueUSD' | 'resolved.totalRevenue_USD' = Object.keys(outPreRoyalties.revenue.byMetalRevenueUSD).length > 0
             ? 'resolved.totalRevenue_USD'
             : 'outPreRoyalties.revenue.grossRevenueUSD';
+          const rawSeries = (rawJsonRecord.series ?? null) as Record<string, unknown> | null;
+          const explicitNetRevenueUSD = Array.isArray(rawSeries?.revenueUSD)
+            ? sanitizeSeries(rawSeries.revenueUSD as Array<number | null>)
+            : null;
+          const useExplicitNetRevenue = explicitNetRevenueUSD !== null
+            && explicitNetRevenueUSD.length === projectLength
+            && explicitNetRevenueUSD.every((value) => value !== null);
 
           const grossRevenueNullPeriods = grossRevenueForRoyalties
             .map((value, t) => (value === null ? t : null))
@@ -1812,16 +1821,17 @@ export async function runCorporateSnapshotPipeline(args: {
           const capexUSD_used = sanitizeSeries(out.capexUSD_used);
           const workingCapitalDeltaUSD_effective = sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective);
 
-          const centralRevenueUSD = grossRevenueForRoyalties;
+          const centralRevenueUSD = useExplicitNetRevenue ? explicitNetRevenueUSD : grossRevenueForRoyalties;
           const ebitdaUSD = centralRevenueUSD.map((revenue, t) => {
             if (revenue === null) return null;
             const op = operatingCostsUSD[t] ?? 0;
-            const sc = sustainingCapexUSD[t] ?? 0;
             const ga = siteGandA_USD[t] ?? 0;
             const roy = royaltiesUSD[t] ?? 0;
             const rec = reclamationUSD[t] ?? 0;
-            const bp = byproductCreditsUSD[t] ?? 0;
-            return revenue - op - sc - ga - roy - rec + bp;
+            // Explicit series.revenueUSD is total net revenue; its by-product
+            // contribution must not be added a second time.
+            const bp = useExplicitNetRevenue ? 0 : byproductCreditsUSD[t] ?? 0;
+            return revenue - op - ga - roy - rec + bp;
           });
           const ebitUSD = ebitdaUSD.map((ebitda, t) => {
             if (ebitda === null) return null;
@@ -1853,8 +1863,8 @@ export async function runCorporateSnapshotPipeline(args: {
             return Math.max(max, Math.abs(value));
           }, 0);
           diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
-          diagnostics.warnings.push(`[${projectId}] totalRevenue source path=grossRevenueForRoyalties (${grossRevenueSourceForRoyalties})`);
-          diagnostics.warnings.push(`[${projectId}] ebit source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits - depreciation`);
+          diagnostics.warnings.push(`[${projectId}] totalRevenue source path=${useExplicitNetRevenue ? 'series.revenueUSD (explicit total net revenue)' : `grossRevenueForRoyalties (${grossRevenueSourceForRoyalties})`}`);
+          diagnostics.warnings.push(`[${projectId}] ebit source path=totalRevenue - operatingCosts - siteG&A - royalties - reclamation + byproductCredits - depreciation`);
           diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - sustainingCapex - capex - workingCapitalDelta (reclamation already included in EBIT)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (central revenue-cost builder)`);
@@ -2159,6 +2169,9 @@ export async function runCorporateSnapshotPipeline(args: {
     const snapshotSeries = shiftedDeep.value as CorporateSnapshotSeries;
     snapshotSeries.capexUSD = applyScalarMultiplier(snapshotSeries.capexUSD, input.scenario.capexMult);
     snapshotSeries.operatingCostsUSD = applyScalarMultiplier(snapshotSeries.operatingCostsUSD, input.scenario.opexMult);
+    const valuationYear = new Date().getUTCFullYear();
+    const valuationStartPeriodRaw = snapshotSeries.yearsByPeriod.findIndex((year) => year >= valuationYear);
+    const valuationStartPeriod = valuationStartPeriodRaw < 0 ? snapshotSeries.yearsByPeriod.length : valuationStartPeriodRaw;
 
     const metalRevenueDiagnostics = buildMetalRevenueDiagnostics({
       corporateYearsByPeriod: snapshotSeries.yearsByPeriod,
@@ -2204,7 +2217,7 @@ export async function runCorporateSnapshotPipeline(args: {
       sustainingCostUSD_total: snapshotSeries.sustainingCostUSD,
       payableAuEqOz_total: snapshotSeries.payableQtyByMetal.Au ?? aggregation.payableAuEqOz_total,
       CF_LOM_USD: sumFinite(snapshotSeries.fcffUSD),
-      NPV_today_USD: discountedSum(snapshotSeries.fcffUSD, input.discountRate),
+      NPV_today_USD: discountedSum(snapshotSeries.fcffUSD.slice(valuationStartPeriod), input.discountRate),
       aiscAuEqUSDPerOz_LOM: (() => {
         const cost = sumFinite(snapshotSeries.sustainingCostUSD);
         const pay = sumFinite(snapshotSeries.payableQtyByMetal.Au ?? []);
@@ -2240,7 +2253,7 @@ export async function runCorporateSnapshotPipeline(args: {
         : aggregationEffective.payableAuEqOz_total;
 
       aggregationEffective.CF_LOM_USD = sumFinite(aggregationEffective.fcffUSD_total);
-      aggregationEffective.NPV_today_USD = discountedSum(aggregationEffective.fcffUSD_total, input.discountRate);
+      aggregationEffective.NPV_today_USD = discountedSum(aggregationEffective.fcffUSD_total.slice(valuationStartPeriod), input.discountRate);
       aggregationEffective.aiscAuEqUSDPerOz_LOM = (() => {
         const cost = sumFinite(aggregationEffective.sustainingCostUSD_total);
         const pay = sumFinite(aggregationEffective.payableAuEqOz_total);
@@ -2263,7 +2276,7 @@ export async function runCorporateSnapshotPipeline(args: {
         const productionYear = project.yearsByPeriod[project.productionStartPeriod];
         const constructionStartPeriod = aggregationEffective.corporateYearsByPeriod.findIndex((year) => {
           const local = project.yearsByPeriod.indexOf(year);
-          return local >= 0 && local < project.productionStartPeriod && (context?.economics.capexUSD[local] ?? 0) > 0;
+          return local >= 0 && year >= valuationYear && (context?.economics.capexUSD[local] ?? 0) > 0;
         });
         return {
           projectId: project.projectId,
@@ -2272,11 +2285,11 @@ export async function runCorporateSnapshotPipeline(args: {
           debtPercent: input.financingPlanByProject?.[project.projectId]?.debt_fraction ?? input.financingPlan?.debt_fraction ?? 0,
           capexNeedByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
             const local = project.yearsByPeriod.indexOf(year);
-            return local >= 0 && local < project.productionStartPeriod ? Math.max(0, context?.economics.capexUSD[local] ?? 0) : 0;
+            return local >= 0 && year >= valuationYear ? Math.max(0, context?.economics.capexUSD[local] ?? 0) : 0;
           }),
           fcffByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
             const local = project.yearsByPeriod.indexOf(year);
-            return local < 0 ? 0 : context?.economics.fcffUSD[local] ?? 0;
+            return local < 0 || year < valuationYear ? 0 : context?.economics.fcffUSD[local] ?? 0;
           }),
         };
       }),
@@ -2459,9 +2472,17 @@ export async function runCorporateSnapshotPipeline(args: {
     const cashAfterInitialFundingTarget = cashWaterfall && fxRate !== null
       ? (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) - cashWaterfall.totalInitialCashUsed * fxRate
       : financingEffective.cash_t0_post_TargetCurrency;
-    // Project FCFF already contains the full construction CAPEX. Use reported cash
-    // in NAV so cash allocated to that CAPEX is not deducted a second time.
-    const cashForNavTarget = input.balanceSheet?.cash_t0_TargetCurrency ?? 0;
+    // This convention changes only the equity bridge. Project FCFF (and therefore
+    // enterprise value) continues to contain construction CAPEX exactly once.
+    // Only reported cash actually allocated by the waterfall is removed in the
+    // pro-forma view; future internally generated FCFF is never added to NAV cash.
+    const navCashDefinition = input.financingPlan?.nav_cash_definition ?? 'reported_t0';
+    const cashForNavTarget = resolveCashForNav({
+      definition: navCashDefinition,
+      reportedCash: input.balanceSheet?.cash_t0_TargetCurrency ?? 0,
+      initialCashUsedForFunding: cashWaterfall && fxRate !== null ? cashWaterfall.totalInitialCashUsed * fxRate : 0,
+      minimumCashReserve: input.financingPlan?.minimum_cash_reserve_TargetCurrency,
+    });
     const netCashForNavTarget = debtPostTarget === null ? null : cashForNavTarget - debtPostTarget;
     const waterfallNavTarget = financingEffective.NPV_today_TargetCurrency === null || debtPostTarget === null
       ? navTodayTarget
@@ -2493,6 +2514,7 @@ export async function runCorporateSnapshotPipeline(args: {
       new_shares: totalNewShares,
       cash_t0_post_TargetCurrency: cashAfterInitialFundingTarget,
       cash_for_nav_TargetCurrency: cashForNavTarget,
+      nav_cash_definition: navCashDefinition,
       closing_corporate_cash_TargetCurrency: cashWaterfall ? cashWaterfall.closingCorporateCash * (fxRate as number) : financingEffective.cash_t0_post_TargetCurrency,
       corporate_cash_waterfall: cashWaterfall,
     };
@@ -3315,12 +3337,15 @@ export async function runCorporateSnapshotPipeline(args: {
             navProdstartPerShareSeries: [] as Array<number | null>,
           };
         }
-        const rangeEnd = Math.min(aggregationEffective.corporateMasterN, tpEff + 5);
+        // Preserve the complete economic timeline in the snapshot. Presentation
+        // may clip its window, but peak selection must inspect every period.
+        const rangeEnd = aggregationEffective.corporateMasterN;
         const dcfProdstartPresentPerShareSeries: Array<number | null> = [];
         const navProdstartPerShareSeries: Array<number | null> = [];
-        const dcfProdstartExCapexPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
-        const navByPeriodPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
-        for (let period = 0; period <= rangeEnd; period += 1) {
+        const visibleLength = Math.max(0, rangeEnd - valuationStartPeriod + 1);
+        const dcfProdstartExCapexPerShareSeries: Array<number | null> = Array.from({ length: visibleLength }, () => null);
+        const navByPeriodPerShareSeries: Array<number | null> = Array.from({ length: visibleLength }, () => null);
+        for (let period = valuationStartPeriod; period <= rangeEnd; period += 1) {
           const periodMetrics = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
             capexUSD_total: aggregationEffective.capexUSD_total,
@@ -3332,10 +3357,15 @@ export async function runCorporateSnapshotPipeline(args: {
             npvToday_USD: aggregationEffective.NPV_today_USD,
             netCash_t0_post_TargetCurrency: netCashForNavTarget,
           }).metrics;
-          dcfProdstartExCapexPerShareSeries[period] = periodMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
-          navByPeriodPerShareSeries[period] = periodMetrics.NAV_prodStart_perShare_TargetCurrency;
+          dcfProdstartExCapexPerShareSeries[period - valuationStartPeriod] = periodMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
+          navByPeriodPerShareSeries[period - valuationStartPeriod] = periodMetrics.NAV_prodStart_perShare_TargetCurrency;
         }
-        for (let tp = tpEff; tp <= rangeEnd; tp += 1) {
+        const canonicalHigh = buildCanonicalHighSeries({
+          rollingDcfSeries: dcfProdstartExCapexPerShareSeries,
+          productionStartPeriod: Math.max(0, tpEff - valuationStartPeriod),
+          discountRate: input.discountRate,
+        });
+        for (let tp = Math.max(tpEff, valuationStartPeriod); tp <= rangeEnd; tp += 1) {
           const metricsAtTp = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
             capexUSD_total: aggregationEffective.capexUSD_total,
@@ -3353,15 +3383,15 @@ export async function runCorporateSnapshotPipeline(args: {
         return {
           dcfProdstartPresentPerShareSeries,
           navProdstartPerShareSeries,
-          dcfProdstartExCapexPerShareSeries,
+          dcfProdstartExCapexPerShareSeries: canonicalHigh,
           navByPeriodPerShareSeries,
-          yearsByPeriod: aggregationEffective.corporateYearsByPeriod.slice(0, rangeEnd + 1),
-          productionStartPeriod: tpEff,
+          yearsByPeriod: aggregationEffective.corporateYearsByPeriod.slice(valuationStartPeriod, rangeEnd + 1),
+          productionStartPeriod: tpEff === null ? null : Math.max(0, tpEff - valuationStartPeriod),
           discountRate: input.discountRate,
         };
     })();
-    const corporateValuationTimeSeries = {
-      rows: aggregationEffective.corporateYearsByPeriod.map((year, period) => {
+    const corporateRows = aggregationEffective.corporateYearsByPeriod.slice(valuationStartPeriod).map((year, displayPeriod) => {
+        const period = displayPeriod + valuationStartPeriod;
         const metricsAtPeriod = computeLista2CfDcfMetrics({
           fcfUSD_total: aggregationEffective.fcffUSD_total,
           capexUSD_total: aggregationEffective.capexUSD_total,
@@ -3385,7 +3415,23 @@ export async function runCorporateSnapshotPipeline(args: {
           npvPerShare: metricsAtPeriod.NPV_prodStart_perShare_TargetCurrency,
           sharesPf: shares_post_financing_fd_effective,
         };
-      }),
+      });
+    const corporateHighAbsolute = buildCanonicalHighSeries({
+      rollingDcfSeries: corporateRows.map((row) => row.dcfExCapexAbsolute),
+      productionStartPeriod: Math.max(0, (tpEff ?? valuationStartPeriod) - valuationStartPeriod),
+      discountRate: input.discountRate,
+    });
+    const corporateHighPerShare = buildCanonicalHighSeries({
+      rollingDcfSeries: corporateRows.map((row) => row.dcfExCapexPerShare),
+      productionStartPeriod: Math.max(0, (tpEff ?? valuationStartPeriod) - valuationStartPeriod),
+      discountRate: input.discountRate,
+    });
+    corporateRows.forEach((row, index) => {
+      row.dcfExCapexAbsolute = corporateHighAbsolute[index];
+      row.dcfExCapexPerShare = corporateHighPerShare[index];
+    });
+    const corporateValuationTimeSeries = {
+      rows: corporateRows,
       projectMarkers: projectsForBuildFunding.map((project) => {
         const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
         const productionYear = project.yearsByPeriod[project.productionStartPeriod] ?? null;

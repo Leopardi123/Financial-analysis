@@ -42,6 +42,8 @@ export type SnapshotRequest = {
     minimum_cash_reserve_TargetCurrency?: number | null;
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
+    /** Selects only the cash balance used in the NAV equity bridge. */
+    nav_cash_definition?: 'reported_t0' | 'pro_forma_after_funding';
   };
   financingPlanByProject?: Record<string, {
     debt_fraction?: number | null;

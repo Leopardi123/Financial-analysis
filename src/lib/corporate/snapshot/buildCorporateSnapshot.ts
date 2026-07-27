@@ -123,6 +123,11 @@ export function buildCorporateSnapshot(args: {
         ? marketValue.EV_TargetCurrency / lista4Base.Revenue_10Y_TargetCurrency
         : null,
   };
+  const navToday = toFiniteOrNull(args.financing.NAV_today_TargetCurrency);
+  const sharesPostFinancing = toFiniteOrNull(args.financing.shares_post_financing);
+  const navTodayPerShare = navToday !== null && sharesPostFinancing !== null && sharesPostFinancing > 0
+    ? navToday / sharesPostFinancing
+    : null;
 
   return {
     targetCurrency: args.targetCurrency,
@@ -136,7 +141,8 @@ export function buildCorporateSnapshot(args: {
     EV_over_NAV: marketValue.EV_over_NAV,
     P_over_NAV: marketValue.P_over_NAV,
     NPV_today_TargetCurrency: toFiniteOrNull(args.financing.NPV_today_TargetCurrency),
-    NAV_today_TargetCurrency: toFiniteOrNull(args.financing.NAV_today_TargetCurrency),
+    NAV_today_TargetCurrency: navToday,
+    NAV_today_perShare_TargetCurrency: navTodayPerShare,
     ...lista2,
     ...lista3a,
     ...lista4,

@@ -1,9 +1,5 @@
 export type ValueRangeCurveInput = {
   totalLen: number;
-  tpOffset: number;
-  discountRate: number;
-  lowTp: number | null;
-  highTp: number | null;
   /** Rolling NAV values aligned to economic period 0..N. */
   navSeriesRaw: Array<number | null>;
   /** Rolling ex-CAPEX DCF values aligned to economic period 0..N. */
@@ -12,18 +8,17 @@ export type ValueRangeCurveInput = {
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
-/** Canonical Project chart curve generation, shared verbatim by Corporate presentation. */
+/** Canonical Project chart curve generation, shared verbatim by Corporate presentation.
+ * Both boundaries are direct, period-aligned snapshot series. No UI rebasing or
+ * production-start fallback is allowed because peak Low must use NAV at peak High's index.
+ */
 export function buildValueRangeCurve(input: ValueRangeCurveInput) {
   const high: Array<number | null> = Array.from({ length: input.totalLen }, () => null);
   const low: Array<number | null> = Array.from({ length: input.totalLen }, () => null);
   for (let index = 0; index < input.totalLen; index += 1) {
     low[index] = finite(input.navSeriesRaw[index]) ? input.navSeriesRaw[index] : null;
-    if (index < input.tpOffset) {
-      high[index] = input.highTp === null ? null : input.highTp / ((1 + input.discountRate) ** (input.tpOffset - index));
-    } else high[index] = finite(input.dcfExCapexSeriesRaw[index]) ? input.dcfExCapexSeriesRaw[index] : null;
+    high[index] = finite(input.dcfExCapexSeriesRaw[index]) ? input.dcfExCapexSeriesRaw[index] : null;
   }
-  if (input.lowTp !== null) low[input.tpOffset] = input.lowTp;
-  if (input.highTp !== null) high[input.tpOffset] = input.highTp;
   return { low, high };
 }
 

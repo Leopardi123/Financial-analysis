@@ -190,15 +190,15 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       ? chartFlows?.discountRate as number
       : isFiniteNumber(projectDebug?.discountRate) && (projectDebug?.discountRate as number) > 0 ? projectDebug?.discountRate as number : null;
     if (actualDiscountRate === null) return null;
-    const highTp = isFiniteNumber(tpHigh) ? tpHigh : (isFiniteNumber(dcfSeriesRawAll[tpOffset]) ? dcfSeriesRawAll[tpOffset] : null);
-    const lowTp = isFiniteNumber(tpLow) ? tpLow : (isFiniteNumber(navSeriesRawAll[tpOffset]) ? navSeriesRawAll[tpOffset] : null);
-    const fullCurve = buildValueRangeCurve({ totalLen: rawLen, tpOffset, discountRate: actualDiscountRate, lowTp, highTp, navSeriesRaw: navSeriesRawAll, dcfExCapexSeriesRaw: dcfSeriesRawAll });
+    const highTp = isFiniteNumber(dcfSeriesRawAll[tpOffset]) ? dcfSeriesRawAll[tpOffset] : null;
+    const lowTp = isFiniteNumber(navSeriesRawAll[tpOffset]) ? navSeriesRawAll[tpOffset] : null;
+    const fullCurve = buildValueRangeCurve({ totalLen: rawLen, navSeriesRaw: navSeriesRawAll, dcfExCapexSeriesRaw: dcfSeriesRawAll });
     const fullPeak = findFirstHighPeak(fullCurve.high.map((high, index) => ({ year: years[index], high, low: fullCurve.low[index] })));
     const defaultEndIndex = Math.min(rawLen - 1, tpOffset + 3);
     const totalLen = Math.max(defaultEndIndex, fullPeak?.index ?? 0) + 1;
     const dcfSeriesRaw = dcfSeriesRawAll.slice(0, totalLen);
     const navSeriesRaw = navSeriesRawAll.slice(0, totalLen);
-    const curve = buildValueRangeCurve({ totalLen, tpOffset, discountRate: actualDiscountRate, lowTp, highTp, navSeriesRaw, dcfExCapexSeriesRaw: dcfSeriesRaw });
+    const curve = buildValueRangeCurve({ totalLen, navSeriesRaw, dcfExCapexSeriesRaw: dcfSeriesRaw });
     const discountRate = actualDiscountRate;
     const highByIndex = curve.high;
     const lowByIndex = curve.low;
