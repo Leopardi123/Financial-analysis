@@ -31,7 +31,7 @@ test('corporate rows use Project chart columns and annotate only today and proje
   }, { low: 4.5, high: 5.5, price: 2.1 });
 
   assert.equal(valueRangeChartHeader.length, 23);
-  assert.equal(valueRangeChartHeader.some((column) => typeof column === 'object' && column.role === 'style'), false);
+  assert.equal(JSON.stringify(valueRangeChartHeader).includes('"style"'), false);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
   assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.7 / 1.1, '      5,2']);
