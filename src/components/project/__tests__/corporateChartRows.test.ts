@@ -24,7 +24,7 @@ test('corporate rows use Project chart columns and annotate only today and proje
   assert.equal(valueRangeChartHeader.length, 21);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
-  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.7 / 1.1, '      5,2']);
+  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.4, '      5,4']);
   assert.deepEqual(rows[2].slice(5, 15), [null, null, null, null, null, null, null, null, null, null]);
   assert.equal(rows[1][12], '      4,9');
   assert.equal(rows[1][14], '      5,7');
@@ -128,6 +128,91 @@ test('corporate x-axis ticks contain today, every unique production start, and t
   assert.equal(buildCorporateYearTicks(input).some((tick) => tick.f === '2,029'), false);
 });
 
+test('valuationYear clips historical rows and marks the valuation-year row as current', () => {
+  const input = {
+    valuationYear: 2026,
+    rows: [2025, 2026, 2027, 2028].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, dcfExCapexPerShare: 3, sharesPf: 100 })),
+    projectMarkers: [{ projectId: 'future', projectName: 'Future', productionStartYear: 2028 }],
+  };
+  const window = clipCorporateChartInput(input);
+  assert.deepEqual(window.input.rows.map((row) => row.year), [2026, 2027, 2028]);
+  const rows = buildCorporateChartRows(window.input, { low: 2, high: 3, price: 1 }, 0.1);
+  assert.equal(rows[0][0], 2026);
+  assert.equal(rows[0][5], 1);
+  assert.equal(rows.some((row) => row[0] === 2025), false);
+});
+
+test('production start at valuationYear without marker values keeps rolling High and Low', () => {
+  const input = {
+    valuationYear: 2026,
+    rows: [
+      { period: 0, year: 2026, npvPerShare: 1, navPerShare: 1.436098354, dcfPerShare: 1.106524312, dcfExCapexPerShare: 1.106524312, sharesPf: 100 },
+      { period: 1, year: 2029, npvPerShare: 1, navPerShare: 1.8, dcfPerShare: 2.1, dcfExCapexPerShare: 2.1, sharesPf: 100 },
+    ],
+    projectMarkers: [{ projectId: 'current', projectName: 'Current', productionStartYear: 2026, navPerShare: null, dcfPerShare: null }],
+  };
+  const row = buildCorporateChartRows(input, { low: 9, high: 9, price: 3, tpLow: 1.442408197, tpHigh: 2.109618604 }, 0.1)[0];
+  assert.equal(row[1], 1.436098354);
+  assert.equal(row[4], 1.106524312);
+  assert.equal(row[7], 1.436098354);
+  assert.equal(row[9], 1.106524312);
+  assert.equal(row[11], 1.436098354);
+  assert.equal(row[13], 1.106524312);
+});
+
+test('historical production start cannot overwrite the valuation-year rolling row', () => {
+  const input = {
+    valuationYear: 2026,
+    rows: [{ period: 0, year: 2026, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, dcfExCapexPerShare: 3, sharesPf: 100 }],
+    projectMarkers: [{ projectId: 'historic', projectName: 'Historic', productionStartYear: 2025, navPerShare: null, dcfPerShare: null }],
+  };
+  const row = buildCorporateChartRows(input, { low: 8, high: 9, price: null, tpLow: 8, tpHigh: 9 }, 0.1)[0];
+  assert.equal(row[1], 2);
+  assert.equal(row[4], 3);
+});
+
+test('future marker with explicit values maps to its calendar year and backcasts only its own High', () => {
+  const input = {
+    valuationYear: 2026,
+    rows: [2026, 2027, 2028, 2029].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 })),
+    projectMarkers: [{ projectId: 'future', projectName: 'Future', productionStartYear: 2029, navPerShare: 8, dcfPerShare: 9 }],
+  };
+  const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 99, tpHigh: 99 }, 0.1);
+  assert.ok(Math.abs((rows[0][4] as number) - 9 / 1.1 ** 3) < 1e-12);
+  assert.equal(rows[0][1], 2);
+  assert.equal(rows[3][1], 8);
+  assert.equal(rows[3][4], 9);
+});
+
+test('multiple project starts never inject a future marker value into valuationYear', () => {
+  const input = {
+    valuationYear: 2026,
+    rows: [2026, 2029, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 })),
+    projectMarkers: [
+      { projectId: 'current', projectName: 'Current', productionStartYear: 2026, navPerShare: null, dcfPerShare: null },
+      { projectId: 'future-a', projectName: 'Future A', productionStartYear: 2029, navPerShare: 8, dcfPerShare: 9 },
+      { projectId: 'future-b', projectName: 'Future B', productionStartYear: 2032, navPerShare: 11, dcfPerShare: 12 },
+    ],
+  };
+  const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 98, tpHigh: 99 }, 0.1);
+  assert.deepEqual(rows.map((row) => row[4]), [4, 9, 12]);
+  assert.deepEqual(rows.map((row) => row[1]), [2, 8, 11]);
+});
+
+test('a missing marker side preserves that side of the existing curve', () => {
+  const input = {
+    valuationYear: 2026,
+    rows: [
+      { period: 0, year: 2026, npvPerShare: 1, navPerShare: 2, dcfPerShare: 3, dcfExCapexPerShare: 3, sharesPf: 100 },
+      { period: 1, year: 2029, npvPerShare: 1, navPerShare: 5, dcfPerShare: 6, dcfExCapexPerShare: 6, sharesPf: 100 },
+    ],
+    projectMarkers: [{ projectId: 'partial', projectName: 'Partial', productionStartYear: 2029, navPerShare: 8, dcfPerShare: null }],
+  };
+  const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 98, tpHigh: 99 }, 0.1);
+  assert.equal(rows[1][1], 8);
+  assert.equal(rows[1][4], 6);
+});
+
 test('Project and Corporate charts share one visual options builder', () => {
   const args = { currencyCode: 'CAD', ticks: [2026, 2029], yearMin: 2025, yearMax: 2030, valueWindow: { min: 1, max: 8 } };
   assert.deepEqual(buildValueRangeChartOptions(args), buildValueRangeChartOptions(args));
@@ -135,12 +220,12 @@ test('Project and Corporate charts share one visual options builder', () => {
   assert.equal(buildValueRangeChartOptions(args).series[2].lineWidth, 0.62);
 });
 
-test('single-project Corporate rows use the exact canonical Project curve generator', () => {
+test('missing marker values preserve the rolling Corporate curve instead of using global TP fallbacks', () => {
   const input = {
     rows: [2026, 2027, 2028, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 2, navPerShare: 3 + period, dcfPerShare: 4 + period * 0.4, dcfExCapexPerShare: 4 + period * 0.4, sharesPf: 100 })),
     projectMarkers: [{ projectId: 'one', projectName: 'One', productionStartYear: 2028 }],
   };
-  const curveInput = { totalLen: 5, tpOffset: 2, discountRate: 0.1, lowTp: 5, highTp: 7, navSeriesRaw: [3, 4, 5, 6, 7], dcfExCapexSeriesRaw: [4, 4.4, 4.8, 5.2, 5.6] };
+  const curveInput = { totalLen: 5, tpOffset: 0, discountRate: 0.1, lowTp: 3, highTp: 4, navSeriesRaw: [3, 4, 5, 6, 7], dcfExCapexSeriesRaw: [4, 4.4, 4.8, 5.2, 5.6] };
   const projectCurve = buildValueRangeCurve(curveInput);
   const corporateRows = buildCorporateChartRows(input, { low: 2.5, high: 4, price: 1, tpLow: 5, tpHigh: 7 });
   assert.deepEqual(corporateRows.map((row) => row[1]), projectCurve.low);

@@ -192,6 +192,7 @@ export default function PlaygroundSnapshot() {
 
     const payload: SnapshotRequest = {
       targetCurrency,
+      valuationYear: new Date().getUTCFullYear(),
       discountRate: parseRequiredNumber(discountRate),
       projects: normalizedProjects.projects,
       market: {

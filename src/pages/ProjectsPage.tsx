@@ -303,6 +303,7 @@ export default function ProjectsPage() {
 
         const payload: SnapshotRequest = {
           symbol,
+          valuationYear: new Date().getUTCFullYear(),
           targetCurrency: lockedTargetCurrency,
           discountRate: 0.1,
           market,

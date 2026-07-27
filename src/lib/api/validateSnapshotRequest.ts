@@ -21,6 +21,8 @@ export type SnapshotFxConfig = {
 
 export type SnapshotRequest = {
   targetCurrency: string;
+  /** Calendar year used as the period-zero present-value anchor. */
+  valuationYear: number;
   discountRate: number;
   // legacy/manual fallback; callers may still send top-level FX directly
   fx_USD_to_TargetCurrency?: number;
@@ -137,6 +139,15 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
   const targetCurrency = typeof body.targetCurrency === 'string' ? body.targetCurrency.trim() : '';
   if (!targetCurrency) {
     errors.push('targetCurrency is required and must be a non-empty string');
+  }
+
+  const currentUtcYear = new Date().getUTCFullYear();
+  const valuationYearRaw = readFiniteNumber(body.valuationYear);
+  const valuationYear = valuationYearRaw === null ? currentUtcYear : valuationYearRaw;
+  if (body.valuationYear === undefined) {
+    warnings.push(`valuationYear missing; using current UTC year ${currentUtcYear}`);
+  } else if (!Number.isInteger(valuationYearRaw) || (valuationYearRaw as number) < 1900 || (valuationYearRaw as number) > 2200) {
+    errors.push('valuationYear must be an integer calendar year within [1900, 2200]');
   }
 
   const discountRate = readFiniteNumber(body.discountRate);
@@ -572,6 +583,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
 
   const valueBase = {
     targetCurrency,
+    valuationYear,
     discountRate: discountRate as number,
     fx_USD_to_TargetCurrency: legacyFx ?? manualFx,
     fx: {

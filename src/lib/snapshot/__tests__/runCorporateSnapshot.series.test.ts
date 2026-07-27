@@ -1171,3 +1171,115 @@ test('stressOptions taxPlus5pp recomputes tax series in engine outputs', async (
   assert.ok(idx >= 0, 'expected positive tax period in base case');
   assert.ok((stressedTax[idx] as number) > (baseTax[idx] as number), 'stressed tax should be higher when tax rate is increased');
 });
+
+function setFirstModelYear(body: Record<string, unknown>, firstYear: number, projectIndex = 0): void {
+  const project = (body.projects as Array<Record<string, unknown>>)[projectIndex];
+  const raw = project.rawJson as Record<string, unknown>;
+  const time = raw.time as Record<string, unknown>;
+  time.productionStartYear = firstYear + (time.productionStartPeriod as number);
+}
+
+function valuationSeries(snapshot: unknown): {
+  valuationYear: number;
+  internalCorporateYears: number[];
+  rows: Array<{ year: number; dcfExCapexAbsolute: number; npvAbsolute: number; navAbsolute: number }>;
+  projectMarkers: Array<{ productionStartYear: number | null }>;
+} {
+  return (snapshot as { corporateValuationTimeSeries: ReturnType<typeof valuationSeries> }).corporateValuationTimeSeries;
+}
+
+test('valuation axis rebases a project beginning before valuationYear without historical CAPEX', async () => {
+  const body = await loadFixture();
+  body.valuationYear = 2026;
+  setFirstModelYear(body, 2025);
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const series = valuationSeries(result.snapshot as unknown);
+  assert.equal(series.internalCorporateYears[0], 2025);
+  assert.equal(series.rows[0].year, 2026);
+  assert.equal(series.rows.some((row) => row.year === 2025), false);
+  assert.ok(Math.abs(series.rows[0].npvAbsolute - series.rows[0].dcfExCapexAbsolute) < 1e-6, 'historical 2025 CAPEX must not be deducted at valuationYear');
+  assert.equal((result.diagnostics.meta.valuationTimeAxis as { valuationStartInternalIndex: number }).valuationStartInternalIndex, 1);
+});
+
+test('valuation axis has no shift when a project begins at valuationYear', async () => {
+  const body = await loadFixture();
+  body.valuationYear = 2026;
+  setFirstModelYear(body, 2026);
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const series = valuationSeries(result.snapshot as unknown);
+  assert.equal(series.internalCorporateYears[0], 2026);
+  assert.equal(series.rows[0].year, 2026);
+});
+
+test('valuation axis zero-fills calendar years before a future project without changing JSON periods', async () => {
+  const body = await loadFixture();
+  body.valuationYear = 2026;
+  setFirstModelYear(body, 2028);
+  const raw = ((body.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>);
+  const originalMasterN = (raw.time as Record<string, unknown>).masterN;
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const series = valuationSeries(result.snapshot as unknown);
+  assert.deepEqual(series.rows.slice(0, 3).map((row) => row.year), [2026, 2027, 2028]);
+  assert.equal((raw.time as Record<string, unknown>).masterN, originalMasterN);
+  assert.equal((result.snapshot.aggregation.fcffUSD_total[0] ?? null) !== undefined, true, 'internal aggregation remains intact');
+});
+
+test('multi-project internal grid is preserved while every valuation uses one 2026 present-value point', async () => {
+  const body = await loadFixture();
+  body.valuationYear = 2026;
+  const source = (body.projects as Array<Record<string, unknown>>)[0];
+  body.projects = [2025, 2026, 2030].map((firstYear, index) => {
+    const project = JSON.parse(JSON.stringify(source)) as Record<string, unknown>;
+    project.projectId = `valuation-${index}`;
+    ((project.rawJson as Record<string, unknown>).meta as Record<string, unknown>).projectId = `valuation-${index}`;
+    const time = (project.rawJson as Record<string, unknown>).time as Record<string, unknown>;
+    time.productionStartYear = firstYear + (time.productionStartPeriod as number);
+    return project;
+  });
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const series = valuationSeries(result.snapshot as unknown);
+  assert.equal(series.internalCorporateYears[0], 2025);
+  assert.equal(series.rows[0].year, 2026);
+  assert.equal(series.valuationYear, 2026);
+});
+
+test('already-producing project starts at valuationYear with rolling DCF and no historical marker', async () => {
+  const body = await loadFixture();
+  body.valuationYear = 2026;
+  setFirstModelYear(body, 2023); // tp=2 => production starts in 2025, before valuation.
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const series = valuationSeries(result.snapshot as unknown);
+  assert.equal(series.rows[0].year, 2026);
+  assert.equal(series.projectMarkers[0].productionStartYear, null);
+  assert.equal(series.rows[0].npvAbsolute, series.rows[0].dcfExCapexAbsolute);
+});
+
+test('rebased valuation applies net cash once and discounts the first future milestone from valuationYear', async () => {
+  const body = await loadFixture();
+  body.valuationYear = 2026;
+  setFirstModelYear(body, 2025);
+  body.balanceSheet = { cash_t0_TargetCurrency: 200_000_000, debt_t0_TargetCurrency: 25_000_000 };
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const series = valuationSeries(result.snapshot as unknown);
+  const first = series.rows[0];
+  const netCash = 175_000_000;
+  assert.ok(Math.abs((first.dcfExCapexAbsolute - first.navAbsolute) + netCash) < 1e-6);
+  assert.equal(result.snapshot.NAV_today_TargetCurrency, first.navAbsolute);
+  const marker = result.snapshot.modeledValuationTimeline?.markers[0] as { yearLabelUsed: string | null; lista2Metrics?: { DCF_prodStart_exCapex_TargetCurrency: number | null } } | undefined;
+  assert.ok(marker);
+  const years = Number(marker?.yearLabelUsed) - 2026;
+  const expectedPresent = (marker?.lista2Metrics?.DCF_prodStart_exCapex_TargetCurrency as number) / (1.1 ** years);
+  assert.ok(Math.abs((result.snapshot.DCF_prodStart_present_TargetCurrency as number) - expectedPresent) < 1e-6);
+});

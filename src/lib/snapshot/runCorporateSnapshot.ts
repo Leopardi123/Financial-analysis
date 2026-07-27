@@ -1212,6 +1212,13 @@ type SnapshotDiagnostics = {
       edgeCases: string[];
     };
     scenarioDelay?: DelayScenarioDiagnostics;
+    valuationYear?: number;
+    valuationTimeAxis?: {
+      valuationYear: number;
+      internalCorporateYears: number[];
+      valuationYears: number[];
+      valuationStartInternalIndex: number | null;
+    };
     corporateTotalsDebug?: {
       capexUSD_total: Array<number | null>;
       fcfUSD_total: Array<number | null>;
@@ -2249,6 +2256,41 @@ export async function runCorporateSnapshotPipeline(args: {
       })();
     }
 
+    // Keep the full project-derived calendar grid for mapping and diagnostics, but
+    // rebase every present-value calculation to the explicit valuation year.
+    const lastInternalYear = aggregationEffective.corporateYearsByPeriod[
+      aggregationEffective.corporateYearsByPeriod.length - 1
+    ] ?? input.valuationYear;
+    const valuationYears = Array.from(
+      { length: Math.max(0, Math.max(input.valuationYear, lastInternalYear) - input.valuationYear + 1) },
+      (_, index) => input.valuationYear + index,
+    );
+    const internalIndexByYear = new Map(
+      aggregationEffective.corporateYearsByPeriod.map((year, index) => [year, index]),
+    );
+    const rebaseSeries = (series: Array<number | null>): Array<number | null> => valuationYears.map((year) => {
+      const internalIndex = internalIndexByYear.get(year);
+      return internalIndex === undefined ? 0 : (series[internalIndex] ?? null);
+    });
+    const valuationFcffUSD = rebaseSeries(aggregationEffective.fcffUSD_total);
+    const valuationCapexUSD = rebaseSeries(aggregationEffective.capexUSD_total);
+    const valuationNpvTodayUSD = discountedSum(valuationFcffUSD, input.discountRate);
+    const valuationMasterN = valuationYears.length - 1;
+    const firstFutureProductionYear = projectsForBuildFunding
+      .map((project) => project.productionStartYear)
+      .filter((year): year is number => Number.isInteger(year) && year > input.valuationYear)
+      .sort((left, right) => left - right)[0] ?? null;
+    const valuationProductionStartPeriod = firstFutureProductionYear === null
+      ? 0
+      : firstFutureProductionYear - input.valuationYear + delayPeriods;
+    diagnostics.meta.valuationYear = input.valuationYear;
+    diagnostics.meta.valuationTimeAxis = {
+      valuationYear: input.valuationYear,
+      internalCorporateYears: aggregationEffective.corporateYearsByPeriod,
+      valuationYears,
+      valuationStartInternalIndex: internalIndexByYear.get(input.valuationYear) ?? null,
+    };
+
     // The waterfall is the sole cash allocator. computeCorporateFinancing receives
     // only its residual external need and cash-first is disabled there.
     const cashWaterfall = fxRate === null ? null : computeCorporateCashWaterfall({
@@ -2285,7 +2327,7 @@ export async function runCorporateSnapshotPipeline(args: {
     const financingEffective = fxRate === null
       ? financing
       : computeCorporateFinancing({
-          NPV_today_USD: aggregationEffective.NPV_today_USD,
+          NPV_today_USD: valuationNpvTodayUSD,
           targetCurrency: input.targetCurrency,
           fx_USD_to_TargetCurrency: fxRate,
           cash_t0_TargetCurrency: 0,
@@ -2565,17 +2607,17 @@ export async function runCorporateSnapshotPipeline(args: {
       diagnostics.warnings.push(`Lista2 CF+DCF skipped candidate: first invalid FCFF at t=${fcffIssue.t}; component=${fcffIssue.component}`);
     }
 
-    const lista2 = tpEff !== null && tpEff > aggregation.corporateMasterN
+    const lista2 = valuationProductionStartPeriod > valuationMasterN
       ? { metrics: makeNullLista2CfDcfMetrics(), warnings: ['failure_reason: tp_eff > masterN'], errors: [] }
       : computeLista2CfDcfMetrics({
-        fcfUSD_total: aggregationEffective.fcffUSD_total,
-        capexUSD_total: aggregationEffective.capexUSD_total,
-        masterN: aggregationEffective.corporateMasterN,
-        productionStartPeriod: tpEff,
+        fcfUSD_total: valuationFcffUSD,
+        capexUSD_total: valuationCapexUSD,
+        masterN: valuationMasterN,
+        productionStartPeriod: valuationProductionStartPeriod,
         discountRate: input.discountRate,
         shares_post_financing: shares_post_financing_fd_effective,
         fx_USD_to_TargetCurrency: fxRate,
-        npvToday_USD: aggregationEffective.NPV_today_USD,
+        npvToday_USD: valuationNpvTodayUSD,
         netCash_t0_post_TargetCurrency: netCashForNavTarget,
       });
     diagnostics.warnings.push(...lista2.warnings);
@@ -2590,10 +2632,10 @@ export async function runCorporateSnapshotPipeline(args: {
           : null;
 
     const lista4 = computeLista4TenYearMetrics({
-      masterN: aggregationEffective.corporateMasterN,
-      revenueUSD_total: aggregationEffective.grossRevenueUSD_total,
-      fcffUSD_total: aggregationEffective.fcffUSD_total,
-      auPriceUSDPerOz: aggregationEffective.auPriceUSDPerOz,
+      masterN: valuationMasterN,
+      revenueUSD_total: rebaseSeries(aggregationEffective.grossRevenueUSD_total),
+      fcffUSD_total: valuationFcffUSD,
+      auPriceUSDPerOz: rebaseSeries(aggregationEffective.auPriceUSDPerOz),
       fx_USD_to_TargetCurrency: fxRate,
       shares_current: marketInput.shares_current,
       shares_post_financing: shares_post_financing_fd_effective,
@@ -2601,12 +2643,12 @@ export async function runCorporateSnapshotPipeline(args: {
       totalStockholdersEquity_USD,
     });
     const lista3a = computeLista3aProjectEfficiencyMetrics({
-      masterN: aggregationEffective.corporateMasterN,
-      productionStartPeriod: tpEff,
+      masterN: valuationMasterN,
+      productionStartPeriod: valuationProductionStartPeriod,
       discountRate: input.discountRate,
-      fcffUSD_total: aggregationEffective.fcffUSD_total,
-      ebitUSD_total: snapshotSeries.ebitUSD,
-      capexUSD_total: aggregationEffective.capexUSD_total,
+      fcffUSD_total: valuationFcffUSD,
+      ebitUSD_total: rebaseSeries(snapshotSeries.ebitUSD),
+      capexUSD_total: valuationCapexUSD,
     });
     diagnostics.warnings.push(...lista3a.warnings);
 
@@ -2614,21 +2656,21 @@ export async function runCorporateSnapshotPipeline(args: {
       projectsForBuildFunding
         .filter((project) => project.productionStartPeriod > 0)
         .map((project) => project.productionStartYear)
-        .filter((year): year is number => Number.isInteger(year)),
+        .filter((year): year is number => Number.isInteger(year) && year >= input.valuationYear),
     )].sort((a, b) => a - b);
 
     const milestoneTpByYear = Object.fromEntries(
-      milestoneYears.map((year) => [year, aggregationEffective.corporateYearsByPeriod.indexOf(year)]),
+      milestoneYears.map((year) => [year, valuationYears.indexOf(year)]),
     ) as Record<number, number>;
 
     const milestonePairs = milestoneYears
       .map((year) => ({ year, tp: milestoneTpByYear[year] }))
-      .filter(({ tp }) => Number.isInteger(tp) && tp >= 0 && tp <= aggregationEffective.corporateMasterN);
+      .filter(({ tp }) => Number.isInteger(tp) && tp >= 0 && tp <= valuationMasterN);
 
     const tp_main = milestonePairs.length > 0 ? milestonePairs[0].tp : null;
     const initialCapexUSD_main = tp_main === null
       ? null
-      : sumStrict(aggregationEffective.capexUSD_total.slice(0, tp_main));
+      : sumStrict(valuationCapexUSD.slice(0, tp_main));
 
     const corporateNopatRequiredInputs = ['ebitUSD', 'taxUSD'];
     const corporateNopatProjectInputs = projectSeriesContexts.map((entry) => ({
@@ -3153,7 +3195,7 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const snapshot = buildCorporateSnapshot({
       targetCurrency: input.targetCurrency,
-      aggregation: aggregationEffective,
+      aggregation: { ...aggregationEffective, NPV_today_USD: valuationNpvTodayUSD },
       financing: financingSnapshot,
       market: marketInput,
       lista2CfDcf: lista2.metrics,
@@ -3171,8 +3213,8 @@ export async function runCorporateSnapshotPipeline(args: {
         .map((candidate) => candidate.tp)
         .filter((candidateTp): candidateTp is number => Number.isInteger(candidateTp) && candidateTp >= 0 && candidateTp <= tp)
         .sort((a, b) => b - a)[0] ?? 0;
-      const windowYears = aggregationEffective.corporateYearsByPeriod.slice(prevMilestoneTp, tp);
-      const windowCapexUSD = aggregationEffective.capexUSD_total.slice(prevMilestoneTp, tp);
+      const windowYears = valuationYears.slice(prevMilestoneTp, tp);
+      const windowCapexUSD = valuationCapexUSD.slice(prevMilestoneTp, tp);
       const windowCapexUSD_sum_strict = windowCapexUSD.some((value) => value === null || value === undefined || !Number.isFinite(value))
         ? null
         : (windowCapexUSD as number[]).reduce((sum, value) => sum + value, 0);
@@ -3200,15 +3242,15 @@ export async function runCorporateSnapshotPipeline(args: {
           const prevMilestoneTp = capexWindowDebug?.tp_prev ?? 0;
 
           const tpMetrics = computeLista2CfDcfMetrics({
-            fcfUSD_total: aggregationEffective.fcffUSD_total,
-            capexUSD_total: aggregationEffective.capexUSD_total,
-            masterN: aggregationEffective.corporateMasterN,
+            fcfUSD_total: valuationFcffUSD,
+            capexUSD_total: valuationCapexUSD,
+            masterN: valuationMasterN,
             productionStartPeriod: tp,
             initialCapexStartPeriod: prevMilestoneTp,
             discountRate: input.discountRate,
             shares_post_financing: shares_post_financing_fd_effective,
             fx_USD_to_TargetCurrency: fxRate,
-            npvToday_USD: aggregationEffective.NPV_today_USD,
+            npvToday_USD: valuationNpvTodayUSD,
             netCash_t0_post_TargetCurrency: netCashForNavTarget,
           });
           diagnostics.warnings.push(...tpMetrics.warnings);
@@ -3283,10 +3325,10 @@ export async function runCorporateSnapshotPipeline(args: {
         productionStartPeriod: milestoneTpByYear[year],
         productionStartYear: year,
       })),
-      yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
-      fcfUSD_total: aggregationEffective.fcffUSD_total,
-      capexUSD_total: aggregationEffective.capexUSD_total,
-      masterN: aggregationEffective.corporateMasterN,
+      yearsByPeriod: valuationYears,
+      fcfUSD_total: valuationFcffUSD,
+      capexUSD_total: valuationCapexUSD,
+      masterN: valuationMasterN,
       shares_post_financing: shares_post_financing_fd_effective,
       lista2MetricsByTp,
       includeDebugSanity: debug,
@@ -3309,42 +3351,42 @@ export async function runCorporateSnapshotPipeline(args: {
       );
 
     const chartFlows = (() => {
-        if (tpEff === null || tpEff < 0 || tpEff > aggregationEffective.corporateMasterN) {
+        if (valuationProductionStartPeriod < 0 || valuationProductionStartPeriod > valuationMasterN) {
           return {
             dcfProdstartPresentPerShareSeries: [] as Array<number | null>,
             navProdstartPerShareSeries: [] as Array<number | null>,
           };
         }
-        const rangeEnd = Math.min(aggregationEffective.corporateMasterN, tpEff + 5);
+        const rangeEnd = Math.min(valuationMasterN, valuationProductionStartPeriod + 5);
         const dcfProdstartPresentPerShareSeries: Array<number | null> = [];
         const navProdstartPerShareSeries: Array<number | null> = [];
         const dcfProdstartExCapexPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
         const navByPeriodPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
         for (let period = 0; period <= rangeEnd; period += 1) {
           const periodMetrics = computeLista2CfDcfMetrics({
-            fcfUSD_total: aggregationEffective.fcffUSD_total,
-            capexUSD_total: aggregationEffective.capexUSD_total,
-            masterN: aggregationEffective.corporateMasterN,
+            fcfUSD_total: valuationFcffUSD,
+            capexUSD_total: valuationCapexUSD,
+            masterN: valuationMasterN,
             productionStartPeriod: period,
             discountRate: input.discountRate,
             shares_post_financing: shares_post_financing_fd_effective,
             fx_USD_to_TargetCurrency: fxRate,
-            npvToday_USD: aggregationEffective.NPV_today_USD,
+            npvToday_USD: valuationNpvTodayUSD,
             netCash_t0_post_TargetCurrency: netCashForNavTarget,
           }).metrics;
           dcfProdstartExCapexPerShareSeries[period] = periodMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
           navByPeriodPerShareSeries[period] = periodMetrics.NAV_prodStart_perShare_TargetCurrency;
         }
-        for (let tp = tpEff; tp <= rangeEnd; tp += 1) {
+        for (let tp = valuationProductionStartPeriod; tp <= rangeEnd; tp += 1) {
           const metricsAtTp = computeLista2CfDcfMetrics({
-            fcfUSD_total: aggregationEffective.fcffUSD_total,
-            capexUSD_total: aggregationEffective.capexUSD_total,
-            masterN: aggregationEffective.corporateMasterN,
+            fcfUSD_total: valuationFcffUSD,
+            capexUSD_total: valuationCapexUSD,
+            masterN: valuationMasterN,
             productionStartPeriod: tp,
             discountRate: input.discountRate,
             shares_post_financing: shares_post_financing_fd_effective,
             fx_USD_to_TargetCurrency: fxRate,
-            npvToday_USD: aggregationEffective.NPV_today_USD,
+            npvToday_USD: valuationNpvTodayUSD,
             netCash_t0_post_TargetCurrency: netCashForNavTarget,
           });
           dcfProdstartPresentPerShareSeries.push(metricsAtTp.metrics.DCF_prodStart_present_perShare_TargetCurrency);
@@ -3355,22 +3397,24 @@ export async function runCorporateSnapshotPipeline(args: {
           navProdstartPerShareSeries,
           dcfProdstartExCapexPerShareSeries,
           navByPeriodPerShareSeries,
-          yearsByPeriod: aggregationEffective.corporateYearsByPeriod.slice(0, rangeEnd + 1),
-          productionStartPeriod: tpEff,
+          yearsByPeriod: valuationYears.slice(0, rangeEnd + 1),
+          productionStartPeriod: valuationProductionStartPeriod,
           discountRate: input.discountRate,
         };
     })();
     const corporateValuationTimeSeries = {
-      rows: aggregationEffective.corporateYearsByPeriod.map((year, period) => {
+      valuationYear: input.valuationYear,
+      internalCorporateYears: aggregationEffective.corporateYearsByPeriod,
+      rows: valuationYears.map((year, period) => {
         const metricsAtPeriod = computeLista2CfDcfMetrics({
-          fcfUSD_total: aggregationEffective.fcffUSD_total,
-          capexUSD_total: aggregationEffective.capexUSD_total,
-          masterN: aggregationEffective.corporateMasterN,
+          fcfUSD_total: valuationFcffUSD,
+          capexUSD_total: valuationCapexUSD,
+          masterN: valuationMasterN,
           productionStartPeriod: period,
           discountRate: input.discountRate,
           shares_post_financing: shares_post_financing_fd_effective,
           fx_USD_to_TargetCurrency: fxRate,
-          npvToday_USD: aggregationEffective.NPV_today_USD,
+          npvToday_USD: valuationNpvTodayUSD,
           netCash_t0_post_TargetCurrency: netCashForNavTarget,
         }).metrics;
         return {
@@ -3389,11 +3433,11 @@ export async function runCorporateSnapshotPipeline(args: {
       projectMarkers: projectsForBuildFunding.map((project) => {
         const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
         const productionYear = project.yearsByPeriod[project.productionStartPeriod] ?? null;
-        const productionCorporatePeriod = productionYear === null ? null : aggregationEffective.corporateYearsByPeriod.indexOf(productionYear);
+        const productionCorporatePeriod = productionYear === null ? null : valuationYears.indexOf(productionYear);
         const constructionLocalPeriod = context?.economics.capexUSD.findIndex((value, index) => index < project.productionStartPeriod && typeof value === 'number' && value > 0) ?? -1;
         const constructionYear = constructionLocalPeriod >= 0 ? project.yearsByPeriod[constructionLocalPeriod] ?? null : null;
-        const contributionPeriods = aggregationEffective.corporateYearsByPeriod.map((year, period) => ({ period, local: project.yearsByPeriod.indexOf(year) })).filter(({ local }) => local >= 0 && typeof context?.economics.fcffUSD[local] === 'number' && context.economics.fcffUSD[local] !== 0).map(({ period }) => period);
-        return { projectId: project.projectId, projectName: project.projectName, constructionStartPeriod: constructionYear === null ? null : aggregationEffective.corporateYearsByPeriod.indexOf(constructionYear), constructionStartYear: constructionYear, productionStartPeriod: productionCorporatePeriod, productionStartYear: productionYear, firstContributionPeriod: contributionPeriods[0] ?? null, lastContributionPeriod: contributionPeriods.length ? contributionPeriods[contributionPeriods.length - 1] : null };
+        const contributionPeriods = valuationYears.map((year, period) => ({ period, local: project.yearsByPeriod.indexOf(year) })).filter(({ local }) => local >= 0 && typeof context?.economics.fcffUSD[local] === 'number' && context.economics.fcffUSD[local] !== 0).map(({ period }) => period);
+        return { projectId: project.projectId, projectName: project.projectName, constructionStartPeriod: constructionYear === null ? null : valuationYears.indexOf(constructionYear), constructionStartYear: constructionYear, productionStartPeriod: productionCorporatePeriod !== null && productionCorporatePeriod >= 0 ? productionCorporatePeriod : null, productionStartYear: productionYear !== null && productionYear >= input.valuationYear ? productionYear : null, firstContributionPeriod: contributionPeriods[0] ?? null, lastContributionPeriod: contributionPeriods.length ? contributionPeriods[contributionPeriods.length - 1] : null };
       }),
     };
     (snapshot as Record<string, unknown>).corporateValuationTimeSeries = corporateValuationTimeSeries;

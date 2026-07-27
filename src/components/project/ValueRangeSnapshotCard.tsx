@@ -36,6 +36,7 @@ type ValueRangeSnapshotCardProps = {
   /** Canonical denominator used by the List 2 table after cash-first financing. */
   canonicalSharesPostFinancing?: number | null;
   corporateTimeSeries?: {
+    valuationYear?: number;
     rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null }>;
     projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null; navPerShare?: number | null; dcfPerShare?: number | null }>;
   } | null;
@@ -424,11 +425,11 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     if (!isFiniteNumber(discountRateProp) || discountRateProp <= 0) return null;
     const chartWindow = clipCorporateChartInput(corporateTimeSeries as CorporateChartInput);
     const today = { low: isFiniteNumber(npvLow) ? npvLow : null, high: isFiniteNumber(npvHigh) ? npvHigh : null, price: isFiniteNumber(priceToday) ? priceToday : null, tpLow: isFiniteNumber(tpLow) ? tpLow : null, tpHigh: isFiniteNumber(tpHigh) ? tpHigh : null };
-    const fullRows = buildCorporateChartRows(corporateTimeSeries as CorporateChartInput, today, discountRateProp, currencyCode);
+    const fullRows = buildCorporateChartRows(chartWindow.input, today, discountRateProp, currencyCode);
     const peak = findFirstHighPeak(fullRows.map((row) => ({ year: row[0] as number, low: row[1] as number | null, high: row[4] as number | null })));
     const baselineEnd = chartWindow.effectiveChartEndYear ?? chartWindow.lastAvailableCorporateYear;
     const effectiveEnd = peak && baselineEnd !== null ? Math.max(baselineEnd, peak.year) : baselineEnd;
-    const renderedInput = effectiveEnd === null ? chartWindow.input : { ...(corporateTimeSeries as CorporateChartInput), rows: corporateTimeSeries.rows.filter((row) => row.year <= effectiveEnd) };
+    const renderedInput = effectiveEnd === null ? chartWindow.input : { ...chartWindow.input, rows: chartWindow.input.rows.filter((row) => row.year <= effectiveEnd) };
     const rows = buildCorporateChartRows(renderedInput, today, discountRateProp, currencyCode);
     const domainValues = rows.flatMap((row) => [row[1], row[4], row[5]]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const valueWindow = computeViewWindow(domainValues);

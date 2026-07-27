@@ -1,6 +1,7 @@
 import { buildValueRangeChartRow, buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from './valueRangeCurve.ts';
 
 export type CorporateChartInput = {
+  valuationYear?: number;
   rows: Array<{ period: number; year: number; npvPerShare: number | null; navPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; sharesPf: number | null }>;
   projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null; navPerShare?: number | null; dcfPerShare?: number | null }>;
 };
@@ -27,6 +28,7 @@ export const valueRangeChartHeader = [
 ] as const;
 
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
 /** Clips presentation rows by calendar year; the complete snapshot time series remains untouched. */
 export function clipCorporateChartInput(input: CorporateChartInput): CorporateChartWindow {
@@ -40,10 +42,13 @@ export function clipCorporateChartInput(input: CorporateChartInput): CorporateCh
   const effectiveChartEndYear = chartEndYear === null || lastAvailableCorporateYear === null
     ? lastAvailableCorporateYear
     : Math.min(chartEndYear, lastAvailableCorporateYear);
+  const rows = input.rows.filter((row) => (
+    (typeof input.valuationYear !== 'number' || row.year >= input.valuationYear)
+    && (effectiveChartEndYear === null || row.year <= effectiveChartEndYear)
+  ));
+  const clipped = rows.length !== input.rows.length;
   return {
-    input: chartEndYear === null || effectiveChartEndYear === null || effectiveChartEndYear === lastAvailableCorporateYear
-      ? input
-      : { ...input, rows: input.rows.filter((row) => row.year <= effectiveChartEndYear) },
+    input: clipped ? { ...input, rows } : input,
     lastProductionStartYear,
     lastAvailableCorporateYear,
     chartEndYear,
@@ -65,15 +70,32 @@ export function buildCorporateChartRows(
     }
   }
 
-  const firstStartIndex = input.rows.findIndex((row) => productionStartYears.has(row.year));
-  const tpOffset = firstStartIndex > 0 ? firstStartIndex : 0;
-  const firstStartMarker = input.projectMarkers.find((marker) => marker.productionStartYear === input.rows[tpOffset]?.year);
+  const valuationYear = finite(input.valuationYear) ? input.valuationYear : input.rows[0]?.year;
+  const corporateAlreadyProducing = input.projectMarkers.some(
+    (marker) => finite(marker.productionStartYear) && finite(valuationYear) && marker.productionStartYear <= valuationYear,
+  );
+  const firstFutureStartIndex = input.rows.findIndex((row) => (
+    finite(valuationYear)
+    && row.year > valuationYear
+    && input.projectMarkers.some((marker) => marker.productionStartYear === row.year)
+  ));
+  const firstFutureStartMarker = firstFutureStartIndex < 0
+    ? undefined
+    : input.projectMarkers.find((marker) => marker.productionStartYear === input.rows[firstFutureStartIndex]?.year);
+  const canBackcastFirstFutureHigh = !corporateAlreadyProducing
+    && firstFutureStartIndex > 0
+    && finite(firstFutureStartMarker?.dcfPerShare);
+  const tpOffset = canBackcastFirstFutureHigh ? firstFutureStartIndex : 0;
   const curve = buildValueRangeCurve({
     totalLen: input.rows.length,
     tpOffset,
     discountRate,
-    lowTp: firstStartMarker?.navPerShare ?? today.tpLow ?? input.rows[tpOffset]?.navPerShare ?? null,
-    highTp: firstStartMarker?.dcfPerShare ?? today.tpHigh ?? input.rows[tpOffset]?.dcfPerShare ?? null,
+    lowTp: canBackcastFirstFutureHigh && finite(firstFutureStartMarker?.navPerShare)
+      ? firstFutureStartMarker.navPerShare
+      : input.rows[tpOffset]?.navPerShare ?? null,
+    highTp: canBackcastFirstFutureHigh
+      ? firstFutureStartMarker.dcfPerShare as number
+      : input.rows[tpOffset]?.dcfExCapexPerShare ?? null,
     navSeriesRaw: input.rows.map((row) => row.navPerShare),
     dcfExCapexSeriesRaw: input.rows.map((row) => row.dcfExCapexPerShare ?? null),
   });
@@ -84,7 +106,8 @@ export function buildCorporateChartRows(
   });
   const peak = findFirstHighPeak(values);
   return values.map(({ year, low, high }, index) => buildValueRangeChartRow({
-    year, low, high, currentPrice: today.price, annotateCurrent: index === 0,
+    year, low, high, currentPrice: today.price,
+    annotateCurrent: typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0,
     annotateProductionStart: productionStartYears.has(year), format: label,
     highlightPeak: index === peak?.index,
     peakTooltip: peak ? formatPeakTooltip(peak, label, currencyCode) : null,

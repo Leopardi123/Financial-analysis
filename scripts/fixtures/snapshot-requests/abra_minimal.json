@@ -1,5 +1,6 @@
 {
   "targetCurrency": "CAD",
+  "valuationYear": 2026,
   "discountRate": 0.1,
   "market": {
     "shares_current": 100000000,
