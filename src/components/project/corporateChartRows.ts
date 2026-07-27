@@ -21,15 +21,14 @@ export const valueRangeChartHeader = [
   'Current', { role: 'annotation', type: 'string' },
   'Current Low', { role: 'annotation', type: 'string' },
   'Current High', { role: 'annotation', type: 'string' },
-  'TP Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' }, { role: 'style', type: 'string' },
-  'TP High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' }, { role: 'style', type: 'string' },
+  'TP Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  'TP High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
   'Peak Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
   'Peak High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
 ] as const;
 
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-const productionStartRingStyle = 'point { size: 11; fill-color: transparent; stroke-color: #2C3E50; stroke-width: 1; }';
 
 function productionStartTooltip(args: { year: number; projectNames: string[]; high: number | null; low: number | null; isPeak: boolean; currencyCode?: string }): string {
   const unit = args.currencyCode ? ` ${args.currencyCode}` : '';
@@ -114,11 +113,11 @@ export function buildCorporateChartRows(
       const projectNames = input.projectMarkers
         .filter((marker) => marker.productionStartYear === year)
         .map((marker) => marker.projectName);
-      const collisionLevels = Number(year === input.valuationYear) + Number(index === peak?.index);
+      const hasExistingValueAnnotation = year === input.valuationYear || index === peak?.index;
       return {
-        productionStartAnnotation: `${'\n'.repeat(collisionLevels)}PS`,
+        productionStartLowAnnotation: hasExistingValueAnnotation ? null : undefined,
+        productionStartHighAnnotation: hasExistingValueAnnotation ? null : undefined,
         productionStartTooltip: productionStartTooltip({ year, projectNames, high, low, isPeak: index === peak?.index, currencyCode }),
-        productionStartStyle: productionStartRingStyle,
       };
     })() : {}),
     year, low, high, currentPrice: today.price,
