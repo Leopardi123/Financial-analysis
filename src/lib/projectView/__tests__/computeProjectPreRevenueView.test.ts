@@ -32,10 +32,10 @@ assert.equal(out.marketBox.marketCapCurrent.value, 1000);
 assert.equal(out.list5.cash_used_Target.value, 50);
 assert.equal(out.list4.InSitu_10Y_USD.value, 1000);
 assertApprox(out.list2.DCF_Target.value, 2603.60953, 1e-4);
-assertApprox(out.list2.NPV_prodStart.value, 1603.60953, 1e-4);
-assertApprox(out.list2.NAV_prodStart.value, 1703.60953, 1e-4);
-assertApprox(out.list2.NPV_prodStart_perShare.value, 8.22364, 1e-4);
-assertApprox(out.list2.NAV_prodStart_perShare.value, 8.73646, 1e-4);
+assertApprox(out.list2.NPV_prodStart.value, 2603.60953, 1e-4);
+assertApprox(out.list2.NAV_prodStart.value, 2703.60953, 1e-4);
+assertApprox(out.list2.NPV_prodStart_perShare.value, 13.35184, 1e-4);
+assertApprox(out.list2.NAV_prodStart_perShare.value, 13.86466, 1e-4);
 assert.equal(out.marketBox.marketCapCurrent.reason, null);
 
 const cashFirstBase = {
@@ -84,6 +84,28 @@ const proFormaNavView = computeProjectViewMetrics({
   sharesPostFinancingInput: 400_000_000,
   financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
 });
+const precomputedFundingView = computeProjectViewMetrics({
+  ...cashFirstBase,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 30_000_000,
+  sharesPostFinancingInput: 410_000_000,
+  financing: {
+    equityPct: 100, debtPct: 0, usePrecomputedFinancing: true,
+    precomputedEligibleFundingTarget: 300_000_000,
+    precomputedCashUsedTarget: 100_000_000,
+    precomputedRemainingNeedTarget: 200_000_000,
+    precomputedDebtAddedTarget: 30_000_000,
+    precomputedEquityRaiseTarget: 170_000_000,
+    precomputedNewShares: 10_000_000,
+  },
+});
+assert.equal(precomputedFundingView.list5.Initial_CAPEX_Target.value, 300_000_000);
+assert.equal(precomputedFundingView.list5.cash_used_Target.value, 100_000_000);
+assert.equal(precomputedFundingView.list5.remaining_need_Target.value, 200_000_000);
+assert.equal(precomputedFundingView.list5.Debt_Added_Target.value, 30_000_000);
+assert.equal(precomputedFundingView.list5.Equity_Raise_Target.value, 170_000_000);
+assert.equal(precomputedFundingView.list5.New_Shares.value, 10_000_000);
+assert.equal(precomputedFundingView.list5.debt_t0.value, 30_000_000, 'post-financing debt must not add precomputed debt twice');
 for (const key of ['NAV_Target', 'NAV_perShare', 'NAV_prodStart', 'NAV_prodStart_perShare', 'P_over_NAV', 'EV_over_NAV'] as const) {
   assert.notEqual(reportedNavView.list2[key].value, proFormaNavView.list2[key].value, `${key} must follow selected NAV cash`);
 }

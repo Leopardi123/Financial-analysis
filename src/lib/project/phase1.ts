@@ -84,8 +84,8 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     workingCapitalDeltaUSD_effective[t] = dWC;
 
     const sustainingValue = op + sc + ga + roy + rec - bp;
-    // EBITDA convention in this model: gross revenue less operating, sustaining, G&A, royalties, reclamation, plus byproduct credits.
-    const ebitdaValue = r - op - sc - ga - roy - rec + bp;
+    // Sustaining CAPEX is a cash investment below EBITDA and is deducted once in FCFF.
+    const ebitdaValue = r - op - ga - roy - rec + bp;
     const ebitValue = ebitdaValue - dep;
 
     sustainingCostUSD[t] = Number.isFinite(sustainingValue) ? sustainingValue : null;

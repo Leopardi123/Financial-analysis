@@ -8,6 +8,7 @@ export function deriveBuildFundingNeedUSD(args: {
     productionStartPeriod: number;
     yearsByPeriod: number[];
   }>;
+  valuationYear?: number;
 }): number | null {
   const { yearsByPeriod, masterN, capexUSD_total, projects } = args;
 
@@ -23,7 +24,7 @@ export function deriveBuildFundingNeedUSD(args: {
     throw new Error('Cannot derive build funding need without projects');
   }
 
-  let corporateFirstProductionYear: number | null = null;
+  const valuationYear = args.valuationYear ?? new Date().getUTCFullYear();
 
   for (const project of projects) {
     const { productionStartPeriod, yearsByPeriod: projectYears, masterN: projectMasterN, projectId } = project;
@@ -42,28 +43,19 @@ export function deriveBuildFundingNeedUSD(args: {
       throw new Error(`Project ${projectId} production start year is missing`);
     }
 
-    if (corporateFirstProductionYear === null || productionYear < corporateFirstProductionYear) {
-      corporateFirstProductionYear = productionYear;
-    }
   }
 
-  if (corporateFirstProductionYear === null) {
-    throw new Error('Unable to derive corporate first production year');
-  }
-
-  let negativeCapexSum = 0;
+  let remainingCapexSpend = 0;
 
   for (let t = 0; t < yearsByPeriod.length; t += 1) {
-    if (yearsByPeriod[t] < corporateFirstProductionYear) {
+    if (yearsByPeriod[t] >= valuationYear) {
       const capex = capexUSD_total[t];
       if (capex === null) {
         return null;
       }
-      if (capex < 0) {
-        negativeCapexSum += capex;
-      }
+      remainingCapexSpend += Math.abs(capex);
     }
   }
 
-  return Math.abs(negativeCapexSum);
+  return remainingCapexSpend;
 }

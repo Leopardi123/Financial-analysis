@@ -867,7 +867,7 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   const navCashDifference = (result.snapshot.financing.cash_for_nav_TargetCurrency ?? 0) - (proForma.snapshot.financing.cash_for_nav_TargetCurrency ?? 0);
   const sharesPf = result.snapshot.financing.shares_post_financing as number;
   for (let period = 0; period < reportedRows.length; period += 1) {
-    assert.equal((reportedRows[period].navAbsolute ?? 0) - (proFormaRows[period].navAbsolute ?? 0), navCashDifference, `NAV bridge delta at t=${period}`);
+    assert.ok(Math.abs(((reportedRows[period].navAbsolute ?? 0) - (proFormaRows[period].navAbsolute ?? 0)) - navCashDifference) < 1e-6, `NAV bridge delta at t=${period}`);
     assert.ok(Math.abs(((reportedRows[period].navPerShare ?? 0) - (proFormaRows[period].navPerShare ?? 0)) - navCashDifference / sharesPf) < 1e-9, `NAV/share bridge delta at t=${period}`);
   }
   const firstPeakIndex = (rows: typeof reportedRows) => rows.reduce((peak, row, index) => row.dcfAbsolute !== null && (peak < 0 || row.dcfAbsolute > (rows[peak].dcfAbsolute as number)) ? index : peak, -1);
@@ -888,7 +888,7 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
     assert.equal(reserveReported.snapshot.financing.cash_used_for_build_TargetCurrency, 75_000_000);
     const reserveReportedRows = (reserveReported.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ navAbsolute: number | null }> } }).corporateValuationTimeSeries.rows;
     const reserveProFormaRows = (reserveProForma.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ navAbsolute: number | null }> } }).corporateValuationTimeSeries.rows;
-    reserveReportedRows.forEach((row, period) => assert.equal((row.navAbsolute ?? 0) - (reserveProFormaRows[period].navAbsolute ?? 0), 75_000_000));
+    reserveReportedRows.forEach((row, period) => assert.ok(Math.abs(((row.navAbsolute ?? 0) - (reserveProFormaRows[period].navAbsolute ?? 0)) - 75_000_000) < 1e-6));
   }
 
   const snapshotSeries = result.snapshot.series as { fcffUSD: Array<number | null>; capexUSD: Array<number | null>; totalRevenue_USD: Array<number | null>; ebitUSD: Array<number | null> };

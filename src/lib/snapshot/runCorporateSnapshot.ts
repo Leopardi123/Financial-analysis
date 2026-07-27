@@ -1631,6 +1631,13 @@ export async function runCorporateSnapshotPipeline(args: {
           const grossRevenueSourceForRoyalties: 'outPreRoyalties.revenue.grossRevenueUSD' | 'resolved.totalRevenue_USD' = Object.keys(outPreRoyalties.revenue.byMetalRevenueUSD).length > 0
             ? 'resolved.totalRevenue_USD'
             : 'outPreRoyalties.revenue.grossRevenueUSD';
+          const rawSeries = (rawJsonRecord.series ?? null) as Record<string, unknown> | null;
+          const explicitNetRevenueUSD = Array.isArray(rawSeries?.revenueUSD)
+            ? sanitizeSeries(rawSeries.revenueUSD as Array<number | null>)
+            : null;
+          const useExplicitNetRevenue = explicitNetRevenueUSD !== null
+            && explicitNetRevenueUSD.length === projectLength
+            && explicitNetRevenueUSD.every((value) => value !== null);
 
           const grossRevenueNullPeriods = grossRevenueForRoyalties
             .map((value, t) => (value === null ? t : null))
@@ -1813,16 +1820,17 @@ export async function runCorporateSnapshotPipeline(args: {
           const capexUSD_used = sanitizeSeries(out.capexUSD_used);
           const workingCapitalDeltaUSD_effective = sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective);
 
-          const centralRevenueUSD = grossRevenueForRoyalties;
+          const centralRevenueUSD = useExplicitNetRevenue ? explicitNetRevenueUSD : grossRevenueForRoyalties;
           const ebitdaUSD = centralRevenueUSD.map((revenue, t) => {
             if (revenue === null) return null;
             const op = operatingCostsUSD[t] ?? 0;
-            const sc = sustainingCapexUSD[t] ?? 0;
             const ga = siteGandA_USD[t] ?? 0;
             const roy = royaltiesUSD[t] ?? 0;
             const rec = reclamationUSD[t] ?? 0;
-            const bp = byproductCreditsUSD[t] ?? 0;
-            return revenue - op - sc - ga - roy - rec + bp;
+            // Explicit series.revenueUSD is total net revenue; its by-product
+            // contribution must not be added a second time.
+            const bp = useExplicitNetRevenue ? 0 : byproductCreditsUSD[t] ?? 0;
+            return revenue - op - ga - roy - rec + bp;
           });
           const ebitUSD = ebitdaUSD.map((ebitda, t) => {
             if (ebitda === null) return null;
@@ -1854,8 +1862,8 @@ export async function runCorporateSnapshotPipeline(args: {
             return Math.max(max, Math.abs(value));
           }, 0);
           diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
-          diagnostics.warnings.push(`[${projectId}] totalRevenue source path=grossRevenueForRoyalties (${grossRevenueSourceForRoyalties})`);
-          diagnostics.warnings.push(`[${projectId}] ebit source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits - depreciation`);
+          diagnostics.warnings.push(`[${projectId}] totalRevenue source path=${useExplicitNetRevenue ? 'series.revenueUSD (explicit total net revenue)' : `grossRevenueForRoyalties (${grossRevenueSourceForRoyalties})`}`);
+          diagnostics.warnings.push(`[${projectId}] ebit source path=totalRevenue - operatingCosts - siteG&A - royalties - reclamation + byproductCredits - depreciation`);
           diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - sustainingCapex - capex - workingCapitalDelta (reclamation already included in EBIT)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (central revenue-cost builder)`);
@@ -2160,6 +2168,9 @@ export async function runCorporateSnapshotPipeline(args: {
     const snapshotSeries = shiftedDeep.value as CorporateSnapshotSeries;
     snapshotSeries.capexUSD = applyScalarMultiplier(snapshotSeries.capexUSD, input.scenario.capexMult);
     snapshotSeries.operatingCostsUSD = applyScalarMultiplier(snapshotSeries.operatingCostsUSD, input.scenario.opexMult);
+    const valuationYear = new Date().getUTCFullYear();
+    const valuationStartPeriodRaw = snapshotSeries.yearsByPeriod.findIndex((year) => year >= valuationYear);
+    const valuationStartPeriod = valuationStartPeriodRaw < 0 ? snapshotSeries.yearsByPeriod.length : valuationStartPeriodRaw;
 
     const metalRevenueDiagnostics = buildMetalRevenueDiagnostics({
       corporateYearsByPeriod: snapshotSeries.yearsByPeriod,
@@ -2205,7 +2216,7 @@ export async function runCorporateSnapshotPipeline(args: {
       sustainingCostUSD_total: snapshotSeries.sustainingCostUSD,
       payableAuEqOz_total: snapshotSeries.payableQtyByMetal.Au ?? aggregation.payableAuEqOz_total,
       CF_LOM_USD: sumFinite(snapshotSeries.fcffUSD),
-      NPV_today_USD: discountedSum(snapshotSeries.fcffUSD, input.discountRate),
+      NPV_today_USD: discountedSum(snapshotSeries.fcffUSD.slice(valuationStartPeriod), input.discountRate),
       aiscAuEqUSDPerOz_LOM: (() => {
         const cost = sumFinite(snapshotSeries.sustainingCostUSD);
         const pay = sumFinite(snapshotSeries.payableQtyByMetal.Au ?? []);
@@ -2241,7 +2252,7 @@ export async function runCorporateSnapshotPipeline(args: {
         : aggregationEffective.payableAuEqOz_total;
 
       aggregationEffective.CF_LOM_USD = sumFinite(aggregationEffective.fcffUSD_total);
-      aggregationEffective.NPV_today_USD = discountedSum(aggregationEffective.fcffUSD_total, input.discountRate);
+      aggregationEffective.NPV_today_USD = discountedSum(aggregationEffective.fcffUSD_total.slice(valuationStartPeriod), input.discountRate);
       aggregationEffective.aiscAuEqUSDPerOz_LOM = (() => {
         const cost = sumFinite(aggregationEffective.sustainingCostUSD_total);
         const pay = sumFinite(aggregationEffective.payableAuEqOz_total);
@@ -2264,7 +2275,7 @@ export async function runCorporateSnapshotPipeline(args: {
         const productionYear = project.yearsByPeriod[project.productionStartPeriod];
         const constructionStartPeriod = aggregationEffective.corporateYearsByPeriod.findIndex((year) => {
           const local = project.yearsByPeriod.indexOf(year);
-          return local >= 0 && local < project.productionStartPeriod && (context?.economics.capexUSD[local] ?? 0) > 0;
+          return local >= 0 && year >= valuationYear && (context?.economics.capexUSD[local] ?? 0) > 0;
         });
         return {
           projectId: project.projectId,
@@ -2273,11 +2284,11 @@ export async function runCorporateSnapshotPipeline(args: {
           debtPercent: input.financingPlanByProject?.[project.projectId]?.debt_fraction ?? input.financingPlan?.debt_fraction ?? 0,
           capexNeedByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
             const local = project.yearsByPeriod.indexOf(year);
-            return local >= 0 && local < project.productionStartPeriod ? Math.max(0, context?.economics.capexUSD[local] ?? 0) : 0;
+            return local >= 0 && year >= valuationYear ? Math.max(0, context?.economics.capexUSD[local] ?? 0) : 0;
           }),
           fcffByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
             const local = project.yearsByPeriod.indexOf(year);
-            return local < 0 ? 0 : context?.economics.fcffUSD[local] ?? 0;
+            return local < 0 || year < valuationYear ? 0 : context?.economics.fcffUSD[local] ?? 0;
           }),
         };
       }),
@@ -3330,9 +3341,10 @@ export async function runCorporateSnapshotPipeline(args: {
         const rangeEnd = aggregationEffective.corporateMasterN;
         const dcfProdstartPresentPerShareSeries: Array<number | null> = [];
         const navProdstartPerShareSeries: Array<number | null> = [];
-        const dcfProdstartExCapexPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
-        const navByPeriodPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
-        for (let period = 0; period <= rangeEnd; period += 1) {
+        const visibleLength = Math.max(0, rangeEnd - valuationStartPeriod + 1);
+        const dcfProdstartExCapexPerShareSeries: Array<number | null> = Array.from({ length: visibleLength }, () => null);
+        const navByPeriodPerShareSeries: Array<number | null> = Array.from({ length: visibleLength }, () => null);
+        for (let period = valuationStartPeriod; period <= rangeEnd; period += 1) {
           const periodMetrics = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
             capexUSD_total: aggregationEffective.capexUSD_total,
@@ -3344,10 +3356,10 @@ export async function runCorporateSnapshotPipeline(args: {
             npvToday_USD: aggregationEffective.NPV_today_USD,
             netCash_t0_post_TargetCurrency: netCashForNavTarget,
           }).metrics;
-          dcfProdstartExCapexPerShareSeries[period] = periodMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
-          navByPeriodPerShareSeries[period] = periodMetrics.NAV_prodStart_perShare_TargetCurrency;
+          dcfProdstartExCapexPerShareSeries[period - valuationStartPeriod] = periodMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
+          navByPeriodPerShareSeries[period - valuationStartPeriod] = periodMetrics.NAV_prodStart_perShare_TargetCurrency;
         }
-        for (let tp = tpEff; tp <= rangeEnd; tp += 1) {
+        for (let tp = Math.max(tpEff, valuationStartPeriod); tp <= rangeEnd; tp += 1) {
           const metricsAtTp = computeLista2CfDcfMetrics({
             fcfUSD_total: aggregationEffective.fcffUSD_total,
             capexUSD_total: aggregationEffective.capexUSD_total,
@@ -3367,13 +3379,14 @@ export async function runCorporateSnapshotPipeline(args: {
           navProdstartPerShareSeries,
           dcfProdstartExCapexPerShareSeries,
           navByPeriodPerShareSeries,
-          yearsByPeriod: aggregationEffective.corporateYearsByPeriod.slice(0, rangeEnd + 1),
-          productionStartPeriod: tpEff,
+          yearsByPeriod: aggregationEffective.corporateYearsByPeriod.slice(valuationStartPeriod, rangeEnd + 1),
+          productionStartPeriod: tpEff === null ? null : Math.max(0, tpEff - valuationStartPeriod),
           discountRate: input.discountRate,
         };
     })();
     const corporateValuationTimeSeries = {
-      rows: aggregationEffective.corporateYearsByPeriod.map((year, period) => {
+      rows: aggregationEffective.corporateYearsByPeriod.slice(valuationStartPeriod).map((year, displayPeriod) => {
+        const period = displayPeriod + valuationStartPeriod;
         const metricsAtPeriod = computeLista2CfDcfMetrics({
           fcfUSD_total: aggregationEffective.fcffUSD_total,
           capexUSD_total: aggregationEffective.capexUSD_total,

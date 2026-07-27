@@ -96,15 +96,11 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     netCash_t0_post_TargetCurrency: 0,
   });
 
-  assertEqual(
-    corporateMilestone2029.metrics.InitialCAPEX_incremental_USD,
-    100,
-    'InitialCAPEX_incremental_USD should be strict sum(capexUSD_total[t]) for 0 <= t < tp_2029',
-  );
+  assertEqual(corporateMilestone2029.metrics.InitialCAPEX_incremental_USD, 50, 'remaining initial CAPEX should include valuation period and later');
   assertEqual(
     corporateMilestone2031.metrics.InitialCAPEX_incremental_USD,
-    50,
-    'InitialCAPEX_incremental_USD should be strict sum(capexUSD_total[t]) for tp_2029 <= t < tp_2031',
+    0,
+    'remaining initial CAPEX should be zero after all initial CAPEX periods',
   );
 
   if (
@@ -117,8 +113,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     assertAlmostEqual(
       corporateMilestone2029.metrics.DCF_prodStart_exCapex_TargetCurrency
         - corporateMilestone2029.metrics.NPV_prodStart_TargetCurrency,
-      100,
-      'DCF - NPV must equal InitialCAPEX_incremental for 2029',
+      50,
+      'High - rolling NPV must equal remaining initial CAPEX for 2029',
     );
   }
 
@@ -126,14 +122,11 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     corporateMilestone2031.metrics.DCF_prodStart_exCapex_TargetCurrency !== null
     && corporateMilestone2031.metrics.NPV_prodStart_TargetCurrency !== null
   ) {
-    if (corporateMilestone2031.metrics.DCF_prodStart_exCapex_TargetCurrency === corporateMilestone2031.metrics.NPV_prodStart_TargetCurrency) {
-      throw new Error('DCF and NPV at prod-start must differ when InitialCAPEX_incremental > 0 (2031)');
-    }
     assertAlmostEqual(
       corporateMilestone2031.metrics.DCF_prodStart_exCapex_TargetCurrency
         - corporateMilestone2031.metrics.NPV_prodStart_TargetCurrency,
-      50,
-      'DCF - NPV must equal InitialCAPEX_incremental for 2031',
+      0,
+      'High - rolling NPV must be zero when no initial CAPEX remains',
     );
   }
 
@@ -150,7 +143,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 
   const invalidCapexWindow = computeLista2CfDcfMetrics({
     fcfUSD_total: [0, 0, 100],
-    capexUSD_total: [50, null, 0],
+    capexUSD_total: [50, 0, null],
     masterN: 2,
     productionStartPeriod: 2,
     initialCapexStartPeriod: 0,
@@ -162,8 +155,9 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   });
 
   assertEqual(invalidCapexWindow.metrics.InitialCAPEX_incremental_USD, null, 'InitialCAPEX_incremental_USD should be null when capex window has null');
-  assertEqual(invalidCapexWindow.metrics.NPV_prodStart_TargetCurrency, null, 'NPV_prodStart_TargetCurrency should be null when capex window is invalid');
-  assertEqual(invalidCapexWindow.metrics.NAV_prodStart_TargetCurrency, null, 'NAV_prodStart_TargetCurrency should be null when NPV_prodStart is null');
+  assertEqual(invalidCapexWindow.metrics.DCF_prodStart_exCapex_TargetCurrency, null, 'ex-initial-CAPEX High should be null when remaining CAPEX is invalid');
+  assertEqual(invalidCapexWindow.metrics.NPV_prodStart_TargetCurrency, 100, 'rolling FCFF NPV does not subtract CAPEX a second time');
+  assertEqual(invalidCapexWindow.metrics.NAV_prodStart_TargetCurrency, 100, 'NAV remains rolling FCFF NPV plus net cash');
 
   console.log('Lista2 CF+DCF tests passed');
 })();

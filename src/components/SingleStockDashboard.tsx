@@ -3046,6 +3046,16 @@ Capital Available: ${availableLabel}`,
         equityPct: 100,
         debtPct: 0,
         usePrecomputedFinancing: true,
+        precomputedEligibleFundingTarget: (() => {
+          const cashUsed = asNum(projectFinancing.cash_used_for_build_TargetCurrency);
+          const remaining = asNum(projectFinancing.remaining_funding_need_TargetCurrency);
+          return cashUsed !== null && remaining !== null ? cashUsed + remaining : null;
+        })(),
+        precomputedCashUsedTarget: asNum(projectFinancing.cash_used_for_build_TargetCurrency),
+        precomputedRemainingNeedTarget: asNum(projectFinancing.remaining_funding_need_TargetCurrency),
+        precomputedDebtAddedTarget: asNum(projectFinancing.new_debt_TargetCurrency),
+        precomputedEquityRaiseTarget: asNum(projectFinancing.equity_raised_TargetCurrency),
+        precomputedNewShares: asNum(projectFinancing.new_shares),
       },
     });
   }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
@@ -3095,6 +3105,16 @@ Capital Available: ${availableLabel}`,
         equityPct: 100,
         debtPct: 0,
         usePrecomputedFinancing: true,
+        precomputedEligibleFundingTarget: (() => {
+          const cashUsed = asNum(corporateFinancing.cash_used_for_build_TargetCurrency);
+          const remaining = asNum(corporateFinancing.remaining_funding_need_TargetCurrency);
+          return cashUsed !== null && remaining !== null ? cashUsed + remaining : null;
+        })(),
+        precomputedCashUsedTarget: asNum(corporateFinancing.cash_used_for_build_TargetCurrency),
+        precomputedRemainingNeedTarget: asNum(corporateFinancing.remaining_funding_need_TargetCurrency),
+        precomputedDebtAddedTarget: asNum(corporateFinancing.new_debt_TargetCurrency),
+        precomputedEquityRaiseTarget: asNum(corporateFinancing.equity_raised_TargetCurrency),
+        precomputedNewShares: asNum(corporateFinancing.new_shares),
       },
     });
     const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
