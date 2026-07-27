@@ -6,6 +6,7 @@ import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import AlltGickFelCard from "./project/AlltGickFelCard";
+import { resolveCorporateMilestoneYear } from "./project/corporateMilestoneYear";
 import type { StressOptions } from "../lib/snapshot/applyStressModifiers.ts";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
@@ -3235,16 +3236,16 @@ Capital Available: ${availableLabel}`,
   const corporateProdStartMarkerValuesByKey = useMemo(() => {
     if (!corporateSnapshotData) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
 
-    let yearsByPeriod: number[];
-    try {
-      yearsByPeriod = requireYearsByPeriod(corporateSnapshotData.series);
-    } catch {
-      return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
-    }
+    const valuationYears = ((corporateSnapshotData.corporateValuationTimeSeries as {
+      rows?: Array<{ year?: number }>;
+    } | null | undefined)?.rows ?? [])
+      .map((row) => row.year)
+      .filter((year): year is number => typeof year === "number" && Number.isFinite(year));
     const timeline = corporateSnapshotData.modeledValuationTimeline as {
       markers?: Array<{
         tp: number;
         corporateTpIndexUsed?: number | null;
+        yearLabelUsed?: string | null;
         lista2Metrics?: {
           DCF_prodStart_exCapex_TargetCurrency?: number | null;
           DCF_prodStart_exCapex_perShare_TargetCurrency?: number | null;
@@ -3287,8 +3288,7 @@ Capital Available: ${availableLabel}`,
     ): YearlyMetricValue[] => {
       const values: YearlyMetricValue[] = [];
       for (const marker of markers) {
-        const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
-        const year = yearLabel(yearsByPeriod, tIndex);
+        const year = resolveCorporateMilestoneYear(marker, valuationYears);
         const dcfProdStartPerShareRaw = marker.lista2Metrics?.DCF_prodStart_exCapex_perShare_TargetCurrency;
         const npvProdStartPerShareRaw = marker.lista2Metrics?.NPV_prodStart_perShare_TargetCurrency;
         const navProdStartPerShareRaw = marker.lista2Metrics?.NAV_prodStart_perShare_TargetCurrency;
