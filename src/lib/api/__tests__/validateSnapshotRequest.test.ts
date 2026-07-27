@@ -12,6 +12,7 @@ function assert(condition: boolean, message: string): void {
 
   const inlineProjectsValid = validateSnapshotRequest({
     targetCurrency: 'SEK',
+    valuationYear: 2026,
     discountRate: 0.1,
     fx_USD_to_TargetCurrency: 10,
     market: {
@@ -21,6 +22,13 @@ function assert(condition: boolean, message: string): void {
     projects: [{ projectId: 'p1', rawJson }],
   });
   assert(inlineProjectsValid.ok, 'inline projects mode should validate');
+  if (inlineProjectsValid.ok) assert(inlineProjectsValid.value.valuationYear === 2026, 'explicit valuationYear should be preserved');
+
+  const invalidValuationYear = validateSnapshotRequest({
+    targetCurrency: 'SEK', valuationYear: 2026.5, discountRate: 0.1,
+    projects: [{ projectId: 'p1', rawJson }],
+  });
+  assert(!invalidValuationYear.ok, 'fractional valuationYear should fail validation');
 
 
   const projectsWithoutMarketValid = validateSnapshotRequest({

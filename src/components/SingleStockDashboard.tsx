@@ -557,6 +557,7 @@ function buildProjectsSnapshotRequest(args: {
   const lockedTargetCurrency = resolveProfileTargetCurrency(args.profile);
   return {
     targetCurrency: lockedTargetCurrency,
+    valuationYear: new Date().getUTCFullYear(),
     discountRate: args.discountRate,
     scenario: args.scenario,
     fx: args.fx,
@@ -1972,6 +1973,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             symbol: ticker,
+            valuationYear: new Date().getUTCFullYear(),
             targetCurrency: lockedTargetCurrency,
             discountRate,
             market: {
@@ -3398,6 +3400,7 @@ Capital Available: ${availableLabel}`,
 
   const corporateChartTimeSeries = useMemo(() => {
     const source = corporateSnapshotData?.corporateValuationTimeSeries as {
+      valuationYear?: number;
       rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null }>;
       projectMarkers?: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
     } | null | undefined;
@@ -3408,6 +3411,7 @@ Capital Available: ${availableLabel}`,
     const adjustedShares = calculatedShares === null ? null : calculatedShares + parseExtraShares(corporateExtraSharesInput);
     const scale = calculatedShares !== null && adjustedShares !== null && adjustedShares > 0 ? calculatedShares / adjustedShares : 1;
     return {
+      valuationYear: source.valuationYear,
       rows: source.rows.map((row) => ({
         ...row,
         sharesPf: adjustedShares ?? row.sharesPf,
