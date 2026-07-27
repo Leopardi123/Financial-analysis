@@ -21,14 +21,30 @@ export const valueRangeChartHeader = [
   'Current', { role: 'annotation', type: 'string' },
   'Current Low', { role: 'annotation', type: 'string' },
   'Current High', { role: 'annotation', type: 'string' },
-  'TP Low', { role: 'annotation', type: 'string' },
-  'TP High', { role: 'annotation', type: 'string' },
+  'TP Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' }, { role: 'style', type: 'string' },
+  'TP High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' }, { role: 'style', type: 'string' },
   'Peak Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
   'Peak High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
 ] as const;
 
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const productionStartRingStyle = 'point { size: 11; fill-color: transparent; stroke-color: #2C3E50; stroke-width: 1; }';
+
+function productionStartTooltip(args: { year: number; projectNames: string[]; high: number | null; low: number | null; isPeak: boolean; currencyCode?: string }): string {
+  const unit = args.currencyCode ? ` ${args.currencyCode}` : '';
+  const value = (number: number | null) => number === null ? 'n/a' : `${label(number)}${unit}`;
+  const projects = args.projectNames.length === 1
+    ? args.projectNames[0]
+    : args.projectNames.map((name) => `• ${name}`).join('\n');
+  return [
+    `År: ${args.year}`,
+    ...(args.isPeak ? ['Peak High'] : []),
+    `Produktionsstart: ${projects}`,
+    `High: ${value(args.high)}`,
+    `Low: ${value(args.low)}`,
+  ].join('\n');
+}
 
 /** Clips presentation rows by calendar year; the complete snapshot time series remains untouched. */
 export function clipCorporateChartInput(input: CorporateChartInput): CorporateChartWindow {
@@ -56,7 +72,7 @@ export function clipCorporateChartInput(input: CorporateChartInput): CorporateCh
   };
 }
 
-/** Builds the Project-chart row shape; TP columns are reused for every corporate project-start year. */
+/** Builds the ordinary curve first, then adds project starts in dedicated presentation columns. */
 export function buildCorporateChartRows(
   input: CorporateChartInput,
   today: { low: number | null; high: number | null; price: number | null; tpLow?: number | null; tpHigh?: number | null },
@@ -79,33 +95,32 @@ export function buildCorporateChartRows(
     && row.year > valuationYear
     && input.projectMarkers.some((marker) => marker.productionStartYear === row.year)
   ));
-  const firstFutureStartMarker = firstFutureStartIndex < 0
-    ? undefined
-    : input.projectMarkers.find((marker) => marker.productionStartYear === input.rows[firstFutureStartIndex]?.year);
-  const canBackcastFirstFutureHigh = !corporateAlreadyProducing
-    && firstFutureStartIndex > 0
-    && finite(firstFutureStartMarker?.dcfPerShare);
-  const tpOffset = canBackcastFirstFutureHigh ? firstFutureStartIndex : 0;
+  const shouldBackcastFirstFutureHigh = !corporateAlreadyProducing && firstFutureStartIndex > 0;
+  const tpOffset = shouldBackcastFirstFutureHigh ? firstFutureStartIndex : 0;
   const curve = buildValueRangeCurve({
     totalLen: input.rows.length,
     tpOffset,
     discountRate,
-    lowTp: canBackcastFirstFutureHigh && finite(firstFutureStartMarker?.navPerShare)
-      ? firstFutureStartMarker.navPerShare
-      : input.rows[tpOffset]?.navPerShare ?? null,
-    highTp: canBackcastFirstFutureHigh
-      ? firstFutureStartMarker.dcfPerShare as number
-      : input.rows[tpOffset]?.dcfExCapexPerShare ?? null,
+    lowTp: input.rows[tpOffset]?.navPerShare ?? null,
+    highTp: input.rows[tpOffset]?.dcfExCapexPerShare ?? null,
     navSeriesRaw: input.rows.map((row) => row.navPerShare),
     dcfExCapexSeriesRaw: input.rows.map((row) => row.dcfExCapexPerShare ?? null),
   });
 
-  const values = input.rows.map((row, index) => {
-    const startMarker = input.projectMarkers.find((marker) => marker.productionStartYear === row.year);
-    return { year: row.year, low: startMarker?.navPerShare ?? curve.low[index], high: startMarker?.dcfPerShare ?? curve.high[index] };
-  });
+  const values = input.rows.map((row, index) => ({ year: row.year, low: curve.low[index], high: curve.high[index] }));
   const peak = findFirstHighPeak(values);
   return values.map(({ year, low, high }, index) => buildValueRangeChartRow({
+    ...(productionStartYears.has(year) ? (() => {
+      const projectNames = input.projectMarkers
+        .filter((marker) => marker.productionStartYear === year)
+        .map((marker) => marker.projectName);
+      const collisionLevels = Number(year === input.valuationYear) + Number(index === peak?.index);
+      return {
+        productionStartAnnotation: `${'\n'.repeat(collisionLevels)}PS`,
+        productionStartTooltip: productionStartTooltip({ year, projectNames, high, low, isPeak: index === peak?.index, currencyCode }),
+        productionStartStyle: productionStartRingStyle,
+      };
+    })() : {}),
     year, low, high, currentPrice: today.price,
     annotateCurrent: typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0,
     annotateProductionStart: productionStartYears.has(year), format: label,

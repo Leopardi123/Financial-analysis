@@ -38,6 +38,9 @@ export function buildValueRangeChartRow(input: {
   currentPriceAnnotation?: string | null;
   highlightPeak?: boolean;
   peakTooltip?: string | null;
+  productionStartAnnotation?: string | null;
+  productionStartTooltip?: string | null;
+  productionStartStyle?: string | null;
 }) {
   const orderedLow = input.low;
   const orderedHigh = input.high;
@@ -48,8 +51,8 @@ export function buildValueRangeChartRow(input: {
     current, current === null ? null : input.currentPriceAnnotation === undefined ? annotation(current) : input.currentPriceAnnotation,
     input.annotateCurrent ? orderedLow : null, input.annotateCurrent ? annotation(orderedLow) : null,
     input.annotateCurrent ? orderedHigh : null, input.annotateCurrent ? annotation(orderedHigh) : null,
-    input.annotateProductionStart ? input.low : null, input.annotateProductionStart ? annotation(input.low) : null,
-    input.annotateProductionStart ? input.high : null, input.annotateProductionStart ? annotation(input.high) : null,
+    input.annotateProductionStart ? input.low : null, input.annotateProductionStart ? input.productionStartAnnotation ?? annotation(input.low) : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null, input.annotateProductionStart ? input.productionStartStyle ?? null : null,
+    input.annotateProductionStart ? input.high : null, input.annotateProductionStart ? input.productionStartAnnotation ?? annotation(input.high) : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null, input.annotateProductionStart ? input.productionStartStyle ?? null : null,
     input.highlightPeak ? orderedLow : null, input.highlightPeak ? annotation(orderedLow) : null, input.highlightPeak ? input.peakTooltip ?? null : null,
     input.highlightPeak ? orderedHigh : null, input.highlightPeak ? annotation(orderedHigh) : null, input.highlightPeak ? input.peakTooltip ?? null : null,
   ];

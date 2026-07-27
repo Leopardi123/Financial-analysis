@@ -4,6 +4,17 @@ import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInp
 import { buildValueRangeChartOptions } from '../valueRangeChartOptions.ts';
 import { buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from '../valueRangeCurve.ts';
 
+const TP_LOW = 11;
+const TP_LOW_ANNOTATION = 12;
+const TP_LOW_TOOLTIP = 13;
+const TP_LOW_STYLE = 14;
+const TP_HIGH = 15;
+const TP_HIGH_ANNOTATION = 16;
+const TP_HIGH_TOOLTIP = 17;
+const TP_HIGH_STYLE = 18;
+const PEAK_LOW = 19;
+const PEAK_HIGH = 22;
+
 test('corporate rows use Project chart columns and annotate only today and project starts', () => {
   const rows = buildCorporateChartRows({
     rows: [
@@ -21,16 +32,17 @@ test('corporate rows use Project chart columns and annotate only today and proje
     ],
   }, { low: 4.5, high: 5.5, price: 2.1 });
 
-  assert.equal(valueRangeChartHeader.length, 21);
+  assert.equal(valueRangeChartHeader.length, 25);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
-  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.4, '      5,4']);
-  assert.deepEqual(rows[2].slice(5, 15), [null, null, null, null, null, null, null, null, null, null]);
-  assert.equal(rows[1][12], '      4,9');
-  assert.equal(rows[1][14], '      5,7');
+  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.7 / 1.1, '      5,2']);
+  assert.deepEqual(rows[2].slice(5, 19), new Array(14).fill(null));
+  assert.equal(rows[1][TP_LOW_ANNOTATION], 'PS');
+  assert.equal(rows[1][TP_HIGH_ANNOTATION], 'PS');
+  assert.match(rows[1][TP_HIGH_TOOLTIP] as string, /Project A.*Project A2/s);
   assert.equal(rows.filter((row) => row[5] !== null).length, 1);
   assert.equal(rows.filter((row) => row[11] !== null).length, 3);
-  assert.equal(rows.flat().some((value) => typeof value === 'string' && value.includes('Project')), false);
+  assert.equal(rows.some((row) => [row[6], row[8], row[10], row[12], row[16], row[20], row[23]].some((value) => typeof value === 'string' && value.includes('Project'))), false);
 });
 
 test('one production start always has separate low and high point/annotation columns', () => {
@@ -42,8 +54,12 @@ test('one production start always has separate low and high point/annotation col
     projectMarkers: [{ projectId: 'only', projectName: 'Never rendered', productionStartYear: 2030 }],
   }, { low: 3, high: 5, price: 2 });
   const start = rows[1];
-  assert.deepEqual(start.slice(0, 15), [2030, 5.2, 6.4 - 5.2, 5.2, 6.4, null, null, null, null, null, null, 5.2, '      5,2', 6.4, '      6,4']);
-  assert.deepEqual(start.slice(15), [5.2, '      5,2', 'År: 2030\nHigh: 6,4\nLow: 5,2', 6.4, '      6,4', 'År: 2030\nHigh: 6,4\nLow: 5,2']);
+  assert.deepEqual(start.slice(0, 11), [2030, 5.2, 6.4 - 5.2, 5.2, 6.4, null, null, null, null, null, null]);
+  assert.equal(start[TP_LOW], 5.2);
+  assert.equal(start[TP_HIGH], 6.4);
+  assert.match(start[TP_LOW_TOOLTIP] as string, /Produktionsstart: Never rendered/);
+  assert.equal(start[PEAK_LOW], 5.2);
+  assert.equal(start[PEAK_HIGH], 6.4);
 });
 
 test('peak helper selects the first equal maximum and formats both values with currency', () => {
@@ -57,7 +73,7 @@ test('peak helper selects the first equal maximum and formats both values with c
   assert.deepEqual(buildCorporateYearTicks({ rows: timeline(2028, 2031), projectMarkers: [] }, 2030).map((tick) => tick.v), [2028, 2030, 2031]);
 });
 
-test('canonical Corporate marker DCF maps to High even when the scalar fallback equals NAV', () => {
+test('marker-specific valuation cannot replace the ordinary Corporate curve', () => {
   const rows = buildCorporateChartRows({
     rows: [
       { period: 0, year: 2028, npvPerShare: 1.5, navPerShare: 1.5, dcfPerShare: 1.9, dcfExCapexPerShare: 1.9, sharesPf: 100 },
@@ -68,13 +84,12 @@ test('canonical Corporate marker DCF maps to High even when the scalar fallback 
   }, { low: 1.5, high: 1.9, price: 1, tpLow: 1.9, tpHigh: 1.9 });
   const start = rows.find((row) => row[0] === 2030);
   assert.ok(start);
-  assert.equal(start[11], 1.9);
-  assert.equal((start[12] as string).trim(), '1,9');
-  assert.equal(start[13], 2.3);
-  assert.equal((start[14] as string).trim(), '2,3');
+  assert.equal(start[TP_LOW], 1.9);
+  assert.equal(start[TP_HIGH], 1.9);
+  assert.match(start[TP_HIGH_TOOLTIP] as string, /High: 1,9/);
 });
 
-test('each Corporate production-start year maps its own NAV to Low and DCF to High', () => {
+test('each Corporate production-start year marks the ordinary High and Low for that year', () => {
   const input = {
     rows: [2028, 2029, 2030, 2031, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 1.5, dcfPerShare: 1.8, dcfExCapexPerShare: 1.8, sharesPf: 100 })),
     projectMarkers: [
@@ -83,7 +98,7 @@ test('each Corporate production-start year maps its own NAV to Low and DCF to Hi
     ],
   };
   const rows = buildCorporateChartRows(input, { low: 1.5, high: 1.9, price: 1 });
-  assert.deepEqual(rows.filter((row) => row[0] === 2030 || row[0] === 2032).map((row) => [row[0], row[11], row[13]]), [[2030, 1.9, 2.3], [2032, 2.4, 3.1]]);
+  assert.deepEqual(rows.filter((row) => row[0] === 2030 || row[0] === 2032).map((row) => [row[0], row[TP_LOW], row[TP_HIGH]]), [[2030, 1.5, 1.8], [2032, 1.5, 1.8]]);
 });
 
 test('two production starts each have separate low and high annotations', () => {
@@ -95,7 +110,7 @@ test('two production starts each have separate low and high annotations', () => 
     ],
   }, { low: 3, high: 5, price: 2 });
   assert.equal(rows.filter((row) => row[12] !== null).length, 2);
-  assert.equal(rows.filter((row) => row[14] !== null).length, 2);
+  assert.equal(rows.filter((row) => row[TP_HIGH_ANNOTATION] !== null).length, 2);
 });
 
 test('equal rounded low and high retain two values, series columns, and annotations', () => {
@@ -104,12 +119,12 @@ test('equal rounded low and high retain two values, series columns, and annotati
     projectMarkers: [{ projectId: 'a', projectName: 'Never rendered', productionStartYear: 2030 }],
   }, { low: 5.21, high: 5.24, price: 2 });
   const row = rows[0];
-  assert.deepEqual([row[11], row[13]], [5.21, 5.24]);
-  assert.equal((row[12] as string).trim(), '5,2');
-  assert.equal((row[14] as string).trim(), '5,2');
-  assert.equal(row[12], row[14]);
+  assert.deepEqual([row[TP_LOW], row[TP_HIGH]], [5.21, 5.24]);
+  assert.equal((row[TP_LOW_ANNOTATION] as string).trim(), 'PS');
+  assert.equal((row[TP_HIGH_ANNOTATION] as string).trim(), 'PS');
+  assert.equal(row[TP_LOW_ANNOTATION], row[TP_HIGH_ANNOTATION]);
   assert.equal(valueRangeChartHeader[11], 'TP Low');
-  assert.equal(valueRangeChartHeader[13], 'TP High');
+  assert.equal(valueRangeChartHeader[15], 'TP High');
 });
 
 test('corporate x-axis ticks contain today, every unique production start, and the final year', () => {
@@ -156,8 +171,12 @@ test('production start at valuationYear without marker values keeps rolling High
   assert.equal(row[4], 1.106524312);
   assert.equal(row[7], 1.436098354);
   assert.equal(row[9], 1.106524312);
-  assert.equal(row[11], 1.436098354);
-  assert.equal(row[13], 1.106524312);
+  assert.equal(row[TP_LOW], 1.436098354);
+  assert.equal(row[TP_HIGH], 1.106524312);
+  assert.match(row[TP_LOW_STYLE] as string, /fill-color: transparent/);
+  assert.equal(row[TP_HIGH_STYLE], row[TP_LOW_STYLE]);
+  assert.match(row[TP_HIGH_TOOLTIP] as string, /High: 1,1/);
+  assert.match(row[TP_HIGH_TOOLTIP] as string, /Low: 1,4/);
 });
 
 test('historical production start cannot overwrite the valuation-year rolling row', () => {
@@ -171,17 +190,19 @@ test('historical production start cannot overwrite the valuation-year rolling ro
   assert.equal(row[4], 3);
 });
 
-test('future marker with explicit values maps to its calendar year and backcasts only its own High', () => {
+test('future marker maps to its calendar year but cannot replace the ordinary curve', () => {
   const input = {
     valuationYear: 2026,
     rows: [2026, 2027, 2028, 2029].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 })),
     projectMarkers: [{ projectId: 'future', projectName: 'Future', productionStartYear: 2029, navPerShare: 8, dcfPerShare: 9 }],
   };
   const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 99, tpHigh: 99 }, 0.1);
-  assert.ok(Math.abs((rows[0][4] as number) - 9 / 1.1 ** 3) < 1e-12);
+  assert.ok(Math.abs((rows[0][4] as number) - 7 / 1.1 ** 3) < 1e-12);
   assert.equal(rows[0][1], 2);
-  assert.equal(rows[3][1], 8);
-  assert.equal(rows[3][4], 9);
+  assert.equal(rows[3][1], 5);
+  assert.equal(rows[3][4], 7);
+  assert.equal(rows[3][TP_LOW], 5);
+  assert.equal(rows[3][TP_HIGH], 7);
 });
 
 test('multiple project starts never inject a future marker value into valuationYear', () => {
@@ -195,8 +216,9 @@ test('multiple project starts never inject a future marker value into valuationY
     ],
   };
   const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 98, tpHigh: 99 }, 0.1);
-  assert.deepEqual(rows.map((row) => row[4]), [4, 9, 12]);
-  assert.deepEqual(rows.map((row) => row[1]), [2, 8, 11]);
+  assert.deepEqual(rows.map((row) => row[4]), [4, 5, 6]);
+  assert.deepEqual(rows.map((row) => row[1]), [2, 3, 4]);
+  assert.deepEqual(rows.map((row) => row[TP_HIGH]), [4, 5, 6]);
 });
 
 test('a missing marker side preserves that side of the existing curve', () => {
@@ -209,8 +231,97 @@ test('a missing marker side preserves that side of the existing curve', () => {
     projectMarkers: [{ projectId: 'partial', projectName: 'Partial', productionStartYear: 2029, navPerShare: 8, dcfPerShare: null }],
   };
   const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 98, tpHigh: 99 }, 0.1);
-  assert.equal(rows[1][1], 8);
+  assert.equal(rows[1][1], 5);
   assert.equal(rows[1][4], 6);
+});
+
+test('production layer leaves ordinary High and Low unchanged without collisions', () => {
+  const rowsInput = [2026, 2027, 2028].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 }));
+  const marked = buildCorporateChartRows({ valuationYear: 2026, rows: rowsInput, projectMarkers: [{ projectId: 'p', projectName: 'Project', productionStartYear: 2027 }] }, { low: 1, high: 1, price: null }, 0.1);
+  const ordinary = buildValueRangeCurve({
+    totalLen: rowsInput.length,
+    tpOffset: 1,
+    discountRate: 0.1,
+    lowTp: rowsInput[1].navPerShare,
+    highTp: rowsInput[1].dcfExCapexPerShare,
+    navSeriesRaw: rowsInput.map((row) => row.navPerShare),
+    dcfExCapexSeriesRaw: rowsInput.map((row) => row.dcfExCapexPerShare),
+  });
+  assert.deepEqual(marked.map((row) => [row[1], row[4]]), ordinary.low.map((low, index) => [low, ordinary.high[index]]));
+  assert.deepEqual([marked[1][TP_LOW], marked[1][TP_HIGH]], [marked[1][1], marked[1][4]]);
+});
+
+test('peak and production start coexist in separate series at the same coordinate', () => {
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [2026, 2027].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 })),
+    projectMarkers: [{ projectId: 'peak', projectName: 'Peak Project', productionStartYear: 2027 }],
+  }, { low: 1, high: 1, price: null }, 0.1, 'CAD');
+  const row = rows[1];
+  assert.equal(row[TP_LOW], row[PEAK_LOW]);
+  assert.equal(row[TP_HIGH], row[PEAK_HIGH]);
+  assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak High/);
+  assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak Project/);
+});
+
+test('current peak and production start all coexist with deterministic production label separation', () => {
+  const row = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [{ period: 0, year: 2026, npvPerShare: 1, navPerShare: 2, dcfPerShare: 4, dcfExCapexPerShare: 4, sharesPf: 100 }],
+    projectMarkers: [{ projectId: 'all', projectName: 'All States', productionStartYear: 2026 }],
+  }, { low: 1, high: 1, price: 3 }, 0.1, 'CAD')[0];
+  assert.equal(row[5], 3);
+  assert.equal(row[7], row[TP_LOW]);
+  assert.equal(row[9], row[TP_HIGH]);
+  assert.equal(row[PEAK_LOW], row[TP_LOW]);
+  assert.equal(row[PEAK_HIGH], row[TP_HIGH]);
+  assert.equal(row[TP_HIGH_ANNOTATION], '\n\nPS');
+  assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak High/);
+  assert.match(row[TP_HIGH_TOOLTIP] as string, /All States/);
+});
+
+test('projects sharing a production year use one visual point and retain every project in its tooltip', () => {
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [2026, 2029].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 })),
+    projectMarkers: [
+      { projectId: 'a', projectName: 'Project A', productionStartYear: 2029 },
+      { projectId: 'b', projectName: 'Project B', productionStartYear: 2029 },
+    ],
+  }, { low: 1, high: 1, price: null }, 0.1);
+  assert.equal(rows.filter((row) => row[TP_HIGH] !== null).length, 1);
+  assert.match(rows[1][TP_HIGH_TOOLTIP] as string, /Project A.*Project B/s);
+});
+
+test('High peak remains independent when the maximum Low occurs in another production-start year', () => {
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [
+      { period: 0, year: 2026, npvPerShare: 1, navPerShare: 9, dcfPerShare: 4, dcfExCapexPerShare: 4, sharesPf: 100 },
+      { period: 1, year: 2027, npvPerShare: 1, navPerShare: 2, dcfPerShare: 8, dcfExCapexPerShare: 8, sharesPf: 100 },
+    ],
+    projectMarkers: [
+      { projectId: 'low', projectName: 'Low Maximum Year', productionStartYear: 2026 },
+      { projectId: 'high', projectName: 'High Peak Year', productionStartYear: 2027 },
+    ],
+  }, { low: 1, high: 1, price: null }, 0.1);
+  assert.equal(rows[0][TP_LOW], 9);
+  assert.equal(rows[1][PEAK_HIGH], 8);
+  assert.equal(rows[1][TP_HIGH], 8);
+});
+
+test('production starts at first and last visible years retain true coordinates and separate labels', () => {
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [2026, 2027, 2028].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 })),
+    projectMarkers: [
+      { projectId: 'first', projectName: 'First', productionStartYear: 2026 },
+      { projectId: 'last', projectName: 'Last', productionStartYear: 2028 },
+    ],
+  }, { low: 1, high: 1, price: 3 }, 0.1);
+  assert.deepEqual([rows[0][0], rows[0][TP_LOW], rows[0][TP_HIGH]], [2026, rows[0][1], rows[0][4]]);
+  assert.deepEqual([rows[2][0], rows[2][TP_LOW], rows[2][TP_HIGH]], [2028, rows[2][1], rows[2][4]]);
+  assert.ok(typeof rows[0][TP_HIGH_ANNOTATION] === 'string' && typeof rows[2][TP_HIGH_ANNOTATION] === 'string');
 });
 
 test('Project and Corporate charts share one visual options builder', () => {
@@ -225,7 +336,7 @@ test('missing marker values preserve the rolling Corporate curve instead of usin
     rows: [2026, 2027, 2028, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 2, navPerShare: 3 + period, dcfPerShare: 4 + period * 0.4, dcfExCapexPerShare: 4 + period * 0.4, sharesPf: 100 })),
     projectMarkers: [{ projectId: 'one', projectName: 'One', productionStartYear: 2028 }],
   };
-  const curveInput = { totalLen: 5, tpOffset: 0, discountRate: 0.1, lowTp: 3, highTp: 4, navSeriesRaw: [3, 4, 5, 6, 7], dcfExCapexSeriesRaw: [4, 4.4, 4.8, 5.2, 5.6] };
+  const curveInput = { totalLen: 5, tpOffset: 2, discountRate: 0.1, lowTp: 5, highTp: 4.8, navSeriesRaw: [3, 4, 5, 6, 7], dcfExCapexSeriesRaw: [4, 4.4, 4.8, 5.2, 5.6] };
   const projectCurve = buildValueRangeCurve(curveInput);
   const corporateRows = buildCorporateChartRows(input, { low: 2.5, high: 4, price: 1, tpLow: 5, tpHigh: 7 });
   assert.deepEqual(corporateRows.map((row) => row[1]), projectCurve.low);
@@ -280,7 +391,7 @@ test('latest of three production starts controls the five-year chart window and 
   assert.deepEqual(buildCorporateYearTicks(window.input).filter((tick) => [2027, 2029, 2032].includes(tick.v)).map((tick) => tick.v), [2027, 2029, 2032]);
   const rows = buildCorporateChartRows(window.input, { low: 1, high: 3, price: 1 });
   assert.equal(rows.filter((row) => row[12] !== null).length, 3);
-  assert.equal(rows.filter((row) => row[14] !== null).length, 3);
+  assert.equal(rows.filter((row) => row[TP_HIGH_ANNOTATION] !== null).length, 3);
 });
 
 test('shorter LOM ends at its last available year and does not synthesize rows', () => {
