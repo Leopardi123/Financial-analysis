@@ -136,13 +136,13 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
 
 function isProjectChartDataTypeSafe(data: Array<Array<string | number | null | { role: string; type?: string }>>): boolean {
   if (!Array.isArray(data) || data.length < 2) return false;
-  const numericColumns = new Set([0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 18]);
   for (let rowIndex = 1; rowIndex < data.length; rowIndex += 1) {
     const row = data[rowIndex];
-    if (!Array.isArray(row)) return false;
+    if (!Array.isArray(row) || row.length !== valueRangeChartHeader.length) return false;
     for (let col = 0; col < row.length; col += 1) {
       const value = row[col];
-      if (numericColumns.has(col)) {
+      const header = valueRangeChartHeader[col];
+      if (typeof header === 'string') {
         if (value !== null && !(typeof value === 'number' && Number.isFinite(value))) {
           return false;
         }
