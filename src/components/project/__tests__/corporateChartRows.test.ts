@@ -5,6 +5,8 @@ import { buildValueRangeChartOptions } from '../valueRangeChartOptions.ts';
 import { buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from '../valueRangeCurve.ts';
 
 const TP_LOW = 11;
+const CURRENT_LOW = 7;
+const CURRENT_HIGH = 9;
 const TP_LOW_ANNOTATION = 12;
 const TP_LOW_TOOLTIP = 13;
 const TP_HIGH = 14;
@@ -34,7 +36,7 @@ test('corporate rows use Project chart columns and annotate only today and proje
   assert.equal(JSON.stringify(valueRangeChartHeader).includes('"style"'), false);
   assert.equal(rows.every((row) => row.length === valueRangeChartHeader.length), true);
   assert.equal(rows.every((row) => typeof row[1] === 'number' && typeof row[4] === 'number'), true);
-  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.7, '      4,7', 5.7 / 1.1, '      5,2']);
+  assert.deepEqual(rows[0].slice(5, 11), [2.1, '      2,1', 4.5, '      4,5', 5.5, '      5,5']);
   assert.deepEqual(rows[2].slice(5, 17), new Array(12).fill(null));
   assert.equal(rows[1][TP_LOW_ANNOTATION], '      4,9');
   assert.equal(rows[1][TP_HIGH_ANNOTATION], '      5,7');
@@ -85,8 +87,8 @@ test('marker-specific valuation cannot replace the ordinary Corporate curve', ()
   const start = rows.find((row) => row[0] === 2030);
   assert.ok(start);
   assert.equal(start[TP_LOW], 1.9);
-  assert.equal(start[TP_HIGH], 1.9);
-  assert.match(start[TP_HIGH_TOOLTIP] as string, /High: 1,9/);
+  assert.equal(start[TP_HIGH], 2.3);
+  assert.match(start[TP_HIGH_TOOLTIP] as string, /High: 2,3/);
 });
 
 test('Corporate table today props cannot replace the ordinary rolling Corporate row', () => {
@@ -103,18 +105,21 @@ test('Corporate table today props cannot replace the ordinary rolling Corporate 
   assert.equal(rows[0][4], 6.7);
   assert.notEqual(rows[0][1], 4.7);
   assert.notEqual(rows[0][4], 6.0);
+  assert.equal(rows[0][CURRENT_LOW], 4.7);
+  assert.equal(rows[0][CURRENT_HIGH], 6.0);
 });
 
-test('each Corporate production-start year marks the ordinary High and Low for that year', () => {
+test('each Corporate production-start year marks its table milestone without replacing the ordinary lines', () => {
   const input = {
     rows: [2028, 2029, 2030, 2031, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 1.5, dcfPerShare: 1.8, dcfExCapexPerShare: 1.8, sharesPf: 100 })),
     projectMarkers: [
-      { projectId: 'a', projectName: 'A', productionStartYear: 2030, navPerShare: 1.9, dcfPerShare: 2.3 },
+      { projectId: 'a', projectName: 'A', productionStartYear: 2029, navPerShare: 1.9, dcfPerShare: 2.3 },
       { projectId: 'b', projectName: 'B', productionStartYear: 2032, navPerShare: 2.4, dcfPerShare: 3.1 },
     ],
   };
   const rows = buildCorporateChartRows(input, { low: 1.5, high: 1.9, price: 1 });
-  assert.deepEqual(rows.filter((row) => row[0] === 2030 || row[0] === 2032).map((row) => [row[0], row[TP_LOW], row[TP_HIGH]]), [[2030, 1.5, 1.8], [2032, 1.5, 1.8]]);
+  assert.deepEqual(rows.filter((row) => row[0] === 2029 || row[0] === 2032).map((row) => [row[0], row[TP_LOW], row[TP_HIGH]]), [[2029, 1.9, 2.3], [2032, 2.4, 3.1]]);
+  assert.deepEqual(rows.filter((row) => row[0] === 2029 || row[0] === 2032).map((row) => [row[0], row[1], row[4]]), [[2029, 1.5, 1.8], [2032, 1.5, 1.8]]);
 });
 
 test('two production starts each have separate low and high annotations', () => {
@@ -188,8 +193,8 @@ test('production start at valuationYear without marker values keeps rolling High
   const row = buildCorporateChartRows(input, { low: 9, high: 9, price: 3, tpLow: 1.442408197, tpHigh: 2.109618604 }, 0.1)[0];
   assert.equal(row[1], 1.436098354);
   assert.equal(row[4], 1.106524312);
-  assert.equal(row[7], 1.436098354);
-  assert.equal(row[9], 1.106524312);
+  assert.equal(row[7], 9);
+  assert.equal(row[9], 9);
   assert.equal(row[TP_LOW], 1.436098354);
   assert.equal(row[TP_HIGH], 1.106524312);
   assert.equal(row[TP_LOW_ANNOTATION], null, 'current already prints the Low value');
@@ -220,8 +225,8 @@ test('future marker maps to its calendar year but cannot replace the ordinary cu
   assert.equal(rows[0][1], 2);
   assert.equal(rows[3][1], 5);
   assert.equal(rows[3][4], 7);
-  assert.equal(rows[3][TP_LOW], 5);
-  assert.equal(rows[3][TP_HIGH], 7);
+  assert.equal(rows[3][TP_LOW], 8);
+  assert.equal(rows[3][TP_HIGH], 9);
 });
 
 test('multiple project starts never inject a future marker value into valuationYear', () => {
@@ -237,7 +242,7 @@ test('multiple project starts never inject a future marker value into valuationY
   const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 98, tpHigh: 99 }, 0.1);
   assert.deepEqual(rows.map((row) => row[4]), [4, 5, 6]);
   assert.deepEqual(rows.map((row) => row[1]), [2, 3, 4]);
-  assert.deepEqual(rows.map((row) => row[TP_HIGH]), [4, 5, 6]);
+  assert.deepEqual(rows.map((row) => row[TP_HIGH]), [4, 9, 12]);
 });
 
 test('a missing marker side preserves that side of the existing curve', () => {
@@ -290,8 +295,8 @@ test('current peak and production start reuse existing value labels without PS t
     projectMarkers: [{ projectId: 'all', projectName: 'All States', productionStartYear: 2026 }],
   }, { low: 1, high: 1, price: 3 }, 0.1, 'CAD')[0];
   assert.equal(row[5], 3);
-  assert.equal(row[7], row[TP_LOW]);
-  assert.equal(row[9], row[TP_HIGH]);
+  assert.equal(row[7], 1);
+  assert.equal(row[9], 1);
   assert.equal(row[PEAK_LOW], row[TP_LOW]);
   assert.equal(row[PEAK_HIGH], row[TP_HIGH]);
   assert.equal(row[TP_LOW_ANNOTATION], null);

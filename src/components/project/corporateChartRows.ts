@@ -108,24 +108,33 @@ export function buildCorporateChartRows(
 
   const values = input.rows.map((row, index) => ({ year: row.year, low: curve.low[index], high: curve.high[index] }));
   const peak = findFirstHighPeak(values);
-  return values.map(({ year, low, high }, index) => buildValueRangeChartRow({
-    ...(productionStartYears.has(year) ? (() => {
-      const projectNames = input.projectMarkers
-        .filter((marker) => marker.productionStartYear === year)
-        .map((marker) => marker.projectName);
-      const hasExistingValueAnnotation = year === input.valuationYear || index === peak?.index;
-      return {
-        productionStartLowAnnotation: hasExistingValueAnnotation ? null : undefined,
-        productionStartHighAnnotation: hasExistingValueAnnotation ? null : undefined,
-        productionStartTooltip: productionStartTooltip({ year, projectNames, high, low, isPeak: index === peak?.index, currencyCode }),
-      };
-    })() : {}),
-    year, low, high, currentPrice: today.price,
-    annotateCurrent: typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0,
-    annotateProductionStart: productionStartYears.has(year), format: label,
-    highlightPeak: index === peak?.index,
-    peakTooltip: peak ? formatPeakTooltip(peak, label, currencyCode) : null,
-  }));
+  return values.map(({ year, low, high }, index) => {
+    const marker = input.projectMarkers.find((candidate) => candidate.productionStartYear === year);
+    const markerLow = finite(marker?.navPerShare) ? marker.navPerShare : null;
+    const markerHigh = finite(marker?.dcfPerShare) ? marker.dcfPerShare : null;
+    return buildValueRangeChartRow({
+      ...(productionStartYears.has(year) ? (() => {
+        const projectNames = input.projectMarkers
+          .filter((marker) => marker.productionStartYear === year)
+          .map((marker) => marker.projectName);
+        const hasExistingValueAnnotation = year === input.valuationYear || index === peak?.index;
+        return {
+          productionStartLowAnnotation: hasExistingValueAnnotation ? null : undefined,
+          productionStartHighAnnotation: hasExistingValueAnnotation ? null : undefined,
+          productionStartTooltip: productionStartTooltip({ year, projectNames, high: markerHigh ?? high, low: markerLow ?? low, isPeak: index === peak?.index, currencyCode }),
+        };
+      })() : {}),
+      year, low, high, currentPrice: today.price,
+      annotateCurrent: typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0,
+      annotateProductionStart: productionStartYears.has(year), format: label,
+      currentLowValue: today.low,
+      currentHighValue: today.high,
+      productionStartLowValue: markerLow,
+      productionStartHighValue: markerHigh,
+      highlightPeak: index === peak?.index,
+      peakTooltip: peak ? formatPeakTooltip(peak, label, currencyCode) : null,
+    });
+  });
 }
 
 /** Explicit formatted ticks prevent Google Charts from localizing years as e.g. 2,029. */

@@ -41,6 +41,10 @@ export function buildValueRangeChartRow(input: {
   productionStartLowAnnotation?: string | null;
   productionStartHighAnnotation?: string | null;
   productionStartTooltip?: string | null;
+  currentLowValue?: number | null;
+  currentHighValue?: number | null;
+  productionStartLowValue?: number | null;
+  productionStartHighValue?: number | null;
 }) {
   const orderedLow = input.low;
   const orderedHigh = input.high;
@@ -49,10 +53,10 @@ export function buildValueRangeChartRow(input: {
   return [
     input.year, orderedLow, orderedLow !== null && orderedHigh !== null ? orderedHigh - orderedLow : null, orderedLow, orderedHigh,
     current, current === null ? null : input.currentPriceAnnotation === undefined ? annotation(current) : input.currentPriceAnnotation,
-    input.annotateCurrent ? orderedLow : null, input.annotateCurrent ? annotation(orderedLow) : null,
-    input.annotateCurrent ? orderedHigh : null, input.annotateCurrent ? annotation(orderedHigh) : null,
-    input.annotateProductionStart ? input.low : null, input.annotateProductionStart ? input.productionStartLowAnnotation === undefined ? annotation(input.low) : input.productionStartLowAnnotation : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null,
-    input.annotateProductionStart ? input.high : null, input.annotateProductionStart ? input.productionStartHighAnnotation === undefined ? annotation(input.high) : input.productionStartHighAnnotation : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null,
+    input.annotateCurrent ? input.currentLowValue ?? orderedLow : null, input.annotateCurrent ? annotation(input.currentLowValue ?? orderedLow) : null,
+    input.annotateCurrent ? input.currentHighValue ?? orderedHigh : null, input.annotateCurrent ? annotation(input.currentHighValue ?? orderedHigh) : null,
+    input.annotateProductionStart ? input.productionStartLowValue ?? input.low : null, input.annotateProductionStart ? input.productionStartLowAnnotation === undefined ? annotation(input.productionStartLowValue ?? input.low) : input.productionStartLowAnnotation : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null,
+    input.annotateProductionStart ? input.productionStartHighValue ?? input.high : null, input.annotateProductionStart ? input.productionStartHighAnnotation === undefined ? annotation(input.productionStartHighValue ?? input.high) : input.productionStartHighAnnotation : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null,
     input.highlightPeak ? orderedLow : null, input.highlightPeak ? annotation(orderedLow) : null, input.highlightPeak ? input.peakTooltip ?? null : null,
     input.highlightPeak ? orderedHigh : null, input.highlightPeak ? annotation(orderedHigh) : null, input.highlightPeak ? input.peakTooltip ?? null : null,
   ];

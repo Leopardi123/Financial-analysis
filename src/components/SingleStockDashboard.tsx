@@ -5806,7 +5806,7 @@ Capital Available: ${availableLabel}`,
                               ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
                               : null
                           }
-                          npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
+                          npvLow={corporateViewMetrics.list2.NAV_perShare?.value ?? null}
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
