@@ -122,15 +122,14 @@ test('today DCF marker stays separate from a higher ordinary rolling High at the
     ],
   }, { low: 4.7, high: 5.9, price: 3.0 });
 
-  const milestoneTooltip = 'År: 2026\nPeak High\nProduktionsstart: Current\nHigh: 6,2\nLow: 4,9';
   assert.deepEqual(rows[0], [
     2026,
     4.9, 1.2999999999999998, 4.9, 6.2,
     3.0, '      3,0',
     4.7, '      4,7',
     5.9, '      5,9',
-    4.9, null, milestoneTooltip,
-    6.2, null, milestoneTooltip,
+    null, null, null,
+    null, null, null,
     null, null, null,
     null, null, null,
   ]);
@@ -171,7 +170,7 @@ test('equal rounded low and high retain two values, series columns, and annotati
     projectMarkers: [{ projectId: 'a', projectName: 'Never rendered', productionStartYear: 2030 }],
   }, { low: 5.21, high: 5.24, price: 2 });
   const row = rows[0];
-  assert.deepEqual([row[TP_LOW], row[TP_HIGH]], [5.21, 5.24]);
+  assert.deepEqual([row[TP_LOW], row[TP_HIGH]], [null, null]);
   assert.equal(row[TP_LOW_ANNOTATION], null);
   assert.equal(row[TP_HIGH_ANNOTATION], null);
   assert.equal((row[8] as string).trim(), '5,2', 'current Low keeps the visible value');
@@ -210,7 +209,7 @@ test('valuationYear clips historical rows and marks the valuation-year row as cu
   assert.equal(rows.some((row) => row[0] === 2025), false);
 });
 
-test('production start at valuationYear without marker values keeps rolling High and Low', () => {
+test('production start at valuationYear without marker values has no milestone overlay', () => {
   const input = {
     valuationYear: 2026,
     rows: [
@@ -224,12 +223,12 @@ test('production start at valuationYear without marker values keeps rolling High
   assert.equal(row[4], 1.106524312);
   assert.equal(row[7], 9);
   assert.equal(row[9], 9);
-  assert.equal(row[TP_LOW], 1.436098354);
-  assert.equal(row[TP_HIGH], 1.106524312);
-  assert.equal(row[TP_LOW_ANNOTATION], null, 'current already prints the Low value');
-  assert.equal(row[TP_HIGH_ANNOTATION], null, 'current already prints the High value');
-  assert.match(row[TP_HIGH_TOOLTIP] as string, /High: 1,1/);
-  assert.match(row[TP_HIGH_TOOLTIP] as string, /Low: 1,4/);
+  assert.equal(row[TP_LOW], null);
+  assert.equal(row[TP_HIGH], null);
+  assert.equal(row[TP_LOW_ANNOTATION], null);
+  assert.equal(row[TP_HIGH_ANNOTATION], null);
+  assert.equal(row[TP_LOW_TOOLTIP], null);
+  assert.equal(row[TP_HIGH_TOOLTIP], null);
 });
 
 test('historical production start cannot overwrite the valuation-year rolling row', () => {
@@ -271,7 +270,7 @@ test('multiple project starts never inject a future marker value into valuationY
   const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 98, tpHigh: 99 }, 0.1);
   assert.deepEqual(rows.map((row) => row[4]), [4, 5, 6]);
   assert.deepEqual(rows.map((row) => row[1]), [2, 3, 4]);
-  assert.deepEqual(rows.map((row) => row[TP_HIGH]), [4, 9, 12]);
+  assert.deepEqual(rows.map((row) => row[TP_HIGH]), [null, 9, 12]);
 });
 
 test('a missing marker side preserves that side of the existing curve', () => {
@@ -317,7 +316,7 @@ test('peak and production start coexist in separate series at the same coordinat
   assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak Project/);
 });
 
-test('current peak overlay is suppressed so it cannot cover today markers', () => {
+test('current peak and milestone overlays are suppressed so they cannot cover today markers', () => {
   const row = buildCorporateChartRows({
     valuationYear: 2026,
     rows: [{ period: 0, year: 2026, npvPerShare: 1, navPerShare: 2, dcfPerShare: 4, dcfExCapexPerShare: 4, sharesPf: 100 }],
@@ -328,10 +327,12 @@ test('current peak overlay is suppressed so it cannot cover today markers', () =
   assert.equal(row[9], 1);
   assert.equal(row[PEAK_LOW], null);
   assert.equal(row[PEAK_HIGH], null);
+  assert.equal(row[TP_LOW], null);
+  assert.equal(row[TP_HIGH], null);
   assert.equal(row[TP_LOW_ANNOTATION], null);
   assert.equal(row[TP_HIGH_ANNOTATION], null);
-  assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak High/);
-  assert.match(row[TP_HIGH_TOOLTIP] as string, /All States/);
+  assert.equal(row[TP_LOW_TOOLTIP], null);
+  assert.equal(row[TP_HIGH_TOOLTIP], null);
 });
 
 test('projects sharing a production year use one visual point and retain every project in its tooltip', () => {
@@ -359,12 +360,12 @@ test('High peak remains independent when the maximum Low occurs in another produ
       { projectId: 'high', projectName: 'High Peak Year', productionStartYear: 2027 },
     ],
   }, { low: 1, high: 1, price: null }, 0.1);
-  assert.equal(rows[0][TP_LOW], 9);
+  assert.equal(rows[0][TP_LOW], null);
   assert.equal(rows[1][PEAK_HIGH], 8);
   assert.equal(rows[1][TP_HIGH], 8);
 });
 
-test('production starts at first and last visible years retain true coordinates and separate labels', () => {
+test('only the future production start retains milestone coordinates and labels', () => {
   const rows = buildCorporateChartRows({
     valuationYear: 2026,
     rows: [2026, 2027, 2028].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 })),
@@ -373,11 +374,12 @@ test('production starts at first and last visible years retain true coordinates 
       { projectId: 'last', projectName: 'Last', productionStartYear: 2028 },
     ],
   }, { low: 1, high: 1, price: 3 }, 0.1);
-  assert.deepEqual([rows[0][0], rows[0][TP_LOW], rows[0][TP_HIGH]], [2026, rows[0][1], rows[0][4]]);
+  assert.deepEqual([rows[0][0], rows[0][TP_LOW], rows[0][TP_HIGH]], [2026, null, null]);
   assert.deepEqual([rows[2][0], rows[2][TP_LOW], rows[2][TP_HIGH]], [2028, rows[2][1], rows[2][4]]);
-  assert.equal(rows[0][TP_HIGH_ANNOTATION], null, 'current annotation already shows the first-year value');
+  assert.equal(rows[0][TP_HIGH_ANNOTATION], null);
   assert.equal(rows[2][TP_HIGH_ANNOTATION], null, 'peak annotation already shows the peak value');
-  assert.ok(typeof rows[0][TP_HIGH_TOOLTIP] === 'string' && typeof rows[2][TP_HIGH_TOOLTIP] === 'string');
+  assert.equal(rows[0][TP_HIGH_TOOLTIP], null);
+  assert.equal(typeof rows[2][TP_HIGH_TOOLTIP], 'string');
 });
 
 test('Project and Corporate charts share one visual options builder', () => {

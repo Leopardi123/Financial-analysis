@@ -113,8 +113,9 @@ export function buildCorporateChartRows(
     const markerLow = finite(marker?.navPerShare) ? marker.navPerShare : null;
     const markerHigh = finite(marker?.dcfPerShare) ? marker.dcfPerShare : null;
     const isCurrent = typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0;
+    const isFutureProductionStart = productionStartYears.has(year) && finite(valuationYear) && year > valuationYear;
     return buildValueRangeChartRow({
-      ...(productionStartYears.has(year) ? (() => {
+      ...(isFutureProductionStart ? (() => {
         const projectNames = input.projectMarkers
           .filter((marker) => marker.productionStartYear === year)
           .map((marker) => marker.projectName);
@@ -127,7 +128,7 @@ export function buildCorporateChartRows(
       })() : {}),
       year, low, high, currentPrice: today.price,
       annotateCurrent: isCurrent,
-      annotateProductionStart: productionStartYears.has(year), format: label,
+      annotateProductionStart: isFutureProductionStart, format: label,
       currentLowValue: today.low,
       currentHighValue: today.high,
       productionStartLowValue: markerLow,
