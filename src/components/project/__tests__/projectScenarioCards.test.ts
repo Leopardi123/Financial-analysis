@@ -10,7 +10,11 @@ assert.match(dashboard, /<h2 className="subrub small">ALLT GICK FEL<\/h2>/);
 assert.match(dashboard, /project\.modeled\.npvSpotRange/);
 
 const pagerRule = styles.match(/\.project-list2-pager\s*\{([^}]*)\}/)?.[1] ?? '';
-assert.match(pagerRule, /grid-auto-flow:\s*row/);
-assert.doesNotMatch(pagerRule, /overflow-x:\s*auto/);
+assert.match(pagerRule, /grid-auto-flow:\s*column/);
+assert.match(pagerRule, /grid-auto-columns:\s*minmax\(100%,\s*100%\)/);
+assert.match(pagerRule, /overflow-x:\s*auto/);
+assert.match(pagerRule, /scroll-snap-type:\s*x mandatory/);
+assert.match(styles, /\.project-list2-page\s*\{[^}]*scroll-snap-align:\s*start/s);
+assert.match(styles, /-webkit-overflow-scrolling:\s*touch/);
 
 console.log('Project scenario card rendering contract tests passed');

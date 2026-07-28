@@ -89,6 +89,22 @@ test('marker-specific valuation cannot replace the ordinary Corporate curve', ()
   assert.match(start[TP_HIGH_TOOLTIP] as string, /High: 1,9/);
 });
 
+test('Corporate table today props cannot replace the ordinary rolling Corporate row', () => {
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [
+      { period: 0, year: 2026, npvPerShare: 4.4, navPerShare: 6.4, dcfPerShare: 6.0, dcfExCapexPerShare: 6.7, sharesPf: 430 },
+      { period: 1, year: 2027, npvPerShare: 4.8, navPerShare: 6.6, dcfPerShare: 6.2, dcfExCapexPerShare: 6.9, sharesPf: 430 },
+    ],
+    projectMarkers: [{ projectId: 'producing', projectName: 'Producing', productionStartYear: 2026 }],
+  }, { low: 4.7, high: 6.0, price: 3.0 });
+
+  assert.equal(rows[0][1], 6.4);
+  assert.equal(rows[0][4], 6.7);
+  assert.notEqual(rows[0][1], 4.7);
+  assert.notEqual(rows[0][4], 6.0);
+});
+
 test('each Corporate production-start year marks the ordinary High and Low for that year', () => {
   const input = {
     rows: [2028, 2029, 2030, 2031, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 1.5, dcfPerShare: 1.8, dcfExCapexPerShare: 1.8, sharesPf: 100 })),
