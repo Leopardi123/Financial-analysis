@@ -109,6 +109,35 @@ test('Corporate table today props cannot replace the ordinary rolling Corporate 
   assert.equal(rows[0][CURRENT_HIGH], 6.0);
 });
 
+test('today DCF marker stays separate from a higher ordinary rolling High at the same year', () => {
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [
+      { period: 0, year: 2026, npvPerShare: 4.4, navPerShare: 4.9, dcfPerShare: 5.9, dcfExCapexPerShare: 6.2, sharesPf: 430 },
+      { period: 1, year: 2029, npvPerShare: 4.1, navPerShare: 4.5, dcfPerShare: 5.4, dcfExCapexPerShare: 5.8, sharesPf: 430 },
+    ],
+    projectMarkers: [
+      { projectId: 'current', projectName: 'Current', productionStartYear: 2026 },
+      { projectId: 'future', projectName: 'Future', productionStartYear: 2029, navPerShare: 5.1, dcfPerShare: 6.1 },
+    ],
+  }, { low: 4.7, high: 5.9, price: 3.0 });
+
+  const milestoneTooltip = 'År: 2026\nPeak High\nProduktionsstart: Current\nHigh: 6,2\nLow: 4,9';
+  assert.deepEqual(rows[0], [
+    2026,
+    4.9, 1.2999999999999998, 4.9, 6.2,
+    3.0, '      3,0',
+    4.7, '      4,7',
+    5.9, '      5,9',
+    4.9, null, milestoneTooltip,
+    6.2, null, milestoneTooltip,
+    null, null, null,
+    null, null, null,
+  ]);
+  assert.equal(rows[0][4], 6.2, 'ordinary High line remains rolling DCF');
+  assert.equal(rows[0][CURRENT_HIGH], 5.9, 'today High marker uses discounted table DCF');
+});
+
 test('each Corporate production-start year marks its table milestone without replacing the ordinary lines', () => {
   const input = {
     rows: [2028, 2029, 2030, 2031, 2032].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 1.5, dcfPerShare: 1.8, dcfExCapexPerShare: 1.8, sharesPf: 100 })),
@@ -288,7 +317,7 @@ test('peak and production start coexist in separate series at the same coordinat
   assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak Project/);
 });
 
-test('current peak and production start reuse existing value labels without PS text', () => {
+test('current peak overlay is suppressed so it cannot cover today markers', () => {
   const row = buildCorporateChartRows({
     valuationYear: 2026,
     rows: [{ period: 0, year: 2026, npvPerShare: 1, navPerShare: 2, dcfPerShare: 4, dcfExCapexPerShare: 4, sharesPf: 100 }],
@@ -297,8 +326,8 @@ test('current peak and production start reuse existing value labels without PS t
   assert.equal(row[5], 3);
   assert.equal(row[7], 1);
   assert.equal(row[9], 1);
-  assert.equal(row[PEAK_LOW], row[TP_LOW]);
-  assert.equal(row[PEAK_HIGH], row[TP_HIGH]);
+  assert.equal(row[PEAK_LOW], null);
+  assert.equal(row[PEAK_HIGH], null);
   assert.equal(row[TP_LOW_ANNOTATION], null);
   assert.equal(row[TP_HIGH_ANNOTATION], null);
   assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak High/);

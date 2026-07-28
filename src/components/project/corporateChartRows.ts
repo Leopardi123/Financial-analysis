@@ -112,6 +112,7 @@ export function buildCorporateChartRows(
     const marker = input.projectMarkers.find((candidate) => candidate.productionStartYear === year);
     const markerLow = finite(marker?.navPerShare) ? marker.navPerShare : null;
     const markerHigh = finite(marker?.dcfPerShare) ? marker.dcfPerShare : null;
+    const isCurrent = typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0;
     return buildValueRangeChartRow({
       ...(productionStartYears.has(year) ? (() => {
         const projectNames = input.projectMarkers
@@ -125,13 +126,13 @@ export function buildCorporateChartRows(
         };
       })() : {}),
       year, low, high, currentPrice: today.price,
-      annotateCurrent: typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0,
+      annotateCurrent: isCurrent,
       annotateProductionStart: productionStartYears.has(year), format: label,
       currentLowValue: today.low,
       currentHighValue: today.high,
       productionStartLowValue: markerLow,
       productionStartHighValue: markerHigh,
-      highlightPeak: index === peak?.index,
+      highlightPeak: index === peak?.index && !isCurrent,
       peakTooltip: peak ? formatPeakTooltip(peak, label, currencyCode) : null,
     });
   });
