@@ -128,10 +128,7 @@ export function buildCorporateChartRows(
         const projectNames = input.projectMarkers
           .filter((marker) => marker.productionStartYear === year)
           .map((marker) => marker.projectName);
-        const hasExistingValueAnnotation = year === input.valuationYear || index === peak?.index;
         return {
-          productionStartLowAnnotation: hasExistingValueAnnotation ? null : undefined,
-          productionStartHighAnnotation: hasExistingValueAnnotation ? null : undefined,
           productionStartTooltip: productionStartTooltip({ year, projectNames, high: markerHigh ?? high, low: markerLow ?? low, isPeak: index === peak?.index, currencyCode }),
         };
       })() : {}),
@@ -142,7 +139,7 @@ export function buildCorporateChartRows(
       currentHighValue: today.high,
       productionStartLowValue: markerLow,
       productionStartHighValue: markerHigh,
-      highlightPeak: index === peak?.index && !isCurrent,
+      highlightPeak: index === peak?.index && !isCurrent && !isFutureProductionStart,
       peakTooltip: peak ? formatPeakTooltip(peak, label, currencyCode) : null,
     });
   });

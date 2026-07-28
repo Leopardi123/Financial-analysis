@@ -60,8 +60,8 @@ test('one production start always has separate low and high point/annotation col
   assert.equal(start[TP_LOW], 5.2);
   assert.equal(start[TP_HIGH], 6.4);
   assert.match(start[TP_LOW_TOOLTIP] as string, /Produktionsstart: Never rendered/);
-  assert.equal(start[PEAK_LOW], 5.2);
-  assert.equal(start[PEAK_HIGH], 6.4);
+  assert.equal(start[PEAK_LOW], null);
+  assert.equal(start[PEAK_HIGH], null);
 });
 
 test('peak helper selects the first equal maximum and formats both values with currency', () => {
@@ -168,6 +168,34 @@ test('each Corporate production-start year marks its table milestone without rep
   assert.deepEqual(rows.filter((row) => row[0] === 2029 || row[0] === 2032).map((row) => [row[0], row[1], row[4]]), [[2029, 1.5, 1.8], [2032, 1.5, 1.8]]);
 });
 
+test('2032 milestone Low and High retain separate points and labels when 2032 is the rolling peak', () => {
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [
+      { period: 0, year: 2026, npvPerShare: 1, navPerShare: 4.7, dcfPerShare: 5.9, dcfExCapexPerShare: 6.2, sharesPf: 430 },
+      { period: 1, year: 2029, npvPerShare: 1, navPerShare: 5.0, dcfPerShare: 6.0, dcfExCapexPerShare: 6.0, sharesPf: 430 },
+      { period: 2, year: 2032, npvPerShare: 1, navPerShare: 5.2, dcfPerShare: 6.4, dcfExCapexPerShare: 6.4, sharesPf: 430 },
+    ],
+    projectMarkers: [{ projectId: 'north', projectName: 'North', productionStartYear: 2032, navPerShare: 5.8, dcfPerShare: 5.7 }],
+  }, { low: 5.0, high: 5.9, price: 3.0 });
+
+  assert.deepEqual(rows[2], [
+    2032,
+    5.2, 1.2000000000000002, 5.2, 6.4,
+    null, null,
+    null, null,
+    null, null,
+    5.8, '      5,8', 'År: 2032\nPeak High\nProduktionsstart: North\nHigh: 5,7\nLow: 5,8',
+    5.7, '      5,7', 'År: 2032\nPeak High\nProduktionsstart: North\nHigh: 5,7\nLow: 5,8',
+    null, null, null,
+    null, null, null,
+  ]);
+  assert.equal(rows[2][TP_LOW], 5.8);
+  assert.equal(rows[2][TP_HIGH], 5.7);
+  assert.equal(rows[2][PEAK_LOW], null);
+  assert.equal(rows[2][PEAK_HIGH], null);
+});
+
 test('two production starts each have separate low and high annotations', () => {
   const rows = buildCorporateChartRows({
     rows: [2026, 2029, 2030].map((year, period) => ({ period, year, npvPerShare: 3, navPerShare: 4 + period, dcfPerShare: 5 + period, dcfExCapexPerShare: 5 + period, sharesPf: 100 })),
@@ -176,10 +204,10 @@ test('two production starts each have separate low and high annotations', () => 
       { projectId: 'b', projectName: 'Never rendered B', productionStartYear: 2030 },
     ],
   }, { low: 3, high: 5, price: 2 });
-  assert.equal(rows.filter((row) => row[TP_LOW_ANNOTATION] !== null).length, 1);
-  assert.equal(rows.filter((row) => row[TP_HIGH_ANNOTATION] !== null).length, 1);
-  assert.equal(rows[2][TP_HIGH_ANNOTATION], null, 'the peak already displays the production-start value');
-  assert.equal(typeof rows[2][PEAK_HIGH + 1], 'string');
+  assert.equal(rows.filter((row) => row[TP_LOW_ANNOTATION] !== null).length, 2);
+  assert.equal(rows.filter((row) => row[TP_HIGH_ANNOTATION] !== null).length, 2);
+  assert.equal(typeof rows[2][TP_HIGH_ANNOTATION], 'string');
+  assert.equal(rows[2][PEAK_HIGH], null);
 });
 
 test('equal rounded low and high retain two values, series columns, and annotations', () => {
@@ -321,15 +349,17 @@ test('production layer leaves ordinary High and Low unchanged without collisions
   assert.deepEqual([marked[1][TP_LOW], marked[1][TP_HIGH]], [marked[1][1], marked[1][4]]);
 });
 
-test('peak and production start coexist in separate series at the same coordinate', () => {
+test('production-start points replace the redundant peak point overlay at the same coordinate', () => {
   const rows = buildCorporateChartRows({
     valuationYear: 2026,
     rows: [2026, 2027].map((year, period) => ({ period, year, npvPerShare: 1, navPerShare: 2 + period, dcfPerShare: 4 + period, dcfExCapexPerShare: 4 + period, sharesPf: 100 })),
     projectMarkers: [{ projectId: 'peak', projectName: 'Peak Project', productionStartYear: 2027 }],
   }, { low: 1, high: 1, price: null }, 0.1, 'CAD');
   const row = rows[1];
-  assert.equal(row[TP_LOW], row[PEAK_LOW]);
-  assert.equal(row[TP_HIGH], row[PEAK_HIGH]);
+  assert.equal(row[TP_LOW], 3);
+  assert.equal(row[TP_HIGH], 5);
+  assert.equal(row[PEAK_LOW], null);
+  assert.equal(row[PEAK_HIGH], null);
   assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak High/);
   assert.match(row[TP_HIGH_TOOLTIP] as string, /Peak Project/);
 });
@@ -379,7 +409,7 @@ test('High peak remains independent when the maximum Low occurs in another produ
     ],
   }, { low: 1, high: 1, price: null }, 0.1);
   assert.equal(rows[0][TP_LOW], null);
-  assert.equal(rows[1][PEAK_HIGH], 8);
+  assert.equal(rows[1][PEAK_HIGH], null);
   assert.equal(rows[1][TP_HIGH], 8);
 });
 
@@ -395,7 +425,7 @@ test('only the future production start retains milestone coordinates and labels'
   assert.deepEqual([rows[0][0], rows[0][TP_LOW], rows[0][TP_HIGH]], [2026, null, null]);
   assert.deepEqual([rows[2][0], rows[2][TP_LOW], rows[2][TP_HIGH]], [2028, rows[2][1], rows[2][4]]);
   assert.equal(rows[0][TP_HIGH_ANNOTATION], null);
-  assert.equal(rows[2][TP_HIGH_ANNOTATION], null, 'peak annotation already shows the peak value');
+  assert.equal(typeof rows[2][TP_HIGH_ANNOTATION], 'string');
   assert.equal(rows[0][TP_HIGH_TOOLTIP], null);
   assert.equal(typeof rows[2][TP_HIGH_TOOLTIP], 'string');
 });
@@ -467,8 +497,8 @@ test('latest of three production starts controls the five-year chart window and 
   assert.deepEqual(buildCorporateYearTicks(window.input).filter((tick) => [2027, 2029, 2032].includes(tick.v)).map((tick) => tick.v), [2027, 2029, 2032]);
   const rows = buildCorporateChartRows(window.input, { low: 1, high: 3, price: 1 });
   assert.equal(rows.filter((row) => row[TP_LOW] !== null).length, 3);
-  assert.equal(rows.filter((row) => row[TP_HIGH_ANNOTATION] !== null).length, 2);
-  assert.equal(rows.find((row) => row[0] === 2027)?.[TP_HIGH_ANNOTATION], null, 'the peak annotation already displays this start value');
+  assert.equal(rows.filter((row) => row[TP_HIGH_ANNOTATION] !== null).length, 3);
+  assert.equal(typeof rows.find((row) => row[0] === 2027)?.[TP_HIGH_ANNOTATION], 'string');
 });
 
 test('shorter LOM ends at its last available year and does not synthesize rows', () => {
