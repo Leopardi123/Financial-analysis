@@ -6,6 +6,7 @@ import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import AlltGickFelCard from "./project/AlltGickFelCard";
+import { resolveCorporateMilestoneYear } from "./project/corporateMilestoneYear";
 import type { StressOptions } from "../lib/snapshot/applyStressModifiers.ts";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
@@ -3009,6 +3010,10 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
+    const snapshotYears = ((projectSnapshotData.series ?? {}) as { yearsByPeriod?: unknown }).yearsByPeriod;
+    const valuationYears = ((projectSnapshotData.project ?? {}) as { chartFlows?: { yearsByPeriod?: unknown } }).chartFlows?.yearsByPeriod;
+    const internalStartYear = Array.isArray(snapshotYears) && typeof snapshotYears[0] === "number" ? snapshotYears[0] : null;
+    const valuationStartYear = Array.isArray(valuationYears) && typeof valuationYears[0] === "number" ? valuationYears[0] : null;
     const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
       .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
 
@@ -3038,12 +3043,14 @@ Capital Available: ${availableLabel}`,
       payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
+      valuationPeriodOffset: internalStartYear !== null && valuationStartYear !== null ? internalStartYear - valuationStartYear : 0,
       financing: {
         equityPct: toInputNumber(projectEquityPct) ?? 100,
         debtPct: toInputNumber(projectDebtPct) ?? 0,
         latestQuarterlyCashTarget: latestQuarterlyCash,
         useCashFirst: projectUseQuarterlyCash,
         cashUsePercent: projectCashUsedPct / 100,
+        usePrecomputedFinancing: true,
       },
     });
   }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
@@ -3061,6 +3068,9 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const corporateFinancing = (corporateSnapshotData.financing ?? {}) as Record<string, unknown>;
+    const internalYears = ((corporateSnapshotData.series ?? {}) as { yearsByPeriod?: unknown }).yearsByPeriod;
+    const valuationYear = ((corporateSnapshotData.corporateValuationTimeSeries ?? {}) as { valuationYear?: unknown }).valuationYear;
+    const internalStartYear = Array.isArray(internalYears) && typeof internalYears[0] === "number" ? internalYears[0] : null;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
     const computed = computeProjectViewMetrics({
       meta: { projectId: "corporate" },
@@ -3088,6 +3098,7 @@ Capital Available: ${availableLabel}`,
       payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
+      valuationPeriodOffset: internalStartYear !== null && typeof valuationYear === "number" ? internalStartYear - valuationYear : 0,
       financing: {
         equityPct: 100,
         debtPct: 0,
@@ -3235,16 +3246,16 @@ Capital Available: ${availableLabel}`,
   const corporateProdStartMarkerValuesByKey = useMemo(() => {
     if (!corporateSnapshotData) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
 
-    let yearsByPeriod: number[];
-    try {
-      yearsByPeriod = requireYearsByPeriod(corporateSnapshotData.series);
-    } catch {
-      return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
-    }
+    const valuationYears = ((corporateSnapshotData.corporateValuationTimeSeries as {
+      rows?: Array<{ year?: number }>;
+    } | null | undefined)?.rows ?? [])
+      .map((row) => row.year)
+      .filter((year): year is number => typeof year === "number" && Number.isFinite(year));
     const timeline = corporateSnapshotData.modeledValuationTimeline as {
       markers?: Array<{
         tp: number;
         corporateTpIndexUsed?: number | null;
+        yearLabelUsed?: string | null;
         lista2Metrics?: {
           DCF_prodStart_exCapex_TargetCurrency?: number | null;
           DCF_prodStart_exCapex_perShare_TargetCurrency?: number | null;
@@ -3287,8 +3298,7 @@ Capital Available: ${availableLabel}`,
     ): YearlyMetricValue[] => {
       const values: YearlyMetricValue[] = [];
       for (const marker of markers) {
-        const tIndex = typeof marker.corporateTpIndexUsed === "number" ? marker.corporateTpIndexUsed : marker.tp;
-        const year = yearLabel(yearsByPeriod, tIndex);
+        const year = resolveCorporateMilestoneYear(marker, valuationYears);
         const dcfProdStartPerShareRaw = marker.lista2Metrics?.DCF_prodStart_exCapex_perShare_TargetCurrency;
         const npvProdStartPerShareRaw = marker.lista2Metrics?.NPV_prodStart_perShare_TargetCurrency;
         const navProdStartPerShareRaw = marker.lista2Metrics?.NAV_prodStart_perShare_TargetCurrency;
@@ -5796,7 +5806,7 @@ Capital Available: ${availableLabel}`,
                               ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value
                               : null
                           }
-                          npvLow={corporateViewMetrics.list2.NPV_perShare?.value ?? null}
+                          npvLow={corporateViewMetrics.list2.NAV_perShare?.value ?? null}
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
@@ -6357,7 +6367,7 @@ Capital Available: ${availableLabel}`,
                               high: npvRange.high,
                             };
                           })()}
-                          yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                          yearsByPeriod={Array.isArray(((projectSnapshotData?.project as { chartFlows?: { yearsByPeriod?: number[] } } | undefined)?.chartFlows?.yearsByPeriod)) ? ((projectSnapshotData?.project as { chartFlows?: { yearsByPeriod?: number[] } }).chartFlows?.yearsByPeriod as number[]) : []}
                           productionStartYear={(() => {
                             const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
                               ? selectedProjectRawJson.time as Record<string, unknown>
@@ -6404,7 +6414,7 @@ Capital Available: ${availableLabel}`,
                               high: npvRange.high,
                             };
                           })()}
-                          yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                          yearsByPeriod={Array.isArray(((projectSnapshotData?.project as { chartFlows?: { yearsByPeriod?: number[] } } | undefined)?.chartFlows?.yearsByPeriod)) ? ((projectSnapshotData?.project as { chartFlows?: { yearsByPeriod?: number[] } }).chartFlows?.yearsByPeriod as number[]) : []}
                           marketCapToday={projectViewMetrics.marketBox.marketCapCurrent.value}
                           currencyCode={lockedTargetCurrency}
                           formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}

@@ -142,14 +142,12 @@ function isProjectChartDataTypeSafe(data: Array<Array<string | number | null | {
     for (let col = 0; col < row.length; col += 1) {
       const value = row[col];
       const header = valueRangeChartHeader[col];
-      if (typeof header === 'string') {
-        if (value !== null && !(typeof value === 'number' && Number.isFinite(value))) {
-          return false;
-        }
-      } else {
+      if (typeof header === 'object' && 'role' in header) {
         if (value !== null && typeof value !== 'string') {
           return false;
         }
+      } else if (value !== null && !(typeof value === 'number' && Number.isFinite(value))) {
+        return false;
       }
     }
   }

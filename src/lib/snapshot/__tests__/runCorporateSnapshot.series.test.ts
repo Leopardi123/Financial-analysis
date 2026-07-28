@@ -1151,6 +1151,9 @@ test('project npv spot range includes scenario metrics beyond npv', async () => 
   assert.equal(Object.prototype.hasOwnProperty.call(range?.base ?? {}, 'inSitu10YUsd'), true);
   assert.equal(typeof range?.base.irr === 'number' || range?.base.irr === null, true);
   assert.equal(typeof range?.base.payback === 'number' || range?.base.payback === null, true);
+  assert.ok((range?.low.npvSeries.length ?? 0) > 0);
+  assert.ok((range?.base.npvSeries.length ?? 0) > 0);
+  assert.ok((range?.high.npvSeries.length ?? 0) > 0);
 });
 
 test('stressOptions taxPlus5pp recomputes tax series in engine outputs', async () => {

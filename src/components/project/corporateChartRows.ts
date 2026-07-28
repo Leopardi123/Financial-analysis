@@ -17,14 +17,18 @@ export type CorporateChartWindow = {
 };
 
 export const valueRangeChartHeader = [
-  'Index', 'Low', 'Band', 'Low boundary', 'High boundary',
-  'Current', { role: 'annotation', type: 'string' },
-  'Current Low', { role: 'annotation', type: 'string' },
-  'Current High', { role: 'annotation', type: 'string' },
-  'TP Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
-  'TP High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
-  'Peak Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
-  'Peak High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  { label: 'Index', type: 'number' },
+  { label: 'Low', type: 'number' },
+  { label: 'Band', type: 'number' },
+  { label: 'Low boundary', type: 'number' },
+  { label: 'High boundary', type: 'number' },
+  { label: 'Current', type: 'number' }, { role: 'annotation', type: 'string' },
+  { label: 'Current Low', type: 'number' }, { role: 'annotation', type: 'string' },
+  { label: 'Current High', type: 'number' }, { role: 'annotation', type: 'string' },
+  { label: 'TP Low', type: 'number' }, { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  { label: 'TP High', type: 'number' }, { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  { label: 'Peak Low', type: 'number' }, { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  { label: 'Peak High', type: 'number' }, { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
 ] as const;
 
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -106,26 +110,43 @@ export function buildCorporateChartRows(
     dcfExCapexSeriesRaw: input.rows.map((row) => row.dcfExCapexPerShare ?? null),
   });
 
-  const values = input.rows.map((row, index) => ({ year: row.year, low: curve.low[index], high: curve.high[index] }));
-  const peak = findFirstHighPeak(values);
-  return values.map(({ year, low, high }, index) => buildValueRangeChartRow({
-    ...(productionStartYears.has(year) ? (() => {
-      const projectNames = input.projectMarkers
-        .filter((marker) => marker.productionStartYear === year)
-        .map((marker) => marker.projectName);
-      const hasExistingValueAnnotation = year === input.valuationYear || index === peak?.index;
-      return {
-        productionStartLowAnnotation: hasExistingValueAnnotation ? null : undefined,
-        productionStartHighAnnotation: hasExistingValueAnnotation ? null : undefined,
-        productionStartTooltip: productionStartTooltip({ year, projectNames, high, low, isPeak: index === peak?.index, currencyCode }),
-      };
-    })() : {}),
-    year, low, high, currentPrice: today.price,
-    annotateCurrent: typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0,
-    annotateProductionStart: productionStartYears.has(year), format: label,
-    highlightPeak: index === peak?.index,
-    peakTooltip: peak ? formatPeakTooltip(peak, label, currencyCode) : null,
-  }));
+  const rollingValues = input.rows.map((row, index) => ({ year: row.year, low: curve.low[index], high: curve.high[index] }));
+  const peak = findFirstHighPeak(rollingValues);
+  const values = rollingValues.map((value, index) => {
+    const isCurrent = finite(valuationYear) ? value.year === valuationYear : index === 0;
+    if (!isCurrent) return value;
+    return {
+      ...value,
+      low: finite(today.low) ? today.low : value.low,
+      high: finite(today.high) ? today.high : value.high,
+    };
+  });
+  return values.map(({ year, low, high }, index) => {
+    const marker = input.projectMarkers.find((candidate) => candidate.productionStartYear === year);
+    const markerLow = finite(marker?.navPerShare) ? marker.navPerShare : null;
+    const markerHigh = finite(marker?.dcfPerShare) ? marker.dcfPerShare : null;
+    const isCurrent = typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0;
+    const isFutureProductionStart = productionStartYears.has(year) && finite(valuationYear) && year > valuationYear;
+    return buildValueRangeChartRow({
+      ...(isFutureProductionStart ? (() => {
+        const projectNames = input.projectMarkers
+          .filter((marker) => marker.productionStartYear === year)
+          .map((marker) => marker.projectName);
+        return {
+          productionStartTooltip: productionStartTooltip({ year, projectNames, high: markerHigh ?? high, low: markerLow ?? low, isPeak: index === peak?.index, currencyCode }),
+        };
+      })() : {}),
+      year, low, high, currentPrice: today.price,
+      annotateCurrent: isCurrent,
+      annotateProductionStart: isFutureProductionStart, format: label,
+      currentLowValue: today.low,
+      currentHighValue: today.high,
+      productionStartLowValue: markerLow,
+      productionStartHighValue: markerHigh,
+      highlightPeak: index === peak?.index && !isCurrent && !isFutureProductionStart,
+      peakTooltip: peak ? formatPeakTooltip(peak, label, currencyCode) : null,
+    });
+  });
 }
 
 /** Explicit formatted ticks prevent Google Charts from localizing years as e.g. 2,029. */

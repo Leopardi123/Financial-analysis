@@ -516,6 +516,92 @@ const financingSharesAllDebt = computeProjectViewMetrics({
 });
 assertApprox(financingSharesAllDebt.marketBox.sharesPf.value, 100, 1e-9);
 
+const precomputedDebtFinancingBase = {
+  targetCurrency: 'USD' as const,
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 2,
+  sharesCurrent: 300_000_000,
+  sharesPostFinancingInput: 300_000_000,
+  priceCurrentTarget: 2,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 139_000_000,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [-139_000_000, 100_000_000, 100_000_000],
+  capexUSD: [139_000_000, 0, 0],
+  grossRevenueUSD: [0, 100_000_000, 100_000_000],
+  ebitUSD: [0, 100_000_000, 100_000_000],
+  payableAuEqOz: [0, 1, 1],
+  sustainingCostUSD: [0, 0, 0],
+  productionStartPeriod: 1,
+};
+const recomputedDebtFinancing = computeProjectViewMetrics({
+  ...precomputedDebtFinancingBase,
+  financing: { equityPct: 0, debtPct: 100 },
+});
+const precomputedDebtFinancing = computeProjectViewMetrics({
+  ...precomputedDebtFinancingBase,
+  financing: { equityPct: 0, debtPct: 100, usePrecomputedFinancing: true },
+});
+
+const calendarRebasedNorth = computeProjectViewMetrics({
+  ...precomputedDebtFinancingBase,
+  fcfUSD: [-61_540_000, -169_400_000, 70_518_076.2],
+  capexUSD: [61_540_000, 159_110_000, 0],
+  grossRevenueUSD: [0, 0, 70_518_076.2],
+  ebitUSD: [0, 0, 70_518_076.2],
+  payableAuEqOz: [0, 0, 1],
+  sustainingCostUSD: [0, 0, 0],
+  masterN: 2,
+  productionStartPeriod: 2,
+  valuationPeriodOffset: 4,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  sharesCurrent: 1,
+  sharesPostFinancingInput: 1,
+  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+});
+const northNpvFrom2026 = -61_540_000 / 1.1 ** 4 - 169_400_000 / 1.1 ** 5 + 70_518_076.2 / 1.1 ** 6;
+assertApprox(calendarRebasedNorth.list2.NPV_Target.value, northNpvFrom2026, Math.abs(northNpvFrom2026) * 1e-12);
+assertApprox(calendarRebasedNorth.list2.NAV_Target.value, northNpvFrom2026, Math.abs(northNpvFrom2026) * 1e-12);
+assertApprox(calendarRebasedNorth.list2.DCF_Target_discounted.value, 70_518_076.2 / 1.1 ** 6, 1e-6);
+assert.equal(calendarRebasedNorth.list2.DCF_Target.value, 70_518_076.2);
+
+const calendarRebasedSouth = computeProjectViewMetrics({
+  ...precomputedDebtFinancingBase,
+  fcfUSD: [0, 0, -89_700_000, -137_000_000, 37_538_840],
+  capexUSD: [0, 0, 89_700_000, 137_000_000, 11_200_000],
+  grossRevenueUSD: [0, 0, 0, 0, 37_538_840],
+  ebitUSD: [0, 0, 0, 0, 37_538_840],
+  payableAuEqOz: [0, 0, 0, 0, 1],
+  sustainingCostUSD: [0, 0, 0, 0, 0],
+  masterN: 4,
+  productionStartPeriod: 4,
+  valuationPeriodOffset: -1,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 0,
+  sharesCurrent: 1,
+  sharesPostFinancingInput: 1,
+  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+});
+const southNpvFrom2026 = -89_700_000 / 1.1 - 137_000_000 / 1.1 ** 2 + 37_538_840 / 1.1 ** 3;
+assertApprox(calendarRebasedSouth.list2.NPV_Target.value, southNpvFrom2026, Math.abs(southNpvFrom2026) * 1e-12);
+assertApprox(calendarRebasedSouth.list2.NAV_Target.value, southNpvFrom2026, Math.abs(southNpvFrom2026) * 1e-12);
+assertApprox(calendarRebasedSouth.list2.DCF_Target_discounted.value, 37_538_840 / 1.1 ** 3, 1e-6);
+assert.equal(calendarRebasedSouth.list2.DCF_Target.value, 37_538_840);
+assert.deepEqual(calendarRebasedSouth.diagnostics.payback_real_debug.fcff_used, [0, 0, -89_700_000, -137_000_000, 37_538_840]);
+assert.equal(recomputedDebtFinancing.list5.Debt_Added_Target.value, 139_000_000);
+assert.equal(precomputedDebtFinancing.list5.Debt_Added_Target.value, 0);
+assert.equal(precomputedDebtFinancing.list5.debt_t0.value, 139_000_000);
+assert.equal(precomputedDebtFinancing.marketBox.sharesPf.value, 300_000_000);
+assert.equal(precomputedDebtFinancing.list2.DCF_Target.value, recomputedDebtFinancing.list2.DCF_Target.value);
+assert.equal(precomputedDebtFinancing.list2.DCF_Target_discounted.value, recomputedDebtFinancing.list2.DCF_Target_discounted.value);
+assertApprox(
+  precomputedDebtFinancing.list2.NAV_perShare.value,
+  ((precomputedDebtFinancing.list2.NPV_Target.value as number) - 139_000_000) / 300_000_000,
+  1e-9,
+);
+
 
 const financingScenarioBase = {
   targetCurrency: 'USD' as const,
