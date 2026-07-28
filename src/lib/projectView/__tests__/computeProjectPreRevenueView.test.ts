@@ -589,6 +589,7 @@ assertApprox(calendarRebasedSouth.list2.NPV_Target.value, southNpvFrom2026, Math
 assertApprox(calendarRebasedSouth.list2.NAV_Target.value, southNpvFrom2026, Math.abs(southNpvFrom2026) * 1e-12);
 assertApprox(calendarRebasedSouth.list2.DCF_Target_discounted.value, 37_538_840 / 1.1 ** 3, 1e-6);
 assert.equal(calendarRebasedSouth.list2.DCF_Target.value, 37_538_840);
+assert.deepEqual(calendarRebasedSouth.diagnostics.payback_real_debug.fcff_used, [0, 0, -89_700_000, -137_000_000, 37_538_840]);
 assert.equal(recomputedDebtFinancing.list5.Debt_Added_Target.value, 139_000_000);
 assert.equal(precomputedDebtFinancing.list5.Debt_Added_Target.value, 0);
 assert.equal(precomputedDebtFinancing.list5.debt_t0.value, 139_000_000);

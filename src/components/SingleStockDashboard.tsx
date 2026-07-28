@@ -3068,6 +3068,9 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const corporateFinancing = (corporateSnapshotData.financing ?? {}) as Record<string, unknown>;
+    const internalYears = ((corporateSnapshotData.series ?? {}) as { yearsByPeriod?: unknown }).yearsByPeriod;
+    const valuationYear = ((corporateSnapshotData.corporateValuationTimeSeries ?? {}) as { valuationYear?: unknown }).valuationYear;
+    const internalStartYear = Array.isArray(internalYears) && typeof internalYears[0] === "number" ? internalYears[0] : null;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
     const computed = computeProjectViewMetrics({
       meta: { projectId: "corporate" },
@@ -3095,6 +3098,7 @@ Capital Available: ${availableLabel}`,
       payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
+      valuationPeriodOffset: internalStartYear !== null && typeof valuationYear === "number" ? internalStartYear - valuationYear : 0,
       financing: {
         equityPct: 100,
         debtPct: 0,
@@ -6363,7 +6367,7 @@ Capital Available: ${availableLabel}`,
                               high: npvRange.high,
                             };
                           })()}
-                          yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                          yearsByPeriod={Array.isArray(((projectSnapshotData?.project as { chartFlows?: { yearsByPeriod?: number[] } } | undefined)?.chartFlows?.yearsByPeriod)) ? ((projectSnapshotData?.project as { chartFlows?: { yearsByPeriod?: number[] } }).chartFlows?.yearsByPeriod as number[]) : []}
                           productionStartYear={(() => {
                             const time = selectedProjectRawJson && typeof selectedProjectRawJson.time === "object" && selectedProjectRawJson.time !== null
                               ? selectedProjectRawJson.time as Record<string, unknown>
@@ -6410,7 +6414,7 @@ Capital Available: ${availableLabel}`,
                               high: npvRange.high,
                             };
                           })()}
-                          yearsByPeriod={Array.isArray((projectSnapshotData?.series as { yearsByPeriod?: number[] } | undefined)?.yearsByPeriod) ? ((projectSnapshotData?.series as { yearsByPeriod?: number[] }).yearsByPeriod as number[]) : []}
+                          yearsByPeriod={Array.isArray(((projectSnapshotData?.project as { chartFlows?: { yearsByPeriod?: number[] } } | undefined)?.chartFlows?.yearsByPeriod)) ? ((projectSnapshotData?.project as { chartFlows?: { yearsByPeriod?: number[] } }).chartFlows?.yearsByPeriod as number[]) : []}
                           marketCapToday={projectViewMetrics.marketBox.marketCapCurrent.value}
                           currencyCode={lockedTargetCurrency}
                           formatMoney={(value) => formatMetricValue({ value, reason: null }, "money", lockedTargetCurrency)}

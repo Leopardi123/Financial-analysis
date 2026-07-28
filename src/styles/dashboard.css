@@ -1643,22 +1643,18 @@ td.sticky-col {
 
 .project-list2-pager {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(100%, 100%);
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
+  grid-auto-flow: row;
+  grid-auto-rows: auto;
   gap: 8px;
   padding-bottom: 4px;
 }
 
 .project-list2-page {
-  scroll-snap-align: start;
   min-width: 0;
 }
 
 .project-list2-pager {
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-x pan-y;
+  touch-action: pan-y;
 }
 
 .spot-range-chart-guard {
