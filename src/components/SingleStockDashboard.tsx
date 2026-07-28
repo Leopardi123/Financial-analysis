@@ -3010,6 +3010,10 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (projectSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
+    const snapshotYears = ((projectSnapshotData.series ?? {}) as { yearsByPeriod?: unknown }).yearsByPeriod;
+    const valuationYears = ((projectSnapshotData.project ?? {}) as { chartFlows?: { yearsByPeriod?: unknown } }).chartFlows?.yearsByPeriod;
+    const internalStartYear = Array.isArray(snapshotYears) && typeof snapshotYears[0] === "number" ? snapshotYears[0] : null;
+    const valuationStartYear = Array.isArray(valuationYears) && typeof valuationYears[0] === "number" ? valuationYears[0] : null;
     const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
       .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
 
@@ -3039,6 +3043,7 @@ Capital Available: ${availableLabel}`,
       payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
+      valuationPeriodOffset: internalStartYear !== null && valuationStartYear !== null ? internalStartYear - valuationStartYear : 0,
       financing: {
         equityPct: toInputNumber(projectEquityPct) ?? 100,
         debtPct: toInputNumber(projectDebtPct) ?? 0,

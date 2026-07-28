@@ -46,6 +46,8 @@ export type ProjectViewInputs = {
   payableAuEqOz: Series;
   sustainingCostUSD: Series;
   productionStartPeriod: number | null;
+  /** Internal period zero expressed relative to the valuation year (for example, 2030 - 2026 = 4). */
+  valuationPeriodOffset?: number;
   financing: FinancingInput;
 };
 
@@ -345,6 +347,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const enterpriseAdjustments = finite(input.enterpriseAdjustmentsTarget) ? input.enterpriseAdjustmentsTarget : 0;
   const tp = Number.isInteger(input.productionStartPeriod) ? input.productionStartPeriod as number : null;
   const masterN = Number.isInteger(input.masterN) ? input.masterN as number : null;
+  const valuationPeriodOffset = Number.isInteger(input.valuationPeriodOffset) ? input.valuationPeriodOffset as number : 0;
 
 
   const debtFrac = Math.max(0, Math.min(1, input.financing.debtPct / 100));
@@ -393,9 +396,11 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const npvTodayUSD = r !== null ? (() => {
     let sum = 0;
     for (let i = 0; i < input.fcfUSD.length; i += 1) {
+      const valuationPeriod = i + valuationPeriodOffset;
+      if (valuationPeriod < 0) continue;
       const v = input.fcfUSD[i];
       if (!finite(v)) return null;
-      sum += v * discountToToday(i, r);
+      sum += v * discountToToday(valuationPeriod, r);
     }
     return sum;
   })() : null;
@@ -426,7 +431,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     : null;
 
   const dcfProdStartPresentUSD = dcfProdStartExCapexUSD !== null && tp !== null && r !== null
-    ? dcfProdStartExCapexUSD / ((1 + r) ** tp)
+    ? dcfProdStartExCapexUSD / ((1 + r) ** (tp + valuationPeriodOffset))
     : null;
   const dcfTargetDiscounted = dcfProdStartPresentUSD !== null && fx !== null ? dcfProdStartPresentUSD * fx : null;
 
