@@ -106,8 +106,17 @@ export function buildCorporateChartRows(
     dcfExCapexSeriesRaw: input.rows.map((row) => row.dcfExCapexPerShare ?? null),
   });
 
-  const values = input.rows.map((row, index) => ({ year: row.year, low: curve.low[index], high: curve.high[index] }));
-  const peak = findFirstHighPeak(values);
+  const rollingValues = input.rows.map((row, index) => ({ year: row.year, low: curve.low[index], high: curve.high[index] }));
+  const peak = findFirstHighPeak(rollingValues);
+  const values = rollingValues.map((value, index) => {
+    const isCurrent = finite(valuationYear) ? value.year === valuationYear : index === 0;
+    if (!isCurrent) return value;
+    return {
+      ...value,
+      low: finite(today.low) ? today.low : value.low,
+      high: finite(today.high) ? today.high : value.high,
+    };
+  });
   return values.map(({ year, low, high }, index) => {
     const marker = input.projectMarkers.find((candidate) => candidate.productionStartYear === year);
     const markerLow = finite(marker?.navPerShare) ? marker.navPerShare : null;

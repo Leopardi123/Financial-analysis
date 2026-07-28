@@ -91,7 +91,7 @@ test('marker-specific valuation cannot replace the ordinary Corporate curve', ()
   assert.match(start[TP_HIGH_TOOLTIP] as string, /High: 2,3/);
 });
 
-test('Corporate table today props cannot replace the ordinary rolling Corporate row', () => {
+test('Corporate rolling curve starts at canonical today values and leaves later rows unchanged', () => {
   const rows = buildCorporateChartRows({
     valuationYear: 2026,
     rows: [
@@ -101,15 +101,15 @@ test('Corporate table today props cannot replace the ordinary rolling Corporate 
     projectMarkers: [{ projectId: 'producing', projectName: 'Producing', productionStartYear: 2026 }],
   }, { low: 4.7, high: 6.0, price: 3.0 });
 
-  assert.equal(rows[0][1], 6.4);
-  assert.equal(rows[0][4], 6.7);
-  assert.notEqual(rows[0][1], 4.7);
-  assert.notEqual(rows[0][4], 6.0);
+  assert.equal(rows[0][1], 4.7);
+  assert.equal(rows[0][4], 6.0);
   assert.equal(rows[0][CURRENT_LOW], 4.7);
   assert.equal(rows[0][CURRENT_HIGH], 6.0);
+  assert.equal(rows[1][1], 6.6);
+  assert.equal(rows[1][4], 6.9);
 });
 
-test('today DCF marker stays separate from a higher ordinary rolling High at the same year', () => {
+test('multi-project Corporate rebases only the first rolling point to canonical today NAV and DCF', () => {
   const rows = buildCorporateChartRows({
     valuationYear: 2026,
     rows: [
@@ -124,7 +124,7 @@ test('today DCF marker stays separate from a higher ordinary rolling High at the
 
   assert.deepEqual(rows[0], [
     2026,
-    4.9, 1.2999999999999998, 4.9, 6.2,
+    4.7, 1.2000000000000002, 4.7, 5.9,
     3.0, '      3,0',
     4.7, '      4,7',
     5.9, '      5,9',
@@ -133,8 +133,26 @@ test('today DCF marker stays separate from a higher ordinary rolling High at the
     null, null, null,
     null, null, null,
   ]);
-  assert.equal(rows[0][4], 6.2, 'ordinary High line remains rolling DCF');
+  assert.equal(rows[0][1], 4.7, 'rolling Low starts at canonical today NAV');
+  assert.equal(rows[0][4], 5.9, 'rolling High starts at canonical today DCF');
   assert.equal(rows[0][CURRENT_HIGH], 5.9, 'today High marker uses discounted table DCF');
+  assert.deepEqual(rows[1].slice(0, 5), [2029, 4.5, 1.2999999999999998, 4.5, 5.8], 'the next rolling row is bit-for-bit unchanged');
+});
+
+test('single-project Corporate is unchanged when rolling and canonical today values already match', () => {
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [
+      { period: 0, year: 2026, npvPerShare: 4.4, navPerShare: 5.0, dcfPerShare: 5.9, dcfExCapexPerShare: 5.9, sharesPf: 430 },
+      { period: 1, year: 2029, npvPerShare: 4.1, navPerShare: 4.5, dcfPerShare: 5.4, dcfExCapexPerShare: 5.8, sharesPf: 430 },
+    ],
+    projectMarkers: [{ projectId: 'future', projectName: 'Future', productionStartYear: 2029, navPerShare: 5.1, dcfPerShare: 6.1 }],
+  }, { low: 5.0, high: 5.9, price: 3.0 });
+
+  assert.deepEqual(rows.map((row) => row.slice(0, 5)), [
+    [2026, 5.0, 0.9000000000000004, 5.0, 5.9],
+    [2029, 4.5, 1.2999999999999998, 4.5, 5.8],
+  ]);
 });
 
 test('each Corporate production-start year marks its table milestone without replacing the ordinary lines', () => {
@@ -219,8 +237,8 @@ test('production start at valuationYear without marker values has no milestone o
     projectMarkers: [{ projectId: 'current', projectName: 'Current', productionStartYear: 2026, navPerShare: null, dcfPerShare: null }],
   };
   const row = buildCorporateChartRows(input, { low: 9, high: 9, price: 3, tpLow: 1.442408197, tpHigh: 2.109618604 }, 0.1)[0];
-  assert.equal(row[1], 1.436098354);
-  assert.equal(row[4], 1.106524312);
+  assert.equal(row[1], 9);
+  assert.equal(row[4], 9);
   assert.equal(row[7], 9);
   assert.equal(row[9], 9);
   assert.equal(row[TP_LOW], null);
@@ -238,8 +256,8 @@ test('historical production start cannot overwrite the valuation-year rolling ro
     projectMarkers: [{ projectId: 'historic', projectName: 'Historic', productionStartYear: 2025, navPerShare: null, dcfPerShare: null }],
   };
   const row = buildCorporateChartRows(input, { low: 8, high: 9, price: null, tpLow: 8, tpHigh: 9 }, 0.1)[0];
-  assert.equal(row[1], 2);
-  assert.equal(row[4], 3);
+  assert.equal(row[1], 8);
+  assert.equal(row[4], 9);
 });
 
 test('future marker maps to its calendar year but cannot replace the ordinary curve', () => {
@@ -249,8 +267,8 @@ test('future marker maps to its calendar year but cannot replace the ordinary cu
     projectMarkers: [{ projectId: 'future', projectName: 'Future', productionStartYear: 2029, navPerShare: 8, dcfPerShare: 9 }],
   };
   const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 99, tpHigh: 99 }, 0.1);
-  assert.ok(Math.abs((rows[0][4] as number) - 7 / 1.1 ** 3) < 1e-12);
-  assert.equal(rows[0][1], 2);
+  assert.equal(rows[0][4], 99);
+  assert.equal(rows[0][1], 99);
   assert.equal(rows[3][1], 5);
   assert.equal(rows[3][4], 7);
   assert.equal(rows[3][TP_LOW], 8);
@@ -268,8 +286,8 @@ test('multiple project starts never inject a future marker value into valuationY
     ],
   };
   const rows = buildCorporateChartRows(input, { low: 99, high: 99, price: null, tpLow: 98, tpHigh: 99 }, 0.1);
-  assert.deepEqual(rows.map((row) => row[4]), [4, 5, 6]);
-  assert.deepEqual(rows.map((row) => row[1]), [2, 3, 4]);
+  assert.deepEqual(rows.map((row) => row[4]), [99, 5, 6]);
+  assert.deepEqual(rows.map((row) => row[1]), [99, 3, 4]);
   assert.deepEqual(rows.map((row) => row[TP_HIGH]), [null, 9, 12]);
 });
 
@@ -299,7 +317,7 @@ test('production layer leaves ordinary High and Low unchanged without collisions
     navSeriesRaw: rowsInput.map((row) => row.navPerShare),
     dcfExCapexSeriesRaw: rowsInput.map((row) => row.dcfExCapexPerShare),
   });
-  assert.deepEqual(marked.map((row) => [row[1], row[4]]), ordinary.low.map((low, index) => [low, ordinary.high[index]]));
+  assert.deepEqual(marked.map((row) => [row[1], row[4]]), [[1, 1], ...ordinary.low.slice(1).map((low, index) => [low, ordinary.high[index + 1]])]);
   assert.deepEqual([marked[1][TP_LOW], marked[1][TP_HIGH]], [marked[1][1], marked[1][4]]);
 });
 
@@ -397,8 +415,8 @@ test('missing marker values preserve the rolling Corporate curve instead of usin
   const curveInput = { totalLen: 5, tpOffset: 2, discountRate: 0.1, lowTp: 5, highTp: 4.8, navSeriesRaw: [3, 4, 5, 6, 7], dcfExCapexSeriesRaw: [4, 4.4, 4.8, 5.2, 5.6] };
   const projectCurve = buildValueRangeCurve(curveInput);
   const corporateRows = buildCorporateChartRows(input, { low: 2.5, high: 4, price: 1, tpLow: 5, tpHigh: 7 });
-  assert.deepEqual(corporateRows.map((row) => row[1]), projectCurve.low);
-  assert.deepEqual(corporateRows.map((row) => row[4]), projectCurve.high);
+  assert.deepEqual(corporateRows.map((row) => row[1]), [2.5, ...projectCurve.low.slice(1)]);
+  assert.deepEqual(corporateRows.map((row) => row[4]), [4, ...projectCurve.high.slice(1)]);
 });
 
 test('canonical period mapping and actual discount rate drive pre-production High', () => {
