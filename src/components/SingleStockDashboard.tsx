@@ -3045,6 +3045,7 @@ Capital Available: ${availableLabel}`,
         latestQuarterlyCashTarget: latestQuarterlyCash,
         useCashFirst: projectUseQuarterlyCash,
         cashUsePercent: projectCashUsedPct / 100,
+        usePrecomputedFinancing: true,
       },
     });
   }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);

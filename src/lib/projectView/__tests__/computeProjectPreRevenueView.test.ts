@@ -516,6 +516,45 @@ const financingSharesAllDebt = computeProjectViewMetrics({
 });
 assertApprox(financingSharesAllDebt.marketBox.sharesPf.value, 100, 1e-9);
 
+const precomputedDebtFinancingBase = {
+  targetCurrency: 'USD' as const,
+  fxUSDToTarget: 1,
+  discountRate: 0.1,
+  masterN: 2,
+  sharesCurrent: 300_000_000,
+  sharesPostFinancingInput: 300_000_000,
+  priceCurrentTarget: 2,
+  cashCurrentTarget: 0,
+  debtCurrentTarget: 139_000_000,
+  enterpriseAdjustmentsTarget: 0,
+  fcfUSD: [-139_000_000, 100_000_000, 100_000_000],
+  capexUSD: [139_000_000, 0, 0],
+  grossRevenueUSD: [0, 100_000_000, 100_000_000],
+  ebitUSD: [0, 100_000_000, 100_000_000],
+  payableAuEqOz: [0, 1, 1],
+  sustainingCostUSD: [0, 0, 0],
+  productionStartPeriod: 1,
+};
+const recomputedDebtFinancing = computeProjectViewMetrics({
+  ...precomputedDebtFinancingBase,
+  financing: { equityPct: 0, debtPct: 100 },
+});
+const precomputedDebtFinancing = computeProjectViewMetrics({
+  ...precomputedDebtFinancingBase,
+  financing: { equityPct: 0, debtPct: 100, usePrecomputedFinancing: true },
+});
+assert.equal(recomputedDebtFinancing.list5.Debt_Added_Target.value, 139_000_000);
+assert.equal(precomputedDebtFinancing.list5.Debt_Added_Target.value, 0);
+assert.equal(precomputedDebtFinancing.list5.debt_t0.value, 139_000_000);
+assert.equal(precomputedDebtFinancing.marketBox.sharesPf.value, 300_000_000);
+assert.equal(precomputedDebtFinancing.list2.DCF_Target.value, recomputedDebtFinancing.list2.DCF_Target.value);
+assert.equal(precomputedDebtFinancing.list2.DCF_Target_discounted.value, recomputedDebtFinancing.list2.DCF_Target_discounted.value);
+assertApprox(
+  precomputedDebtFinancing.list2.NAV_perShare.value,
+  ((precomputedDebtFinancing.list2.NPV_Target.value as number) - 139_000_000) / 300_000_000,
+  1e-9,
+);
+
 
 const financingScenarioBase = {
   targetCurrency: 'USD' as const,
