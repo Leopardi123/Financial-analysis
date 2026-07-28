@@ -17,14 +17,18 @@ export type CorporateChartWindow = {
 };
 
 export const valueRangeChartHeader = [
-  'Index', 'Low', 'Band', 'Low boundary', 'High boundary',
-  'Current', { role: 'annotation', type: 'string' },
-  'Current Low', { role: 'annotation', type: 'string' },
-  'Current High', { role: 'annotation', type: 'string' },
-  'TP Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
-  'TP High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
-  'Peak Low', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
-  'Peak High', { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  { label: 'Index', type: 'number' },
+  { label: 'Low', type: 'number' },
+  { label: 'Band', type: 'number' },
+  { label: 'Low boundary', type: 'number' },
+  { label: 'High boundary', type: 'number' },
+  { label: 'Current', type: 'number' }, { role: 'annotation', type: 'string' },
+  { label: 'Current Low', type: 'number' }, { role: 'annotation', type: 'string' },
+  { label: 'Current High', type: 'number' }, { role: 'annotation', type: 'string' },
+  { label: 'TP Low', type: 'number' }, { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  { label: 'TP High', type: 'number' }, { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  { label: 'Peak Low', type: 'number' }, { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
+  { label: 'Peak High', type: 'number' }, { role: 'annotation', type: 'string' }, { role: 'tooltip', type: 'string' },
 ] as const;
 
 const label = (value: number) => value.toLocaleString('sv-SE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });

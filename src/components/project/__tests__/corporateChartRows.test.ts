@@ -221,8 +221,22 @@ test('equal rounded low and high retain two values, series columns, and annotati
   assert.equal(row[TP_HIGH_ANNOTATION], null);
   assert.equal((row[8] as string).trim(), '5,2', 'current Low keeps the visible value');
   assert.equal((row[10] as string).trim(), '5,2', 'current High keeps the visible value');
-  assert.equal(valueRangeChartHeader[11], 'TP Low');
-  assert.equal(valueRangeChartHeader[14], 'TP High');
+  assert.deepEqual(valueRangeChartHeader[11], { label: 'TP Low', type: 'number' });
+  assert.deepEqual(valueRangeChartHeader[14], { label: 'TP High', type: 'number' });
+});
+
+test('every Google Chart value column has an explicit numeric type even when an overlay series is all null', () => {
+  const valueColumnIndexes = [0, 1, 2, 3, 4, 5, 7, 9, 11, 14, 17, 20];
+  for (const index of valueColumnIndexes) {
+    assert.deepEqual((valueRangeChartHeader[index] as { type?: string }).type, 'number');
+  }
+
+  const rows = buildCorporateChartRows({
+    valuationYear: 2026,
+    rows: [{ period: 0, year: 2026, npvPerShare: 1, navPerShare: 5, dcfPerShare: 5.9, dcfExCapexPerShare: 6.2, sharesPf: 430 }],
+    projectMarkers: [],
+  }, { low: 5, high: 5.9, price: 3 });
+  assert.deepEqual(rows[0].slice(11), new Array(12).fill(null));
 });
 
 test('corporate x-axis ticks contain today, every unique production start, and the final year', () => {
