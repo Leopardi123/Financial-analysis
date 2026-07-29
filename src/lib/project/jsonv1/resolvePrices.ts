@@ -369,7 +369,7 @@ export async function resolveProjectPricesToEngineInput(
     spotPriceUSDByMetal[metal] = selectedSeries;
     priceSeriesByKey[priceKey] = [...selectedSeries];
     if (resolvedPrice.priceKeyUsed !== priceKey && resolvedPrice.derivedFrom) {
-      priceSeriesByKey[resolvedPrice.derivedFrom] = [...selectedSeries];
+      priceSeriesByKey[resolvedPrice.derivedFrom] = await resolveSeriesForPriceKey(resolvedPrice.derivedFrom);
     }
 
     const liveSymbol = getLegacySymbolForPriceKey(priceKey);

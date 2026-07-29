@@ -467,6 +467,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     { resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc, scenario }) => ({ values: anchorDatesUtc.map(() => (scenario.mode === 'fixed' && Number.isFinite(scenario.fixedByKey[price_key]) ? scenario.fixedByKey[price_key] : null)), warnings: [] }) },
   );
   assertEqual(derivedTonFromLb.spotPriceUSDByMetal.Cu[0], 4 * 2204.6226218, 'CU_USD_TONNE derives from CU_USD_LB using tonne/lb factor');
+  assertEqual(derivedTonFromLb.priceSeriesByKey?.CU_USD_LB[0], 4, 'derived source key retains its own USD/lb series');
   assert(derivedTonFromLb.diagnostics?.warnings.some((w) => w.includes('price_diagnostic metal=Cu') && w.includes('price_key_requested=CU_USD_TONNE') && w.includes('price_key_used=CU_USD_LB') && w.includes('derived=true') && w.includes('conversion_factor=2204.6226218') && w.includes('warning="Cu COMEX–LME basis can diverge; unit conversion is not basis conversion."')) ?? false, 'diagnostic shows CU tonne derived from lb with warning');
 
   const cuLbRequested = JSON.parse(JSON.stringify(cuTonRequested));
