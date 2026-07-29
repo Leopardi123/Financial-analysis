@@ -792,11 +792,11 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   assert.equal(financing.corporate_cash_waterfall?.totalInitialCashUsed, 100_000_000);
   assert.equal(financing.corporate_cash_waterfall?.remainingExternalFundingNeed, 200_000_000);
   assert.equal(result.snapshot.financing.NPV_today_TargetCurrency, disabled.snapshot.financing.NPV_today_TargetCurrency);
-  assert.equal(result.snapshot.financing.NAV_today_TargetCurrency, disabled.snapshot.financing.NAV_today_TargetCurrency);
+  assert.equal((disabled.snapshot.financing.NAV_today_TargetCurrency as number) - (result.snapshot.financing.NAV_today_TargetCurrency as number), 100_000_000);
   assert.equal(result.snapshot.DCF_prodStart_exCapex_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_TargetCurrency);
   const corporateProdStart = result.snapshot as unknown as { NAV_prodStart_TargetCurrency: number | null; NAV_prodStart_perShare_TargetCurrency: number | null };
   const disabledProdStart = disabled.snapshot as unknown as { NAV_prodStart_TargetCurrency: number | null };
-  assert.equal(corporateProdStart.NAV_prodStart_TargetCurrency, disabledProdStart.NAV_prodStart_TargetCurrency);
+  assert.equal(corporateProdStart.NAV_prodStart_TargetCurrency, disabledProdStart.NAV_prodStart_TargetCurrency, 'external funding can restore the same production-start closing cash');
   assert.notEqual(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, disabled.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency);
 
   const snapshotSeries = result.snapshot.series as { fcffUSD: Array<number | null>; capexUSD: Array<number | null>; totalRevenue_USD: Array<number | null>; ebitUSD: Array<number | null> };
@@ -809,9 +809,17 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
     ebitUSD: snapshotSeries.ebitUSD, payableAuEqOz: new Array(snapshotSeries.fcffUSD.length).fill(1), sustainingCostUSD: new Array(snapshotSeries.fcffUSD.length).fill(0),
     productionStartPeriod, financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
   });
-  assert.equal(corporateProdStart.NAV_prodStart_TargetCurrency, projectEquivalent.list2.NAV_prodStart.value);
+  assert.equal(
+    corporateProdStart.NAV_prodStart_TargetCurrency,
+    (projectEquivalent.list2.NPV_prodStart.value as number)
+      + ((financing.corporate_cash_waterfall?.rows[productionStartPeriod]?.closingCash ?? 0)
+        - (financing.corporate_cash_waterfall?.rows.slice(0, productionStartPeriod + 1).reduce((sum, row) => sum + row.debtAdded, 0) ?? 0)),
+  );
   assert.equal(result.snapshot.DCF_prodStart_exCapex_TargetCurrency, projectEquivalent.list2.DCF_Target.value);
-  assert.equal(corporateProdStart.NAV_prodStart_perShare_TargetCurrency, projectEquivalent.list2.NAV_prodStart_perShare.value);
+  assert.ok(Math.abs(
+    (corporateProdStart.NAV_prodStart_perShare_TargetCurrency as number)
+      - (corporateProdStart.NAV_prodStart_TargetCurrency as number) / (financing.shares_post_financing as number),
+  ) < 1e-12);
   assert.equal(result.snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency, projectEquivalent.list2.DCF_perShare.value);
   const chartFlows = (result.snapshot as unknown as { project?: { chartFlows?: {
     dcfProdstartExCapexPerShareSeries: Array<number | null>;
@@ -1003,11 +1011,16 @@ test('corporate prod-start markers apply incremental initial capex windows to NP
       assert.notEqual(dcf, npv);
     }
     assert.ok(Math.abs((dcf - npv) - initialCapex) <= 0.01);
-    const cashForNav: number | null = result.snapshot.financing.cash_for_nav_TargetCurrency ?? null;
-    const debtPost: number | null = result.snapshot.financing.debt_t0_post_TargetCurrency;
-    assert.notEqual(cashForNav, null);
-    assert.notEqual(debtPost, null);
-    assert.ok(Math.abs(nav - (npv + (cashForNav as number) - (debtPost as number))) <= 0.01);
+    const waterfall = result.snapshot.financing.corporate_cash_waterfall as {
+      rows: Array<{ year: number | null; closingCash: number; debtAdded: number }>;
+    } | null | undefined;
+    const rowIndex = waterfall?.rows.findIndex((row) => String(row.year) === marker.yearLabelUsed) ?? -1;
+    assert.ok(waterfall && rowIndex >= 0);
+    const fx = (body.fx as Record<string, unknown>).manual_fx_USD_to_TargetCurrency as number;
+    const openingDebt = ((body.balanceSheet as Record<string, number>).debt_t0_TargetCurrency ?? 0);
+    const debtAtMilestone = openingDebt + waterfall.rows.slice(0, rowIndex + 1).reduce((sum, row) => sum + row.debtAdded, 0) * fx;
+    const netCashAtMilestone = waterfall.rows[rowIndex].closingCash * fx - debtAtMilestone;
+    assert.ok(Math.abs(nav - (npv + netCashAtMilestone)) <= 0.01);
   }
 });
 
@@ -1277,8 +1290,13 @@ test('rebased valuation applies net cash once and discounts the first future mil
   if (!result.ok) return;
   const series = valuationSeries(result.snapshot as unknown);
   const first = series.rows[0];
-  const netCash = 175_000_000;
-  assert.ok(Math.abs((first.dcfExCapexAbsolute - first.navAbsolute) + netCash) < 1e-6);
+  const waterfall = result.snapshot.financing.corporate_cash_waterfall;
+  const firstRow = waterfall?.rows.find((row) => row.year === first.year);
+  assert.ok(firstRow);
+  const rowIndex = waterfall?.rows.indexOf(firstRow as NonNullable<typeof firstRow>) ?? -1;
+  const debtAtFirst = 25_000_000 + (waterfall?.rows.slice(0, rowIndex + 1).reduce((sum, row) => sum + row.debtAdded, 0) ?? 0);
+  const netCashAtFirst = (firstRow?.closingCash ?? 0) - debtAtFirst;
+  assert.ok(Math.abs((first.npvAbsolute + netCashAtFirst) - first.navAbsolute) < 1e-6);
   assert.equal(result.snapshot.NAV_today_TargetCurrency, first.navAbsolute);
   const marker = result.snapshot.modeledValuationTimeline?.markers[0] as { yearLabelUsed: string | null; lista2Metrics?: { DCF_prodStart_exCapex_TargetCurrency: number | null } } | undefined;
   assert.ok(marker);
