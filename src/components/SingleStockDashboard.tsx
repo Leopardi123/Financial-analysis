@@ -3008,12 +3008,13 @@ Capital Available: ${availableLabel}`,
     });
     const rawTime = (selectedProjectRawJson.time ?? null) as { productionStartYear?: unknown; periodEndDatesUtc?: unknown } | null;
     return verifyProjectCalendarAxis({
+      version: selectedProjectRawJson.version === 'project_json_v1' ? 'project_json_v1' : 'project_json_v2',
       masterN: Number(inputs.masterN),
       fcffLength: Array.isArray(inputs.series.fcfUSD) ? inputs.series.fcfUSD.length : 0,
       productionStartPeriod: Number(inputs.tp),
       productionStartYear: typeof rawTime?.productionStartYear === 'number' ? rawTime.productionStartYear : null,
       periodEndDatesUtc: rawTime?.periodEndDatesUtc,
-      yearsByPeriod: parsedSelectedProject.engineInputWithoutPrices.yearsByPeriod,
+      parsedCanonicalYears: parsedSelectedProject.engineInputWithoutPrices.yearsByPeriod,
     });
   }, [lockedTargetCurrency, parsedSelectedProject, projectSnapshotData, riskAdjustedDiscountRatePctInput, selectedProjectRawJson]);
 
@@ -3069,7 +3070,7 @@ Capital Available: ${availableLabel}`,
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
       calendarYears: projectCalendarResolution.value.yearsByPeriod,
-      periodEndDates: projectCalendarResolution.value.periodEndDatesUtc,
+      periodEndDates: projectCalendarResolution.value.periodEndDatesUtc ?? undefined,
       calendarYearPolicy: 'verified',
       valuationPeriodOffset: discountPeriodOffset,
       financing: {

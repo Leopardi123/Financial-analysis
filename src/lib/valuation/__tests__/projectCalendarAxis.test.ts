@@ -4,11 +4,14 @@ import { verifyProjectCalendarAxis } from '../projectCalendarAxis.ts';
 import { computeProjectViewMetrics } from '../../projectView/computeProjectPreRevenueView.ts';
 import { buildValuationTimeline } from '../canonicalValuationTimeline.ts';
 import { buildValuationChartRenderModel } from '../../../components/project/valuationChartPresentation.ts';
+import { getProjectJsonV1Template } from '../../project/jsonv1/template.ts';
+import { resolveV2TimeAxis } from '../../time/resolveV2TimeAxis.ts';
 
 type RawProject = { version: string; meta: { projectId: string; projectName: string }; time: { masterN: number; productionStartPeriod: number; productionStartYear?: number; periodEndDatesUtc: string[] }; series: { capexUSD: Array<number | null> } };
 const readProject = async (path: string): Promise<RawProject> => JSON.parse(await readFile(path, 'utf8')) as RawProject;
 const yearsFromDates = (raw: RawProject): number[] => raw.time.periodEndDatesUtc.map((date) => Number(date.slice(0, 4)));
 const verify = (raw: RawProject) => verifyProjectCalendarAxis({
+  version: raw.version as 'project_json_v1' | 'project_json_v2',
   masterN: raw.time.masterN,
   fcffLength: raw.series.capexUSD.length,
   productionStartPeriod: raw.time.productionStartPeriod,
@@ -16,6 +19,17 @@ const verify = (raw: RawProject) => verifyProjectCalendarAxis({
   periodEndDatesUtc: raw.time.periodEndDatesUtc,
   yearsByPeriod: yearsFromDates(raw),
 });
+
+const diablillosRaw = getProjectJsonV1Template() as unknown as RawProject;
+diablillosRaw.meta.projectId = 'diablillos';
+diablillosRaw.meta.projectName = 'Diablillos';
+const diablillosTime = resolveV2TimeAxis({ masterN: diablillosRaw.time.masterN, productionStartPeriod: diablillosRaw.time.productionStartPeriod, productionStartYear: diablillosRaw.time.productionStartYear as number });
+const diablillos = verifyProjectCalendarAxis({
+  version: 'project_json_v2', masterN: diablillosTime.masterN,
+  fcffLength: diablillosTime.masterN + 1, productionStartPeriod: diablillosTime.productionStartPeriod,
+  productionStartYear: diablillosTime.productionStartYear, parsedCanonicalYears: diablillosTime.yearsByPeriod,
+});
+assert.equal(diablillos.ok, true); // A: Operations/parser axis works without periodEndDatesUtc
 
 const north = await readProject('src/lib/snapshot/__tests__/fixtures/p5.los-ricos-north.project_json_v1.json');
 const south = await readProject('src/lib/snapshot/__tests__/fixtures/p6.los-ricos-south.project_json_v1.json');
@@ -38,7 +52,7 @@ for (const [raw, expectedFirst, expectedProduction] of [[working, 2026, 2029], [
   assert.ok(direct.value.yearsByPeriod.every((year) => year > 2000)); // J
   const timeline = buildValuationTimeline({
     scope: 'project', fcfUSD: new Array(raw.time.masterN + 1).fill(0), capexUSD: new Array(raw.time.masterN + 1).fill(0),
-    yearsByPeriod: direct.value.yearsByPeriod, periodEndDates: direct.value.periodEndDatesUtc,
+    yearsByPeriod: direct.value.yearsByPeriod, periodEndDates: direct.value.periodEndDatesUtc ?? undefined,
     discountRate: 0.1, fxUSDToTarget: 1, productionStartPeriod: raw.time.productionStartPeriod,
     cashTarget: 0, debtTarget: 0, sharesCurrent: 1, sharesPf: 1,
   });
@@ -53,10 +67,15 @@ for (const [raw, expectedFirst, expectedProduction] of [[working, 2026, 2029], [
 assert.deepEqual([0, 4].map((period) => period - 1), [-1, 3]);
 assert.deepEqual([0, 2].map((period) => period + 4), [4, 6]);
 
-const missing = verifyProjectCalendarAxis({ masterN: 2, fcffLength: 3, productionStartPeriod: 1, periodEndDatesUtc: undefined, yearsByPeriod: undefined });
-assert.deepEqual(missing, { ok: false, error: 'Ej verifierad Project timeline: time.periodEndDatesUtc is missing' }); // E-F
-const mismatch = verifyProjectCalendarAxis({ masterN: 2, fcffLength: 3, productionStartPeriod: 1, periodEndDatesUtc: ['2026-12-31', '2027-12-31', '2028-12-31'], yearsByPeriod: [2026, 2027] });
-assert.deepEqual(mismatch, { ok: false, error: 'Ej verifierad Project timeline: yearsByPeriod length=2, expected 3' });
+const noDatesButCanonical = verifyProjectCalendarAxis({ version: 'project_json_v2', masterN: 2, fcffLength: 3, productionStartPeriod: 1, productionStartYear: 2027, parsedCanonicalYears: [2026, 2027, 2028] });
+assert.equal(noDatesButCanonical.ok, true); // E-F: V2 canonical axis does not require raw dates
+const missing = verifyProjectCalendarAxis({ version: 'project_json_v2', masterN: 2, fcffLength: 3, productionStartPeriod: 1 });
+assert.deepEqual(missing, { ok: false, error: 'Ej verifierad Project timeline: inga absoluta periodår kan härledas från den parsade eller lagrade projektmodellen' }); // L-M
+const mismatch = verifyProjectCalendarAxis({ version: 'project_json_v2', masterN: 2, fcffLength: 3, productionStartPeriod: 1, productionStartYear: 2027, yearsByPeriod: [2026, 2027] });
+assert.deepEqual(mismatch, { ok: false, error: 'Ej verifierad Project timeline: normaliserad periodmängd=2, expected 3 for project_json_v2' });
+const legacyMasterNCount = verifyProjectCalendarAxis({ version: 'project_json_v1', masterN: 3, fcffLength: 3, productionStartPeriod: 1, yearsByPeriod: [2026, 2027, 2028] });
+assert.equal(legacyMasterNCount.ok, true); // G: legacy import permits masterN period-count semantics
+
 
 assert.throws(() => computeProjectViewMetrics({
   targetCurrency: 'USD', fxUSDToTarget: 1, discountRate: 0.1, masterN: 2,
@@ -66,6 +85,6 @@ assert.throws(() => computeProjectViewMetrics({
   calendarYears: [2026, 2027], calendarYearPolicy: 'verified', financing: { equityPct: 100, debtPct: 0 },
 }), /Ej verifierad Project timeline: calendarYears length=2, FCFF length=3/);
 
-console.log('Project calendar axis A-J passed', {
-  working: verify(working), south: verify(south), north: verify(north),
+console.log('Project calendar axis A-M passed', {
+  diablillos, working: verify(working), south: verify(south), north: verify(north),
 });
