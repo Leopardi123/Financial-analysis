@@ -449,6 +449,8 @@ test('Project and Corporate charts share one visual options builder', () => {
   assert.deepEqual(buildValueRangeChartOptions(args), buildValueRangeChartOptions(args));
   assert.equal(buildValueRangeChartOptions(args).legend.position, 'none');
   assert.equal(buildValueRangeChartOptions(args).series[2].lineWidth, 0.62);
+  assert.equal(buildValueRangeChartOptions(args).series[11].color, '#83a6dd');
+  assert.equal(JSON.stringify(buildValueRangeChartOptions(args)).includes('rgba('), false, 'Google Charts only receives supported color formats');
 });
 
 test('missing marker values preserve the rolling Corporate curve instead of using global TP fallbacks', () => {

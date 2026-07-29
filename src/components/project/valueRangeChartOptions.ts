@@ -26,7 +26,9 @@ export function buildValueRangeChartOptions(args: {
       8: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       9: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       10: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
-      11: { type: 'line', color: 'rgba(37, 99, 235, 0.5)', lineWidth: 2, pointSize: 0, visibleInLegend: false },
+      // Google Charts rejects CSS rgba() colors. This is #2563eb blended at 50%
+      // over the chart's fixed #e0e9ce background, preserving the requested look.
+      11: { type: 'line', color: '#83a6dd', lineWidth: 2, pointSize: 0, visibleInLegend: false },
     },
     intervals: { style: 'area', color: '#2563eb', fillOpacity: 0.75, lineWidth: 0 },
   };
