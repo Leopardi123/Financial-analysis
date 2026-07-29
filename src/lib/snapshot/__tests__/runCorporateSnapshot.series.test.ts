@@ -831,12 +831,16 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   }
   const multipleRow = corporateRows.find((row) => typeof row.ebitdaTarget === 'number' && row.sharesPf !== null);
   assert.ok(multipleRow, 'Corporate timeline exposes an EV/EBITDA row');
-  assert.equal(multipleRow.ev5xTarget, multipleRow.ebitdaTarget * 5);
-  assert.equal(multipleRow.ev6xTarget, multipleRow.ebitdaTarget * 6);
-  assert.equal(multipleRow.ev7xTarget, multipleRow.ebitdaTarget * 7);
-  const netCash = (multipleRow.evEbitda6xPerShare as number) * (multipleRow.sharesPf as number) - multipleRow.ev6xTarget;
-  assert.equal(multipleRow.evEbitda5xPerShare, (multipleRow.ev5xTarget + netCash) / (multipleRow.sharesPf as number));
-  assert.equal(multipleRow.evEbitda7xPerShare, (multipleRow.ev7xTarget + netCash) / (multipleRow.sharesPf as number));
+  const { ebitdaTarget, sharesPf, ev5xTarget, ev6xTarget, ev7xTarget, evEbitda6xPerShare } = multipleRow;
+  if (ebitdaTarget === null || sharesPf === null || ev5xTarget === null || ev6xTarget === null || ev7xTarget === null || evEbitda6xPerShare === null) {
+    assert.fail('Complete EV/EBITDA inputs are required for a computable Corporate timeline row');
+  }
+  assert.equal(ev5xTarget, ebitdaTarget * 5);
+  assert.equal(ev6xTarget, ebitdaTarget * 6);
+  assert.equal(ev7xTarget, ebitdaTarget * 7);
+  const netCash = evEbitda6xPerShare * sharesPf - ev6xTarget;
+  assert.equal(multipleRow.evEbitda5xPerShare, (ev5xTarget + netCash) / sharesPf);
+  assert.equal(multipleRow.evEbitda7xPerShare, (ev7xTarget + netCash) / sharesPf);
 });
 
 test('reported debt changes NAV but cannot alter the corporate cash waterfall or High absolute', async () => {
