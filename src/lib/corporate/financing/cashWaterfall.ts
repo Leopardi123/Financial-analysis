@@ -8,11 +8,16 @@ const nonNegative = (value: number) => Math.max(0, Number.isFinite(value) ? valu
 export function computeCorporateCashWaterfall(input: { yearsByPeriod?: number[]; latestQuarterlyCash: number; useLatestQuarterlyCash: boolean; cashUsedPercent: number; minimumCashReserve: number | number[]; debtPercent: number; projects: CashWaterfallProject[] }): CashWaterfallResult {
   const cashPercent = Math.min(1, nonNegative(input.cashUsedPercent));
   const debtPercent = Math.min(1, nonNegative(input.debtPercent));
-  const initialCashAvailable = input.useLatestQuarterlyCash ? nonNegative(input.latestQuarterlyCash) * cashPercent : 0;
+  const initialReserve = nonNegative(Array.isArray(input.minimumCashReserve) ? input.minimumCashReserve[0] ?? 0 : input.minimumCashReserve);
+  const usableInitialCash = input.useLatestQuarterlyCash
+    ? Math.max(0, nonNegative(input.latestQuarterlyCash) - initialReserve) * cashPercent
+    : 0;
+  // Keep the reserve in the roll-forward, but outside the pool that can fund CAPEX.
+  const initialCashAvailable = input.useLatestQuarterlyCash ? initialReserve + usableInitialCash : 0;
   const periods = Math.max(input.yearsByPeriod?.length ?? 0, ...input.projects.map((p) => Math.max(p.capexNeedByPeriod.length, p.fcffByPeriod.length)), 0);
   const projects = [...input.projects].sort((a, b) => a.constructionStartPeriod - b.constructionStartPeriod || a.projectId.localeCompare(b.projectId));
   const rows: CashWaterfallRow[] = [];
-  let openingCash = initialCashAvailable, initialCashBalance = initialCashAvailable;
+  let openingCash = initialCashAvailable, initialCashBalance = usableInitialCash;
   for (let period = 0; period < periods; period += 1) {
     const needs = projects.map((project) => ({ project, need: nonNegative(project.capexNeedByPeriod[period] ?? 0) }));
     const projectCapexNeed = needs.reduce((sum, item) => sum + item.need, 0);
@@ -29,6 +34,10 @@ export function computeCorporateCashWaterfall(input: { yearsByPeriod?: number[];
     const remainingExternalFundingNeed = Math.max(0, projectCapexNeed - internalCashUsed);
     const debtAdded = Object.values(debtAddedByProject).reduce((a,b)=>a+b,0), equityRaised = Object.values(equityRaisedByProject).reduce((a,b)=>a+b,0);
     const closingCash = openingCash + operatingCashGenerated + debtAdded + equityRaised - projectCapexNeed;
+    const tolerance = 1e-8 * Math.max(1, remainingExternalFundingNeed);
+    if (Math.abs(debtAdded + equityRaised - remainingExternalFundingNeed) > tolerance) {
+      throw new Error(`Corporate financing identity failed in period ${period}`);
+    }
     rows.push({ period, year: input.yearsByPeriod?.[period] ?? null, openingCash, operatingCashGenerated, projectCapexNeed, internalCashUsed, initialCashUsed, internallyGeneratedCashUsed, remainingExternalFundingNeed, debtAdded, equityRaised, closingCash, internalCashUsedByProject, debtAddedByProject, equityRaisedByProject }); openingCash = closingCash;
   }
   const sum = (key: 'initialCashUsed'|'internallyGeneratedCashUsed'|'internalCashUsed'|'remainingExternalFundingNeed'|'debtAdded'|'equityRaised') => rows.reduce((total, row) => total + row[key], 0);

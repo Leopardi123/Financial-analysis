@@ -381,6 +381,16 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const sharesPfCalculated = input.financing.usePrecomputedFinancing ? sharesPostFinancingInput : (sharesPfComputed ?? sharesPostFinancingInput);
   const extraShares = finite(input.extraShares) ? Math.max(0, Math.floor(input.extraShares as number)) : 0;
   const sharesPf = sharesPfCalculated !== null ? sharesPfCalculated + extraShares : null;
+  const financingTolerance = 1e-8 * Math.max(1, remainingNeedTarget ?? 0);
+  if (cashUsedTarget < 0 || (remainingNeedTarget ?? 0) < 0 || debtAddedTarget < 0 || equityRaiseTarget < 0 || (newShares ?? 0) < 0) {
+    throw new Error('Project financing values must be non-negative');
+  }
+  if (remainingNeedTarget !== null && Math.abs(debtAddedTarget + equityRaiseTarget - remainingNeedTarget) > financingTolerance) {
+    throw new Error('Project financing identity failed');
+  }
+  if (sharesPf !== null && sharesCurrent !== null && sharesPf < sharesCurrent + extraShares) {
+    throw new Error('Project post-financing shares cannot be below current plus manual shares');
+  }
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
   // FCFF already deducts the complete construction CAPEX. Deducting cash used for

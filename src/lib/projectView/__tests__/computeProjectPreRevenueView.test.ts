@@ -637,3 +637,37 @@ assertApprox(scenarioA_allEquity.list2.NPV_Target.value, scenarioB_allDebt.list2
 assertApprox(scenarioA_allEquity.list2.CF_LOM_Target.value, scenarioB_allDebt.list2.CF_LOM_Target.value as number, 1e-9);
 assertApprox(scenarioA_allEquity.list2.DCF_Target.value, scenarioB_allDebt.list2.DCF_Target.value as number, 1e-9);
 assert.notEqual(scenarioA_allEquity.marketBox.sharesPf.value, scenarioB_allDebt.marketBox.sharesPf.value);
+
+// Canonical Project financing regression matrix (P1-P6).
+const canonicalFinancingBase = {
+  ...precomputedDebtFinancingBase,
+  capexUSD: [3_200_000_000, 0, 0],
+  fcfUSD: [-3_200_000_000, 1, 1],
+  sharesCurrent: 300_000_000,
+  sharesPostFinancingInput: 999_999_999,
+  priceCurrentTarget: 4,
+  cashCurrentTarget: 1_406_900_000,
+  debtCurrentTarget: 0,
+  extraShares: 10,
+  financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 1_406_900_000, useCashFirst: false, cashUsePercent: 1 },
+};
+const p1 = computeProjectViewMetrics(canonicalFinancingBase);
+assert.equal(p1.list5.cash_used_Target.value, 0);
+assert.equal(p1.list5.remaining_need_Target.value, 3_200_000_000);
+assert.equal(p1.list5.Equity_Raise_Target.value, 3_200_000_000);
+assert.equal(p1.list5.Debt_Added_Target.value, 0);
+assert.equal(p1.list5.New_Shares.value, 800_000_000);
+assert.equal(p1.marketBox.sharesPf.value, 1_100_000_010);
+const p2 = computeProjectViewMetrics({...canonicalFinancingBase, financing:{...canonicalFinancingBase.financing,useCashFirst:true}});
+assert.equal(p2.list5.cash_used_Target.value,1_406_900_000);
+assert.equal(p2.list5.remaining_need_Target.value,1_793_100_000);
+assert.equal(p2.list5.Equity_Raise_Target.value,1_793_100_000);
+assert.equal(p2.list5.New_Shares.value,448_275_000);
+const p3a=computeProjectViewMetrics({...canonicalFinancingBase,financing:{...canonicalFinancingBase.financing,cashUsePercent:0}});
+const p3b=computeProjectViewMetrics({...canonicalFinancingBase,financing:{...canonicalFinancingBase.financing,cashUsePercent:1}});
+for(const key of ['cash_used_Target','remaining_need_Target','Debt_Added_Target','Equity_Raise_Target','New_Shares']) assert.equal(p3a.list5[key].value,p3b.list5[key].value);
+assert.equal(p3a.marketBox.sharesPf.value,p3b.marketBox.sharesPf.value);
+let prior=p1;
+for(const cashUsePercent of [0,.25,.5,.75,1]) { const next=computeProjectViewMetrics({...canonicalFinancingBase,financing:{...canonicalFinancingBase.financing,useCashFirst:true,cashUsePercent}});assert.ok((next.list5.cash_used_Target.value??0)>=(prior.list5.cash_used_Target.value??0));assert.ok((next.list5.remaining_need_Target.value??0)<=(prior.list5.remaining_need_Target.value??0));assert.ok((next.list5.New_Shares.value??0)<=(prior.list5.New_Shares.value??0));assert.ok((next.marketBox.sharesPf.value??0)<=(prior.marketBox.sharesPf.value??0));prior=next;}
+assert.equal(p2.marketBox.sharesPf.value,(canonicalFinancingBase.sharesCurrent??0)+(p2.list5.New_Shares.value??0)+(canonicalFinancingBase.extraShares??0));
+assert.equal((p2.list5.Debt_Added_Target.value??0)+(p2.list5.Equity_Raise_Target.value??0),p2.list5.remaining_need_Target.value);

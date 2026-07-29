@@ -3016,6 +3016,8 @@ Capital Available: ${availableLabel}`,
     const valuationStartYear = Array.isArray(valuationYears) && typeof valuationYears[0] === "number" ? valuationYears[0] : null;
     const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
       .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+    const latestQuarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")]
+      .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
 
     return computeProjectViewMetrics({
       meta: { projectId: selectedProjectId },
@@ -3028,7 +3030,7 @@ Capital Available: ${availableLabel}`,
       extraShares: parseExtraShares(projectExtraSharesInput),
       priceCurrentTarget: inputs.price,
       cashCurrentTarget: latestQuarterlyCash,
-      debtCurrentTarget: inputs.debt0,
+      debtCurrentTarget: latestQuarterlyDebt,
       enterpriseAdjustmentsTarget: asNum(marketValue.EnterpriseAdjustments_TargetCurrency),
       fcfUSD: asSeries(inputs.series.fcfUSD),
       capexUSD: asSeries(inputs.series.capexUSD),
@@ -3050,7 +3052,6 @@ Capital Available: ${availableLabel}`,
         latestQuarterlyCashTarget: latestQuarterlyCash,
         useCashFirst: projectUseQuarterlyCash,
         cashUsePercent: projectCashUsedPct / 100,
-        usePrecomputedFinancing: true,
       },
     });
   }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
@@ -5768,8 +5769,12 @@ Capital Available: ${availableLabel}`,
                     </div>
                     {(() => {
                       const financing = (corporateSnapshotData?.financing ?? {}) as Record<string, unknown>;
+                      const manualExtraShares = parseExtraShares(corporateExtraSharesInput);
+                      const sharesPf = typeof financing.shares_post_financing === "number"
+                        ? financing.shares_post_financing + manualExtraShares
+                        : null;
                       const fields = [
-                        ["Latest Quarterly Cash", financing.latest_quarterly_cash_TargetCurrency], ["Cash Used %", typeof financing.cash_used_percent === "number" ? financing.cash_used_percent * 100 : null], ["Initial Cash Used", financing.cash_used_for_build_TargetCurrency], ["Internally Generated Cash Used", financing.internally_generated_cash_used_TargetCurrency], ["Total Internal Cash Used", financing.total_internal_cash_used_TargetCurrency], ["Remaining Funding Need", financing.remaining_funding_need_TargetCurrency], ["Debt Added", financing.new_debt_TargetCurrency], ["Equity Raise", financing.equity_raised_TargetCurrency], ["New Shares", financing.new_shares], ["Shares PF", financing.shares_post_financing], ["Closing Corporate Cash", financing.closing_corporate_cash_TargetCurrency],
+                        ["Latest Quarterly Cash", financing.latest_quarterly_cash_TargetCurrency], ["Cash Used %", typeof financing.cash_used_percent === "number" ? financing.cash_used_percent * 100 : null], ["Initial Cash Used", financing.cash_used_for_build_TargetCurrency], ["Internally Generated Cash Used", financing.internally_generated_cash_used_TargetCurrency], ["Total Internal Cash Used", financing.total_internal_cash_used_TargetCurrency], ["Remaining Funding Need", financing.remaining_funding_need_TargetCurrency], ["Debt Added", financing.new_debt_TargetCurrency], ["Equity Raise", financing.equity_raised_TargetCurrency], ["New Shares", financing.new_shares], ["Shares PF", sharesPf], ["Closing Corporate Cash", financing.closing_corporate_cash_TargetCurrency],
                       ];
                       return <div className="compact-metrics-grid">{fields.map(([label, raw]) => <div className="compact-metric-row" key={String(label)}><span className="compact-metric-label">{String(label)}</span><span className="compact-metric-dots"/><span className="compact-metric-value">{typeof raw === "number" ? raw.toLocaleString() : "n/a"}</span></div>)}</div>;
                     })()}
