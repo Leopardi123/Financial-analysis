@@ -1,4 +1,4 @@
-import { buildValueRangeChartRow, buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from './valueRangeCurve.ts';
+import { buildValueRangeChartRow, findFirstHighPeak, formatPeakTooltip } from './valueRangeCurve.ts';
 
 export type CorporateChartInput = {
   valuationYear?: number;
@@ -79,7 +79,7 @@ export function clipCorporateChartInput(input: CorporateChartInput): CorporateCh
 export function buildCorporateChartRows(
   input: CorporateChartInput,
   today: { low: number | null; high: number | null; price: number | null; tpLow?: number | null; tpHigh?: number | null },
-  discountRate = 0.1,
+  _discountRate = 0.1,
   currencyCode?: string,
 ) {
   const productionStartYears = new Set<number>();
@@ -90,41 +90,11 @@ export function buildCorporateChartRows(
   }
 
   const valuationYear = finite(input.valuationYear) ? input.valuationYear : input.rows[0]?.year;
-  const corporateAlreadyProducing = input.projectMarkers.some(
-    (marker) => finite(marker.productionStartYear) && finite(valuationYear) && marker.productionStartYear <= valuationYear,
-  );
-  const firstFutureStartIndex = input.rows.findIndex((row) => (
-    finite(valuationYear)
-    && row.year > valuationYear
-    && input.projectMarkers.some((marker) => marker.productionStartYear === row.year)
-  ));
-  const shouldBackcastFirstFutureHigh = !corporateAlreadyProducing && firstFutureStartIndex > 0;
-  const tpOffset = shouldBackcastFirstFutureHigh ? firstFutureStartIndex : 0;
-  const curve = buildValueRangeCurve({
-    totalLen: input.rows.length,
-    tpOffset,
-    discountRate,
-    lowTp: input.rows[tpOffset]?.navPerShare ?? null,
-    highTp: input.rows[tpOffset]?.dcfExCapexPerShare ?? null,
-    navSeriesRaw: input.rows.map((row) => row.navPerShare),
-    dcfExCapexSeriesRaw: input.rows.map((row) => row.dcfExCapexPerShare ?? null),
-  });
-
-  const rollingValues = input.rows.map((row, index) => ({ year: row.year, low: curve.low[index], high: curve.high[index] }));
+  const rollingValues = input.rows.map((row) => ({ year: row.year, low: row.navPerShare, high: row.dcfExCapexPerShare ?? null }));
   const peak = findFirstHighPeak(rollingValues);
-  const values = rollingValues.map((value, index) => {
-    const isCurrent = finite(valuationYear) ? value.year === valuationYear : index === 0;
-    if (!isCurrent) return value;
-    return {
-      ...value,
-      low: finite(today.low) ? today.low : value.low,
-      high: finite(today.high) ? today.high : value.high,
-    };
-  });
-  return values.map(({ year, low, high }, index) => {
-    const marker = input.projectMarkers.find((candidate) => candidate.productionStartYear === year);
-    const markerLow = finite(marker?.navPerShare) ? marker.navPerShare : null;
-    const markerHigh = finite(marker?.dcfPerShare) ? marker.dcfPerShare : null;
+  return rollingValues.map(({ year, low, high }, index) => {
+    const markerLow = low;
+    const markerHigh = high;
     const isCurrent = typeof input.valuationYear === 'number' ? year === input.valuationYear : index === 0;
     const isFutureProductionStart = productionStartYears.has(year) && finite(valuationYear) && year > valuationYear;
     return buildValueRangeChartRow({
@@ -139,8 +109,8 @@ export function buildCorporateChartRows(
       year, low, high, currentPrice: today.price,
       annotateCurrent: isCurrent,
       annotateProductionStart: isFutureProductionStart, format: label,
-      currentLowValue: today.low,
-      currentHighValue: today.high,
+      currentLowValue: low,
+      currentHighValue: high,
       productionStartLowValue: markerLow,
       productionStartHighValue: markerHigh,
       highlightPeak: index === peak?.index && !isCurrent && !isFutureProductionStart,

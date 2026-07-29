@@ -1,4 +1,5 @@
 import { computeLista3 } from '../metrics/lista3.ts';
+import { buildValuationTimeline, selectTimelineNodes, type ValuationTimeline } from '../valuation/canonicalValuationTimeline.ts';
 
 export type NullableNumber = number | null;
 
@@ -46,6 +47,7 @@ export type ProjectViewInputs = {
   payableAuEqOz: Series;
   sustainingCostUSD: Series;
   productionStartPeriod: number | null;
+  calendarYears?: number[];
   /** Internal period zero expressed relative to the valuation year (for example, 2030 - 2026 = 4). */
   valuationPeriodOffset?: number;
   financing: FinancingInput;
@@ -54,6 +56,8 @@ export type ProjectViewInputs = {
 export type MetricValue = { value: NullableNumber; reason: string | null };
 
 export type ProjectViewMetrics = {
+  /** The sole source for valuation table, chart, marker, debug and export consumers. */
+  valuationTimeline: ValuationTimeline;
   marketBox: {
     marketCapCurrent: MetricValue;
     evCurrent: MetricValue;
@@ -403,47 +407,38 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     ? marketCapCurrent + debtT0 - cashT0 + enterpriseAdjustments
     : null;
 
-  const npvTodayUSD = r !== null ? (() => {
-    let sum = 0;
-    for (let i = 0; i < input.fcfUSD.length; i += 1) {
-      const valuationPeriod = i + valuationPeriodOffset;
-      if (valuationPeriod < 0) continue;
-      const v = input.fcfUSD[i];
-      if (!finite(v)) return null;
-      sum += v * discountToToday(valuationPeriod, r);
-    }
-    return sum;
-  })() : null;
-
-  const npvTarget = npvTodayUSD !== null && fx !== null ? npvTodayUSD * fx : null;
-  const navTarget = npvTarget !== null && cashForNav !== null && debtT0 !== null ? npvTarget + (cashForNav - debtT0) : null;
+  const valuationTimeline = buildValuationTimeline({
+    scope: input.meta?.projectId === 'corporate' ? 'corporate' : 'project',
+    fcfUSD: input.fcfUSD,
+    capexUSD: input.capexUSD,
+    yearsByPeriod: input.calendarYears?.length === input.fcfUSD.length
+      ? input.calendarYears
+      : input.fcfUSD.map((_, period) => period + valuationPeriodOffset),
+    discountRate: r,
+    fxUSDToTarget: fx,
+    valuationPeriodOffset,
+    productionStartPeriod: tp,
+    cashTarget: cashForNav,
+    debtTarget: debtT0,
+    sharesCurrent,
+    sharesPf,
+    newSharesCumulative: newShares,
+    manualExtraShares: extraShares,
+  });
+  const timelineNodes = selectTimelineNodes(valuationTimeline);
+  const npvTodayUSD = timelineNodes.today.npvAtPeriodUSD;
+  const npvTarget = timelineNodes.today.npvAtPeriodTarget;
+  const navTarget = timelineNodes.today.navAtPeriodTarget;
   const cfLomUSD = input.fcfUSD.length > 0 ? sumRange(input.fcfUSD, 0, input.fcfUSD.length - 1) : null;
   const cfLomTarget = cfLomUSD !== null && fx !== null ? cfLomUSD * fx : null;
 
-  const dcfProdStartExCapexUSD = tp !== null && r !== null ? (() => {
-    let sum = 0;
-    for (let i = tp; i < input.fcfUSD.length; i += 1) {
-      const v = input.fcfUSD[i];
-      if (!finite(v)) return null;
-      sum += v / ((1 + r) ** (i - tp));
-    }
-    return sum;
-  })() : null;
-
-  const dcfTarget = dcfProdStartExCapexUSD !== null && fx !== null ? dcfProdStartExCapexUSD * fx : null;
-
-  const npvProdStartUSD = dcfProdStartExCapexUSD !== null && initialCapexUSD !== null
-    ? dcfProdStartExCapexUSD - Math.abs(initialCapexUSD)
-    : null;
-  const npvProdStartTarget = npvProdStartUSD !== null && fx !== null ? npvProdStartUSD * fx : null;
-  const navProdStartTarget = npvProdStartTarget !== null && cashForNav !== null && debtT0 !== null
-    ? npvProdStartTarget + (cashForNav - debtT0)
-    : null;
-
-  const dcfProdStartPresentUSD = dcfProdStartExCapexUSD !== null && tp !== null && r !== null
-    ? dcfProdStartExCapexUSD / ((1 + r) ** (tp + valuationPeriodOffset))
-    : null;
-  const dcfTargetDiscounted = dcfProdStartPresentUSD !== null && fx !== null ? dcfProdStartPresentUSD * fx : null;
+  const productionState = timelineNodes.productionStart;
+  const dcfProdStartExCapexUSD = productionState?.dcfAtPeriodUSD ?? null;
+  const dcfTarget = productionState?.dcfAtPeriodTarget ?? null;
+  const npvProdStartTarget = productionState?.npvAtPeriodTarget ?? null;
+  const navProdStartTarget = productionState?.navAtPeriodTarget ?? null;
+  const dcfProdStartPresentUSD = productionState?.dcfPresentValueTodayUSD ?? null;
+  const dcfTargetDiscounted = productionState?.dcfPresentValueTodayTarget ?? null;
 
   const npv10Trace = {
     input: {
@@ -848,6 +843,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     : (kapitalavkastningLom === null ? (kapitalReason ?? 'Missing Kapitalavkastning_LOM') : 'Missing production-year count');
 
   return {
+    valuationTimeline,
     marketBox: {
       marketCapCurrent: mv(marketCapCurrent, sharesCurrent === null ? 'Missing shares_current' : 'Missing price_current_TargetCurrency'),
       evCurrent: mv(evTarget, marketCapCurrent === null ? 'Missing MarketCap_current' : (debtT0 === null || cashT0 === null ? 'Missing cash_t0 or debt_t0' : null)),

@@ -22,6 +22,7 @@ import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical, convertQuantityToCanonical } from '../units/conversion.ts';
 import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
 import { applyStressModifiers } from './applyStressModifiers.ts';
+import { buildValuationTimeline, selectTimelineChartSeries } from '../valuation/canonicalValuationTimeline.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -3350,86 +3351,38 @@ export async function runCorporateSnapshotPipeline(args: {
           && ctx.spotRangeRevenueByScenario !== undefined,
       );
 
-    const chartFlows = (() => {
-        if (valuationProductionStartPeriod < 0 || valuationProductionStartPeriod > valuationMasterN) {
-          return {
-            dcfProdstartPresentPerShareSeries: [] as Array<number | null>,
-            navProdstartPerShareSeries: [] as Array<number | null>,
-          };
-        }
-        const rangeEnd = Math.min(valuationMasterN, valuationProductionStartPeriod + 5);
-        const dcfProdstartPresentPerShareSeries: Array<number | null> = [];
-        const navProdstartPerShareSeries: Array<number | null> = [];
-        const dcfProdstartExCapexPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
-        const navByPeriodPerShareSeries: Array<number | null> = Array.from({ length: rangeEnd + 1 }, () => null);
-        for (let period = 0; period <= rangeEnd; period += 1) {
-          const periodMetrics = computeLista2CfDcfMetrics({
-            fcfUSD_total: valuationFcffUSD,
-            capexUSD_total: valuationCapexUSD,
-            masterN: valuationMasterN,
-            productionStartPeriod: period,
-            discountRate: input.discountRate,
-            shares_post_financing: shares_post_financing_fd_effective,
-            fx_USD_to_TargetCurrency: fxRate,
-            npvToday_USD: valuationNpvTodayUSD,
-            netCash_t0_post_TargetCurrency: netCashForNavTarget,
-          }).metrics;
-          dcfProdstartExCapexPerShareSeries[period] = periodMetrics.DCF_prodStart_exCapex_perShare_TargetCurrency;
-          navByPeriodPerShareSeries[period] = periodMetrics.NAV_prodStart_perShare_TargetCurrency;
-        }
-        for (let tp = valuationProductionStartPeriod; tp <= rangeEnd; tp += 1) {
-          const metricsAtTp = computeLista2CfDcfMetrics({
-            fcfUSD_total: valuationFcffUSD,
-            capexUSD_total: valuationCapexUSD,
-            masterN: valuationMasterN,
-            productionStartPeriod: tp,
-            discountRate: input.discountRate,
-            shares_post_financing: shares_post_financing_fd_effective,
-            fx_USD_to_TargetCurrency: fxRate,
-            npvToday_USD: valuationNpvTodayUSD,
-            netCash_t0_post_TargetCurrency: netCashForNavTarget,
-          });
-          dcfProdstartPresentPerShareSeries.push(metricsAtTp.metrics.DCF_prodStart_present_perShare_TargetCurrency);
-          navProdstartPerShareSeries.push(metricsAtTp.metrics.NAV_prodStart_perShare_TargetCurrency);
-        }
-        return {
-          dcfProdstartPresentPerShareSeries,
-          navProdstartPerShareSeries,
-          dcfProdstartExCapexPerShareSeries,
-          navByPeriodPerShareSeries,
-          yearsByPeriod: valuationYears.slice(0, rangeEnd + 1),
-          productionStartPeriod: valuationProductionStartPeriod,
-          discountRate: input.discountRate,
-        };
-    })();
+    const corporateCanonicalTimeline = buildValuationTimeline({
+      scope: 'corporate', fcfUSD: valuationFcffUSD, capexUSD: valuationCapexUSD,
+      yearsByPeriod: valuationYears, discountRate: input.discountRate, fxUSDToTarget: fxRate,
+      productionStartPeriod: valuationProductionStartPeriod,
+      cashTarget: cashForNavTarget, debtTarget: debtPostTarget,
+      sharesCurrent: marketInput.shares_current, sharesPf: shares_post_financing_fd_effective,
+      projectContributionsByPeriod: valuationYears.map((year) => projectSeriesContexts.map((context) => {
+        const localPeriod = context.yearsByPeriod.indexOf(year);
+        return { projectId: context.projectId, fcffUSD: localPeriod >= 0 ? context.economics.fcffUSD[localPeriod] ?? null : 0 };
+      })),
+    });
+    (snapshot as Record<string, unknown>).canonicalValuationTimeline = corporateCanonicalTimeline;
+    const canonicalChartRows = selectTimelineChartSeries(corporateCanonicalTimeline);
+    const chartFlows = {
+      dcfProdstartPresentPerShareSeries: corporateCanonicalTimeline.periods.map((row) => row.dcfPresentValueTodayPerShareTarget),
+      navProdstartPerShareSeries: corporateCanonicalTimeline.periods.map((row) => row.navPerShareTarget),
+      dcfProdstartExCapexPerShareSeries: canonicalChartRows.map((row) => row.dcfPerShare),
+      navByPeriodPerShareSeries: canonicalChartRows.map((row) => row.navPerShare),
+      yearsByPeriod: canonicalChartRows.map((row) => row.year),
+      productionStartPeriod: corporateCanonicalTimeline.productionStartPeriod,
+      discountRate: input.discountRate,
+    };
     const corporateValuationTimeSeries = {
       valuationYear: input.valuationYear,
       internalCorporateYears: aggregationEffective.corporateYearsByPeriod,
-      rows: valuationYears.map((year, period) => {
-        const metricsAtPeriod = computeLista2CfDcfMetrics({
-          fcfUSD_total: valuationFcffUSD,
-          capexUSD_total: valuationCapexUSD,
-          masterN: valuationMasterN,
-          productionStartPeriod: period,
-          discountRate: input.discountRate,
-          shares_post_financing: shares_post_financing_fd_effective,
-          fx_USD_to_TargetCurrency: fxRate,
-          npvToday_USD: valuationNpvTodayUSD,
-          netCash_t0_post_TargetCurrency: netCashForNavTarget,
-        }).metrics;
-        return {
-          period, year,
-          dcfAbsolute: metricsAtPeriod.DCF_prodStart_present_TargetCurrency,
-          navAbsolute: metricsAtPeriod.NAV_prodStart_TargetCurrency,
-          npvAbsolute: metricsAtPeriod.NPV_prodStart_TargetCurrency,
-          dcfPerShare: metricsAtPeriod.DCF_prodStart_present_perShare_TargetCurrency,
-          dcfExCapexAbsolute: metricsAtPeriod.DCF_prodStart_exCapex_TargetCurrency,
-          dcfExCapexPerShare: metricsAtPeriod.DCF_prodStart_exCapex_perShare_TargetCurrency,
-          navPerShare: metricsAtPeriod.NAV_prodStart_perShare_TargetCurrency,
-          npvPerShare: metricsAtPeriod.NPV_prodStart_perShare_TargetCurrency,
-          sharesPf: shares_post_financing_fd_effective,
-        };
-      }),
+      rows: corporateCanonicalTimeline.periods.map((row) => ({
+        period: row.periodIndex, year: row.calendarYear,
+        dcfAbsolute: row.dcfPresentValueTodayTarget, navAbsolute: row.navAtPeriodTarget,
+        npvAbsolute: row.npvAtPeriodTarget, dcfPerShare: row.dcfPresentValueTodayPerShareTarget,
+        dcfExCapexAbsolute: row.dcfAtPeriodTarget, dcfExCapexPerShare: row.dcfPerShareTarget,
+        navPerShare: row.navPerShareTarget, npvPerShare: row.npvPerShareTarget, sharesPf: row.sharesPf,
+      })),
       projectMarkers: projectsForBuildFunding.map((project) => {
         const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
         const productionYear = project.yearsByPeriod[project.productionStartPeriod] ?? null;
