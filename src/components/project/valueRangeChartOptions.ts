@@ -30,6 +30,6 @@ export function buildValueRangeChartOptions(args: {
       // over the chart's fixed #e0e9ce background, preserving the requested look.
       11: { type: 'line', color: '#83a6dd', lineWidth: 2, pointSize: 0, visibleInLegend: false },
     },
-    intervals: { style: 'area', color: '#2563eb', fillOpacity: 0.75, lineWidth: 0 },
+    intervals: { style: 'area', color: '#2563eb', fillOpacity: 0.25, lineWidth: 0 },
   };
 }

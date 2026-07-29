@@ -142,6 +142,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const formatMoney = (value: number | null | undefined) => isFiniteNumber(value) ? `${formatPerShareValue(value)}${currencyCode ? ` ${currencyCode}` : ''}` : 'n/a';
     const chartRows = isProjectMode ? rows : rows.map((row, index) => {
       const multiple = multipleByYear.get(periods[index].calendarYear);
+      const showUncertaintyBand = isFiniteNumber(multiple?.ebitdaTarget) && multiple.ebitdaTarget > 0;
       const tooltip = multiple && isFiniteNumber(multiple.evEbitda6xPerShare) ? [
         `År: ${multiple.year}`,
         `EBITDA: ${formatMoney(multiple.ebitdaTarget)}`,
@@ -152,7 +153,13 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         `Värde/aktie (6×): ${formatMoney(multiple.evEbitda6xPerShare)}`,
         `Värde/aktie (7×): ${formatMoney(multiple.evEbitda7xPerShare)}`,
       ].join('\n') : null;
-      return [...row, multiple?.evEbitda6xPerShare ?? null, tooltip, multiple?.evEbitda5xPerShare ?? null, multiple?.evEbitda7xPerShare ?? null];
+      return [
+        ...row,
+        multiple?.evEbitda6xPerShare ?? null,
+        tooltip,
+        showUncertaintyBand ? multiple?.evEbitda5xPerShare ?? null : null,
+        showUncertaintyBand ? multiple?.evEbitda7xPerShare ?? null : null,
+      ];
     });
     const data = [[...valueRangeChartHeader, ...(isProjectMode ? [] : multipleHeader)], ...chartRows] as (string | number | null | { role: string; type?: string })[][];
     if (isProjectMode && !isProjectChartDataTypeSafe(data)) return null;
