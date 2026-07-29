@@ -37,6 +37,8 @@ export function buildValueRangeChartRow(input: {
   format: (value: number) => string;
   currentPriceAnnotation?: string | null;
   highlightPeak?: boolean;
+  highlightPeakLow?: boolean;
+  highlightPeakHigh?: boolean;
   peakTooltip?: string | null;
   productionStartLowAnnotation?: string | null;
   productionStartHighAnnotation?: string | null;
@@ -57,8 +59,8 @@ export function buildValueRangeChartRow(input: {
     input.annotateCurrent ? input.currentHighValue ?? orderedHigh : null, input.annotateCurrent ? annotation(input.currentHighValue ?? orderedHigh) : null,
     input.annotateProductionStart ? input.productionStartLowValue ?? input.low : null, input.annotateProductionStart ? input.productionStartLowAnnotation === undefined ? annotation(input.productionStartLowValue ?? input.low) : input.productionStartLowAnnotation : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null,
     input.annotateProductionStart ? input.productionStartHighValue ?? input.high : null, input.annotateProductionStart ? input.productionStartHighAnnotation === undefined ? annotation(input.productionStartHighValue ?? input.high) : input.productionStartHighAnnotation : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null,
-    input.highlightPeak ? orderedLow : null, input.highlightPeak ? annotation(orderedLow) : null, input.highlightPeak ? input.peakTooltip ?? null : null,
-    input.highlightPeak ? orderedHigh : null, input.highlightPeak ? annotation(orderedHigh) : null, input.highlightPeak ? input.peakTooltip ?? null : null,
+    (input.highlightPeakLow ?? input.highlightPeak) ? orderedLow : null, (input.highlightPeakLow ?? input.highlightPeak) ? annotation(orderedLow) : null, (input.highlightPeakLow ?? input.highlightPeak) ? input.peakTooltip ?? null : null,
+    (input.highlightPeakHigh ?? input.highlightPeak) ? orderedHigh : null, (input.highlightPeakHigh ?? input.highlightPeak) ? annotation(orderedHigh) : null, (input.highlightPeakHigh ?? input.highlightPeak) ? input.peakTooltip ?? null : null,
   ];
 }
 

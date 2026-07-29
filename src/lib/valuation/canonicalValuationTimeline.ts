@@ -62,6 +62,23 @@ export type TimelineNodes = {
   productionStart: ValuationPeriodState | null;
 };
 
+export type ValuationChartPoint = {
+  periodIndex: number;
+  calendarYear: number;
+  low: NullableNumber;
+  high: NullableNumber;
+  isToday: boolean;
+  isStart: boolean;
+};
+
+export type ValuationChartSelection = {
+  points: ValuationChartPoint[];
+  today: ValuationChartPoint;
+  starts: ValuationChartPoint[];
+  peakLow: ValuationChartPoint | null;
+  peakHigh: ValuationChartPoint | null;
+};
+
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const divide = (value: NullableNumber, denominator: NullableNumber): NullableNumber =>
   finite(value) && finite(denominator) && denominator > 0 ? value / denominator : null;
@@ -169,6 +186,43 @@ export function selectTimelineChartSeries(timeline: ValuationTimeline) {
     high: period.dcfPerShareTarget, low: period.navPerShareTarget,
     dcfPerShare: period.dcfPerShareTarget, navPerShare: period.navPerShareTarget,
   }));
+}
+
+/**
+ * Canonical chart semantics. Today High is the start DCF brought back to today;
+ * subsequent High values are each period's rolling DCF. Low is NAV throughout.
+ * Peak selection preserves series identity and never orders Low/High with min/max.
+ */
+export function selectValuationChart(
+  timeline: ValuationTimeline,
+  startPeriods: number[] = timeline.productionStartPeriod === null ? [] : [timeline.productionStartPeriod],
+): ValuationChartSelection {
+  const nodes = selectTimelineNodes(timeline);
+  const validStartPeriods = new Set(startPeriods.filter((period) => Number.isInteger(period) && timeline.periods[period]));
+  const points = timeline.periods.map((period): ValuationChartPoint => ({
+    periodIndex: period.periodIndex,
+    calendarYear: period.calendarYear,
+    low: period.navPerShareTarget,
+    high: period.periodIndex === timeline.todayPeriod
+      ? nodes.productionStart?.dcfPresentValueTodayPerShareTarget ?? null
+      : period.dcfPerShareTarget,
+    isToday: period.periodIndex === timeline.todayPeriod,
+    isStart: validStartPeriods.has(period.periodIndex),
+  }));
+  const maximum = (field: 'low' | 'high'): ValuationChartPoint | null => points.reduce<ValuationChartPoint | null>((peak, point) => {
+    const value = point[field];
+    if (!finite(value)) return peak;
+    return peak === null || value > (peak[field] as number) ? point : peak;
+  }, null);
+  const today = points[timeline.todayPeriod];
+  if (!today) throw new Error('Canonical chart today period is outside the timeline');
+  return {
+    points,
+    today,
+    starts: points.filter((point) => point.isStart),
+    peakLow: maximum('low'),
+    peakHigh: maximum('high'),
+  };
 }
 
 export function selectTimelineMarker(timeline: ValuationTimeline, period: number): ValuationPeriodState | null {

@@ -3437,19 +3437,19 @@ Capital Available: ${availableLabel}`,
         tIndexUsed: 0,
         yearLabelUsed: todayLabel.label,
         yearLabelSource: todayLabel.source,
-        lowValueUsed: projectViewMetrics.list2.NPV_perShare?.value ?? null,
+        lowValueUsed: projectViewMetrics.valuationTimeline.periods[projectViewMetrics.valuationTimeline.todayPeriod]?.navPerShareTarget ?? null,
         highValueUsed: projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null,
-        lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
+        lowSource: { metricKey: "valuationTimeline.today.navPerShareTarget", description: "canonical chart selector" },
         highSource: { metricKey: "DCF_Target_discounted_perShare", description: "ValueRangeSnapshotCard npvHigh" },
         perShareBasis: sharedPerShareBasis,
         nullReasons: {
-          ...(projectViewMetrics.list2.NPV_perShare?.value === null ? { low: projectViewMetrics.list2.NPV_perShare?.reason ?? "Metric is null." } : {}),
+          ...(projectViewMetrics.list2.NAV_perShare?.value === null ? { low: projectViewMetrics.list2.NAV_perShare?.reason ?? "Metric is null." } : {}),
           ...(projectViewMetrics.list2.DCF_Target_discounted_perShare?.value === null ? { high: projectViewMetrics.list2.DCF_Target_discounted_perShare?.reason ?? "Metric is null." } : {}),
           ...(todayLabel.reason ? { yearLabel: todayLabel.reason } : {}),
         },
         sanity: {
-          lowLEHigh: (typeof projectViewMetrics.list2.NPV_perShare?.value === "number" && typeof projectViewMetrics.list2.DCF_Target_discounted_perShare?.value === "number")
-            ? projectViewMetrics.list2.NPV_perShare.value <= projectViewMetrics.list2.DCF_Target_discounted_perShare.value
+          lowLEHigh: (typeof projectViewMetrics.list2.NAV_perShare?.value === "number" && typeof projectViewMetrics.list2.DCF_Target_discounted_perShare?.value === "number")
+            ? projectViewMetrics.list2.NAV_perShare.value <= projectViewMetrics.list2.DCF_Target_discounted_perShare.value
             : null,
           notes: "If false, low/high may be swapped in source metrics for today point.",
         },
@@ -3681,7 +3681,7 @@ Capital Available: ${availableLabel}`,
       usesShares: (sharesPf !== null ? "shares_post_financing" : "shares_current") as "shares_post_financing" | "shares_current",
       sharesValue: sharesPf ?? sharesCurrent ?? 0,
     };
-    const todayLow = corporateViewMetrics.list2.NPV_perShare?.value ?? null;
+    const todayLow = corporateViewMetrics.valuationTimeline.periods[corporateViewMetrics.valuationTimeline.todayPeriod]?.navPerShareTarget ?? null;
     const todayHigh = (typeof corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
       ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
       : null);
@@ -3694,11 +3694,11 @@ Capital Available: ${availableLabel}`,
         yearLabelSource: "series.yearsByPeriod[0]",
         lowValueUsed: todayLow,
         highValueUsed: todayHigh,
-        lowSource: { metricKey: "NPV_perShare", description: "ValueRangeSnapshotCard npvLow" },
+        lowSource: { metricKey: "valuationTimeline.today.navPerShareTarget", description: "canonical chart selector" },
         highSource: { metricKey: "DCF_prodStart_present_perShare_TargetCurrency", description: "ValueRangeSnapshotCard npvHigh" },
         perShareBasis: shareBasis,
         nullReasons: {
-          ...(todayLow === null ? { low: corporateViewMetrics.list2.NPV_perShare?.reason ?? "Metric is null." } : {}),
+          ...(todayLow === null ? { low: corporateViewMetrics.list2.NAV_perShare?.reason ?? "Metric is null." } : {}),
           ...(todayHigh === null ? { high: "Both corporate snapshot and list2 discounted DCF per share are null." } : {}),
         },
         sanity: {
@@ -5710,6 +5710,10 @@ Capital Available: ${availableLabel}`,
                           npvHigh={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
+                          canonicalTimeline={corporateViewMetrics.valuationTimeline}
+                          canonicalStartPeriods={corporateChartTimeSeries?.projectMarkers
+                            .map((marker) => corporateChartTimeSeries.rows.find((row) => row.year === marker.productionStartYear)?.period)
+                            .filter((period): period is number => Number.isInteger(period)) ?? []}
                           corporateTimeSeries={corporateChartTimeSeries}
                           discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
                           currencyCode={lockedTargetCurrency}
@@ -6073,7 +6077,7 @@ Capital Available: ${availableLabel}`,
                         <ValueRangeSnapshotCard
                           mode="project"
                           priceToday={typeof profile?.price === "number" && Number.isFinite(profile.price) ? profile.price : null}
-                          npvLow={projectViewMetrics.list2.NPV_perShare?.value ?? null}
+                          npvLow={projectViewMetrics.list2.NAV_perShare?.value ?? null}
                           npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
