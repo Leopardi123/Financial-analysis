@@ -22,6 +22,7 @@ import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStar
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import { selectValuationChart, withManualExtraShares } from "../lib/valuation/canonicalValuationTimeline.ts";
+import { withCanonicalViewMetrics } from "../lib/projectView/canonicalViewMetrics.ts";
 import { verifyProjectCalendarAxis } from "../lib/valuation/projectCalendarAxis.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import { getManualMetalPriceStore, saveManualMetalPrice } from "../lib/engine/pricing/manualMetalPriceStore.ts";
@@ -3141,7 +3142,9 @@ Capital Available: ${availableLabel}`,
     const canonicalTimeline = snapshotTimeline
       ? withManualExtraShares(snapshotTimeline, parseExtraShares(corporateExtraSharesInput))
       : null;
-    const computedWithCanonical = canonicalTimeline ? { ...computed, valuationTimeline: canonicalTimeline } : computed;
+    const computedWithCanonical = canonicalTimeline
+      ? withCanonicalViewMetrics(computed, canonicalTimeline)
+      : computed;
     const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
       AISC_LOM?: number | null;
       BreakEven_AuEq?: number | null;

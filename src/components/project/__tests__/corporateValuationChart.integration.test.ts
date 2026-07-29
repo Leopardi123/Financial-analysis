@@ -5,6 +5,7 @@ import { getProjectInputs } from '../../../lib/projectView/projectInputs.ts';
 import { computeProjectViewMetrics } from '../../../lib/projectView/computeProjectPreRevenueView.ts';
 import { buildValuationChartRenderModel } from '../valuationChartPresentation.ts';
 import { buildValuationTimeline, selectCorporateProjectStartMilestones, selectTimelineChartSeries, selectValuationChart, withManualExtraShares } from '../../../lib/valuation/canonicalValuationTimeline.ts';
+import { withCanonicalViewMetrics } from '../../../lib/projectView/canonicalViewMetrics.ts';
 
 const body = JSON.parse(await readFile('scripts/fixtures/snapshot-requests/abra_minimal.json', 'utf8'));
 for (const project of body.projects) {
@@ -159,6 +160,27 @@ for (const projectCase of [
     }
     const selection = selectValuationChart(corporate, [corporate.productionStartPeriod as number]);
     const start = corporate.periods[corporate.productionStartPeriod as number];
+    const canonicalTable = withCanonicalViewMetrics(view, corporate);
+    const projectTable = withCanonicalViewMetrics(view, project);
+    assert.equal(canonicalTable.list2.NPV_Target.value, corporate.periods[corporate.todayPeriod].npvAtPeriodTarget); // I
+    assert.equal(canonicalTable.list2.NPV_perShare.value, corporate.periods[corporate.todayPeriod].npvPerShareTarget);
+    assert.equal(canonicalTable.list2.NAV_Target.value, corporate.periods[corporate.todayPeriod].navAtPeriodTarget); // J
+    assert.equal(canonicalTable.list2.NAV_perShare.value, selection.today.low);
+    assert.equal(canonicalTable.list2.DCF_Target.value, start.dcfAtPeriodTarget);
+    assert.equal(canonicalTable.list2.DCF_perShare.value, start.dcfPerShareTarget);
+    for (const key of [
+      'NPV_Target', 'NPV_perShare', 'NAV_Target', 'NAV_perShare',
+      'DCF_Target', 'DCF_perShare', 'DCF_Target_discounted', 'DCF_Target_discounted_perShare',
+    ]) assert.equal(canonicalTable.list2[key].value, projectTable.list2[key].value, `Project/Corporate table ${key}`);
+    console.log('Corporate canonical pre-render objects', JSON.stringify({
+      table: {
+        navToday: canonicalTable.list2.NAV_Target.value,
+        navPerShareToday: canonicalTable.list2.NAV_perShare.value,
+        npvToday: canonicalTable.list2.NPV_Target.value,
+        npvPerShareToday: canonicalTable.list2.NPV_perShare.value,
+      },
+      chart: { lowToday: selection.today.low, highToday: selection.today.high },
+    }));
     assert.equal(selection.today.high, start.dcfPresentValueTodayTarget! / canonicalShares); // C-H, K
     assert.ok((start.dcfPresentValueTodayTarget as number) < (start.dcfAtPeriodTarget as number));
     const milestone = selectCorporateProjectStartMilestones(corporate, [{

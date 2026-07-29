@@ -75,6 +75,21 @@ export type TimelineNodes = {
   productionStart: ValuationPeriodState | null;
 };
 
+export type CanonicalValuationMetrics = {
+  npvToday: NullableNumber;
+  npvPerShareToday: NullableNumber;
+  navToday: NullableNumber;
+  navPerShareToday: NullableNumber;
+  dcfStart: NullableNumber;
+  dcfPerShareStart: NullableNumber;
+  dcfStartPresentToday: NullableNumber;
+  dcfPerShareStartPresentToday: NullableNumber;
+  npvStart: NullableNumber;
+  npvPerShareStart: NullableNumber;
+  navStart: NullableNumber;
+  navPerShareStart: NullableNumber;
+};
+
 export type ValuationChartPoint = {
   periodIndex: number;
   calendarYear: number;
@@ -213,6 +228,25 @@ export function selectTimelineNodes(timeline: ValuationTimeline): TimelineNodes 
   if (!today || !projectStart) throw new Error('Canonical timeline node is outside the period axis');
   const productionStart = timeline.productionStartPeriod === null ? null : timeline.periods[timeline.productionStartPeriod] ?? null;
   return { today, projectStart, productionStart };
+}
+
+/** Sole table/chart scalar adapter for canonical valuation values. */
+export function selectCanonicalValuationMetrics(timeline: ValuationTimeline): CanonicalValuationMetrics {
+  const { today, productionStart } = selectTimelineNodes(timeline);
+  return {
+    npvToday: today.npvAtPeriodTarget,
+    npvPerShareToday: today.npvPerShareTarget,
+    navToday: today.navAtPeriodTarget,
+    navPerShareToday: today.navPerShareTarget,
+    dcfStart: productionStart?.dcfAtPeriodTarget ?? null,
+    dcfPerShareStart: productionStart?.dcfPerShareTarget ?? null,
+    dcfStartPresentToday: productionStart?.dcfPresentValueTodayTarget ?? null,
+    dcfPerShareStartPresentToday: productionStart?.dcfPresentValueTodayPerShareTarget ?? null,
+    npvStart: productionStart?.npvAtPeriodTarget ?? null,
+    npvPerShareStart: productionStart?.npvPerShareTarget ?? null,
+    navStart: productionStart?.navAtPeriodTarget ?? null,
+    navPerShareStart: productionStart?.navPerShareTarget ?? null,
+  };
 }
 
 /** Apply a UI-only manual share adjustment without creating financing proceeds. */
