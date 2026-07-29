@@ -107,6 +107,7 @@ for (const projectCase of [
     yearsByPeriod: corporate.periods.map((period: any) => period.calendarYear),
     discountRate: singleSnapshot.discountRate,
     fxUSDToTarget: singleSnapshot.fx_USD_to_TargetCurrency,
+    valuationYear: singleBody.valuationYear,
     productionStartPeriod: raw.time.productionStartPeriod,
     cashTarget: corporate.periods[0].cashTarget,
     debtTarget: corporate.periods[0].debtTarget,
@@ -116,10 +117,16 @@ for (const projectCase of [
     manualExtraShares: corporate.periods[0].manualExtraShares,
   });
 
-  assert.equal(project.periods[0].calendarYear, projectCase.productionStartYear - raw.time.productionStartPeriod); // B, C
+  assert.equal(project.periods[0].calendarYear, projectCase.productionStartYear - raw.time.productionStartPeriod); // A, K
   assert.notEqual(project.productionStartPeriod, null);
   assert.equal(project.periods[project.productionStartPeriod as number].calendarYear, projectCase.productionStartYear); // D
-  assert.equal(project.periods[project.todayPeriod].calendarYear, corporate.periods[corporate.todayPeriod].calendarYear); // C
+  assert.equal(project.periods[project.todayPeriod].calendarYear, singleBody.valuationYear); // C, J
+  assert.equal(project.periods[project.todayPeriod].calendarYear, corporate.periods[corporate.todayPeriod].calendarYear); // E
+  for (const historical of project.periods.slice(0, project.todayPeriod)) {
+    assert.equal(historical.isHistoricalPeriod, true); // B
+    assert.ok(historical.discountExponentFromToday < 0);
+  }
+  assert.equal(project.periods[project.todayPeriod].discountExponentFromToday, 0); // C
   for (let periodIndex = 0; periodIndex < project.periods.length; periodIndex += 1) {
     const projectPeriod = project.periods[periodIndex];
     const corporatePeriod = corporate.periods[periodIndex];
@@ -164,10 +171,10 @@ const multiSnapshot = multiResult.snapshot as Record<string, any>;
 const canonical = multiSnapshot.canonicalValuationTimeline;
 const milestones = multiSnapshot.projectStartMilestones as Array<Record<string, any>>;
 const multiRows = multiSnapshot.corporateValuationTimeSeries.rows as Array<Record<string, any>>;
-assert.deepEqual(canonical.periods.map((period: any) => period.calendarYear), Array.from({ length: 13 }, (_, index) => 2027 + index)); // A, B
+assert.deepEqual(canonical.periods.map((period: any) => period.calendarYear), Array.from({ length: 14 }, (_, index) => 2026 + index)); // A, B
 assert.equal(canonical.periods.some((period: any) => [-1, 2, 5].includes(period.calendarYear)), false); // B, N
 assert.deepEqual(milestones.map((milestone) => milestone.calendarYear), [2029, 2032]); // C, M
-assert.deepEqual(milestones.map((milestone) => milestone.corporatePeriodIndex), [2, 5]); // F, G
+assert.deepEqual(milestones.map((milestone) => milestone.corporatePeriodIndex), [3, 6]); // F, G
 assert.equal(projectA.rawJson.time.productionStartYear, 2029);
 assert.equal(projectB.rawJson.time.productionStartYear, 2032);
 for (const milestone of milestones) {
@@ -180,7 +187,7 @@ const year2032 = canonical.periods.find((period: any) => period.calendarYear ===
 assert.notEqual(year2029.projectContributions.find((item: any) => item.projectId === 'A').fcffUSD, 0); // H
 assert.equal(year2029.projectContributions.find((item: any) => item.projectId === 'B').fcffUSD, 0);
 assert.notEqual(year2032.projectContributions.find((item: any) => item.projectId === 'B').fcffUSD, 0);
-for (const period of canonical.periods) assert.equal(period.discountExponentFromToday, period.calendarYear - 2027); // I
+for (const period of canonical.periods) assert.equal(period.discountExponentFromToday, period.calendarYear - 2026); // I
 const multiInputs = getProjectInputs({ snapshot: multiSnapshot });
 const multiRender = buildValuationChartRenderModel({ timeline: canonical, scope: 'corporate', startPeriods: milestones.map((item) => item.corporatePeriodIndex), priceToday: multiInputs.price, format: String });
 assert.equal(multiRender.displayRange.latestProjectStartYear, 2032); // J

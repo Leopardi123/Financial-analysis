@@ -99,4 +99,26 @@ assert.equal(abraChart.today.low, 15.5, 'Abra today uses NAV/share, not NPV/shar
 assert.equal(abraChart.today.high, 18.7, 'Abra today uses production-start DCF present value/share');
 assert.equal(abraChart.starts[0].low, 21.4, 'Abra start Low remains NAV/share');
 assert.equal(abraChart.starts[0].high, 24.9, 'Abra start High remains DCF/share');
+
+// Valuation-date regression A-L: preserve 2025 for traceability, but value from 2026.
+const dated = buildValuationTimeline({
+  scope: 'project', fcfUSD: [-100, 50, 60], capexUSD: [100, 0, 0],
+  yearsByPeriod: [2025, 2026, 2027], valuationYear: 2026,
+  discountRate: 0.1, fxUSDToTarget: 1, productionStartPeriod: 2,
+  cashTarget: 10, debtTarget: 2, sharesCurrent: 2, sharesPf: 2,
+});
+const datedNodes = selectTimelineNodes(dated);
+const datedChart = selectValuationChart(dated);
+assert.equal(dated.timelineStart, 2025); // A, K
+assert.equal(datedNodes.today.calendarYear, 2026); // A, C, J
+assert.equal(dated.periods[0].isHistoricalPeriod, true); // B
+assert.equal(dated.periods[0].phase, 'historical');
+assert.equal(dated.periods[0].discountExponentFromToday, -1);
+assert.equal(datedNodes.today.discountExponentFromToday, 0); // C
+assert.equal(datedNodes.today.npvAtPeriodUSD, 50 + 60 / 1.1); // D
+assert.equal(datedChart.today.calendarYear, 2026); // H, I
+assert.equal(datedChart.today.low, datedNodes.today.navPerShareTarget); // G
+assert.equal(datedChart.today.high, datedNodes.productionStart?.dcfPresentValueTodayPerShareTarget); // F
+const startsToday = buildValuationTimeline({ ...input, scope: 'project', valuationYear: 2026 });
+assert.equal(startsToday.todayPeriod, 0); // L
 console.log('Canonical valuation timeline T1-T10 passed');

@@ -1,6 +1,6 @@
 export type NullableNumber = number | null;
 
-export type ValuationPhase = 'today' | 'construction' | 'production-start' | 'operating' | 'closure';
+export type ValuationPhase = 'historical' | 'today' | 'construction' | 'production-start' | 'operating' | 'closure';
 
 export type ProjectContribution = {
   projectId: string;
@@ -14,6 +14,7 @@ export type ValuationPeriodState = {
   periodEndDate: string | null;
   phase: ValuationPhase;
   isTodayPeriod: boolean;
+  isHistoricalPeriod: boolean;
   isProjectStartPeriod: boolean;
   isConstructionPeriod: boolean;
   isProductionStartPeriod: boolean;
@@ -117,6 +118,8 @@ export function buildValuationTimeline(args: {
   fxUSDToTarget: NullableNumber;
   valuationPeriodOffset?: number;
   todayPeriod?: number;
+  /** Verified as-of year. The full model axis may start before this year. */
+  valuationYear?: number;
   projectStartPeriod?: number;
   productionStartPeriod: number | null;
   cashTarget: NullableNumber;
@@ -131,9 +134,17 @@ export function buildValuationTimeline(args: {
 }): ValuationTimeline {
   const length = args.fcfUSD.length;
   if (args.yearsByPeriod.length !== length) throw new Error('Canonical timeline requires one calendar year per FCFF period');
-  const todayPeriod = args.todayPeriod ?? 0;
+  const resolvedTodayPeriod = args.todayPeriod ?? (args.valuationYear === undefined
+    ? 0
+    : args.yearsByPeriod.indexOf(args.valuationYear));
+  if (!Number.isInteger(resolvedTodayPeriod) || resolvedTodayPeriod < 0 || resolvedTodayPeriod >= length) {
+    throw new Error(`Canonical valuation year ${String(args.valuationYear)} is outside the model calendar axis`);
+  }
+  const todayPeriod = resolvedTodayPeriod;
   const projectStartPeriod = args.projectStartPeriod ?? 0;
-  const offset = Number.isInteger(args.valuationPeriodOffset) ? args.valuationPeriodOffset as number : 0;
+  const offset = args.todayPeriod === undefined && args.valuationYear === undefined && Number.isInteger(args.valuationPeriodOffset)
+    ? args.valuationPeriodOffset as number
+    : 0;
   const rate = finite(args.discountRate) && args.discountRate > 0 ? args.discountRate : null;
   const fx = finite(args.fxUSDToTarget) ? args.fxUSDToTarget : null;
   const netCash = finite(args.cashTarget) && finite(args.debtTarget) ? args.cashTarget - args.debtTarget : null;
@@ -149,7 +160,7 @@ export function buildValuationTimeline(args: {
   };
 
   const periods = args.fcfUSD.map((fcff, periodIndex): ValuationPeriodState => {
-    const exponent = periodIndex + offset;
+    const exponent = periodIndex - todayPeriod + offset;
     const discountFactor = rate !== null ? 1 / ((1 + rate) ** exponent) : null;
     const remaining = args.fcfUSD.slice(periodIndex);
     const remainingUndiscounted = sumFinite(remaining);
@@ -165,11 +176,12 @@ export function buildValuationTimeline(args: {
     const isLast = periodIndex === length - 1;
     const isProductionStart = periodIndex === args.productionStartPeriod;
     const isConstruction = args.productionStartPeriod !== null && periodIndex < args.productionStartPeriod;
-    const phase: ValuationPhase = periodIndex === todayPeriod ? 'today' : isProductionStart ? 'production-start' : isLast ? 'closure' : isConstruction ? 'construction' : 'operating';
+    const isHistorical = periodIndex < todayPeriod;
+    const phase: ValuationPhase = isHistorical ? 'historical' : periodIndex === todayPeriod ? 'today' : isProductionStart ? 'production-start' : isLast ? 'closure' : isConstruction ? 'construction' : 'operating';
     const endDate = args.periodEndDates?.[periodIndex] ?? null;
     return {
       periodIndex, calendarYear: args.yearsByPeriod[periodIndex], periodStartDate: null, periodEndDate: endDate,
-      phase, isTodayPeriod: periodIndex === todayPeriod, isProjectStartPeriod: periodIndex === projectStartPeriod,
+      phase, isTodayPeriod: periodIndex === todayPeriod, isHistoricalPeriod: isHistorical, isProjectStartPeriod: periodIndex === projectStartPeriod,
       isConstructionPeriod: isConstruction, isProductionStartPeriod: isProductionStart,
       isOperatingPeriod: !isConstruction && !isLast, isClosurePeriod: isLast,
       discountExponentFromToday: exponent, discountFactorFromToday: discountFactor,
