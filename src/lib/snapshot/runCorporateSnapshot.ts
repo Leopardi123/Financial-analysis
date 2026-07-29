@@ -2265,8 +2265,8 @@ export async function runCorporateSnapshotPipeline(args: {
       })();
     }
 
-    // Keep the full project-derived calendar grid for mapping and diagnostics, but
-    // rebase every present-value calculation to the explicit valuation year.
+    // Present-value and financing scalars start at the verified valuation year.
+    // The canonical trace below separately retains the complete model axis.
     const lastInternalYear = aggregationEffective.corporateYearsByPeriod[
       aggregationEffective.corporateYearsByPeriod.length - 1
     ] ?? input.valuationYear;
@@ -3359,13 +3359,33 @@ export async function runCorporateSnapshotPipeline(args: {
           && ctx.spotRangeRevenueByScenario !== undefined,
       );
 
+    const canonicalStartYear = Math.min(
+      input.valuationYear,
+      aggregationEffective.corporateYearsByPeriod[0] ?? input.valuationYear,
+    );
+    const canonicalYears = Array.from(
+      { length: Math.max(0, lastInternalYear - canonicalStartYear + 1) },
+      (_, index) => canonicalStartYear + index,
+    );
+    const canonicalSeries = (series: Array<number | null>) => canonicalYears.map((year) => {
+      const internalIndex = internalIndexByYear.get(year);
+      return internalIndex === undefined ? 0 : (series[internalIndex] ?? null);
+    });
+    const earliestProductionYear = projectsForBuildFunding
+      .map((project) => project.productionStartYear)
+      .filter((year): year is number => Number.isInteger(year))
+      .sort((left, right) => left - right)[0] ?? null;
+    const canonicalProductionStartPeriod = earliestProductionYear === null
+      ? null
+      : canonicalYears.indexOf(earliestProductionYear) + delayPeriods;
     const corporateCanonicalTimeline = buildValuationTimeline({
-      scope: 'corporate', fcfUSD: valuationFcffUSD, capexUSD: valuationCapexUSD,
-      yearsByPeriod: valuationYears, discountRate: input.discountRate, fxUSDToTarget: fxRate,
-      productionStartPeriod: valuationProductionStartPeriod,
+      scope: 'corporate', fcfUSD: canonicalSeries(aggregationEffective.fcffUSD_total), capexUSD: canonicalSeries(aggregationEffective.capexUSD_total),
+      yearsByPeriod: canonicalYears, discountRate: input.discountRate, fxUSDToTarget: fxRate,
+      valuationYear: input.valuationYear,
+      productionStartPeriod: canonicalProductionStartPeriod,
       cashTarget: cashForNavTarget, debtTarget: debtPostTarget,
       sharesCurrent: marketInput.shares_current, sharesPf: shares_post_financing_fd_effective,
-      projectContributionsByPeriod: valuationYears.map((year) => projectSeriesContexts.map((context) => {
+      projectContributionsByPeriod: canonicalYears.map((year) => projectSeriesContexts.map((context) => {
         const localPeriod = context.yearsByPeriod.indexOf(year);
         return { projectId: context.projectId, fcffUSD: localPeriod >= 0 ? context.economics.fcffUSD[localPeriod] ?? null : 0 };
       })),

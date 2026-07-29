@@ -48,6 +48,8 @@ export type ProjectViewInputs = {
   sustainingCostUSD: Series;
   productionStartPeriod: number | null;
   calendarYears?: number[];
+  /** Verified valuation anchor; periods before it remain visible as historical. */
+  valuationYear?: number;
   periodEndDates?: string[];
   calendarYearPolicy?: 'legacy' | 'verified';
   /** Internal period zero expressed relative to the valuation year (for example, 2030 - 2026 = 4). */
@@ -421,6 +423,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       : input.fcfUSD.map((_, period) => period + valuationPeriodOffset),
     discountRate: r,
     fxUSDToTarget: fx,
+    valuationYear: input.valuationYear,
     valuationPeriodOffset,
     periodEndDates: input.periodEndDates,
     productionStartPeriod: tp,

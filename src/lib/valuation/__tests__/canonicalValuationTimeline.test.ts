@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildValuationTimeline, selectTimelineChartSeries, selectTimelineDebugRows, selectTimelineMarker, selectTimelineNodes, selectValuationChart } from '../canonicalValuationTimeline.ts';
+import { buildValuationTimeline, selectTimelineChartSeries, selectTimelineDebugRows, selectTimelineMarker, selectTimelineNodes, selectValuationChart, withManualExtraShares } from '../canonicalValuationTimeline.ts';
 
 const input = { fcfUSD: [-100, -50, 80, 90, 20], capexUSD: [100, 50, 0, 0, 0], yearsByPeriod: [2026, 2027, 2028, 2029, 2030], discountRate: 0.1, fxUSDToTarget: 2, productionStartPeriod: 2, cashTarget: 40, debtTarget: 10, sharesCurrent: 10, sharesPf: 20 };
 const project = buildValuationTimeline({ scope: 'project', ...input });
@@ -99,4 +99,47 @@ assert.equal(abraChart.today.low, 15.5, 'Abra today uses NAV/share, not NPV/shar
 assert.equal(abraChart.today.high, 18.7, 'Abra today uses production-start DCF present value/share');
 assert.equal(abraChart.starts[0].low, 21.4, 'Abra start Low remains NAV/share');
 assert.equal(abraChart.starts[0].high, 24.9, 'Abra start High remains DCF/share');
+
+// Valuation-date regression A-L: preserve 2025 for traceability, but value from 2026.
+const dated = buildValuationTimeline({
+  scope: 'project', fcfUSD: [-100, 50, 60], capexUSD: [100, 0, 0],
+  yearsByPeriod: [2025, 2026, 2027], valuationYear: 2026,
+  discountRate: 0.1, fxUSDToTarget: 1, productionStartPeriod: 2,
+  cashTarget: 10, debtTarget: 2, sharesCurrent: 2, sharesPf: 2,
+});
+const datedNodes = selectTimelineNodes(dated);
+const datedChart = selectValuationChart(dated);
+assert.equal(dated.timelineStart, 2025); // A, K
+assert.equal(datedNodes.today.calendarYear, 2026); // A, C, J
+assert.equal(dated.periods[0].isHistoricalPeriod, true); // B
+assert.equal(dated.periods[0].phase, 'historical');
+assert.equal(dated.periods[0].discountExponentFromToday, -1);
+assert.equal(datedNodes.today.discountExponentFromToday, 0); // C
+assert.equal(datedNodes.today.npvAtPeriodUSD, 50 + 60 / 1.1); // D
+assert.equal(datedChart.today.calendarYear, 2026); // H, I
+assert.equal(datedChart.today.low, datedNodes.today.navPerShareTarget); // G
+assert.equal(datedChart.today.high, datedNodes.productionStart?.dcfPresentValueTodayPerShareTarget); // F
+const startsToday = buildValuationTimeline({ ...input, scope: 'project', valuationYear: 2026 });
+assert.equal(startsToday.todayPeriod, 0); // L
+const manuallyDiluted = withManualExtraShares(startsToday, 250);
+assert.equal(manuallyDiluted.periods[0].sharesPf, 270);
+assert.equal(manuallyDiluted.periods[0].manualExtraShares, 250);
+assert.equal(manuallyDiluted.periods[0].dcfPerShareTarget, manuallyDiluted.periods[0].dcfAtPeriodTarget! / 270);
+assert.equal(startsToday.periods[0].sharesPf, 20, 'manual share adjustment does not mutate snapshot timeline');
+
+// A valid future-starting model is padded back to the valuation anchor rather
+// than rejected merely because its first modeled cash-flow year is later.
+const losRicosNorth = buildValuationTimeline({
+  scope: 'project', fcfUSD: [-10, -20, 100, 80], capexUSD: [10, 20, 0, 0],
+  yearsByPeriod: [2030, 2031, 2032, 2033], valuationYear: 2026,
+  discountRate: 0.1, fxUSDToTarget: 1, productionStartPeriod: 2,
+  cashTarget: 0, debtTarget: 0, sharesCurrent: 1, sharesPf: 1,
+});
+assert.deepEqual(losRicosNorth.periods.map((period) => period.calendarYear), [2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033]);
+assert.deepEqual(losRicosNorth.periods.slice(0, 4).map((period) => period.fcffUSD), [0, 0, 0, 0]);
+assert.equal(losRicosNorth.todayPeriod, 0);
+assert.equal(losRicosNorth.projectStartPeriod, 4);
+assert.equal(losRicosNorth.productionStartPeriod, 6);
+assert.equal(losRicosNorth.periods[6].calendarYear, 2032);
+assert.equal(losRicosNorth.periods[4].fcffUSD, -10);
 console.log('Canonical valuation timeline T1-T10 passed');

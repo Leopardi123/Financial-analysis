@@ -4,6 +4,8 @@ import { runCorporateSnapshotPipeline } from '../../../lib/snapshot/runCorporate
 import { getProjectInputs } from '../../../lib/projectView/projectInputs.ts';
 import { computeProjectViewMetrics } from '../../../lib/projectView/computeProjectPreRevenueView.ts';
 import { buildValuationChartRenderModel } from '../valuationChartPresentation.ts';
+import { buildValuationTimeline, selectCorporateProjectStartMilestones, selectTimelineChartSeries, selectValuationChart, withManualExtraShares } from '../../../lib/valuation/canonicalValuationTimeline.ts';
+import { withCanonicalViewMetrics } from '../../../lib/projectView/canonicalViewMetrics.ts';
 
 const body = JSON.parse(await readFile('scripts/fixtures/snapshot-requests/abra_minimal.json', 'utf8'));
 for (const project of body.projects) {
@@ -77,6 +79,139 @@ console.log('Abra Corporate runtime trace', JSON.stringify({
   chartEndYear: render.displayRange.chartEndYear,
   highSeriesTrace,
 }));
+
+// A-M: the one-project corporate path must be an identity transform.  Run two
+// real project-labelled runtime cases whose model starts precede valuationYear;
+// this is the boundary that regressed for Viscaria (2025 became 2026).
+for (const projectCase of [
+  { id: 'Viscaria', name: 'Viscaria Copper-Iron Project — FS+ Upside Case, full LoM', productionStartYear: 2027 },
+  { id: 'AbraSilver', name: 'AbraSilver', productionStartYear: 2026 },
+]) {
+  const singleBody = structuredClone(body) as Record<string, any>;
+  const raw = singleBody.projects[0].rawJson;
+  singleBody.projects[0].projectId = projectCase.id;
+  raw.meta.projectId = projectCase.id;
+  raw.meta.projectName = projectCase.name;
+  raw.version = 'project_json_v2';
+  raw.time.productionStartYear = projectCase.productionStartYear;
+  delete raw.time.periodEndDatesUtc;
+  const manualExtraShares = projectCase.id === 'Viscaria' ? 250_000_000 : 0;
+  if (projectCase.id === 'Viscaria') {
+    singleBody.market.shares_current = 130_908_366;
+    singleBody.financingPlan = { equity_fraction: 0, debt_fraction: 1, use_cash_first: false, cash_use_percent: 1 };
+  }
+  const singleResult = await runCorporateSnapshotPipeline({ body: singleBody, refresh: false, debug: true });
+  assert.equal(singleResult.ok, true);
+  if (!singleResult.ok) throw new Error(`${projectCase.name} corporate snapshot failed`);
+  const singleSnapshot = singleResult.snapshot as Record<string, any>;
+  const corporate = withManualExtraShares(singleSnapshot.canonicalValuationTimeline, manualExtraShares);
+  const contributionFcff = corporate.periods.map((period: any) => period.projectContributions[0].fcffUSD);
+  const project = buildValuationTimeline({
+    scope: 'project',
+    fcfUSD: contributionFcff,
+    capexUSD: singleSnapshot.series.capexUSD,
+    yearsByPeriod: corporate.periods.map((period: any) => period.calendarYear),
+    discountRate: singleSnapshot.discountRate,
+    fxUSDToTarget: singleSnapshot.fx_USD_to_TargetCurrency,
+    valuationYear: singleBody.valuationYear,
+    productionStartPeriod: raw.time.productionStartPeriod,
+    cashTarget: corporate.periods[0].cashTarget,
+    debtTarget: corporate.periods[0].debtTarget,
+    sharesCurrent: corporate.periods[0].sharesCurrent,
+    sharesPf: corporate.periods[0].sharesPf,
+    newSharesCumulative: corporate.periods[0].newSharesCumulative,
+    manualExtraShares,
+  });
+
+  assert.equal(project.periods[0].calendarYear, projectCase.productionStartYear - raw.time.productionStartPeriod); // A, K
+  assert.notEqual(project.productionStartPeriod, null);
+  assert.equal(project.periods[project.productionStartPeriod as number].calendarYear, projectCase.productionStartYear); // D
+  assert.equal(project.periods[project.todayPeriod].calendarYear, singleBody.valuationYear); // C, J
+  assert.equal(project.periods[project.todayPeriod].calendarYear, corporate.periods[corporate.todayPeriod].calendarYear); // E
+  for (const historical of project.periods.slice(0, project.todayPeriod)) {
+    assert.equal(historical.isHistoricalPeriod, true); // B
+    assert.ok(historical.discountExponentFromToday < 0);
+  }
+  assert.equal(project.periods[project.todayPeriod].discountExponentFromToday, 0); // C
+  for (let periodIndex = 0; periodIndex < project.periods.length; periodIndex += 1) {
+    const projectPeriod = project.periods[periodIndex];
+    const corporatePeriod = corporate.periods[periodIndex];
+    assert.equal(projectPeriod.fcffUSD, corporatePeriod.projectContributions![0].fcffUSD); // A contribution
+    assert.equal(projectPeriod.fcffUSD, corporatePeriod.fcffUSD); // A aggregate
+    for (const key of [
+      'calendarYear', 'discountExponentFromToday', 'discountFactorFromToday',
+      'remainingUndiscountedFcffUSD', 'dcfAtPeriodUSD', 'dcfPresentValueTodayUSD',
+      'npvAtPeriodUSD', 'dcfAtPeriodTarget', 'dcfPresentValueTodayTarget',
+      'npvAtPeriodTarget', 'navAtPeriodTarget', 'sharesCurrent', 'sharesPf',
+      'dcfPerShareTarget', 'dcfPresentValueTodayPerShareTarget',
+      'npvPerShareTarget', 'navPerShareTarget',
+    ] as const) assert.equal(projectPeriod[key], corporatePeriod[key], `${projectCase.id} period=${periodIndex} key=${key}`); // E-K
+  }
+  assert.deepEqual(selectTimelineChartSeries(project), selectTimelineChartSeries(corporate)); // L
+  if (projectCase.id === 'Viscaria') {
+    const canonicalShares = 380_908_366;
+    assert.equal(corporate.periods[corporate.todayPeriod].sharesPf, canonicalShares); // A, B, L
+    assert.equal(corporate.periods[corporate.todayPeriod].sharesPfBeforeManualExtra, 130_908_366);
+    assert.equal(corporate.periods[corporate.todayPeriod].canonicalSharesForPerShare, canonicalShares);
+    for (const period of corporate.periods) {
+      assert.equal(period.dcfPerShareTarget, period.dcfAtPeriodTarget! / canonicalShares);
+      assert.equal(period.npvPerShareTarget, period.npvAtPeriodTarget! / canonicalShares);
+      assert.equal(period.navPerShareTarget, period.navAtPeriodTarget! / canonicalShares);
+    }
+    const selection = selectValuationChart(corporate, [corporate.productionStartPeriod as number]);
+    const start = corporate.periods[corporate.productionStartPeriod as number];
+    const canonicalTable = withCanonicalViewMetrics(view, corporate);
+    const projectTable = withCanonicalViewMetrics(view, project);
+    assert.equal(canonicalTable.list2.NPV_Target.value, corporate.periods[corporate.todayPeriod].npvAtPeriodTarget); // I
+    assert.equal(canonicalTable.list2.NPV_perShare.value, corporate.periods[corporate.todayPeriod].npvPerShareTarget);
+    assert.equal(canonicalTable.list2.NAV_Target.value, corporate.periods[corporate.todayPeriod].navAtPeriodTarget); // J
+    assert.equal(canonicalTable.list2.NAV_perShare.value, selection.today.low);
+    assert.equal(canonicalTable.list2.DCF_Target.value, start.dcfAtPeriodTarget);
+    assert.equal(canonicalTable.list2.DCF_perShare.value, start.dcfPerShareTarget);
+    for (const key of [
+      'NPV_Target', 'NPV_perShare', 'NAV_Target', 'NAV_perShare',
+      'DCF_Target', 'DCF_perShare', 'DCF_Target_discounted', 'DCF_Target_discounted_perShare',
+    ]) assert.equal(canonicalTable.list2[key].value, projectTable.list2[key].value, `Project/Corporate table ${key}`);
+    console.log('Corporate canonical pre-render objects', JSON.stringify({
+      table: {
+        navToday: canonicalTable.list2.NAV_Target.value,
+        navPerShareToday: canonicalTable.list2.NAV_perShare.value,
+        npvToday: canonicalTable.list2.NPV_Target.value,
+        npvPerShareToday: canonicalTable.list2.NPV_perShare.value,
+      },
+      chart: { lowToday: selection.today.low, highToday: selection.today.high },
+    }));
+    assert.equal(selection.today.high, start.dcfPresentValueTodayTarget! / canonicalShares); // C-H, K
+    assert.ok((start.dcfPresentValueTodayTarget as number) < (start.dcfAtPeriodTarget as number));
+    const milestone = selectCorporateProjectStartMilestones(corporate, [{
+      projectId: projectCase.id, productionStartYear: projectCase.productionStartYear,
+    }])[0];
+    assert.equal(milestone.dcfPerShare, start.dcfAtPeriodTarget! / canonicalShares); // C-E
+    assert.equal(milestone.navPerShare, start.navAtPeriodTarget! / canonicalShares);
+    const renderModel = buildValuationChartRenderModel({
+      timeline: corporate, scope: 'corporate', startPeriods: [start.periodIndex], priceToday: 1.25, format: String,
+    });
+    assert.equal(renderModel.trace.todayYear, singleBody.valuationYear);
+    assert.equal(renderModel.trace.todayRowHigh, start.dcfPresentValueTodayTarget! / canonicalShares); // K
+    const waterfall = singleSnapshot.financing.corporate_cash_waterfall;
+    assert.equal(waterfall.totalInitialCashUsed, 0); // M
+    assert.equal(singleSnapshot.financing.closing_corporate_cash_TargetCurrency, waterfall.rows.at(-1).closingCash * singleSnapshot.fx_USD_to_TargetCurrency); // O
+    assert.notEqual(singleSnapshot.financing.cash_for_nav_TargetCurrency, singleSnapshot.financing.closing_corporate_cash_TargetCurrency);
+
+    const cashFirstBody = structuredClone(singleBody);
+    cashFirstBody.financingPlan.use_cash_first = true;
+    const cashFirstResult = await runCorporateSnapshotPipeline({ body: cashFirstBody, refresh: false });
+    assert.equal(cashFirstResult.ok, true);
+    if (!cashFirstResult.ok) throw new Error('Viscaria cash-first snapshot failed');
+    assert.ok(cashFirstResult.snapshot.financing.cash_used_for_build_TargetCurrency! > 0); // N
+    assert.ok(cashFirstResult.snapshot.financing.remaining_funding_need_TargetCurrency! < singleSnapshot.financing.remaining_funding_need_TargetCurrency!);
+  }
+  console.log('Single-project Project/Corporate reconciliation', JSON.stringify({
+    project: projectCase.name,
+    input: { years: project.periods.map((row) => row.calendarYear), fcffUSD: contributionFcff, todayPeriod: project.todayPeriod, productionStartPeriod: project.productionStartPeriod },
+    rows: project.periods.map((row, periodIndex) => ({ periodIndex, calendarYear: row.calendarYear, fcffUSD: row.fcffUSD, discountExponentFromToday: row.discountExponentFromToday, discountFactorFromToday: row.discountFactorFromToday, remainingDCF: row.dcfAtPeriodUSD, npv: row.npvAtPeriodTarget, nav: row.navAtPeriodTarget, dcf: row.dcfAtPeriodTarget, shares: row.sharesPf, cash: row.cashTarget, debt: row.debtTarget, netCash: row.netCashTarget, npvPerShare: row.npvPerShareTarget, navPerShare: row.navPerShareTarget, dcfPerShare: row.dcfPerShareTarget })),
+  })); // M
+}
 
 // A-O regression: two projects share local t=2 but start in distinct calendar years.
 const multiBody = JSON.parse(await readFile('scripts/fixtures/snapshot-requests/abra_minimal.json', 'utf8')) as Record<string, any>;

@@ -21,7 +21,8 @@ import { extractFailingMetals, extractFallbackOrFailingPriceMetals, rowHasMetalR
 import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
-import { selectValuationChart } from "../lib/valuation/canonicalValuationTimeline.ts";
+import { selectValuationChart, withManualExtraShares } from "../lib/valuation/canonicalValuationTimeline.ts";
+import { withCanonicalViewMetrics } from "../lib/projectView/canonicalViewMetrics.ts";
 import { verifyProjectCalendarAxis } from "../lib/valuation/projectCalendarAxis.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import { getManualMetalPriceStore, saveManualMetalPrice } from "../lib/engine/pricing/manualMetalPriceStore.ts";
@@ -3070,6 +3071,7 @@ Capital Available: ${availableLabel}`,
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
       calendarYears: projectCalendarResolution.value.yearsByPeriod,
+      valuationYear: new Date().getUTCFullYear(),
       periodEndDates: projectCalendarResolution.value.periodEndDatesUtc ?? undefined,
       calendarYearPolicy: 'verified',
       valuationPeriodOffset: discountPeriodOffset,
@@ -3136,8 +3138,13 @@ Capital Available: ${availableLabel}`,
     // The snapshot's canonical timeline is already rebased to valuationYear and
     // calendar-aligned. Recomputing it from the internal series can have a different
     // length when projects begin before/after today and would fall back to offsets.
-    const canonicalTimeline = (corporateSnapshotData as unknown as { canonicalValuationTimeline?: typeof computed.valuationTimeline }).canonicalValuationTimeline;
-    const computedWithCanonical = canonicalTimeline ? { ...computed, valuationTimeline: canonicalTimeline } : computed;
+    const snapshotTimeline = (corporateSnapshotData as unknown as { canonicalValuationTimeline?: typeof computed.valuationTimeline }).canonicalValuationTimeline;
+    const canonicalTimeline = snapshotTimeline
+      ? withManualExtraShares(snapshotTimeline, parseExtraShares(corporateExtraSharesInput))
+      : null;
+    const computedWithCanonical = canonicalTimeline
+      ? withCanonicalViewMetrics(computed, canonicalTimeline)
+      : computed;
     const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
       AISC_LOM?: number | null;
       BreakEven_AuEq?: number | null;
