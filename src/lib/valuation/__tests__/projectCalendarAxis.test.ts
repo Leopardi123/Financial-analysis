@@ -79,7 +79,7 @@ assert.equal(legacyMasterNCount.ok, true); // G: legacy import permits masterN p
 
 assert.throws(() => computeProjectViewMetrics({
   targetCurrency: 'USD', fxUSDToTarget: 1, discountRate: 0.1, masterN: 2,
-  sharesCurrent: 1, priceCurrentTarget: 1, cashCurrentTarget: 0, debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
+  sharesCurrent: 1, priceCurrentTarget: 1, cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false, debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
   fcfUSD: [0, 1, 2], capexUSD: [0, 0, 0], grossRevenueUSD: [0, 0, 0], ebitUSD: [0, 0, 0],
   payableAuEqOz: [0, 0, 0], sustainingCostUSD: [0, 0, 0], productionStartPeriod: 1,
   calendarYears: [2026, 2027], calendarYearPolicy: 'verified', financing: { equityPct: 100, debtPct: 0 },

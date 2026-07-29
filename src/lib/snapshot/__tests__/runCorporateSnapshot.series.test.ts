@@ -804,7 +804,7 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   const projectEquivalent = computeProjectViewMetrics({
     targetCurrency: 'CAD', fxUSDToTarget: 1, discountRate: body.discountRate as number, masterN: snapshotSeries.fcffUSD.length - 1,
     sharesCurrent: 300_000_000, sharesPostFinancingInput: financing.shares_post_financing, priceCurrentTarget: 3,
-    cashCurrentTarget: 100_000_000, debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
+    cashForNavTarget: 100_000_000, cashForEvTarget: 100_000_000, cashForEvIsPostFinancing: false, debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
     fcfUSD: snapshotSeries.fcffUSD, capexUSD: snapshotSeries.capexUSD, grossRevenueUSD: snapshotSeries.totalRevenue_USD,
     ebitUSD: snapshotSeries.ebitUSD, payableAuEqOz: new Array(snapshotSeries.fcffUSD.length).fill(1), sustainingCostUSD: new Array(snapshotSeries.fcffUSD.length).fill(0),
     productionStartPeriod, financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },

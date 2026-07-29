@@ -25,7 +25,7 @@ const view = computeProjectViewMetrics({
   meta: { projectId: 'corporate' }, targetCurrency: snapshot.targetCurrency,
   fxUSDToTarget: inputs.fx, discountRate: inputs.r, masterN: inputs.masterN,
   sharesCurrent: inputs.sharesCurrent, sharesPostFinancingInput: inputs.sharesPostFinancing,
-  priceCurrentTarget: inputs.price, cashCurrentTarget: snapshot.financing.cash_for_nav_TargetCurrency ?? inputs.cash0,
+  priceCurrentTarget: inputs.price, cashForNavTarget: snapshot.financing.cash_for_nav_TargetCurrency, cashForEvTarget: snapshot.financing.cash_t0_post_TargetCurrency, cashForEvIsPostFinancing: true,
   debtCurrentTarget: inputs.debt0, enterpriseAdjustmentsTarget: 0,
   fcfUSD: finiteSeries(inputs.series.fcfUSD), capexUSD: finiteSeries(inputs.series.capexUSD),
   grossRevenueUSD: finiteSeries(inputs.series.grossRevenueUSD), ebitUSD: finiteSeries(inputs.series.ebitUSD),
@@ -33,6 +33,20 @@ const view = computeProjectViewMetrics({
   productionStartPeriod: inputs.tp, calendarYears: timelineRows.map((row) => row.year), valuationPeriodOffset: 0,
   financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
 });
+assert.equal(
+  view.marketBox.evCurrent.value,
+  (inputs.sharesCurrent as number) * (inputs.price as number)
+    + (snapshot.financing.debt_t0_post_TargetCurrency as number)
+    - (snapshot.financing.cash_t0_post_TargetCurrency as number),
+  'Corporate EV must use post-financing debt and post-financing cash',
+);
+assert.equal(
+  view.list2.NAV_Target.value,
+  view.list2.NPV_Target.value!
+    + (snapshot.financing.cash_for_nav_TargetCurrency as number)
+    - (snapshot.financing.debt_t0_post_TargetCurrency as number),
+  'Corporate NAV must continue to use reported cash',
+);
 const startPeriods = snapshot.corporateValuationTimeSeries.projectMarkers.flatMap((marker: { productionStartYear: number | null }) => {
   const period = timelineRows.find((row) => row.year === marker.productionStartYear)?.period;
   return Number.isInteger(period) ? [period as number] : [];

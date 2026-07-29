@@ -14,7 +14,7 @@ const out = computeProjectViewMetrics({
   masterN: 11,
   sharesCurrent: 100,
   priceCurrentTarget: 10,
-  cashCurrentTarget: 200,
+  cashForNavTarget: 200, cashForEvTarget: 200, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 100,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [-100, -100, 150, 200, 200, 200, 200, 200, 200, 200, 200, 200],
@@ -40,7 +40,7 @@ assert.equal(out.marketBox.marketCapCurrent.reason, null);
 
 const cashFirstBase = {
   targetCurrency: 'CAD', fxUSDToTarget: 1, discountRate: .1, masterN: 2,
-  sharesCurrent: 300_000_000, priceCurrentTarget: 3, cashCurrentTarget: 100_000_000,
+  sharesCurrent: 300_000_000, priceCurrentTarget: 3, cashForNavTarget: 100_000_000, cashForEvTarget: 100_000_000, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0, enterpriseAdjustmentsTarget: 0,
   fcfUSD: [-300_000_000, 0, 400_000_000], capexUSD: [300_000_000, 0, 0],
   grossRevenueUSD: [0, 0, 500_000_000], ebitUSD: [0, 0, 400_000_000],
@@ -49,7 +49,7 @@ const cashFirstBase = {
 const cashDisabled = computeProjectViewMetrics({ ...cashFirstBase, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 100_000_000, useCashFirst: false, cashUsePercent: 1 } });
 const cashEnabled = computeProjectViewMetrics({ ...cashFirstBase, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 100_000_000, useCashFirst: true, cashUsePercent: 1 } });
 const cashHalf = computeProjectViewMetrics({ ...cashFirstBase, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 100_000_000, useCashFirst: true, cashUsePercent: 0.5 } });
-const excessCash = computeProjectViewMetrics({ ...cashFirstBase, cashCurrentTarget: 400_000_000, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 400_000_000, useCashFirst: true, cashUsePercent: 1 } });
+const excessCash = computeProjectViewMetrics({ ...cashFirstBase, cashForNavTarget: 400_000_000, cashForEvTarget: 400_000_000, cashForEvIsPostFinancing: false, financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 400_000_000, useCashFirst: true, cashUsePercent: 1 } });
 assert.equal(cashDisabled.list5.cash_used_Target.value, 0);
 assert.equal(cashDisabled.list5.Equity_Raise_Target.value, 300_000_000);
 assert.equal(cashDisabled.list5.New_Shares.value, 100_000_000);
@@ -69,6 +69,40 @@ assert.equal(cashEnabled.list2.NAV_Target.value, cashDisabled.list2.NAV_Target.v
 assert.equal(cashEnabled.list2.NAV_prodStart.value, cashDisabled.list2.NAV_prodStart.value, 'production-start NAV must use the same no-double-count rule');
 assert.notEqual(cashEnabled.list2.NAV_perShare.value, cashDisabled.list2.NAV_perShare.value);
 assert.ok(cashEnabled.diagnostics.valuation_metric_audit.every((row) => row.metric.endsWith('/share') ? row.sharesUsed !== null : true));
+assert.equal(cashEnabled.marketBox.evCurrent.value, 900_000_000, 'Project EV must still subtract reported cash less cash used');
+
+const separatedCashBase = {
+  ...cashFirstBase,
+  cashForNavTarget: 200_000_000,
+  cashForEvTarget: 150_000_000,
+  cashForEvIsPostFinancing: true,
+  debtCurrentTarget: 100_000_000,
+  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+};
+const separatedCash = computeProjectViewMetrics(separatedCashBase);
+const changedNavCash = computeProjectViewMetrics({ ...separatedCashBase, cashForNavTarget: 250_000_000 });
+const changedEvCash = computeProjectViewMetrics({ ...separatedCashBase, cashForEvTarget: 125_000_000 });
+assert.equal(changedNavCash.list2.NAV_Target.value! - separatedCash.list2.NAV_Target.value!, 50_000_000, 'cashForNav must affect NAV');
+assert.equal(changedNavCash.marketBox.evCurrent.value, separatedCash.marketBox.evCurrent.value, 'cashForNav must not affect EV');
+assert.equal(changedEvCash.list2.NAV_Target.value, separatedCash.list2.NAV_Target.value, 'cashForEv must not affect NAV');
+assert.equal(changedEvCash.marketBox.evCurrent.value! - separatedCash.marketBox.evCurrent.value!, 25_000_000, 'cashForEv must affect EV');
+
+const corporateEvRegression = computeProjectViewMetrics({
+  ...cashFirstBase,
+  sharesCurrent: 300_000_000,
+  priceCurrentTarget: 3,
+  cashForNavTarget: 1_406_900_000,
+  cashForEvTarget: 293_046_254,
+  cashForEvIsPostFinancing: true,
+  debtCurrentTarget: 2_099_593_384,
+  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
+});
+const marketCapRegression = 300_000_000 * 3;
+const correctedCorporateEv = marketCapRegression + 2_099_593_384 - 293_046_254;
+const formerCorporateEv = marketCapRegression + 2_099_593_384 - 1_406_900_000;
+assert.equal(corporateEvRegression.marketBox.evCurrent.value, correctedCorporateEv, 'Corporate EV must subtract post-financing cash');
+assert.equal(correctedCorporateEv - formerCorporateEv, 1_113_853_746, 'Corporate EV regression delta must equal initial cash used');
+assert.equal(corporateEvRegression.list2.NAV_Target.value! - corporateEvRegression.list2.NPV_Target.value!, 1_406_900_000 - 2_099_593_384, 'Corporate NAV must retain reported cash');
 
 assert.ok((out.list3.IRR.value as number) > 0, `Expected positive IRR, got ${out.list3.IRR.value}`);
 assert.ok((out.list3.LOM_discounted_EBIT_ROCE.value as number) > 0, 'Expected finite discounted EBIT ROCE');
@@ -91,7 +125,7 @@ const lista3MissingInputs = computeProjectViewMetrics({
   masterN: 2,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [-10, 0, 5],
@@ -117,7 +151,7 @@ const zeroCapexDenominator = computeProjectViewMetrics({
   masterN: 2,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [10, 10, 10],
@@ -142,7 +176,7 @@ const multiSignChange = computeProjectViewMetrics({
   masterN: 4,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [0, 0, 400, -50, 200],
@@ -165,7 +199,7 @@ const actualMultipleRootProject = computeProjectViewMetrics({
   masterN: 10,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: actualMultipleRootCashflows,
@@ -200,7 +234,7 @@ const noSignChange = computeProjectViewMetrics({
   masterN: 3,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [0, 0, 0, 0],
@@ -223,7 +257,7 @@ const notBracketed = computeProjectViewMetrics({
   masterN: 2,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [0, 100, -0.1],
@@ -246,7 +280,7 @@ const consistencyGuard = computeProjectViewMetrics({
   masterN: 11,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [0, 100, -90, 10, 10, 10, 10, 10, 10, 10, 10, 10],
@@ -272,7 +306,7 @@ const noDiscount = computeProjectViewMetrics({
   masterN: 2,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [1, 2, 3],
@@ -299,7 +333,7 @@ const userProvidedSeries = computeProjectViewMetrics({
   masterN: 16,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [
@@ -342,7 +376,7 @@ const strict10yInsufficientPeriods = computeProjectViewMetrics({
   masterN: 8,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: new Array(9).fill(1),
@@ -365,7 +399,7 @@ const strict10yMissingWindowValue = computeProjectViewMetrics({
   masterN: 11,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: new Array(12).fill(1),
@@ -387,7 +421,7 @@ const delayedStartStillHasTenYearWindow = computeProjectViewMetrics({
   masterN: 13,
   sharesCurrent: 10,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: new Array(14).fill(1),
@@ -411,7 +445,7 @@ const perShareUpstreamMissingShares = computeProjectViewMetrics({
   masterN: 11,
   sharesCurrent: null,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: new Array(12).fill(1),
@@ -433,7 +467,7 @@ const auEqPerShareSmallNonZero = computeProjectViewMetrics({
   masterN: 11,
   sharesCurrent: 150000000,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: new Array(12).fill(1),
@@ -455,7 +489,7 @@ const auEqPerShareInvalidShares = computeProjectViewMetrics({
   masterN: 11,
   sharesCurrent: 0,
   priceCurrentTarget: 5,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: new Array(12).fill(1),
@@ -480,7 +514,7 @@ const financingSharesOverride = computeProjectViewMetrics({
   sharesCurrent: 100,
   sharesPostFinancingInput: 250,
   priceCurrentTarget: 10,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [-100, 100, 100],
@@ -502,7 +536,7 @@ const financingSharesAllDebt = computeProjectViewMetrics({
   sharesCurrent: 100,
   sharesPostFinancingInput: 250,
   priceCurrentTarget: 10,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [-100, 100, 100],
@@ -524,7 +558,7 @@ const precomputedDebtFinancingBase = {
   sharesCurrent: 300_000_000,
   sharesPostFinancingInput: 300_000_000,
   priceCurrentTarget: 2,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 139_000_000,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [-139_000_000, 100_000_000, 100_000_000],
@@ -555,7 +589,7 @@ const calendarRebasedNorth = computeProjectViewMetrics({
   masterN: 2,
   productionStartPeriod: 2,
   valuationPeriodOffset: 4,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   sharesCurrent: 1,
   sharesPostFinancingInput: 1,
@@ -578,7 +612,7 @@ const calendarRebasedSouth = computeProjectViewMetrics({
   masterN: 4,
   productionStartPeriod: 4,
   valuationPeriodOffset: -1,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   sharesCurrent: 1,
   sharesPostFinancingInput: 1,
@@ -611,7 +645,7 @@ const financingScenarioBase = {
   sharesCurrent: 100,
   sharesPostFinancingInput: 250,
   priceCurrentTarget: 10,
-  cashCurrentTarget: 0,
+  cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   enterpriseAdjustmentsTarget: 0,
   fcfUSD: [-100, 50, 60, 70, 80],
@@ -646,7 +680,7 @@ const canonicalFinancingBase = {
   sharesCurrent: 300_000_000,
   sharesPostFinancingInput: 999_999_999,
   priceCurrentTarget: 4,
-  cashCurrentTarget: 1_406_900_000,
+  cashForNavTarget: 1_406_900_000, cashForEvTarget: 1_406_900_000, cashForEvIsPostFinancing: false,
   debtCurrentTarget: 0,
   extraShares: 10,
   financing: { equityPct: 100, debtPct: 0, latestQuarterlyCashTarget: 1_406_900_000, useCashFirst: false, cashUsePercent: 1 },

@@ -31,7 +31,11 @@ export type ProjectViewInputs = {
   /** A user-controlled increment applied after, without mutating, financing. */
   extraShares?: number;
   priceCurrentTarget: NullableNumber;
-  cashCurrentTarget: NullableNumber;
+  /** Cash included in NAV. For project FCFF this is reported cash to avoid double-counting construction CAPEX. */
+  cashForNavTarget: NullableNumber;
+  /** Cash basis used by EV; its timing is made explicit by cashForEvIsPostFinancing. */
+  cashForEvTarget: NullableNumber;
+  cashForEvIsPostFinancing: boolean;
   debtCurrentTarget: NullableNumber;
   enterpriseAdjustmentsTarget: NullableNumber;
   fcfUSD: Series;
@@ -350,7 +354,8 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   const r = finite(input.discountRate) && input.discountRate > 0 ? input.discountRate : null;
   const sharesCurrent = finite(input.sharesCurrent) && input.sharesCurrent > 0 ? input.sharesCurrent : null;
   const priceCurrent = finite(input.priceCurrentTarget) && input.priceCurrentTarget > 0 ? input.priceCurrentTarget : null;
-  const cashCurrent = finite(input.cashCurrentTarget) ? input.cashCurrentTarget : null;
+  const cashForNav = finite(input.cashForNavTarget) ? input.cashForNavTarget : null;
+  const cashForEvInput = finite(input.cashForEvTarget) ? input.cashForEvTarget : null;
   const debtCurrent = finite(input.debtCurrentTarget) ? input.debtCurrentTarget : null;
   const enterpriseAdjustments = finite(input.enterpriseAdjustmentsTarget) ? input.enterpriseAdjustmentsTarget : 0;
   const tp = Number.isInteger(input.productionStartPeriod) ? input.productionStartPeriod as number : null;
@@ -370,7 +375,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
 
   const latestQuarterlyCash = finite(input.financing.latestQuarterlyCashTarget)
     ? Math.max(0, input.financing.latestQuarterlyCashTarget as number)
-    : cashCurrent;
+    : cashForNav;
   const cashUsePercent = Math.max(0, Math.min(1, input.financing.cashUsePercent ?? 1));
   const requestedCash = input.financing.latestQuarterlyCashTarget !== undefined
     ? ((input.financing.useCashFirst ?? false) ? (latestQuarterlyCash ?? 0) * cashUsePercent : 0)
@@ -400,11 +405,14 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     throw new Error('Project post-financing shares cannot be below current plus manual shares');
   }
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
-  const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
+  const cashT0 = cashForEvInput === null
+    ? null
+    : input.cashForEvIsPostFinancing
+      ? cashForEvInput
+      : cashForEvInput - cashUsedTarget;
   // FCFF already deducts the complete construction CAPEX. Deducting cash used for
   // that same CAPEX from NAV would count the investment twice. NAV therefore adds
   // the reported balance-sheet cash once; cashT0 remains the post-funding liquidity metric.
-  const cashForNav = cashCurrent;
 
   const marketCapCurrent = sharesCurrent !== null && priceCurrent !== null ? sharesCurrent * priceCurrent : null;
   const evTarget = marketCapCurrent !== null && debtT0 !== null && cashT0 !== null
