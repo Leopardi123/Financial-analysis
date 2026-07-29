@@ -38,7 +38,7 @@ async function runCase(rawJson: Record<string, unknown>, label: string) {
       sharesCurrent: 1,
       sharesPostFinancingInput: 1,
       priceCurrentTarget: 1,
-      cashCurrentTarget: 0,
+      cashForNavTarget: 0, cashForEvTarget: 0, cashForEvIsPostFinancing: false,
       debtCurrentTarget: 0,
       enterpriseAdjustmentsTarget: 0,
       fcfUSD: asSeries((series as any).fcfUSD),
