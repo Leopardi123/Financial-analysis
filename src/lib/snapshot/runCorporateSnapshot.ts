@@ -20,6 +20,7 @@ import { aggregateProjectsToCorporateTotals } from './aggregateProjectsToCorpora
 import type { CorporateSnapshotSeries } from '../corporate/snapshot/types.ts';
 import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical, convertQuantityToCanonical } from '../units/conversion.ts';
+import { getPriceKeyDefinition } from '../prices/keys.ts';
 import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
 import { applyStressModifiers } from './applyStressModifiers.ts';
 import { buildValuationTimeline, selectCorporateProjectStartMilestones, selectTimelineChartSeries } from '../valuation/canonicalValuationTimeline.ts';
@@ -307,7 +308,7 @@ type TaxesDetailSeries = {
   municipalRevenueTaxUSD?: Array<number | null>;
 };
 
-type ProjectSeriesContext = {
+export type ProjectSeriesContext = {
   projectId: string;
   taxRate: number | null;
   taxRateByPeriod: Array<number | null> | null;
@@ -652,7 +653,11 @@ function buildMetalRevenueDiagnostics(args: {
   return out;
 }
 
-function buildSnapshotSeries(args: {
+export function priceUSDUnitFromPriceKey(priceKey: string): string {
+  return getPriceKeyDefinition(priceKey).canonicalUnit.replace('_per_', '_');
+}
+
+export function buildSnapshotSeries(args: {
   masterN: number;
   corporateYearsByPeriod: number[];
   projectSeriesContexts: ProjectSeriesContext[];
@@ -1944,7 +1949,7 @@ export async function runCorporateSnapshotPipeline(args: {
             payableQtyUnitByMetal: { ...parsed.engineInputWithoutPrices.payableQtyUnitByMetal },
             priceKeyByMetal: { ...parsed.engineInputWithoutPrices.priceKeyByMetal },
             priceUSDUnitByMetal: Object.fromEntries(
-              Object.keys(parsed.engineInputWithoutPrices.priceKeyByMetal).map((metal) => [metal, `USD_${canonicalUnitForMetal(metal)}`]),
+              Object.entries(parsed.engineInputWithoutPrices.priceKeyByMetal).map(([metal, priceKey]) => [metal, priceUSDUnitFromPriceKey(priceKey)]),
             ),
             spotPriceUSDByMetal: Object.fromEntries(
               Object.entries(resolved.spotPriceUSDByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
