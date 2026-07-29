@@ -56,6 +56,16 @@ export type ValuationTimeline = {
   periods: ValuationPeriodState[];
 };
 
+export type CorporateProjectStartMilestone = {
+  projectId: string;
+  projectName: string | null;
+  corporatePeriodIndex: number;
+  calendarYear: number;
+  navPerShare: NullableNumber;
+  dcfPerShare: NullableNumber;
+  dcfPresentValueTodayPerShare: NullableNumber;
+};
+
 export type TimelineNodes = {
   today: ValuationPeriodState;
   projectStart: ValuationPeriodState;
@@ -187,6 +197,28 @@ export function selectTimelineNodes(timeline: ValuationTimeline): TimelineNodes 
   if (!today || !projectStart) throw new Error('Canonical timeline node is outside the period axis');
   const productionStart = timeline.productionStartPeriod === null ? null : timeline.periods[timeline.productionStartPeriod] ?? null;
   return { today, projectStart, productionStart };
+}
+
+/** Resolve project-local start years once; tables, charts and debug consume these objects. */
+export function selectCorporateProjectStartMilestones(
+  timeline: ValuationTimeline,
+  projects: Array<{ projectId: string; projectName?: string | null; productionStartYear: number | null }>,
+): CorporateProjectStartMilestone[] {
+  if (timeline.scope !== 'corporate') throw new Error('Corporate project milestones require a corporate timeline');
+  return projects.flatMap((project) => {
+    if (!finite(project.productionStartYear)) return [];
+    const state = timeline.periods.find((period) => period.calendarYear === project.productionStartYear);
+    if (!state) return [];
+    return [{
+      projectId: project.projectId,
+      projectName: project.projectName ?? null,
+      corporatePeriodIndex: state.periodIndex,
+      calendarYear: state.calendarYear,
+      navPerShare: state.navPerShareTarget,
+      dcfPerShare: state.dcfPerShareTarget,
+      dcfPresentValueTodayPerShare: state.dcfPresentValueTodayPerShareTarget,
+    }];
+  }).sort((left, right) => left.calendarYear - right.calendarYear || left.projectId.localeCompare(right.projectId));
 }
 
 export function selectTimelineChartSeries(timeline: ValuationTimeline) {

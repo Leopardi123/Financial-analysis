@@ -22,7 +22,7 @@ import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical, convertQuantityToCanonical } from '../units/conversion.ts';
 import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
 import { applyStressModifiers } from './applyStressModifiers.ts';
-import { buildValuationTimeline, selectTimelineChartSeries } from '../valuation/canonicalValuationTimeline.ts';
+import { buildValuationTimeline, selectCorporateProjectStartMilestones, selectTimelineChartSeries } from '../valuation/canonicalValuationTimeline.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -2222,17 +2222,25 @@ export async function runCorporateSnapshotPipeline(args: {
     };
 
     if (projectSeriesContexts.length > 1) {
+      // Corporate totals must be aggregated on the corporate calendar grid. A local
+      // project period is not a corporate period: two projects can both have t=2
+      // while those periods represent different calendar years.
+      const alignToCorporateCalendar = (entry: typeof projectSeriesContexts[number], series: Array<number | null>): Array<number | null> =>
+        aggregation.corporateYearsByPeriod.map((year) => {
+          const localPeriod = entry.yearsByPeriod.indexOf(year);
+          return localPeriod < 0 ? 0 : (series[localPeriod] ?? null);
+        });
       const corporateTotals = aggregateProjectsToCorporateTotals(
         projectSeriesContexts.map((entry) => ({
-          capexUSD: entry.economics.capexUSD,
-          fcfUSD: entry.economics.fcffUSD,
-          operatingCostsUSD: entry.economics.operatingCostsUSD,
-          sustainingCapexUSD: entry.economics.sustainingCapexUSD,
-          siteGandA_USD: entry.economics.siteGandA_USD,
-          royaltiesUSD: entry.economics.royaltiesUSD,
-          reclamationAccrualUSD: entry.economics.reclamationUSD,
-          payable_AuEq_Oz: entry.payableQtyByMetal.Au,
-          sustainingCostUSD: entry.economics.sustainingCostUSD,
+          capexUSD: alignToCorporateCalendar(entry, entry.economics.capexUSD),
+          fcfUSD: alignToCorporateCalendar(entry, entry.economics.fcffUSD),
+          operatingCostsUSD: alignToCorporateCalendar(entry, entry.economics.operatingCostsUSD),
+          sustainingCapexUSD: alignToCorporateCalendar(entry, entry.economics.sustainingCapexUSD),
+          siteGandA_USD: alignToCorporateCalendar(entry, entry.economics.siteGandA_USD),
+          royaltiesUSD: alignToCorporateCalendar(entry, entry.economics.royaltiesUSD),
+          reclamationAccrualUSD: alignToCorporateCalendar(entry, entry.economics.reclamationUSD),
+          payable_AuEq_Oz: alignToCorporateCalendar(entry, entry.payableQtyByMetal.Au),
+          sustainingCostUSD: alignToCorporateCalendar(entry, entry.economics.sustainingCostUSD),
         })),
         aggregation.corporateMasterN,
       );
@@ -3363,6 +3371,13 @@ export async function runCorporateSnapshotPipeline(args: {
       })),
     });
     (snapshot as Record<string, unknown>).canonicalValuationTimeline = corporateCanonicalTimeline;
+    (snapshot as Record<string, unknown>).projectStartMilestones = selectCorporateProjectStartMilestones(
+      corporateCanonicalTimeline,
+      projectsForBuildFunding.map((project) => ({
+        projectId: project.projectId, projectName: project.projectName,
+        productionStartYear: project.yearsByPeriod[project.productionStartPeriod] ?? null,
+      })),
+    );
     const canonicalChartRows = selectTimelineChartSeries(corporateCanonicalTimeline);
     const chartFlows = {
       dcfProdstartPresentPerShareSeries: corporateCanonicalTimeline.periods.map((row) => row.dcfPresentValueTodayPerShareTarget),
