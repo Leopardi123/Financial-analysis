@@ -126,4 +126,20 @@ assert.equal(manuallyDiluted.periods[0].sharesPf, 270);
 assert.equal(manuallyDiluted.periods[0].manualExtraShares, 250);
 assert.equal(manuallyDiluted.periods[0].dcfPerShareTarget, manuallyDiluted.periods[0].dcfAtPeriodTarget! / 270);
 assert.equal(startsToday.periods[0].sharesPf, 20, 'manual share adjustment does not mutate snapshot timeline');
+
+// A valid future-starting model is padded back to the valuation anchor rather
+// than rejected merely because its first modeled cash-flow year is later.
+const losRicosNorth = buildValuationTimeline({
+  scope: 'project', fcfUSD: [-10, -20, 100, 80], capexUSD: [10, 20, 0, 0],
+  yearsByPeriod: [2030, 2031, 2032, 2033], valuationYear: 2026,
+  discountRate: 0.1, fxUSDToTarget: 1, productionStartPeriod: 2,
+  cashTarget: 0, debtTarget: 0, sharesCurrent: 1, sharesPf: 1,
+});
+assert.deepEqual(losRicosNorth.periods.map((period) => period.calendarYear), [2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033]);
+assert.deepEqual(losRicosNorth.periods.slice(0, 4).map((period) => period.fcffUSD), [0, 0, 0, 0]);
+assert.equal(losRicosNorth.todayPeriod, 0);
+assert.equal(losRicosNorth.projectStartPeriod, 4);
+assert.equal(losRicosNorth.productionStartPeriod, 6);
+assert.equal(losRicosNorth.periods[6].calendarYear, 2032);
+assert.equal(losRicosNorth.periods[4].fcffUSD, -10);
 console.log('Canonical valuation timeline T1-T10 passed');
