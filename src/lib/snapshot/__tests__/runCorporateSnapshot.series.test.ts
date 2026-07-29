@@ -824,11 +824,19 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   assert.equal(chartFlows.productionStartPeriod, productionStartPeriod);
   assert.equal(chartFlows.discountRate, body.discountRate);
   assert.equal(chartFlows.yearsByPeriod[productionStartPeriod] - chartFlows.yearsByPeriod[0], productionStartPeriod);
-  const corporateRows = (result.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ dcfExCapexPerShare: number | null; navPerShare: number | null }> } }).corporateValuationTimeSeries.rows;
+  const corporateRows = (result.snapshot as unknown as { corporateValuationTimeSeries: { rows: Array<{ dcfExCapexPerShare: number | null; navPerShare: number | null; sharesPf: number | null; ebitdaTarget: number | null; ev5xTarget: number | null; ev6xTarget: number | null; ev7xTarget: number | null; evEbitda5xPerShare: number | null; evEbitda6xPerShare: number | null; evEbitda7xPerShare: number | null }> } }).corporateValuationTimeSeries.rows;
   for (let period = 0; period < chartFlows.dcfProdstartExCapexPerShareSeries.length; period += 1) {
     assert.equal(chartFlows.dcfProdstartExCapexPerShareSeries[period], corporateRows[period].dcfExCapexPerShare);
     assert.equal(chartFlows.navByPeriodPerShareSeries[period], corporateRows[period].navPerShare);
   }
+  const multipleRow = corporateRows.find((row) => typeof row.ebitdaTarget === 'number' && row.sharesPf !== null);
+  assert.ok(multipleRow, 'Corporate timeline exposes an EV/EBITDA row');
+  assert.equal(multipleRow.ev5xTarget, multipleRow.ebitdaTarget * 5);
+  assert.equal(multipleRow.ev6xTarget, multipleRow.ebitdaTarget * 6);
+  assert.equal(multipleRow.ev7xTarget, multipleRow.ebitdaTarget * 7);
+  const netCash = (multipleRow.evEbitda6xPerShare as number) * (multipleRow.sharesPf as number) - multipleRow.ev6xTarget;
+  assert.equal(multipleRow.evEbitda5xPerShare, (multipleRow.ev5xTarget + netCash) / (multipleRow.sharesPf as number));
+  assert.equal(multipleRow.evEbitda7xPerShare, (multipleRow.ev7xTarget + netCash) / (multipleRow.sharesPf as number));
 });
 
 test('reported debt changes NAV but cannot alter the corporate cash waterfall or High absolute', async () => {

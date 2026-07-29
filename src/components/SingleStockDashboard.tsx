@@ -3352,7 +3352,7 @@ Capital Available: ${availableLabel}`,
   const corporateChartTimeSeries = useMemo(() => {
     const source = corporateSnapshotData?.corporateValuationTimeSeries as {
       valuationYear?: number;
-      rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null }>;
+      rows?: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null; ebitdaTarget?: number | null; ev5xTarget?: number | null; ev6xTarget?: number | null; ev7xTarget?: number | null; evEbitda5xPerShare?: number | null; evEbitda6xPerShare?: number | null; evEbitda7xPerShare?: number | null }>;
       projectMarkers?: Array<{ projectId: string; projectName: string; productionStartYear: number | null }>;
     } | null | undefined;
     if (!source?.rows || !source.projectMarkers) return null;
@@ -3370,6 +3370,9 @@ Capital Available: ${availableLabel}`,
         navPerShare: row.navPerShare === null ? null : row.navPerShare * scale,
         dcfPerShare: row.dcfPerShare === null ? null : row.dcfPerShare * scale,
         dcfExCapexPerShare: row.dcfExCapexPerShare == null ? null : row.dcfExCapexPerShare * scale,
+        evEbitda5xPerShare: row.evEbitda5xPerShare == null ? null : row.evEbitda5xPerShare * scale,
+        evEbitda6xPerShare: row.evEbitda6xPerShare == null ? null : row.evEbitda6xPerShare * scale,
+        evEbitda7xPerShare: row.evEbitda7xPerShare == null ? null : row.evEbitda7xPerShare * scale,
       })),
       projectMarkers: source.projectMarkers.map((marker) => ({
         ...marker,

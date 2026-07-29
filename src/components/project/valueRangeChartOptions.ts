@@ -26,6 +26,8 @@ export function buildValueRangeChartOptions(args: {
       8: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       9: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       10: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
+      11: { type: 'line', color: 'rgba(37, 99, 235, 0.5)', lineWidth: 2, pointSize: 0, visibleInLegend: false },
     },
+    intervals: { style: 'area', color: '#2563eb', fillOpacity: 0.75, lineWidth: 0 },
   };
 }
