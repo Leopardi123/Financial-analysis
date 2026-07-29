@@ -46,6 +46,25 @@ assert.equal(render.trace.renderedTodayHighCoordinate, tableRaw);
 assert.equal(render.trace.renderedTodayHighLabel, `      ${String(tableRaw)}`);
 assert.equal(render.trace.selectedStartPeriod, startPeriods[0]);
 assert.equal(render.displayRange.chartEndYear, 2031);
+const startState = render.trace.selectedStartState!;
+const preStartPoints = render.selection.points.filter((point) => point.periodIndex < (render.trace.selectedStartPeriod as number));
+for (const point of preStartPoints) {
+  const period = view.valuationTimeline.periods[point.periodIndex];
+  const expected = point.isToday
+    ? startState.dcfPresentValueTodayPerShareTarget
+    : (startState.dcfPerShareTarget as number) * ((startState.discountFactorFromToday as number) / (period.discountFactorFromToday as number));
+  assert.equal(point.high, expected);
+  assert.notEqual(point.highSource, 'period-remaining-dcf');
+}
+for (let index = 0; index < preStartPoints.length; index += 1) {
+  assert.ok((render.selection.points[index + 1].high as number) >= (render.selection.points[index].high as number));
+}
+const highSeriesTrace = render.selection.points.slice(0, (render.trace.selectedStartPeriod as number) + 1).map((point) => ({
+  year: point.calendarYear,
+  before: point.isToday ? point.high : view.valuationTimeline.periods[point.periodIndex].dcfPerShareTarget,
+  after: point.high,
+  source: point.highSource,
+}));
 console.log('Abra Corporate runtime trace', JSON.stringify({
   todayPeriod: render.trace.todayPeriod, todayYear: render.trace.todayYear,
   projectStartPeriods: startPeriods, selectedStartPeriod: render.trace.selectedStartPeriod,
@@ -56,4 +75,5 @@ console.log('Abra Corporate runtime trace', JSON.stringify({
   label: render.trace.renderedTodayHighLabel, peakLowYear: render.selection.peakLow?.calendarYear,
   peakHighYear: render.selection.peakHigh?.calendarYear, latestProjectStartYear: render.displayRange.latestProjectStartYear,
   chartEndYear: render.displayRange.chartEndYear,
+  highSeriesTrace,
 }));

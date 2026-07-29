@@ -55,19 +55,37 @@ assert.equal(projectChart.peakLow?.low, Math.max(...projectChart.points.map((poi
 assert.equal(projectChart.peakHigh?.high, Math.max(...projectChart.points.map((point) => point.high).filter((value): value is number => value !== null)), 'J High peak is own-series maximum');
 for (const point of projectChart.points) {
   assert.equal(point.low, project.periods[point.periodIndex].navPerShareTarget, 'K Low identity remains NAV');
-  const expectedHigh: number | null | undefined = point.isToday ? nodes.productionStart?.dcfPresentValueTodayPerShareTarget : project.periods[point.periodIndex].dcfPerShareTarget;
+  const expectedHigh: number | null | undefined = point.isToday
+    ? nodes.productionStart?.dcfPresentValueTodayPerShareTarget
+    : point.periodIndex < input.productionStartPeriod
+      ? (nodes.productionStart?.dcfPerShareTarget ?? 0) * ((nodes.productionStart?.discountFactorFromToday ?? 0) / (project.periods[point.periodIndex].discountFactorFromToday ?? 1))
+      : project.periods[point.periodIndex].dcfPerShareTarget;
   assert.equal(point.high, expectedHigh, 'K High identity remains DCF');
 }
+assert.equal(projectChart.today.high, nodes.productionStart?.dcfPresentValueTodayPerShareTarget, '1 today anchor');
+assert.equal(projectChart.starts[0].high, nodes.productionStart?.dcfPerShareTarget, '2 start anchor');
+for (const point of projectChart.points.filter((candidate) => candidate.periodIndex < input.productionStartPeriod)) {
+  const start: typeof project.periods[number] = nodes.productionStart!;
+  const expected: number | null = point.isToday
+    ? start.dcfPresentValueTodayPerShareTarget
+    : (start.dcfPerShareTarget ?? 0) * ((start.discountFactorFromToday ?? 0) / (project.periods[point.periodIndex].discountFactorFromToday ?? 1));
+  assert.equal(point.high, expected, '3 pre-production High is the selected start DCF rolled to t');
+  assert.notEqual(point.highSource, 'period-remaining-dcf', '5 construction-tail DCF is forbidden before start');
+}
+for (let period = project.todayPeriod; period < input.productionStartPeriod; period += 1) {
+  assert.ok((projectChart.points[period + 1].high ?? -Infinity) >= (projectChart.points[period].high ?? Infinity), '4 positive-rate roll-up is monotonic');
+}
+assert.deepEqual(corporateChart.points.map((point) => point.high), projectChart.points.map((point) => point.high), '6 one-project Corporate High equals Project year for year');
 const crossing = buildValuationTimeline({ scope: 'project', ...input });
-crossing.periods[1].navPerShareTarget = 100;
-crossing.periods[1].dcfPerShareTarget = 2;
+crossing.periods[3].navPerShareTarget = 100;
+crossing.periods[3].dcfPerShareTarget = 2;
 crossing.periods[2].navPerShareTarget = 1;
 crossing.periods[2].dcfPerShareTarget = 200;
 const crossingChart = selectValuationChart(crossing);
-assert.equal(crossingChart.peakLow?.periodIndex, 1, 'I/J Low has its own peak marker');
+assert.equal(crossingChart.peakLow?.periodIndex, 3, 'I/J Low has its own peak marker');
 assert.equal(crossingChart.peakHigh?.periodIndex, 2, 'I/J High has its own peak marker');
-assert.equal(crossingChart.points[1].low, 100, 'K crossing does not rename Low');
-assert.equal(crossingChart.points[1].high, 2, 'K crossing does not rename High');
+assert.equal(crossingChart.points[3].low, 100, 'K crossing does not rename Low');
+assert.equal(crossingChart.points[3].high, 2, 'K crossing does not rename High');
 
 // AbraSilver selector regression values are compared as raw numbers (before presentation rounding).
 const abraSelectorFixture = buildValuationTimeline({ scope: 'project', ...input });

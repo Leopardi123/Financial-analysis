@@ -69,6 +69,7 @@ export type ValuationChartPoint = {
   high: NullableNumber;
   isToday: boolean;
   isStart: boolean;
+  highSource: 'start-dcf-present' | 'start-dcf-rollup' | 'period-remaining-dcf';
 };
 
 export type ValuationChartSelection = {
@@ -209,16 +210,24 @@ export function selectValuationChart(
   const validStartPeriods = new Set(startPeriods.filter((period) => Number.isInteger(period) && timeline.periods[period]));
   if (selectedStartPeriod !== null) validStartPeriods.add(selectedStartPeriod);
   const selectedStart = selectedStartPeriod === null ? null : timeline.periods[selectedStartPeriod] ?? null;
-  const points = timeline.periods.map((period): ValuationChartPoint => ({
-    periodIndex: period.periodIndex,
-    calendarYear: period.calendarYear,
-    low: period.navPerShareTarget,
-    high: period.periodIndex === timeline.todayPeriod
+  const points = timeline.periods.map((period): ValuationChartPoint => {
+    const isToday = period.periodIndex === timeline.todayPeriod;
+    const isBeforeSelectedStart = selectedStartPeriod !== null && period.periodIndex < selectedStartPeriod;
+    const high = isToday
       ? selectedStart?.dcfPresentValueTodayPerShareTarget ?? null
-      : period.dcfPerShareTarget,
-    isToday: period.periodIndex === timeline.todayPeriod,
-    isStart: validStartPeriods.has(period.periodIndex),
-  }));
+      : isBeforeSelectedStart
+        ? rollStartDcfToPeriod(selectedStart, period)
+        : period.dcfPerShareTarget;
+    return {
+      periodIndex: period.periodIndex,
+      calendarYear: period.calendarYear,
+      low: period.navPerShareTarget,
+      high,
+      isToday,
+      isStart: validStartPeriods.has(period.periodIndex),
+      highSource: isToday ? 'start-dcf-present' : isBeforeSelectedStart ? 'start-dcf-rollup' : 'period-remaining-dcf',
+    };
+  });
   const maximum = (field: 'low' | 'high'): ValuationChartPoint | null => points.reduce<ValuationChartPoint | null>((peak, point) => {
     const value = point[field];
     if (!finite(value)) return peak;
@@ -234,6 +243,18 @@ export function selectValuationChart(
     peakHigh: maximum('high'),
     selectedStartPeriod,
   };
+}
+
+function rollStartDcfToPeriod(
+  start: ValuationPeriodState | null,
+  period: ValuationPeriodState,
+): NullableNumber {
+  if (
+    start?.dcfPerShareTarget === null || start?.dcfPerShareTarget === undefined
+    || !finite(start.discountFactorFromToday) || !finite(period.discountFactorFromToday)
+    || period.discountFactorFromToday === 0
+  ) return null;
+  return start.dcfPerShareTarget * (start.discountFactorFromToday / period.discountFactorFromToday);
 }
 
 /** Corporate and Project tables/charts share this exact milestone rule. */
