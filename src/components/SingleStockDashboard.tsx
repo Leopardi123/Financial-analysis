@@ -6,7 +6,6 @@ import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import AlltGickFelCard from "./project/AlltGickFelCard";
-import { resolveCorporateMilestoneYear } from "./project/corporateMilestoneYear";
 import type { StressOptions } from "../lib/snapshot/applyStressModifiers.ts";
 import useCompanyData from "../hooks/useCompanyData";
 import type { CompanyResponse } from "./Viewer";
@@ -3045,6 +3044,7 @@ Capital Available: ${availableLabel}`,
       payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
+      calendarYears: Array.isArray(valuationYears) ? valuationYears.filter((year): year is number => typeof year === "number") : undefined,
       valuationPeriodOffset: internalStartYear !== null && valuationStartYear !== null ? internalStartYear - valuationStartYear : 0,
       financing: {
         equityPct: toInputNumber(projectEquityPct) ?? 100,
@@ -3099,6 +3099,9 @@ Capital Available: ${availableLabel}`,
       payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
+      calendarYears: Array.isArray((corporateSnapshotData.corporateValuationTimeSeries as { rows?: Array<{ year: number }> } | undefined)?.rows)
+        ? (corporateSnapshotData.corporateValuationTimeSeries as { rows: Array<{ year: number }> }).rows.map((row) => row.year)
+        : undefined,
       valuationPeriodOffset: internalStartYear !== null && typeof valuationYear === "number" ? internalStartYear - valuationYear : 0,
       financing: {
         equityPct: 100,
@@ -3245,134 +3248,26 @@ Capital Available: ${availableLabel}`,
   };
 
   const corporateProdStartMarkerValuesByKey = useMemo(() => {
-    if (!corporateSnapshotData) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
-
-    const valuationYears = ((corporateSnapshotData.corporateValuationTimeSeries as {
-      rows?: Array<{ year?: number }>;
-    } | null | undefined)?.rows ?? [])
-      .map((row) => row.year)
-      .filter((year): year is number => typeof year === "number" && Number.isFinite(year));
-    const timeline = corporateSnapshotData.modeledValuationTimeline as {
-      markers?: Array<{
-        tp: number;
-        corporateTpIndexUsed?: number | null;
-        yearLabelUsed?: string | null;
-        lista2Metrics?: {
-          DCF_prodStart_exCapex_TargetCurrency?: number | null;
-          DCF_prodStart_exCapex_perShare_TargetCurrency?: number | null;
-          NPV_prodStart_TargetCurrency?: number | null;
-          NPV_prodStart_perShare_TargetCurrency?: number | null;
-          NAV_prodStart_TargetCurrency?: number | null;
-          NAV_prodStart_perShare_TargetCurrency?: number | null;
-          InitialCAPEX_incremental_TargetCurrency?: number | null;
-          DCF_prodStart_present_TargetCurrency?: number | null;
-          DCF_prodStart_present_perShare_TargetCurrency?: number | null;
-        };
-      }>;
-    } | null | undefined;
-    const markers = Array.isArray(timeline?.markers) ? timeline.markers : [];
-    if (markers.length < 1) return {} as Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>>;
-
-    const financing = (corporateSnapshotData?.financing ?? {}) as Record<string, unknown>;
-    const sharesPf = typeof financing.shares_post_financing === "number" && Number.isFinite(financing.shares_post_financing) && financing.shares_post_financing > 0
-      ? financing.shares_post_financing
-      : null;
-    const sharesPfAdjusted = sharesPf === null ? null : sharesPf + parseExtraShares(corporateExtraSharesInput);
-    const cashT0 = typeof financing.cash_t0_post_TargetCurrency === "number" && Number.isFinite(financing.cash_t0_post_TargetCurrency)
-      ? financing.cash_t0_post_TargetCurrency
-      : null;
-    const debtT0 = typeof financing.debt_t0_post_TargetCurrency === "number" && Number.isFinite(financing.debt_t0_post_TargetCurrency)
-      ? financing.debt_t0_post_TargetCurrency
-      : null;
-    const netCashPerShare = sharesPf !== null && cashT0 !== null && debtT0 !== null
-      ? (cashT0 - debtT0) / sharesPf
-      : null;
-
-    const buildValues = (
-      metricKey:
-        | "NPV_prodStart"
-        | "NPV_prodStart_perShare"
-        | "NAV_prodStart"
-        | "NAV_prodStart_perShare"
-        | "DCF_Target"
-        | "DCF_perShare",
-    ): YearlyMetricValue[] => {
-      const values: YearlyMetricValue[] = [];
-      for (const marker of markers) {
-        const year = resolveCorporateMilestoneYear(marker, valuationYears);
-        const dcfProdStartPerShareRaw = marker.lista2Metrics?.DCF_prodStart_exCapex_perShare_TargetCurrency;
-        const npvProdStartPerShareRaw = marker.lista2Metrics?.NPV_prodStart_perShare_TargetCurrency;
-        const navProdStartPerShareRaw = marker.lista2Metrics?.NAV_prodStart_perShare_TargetCurrency;
-        const dcfProdStartRaw = marker.lista2Metrics?.DCF_prodStart_exCapex_TargetCurrency;
-        const npvProdStartRaw = marker.lista2Metrics?.NPV_prodStart_TargetCurrency;
-        const navProdStartRaw = marker.lista2Metrics?.NAV_prodStart_TargetCurrency;
-
-        const dcfProdStartPerShare = typeof dcfProdStartPerShareRaw === "number" && Number.isFinite(dcfProdStartPerShareRaw)
-          ? dcfProdStartPerShareRaw
-          : null;
-        const npvProdStartPerShare = typeof npvProdStartPerShareRaw === "number" && Number.isFinite(npvProdStartPerShareRaw)
-          ? npvProdStartPerShareRaw
-          : null;
-        const navProdStartPerShare = typeof navProdStartPerShareRaw === "number" && Number.isFinite(navProdStartPerShareRaw)
-          ? navProdStartPerShareRaw
-          : null;
-        const dcfProdStart = typeof dcfProdStartRaw === "number" && Number.isFinite(dcfProdStartRaw)
-          ? dcfProdStartRaw
-          : null;
-        const npvProdStart = typeof npvProdStartRaw === "number" && Number.isFinite(npvProdStartRaw)
-          ? npvProdStartRaw
-          : null;
-        const navProdStart = typeof navProdStartRaw === "number" && Number.isFinite(navProdStartRaw)
-          ? navProdStartRaw
-          : null;
-
-        const value = (() => {
-          if (metricKey === "NPV_prodStart_perShare") return npvProdStart !== null && sharesPfAdjusted ? npvProdStart / sharesPfAdjusted : npvProdStartPerShare;
-          if (metricKey === "NPV_prodStart") return npvProdStart;
-          if (metricKey === "NAV_prodStart_perShare") return navProdStart !== null && sharesPfAdjusted ? navProdStart / sharesPfAdjusted : navProdStartPerShare;
-          if (metricKey === "DCF_perShare") return dcfProdStart !== null && sharesPfAdjusted ? dcfProdStart / sharesPfAdjusted : dcfProdStartPerShare;
-          if (metricKey === "DCF_Target") return dcfProdStart;
-          return navProdStart;
-        })();
-
-        if (value === null) continue;
-        values.push({ year, value });
-      }
-      return values;
-    };
-
     const result: Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>> = {};
-    ([
-      "NPV_prodStart",
-      "NPV_prodStart_perShare",
-      "NAV_prodStart",
-      "NAV_prodStart_perShare",
-      "DCF_Target",
-      "DCF_perShare",
-    ] as const).forEach((key) => {
-      const values = buildValues(key);
-      if (values.length > 0) {
-        result[key] = values;
-      }
-    });
-
-    if (debugEnabled) {
-      const formatted = Object.fromEntries(
-        Object.entries(result).map(([metricKey, values]) => [
-          metricKey,
-          (values ?? []).map((row) => `${row.year}: ${formatMetricValue({ value: row.value, reason: null }, "money", lockedTargetCurrency)}`).join(", "),
-        ]),
-      );
-      console.debug("[corporate-prod-start-markers]", {
-        markerCount: markers.length,
-        sharesPf,
-        netCashPerShare,
-        formatted,
+    if (!corporateViewMetrics || !corporateSnapshotData) return result;
+    const markerPeriods = ((corporateSnapshotData.modeledValuationTimeline as { markers?: Array<{ corporateTpIndexUsed?: number | null }> } | undefined)?.markers ?? [])
+      .map((marker) => marker.corporateTpIndexUsed)
+      .filter((period): period is number => Number.isInteger(period));
+    const fields = {
+      NPV_prodStart: 'npvAtPeriodTarget', NPV_prodStart_perShare: 'npvPerShareTarget',
+      NAV_prodStart: 'navAtPeriodTarget', NAV_prodStart_perShare: 'navPerShareTarget',
+      DCF_Target: 'dcfAtPeriodTarget', DCF_perShare: 'dcfPerShareTarget',
+    } as const;
+    for (const [metric, field] of Object.entries(fields) as Array<[keyof typeof fields, typeof fields[keyof typeof fields]]>) {
+      const rows = markerPeriods.flatMap((period) => {
+        const state = corporateViewMetrics.valuationTimeline.periods[period];
+        const value = state?.[field];
+        return state && typeof value === 'number' ? [{ year: String(state.calendarYear), value }] : [];
       });
+      if (rows.length) result[metric] = rows;
     }
-
     return result;
-  }, [corporateExtraSharesInput, corporateSnapshotData, debugEnabled, lockedTargetCurrency]);
+  }, [corporateSnapshotData, corporateViewMetrics]);
 
   const corporateProdStartMarkerTextByKey = useMemo(() => {
     return Object.fromEntries(
@@ -6182,6 +6077,7 @@ Capital Available: ${availableLabel}`,
                           npvHigh={projectViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                           tpLow={projectViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={projectViewMetrics.list2.DCF_perShare?.value ?? null}
+                          canonicalTimeline={projectViewMetrics.valuationTimeline}
                           canonicalSharesPostFinancing={projectViewMetrics.marketBox.sharesPf.value}
                           chartFlows={(() => {
                             const projectPayload = (projectSnapshotData?.project ?? null) as { chartFlows?: { dcfProdstartPresentPerShareSeries?: Array<number | null>; navProdstartPerShareSeries?: Array<number | null>; dcfProdstartExCapexPerShareSeries?: Array<number | null>; navByPeriodPerShareSeries?: Array<number | null>; yearsByPeriod?: Array<number | null>; productionStartPeriod?: number | null; discountRate?: number | null } | null } | null;

@@ -1,9 +1,7 @@
 import { useMemo } from "react";
-import { computeLista2CfDcfMetrics } from "../../lib/snapshot/lista2CfDcf";
-import { rescalePerShareSeries } from "./chartDenominator";
 import { buildCorporateChartRows, buildCorporateYearTicks, clipCorporateChartInput, valueRangeChartHeader, type CorporateChartInput } from "./corporateChartRows";
 import ValueRangeChart from "./ValueRangeChart";
-import { buildValueRangeChartRow, buildValueRangeCurve, findFirstHighPeak, formatPeakTooltip } from "./valueRangeCurve";
+import { buildValueRangeChartRow, findFirstHighPeak } from "./valueRangeCurve";
 
 type TpMarker = {
   tp: number;
@@ -39,6 +37,10 @@ type ValueRangeSnapshotCardProps = {
     valuationYear?: number;
     rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null }>;
     projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null; navPerShare?: number | null; dcfPerShare?: number | null }>;
+  } | null;
+  canonicalTimeline?: {
+    productionStartPeriod: number | null;
+    periods: Array<{ periodIndex: number; calendarYear: number; dcfPerShareTarget: number | null; navPerShareTarget: number | null }>;
   } | null;
   projectDebug?: {
     yearsByPeriod?: Array<number | null> | null;
@@ -124,7 +126,7 @@ function normalizeTpMarkers(tpMarkers: TpMarker[] | undefined, fallback: { low: 
       if (high === null && low === null) return { ...marker, high: null, low: null };
       if (high === null) return { ...marker, high: low, low };
       if (low === null) return { ...marker, high, low: high };
-      return { ...marker, high: Math.max(high, low), low: Math.min(high, low) };
+      return { ...marker, high, low };
     })
     .sort((a, b) => a.tp - b.tp);
 
@@ -155,268 +157,64 @@ function isProjectChartDataTypeSafe(data: Array<Array<string | number | null | {
 }
 
 
-function computeCorrectDcfAt(args: { fcffSeries: Array<number | null>; discountRate: number; t: number }): number | null {
-  let sum = 0;
-  for (let k = args.t; k < args.fcffSeries.length; k += 1) {
-    const cf = args.fcffSeries[k];
-    if (!isFiniteNumber(cf)) return null;
-    sum += cf / ((1 + args.discountRate) ** (k - args.t));
-  }
-  return Number.isFinite(sum) ? sum : null;
-}
-
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, chartFlows, currencyCode, discountRate: discountRateProp, projectDebug, canonicalSharesPostFinancing, corporateTimeSeries } = props;
+  const { mode = "corporate", priceToday, npvLow, npvHigh, tpLow, tpHigh, tpMarkers, currencyCode, discountRate: discountRateProp, projectDebug, corporateTimeSeries, canonicalTimeline } = props;
   const isProjectMode = mode === "project";
 
   const projectChartModel = useMemo(() => {
-    if (!isProjectMode) return null;
-    const sourceShares = isFiniteNumber(projectDebug?.sharesPostFinancing) && (projectDebug?.sharesPostFinancing as number) > 0 ? projectDebug?.sharesPostFinancing as number : null;
-    const canonicalShares = isFiniteNumber(canonicalSharesPostFinancing) && (canonicalSharesPostFinancing as number) > 0 ? canonicalSharesPostFinancing as number : null;
-    const dcfSeriesRawAll = rescalePerShareSeries(chartFlows?.dcfProdstartExCapexPerShareSeries, sourceShares, canonicalShares);
-    const navSeriesRawAll = rescalePerShareSeries(chartFlows?.navByPeriodPerShareSeries, sourceShares, canonicalShares);
-    const rawLen = Math.max(dcfSeriesRawAll.length, navSeriesRawAll.length);
-    if (rawLen < 1) return null;
-    const years = (chartFlows?.yearsByPeriod ?? projectDebug?.yearsByPeriod ?? []).filter((year): year is number => isFiniteNumber(year));
-    if (years.length < rawLen) return null;
-    const yearNow = years[0];
-    const tpOffset = Number.isInteger(chartFlows?.productionStartPeriod)
-      ? chartFlows?.productionStartPeriod as number
-      : Number.isInteger(projectDebug?.tpPeriod) ? projectDebug?.tpPeriod as number : -1;
-    if (tpOffset < 0 || tpOffset >= rawLen) return null;
-    const yearTp = years[tpOffset];
-    const actualDiscountRate = isFiniteNumber(chartFlows?.discountRate) && (chartFlows?.discountRate as number) > 0
-      ? chartFlows?.discountRate as number
-      : isFiniteNumber(projectDebug?.discountRate) && (projectDebug?.discountRate as number) > 0 ? projectDebug?.discountRate as number : null;
-    if (actualDiscountRate === null) return null;
-    const highTp = isFiniteNumber(tpHigh) ? tpHigh : (isFiniteNumber(dcfSeriesRawAll[tpOffset]) ? dcfSeriesRawAll[tpOffset] : null);
-    const lowTp = isFiniteNumber(tpLow) ? tpLow : (isFiniteNumber(navSeriesRawAll[tpOffset]) ? navSeriesRawAll[tpOffset] : null);
-    const fullCurve = buildValueRangeCurve({ totalLen: rawLen, tpOffset, discountRate: actualDiscountRate, lowTp, highTp, navSeriesRaw: navSeriesRawAll, dcfExCapexSeriesRaw: dcfSeriesRawAll });
-    const fullPeak = findFirstHighPeak(fullCurve.high.map((high, index) => ({ year: years[index], high, low: fullCurve.low[index] })));
-    const defaultEndIndex = Math.min(rawLen - 1, tpOffset + 3);
-    const totalLen = Math.max(defaultEndIndex, fullPeak?.index ?? 0) + 1;
-    const dcfSeriesRaw = dcfSeriesRawAll.slice(0, totalLen);
-    const navSeriesRaw = navSeriesRawAll.slice(0, totalLen);
-    const curve = buildValueRangeCurve({ totalLen, tpOffset, discountRate: actualDiscountRate, lowTp, highTp, navSeriesRaw, dcfExCapexSeriesRaw: dcfSeriesRaw });
-    const discountRate = actualDiscountRate;
-    const highByIndex = curve.high;
-    const lowByIndex = curve.low;
-    const peak = findFirstHighPeak(highByIndex.map((high, index) => ({ year: years[index], high, low: lowByIndex[index] })));
-    const highBeforeFixByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
-    const highExponentBeforeByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
-    const highExponentAfterByIndex: Array<number | null> = Array.from({ length: totalLen }, () => null);
-
-    for (let idx = tpOffset; idx < totalLen; idx += 1) highExponentAfterByIndex[idx] = 0;
-
-    const rows: Array<Array<number | string | null>> = [];
-    const domainValues: number[] = [];
-    const currentLowCandidate = lowByIndex[0];
-    const currentHighCandidate = highByIndex[0];
-    const markerDomain = [currentLowCandidate, currentHighCandidate, priceToday].filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-    const markerSpan = markerDomain.length > 1 ? Math.max(...markerDomain) - Math.min(...markerDomain) : 0;
-    const markerMinSep = Math.max(0.12, markerSpan * 0.08);
-    const suppressCurrentPriceLabel = isFiniteNumber(priceToday)
-      && ((typeof currentLowCandidate === "number" && Math.abs((priceToday as number) - currentLowCandidate) < markerMinSep)
-        || (typeof currentHighCandidate === "number" && Math.abs((priceToday as number) - currentHighCandidate) < markerMinSep));
-
-    for (let idx = 0; idx < totalLen; idx += 1) {
-      const low = lowByIndex[idx];
-      const high = highByIndex[idx];
-      const orderedLow = low !== null && high !== null ? Math.min(low, high) : low;
-      const orderedHigh = low !== null && high !== null ? Math.max(low, high) : high;
-      const currentMarker = idx === 0 && isFiniteNumber(priceToday) ? priceToday : null;
-      const tpLowMarker = idx === tpOffset && lowTp !== null ? lowTp : null;
-      const tpHighMarker = idx === tpOffset && highTp !== null ? highTp : null;
-
-      for (const value of [orderedLow, orderedHigh, currentMarker, tpLowMarker, tpHighMarker]) {
-        if (typeof value === 'number' && Number.isFinite(value)) domainValues.push(value);
-      }
-
-      rows.push(buildValueRangeChartRow({
-        year: years[idx], low, high, currentPrice: currentMarker, annotateCurrent: idx === 0,
-        annotateProductionStart: idx === tpOffset, format: formatPerShareValue,
-        currentPriceAnnotation: currentMarker !== null && !suppressCurrentPriceLabel ? `      ${formatPerShareValue(currentMarker)}` : null,
-        highlightPeak: idx === peak?.index,
-        peakTooltip: peak ? formatPeakTooltip(peak, formatPerShareValue, currencyCode) : null,
-      }));
-    }
-
-    if (domainValues.length < 1) return null;
+    if (!isProjectMode || !canonicalTimeline?.periods.length) return null;
+    const periods = canonicalTimeline.periods;
+    const domainValues = periods
+      .flatMap((period) => [period.dcfPerShareTarget, period.navPerShareTarget])
+      .filter((value): value is number => isFiniteNumber(value));
+    if (isFiniteNumber(priceToday)) domainValues.push(priceToday);
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
-    const data = [
-        [...valueRangeChartHeader],
-        ...rows,
-      ] as (string | number | null | { role: string; type?: string })[][];
-
+    const tpOffset = canonicalTimeline.productionStartPeriod ?? -1;
+    const rows = periods.map((period) => buildValueRangeChartRow({
+      year: period.calendarYear,
+      low: period.navPerShareTarget,
+      high: period.dcfPerShareTarget,
+      currentPrice: period.periodIndex === 0 && isFiniteNumber(priceToday) ? priceToday : null,
+      annotateCurrent: period.periodIndex === 0,
+      annotateProductionStart: period.periodIndex === tpOffset,
+      format: formatPerShareValue,
+    }));
+    const data = [[...valueRangeChartHeader], ...rows] as (string | number | null | { role: string; type?: string })[][];
     if (!isProjectChartDataTypeSafe(data)) return null;
-
-    const debugRows = rows.map((row, idx) => {
-      const discountFactorHigh = discountRate !== null
-        ? (idx <= tpOffset ? (1 + discountRate) ** (tpOffset - idx) : 1 / ((1 + discountRate) ** idx))
-        : null;
-      const discountFactorLow = idx > tpOffset
-        ? null
-        : null;
-      const discountedHigh = discountRate !== null && highByIndex[idx] !== null
-        ? (idx <= tpOffset ? highByIndex[idx] : highByIndex[idx] / ((1 + discountRate) ** idx))
-        : null;
-      const discountedLow = discountFactorLow !== null && lowByIndex[idx] !== null
-        ? lowByIndex[idx] * discountFactorLow
-        : null;
-      return {
-        periodIndex: idx,
-        calendarYear: row[0],
-        undiscountedHigh: highByIndex[idx],
-        undiscountedLow: lowByIndex[idx],
-        discountFactorHigh,
-        discountFactorLow,
-        discountedHigh,
-        discountedLow,
-        highBeforeFix: highBeforeFixByIndex[idx],
-        highExponentBefore: highExponentBeforeByIndex[idx],
-        highExponentAfter: highExponentAfterByIndex[idx],
-      };
-    });
-
+    const debugRows = periods.map((period) => ({
+      periodIndex: period.periodIndex,
+      calendarYear: period.calendarYear,
+      undiscountedHigh: period.dcfPerShareTarget,
+      undiscountedLow: period.navPerShareTarget,
+      discountedHigh: null,
+      discountedLow: null,
+      discountFactorHigh: null,
+      discountFactorLow: null,
+      highBeforeFix: null,
+      highExponentBefore: null,
+      highExponentAfter: null,
+    }));
     return {
-      yearNow,
+      yearNow: periods[0].calendarYear,
       data,
-      ticks: [
-        { v: yearNow - 1, f: "" },
-        { v: yearNow, f: String(yearNow) },
-        { v: yearTp, f: String(yearTp) },
-        ...(peak ? [{ v: peak.year, f: String(peak.year) }] : []),
-      ],
-      peakYear: peak?.year ?? yearNow,
+      ticks: periods.filter((period) => period.periodIndex === 0 || period.periodIndex === tpOffset)
+        .map((period) => ({ v: period.calendarYear, f: String(period.calendarYear) })),
+      peakYear: periods[0].calendarYear,
       valueWindow,
-      discountRate,
+      discountRate: null,
       tpOffset,
       debugRows,
       rawFlowSeries: {
-        dcfSeriesRawAll,
-        navSeriesRawAll,
-        dcfSeriesRaw,
-        navSeriesRaw,
+        dcfSeriesRawAll: periods.map((period) => period.dcfPerShareTarget),
+        navSeriesRawAll: periods.map((period) => period.navPerShareTarget),
+        dcfSeriesRaw: periods.map((period) => period.dcfPerShareTarget),
+        navSeriesRaw: periods.map((period) => period.navPerShareTarget),
       },
     };
-  }, [canonicalSharesPostFinancing, chartFlows, currencyCode, isProjectMode, npvLow, priceToday, projectDebug?.discountRate, projectDebug?.sharesPostFinancing, projectDebug?.tpPeriod, projectDebug?.yearsByPeriod, tpHigh, tpLow]);
+  }, [canonicalTimeline, isProjectMode, priceToday]);
 
-  const projectCurveDiagnosis = useMemo(() => {
-    if (!projectChartModel) return null;
-    const firstHighDrop = projectChartModel.debugRows.find((row, idx) => idx > 0 && row.discountedHigh !== null && projectChartModel.debugRows[idx - 1].discountedHigh !== null && (row.discountedHigh as number) < (projectChartModel.debugRows[idx - 1].discountedHigh as number)) ?? null;
-    const firstLowDrop = projectChartModel.debugRows.find((row, idx) => idx > 0 && row.discountedLow !== null && projectChartModel.debugRows[idx - 1].discountedLow !== null && (row.discountedLow as number) < (projectChartModel.debugRows[idx - 1].discountedLow as number)) ?? null;
-    return { firstHighDrop, firstLowDrop };
-  }, [projectChartModel]);
 
-  const fcffComparison = useMemo(() => {
-    if (!projectDebug) return null;
-    const prod = Array.isArray(projectDebug.fcffProductionTableSeries) ? projectDebug.fcffProductionTableSeries : [];
-    const npv = Array.isArray(projectDebug.fcffNpvSeries) ? projectDebug.fcffNpvSeries : [];
-    const len = Math.max(prod.length, npv.length);
-    const rows = Array.from({ length: len }, (_, t) => {
-      const p = prod[t] ?? null;
-      const n = npv[t] ?? null;
-      const diff = p !== null && n !== null ? p - n : null;
-      return { periodIndex: t, fcffProductionTable: p, fcffNpv: n, diff };
-    });
-    const firstDiff = rows.find((row) => row.diff !== null && row.diff !== 0) ?? null;
-    return { rows, match: firstDiff === null, firstDiff };
-  }, [projectDebug]);
-
-  const graphDebug2 = useMemo(() => {
-    if (!projectChartModel || !projectDebug?.debugEnabled) return null;
-    const r = isFiniteNumber(projectDebug.discountRate) ? projectDebug.discountRate : null;
-    const tp = Number.isInteger(projectDebug.tpPeriod) ? (projectDebug.tpPeriod as number) : null;
-    const fcffSeries = Array.isArray(projectDebug.fcffNpvSeries) ? projectDebug.fcffNpvSeries : [];
-    const yearsByPeriod = Array.isArray(projectDebug.yearsByPeriod) ? projectDebug.yearsByPeriod : [];
-
-    const points = projectChartModel.debugRows
-      .map((row) => {
-        const idx = row.periodIndex;
-        const flowIndex = idx - projectChartModel.tpOffset;
-        const postTp = idx >= projectChartModel.tpOffset;
-        const sourceHighRaw = projectChartModel.rawFlowSeries.dcfSeriesRaw[idx] ?? null;
-        const sourceLowRaw = projectChartModel.rawFlowSeries.navSeriesRaw[idx] ?? null;
-        const exponentHigh = row.highExponentAfter ?? null;
-        const scalingHigh = postTp ? 1 : null;
-        const graphHighValue = row.undiscountedHigh ?? null;
-        const graphHighValueBeforeFix = row.highBeforeFix ?? null;
-        const exponentHighBeforeFix = row.highExponentBefore ?? null;
-        const graphLowValue = row.undiscountedLow ?? null;
-        const correctHighValue = (r !== null && postTp) ? computeCorrectDcfAt({ fcffSeries, discountRate: r, t: idx }) : null;
-        const diffHigh = graphHighValue !== null && correctHighValue !== null ? graphHighValue - correctHighValue : null;
-        return {
-          periodIndex: idx,
-          calendarYear: row.calendarYear,
-          tp,
-          flowIndex,
-          postTp,
-          sourceHighRaw,
-          sourceLowRaw,
-          sourceBasisHigh: 'rolling ex-CAPEX DCF per share at the same economic period',
-          sourceBasisLow: 'rolling NAV per share at the same economic period',
-          discountRate: r,
-          exponentHigh,
-          scalingHigh,
-          graphHighValue,
-          graphHighValueBeforeFix,
-          exponentHighBeforeFix,
-          graphLowValue,
-          correctHighValue,
-          diffHigh,
-          calendarFromSeries: yearsByPeriod[tp !== null ? tp + flowIndex : -1] ?? null,
-        };
-      })
-      .filter((row) => row.postTp);
-
-    const focus = points.filter((row) => row.flowIndex >= 0 && row.flowIndex <= 3);
-
-    const centralTodayBasisRows = focus.map((row) => {
-      const tpAtPoint = tp !== null ? tp + row.flowIndex : null;
-      const hasCentralInputs = tpAtPoint !== null && r !== null && fcffSeries.length > 0;
-      const central = hasCentralInputs
-        ? computeLista2CfDcfMetrics({
-            fcfUSD_total: fcffSeries,
-            masterN: fcffSeries.length - 1,
-            productionStartPeriod: tpAtPoint,
-            discountRate: r as number,
-            shares_post_financing: projectDebug.sharesPostFinancing ?? null,
-            fx_USD_to_TargetCurrency: projectDebug.fxUsdToTarget ?? null,
-            npvToday_USD: null,
-            netCash_t0_post_TargetCurrency: projectDebug.netCashTarget ?? null,
-            capexUSD_total: Array.isArray(projectDebug.capexSeries) ? projectDebug.capexSeries : undefined,
-          })
-        : null;
-
-      const highPresentUsedNow = row.sourceHighRaw ?? null;
-      const highPresentFromCentral = central?.metrics.DCF_prodStart_present_perShare_TargetCurrency ?? null;
-      const lowPresentUsedNow = (() => {
-        if (row.sourceLowRaw === null || r === null || tp === null || row.flowIndex < 0) return null;
-        return row.sourceLowRaw / ((1 + r) ** (tp + row.flowIndex));
-      })();
-      const lowPresentFromCentral = central?.metrics.NAV_prodStart_perShare_TargetCurrency ?? null;
-
-      return {
-        pointLabel: row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`,
-        periodIndex: row.periodIndex,
-        calendarYear: row.calendarYear,
-        highPresentUsedNow,
-        highPresentFromCentral,
-        lowPresentUsedNow,
-        lowPresentFromCentral,
-        highUsedSourceName: 'chartFlows.dcfProdstartExCapexPerShareSeries',
-        highCentralSourceName: 'derived from NPV/List2 central FCFF + computeLista2CfDcfMetrics',
-        lowUsedSourceName: 'chartFlows.navProdstartPerShareSeries (normalized to today-basis in debug only)',
-        lowCentralSourceName: 'derived from NPV/List2 central FCFF + computeLista2CfDcfMetrics',
-        diffHighPresent: highPresentUsedNow !== null && highPresentFromCentral !== null ? highPresentUsedNow - highPresentFromCentral : null,
-        diffLowPresent: lowPresentUsedNow !== null && lowPresentFromCentral !== null ? lowPresentUsedNow - lowPresentFromCentral : null,
-        notes: lowPresentUsedNow === null ? 'Low used-now kunde inte normaliseras till today-basis med tillgängliga inputs.' : null,
-      };
-    });
-
-    return { points, focus, centralTodayBasisRows };
-  }, [projectChartModel, projectDebug]);
 
   const corporateChartModel = useMemo(() => {
     if (!corporateTimeSeries?.rows?.length) return null;
@@ -456,39 +254,12 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
           valueWindow={projectChartModel.valueWindow}
           currencyCode={currencyCode}
         />
-        <details style={{ marginTop: 8 }}>
-          <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>debugg fallande graf</summary>
-          <div style={{ marginTop: 8, fontSize: 12, color: "#1f2937", display: "grid", gap: 12 }}>
-            <div><strong>1. Sammanfattning</strong><div>FCFF-serier matchar: {fcffComparison?.match ? "JA" : "NEJ"}</div></div>
-            <div><strong>2. Var räknas serierna ut</strong><div>High/Low-graf: <code>src/components/project/ValueRangeSnapshotCard.tsx :: projectChartModel(useMemo)</code>, input: <code>project.chartFlows.dcfProdstartExCapexPerShareSeries/navByPeriodPerShareSeries</code>.</div><div>Produktionstabell FCFF: <code>snapshot.series.fcffUSD</code> (från motorn).</div><div>NPV FCFF: <code>getProjectInputs().series.fcfUSD</code> prioriterar <code>snapshot.series.fcffUSD</code>.</div></div>
-            <div><strong>3. Hur räknas serierna ut</strong><div>High före tp: <code>highTp / (1 + discountRate)^(tpOffset - idx)</code>. High vid/efter tp: direkt rolling <code>DCF_prodStart_exCapex_perShare[idx]</code>. Low: direkt rolling <code>NAV_prodStart_perShare[idx]</code>. Diskonteringsränta: {projectDebug?.discountRate ?? null}.</div></div>
-            <div style={{ overflowX: "auto" }}><strong>4. Diskonterad serie high/low</strong>
-              <table><thead><tr><th>t</th><th>år</th><th>odisk high</th><th>odisk low</th><th>df high</th><th>df low</th><th>disk high</th><th>disk low</th></tr></thead><tbody>{projectChartModel.debugRows.map((row) => <tr key={`disc-${row.periodIndex}`}><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.undiscountedHigh ?? "null"}</td><td>{row.undiscountedLow ?? "null"}</td><td>{row.discountFactorHigh ?? "null"}</td><td>{row.discountFactorLow ?? "null"}</td><td>{row.discountedHigh ?? "null"}</td><td>{row.discountedLow ?? "null"}</td></tr>)}</tbody></table>
-            </div>
-            <div style={{ overflowX: "auto" }}><strong>5. Odiskonterad grafinput high/low</strong>
-              <table><thead><tr><th>t</th><th>år</th><th>input high (dcf)</th><th>input low (nav)</th></tr></thead><tbody>{projectChartModel.rawFlowSeries.dcfSeriesRawAll.map((_, idx) => <tr key={`raw-${idx}`}><td>{idx}</td><td>{projectDebug?.yearsByPeriod?.[idx] ?? "null"}</td><td>{projectChartModel.rawFlowSeries.dcfSeriesRawAll[idx] ?? "null"}</td><td>{projectChartModel.rawFlowSeries.navSeriesRawAll[idx] ?? "null"}</td></tr>)}</tbody></table>
-            </div>
-            <div style={{ overflowX: "auto" }}><strong>6. FCFF från produktionstabell</strong><table><thead><tr><th>t</th><th>år</th><th>fcffUSD</th><th>source</th></tr></thead><tbody>{(projectDebug?.fcffProductionTableSeries ?? []).map((v, idx) => <tr key={`prod-${idx}`}><td>{idx}</td><td>{projectDebug?.yearsByPeriod?.[idx] ?? "null"}</td><td>{v ?? "null"}</td><td>snapshot.series.fcffUSD</td></tr>)}</tbody></table></div>
-            <div style={{ overflowX: "auto" }}><strong>7. FCFF för NPV</strong><table><thead><tr><th>t</th><th>år</th><th>fcffUSD</th><th>source</th></tr></thead><tbody>{(projectDebug?.fcffNpvSeries ?? []).map((v, idx) => <tr key={`npv-${idx}`}><td>{idx}</td><td>{projectDebug?.yearsByPeriod?.[idx] ?? "null"}</td><td>{v ?? "null"}</td><td>getProjectInputs().series.fcfUSD</td></tr>)}</tbody></table></div>
-            <div style={{ overflowX: "auto" }}><strong>8. Matchningstabell produktionstabell vs NPV</strong><div>FCFF-serier matchar: {fcffComparison?.match ? "JA" : "NEJ"}</div><table><thead><tr><th>t</th><th>fcff_productionTable</th><th>fcff_npv</th><th>diff</th></tr></thead><tbody>{fcffComparison?.rows.map((row) => <tr key={`cmp-${row.periodIndex}`}><td>{row.periodIndex}</td><td>{row.fcffProductionTable ?? "null"}</td><td>{row.fcffNpv ?? "null"}</td><td>{row.diff ?? "null"}</td></tr>)}</tbody></table></div>
-            <div style={{ overflowX: "auto" }}><strong>9. Matchningstabell grafinput vs FCFF</strong><table><thead><tr><th>t</th><th>graf high input</th><th>graf low input</th><th>fcff</th></tr></thead><tbody>{projectChartModel.rawFlowSeries.dcfSeriesRawAll.map((_, idx) => <tr key={`gfcff-${idx}`}><td>{idx}</td><td>{projectChartModel.rawFlowSeries.dcfSeriesRawAll[idx] ?? "null"}</td><td>{projectChartModel.rawFlowSeries.navSeriesRawAll[idx] ?? "null"}</td><td>{projectDebug?.fcffNpvSeries?.[idx] ?? "null"}</td></tr>)}</tbody></table></div>
-            <div><strong>10. Diagnos fallande kurva</strong><div>Första år high faller: {projectCurveDiagnosis?.firstHighDrop?.calendarYear ?? "saknas"}</div><div>Första år low faller: {projectCurveDiagnosis?.firstLowDrop?.calendarYear ?? "saknas"}</div><div>Orsak: jämför odiskonterat flöde och diskonteringsfaktor i tabell 4.</div></div>
-          </div>
-        </details>
-        {projectDebug?.debugEnabled && graphDebug2 && (
+        {projectDebug?.debugEnabled && (
           <details style={{ marginTop: 8 }}>
-            <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>debugg fallande graf 2</summary>
-            <div style={{ marginTop: 8, fontSize: 12, display: "grid", gap: 12 }}>
-              <div><strong>1. High series source</strong><div>Fil/funktion: <code>src/lib/snapshot/runCorporateSnapshot.ts :: chartFlows-loop + computeLista2CfDcfMetrics</code>.</div><div>Före TP diskonteras TP-värdet med faktisk ränta och faktiskt periodavstånd. Vid/efter TP används direkt <code>dcfProdstartExCapexPerShareSeries[period]</code>.</div></div>
-              <div><strong>2. Low series source</strong><div>Fil/funktion: <code>src/lib/snapshot/runCorporateSnapshot.ts :: chartFlows-loop + computeLista2CfDcfMetrics</code>.</div><div>Grafen använder direkt <code>navByPeriodPerShareSeries[period]</code> för samma ekonomiska period.</div></div>
-              <div><strong>3. Graph formula chain</strong><div>Ingen ränta härleds från grafpunkter och ingen High-serie återuppräknas i presentationslagret efter TP.</div></div>
-              <div style={{ overflowX: "auto" }}><strong>4. Period index mapping</strong><table><thead><tr><th>periodIndex</th><th>calendarYear(graf)</th><th>tp</th><th>tpOffset</th><th>flowIndex</th><th>calendarYear(series)</th><th>exponent(high)</th></tr></thead><tbody>{graphDebug2.points.map((row) => <tr key={`map2-${row.periodIndex}`}><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.tp ?? "null"}</td><td>{projectChartModel.tpOffset}</td><td>{row.flowIndex}</td><td>{row.calendarFromSeries ?? "null"}</td><td>{row.exponentHigh ?? "null"}</td></tr>)}</tbody></table></div>
-              <div style={{ overflowX: "auto" }}><strong>5. DCF verification</strong><table><thead><tr><th>point</th><th>source input raw</th><th>basis</th><th>graph value</th><th>correct DCF(t)</th><th>diff</th></tr></thead><tbody>{graphDebug2.focus.map((row) => <tr key={`dcf2-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>{row.sourceHighRaw ?? "null"}</td><td>present/today</td><td>{row.graphHighValue ?? "null"}</td><td>{row.correctHighValue ?? "null"}</td><td>{row.diffHigh ?? "null"}</td></tr>)}</tbody></table></div>
-              <div style={{ overflowX: "auto" }}><strong>6. Difference table</strong><table><thead><tr><th>point</th><th>series</th><th>source input</th><th>basis</th><th>graph formula</th><th>graph value</th><th>correct value</th><th>diff</th></tr></thead><tbody>{graphDebug2.focus.flatMap((row) => ([<tr key={`high-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>high</td><td>{row.sourceHighRaw ?? "null"}</td><td>{row.sourceBasisHigh}</td><td>direct rolling ex-CAPEX DCF</td><td>{row.graphHighValue ?? "null"}</td><td>{row.correctHighValue ?? "null"}</td><td>{row.diffHigh ?? "null"}</td></tr>, <tr key={`low-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>low</td><td>{row.sourceLowRaw ?? "null"}</td><td>{row.sourceBasisLow}</td><td>direct rolling NAV</td><td>{row.graphLowValue ?? "null"}</td><td>null</td><td>null</td></tr>]))}</tbody></table></div>
-              <div style={{ overflowX: "auto" }}><strong>High exponent fix verification</strong><table><thead><tr><th>point</th><th>periodIndex</th><th>calendarYear</th><th>source input raw</th><th>source basis</th><th>current exponent used</th><th>corrected exponent</th><th>graph value before fix</th><th>graph value after fix</th><th>diff_before_vs_after</th></tr></thead><tbody>{graphDebug2.focus.map((row) => <tr key={`high-exp-fix-${row.periodIndex}`}><td>{row.flowIndex === 0 ? 'TP' : `TP+${row.flowIndex}`}</td><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.sourceHighRaw ?? "null"}</td><td>{row.sourceBasisHigh}</td><td>{row.exponentHighBeforeFix ?? "null"}</td><td>{row.exponentHigh ?? "null"}</td><td>{row.graphHighValueBeforeFix ?? "null"}</td><td>{row.graphHighValue ?? "null"}</td><td>{(row.graphHighValueBeforeFix !== null && row.graphHighValue !== null) ? (row.graphHighValueBeforeFix - row.graphHighValue) : "null"}</td></tr>)}</tbody></table></div>
-              <div style={{ overflowX: "auto" }}><strong>Centralkälla vs grafens nuvärden</strong><table><thead><tr><th>point</th><th>periodIndex</th><th>calendarYear</th><th>high_present_used_now</th><th>high_present_from_central_npv_source</th><th>low_present_used_now</th><th>low_present_from_central_npv_source</th><th>high_used_source_name</th><th>high_central_source_name</th><th>low_used_source_name</th><th>low_central_source_name</th><th>diff_high_present</th><th>diff_low_present</th><th>notes</th></tr></thead><tbody>{graphDebug2.centralTodayBasisRows.map((row) => <tr key={`central-vs-graph-${row.periodIndex}`}><td>{row.pointLabel}</td><td>{row.periodIndex}</td><td>{row.calendarYear}</td><td>{row.highPresentUsedNow ?? "null"}</td><td>{row.highPresentFromCentral ?? "null"}</td><td>{row.lowPresentUsedNow ?? "null"}</td><td>{row.lowPresentFromCentral ?? "null"}</td><td>{row.highUsedSourceName}</td><td>{row.highCentralSourceName}</td><td>{row.lowUsedSourceName}</td><td>{row.lowCentralSourceName}</td><td>{row.diffHighPresent ?? "null"}</td><td>{row.diffLowPresent ?? "null"}</td><td>{row.notes ?? ""}</td></tr>)}</tbody></table></div>
-              <div><strong>TP-ankare</strong><div>TP high kommer från prop <code>tpHigh</code> (list2 DCF_perShare) om finite, annars från den periodjusterade rolling DCF-serien. TP+1 och senare använder motorns direkta ex-CAPEX-DCF.</div></div>
-            </div>
+            <summary>Canonical valuation timeline</summary>
+            <div style={{ overflowX: "auto" }}><table><thead><tr><th>period</th><th>year</th><th>DCF/share (High)</th><th>NAV/share (Low)</th></tr></thead><tbody>
+              {canonicalTimeline?.periods.map((period) => <tr key={period.periodIndex}><td>{period.periodIndex}</td><td>{period.calendarYear}</td><td>{period.dcfPerShareTarget ?? "null"}</td><td>{period.navPerShareTarget ?? "null"}</td></tr>)}
+            </tbody></table></div>
           </details>
         )}
       </div>
