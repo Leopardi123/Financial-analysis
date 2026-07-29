@@ -38,7 +38,9 @@ export type ValuationPeriodState = {
   sharesCurrent: NullableNumber;
   newSharesCumulative: NullableNumber;
   manualExtraShares: number;
+  sharesPfBeforeManualExtra: NullableNumber;
   sharesPf: NullableNumber;
+  canonicalSharesForPerShare: NullableNumber;
   dcfPerShareTarget: NullableNumber;
   dcfPresentValueTodayPerShareTarget: NullableNumber;
   npvPerShareTarget: NullableNumber;
@@ -192,7 +194,9 @@ export function buildValuationTimeline(args: {
       npvAtPeriodTarget: npvTarget, navAtPeriodTarget: navTarget,
       cashTarget: args.cashTarget, debtTarget: args.debtTarget, netCashTarget: netCash,
       sharesCurrent: args.sharesCurrent, newSharesCumulative: args.newSharesCumulative ?? null,
-      manualExtraShares: args.manualExtraShares ?? 0, sharesPf: args.sharesPf,
+      manualExtraShares: args.manualExtraShares ?? 0,
+      sharesPfBeforeManualExtra: finite(args.sharesPf) ? args.sharesPf - (args.manualExtraShares ?? 0) : null,
+      sharesPf: args.sharesPf, canonicalSharesForPerShare: args.sharesPf,
       dcfPerShareTarget: divide(dcfTarget, args.sharesPf),
       dcfPresentValueTodayPerShareTarget: divide(multiply(dcfTarget, discountFactor), args.sharesPf),
       npvPerShareTarget: divide(npvTarget, args.sharesPf), navPerShareTarget: divide(navTarget, args.sharesPf),
@@ -209,6 +213,33 @@ export function selectTimelineNodes(timeline: ValuationTimeline): TimelineNodes 
   if (!today || !projectStart) throw new Error('Canonical timeline node is outside the period axis');
   const productionStart = timeline.productionStartPeriod === null ? null : timeline.periods[timeline.productionStartPeriod] ?? null;
   return { today, projectStart, productionStart };
+}
+
+/** Apply a UI-only manual share adjustment without creating financing proceeds. */
+export function withManualExtraShares(
+  timeline: ValuationTimeline,
+  manualExtraShares: number,
+): ValuationTimeline {
+  const extra = Number.isFinite(manualExtraShares) ? Math.max(0, Math.floor(manualExtraShares)) : 0;
+  if (extra === 0) return timeline;
+  return {
+    ...timeline,
+    periods: timeline.periods.map((period) => {
+      const baseShares = finite(period.sharesPf) ? period.sharesPf - period.manualExtraShares : null;
+      const sharesPf = finite(baseShares) ? baseShares + extra : null;
+      return {
+        ...period,
+        manualExtraShares: extra,
+        sharesPfBeforeManualExtra: baseShares,
+        sharesPf,
+        canonicalSharesForPerShare: sharesPf,
+        dcfPerShareTarget: divide(period.dcfAtPeriodTarget, sharesPf),
+        dcfPresentValueTodayPerShareTarget: divide(period.dcfPresentValueTodayTarget, sharesPf),
+        npvPerShareTarget: divide(period.npvAtPeriodTarget, sharesPf),
+        navPerShareTarget: divide(period.navAtPeriodTarget, sharesPf),
+      };
+    }),
+  };
 }
 
 /** Resolve project-local start years once; tables, charts and debug consume these objects. */

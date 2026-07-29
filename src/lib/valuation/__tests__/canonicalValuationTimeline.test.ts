@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildValuationTimeline, selectTimelineChartSeries, selectTimelineDebugRows, selectTimelineMarker, selectTimelineNodes, selectValuationChart } from '../canonicalValuationTimeline.ts';
+import { buildValuationTimeline, selectTimelineChartSeries, selectTimelineDebugRows, selectTimelineMarker, selectTimelineNodes, selectValuationChart, withManualExtraShares } from '../canonicalValuationTimeline.ts';
 
 const input = { fcfUSD: [-100, -50, 80, 90, 20], capexUSD: [100, 50, 0, 0, 0], yearsByPeriod: [2026, 2027, 2028, 2029, 2030], discountRate: 0.1, fxUSDToTarget: 2, productionStartPeriod: 2, cashTarget: 40, debtTarget: 10, sharesCurrent: 10, sharesPf: 20 };
 const project = buildValuationTimeline({ scope: 'project', ...input });
@@ -121,4 +121,9 @@ assert.equal(datedChart.today.low, datedNodes.today.navPerShareTarget); // G
 assert.equal(datedChart.today.high, datedNodes.productionStart?.dcfPresentValueTodayPerShareTarget); // F
 const startsToday = buildValuationTimeline({ ...input, scope: 'project', valuationYear: 2026 });
 assert.equal(startsToday.todayPeriod, 0); // L
+const manuallyDiluted = withManualExtraShares(startsToday, 250);
+assert.equal(manuallyDiluted.periods[0].sharesPf, 270);
+assert.equal(manuallyDiluted.periods[0].manualExtraShares, 250);
+assert.equal(manuallyDiluted.periods[0].dcfPerShareTarget, manuallyDiluted.periods[0].dcfAtPeriodTarget! / 270);
+assert.equal(startsToday.periods[0].sharesPf, 20, 'manual share adjustment does not mutate snapshot timeline');
 console.log('Canonical valuation timeline T1-T10 passed');
