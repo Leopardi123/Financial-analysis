@@ -48,6 +48,8 @@ export type ProjectViewInputs = {
   sustainingCostUSD: Series;
   productionStartPeriod: number | null;
   calendarYears?: number[];
+  periodEndDates?: string[];
+  calendarYearPolicy?: 'legacy' | 'verified';
   /** Internal period zero expressed relative to the valuation year (for example, 2030 - 2026 = 4). */
   valuationPeriodOffset?: number;
   financing: FinancingInput;
@@ -407,6 +409,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     ? marketCapCurrent + debtT0 - cashT0 + enterpriseAdjustments
     : null;
 
+  if (input.calendarYearPolicy === 'verified' && input.calendarYears?.length !== input.fcfUSD.length) {
+    throw new Error(`Ej verifierad Project timeline: calendarYears length=${input.calendarYears?.length ?? 0}, FCFF length=${input.fcfUSD.length}`);
+  }
   const valuationTimeline = buildValuationTimeline({
     scope: input.meta?.projectId === 'corporate' ? 'corporate' : 'project',
     fcfUSD: input.fcfUSD,
@@ -417,6 +422,7 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     discountRate: r,
     fxUSDToTarget: fx,
     valuationPeriodOffset,
+    periodEndDates: input.periodEndDates,
     productionStartPeriod: tp,
     cashTarget: cashForNav,
     debtTarget: debtT0,

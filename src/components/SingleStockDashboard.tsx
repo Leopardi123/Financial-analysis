@@ -22,6 +22,7 @@ import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStar
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import { selectValuationChart } from "../lib/valuation/canonicalValuationTimeline.ts";
+import { verifyProjectCalendarAxis } from "../lib/valuation/projectCalendarAxis.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import { getManualMetalPriceStore, saveManualMetalPrice } from "../lib/engine/pricing/manualMetalPriceStore.ts";
 import { collectDashboardTasks } from "../lib/engine/pricing/collectDashboardTasks.ts";
@@ -2997,8 +2998,27 @@ Capital Available: ${availableLabel}`,
 
   const lastNpvTraceFingerprintRef = useRef<string | null>(null);
 
+  const projectCalendarResolution = useMemo(() => {
+    if (!projectSnapshotData || !parsedSelectedProject || !selectedProjectRawJson) return null;
+    const inputs = getProjectInputs({
+      snapshot: projectSnapshotData,
+      parsedProject: parsedSelectedProject,
+      discountRateInput: riskAdjustedDiscountRatePctInput,
+      targetCurrency: lockedTargetCurrency,
+    });
+    const rawTime = (selectedProjectRawJson.time ?? null) as { productionStartYear?: unknown; periodEndDatesUtc?: unknown } | null;
+    return verifyProjectCalendarAxis({
+      masterN: Number(inputs.masterN),
+      fcffLength: Array.isArray(inputs.series.fcfUSD) ? inputs.series.fcfUSD.length : 0,
+      productionStartPeriod: Number(inputs.tp),
+      productionStartYear: typeof rawTime?.productionStartYear === 'number' ? rawTime.productionStartYear : null,
+      periodEndDatesUtc: rawTime?.periodEndDatesUtc,
+      yearsByPeriod: parsedSelectedProject.engineInputWithoutPrices.yearsByPeriod,
+    });
+  }, [lockedTargetCurrency, parsedSelectedProject, projectSnapshotData, riskAdjustedDiscountRatePctInput, selectedProjectRawJson]);
+
   const projectViewMetrics = useMemo(() => {
-    if (!projectSnapshotData) return null;
+    if (!projectSnapshotData || !projectCalendarResolution?.ok) return null;
     const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
       ? raw.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null))
       : []);
@@ -3012,8 +3032,11 @@ Capital Available: ${availableLabel}`,
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
     const snapshotYears = ((projectSnapshotData.series ?? {}) as { yearsByPeriod?: unknown }).yearsByPeriod;
     const valuationYears = ((projectSnapshotData.project ?? {}) as { chartFlows?: { yearsByPeriod?: unknown } }).chartFlows?.yearsByPeriod;
-    const internalStartYear = Array.isArray(snapshotYears) && typeof snapshotYears[0] === "number" ? snapshotYears[0] : null;
-    const valuationStartYear = Array.isArray(valuationYears) && typeof valuationYears[0] === "number" ? valuationYears[0] : null;
+    const internalStartYear = Array.isArray(snapshotYears) && typeof snapshotYears[0] === 'number' ? snapshotYears[0] : null;
+    const valuationStartYear = Array.isArray(valuationYears) && typeof valuationYears[0] === 'number' ? valuationYears[0] : null;
+    // This remains a discount-distance input only. Presentation years come solely
+    // from the verified project period dates below.
+    const discountPeriodOffset = internalStartYear !== null && valuationStartYear !== null ? internalStartYear - valuationStartYear : 0;
     const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
       .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
     const latestQuarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")]
@@ -3045,8 +3068,10 @@ Capital Available: ${availableLabel}`,
       payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
-      calendarYears: Array.isArray(valuationYears) ? valuationYears.filter((year): year is number => typeof year === "number") : undefined,
-      valuationPeriodOffset: internalStartYear !== null && valuationStartYear !== null ? internalStartYear - valuationStartYear : 0,
+      calendarYears: projectCalendarResolution.value.yearsByPeriod,
+      periodEndDates: projectCalendarResolution.value.periodEndDatesUtc,
+      calendarYearPolicy: 'verified',
+      valuationPeriodOffset: discountPeriodOffset,
       financing: {
         equityPct: toInputNumber(projectEquityPct) ?? 100,
         debtPct: toInputNumber(projectDebtPct) ?? 0,
@@ -3055,7 +3080,7 @@ Capital Available: ${availableLabel}`,
         cashUsePercent: projectCashUsedPct / 100,
       },
     });
-  }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput, projectCalendarResolution]);
 
   const corporateViewMetrics = useMemo(() => {
     if (!corporateSnapshotData) return null;
@@ -6009,6 +6034,9 @@ Capital Available: ${availableLabel}`,
 
               {projectSnapshotLoading && <p className="bread">Running snapshot…</p>}
               {projectSnapshotError && <p className="status error">{projectSnapshotError}</p>}
+              {projectCalendarResolution && !projectCalendarResolution.ok && (
+                <p className="status error">{projectCalendarResolution.error}</p>
+              )}
 
               {projectViewMetrics && (
                 <section className="project-producer-layout" style={{ marginTop: 12, display: "grid", gap: 8 }}>
