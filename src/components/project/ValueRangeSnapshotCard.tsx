@@ -36,7 +36,7 @@ type ValueRangeSnapshotCardProps = {
   canonicalSharesPostFinancing?: number | null;
   corporateTimeSeries?: {
     valuationYear?: number;
-    rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null }>;
+    rows: Array<{ period: number; year: number; npvPerShare: number | null; dcfPerShare: number | null; dcfExCapexPerShare?: number | null; navPerShare: number | null; sharesPf: number | null; ebitdaTarget?: number | null; ev5xTarget?: number | null; ev6xTarget?: number | null; ev7xTarget?: number | null; evEbitda5xPerShare?: number | null; evEbitda6xPerShare?: number | null; evEbitda7xPerShare?: number | null }>;
     projectMarkers: Array<{ projectId: string; projectName: string; productionStartYear: number | null; navPerShare?: number | null; dcfPerShare?: number | null }>;
   } | null;
   canonicalTimeline?: ValuationTimeline | null;
@@ -105,7 +105,7 @@ function isProjectChartDataTypeSafe(data: Array<Array<string | number | null | {
 
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, currencyCode, projectDebug, canonicalTimeline, canonicalStartPeriods } = props;
+  const { mode = "corporate", priceToday, currencyCode, projectDebug, canonicalTimeline, canonicalStartPeriods, corporateTimeSeries } = props;
   const isProjectMode = mode === "project";
 
   const projectChartModel = useMemo(() => {
@@ -119,16 +119,67 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     });
     const selection = renderModel.selection;
     const periods = renderModel.displayRange.points;
+    const multipleByYear = new Map((corporateTimeSeries?.rows ?? []).map((row) => [row.year, row]));
+    const multipleValues = isProjectMode ? [] : periods.flatMap((period) => {
+      const row = multipleByYear.get(period.calendarYear);
+      if (!isFiniteNumber(row?.ebitdaTarget) || row.ebitdaTarget <= 0) return [];
+      return [row?.evEbitda5xPerShare, row?.evEbitda6xPerShare, row?.evEbitda7xPerShare].filter(isFiniteNumber);
+    });
+    const multiplePeak = isProjectMode ? null : periods.reduce<{ year: number; base: number; low: number; high: number } | null>((peak, period) => {
+      const row = multipleByYear.get(period.calendarYear);
+      if (!isFiniteNumber(row?.ebitdaTarget) || row.ebitdaTarget <= 0
+        || !isFiniteNumber(row.evEbitda5xPerShare) || !isFiniteNumber(row.evEbitda6xPerShare) || !isFiniteNumber(row.evEbitda7xPerShare)) return peak;
+      return peak === null || row.evEbitda6xPerShare > peak.base
+        ? { year: period.calendarYear, base: row.evEbitda6xPerShare, low: row.evEbitda5xPerShare, high: row.evEbitda7xPerShare }
+        : peak;
+    }, null);
     const domainValues = periods
       .flatMap((period) => [period.high, period.low])
       .filter((value): value is number => isFiniteNumber(value));
+    domainValues.push(...multipleValues);
     if (isFiniteNumber(priceToday)) domainValues.push(priceToday);
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
     const tpOffset = canonicalTimeline.productionStartPeriod ?? -1;
     const rows = renderModel.rows;
-    const data = [[...valueRangeChartHeader], ...rows] as (string | number | null | { role: string; type?: string })[][];
-    if (!isProjectChartDataTypeSafe(data)) return null;
+    const multipleHeader = [
+      { label: 'EV/EBITDA 6×', type: 'number' },
+      { role: 'tooltip', type: 'string' },
+      { role: 'interval', type: 'number', label: '5×' },
+      { role: 'interval', type: 'number', label: '7×' },
+      { label: 'EV/EBITDA 5× boundary', type: 'number' },
+      { label: 'EV/EBITDA 7× boundary', type: 'number' },
+      { label: 'Peak EV/EBITDA', type: 'number' },
+      { role: 'annotation', type: 'string' },
+    ];
+    const formatMoney = (value: number | null | undefined) => isFiniteNumber(value) ? `${formatPerShareValue(value)}${currencyCode ? ` ${currencyCode}` : ''}` : 'n/a';
+    const chartRows = isProjectMode ? rows : rows.map((row, index) => {
+      const multiple = multipleByYear.get(periods[index].calendarYear);
+      const showUncertaintyBand = isFiniteNumber(multiple?.ebitdaTarget) && multiple.ebitdaTarget > 0;
+      const tooltip = multiple && isFiniteNumber(multiple.evEbitda6xPerShare) ? [
+        `År: ${multiple.year}`,
+        `EBITDA: ${formatMoney(multiple.ebitdaTarget)}`,
+        `5× EV: ${formatMoney(multiple.ev5xTarget)}`,
+        `6× EV: ${formatMoney(multiple.ev6xTarget)}`,
+        `7× EV: ${formatMoney(multiple.ev7xTarget)}`,
+        `Värde/aktie (5×): ${formatMoney(multiple.evEbitda5xPerShare)}`,
+        `Värde/aktie (6×): ${formatMoney(multiple.evEbitda6xPerShare)}`,
+        `Värde/aktie (7×): ${formatMoney(multiple.evEbitda7xPerShare)}`,
+      ].join('\n') : null;
+      return [
+        ...row,
+        showUncertaintyBand ? multiple?.evEbitda6xPerShare ?? null : null,
+        showUncertaintyBand ? tooltip : null,
+        showUncertaintyBand ? multiple?.evEbitda5xPerShare ?? null : null,
+        showUncertaintyBand ? multiple?.evEbitda7xPerShare ?? null : null,
+        showUncertaintyBand ? multiple?.evEbitda5xPerShare ?? null : null,
+        showUncertaintyBand ? multiple?.evEbitda7xPerShare ?? null : null,
+        multiplePeak?.year === periods[index].calendarYear ? multiplePeak.base : null,
+        multiplePeak?.year === periods[index].calendarYear ? `${formatPerShareValue(multiplePeak.low)}-${formatPerShareValue(multiplePeak.high)}` : null,
+      ];
+    });
+    const data = [[...valueRangeChartHeader, ...(isProjectMode ? [] : multipleHeader)], ...chartRows] as (string | number | null | { role: string; type?: string })[][];
+    if (isProjectMode && !isProjectChartDataTypeSafe(data)) return null;
     const debugRows = periods.map((period) => ({
       periodIndex: period.periodIndex,
       calendarYear: period.calendarYear,
@@ -145,7 +196,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return {
       yearNow: periods[0].calendarYear,
       data,
-      ticks: periods.filter((period) => period.isToday || period.isStart || period.periodIndex === selection.peakLow?.periodIndex || period.periodIndex === selection.peakHigh?.periodIndex)
+      ticks: periods.filter((period) => period.isToday || period.isStart || period.periodIndex === selection.peakLow?.periodIndex || period.periodIndex === selection.peakHigh?.periodIndex || period.calendarYear === multiplePeak?.year)
         .map((period) => ({ v: period.calendarYear, f: String(period.calendarYear) })),
       peakYear: selection.peakHigh?.calendarYear ?? periods[0].calendarYear,
       chartEndYear: renderModel.displayRange.chartEndYear,
@@ -161,7 +212,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         navSeriesRaw: periods.map((period) => period.low),
       },
     };
-  }, [canonicalStartPeriods, canonicalTimeline, isProjectMode, priceToday]);
+  }, [canonicalStartPeriods, canonicalTimeline, corporateTimeSeries, currencyCode, isProjectMode, priceToday]);
 
 
 

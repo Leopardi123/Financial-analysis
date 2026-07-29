@@ -2212,6 +2212,7 @@ export async function runCorporateSnapshotPipeline(args: {
       ...aggregation,
       capexUSD_total: snapshotSeries.capexUSD,
       fcffUSD_total: snapshotSeries.fcffUSD,
+      ebitdaUSD_total: snapshotSeries.ebitdaUSD,
       grossRevenueUSD_total: snapshotSeries.totalRevenue_USD,
       auPriceUSDPerOz: snapshotSeries.priceUsedByMetal_USD.Au ?? aggregation.auPriceUSDPerOz,
       sustainingCostUSD_total: snapshotSeries.sustainingCostUSD,
@@ -3416,13 +3417,30 @@ export async function runCorporateSnapshotPipeline(args: {
     const corporateValuationTimeSeries = {
       valuationYear: input.valuationYear,
       internalCorporateYears: aggregationEffective.corporateYearsByPeriod,
-      rows: corporateCanonicalTimeline.periods.map((row) => ({
+      rows: corporateCanonicalTimeline.periods.map((row) => {
+        const ebitdaUSD = canonicalSeries(aggregationEffective.ebitdaUSD_total ?? [])[row.periodIndex] ?? null;
+        const ebitdaTarget = typeof ebitdaUSD === 'number' && typeof fxRate === 'number' ? ebitdaUSD * fxRate : null;
+        const multipleValue = (multiple: number) => ebitdaTarget !== null && row.netCashTarget !== null
+          ? ebitdaTarget * multiple + row.netCashTarget
+          : null;
+        const perShare = (value: number | null) => value !== null && row.sharesPf !== null && row.sharesPf > 0
+          ? value / row.sharesPf
+          : null;
+        const ev5xTarget = ebitdaTarget === null ? null : ebitdaTarget * 5;
+        const ev6xTarget = ebitdaTarget === null ? null : ebitdaTarget * 6;
+        const ev7xTarget = ebitdaTarget === null ? null : ebitdaTarget * 7;
+        return {
         period: row.periodIndex, year: row.calendarYear,
         dcfAbsolute: row.dcfPresentValueTodayTarget, navAbsolute: row.navAtPeriodTarget,
         npvAbsolute: row.npvAtPeriodTarget, dcfPerShare: row.dcfPresentValueTodayPerShareTarget,
         dcfExCapexAbsolute: row.dcfAtPeriodTarget, dcfExCapexPerShare: row.dcfPerShareTarget,
         navPerShare: row.navPerShareTarget, npvPerShare: row.npvPerShareTarget, sharesPf: row.sharesPf,
-      })),
+        ebitdaTarget, ev5xTarget, ev6xTarget, ev7xTarget,
+        evEbitda5xPerShare: perShare(multipleValue(5)),
+        evEbitda6xPerShare: perShare(multipleValue(6)),
+        evEbitda7xPerShare: perShare(multipleValue(7)),
+        };
+      }),
       projectMarkers: projectsForBuildFunding.map((project) => {
         const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
         const productionYear = project.yearsByPeriod[project.productionStartPeriod] ?? null;
