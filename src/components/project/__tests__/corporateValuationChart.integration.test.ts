@@ -118,18 +118,6 @@ assert.equal(year2029.projectContributions.find((item: any) => item.projectId ==
 assert.notEqual(year2032.projectContributions.find((item: any) => item.projectId === 'B').fcffUSD, 0);
 for (const period of canonical.periods) assert.equal(period.discountExponentFromToday, period.calendarYear - 2026); // I
 const multiInputs = getProjectInputs({ snapshot: multiSnapshot });
-const multiView = computeProjectViewMetrics({
-  meta: { projectId: 'corporate' }, targetCurrency: multiSnapshot.targetCurrency,
-  fxUSDToTarget: multiInputs.fx, discountRate: multiInputs.r, masterN: multiInputs.masterN,
-  sharesCurrent: multiInputs.sharesCurrent, sharesPostFinancingInput: multiInputs.sharesPostFinancing,
-  priceCurrentTarget: multiInputs.price, cashCurrentTarget: multiSnapshot.financing.cash_for_nav_TargetCurrency ?? multiInputs.cash0,
-  debtCurrentTarget: multiInputs.debt0, enterpriseAdjustmentsTarget: 0,
-  fcfUSD: finiteSeries(multiInputs.series.fcfUSD), capexUSD: finiteSeries(multiInputs.series.capexUSD),
-  grossRevenueUSD: finiteSeries(multiInputs.series.grossRevenueUSD), ebitUSD: finiteSeries(multiInputs.series.ebitUSD),
-  payableAuEqOz: finiteSeries(multiInputs.series.payableAuEqOz), sustainingCostUSD: finiteSeries(multiInputs.series.sustainingCostUSD),
-  productionStartPeriod: multiInputs.tp, calendarYears: multiRows.map((row) => row.year), valuationPeriodOffset: 0,
-  financing: { equityPct: 100, debtPct: 0, usePrecomputedFinancing: true },
-});
 const multiRender = buildValuationChartRenderModel({ timeline: canonical, scope: 'corporate', startPeriods: milestones.map((item) => item.corporatePeriodIndex), priceToday: multiInputs.price, format: String });
 assert.equal(multiRender.displayRange.latestProjectStartYear, 2032); // J
 assert.equal(multiRender.displayRange.chartEndYear, Math.min(2039, Math.max(2032, multiRender.selection.peakLow?.calendarYear ?? -Infinity, multiRender.selection.peakHigh?.calendarYear ?? -Infinity) + 3)); // K
