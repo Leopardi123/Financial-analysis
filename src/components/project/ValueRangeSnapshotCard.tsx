@@ -122,6 +122,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const multipleByYear = new Map((corporateTimeSeries?.rows ?? []).map((row) => [row.year, row]));
     const multipleValues = isProjectMode ? [] : periods.flatMap((period) => {
       const row = multipleByYear.get(period.calendarYear);
+      if (!isFiniteNumber(row?.ebitdaTarget) || row.ebitdaTarget <= 0) return [];
       return [row?.evEbitda5xPerShare, row?.evEbitda6xPerShare, row?.evEbitda7xPerShare].filter(isFiniteNumber);
     });
     const domainValues = periods
@@ -138,6 +139,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       { role: 'tooltip', type: 'string' },
       { role: 'interval', type: 'number', label: '5×' },
       { role: 'interval', type: 'number', label: '7×' },
+      { label: 'EV/EBITDA 5× boundary', type: 'number' },
+      { label: 'EV/EBITDA 7× boundary', type: 'number' },
     ];
     const formatMoney = (value: number | null | undefined) => isFiniteNumber(value) ? `${formatPerShareValue(value)}${currencyCode ? ` ${currencyCode}` : ''}` : 'n/a';
     const chartRows = isProjectMode ? rows : rows.map((row, index) => {
@@ -155,8 +158,10 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       ].join('\n') : null;
       return [
         ...row,
-        multiple?.evEbitda6xPerShare ?? null,
-        tooltip,
+        showUncertaintyBand ? multiple?.evEbitda6xPerShare ?? null : null,
+        showUncertaintyBand ? tooltip : null,
+        showUncertaintyBand ? multiple?.evEbitda5xPerShare ?? null : null,
+        showUncertaintyBand ? multiple?.evEbitda7xPerShare ?? null : null,
         showUncertaintyBand ? multiple?.evEbitda5xPerShare ?? null : null,
         showUncertaintyBand ? multiple?.evEbitda7xPerShare ?? null : null,
       ];

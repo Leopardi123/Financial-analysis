@@ -26,10 +26,13 @@ export function buildValueRangeChartOptions(args: {
       8: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       9: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       10: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
-      // Google Charts rejects CSS rgba() colors. This is #2563eb blended at 50%
+      // Google Charts rejects CSS rgba() colors. This is #2563eb blended at 25%
       // over the chart's fixed #e0e9ce background, preserving the requested look.
-      11: { type: 'line', color: '#83a6dd', lineWidth: 2, pointSize: 0, visibleInLegend: false },
+      11: { type: 'line', color: '#b1c8d5', lineWidth: 2, pointSize: 0, visibleInLegend: false },
+      // Separate boundary series allow a 10% edge without increasing the band fill.
+      12: { type: 'line', color: '#cddcd1', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
+      13: { type: 'line', color: '#cddcd1', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
     },
-    intervals: { style: 'area', color: '#2563eb', fillOpacity: 0.25, lineWidth: 0 },
+    intervals: { style: 'area', color: '#2563eb', fillOpacity: 0.05, lineWidth: 0 },
   };
 }
