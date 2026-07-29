@@ -125,6 +125,14 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       if (!isFiniteNumber(row?.ebitdaTarget) || row.ebitdaTarget <= 0) return [];
       return [row?.evEbitda5xPerShare, row?.evEbitda6xPerShare, row?.evEbitda7xPerShare].filter(isFiniteNumber);
     });
+    const multiplePeak = isProjectMode ? null : periods.reduce<{ year: number; base: number; low: number; high: number } | null>((peak, period) => {
+      const row = multipleByYear.get(period.calendarYear);
+      if (!isFiniteNumber(row?.ebitdaTarget) || row.ebitdaTarget <= 0
+        || !isFiniteNumber(row.evEbitda5xPerShare) || !isFiniteNumber(row.evEbitda6xPerShare) || !isFiniteNumber(row.evEbitda7xPerShare)) return peak;
+      return peak === null || row.evEbitda6xPerShare > peak.base
+        ? { year: period.calendarYear, base: row.evEbitda6xPerShare, low: row.evEbitda5xPerShare, high: row.evEbitda7xPerShare }
+        : peak;
+    }, null);
     const domainValues = periods
       .flatMap((period) => [period.high, period.low])
       .filter((value): value is number => isFiniteNumber(value));
@@ -141,6 +149,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       { role: 'interval', type: 'number', label: '7×' },
       { label: 'EV/EBITDA 5× boundary', type: 'number' },
       { label: 'EV/EBITDA 7× boundary', type: 'number' },
+      { label: 'Peak EV/EBITDA', type: 'number' },
+      { role: 'annotation', type: 'string' },
     ];
     const formatMoney = (value: number | null | undefined) => isFiniteNumber(value) ? `${formatPerShareValue(value)}${currencyCode ? ` ${currencyCode}` : ''}` : 'n/a';
     const chartRows = isProjectMode ? rows : rows.map((row, index) => {
@@ -164,6 +174,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         showUncertaintyBand ? multiple?.evEbitda7xPerShare ?? null : null,
         showUncertaintyBand ? multiple?.evEbitda5xPerShare ?? null : null,
         showUncertaintyBand ? multiple?.evEbitda7xPerShare ?? null : null,
+        multiplePeak?.year === periods[index].calendarYear ? multiplePeak.base : null,
+        multiplePeak?.year === periods[index].calendarYear ? `${formatPerShareValue(multiplePeak.low)}-${formatPerShareValue(multiplePeak.high)}` : null,
       ];
     });
     const data = [[...valueRangeChartHeader, ...(isProjectMode ? [] : multipleHeader)], ...chartRows] as (string | number | null | { role: string; type?: string })[][];
@@ -184,7 +196,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return {
       yearNow: periods[0].calendarYear,
       data,
-      ticks: periods.filter((period) => period.isToday || period.isStart || period.periodIndex === selection.peakLow?.periodIndex || period.periodIndex === selection.peakHigh?.periodIndex)
+      ticks: periods.filter((period) => period.isToday || period.isStart || period.periodIndex === selection.peakLow?.periodIndex || period.periodIndex === selection.peakHigh?.periodIndex || period.calendarYear === multiplePeak?.year)
         .map((period) => ({ v: period.calendarYear, f: String(period.calendarYear) })),
       peakYear: selection.peakHigh?.calendarYear ?? periods[0].calendarYear,
       chartEndYear: renderModel.displayRange.chartEndYear,

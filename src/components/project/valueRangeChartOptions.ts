@@ -32,6 +32,7 @@ export function buildValueRangeChartOptions(args: {
       // Separate boundary series allow a 10% edge without increasing the band fill.
       12: { type: 'line', color: '#cddcd1', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
       13: { type: 'line', color: '#cddcd1', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
+      14: { type: 'scatter', color: '#b1c8d5', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
     },
     intervals: { style: 'area', color: '#2563eb', fillOpacity: 0.05, lineWidth: 0 },
   };

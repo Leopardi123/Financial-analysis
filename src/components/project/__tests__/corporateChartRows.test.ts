@@ -452,6 +452,7 @@ test('Project and Corporate charts share one visual options builder', () => {
   assert.equal(buildValueRangeChartOptions(args).series[11].color, '#b1c8d5');
   assert.equal(buildValueRangeChartOptions(args).series[12].color, '#cddcd1');
   assert.equal(buildValueRangeChartOptions(args).series[13].lineWidth, 0.62);
+  assert.equal(buildValueRangeChartOptions(args).series[14].pointSize, 7);
   assert.equal(buildValueRangeChartOptions(args).intervals.fillOpacity, 0.05);
   assert.equal(JSON.stringify(buildValueRangeChartOptions(args)).includes('rgba('), false, 'Google Charts only receives supported color formats');
 });
