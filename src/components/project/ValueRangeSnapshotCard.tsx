@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { valueRangeChartHeader } from "./corporateChartRows";
 import ValueRangeChart from "./ValueRangeChart";
-import { buildValueRangeChartRow } from "./valueRangeCurve";
-import { selectValuationChart, type ValuationTimeline } from "../../lib/valuation/canonicalValuationTimeline.ts";
+import type { ValuationTimeline } from "../../lib/valuation/canonicalValuationTimeline.ts";
+import { buildValuationChartRenderModel } from "./valuationChartPresentation.ts";
 
 type TpMarker = {
   tp: number;
@@ -110,8 +110,15 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
 
   const projectChartModel = useMemo(() => {
     if (!canonicalTimeline?.periods.length) return null;
-    const selection = selectValuationChart(canonicalTimeline, canonicalStartPeriods);
-    const periods = selection.points;
+    const renderModel = buildValuationChartRenderModel({
+      timeline: canonicalTimeline,
+      scope: isProjectMode ? 'project' : 'corporate',
+      startPeriods: canonicalStartPeriods,
+      priceToday: isFiniteNumber(priceToday) ? priceToday : null,
+      format: formatPerShareValue,
+    });
+    const selection = renderModel.selection;
+    const periods = renderModel.displayRange.points;
     const domainValues = periods
       .flatMap((period) => [period.high, period.low])
       .filter((value): value is number => isFiniteNumber(value));
@@ -119,18 +126,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const valueWindow = computeViewWindow(domainValues);
     if (!valueWindow) return null;
     const tpOffset = canonicalTimeline.productionStartPeriod ?? -1;
-    const rows = periods.map((period) => buildValueRangeChartRow({
-      year: period.calendarYear,
-      low: period.low,
-      high: period.high,
-      currentPrice: period.isToday && isFiniteNumber(priceToday) ? priceToday : null,
-      annotateCurrent: period.isToday,
-      annotateProductionStart: period.isStart,
-      highlightPeakLow: period.periodIndex === selection.peakLow?.periodIndex,
-      highlightPeakHigh: period.periodIndex === selection.peakHigh?.periodIndex,
-      peakTooltip: `År: ${period.calendarYear}`,
-      format: formatPerShareValue,
-    }));
+    const rows = renderModel.rows;
     const data = [[...valueRangeChartHeader], ...rows] as (string | number | null | { role: string; type?: string })[][];
     if (!isProjectChartDataTypeSafe(data)) return null;
     const debugRows = periods.map((period) => ({
@@ -152,6 +148,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       ticks: periods.filter((period) => period.isToday || period.isStart || period.periodIndex === selection.peakLow?.periodIndex || period.periodIndex === selection.peakHigh?.periodIndex)
         .map((period) => ({ v: period.calendarYear, f: String(period.calendarYear) })),
       peakYear: selection.peakHigh?.calendarYear ?? periods[0].calendarYear,
+      chartEndYear: renderModel.displayRange.chartEndYear,
+      trace: renderModel.trace,
       valueWindow,
       discountRate: null,
       tpOffset,
@@ -163,12 +161,12 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         navSeriesRaw: periods.map((period) => period.low),
       },
     };
-  }, [canonicalStartPeriods, canonicalTimeline, priceToday]);
+  }, [canonicalStartPeriods, canonicalTimeline, isProjectMode, priceToday]);
 
 
 
   if (!isProjectMode && projectChartModel) {
-    return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><ValueRangeChart data={projectChartModel.data} ticks={projectChartModel.ticks} yearMin={projectChartModel.yearNow - 1} yearMax={projectChartModel.yearNow + Math.max(1, projectChartModel.data.length - 2)} peakYear={projectChartModel.peakYear} valueWindow={projectChartModel.valueWindow} currencyCode={currencyCode} /></div>;
+    return <div className="spot-range-chart-guard" style={{ marginTop: 8 }}><ValueRangeChart data={projectChartModel.data} ticks={projectChartModel.ticks} yearMin={projectChartModel.yearNow - 1} yearMax={projectChartModel.chartEndYear} peakYear={projectChartModel.peakYear} valueWindow={projectChartModel.valueWindow} currencyCode={currencyCode} /></div>;
   }
 
   if (isProjectMode) {
@@ -181,7 +179,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
           data={projectChartModel.data}
           ticks={projectChartModel.ticks}
           yearMin={projectChartModel.yearNow - 1}
-          yearMax={projectChartModel.yearNow + Math.max(1, projectChartModel.data.length - 2)}
+          yearMax={projectChartModel.chartEndYear}
           peakYear={projectChartModel.peakYear}
           valueWindow={projectChartModel.valueWindow}
           currencyCode={currencyCode}

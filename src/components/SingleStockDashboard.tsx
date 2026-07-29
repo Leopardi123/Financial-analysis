@@ -21,6 +21,7 @@ import { extractFailingMetals, extractFallbackOrFailingPriceMetals, rowHasMetalR
 import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStartIndexCandidate } from "../lib/project/validation/productionStartAlignment.ts";
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
+import { selectValuationChart } from "../lib/valuation/canonicalValuationTimeline.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import { getManualMetalPriceStore, saveManualMetalPrice } from "../lib/engine/pricing/manualMetalPriceStore.ts";
 import { collectDashboardTasks } from "../lib/engine/pricing/collectDashboardTasks.ts";
@@ -3278,16 +3279,24 @@ Capital Available: ${availableLabel}`,
     ) as Record<string, string>;
   }, [corporateProdStartMarkerValuesByKey, lockedTargetCurrency]);
 
+  const corporateCanonicalStartPeriods = useMemo(() => {
+    const source = corporateSnapshotData?.corporateValuationTimeSeries as { rows?: Array<{ period: number; year: number }>; projectMarkers?: Array<{ productionStartYear: number | null }> } | null | undefined;
+    return source?.projectMarkers?.flatMap((marker) => {
+      const period = source.rows?.find((row) => row.year === marker.productionStartYear)?.period;
+      return Number.isInteger(period) ? [period as number] : [];
+    }) ?? [];
+  }, [corporateSnapshotData]);
 
   const corporateList2ScalarTextByKey = useMemo(() => {
-    const discounted = typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number"
-      && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_TargetCurrency)
-      ? formatMetricValue({ value: corporateSnapshotData.DCF_prodStart_present_TargetCurrency, reason: null }, "money", lockedTargetCurrency)
+    const selection = corporateViewMetrics ? selectValuationChart(corporateViewMetrics.valuationTimeline, corporateCanonicalStartPeriods) : null;
+    const discountedPerShareValue = selection?.today.high ?? null;
+    const adjustedShares = selection?.today.high !== null ? corporateViewMetrics?.marketBox.sharesPf.value ?? null : null;
+    const discountedValue = discountedPerShareValue !== null && adjustedShares !== null
+      ? discountedPerShareValue * adjustedShares
       : null;
-    const adjustedShares = corporateViewMetrics?.marketBox.sharesPf.value ?? null;
-    const discountedPerShareValue = typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number" && adjustedShares !== null && adjustedShares > 0
-      ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency / adjustedShares
-      : corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency;
+    const discounted = discountedValue !== null
+      ? formatMetricValue({ value: discountedValue, reason: null }, "money", lockedTargetCurrency)
+      : null;
     const discountedPerShare = typeof discountedPerShareValue === "number"
       && Number.isFinite(discountedPerShareValue)
       ? formatMetricValue({ value: discountedPerShareValue, reason: null }, "money", lockedTargetCurrency)
@@ -3297,7 +3306,7 @@ Capital Available: ${availableLabel}`,
       DCF_Target_discounted: discounted,
       DCF_Target_discounted_perShare: discountedPerShare,
     } as const;
-  }, [corporateSnapshotData, corporateViewMetrics, lockedTargetCurrency]);
+  }, [corporateCanonicalStartPeriods, corporateViewMetrics, lockedTargetCurrency]);
 
   const corporateAlwaysMarkerMetricKeys = useMemo(
     () => new Set<string>(["DCF_Target", "DCF_perShare"]),
@@ -5711,9 +5720,7 @@ Capital Available: ${availableLabel}`,
                           tpLow={corporateViewMetrics.list2.NAV_prodStart_perShare?.value ?? null}
                           tpHigh={corporateViewMetrics.list2.DCF_perShare?.value ?? null}
                           canonicalTimeline={corporateViewMetrics.valuationTimeline}
-                          canonicalStartPeriods={corporateChartTimeSeries?.projectMarkers
-                            .map((marker) => corporateChartTimeSeries.rows.find((row) => row.year === marker.productionStartYear)?.period)
-                            .filter((period): period is number => Number.isInteger(period)) ?? []}
+                          canonicalStartPeriods={corporateCanonicalStartPeriods}
                           corporateTimeSeries={corporateChartTimeSeries}
                           discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
                           currencyCode={lockedTargetCurrency}
