@@ -4,6 +4,7 @@ import { runCorporateSnapshotPipeline } from '../../../lib/snapshot/runCorporate
 import { getProjectInputs } from '../../../lib/projectView/projectInputs.ts';
 import { computeProjectViewMetrics } from '../../../lib/projectView/computeProjectPreRevenueView.ts';
 import { buildValuationChartRenderModel } from '../valuationChartPresentation.ts';
+import { buildValuationTimeline, selectTimelineChartSeries } from '../../../lib/valuation/canonicalValuationTimeline.ts';
 
 const body = JSON.parse(await readFile('scripts/fixtures/snapshot-requests/abra_minimal.json', 'utf8'));
 for (const project of body.projects) {
@@ -78,6 +79,69 @@ console.log('Abra Corporate runtime trace', JSON.stringify({
   highSeriesTrace,
 }));
 
+// A-M: the one-project corporate path must be an identity transform.  Run two
+// real project-labelled runtime cases whose model starts precede valuationYear;
+// this is the boundary that regressed for Viscaria (2025 became 2026).
+for (const projectCase of [
+  { id: 'Viscaria', name: 'Viscaria Copper-Iron Project — FS+ Upside Case, full LoM', productionStartYear: 2027 },
+  { id: 'AbraSilver', name: 'AbraSilver', productionStartYear: 2026 },
+]) {
+  const singleBody = structuredClone(body) as Record<string, any>;
+  const raw = singleBody.projects[0].rawJson;
+  singleBody.projects[0].projectId = projectCase.id;
+  raw.meta.projectId = projectCase.id;
+  raw.meta.projectName = projectCase.name;
+  raw.version = 'project_json_v2';
+  raw.time.productionStartYear = projectCase.productionStartYear;
+  delete raw.time.periodEndDatesUtc;
+  const singleResult = await runCorporateSnapshotPipeline({ body: singleBody, refresh: false, debug: true });
+  assert.equal(singleResult.ok, true);
+  if (!singleResult.ok) throw new Error(`${projectCase.name} corporate snapshot failed`);
+  const singleSnapshot = singleResult.snapshot as Record<string, any>;
+  const corporate = singleSnapshot.canonicalValuationTimeline;
+  const contributionFcff = corporate.periods.map((period: any) => period.projectContributions[0].fcffUSD);
+  const project = buildValuationTimeline({
+    scope: 'project',
+    fcfUSD: contributionFcff,
+    capexUSD: singleSnapshot.series.capexUSD,
+    yearsByPeriod: corporate.periods.map((period: any) => period.calendarYear),
+    discountRate: singleSnapshot.discountRate,
+    fxUSDToTarget: singleSnapshot.fx_USD_to_TargetCurrency,
+    productionStartPeriod: raw.time.productionStartPeriod,
+    cashTarget: corporate.periods[0].cashTarget,
+    debtTarget: corporate.periods[0].debtTarget,
+    sharesCurrent: corporate.periods[0].sharesCurrent,
+    sharesPf: corporate.periods[0].sharesPf,
+    newSharesCumulative: corporate.periods[0].newSharesCumulative,
+    manualExtraShares: corporate.periods[0].manualExtraShares,
+  });
+
+  assert.equal(project.periods[0].calendarYear, projectCase.productionStartYear - raw.time.productionStartPeriod); // B, C
+  assert.notEqual(project.productionStartPeriod, null);
+  assert.equal(project.periods[project.productionStartPeriod as number].calendarYear, projectCase.productionStartYear); // D
+  assert.equal(project.periods[project.todayPeriod].calendarYear, corporate.periods[corporate.todayPeriod].calendarYear); // C
+  for (let periodIndex = 0; periodIndex < project.periods.length; periodIndex += 1) {
+    const projectPeriod = project.periods[periodIndex];
+    const corporatePeriod = corporate.periods[periodIndex];
+    assert.equal(projectPeriod.fcffUSD, corporatePeriod.projectContributions[0].fcffUSD); // A contribution
+    assert.equal(projectPeriod.fcffUSD, corporatePeriod.fcffUSD); // A aggregate
+    for (const key of [
+      'calendarYear', 'discountExponentFromToday', 'discountFactorFromToday',
+      'remainingUndiscountedFcffUSD', 'dcfAtPeriodUSD', 'dcfPresentValueTodayUSD',
+      'npvAtPeriodUSD', 'dcfAtPeriodTarget', 'dcfPresentValueTodayTarget',
+      'npvAtPeriodTarget', 'navAtPeriodTarget', 'sharesCurrent', 'sharesPf',
+      'dcfPerShareTarget', 'dcfPresentValueTodayPerShareTarget',
+      'npvPerShareTarget', 'navPerShareTarget',
+    ] as const) assert.equal(projectPeriod[key], corporatePeriod[key], `${projectCase.id} period=${periodIndex} key=${key}`); // E-K
+  }
+  assert.deepEqual(selectTimelineChartSeries(project), selectTimelineChartSeries(corporate)); // L
+  console.log('Single-project Project/Corporate reconciliation', JSON.stringify({
+    project: projectCase.name,
+    input: { years: project.periods.map((row) => row.calendarYear), fcffUSD: contributionFcff, todayPeriod: project.todayPeriod, productionStartPeriod: project.productionStartPeriod },
+    rows: project.periods.map((row, periodIndex) => ({ periodIndex, calendarYear: row.calendarYear, fcffUSD: row.fcffUSD, discountExponentFromToday: row.discountExponentFromToday, discountFactorFromToday: row.discountFactorFromToday, remainingDCF: row.dcfAtPeriodUSD, npv: row.npvAtPeriodTarget, nav: row.navAtPeriodTarget, dcf: row.dcfAtPeriodTarget, shares: row.sharesPf, cash: row.cashTarget, debt: row.debtTarget, netCash: row.netCashTarget, npvPerShare: row.npvPerShareTarget, navPerShare: row.navPerShareTarget, dcfPerShare: row.dcfPerShareTarget })),
+  })); // M
+}
+
 // A-O regression: two projects share local t=2 but start in distinct calendar years.
 const multiBody = JSON.parse(await readFile('scripts/fixtures/snapshot-requests/abra_minimal.json', 'utf8')) as Record<string, any>;
 const projectA = multiBody.projects[0];
@@ -100,10 +164,10 @@ const multiSnapshot = multiResult.snapshot as Record<string, any>;
 const canonical = multiSnapshot.canonicalValuationTimeline;
 const milestones = multiSnapshot.projectStartMilestones as Array<Record<string, any>>;
 const multiRows = multiSnapshot.corporateValuationTimeSeries.rows as Array<Record<string, any>>;
-assert.deepEqual(canonical.periods.map((period: any) => period.calendarYear), Array.from({ length: 14 }, (_, index) => 2026 + index)); // A, B
+assert.deepEqual(canonical.periods.map((period: any) => period.calendarYear), Array.from({ length: 13 }, (_, index) => 2027 + index)); // A, B
 assert.equal(canonical.periods.some((period: any) => [-1, 2, 5].includes(period.calendarYear)), false); // B, N
 assert.deepEqual(milestones.map((milestone) => milestone.calendarYear), [2029, 2032]); // C, M
-assert.deepEqual(milestones.map((milestone) => milestone.corporatePeriodIndex), [3, 6]); // F, G
+assert.deepEqual(milestones.map((milestone) => milestone.corporatePeriodIndex), [2, 5]); // F, G
 assert.equal(projectA.rawJson.time.productionStartYear, 2029);
 assert.equal(projectB.rawJson.time.productionStartYear, 2032);
 for (const milestone of milestones) {
@@ -116,7 +180,7 @@ const year2032 = canonical.periods.find((period: any) => period.calendarYear ===
 assert.notEqual(year2029.projectContributions.find((item: any) => item.projectId === 'A').fcffUSD, 0); // H
 assert.equal(year2029.projectContributions.find((item: any) => item.projectId === 'B').fcffUSD, 0);
 assert.notEqual(year2032.projectContributions.find((item: any) => item.projectId === 'B').fcffUSD, 0);
-for (const period of canonical.periods) assert.equal(period.discountExponentFromToday, period.calendarYear - 2026); // I
+for (const period of canonical.periods) assert.equal(period.discountExponentFromToday, period.calendarYear - 2027); // I
 const multiInputs = getProjectInputs({ snapshot: multiSnapshot });
 const multiRender = buildValuationChartRenderModel({ timeline: canonical, scope: 'corporate', startPeriods: milestones.map((item) => item.corporatePeriodIndex), priceToday: multiInputs.price, format: String });
 assert.equal(multiRender.displayRange.latestProjectStartYear, 2032); // J

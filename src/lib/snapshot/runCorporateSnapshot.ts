@@ -2265,14 +2265,19 @@ export async function runCorporateSnapshotPipeline(args: {
       })();
     }
 
-    // Keep the full project-derived calendar grid for mapping and diagnostics, but
-    // rebase every present-value calculation to the explicit valuation year.
+    // The canonical Project view anchors "today" at the first model period.  Keep
+    // that same anchor here: otherwise a one-project Corporate silently drops the
+    // project's first model years when valuationYear has moved on (the Viscaria
+    // regression dropped 2025 and made 2026 period zero).  valuationYear remains
+    // useful request metadata; it must not rewrite the economic period axis.
+    const firstInternalYear = aggregationEffective.corporateYearsByPeriod[0]
+      ?? input.valuationYear;
     const lastInternalYear = aggregationEffective.corporateYearsByPeriod[
       aggregationEffective.corporateYearsByPeriod.length - 1
     ] ?? input.valuationYear;
     const valuationYears = Array.from(
-      { length: Math.max(0, Math.max(input.valuationYear, lastInternalYear) - input.valuationYear + 1) },
-      (_, index) => input.valuationYear + index,
+      { length: Math.max(0, lastInternalYear - firstInternalYear + 1) },
+      (_, index) => firstInternalYear + index,
     );
     const internalIndexByYear = new Map(
       aggregationEffective.corporateYearsByPeriod.map((year, index) => [year, index]),
@@ -2287,11 +2292,11 @@ export async function runCorporateSnapshotPipeline(args: {
     const valuationMasterN = valuationYears.length - 1;
     const firstFutureProductionYear = projectsForBuildFunding
       .map((project) => project.productionStartYear)
-      .filter((year): year is number => Number.isInteger(year) && year > input.valuationYear)
+      .filter((year): year is number => Number.isInteger(year) && year > firstInternalYear)
       .sort((left, right) => left - right)[0] ?? null;
     const valuationProductionStartPeriod = firstFutureProductionYear === null
       ? 0
-      : firstFutureProductionYear - input.valuationYear + delayPeriods;
+      : firstFutureProductionYear - firstInternalYear + delayPeriods;
     diagnostics.meta.valuationYear = input.valuationYear;
     diagnostics.meta.valuationTimeAxis = {
       valuationYear: input.valuationYear,
