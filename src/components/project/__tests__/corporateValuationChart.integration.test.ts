@@ -77,3 +77,55 @@ console.log('Abra Corporate runtime trace', JSON.stringify({
   chartEndYear: render.displayRange.chartEndYear,
   highSeriesTrace,
 }));
+
+// A-O regression: two projects share local t=2 but start in distinct calendar years.
+const multiBody = JSON.parse(await readFile('scripts/fixtures/snapshot-requests/abra_minimal.json', 'utf8')) as Record<string, any>;
+const projectA = multiBody.projects[0];
+projectA.rawJson.version = 'project_json_v2';
+projectA.projectId = 'A';
+projectA.rawJson.meta.projectId = 'A';
+projectA.rawJson.meta.projectName = 'Project A';
+projectA.rawJson.time.productionStartPeriod = 2;
+projectA.rawJson.time.productionStartYear = 2029;
+const projectB = structuredClone(projectA);
+projectB.projectId = 'B';
+projectB.rawJson.meta.projectId = 'B';
+projectB.rawJson.meta.projectName = 'Project B';
+projectB.rawJson.time.productionStartYear = 2032;
+multiBody.projects = [projectA, projectB];
+const multiResult = await runCorporateSnapshotPipeline({ body: multiBody, refresh: false, debug: true });
+assert.equal(multiResult.ok, true);
+if (!multiResult.ok) throw new Error('Multi-project corporate snapshot failed');
+const multiSnapshot = multiResult.snapshot as Record<string, any>;
+const canonical = multiSnapshot.canonicalValuationTimeline;
+const milestones = multiSnapshot.projectStartMilestones as Array<Record<string, any>>;
+const multiRows = multiSnapshot.corporateValuationTimeSeries.rows as Array<Record<string, any>>;
+assert.deepEqual(canonical.periods.map((period: any) => period.calendarYear), Array.from({ length: 14 }, (_, index) => 2026 + index)); // A, B
+assert.equal(canonical.periods.some((period: any) => [-1, 2, 5].includes(period.calendarYear)), false); // B, N
+assert.deepEqual(milestones.map((milestone) => milestone.calendarYear), [2029, 2032]); // C, M
+assert.deepEqual(milestones.map((milestone) => milestone.corporatePeriodIndex), [3, 6]); // F, G
+assert.equal(projectA.rawJson.time.productionStartYear, 2029);
+assert.equal(projectB.rawJson.time.productionStartYear, 2032);
+for (const milestone of milestones) {
+  const row = multiRows[milestone.corporatePeriodIndex];
+  assert.equal(row.year, milestone.calendarYear); // D, E, F, O
+  assert.equal(canonical.periods[milestone.corporatePeriodIndex].calendarYear, milestone.calendarYear);
+}
+const year2029 = canonical.periods.find((period: any) => period.calendarYear === 2029);
+const year2032 = canonical.periods.find((period: any) => period.calendarYear === 2032);
+assert.notEqual(year2029.projectContributions.find((item: any) => item.projectId === 'A').fcffUSD, 0); // H
+assert.equal(year2029.projectContributions.find((item: any) => item.projectId === 'B').fcffUSD, 0);
+assert.notEqual(year2032.projectContributions.find((item: any) => item.projectId === 'B').fcffUSD, 0);
+for (const period of canonical.periods) assert.equal(period.discountExponentFromToday, period.calendarYear - 2026); // I
+const multiInputs = getProjectInputs({ snapshot: multiSnapshot });
+const multiRender = buildValuationChartRenderModel({ timeline: canonical, scope: 'corporate', startPeriods: milestones.map((item) => item.corporatePeriodIndex), priceToday: multiInputs.price, format: String });
+assert.equal(multiRender.displayRange.latestProjectStartYear, 2032); // J
+assert.equal(multiRender.displayRange.chartEndYear, Math.min(2039, Math.max(2032, multiRender.selection.peakLow?.calendarYear ?? -Infinity, multiRender.selection.peakHigh?.calendarYear ?? -Infinity) + 3)); // K
+assert.deepEqual(multiRender.selection.starts.map((point) => point.calendarYear), [2029, 2032]); // E, F, M
+assert.deepEqual(milestones.map(({ projectId, projectName, corporatePeriodIndex, calendarYear, navPerShare, dcfPerShare, dcfPresentValueTodayPerShare }) => ({ projectId, projectName, corporatePeriodIndex, calendarYear, navPerShare, dcfPerShare, dcfPresentValueTodayPerShare })), milestones); // O exact shared shape
+console.log('Multi-project Corporate calendar runtime trace', JSON.stringify(canonical.periods.map((period: any) => ({
+  periodIndex: period.periodIndex, calendarYear: period.calendarYear,
+  discountExponentFromToday: period.discountExponentFromToday, fcffUSD: period.fcffUSD,
+  contributions: period.projectContributions, projectsStarting: milestones.filter((item) => item.corporatePeriodIndex === period.periodIndex).map((item) => item.projectId),
+  low: period.navPerShareTarget, high: period.dcfPerShareTarget,
+}))));

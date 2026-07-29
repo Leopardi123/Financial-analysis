@@ -22,6 +22,7 @@ import { buildProductionDriverFirstNonZeroMap, firstNonZeroIndex, productionStar
 import { buildOperationsGridModel, type OperationsGridInput } from "../pages/projectOperationsGrid.ts";
 import { computeProjectViewMetrics, type MetricValue } from "../lib/projectView/computeProjectPreRevenueView.ts";
 import { selectValuationChart } from "../lib/valuation/canonicalValuationTimeline.ts";
+import { verifyProjectCalendarAxis } from "../lib/valuation/projectCalendarAxis.ts";
 import { getProjectInputs, validateProjectInputs } from "../lib/projectView/projectInputs.ts";
 import { getManualMetalPriceStore, saveManualMetalPrice } from "../lib/engine/pricing/manualMetalPriceStore.ts";
 import { collectDashboardTasks } from "../lib/engine/pricing/collectDashboardTasks.ts";
@@ -2997,8 +2998,28 @@ Capital Available: ${availableLabel}`,
 
   const lastNpvTraceFingerprintRef = useRef<string | null>(null);
 
+  const projectCalendarResolution = useMemo(() => {
+    if (!projectSnapshotData || !parsedSelectedProject || !selectedProjectRawJson) return null;
+    const inputs = getProjectInputs({
+      snapshot: projectSnapshotData,
+      parsedProject: parsedSelectedProject,
+      discountRateInput: riskAdjustedDiscountRatePctInput,
+      targetCurrency: lockedTargetCurrency,
+    });
+    const rawTime = (selectedProjectRawJson.time ?? null) as { productionStartYear?: unknown; periodEndDatesUtc?: unknown } | null;
+    return verifyProjectCalendarAxis({
+      version: selectedProjectRawJson.version === 'project_json_v1' ? 'project_json_v1' : 'project_json_v2',
+      masterN: Number(inputs.masterN),
+      fcffLength: Array.isArray(inputs.series.fcfUSD) ? inputs.series.fcfUSD.length : 0,
+      productionStartPeriod: Number(inputs.tp),
+      productionStartYear: typeof rawTime?.productionStartYear === 'number' ? rawTime.productionStartYear : null,
+      periodEndDatesUtc: rawTime?.periodEndDatesUtc,
+      parsedCanonicalYears: parsedSelectedProject.engineInputWithoutPrices.yearsByPeriod,
+    });
+  }, [lockedTargetCurrency, parsedSelectedProject, projectSnapshotData, riskAdjustedDiscountRatePctInput, selectedProjectRawJson]);
+
   const projectViewMetrics = useMemo(() => {
-    if (!projectSnapshotData) return null;
+    if (!projectSnapshotData || !projectCalendarResolution?.ok) return null;
     const asSeries = (raw: Array<number> | null | undefined): Array<number | null> => (Array.isArray(raw)
       ? raw.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null))
       : []);
@@ -3012,8 +3033,11 @@ Capital Available: ${availableLabel}`,
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
     const snapshotYears = ((projectSnapshotData.series ?? {}) as { yearsByPeriod?: unknown }).yearsByPeriod;
     const valuationYears = ((projectSnapshotData.project ?? {}) as { chartFlows?: { yearsByPeriod?: unknown } }).chartFlows?.yearsByPeriod;
-    const internalStartYear = Array.isArray(snapshotYears) && typeof snapshotYears[0] === "number" ? snapshotYears[0] : null;
-    const valuationStartYear = Array.isArray(valuationYears) && typeof valuationYears[0] === "number" ? valuationYears[0] : null;
+    const internalStartYear = Array.isArray(snapshotYears) && typeof snapshotYears[0] === 'number' ? snapshotYears[0] : null;
+    const valuationStartYear = Array.isArray(valuationYears) && typeof valuationYears[0] === 'number' ? valuationYears[0] : null;
+    // This remains a discount-distance input only. Presentation years come solely
+    // from the verified project period dates below.
+    const discountPeriodOffset = internalStartYear !== null && valuationStartYear !== null ? internalStartYear - valuationStartYear : 0;
     const latestQuarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")]
       .reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
     const latestQuarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")]
@@ -3045,8 +3069,10 @@ Capital Available: ${availableLabel}`,
       payableAuEqOz: asSeries(inputs.series.payableAuEqOz),
       sustainingCostUSD: asSeries(inputs.series.sustainingCostUSD),
       productionStartPeriod: inputs.tp,
-      calendarYears: Array.isArray(valuationYears) ? valuationYears.filter((year): year is number => typeof year === "number") : undefined,
-      valuationPeriodOffset: internalStartYear !== null && valuationStartYear !== null ? internalStartYear - valuationStartYear : 0,
+      calendarYears: projectCalendarResolution.value.yearsByPeriod,
+      periodEndDates: projectCalendarResolution.value.periodEndDatesUtc ?? undefined,
+      calendarYearPolicy: 'verified',
+      valuationPeriodOffset: discountPeriodOffset,
       financing: {
         equityPct: toInputNumber(projectEquityPct) ?? 100,
         debtPct: toInputNumber(projectDebtPct) ?? 0,
@@ -3055,7 +3081,7 @@ Capital Available: ${availableLabel}`,
         cashUsePercent: projectCashUsedPct / 100,
       },
     });
-  }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
+  }, [data, projectUseQuarterlyCash, projectCashUsedPct, projectDebtPct, projectEquityPct, projectExtraSharesInput, projectSnapshotData, parsedSelectedProject, selectedProjectId, lockedTargetCurrency, riskAdjustedDiscountRatePctInput, projectCalendarResolution]);
 
   const corporateViewMetrics = useMemo(() => {
     if (!corporateSnapshotData) return null;
@@ -3070,9 +3096,6 @@ Capital Available: ${availableLabel}`,
     });
     const marketValue = (corporateSnapshotData.marketValue ?? {}) as Record<string, unknown>;
     const corporateFinancing = (corporateSnapshotData.financing ?? {}) as Record<string, unknown>;
-    const internalYears = ((corporateSnapshotData.series ?? {}) as { yearsByPeriod?: unknown }).yearsByPeriod;
-    const valuationYear = ((corporateSnapshotData.corporateValuationTimeSeries ?? {}) as { valuationYear?: unknown }).valuationYear;
-    const internalStartYear = Array.isArray(internalYears) && typeof internalYears[0] === "number" ? internalYears[0] : null;
     const asNum = (raw: unknown): number | null => (typeof raw === "number" && Number.isFinite(raw) ? raw : null);
     const computed = computeProjectViewMetrics({
       meta: { projectId: "corporate" },
@@ -3103,13 +3126,18 @@ Capital Available: ${availableLabel}`,
       calendarYears: Array.isArray((corporateSnapshotData.corporateValuationTimeSeries as { rows?: Array<{ year: number }> } | undefined)?.rows)
         ? (corporateSnapshotData.corporateValuationTimeSeries as { rows: Array<{ year: number }> }).rows.map((row) => row.year)
         : undefined,
-      valuationPeriodOffset: internalStartYear !== null && typeof valuationYear === "number" ? internalStartYear - valuationYear : 0,
+      valuationPeriodOffset: 0,
       financing: {
         equityPct: 100,
         debtPct: 0,
         usePrecomputedFinancing: true,
       },
     });
+    // The snapshot's canonical timeline is already rebased to valuationYear and
+    // calendar-aligned. Recomputing it from the internal series can have a different
+    // length when projects begin before/after today and would fall back to offsets.
+    const canonicalTimeline = (corporateSnapshotData as unknown as { canonicalValuationTimeline?: typeof computed.valuationTimeline }).canonicalValuationTimeline;
+    const computedWithCanonical = canonicalTimeline ? { ...computed, valuationTimeline: canonicalTimeline } : computed;
     const corporateLista3 = ((corporateSnapshotData.corporate ?? {}) as { lista3Metrics?: {
       AISC_LOM?: number | null;
       BreakEven_AuEq?: number | null;
@@ -3126,7 +3154,7 @@ Capital Available: ${availableLabel}`,
       Kapitalavkastning_per_Year?: number | null;
     } }).lista3Metrics;
     if (!corporateLista3) {
-      return computed;
+      return computedWithCanonical;
     }
 
     const toMetricValue = (value: number | null | undefined, reason: string): MetricValue => ({
@@ -3135,7 +3163,7 @@ Capital Available: ${availableLabel}`,
     });
 
     return {
-      ...computed,
+      ...computedWithCanonical,
       list3: {
         ...computed.list3,
         AISC_LOM: toMetricValue(corporateLista3.AISC_LOM, "Missing corporate.lista3Metrics.AISC_LOM"),
@@ -3251,8 +3279,8 @@ Capital Available: ${availableLabel}`,
   const corporateProdStartMarkerValuesByKey = useMemo(() => {
     const result: Partial<Record<"NPV_prodStart" | "NPV_prodStart_perShare" | "NAV_prodStart" | "NAV_prodStart_perShare" | "DCF_Target" | "DCF_perShare", YearlyMetricValue[]>> = {};
     if (!corporateViewMetrics || !corporateSnapshotData) return result;
-    const markerPeriods = ((corporateSnapshotData.modeledValuationTimeline as { markers?: Array<{ corporateTpIndexUsed?: number | null }> } | undefined)?.markers ?? [])
-      .map((marker) => marker.corporateTpIndexUsed)
+    const markerPeriods = ((corporateSnapshotData as unknown as { projectStartMilestones?: Array<{ corporatePeriodIndex: number }> }).projectStartMilestones ?? [])
+      .map((milestone) => milestone.corporatePeriodIndex)
       .filter((period): period is number => Number.isInteger(period));
     const fields = {
       NPV_prodStart: 'npvAtPeriodTarget', NPV_prodStart_perShare: 'npvPerShareTarget',
@@ -3279,13 +3307,10 @@ Capital Available: ${availableLabel}`,
     ) as Record<string, string>;
   }, [corporateProdStartMarkerValuesByKey, lockedTargetCurrency]);
 
-  const corporateCanonicalStartPeriods = useMemo(() => {
-    const source = corporateSnapshotData?.corporateValuationTimeSeries as { rows?: Array<{ period: number; year: number }>; projectMarkers?: Array<{ productionStartYear: number | null }> } | null | undefined;
-    return source?.projectMarkers?.flatMap((marker) => {
-      const period = source.rows?.find((row) => row.year === marker.productionStartYear)?.period;
-      return Number.isInteger(period) ? [period as number] : [];
-    }) ?? [];
-  }, [corporateSnapshotData]);
+  const corporateCanonicalStartPeriods = useMemo(() =>
+    ((corporateSnapshotData as unknown as { projectStartMilestones?: Array<{ corporatePeriodIndex: number }> } | null)?.projectStartMilestones ?? [])
+      .map((milestone) => milestone.corporatePeriodIndex),
+  [corporateSnapshotData]);
 
   const corporateList2ScalarTextByKey = useMemo(() => {
     const selection = corporateViewMetrics ? selectValuationChart(corporateViewMetrics.valuationTimeline, corporateCanonicalStartPeriods) : null;
@@ -6010,6 +6035,9 @@ Capital Available: ${availableLabel}`,
 
               {projectSnapshotLoading && <p className="bread">Running snapshot…</p>}
               {projectSnapshotError && <p className="status error">{projectSnapshotError}</p>}
+              {projectCalendarResolution && !projectCalendarResolution.ok && (
+                <p className="status error">{projectCalendarResolution.error}</p>
+              )}
 
               {projectViewMetrics && (
                 <section className="project-producer-layout" style={{ marginTop: 12, display: "grid", gap: 8 }}>
