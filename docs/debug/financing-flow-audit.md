@@ -88,8 +88,8 @@ The Corporate box reads the canonical `corporateSnapshotData.financing` object:
   `closing_corporate_cash_TargetCurrency`.
 * `debt_t0_post_TargetCurrency` is opening reported debt plus cumulative new waterfall
   debt. `cash_t0_post_TargetCurrency` is reported initial cash less initial cash used;
-  `cash_for_nav_TargetCurrency` deliberately remains reported cash because FCFF has
-  already deducted construction CAPEX.
+  `cash_for_nav_TargetCurrency` is the same post-financing balance. Future Corporate
+  NAV points use the waterfall row's closing cash and cumulative debt for that year.
 
 Thus Corporate rows are cumulative over the chronological waterfall, except latest
 cash and the explicitly named t0 balance fields. Corporate per-share calculations

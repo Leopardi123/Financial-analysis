@@ -11,6 +11,8 @@ type FinancingInput = {
   latestQuarterlyCashTarget?: number;
   useCashFirst?: boolean;
   cashUsePercent?: number;
+  /** Cash that cash-first must leave on the balance sheet. */
+  minimumCashReserveTarget?: number;
   /** Legacy test/caller compatibility. Prefer latestQuarterlyCashTarget. */
   cashUsedInput?: number;
   /** Corporate snapshots already contain the canonical financing result. */
@@ -364,8 +366,10 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
     ? Math.max(0, input.financing.latestQuarterlyCashTarget as number)
     : cashCurrent;
   const cashUsePercent = Math.max(0, Math.min(1, input.financing.cashUsePercent ?? 1));
+  const minimumCashReserve = Math.max(0, input.financing.minimumCashReserveTarget ?? 0);
+  const cashAvailableAboveReserve = Math.max(0, (latestQuarterlyCash ?? 0) - minimumCashReserve);
   const requestedCash = input.financing.latestQuarterlyCashTarget !== undefined
-    ? ((input.financing.useCashFirst ?? false) ? (latestQuarterlyCash ?? 0) * cashUsePercent : 0)
+    ? ((input.financing.useCashFirst ?? false) ? cashAvailableAboveReserve * cashUsePercent : 0)
     : Math.max(0, input.financing.cashUsedInput ?? 0);
   const cashUsedTarget = input.financing.usePrecomputedFinancing
     ? 0
@@ -393,10 +397,10 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
   }
   const debtT0 = debtCurrent !== null ? debtCurrent + debtAddedTarget : debtCurrent;
   const cashT0 = cashCurrent !== null ? cashCurrent - cashUsedTarget : cashCurrent;
-  // FCFF already deducts the complete construction CAPEX. Deducting cash used for
-  // that same CAPEX from NAV would count the investment twice. NAV therefore adds
-  // the reported balance-sheet cash once; cashT0 remains the post-funding liquidity metric.
-  const cashForNav = cashCurrent;
+  // Financing does not change pre-finance FCFF/NPV, but cash allocated to the build
+  // is no longer a balance-sheet asset.  Use the same post-financing cash shown in
+  // List 5; do not apply a second, separate cash-used deduction to NAV.
+  const cashForNav = cashT0;
 
   const marketCapCurrent = sharesCurrent !== null && priceCurrent !== null ? sharesCurrent * priceCurrent : null;
   const evTarget = marketCapCurrent !== null && debtT0 !== null && cashT0 !== null
@@ -1055,9 +1059,9 @@ export function computeProjectViewMetrics(input: ProjectViewInputs): ProjectView
       },
       valuation_metric_audit: [
         ['NPV', npvTarget, sharesPf, 'absolute', npvTarget], ['NPV/share', npvTarget, sharesPf, 'NPV / sharesPF', safeRatio(npvTarget, sharesPf).value],
-        ['NAV', navTarget, sharesPf, 'NPV + reported cash - debt_t0_post (CAPEX already in FCFF)', navTarget], ['NAV/share', navTarget, sharesPf, 'NAV / sharesPF', safeRatio(navTarget, sharesPf).value],
+        ['NAV', navTarget, sharesPf, 'NPV + cash_t0_post - debt_t0_post', navTarget], ['NAV/share', navTarget, sharesPf, 'NAV / sharesPF', safeRatio(navTarget, sharesPf).value],
         ['NPV prod start', npvProdStartTarget, sharesPf, 'DCF prod start - Initial CAPEX', npvProdStartTarget], ['NPV prod start/share', npvProdStartTarget, sharesPf, 'NPV prod start / sharesPF', safeRatio(npvProdStartTarget, sharesPf).value],
-        ['NAV prod start', navProdStartTarget, sharesPf, 'NPV prod start + reported cash - debt_t0_post (CAPEX already in FCFF)', navProdStartTarget], ['NAV prod start/share', navProdStartTarget, sharesPf, 'NAV prod start / sharesPF', safeRatio(navProdStartTarget, sharesPf).value],
+        ['NAV prod start', navProdStartTarget, sharesPf, 'NPV prod start + cash_t0_post - debt_t0_post', navProdStartTarget], ['NAV prod start/share', navProdStartTarget, sharesPf, 'NAV prod start / sharesPF', safeRatio(navProdStartTarget, sharesPf).value],
         ['DCF prod start', dcfTarget, sharesPf, 'fx × discounted FCFF from tp', dcfTarget], ['DCF prod start/share', dcfTarget, sharesPf, 'DCF prod start / sharesPF', safeRatio(dcfTarget, sharesPf).value],
         ['DCF prod start present', dcfTargetDiscounted, sharesPf, 'DCF prod start / (1+r)^tp', dcfTargetDiscounted], ['DCF prod start present/share', dcfTargetDiscounted, sharesPf, 'DCF prod start present / sharesPF', safeRatio(dcfTargetDiscounted, sharesPf).value],
         ['CF LOM', cfLomTarget, sharesPf, 'fx × sum(FCFF)', cfLomTarget], ['CF LOM/share', cfLomTarget, sharesPf, 'CF LOM / sharesPF', safeRatio(cfLomTarget, sharesPf).value],
