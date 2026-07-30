@@ -8,6 +8,8 @@ assert.match(dashboard, /<NpvSpotRangeComparisonCard[\s\S]*?chartFlows\?\.yearsB
 assert.match(dashboard, /<AlltGickFelCard[\s\S]*?chartFlows\?\.yearsByPeriod/);
 assert.match(dashboard, /<h2 className="subrub small">ALLT GICK FEL<\/h2>/);
 assert.match(dashboard, /project\.modeled\.npvSpotRange/);
+assert.match(dashboard, /className="project-list2-pager" aria-label="Corporate modeled valuation pages"/);
+assert.match(dashboard, /key="corporate-list2-pager"[\s\S]*?\{section\}[\s\S]*?<ModelAnalysis/);
 
 const pagerRule = styles.match(/\.project-list2-pager\s*\{([^}]*)\}/)?.[1] ?? '';
 assert.match(pagerRule, /grid-auto-flow:\s*column/);

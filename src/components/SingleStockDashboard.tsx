@@ -5744,8 +5744,8 @@ Capital Available: ${availableLabel}`,
                     ["list3", "EFFEKTIVITET OCH LÖNSAMHET", corporateViewMetrics.list3],
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", corporateViewMetrics.list4],
                     ["list6", "M&A VALUATION", corporateViewMetrics.list6],
-                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
-                    <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
+                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => {
+                    const section = <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
                         <>
@@ -5764,11 +5764,6 @@ Capital Available: ${availableLabel}`,
                           corporateTimeSeries={corporateChartTimeSeries}
                           discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
                           currencyCode={lockedTargetCurrency}
-                        />
-                        <ModelAnalysis
-                          dcfPerShare={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
-                          currency={lockedTargetCurrency}
-                          rows={corporateChartTimeSeries?.rows ?? []}
                         />
                         {debugEnabled && corporateTimelineDebug && (
                           <details style={{ marginTop: 8 }}>
@@ -5996,8 +5991,22 @@ Capital Available: ${availableLabel}`,
                         targetCurrency: lockedTargetCurrency,
                         yearlyValuesByKey: corporateProdStartMarkerValuesByKey,
                       })}
-                    </details>
-                  ))}
+                    </details>;
+                    if (sectionKey !== "list2") return section;
+                    return <div key="corporate-list2-pager" className="project-list2-pager" aria-label="Corporate modeled valuation pages">
+                      <div className="project-list2-page">{section}</div>
+                      <div className="project-list2-page">
+                        <details className="producer-core-section project-collapsible-card" open>
+                          <summary><h2 className="subrub small">MODELLANALYS</h2></summary>
+                          <ModelAnalysis
+                            dcfPerShare={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
+                            currency={lockedTargetCurrency}
+                            rows={corporateChartTimeSeries?.rows ?? []}
+                          />
+                        </details>
+                      </div>
+                    </div>;
+                  })}
                 </>
                   );
                 } catch {

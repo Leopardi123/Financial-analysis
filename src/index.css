@@ -110,7 +110,7 @@ input {
     align-items: start;
   }
 }
-.model-analysis { margin-top: 14px; border-top: 1px solid #dbe3ea; padding-top: 14px; }
+.model-analysis { padding-top: 4px; }
 .model-analysis h3 { margin: 0; font-size: 18px; color: #152536; }
 .model-analysis-subtitle { margin: 4px 0 10px; color: #526273; font-size: 13px; }
 .model-analysis-baseline { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; font-weight: 650; color: #334155; margin-bottom: 10px; }
