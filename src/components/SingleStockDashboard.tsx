@@ -4,6 +4,7 @@ import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
+import ModelAnalysis from "./project/ModelAnalysis";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import AlltGickFelCard from "./project/AlltGickFelCard";
 import type { StressOptions } from "../lib/snapshot/applyStressModifiers.ts";
@@ -5743,8 +5744,8 @@ Capital Available: ${availableLabel}`,
                     ["list3", "EFFEKTIVITET OCH LÖNSAMHET", corporateViewMetrics.list3],
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", corporateViewMetrics.list4],
                     ["list6", "M&A VALUATION", corporateViewMetrics.list6],
-                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
-                    <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
+                  ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => {
+                    const section = <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
                         <>
@@ -5990,8 +5991,27 @@ Capital Available: ${availableLabel}`,
                         targetCurrency: lockedTargetCurrency,
                         yearlyValuesByKey: corporateProdStartMarkerValuesByKey,
                       })}
-                    </details>
-                  ))}
+                    </details>;
+                    if (sectionKey !== "list2") return section;
+                    return <div key="corporate-list2-pager" className="project-list2-pager" aria-label="Corporate modeled valuation pages">
+                      <div className="project-list2-page">{section}</div>
+                      <div className="project-list2-page">
+                        <details className="producer-core-section project-collapsible-card" open>
+                          <summary><h2 className="subrub small">MODELLANALYS</h2></summary>
+                          <ModelAnalysis
+                            dcfPerShare={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
+                            currency={lockedTargetCurrency}
+                            rows={corporateChartTimeSeries?.rows ?? []}
+                            series={(corporateSnapshotData?.series ?? null) as import('../lib/corporate/snapshot/types.ts').CorporateSnapshotSeries | null}
+                            discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
+                            fx={typeof corporateSnapshotData?.fx_USD_to_TargetCurrency === "number" ? corporateSnapshotData.fx_USD_to_TargetCurrency : null}
+                            shares={typeof (corporateSnapshotData?.financing as Record<string, unknown> | undefined)?.shares_post_financing === "number" ? (corporateSnapshotData?.financing as Record<string, number>).shares_post_financing : null}
+                            netCashTarget={typeof corporateChartTimeSeries?.rows?.[0]?.evEbitda6xPerShare === "number" ? Number(((corporateSnapshotData?.financing as Record<string, unknown> | undefined)?.cash_t0_post_TargetCurrency ?? 0)) - Number(((corporateSnapshotData?.financing as Record<string, unknown> | undefined)?.debt_t0_post_TargetCurrency ?? 0)) : null}
+                          />
+                        </details>
+                      </div>
+                    </div>;
+                  })}
                 </>
                   );
                 } catch {
