@@ -1,4 +1,4 @@
-export type ConvergenceStatus = "Fullt beräkningsbart" | "Ej beräkningsbart";
+export type ConvergenceStatus = "Fullt beräkningsbart" | "Matematiskt lösbart – utanför modellintervall" | "Kräver användarindata" | "Ej beräkningsbart";
 
 export type ConvergencePackage = {
   id: string;
@@ -48,6 +48,14 @@ function interpolate(points: MultiplePoint[], multiple: number): number | null {
   return low.valuePerShare + (high.valuePerShare - low.valuePerShare) * weight;
 }
 
+function extrapolate(points: MultiplePoint[], multiple: number): number | null {
+  const sorted = points.filter((point) => finite(point.valuePerShare)).sort((a, b) => a.multiple - b.multiple);
+  if (sorted.length < 2) return null;
+  if (multiple >= sorted[0].multiple && multiple <= sorted[sorted.length - 1].multiple) return interpolate(sorted, multiple);
+  const pair = multiple < sorted[0].multiple ? sorted.slice(0, 2) : sorted.slice(-2);
+  return pair[0].valuePerShare + (pair[1].valuePerShare - pair[0].valuePerShare) * (multiple - pair[0].multiple) / (pair[1].multiple - pair[0].multiple);
+}
+
 function unavailable(id: string, name: string, missingRelation: string): ConvergencePackage {
   return {
     id, name, status: "Ej beräkningsbart", changedAssumptions: [], requiredChange: "Ej beräkningsbart",
@@ -71,33 +79,33 @@ export function buildConvergencePackages(input: ConvergenceInput): ConvergencePa
   if (finite(dcf) && finite(referenceValue) && finite(lowValue) && finite(highValue) && highValue !== lowValue) {
     // EV/equity value is evaluated from the model's own explicit multiple boundary points.
     const requiredMultiple = minMultiple + (dcf - lowValue) * (maxMultiple - minMultiple) / (highValue - lowValue);
-    if (requiredMultiple >= minMultiple && requiredMultiple <= maxMultiple) {
-      const convergedValue = interpolate(input.multiplePoints, requiredMultiple) as number;
+    if (Number.isFinite(requiredMultiple) && requiredMultiple >= 0) {
+      const within = requiredMultiple >= minMultiple && requiredMultiple <= maxMultiple;
+      const convergedValue = extrapolate(input.multiplePoints, requiredMultiple) as number;
       const gap = Math.abs(dcf - convergedValue);
       const gapPct = relativeGapPct(dcf, convergedValue);
       packages.push({
-        id: "ev-multiple", name: "Ändrad EV/EBITDA-multipel", status: "Fullt beräkningsbart",
+        id: "ev-multiple", name: "Ändrad EV/EBITDA-multipel", status: within ? "Fullt beräkningsbart" : "Matematiskt lösbart – utanför modellintervall",
         changedAssumptions: [`Mittmultipel ${input.referenceMultiple.toFixed(1)}× → ${requiredMultiple.toFixed(2)}×`],
         requiredChange: `${requiredMultiple - input.referenceMultiple >= 0 ? "+" : ""}${(requiredMultiple - input.referenceMultiple).toFixed(2)}×`,
-        effects: ["EBITDA: oförändrad", "DCF/NAV: oförändrat", `EV/EBITDA-värde/aktie: ${referenceValue.toFixed(2)} → ${convergedValue.toFixed(2)} ${input.currency}`],
+        effects: ["EBITDA: oförändrad", "DCF/NAV: oförändrat", `Modellintervall: ${minMultiple.toFixed(1)}–${maxMultiple.toFixed(1)}×`, `EV/EBITDA-värde/aktie: ${referenceValue.toFixed(2)} → ${convergedValue.toFixed(2)} ${input.currency}`],
         dcfBefore: dcf, dcfAfter: dcf, multipleBefore: referenceValue, multipleAfter: convergedValue,
         absoluteGap: gap, relativeGapPct: gapPct, additionalCapital: 0, dilutionPct: 0,
         conclusion: `En mittmultipel om ${requiredMultiple.toFixed(2)}× reducerar modellgapet från ${relativeGapPct(dcf, referenceValue).toFixed(1)} % till ${gapPct.toFixed(1)} % och ${gapPct <= tolerance ? "når" : "når inte"} toleransen ${tolerance.toFixed(1)} %.`,
       });
-    } else {
-      packages.push(unavailable("ev-multiple", "Ändrad EV/EBITDA-multipel", `Krävd multipel ${requiredMultiple.toFixed(2)}× ligger utanför modellens explicita intervall ${minMultiple.toFixed(1)}–${maxMultiple.toFixed(1)}×.`));
     }
   } else {
     packages.push(unavailable("ev-multiple", "Ändrad EV/EBITDA-multipel", "Corporate-serien saknar fullständiga DCF- och EV/EBITDA-värden."));
   }
 
   packages.push(
-    unavailable("throughput", "Ökad throughput", "Modellen saknar en definierad, gemensam relation mellan throughput, expansions-CAPEX, sustaining CAPEX, LOM och finansiering."),
+    { ...unavailable("throughput", "Throughput med expansionsrelationer", "Ange throughputökning, expansions-CAPEX och tidpunkt, sustaining-CAPEX-effekt, cost-scaling, byggtid, produktionsstörning och finansieringsbehov."), status: "Kräver användarindata" },
     unavailable("cost", "Kostnadspaket", "Modellutdata anger inte sökbara kostnadsgränser och kausala regler för samtliga skatte- och produktionsföljder."),
     unavailable("royalty", "Återköp av royalty", "Modellen saknar angiven återköpskostnad eller explicit sökintervall för återköpspriset samt en verifierbar periodiserad återköpsbetalning."),
   );
 
-  return packages.sort((a, b) => Number(b.status === "Fullt beräkningsbart") - Number(a.status === "Fullt beräkningsbart")
+  const rank: Record<ConvergenceStatus, number> = { "Fullt beräkningsbart": 0, "Matematiskt lösbart – utanför modellintervall": 2, "Kräver användarindata": 3, "Ej beräkningsbart": 4 };
+  return packages.sort((a, b) => rank[a.status] - rank[b.status]
     || Math.abs((a.multipleAfter ?? 0) - (a.multipleBefore ?? 0)) - Math.abs((b.multipleAfter ?? 0) - (b.multipleBefore ?? 0))
     || (a.additionalCapital ?? Infinity) - (b.additionalCapital ?? Infinity)
     || (a.relativeGapPct ?? Infinity) - (b.relativeGapPct ?? Infinity)

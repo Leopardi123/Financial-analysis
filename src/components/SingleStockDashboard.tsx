@@ -6002,6 +6002,11 @@ Capital Available: ${availableLabel}`,
                             dcfPerShare={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
                             currency={lockedTargetCurrency}
                             rows={corporateChartTimeSeries?.rows ?? []}
+                            series={(corporateSnapshotData?.series ?? null) as import('../lib/corporate/snapshot/types.ts').CorporateSnapshotSeries | null}
+                            discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
+                            fx={typeof corporateSnapshotData?.fx_USD_to_TargetCurrency === "number" ? corporateSnapshotData.fx_USD_to_TargetCurrency : null}
+                            shares={typeof (corporateSnapshotData?.financing as Record<string, unknown> | undefined)?.shares_post_financing === "number" ? (corporateSnapshotData?.financing as Record<string, number>).shares_post_financing : null}
+                            netCashTarget={typeof corporateChartTimeSeries?.rows?.[0]?.evEbitda6xPerShare === "number" ? Number(((corporateSnapshotData?.financing as Record<string, unknown> | undefined)?.cash_t0_post_TargetCurrency ?? 0)) - Number(((corporateSnapshotData?.financing as Record<string, unknown> | undefined)?.debt_t0_post_TargetCurrency ?? 0)) : null}
                           />
                         </details>
                       </div>
