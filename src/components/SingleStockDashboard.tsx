@@ -4,6 +4,7 @@ import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
+import ModelAnalysis from "./project/ModelAnalysis";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import AlltGickFelCard from "./project/AlltGickFelCard";
 import type { StressOptions } from "../lib/snapshot/applyStressModifiers.ts";
@@ -5763,6 +5764,11 @@ Capital Available: ${availableLabel}`,
                           corporateTimeSeries={corporateChartTimeSeries}
                           discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
                           currencyCode={lockedTargetCurrency}
+                        />
+                        <ModelAnalysis
+                          dcfPerShare={corporateViewMetrics.list2.DCF_Target_discounted_perShare?.value ?? null}
+                          currency={lockedTargetCurrency}
+                          rows={corporateChartTimeSeries?.rows ?? []}
                         />
                         {debugEnabled && corporateTimelineDebug && (
                           <details style={{ marginTop: 8 }}>
