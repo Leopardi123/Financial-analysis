@@ -32,6 +32,7 @@ export type OperationsGridInput = {
       rate?: number | null;
     }> | null;
     ebitdaUSD?: Array<number | null>;
+    sustainingAdjustedOperatingEarningsUSD?: Array<number | null>;
     ebitUSD?: Array<number | null>;
     depreciationUSD?: Array<number | null>;
     taxableIncomeUSD?: Array<number | null>;
@@ -231,11 +232,17 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   if (metals.length > 0) rows.push({ label: 'Royalties (USD)', values: effectiveRoyaltiesUSD });
 
   const ebitda = Array.from({ length: columnCount }, (_, t) => {
+    const explicit = input.economics?.ebitdaUSD?.[t] ?? null;
+    if (explicit !== null && Number.isFinite(explicit)) return explicit;
     const revenue = grossRevenue[t];
     const operatingCost = input.economics?.operatingCostsUSD?.[t] ?? null;
     const royalties = effectiveRoyaltiesUSD[t] ?? null;
     if (revenue === null || operatingCost === null || royalties === null || !Number.isFinite(revenue) || !Number.isFinite(operatingCost) || !Number.isFinite(royalties)) return null;
     return revenue - operatingCost - royalties;
+  });
+  const sustainingAdjustedOperatingEarnings = Array.from({ length: columnCount }, (_, t) => {
+    const value = input.economics?.sustainingAdjustedOperatingEarningsUSD?.[t] ?? null;
+    return value !== null && Number.isFinite(value) ? value : null;
   });
 
   const hasDepreciation = Array.isArray(input.economics?.depreciationUSD);
@@ -244,13 +251,14 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
       const explicit = input.economics?.ebitUSD?.[t] ?? null;
       return explicit !== null && Number.isFinite(explicit) ? explicit : null;
     }
-    const ebitdaValue = ebitda[t];
+    const operatingEarningsValue = sustainingAdjustedOperatingEarnings[t] ?? ebitda[t];
     const depreciation = input.economics?.depreciationUSD?.[t] ?? null;
-    if (ebitdaValue === null || depreciation === null || !Number.isFinite(ebitdaValue) || !Number.isFinite(depreciation)) return null;
-    return ebitdaValue - depreciation;
+    if (operatingEarningsValue === null || depreciation === null || !Number.isFinite(operatingEarningsValue) || !Number.isFinite(depreciation)) return null;
+    return operatingEarningsValue - depreciation;
   });
   if (Array.isArray(input.economics?.ebitUSD) || hasDepreciation) {
     rows.push({ label: 'EBITDA (USD)', values: ebitda });
+    rows.push({ label: 'Sustaining-adjusted operating earnings (USD)', values: sustainingAdjustedOperatingEarnings });
     rows.push({ label: 'EBIT (USD)', values: ebit });
   }
   if (Array.isArray(input.economics?.taxableIncomeUSD)) {

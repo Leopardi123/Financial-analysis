@@ -57,6 +57,7 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const workingCapitalDeltaUSD = normalizeSeriesLength(input.workingCapitalDeltaUSD, length, 'workingCapitalDeltaUSD');
 
   const sustainingCostUSD: (number | null)[] = new Array(length).fill(null);
+  const sustainingAdjustedOperatingEarningsUSD: (number | null)[] = new Array(length).fill(null);
   const ebitdaUSD: (number | null)[] = new Array(length).fill(null);
   const ebitUSD: (number | null)[] = new Array(length).fill(null);
   const totalCapexUSD: (number | null)[] = new Array(length).fill(null);
@@ -84,11 +85,18 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     workingCapitalDeltaUSD_effective[t] = dWC;
 
     const sustainingValue = op + sc + ga + roy + rec - bp;
-    // EBITDA convention in this model: gross revenue less operating, sustaining, G&A, royalties, reclamation, plus byproduct credits.
-    const ebitdaValue = r - op - sc - ga - roy - rec + bp;
-    const ebitValue = ebitdaValue - dep;
+    // Project-specific operating earnings after sustaining investment.  This is
+    // deliberately not EBITDA and remains the basis for EBIT/tax in this phase.
+    const sustainingAdjustedOperatingEarningsValue = r - op - sc - ga - roy - rec + bp;
+    // Informational/valuation EBITDA excludes sustaining CAPEX.  Do not use this
+    // parallel series for EBIT, tax, NOPAT or FCFF without a separate policy change.
+    const ebitdaValue = r - op - ga - roy - rec + bp;
+    const ebitValue = sustainingAdjustedOperatingEarningsValue - dep;
 
     sustainingCostUSD[t] = Number.isFinite(sustainingValue) ? sustainingValue : null;
+    sustainingAdjustedOperatingEarningsUSD[t] = Number.isFinite(sustainingAdjustedOperatingEarningsValue)
+      ? sustainingAdjustedOperatingEarningsValue
+      : null;
     ebitdaUSD[t] = Number.isFinite(ebitdaValue) ? ebitdaValue : null;
     ebitUSD[t] = Number.isFinite(ebitValue) ? ebitValue : null;
 
@@ -148,12 +156,15 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
 
     const nopatAtT = nopatUSD[t] as number;
     // Reclamation is already included in EBITDA/EBIT above and must not be deducted twice in FCFF.
-    const fcffValue = nopatAtT + dep - (totalCapexUSD[t] as number) - dWC;
+    // Sustaining CAPEX is already deducted in sustaining-adjusted operating
+    // earnings.  FCFF therefore deducts only capexUSD here, exactly once.
+    const fcffValue = nopatAtT + dep - cx - dWC;
     fcffUSD[t] = Number.isFinite(fcffValue) ? fcffValue : null;
   }
 
   return {
     sustainingCostUSD,
+    sustainingAdjustedOperatingEarningsUSD,
     ebitdaUSD,
     depreciationUSD,
     totalCapexUSD,

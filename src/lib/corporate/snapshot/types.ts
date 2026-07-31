@@ -63,6 +63,7 @@ export type CorporateSnapshotSeries = {
   reclamationUSD: Array<number | null>;
   byproductCreditsUSD: Array<number | null>;
   sustainingCostUSD: Array<number | null>;
+  sustainingAdjustedOperatingEarningsUSD?: Array<number | null>;
   ebitdaUSD?: Array<number | null>;
   depreciationUSD?: Array<number | null>;
   ebitUSD: Array<number | null>;

@@ -21,8 +21,9 @@ test('buildProjectGridPnl keeps P&L internally consistent and does not reuse sta
   assert.deepEqual(pnl.grossRevenue, [600]);
   assert.deepEqual(pnl.royaltyRatePct, [null]);
   assert.equal(pnl.royaltiesSourceUsed, 'series.royaltiesUSD-fallback');
-  assert.equal(Math.abs((pnl.ebitda[0] ?? 0) - 540.19) < 1e-9, true);
-  assert.deepEqual(pnl.ebit, [537.39]);
+  assert.equal(Math.abs((pnl.ebitda[0] ?? 0) - 536.39) < 1e-9, true);
+  assert.equal(Math.abs((pnl.sustainingAdjustedOperatingEarnings[0] ?? 0) - 531.39) < 1e-9, true);
+  assert.deepEqual(pnl.ebit, [531.39]);
   assert.deepEqual(pnl.fcff, [516.39]);
   assert.equal((pnl.ebit[0] ?? 0) > 0, true);
 

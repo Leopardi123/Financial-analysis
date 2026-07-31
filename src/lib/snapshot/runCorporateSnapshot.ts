@@ -353,6 +353,7 @@ export type ProjectSeriesContext = {
     reclamationUSD: Array<number | null>;
     byproductCreditsUSD: Array<number | null>;
     sustainingCostUSD: Array<number | null>;
+    sustainingAdjustedOperatingEarningsUSD: Array<number | null>;
     ebitdaUSD: Array<number | null>;
     depreciationUSD: Array<number | null>;
     ebitUSD: Array<number | null>;
@@ -414,6 +415,7 @@ function validateProjectIdentities(input: {
   grossRevenueUSD: Array<number | null>;
   operatingCostsUSD: Array<number | null>;
   royaltiesUSD: Array<number | null>;
+  siteGandA_USD: Array<number | null>;
   depreciationUSD: Array<number | null>;
   taxUSD: Array<number | null>;
   capexUSD: Array<number | null>;
@@ -423,6 +425,7 @@ function validateProjectIdentities(input: {
   reclamationUSD: Array<number | null>;
   byproductCreditsUSD: Array<number | null>;
   grossProfitUSD: Array<number | null>;
+  sustainingAdjustedOperatingEarningsUSD: Array<number | null>;
   ebitdaUSD: Array<number | null>;
   ebitUSD: Array<number | null>;
   taxableIncomeUSD: Array<number | null>;
@@ -439,19 +442,6 @@ function validateProjectIdentities(input: {
   const perPeriod: ProjectIdentityValidationResult['perPeriod'] = [];
   let identityHasFailure = false;
   let fcffIdentityFailInProductionWindow = false;
-  let loggedSellingAssumption = false;
-
-  const allSellingSeries = [
-    input.selling?.treatmentChargesUSD,
-    input.selling?.refiningChargesUSD,
-    input.selling?.tcRcUSD,
-    input.selling?.transportUSD,
-  ];
-  const allSellingAbsent = allSellingSeries.every((series) => !Array.isArray(series));
-  if (allSellingAbsent) {
-    diagnostics.push('Identity checks: selling costs absent => assumed 0 in identity check');
-    loggedSellingAssumption = true;
-  }
 
   const formatFail = (t: number, label: string, expected: number, actual: number): string => {
     const date = input.periodLabels[t] ?? String(t);
@@ -483,26 +473,12 @@ function validateProjectIdentities(input: {
     }
 
     const roy = toFiniteOrNull(input.royaltiesUSD[t]);
+    const ga = toFiniteOrNull(input.siteGandA_USD[t]);
+    const rec = toFiniteOrNull(input.reclamationUSD[t]);
+    const bp = toFiniteOrNull(input.byproductCreditsUSD[t]);
     const ebitdaActual = toFiniteOrNull(input.ebitdaUSD[t]);
-    let sellingSum = 0;
-    let hasFiniteSelling = false;
-    let sellingCannotEvaluate = false;
-    for (const series of allSellingSeries) {
-      if (!Array.isArray(series)) continue;
-      const value = toFiniteOrNull(series[t]);
-      if (value === null) {
-        sellingCannotEvaluate = true;
-        continue;
-      }
-      sellingSum += value;
-      hasFiniteSelling = true;
-    }
-    if (!hasFiniteSelling && !loggedSellingAssumption) {
-      diagnostics.push('Identity checks: selling costs absent => assumed 0 in identity check');
-      loggedSellingAssumption = true;
-    }
-    if (gr !== null && oc !== null && roy !== null && ebitdaActual !== null && !sellingCannotEvaluate) {
-      const expected = gr - oc - roy - sellingSum;
+    if (gr !== null && oc !== null && ga !== null && roy !== null && rec !== null && bp !== null && ebitdaActual !== null) {
+      const expected = gr - oc - ga - roy - rec + bp;
       if (Math.abs(expected - ebitdaActual) > EPS_USD) {
         diagnostics.push(formatFail(t, 'EBITDA identity', expected, ebitdaActual));
         checks.ebitda = 'fail';
@@ -513,10 +489,10 @@ function validateProjectIdentities(input: {
     }
 
     const dep = toFiniteOrNull(input.depreciationUSD[t]);
-    const ebitda = toFiniteOrNull(input.ebitdaUSD[t]);
+    const sustainingAdjustedOperatingEarnings = toFiniteOrNull(input.sustainingAdjustedOperatingEarningsUSD[t]);
     const ebitActual = toFiniteOrNull(input.ebitUSD[t]);
-    if (ebitda !== null && dep !== null && ebitActual !== null) {
-      const expected = ebitda - dep;
+    if (sustainingAdjustedOperatingEarnings !== null && dep !== null && ebitActual !== null) {
+      const expected = sustainingAdjustedOperatingEarnings - dep;
       if (Math.abs(expected - ebitActual) > EPS_USD) {
         diagnostics.push(formatFail(t, 'EBIT identity', expected, ebitActual));
         checks.ebit = 'fail';
@@ -540,18 +516,18 @@ function validateProjectIdentities(input: {
     }
 
     const fcffActual = toFiniteOrNull(input.fcffUSD[t]);
-    const totalCapex = toFiniteOrNull(input.totalCapexUSD[t]);
+    const capex = toFiniteOrNull(input.capexUSD[t]);
     const wc = toFiniteOrNull(input.workingCapitalDeltaUSD[t]);
     const tax = toFiniteOrNull(input.taxUSD[t]);
     if (
       ebitActual !== null
       && tax !== null
       && dep !== null
-      && totalCapex !== null
+      && capex !== null
       && wc !== null
       && fcffActual !== null
     ) {
-      const expected = ebitActual - tax + dep - totalCapex - wc;
+      const expected = ebitActual - tax + dep - capex - wc;
       if (Math.abs(expected - fcffActual) > EPS_USD) {
         diagnostics.push(formatFail(t, 'FCFF identity', expected, fcffActual));
         checks.fcff = 'fail';
@@ -841,6 +817,7 @@ export function buildSnapshotSeries(args: {
   const reclamationUSD = aggregateEconomic('reclamationUSD');
   const byproductCreditsUSD = aggregateEconomic('byproductCreditsUSD');
   const sustainingCostUSD = aggregateEconomic('sustainingCostUSD');
+  const sustainingAdjustedOperatingEarningsUSD = aggregateEconomic('sustainingAdjustedOperatingEarningsUSD');
   const depreciationUSD = aggregateEconomic('depreciationUSD');
   // Single source of truth in live model: consume central phase1 economics series,
   // do not re-derive EBIT/FCFF from independently reconstructed revenue paths.
@@ -1003,6 +980,7 @@ export function buildSnapshotSeries(args: {
     reclamationUSD,
     byproductCreditsUSD,
     sustainingCostUSD,
+    sustainingAdjustedOperatingEarningsUSD,
     ebitdaUSD,
     depreciationUSD,
     ebitUSD,
@@ -1619,7 +1597,7 @@ export async function runCorporateSnapshotPipeline(args: {
             ? Array.from({ length: projectLength }, (_, t) => toFiniteOrNull(typeof rawTaxRateByPeriod[t] === 'number' ? rawTaxRateByPeriod[t] as number : null))
             : null;
           const depreciationUSD = sanitizeSeries(parsed.context.series?.depreciationUSD ?? nullSeries);
-          diagnostics.warnings.push(`Tax base: TaxableIncome = max(0, EBIT); EBIT = EBITDA - Depreciation; taxRate=${taxRate === null ? 'null' : String(taxRate)}`);
+          diagnostics.warnings.push(`Tax base: TaxableIncome = max(0, EBIT); EBIT = sustainingAdjustedOperatingEarnings - Depreciation; taxRate=${taxRate === null ? 'null' : String(taxRate)}`);
           const grossRevenueUSD = sanitizeSeries(outPreRoyalties.revenue.grossRevenueUSD);
           const operatingCostsUSD = sanitizeSeries(parsed.engineInputWithoutPrices.phase1.operatingCostsUSD);
           const grossProfitUSD = grossRevenueUSD.map((gross, t) => {
@@ -1826,7 +1804,7 @@ export async function runCorporateSnapshotPipeline(args: {
           const workingCapitalDeltaUSD_effective = sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective);
 
           const centralRevenueUSD = grossRevenueForRoyalties;
-          const ebitdaUSD = centralRevenueUSD.map((revenue, t) => {
+          const sustainingAdjustedOperatingEarningsUSD = centralRevenueUSD.map((revenue, t) => {
             if (revenue === null) return null;
             const op = operatingCostsUSD[t] ?? 0;
             const sc = sustainingCapexUSD[t] ?? 0;
@@ -1836,10 +1814,19 @@ export async function runCorporateSnapshotPipeline(args: {
             const bp = byproductCreditsUSD[t] ?? 0;
             return revenue - op - sc - ga - roy - rec + bp;
           });
-          const ebitUSD = ebitdaUSD.map((ebitda, t) => {
-            if (ebitda === null) return null;
+          const ebitdaUSD = centralRevenueUSD.map((revenue, t) => {
+            if (revenue === null) return null;
+            const op = operatingCostsUSD[t] ?? 0;
+            const ga = siteGandA_USD[t] ?? 0;
+            const roy = royaltiesUSD[t] ?? 0;
+            const rec = reclamationUSD[t] ?? 0;
+            const bp = byproductCreditsUSD[t] ?? 0;
+            return revenue - op - ga - roy - rec + bp;
+          });
+          const ebitUSD = sustainingAdjustedOperatingEarningsUSD.map((operatingEarnings, t) => {
+            if (operatingEarnings === null) return null;
             const dep = depreciationUSD[t] ?? 0;
-            return ebitda - dep;
+            return operatingEarnings - dep;
           });
           const taxableIncomeUSD = ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
           const taxByRule = taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
@@ -1848,11 +1835,10 @@ export async function runCorporateSnapshotPipeline(args: {
             if (ebit === null) return null;
             const tax = taxByRule[t] ?? 0;
             const dep = depreciationUSD[t] ?? 0;
-            const sc = sustainingCapexUSD[t] ?? 0;
             const cx = capexUSD_used[t] ?? 0;
             const dWC = workingCapitalDeltaUSD_effective[t] ?? 0;
             // Reclamation is already included in EBITDA/EBIT and must not be deducted twice in FCFF.
-            return ebit - tax + dep - sc - cx - dWC;
+            return ebit - tax + dep - cx - dWC;
           });
           const usesTaxRateRule = taxRate !== null;
           const taxExpectedFromCentralEbit = ebitUSD.map((ebit) => (ebit === null || taxRate === null ? null : Math.max(0, ebit) * taxRate));
@@ -1867,8 +1853,10 @@ export async function runCorporateSnapshotPipeline(args: {
           }, 0);
           diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
           diagnostics.warnings.push(`[${projectId}] totalRevenue source path=grossRevenueForRoyalties (${grossRevenueSourceForRoyalties})`);
-          diagnostics.warnings.push(`[${projectId}] ebit source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits - depreciation`);
-          diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - sustainingCapex - capex - workingCapitalDelta (reclamation already included in EBIT)`);
+          diagnostics.warnings.push(`[${projectId}] sustaining-adjusted operating earnings source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits`);
+          diagnostics.warnings.push(`[${projectId}] EBITDA source path=totalRevenue - operatingCosts - siteG&A - royalties - reclamation + byproductCredits (informational/valuation only)`);
+          diagnostics.warnings.push(`[${projectId}] ebit source path=sustainingAdjustedOperatingEarnings - depreciation`);
+          diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - capex - workingCapitalDelta (sustaining CAPEX and reclamation already included in operating earnings)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] sameEbitSource=true`);
@@ -1903,6 +1891,7 @@ export async function runCorporateSnapshotPipeline(args: {
             taxRate,
             grossRevenueUSD,
             operatingCostsUSD,
+            siteGandA_USD,
             royaltiesUSD,
             depreciationUSD,
             taxUSD: taxByRule,
@@ -1913,6 +1902,7 @@ export async function runCorporateSnapshotPipeline(args: {
             reclamationUSD,
             byproductCreditsUSD,
             grossProfitUSD,
+            sustainingAdjustedOperatingEarningsUSD,
             ebitdaUSD,
             ebitUSD: sanitizeSeries(ebitUSD),
             taxableIncomeUSD: sanitizeSeries(taxableIncomeUSD),
@@ -2014,6 +2004,7 @@ export async function runCorporateSnapshotPipeline(args: {
               reclamationUSD,
               byproductCreditsUSD,
               sustainingCostUSD: sanitizeSeries(out.phase1.sustainingCostUSD),
+              sustainingAdjustedOperatingEarningsUSD,
               ebitdaUSD,
               depreciationUSD,
               ebitUSD,
@@ -2212,6 +2203,7 @@ export async function runCorporateSnapshotPipeline(args: {
       ...aggregation,
       capexUSD_total: snapshotSeries.capexUSD,
       fcffUSD_total: snapshotSeries.fcffUSD,
+      sustainingAdjustedOperatingEarningsUSD_total: snapshotSeries.sustainingAdjustedOperatingEarningsUSD,
       ebitdaUSD_total: snapshotSeries.ebitdaUSD,
       grossRevenueUSD_total: snapshotSeries.totalRevenue_USD,
       auPriceUSDPerOz: snapshotSeries.priceUsedByMetal_USD.Au ?? aggregation.auPriceUSDPerOz,

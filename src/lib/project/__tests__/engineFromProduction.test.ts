@@ -28,6 +28,8 @@ import { computeProjectEngineFromProduction } from '../engineFromProduction.ts';
   });
 
   if (output.take.totalTakeUSD[1] !== 40) throw new Error('take should be 2% of revenue');
-  if (output.phase1.ebitUSD[1] !== 1410) throw new Error('phase1 should use net revenue after take');
+  if (output.phase1.ebitdaUSD[1] !== 1440) throw new Error('informational EBITDA should exclude sustaining CAPEX');
+  if (output.phase1.sustainingAdjustedOperatingEarningsUSD[1] !== 1390) throw new Error('operating earnings should use net revenue after take and deduct sustaining CAPEX');
+  if (output.phase1.ebitUSD[1] !== 1390) throw new Error('EBIT should continue from sustaining-adjusted operating earnings');
   console.log('Engine from production wrapper tests passed');
 })();
