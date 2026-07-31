@@ -15,6 +15,7 @@ const qualityRow = (overrides: Partial<CorporateQualityMultipleRow> = {}): Corpo
 });
 const staticRows = [{ year: 2030, ebitdaTarget: 125, evEbitda5xPerShare: 6.35, evEbitda6xPerShare: 7.6, evEbitda7xPerShare: 8.85, sharesPf: 100 }];
 const bridgeRows = [{ year: 2030, netCashTarget: 10, sharesPostFinancing: 100 }];
+const canonicalShares = (shares: number | null = 1) => new Map<number, number | null>([[2030, shares]]);
 
 test('annual natural band has exact parity with existing Corporate static per-share rows', () => {
   const [row] = buildStaticMultipleContrastSeries({ basis: 'annual', staticRows, qualityRows: [qualityRow()], bridgeRows, fxUSDToTarget: 1.25 });
@@ -30,23 +31,88 @@ test('forward natural band uses forward EBITDA and the same FX/net-cash/share br
   assert.notEqual(row.mid, staticRows[0].evEbitda6xPerShare);
 });
 
-test('quality selector reads Phase-A annual and forward bases without recomputation', () => {
-  const annual = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows: [qualityRow()] })[0];
-  const forward = buildQualityMultipleContrastSeries({ basis: 'forwardAverage', qualityRows: [qualityRow()] })[0];
+test('quality selector divides Phase-A absolute equity values by canonical shares for both bases', () => {
+  const annual = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows: [qualityRow()], canonicalSharesForPerShareByYear: canonicalShares() })[0];
+  const forward = buildQualityMultipleContrastSeries({ basis: 'forwardAverage', qualityRows: [qualityRow()], canonicalSharesForPerShareByYear: canonicalShares() })[0];
   assert.deepEqual([annual.low, annual.mid, annual.high], [6.5, 7.5, 8.5]);
   assert.deepEqual([forward.low, forward.mid, forward.high], [5.2, 6, 6.8]);
 });
 
 test('quality null years remain null with no 6x fallback or interpolation', () => {
   const row = qualityRow({ annualBasis: overlay(null, null, null), qualityMidMultiple: null, qualityLowMultiple: null, qualityHighMultiple: null, qualityStatus: 'NOT_COMPUTABLE' });
-  const point = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows: [row] })[0];
+  const point = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows: [row], canonicalSharesForPerShareByYear: canonicalShares() })[0];
   assert.deepEqual([point.low, point.mid, point.high, point.tooltip], [null, null, null, null]);
 });
 
 test('short-window quality point remains visible and tooltip reports short status', () => {
-  const point = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows: [qualityRow({ shortWindow: true, qualityDiagnostics: ['SHORT_WINDOW'] })] })[0];
+  const point = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows: [qualityRow({ shortWindow: true, qualityDiagnostics: ['SHORT_WINDOW'] })], canonicalSharesForPerShareByYear: canonicalShares() })[0];
   assert.equal(point.mid, 7.5);
   assert.match(point.tooltip ?? '', /Kort fönster/);
+});
+
+test('annual quality uses canonical fully diluted shares instead of frozen snapshot per-share values', () => {
+  const annualBasis = overlay(400, 800, 1_200);
+  annualBasis.valuePerShareLow = 4;
+  annualBasis.valuePerShareMid = 8;
+  annualBasis.valuePerShareHigh = 12;
+  const point = buildQualityMultipleContrastSeries({
+    basis: 'annual', qualityRows: [qualityRow({ annualBasis })], canonicalSharesForPerShareByYear: canonicalShares(400), currencyCode: 'SEK',
+  })[0];
+  assert.deepEqual([point.low, point.mid, point.high], [1, 2, 3]);
+  assert.equal((point.low as number) * 400, annualBasis.equityValueLowTarget);
+  assert.equal((point.mid as number) * 400, annualBasis.equityValueMidTarget);
+  assert.equal((point.high as number) * 400, annualBasis.equityValueHighTarget);
+  assert.match(point.tooltip ?? '', /Värde\/aktie: 2,00 SEK/);
+  assert.doesNotMatch(point.tooltip ?? '', /8,00 SEK/);
+});
+
+test('forward quality uses canonical fully diluted shares and preserves equity-value parity', () => {
+  const forwardAverageBasis = overlay(600, 900, 1_200);
+  const point = buildQualityMultipleContrastSeries({
+    basis: 'forwardAverage', qualityRows: [qualityRow({ forwardAverageBasis })], canonicalSharesForPerShareByYear: canonicalShares(300),
+  })[0];
+  assert.deepEqual([point.low, point.mid, point.high], [2, 3, 4]);
+  assert.equal((point.low as number) * 300, forwardAverageBasis.equityValueLowTarget);
+  assert.equal((point.mid as number) * 300, forwardAverageBasis.equityValueMidTarget);
+  assert.equal((point.high as number) * 300, forwardAverageBasis.equityValueHighTarget);
+});
+
+test('unchanged canonical shares preserve Phase-A per-share parity', () => {
+  const annualBasis = overlay(650, 750, 850);
+  annualBasis.valuePerShareLow = 6.5;
+  annualBasis.valuePerShareMid = 7.5;
+  annualBasis.valuePerShareHigh = 8.5;
+  const point = buildQualityMultipleContrastSeries({
+    basis: 'annual', qualityRows: [qualityRow({ annualBasis })], canonicalSharesForPerShareByYear: canonicalShares(100),
+  })[0];
+  assert.deepEqual([point.low, point.mid, point.high], [annualBasis.valuePerShareLow, annualBasis.valuePerShareMid, annualBasis.valuePerShareHigh]);
+});
+
+test('invalid canonical denominators null the entire quality band without fallback', () => {
+  for (const shares of [null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const point = buildQualityMultipleContrastSeries({
+      basis: 'annual', qualityRows: [qualityRow()], canonicalSharesForPerShareByYear: canonicalShares(shares),
+    })[0];
+    assert.deepEqual([point.low, point.mid, point.high, point.tooltip], [null, null, null, null]);
+  }
+  const missing = buildQualityMultipleContrastSeries({
+    basis: 'annual', qualityRows: [qualityRow()], canonicalSharesForPerShareByYear: new Map(),
+  })[0];
+  assert.deepEqual([missing.low, missing.mid, missing.high], [null, null, null]);
+});
+
+test('Viscaria-like manual-share correction rebases 185 per share to about 63 without changing equity value', () => {
+  const snapshotShares = 130_900_000;
+  const canonicalFullyDilutedShares = 384_000_000;
+  const unchangedEquityValue = 185 * snapshotShares;
+  const annualBasis = overlay(unchangedEquityValue * 0.9, unchangedEquityValue, unchangedEquityValue * 1.1);
+  annualBasis.valuePerShareMid = 185;
+  const point = buildQualityMultipleContrastSeries({
+    basis: 'annual', qualityRows: [qualityRow({ annualBasis })], canonicalSharesForPerShareByYear: canonicalShares(canonicalFullyDilutedShares),
+  })[0];
+  assert.ok(Math.abs((point.mid as number) - (185 * snapshotShares / canonicalFullyDilutedShares)) < 1e-12);
+  assert.ok(Math.abs((point.mid as number) - 63.06) < 0.02);
+  assert.ok(Math.abs((point.mid as number) * canonicalFullyDilutedShares - unchangedEquityValue) < 1e-6);
 });
 
 test('combined target uses exact 70/30 and prioritizes visible computable quality', () => {
@@ -54,6 +120,22 @@ test('combined target uses exact 70/30 and prioritizes visible computable qualit
   const [point] = buildCombinedTargetSeries({ years: [2030], navPerShareByYear: new Map([[2030, 10]]), staticSeries: [{ year: 2030, selectedEbitdaUSD: 1, low: 5, mid: 6, high: 7, tooltip: null }], qualitySeries: [{ year: 2030, selectedEbitdaUSD: 1, low: 6.5, mid: 7.5, high: 8.5, tooltip: null }], visibility });
   assert.equal(point.value, (10 * 0.7) + (7.5 * 0.3));
   assert.equal(point.source, 'quality');
+});
+
+test('combined target consumes the corrected quality midpoint', () => {
+  const annualBasis = overlay(6_000, 8_000, 10_000);
+  annualBasis.valuePerShareMid = 80;
+  const qualitySeries = buildQualityMultipleContrastSeries({
+    basis: 'annual', qualityRows: [qualityRow({ annualBasis })], canonicalSharesForPerShareByYear: canonicalShares(400),
+  });
+  const point = buildCombinedTargetSeries({
+    years: [2030], navPerShareByYear: new Map([[2030, 10]]), staticSeries: [], qualitySeries,
+    visibility: { showStaticMultipleBand: false, showQualityMultipleBand: true, showCombinedTarget: true }, currencyCode: 'SEK',
+  })[0];
+  assert.equal(qualitySeries[0].mid, 20);
+  assert.equal(point.value, 13);
+  assert.equal(point.multipleContribution, 6);
+  assert.match(point.tooltip ?? '', /Totalt: 13,00 SEK/);
 });
 
 test('combined target falls back only to a visible natural 6x point', () => {

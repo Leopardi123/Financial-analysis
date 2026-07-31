@@ -102,19 +102,29 @@ export function buildStaticMultipleContrastSeries(args: {
   });
 }
 
-/** Selects already-computed Phase-A per-share output without recomputing any quality formula. */
+/**
+ * Converts Phase-A absolute equity values to the Corporate View's canonical per-share
+ * denominator. Phase-A snapshot per-share fields remain audit-only values before the
+ * UI manual-share adjustment and must not drive visible Corporate overlays.
+ */
 export function buildQualityMultipleContrastSeries(args: {
   basis: MultipleContrastBasis;
   qualityRows: CorporateQualityMultipleRow[];
+  canonicalSharesForPerShareByYear: ReadonlyMap<number, number | null>;
   currencyCode?: string;
 }): MultipleBandPoint[] {
   return args.qualityRows.map((row) => {
     const selectedEbitdaUSD = args.basis === 'annual' ? row.annualEbitdaUSD : row.forwardAverageEbitdaUSD;
     const selected = args.basis === 'annual' ? row.annualBasis : row.forwardAverageBasis;
     if (!finite(selectedEbitdaUSD) || selectedEbitdaUSD <= 0) return emptyBand(row.calendarYear, selectedEbitdaUSD);
-    const low = finite(selected.valuePerShareLow) ? selected.valuePerShareLow : null;
-    const mid = finite(selected.valuePerShareMid) ? selected.valuePerShareMid : null;
-    const high = finite(selected.valuePerShareHigh) ? selected.valuePerShareHigh : null;
+    const canonicalShares = args.canonicalSharesForPerShareByYear.get(row.calendarYear);
+    const perShare = (equityValue: number | null): number | null =>
+      finite(equityValue) && finite(canonicalShares) && canonicalShares > 0
+        ? equityValue / canonicalShares
+        : null;
+    const low = perShare(selected.equityValueLowTarget);
+    const mid = perShare(selected.equityValueMidTarget);
+    const high = perShare(selected.equityValueHighTarget);
     const status = row.shortWindow ? 'Kort fönster' : 'Fullt femårsfönster';
     const unit = args.currencyCode ? ` ${args.currencyCode}` : '';
     const tooltip = finite(mid) ? [

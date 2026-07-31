@@ -149,7 +149,16 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       fxUSDToTarget: fxUSDToTarget ?? null,
       currencyCode,
     });
-    const qualitySeries = isProjectMode ? [] : buildQualityMultipleContrastSeries({ basis: multipleBasis, qualityRows, currencyCode });
+    const canonicalSharesForPerShareByYear = new Map(canonicalTimeline.periods.map((row) => [
+      row.calendarYear,
+      row.canonicalSharesForPerShare,
+    ]));
+    const qualitySeries = isProjectMode ? [] : buildQualityMultipleContrastSeries({
+      basis: multipleBasis,
+      qualityRows,
+      canonicalSharesForPerShareByYear,
+      currencyCode,
+    });
     const combinedSeries = isProjectMode ? [] : buildCombinedTargetSeries({
       years: periods.map((period) => period.calendarYear),
       navPerShareByYear: new Map(canonicalTimeline.periods.map((row) => [row.calendarYear, row.navPerShareTarget])),
