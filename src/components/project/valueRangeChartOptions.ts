@@ -1,9 +1,19 @@
+export const VALUE_RANGE_CHART_COLORS = {
+  dcf: '#2C3E50',
+  nav: '#A8C686',
+  staticMultiple: '#dfb9a4',
+  staticMultipleBoundary: '#dfcdb5',
+  qualityMultiple: '#7C3AED',
+  combinedTarget: '#be123c',
+} as const;
+
 export function buildValueRangeChartOptions(args: {
   currencyCode?: string;
   ticks: unknown[];
   yearMin: number;
   yearMax: number;
   valueWindow: { min: number; max: number };
+  overlaySeries?: Record<number, Record<string, unknown>>;
 }) {
   return {
     backgroundColor: '#e0e9ce', legend: { position: 'none' }, isStacked: true, areaOpacity: 0.32,
@@ -12,7 +22,7 @@ export function buildValueRangeChartOptions(args: {
     vAxis: { title: args.currencyCode ?? '', textPosition: 'none', titleTextStyle: { color: '#1f2937', italic: false }, gridlines: { color: 'transparent', count: 0 }, minorGridlines: { color: 'transparent', count: 0 }, baselineColor: 'transparent', viewWindowMode: 'explicit', viewWindow: args.valueWindow },
     tooltip: { trigger: 'focus' }, interpolateNulls: false,
     annotations: { alwaysOutside: true, textStyle: { color: '#111827', fontSize: 9 }, stem: { color: 'transparent', length: 10 } },
-    colors: ['transparent', '#A8C686', '#2C3E50', '#2C3E50', '#be123c', '#111111', '#111111', '#111111', '#111111'],
+    colors: ['transparent', VALUE_RANGE_CHART_COLORS.nav, VALUE_RANGE_CHART_COLORS.dcf, VALUE_RANGE_CHART_COLORS.dcf, VALUE_RANGE_CHART_COLORS.combinedTarget, '#111111', '#111111', '#111111', '#111111'],
     seriesType: 'line',
     series: {
       0: { type: 'area', lineWidth: 0, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
@@ -28,12 +38,19 @@ export function buildValueRangeChartOptions(args: {
       10: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       // Google Charts rejects CSS rgba() colors. This is #dc2626 blended at 25%
       // over the chart's fixed #e0e9ce background, preserving the requested look.
-      11: { type: 'line', color: '#dfb9a4', lineWidth: 0.62, pointSize: 0, visibleInLegend: false },
+      11: { type: 'line', color: VALUE_RANGE_CHART_COLORS.staticMultiple, lineWidth: 0.62, pointSize: 0, visibleInLegend: false },
       // Separate boundary series allow a 15% edge without increasing the band fill.
-      12: { type: 'line', color: '#dfcdb5', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
-      13: { type: 'line', color: '#dfcdb5', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
-      14: { type: 'scatter', color: '#dfb9a4', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
+      12: { type: 'line', color: VALUE_RANGE_CHART_COLORS.staticMultipleBoundary, lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
+      13: { type: 'line', color: VALUE_RANGE_CHART_COLORS.staticMultipleBoundary, lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
+      14: { type: 'scatter', color: VALUE_RANGE_CHART_COLORS.staticMultiple, pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
+      ...(args.overlaySeries ?? {}),
     },
     intervals: { style: 'area', color: '#dc2626', fillOpacity: 0.05, lineWidth: 0 },
+    interval: {
+      staticLow: { color: VALUE_RANGE_CHART_COLORS.staticMultiple, fillOpacity: 0.05, lineWidth: 0 },
+      staticHigh: { color: VALUE_RANGE_CHART_COLORS.staticMultiple, fillOpacity: 0.05, lineWidth: 0 },
+      qualityLow: { color: VALUE_RANGE_CHART_COLORS.qualityMultiple, fillOpacity: 0.05, lineWidth: 0 },
+      qualityHigh: { color: VALUE_RANGE_CHART_COLORS.qualityMultiple, fillOpacity: 0.05, lineWidth: 0 },
+    },
   };
 }
