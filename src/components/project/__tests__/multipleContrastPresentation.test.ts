@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { activeOverlayDomainValues, buildCombinedTargetSeries, buildQualityMultipleContrastSeries, buildStaticMultipleContrastSeries, type MultipleContrastVisibility } from '../multipleContrastPresentation.ts';
 import type { CorporateQualityMultipleRow } from '../../../lib/corporate/multipleContrast/types.ts';
+import { buildValueRangeChartOptions, VALUE_RANGE_CHART_COLORS } from '../valueRangeChartOptions.ts';
 
 const overlay = (low: number | null, mid: number | null, high: number | null) => ({ enterpriseValueLowTarget: low, enterpriseValueMidTarget: mid, enterpriseValueHighTarget: high, equityValueLowTarget: low, equityValueMidTarget: mid, equityValueHighTarget: high, valuePerShareLow: low, valuePerShareMid: mid, valuePerShareHigh: high });
 const qualityRow = (overrides: Partial<CorporateQualityMultipleRow> = {}): CorporateQualityMultipleRow => ({
@@ -168,4 +169,27 @@ test('panel source contract provides accessible disclosure and required local co
   assert.match(source, /Kvalitetsjusterat spann/);
   assert.match(source, /Kombinerad riktkurs/);
   assert.match(source, /Kvalitetsjusterad multipel kan inte beräknas/);
+});
+
+test('quality overlay uses purple while existing static and DCF/NAV colors remain unchanged', () => {
+  assert.equal(VALUE_RANGE_CHART_COLORS.qualityMultiple, '#7C3AED');
+  assert.equal(VALUE_RANGE_CHART_COLORS.staticMultiple, '#dfb9a4');
+  assert.equal(VALUE_RANGE_CHART_COLORS.dcf, '#2C3E50');
+  assert.equal(VALUE_RANGE_CHART_COLORS.nav, '#A8C686');
+  const options = buildValueRangeChartOptions({ ticks: [], yearMin: 2030, yearMax: 2035, valueWindow: { min: 0, max: 10 } });
+  assert.equal(options.colors[1], VALUE_RANGE_CHART_COLORS.nav);
+  assert.equal(options.colors[2], VALUE_RANGE_CHART_COLORS.dcf);
+  assert.equal(options.series[11].color, VALUE_RANGE_CHART_COLORS.staticMultiple);
+  assert.equal(options.interval.staticLow.color, VALUE_RANGE_CHART_COLORS.staticMultiple);
+  assert.equal(options.interval.qualityLow.color, VALUE_RANGE_CHART_COLORS.qualityMultiple);
+  assert.equal(options.interval.qualityLow.fillOpacity, options.interval.staticLow.fillOpacity);
+});
+
+test('quality line, boundaries, peak marker, annotation, and legend share the purple presentation token', () => {
+  const cardSource = readFileSync(new URL('../ValueRangeSnapshotCard.tsx', import.meta.url), 'utf8');
+  const cssSource = readFileSync(new URL('../../../styles/dashboard.css', import.meta.url), 'utf8');
+  assert.match(cardSource, /color: VALUE_RANGE_CHART_COLORS\.qualityMultiple, lineWidth: 0\.8/);
+  assert.equal((cardSource.match(/color: VALUE_RANGE_CHART_COLORS\.qualityMultiple/g) ?? []).length, 5);
+  assert.match(cardSource, /pointSize: 7[^\n]+annotations: \{ textStyle: \{ color: VALUE_RANGE_CHART_COLORS\.qualityMultiple/);
+  assert.match(cssSource, /\.legend-quality-multiple \{ background: #7C3AED; \}/);
 });

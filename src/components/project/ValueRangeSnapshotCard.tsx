@@ -5,6 +5,7 @@ import type { ValuationTimeline } from "../../lib/valuation/canonicalValuationTi
 import { buildValuationChartRenderModel } from "./valuationChartPresentation.ts";
 import type { CorporateQualityMultipleOutput } from "../../lib/corporate/multipleContrast/types.ts";
 import MultipleContrastPanel from "./MultipleContrastPanel.tsx";
+import { VALUE_RANGE_CHART_COLORS } from "./valueRangeChartOptions.ts";
 import {
   activeOverlayDomainValues,
   buildCombinedTargetSeries,
@@ -172,6 +173,11 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       if (!isFiniteNumber(row?.mid) || !isFiniteNumber(row.low) || !isFiniteNumber(row.high)) return peak;
       return peak === null || row.mid > peak.base ? { year: period.calendarYear, base: row.mid, low: row.low, high: row.high } : peak;
     }, null);
+    const qualityPeak = isProjectMode || !contrastVisibility.showQualityMultipleBand ? null : periods.reduce<{ year: number; base: number; low: number; high: number } | null>((peak, period) => {
+      const row = qualityByYear.get(period.calendarYear);
+      if (!isFiniteNumber(row?.mid) || !isFiniteNumber(row.low) || !isFiniteNumber(row.high)) return peak;
+      return peak === null || row.mid > peak.base ? { year: period.calendarYear, base: row.mid, low: row.low, high: row.high } : peak;
+    }, null);
     const domainValues = periods
       .flatMap((period) => [period.high, period.low])
       .filter((value): value is number => isFiniteNumber(value));
@@ -184,8 +190,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const staticHeader = [
       { label: 'EV/EBITDA 6×', type: 'number' },
       { role: 'tooltip', type: 'string' },
-      { role: 'interval', type: 'number', label: '5×' },
-      { role: 'interval', type: 'number', label: '7×' },
+      { id: 'staticLow', role: 'interval', type: 'number', label: '5×' },
+      { id: 'staticHigh', role: 'interval', type: 'number', label: '7×' },
       { label: 'EV/EBITDA 5× boundary', type: 'number' },
       { label: 'EV/EBITDA 7× boundary', type: 'number' },
       { label: 'Peak EV/EBITDA', type: 'number' },
@@ -194,10 +200,12 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     const qualityHeader = [
       { label: 'Kvalitetsjusterat EV/EBITDA', type: 'number' },
       { role: 'tooltip', type: 'string' },
-      { role: 'interval', type: 'number', label: 'Quality low' },
-      { role: 'interval', type: 'number', label: 'Quality high' },
+      { id: 'qualityLow', role: 'interval', type: 'number', label: 'Quality low' },
+      { id: 'qualityHigh', role: 'interval', type: 'number', label: 'Quality high' },
       { label: 'Kvalitetsjusterad low boundary', type: 'number' },
       { label: 'Kvalitetsjusterad high boundary', type: 'number' },
+      { label: 'Peak kvalitetsjusterad EV/EBITDA', type: 'number' },
+      { role: 'annotation', type: 'string' },
     ];
     const combinedHeader = [{ label: 'Kombinerad riktkurs 70/30', type: 'number' }, { role: 'tooltip', type: 'string' }];
     const chartRows = isProjectMode ? rows : rows.map((row, index) => {
@@ -215,6 +223,8 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
         ...(contrastVisibility.showQualityMultipleBand ? [
           qualityPoint?.mid ?? null, qualityPoint?.tooltip ?? null, qualityPoint?.low ?? null, qualityPoint?.high ?? null,
           qualityPoint?.low ?? null, qualityPoint?.high ?? null,
+          qualityPeak?.year === periods[index].calendarYear ? qualityPeak.base : null,
+          qualityPeak?.year === periods[index].calendarYear ? `${formatPerShareValue(qualityPeak.low)}-${formatPerShareValue(qualityPeak.high)}` : null,
         ] : []),
         ...(contrastVisibility.showCombinedTarget ? [combinedPoint?.value ?? null, combinedPoint?.tooltip ?? null] : []),
       ];
@@ -246,18 +256,19 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
       { label: 'NAV', className: 'legend-nav' },
     ];
     if (!isProjectMode && contrastVisibility.showStaticMultipleBand) {
-      overlaySeries[nextSeries] = { type: 'line', color: '#dfb9a4', lineWidth: 0.8, pointSize: 0, visibleInLegend: false };
-      overlaySeries[nextSeries + 1] = { type: 'line', color: '#dfcdb5', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false };
-      overlaySeries[nextSeries + 2] = { type: 'line', color: '#dfcdb5', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false };
-      overlaySeries[nextSeries + 3] = { type: 'scatter', color: '#dfb9a4', pointSize: 7, lineWidth: 0, visibleInLegend: false };
+      overlaySeries[nextSeries] = { type: 'line', color: VALUE_RANGE_CHART_COLORS.staticMultiple, lineWidth: 0.8, pointSize: 0, visibleInLegend: false };
+      overlaySeries[nextSeries + 1] = { type: 'line', color: VALUE_RANGE_CHART_COLORS.staticMultipleBoundary, lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false };
+      overlaySeries[nextSeries + 2] = { type: 'line', color: VALUE_RANGE_CHART_COLORS.staticMultipleBoundary, lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false };
+      overlaySeries[nextSeries + 3] = { type: 'scatter', color: VALUE_RANGE_CHART_COLORS.staticMultiple, pointSize: 7, lineWidth: 0, visibleInLegend: false };
       nextSeries += 4;
       if (staticSeries.some((row) => isFiniteNumber(row.mid))) legendItems.push({ label: 'Naturligt EV/EBITDA 5x–7x', className: 'legend-static-multiple' });
     }
     if (!isProjectMode && contrastVisibility.showQualityMultipleBand) {
-      overlaySeries[nextSeries] = { type: 'line', color: '#2C3E50', lineWidth: 1.15, pointSize: 0, visibleInLegend: false };
-      overlaySeries[nextSeries + 1] = { type: 'line', color: '#2C3E50', lineWidth: 0.55, pointSize: 0, visibleInLegend: false, enableInteractivity: false };
-      overlaySeries[nextSeries + 2] = { type: 'line', color: '#2C3E50', lineWidth: 0.55, pointSize: 0, visibleInLegend: false, enableInteractivity: false };
-      nextSeries += 3;
+      overlaySeries[nextSeries] = { type: 'line', color: VALUE_RANGE_CHART_COLORS.qualityMultiple, lineWidth: 0.8, pointSize: 0, visibleInLegend: false };
+      overlaySeries[nextSeries + 1] = { type: 'line', color: VALUE_RANGE_CHART_COLORS.qualityMultiple, lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false };
+      overlaySeries[nextSeries + 2] = { type: 'line', color: VALUE_RANGE_CHART_COLORS.qualityMultiple, lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false };
+      overlaySeries[nextSeries + 3] = { type: 'scatter', color: VALUE_RANGE_CHART_COLORS.qualityMultiple, pointSize: 7, lineWidth: 0, visibleInLegend: false, annotations: { textStyle: { color: VALUE_RANGE_CHART_COLORS.qualityMultiple } } };
+      nextSeries += 4;
       if (qualitySeries.some((row) => isFiniteNumber(row.mid))) legendItems.push({ label: 'Kvalitetsjusterat EV/EBITDA', className: 'legend-quality-multiple' });
     }
     if (!isProjectMode && contrastVisibility.showCombinedTarget) {
@@ -267,7 +278,7 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     return {
       yearNow: periods[0].calendarYear,
       data,
-      ticks: periods.filter((period) => period.isToday || period.isStart || period.periodIndex === selection.peakLow?.periodIndex || period.periodIndex === selection.peakHigh?.periodIndex || period.calendarYear === multiplePeak?.year)
+      ticks: periods.filter((period) => period.isToday || period.isStart || period.periodIndex === selection.peakLow?.periodIndex || period.periodIndex === selection.peakHigh?.periodIndex || period.calendarYear === multiplePeak?.year || period.calendarYear === qualityPeak?.year)
         .map((period) => ({ v: period.calendarYear, f: String(period.calendarYear) })),
       peakYear: selection.peakHigh?.calendarYear ?? periods[0].calendarYear,
       chartEndYear: renderModel.displayRange.chartEndYear,
