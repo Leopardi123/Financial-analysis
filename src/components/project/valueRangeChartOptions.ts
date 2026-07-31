@@ -4,6 +4,7 @@ export function buildValueRangeChartOptions(args: {
   yearMin: number;
   yearMax: number;
   valueWindow: { min: number; max: number };
+  overlaySeries?: Record<number, Record<string, unknown>>;
 }) {
   return {
     backgroundColor: '#e0e9ce', legend: { position: 'none' }, isStacked: true, areaOpacity: 0.32,
@@ -33,6 +34,7 @@ export function buildValueRangeChartOptions(args: {
       12: { type: 'line', color: '#dfcdb5', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
       13: { type: 'line', color: '#dfcdb5', lineWidth: 0.62, pointSize: 0, visibleInLegend: false, enableInteractivity: false },
       14: { type: 'scatter', color: '#dfb9a4', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
+      ...(args.overlaySeries ?? {}),
     },
     intervals: { style: 'area', color: '#dc2626', fillOpacity: 0.05, lineWidth: 0 },
   };

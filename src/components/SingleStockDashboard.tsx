@@ -5768,6 +5768,13 @@ Capital Available: ${availableLabel}`,
                           canonicalTimeline={corporateViewMetrics.valuationTimeline}
                           canonicalStartPeriods={corporateCanonicalStartPeriods}
                           corporateTimeSeries={corporateChartTimeSeries}
+                          corporateQualityMultipleTimeSeries={(() => {
+                            const source = corporateSnapshotData?.corporateQualityMultipleTimeSeries;
+                            return source && typeof source === 'object'
+                              ? source as ComponentProps<typeof ValueRangeSnapshotCard>['corporateQualityMultipleTimeSeries']
+                              : null;
+                          })()}
+                          fxUSDToTarget={typeof corporateSnapshotData?.fx_USD_to_TargetCurrency === "number" ? corporateSnapshotData.fx_USD_to_TargetCurrency : null}
                           discountRate={typeof corporateSnapshotData?.discountRate === "number" ? corporateSnapshotData.discountRate : null}
                           currencyCode={lockedTargetCurrency}
                         />
