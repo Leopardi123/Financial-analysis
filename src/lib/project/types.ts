@@ -24,6 +24,7 @@ export type ProjectPhase1Input = {
 
 export type ProjectPhase1Output = {
   sustainingCostUSD: (number | null)[];
+  sustainingAdjustedOperatingEarningsUSD: (number | null)[];
   ebitdaUSD: (number | null)[];
   depreciationUSD: (number | null)[];
   totalCapexUSD: (number | null)[];

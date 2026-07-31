@@ -517,7 +517,7 @@ test('royaltiesDetail computes royalties from revenue rules and overrides series
   }
 });
 
-test('tax chain uses EBIT=EBITDA-depreciation and taxRate null yields null tax', async () => {
+test('tax chain uses sustaining-adjusted operating earnings while EBITDA remains informational', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;
   const rawJson = projects[0].rawJson as Record<string, unknown>;
@@ -539,6 +539,8 @@ test('tax chain uses EBIT=EBITDA-depreciation and taxRate null yields null tax',
   const outSeries = result.snapshot.series;
   assert.ok(outSeries);
   const ebitda = outSeries?.ebitdaUSD ?? [];
+  const sustainingAdjustedOperatingEarnings = outSeries?.sustainingAdjustedOperatingEarningsUSD ?? [];
+  const sustainingCapex = outSeries?.sustainingCapexUSD ?? [];
   const ebit = outSeries?.ebitUSD ?? [];
   const dep = outSeries?.depreciationUSD ?? [];
   const tax = outSeries?.taxUSD ?? [];
@@ -546,11 +548,12 @@ test('tax chain uses EBIT=EBITDA-depreciation and taxRate null yields null tax',
   const royalties = outSeries?.royaltiesUSD ?? [];
 
   for (let t = 0; t < ebitda.length; t += 1) {
-    if (ebitda[t] === null || dep[t] === null) {
+    if (sustainingAdjustedOperatingEarnings[t] === null || dep[t] === null) {
       assert.equal(ebit[t], null);
       continue;
     }
-    assert.equal(ebit[t], (ebitda[t] as number) - (dep[t] as number));
+    assert.equal(sustainingAdjustedOperatingEarnings[t], (ebitda[t] as number) - (sustainingCapex[t] ?? 0));
+    assert.equal(ebit[t], (sustainingAdjustedOperatingEarnings[t] as number) - (dep[t] as number));
     assert.ok(royalties[t] === null || royalties[t]! >= 0);
     const expectedTaxable = Math.max(0, ebit[t] as number);
     assert.equal(taxableIncome[t], expectedTaxable);
@@ -569,7 +572,7 @@ test('tax chain uses EBIT=EBITDA-depreciation and taxRate null yields null tax',
 });
 
 
-test('project FCFF identity counts reclamation once through EBIT', async () => {
+test('project FCFF identity counts sustaining CAPEX and reclamation once through operating earnings', async () => {
   const body = await loadFixture();
   const projects = body.projects as Array<Record<string, unknown>>;
   const rawJson = projects[0].rawJson as Record<string, unknown>;
@@ -597,10 +600,11 @@ test('project FCFF identity counts reclamation once through EBIT', async () => {
   const priorStyleFcff = (outSeries?.ebitUSD[t] as number) - (outSeries?.taxUSD[t] as number) + (outSeries?.depreciationUSD?.[t] as number) - (outSeries?.capexUSD[t] as number) - (outSeries?.workingCapitalDeltaUSD?.[t] as number);
   const fcffAtT = outSeries?.fcffUSD[t] as number;
   const sustainingAtT = outSeries?.sustainingCapexUSD[t] as number;
-  assert.equal(fcffAtT - priorStyleFcff, -sustainingAtT);
+  assert.equal(fcffAtT - priorStyleFcff, 0);
+  assert.equal(outSeries?.sustainingAdjustedOperatingEarningsUSD?.[t], (outSeries?.ebitdaUSD?.[t] as number) - sustainingAtT);
 
   const last = (outSeries?.fcffUSD.length ?? 1) - 1;
-  const priorAtLast = (outSeries?.ebitUSD[last] as number) - (outSeries?.taxUSD[last] as number) + (outSeries?.depreciationUSD?.[last] as number) - (outSeries?.capexUSD[last] as number) - (outSeries?.workingCapitalDeltaUSD?.[last] as number) - (outSeries?.sustainingCapexUSD[last] as number);
+  const priorAtLast = (outSeries?.ebitUSD[last] as number) - (outSeries?.taxUSD[last] as number) + (outSeries?.depreciationUSD?.[last] as number) - (outSeries?.capexUSD[last] as number) - (outSeries?.workingCapitalDeltaUSD?.[last] as number);
   assert.equal((outSeries?.fcffUSD[last] as number) - priorAtLast, 0);
 
   assert.equal(outSeries?.totalCapexUSD[t], (outSeries?.capexUSD[t] as number) + (outSeries?.sustainingCapexUSD[t] as number));

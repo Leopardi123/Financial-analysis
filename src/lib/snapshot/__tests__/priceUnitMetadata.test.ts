@@ -43,6 +43,7 @@ function context(args: {
       reclamationUSD: zeros(),
       byproductCreditsUSD: zeros(),
       sustainingCostUSD: zeros(),
+      sustainingAdjustedOperatingEarningsUSD: zeros(),
       ebitdaUSD: zeros(),
       depreciationUSD: zeros(),
       ebitUSD: zeros(),

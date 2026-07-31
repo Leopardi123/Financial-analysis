@@ -17,6 +17,7 @@ export type ProjectGridSeries = {
   byproductCreditsUSD?: Array<number | null>;
   sustainingCostUSD?: Array<number | null>;
   depreciationUSD?: Array<number | null>;
+  sustainingAdjustedOperatingEarningsUSD?: Array<number | null>;
   ebitdaUSD?: Array<number | null>;
   ebitUSD?: Array<number | null>;
   taxableIncomeUSD?: Array<number | null>;
@@ -48,6 +49,7 @@ export type ProjectGridPnlSeries = {
   siteGandA: Array<number | null>;
   grossProfit: Array<number | null>;
   ebitda: Array<number | null>;
+  sustainingAdjustedOperatingEarnings: Array<number | null>;
   ebit: Array<number | null>;
   taxableIncome: Array<number | null>;
   tax: Array<number | null>;
@@ -148,26 +150,31 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
   const ebitdaFromComponents = Array.from({ length }, (_, t) => {
     const revenue = grossRevenue[t];
     const opCost = operatingCosts[t];
-    const royalty = royalties[t];
-    if (revenue === null || opCost === null || royalty === null) return null;
-    return revenue - opCost - royalty;
-  });
-  const ebitda = Array.from({ length }, (_, t) => finiteOrNull(series.ebitdaUSD?.[t]) ?? ebitdaFromComponents[t]);
-
-  const ebitFromComponents = Array.from({ length }, (_, t) => {
-    const revenue = grossRevenue[t];
-    const opCost = operatingCosts[t];
     const gna = siteGandA[t];
     const royalty = royalties[t];
-    if (revenue === null || opCost === null || gna === null || royalty === null) return null;
-    return revenue - opCost - gna - royalty + byproductCredits[t];
+    const recl = reclamation[t];
+    if (revenue === null || opCost === null || gna === null || royalty === null || recl === null) return null;
+    return revenue - opCost - gna - royalty - recl + byproductCredits[t];
+  });
+  const ebitda = Array.from({ length }, (_, t) => finiteOrNull(series.ebitdaUSD?.[t]) ?? ebitdaFromComponents[t]);
+  const sustainingAdjustedOperatingEarnings = Array.from({ length }, (_, t) => {
+    const explicit = finiteOrNull(series.sustainingAdjustedOperatingEarningsUSD?.[t]);
+    const ebitdaValue = ebitda[t];
+    const sustaining = sustainingCapex[t];
+    return explicit ?? (ebitdaValue === null || sustaining === null ? null : ebitdaValue - sustaining);
+  });
+
+  const ebitFromComponents = Array.from({ length }, (_, t) => {
+    const operatingEarnings = sustainingAdjustedOperatingEarnings[t];
+    if (operatingEarnings === null) return null;
+    return operatingEarnings - (depreciation[t] ?? 0);
   });
   const ebit = Array.from({ length }, (_, t) => finiteOrNull(series.ebitUSD?.[t]) ?? ebitFromComponents[t]);
 
   const taxableIncomeFromComponents = Array.from({ length }, (_, t) => {
     const ebitValue = ebit[t];
     if (ebitValue === null) return null;
-    return ebitValue - depreciation[t];
+    return Math.max(0, ebitValue);
   });
   const taxableIncome = Array.from({ length }, (_, t) => finiteOrNull(series.taxableIncomeUSD?.[t]) ?? taxableIncomeFromComponents[t]);
 
@@ -216,6 +223,7 @@ export function buildProjectGridPnl(series: ProjectGridSeries, length: number): 
     siteGandA,
     grossProfit,
     ebitda,
+    sustainingAdjustedOperatingEarnings,
     ebit,
     taxableIncome,
     tax,

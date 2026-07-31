@@ -3915,6 +3915,7 @@ Capital Available: ${availableLabel}`,
         operatingCostsUSD: getSeries(projectSeriesRecord.operatingCostsUSD) ?? undefined,
         royaltiesUSD: getSeries(projectSeriesRecord.royaltiesUSD) ?? undefined,
         ebitdaUSD: getSeries(projectSeriesRecord.ebitdaUSD) ?? undefined,
+        sustainingAdjustedOperatingEarningsUSD: getSeries(projectSeriesRecord.sustainingAdjustedOperatingEarningsUSD) ?? undefined,
         ebitUSD: getSeries(projectSeriesRecord.ebitUSD) ?? undefined,
         depreciationUSD: getSeries(projectSeriesRecord.depreciationUSD) ?? getSeries((parsedSelectedProject.context.series ?? {}).depreciationUSD) ?? undefined,
         taxableIncomeUSD: getSeries(projectSeriesRecord.taxableIncomeUSD) ?? undefined,
@@ -4120,6 +4121,7 @@ Capital Available: ${availableLabel}`,
     })();
     const grossProfit = seriesOrNull(record.grossProfitUSD);
     const ebitda = seriesOrNull(record.ebitdaUSD);
+    const sustainingAdjustedOperatingEarnings = seriesOrNull(record.sustainingAdjustedOperatingEarningsUSD);
     const ebit = seriesOrNull(record.ebitUSD);
     const siteGandA = seriesOrNull(record.siteGandA_USD);
     const byproductCredits = seriesOrNull(record.byproductCreditsUSD);
@@ -4232,17 +4234,18 @@ Capital Available: ${availableLabel}`,
       const coercedToZero = inputRowsWithEngineValue
         .filter((row) => row.rawValue === null)
         .map((row) => row.key);
-      const ebitdaComputed = inputRowsWithEngineValue[0].usedByEngine
+      const sustainingAdjustedOperatingEarningsComputed = inputRowsWithEngineValue[0].usedByEngine
         - inputRowsWithEngineValue[1].usedByEngine
         - inputRowsWithEngineValue[2].usedByEngine
         - inputRowsWithEngineValue[3].usedByEngine
         - inputRowsWithEngineValue[4].usedByEngine
         - inputRowsWithEngineValue[5].usedByEngine
         + inputRowsWithEngineValue[6].usedByEngine;
+      const ebitdaComputed = sustainingAdjustedOperatingEarningsComputed + inputRowsWithEngineValue[2].usedByEngine;
       const depreciationAtSpotlight = seriesValue((seriesOrNull((parsedSelectedProject?.context?.series ?? {}).depreciationUSD) ?? null), spotlightPeriod)
         ?? seriesValue((seriesOrNull(record.depreciationUSD) ?? null), spotlightPeriod);
       const depreciationUsedByEngine = depreciationAtSpotlight ?? 0;
-      const ebitComputed = ebitdaComputed - depreciationUsedByEngine;
+      const ebitComputed = sustainingAdjustedOperatingEarningsComputed - depreciationUsedByEngine;
       const ebitReported = seriesValue(ebit, spotlightPeriod);
       const taxAtSpotlight = seriesValue(tax, spotlightPeriod);
       const capexAtSpotlight = seriesValue(capex, spotlightPeriod);
@@ -4254,10 +4257,8 @@ Capital Available: ${availableLabel}`,
         : ebitReported
           - (taxAtSpotlight ?? 0)
           + (depreciationAtSpotlight ?? 0)
-          - (sustainingCapexAtSpotlight ?? 0)
           - (capexAtSpotlight ?? 0)
-          - (workingCapitalDeltaAtSpotlight ?? 0)
-          - (reclamationAtSpotlight ?? 0);
+          - (workingCapitalDeltaAtSpotlight ?? 0);
       const fcffReported = seriesValue(fcff, spotlightPeriod);
       const fcffDiff = fcffRecomputedFromEbit !== null && fcffReported !== null
         ? fcffReported - fcffRecomputedFromEbit
@@ -4267,6 +4268,7 @@ Capital Available: ${availableLabel}`,
         ebitReported,
         ebitComputed,
         ebitdaComputed,
+        sustainingAdjustedOperatingEarningsComputed,
         depreciationAtSpotlight,
         depreciationUsedByEngine,
         taxAtSpotlight,
@@ -4341,13 +4343,12 @@ Capital Available: ${availableLabel}`,
         },
         {
           label: "EBITDA",
-          formula: "grossRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits",
+          formula: "grossRevenue - operatingCosts - siteG&A - royalties - reclamation + byproductCredits",
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.ebitdaUSD",
           inputs: [
             { label: "Gross revenue", source: grossRevenueSource, values: grossRevenue },
             { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
-            { label: "Sustaining capex", source: "series.sustainingCapexUSD", values: sustainingCapex },
             { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
             { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
             { label: "Reclamation", source: "series.reclamationUSD", values: reclamation },
@@ -4356,12 +4357,23 @@ Capital Available: ${availableLabel}`,
           output: ebitda,
         },
         {
+          label: "Sustaining-adjusted operating earnings",
+          formula: "EBITDA - sustainingCapex",
+          calculatedIn: "snapshot series pipeline",
+          sourceOfTruth: "series.sustainingAdjustedOperatingEarningsUSD",
+          inputs: [
+            { label: "EBITDA", source: "series.ebitdaUSD", values: ebitda },
+            { label: "Sustaining capex", source: "series.sustainingCapexUSD", values: sustainingCapex },
+          ],
+          output: sustainingAdjustedOperatingEarnings,
+        },
+        {
           label: "EBIT",
-          formula: "EBITDA - depreciation",
+          formula: "sustainingAdjustedOperatingEarnings - depreciation",
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.ebitUSD",
           inputs: [
-            { label: "EBITDA", source: "series.ebitdaUSD", values: ebitda },
+            { label: "Sustaining-adjusted operating earnings", source: "series.sustainingAdjustedOperatingEarningsUSD", values: sustainingAdjustedOperatingEarnings },
             { label: "Depreciation", source: "series.depreciationUSD", values: seriesOrNull(record.depreciationUSD) },
           ],
           output: ebit,
@@ -4376,20 +4388,15 @@ Capital Available: ${availableLabel}`,
         },
         {
           label: "FCFF",
-          formula: "grossRevenue - operatingCosts - siteG&A - royalties - tax - sustainingCapex - reclamation - workingCapitalDelta - capex + byproductCredits",
+          formula: "EBIT - tax + depreciation - capex - workingCapitalDelta",
           calculatedIn: "snapshot series pipeline",
           sourceOfTruth: "series.fcffUSD",
           inputs: [
-            { label: "Gross revenue", source: grossRevenueSource, values: grossRevenue },
-            { label: "Operating costs", source: "series.operatingCostsUSD", values: operatingCosts },
-            { label: "Site G&A", source: "series.siteGandA_USD", values: siteGandA },
-            { label: "Royalties", source: "series.royaltiesDetail/series.royaltiesUSD", values: royalties },
+            { label: "EBIT", source: "series.ebitUSD", values: ebit },
             { label: "Tax", source: "series.taxUSD", values: tax },
-            { label: "Sustaining capex", source: "series.sustainingCapexUSD", values: sustainingCapex },
-            { label: "Reclamation", source: "series.reclamationUSD", values: reclamation },
+            { label: "Depreciation", source: "series.depreciationUSD", values: seriesOrNull(record.depreciationUSD) },
             { label: "Working capital delta", source: "series.workingCapitalDeltaUSD", values: workingCapitalDelta },
             { label: "Capex", source: "series.capexUSD", values: capex },
-            { label: "Byproduct credits", source: "series.byproductCreditsUSD", values: byproductCredits },
           ],
           output: fcff,
         },
@@ -6766,7 +6773,7 @@ Capital Available: ${availableLabel}`,
 
                         {projectPnlTraceDebugger.ebitWalkthrough && (
                           <div style={{ border: "1px solid #d8e0d2", borderRadius: 6, background: "#fff", padding: "8px" }}>
-                            <strong>Noggrann steg-för-steg: Gross revenue → EBITDA → EBIT → FCFF (spotlight)</strong>
+                            <strong>Noggrann steg-för-steg: Gross revenue → EBITDA → Sustaining-adjusted operating earnings → EBIT → FCFF (spotlight)</strong>
                             <div style={{ marginTop: 4, color: "#374151" }}>Spotlight väljs som första t med revenue &gt; 0, annars fallback t=6.</div>
                             <div style={{ marginTop: 4 }}>t={projectPnlTraceDebugger.ebitWalkthrough.t}</div>
                             <div style={{ marginTop: 4 }}>Gross revenue-källa i walkthrough: <code>{projectPnlTraceDebugger.ebitWalkthrough.grossRevenueSource}</code></div>
@@ -6779,6 +6786,7 @@ Capital Available: ${availableLabel}`,
                               ))}
                             </ul>
                             <div>EBITDA (computed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.ebitdaComputed)}</div>
+                            <div>Sustaining-adjusted operating earnings (computed): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.sustainingAdjustedOperatingEarningsComputed)}</div>
                             <div>Depreciation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight)}</div>
                             {projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight === null && (
                               <div>Depreciation saknas i raden; engine använder 0 i beräkningen.</div>
@@ -6789,10 +6797,8 @@ Capital Available: ${availableLabel}`,
                             <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
                               <li>- Tax: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.taxAtSpotlight)}</li>
                               <li>+ Depreciation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.depreciationAtSpotlight)}</li>
-                              <li>- Sustaining capex: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.sustainingCapexAtSpotlight)}</li>
                               <li>- Capex: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.capexAtSpotlight)}</li>
                               <li>- Working capital delta: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.workingCapitalDeltaAtSpotlight)}</li>
-                              <li>- Reclamation: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.reclamationAtSpotlight)}</li>
                             </ul>
                             <div>fcffRecomputedFromEbit: {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffRecomputedFromEbit)}</div>
                             <div>FCFF (series.fcffUSD): {formatPanelValue(projectPnlTraceDebugger.ebitWalkthrough.fcffReported)}</div>

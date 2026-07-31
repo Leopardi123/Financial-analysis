@@ -58,6 +58,7 @@ function makeOutputStub(input: {
       totalRoyaltiesUSD: [],
       phase1: {
         sustainingCostUSD: input.sustainingCostUSD,
+        sustainingAdjustedOperatingEarningsUSD: [],
         ebitdaUSD: [],
         depreciationUSD: [],
         ebitUSD: [],
@@ -79,6 +80,7 @@ function makeOutputStub(input: {
     itemTakeUSDById: {},
     phase1: {
       sustainingCostUSD: input.sustainingCostUSD,
+      sustainingAdjustedOperatingEarningsUSD: [],
       ebitdaUSD: [],
       depreciationUSD: [],
       ebitUSD: [],

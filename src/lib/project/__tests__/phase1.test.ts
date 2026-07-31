@@ -46,11 +46,13 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   });
 
   assertDeepEqual(happyPath.sustainingCostUSD, [12, 12, 51, 51], 'happy path sustainingCostUSD');
+  assertDeepEqual(happyPath.ebitdaUSD, [-12, -12, 54, 54], 'happy path informational EBITDA excludes sustaining CAPEX');
+  assertDeepEqual(happyPath.sustainingAdjustedOperatingEarningsUSD, [-12, -12, 49, 49], 'happy path sustaining-adjusted operating earnings');
   assertDeepEqual(happyPath.ebitUSD, [-12, -12, 49, 49], 'happy path ebitUSD');
   assertDeepEqual(happyPath.taxUSD, [0, 0, 14.7, 14.7], 'happy path taxUSD');
   assertDeepEqual(happyPath.nopatUSD, [-12, -12, 34.3, 34.3], 'happy path nopatUSD');
   assertDeepEqual(happyPath.totalCapexUSD, [50, 20, 5, 5], 'happy path totalCapexUSD');
-  assertDeepEqual(happyPath.fcffUSD, [-62, -32, 29.299999999999997, 29.299999999999997], 'happy path fcffUSD counts reclamation once through EBIT');
+  assertDeepEqual(happyPath.fcffUSD, [-62, -32, 34.3, 34.3], 'happy path fcffUSD counts sustaining CAPEX and reclamation once through operating earnings');
   assertDeepEqual(happyPath.workingCapitalDeltaUSD_effective, [0, 0, 0, 0], 'happy path defaults working capital delta to zero');
   assert((happyPath.ebitUSD[0] as number) < 0, 'pre-production ebit at t=0 should be negative');
   assert((happyPath.ebitUSD[1] as number) < 0, 'pre-production ebit at t=1 should be negative');
@@ -78,7 +80,33 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertEqual(nonFiniteInput.taxUSD[2], 26.7, 'tax at t=2 after non-finite op normalization');
   assertEqual(nonFiniteInput.nopatUSD[2], 62.3, 'nopat at t=2 after non-finite op normalization');
   assertEqual(nonFiniteInput.totalCapexUSD[2], 5, 'total capex at t=2 after non-finite op normalization');
-  assertEqual(nonFiniteInput.fcffUSD[2], 57.3, 'fcff at t=2 after non-finite op normalization');
+  assertEqual(nonFiniteInput.fcffUSD[2], 62.3, 'fcff at t=2 after non-finite op normalization');
+
+  const definitionCase = (sustainingCapex: number, initialCapex = 0) => computeProjectPhase1({
+    masterN: 0,
+    productionStartPeriod: 0,
+    taxRate: 0.25,
+    revenueUSD: [100],
+    operatingCostsUSD: [40],
+    sustainingCapexUSD: [sustainingCapex],
+    siteGandA_USD: [5],
+    royaltiesUSD: [3],
+    reclamationUSD: [2],
+    byproductCreditsUSD: [4],
+    depreciationUSD: [6],
+    capexUSD: [initialCapex],
+    workingCapitalDeltaUSD: [0],
+  });
+  const withoutSustaining = definitionCase(0);
+  const withSustaining = definitionCase(10);
+  assertEqual(withSustaining.ebitdaUSD[0], 54, 'true EBITDA excludes sustaining CAPEX');
+  assertEqual(withSustaining.sustainingAdjustedOperatingEarningsUSD[0], 44, 'renamed operating metric deducts sustaining CAPEX');
+  assertEqual(withSustaining.ebitUSD[0], 38, 'EBIT continues from sustaining-adjusted operating earnings');
+  assertEqual(withSustaining.taxUSD[0], 9.5, 'tax is 25% of EBIT after sustaining CAPEX');
+  assertEqual(withoutSustaining.fcffUSD[0], 42, 'FCFF before sustaining CAPEX sensitivity');
+  assertEqual(withSustaining.fcffUSD[0], 34.5, 'FCFF deducts sustaining CAPEX exactly once through after-tax operating earnings');
+  assertEqual((withoutSustaining.fcffUSD[0] as number) - (withSustaining.fcffUSD[0] as number), 7.5, 'a 10 sustaining CAPEX increase reduces FCFF by 10 less the 2.5 tax shield');
+  assertEqual(definitionCase(10, 7).fcffUSD[0], 27.5, 'initial CAPEX remains a separate full FCFF deduction');
 
   assertThrows(
     () =>

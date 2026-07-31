@@ -42,6 +42,7 @@ type SeriesShape = {
   reclamationUSD?: Array<number | null>;
   byproductCreditsUSD?: Array<number | null>;
   sustainingCostUSD?: Array<number | null>;
+  sustainingAdjustedOperatingEarningsUSD?: Array<number | null>;
   ebitdaUSD?: Array<number | null>;
   depreciationUSD?: Array<number | null>;
   ebitUSD?: Array<number | null>;
@@ -461,6 +462,7 @@ export default function ProjectsPage() {
         royaltiesUSD: series?.royaltiesUSD,
         royaltiesDetail: raw.engineInputWithoutPrices.royaltiesDetail,
         ebitdaUSD: series?.ebitdaUSD,
+        sustainingAdjustedOperatingEarningsUSD: series?.sustainingAdjustedOperatingEarningsUSD,
         ebitUSD: series?.ebitUSD,
         depreciationUSD: series?.depreciationUSD,
         taxableIncomeUSD: series?.taxableIncomeUSD,
@@ -567,6 +569,7 @@ export default function ProjectsPage() {
       { label: 'Royalties (USD)', values: pnl.royalties },
       { label: 'Gross profit', values: pnl.grossProfit },
       { label: 'EBITDA', values: pnl.ebitda },
+      { label: 'Sustaining-adjusted operating earnings', values: pnl.sustainingAdjustedOperatingEarnings },
       { label: 'Site G&A', values: pnl.siteGandA },
       { label: 'EBIT', values: pnl.ebit },
       { label: 'Taxable income', values: pnl.taxableIncome },
