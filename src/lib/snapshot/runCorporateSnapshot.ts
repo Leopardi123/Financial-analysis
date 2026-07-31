@@ -24,6 +24,7 @@ import { getPriceKeyDefinition } from '../prices/keys.ts';
 import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
 import { applyStressModifiers } from './applyStressModifiers.ts';
 import { buildValuationTimeline, selectCorporateProjectStartMilestones, selectTimelineChartSeries } from '../valuation/canonicalValuationTimeline.ts';
+import { computeCorporateQualityMultiples } from '../corporate/multipleContrast/engine.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -3444,6 +3445,18 @@ export async function runCorporateSnapshotPipeline(args: {
       }),
     };
     (snapshot as Record<string, unknown>).corporateValuationTimeSeries = corporateValuationTimeSeries;
+    // Phase A only: publish an isolated, read-only valuation overlay. The engine
+    // consumes final calendar-aligned Corporate series and cannot feed economics,
+    // financing, canonical valuation, or the existing static 5x/6x/7x rows.
+    (snapshot as Record<string, unknown>).corporateQualityMultipleTimeSeries = computeCorporateQualityMultiples({
+      calendarYears: canonicalYears,
+      ebitdaUSD_total: canonicalSeries(aggregationEffective.ebitdaUSD_total ?? []),
+      revenueUSD_total: canonicalSeries(aggregationEffective.grossRevenueUSD_total),
+      sustainingCapexUSD_total: canonicalSeries(snapshotSeries.sustainingCapexUSD),
+      netCashTarget: corporateCanonicalTimeline.periods.map((row) => row.netCashTarget),
+      sharesPostFinancing: corporateCanonicalTimeline.periods.map((row) => row.sharesPf),
+      fxUSDToTarget: fxRate,
+    });
 
     if (projects.length === 1) {
       const fxForRange = typeof fxRate === 'number' && Number.isFinite(fxRate) ? fxRate : null;
