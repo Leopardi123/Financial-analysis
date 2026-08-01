@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { bridgeCorporateMultipleToEquity, computeCorporateQualityMultiples } from '../engine.ts';
+import { bridgeCorporateMultipleToEquity, computeCorporateQualityMultiples, fiveYearEbitdaConcentrationAdjustment } from '../engine.ts';
 import { QUALITY_MULTIPLE_POLICY, type CorporateQualityMultipleInput } from '../types.ts';
 import { runCorporateSnapshotPipeline } from '../../../snapshot/runCorporateSnapshot.ts';
 
@@ -47,23 +47,81 @@ test('three and four period tails use every remaining calendar period as a short
   }
 });
 
-test('front-loading policy handles 60%, 75%, 90%, and back-loaded profiles exactly', () => {
-  const profile = (ratio: number) => first(input([
-    ...new Array(5).fill((ratio * 1000) / 5), ...new Array(5).fill(((1 - ratio) * 1000) / 5),
-  ]));
-  assert.equal(profile(0.60).frontLoadingAdjustment, 0.25);
-  assert.equal(profile(0.75).frontLoadingAdjustment, 0);
-  assert.equal(profile(0.90).frontLoadingAdjustment, -0.25);
-  assert.equal(profile(0.15).frontLoadingAdjustment, -0.5);
+test('uniform 10-year and 20-year profiles are neutral so duration is not rewarded twice', () => {
+  for (const length of [10, 20]) {
+    const row = first(input(new Array(length).fill(100)));
+    assert.equal(row.actualFiveYearEbitdaShare, 5 / length);
+    assert.equal(row.expectedFiveYearEbitdaShare, 5 / length);
+    assert.equal(row.fiveYearEbitdaConcentrationDeviation, 0);
+    assert.equal(row.fiveYearEbitdaConcentrationAdjustment, 0);
+  }
 });
 
-test('negative EBITDA tail is diagnostic only and front-loading uses positive EBITDA', () => {
+test('front- and back-loaded ten-year profiles are scored relative to a uniform profile', () => {
+  const front = first(input([160, 150, 140, 130, 120, 60, 60, 60, 60, 60]));
+  assert.ok(front.actualFiveYearEbitdaShare! > front.expectedFiveYearEbitdaShare!);
+  assert.ok(front.fiveYearEbitdaConcentrationDeviation! > 0);
+  assert.equal(front.fiveYearEbitdaConcentrationAdjustment, -0.5);
+  const back = first(input([60, 60, 60, 60, 60, 120, 130, 140, 150, 160]));
+  assert.ok(back.actualFiveYearEbitdaShare! < back.expectedFiveYearEbitdaShare!);
+  assert.ok(back.fiveYearEbitdaConcentrationDeviation! < 0);
+  assert.equal(back.fiveYearEbitdaConcentrationAdjustment, 0.25);
+});
+
+test('exact concentration-policy boundaries are deterministic', () => {
+  assert.equal(fiveYearEbitdaConcentrationAdjustment(-0.20), 0.25);
+  assert.equal(fiveYearEbitdaConcentrationAdjustment(-0.10), 0.125);
+  assert.equal(fiveYearEbitdaConcentrationAdjustment(0.10), -0.25);
+  assert.equal(fiveYearEbitdaConcentrationAdjustment(0.20), -0.5);
+  assert.equal(fiveYearEbitdaConcentrationAdjustment(0.30), -0.75);
+  assert.equal(fiveYearEbitdaConcentrationAdjustment(0.40), -1);
+});
+
+test('negative EBITDA tail is diagnostic only and concentration uses positive EBITDA', () => {
   const row = first(input([20, 20, 20, 20, 20, -10, -10, -10, -10, -10]));
-  assert.equal(row.frontLoading5Y, 1);
+  assert.equal(row.positiveRemainingEbitda, 100);
+  assert.equal(row.positiveEbitdaFirstFiveYears, 100);
+  assert.equal(row.actualFiveYearEbitdaShare, 1);
+  assert.equal(row.expectedFiveYearEbitdaShare, 1);
+  assert.equal(row.fiveYearEbitdaConcentrationDeviation, 0);
+  assert.equal(row.fiveYearEbitdaConcentrationAdjustment, 0);
   assert.equal(row.negativeEbitdaTailShare, 0.5);
-  const expected = 6 + (row.remainingEconomicYearsAdjustment as number) + (row.frontLoadingAdjustment as number)
+  const expected = 6 + (row.remainingEconomicYearsAdjustment as number) + (row.fiveYearEbitdaConcentrationAdjustment as number)
     + (row.stabilityAdjustment as number) + (row.sustainingIntensityAdjustment as number) + (row.marginAdjustment as number);
   assert.equal(row.rawQualityMultiple, expected);
+});
+
+test('uniform five-year and three-year profiles are neutral while two years are not computable', () => {
+  for (const length of [5, 3]) {
+    const row = first(input(new Array(length).fill(100)));
+    assert.equal(row.actualFiveYearEbitdaShare, 1);
+    assert.equal(row.expectedFiveYearEbitdaShare, 1);
+    assert.equal(row.fiveYearEbitdaConcentrationDeviation, 0);
+    assert.equal(row.fiveYearEbitdaConcentrationAdjustment, 0);
+    assert.equal(row.shortWindow, length === 3);
+  }
+  const row = first(input([100, 100]));
+  assert.equal(row.actualFiveYearEbitdaShare, null);
+  assert.equal(row.fiveYearEbitdaConcentrationAdjustment, null);
+  assert.ok(row.qualityDiagnostics.includes('INSUFFICIENT_REMAINING_PERIODS'));
+});
+
+test('gap years stay in the calendar window and active-year diagnostics remain explicit', () => {
+  const row = first(input([100, 100, 0, 100, 100, 100, 100, 100]));
+  assert.equal(row.positiveEbitdaFirstFiveYears, 400);
+  assert.equal(row.positiveRemainingEbitda, 700);
+  assert.equal(row.remainingActiveEconomicYears, 7);
+  assert.equal(row.economicGapYears, 1);
+  assert.equal(row.windowLength, 5);
+});
+
+test('null EBITDA or revenue in the mandatory tail nulls concentration without fallback', () => {
+  const nullEbitda = first(input([100, 100, null, 100, 100, 100]));
+  assert.equal(nullEbitda.fiveYearEbitdaConcentrationAdjustment, null);
+  const nullRevenue = first(input(new Array(6).fill(100), { revenueUSD_total: [200, 200, 200, 200, 200, null] }));
+  assert.equal(nullRevenue.actualFiveYearEbitdaShare, null);
+  assert.equal(nullRevenue.fiveYearEbitdaConcentrationAdjustment, null);
+  assert.ok(nullRevenue.qualityDiagnostics.includes('NULL_REVENUE'));
 });
 
 test('gap years affect diagnostics but introduce no sixth adjustment', () => {

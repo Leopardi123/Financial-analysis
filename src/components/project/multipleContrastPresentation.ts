@@ -66,7 +66,10 @@ export function buildStaticMultipleContrastSeries(args: {
     const selectedEbitdaUSD = args.basis === 'annual'
       ? quality?.annualEbitdaUSD ?? (finite(staticRow.ebitdaTarget) ? staticRow.ebitdaTarget : null)
       : quality?.forwardAverageEbitdaUSD ?? null;
-    if (!finite(selectedEbitdaUSD) || selectedEbitdaUSD <= 0) return emptyBand(staticRow.year, selectedEbitdaUSD);
+    const annualEconomicBasis = quality?.annualEbitdaUSD ?? (finite(staticRow.ebitdaTarget) ? staticRow.ebitdaTarget : null);
+    if (!finite(selectedEbitdaUSD) || selectedEbitdaUSD <= 0 || !finite(annualEconomicBasis) || annualEconomicBasis <= 0) {
+      return emptyBand(staticRow.year, selectedEbitdaUSD);
+    }
     let low: number | null;
     let mid: number | null;
     let high: number | null;
@@ -116,8 +119,14 @@ export function buildQualityMultipleContrastSeries(args: {
   return args.qualityRows.map((row) => {
     const selectedEbitdaUSD = args.basis === 'annual' ? row.annualEbitdaUSD : row.forwardAverageEbitdaUSD;
     const selected = args.basis === 'annual' ? row.annualBasis : row.forwardAverageBasis;
-    if (!finite(selectedEbitdaUSD) || selectedEbitdaUSD <= 0) return emptyBand(row.calendarYear, selectedEbitdaUSD);
+    if (!finite(selectedEbitdaUSD) || selectedEbitdaUSD <= 0 || !finite(row.annualEbitdaUSD) || row.annualEbitdaUSD <= 0) {
+      return emptyBand(row.calendarYear, selectedEbitdaUSD);
+    }
     const canonicalShares = args.canonicalSharesForPerShareByYear.get(row.calendarYear);
+    if (row.qualityStatus !== 'COMPUTABLE'
+      || !finite(row.qualityLowMultiple) || !finite(row.qualityMidMultiple) || !finite(row.qualityHighMultiple)
+      || !finite(selected.equityValueLowTarget) || !finite(selected.equityValueMidTarget) || !finite(selected.equityValueHighTarget)
+      || !finite(canonicalShares) || canonicalShares <= 0) return emptyBand(row.calendarYear, selectedEbitdaUSD);
     const perShare = (equityValue: number | null): number | null =>
       finite(equityValue) && finite(canonicalShares) && canonicalShares > 0
         ? equityValue / canonicalShares

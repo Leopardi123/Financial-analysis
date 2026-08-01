@@ -23,7 +23,7 @@ const diagnosticLabels: Record<string, string> = {
   NO_ACTIVE_ECONOMIC_YEARS: 'Inga aktiva ekonomiska år', NULL_EBITDA: 'EBITDA saknas', NULL_REVENUE: 'Intäkt saknas',
   NULL_SUSTAINING_CAPEX: 'Sustaining CAPEX saknas', NON_POSITIVE_EBITDA_MEAN: 'EBITDA-genomsnittet är inte positivt',
   NON_POSITIVE_POSITIVE_EBITDA_DENOMINATOR: 'Positiv EBITDA-nämnare saknas', NON_POSITIVE_REVENUE_DENOMINATOR: 'Positiv intäktsnämnare saknas',
-  NEGATIVE_SUSTAINING_CAPEX: 'Negativ sustaining CAPEX', INVALID_FRONT_LOADING_INVARIANT: 'Ogiltig front-loading-invariant',
+  NEGATIVE_SUSTAINING_CAPEX: 'Negativ sustaining CAPEX', INVALID_FIVE_YEAR_EBITDA_SHARE_INVARIANT: 'Ogiltig femårig EBITDA-andel',
   EBITDA_MARGIN_ABOVE_ONE: 'EBITDA-marginal över 100 %',
 };
 
@@ -63,7 +63,11 @@ export default function MultipleContrastPanel(props: Props) {
                     <span><strong>År</strong>{row.calendarYear}</span>
                     <span><strong>Kvalitetsmultipel</strong>{multiple(row.qualityMidMultiple)}</span>
                     <span><strong>Aktiva ekonomiska år</strong>{row.remainingActiveEconomicYears ?? 'n/a'}</span>
-                    <span><strong>Front-loading</strong>{percent(row.frontLoading5Y)}</span>
+                    <span><strong>Faktisk 5Y-andel</strong>{percent(row.actualFiveYearEbitdaShare)}</span>
+                    <span><strong>Förväntad 5Y-andel</strong>{percent(row.expectedFiveYearEbitdaShare)}</span>
+                    <span><strong>5-årig EBITDA-koncentration</strong>{percent(row.fiveYearEbitdaConcentrationDeviation)}</span>
+                    <span><strong>Positiv EBITDA, återstående</strong>{row.positiveRemainingEbitda?.toLocaleString('sv-SE') ?? 'n/a'}</span>
+                    <span><strong>Positiv EBITDA, första fem år</strong>{row.positiveEbitdaFirstFiveYears?.toLocaleString('sv-SE') ?? 'n/a'}</span>
                     <span><strong>EBITDA-stabilitet</strong>{percent(row.ebitdaCv5Y)}</span>
                     <span><strong>Sustaining/EBITDA</strong>{percent(row.sustainingIntensity5Y)}</span>
                     <span><strong>EBITDA-marginal</strong>{percent(row.ebitdaMargin5Y)}</span>
@@ -73,7 +77,7 @@ export default function MultipleContrastPanel(props: Props) {
                   <h4>Justeringar</h4>
                   <div className="multiple-contrast-adjustments">
                     <span>Livslängd: {multiple(row.remainingEconomicYearsAdjustment, true)}</span>
-                    <span>Front-loading: {multiple(row.frontLoadingAdjustment, true)}</span>
+                    <span>5-årig EBITDA-koncentration: {multiple(row.fiveYearEbitdaConcentrationAdjustment, true)}</span>
                     <span>Stabilitet: {multiple(row.stabilityAdjustment, true)}</span>
                     <span>Sustaining: {multiple(row.sustainingIntensityAdjustment, true)}</span>
                     <span>Marginal: {multiple(row.marginAdjustment, true)}</span>
@@ -86,6 +90,7 @@ export default function MultipleContrastPanel(props: Props) {
                   {row?.qualityDiagnostics.length ? <p className="multiple-contrast-status">{row.qualityDiagnostics.map((code) => diagnosticLabels[code] ?? code).join(' · ')}</p> : null}
                 </>
               )}
+              <p className="multiple-contrast-policy">5-årig EBITDA-koncentration mäter hur stor andel av återstående positiv EBITDA som ligger inom fem år jämfört med en jämnt fördelad EBITDA-profil över samma kvarvarande ekonomiska livslängd.</p>
               <p className="multiple-contrast-policy">Kvalitetsmultipeln är en deterministisk modellpolicy baserad på Corporate-serier, inte ett observerat marknadsgenomsnitt.</p>
             </section>
           )}

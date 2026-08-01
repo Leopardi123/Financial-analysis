@@ -8,10 +8,11 @@ import { buildValueRangeChartOptions, VALUE_RANGE_CHART_COLORS } from '../valueR
 const overlay = (low: number | null, mid: number | null, high: number | null) => ({ enterpriseValueLowTarget: low, enterpriseValueMidTarget: mid, enterpriseValueHighTarget: high, equityValueLowTarget: low, equityValueMidTarget: mid, equityValueHighTarget: high, valuePerShareLow: low, valuePerShareMid: mid, valuePerShareHigh: high });
 const qualityRow = (overrides: Partial<CorporateQualityMultipleRow> = {}): CorporateQualityMultipleRow => ({
   calendarYear: 2030, annualEbitdaUSD: 100, forwardAverageEbitdaUSD: 80, remainingActiveEconomicYears: 8, economicEndYear: 2037, remainingEconomicSpanYears: 8, economicGapYears: 0,
-  frontLoading5Y: 0.625, negativeEbitdaTailShare: 0, ebitdaCv5Y: 0, sustainingIntensity5Y: 0.088, ebitdaMargin5Y: 0.478,
-  remainingEconomicYearsAdjustment: 0, frontLoadingAdjustment: 0.25, stabilityAdjustment: 0.5, sustainingIntensityAdjustment: 0.25, marginAdjustment: 0.5,
+  actualFiveYearEbitdaShare: 0.625, expectedFiveYearEbitdaShare: 0.625, fiveYearEbitdaConcentrationDeviation: 0,
+  positiveRemainingEbitda: 800, positiveEbitdaFirstFiveYears: 500, negativeEbitdaTailShare: 0, ebitdaCv5Y: 0, sustainingIntensity5Y: 0.088, ebitdaMargin5Y: 0.478,
+  remainingEconomicYearsAdjustment: 0, fiveYearEbitdaConcentrationAdjustment: 0, stabilityAdjustment: 0.5, sustainingIntensityAdjustment: 0.25, marginAdjustment: 0.5,
   rawQualityMultiple: 7.5, qualityLowMultiple: 6.5, qualityMidMultiple: 7.5, qualityHighMultiple: 8.5,
-  annualBasis: overlay(6.5, 7.5, 8.5), forwardAverageBasis: overlay(5.2, 6, 6.8), shortWindow: false, windowLength: 5, windowStartYear: 2030, windowEndYear: 2034,
+  annualBasis: overlay(6.5, 7.5, 8.5), forwardAverageBasis: overlay(5.2, 6, 6.8), shortWindow: false, fullWindow: true, windowLength: 5, windowStartYear: 2030, windowEndYear: 2034,
   qualityStatus: 'COMPUTABLE', qualityDiagnostics: ['FULL_WINDOW'], ...overrides,
 });
 const staticRows = [{ year: 2030, ebitdaTarget: 125, evEbitda5xPerShare: 6.35, evEbitda6xPerShare: 7.6, evEbitda7xPerShare: 8.85, sharesPf: 100 }];
@@ -43,6 +44,52 @@ test('quality null years remain null with no 6x fallback or interpolation', () =
   const row = qualityRow({ annualBasis: overlay(null, null, null), qualityMidMultiple: null, qualityLowMultiple: null, qualityHighMultiple: null, qualityStatus: 'NOT_COMPUTABLE' });
   const point = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows: [row], canonicalSharesForPerShareByYear: canonicalShares() })[0];
   assert.deepEqual([point.low, point.mid, point.high, point.tooltip], [null, null, null, null]);
+});
+
+test('quality visibility requires computable policy, finite multiples, equity values, positive basis, and canonical shares', () => {
+  const cases: CorporateQualityMultipleRow[] = [
+    qualityRow({ annualEbitdaUSD: 0 }),
+    qualityRow({ annualEbitdaUSD: -1 }),
+    qualityRow({ annualEbitdaUSD: null }),
+    qualityRow({ qualityStatus: 'NOT_COMPUTABLE' }),
+    qualityRow({ qualityMidMultiple: null }),
+    qualityRow({ annualBasis: { ...overlay(1, 2, 3), equityValueHighTarget: null } }),
+  ];
+  for (const row of cases) {
+    const point = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows: [row], canonicalSharesForPerShareByYear: canonicalShares(100) })[0];
+    assert.deepEqual([point.low, point.mid, point.high], [null, null, null]);
+  }
+});
+
+test('quality and natural overlays share positive-EBITDA start and preserve later gaps without interpolation', () => {
+  const years = [2028, 2029, 2030, 2031, 2032];
+  const ebitda = [0, -10, 100, 0, 80];
+  const qualityRows = years.map((year, index) => qualityRow({
+    calendarYear: year,
+    annualEbitdaUSD: ebitda[index],
+    qualityStatus: index === 4 ? 'NOT_COMPUTABLE' : 'COMPUTABLE',
+  }));
+  const natural = buildStaticMultipleContrastSeries({
+    basis: 'annual', qualityRows, fxUSDToTarget: 1,
+    staticRows: years.map((year, index) => ({ year, ebitdaTarget: ebitda[index], evEbitda5xPerShare: 5, evEbitda6xPerShare: 6, evEbitda7xPerShare: 7, sharesPf: 100 })),
+    bridgeRows: years.map((year) => ({ year, netCashTarget: 0, sharesPostFinancing: 100 })),
+  });
+  const shares = new Map(years.map((year) => [year, 100]));
+  const quality = buildQualityMultipleContrastSeries({ basis: 'annual', qualityRows, canonicalSharesForPerShareByYear: shares });
+  assert.equal(natural.find((row) => row.mid !== null)?.year, 2030);
+  assert.equal(quality.find((row) => row.mid !== null)?.year, 2030);
+  assert.deepEqual(quality.map((row) => row.mid !== null), [false, false, true, false, false]);
+});
+
+test('forward-average quality clipping uses the selected basis and stops at non-computable tails', () => {
+  const rows = [
+    qualityRow({ calendarYear: 2030, annualEbitdaUSD: 0, forwardAverageEbitdaUSD: 80 }),
+    qualityRow({ calendarYear: 2031, forwardAverageEbitdaUSD: 80 }),
+    qualityRow({ calendarYear: 2032, forwardAverageEbitdaUSD: 70, qualityStatus: 'NOT_COMPUTABLE' }),
+  ];
+  const shares = new Map(rows.map((row) => [row.calendarYear, 100]));
+  const quality = buildQualityMultipleContrastSeries({ basis: 'forwardAverage', qualityRows: rows, canonicalSharesForPerShareByYear: shares });
+  assert.deepEqual(quality.map((row) => row.mid !== null), [false, true, false]);
 });
 
 test('short-window quality point remains visible and tooltip reports short status', () => {
@@ -169,6 +216,8 @@ test('panel source contract provides accessible disclosure and required local co
   assert.match(source, /Kvalitetsjusterat spann/);
   assert.match(source, /Kombinerad riktkurs/);
   assert.match(source, /Kvalitetsjusterad multipel kan inte beräknas/);
+  assert.match(source, /5-årig EBITDA-koncentration/);
+  assert.match(source, /jämnt fördelad EBITDA-profil/);
 });
 
 test('quality overlay uses purple while existing static and DCF/NAV colors remain unchanged', () => {

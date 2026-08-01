@@ -71,13 +71,14 @@ function remainingYearsAdjustment(years: number): number {
   return 1;
 }
 
-function frontLoadingAdjustment(value: number): number {
-  if (value < 0.20) return -0.5;
-  if (value < 0.30) return -0.25;
-  if (value < 0.55) return 0;
-  if (value < 0.70) return 0.25;
-  if (value <= 0.85) return 0;
-  return -0.25;
+export function fiveYearEbitdaConcentrationAdjustment(value: number): number {
+  if (value <= -0.20) return 0.25;
+  if (value <= -0.10) return 0.125;
+  if (value < 0.10) return 0;
+  if (value < 0.20) return -0.25;
+  if (value < 0.30) return -0.5;
+  if (value < 0.40) return -0.75;
+  return -1;
 }
 
 function stabilityAdjustment(value: number): number {
@@ -122,16 +123,18 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
       : remainingPeriods;
     const shortWindow = remainingPeriods >= QUALITY_MULTIPLE_POLICY.minimumWindowLength
       && remainingPeriods < QUALITY_MULTIPLE_POLICY.fullWindowLength;
-    addDiagnostic(diagnostics, remainingPeriods >= QUALITY_MULTIPLE_POLICY.fullWindowLength ? 'FULL_WINDOW'
+    const fullWindow = remainingPeriods >= QUALITY_MULTIPLE_POLICY.fullWindowLength;
+    addDiagnostic(diagnostics, fullWindow ? 'FULL_WINDOW'
       : shortWindow ? 'SHORT_WINDOW' : 'INSUFFICIENT_REMAINING_PERIODS');
     const windowEnd = t + windowLength;
     const ebitdaWindow = input.ebitdaUSD_total.slice(t, windowEnd);
     const revenueWindow = input.revenueUSD_total.slice(t, windowEnd);
     const sustainingWindow = input.sustainingCapexUSD_total.slice(t, windowEnd);
     const ebitdaTail = input.ebitdaUSD_total.slice(t);
+    const revenueTail = input.revenueUSD_total.slice(t);
 
     if (ebitdaWindow.some((value) => !finite(value)) || ebitdaTail.some((value) => !finite(value))) addDiagnostic(diagnostics, 'NULL_EBITDA');
-    if (revenueWindow.some((value) => !finite(value))) addDiagnostic(diagnostics, 'NULL_REVENUE');
+    if (revenueWindow.some((value) => !finite(value)) || revenueTail.some((value) => !finite(value))) addDiagnostic(diagnostics, 'NULL_REVENUE');
     if (sustainingWindow.some((value) => !finite(value))) addDiagnostic(diagnostics, 'NULL_SUSTAINING_CAPEX');
     if (sustainingWindow.some((value) => finite(value) && value < 0)) addDiagnostic(diagnostics, 'NEGATIVE_SUSTAINING_CAPEX');
 
@@ -160,12 +163,19 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
       ? Math.abs(negativeTailSum) / positiveTailSum : null;
     const positiveWindowSum = eligibleWindow
       ? strictSum(ebitdaWindow.map((value) => finite(value) ? Math.max(value, 0) : null)) : null;
-    let frontLoading5Y = positiveWindowSum !== null && positiveTailSum !== null && positiveTailSum > 0
+    let actualFiveYearEbitdaShare = !diagnostics.includes('NULL_REVENUE')
+      && positiveWindowSum !== null && positiveTailSum !== null && positiveTailSum > 0
       ? positiveWindowSum / positiveTailSum : null;
-    if (frontLoading5Y !== null && (frontLoading5Y < 0 || frontLoading5Y > 1)) {
-      addDiagnostic(diagnostics, 'INVALID_FRONT_LOADING_INVARIANT');
-      frontLoading5Y = null;
+    if (actualFiveYearEbitdaShare !== null && (actualFiveYearEbitdaShare < 0 || actualFiveYearEbitdaShare > 1)) {
+      addDiagnostic(diagnostics, 'INVALID_FIVE_YEAR_EBITDA_SHARE_INVARIANT');
+      actualFiveYearEbitdaShare = null;
     }
+    const expectedFiveYearEbitdaShare = eligibleWindow && remainingActiveEconomicYears !== null && remainingActiveEconomicYears > 0
+      ? Math.min(QUALITY_MULTIPLE_POLICY.fullWindowLength, remainingActiveEconomicYears) / remainingActiveEconomicYears
+      : null;
+    const fiveYearEbitdaConcentrationDeviation = actualFiveYearEbitdaShare !== null && expectedFiveYearEbitdaShare !== null
+      ? Number((actualFiveYearEbitdaShare - expectedFiveYearEbitdaShare).toFixed(12))
+      : null;
 
     const ebitdaCv5Y = eligibleWindow && forwardAverageEbitdaUSD !== null && forwardAverageEbitdaUSD > 0
       ? Math.sqrt((ebitdaWindow as number[]).reduce((sum, value) => sum + ((value - forwardAverageEbitdaUSD) ** 2), 0) / windowLength) / forwardAverageEbitdaUSD
@@ -181,11 +191,12 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
     if (ebitdaMargin5Y !== null && ebitdaMargin5Y > 1) addDiagnostic(diagnostics, 'EBITDA_MARGIN_ABOVE_ONE');
 
     const remainingEconomicYearsAdjustment = remainingActiveEconomicYears === null ? null : remainingYearsAdjustment(remainingActiveEconomicYears);
-    const frontAdjustment = frontLoading5Y === null ? null : frontLoadingAdjustment(frontLoading5Y);
+    const concentrationAdjustment = fiveYearEbitdaConcentrationDeviation === null
+      ? null : fiveYearEbitdaConcentrationAdjustment(fiveYearEbitdaConcentrationDeviation);
     const stability = ebitdaCv5Y === null ? null : stabilityAdjustment(ebitdaCv5Y);
     const sustainingAdjustment = sustainingIntensity5Y === null ? null : sustainingIntensityAdjustment(sustainingIntensity5Y);
     const margin = ebitdaMargin5Y === null ? null : marginAdjustment(ebitdaMargin5Y);
-    const adjustments = [remainingEconomicYearsAdjustment, frontAdjustment, stability, sustainingAdjustment, margin];
+    const adjustments = [remainingEconomicYearsAdjustment, concentrationAdjustment, stability, sustainingAdjustment, margin];
     const rawQualityMultiple = adjustments.every(finite)
       ? QUALITY_MULTIPLE_POLICY.base + (adjustments as number[]).reduce((sum, value) => sum + value, 0) : null;
     const qualityMidMultiple = rawQualityMultiple === null ? null
@@ -203,12 +214,14 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
     return {
       calendarYear, annualEbitdaUSD: finite(input.ebitdaUSD_total[t]) ? input.ebitdaUSD_total[t] : null,
       forwardAverageEbitdaUSD, remainingActiveEconomicYears, economicEndYear, remainingEconomicSpanYears, economicGapYears,
-      frontLoading5Y, negativeEbitdaTailShare, ebitdaCv5Y, sustainingIntensity5Y, ebitdaMargin5Y,
-      remainingEconomicYearsAdjustment, frontLoadingAdjustment: frontAdjustment, stabilityAdjustment: stability,
+      actualFiveYearEbitdaShare, expectedFiveYearEbitdaShare, fiveYearEbitdaConcentrationDeviation,
+      positiveRemainingEbitda: positiveTailSum, positiveEbitdaFirstFiveYears: positiveWindowSum,
+      negativeEbitdaTailShare, ebitdaCv5Y, sustainingIntensity5Y, ebitdaMargin5Y,
+      remainingEconomicYearsAdjustment, fiveYearEbitdaConcentrationAdjustment: concentrationAdjustment, stabilityAdjustment: stability,
       sustainingIntensityAdjustment: sustainingAdjustment, marginAdjustment: margin,
       rawQualityMultiple, qualityLowMultiple, qualityMidMultiple, qualityHighMultiple,
       annualBasis: bridge(finite(input.ebitdaUSD_total[t]) ? input.ebitdaUSD_total[t] : null),
-      forwardAverageBasis: bridge(forwardAverageEbitdaUSD), shortWindow, windowLength,
+      forwardAverageBasis: bridge(forwardAverageEbitdaUSD), shortWindow, fullWindow, windowLength,
       windowStartYear: calendarYear, windowEndYear: input.calendarYears[windowEnd - 1],
       qualityStatus: qualityMidMultiple === null ? 'NOT_COMPUTABLE' as const : 'COMPUTABLE' as const,
       qualityDiagnostics: diagnostics,
