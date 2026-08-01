@@ -62,7 +62,8 @@ export default function MultipleContrastPanel(props: Props) {
                   <div className="multiple-contrast-metrics">
                     <span><strong>År</strong>{row.calendarYear}</span>
                     <span><strong>Kvalitetsmultipel</strong>{multiple(row.qualityMidMultiple)}</span>
-                    <span><strong>Aktiva ekonomiska år</strong>{row.remainingActiveEconomicYears ?? 'n/a'}</span>
+                    <span title="Summan av varje års positiva EBITDA relativt projektets högsta positiva EBITDA. Måttet beskriver hur många fullvärdiga ekonomiska produktionsår projektet motsvarar."><strong>Effective Economic Years</strong>{row.effectiveEconomicYears?.toLocaleString('sv-SE', { maximumFractionDigits: 2 }) ?? 'n/a'}</span>
+                    <span><strong>Peak positive EBITDA</strong>{row.peakPositiveEbitda?.toLocaleString('sv-SE') ?? 'n/a'}</span>
                     <span><strong>Faktisk 5Y-andel</strong>{percent(row.actualFiveYearEbitdaShare)}</span>
                     <span><strong>Förväntad 5Y-andel</strong>{percent(row.expectedFiveYearEbitdaShare)}</span>
                     <span><strong>5-årig EBITDA-koncentration</strong>{percent(row.fiveYearEbitdaConcentrationDeviation)}</span>
@@ -76,7 +77,7 @@ export default function MultipleContrastPanel(props: Props) {
                   </div>
                   <h4>Justeringar</h4>
                   <div className="multiple-contrast-adjustments">
-                    <span>Livslängd: {multiple(row.remainingEconomicYearsAdjustment, true)}</span>
+                    <span>Effective Economic Years: {multiple(row.effectiveEconomicYearsAdjustment, true)}</span>
                     <span>5-årig EBITDA-koncentration: {multiple(row.fiveYearEbitdaConcentrationAdjustment, true)}</span>
                     <span>Stabilitet: {multiple(row.stabilityAdjustment, true)}</span>
                     <span>Sustaining: {multiple(row.sustainingIntensityAdjustment, true)}</span>
