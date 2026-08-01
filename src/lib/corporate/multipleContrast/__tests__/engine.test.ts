@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { bridgeCorporateMultipleToEquity, computeCorporateQualityMultiples, fiveYearEbitdaConcentrationAdjustment } from '../engine.ts';
+import { bridgeCorporateMultipleToEquity, computeCorporateQualityMultiples, effectiveEconomicYearsAdjustment, fiveYearEbitdaConcentrationAdjustment } from '../engine.ts';
 import { QUALITY_MULTIPLE_POLICY, type CorporateQualityMultipleInput } from '../types.ts';
 import { runCorporateSnapshotPipeline } from '../../../snapshot/runCorporateSnapshot.ts';
 
@@ -17,6 +17,68 @@ const first = (args: CorporateQualityMultipleInput) => computeCorporateQualityMu
 
 test('policy constants are centralized and stable', () => {
   assert.deepEqual(QUALITY_MULTIPLE_POLICY, { base: 6, minimum: 3, maximum: 10, band: 1, fullWindowLength: 5, minimumWindowLength: 3 });
+});
+
+test('effective-economic-years policy boundaries are exact and half-open', () => {
+  const cases: Array<[number, number]> = [
+    [0, -1.5], [2.999999, -1.5], [3, -1], [4.999999, -1],
+    [5, -0.5], [6.999999, -0.5], [7, 0], [9.999999, 0],
+    [10, 0.25], [12.999999, 0.25], [13, 0.5], [15.999999, 0.5],
+    [16, 0.75], [20, 0.75], [20.000001, 1],
+  ];
+  for (const [years, expected] of cases) assert.equal(effectiveEconomicYearsAdjustment(years), expected);
+});
+
+test('effective economic years cover uniform, weak-tail, short-intensive, peak, zero, and negative profiles', () => {
+  const uniform = first(input(new Array(10).fill(280)));
+  assert.equal(uniform.peakPositiveEbitda, 280);
+  assert.equal(uniform.effectiveEconomicYears, 10);
+  assert.equal(uniform.effectiveEconomicYearsAdjustment, 0.25);
+
+  const weakTail = first(input([...new Array(10).fill(280), ...new Array(7).fill(60)]));
+  assert.equal(weakTail.peakPositiveEbitda, 280);
+  assert.ok(Math.abs(weakTail.effectiveEconomicYears! - 11.5) < 1e-12);
+  assert.equal(weakTail.effectiveEconomicYearsAdjustment, 0.25);
+  const equallyLongStrong = first(input(new Array(17).fill(280)));
+  assert.equal(equallyLongStrong.effectiveEconomicYears, 17);
+  assert.equal(equallyLongStrong.effectiveEconomicYearsAdjustment, 0.75);
+  assert.ok(weakTail.effectiveEconomicYearsAdjustment! < equallyLongStrong.effectiveEconomicYearsAdjustment!, 'a weak tail must not earn the same bonus as sustained EBITDA');
+
+  const intensive = first(input([500, 500, 500]));
+  assert.equal(intensive.effectiveEconomicYears, 3);
+  assert.equal(intensive.effectiveEconomicYearsAdjustment, -1);
+  const onePositive = first(input([500, 0, -100, 0, 0]));
+  assert.equal(onePositive.effectiveEconomicYears, 1);
+  assert.equal(onePositive.effectiveEconomicYearsAdjustment, -1.5);
+  const middlePeak = first(input([50, 100, 200, 100, 50]));
+  assert.equal(middlePeak.peakPositiveEbitda, 200);
+  assert.equal(middlePeak.effectiveEconomicYears, 2.5);
+  const zerosAndNegatives = first(input([100, 0, -50, 100, 0]));
+  assert.equal(zerosAndNegatives.effectiveEconomicYears, 2);
+});
+
+test('effective economic years preserve strict-null and short-window rules', () => {
+  const nullRow = first(input([100, 100, null, 100, 100]));
+  assert.equal(nullRow.peakPositiveEbitda, null);
+  assert.equal(nullRow.effectiveEconomicYears, null);
+  assert.equal(nullRow.effectiveEconomicYearsAdjustment, null);
+  assert.equal(nullRow.qualityStatus, 'NOT_COMPUTABLE');
+  const short = first(input([100, 50, 100]));
+  assert.equal(short.effectiveEconomicYears, 2.5);
+  assert.equal(short.effectiveEconomicYearsAdjustment, -1.5);
+  assert.equal(short.shortWindow, true);
+  assert.equal(short.qualityStatus, 'COMPUTABLE');
+});
+
+test('effective economic years are monotonic under an added positive tail and quality clamp remains 3x–10x', () => {
+  const base = first(input([100, 100, 100, 100, 100]));
+  const extended = first(input([100, 100, 100, 100, 100, 50]));
+  assert.ok(extended.effectiveEconomicYears! > base.effectiveEconomicYears!);
+  const upper = first(input(new Array(25).fill(100), { sustainingCapexUSD_total: new Array(25).fill(0), revenueUSD_total: new Array(25).fill(150) }));
+  assert.ok(upper.rawQualityMultiple! > 6);
+  assert.ok(upper.qualityHighMultiple! <= QUALITY_MULTIPLE_POLICY.maximum);
+  const lower = first(input([1, 1000, 1, 1, 1], { revenueUSD_total: new Array(5).fill(1000), sustainingCapexUSD_total: new Array(5).fill(400) }));
+  assert.ok(lower.qualityLowMultiple! >= QUALITY_MULTIPLE_POLICY.minimum);
 });
 
 test('long stable high-quality profile receives a positive aggregate adjustment', () => {
@@ -86,7 +148,7 @@ test('negative EBITDA tail is diagnostic only and concentration uses positive EB
   assert.equal(row.fiveYearEbitdaConcentrationDeviation, 0);
   assert.equal(row.fiveYearEbitdaConcentrationAdjustment, 0);
   assert.equal(row.negativeEbitdaTailShare, 0.5);
-  const expected = 6 + (row.remainingEconomicYearsAdjustment as number) + (row.fiveYearEbitdaConcentrationAdjustment as number)
+  const expected = 6 + (row.effectiveEconomicYearsAdjustment as number) + (row.fiveYearEbitdaConcentrationAdjustment as number)
     + (row.stabilityAdjustment as number) + (row.sustainingIntensityAdjustment as number) + (row.marginAdjustment as number);
   assert.equal(row.rawQualityMultiple, expected);
 });
@@ -129,7 +191,7 @@ test('gap years affect diagnostics but introduce no sixth adjustment', () => {
   assert.equal(row.remainingActiveEconomicYears, 4);
   assert.equal(row.remainingEconomicSpanYears, 7);
   assert.equal(row.economicGapYears, 3);
-  assert.equal(row.remainingEconomicYearsAdjustment, -1);
+  assert.equal(row.effectiveEconomicYearsAdjustment, -1);
 });
 
 test('non-positive EBITDA mean nulls stability and the mandatory quality multiple', () => {

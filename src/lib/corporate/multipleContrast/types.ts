@@ -44,6 +44,8 @@ export type CorporateQualityMultipleRow = {
   economicEndYear: number | null;
   remainingEconomicSpanYears: number | null;
   economicGapYears: number | null;
+  peakPositiveEbitda: number | null;
+  effectiveEconomicYears: number | null;
   actualFiveYearEbitdaShare: number | null;
   expectedFiveYearEbitdaShare: number | null;
   fiveYearEbitdaConcentrationDeviation: number | null;
@@ -53,7 +55,7 @@ export type CorporateQualityMultipleRow = {
   ebitdaCv5Y: number | null;
   sustainingIntensity5Y: number | null;
   ebitdaMargin5Y: number | null;
-  remainingEconomicYearsAdjustment: number | null;
+  effectiveEconomicYearsAdjustment: number | null;
   fiveYearEbitdaConcentrationAdjustment: number | null;
   stabilityAdjustment: number | null;
   sustainingIntensityAdjustment: number | null;

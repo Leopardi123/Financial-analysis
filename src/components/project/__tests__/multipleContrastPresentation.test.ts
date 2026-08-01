@@ -8,9 +8,10 @@ import { buildValueRangeChartOptions, VALUE_RANGE_CHART_COLORS } from '../valueR
 const overlay = (low: number | null, mid: number | null, high: number | null) => ({ enterpriseValueLowTarget: low, enterpriseValueMidTarget: mid, enterpriseValueHighTarget: high, equityValueLowTarget: low, equityValueMidTarget: mid, equityValueHighTarget: high, valuePerShareLow: low, valuePerShareMid: mid, valuePerShareHigh: high });
 const qualityRow = (overrides: Partial<CorporateQualityMultipleRow> = {}): CorporateQualityMultipleRow => ({
   calendarYear: 2030, annualEbitdaUSD: 100, forwardAverageEbitdaUSD: 80, remainingActiveEconomicYears: 8, economicEndYear: 2037, remainingEconomicSpanYears: 8, economicGapYears: 0,
+  peakPositiveEbitda: 100, effectiveEconomicYears: 8,
   actualFiveYearEbitdaShare: 0.625, expectedFiveYearEbitdaShare: 0.625, fiveYearEbitdaConcentrationDeviation: 0,
   positiveRemainingEbitda: 800, positiveEbitdaFirstFiveYears: 500, negativeEbitdaTailShare: 0, ebitdaCv5Y: 0, sustainingIntensity5Y: 0.088, ebitdaMargin5Y: 0.478,
-  remainingEconomicYearsAdjustment: 0, fiveYearEbitdaConcentrationAdjustment: 0, stabilityAdjustment: 0.5, sustainingIntensityAdjustment: 0.25, marginAdjustment: 0.5,
+  effectiveEconomicYearsAdjustment: 0, fiveYearEbitdaConcentrationAdjustment: 0, stabilityAdjustment: 0.5, sustainingIntensityAdjustment: 0.25, marginAdjustment: 0.5,
   rawQualityMultiple: 7.5, qualityLowMultiple: 6.5, qualityMidMultiple: 7.5, qualityHighMultiple: 8.5,
   annualBasis: overlay(6.5, 7.5, 8.5), forwardAverageBasis: overlay(5.2, 6, 6.8), shortWindow: false, fullWindow: true, windowLength: 5, windowStartYear: 2030, windowEndYear: 2034,
   qualityStatus: 'COMPUTABLE', qualityDiagnostics: ['FULL_WINDOW'], ...overrides,

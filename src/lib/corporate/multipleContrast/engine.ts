@@ -61,12 +61,13 @@ export function bridgeCorporateMultipleToEquity(args: {
   };
 }
 
-function remainingYearsAdjustment(years: number): number {
+export function effectiveEconomicYearsAdjustment(years: number): number {
   if (years < 3) return -1.5;
-  if (years <= 4) return -1;
-  if (years <= 7) return -0.5;
-  if (years <= 11) return 0;
-  if (years <= 15) return 0.5;
+  if (years < 5) return -1;
+  if (years < 7) return -0.5;
+  if (years < 10) return 0;
+  if (years < 13) return 0.25;
+  if (years < 16) return 0.5;
   if (years <= 20) return 0.75;
   return 1;
 }
@@ -150,6 +151,16 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
     const economicGapYears = remainingEconomicSpanYears === null || remainingActiveEconomicYears === null
       ? null : remainingEconomicSpanYears - remainingActiveEconomicYears;
     if (remainingActiveEconomicYears === null) addDiagnostic(diagnostics, 'NO_ACTIVE_ECONOMIC_YEARS');
+    const economicTailIsComplete = !diagnostics.includes('NULL_EBITDA') && !diagnostics.includes('NULL_REVENUE');
+    const positiveEconomicEbitda = economicTailIsComplete
+      ? activeIndices.map((index) => input.ebitdaUSD_total[index] as number)
+      : null;
+    const peakPositiveEbitda = positiveEconomicEbitda && positiveEconomicEbitda.length > 0
+      ? Math.max(...positiveEconomicEbitda)
+      : null;
+    const effectiveEconomicYears = positiveEconomicEbitda !== null && peakPositiveEbitda !== null
+      ? positiveEconomicEbitda.reduce((sum, value) => sum + (value / peakPositiveEbitda), 0)
+      : null;
 
     const eligibleWindow = remainingPeriods >= QUALITY_MULTIPLE_POLICY.minimumWindowLength;
     const ebitdaSum = eligibleWindow ? strictSum(ebitdaWindow) : null;
@@ -190,13 +201,13 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
     const ebitdaMargin5Y = ebitdaSum !== null && revenueSum !== null && revenueSum > 0 ? ebitdaSum / revenueSum : null;
     if (ebitdaMargin5Y !== null && ebitdaMargin5Y > 1) addDiagnostic(diagnostics, 'EBITDA_MARGIN_ABOVE_ONE');
 
-    const remainingEconomicYearsAdjustment = remainingActiveEconomicYears === null ? null : remainingYearsAdjustment(remainingActiveEconomicYears);
+    const effectiveYearsAdjustment = effectiveEconomicYears === null ? null : effectiveEconomicYearsAdjustment(effectiveEconomicYears);
     const concentrationAdjustment = fiveYearEbitdaConcentrationDeviation === null
       ? null : fiveYearEbitdaConcentrationAdjustment(fiveYearEbitdaConcentrationDeviation);
     const stability = ebitdaCv5Y === null ? null : stabilityAdjustment(ebitdaCv5Y);
     const sustainingAdjustment = sustainingIntensity5Y === null ? null : sustainingIntensityAdjustment(sustainingIntensity5Y);
     const margin = ebitdaMargin5Y === null ? null : marginAdjustment(ebitdaMargin5Y);
-    const adjustments = [remainingEconomicYearsAdjustment, concentrationAdjustment, stability, sustainingAdjustment, margin];
+    const adjustments = [effectiveYearsAdjustment, concentrationAdjustment, stability, sustainingAdjustment, margin];
     const rawQualityMultiple = adjustments.every(finite)
       ? QUALITY_MULTIPLE_POLICY.base + (adjustments as number[]).reduce((sum, value) => sum + value, 0) : null;
     const qualityMidMultiple = rawQualityMultiple === null ? null
@@ -214,10 +225,11 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
     return {
       calendarYear, annualEbitdaUSD: finite(input.ebitdaUSD_total[t]) ? input.ebitdaUSD_total[t] : null,
       forwardAverageEbitdaUSD, remainingActiveEconomicYears, economicEndYear, remainingEconomicSpanYears, economicGapYears,
+      peakPositiveEbitda, effectiveEconomicYears,
       actualFiveYearEbitdaShare, expectedFiveYearEbitdaShare, fiveYearEbitdaConcentrationDeviation,
       positiveRemainingEbitda: positiveTailSum, positiveEbitdaFirstFiveYears: positiveWindowSum,
       negativeEbitdaTailShare, ebitdaCv5Y, sustainingIntensity5Y, ebitdaMargin5Y,
-      remainingEconomicYearsAdjustment, fiveYearEbitdaConcentrationAdjustment: concentrationAdjustment, stabilityAdjustment: stability,
+      effectiveEconomicYearsAdjustment: effectiveYearsAdjustment, fiveYearEbitdaConcentrationAdjustment: concentrationAdjustment, stabilityAdjustment: stability,
       sustainingIntensityAdjustment: sustainingAdjustment, marginAdjustment: margin,
       rawQualityMultiple, qualityLowMultiple, qualityMidMultiple, qualityHighMultiple,
       annualBasis: bridge(finite(input.ebitdaUSD_total[t]) ? input.ebitdaUSD_total[t] : null),
