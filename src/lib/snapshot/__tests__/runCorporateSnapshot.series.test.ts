@@ -736,10 +736,10 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  const totalCapexToFinanceUSD = (200000000 + 120000000) + 2 * (100000000 + 50000000);
   const fx = (body.fx as Record<string, unknown>).manual_fx_USD_to_TargetCurrency as number;
-  const initialCashUSD = ((body.balanceSheet as Record<string, number>).cash_t0_TargetCurrency ?? 0) / fx;
-  const expectedExternalNeedUSD = totalCapexToFinanceUSD - initialCashUSD;
+  const waterfall = result.snapshot.financing.corporate_cash_waterfall;
+  assert.ok(waterfall);
+  const expectedExternalNeedUSD = waterfall?.rows.reduce((sum, row) => sum + (row.totalExternalFundingNeed ?? 0), 0) ?? 0;
   const expectedDebtUSD = expectedExternalNeedUSD * 0.5;
   const expectedNewShares = (expectedExternalNeedUSD * 0.5 * fx) / 1;
 
@@ -749,6 +749,11 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(financingDebug?.totalNewShares !== null);
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
+  assert.equal(waterfall?.unfundedGap, 0);
+  assert.ok(waterfall?.rows.every((row) => row.closingCash !== null && row.closingCash >= row.minimumCashReserve));
+  const actualProjectFinancing = financingDebug?.actualProjectFinancing ?? {};
+  assert.ok(Math.abs(Object.values(actualProjectFinancing).reduce((sum, item) => sum + item.debtRaisedUSD, 0) - expectedDebtUSD) < 1e-6);
+  assert.ok(Math.abs(Object.values(actualProjectFinancing).reduce((sum, item) => sum + item.newShares!, 0) - expectedNewShares) < 1e-6);
   const corporateTimeSeries = (result.snapshot as unknown as { corporateValuationTimeSeries?: { rows: Array<{ year: number; sharesPf: number | null; npvAbsolute: number | null; npvPerShare: number | null; dcfAbsolute: number | null; dcfPerShare: number | null }>; projectMarkers: Array<{ projectId: string; constructionStartPeriod: number | null; productionStartPeriod: number | null; productionStartYear: number | null; firstContributionPeriod: number | null }> } }).corporateValuationTimeSeries;
   assert.equal(corporateTimeSeries?.rows.length, result.snapshot.series?.yearsByPeriod.length);
   assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.projectId).sort(), ['ABRA_MINIMAL','ABRA_MINIMAL_2','ABRA_MINIMAL_3']);

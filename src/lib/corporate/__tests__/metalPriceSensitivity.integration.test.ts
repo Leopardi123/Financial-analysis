@@ -34,6 +34,9 @@ test('seven full scenarios preserve spot parity, isolate inputs, and recalculate
   assert.equal(spot.ok, true); if (!spot.ok || !pureSpot.ok) return;
   for (const key of ['series', 'aggregation', 'canonicalValuationTimeline', 'corporateValuationTimeSeries', 'corporateQualityMultipleTimeSeries', 'financing']) assert.deepEqual((spot.snapshot as any)[key], (pureSpot.snapshot as any)[key], `1.00 parity: ${key}`);
   const low = results[0]; const high = results[6]; assert.equal(low.ok, true); assert.equal(high.ok, true); if (!low.ok || !high.ok) return;
+  assert.equal(low.snapshot.financing.shares_post_financing, 402_388_436.37417, 'Los Ricos Spot -25% canonical shares regression');
+  assert.equal(spot.snapshot.financing.shares_post_financing, 362_702_125.43736, 'Los Ricos Spot canonical shares regression');
+  assert.equal(high.snapshot.financing.shares_post_financing, 340_836_000, 'Los Ricos Spot +25% canonical shares regression');
   const resolvedSpotPriceByProject = Object.fromEntries(((pureSpot.snapshot as any).metalPriceSensitivityAudit.projects as Array<any>).map((project) => [project.projectId, project.resolvedPriceByKey]));
   const pinnedHigh = await runCorporateSnapshotPipeline({ body: { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: 1.25 }, resolvedSpotPriceByProject }, refresh: false });
   assert.equal(pinnedHigh.ok, true); if (!pinnedHigh.ok) return;
