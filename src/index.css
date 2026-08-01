@@ -156,9 +156,52 @@ input {
 .corporate-sensitivity-status[data-status="NOT_COMPUTABLE"] { border-color: #dc2626; }
 .corporate-sensitivity-prices { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
 .corporate-sensitivity-table-scroll { box-sizing: border-box; inline-size: 100%; max-inline-size: 100%; min-inline-size: 0; overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x pan-y; }
-.corporate-sensitivity-table { border-collapse: collapse; min-width: 900px; width: 100%; }
-.corporate-sensitivity-table th, .corporate-sensitivity-table td { border-bottom: 1px solid #e2e8f0; padding: 3px; text-align: left; }
-.corporate-sensitivity-table button { background: transparent; border: 2px solid transparent; min-height: 44px; width: 100%; }
+.corporate-sensitivity-table {
+  border-collapse: collapse;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  line-height: 1.05;
+  min-width: 760px;
+  table-layout: fixed;
+  width: 100%;
+}
+.corporate-sensitivity-table caption {
+  font-size: 11px;
+  padding: 2px 0;
+  text-align: left;
+}
+.corporate-sensitivity-table th,
+.corporate-sensitivity-table td {
+  border: 1px solid #d7dde5;
+  height: 28px;
+  overflow: hidden;
+  padding: 0;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.corporate-sensitivity-table th:first-child {
+  padding: 2px 5px;
+  text-align: left;
+  width: 190px;
+}
+.corporate-sensitivity-table thead th:not(:first-child) {
+  padding: 2px 3px;
+  text-align: center;
+}
+.corporate-sensitivity-table button {
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: inherit;
+  line-height: 1;
+  min-height: 26px;
+  overflow: hidden;
+  padding: 1px 3px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
 .corporate-sensitivity-table .is-selected-column { background: #eff6ff; }
 .corporate-sensitivity-table button[aria-pressed="true"] { border-color: #2563eb; font-weight: 700; }
 .corporate-sensitivity-table button:focus-visible, .corporate-page-nav button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }

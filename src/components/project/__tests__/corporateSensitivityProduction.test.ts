@@ -30,6 +30,8 @@ test('lazy loading, real buttons, reset, aria, focus mapping and two-page snap c
   assert.match(css, /\.corporate-finance-card[\s\S]*inline-size: 100%[\s\S]*overflow: hidden/);
   assert.match(css, /\.corporate-finance-pages[\s\S]*contain: inline-size/);
   assert.match(css, /\.corporate-finance-page[\s\S]*max-inline-size: 100%[\s\S]*overflow: hidden/);
+  assert.match(css, /\.corporate-sensitivity-table \{[\s\S]*font-size: 11px[\s\S]*table-layout: fixed/);
+  assert.match(css, /\.corporate-sensitivity-table button \{[\s\S]*min-height: 26px[\s\S]*padding: 1px 3px/);
   assert.match(dashboardCss, /\.breadcontainersinglecolumn[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(chart, /emphasisFocus === 'quality'/);
   assert.match(chart, /emphasisFocus === 'combined'/);
