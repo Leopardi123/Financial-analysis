@@ -110,3 +110,99 @@ input {
     align-items: start;
   }
 }
+
+.corporate-finance-card {
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+.corporate-finance-pages {
+  box-sizing: border-box;
+  contain: inline-size;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+.corporate-page-scroller {
+  box-sizing: border-box;
+  display: flex;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+}
+.corporate-finance-page {
+  box-sizing: border-box;
+  flex: 0 0 100%;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+.corporate-page-nav { display: flex; justify-content: flex-end; gap: 6px; }
+.corporate-page-nav button, .corporate-sensitivity-header button { min-height: 44px; }
+.corporate-page-indicator { display: flex; justify-content: center; gap: 8px; color: #64748b; }
+.corporate-sensitivity-header { align-items: start; display: flex; justify-content: space-between; gap: 12px; }
+.corporate-sensitivity-status { border-left: 4px solid #16a34a; padding: 8px; }
+.corporate-sensitivity-status[data-status="PARTIAL"] { border-color: #d97706; }
+.corporate-sensitivity-status[data-status="NOT_COMPUTABLE"] { border-color: #dc2626; }
+.corporate-sensitivity-prices { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
+.corporate-sensitivity-table-scroll { box-sizing: border-box; inline-size: 100%; max-inline-size: 100%; min-inline-size: 0; overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x pan-y; }
+.corporate-sensitivity-table {
+  border-collapse: collapse;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  line-height: 1.05;
+  min-width: 760px;
+  table-layout: fixed;
+  width: 100%;
+}
+.corporate-sensitivity-table caption {
+  font-size: 11px;
+  padding: 2px 0;
+  text-align: left;
+}
+.corporate-sensitivity-table th,
+.corporate-sensitivity-table td {
+  border: 1px solid #d7dde5;
+  height: 28px;
+  overflow: hidden;
+  padding: 0;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.corporate-sensitivity-table th:first-child {
+  padding: 2px 5px;
+  text-align: left;
+  width: 190px;
+}
+.corporate-sensitivity-table thead th:not(:first-child) {
+  padding: 2px 3px;
+  text-align: center;
+}
+.corporate-sensitivity-table button {
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: inherit;
+  line-height: 1;
+  min-height: 26px;
+  overflow: hidden;
+  padding: 1px 3px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+.corporate-sensitivity-table .is-selected-column { background: #eff6ff; }
+.corporate-sensitivity-table button[aria-pressed="true"] { border-color: #2563eb; font-weight: 700; }
+.corporate-sensitivity-table button:focus-visible, .corporate-page-nav button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
+@media (max-width: 700px) { .corporate-page-nav { display: none; } .corporate-sensitivity-header { display: grid; } }

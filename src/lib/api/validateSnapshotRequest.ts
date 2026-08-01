@@ -5,6 +5,8 @@ type SnapshotScenarioControls = {
   delayPeriods?: number;
   capexMult?: number;
   opexMult?: number;
+  /** Multiplies every resolved spot metal series before the project engine runs. */
+  spotPriceMultiplier?: number;
 };
 
 export type SnapshotScenario =
@@ -59,6 +61,8 @@ export type SnapshotRequest = {
   }>;
   symbol?: string;
   manualMetalPrices?: Record<string, ManualMetalPriceEntry>;
+  /** Trusted spot deck captured from the immediately preceding base Corporate snapshot. */
+  resolvedSpotPriceByProject?: Record<string, Record<string, number>>;
   stressOptions?: {
     initialCapex2x?: boolean;
     spotHalf?: boolean;
@@ -122,6 +126,17 @@ function applyScenarioControls(base: SnapshotScenario, scenarioRaw: Record<strin
       errors.push('scenario.opexMult must be finite and >= 0 when provided');
     } else {
       withControls.opexMult = opexMult;
+    }
+  }
+
+  if (scenarioRaw.spotPriceMultiplier !== undefined) {
+    const multiplier = readFiniteNumber(scenarioRaw.spotPriceMultiplier);
+    if (multiplier === null || multiplier < 0.01 || multiplier > 10) {
+      errors.push('scenario.spotPriceMultiplier must be finite and within [0.01, 10] when provided');
+    } else if (base.mode !== 'spot') {
+      errors.push('scenario.spotPriceMultiplier is only valid for mode=spot');
+    } else {
+      withControls.spotPriceMultiplier = multiplier;
     }
   }
 
@@ -518,15 +533,9 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
             productionStartYear: time.productionStartYear as number,
           });
 
-          const existingDiagnostics = isObject(rawJson.diagnostics) ? rawJson.diagnostics : {};
-          rawJson.diagnostics = {
-            ...existingDiagnostics,
-            time: {
-              ...(isObject(existingDiagnostics.time) ? existingDiagnostics.time : {}),
-              v2YearsByPeriod_first8: resolved.yearsByPeriod.slice(0, 8),
-              v2ProductionStartYear: resolved.productionStartYear,
-            },
-          };
+          // Validation is intentionally read-only. Runtime diagnostics belong to
+          // the result, never to the caller-owned project JSON.
+          void resolved;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           errors.push(`projects[${i}].rawJson.time invalid for project_json_v2: ${message}`);
@@ -557,6 +566,20 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
       };
     }
     return Object.keys(out).length > 0 ? out : undefined;
+  })();
+
+  const resolvedSpotPriceByProject: SnapshotRequest['resolvedSpotPriceByProject'] = (() => {
+    if (!isObject(body.resolvedSpotPriceByProject)) return undefined;
+    const projects: Record<string, Record<string, number>> = {};
+    for (const [projectId, pricesRaw] of Object.entries(body.resolvedSpotPriceByProject)) {
+      if (!isObject(pricesRaw)) continue;
+      const prices = Object.fromEntries(Object.entries(pricesRaw).flatMap(([priceKey, raw]) => {
+        const value = readFiniteNumber(raw);
+        return value !== null && value > 0 ? [[priceKey, value]] : [];
+      }));
+      if (Object.keys(prices).length > 0) projects[projectId] = prices;
+    }
+    return Object.keys(projects).length > 0 ? projects : undefined;
   })();
 
   const stressOptions: SnapshotRequest['stressOptions'] = (() => {
@@ -612,6 +635,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     buildFundingNeed_USD: buildFundingNeed,
     scenario,
     manualMetalPrices,
+    resolvedSpotPriceByProject,
     stressOptions,
   };
 

@@ -319,6 +319,8 @@ export type ProjectSeriesContext = {
   priceKeyByMetal: Record<string, string>;
   priceUSDUnitByMetal: Record<string, string>;
   spotPriceUSDByMetal: Record<string, Array<number | null>>;
+  auPriceKey?: string;
+  auPriceUSDPerOz?: Array<number | null>;
   revenueByMetal_USD: Record<string, Array<number | null>>;
   operations: {
     oreMinedTonnes?: Array<number | null>;
@@ -1192,6 +1194,10 @@ type SnapshotDiagnostics = {
     projectCount: number;
     symbol?: string;
     fxSource?: 'auto' | 'manual';
+    metalPriceSensitivity?: {
+      multiplier: number;
+      formula: string;
+    };
     stress?: {
       stressOptions: Record<string, boolean | undefined>;
       edgeCases: string[];
@@ -1529,26 +1535,41 @@ export async function runCorporateSnapshotPipeline(args: {
           const from = `${yearsByPeriod[0]}-12-31`;
           const to = `${yearsByPeriod[yearsByPeriod.length - 1]}-12-31`;
 
+          const pinnedProjectSpot = input.resolvedSpotPriceByProject?.[projectId];
+          const projectResolverScenario = pinnedProjectSpot
+            ? { mode: 'fixed' as const, fixedPriceByKey: pinnedProjectSpot }
+            : resolverScenario;
           const resolvedBase = await resolveProjectPricesToEngineInput(
-            { parsed, from, to, scenario: resolverScenario, projectId, spotAnchorDateUtc, manualMetalPriceByKey: input.manualMetalPrices },
+            { parsed, from, to, scenario: projectResolverScenario, projectId, spotAnchorDateUtc, manualMetalPriceByKey: input.manualMetalPrices },
             {},
           );
 
-          const resolved = stressOptions.spotHalf
+          const sensitivityMultiplier = input.scenario.mode === 'spot'
+            ? input.scenario.spotPriceMultiplier ?? 1
+            : 1;
+          const combinedSpotMultiplier = sensitivityMultiplier * (stressOptions.spotHalf ? 0.5 : 1);
+          const resolved = combinedSpotMultiplier !== 1
             ? {
                 ...resolvedBase,
                 spotPriceUSDByMetal: Object.fromEntries(
                   Object.entries(resolvedBase.spotPriceUSDByMetal).map(([metal, series]) => [
                     metal,
-                    series.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value * 0.5 : null)),
+                    series.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value * combinedSpotMultiplier : null)),
                   ]),
                 ),
                 aisc: {
                   ...resolvedBase.aisc,
-                  auPriceUSDPerOz: resolvedBase.aisc.auPriceUSDPerOz.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value * 0.5 : null)),
+                  auPriceUSDPerOz: resolvedBase.aisc.auPriceUSDPerOz.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value * combinedSpotMultiplier : null)),
                 },
               }
             : resolvedBase;
+
+          if (input.scenario.mode === 'spot' && input.scenario.spotPriceMultiplier !== undefined) {
+            diagnostics.meta.metalPriceSensitivity = {
+              multiplier: input.scenario.spotPriceMultiplier,
+              formula: 'resolvedSpotPrice(project, metal) * multiplier',
+            };
+          }
 
           diagnostics.warnings.push(...(resolved.diagnostics?.warnings ?? []));
           const resolvedMetalPriceDiagnostics = (resolved.diagnostics?.metalPriceDiagnostics ?? null) as Record<string, MetalPriceDiagnostic> | null;
@@ -1945,6 +1966,8 @@ export async function runCorporateSnapshotPipeline(args: {
             spotPriceUSDByMetal: Object.fromEntries(
               Object.entries(resolved.spotPriceUSDByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),
+            auPriceKey: parsed.engineInputWithoutPrices.auPriceKey,
+            auPriceUSDPerOz: sanitizeSeries(resolved.aisc.auPriceUSDPerOz),
             revenueByMetal_USD: Object.fromEntries(
               Object.entries(out.revenue.byMetalRevenueUSD).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),
@@ -3212,6 +3235,10 @@ export async function runCorporateSnapshotPipeline(args: {
       corporateLista3Metrics: corporateLista3,
       corporateLista3Debug,
     });
+    (snapshot as Record<string, unknown>).priceDeck = {
+      mode: input.scenario.mode,
+      spotPriceMultiplier: input.scenario.mode === 'spot' ? input.scenario.spotPriceMultiplier ?? 1 : null,
+    };
 
     snapshot.series = snapshotSeries;
 
@@ -3457,6 +3484,29 @@ export async function runCorporateSnapshotPipeline(args: {
       sharesPostFinancing: corporateCanonicalTimeline.periods.map((row) => row.sharesPf),
       fxUSDToTarget: fxRate,
     });
+    (snapshot as Record<string, unknown>).metalPriceSensitivityAudit = {
+      projects: projectSeriesContexts.map((context) => ({
+        projectId: context.projectId,
+        priceKeyByMetal: { ...context.priceKeyByMetal },
+        priceUnitByMetal: { ...context.priceUSDUnitByMetal },
+        resolvedPriceByMetal: Object.fromEntries(Object.entries(context.spotPriceUSDByMetal).map(([metal, values]) => [metal, values.find((value): value is number => typeof value === 'number' && Number.isFinite(value)) ?? null])),
+        resolvedPriceByKey: {
+          ...Object.fromEntries(Object.entries(context.priceKeyByMetal).map(([metal, priceKey]) => [priceKey, context.spotPriceUSDByMetal[metal]?.find((value): value is number => typeof value === 'number' && Number.isFinite(value)) ?? null])),
+          ...(context.auPriceKey && context.auPriceUSDPerOz?.some((value) => typeof value === 'number' && Number.isFinite(value))
+            ? { [context.auPriceKey]: context.auPriceUSDPerOz.find((value): value is number => typeof value === 'number' && Number.isFinite(value)) as number }
+            : {}),
+        },
+        revenueByMetalUSD: Object.fromEntries(Object.entries(context.revenueByMetal_USD).map(([metal, values]) => [metal, sumStrict(values)])),
+        revenueUSD: sumStrict(Object.values(context.revenueByMetal_USD).flat()),
+        ebitdaUSD: sumStrict(context.economics.ebitdaUSD),
+        ebitUSD: sumStrict(context.economics.ebitUSD),
+        taxUSD: sumStrict(context.economics.taxUSD),
+        fcffUSD: sumStrict(context.economics.fcffUSD),
+        royaltiesUSD: sumStrict(context.economics.royaltiesUSD),
+        byproductCreditsUSD: sumStrict(context.economics.byproductCreditsUSD),
+        tcRcUSD: context.economicsBreakdown?.selling?.tcRcUSD ? sumStrict(context.economicsBreakdown.selling.tcRcUSD) : null,
+      })),
+    };
 
     if (projects.length === 1) {
       const fxForRange = typeof fxRate === 'number' && Number.isFinite(fxRate) ? fxRate : null;

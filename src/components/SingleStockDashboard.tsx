@@ -4,6 +4,8 @@ import ChartCard from "./ChartCard";
 import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
+import { CorporateMetalPriceSensitivity } from "./project/CorporateMetalPriceSensitivity.tsx";
+import { buildCorporateSensitivityScenarioModel, CORPORATE_SENSITIVITY_METRICS } from "./project/corporateSensitivityModel.ts";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import AlltGickFelCard from "./project/AlltGickFelCard";
 import type { StressOptions } from "../lib/snapshot/applyStressModifiers.ts";
@@ -13,6 +15,8 @@ import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
 import { getCompanyProject, getCompanyProjectsBySymbol, type CompanyProjectSummary } from "../lib/client/companyProjectsClient.ts";
 import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
+import { useCorporateMetalPriceSensitivity, type CorporateResolvedSpotAudit } from "../hooks/useCorporateMetalPriceSensitivity.ts";
+import { CORPORATE_METAL_PRICE_MULTIPLIERS } from "../lib/corporate/sensitivity.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { EXTRA_SHARES_HELP, extraSharesStorageKey, formatExtraSharesInput, parseExtraShares } from "../lib/market/extraShares.ts";
 import { parseProjectJsonV1WithContext } from "../lib/project/jsonv1/parse.ts";
@@ -1939,6 +1943,31 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     };
   }, [companyProjects, corporateProjectEquityPct, corporateUseQuarterlyCash, corporateCashUsedPct]);
 
+  const corporateSnapshotRequest = useMemo<SnapshotRequest | null>(() => {
+    if (!ticker || companyProjects.length === 0) return null;
+    const discountRatePct = toInputNumber(riskAdjustedDiscountRatePctInput);
+    const discountRate = typeof discountRatePct === "number" && Number.isFinite(discountRatePct) ? discountRatePct / 100 : 0.1;
+    const statementShares = resolveCommonSharesCurrent({ balance: data?.balance as Record<string, Array<number | null>> | undefined, income: data?.income as Record<string, Array<number | null>> | undefined });
+    const profileShares = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding) && profile.sharesOutstanding > 0 ? profile.sharesOutstanding : undefined;
+    const quarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+    const quarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+    const currentPrice = typeof profile?.price === "number" && Number.isFinite(profile.price) && profile.price > 0 ? profile.price : 1;
+    return {
+      symbol: ticker, valuationYear: new Date().getUTCFullYear(), targetCurrency: lockedTargetCurrency, discountRate,
+      market: { shares_current: statementShares ?? profileShares ?? 1, price_current_TargetCurrency: currentPrice },
+      balanceSheet: { cash_t0_TargetCurrency: quarterlyCash, debt_t0_TargetCurrency: quarterlyDebt },
+      financingPlan: corporateFinancingPlan, financingPlanByProject: corporateFinancingPlan?.financingPlanByProject,
+      scenario: { mode: "spot" }, fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } }, manualMetalPrices,
+    } as unknown as SnapshotRequest;
+  }, [corporateFinancingPlan, companyProjects.length, data, lockedTargetCurrency, manualMetalPrices, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
+
+  const [corporateSensitivityEnabled, setCorporateSensitivityEnabled] = useState(false);
+  const resolvedCorporateFx = typeof corporateSnapshotData?.fx_USD_to_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.fx_USD_to_TargetCurrency)
+    ? corporateSnapshotData.fx_USD_to_TargetCurrency
+    : null;
+  const resolvedCorporateSpotAudit = (corporateSnapshotData?.metalPriceSensitivityAudit ?? null) as CorporateResolvedSpotAudit | null;
+  const corporateSensitivity = useCorporateMetalPriceSensitivity(corporateSnapshotRequest, corporateSensitivityEnabled && primaryView === "modeled", resolvedCorporateFx, resolvedCorporateSpotAudit);
+
   useEffect(() => {
     let isMounted = true;
     async function runCorporateSnapshot() {
@@ -1949,47 +1978,13 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         setCorporateSnapshotError(null);
         return;
       }
-      const discountRatePct = toInputNumber(riskAdjustedDiscountRatePctInput);
-      const discountRate = typeof discountRatePct === "number" && Number.isFinite(discountRatePct)
-        ? discountRatePct / 100
-        : 0.1;
-      const profileSharesCurrent = resolveCommonSharesCurrent({
-        balance: data?.balance as Record<string, Array<number | null>> | undefined,
-        income: data?.income as Record<string, Array<number | null>> | undefined,
-      });
-      const profileSharesOutstanding = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding) && profile.sharesOutstanding > 0
-        ? profile.sharesOutstanding
-        : undefined;
-      const sharesCurrent = profileSharesCurrent ?? profileSharesOutstanding ?? 1;
-      const quarterlyCashSeries = getFieldSeries(data, "balance", "cashAndCashEquivalents");
-      const latestQuarterlyCash = [...quarterlyCashSeries].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
-      const latestQuarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
-      const profilePriceCurrent = typeof profile?.price === "number" && Number.isFinite(profile.price) && profile.price > 0
-        ? profile.price
-        : 1;
-
       setCorporateSnapshotLoading(true);
       setCorporateSnapshotError(null);
       try {
         const response = await fetch(withDebugQueryPath("/api/snapshot/corporate", debugEnabled), {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            symbol: ticker,
-            valuationYear: new Date().getUTCFullYear(),
-            targetCurrency: lockedTargetCurrency,
-            discountRate,
-            market: {
-              shares_current: sharesCurrent,
-              price_current_TargetCurrency: profilePriceCurrent,
-            },
-            balanceSheet: { cash_t0_TargetCurrency: latestQuarterlyCash, debt_t0_TargetCurrency: latestQuarterlyDebt },
-            financingPlan: corporateFinancingPlan,
-            financingPlanByProject: corporateFinancingPlan?.financingPlanByProject,
-            scenario: { mode: "spot" },
-            fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } },
-            manualMetalPrices,
-          }),
+          body: JSON.stringify(corporateSnapshotRequest),
         });
         const result = await response.json() as {
           ok?: boolean;
@@ -2025,7 +2020,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return () => {
       isMounted = false;
     };
-  }, [companyProjects.length, corporateFinancingPlan, data?.balance, data?.income, debugEnabled, lockedTargetCurrency, manualMetalPrices, primaryView, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
+  }, [companyProjects.length, corporateSnapshotRequest, debugEnabled, primaryView, ticker]);
 
   const revenueData = buildSeriesData(
     buildSeries(data, [{ label: "Revenue", statement: "income", field: "revenue" }]),
@@ -3381,6 +3376,19 @@ Capital Available: ${availableLabel}`,
       })),
     };
   }, [corporateExtraSharesInput, corporateProdStartMarkerValuesByKey, corporateSnapshotData]);
+
+  const corporateSensitivityModels = useMemo(() => new Map(corporateSensitivity.runs.flatMap((run) => {
+    if (!run.response.ok || !run.response.snapshot) return [];
+    const diagnostics = [...(run.response.diagnostics?.errors ?? []), ...(run.response.diagnostics?.warnings ?? [])];
+    return [[run.multiplier, buildCorporateSensitivityScenarioModel({ snapshot: run.response.snapshot, multiplier: run.multiplier, diagnostics, extraShares: parseExtraShares(corporateExtraSharesInput) })] as const];
+  })), [corporateExtraSharesInput, corporateSensitivity.runs]);
+  const corporateSensitivityColumns = useMemo(() => CORPORATE_METAL_PRICE_MULTIPLIERS.map((multiplier) => {
+    const model = corporateSensitivityModels.get(multiplier);
+    if (model) return model.column;
+    const run = corporateSensitivity.runs.find((item) => item.multiplier === multiplier);
+    const diagnostics = [...(run?.response.diagnostics?.errors ?? []), ...(run?.response.diagnostics?.warnings ?? [])];
+    return { multiplier, status: 'NOT_COMPUTABLE' as const, values: { status: 'NOT_COMPUTABLE' }, diagnostics, prices: [] };
+  }), [corporateSensitivity.runs, corporateSensitivityModels]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
@@ -5751,10 +5759,11 @@ Capital Available: ${availableLabel}`,
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", corporateViewMetrics.list4],
                     ["list6", "M&A VALUATION", corporateViewMetrics.list6],
                   ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
-                    <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
+                    <details key={`corporate-${sectionKey}`} className={`producer-core-section project-collapsible-card${sectionKey === "list2" ? " corporate-finance-card" : ""}`} open>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
-                        <>
+                        <CorporateMetalPriceSensitivity
+                          baseContent={<>
                         <ValueRangeSnapshotCard
                           priceToday={
                             corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0
@@ -5784,8 +5793,6 @@ Capital Available: ${availableLabel}`,
                             <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, marginTop: 8 }}>{JSON.stringify(corporateTimelineDebug, null, 2)}</pre>
                           </details>
                         )}
-                        </>
-                      )}
                       <div className="compact-metrics-grid">
                         {Object.entries(metrics).map(([key, value]) => (
                           <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
@@ -5823,6 +5830,83 @@ Capital Available: ${availableLabel}`,
                                 ) {
                                   return corporateProdStartMarkerTextByKey[key];
                                 }
+                                if ((sectionKey as string) === "list3") {
+                                  if (key === "ROI_10Y") return formatMetricValue(value, "multiple", lockedTargetCurrency);
+                                  if (key === "IRR") return formatIrrMetricValue(value);
+                                  if (key.includes("Payback")) return formatMetricValue(value, "decimal", lockedTargetCurrency);
+                                  if (key === "AISC_LOM" || key === "BreakEven_AuEq" || key === "CAPEX_per_Annual_AuEq") return formatMetricValue(value, "decimal", lockedTargetCurrency);
+                                  if (key === "LOM_avg_EBIT_ROCE" || key === "LOM_discounted_EBIT_ROCE") {
+                                    return value.value === null ? "n/a" : value.value.toFixed(2);
+                                  }
+                                }
+                                return formatMetricValue(value, key.includes("over") || key.includes("Mult") ? "multiple" : key === "LOM" ? "integer" : key.includes("Payback") ? "decimal" : "money", lockedTargetCurrency);
+                              })()
+                            }</span>
+                          </div>
+                        ))}
+                      </div>
+                        </>}
+                          columns={corporateSensitivityColumns}
+                          metrics={CORPORATE_SENSITIVITY_METRICS}
+                          onSensitivityOpen={() => setCorporateSensitivityEnabled(true)}
+                          loading={corporateSensitivity.loading}
+                          error={corporateSensitivity.error}
+                          performanceText={corporateSensitivity.performance ? (corporateSensitivity.performance.cacheHit ? "Återöppning från cache: 0 ms" : `7 scenarier: ${corporateSensitivity.performance.totalMs.toFixed(0)} ms totalt · ${corporateSensitivity.performance.averageMs.toFixed(0)} ms/genomsnitt · ${corporateSensitivity.performance.slowestMs.toFixed(0)} ms långsammast`) : null}
+                          baseDeckLabel={String((corporateSnapshotData as any)?.priceDeck?.mode ?? "okänt")}
+                          renderChart={(multiplier, focus) => {
+                            const model = corporateSensitivityModels.get(multiplier);
+                            if (!model?.timeline || !model.timeSeries) return <p className="status empty">Ej beräkningsbart — se diagnostik.</p>;
+                            return <ValueRangeSnapshotCard
+                              emphasisFocus={focus}
+                              priceToday={corporateViewMetrics.marketBox.marketCapCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value !== null && corporateViewMetrics.marketBox.sharesCurrent.value > 0 ? corporateViewMetrics.marketBox.marketCapCurrent.value / corporateViewMetrics.marketBox.sharesCurrent.value : null}
+                              canonicalTimeline={model.timeline}
+                              canonicalStartPeriods={corporateCanonicalStartPeriods}
+                              corporateTimeSeries={model.timeSeries as ComponentProps<typeof ValueRangeSnapshotCard>["corporateTimeSeries"]}
+                              corporateQualityMultipleTimeSeries={model.quality}
+                              fxUSDToTarget={typeof corporateSensitivity.runs.find((run) => run.multiplier === multiplier)?.response.snapshot?.fx_USD_to_TargetCurrency === "number" ? corporateSensitivity.runs.find((run) => run.multiplier === multiplier)?.response.snapshot?.fx_USD_to_TargetCurrency : null}
+                              currencyCode={lockedTargetCurrency}
+                            />;
+                          }}
+                        />
+                      )}
+                      {sectionKey !== "list2" && (
+                      <div className="compact-metrics-grid">
+                        {Object.entries(metrics).map(([key, value]) => (
+                          <div key={`corporate-${sectionKey}-${key}`} className="compact-metric-row">
+                            <span className="compact-metric-label">{resolveCorporateMetricLabel(key, formatDiscountRateTag(riskAdjustedDiscountRatePctInput))}</span>
+                            <span className="compact-metric-dots" />
+                            <span className="compact-metric-value">{
+                              (() => {
+                                if ((sectionKey as string) === "list2" && (key === "DCF_Target_discounted" || key === "DCF_Target_discounted_perShare")) {
+                                  const scalarText = corporateList2ScalarTextByKey[key];
+                                  if (import.meta.env.DEV) {
+                                    const debugPanelValue = key === "DCF_Target_discounted"
+                                      ? (typeof corporateSnapshotData?.DCF_prodStart_present_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_TargetCurrency)
+                                        ? corporateSnapshotData.DCF_prodStart_present_TargetCurrency
+                                        : null)
+                                      : (typeof corporateSnapshotData?.DCF_prodStart_present_perShare_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency)
+                                        ? corporateSnapshotData.DCF_prodStart_present_perShare_TargetCurrency
+                                        : null);
+                                    if (debugPanelValue !== null && scalarText === null) {
+                                      console.assert(false, "[corporate-list2-scalar-missing] discounted DCF available in debug panel but missing in list render", {
+                                        missingKey: key,
+                                        availableMetricKeys: Object.keys(metrics),
+                                        snapshotKeys: Object.keys((corporateSnapshotData ?? {}) as Record<string, unknown>),
+                                      });
+                                    }
+                                  }
+                                  if (scalarText !== null) {
+                                    return scalarText;
+                                  }
+                                }
+
+                                if (
+                                  (sectionKey as string) === "list2"
+                                  && corporateProdStartMarkerTextByKey[key]
+                                  && (value.value === null || corporateAlwaysMarkerMetricKeys.has(key))
+                                ) {
+                                  return corporateProdStartMarkerTextByKey[key];
+                                }
                                 if (sectionKey === "list3") {
                                   if (key === "ROI_10Y") return formatMetricValue(value, "multiple", lockedTargetCurrency);
                                   if (key === "IRR") return formatIrrMetricValue(value);
@@ -5838,6 +5922,7 @@ Capital Available: ${availableLabel}`,
                           </div>
                         ))}
                       </div>
+                      )}
                       {sectionKey === "list3" && (
                         <details style={{ marginTop: 8 }}>
                           <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug (Lista 3 — Corporate)</summary>
