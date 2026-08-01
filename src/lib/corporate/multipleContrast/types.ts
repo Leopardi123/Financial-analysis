@@ -19,7 +19,7 @@ export type CorporateQualityDiagnosticCode =
   | 'NON_POSITIVE_POSITIVE_EBITDA_DENOMINATOR'
   | 'NON_POSITIVE_REVENUE_DENOMINATOR'
   | 'NEGATIVE_SUSTAINING_CAPEX'
-  | 'INVALID_FRONT_LOADING_INVARIANT'
+  | 'INVALID_FIVE_YEAR_EBITDA_SHARE_INVARIANT'
   | 'EBITDA_MARGIN_ABOVE_ONE';
 
 export type CorporateQualityStatus = 'COMPUTABLE' | 'NOT_COMPUTABLE';
@@ -44,13 +44,17 @@ export type CorporateQualityMultipleRow = {
   economicEndYear: number | null;
   remainingEconomicSpanYears: number | null;
   economicGapYears: number | null;
-  frontLoading5Y: number | null;
+  actualFiveYearEbitdaShare: number | null;
+  expectedFiveYearEbitdaShare: number | null;
+  fiveYearEbitdaConcentrationDeviation: number | null;
+  positiveRemainingEbitda: number | null;
+  positiveEbitdaFirstFiveYears: number | null;
   negativeEbitdaTailShare: number | null;
   ebitdaCv5Y: number | null;
   sustainingIntensity5Y: number | null;
   ebitdaMargin5Y: number | null;
   remainingEconomicYearsAdjustment: number | null;
-  frontLoadingAdjustment: number | null;
+  fiveYearEbitdaConcentrationAdjustment: number | null;
   stabilityAdjustment: number | null;
   sustainingIntensityAdjustment: number | null;
   marginAdjustment: number | null;
@@ -61,6 +65,7 @@ export type CorporateQualityMultipleRow = {
   annualBasis: CorporateQualityOverlayBasis;
   forwardAverageBasis: CorporateQualityOverlayBasis;
   shortWindow: boolean;
+  fullWindow: boolean;
   windowLength: number;
   windowStartYear: number;
   windowEndYear: number;
