@@ -61,6 +61,8 @@ export type SnapshotRequest = {
   }>;
   symbol?: string;
   manualMetalPrices?: Record<string, ManualMetalPriceEntry>;
+  /** Trusted spot deck captured from the immediately preceding base Corporate snapshot. */
+  resolvedSpotPriceByProject?: Record<string, Record<string, number>>;
   stressOptions?: {
     initialCapex2x?: boolean;
     spotHalf?: boolean;
@@ -566,6 +568,20 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     return Object.keys(out).length > 0 ? out : undefined;
   })();
 
+  const resolvedSpotPriceByProject: SnapshotRequest['resolvedSpotPriceByProject'] = (() => {
+    if (!isObject(body.resolvedSpotPriceByProject)) return undefined;
+    const projects: Record<string, Record<string, number>> = {};
+    for (const [projectId, pricesRaw] of Object.entries(body.resolvedSpotPriceByProject)) {
+      if (!isObject(pricesRaw)) continue;
+      const prices = Object.fromEntries(Object.entries(pricesRaw).flatMap(([priceKey, raw]) => {
+        const value = readFiniteNumber(raw);
+        return value !== null && value > 0 ? [[priceKey, value]] : [];
+      }));
+      if (Object.keys(prices).length > 0) projects[projectId] = prices;
+    }
+    return Object.keys(projects).length > 0 ? projects : undefined;
+  })();
+
   const stressOptions: SnapshotRequest['stressOptions'] = (() => {
     if (!isObject(body.stressOptions)) return undefined;
     const src = body.stressOptions as Record<string, unknown>;
@@ -619,6 +635,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
     buildFundingNeed_USD: buildFundingNeed,
     scenario,
     manualMetalPrices,
+    resolvedSpotPriceByProject,
     stressOptions,
   };
 

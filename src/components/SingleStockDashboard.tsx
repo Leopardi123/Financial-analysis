@@ -15,7 +15,7 @@ import type { SnapshotRequest } from "../lib/api/validateSnapshotRequest.ts";
 import { getCompanyProject, getCompanyProjectsBySymbol, type CompanyProjectSummary } from "../lib/client/companyProjectsClient.ts";
 import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
-import { useCorporateMetalPriceSensitivity } from "../hooks/useCorporateMetalPriceSensitivity.ts";
+import { useCorporateMetalPriceSensitivity, type CorporateResolvedSpotAudit } from "../hooks/useCorporateMetalPriceSensitivity.ts";
 import { CORPORATE_METAL_PRICE_MULTIPLIERS } from "../lib/corporate/sensitivity.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { EXTRA_SHARES_HELP, extraSharesStorageKey, formatExtraSharesInput, parseExtraShares } from "../lib/market/extraShares.ts";
@@ -1965,7 +1965,8 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const resolvedCorporateFx = typeof corporateSnapshotData?.fx_USD_to_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.fx_USD_to_TargetCurrency)
     ? corporateSnapshotData.fx_USD_to_TargetCurrency
     : null;
-  const corporateSensitivity = useCorporateMetalPriceSensitivity(corporateSnapshotRequest, corporateSensitivityEnabled && primaryView === "modeled", resolvedCorporateFx);
+  const resolvedCorporateSpotAudit = (corporateSnapshotData?.metalPriceSensitivityAudit ?? null) as CorporateResolvedSpotAudit | null;
+  const corporateSensitivity = useCorporateMetalPriceSensitivity(corporateSnapshotRequest, corporateSensitivityEnabled && primaryView === "modeled", resolvedCorporateFx, resolvedCorporateSpotAudit);
 
   useEffect(() => {
     let isMounted = true;

@@ -31,8 +31,25 @@ export function pinCorporateSensitivityFx(request: SnapshotRequest | null, resol
   };
 }
 
-export function useCorporateMetalPriceSensitivity(request: SnapshotRequest | null, enabled: boolean, resolvedBaseFx: number | null = null) {
-  const scenarioBaseRequest = useMemo(() => pinCorporateSensitivityFx(request, resolvedBaseFx), [request, resolvedBaseFx]);
+export type CorporateResolvedSpotAudit = { projects?: Array<{ projectId?: string; resolvedPriceByKey?: Record<string, number | null> }> };
+
+/** Pins the resolver-proven base spot deck per project, avoiding repeated metal
+ * provider lookups while still applying each multiplier inside the engine. */
+export function pinCorporateSensitivitySpots(request: SnapshotRequest | null, audit: CorporateResolvedSpotAudit | null): SnapshotRequest | null {
+  if (!request || !audit?.projects?.length) return request;
+  const resolvedSpotPriceByProject = Object.fromEntries(audit.projects.flatMap((project) => {
+    if (!project.projectId || !project.resolvedPriceByKey) return [];
+    const prices = Object.fromEntries(Object.entries(project.resolvedPriceByKey).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0));
+    return Object.keys(prices).length ? [[project.projectId, prices]] : [];
+  }));
+  return Object.keys(resolvedSpotPriceByProject).length ? { ...request, resolvedSpotPriceByProject } : request;
+}
+
+export function useCorporateMetalPriceSensitivity(request: SnapshotRequest | null, enabled: boolean, resolvedBaseFx: number | null = null, resolvedSpotAudit: CorporateResolvedSpotAudit | null = null) {
+  const scenarioBaseRequest = useMemo(
+    () => pinCorporateSensitivitySpots(pinCorporateSensitivityFx(request, resolvedBaseFx), resolvedSpotAudit),
+    [request, resolvedBaseFx, resolvedSpotAudit],
+  );
   const hash = useMemo(() => stableCorporateRequestHash(scenarioBaseRequest), [scenarioBaseRequest]);
   const generation = useRef(0);
   const [runs, setRuns] = useState<CorporateSensitivityRun[]>([]);
@@ -74,7 +91,7 @@ export function useCorporateMetalPriceSensitivity(request: SnapshotRequest | nul
       setError(reason instanceof Error ? reason.message : String(reason)); setLoading(false);
     });
   }, [enabled, hash, scenarioBaseRequest]);
-  return { runs, loading, error, performance: performanceMetrics, inputHash: hash, fxPinned: scenarioBaseRequest?.fx.source === 'manual' && resolvedBaseFx !== null };
+  return { runs, loading, error, performance: performanceMetrics, inputHash: hash, fxPinned: scenarioBaseRequest?.fx.source === 'manual' && resolvedBaseFx !== null, spotsPinned: Boolean(scenarioBaseRequest?.resolvedSpotPriceByProject) };
 }
 
 export function clearCorporateSensitivityCacheForTests(): void { cache.clear(); }

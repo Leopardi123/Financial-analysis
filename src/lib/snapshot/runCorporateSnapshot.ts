@@ -319,6 +319,8 @@ export type ProjectSeriesContext = {
   priceKeyByMetal: Record<string, string>;
   priceUSDUnitByMetal: Record<string, string>;
   spotPriceUSDByMetal: Record<string, Array<number | null>>;
+  auPriceKey?: string;
+  auPriceUSDPerOz?: Array<number | null>;
   revenueByMetal_USD: Record<string, Array<number | null>>;
   operations: {
     oreMinedTonnes?: Array<number | null>;
@@ -1533,8 +1535,12 @@ export async function runCorporateSnapshotPipeline(args: {
           const from = `${yearsByPeriod[0]}-12-31`;
           const to = `${yearsByPeriod[yearsByPeriod.length - 1]}-12-31`;
 
+          const pinnedProjectSpot = input.resolvedSpotPriceByProject?.[projectId];
+          const projectResolverScenario = pinnedProjectSpot
+            ? { mode: 'fixed' as const, fixedPriceByKey: pinnedProjectSpot }
+            : resolverScenario;
           const resolvedBase = await resolveProjectPricesToEngineInput(
-            { parsed, from, to, scenario: resolverScenario, projectId, spotAnchorDateUtc, manualMetalPriceByKey: input.manualMetalPrices },
+            { parsed, from, to, scenario: projectResolverScenario, projectId, spotAnchorDateUtc, manualMetalPriceByKey: input.manualMetalPrices },
             {},
           );
 
@@ -1960,6 +1966,8 @@ export async function runCorporateSnapshotPipeline(args: {
             spotPriceUSDByMetal: Object.fromEntries(
               Object.entries(resolved.spotPriceUSDByMetal).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),
+            auPriceKey: parsed.engineInputWithoutPrices.auPriceKey,
+            auPriceUSDPerOz: sanitizeSeries(resolved.aisc.auPriceUSDPerOz),
             revenueByMetal_USD: Object.fromEntries(
               Object.entries(out.revenue.byMetalRevenueUSD).map(([metal, series]) => [metal, sanitizeSeries(series)]),
             ),
@@ -3482,6 +3490,12 @@ export async function runCorporateSnapshotPipeline(args: {
         priceKeyByMetal: { ...context.priceKeyByMetal },
         priceUnitByMetal: { ...context.priceUSDUnitByMetal },
         resolvedPriceByMetal: Object.fromEntries(Object.entries(context.spotPriceUSDByMetal).map(([metal, values]) => [metal, values.find((value): value is number => typeof value === 'number' && Number.isFinite(value)) ?? null])),
+        resolvedPriceByKey: {
+          ...Object.fromEntries(Object.entries(context.priceKeyByMetal).map(([metal, priceKey]) => [priceKey, context.spotPriceUSDByMetal[metal]?.find((value): value is number => typeof value === 'number' && Number.isFinite(value)) ?? null])),
+          ...(context.auPriceKey && context.auPriceUSDPerOz?.some((value) => typeof value === 'number' && Number.isFinite(value))
+            ? { [context.auPriceKey]: context.auPriceUSDPerOz.find((value): value is number => typeof value === 'number' && Number.isFinite(value)) as number }
+            : {}),
+        },
         revenueByMetalUSD: Object.fromEntries(Object.entries(context.revenueByMetal_USD).map(([metal, values]) => [metal, sumStrict(values)])),
         revenueUSD: sumStrict(Object.values(context.revenueByMetal_USD).flat()),
         ebitdaUSD: sumStrict(context.economics.ebitdaUSD),

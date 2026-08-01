@@ -34,6 +34,11 @@ test('seven full scenarios preserve spot parity, isolate inputs, and recalculate
   assert.equal(spot.ok, true); if (!spot.ok || !pureSpot.ok) return;
   for (const key of ['series', 'aggregation', 'canonicalValuationTimeline', 'corporateValuationTimeSeries', 'corporateQualityMultipleTimeSeries', 'financing']) assert.deepEqual((spot.snapshot as any)[key], (pureSpot.snapshot as any)[key], `1.00 parity: ${key}`);
   const low = results[0]; const high = results[6]; assert.equal(low.ok, true); assert.equal(high.ok, true); if (!low.ok || !high.ok) return;
+  const resolvedSpotPriceByProject = Object.fromEntries(((pureSpot.snapshot as any).metalPriceSensitivityAudit.projects as Array<any>).map((project) => [project.projectId, project.resolvedPriceByKey]));
+  const pinnedHigh = await runCorporateSnapshotPipeline({ body: { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: 1.25 }, resolvedSpotPriceByProject }, refresh: false });
+  assert.equal(pinnedHigh.ok, true); if (!pinnedHigh.ok) return;
+  for (const key of ['series', 'aggregation', 'canonicalValuationTimeline', 'corporateValuationTimeSeries', 'corporateQualityMultipleTimeSeries', 'financing']) assert.deepEqual((pinnedHigh.snapshot as any)[key], (high.snapshot as any)[key], `pinned spot parity: ${key}`);
+  assert.equal(pinnedHigh.diagnostics.warnings.some((warning) => warning.startsWith('Spot resolver failed')), false, 'pinned scenarios must not call the live metal resolver');
   for (const [index, project] of (spot.snapshot as any).metalPriceSensitivityAudit.projects.entries()) {
     for (const [metal, price] of Object.entries(project.resolvedPriceByMetal) as Array<[string, number]>) {
       assert.equal((low.snapshot as any).metalPriceSensitivityAudit.projects[index].resolvedPriceByMetal[metal], price * 0.75);
