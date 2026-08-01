@@ -17,6 +17,10 @@ const percent = (value: number | null) => finite(value) ? value.toLocaleString('
 const multiple = (value: number | null, signed = false) => finite(value)
   ? `${signed && value > 0 ? '+' : ''}${value.toLocaleString('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x`
   : 'n/a';
+const adjustedMultiple = (original: number | null, adjusted: number | null) =>
+  finite(original) && finite(adjusted) && original !== adjusted
+    ? `${multiple(original, true)} → ${multiple(adjusted, true)}`
+    : multiple(original, true);
 
 const diagnosticLabels: Record<string, string> = {
   FULL_WINDOW: 'Fullt femårsfönster', SHORT_WINDOW: 'Kort fönster', INSUFFICIENT_REMAINING_PERIODS: 'För få kvarvarande perioder',
@@ -63,6 +67,7 @@ export default function MultipleContrastPanel(props: Props) {
                     <span><strong>År</strong>{row.calendarYear}</span>
                     <span><strong>Kvalitetsmultipel</strong>{multiple(row.qualityMidMultiple)}</span>
                     <span title="Summan av varje års positiva EBITDA relativt projektets högsta positiva EBITDA. Måttet beskriver hur många fullvärdiga ekonomiska produktionsår projektet motsvarar."><strong>Effective Economic Years</strong>{row.effectiveEconomicYears?.toLocaleString('sv-SE', { maximumFractionDigits: 2 }) ?? 'n/a'}</span>
+                    <span><strong>Durationsfaktor</strong>{percent(row.durationContextFactor)}</span>
                     <span><strong>Peak positive EBITDA</strong>{row.peakPositiveEbitda?.toLocaleString('sv-SE') ?? 'n/a'}</span>
                     <span><strong>Faktisk 5Y-andel</strong>{percent(row.actualFiveYearEbitdaShare)}</span>
                     <span><strong>Förväntad 5Y-andel</strong>{percent(row.expectedFiveYearEbitdaShare)}</span>
@@ -79,10 +84,11 @@ export default function MultipleContrastPanel(props: Props) {
                   <div className="multiple-contrast-adjustments">
                     <span>Effective Economic Years: {multiple(row.effectiveEconomicYearsAdjustment, true)}</span>
                     <span>5-årig EBITDA-koncentration: {multiple(row.fiveYearEbitdaConcentrationAdjustment, true)}</span>
-                    <span>Stabilitet: {multiple(row.stabilityAdjustment, true)}</span>
-                    <span>Sustaining: {multiple(row.sustainingIntensityAdjustment, true)}</span>
-                    <span>Marginal: {multiple(row.marginAdjustment, true)}</span>
+                    <span>Stabilitet: {adjustedMultiple(row.originalStabilityAdjustment, row.durationAdjustedStabilityAdjustment)}</span>
+                    <span>Sustaining: {adjustedMultiple(row.originalSustainingAdjustment, row.durationAdjustedSustainingAdjustment)}</span>
+                    <span>Marginal: {adjustedMultiple(row.originalMarginAdjustment, row.durationAdjustedMarginAdjustment)}</span>
                   </div>
+                  <p className="multiple-contrast-policy">Positiva premier för stabilitet, låg sustaining intensity och hög EBITDA-marginal skalas ned när färre än fem fullvärdiga ekonomiska år återstår. Negativa justeringar påverkas inte.</p>
                   <p className="multiple-contrast-status"><strong>{row.shortWindow ? 'SHORT_WINDOW' : 'FULL_WINDOW'}</strong> · {row.qualityDiagnostics.map((code) => diagnosticLabels[code] ?? code).join(' · ')}</p>
                 </>
               ) : (

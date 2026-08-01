@@ -60,6 +60,13 @@ export type CorporateQualityMultipleRow = {
   stabilityAdjustment: number | null;
   sustainingIntensityAdjustment: number | null;
   marginAdjustment: number | null;
+  durationContextFactor: number | null;
+  originalStabilityAdjustment: number | null;
+  durationAdjustedStabilityAdjustment: number | null;
+  originalSustainingAdjustment: number | null;
+  durationAdjustedSustainingAdjustment: number | null;
+  originalMarginAdjustment: number | null;
+  durationAdjustedMarginAdjustment: number | null;
   rawQualityMultiple: number | null;
   qualityLowMultiple: number | null;
   qualityMidMultiple: number | null;
