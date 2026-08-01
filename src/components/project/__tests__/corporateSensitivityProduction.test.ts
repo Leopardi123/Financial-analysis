@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { stableCorporateRequestHash } from '../../../hooks/useCorporateMetalPriceSensitivity.ts';
+import { pinCorporateSensitivityFx, stableCorporateRequestHash } from '../../../hooks/useCorporateMetalPriceSensitivity.ts';
 
 const dashboard = await readFile('src/components/SingleStockDashboard.tsx', 'utf8');
 const component = await readFile('src/components/project/CorporateMetalPriceSensitivity.tsx', 'utf8');
@@ -43,4 +43,14 @@ test('stable Corporate request hash ignores object key ordering and changes with
   assert.equal(stableCorporateRequestHash(a), stableCorporateRequestHash(reordered));
   assert.notEqual(stableCorporateRequestHash(a), stableCorporateRequestHash({ ...a, discountRate: 0.11 }));
   assert.notEqual(stableCorporateRequestHash(a), stableCorporateRequestHash({ ...a, market: { shares_current: 2 } }));
+});
+
+test('sensitivity scenarios pin the one base-resolved FX and avoid repeated auto FX requests', () => {
+  const request = { targetCurrency: 'CAD', discountRate: 0.1, scenario: { mode: 'spot' }, projects: [], fx: { source: 'auto', anchor: 'today', scenario: { mode: 'spot' } }, valuationYear: 2026 } as any;
+  const pinned = pinCorporateSensitivityFx(request, 1.37)!;
+  assert.equal(pinned.fx.source, 'manual');
+  assert.equal(pinned.fx.manual_fx_USD_to_TargetCurrency, 1.37);
+  assert.equal(pinned.fx_USD_to_TargetCurrency, 1.37);
+  assert.equal(request.fx.source, 'auto', 'base request remains unchanged');
+  assert.equal(pinCorporateSensitivityFx(request, null), request, 'auto resolution remains only when the base produced no valid FX');
 });

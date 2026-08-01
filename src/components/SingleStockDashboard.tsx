@@ -1962,7 +1962,10 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   }, [corporateFinancingPlan, companyProjects.length, data, lockedTargetCurrency, manualMetalPrices, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
 
   const [corporateSensitivityEnabled, setCorporateSensitivityEnabled] = useState(false);
-  const corporateSensitivity = useCorporateMetalPriceSensitivity(corporateSnapshotRequest, corporateSensitivityEnabled && primaryView === "modeled");
+  const resolvedCorporateFx = typeof corporateSnapshotData?.fx_USD_to_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.fx_USD_to_TargetCurrency)
+    ? corporateSnapshotData.fx_USD_to_TargetCurrency
+    : null;
+  const corporateSensitivity = useCorporateMetalPriceSensitivity(corporateSnapshotRequest, corporateSensitivityEnabled && primaryView === "modeled", resolvedCorporateFx);
 
   useEffect(() => {
     let isMounted = true;

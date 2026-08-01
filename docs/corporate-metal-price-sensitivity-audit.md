@@ -28,6 +28,10 @@ Status is `NOT_COMPUTABLE` if timeline/chart core is absent, `PARTIAL` if mandat
 
 Opening/swiping to page 2 triggers the first run. Rendering page 1 alone issues no sensitivity calls. Seven requests run in parallel outside React rendering. A canonical key-sorted hash covers projects, manual prices, FX, financing, shares, market values and all other request inputs. The module cache is keyed by that hash; changed economics invalidate state. A generation token prevents stale promises overwriting a newer input generation. Loading, partial failure, total/average/slowest timing and cached reopening states are visible.
 
+### FX request audit
+
+Before the follow-up correction, each of the seven independent Corporate snapshot requests retained `fx.source=auto`. Consequently, opening the sensitivity page could resolve the identical `USDCAD` series seven additional times in parallel, in addition to the base snapshot, and trigger FMP HTTP 429 limits. The sensitivity runner now reads the valid FX already resolved by the base Corporate snapshot and immutably pins that rate as `fx.source=manual` in the seven scenario requests. Price sensitivity does not alter FX, so this preserves the required base assumption while reducing sensitivity-related FX-provider calls from seven to zero. If the base snapshot has no valid finite positive FX, the runner does not invent one and retains normal auto/null behavior. The pinned FX is part of the stable cache hash, so an FX change invalidates all cached scenarios.
+
 ## Spot parity and economic non-regression
 
 Tolerance: **exact deep equality (`assert.deepEqual`, effectively 0 absolute/relative tolerance)** between a clean `mode=spot` run and `mode=spot, spotPriceMultiplier=1.00` for series, aggregation, canonical timeline, Corporate valuation time series, quality output and financing. Tests also prove 0.75/1.25 exact project-metal price multiplication, changed per-project revenue/EBITDA/FCFF, changed Corporate aggregation and NPV, immutable base/scenario requests, canonical fully diluted shares and same-scenario Combined composition.

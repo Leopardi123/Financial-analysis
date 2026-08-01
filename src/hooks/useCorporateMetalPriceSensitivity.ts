@@ -15,8 +15,25 @@ export function stableCorporateRequestHash(request: SnapshotRequest | null): str
   return JSON.stringify(normalize(request));
 }
 
-export function useCorporateMetalPriceSensitivity(request: SnapshotRequest | null, enabled: boolean) {
-  const hash = useMemo(() => stableCorporateRequestHash(request), [request]);
+/** Reuses the already resolved base-snapshot FX so seven price scenarios do not
+ * make seven identical FX-provider requests. Metal prices remain scenario-owned. */
+export function pinCorporateSensitivityFx(request: SnapshotRequest | null, resolvedBaseFx: number | null): SnapshotRequest | null {
+  if (!request || typeof resolvedBaseFx !== 'number' || !Number.isFinite(resolvedBaseFx) || resolvedBaseFx <= 0) return request;
+  return {
+    ...request,
+    fx_USD_to_TargetCurrency: resolvedBaseFx,
+    fx: {
+      source: 'manual',
+      anchor: request.fx.anchor,
+      scenario: request.fx.scenario,
+      manual_fx_USD_to_TargetCurrency: resolvedBaseFx,
+    },
+  };
+}
+
+export function useCorporateMetalPriceSensitivity(request: SnapshotRequest | null, enabled: boolean, resolvedBaseFx: number | null = null) {
+  const scenarioBaseRequest = useMemo(() => pinCorporateSensitivityFx(request, resolvedBaseFx), [request, resolvedBaseFx]);
+  const hash = useMemo(() => stableCorporateRequestHash(scenarioBaseRequest), [scenarioBaseRequest]);
   const generation = useRef(0);
   const [runs, setRuns] = useState<CorporateSensitivityRun[]>([]);
   const [loading, setLoading] = useState(false);
@@ -29,7 +46,7 @@ export function useCorporateMetalPriceSensitivity(request: SnapshotRequest | nul
   }, [hash]);
 
   useEffect(() => {
-    if (!enabled || !request || !hash) return;
+    if (!enabled || !scenarioBaseRequest || !hash) return;
     const currentGeneration = ++generation.current;
     const cached = cache.get(hash);
     if (cached) {
@@ -41,7 +58,7 @@ export function useCorporateMetalPriceSensitivity(request: SnapshotRequest | nul
     const started = performance.now();
     void Promise.all(CORPORATE_METAL_PRICE_MULTIPLIERS.map(async (multiplier) => {
       const scenarioStarted = performance.now();
-      const response = await postCorporateSnapshot(createCorporateMetalPriceScenarioRequest(request, multiplier));
+      const response = await postCorporateSnapshot(createCorporateMetalPriceScenarioRequest(scenarioBaseRequest, multiplier));
       return { multiplier, response, durationMs: performance.now() - scenarioStarted };
     })).then((nextRuns) => {
       if (generation.current !== currentGeneration) return;
@@ -56,8 +73,8 @@ export function useCorporateMetalPriceSensitivity(request: SnapshotRequest | nul
       if (generation.current !== currentGeneration) return;
       setError(reason instanceof Error ? reason.message : String(reason)); setLoading(false);
     });
-  }, [enabled, hash, request]);
-  return { runs, loading, error, performance: performanceMetrics, inputHash: hash };
+  }, [enabled, hash, scenarioBaseRequest]);
+  return { runs, loading, error, performance: performanceMetrics, inputHash: hash, fxPinned: scenarioBaseRequest?.fx.source === 'manual' && resolvedBaseFx !== null };
 }
 
 export function clearCorporateSensitivityCacheForTests(): void { cache.clear(); }
