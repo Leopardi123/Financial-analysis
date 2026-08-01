@@ -5,6 +5,8 @@ type SnapshotScenarioControls = {
   delayPeriods?: number;
   capexMult?: number;
   opexMult?: number;
+  /** Multiplies every resolved spot metal series before the project engine runs. */
+  spotPriceMultiplier?: number;
 };
 
 export type SnapshotScenario =
@@ -122,6 +124,17 @@ function applyScenarioControls(base: SnapshotScenario, scenarioRaw: Record<strin
       errors.push('scenario.opexMult must be finite and >= 0 when provided');
     } else {
       withControls.opexMult = opexMult;
+    }
+  }
+
+  if (scenarioRaw.spotPriceMultiplier !== undefined) {
+    const multiplier = readFiniteNumber(scenarioRaw.spotPriceMultiplier);
+    if (multiplier === null || multiplier < 0.01 || multiplier > 10) {
+      errors.push('scenario.spotPriceMultiplier must be finite and within [0.01, 10] when provided');
+    } else if (base.mode !== 'spot') {
+      errors.push('scenario.spotPriceMultiplier is only valid for mode=spot');
+    } else {
+      withControls.spotPriceMultiplier = multiplier;
     }
   }
 
@@ -518,15 +531,9 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
             productionStartYear: time.productionStartYear as number,
           });
 
-          const existingDiagnostics = isObject(rawJson.diagnostics) ? rawJson.diagnostics : {};
-          rawJson.diagnostics = {
-            ...existingDiagnostics,
-            time: {
-              ...(isObject(existingDiagnostics.time) ? existingDiagnostics.time : {}),
-              v2YearsByPeriod_first8: resolved.yearsByPeriod.slice(0, 8),
-              v2ProductionStartYear: resolved.productionStartYear,
-            },
-          };
+          // Validation is intentionally read-only. Runtime diagnostics belong to
+          // the result, never to the caller-owned project JSON.
+          void resolved;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           errors.push(`projects[${i}].rawJson.time invalid for project_json_v2: ${message}`);

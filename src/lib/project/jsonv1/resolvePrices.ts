@@ -212,6 +212,9 @@ export async function resolveProjectPricesToEngineInput(
         anchorDatesUtc: [spotAnchorDateUtc],
         scenario: coreScenario,
         allowRefresh: args.allowRefresh === true,
+      }).catch((error: unknown) => {
+        pushWarning(`Spot resolver failed for ${priceKey}: ${error instanceof Error ? error.message : String(error)}; strict manual/missing resolution continues.`);
+        return { values: [null], warnings: [] };
       });
       if (resolvedSpot.warnings.length > 0) {
         resolvedSpot.warnings.forEach((warning) => pushWarning(warning));

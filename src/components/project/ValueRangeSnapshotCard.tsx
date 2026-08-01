@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { valueRangeChartHeader } from "./corporateChartRows";
 import ValueRangeChart from "./ValueRangeChart";
 import type { ValuationTimeline } from "../../lib/valuation/canonicalValuationTimeline.ts";
@@ -24,6 +24,7 @@ type TpMarker = {
 
 type ValueRangeSnapshotCardProps = {
   mode?: "corporate" | "project";
+  emphasisFocus?: 'nav' | 'natural' | 'quality' | 'combined' | 'context';
   priceToday?: number | null;
   npvLow?: number | null;
   npvHigh?: number | null;
@@ -118,7 +119,7 @@ function isProjectChartDataTypeSafe(data: Array<Array<string | number | null | {
 
 
 export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProps) {
-  const { mode = "corporate", priceToday, currencyCode, projectDebug, canonicalTimeline, canonicalStartPeriods, corporateTimeSeries, corporateQualityMultipleTimeSeries, fxUSDToTarget } = props;
+  const { mode = "corporate", priceToday, currencyCode, projectDebug, canonicalTimeline, canonicalStartPeriods, corporateTimeSeries, corporateQualityMultipleTimeSeries, fxUSDToTarget, emphasisFocus = 'context' } = props;
   const isProjectMode = mode === "project";
   const [contrastOpen, setContrastOpen] = useState(false);
   const [multipleBasis, setMultipleBasis] = useState<MultipleContrastBasis>('annual');
@@ -129,6 +130,14 @@ export default function ValueRangeSnapshotCard(props: ValueRangeSnapshotCardProp
     showQualityMultipleBand: false,
     showCombinedTarget: false,
   });
+  useEffect(() => {
+    if (isProjectMode || emphasisFocus === 'context') return;
+    setContrastVisibility({
+      showStaticMultipleBand: emphasisFocus === 'natural',
+      showQualityMultipleBand: emphasisFocus === 'quality' || emphasisFocus === 'combined',
+      showCombinedTarget: emphasisFocus === 'combined',
+    });
+  }, [emphasisFocus, isProjectMode]);
 
   const projectChartModel = useMemo(() => {
     if (!canonicalTimeline?.periods.length) return null;
