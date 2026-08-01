@@ -7,6 +7,7 @@ const dashboard = await readFile('src/components/SingleStockDashboard.tsx', 'utf
 const component = await readFile('src/components/project/CorporateMetalPriceSensitivity.tsx', 'utf8');
 const chart = await readFile('src/components/project/ValueRangeSnapshotCard.tsx', 'utf8');
 const css = await readFile('src/index.css', 'utf8');
+const dashboardCss = await readFile('src/styles/dashboard.css', 'utf8');
 
 test('production mount is Corporate-only and reuses the existing chart component', () => {
   const mount = dashboard.indexOf('<CorporateMetalPriceSensitivity');
@@ -26,6 +27,10 @@ test('lazy loading, real buttons, reset, aria, focus mapping and two-page snap c
   assert.match(css, /scroll-snap-type: x mandatory/);
   assert.match(css, /overscroll-behavior-x: contain/);
   assert.match(css, /min-height: 44px/);
+  assert.match(css, /\.corporate-finance-card[\s\S]*inline-size: 100%[\s\S]*overflow: hidden/);
+  assert.match(css, /\.corporate-finance-pages[\s\S]*contain: inline-size/);
+  assert.match(css, /\.corporate-finance-page[\s\S]*max-inline-size: 100%[\s\S]*overflow: hidden/);
+  assert.match(dashboardCss, /\.breadcontainersinglecolumn[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(chart, /emphasisFocus === 'quality'/);
   assert.match(chart, /emphasisFocus === 'combined'/);
 });

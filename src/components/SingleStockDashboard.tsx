@@ -5755,7 +5755,7 @@ Capital Available: ${availableLabel}`,
                     ["list4", "TILLGÅNGSVÄRDE OCH JÄMFÖRELSE", corporateViewMetrics.list4],
                     ["list6", "M&A VALUATION", corporateViewMetrics.list6],
                   ] as Array<["list2" | "list3" | "list4" | "list6", string, Record<string, MetricValue>]>).map(([sectionKey, title, metrics]) => (
-                    <details key={`corporate-${sectionKey}`} className="producer-core-section project-collapsible-card" open>
+                    <details key={`corporate-${sectionKey}`} className={`producer-core-section project-collapsible-card${sectionKey === "list2" ? " corporate-finance-card" : ""}`} open>
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
                         <CorporateMetalPriceSensitivity

@@ -111,9 +111,42 @@ input {
   }
 }
 
-.corporate-finance-pages { min-width: 0; overflow: hidden; }
-.corporate-page-scroller { display: flex; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scrollbar-width: thin; }
-.corporate-finance-page { box-sizing: border-box; flex: 0 0 100%; min-width: 0; scroll-snap-align: start; scroll-snap-stop: always; }
+.corporate-finance-card {
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+.corporate-finance-pages {
+  box-sizing: border-box;
+  contain: inline-size;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+.corporate-page-scroller {
+  box-sizing: border-box;
+  display: flex;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+}
+.corporate-finance-page {
+  box-sizing: border-box;
+  flex: 0 0 100%;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
 .corporate-page-nav { display: flex; justify-content: flex-end; gap: 6px; }
 .corporate-page-nav button, .corporate-sensitivity-header button { min-height: 44px; }
 .corporate-page-indicator { display: flex; justify-content: center; gap: 8px; color: #64748b; }
@@ -122,7 +155,7 @@ input {
 .corporate-sensitivity-status[data-status="PARTIAL"] { border-color: #d97706; }
 .corporate-sensitivity-status[data-status="NOT_COMPUTABLE"] { border-color: #dc2626; }
 .corporate-sensitivity-prices { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
-.corporate-sensitivity-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x pan-y; }
+.corporate-sensitivity-table-scroll { box-sizing: border-box; inline-size: 100%; max-inline-size: 100%; min-inline-size: 0; overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x pan-y; }
 .corporate-sensitivity-table { border-collapse: collapse; min-width: 900px; width: 100%; }
 .corporate-sensitivity-table th, .corporate-sensitivity-table td { border-bottom: 1px solid #e2e8f0; padding: 3px; text-align: left; }
 .corporate-sensitivity-table button { background: transparent; border: 2px solid transparent; min-height: 44px; width: 100%; }
