@@ -69,3 +69,27 @@ test('real scenario outputs populate canonical-share table and same-scenario Com
   const qualityValue = Number(model.column.values.qualityValue.replace(/\s/g, '').replace(',', '.'));
   if (Number.isFinite(qualityValue)) assert.ok(Math.abs(combined - (0.7 * reference.navPerShareTarget! + 0.3 * qualityValue)) < 0.02);
 });
+
+test('survivability scenario family reruns the full Corporate pipeline', async () => {
+  const body = await baseBody(['p5.los-ricos-north.project_json_v1.json', 'p6.los-ricos-south.project_json_v1.json']);
+  const requests = [
+    { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: .8 } },
+    { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: .7 } },
+    { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: .5 } },
+    { ...structuredClone(body), stressOptions: { opex25: true } },
+    { ...structuredClone(body), stressOptions: { sustainingCapex15: true } },
+    { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: .7 }, stressOptions: { opex15: true } },
+  ];
+  const results = await Promise.all(requests.map((request) => runCorporateSnapshotPipeline({ body: request, refresh: false })));
+  assert.ok(results.every((result) => result.ok));
+  for (const result of results) {
+    if (!result.ok) continue;
+    assert.ok(result.snapshot.financing.corporate_cash_waterfall?.rows.length);
+    assert.ok(result.snapshot.financing.corporate_cash_waterfall?.rows.every((row) => row.status === 'COMPUTABLE' && row.unfundedGap === 0));
+  }
+  const opex25 = results[3]; const combined = results[5]; assert.equal(opex25.ok, true); assert.equal(combined.ok, true);
+  if (opex25.ok && combined.ok) {
+    assert.notDeepEqual(opex25.snapshot.series?.fcffUSD, (await runCorporateSnapshotPipeline({ body, refresh: false }) as any).snapshot.series.fcffUSD);
+    assert.notDeepEqual(combined.snapshot.series?.fcffUSD, results[1].ok ? results[1].snapshot.series?.fcffUSD : null);
+  }
+});

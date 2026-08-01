@@ -42,6 +42,8 @@ export type CashWaterfallRow = {
   debtAddedByProject: Record<string, number>;
   equityRaisedByProject: Record<string, number>;
   newSharesByProject: Record<string, number | null>;
+  operatingCashGeneratedByProject: Record<string, number>;
+  constructionCapexByProject: Record<string, number>;
 };
 
 export type CashWaterfallResult = {
@@ -151,6 +153,7 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
         newShares: null, cumulativeNewShares: null, cumulativeCanonicalShares: null,
         status: 'NOT_COMPUTABLE', diagnostics: rowDiagnostics, internalCashUsedByProject: {},
         debtAddedByProject: {}, equityRaisedByProject: {}, newSharesByProject: {},
+        operatingCashGeneratedByProject: {}, constructionCapexByProject: {},
       });
       openingCash = Number.NaN;
       continue;
@@ -262,6 +265,8 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
       unfundedGap, closingCash, newShares, cumulativeNewShares: cumulativeNewSharesValue,
       cumulativeCanonicalShares, status, diagnostics: rowDiagnostics, internalCashUsedByProject,
       debtAddedByProject, equityRaisedByProject, newSharesByProject,
+      operatingCashGeneratedByProject: operatingByProject,
+      constructionCapexByProject: Object.fromEntries(needs.map(({ project, need }) => [project.projectId, need])),
     });
     openingCash = closingCash;
   }
