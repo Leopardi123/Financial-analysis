@@ -82,6 +82,19 @@ export function fiveYearEbitdaConcentrationAdjustment(value: number): number {
   return -1;
 }
 
+/**
+ * Positive operating-quality premiums are fully capitalized only when at least
+ * five effective economic years remain. Shorter duration scales premiums
+ * continuously; zero and negative signals retain their full weight.
+ */
+export function durationContextFactor(effectiveEconomicYears: number): number {
+  return Math.min(1, Math.max(0, effectiveEconomicYears / 5));
+}
+
+export function applyDurationContext(adjustment: number, factor: number): number {
+  return adjustment > 0 ? adjustment * factor : adjustment;
+}
+
 function stabilityAdjustment(value: number): number {
   if (value < 0.10) return 0.5;
   if (value < 0.20) return 0.25;
@@ -207,7 +220,14 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
     const stability = ebitdaCv5Y === null ? null : stabilityAdjustment(ebitdaCv5Y);
     const sustainingAdjustment = sustainingIntensity5Y === null ? null : sustainingIntensityAdjustment(sustainingIntensity5Y);
     const margin = ebitdaMargin5Y === null ? null : marginAdjustment(ebitdaMargin5Y);
-    const adjustments = [effectiveYearsAdjustment, concentrationAdjustment, stability, sustainingAdjustment, margin];
+    const durationFactor = effectiveEconomicYears === null ? null : durationContextFactor(effectiveEconomicYears);
+    const durationAdjustedStability = stability === null || durationFactor === null
+      ? null : applyDurationContext(stability, durationFactor);
+    const durationAdjustedSustaining = sustainingAdjustment === null || durationFactor === null
+      ? null : applyDurationContext(sustainingAdjustment, durationFactor);
+    const durationAdjustedMargin = margin === null || durationFactor === null
+      ? null : applyDurationContext(margin, durationFactor);
+    const adjustments = [effectiveYearsAdjustment, concentrationAdjustment, durationAdjustedStability, durationAdjustedSustaining, durationAdjustedMargin];
     const rawQualityMultiple = adjustments.every(finite)
       ? QUALITY_MULTIPLE_POLICY.base + (adjustments as number[]).reduce((sum, value) => sum + value, 0) : null;
     const qualityMidMultiple = rawQualityMultiple === null ? null
@@ -231,6 +251,10 @@ export function computeCorporateQualityMultiples(input: CorporateQualityMultiple
       negativeEbitdaTailShare, ebitdaCv5Y, sustainingIntensity5Y, ebitdaMargin5Y,
       effectiveEconomicYearsAdjustment: effectiveYearsAdjustment, fiveYearEbitdaConcentrationAdjustment: concentrationAdjustment, stabilityAdjustment: stability,
       sustainingIntensityAdjustment: sustainingAdjustment, marginAdjustment: margin,
+      durationContextFactor: durationFactor,
+      originalStabilityAdjustment: stability, durationAdjustedStabilityAdjustment: durationAdjustedStability,
+      originalSustainingAdjustment: sustainingAdjustment, durationAdjustedSustainingAdjustment: durationAdjustedSustaining,
+      originalMarginAdjustment: margin, durationAdjustedMarginAdjustment: durationAdjustedMargin,
       rawQualityMultiple, qualityLowMultiple, qualityMidMultiple, qualityHighMultiple,
       annualBasis: bridge(finite(input.ebitdaUSD_total[t]) ? input.ebitdaUSD_total[t] : null),
       forwardAverageBasis: bridge(forwardAverageEbitdaUSD), shortWindow, fullWindow, windowLength,

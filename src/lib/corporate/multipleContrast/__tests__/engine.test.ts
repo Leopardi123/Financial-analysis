@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { bridgeCorporateMultipleToEquity, computeCorporateQualityMultiples, effectiveEconomicYearsAdjustment, fiveYearEbitdaConcentrationAdjustment } from '../engine.ts';
+import { applyDurationContext, bridgeCorporateMultipleToEquity, computeCorporateQualityMultiples, durationContextFactor, effectiveEconomicYearsAdjustment, fiveYearEbitdaConcentrationAdjustment } from '../engine.ts';
 import { QUALITY_MULTIPLE_POLICY, type CorporateQualityMultipleInput } from '../types.ts';
 import { runCorporateSnapshotPipeline } from '../../../snapshot/runCorporateSnapshot.ts';
 
@@ -27,6 +27,57 @@ test('effective-economic-years policy boundaries are exact and half-open', () =>
     [16, 0.75], [20, 0.75], [20.000001, 1],
   ];
   for (const [years, expected] of cases) assert.equal(effectiveEconomicYearsAdjustment(years), expected);
+});
+
+test('duration context is continuous at deterministic values and the five-year boundary', () => {
+  const cases: Array<[number, number]> = [
+    [0, 0], [1, 0.2], [2, 0.4], [3, 0.6], [4, 0.8],
+    [4.999999, 4.999999 / 5], [5, 1], [5.000001, 1], [20, 1], [-1, 0],
+  ];
+  for (const [years, expected] of cases) assert.equal(durationContextFactor(years), expected);
+});
+
+test('duration context scales only positive stability, sustaining, and margin premiums', () => {
+  for (const [years, factor] of [[5, 1], [4, 0.8], [3, 0.6], [2, 0.4], [1, 0.2], [0, 0]] as const) {
+    assert.equal(applyDurationContext(0.5, durationContextFactor(years)), 0.5 * factor);
+    assert.equal(applyDurationContext(0.25, durationContextFactor(years)), 0.25 * factor);
+    assert.equal(applyDurationContext(0.75, durationContextFactor(years)), 0.75 * factor);
+  }
+  for (const adjustment of [-0.75, -0.5, -0.25, 0]) {
+    assert.equal(applyDurationContext(adjustment, 0), adjustment);
+    assert.equal(applyDurationContext(adjustment, 0.4), adjustment);
+  }
+});
+
+test('four effective years expose original and duration-adjusted premiums and use only adjusted values in raw multiple', () => {
+  const row = first(input(new Array(4).fill(100), {
+    revenueUSD_total: new Array(4).fill(200), sustainingCapexUSD_total: new Array(4).fill(4),
+  }));
+  assert.equal(row.effectiveEconomicYears, 4);
+  assert.equal(row.durationContextFactor, 0.8);
+  assert.equal(row.originalStabilityAdjustment, 0.5);
+  assert.equal(row.durationAdjustedStabilityAdjustment, 0.4);
+  assert.equal(row.originalSustainingAdjustment, 0.5);
+  assert.equal(row.durationAdjustedSustainingAdjustment, 0.4);
+  assert.equal(row.originalMarginAdjustment, 0.5);
+  assert.equal(row.durationAdjustedMarginAdjustment, 0.4);
+  assert.equal(row.stabilityAdjustment, row.originalStabilityAdjustment);
+  assert.equal(row.sustainingIntensityAdjustment, row.originalSustainingAdjustment);
+  assert.equal(row.marginAdjustment, row.originalMarginAdjustment);
+  assert.ok(Math.abs(row.rawQualityMultiple! - 6.2) < 1e-12);
+});
+
+test('duration context is scale neutral for proportional economic series', () => {
+  const base = first(input([50, 40, 30, 20, 10], {
+    revenueUSD_total: [100, 80, 60, 40, 20], sustainingCapexUSD_total: [2.5, 2, 1.5, 1, 0.5],
+  }));
+  const scaled = first(input([500, 400, 300, 200, 100], {
+    revenueUSD_total: [1000, 800, 600, 400, 200], sustainingCapexUSD_total: [25, 20, 15, 10, 5],
+  }));
+  for (const key of ['effectiveEconomicYears', 'durationContextFactor', 'ebitdaCv5Y', 'sustainingIntensity5Y', 'ebitdaMargin5Y',
+    'durationAdjustedStabilityAdjustment', 'durationAdjustedSustainingAdjustment', 'durationAdjustedMarginAdjustment', 'rawQualityMultiple'] as const) {
+    assert.equal(base[key], scaled[key], key);
+  }
 });
 
 test('effective economic years cover uniform, weak-tail, short-intensive, peak, zero, and negative profiles', () => {
@@ -149,7 +200,7 @@ test('negative EBITDA tail is diagnostic only and concentration uses positive EB
   assert.equal(row.fiveYearEbitdaConcentrationAdjustment, 0);
   assert.equal(row.negativeEbitdaTailShare, 0.5);
   const expected = 6 + (row.effectiveEconomicYearsAdjustment as number) + (row.fiveYearEbitdaConcentrationAdjustment as number)
-    + (row.stabilityAdjustment as number) + (row.sustainingIntensityAdjustment as number) + (row.marginAdjustment as number);
+    + (row.durationAdjustedStabilityAdjustment as number) + (row.durationAdjustedSustainingAdjustment as number) + (row.durationAdjustedMarginAdjustment as number);
   assert.equal(row.rawQualityMultiple, expected);
 });
 
