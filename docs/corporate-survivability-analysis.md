@@ -54,6 +54,14 @@ debt stock, interest expense, amortization or a recurring debt cost. Empty bars
 in later years mean those years require no new operating financing; they do not
 mean that previously raised debt has been repaid.
 
+For the deployed Viscaria case, the residual bar of roughly USD 28m is therefore
+economically consistent with the checked-in series rather than another CAPEX
+classification error. The checked-in series has about USD 39m negative operating
+cash after grossing up production-start CAPEX; available opening cash/headroom in
+the saved runtime case can reduce the external proceeds to roughly USD 28m. The
+complete saved runtime JSON is not checked in, so that exact USD 11m bridge is
+shown from live waterfall values in the UI rather than reconstructed here.
+
 ## Scenario definitions
 
 Base reuses the already completed Corporate snapshot. Six lazy scenarios are
@@ -117,6 +125,11 @@ shows new proceeds in each year, not outstanding debt. The help text and drawer
 separate initial/build CAPEX, construction funding need, operating cash and
 operating funding so a large production-start build tranche cannot be mistaken
 for operating distress.
+
+An always-visible explanation below the charts identifies the largest funding
+year and prints its operating cash, opening cash, reserve, new debt, new equity
+and gap. It also states whether any later displayed year needs new financing.
+This makes a solitary bar self-explanatory without requiring a table-cell click.
 
 There is no dual axis and the old value graph is not reused. Both panels are in
 one horizontal mobile-safe scroll container and expose accessible labels and

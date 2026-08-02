@@ -213,6 +213,7 @@ input {
 .corporate-survivability-header fieldset { border: 1px solid #cbd5e1; display: flex; gap: 6px; min-width: 300px; padding: 8px; }
 .corporate-survivability-header button[aria-pressed="true"] { background: #172313; color: #fff; }
 .survivability-mode-help { background: #eef3e4; border-left: 4px solid #687348; margin: 0; padding: 8px 10px; }
+.survivability-funding-explanation { background: #f8fafc; border-left: 4px solid #334155; margin: 0; padding: 8px 10px; line-height: 1.45; }
 .corporate-sensitivity-status[data-status="PRESSURED"] { border-color: #d97706; }
 .corporate-sensitivity-status[data-status="FUNDING_REQUIRED"] { border-color: #7c3aed; }
 .corporate-sensitivity-status[data-status="CRITICAL"] { border-color: #dc2626; }
