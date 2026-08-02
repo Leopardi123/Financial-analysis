@@ -18,8 +18,10 @@ test('production mount is Corporate-only and reuses the existing chart component
   assert.equal((dashboard.match(/<CorporateMetalPriceSensitivity/g) ?? []).length, 1);
 });
 
-test('lazy loading, real buttons, reset, aria, focus mapping and two-page snap contracts exist', () => {
+test('lazy loading, real buttons, reset, aria, focus mapping and three-page snap contracts exist', () => {
   assert.match(component, /onSensitivityOpen\?\.\(\)/);
+  assert.match(component, /onSurvivabilityOpen\?\.\(\)/);
+  assert.match(component, /Math\.min\(2/);
   assert.match(component, /aria-pressed=\{pressed\}/);
   assert.match(component, /Återställ till Spot/);
   assert.match(component, /aria-live="polite"/);

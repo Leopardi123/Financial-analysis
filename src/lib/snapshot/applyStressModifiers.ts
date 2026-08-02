@@ -6,6 +6,7 @@ export type StressOptions = {
   tpPlus2?: boolean;
   sustainingCapex15?: boolean;
   opex25?: boolean;
+  opex15?: boolean;
   recoveryMinus10?: boolean;
   fxMinus10?: boolean;
   royalty50?: boolean;
@@ -93,11 +94,11 @@ export function applyStressModifiers(baseInputs: SnapshotRequest, stressOptions:
       }
     }
 
-    if (stressOptions.opex25) {
+    if (stressOptions.opex25 || stressOptions.opex15) {
       if (!series) {
         edgeCases.push(`[${project.projectId}] Operating costs +25% requires series.`);
       } else {
-        const operating = scaleSeries(series.operatingCostsUSD, 1.25);
+        const operating = scaleSeries(series.operatingCostsUSD, stressOptions.opex25 ? 1.25 : 1.15);
         if (!operating) edgeCases.push(`[${project.projectId}] Missing series.operatingCostsUSD for opex stress.`);
         else series.operatingCostsUSD = operating;
       }

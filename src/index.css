@@ -206,3 +206,41 @@ input {
 .corporate-sensitivity-table button[aria-pressed="true"] { border-color: #2563eb; font-weight: 700; }
 .corporate-sensitivity-table button:focus-visible, .corporate-page-nav button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
 @media (max-width: 700px) { .corporate-page-nav { display: none; } .corporate-sensitivity-header { display: grid; } }
+.corporate-survivability { display: grid; gap: 12px; padding: 4px; }
+.corporate-survivability-header { align-items: start; display: flex; justify-content: space-between; gap: 18px; }
+.corporate-survivability-header h3 { font-size: clamp(24px, 4vw, 40px); margin: 2px 0 5px; }
+.corporate-survivability-header p { margin: 0; }
+.corporate-survivability-header fieldset { border: 1px solid #cbd5e1; display: flex; gap: 6px; min-width: 300px; padding: 8px; }
+.corporate-survivability-header button[aria-pressed="true"] { background: #172313; color: #fff; }
+.survivability-mode-help { background: #eef3e4; border-left: 4px solid #687348; margin: 0; padding: 8px 10px; }
+.survivability-funding-explanation { background: #f8fafc; border-left: 4px solid #334155; margin: 0; padding: 8px 10px; line-height: 1.45; }
+.survivability-graph-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+.survivability-graph-tabs button { background: #fff; border: 1px solid #64748b; padding: 7px 10px; }
+.survivability-graph-tabs button[aria-pressed="true"] { background: #172313; color: #fff; }
+.corporate-sensitivity-status[data-status="PRESSURED"] { border-color: #d97706; }
+.corporate-sensitivity-status[data-status="FUNDING_REQUIRED"] { border-color: #7c3aed; }
+.corporate-sensitivity-status[data-status="CRITICAL"] { border-color: #dc2626; }
+.survivability-chart-scroll { border: 1px solid #d8ddcf; overflow-x: auto; padding: 6px; }
+.survivability-chart { display: block; height: 210px; min-width: 680px; width: 100%; }
+.survivability-chart text { fill: #64748b; font-size: 9px; }
+.survivability-zero { stroke: #111827; stroke-dasharray: 4 4; }
+.survivability-cash-line, .survivability-reserve-line { fill: none; stroke-width: 3; }
+.survivability-cash-line { stroke: #2563eb; }.survivability-reserve-line { stroke: #d97706; stroke-dasharray: 6 4; }
+.survivability-negative-fcff { fill: #dc2626; }
+.survivability-value-chart { height: 420px; }
+.survivability-npv-line, .survivability-nav-line { fill: none; stroke-width: 3; }
+.survivability-npv-line { stroke: #2563eb; }.survivability-nav-line { stroke: #7c3aed; stroke-dasharray: 7 4; }
+.survivability-npv-point { fill: #2563eb; }.survivability-nav-point { fill: #7c3aed; }
+.survivability-value-empty { min-height: 210px; padding: 24px; }
+.survivability-cash-point { fill: #2563eb; }.survivability-shortfall { fill: rgba(220,38,38,.2); }
+.survivability-debt { fill: #334155; }.survivability-equity { fill: #8b5cf6; }.survivability-gap { fill: #dc2626; }
+.survivability-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; }
+.survivability-legend span::before { background: #777; content: ""; display: inline-block; height: 8px; margin-right: 4px; width: 16px; }
+.survivability-legend .cash::before { background: #2563eb; }.survivability-legend .reserve::before { background: #d97706; }.survivability-legend .negative-fcff::before { background: #dc2626; }.survivability-legend .debt::before { background: #334155; }.survivability-legend .equity::before { background: #8b5cf6; }.survivability-legend .gap::before { background: #dc2626; }
+.survivability-legend .npv::before { background: #2563eb; }.survivability-legend .nav::before { background: #7c3aed; }
+.survivability-table .is-selected-row { background: #f3f0ff; }.survivability-table .is-disabled-row { background: #f1f5f9; color: #64748b; }
+.survivability-drawer { background: #fbfcf7; border: 1px solid #89956b; box-shadow: 0 12px 30px rgba(15,23,42,.15); padding: 14px; }
+.survivability-drawer > header { align-items: start; display: flex; justify-content: space-between; }.survivability-drawer h4 { font-size: 24px; margin: 2px 0 10px; }
+.survivability-drawer-grid { display: grid; gap: 7px; grid-template-columns: repeat(3,minmax(0,1fr)); }.survivability-drawer-grid div { background: #eef3e4; display: grid; padding: 8px; }.survivability-drawer-grid span { color: #64748b; font-size: 10px; text-transform: uppercase; }
+.survivability-projects { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); }.survivability-projects > div { border: 1px solid #d8ddcf; display: grid; font-size: 11px; gap: 3px; padding: 8px; }
+@media (max-width: 700px) { .corporate-survivability-header { display: grid; }.corporate-survivability-header fieldset { display: grid; min-width: 0; width: 100%; }.survivability-drawer-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.survivability-chart { width: 680px; } }
