@@ -13,10 +13,12 @@ export const SURVIVABILITY_SCENARIOS: Array<{ id: SurvivabilityScenarioId; label
 ];
 
 export type SurvivabilityRow = CashWaterfallRow & { fcff: number | null };
+export type SurvivabilityValuationRow = { year: number; npvAbsolute: number | null; navAbsolute: number | null };
 export type SurvivabilityModel = {
   scenarioId: SurvivabilityScenarioId; label: string; financingMode: SurvivabilityFinancingMode;
   status: SurvivabilityStatus; rows: SurvivabilityRow[]; criticalYear: number | null;
   metrics: Record<string, number | string | null>; diagnostics: string[]; analysisStartYear: number | null;
+  valuationRows: SurvivabilityValuationRow[]; targetCurrency: string;
 };
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -59,7 +61,7 @@ export function buildCorporateSurvivabilityModel(args: {
     : dynamicRows.map((row, index) => ({ ...row, totalExternalFundingNeed: row.operationalFundingNeed,
       remainingExternalFundingNeed: row.operationalFundingNeed, debtAdded: row.operationalDebtAdded,
       equityRaised: row.operationalEquityRaised, newShares: row.operationalNewShares, fcff: fcff[index] ?? null }));
-  const timeline = (args.snapshot as CorporateSnapshot & { corporateValuationTimeSeries?: { valuationYear?: number; projectMarkers?: Array<{ productionStartYear?: number | null; productionStartPeriod?: number | null }> } }).corporateValuationTimeSeries;
+  const timeline = (args.snapshot as CorporateSnapshot & { corporateValuationTimeSeries?: { valuationYear?: number; rows?: Array<{ year?: number; npvAbsolute?: number | null; navAbsolute?: number | null }>; projectMarkers?: Array<{ productionStartYear?: number | null; productionStartPeriod?: number | null }> } }).corporateValuationTimeSeries;
   const valuationYear = finite(timeline?.valuationYear) ? timeline.valuationYear : null;
   const markers = timeline?.projectMarkers ?? [];
   const hasAlreadyProducingProject = markers.some((marker) => marker.productionStartYear === null && marker.productionStartPeriod === null);
@@ -67,6 +69,13 @@ export function buildCorporateSurvivabilityModel(args: {
   const analysisStartYear = valuationYear === null ? null : hasAlreadyProducingProject || futureProductionYears.length === 0
     ? valuationYear : Math.max(valuationYear, Math.min(...futureProductionYears));
   const rows = analysisStartYear === null ? [] : allRows.filter((row) => finite(row.year) && row.year >= analysisStartYear);
+  const valuationRows: SurvivabilityValuationRow[] = analysisStartYear === null ? [] : (timeline?.rows ?? [])
+    .filter((row) => finite(row.year) && row.year >= analysisStartYear)
+    .map((row) => ({
+      year: row.year as number,
+      npvAbsolute: finite(row.npvAbsolute) ? row.npvAbsolute : null,
+      navAbsolute: finite(row.navAbsolute) ? row.navAbsolute : null,
+    }));
   const diagnostics = [...(args.diagnostics ?? []), ...rows.flatMap((row) => row.diagnostics ?? [])];
   const computable = rows.length > 0 && rows.every((row) => row.status === 'COMPUTABLE' && finite(row.closingCash) && finite(row.fcff));
   const minimumHeadroom = computable ? Math.min(...rows.map((row) => (row.closingCash as number) - row.minimumCashReserve)) : null;
@@ -83,6 +92,7 @@ export function buildCorporateSurvivabilityModel(args: {
   const sum = (key: 'debtAdded' | 'equityRaised' | 'newShares') => rows.every((row) => finite(row[key])) ? rows.reduce((total, row) => total + (row[key] as number), 0) : null;
   return {
     scenarioId: args.scenarioId, label, financingMode: args.financingMode, status, rows, analysisStartYear,
+    valuationRows, targetCurrency: args.snapshot.targetCurrency,
     criticalYear: critical?.year ?? null, diagnostics,
     metrics: {
       status, minimumCashHeadroom: minimumHeadroom, minimumHeadroomYear: critical?.year ?? null,

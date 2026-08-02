@@ -36,6 +36,35 @@ function SurvivabilityChart({ model, selectedYear }: { model: SurvivabilityModel
   </div>;
 }
 
+function ValueCurvesChart({ model, selectedYear }: { model: SurvivabilityModel; selectedYear: number | null }) {
+  const rows = model.valuationRows;
+  const computableValues = rows.flatMap((row) => [row.npvAbsolute, row.navAbsolute]).filter(finite);
+  if (rows.length === 0 || computableValues.length === 0) return <div className="survivability-chart-unavailable" role="status">Årsvis stress-NPV/NAV är inte beräkningsbar för scenariot.</div>;
+  const width = Math.max(680, rows.length * 48); const height = 420; const pad = 42;
+  const minimum = Math.min(0, ...computableValues); const maximum = Math.max(0, ...computableValues);
+  const span = Math.max(1, maximum - minimum); const y = (value: number) => pad + (maximum - value) / span * (height - pad * 2);
+  const x = (index: number) => pad + index * ((width - pad * 2) / Math.max(1, rows.length - 1));
+  const segments = (key: 'npvAbsolute' | 'navAbsolute') => {
+    const result: string[] = []; let current = '';
+    rows.forEach((row, index) => { const value = row[key]; if (finite(value)) current += `${current ? ' ' : ''}${x(index)},${y(value)}`; else if (current) { result.push(current); current = ''; } });
+    if (current) result.push(current); return result;
+  };
+  return <div className="survivability-chart-scroll survivability-value-scroll" role="group" aria-label={`Årsvisa värdekurvor för ${model.label} i ${model.targetCurrency}`}>
+    <svg className="survivability-chart survivability-value-chart" viewBox={`0 0 ${width} ${height}`} aria-label={`Stress-NPV, canonical stress-NAV och nollinje i ${model.targetCurrency}`}>
+      <line x1={pad} x2={width - pad} y1={y(0)} y2={y(0)} className="survivability-zero survivability-value-zero" />
+      {rows.map((row, index) => row.year === selectedYear ? <line key={`selected-${row.year}`} x1={x(index)} x2={x(index)} y1={pad} y2={height-pad} className="survivability-selected-year" /> : null)}
+      {segments('npvAbsolute').map((points, index) => <polyline key={`npv-${index}`} points={points} className="survivability-npv-line" />)}
+      {segments('navAbsolute').map((points, index) => <polyline key={`nav-${index}`} points={points} className="survivability-nav-line" />)}
+      {rows.map((row, index) => <g key={row.year}>
+        {finite(row.npvAbsolute) && <circle cx={x(index)} cy={y(row.npvAbsolute)} r={row.year === selectedYear ? 6 : 3} className="survivability-npv-point"><title>{model.label}, {row.year}: Stress-NPV, kvarvarande värde {format('npv', row.npvAbsolute)} {model.targetCurrency}</title></circle>}
+        {finite(row.navAbsolute) && <circle cx={x(index)} cy={y(row.navAbsolute)} r={row.year === selectedYear ? 6 : 3} className="survivability-nav-point"><title>{model.label}, {row.year}: Canonical stress-NAV {format('nav', row.navAbsolute)} {model.targetCurrency}</title></circle>}
+        <text x={x(index)} y={height - 12} textAnchor="middle">{row.year}</text>
+      </g>)}
+    </svg>
+    <div className="survivability-legend" aria-label={`Värdekurvornas legend, ${model.targetCurrency}`}><span className="npv">Stress-NPV, kvarvarande värde</span><span className="nav">Canonical stress-NAV</span><span className="zero">Nollinje</span><strong>{model.targetCurrency}</strong></div>
+  </div>;
+}
+
 function FundingExplanation({ model }: { model: SurvivabilityModel }) {
   const fundingRows = model.rows.filter((row) => finite(row.totalExternalFundingNeed) && row.totalExternalFundingNeed > 0);
   const negativeFcffRows = model.rows.filter((row) => finite(row.fcff) && row.fcff < 0);
@@ -47,7 +76,7 @@ function FundingExplanation({ model }: { model: SurvivabilityModel }) {
 }
 
 export function CorporateSurvivabilityAnalysis(props: { models: Map<SurvivabilityScenarioId, SurvivabilityModel>; financingMode: SurvivabilityFinancingMode; onFinancingModeChange: (mode: SurvivabilityFinancingMode) => void; loading: boolean; error?: string | null; performanceText?: string | null }) {
-  const [scenarioId, setScenarioId] = useState<SurvivabilityScenarioId>('base'); const [metricId, setMetricId] = useState('status'); const [drawerOpen, setDrawerOpen] = useState(false); const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [scenarioId, setScenarioId] = useState<SurvivabilityScenarioId>('base'); const [metricId, setMetricId] = useState('status'); const [drawerOpen, setDrawerOpen] = useState(false); const [selectedYear, setSelectedYear] = useState<number | null>(null); const [chartMode, setChartMode] = useState<'liquidity' | 'value'>('liquidity');
   const model = props.models.get(scenarioId) ?? props.models.get('base');
   const criticalRow = useMemo(() => model?.rows.find((row) => row.year === (selectedYear ?? model.criticalYear)) ?? null, [model, selectedYear]);
   const selectCell = (nextScenario: SurvivabilityScenarioId, nextMetric: string) => {
@@ -57,12 +86,13 @@ export function CorporateSurvivabilityAnalysis(props: { models: Map<Survivabilit
     if (nextMetric === 'firstFinancingYear') year = next?.metrics.firstFinancingYear as number | null;
     if (nextMetric === 'largestAnnualFundingNeed') year = next?.rows.reduce((best, row) => (row.totalExternalFundingNeed ?? 0) > (best?.totalExternalFundingNeed ?? -1) ? row : best, null as SurvivabilityModel['rows'][number] | null)?.year ?? year;
     setScenarioId(nextScenario); setMetricId(nextMetric); setSelectedYear(year); setDrawerOpen(true);
+    if (nextMetric === 'stressNpv' || nextMetric === 'stressNav') setChartMode('value');
   };
   return <section className="corporate-survivability" aria-label="Corporate survivability analysis">
     <header className="corporate-survivability-header"><div><p className="eyebrow">CORPORATE SURVIVABILITY</p><h3>Kan bolaget överleva?</h3><p>Likviditet, finansieringsbehov, utspädning och cash runway över Corporate LOM.</p></div><fieldset><legend>Finansieringsläge</legend><button type="button" aria-pressed={props.financingMode === 'dynamic'} onClick={() => props.onFinancingModeChange('dynamic')}>Dynamisk finansiering</button><button type="button" aria-pressed={props.financingMode === 'fixed'} onClick={() => props.onFinancingModeChange('fixed')}>Fast finansiering</button></fieldset></header>
     <p className="survivability-mode-help">Analysperiod: framtida produktionsår från {model?.analysisStartYear ?? 'ej fastställt'}. Historiska år och initial/build CAPEX till och med produktionsstart exkluderas från status, staplar och nyckeltal. Staplarna visar ny finansiering för drift — inte skuldstock, ränta eller amortering. {props.financingMode === 'dynamic' ? 'Driftens debt, equity och nya aktier räknas om.' : 'Basens finansiering är låst; otäckt driftbehov visas som unfunded gap.'}</p>
     {props.loading && <p className="status" aria-live="polite">Beräknar sex fulla stresscenarier; Base återanvänds…</p>}{props.error && <p className="status error">{props.error}</p>}
-    {model && <><div className="corporate-sensitivity-status" data-status={model.status}>{model.label} · {model.status.replace(/_/g, ' ')}</div><SurvivabilityChart model={model} selectedYear={selectedYear}/><FundingExplanation model={model}/></>}
+    {model && <><div className="corporate-sensitivity-status" data-status={model.status}>{model.label} · {model.status.replace(/_/g, ' ')}</div><div className="survivability-chart-toggle" role="group" aria-label="Grafvy"><button type="button" aria-pressed={chartMode === 'liquidity'} onClick={() => setChartMode('liquidity')}>Likviditet</button><button type="button" aria-pressed={chartMode === 'value'} onClick={() => setChartMode('value')}>Värdekurvor</button></div>{chartMode === 'liquidity' ? <><SurvivabilityChart model={model} selectedYear={selectedYear}/><FundingExplanation model={model}/></> : <><ValueCurvesChart model={model} selectedYear={selectedYear}/><p className="survivability-value-explanation"><strong>Värde, inte likviditet.</strong> Linjerna visar återstående stress-NPV och canonical stress-NAV i {model.targetCurrency}. NAV använder valuation-timelinens canonical net-cash bridge, inte waterfallens periodiserade cash eller debt service. Kurvorna är inte closing cash, debt capacity, skuldservice eller faktisk equity-solvens per år.</p></>}</>}
     {props.performanceText && <p className="bread">{props.performanceText}</p>}
     <div className="corporate-sensitivity-table-scroll"><table className="corporate-sensitivity-table survivability-table"><caption>Corporate survivability per scenario och finansieringsläge</caption><thead><tr><th scope="col">Mått</th>{SURVIVABILITY_SCENARIOS.map((scenario) => <th scope="col" key={scenario.id}>{scenario.label}</th>)}</tr></thead><tbody>{METRICS.map(([id, label]) => <tr key={id} className={metricId === id ? 'is-selected-row' : ''}><th scope="row">{label}</th>{SURVIVABILITY_SCENARIOS.map((scenario) => { const value = props.models.get(scenario.id)?.metrics[id] ?? null; return <td key={scenario.id}><button type="button" aria-pressed={scenarioId === scenario.id && metricId === id} aria-label={`${label}, ${scenario.label}: ${format(id, value)}`} onClick={() => selectCell(scenario.id, id)}>{format(id, value)}</button></td>; })}</tr>)}<tr className="is-disabled-row"><th scope="row">Produktionsstopp</th><td colSpan={7}><button type="button" disabled title="Kräver högre upplösning i produktionsmodellen.">Kräver högre upplösning i produktionsmodellen.</button></td></tr></tbody></table></div>
     {drawerOpen && criticalRow && model && <aside className="survivability-drawer" role="dialog" aria-modal="false" aria-labelledby="critical-year-title"><header><div><p className="eyebrow">CRITICAL YEAR</p><h4 id="critical-year-title">{model.label} · {criticalRow.year}</h4></div><button type="button" aria-label="Stäng critical year" onClick={() => setDrawerOpen(false)}>×</button></header><div className="survivability-drawer-grid">{[['Opening cash',criticalRow.openingCash],['Operating cash after build-CAPEX gross-up',criticalRow.operatingCashGenerated],['Initial/build CAPEX',criticalRow.constructionCapex],['Construction funding need',criticalRow.constructionFundingNeed],['Internal cash',criticalRow.internalCashUsed],['Operating debt raised',criticalRow.debtAdded],['Operating equity raised',criticalRow.equityRaised],['Unfunded gap',criticalRow.unfundedGap],['Closing cash',criticalRow.closingCash],['FCFF including CAPEX',criticalRow.fcff]].map(([label,value])=><div key={String(label)}><span>{label}</span><strong>{format(String(label), value as number|null)}</strong></div>)}</div><h5>Projektbidrag</h5><div className="survivability-projects">{Object.keys({ ...criticalRow.operatingCashGeneratedByProject, ...criticalRow.constructionCapexByProject, ...criticalRow.debtAddedByProject, ...criticalRow.equityRaisedByProject }).map((projectId)=><div key={projectId}><strong>{projectId}</strong><span>Operating cash: {format('op',criticalRow.operatingCashGeneratedByProject[projectId] ?? null)}</span><span>Initial/build CAPEX: {format('capex',criticalRow.constructionCapexByProject[projectId] ?? null)}</span><span>Total waterfall debt: {format('debt',criticalRow.debtAddedByProject[projectId] ?? 0)}</span><span>Total waterfall equity: {format('equity',criticalRow.equityRaisedByProject[projectId] ?? 0)}</span><span>Total waterfall shares: {format('shares',criticalRow.newSharesByProject[projectId] ?? 0)}</span></div>)}</div>{model.diagnostics.length > 0 && <details><summary>Diagnostik</summary><ul>{model.diagnostics.map((item,index)=><li key={`${index}-${item}`}>{item}</li>)}</ul></details>}</aside>}

@@ -115,6 +115,49 @@ Rules are ordered, deterministic and contain no score:
 
 ## Main graph
 
+### Annual stress value curves audit and contract
+
+The graph footprint can be switched with the native, keyboard-accessible
+**Likviditet / Värdekurvor** buttons; liquidity remains the default. The value
+view replaces both liquidity panels rather than adding another permanent page
+section. It uses the selected scenario snapshot's existing
+`corporateValuationTimeSeries.rows` as producer and the survivability model/UI as
+consumer. No snapshot run, request, cache key or valuation calculation occurs
+when the view is toggled.
+
+The consumer publishes only `year`, `npvAbsolute` and `navAbsolute`, filtered at
+the same `analysisStartYear` used by survivability rows, plus the snapshot's
+`targetCurrency`. Each stress scenario consumes its own full Corporate snapshot
+timeline; Base is never substituted. Fixed versus dynamic financing changes the
+waterfall presentation but not these canonical valuation rows. Finite numbers
+are preserved exactly. Missing, `NaN` and infinite values remain non-drawable
+`null` values rather than false zeroes; a wholly unavailable series displays an
+explicit not-computable message.
+
+The audited producer maps `npvAbsolute` from canonical `npvAtPeriodTarget` and
+`navAbsolute` from canonical `navAtPeriodTarget`. Both are target-currency
+valuation stocks. Canonical NAV retains the valuation timeline's canonical
+net-cash bridge; it does not use periodized waterfall closing cash, annual debt
+service or a new dynamic survivability NAV. Consequently the view labels the
+metrics “Stress-NPV, kvarvarande värde” and “Canonical stress-NAV” and explicitly
+states that they are value, not liquidity, closing cash, debt capacity, debt
+service or annual equity solvency.
+
+NPV and NAV share one target-currency scale that always includes zero. They are
+not overlaid on USD financing bars, normalized, indexed or placed on a secondary
+axis. The selected/critical calendar year is marked, and the existing minimum
+width plus horizontal-overflow contract preserves later LOM years on mobile.
+
+Focused tests cover scenario-owned rows, analysis-window filtering, exact
+NPV/NAV/null preservation, target currency, financing-mode independence,
+default/toggle and cell interaction source contracts, native button ARIA/focus,
+both curves, zero line, legend/explanation, not-computable text and mobile
+horizontal overflow. Existing full snapshot, waterfall, shares and scalar
+valuation suites remain the non-regression guard for unchanged economics.
+
+Browser screenshots, physical touch scrolling and desktop/mobile rendering are
+**EJ VERIFIERADE** in this container unless recorded separately below.
+
 Two synchronized, independently scaled SVG panels share the Corporate calendar:
 
 1. closing cash, minimum reserve and zero line, with red shortfall fill;
