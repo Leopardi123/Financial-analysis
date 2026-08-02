@@ -2367,7 +2367,10 @@ export async function runCorporateSnapshotPipeline(args: {
             ?? marketInput.price_current_TargetCurrency,
           capexNeedByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
             const local = project.yearsByPeriod.indexOf(year);
-            if (local < 0 || local >= project.productionStartPeriod) return 0;
+            // Initial/build CAPEX can remain in the production-start (ramp) period.
+            // Include that period in the construction leg so FCFF is grossed up once
+            // and the amount is not mislabeled as an operating cash deficit.
+            if (local < 0 || local > project.productionStartPeriod) return 0;
             const capex = context?.economics.capexUSD[local];
             return capex == null ? null : Math.max(0, capex);
           }),
@@ -2415,7 +2418,7 @@ export async function runCorporateSnapshotPipeline(args: {
           reasonIfUnavailable: 'project financing not computed: missing inputs project capex series',
         };
       }
-      const capexBeforeProduction = projectCapexSeries.slice(0, Math.max(0, project.productionStartPeriod));
+      const capexBeforeProduction = projectCapexSeries.slice(0, Math.max(0, project.productionStartPeriod + 1));
       if (capexBeforeProduction.some((value) => value === null || !Number.isFinite(value))) {
         return {
           projectId: project.projectId,

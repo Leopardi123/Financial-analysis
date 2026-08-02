@@ -36,6 +36,24 @@ The repository still has no complete Viscaria Corporate snapshot fixture, so the
 production boundary itself is taken from the runtime project's saved JSON via
 the canonical project marker, never inferred from cash-flow signs.
 
+### Viscaria production-start audit
+
+The checked-in Viscaria debug series has `productionStartPeriod = 2` (2027) and
+still contains USD 105,389,029 of CAPEX in that period. Its 2027 FCFF is
+USD -144,381,554; grossing the production-start CAPEX out leaves approximately
+USD -38,992,525 of operating/working-capital cash deficit. The previous
+waterfall boundary used `period < productionStartPeriod`, so the USD 105.4m was
+incorrectly presented as operating funding in the survivability bar.
+
+The corrected boundary treats initial/build CAPEX **through and including** the
+production-start period as construction financing. It remains in the canonical
+cash chronology and total financing, but is excluded from survivability status,
+operating debt/equity bars and operating dilution. Any residual bar in 2027 is
+therefore the ramp year's genuine operating/working-capital funding need, not a
+debt stock, interest expense, amortization or a recurring debt cost. Empty bars
+in later years mean those years require no new operating financing; they do not
+mean that previously raised debt has been repaid.
+
 ## Scenario definitions
 
 Base reuses the already completed Corporate snapshot. Six lazy scenarios are
@@ -93,6 +111,12 @@ Two synchronized, independently scaled SVG panels share the Corporate calendar:
 
 1. closing cash, minimum reserve and zero line, with red shortfall fill;
 2. stacked debt, equity and unfunded-gap bars.
+
+The second panel is explicitly labeled **Operating debt/equity raised**. It
+shows new proceeds in each year, not outstanding debt. The help text and drawer
+separate initial/build CAPEX, construction funding need, operating cash and
+operating funding so a large production-start build tranche cannot be mistaken
+for operating distress.
 
 There is no dual axis and the old value graph is not reused. Both panels are in
 one horizontal mobile-safe scroll container and expose accessible labels and

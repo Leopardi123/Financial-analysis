@@ -852,6 +852,32 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   assert.equal(multipleRow.evEbitda7xPerShare, (ev7xTarget + netCash) / sharesPf);
 });
 
+test('production-start CAPEX stays in the construction leg instead of operating funding', async () => {
+  const body = await loadFixture();
+  const raw = ((body.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>);
+  const time = raw.time as Record<string, unknown>;
+  const productionStartPeriod = time.productionStartPeriod as number;
+  const series = raw.series as Record<string, unknown>;
+  const capex = series.capexUSD as number[];
+  const rampCapex = 105_389_029;
+  series.capexUSD = capex.map((value, index) => index === productionStartPeriod ? rampCapex : value);
+  body.balanceSheet = { cash_t0_TargetCurrency: 0, debt_t0_TargetCurrency: 0 };
+  body.fx = { source: 'manual', anchor: 'today', manual_fx_USD_to_TargetCurrency: 1, scenario: { mode: 'spot' } };
+  body.financingPlan = { use_cash_first: true, cash_use_percent: 1, debt_fraction: 1, equity_fraction: 0 };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const productionStartYear = time.productionStartYear as number;
+  const row = result.snapshot.financing.corporate_cash_waterfall?.rows.find((item) => item.year === productionStartYear);
+  assert.ok(row);
+  assert.equal(row.constructionCapexByProject.ABRA_MINIMAL, rampCapex);
+  assert.equal(row.constructionCapex, rampCapex);
+  assert.ok(Math.abs((row.operatingCashGenerated ?? 0) - ((result.snapshot.series?.fcffUSD[productionStartPeriod] ?? 0) + rampCapex)) < 1e-6);
+  assert.ok((row.operationalFundingNeed ?? 0) <= Math.max(0, -(row.operatingCashGenerated ?? 0)));
+});
+
 test('reported debt changes NAV but cannot alter the corporate cash waterfall or High absolute', async () => {
   const body = await loadFixture();
   body.balanceSheet = { cash_t0_TargetCurrency: 100_000_000, debt_t0_TargetCurrency: 0 };

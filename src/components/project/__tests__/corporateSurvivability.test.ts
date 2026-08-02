@@ -43,8 +43,8 @@ test('scenario request definitions use full pipeline controls without mutating b
   const combined = createSurvivabilityScenarioRequest(base, 'combined'); assert.equal(combined.scenario.spotPriceMultiplier, .7); assert.deepEqual(combined.stressOptions, { opex15: true }); assert.equal(base.stressOptions, undefined);
 });
 
-test('survivability page contract includes graph, drawer, disabled stopp, keyboard buttons and ARIA', async () => {
+test('survivability page contract explains operating bars and separates production-start build CAPEX', async () => {
   const source = await readFile('src/components/project/CorporateSurvivabilityAnalysis.tsx', 'utf8');
-  for (const token of ['Closing cash','Minimum reserve','Unfunded gap','role="dialog"','aria-pressed','Produktionsstopp','Kräver högre upplösning i produktionsmodellen.','Corporate survivability analysis']) assert.match(source, new RegExp(token));
+  for (const token of ['Closing cash','Minimum reserve','Unfunded gap','Operating debt raised','inte skuldstock, ränta eller amortering','Initial/build CAPEX','Construction funding need','role="dialog"','aria-pressed','Produktionsstopp','Kräver högre upplösning i produktionsmodellen.','Corporate survivability analysis']) assert.match(source, new RegExp(token));
   const css = await readFile('src/index.css', 'utf8'); assert.match(css, /@media \(max-width: 700px\).*corporate-survivability-header/s);
 });
