@@ -45,6 +45,6 @@ test('scenario request definitions use full pipeline controls without mutating b
 
 test('survivability page contract explains operating bars and separates production-start build CAPEX', async () => {
   const source = await readFile('src/components/project/CorporateSurvivabilityAnalysis.tsx', 'utf8');
-  for (const token of ['Closing cash','Minimum reserve','Unfunded gap','Operating debt raised','inte skuldstock, ränta eller amortering','Varför syns stapeln','Övriga visade år behöver ingen ny driftfinansiering','Initial/build CAPEX','Construction funding need','role="dialog"','aria-pressed','Produktionsstopp','Kräver högre upplösning i produktionsmodellen.','Corporate survivability analysis']) assert.match(source, new RegExp(token));
+  for (const token of ['Closing cash','Minimum reserve','Negativ FCFF','negative-fcff','täcks av cash som byggts upp tidigare','Unfunded gap','Operating debt raised','inte skuldstock, ränta eller amortering','Varför syns stapeln','Övriga visade år behöver ingen ny driftfinansiering','Initial/build CAPEX','Construction funding need','role="dialog"','aria-pressed','Produktionsstopp','Kräver högre upplösning i produktionsmodellen.','Corporate survivability analysis']) assert.match(source, new RegExp(token));
   const css = await readFile('src/index.css', 'utf8'); assert.match(css, /@media \(max-width: 700px\).*corporate-survivability-header/s);
 });

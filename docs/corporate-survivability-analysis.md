@@ -131,6 +131,22 @@ year and prints its operating cash, opening cash, reserve, new debt, new equity
 and gap. It also states whether any later displayed year needs new financing.
 This makes a solitary bar self-explanatory without requiring a table-cell click.
 
+### Funding bars are not the complete risk signal
+
+No financing bar in a year means only that accumulated opening cash is sufficient
+to absorb that year's cash flow and reserve requirement. It does **not** mean the
+year has positive FCFF or no economic weakness. In the deployed Spot -50% view,
+the table reports two negative-FCFF years while only 2027 requires fresh funding;
+the other negative year is absorbed by cash accumulated in intervening positive
+years. The cash panel now marks every negative-FCFF year with a red triangle and
+the explanation lists their calendar years, including years outside the initial
+mobile viewport.
+
+This remains a liquidity analysis, not debt-service analysis. The model still
+does not contain annual interest, amortization, maturities or covenants, so the
+absence of later financing bars cannot establish that outstanding debt is
+serviceable or repaid.
+
 There is no dual axis and the old value graph is not reused. Both panels are in
 one horizontal mobile-safe scroll container and expose accessible labels and
 point/bar titles.
