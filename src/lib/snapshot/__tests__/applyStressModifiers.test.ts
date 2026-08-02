@@ -52,6 +52,15 @@ test('applyStressModifiers updates tax, opex, sustaining and capex split in inpu
   assert.equal(out.stressedInput.scenario.delayPeriods, 2);
 });
 
+test('opex15 scales the same raw operating-cost producer used by the full pipeline', async () => {
+  const body = await loadFixture();
+  const series = ((body.projects[0].rawJson as Record<string, unknown>).series as Record<string, unknown>);
+  series.operatingCostsUSD = [10, 20, 30, 40, 50];
+  const out = applyStressModifiers(body, { opex15: true });
+  const stressed = (((out.stressedInput.projects[0].rawJson as Record<string, unknown>).series as Record<string, unknown>).operatingCostsUSD);
+  assert.deepEqual(stressed, [11.5, 23, 34.5, 46, 57.49999999999999]);
+});
+
 test('applyStressModifiers reports explicit tp edge case when tp+2 exceeds masterN', async () => {
   const base = await loadFixture();
   const raw = base.projects[0].rawJson as Record<string, unknown>;

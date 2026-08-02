@@ -12,10 +12,12 @@ export type CorporateSensitivityColumn = {
 
 export function CorporateMetalPriceSensitivity(props: {
   baseContent: ReactNode;
+  survivabilityContent: ReactNode;
   columns: CorporateSensitivityColumn[];
   metrics: CorporateSensitivityMetric[];
   renderChart: (multiplier: CorporateMetalPriceMultiplier, focus: CorporateSensitivityMetric['focus']) => ReactNode;
   onSensitivityOpen?: () => void;
+  onSurvivabilityOpen?: () => void;
   loading?: boolean;
   error?: string | null;
   performanceText?: string | null;
@@ -29,22 +31,25 @@ export function CorporateMetalPriceSensitivity(props: {
   const [page, setPage] = useState(0);
   const go = (nextPage: number) => {
     if (nextPage === 1) props.onSensitivityOpen?.();
+    if (nextPage === 2) props.onSurvivabilityOpen?.();
     scroller.current?.scrollTo({ left: nextPage * scroller.current.clientWidth, behavior: 'smooth' });
     setPage(nextPage);
   };
   const onScroll = (event: UIEvent<HTMLDivElement>) => {
     const node = event.currentTarget;
-    const nextPage = node.clientWidth > 0 && node.scrollLeft >= node.clientWidth * 0.5 ? 1 : 0;
+    const nextPage = node.clientWidth > 0 ? Math.max(0, Math.min(2, Math.round(node.scrollLeft / node.clientWidth))) : 0;
     if (nextPage !== page) {
       setPage(nextPage);
       if (nextPage === 1) props.onSensitivityOpen?.();
+      if (nextPage === 2) props.onSurvivabilityOpen?.();
     }
   };
 
   return <section className="corporate-finance-pages" aria-label="Corporate-värderingssidor">
-    <nav className="corporate-page-nav" aria-label="Värderingssidor">
-      <button type="button" onClick={() => go(0)} aria-current={page === 0 ? 'page' : undefined} aria-label="Visa basvärdering">←</button>
-      <button type="button" onClick={() => go(1)} aria-current={page === 1 ? 'page' : undefined} aria-label="Visa metallprissensitivitet">→</button>
+    <nav className="corporate-page-nav" aria-label="Corporate analyssidor">
+      <button type="button" onClick={() => go(0)} aria-current={page === 0 ? 'page' : undefined} aria-label="Visa basvärdering">1</button>
+      <button type="button" onClick={() => go(1)} aria-current={page === 1 ? 'page' : undefined} aria-label="Visa metallprissensitivitet">2</button>
+      <button type="button" onClick={() => go(2)} aria-current={page === 2 ? 'page' : undefined} aria-label="Visa Corporate survivability">3</button>
     </nav>
     <div className="corporate-page-scroller" ref={scroller} onScroll={onScroll}>
       <div className="corporate-finance-page" aria-label="Basvärdering">{props.baseContent}</div>
@@ -69,7 +74,8 @@ export function CorporateMetalPriceSensitivity(props: {
         </div>
         {!!selected?.diagnostics.length && <details><summary>Diagnostik</summary><ul>{selected.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul></details>}
       </div>
+      <div className="corporate-finance-page" aria-label="Corporate survivability">{props.survivabilityContent}</div>
     </div>
-    <div className="corporate-page-indicator" aria-hidden="true"><span>1</span><span>2</span></div>
+    <div className="corporate-page-indicator" aria-hidden="true"><span>1</span><span>2</span><span>3</span></div>
   </section>;
 }

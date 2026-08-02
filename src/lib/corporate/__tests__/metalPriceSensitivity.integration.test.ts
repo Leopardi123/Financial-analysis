@@ -34,6 +34,9 @@ test('seven full scenarios preserve spot parity, isolate inputs, and recalculate
   assert.equal(spot.ok, true); if (!spot.ok || !pureSpot.ok) return;
   for (const key of ['series', 'aggregation', 'canonicalValuationTimeline', 'corporateValuationTimeSeries', 'corporateQualityMultipleTimeSeries', 'financing']) assert.deepEqual((spot.snapshot as any)[key], (pureSpot.snapshot as any)[key], `1.00 parity: ${key}`);
   const low = results[0]; const high = results[6]; assert.equal(low.ok, true); assert.equal(high.ok, true); if (!low.ok || !high.ok) return;
+  assert.equal(low.snapshot.financing.shares_post_financing, 402_388_436.37417, 'Los Ricos Spot -25% canonical shares regression');
+  assert.equal(spot.snapshot.financing.shares_post_financing, 362_702_125.43736, 'Los Ricos Spot canonical shares regression');
+  assert.equal(high.snapshot.financing.shares_post_financing, 340_836_000, 'Los Ricos Spot +25% canonical shares regression');
   const resolvedSpotPriceByProject = Object.fromEntries(((pureSpot.snapshot as any).metalPriceSensitivityAudit.projects as Array<any>).map((project) => [project.projectId, project.resolvedPriceByKey]));
   const pinnedHigh = await runCorporateSnapshotPipeline({ body: { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: 1.25 }, resolvedSpotPriceByProject }, refresh: false });
   assert.equal(pinnedHigh.ok, true); if (!pinnedHigh.ok) return;
@@ -65,4 +68,28 @@ test('real scenario outputs populate canonical-share table and same-scenario Com
   const combined = Number(model.column.values.combined.replace(/\s/g, '').replace(',', '.'));
   const qualityValue = Number(model.column.values.qualityValue.replace(/\s/g, '').replace(',', '.'));
   if (Number.isFinite(qualityValue)) assert.ok(Math.abs(combined - (0.7 * reference.navPerShareTarget! + 0.3 * qualityValue)) < 0.02);
+});
+
+test('survivability scenario family reruns the full Corporate pipeline', async () => {
+  const body = await baseBody(['p5.los-ricos-north.project_json_v1.json', 'p6.los-ricos-south.project_json_v1.json']);
+  const requests = [
+    { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: .8 } },
+    { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: .7 } },
+    { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: .5 } },
+    { ...structuredClone(body), stressOptions: { opex25: true } },
+    { ...structuredClone(body), stressOptions: { sustainingCapex15: true } },
+    { ...structuredClone(body), scenario: { mode: 'spot', spotPriceMultiplier: .7 }, stressOptions: { opex15: true } },
+  ];
+  const results = await Promise.all(requests.map((request) => runCorporateSnapshotPipeline({ body: request, refresh: false })));
+  assert.ok(results.every((result) => result.ok));
+  for (const result of results) {
+    if (!result.ok) continue;
+    assert.ok(result.snapshot.financing.corporate_cash_waterfall?.rows.length);
+    assert.ok(result.snapshot.financing.corporate_cash_waterfall?.rows.every((row) => row.status === 'COMPUTABLE' && row.unfundedGap === 0));
+  }
+  const opex25 = results[3]; const combined = results[5]; assert.equal(opex25.ok, true); assert.equal(combined.ok, true);
+  if (opex25.ok && combined.ok) {
+    assert.notDeepEqual(opex25.snapshot.series?.fcffUSD, (await runCorporateSnapshotPipeline({ body, refresh: false }) as any).snapshot.series.fcffUSD);
+    assert.notDeepEqual(combined.snapshot.series?.fcffUSD, results[1].ok ? results[1].snapshot.series?.fcffUSD : null);
+  }
 });

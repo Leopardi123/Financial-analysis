@@ -736,10 +736,10 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  const totalCapexToFinanceUSD = (200000000 + 120000000) + 2 * (100000000 + 50000000);
   const fx = (body.fx as Record<string, unknown>).manual_fx_USD_to_TargetCurrency as number;
-  const initialCashUSD = ((body.balanceSheet as Record<string, number>).cash_t0_TargetCurrency ?? 0) / fx;
-  const expectedExternalNeedUSD = totalCapexToFinanceUSD - initialCashUSD;
+  const waterfall = result.snapshot.financing.corporate_cash_waterfall;
+  assert.ok(waterfall);
+  const expectedExternalNeedUSD = waterfall?.rows.reduce((sum, row) => sum + (row.totalExternalFundingNeed ?? 0), 0) ?? 0;
   const expectedDebtUSD = expectedExternalNeedUSD * 0.5;
   const expectedNewShares = (expectedExternalNeedUSD * 0.5 * fx) / 1;
 
@@ -749,6 +749,11 @@ test('corporate modeled aggregates debt by project financing fractions and keeps
   assert.ok(financingDebug?.totalNewShares !== null);
   assert.ok(Math.abs((financingDebug?.totalDebt_USD as number) - expectedDebtUSD) < 1e-6);
   assert.ok(Math.abs((financingDebug?.totalNewShares as number) - expectedNewShares) < 1e-6);
+  assert.equal(waterfall?.unfundedGap, 0);
+  assert.ok(waterfall?.rows.every((row) => row.closingCash !== null && row.closingCash >= row.minimumCashReserve));
+  const actualProjectFinancing = financingDebug?.actualProjectFinancing ?? {};
+  assert.ok(Math.abs(Object.values(actualProjectFinancing).reduce((sum, item) => sum + item.debtRaisedUSD, 0) - expectedDebtUSD) < 1e-6);
+  assert.ok(Math.abs(Object.values(actualProjectFinancing).reduce((sum, item) => sum + item.newShares!, 0) - expectedNewShares) < 1e-6);
   const corporateTimeSeries = (result.snapshot as unknown as { corporateValuationTimeSeries?: { rows: Array<{ year: number; sharesPf: number | null; npvAbsolute: number | null; npvPerShare: number | null; dcfAbsolute: number | null; dcfPerShare: number | null }>; projectMarkers: Array<{ projectId: string; constructionStartPeriod: number | null; productionStartPeriod: number | null; productionStartYear: number | null; firstContributionPeriod: number | null }> } }).corporateValuationTimeSeries;
   assert.equal(corporateTimeSeries?.rows.length, result.snapshot.series?.yearsByPeriod.length);
   assert.deepEqual(corporateTimeSeries?.projectMarkers.map((marker) => marker.projectId).sort(), ['ABRA_MINIMAL','ABRA_MINIMAL_2','ABRA_MINIMAL_3']);
@@ -845,6 +850,32 @@ test('corporate snapshot applies latest-quarter cash exactly once before debt/eq
   const netCash = evEbitda6xPerShare * sharesPf - ev6xTarget;
   assert.equal(multipleRow.evEbitda5xPerShare, (ev5xTarget + netCash) / sharesPf);
   assert.equal(multipleRow.evEbitda7xPerShare, (ev7xTarget + netCash) / sharesPf);
+});
+
+test('production-start CAPEX stays in the construction leg instead of operating funding', async () => {
+  const body = await loadFixture();
+  const raw = ((body.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>);
+  const time = raw.time as Record<string, unknown>;
+  const productionStartPeriod = time.productionStartPeriod as number;
+  const series = raw.series as Record<string, unknown>;
+  const capex = series.capexUSD as number[];
+  const rampCapex = 105_389_029;
+  series.capexUSD = capex.map((value, index) => index === productionStartPeriod ? rampCapex : value);
+  body.balanceSheet = { cash_t0_TargetCurrency: 0, debt_t0_TargetCurrency: 0 };
+  body.fx = { source: 'manual', anchor: 'today', manual_fx_USD_to_TargetCurrency: 1, scenario: { mode: 'spot' } };
+  body.financingPlan = { use_cash_first: true, cash_use_percent: 1, debt_fraction: 1, equity_fraction: 0 };
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const productionStartYear = time.productionStartYear as number;
+  const row = result.snapshot.financing.corporate_cash_waterfall?.rows.find((item) => item.year === productionStartYear);
+  assert.ok(row);
+  assert.equal(row.constructionCapexByProject.ABRA_MINIMAL, rampCapex);
+  assert.equal(row.constructionCapex, rampCapex);
+  assert.ok(Math.abs((row.operatingCashGenerated ?? 0) - ((result.snapshot.series?.fcffUSD[productionStartPeriod] ?? 0) + rampCapex)) < 1e-6);
+  assert.ok((row.operationalFundingNeed ?? 0) <= Math.max(0, -(row.operatingCashGenerated ?? 0)));
 });
 
 test('reported debt changes NAV but cannot alter the corporate cash waterfall or High absolute', async () => {

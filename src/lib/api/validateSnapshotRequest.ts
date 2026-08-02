@@ -69,6 +69,7 @@ export type SnapshotRequest = {
     tpPlus2?: boolean;
     sustainingCapex15?: boolean;
     opex25?: boolean;
+    opex15?: boolean;
     recoveryMinus10?: boolean;
     fxMinus10?: boolean;
     royalty50?: boolean;
@@ -592,6 +593,7 @@ export function validateSnapshotRequest(body: unknown): ValidationResult {
       tpPlus2: readFlag('tpPlus2'),
       sustainingCapex15: readFlag('sustainingCapex15'),
       opex25: readFlag('opex25'),
+      opex15: readFlag('opex15'),
       recoveryMinus10: readFlag('recoveryMinus10'),
       fxMinus10: readFlag('fxMinus10'),
       royalty50: readFlag('royalty50'),

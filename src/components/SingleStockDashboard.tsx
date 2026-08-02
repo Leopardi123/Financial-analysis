@@ -5,6 +5,8 @@ import CompanyPicker from "./CompanyPicker";
 import InfoPopover from "./InfoPopover";
 import ValueRangeSnapshotCard from "./project/ValueRangeSnapshotCard";
 import { CorporateMetalPriceSensitivity } from "./project/CorporateMetalPriceSensitivity.tsx";
+import { CorporateSurvivabilityAnalysis } from "./project/CorporateSurvivabilityAnalysis.tsx";
+import { buildCorporateSurvivabilityModel, type SurvivabilityFinancingMode, type SurvivabilityScenarioId } from "./project/corporateSurvivabilityModel.ts";
 import { buildCorporateSensitivityScenarioModel, CORPORATE_SENSITIVITY_METRICS } from "./project/corporateSensitivityModel.ts";
 import NpvSpotRangeComparisonCard from "./project/NpvSpotRangeComparisonCard";
 import AlltGickFelCard from "./project/AlltGickFelCard";
@@ -16,6 +18,8 @@ import { getCompanyProject, getCompanyProjectsBySymbol, type CompanyProjectSumma
 import { safeParseJson } from "../lib/client/json.ts";
 import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { useCorporateMetalPriceSensitivity, type CorporateResolvedSpotAudit } from "../hooks/useCorporateMetalPriceSensitivity.ts";
+import { useCorporateSurvivability } from "../hooks/useCorporateSurvivability.ts";
+import type { CorporateSnapshot } from "../lib/corporate/snapshot/types.ts";
 import { CORPORATE_METAL_PRICE_MULTIPLIERS } from "../lib/corporate/sensitivity.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { EXTRA_SHARES_HELP, extraSharesStorageKey, formatExtraSharesInput, parseExtraShares } from "../lib/market/extraShares.ts";
@@ -1967,6 +1971,15 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     : null;
   const resolvedCorporateSpotAudit = (corporateSnapshotData?.metalPriceSensitivityAudit ?? null) as CorporateResolvedSpotAudit | null;
   const corporateSensitivity = useCorporateMetalPriceSensitivity(corporateSnapshotRequest, corporateSensitivityEnabled && primaryView === "modeled", resolvedCorporateFx, resolvedCorporateSpotAudit);
+  const [corporateSurvivabilityEnabled, setCorporateSurvivabilityEnabled] = useState(false);
+  const [survivabilityFinancingMode, setSurvivabilityFinancingMode] = useState<SurvivabilityFinancingMode>('dynamic');
+  const corporateSurvivability = useCorporateSurvivability({
+    request: corporateSnapshotRequest,
+    baseSnapshot: corporateSnapshotData as CorporateSnapshot | null,
+    baseDiagnostics: [...((corporateDiagnostics?.errors as string[] | undefined) ?? []), ...((corporateDiagnostics?.warnings as string[] | undefined) ?? [])],
+    enabled: corporateSurvivabilityEnabled && primaryView === 'modeled', resolvedFx: resolvedCorporateFx,
+    resolvedSpotAudit: resolvedCorporateSpotAudit,
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -3389,6 +3402,15 @@ Capital Available: ${availableLabel}`,
     const diagnostics = [...(run?.response.diagnostics?.errors ?? []), ...(run?.response.diagnostics?.warnings ?? [])];
     return { multiplier, status: 'NOT_COMPUTABLE' as const, values: { status: 'NOT_COMPUTABLE' }, diagnostics, prices: [] };
   }), [corporateSensitivity.runs, corporateSensitivityModels]);
+  const corporateSurvivabilityModels = useMemo(() => {
+    const baseSnapshot = corporateSnapshotData as CorporateSnapshot | null; const models = new Map<SurvivabilityScenarioId, ReturnType<typeof buildCorporateSurvivabilityModel>>();
+    if (!baseSnapshot) return models;
+    for (const run of corporateSurvivability.runs) {
+      if (!run.response.ok || !run.response.snapshot) continue;
+      models.set(run.scenarioId, buildCorporateSurvivabilityModel({ scenarioId: run.scenarioId, snapshot: run.response.snapshot, baseSnapshot, financingMode: survivabilityFinancingMode, diagnostics: [...(run.response.diagnostics?.errors ?? []), ...(run.response.diagnostics?.warnings ?? [])] }));
+    }
+    return models;
+  }, [corporateSnapshotData, corporateSurvivability.runs, survivabilityFinancingMode]);
 
   const projectInputDebug = useMemo(() => {
     if (!projectSnapshotData) return null;
@@ -5763,6 +5785,14 @@ Capital Available: ${availableLabel}`,
                       <summary><h2 className="subrub small">{title}</h2></summary>
                       {sectionKey === "list2" && (
                         <CorporateMetalPriceSensitivity
+                          survivabilityContent={<CorporateSurvivabilityAnalysis
+                            models={corporateSurvivabilityModels}
+                            financingMode={survivabilityFinancingMode}
+                            onFinancingModeChange={setSurvivabilityFinancingMode}
+                            loading={corporateSurvivability.loading}
+                            error={corporateSurvivability.error}
+                            performanceText={corporateSurvivability.durationMs === null ? null : corporateSurvivability.durationMs === 0 ? 'Återöppning från cache: 0 ms' : `6 stresscenarier: ${corporateSurvivability.durationMs.toFixed(0)} ms · Base återanvändes`}
+                          />}
                           baseContent={<>
                         <ValueRangeSnapshotCard
                           priceToday={
@@ -5849,6 +5879,7 @@ Capital Available: ${availableLabel}`,
                           columns={corporateSensitivityColumns}
                           metrics={CORPORATE_SENSITIVITY_METRICS}
                           onSensitivityOpen={() => setCorporateSensitivityEnabled(true)}
+                          onSurvivabilityOpen={() => setCorporateSurvivabilityEnabled(true)}
                           loading={corporateSensitivity.loading}
                           error={corporateSensitivity.error}
                           performanceText={corporateSensitivity.performance ? (corporateSensitivity.performance.cacheHit ? "Återöppning från cache: 0 ms" : `7 scenarier: ${corporateSensitivity.performance.totalMs.toFixed(0)} ms totalt · ${corporateSensitivity.performance.averageMs.toFixed(0)} ms/genomsnitt · ${corporateSensitivity.performance.slowestMs.toFixed(0)} ms långsammast`) : null}
