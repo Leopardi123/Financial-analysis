@@ -20,6 +20,22 @@ waterfall's operating, construction, debt, equity and share attribution maps.
 
 No UI-side formula recreates revenue, EBITDA, EBIT, tax, NOPAT or FCFF.
 
+### Analysis window
+
+Survivability status and headline metrics now begin at the later of the canonical
+valuation year and the first future `productionStartYear` published by Corporate
+project markers. If a project is already producing at the valuation year, the
+window begins at the valuation year. Rows before that boundary are retained in
+the canonical waterfall for correct cash chronology, but are excluded from the
+survivability chart, status, critical-year selection and metric table.
+
+This distinction matches the checked-in Viscaria audit series: the early axis
+contains very large initial CAPEX and pre-/ramp-production cash flows, while the
+question addressed here is whether operating years can fund continuing costs.
+The repository still has no complete Viscaria Corporate snapshot fixture, so the
+production boundary itself is taken from the runtime project's saved JSON via
+the canonical project marker, never inferred from cash-flow signs.
+
 ## Scenario definitions
 
 Base reuses the already completed Corporate snapshot. Six lazy scenarios are
@@ -48,6 +64,12 @@ resolution is required.
 **Dynamic** is default and consumes the complete scenario waterfall: cash-first,
 debt, equity, shares and reserve restoration all respond to stress.
 
+Construction financing remains in the waterfall and cash roll-forward, but is
+published separately from operating financing. Status, first financing year,
+largest funding need, debt, equity, new shares and dilution on this page consume
+only `operationalFundingNeed`, `operationalDebtAdded`,
+`operationalEquityRaised` and `operationalNewShares` inside the analysis window.
+
 **Fixed** is a presentation/diagnostic comparison. It reruns the stressed
 operating and construction cash chronology while applying Base's period debt,
 equity and shares. Any remaining reserve deficit is exposed as `unfundedGap`;
@@ -57,8 +79,8 @@ the UI never invents additional financing.
 
 Rules are ordered, deterministic and contain no score:
 
-1. `NOT_COMPUTABLE`: missing rows, non-computable waterfall row, closing cash or
-   FCFF.
+1. `NOT_COMPUTABLE`: missing production boundary/rows, non-computable waterfall
+   row, closing cash or FCFF.
 2. `CRITICAL`: positive unfunded gap or closing cash below minimum reserve.
 3. `FUNDING_REQUIRED`: positive total external funding need with no residual gap.
 4. `PRESSURED`: no external need, but minimum headroom is zero or lower, or more
@@ -78,7 +100,8 @@ point/bar titles.
 
 ## Table and critical-year drawer
 
-The table contains the seven requested scenarios and status, minimum headroom,
+The table contains the seven requested scenarios and production-window status,
+minimum headroom,
 critical year, negative-FCFF, reserve, financing, cumulative debt/equity,
 shares/dilution and secondary stress NPV/NAV rows. Every result cell is a native
 button with `aria-pressed` and an explicit accessible value label.
@@ -99,7 +122,9 @@ not repeated. The drawer is mounted only after a cell click.
 ## Verification
 
 - Pure-model tests cover dynamic/full financing, fixed financing/unfunded gap,
-  reserve, critical year, negative FCFF and dilution.
+  reserve, critical year, negative FCFF and dilution, plus a Viscaria-shaped
+  2025–2029 axis proving that historical/construction years are excluded and
+  only 2028+ operating funding drives the result.
 - Request tests lock every scenario definition and immutability.
 - Full Los Ricos project/Corporate pipeline integration runs all six stresses and
   verifies computable waterfall rows and zero gap under full financing.

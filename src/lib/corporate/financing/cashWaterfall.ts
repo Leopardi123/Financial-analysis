@@ -31,9 +31,14 @@ export type CashWaterfallRow = {
   remainingExternalFundingNeed: number | null;
   debtAdded: number | null;
   equityRaised: number | null;
+  constructionDebtAdded: number | null;
+  constructionEquityRaised: number | null;
+  operationalDebtAdded: number | null;
+  operationalEquityRaised: number | null;
   unfundedGap: number | null;
   closingCash: number | null;
   newShares: number | null;
+  operationalNewShares: number | null;
   cumulativeNewShares: number | null;
   cumulativeCanonicalShares: number | null;
   status: CashWaterfallRowStatus;
@@ -149,8 +154,9 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
         preFinancingCash: null, minimumCashReserve: reserve, constructionFundingNeed: null,
         operationalFundingNeed: null, totalExternalFundingNeed: null, internalCashUsed: null,
         initialCashUsed: null, internallyGeneratedCashUsed: null, remainingExternalFundingNeed: null,
-        debtAdded: null, equityRaised: null, unfundedGap: null, closingCash: null,
-        newShares: null, cumulativeNewShares: null, cumulativeCanonicalShares: null,
+        debtAdded: null, equityRaised: null, constructionDebtAdded: null, constructionEquityRaised: null,
+        operationalDebtAdded: null, operationalEquityRaised: null, unfundedGap: null, closingCash: null,
+        newShares: null, operationalNewShares: null, cumulativeNewShares: null, cumulativeCanonicalShares: null,
         status: 'NOT_COMPUTABLE', diagnostics: rowDiagnostics, internalCashUsedByProject: {},
         debtAddedByProject: {}, equityRaisedByProject: {}, newSharesByProject: {},
         operatingCashGeneratedByProject: {}, constructionCapexByProject: {},
@@ -209,12 +215,22 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
     const projectById = new Map(projects.map((project) => [project.projectId, project]));
     const debtAddedByProject: Record<string, number> = {};
     const equityRaisedByProject: Record<string, number> = {};
+    const debtFractionByAttribution: Record<string, number> = {};
+    let constructionDebtAdded = 0; let constructionEquityRaised = 0;
+    let operationalDebtAdded = 0; let operationalEquityRaised = 0;
     for (const [key, external] of Object.entries(fundingByAttribution)) {
       const projectDebt = key === CORPORATE_OPERATIONAL_FUNDING_KEY
         ? debtPercent
         : clampedFraction(projectById.get(key)?.debtPercent ?? debtPercent);
+      debtFractionByAttribution[key] = projectDebt;
       debtAddedByProject[key] = external * projectDebt;
       equityRaisedByProject[key] = external * (1 - projectDebt);
+      const constructionExternal = constructionExternalByProject[key] ?? 0;
+      const operationalExternal = operationalExternalByProject[key] ?? 0;
+      constructionDebtAdded += constructionExternal * projectDebt;
+      constructionEquityRaised += constructionExternal * (1 - projectDebt);
+      operationalDebtAdded += operationalExternal * projectDebt;
+      operationalEquityRaised += operationalExternal * (1 - projectDebt);
     }
     const debtAdded = sumRecord(debtAddedByProject);
     const equityRaised = sumRecord(equityRaisedByProject);
@@ -223,6 +239,7 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
 
     const newSharesByProject: Record<string, number | null> = {};
     let newShares: number | null = 0;
+    let operationalNewShares: number | null = 0;
     for (const [key, equityUSD] of Object.entries(equityRaisedByProject)) {
       if (equityUSD === 0) {
         newSharesByProject[key] = 0;
@@ -234,11 +251,16 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
       if (!isFiniteNumber(input.fxUSDToTargetCurrency) || input.fxUSDToTargetCurrency <= 0 || !isFiniteNumber(issuePrice) || issuePrice <= 0) {
         newSharesByProject[key] = null;
         newShares = null;
+        if ((operationalExternalByProject[key] ?? 0) > 0) operationalNewShares = null;
         rowDiagnostics.push(`New shares not computable for ${key}: positive equity requires finite FX and issue price > 0.`);
       } else if (newShares !== null) {
         const projectNewShares = equityUSD * input.fxUSDToTargetCurrency / issuePrice;
         newSharesByProject[key] = projectNewShares;
         newShares += projectNewShares;
+        if (operationalNewShares !== null) {
+          const operationalEquityUSD = (operationalExternalByProject[key] ?? 0) * (1 - (debtFractionByAttribution[key] ?? debtPercent));
+          operationalNewShares += operationalEquityUSD * input.fxUSDToTargetCurrency / issuePrice;
+        }
       }
     }
     if (newShares === null) cumulativeSharesComputable = false;
@@ -262,7 +284,9 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
       minimumCashReserve: reserve, constructionFundingNeed, operationalFundingNeed,
       totalExternalFundingNeed, internalCashUsed, initialCashUsed, internallyGeneratedCashUsed,
       remainingExternalFundingNeed: totalExternalFundingNeed, debtAdded, equityRaised,
+      constructionDebtAdded, constructionEquityRaised, operationalDebtAdded, operationalEquityRaised,
       unfundedGap, closingCash, newShares, cumulativeNewShares: cumulativeNewSharesValue,
+      operationalNewShares,
       cumulativeCanonicalShares, status, diagnostics: rowDiagnostics, internalCashUsedByProject,
       debtAddedByProject, equityRaisedByProject, newSharesByProject,
       operatingCashGeneratedByProject: operatingByProject,

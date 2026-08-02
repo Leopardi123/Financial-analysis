@@ -42,6 +42,15 @@ test('negative operations and construction CAPEX are financed exactly once', () 
   assert.deepEqual([row.preFinancingCash, row.constructionFundingNeed, row.operationalFundingNeed, row.totalExternalFundingNeed, row.closingCash], [-5, 15, 0, 15, 10]);
 });
 
+test('publishes separate construction and operating financing components', () => {
+  const result = run({ debtPercent: 0.25, projects: [project('A', [-20], [25])] });
+  const row = result.rows[0];
+  assert.deepEqual([row.constructionFundingNeed, row.operationalFundingNeed], [25, 20]);
+  assert.deepEqual([row.constructionDebtAdded, row.constructionEquityRaised], [6.25, 18.75]);
+  assert.deepEqual([row.operationalDebtAdded, row.operationalEquityRaised], [5, 15]);
+  assert.equal(row.operationalNewShares, 15);
+});
+
 test('future cash cannot finance an earlier operating or construction deficit', () => {
   const result = run({ projects: [project('A', [-20, 150], [0, 0]), project('B', [0, 0], [100, 0])] });
   assert.equal(result.rows[0].totalExternalFundingNeed, 120);

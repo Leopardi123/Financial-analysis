@@ -6,8 +6,8 @@ const METRICS = [
   ['status', 'Status'], ['minimumCashHeadroom', 'Minimum cash headroom'], ['minimumHeadroomYear', 'År med lägst headroom'],
   ['firstNegativeFcffYear', 'Första negativa FCFF-år'], ['negativeFcffYears', 'Antal negativa FCFF-år'],
   ['firstReserveBreach', 'Första reserve breach'], ['firstFinancingYear', 'Första financing year'],
-  ['largestAnnualFundingNeed', 'Största annual funding need'], ['cumulativeDebt', 'Kumulativ debt'],
-  ['cumulativeEquity', 'Kumulativ equity'], ['newShares', 'Nya aktier'], ['cumulativeDilution', 'Kumulativ utspädning'],
+  ['largestAnnualFundingNeed', 'Största operating funding need'], ['cumulativeDebt', 'Operating debt'],
+  ['cumulativeEquity', 'Operating equity'], ['newShares', 'Nya aktier för drift'], ['cumulativeDilution', 'Utspädning för drift'],
   ['stressNpv', 'Stress NPV'], ['stressNav', 'Stress NAV'],
 ] as const;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -49,7 +49,7 @@ export function CorporateSurvivabilityAnalysis(props: { models: Map<Survivabilit
   };
   return <section className="corporate-survivability" aria-label="Corporate survivability analysis">
     <header className="corporate-survivability-header"><div><p className="eyebrow">CORPORATE SURVIVABILITY</p><h3>Kan bolaget överleva?</h3><p>Likviditet, finansieringsbehov, utspädning och cash runway över Corporate LOM.</p></div><fieldset><legend>Finansieringsläge</legend><button type="button" aria-pressed={props.financingMode === 'dynamic'} onClick={() => props.onFinancingModeChange('dynamic')}>Dynamisk finansiering</button><button type="button" aria-pressed={props.financingMode === 'fixed'} onClick={() => props.onFinancingModeChange('fixed')}>Fast finansiering</button></fieldset></header>
-    <p className="survivability-mode-help">{props.financingMode === 'dynamic' ? 'Full waterfall: cash-first, debt, equity och nya aktier räknas om.' : 'Basens debt, equity och shares är låsta. Otäckt behov visas som unfunded gap.'}</p>
+    <p className="survivability-mode-help">Analysperiod: framtida produktionsår från {model?.analysisStartYear ?? 'ej fastställt'}. Historiska år och ren construction-finansiering exkluderas från status och nyckeltal. {props.financingMode === 'dynamic' ? 'Driftens debt, equity och nya aktier räknas om.' : 'Basens finansiering är låst; otäckt driftbehov visas som unfunded gap.'}</p>
     {props.loading && <p className="status" aria-live="polite">Beräknar sex fulla stresscenarier; Base återanvänds…</p>}{props.error && <p className="status error">{props.error}</p>}
     {model && <><div className="corporate-sensitivity-status" data-status={model.status}>{model.label} · {model.status.replace(/_/g, ' ')}</div><SurvivabilityChart model={model} selectedYear={selectedYear}/></>}
     {props.performanceText && <p className="bread">{props.performanceText}</p>}

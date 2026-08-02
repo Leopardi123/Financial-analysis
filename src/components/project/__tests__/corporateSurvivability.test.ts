@@ -3,8 +3,12 @@ import { computeCorporateCashWaterfall } from '../../../lib/corporate/financing/
 import { buildCorporateSurvivabilityModel } from '../corporateSurvivabilityModel.ts';
 import { createSurvivabilityScenarioRequest } from '../../../hooks/useCorporateSurvivability.ts';
 
-const waterfall = (fcff: number[]) => computeCorporateCashWaterfall({ latestQuarterlyCash: 10, useLatestQuarterlyCash: true, cashUsedPercent: 1, minimumCashReserve: 5, debtPercent: 0, fxUSDToTargetCurrency: 1, equityRaisePriceTargetCurrency: 1, sharesCurrent: 100, yearsByPeriod: [2026,2027], projects: [{ projectId: 'A', constructionStartPeriod: 0, capexNeedByPeriod: [0,0], fcffIncludesConstructionCapex: true, fcffByPeriod: fcff }] });
-const snapshot = (fcff: number[]) => ({ series: { fcffUSD: fcff }, financing: { corporate_cash_waterfall: waterfall(fcff) }, NPV_today_TargetCurrency: 50, NAV_today_TargetCurrency: 45 }) as any;
+const snapshot = (fcff: number[], years = fcff.map((_, index) => 2026 + index), productionStartYear = 2026, capex = fcff.map(() => 0)) => ({
+  series: { fcffUSD: fcff }, market: { shares_current: 100 },
+  financing: { corporate_cash_waterfall: computeCorporateCashWaterfall({ latestQuarterlyCash: 10, useLatestQuarterlyCash: true, cashUsedPercent: 1, minimumCashReserve: 5, debtPercent: 0, fxUSDToTargetCurrency: 1, equityRaisePriceTargetCurrency: 1, sharesCurrent: 100, yearsByPeriod: years, projects: [{ projectId: 'A', constructionStartPeriod: 0, capexNeedByPeriod: capex, fcffIncludesConstructionCapex: true, fcffByPeriod: fcff }] }) },
+  corporateValuationTimeSeries: { valuationYear: 2026, projectMarkers: [{ productionStartYear, productionStartPeriod: years.indexOf(productionStartYear) }] },
+  NPV_today_TargetCurrency: 50, NAV_today_TargetCurrency: 45,
+}) as any;
 
 test('dynamic survivability classifies funding, headroom, negative FCFF and dilution', () => {
   const base = snapshot([10,10]); const stressed = snapshot([-20,-10]);
@@ -18,6 +22,17 @@ test('fixed financing locks base proceeds and exposes the stress as unfunded gap
   const base = snapshot([10,10]); const stressed = snapshot([-20,-10]);
   const model = buildCorporateSurvivabilityModel({ scenarioId: 'spot50', snapshot: stressed, baseSnapshot: base, financingMode: 'fixed' });
   assert.equal(model.status, 'CRITICAL'); assert.ok(model.rows.some((row) => (row.unfundedGap ?? 0) > 0)); assert.equal(model.metrics.newShares, 0);
+});
+
+test('analysis excludes historical and construction years and measures only operating funding', () => {
+  const years = [2025, 2026, 2027, 2028, 2029]; const capex = [100, 200, 100, 0, 0];
+  const base = snapshot([-100, -200, -100, 20, 20], years, 2028, capex);
+  const stressed = snapshot([-100, -200, -100, -30, 10], years, 2028, capex);
+  const model = buildCorporateSurvivabilityModel({ scenarioId: 'spot50', snapshot: stressed, baseSnapshot: base, financingMode: 'dynamic' });
+  assert.deepEqual(model.rows.map((row) => row.year), [2028, 2029]);
+  assert.equal(model.analysisStartYear, 2028); assert.equal(model.metrics.firstNegativeFcffYear, 2028);
+  assert.equal(model.metrics.firstFinancingYear, 2028); assert.equal(model.metrics.largestAnnualFundingNeed, 30);
+  assert.equal(model.metrics.newShares, 30, 'construction shares are excluded from operating dilution');
 });
 
 test('scenario request definitions use full pipeline controls without mutating base', () => {

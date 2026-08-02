@@ -16,7 +16,7 @@ export type SurvivabilityRow = CashWaterfallRow & { fcff: number | null };
 export type SurvivabilityModel = {
   scenarioId: SurvivabilityScenarioId; label: string; financingMode: SurvivabilityFinancingMode;
   status: SurvivabilityStatus; rows: SurvivabilityRow[]; criticalYear: number | null;
-  metrics: Record<string, number | string | null>; diagnostics: string[];
+  metrics: Record<string, number | string | null>; diagnostics: string[]; analysisStartYear: number | null;
 };
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -31,10 +31,11 @@ function fixedRows(scenarioRows: CashWaterfallRow[], baseRows: CashWaterfallRow[
     const closingCash = preFinancingCash + debt + equity;
     const unfundedGap = Math.max(0, source.minimumCashReserve - closingCash);
     const row: SurvivabilityRow = {
-      ...source, openingCash: opening, preFinancingCash, debtAdded: debt, equityRaised: equity,
+      ...source, openingCash: opening, preFinancingCash,
+      debtAdded: base.operationalDebtAdded ?? 0, equityRaised: base.operationalEquityRaised ?? 0,
       totalExternalFundingNeed: unfundedGap, remainingExternalFundingNeed: unfundedGap,
       operationalFundingNeed: unfundedGap, unfundedGap, closingCash,
-      newShares: base.newShares, cumulativeNewShares: base.cumulativeNewShares,
+      newShares: base.operationalNewShares ?? 0, cumulativeNewShares: base.cumulativeNewShares,
       cumulativeCanonicalShares: base.cumulativeCanonicalShares,
       debtAddedByProject: base.debtAddedByProject, equityRaisedByProject: base.equityRaisedByProject,
       newSharesByProject: base.newSharesByProject, status: source.status, diagnostics: source.diagnostics,
@@ -53,9 +54,19 @@ export function buildCorporateSurvivabilityModel(args: {
   const dynamicRows = args.snapshot.financing.corporate_cash_waterfall?.rows ?? [];
   const baseRows = args.baseSnapshot.financing.corporate_cash_waterfall?.rows ?? [];
   const fcff = args.snapshot.series?.fcffUSD ?? [];
-  const rows: SurvivabilityRow[] = args.financingMode === 'fixed'
+  const allRows: SurvivabilityRow[] = args.financingMode === 'fixed'
     ? fixedRows(dynamicRows, baseRows, fcff)
-    : dynamicRows.map((row, index) => ({ ...row, fcff: fcff[index] ?? null }));
+    : dynamicRows.map((row, index) => ({ ...row, totalExternalFundingNeed: row.operationalFundingNeed,
+      remainingExternalFundingNeed: row.operationalFundingNeed, debtAdded: row.operationalDebtAdded,
+      equityRaised: row.operationalEquityRaised, newShares: row.operationalNewShares, fcff: fcff[index] ?? null }));
+  const timeline = (args.snapshot as CorporateSnapshot & { corporateValuationTimeSeries?: { valuationYear?: number; projectMarkers?: Array<{ productionStartYear?: number | null; productionStartPeriod?: number | null }> } }).corporateValuationTimeSeries;
+  const valuationYear = finite(timeline?.valuationYear) ? timeline.valuationYear : null;
+  const markers = timeline?.projectMarkers ?? [];
+  const hasAlreadyProducingProject = markers.some((marker) => marker.productionStartYear === null && marker.productionStartPeriod === null);
+  const futureProductionYears = markers.map((marker) => marker.productionStartYear).filter(finite);
+  const analysisStartYear = valuationYear === null ? null : hasAlreadyProducingProject || futureProductionYears.length === 0
+    ? valuationYear : Math.max(valuationYear, Math.min(...futureProductionYears));
+  const rows = analysisStartYear === null ? [] : allRows.filter((row) => finite(row.year) && row.year >= analysisStartYear);
   const diagnostics = [...(args.diagnostics ?? []), ...rows.flatMap((row) => row.diagnostics ?? [])];
   const computable = rows.length > 0 && rows.every((row) => row.status === 'COMPUTABLE' && finite(row.closingCash) && finite(row.fcff));
   const minimumHeadroom = computable ? Math.min(...rows.map((row) => (row.closingCash as number) - row.minimumCashReserve)) : null;
@@ -68,12 +79,10 @@ export function buildCorporateSurvivabilityModel(args: {
   const hasGap = rows.some((row) => finite(row.unfundedGap) && row.unfundedGap > 0);
   const status: SurvivabilityStatus = !computable ? 'NOT_COMPUTABLE' : hasGap || reserveBreach ? 'CRITICAL'
     : fundingRows.length > 0 ? 'FUNDING_REQUIRED' : (minimumHeadroom ?? 0) <= 0 || negativeRows.length > 1 ? 'PRESSURED' : 'ROBUST';
-  const firstShares = args.snapshot.market?.shares_current ?? rows.find((row) => finite(row.cumulativeCanonicalShares))?.cumulativeCanonicalShares ?? null;
-  const lastShares = [...rows].reverse().find((row) => finite(row.cumulativeCanonicalShares))?.cumulativeCanonicalShares ?? null;
-  const dilution = finite(firstShares) && firstShares > 0 && finite(lastShares) ? lastShares / firstShares - 1 : null;
+  const firstShares = args.snapshot.market?.shares_current ?? null;
   const sum = (key: 'debtAdded' | 'equityRaised' | 'newShares') => rows.every((row) => finite(row[key])) ? rows.reduce((total, row) => total + (row[key] as number), 0) : null;
   return {
-    scenarioId: args.scenarioId, label, financingMode: args.financingMode, status, rows,
+    scenarioId: args.scenarioId, label, financingMode: args.financingMode, status, rows, analysisStartYear,
     criticalYear: critical?.year ?? null, diagnostics,
     metrics: {
       status, minimumCashHeadroom: minimumHeadroom, minimumHeadroomYear: critical?.year ?? null,
@@ -81,7 +90,7 @@ export function buildCorporateSurvivabilityModel(args: {
       firstReserveBreach: reserveBreach?.year ?? null, firstFinancingYear: fundingRows[0]?.year ?? null,
       largestAnnualFundingNeed: fundingRows.length ? Math.max(...fundingRows.map((row) => row.totalExternalFundingNeed as number)) : 0,
       cumulativeDebt: sum('debtAdded'), cumulativeEquity: sum('equityRaised'), newShares: sum('newShares'),
-      cumulativeDilution: dilution, stressNpv: args.snapshot.NPV_today_TargetCurrency,
+      cumulativeDilution: finite(firstShares) && firstShares > 0 && finite(sum('newShares')) ? (sum('newShares') as number) / firstShares : null, stressNpv: args.snapshot.NPV_today_TargetCurrency,
       stressNav: args.snapshot.NAV_today_TargetCurrency,
     },
   };
