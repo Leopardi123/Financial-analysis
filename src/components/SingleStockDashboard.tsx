@@ -3579,8 +3579,11 @@ Capital Available: ${availableLabel}`,
         material: true,
         manualPrice: info.manualFallbackValue ?? null,
         fmpPrice: info.livePriceValue ?? null,
-        jsonStudyPrice: null,
+        datasetId: info.datasetId ?? null,
         winningSource: info.priceSourceUsed ?? null,
+        missingSourceReason: info.missingSourceReason ?? null,
+        asOfDate: info.asOfDate ?? null,
+        unit: info.sourceUnit ?? info.interpretedUnit ?? null,
         timestampUtc: info.manualEnteredAtUtc ?? null,
         currency: 'USD',
         finalSpotPrice: info.normalizedOutputValue ?? null,
@@ -3622,7 +3625,7 @@ Capital Available: ${availableLabel}`,
           metals: materialMetals,
           missingMaterialPrice: Boolean((diagnosticsMeta.metalsWithPriceFailure as unknown[] | undefined)?.length),
           scenarioBlocked: !npvSpotRange,
-          priorityRule: 'manual price → FMP price → JSON study price',
+          priorityRule: 'manual price → Nasdaq Data Link (Zn/Ni/Pb) → source missing/unresolved',
         },
         economy: {
           discountRate: projectSnapshotData.discountRate ?? null,
@@ -3894,6 +3897,22 @@ Capital Available: ${availableLabel}`,
   }, [projectSnapshotDiagnosticsMeta]);
 
   const projectMetalPriceDiagnostics = (projectSnapshotDiagnosticsMeta?.metalPriceDiagnostics ?? null) as Record<string, Record<string, unknown>> | null;
+  const modeledNasdaqMetalsDebugRows = useMemo(() => {
+    if (!projectMetalPriceDiagnostics) return [];
+    const targetMetals = new Set(["Zn", "Ni", "Pb"]);
+    return Object.entries(projectMetalPriceDiagnostics)
+      .filter(([metal]) => targetMetals.has(metal))
+      .map(([metal, item]) => ({
+        metal,
+        winningSource: typeof item.priceSourceUsed === "string" ? item.priceSourceUsed : null,
+        datasetId: typeof item.datasetId === "string" ? item.datasetId : null,
+        price: typeof item.normalizedOutputValue === "number" && Number.isFinite(item.normalizedOutputValue) ? item.normalizedOutputValue : null,
+        unit: typeof item.sourceUnit === "string" ? item.sourceUnit : (typeof item.interpretedUnit === "string" ? item.interpretedUnit : null),
+        asOfDate: typeof item.asOfDate === "string" ? item.asOfDate : null,
+        missingSourceReason: typeof item.missingSourceReason === "string" ? item.missingSourceReason : null,
+      }))
+      .sort((a, b) => a.metal.localeCompare(b.metal));
+  }, [projectMetalPriceDiagnostics]);
   const projectMissingPriceActions = useMemo(() => {
     const out: Array<{ metal: string; metalKey: string; unit: string | null; reason: string | null }> = [];
     if (!projectMetalPriceDiagnostics) return out;
@@ -6479,6 +6498,37 @@ Capital Available: ${availableLabel}`,
                           debugEnabled={valueIntervalDebugVisible}
                           debugPayload={projectValueIntervalDebug}
                         />
+                        {debugEnabled && modeledNasdaqMetalsDebugRows.length > 0 && (
+                          <div style={{ marginTop: 10, border: "1px solid #cbd5e1", borderRadius: 6, padding: 10, background: "#f8fafc" }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Metal price source debug (Zn/Ni/Pb · ?debug=1)</div>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>Metal</th>
+                                  <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>winningSource</th>
+                                  <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>datasetId</th>
+                                  <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>price</th>
+                                  <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>unit</th>
+                                  <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>asOfDate</th>
+                                  <th style={{ textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "4px 6px" }}>missingSourceReason</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {modeledNasdaqMetalsDebugRows.map((row) => (
+                                  <tr key={`nasdaq-debug-${row.metal}`}>
+                                    <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.metal}</td>
+                                    <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.winningSource ?? "—"}</td>
+                                    <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.datasetId ?? "—"}</td>
+                                    <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.price ?? "—"}</td>
+                                    <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.unit ?? "—"}</td>
+                                    <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px" }}>{row.asOfDate ?? "—"}</td>
+                                    <td style={{ borderBottom: "1px solid #e2e8f0", padding: "4px 6px", color: row.missingSourceReason ? "#991b1b" : "inherit" }}>{row.missingSourceReason ?? "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </details>
                     </div>
                     <div className="project-list2-page">
