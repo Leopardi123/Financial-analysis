@@ -3579,8 +3579,11 @@ Capital Available: ${availableLabel}`,
         material: true,
         manualPrice: info.manualFallbackValue ?? null,
         fmpPrice: info.livePriceValue ?? null,
-        jsonStudyPrice: null,
+        datasetId: info.datasetId ?? null,
         winningSource: info.priceSourceUsed ?? null,
+        missingSourceReason: info.missingSourceReason ?? null,
+        asOfDate: info.asOfDate ?? null,
+        unit: info.sourceUnit ?? info.interpretedUnit ?? null,
         timestampUtc: info.manualEnteredAtUtc ?? null,
         currency: 'USD',
         finalSpotPrice: info.normalizedOutputValue ?? null,
@@ -3622,7 +3625,7 @@ Capital Available: ${availableLabel}`,
           metals: materialMetals,
           missingMaterialPrice: Boolean((diagnosticsMeta.metalsWithPriceFailure as unknown[] | undefined)?.length),
           scenarioBlocked: !npvSpotRange,
-          priorityRule: 'manual price → FMP price → JSON study price',
+          priorityRule: 'manual price → Nasdaq Data Link (Zn/Ni/Pb) → source missing/unresolved',
         },
         economy: {
           discountRate: projectSnapshotData.discountRate ?? null,
@@ -6997,6 +7000,30 @@ Capital Available: ${availableLabel}`,
                             <div><strong>Outputsumma:</strong> {formatPanelValue(sumFiniteSeries(block.output))}</div>
                           </div>
                         ))}
+                      </div>
+                    )}
+                  </details>
+                  <details style={{ marginTop: 8, border: "1px solid #d8e0d2", borderRadius: 8, background: "#fff", padding: "8px 10px" }}>
+                    <summary><strong>Metal Price Debug (Zn/Ni/Pb)</strong></summary>
+                    {!projectMetalPriceDiagnostics ? (
+                      <p className="bread" style={{ marginTop: 8 }}>Ingen metal price debugdata ännu.</p>
+                    ) : (
+                      <div style={{ marginTop: 8 }}>
+                        <ul style={{ margin: "0 0 8px 0", paddingLeft: 18 }}>
+                          {Object.entries(projectMetalPriceDiagnostics).map(([metal, item]) => (
+                            <li key={`metal-price-debug-${metal}`}>
+                              <strong>{metal}</strong>: source={String(item.priceSourceUsed ?? "unknown")}, datasetId={String(item.datasetId ?? "null")}, price={String(item.normalizedOutputValue ?? "null")}, unit={String(item.sourceUnit ?? item.interpretedUnit ?? "null")}, asOfDate={String(item.asOfDate ?? "null")}, missingSourceReason={String(item.missingSourceReason ?? "null")}
+                            </li>
+                          ))}
+                        </ul>
+                        <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                          {JSON.stringify({
+                            metalsUsingLivePrices: projectSnapshotDiagnosticsMeta?.metalsUsingLivePrices ?? [],
+                            metalsUsingManualFallback: projectSnapshotDiagnosticsMeta?.metalsUsingManualFallback ?? [],
+                            metalsWithPriceFailure: projectSnapshotDiagnosticsMeta?.metalsWithPriceFailure ?? [],
+                            metalPriceDiagnostics: projectMetalPriceDiagnostics,
+                          }, null, 2)}
+                        </pre>
                       </div>
                     )}
                   </details>

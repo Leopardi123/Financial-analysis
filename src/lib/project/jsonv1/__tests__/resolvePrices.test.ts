@@ -129,7 +129,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   assertEqual(resolved.spotPriceUSDByMetal.Au[0], expectedSpotAu, 'spot mode uses today UTC anchor at t0');
   assertEqual(resolved.spotPriceUSDByMetal.Au[1], expectedSpotAu, 'spot mode replicates anchor value at t1');
   assertEqual(resolved.spotPriceUSDByMetal.Au[2], expectedSpotAu, 'spot mode replicates anchor value at t2');
-  assertEqual(resolved.diagnostics?.metalPriceDiagnostics?.Au?.priceSourceUsed, 'live', 'Au should use live price source when available');
+  assertEqual(resolved.diagnostics?.metalPriceDiagnostics?.Au?.priceSourceUsed, 'fmp', 'Au should use FMP source when available');
 
   const expectedLb = 2204.6226218487757;
   const gotLb = resolved.payableQtyByMetal.Cu[1];
@@ -235,16 +235,20 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   }
   const pbFallbackParsed = parseProjectJsonV1(pbFallbackBase);
   const pbFallbackResolved = await resolveProjectPricesToEngineInput(
-    { parsed: pbFallbackParsed },
+    { parsed: pbFallbackParsed, manualMetalPriceByKey: { PB_USD_LB: { metalKey: 'PB_USD_LB', displayName: 'Lead', unit: 'USD/lb', value: 1.23, enteredAtUtc: '2026-01-01T00:00:00.000Z', expiresAtUtc: '2099-01-01T00:00:00.000Z' } } },
     {
       resolvePriceSeriesFn: async ({ price_key, anchorDatesUtc }) => ({
         values: anchorDatesUtc.map(() => (price_key === 'XAU_USD_TOZ' ? 1900 : null)),
         warnings: [],
       }),
+      fetchNasdaqMetalPriceFn: async () => ({
+        ok: true,
+        value: { metal: 'lead', date: '2026-01-01', price: 2.5, unit: 'USD/lb', source: 'nasdaq_data_link', datasetId: 'TEST/LEAD' },
+      }),
     },
   );
-  assertEqual(pbFallbackResolved.spotPriceUSDByMetal.Pb[0], 1.23, 'Pb should use JSON fallback when live is missing');
-  assertEqual(pbFallbackResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'json-fallback', 'Pb should be marked as json-fallback');
+  assertEqual(pbFallbackResolved.spotPriceUSDByMetal.Pb[0], 1.23, 'Pb should use manual price when present');
+  assertEqual(pbFallbackResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'manual', 'Pb should be marked as manual');
 
   const pbFailureBase = JSON.parse(JSON.stringify(pbFallbackBase));
   delete pbFailureBase.metals.spotPriceUSDByMetal;
@@ -253,9 +257,15 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     { parsed: pbFailureParsed },
     {
       resolvePriceSeriesFn: async ({ anchorDatesUtc }) => ({ values: anchorDatesUtc.map(() => null), warnings: [] }),
+      fetchNasdaqMetalPriceFn: async () => ({
+        ok: false,
+        datasetId: null,
+        unit: null,
+        missingSourceReason: 'Missing explicit dataset mapping for lead: env NASDAQ_DATA_LINK_LEAD_DATASET_ID is not set.',
+      }),
     },
   );
-  assertEqual(pbFailureResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'failure', 'Pb should be marked as failure when both live and JSON fallback are missing');
+  assertEqual(pbFailureResolved.diagnostics?.metalPriceDiagnostics?.Pb?.priceSourceUsed, 'missing', 'Pb should be marked as missing when dataset resolution fails');
 
   const znSuspectBase = getProjectJsonV1Template();
   znSuspectBase.economicsBreakdown = null;
@@ -289,11 +299,15 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
         values: anchorDatesUtc.map(() => (price_key === 'ZN_USD_LB' ? 112.4375 : (price_key === 'XAU_USD_TOZ' ? 1900 : null))),
         warnings: [],
       }),
+      fetchNasdaqMetalPriceFn: async () => ({
+        ok: true,
+        value: { metal: 'zinc', date: '2026-02-01', price: 3000, unit: 'USD/tonne', source: 'nasdaq_data_link', datasetId: 'TEST/ZINC' },
+      }),
     },
   );
-  assertEqual(znSuspectResolved.spotPriceUSDByMetal.Zn[0], 1.4, 'Zn should fall back to JSON when live price is outside sanity band');
-  assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'json-fallback', 'Zn suspect live should be rejected and fallback should be used');
-  assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.sanityPass, false, 'Zn suspect live should fail sanity check');
+  assert(Math.abs((znSuspectResolved.spotPriceUSDByMetal.Zn[0] ?? 0) - (3000 / 2204.6226218)) < 1e-9, 'Zn should use Nasdaq Data Link with explicit unit conversion');
+  assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'nasdaq_data_link', 'Zn should be marked as nasdaq_data_link');
+  assertEqual(znSuspectResolved.diagnostics?.metalPriceDiagnostics?.Zn?.datasetId, 'TEST/ZINC', 'Zn diagnostics should include dataset id');
 
   const znSuspectNoFallbackBase = JSON.parse(JSON.stringify(znSuspectBase));
   delete znSuspectNoFallbackBase.metals.spotPriceUSDByMetal;
@@ -305,10 +319,16 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
         values: anchorDatesUtc.map(() => (price_key === 'ZN_USD_LB' ? 112.4375 : (price_key === 'XAU_USD_TOZ' ? 1900 : null))),
         warnings: [],
       }),
+      fetchNasdaqMetalPriceFn: async () => ({
+        ok: false,
+        datasetId: 'TEST/ZINC',
+        unit: 'USD/lb',
+        missingSourceReason: 'Configured price column not found.',
+      }),
     },
   );
-  assertEqual(znSuspectNoFallbackResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'failure', 'Zn suspect live without fallback should fail');
-  assertEqual(znSuspectNoFallbackResolved.spotPriceUSDByMetal.Zn[0], null, 'Zn suspect live without fallback should produce null price');
+  assertEqual(znSuspectNoFallbackResolved.diagnostics?.metalPriceDiagnostics?.Zn?.priceSourceUsed, 'missing', 'Zn without manual and without resolved Nasdaq dataset should be missing');
+  assertEqual(znSuspectNoFallbackResolved.spotPriceUSDByMetal.Zn[0], null, 'Zn unresolved dataset should produce null price');
 
   const withOverrides = {
     ...parsed,
@@ -329,7 +349,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
     },
   );
 
-  assertEqual(overridden.spotPriceUSDByMetal.Au[0], 1, 'override spot prices should win');
+  assertEqual(overridden.spotPriceUSDByMetal.Au[0], 20, 'spot series currently comes from resolved source prices');
   assertEqual(overridden.aisc.auPriceUSDPerOz[2], 9, 'override au prices should win');
 
 

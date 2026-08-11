@@ -5,7 +5,13 @@ import type { QtyUnit } from './schema.ts';
 import type { ParsedProjectJsonV1 } from './parse.ts';
 import { resolvePriceSeries, type PriceScenario as CorePriceScenario } from '../../prices/resolve.ts';
 import { getCommodityPriceKeyForLegacySymbol, getLegacySymbolForPriceKey } from '../../prices/providers/legacyCommoditySymbolMap.ts';
-import { resolveMetalPrice, type ManualMetalPriceEntry } from '../../engine/pricing/resolveMetalPrice.ts';
+import { isManualMetalPriceValid, resolveMetalPrice, type ManualMetalPriceEntry } from '../../engine/pricing/resolveMetalPrice.ts';
+import {
+  fetchNasdaqDataLinkMetalPrice,
+  metalCodeToNasdaqMetal,
+  normalizeNasdaqMetalPriceUnit,
+  type NasdaqDataLinkResolution,
+} from '../../prices/nasdaqDataLinkMetals.ts';
 
 export type PriceScenario =
   | { mode: 'spot' }
@@ -27,7 +33,11 @@ export type MetalPriceDiagnostic = {
   manualFallbackAvailable: boolean;
   manualFallbackValue: number | null;
   fallbackUsed: boolean;
-  priceSourceUsed: 'fmp' | 'manual' | 'missing' | 'expired' | 'scenario-series';
+  priceSourceUsed: 'fmp' | 'manual' | 'missing' | 'expired' | 'scenario-series' | 'nasdaq_data_link';
+  datasetId: string | null;
+  asOfDate: string | null;
+  sourceUnit: string | null;
+  missingSourceReason: string | null;
   manualEnteredAtUtc?: string | null;
   manualExpiresAtUtc?: string | null;
   reason: string;
@@ -161,7 +171,10 @@ export async function resolveProjectPricesToEngineInput(
     spotAnchorDateUtc?: string;
     manualMetalPriceByKey?: Record<string, ManualMetalPriceEntry>;
   },
-  deps: { resolvePriceSeriesFn?: typeof resolvePriceSeries } = {},
+  deps: {
+    resolvePriceSeriesFn?: typeof resolvePriceSeries;
+    fetchNasdaqMetalPriceFn?: (args: { metal: 'zinc' | 'nickel' | 'lead'; apiKey?: string | null }) => Promise<NasdaqDataLinkResolution>;
+  } = {},
 ): Promise<ProjectEngineFullProductionV1Input & {
   diagnostics?: {
     warnings: string[];
@@ -173,6 +186,7 @@ export async function resolveProjectPricesToEngineInput(
 }> {
   const { parsed } = args;
   const resolvePriceSeriesFn = deps.resolvePriceSeriesFn ?? resolvePriceSeries;
+  const fetchNasdaqMetalPriceFn = deps.fetchNasdaqMetalPriceFn ?? fetchNasdaqDataLinkMetalPrice;
   const scenario = args.scenario ?? { mode: 'spot' };
   const warnings: string[] = [];
   const seenWarnings = new Set<string>();
@@ -341,6 +355,91 @@ export async function resolveProjectPricesToEngineInput(
       pushWarning(`Unknown legacy commodity symbol for metal=${metal} priceKey=${priceKey}`);
     }
 
+    const isNasdaqMetalInSpot = scenario.mode === 'spot' && metalCodeToNasdaqMetal(metal) !== null;
+    if (isNasdaqMetalInSpot) {
+      const manualEntry = args.manualMetalPriceByKey?.[priceKey] ?? null;
+      const manualIsValid = isManualMetalPriceValid(manualEntry);
+      const manualIsExpired = Boolean(manualEntry?.expiresAtUtc) && !manualIsValid;
+      let selectedValue: number | null = null;
+      let selectedUnit: string | null = inferInterpretedUnitFromPriceKey(priceKey);
+      let selectedSource: MetalPriceDiagnostic['priceSourceUsed'] = 'missing';
+      let sourceReason = 'No valid source resolved.';
+      let datasetId: string | null = null;
+      let asOfDate: string | null = null;
+      let missingSourceReason: string | null = null;
+      let sourceUnit: string | null = null;
+
+      if (manualIsValid) {
+        selectedValue = manualEntry?.value ?? null;
+        selectedUnit = manualEntry?.unit ?? selectedUnit;
+        selectedSource = 'manual';
+        sourceReason = 'Manual metal price is valid and has highest priority in modeled/prerevenue spot mode.';
+      } else {
+        const nasdaqMetal = metalCodeToNasdaqMetal(metal);
+        const nasdaqResolution = await fetchNasdaqMetalPriceFn({ metal: nasdaqMetal! });
+        if (!nasdaqResolution.ok) {
+          datasetId = nasdaqResolution.datasetId ?? null;
+          missingSourceReason = nasdaqResolution.missingSourceReason;
+          selectedSource = manualIsExpired ? 'expired' : 'missing';
+          sourceReason = nasdaqResolution.missingSourceReason;
+          selectedUnit = nasdaqResolution.unit ?? selectedUnit;
+          sourceUnit = nasdaqResolution.unit ?? null;
+        } else {
+          sourceUnit = nasdaqResolution.value.unit;
+          const normalized = normalizeNasdaqMetalPriceUnit({
+            price: nasdaqResolution.value.price,
+            fromUnit: nasdaqResolution.value.unit,
+            toUnit: inferInterpretedUnitFromPriceKey(priceKey) ?? nasdaqResolution.value.unit,
+          });
+          asOfDate = nasdaqResolution.value.date;
+          datasetId = nasdaqResolution.value.datasetId;
+          if (!normalized.ok) {
+            selectedSource = manualIsExpired ? 'expired' : 'missing';
+            sourceReason = normalized.missingSourceReason;
+            missingSourceReason = normalized.missingSourceReason;
+            selectedUnit = nasdaqResolution.value.unit;
+          } else {
+            selectedValue = normalized.normalizedPrice;
+            selectedSource = 'nasdaq_data_link';
+            selectedUnit = inferInterpretedUnitFromPriceKey(priceKey) ?? nasdaqResolution.value.unit;
+            sourceReason = normalized.conversionNote
+              ? `Nasdaq Data Link price resolved (${nasdaqResolution.value.datasetId}). ${normalized.conversionNote}`
+              : `Nasdaq Data Link price resolved (${nasdaqResolution.value.datasetId}).`;
+          }
+        }
+      }
+
+      const selectedSeries = new Array<number | null>(len).fill(selectedValue);
+      spotPriceUSDByMetal[metal] = selectedSeries;
+      priceSeriesByKey[priceKey] = [...selectedSeries];
+      metalPriceDiagnostics[metal] = {
+        priceKeyRequested: priceKey,
+        liveSymbol: null,
+        liveFeedIdentifier: null,
+        liveEndpoint: null,
+        livePriceAvailable: false,
+        livePriceValue: null,
+        interpretedUnit: selectedUnit,
+        normalizedOutputValue: selectedValue,
+        sanityBandUsed: null,
+        sanityPass: null,
+        sanityReason: null,
+        manualFallbackAvailable: typeof manualEntry?.value === 'number' && Number.isFinite(manualEntry.value),
+        manualFallbackValue: manualEntry?.value ?? null,
+        fallbackUsed: selectedSource === 'manual',
+        priceSourceUsed: selectedSource,
+        reason: sourceReason,
+        manualEnteredAtUtc: manualEntry?.enteredAtUtc ?? null,
+        manualExpiresAtUtc: manualEntry?.expiresAtUtc ?? null,
+        datasetId,
+        asOfDate,
+        sourceUnit,
+        missingSourceReason,
+      };
+      pushWarning(`price source metal=${metal} -> ${selectedSource}${datasetId ? ` datasetId=${datasetId}` : ''}${asOfDate ? ` asOfDate=${asOfDate}` : ''}${selectedValue !== null ? ` value=${selectedValue}` : ''}${selectedUnit ? ` unit=${selectedUnit}` : ''}${missingSourceReason ? ` missingSourceReason=${JSON.stringify(missingSourceReason)}` : ''}`);
+      continue;
+    }
+
     const resolvedPrice = await resolveSeriesWithCuFallback({ metal, requestedPriceKey: priceKey });
 
     const livePriceValue = resolvedPrice.resolvedSeries.find((value: number | null) => typeof value === 'number' && Number.isFinite(value)) ?? null;
@@ -398,6 +497,10 @@ export async function resolveProjectPricesToEngineInput(
       reason: sourceReason,
       manualEnteredAtUtc,
       manualExpiresAtUtc,
+      datasetId: null,
+      asOfDate: null,
+      sourceUnit: inferInterpretedUnitFromPriceKey(priceKey),
+      missingSourceReason: null,
     };
 
     pushWarning(
