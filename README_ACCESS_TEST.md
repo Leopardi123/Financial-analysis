@@ -1,1 +1,1 @@
-access ok
+test only
