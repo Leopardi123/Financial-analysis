@@ -119,6 +119,7 @@ export function resolveProducerMarketValue(args: {
     diagnostics.push('Enterprise value unresolved: balanceSheet is missing; debt/cash must not default to zero');
     return { marketCapUSD, marketCapMethod, enterpriseValueUSD: null, componentsUSD: emptyComponents, diagnostics };
   }
+
   const balanceDateIssue = dateNotAfterValuation(balance.asOfDate, valuationDateUtc, 'balanceSheet');
   if (balanceDateIssue) diagnostics.push(balanceDateIssue);
 
@@ -159,6 +160,14 @@ export function resolveProducerMarketValue(args: {
     nonOperatingInvestmentsUSD: investmentsUSD,
     otherEnterpriseAdjustmentsUSD: otherAdjustmentsUSD,
   };
+
+  if (balance.usability === 'stale_after_material_event') {
+    const reason = balance.usabilityReason?.trim();
+    diagnostics.push(
+      `Enterprise value unresolved: balanceSheet ${balance.asOfDate} is stale after material event${reason ? ` (${reason})` : ''}`,
+    );
+    return { marketCapUSD, marketCapMethod, enterpriseValueUSD: null, componentsUSD, diagnostics };
+  }
 
   const required = [marketCapUSD, debt.valueUSD, cash.valueUSD, preferredUSD, nciUSD, leasesUSD, investmentsUSD, otherAdjustmentsUSD];
   if (balanceDateIssue || required.some((value) => value === null)) {
