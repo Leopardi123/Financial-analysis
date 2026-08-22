@@ -80,6 +80,13 @@ const ALL_BUCKETS: readonly CanonicalCostBucketName[] = [
 const LB_PER_TONNE = 2204.6226218487757;
 
 function periodResolution(disclosure: CostDisclosure, year: number): { applies: boolean; exactYear: boolean; reason?: string } {
+  if (disclosure.period.kind === 'not_periodized') {
+    return {
+      applies: false,
+      exactYear: false,
+      reason: `not_periodized cost disclosure (${disclosure.period.label}) is evidence only and cannot be assigned to ${year}`,
+    };
+  }
   if (disclosure.period.kind === 'year') {
     return { applies: disclosure.period.year === year, exactYear: disclosure.period.year === year };
   }
