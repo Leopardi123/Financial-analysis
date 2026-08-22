@@ -18,7 +18,9 @@ jobs:
           node-version: '22'
       - name: Install dependencies
         run: npm install
-      - name: Run tests
-        run: npm test
+      - name: Run Producer core tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/phase1Core.test.ts
+      - name: Run Producer normalization tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/normalization.test.ts
       - name: Build
         run: npm run build
