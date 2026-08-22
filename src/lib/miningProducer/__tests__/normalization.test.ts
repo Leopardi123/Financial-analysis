@@ -174,6 +174,19 @@ async function run(): Promise<void> {
   assertClose(spotA.pricesByMetal.Au.valueUSD, 2_000, 'spot gold price');
   assertClose(spotA.pricesByMetal.Ag.valueUSD, 20, 'spot silver price');
 
+  const dateMismatchProducer = producer('DATE-MISMATCH');
+  dateMismatchProducer.valuation.valuationDateUtc = '2026-08-21';
+  let dateMismatchThrew = false;
+  try {
+    await resolveProducerPriceDeck(
+      { producer: dateMismatchProducer, context, metals: ['Au'] },
+      { resolvePriceSeriesFn: fakeResolver as typeof import('../../prices/resolve.ts').resolvePriceSeries },
+    );
+  } catch (error) {
+    dateMismatchThrew = error instanceof Error && /does not match run context/.test(error.message);
+  }
+  assert(dateMismatchThrew, 'producer valuationDateUtc and run-context valuationDateUtc must be locked together');
+
   const ltMissing = await resolveProducerPriceDeck({ producer: producer('A'), context: { ...context, priceMode: 'LT' }, metals: ['Au'] });
   assertEqual(ltMissing.id, 'LT:UNRESOLVED', 'LT must not invent a long-term deck');
   assertEqual(ltMissing.pricesByMetal.Au, undefined, 'missing LT deck must not create a price');
