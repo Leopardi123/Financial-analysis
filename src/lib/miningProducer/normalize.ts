@@ -233,7 +233,7 @@ function numericRevenueMap(values: Record<string, number | null>): Record<string
 
 export async function normalizeProducerCompanyYear(
   args: NormalizeProducerCompanyYearArgs,
-  deps: { resolvePriceSeriesFn?: Parameters<typeof resolveProducerPriceDeck>[1]['resolvePriceSeriesFn'] } = {},
+  deps: NonNullable<Parameters<typeof resolveProducerPriceDeck>[1]> = {},
 ): Promise<ProducerCompanyYearNormalization> {
   validateProducerJsonV1(args.producer);
   const context = validateProducerRunContext(args.context);
