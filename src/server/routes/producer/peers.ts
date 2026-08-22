@@ -1,4 +1,5 @@
 import { buildGminProducerJsonV1 } from '../../../lib/miningProducer/data/gmin.ts';
+import { buildLundinGoldProducerJsonV1 } from '../../../lib/miningProducer/data/lundinGold.ts';
 import type { ProducerCaseMode, ProducerPriceMode } from '../../../lib/miningProducer/types.ts';
 import { buildLiveProducerPeerTable } from '../../miningProducer/buildLivePeerTable.ts';
 
@@ -52,18 +53,28 @@ export default async function handler(req: any, res: any) {
 
   const valuationDateUtc = new Date().toISOString().slice(0, 10);
   const gmin = buildGminProducerJsonV1(valuationDateUtc);
+  const lug = buildLundinGoldProducerJsonV1(valuationDateUtc);
+  const producers = [gmin, lug];
 
   let reportedPriceDeckIdByCompanyId: Record<string, string> | undefined;
   if (priceMode === 'REPORTED') {
     if (selectedYear === 2026) {
-      reportedPriceDeckIdByCompanyId = { gmin: 'gmin-guidance-2026' };
+      reportedPriceDeckIdByCompanyId = {
+        gmin: 'gmin-guidance-2026',
+        lug: 'lug-guidance-2026-2028',
+      };
     } else if (selectedYear === 2027) {
-      reportedPriceDeckIdByCompanyId = { gmin: 'gmin-guidance-2027' };
+      reportedPriceDeckIdByCompanyId = {
+        gmin: 'gmin-guidance-2027',
+        lug: 'lug-guidance-2026-2028',
+      };
     } else {
       res.status(400).json({
         ok: false,
         error: 'REPORTED_PRICE_DECK_NOT_AVAILABLE',
-        diagnostics: [`GMIN has explicit reported price decks for 2026 and 2027 only; ${selectedYear} must not inherit either deck.`],
+        diagnostics: [
+          `The current peer set has a complete explicit REPORTED deck mapping for 2026 and 2027 only; ${selectedYear} must not inherit another year's/source's assumptions.`,
+        ],
       });
       return;
     }
@@ -71,7 +82,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const result = await buildLiveProducerPeerTable({
-      producers: [gmin],
+      producers,
       context: {
         valuationDateUtc,
         selectedYear,
@@ -84,7 +95,7 @@ export default async function handler(req: any, res: any) {
     res.status(200).json({
       ok: true,
       dataset: {
-        companies: ['gmin'],
+        companies: producers.map((producer) => producer.company.id),
         sourceContract: 'producer_json_v1',
       },
       table: result.table,
