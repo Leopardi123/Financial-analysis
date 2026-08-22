@@ -111,8 +111,16 @@ function applicableReportedMetric(
   return { value: null };
 }
 
-function productionEstimateClasses(normalized: ProducerCompanyYearNormalization): string[] {
-  return [...new Set(normalized.productionItems.map((item) => item.provenance.estimateClass))].sort();
+function productionEstimateClasses(
+  producer: ProducerJsonV1,
+  normalized: ProducerCompanyYearNormalization,
+): string[] {
+  const classes = normalized.productionItems.flatMap((item) => {
+    const project = producer.projects.find((candidate) => candidate.id === item.projectId);
+    const source = project?.production.find((candidate) => candidate.id === item.disclosureId);
+    return source ? [source.provenance.estimateClass] : [];
+  });
+  return [...new Set(classes)].sort();
 }
 
 function rowFromNormalization(
@@ -141,7 +149,7 @@ function rowFromNormalization(
     priceDeckId: normalized.priceDeck.id,
     auOz,
     auEqOz,
-    productionEstimateClasses: productionEstimateClasses(normalized),
+    productionEstimateClasses: productionEstimateClasses(producer, normalized),
     productionQuality: normalized.quality.physicalAuEq,
     revenueUSD: normalized.metrics.revenueUSD,
     canonicalCashOperatingCostPerAuEqUSD: safeRatio(normalized.costBucketsUSD.cashOperatingCostsUSD, auEqOz),
