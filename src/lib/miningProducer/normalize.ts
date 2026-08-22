@@ -87,6 +87,15 @@ const EBITDA_BUCKETS: readonly CanonicalCostBucketName[] = [
   'otherRecurringOperatingCashExpensesUSD',
 ] as const;
 
+const PROJECT_EBITDA_BUCKETS: readonly CanonicalCostBucketName[] = [
+  'cashOperatingCostsUSD',
+  'royaltiesUSD',
+  'productionTaxesUSD',
+  'tcRcUSD',
+  'siteGnaUSD',
+  'otherRecurringOperatingCashExpensesUSD',
+] as const;
+
 const PRE_GROWTH_BUCKETS: readonly CanonicalCostBucketName[] = [
   'sustainingCapexUSD',
   'sustainingExplorationDevelopmentUSD',
@@ -158,8 +167,67 @@ function missingBucketDiagnostics(
     .map((name) => `${metric}: ${name} is ${buckets.qualityByBucket[name]}; explicit zero is required when the economic amount is zero`);
 }
 
+function coverageBucket(disclosure: CostDisclosure): CanonicalCostBucketName | null {
+  switch (disclosure.canonicalClassification) {
+    case 'operating':
+      switch (disclosure.component) {
+        case 'cash_operating_cost': return 'cashOperatingCostsUSD';
+        case 'royalty': return 'royaltiesUSD';
+        case 'production_tax': return 'productionTaxesUSD';
+        case 'tc_rc': return 'tcRcUSD';
+        case 'site_gna': return 'siteGnaUSD';
+        case 'corporate_gna': return 'corporateGnaUSD';
+        default: return 'otherRecurringOperatingCashExpensesUSD';
+      }
+    case 'sustaining':
+      if (disclosure.component === 'sustaining_capex') return 'sustainingCapexUSD';
+      if (
+        disclosure.component === 'sustaining_exploration'
+        || disclosure.component === 'deferred_stripping'
+        || disclosure.component === 'underground_development'
+      ) return 'sustainingExplorationDevelopmentUSD';
+      return 'otherRecurringNonEbitdaCashSpendUSD';
+    case 'growth':
+      return disclosure.component === 'growth_capex' ? 'growthCapexUSD' : 'growthExplorationDevelopmentUSD';
+    case 'tax':
+      return disclosure.component === 'cash_income_tax' ? 'cashTaxesUSD' : null;
+    case 'working_capital':
+      return disclosure.component === 'working_capital_delta' ? 'workingCapitalDeltaUSD' : null;
+    case 'noncash':
+    case 'excluded':
+    case 'unknown':
+      return null;
+  }
+}
+
 function projectHasAnySelectedYearProductionDisclosure(project: ProducerProject, year: number): boolean {
   return project.production.some((item) => periodAppliesToYear(item.period, year));
+}
+
+function disclosureCoversBucket(disclosure: CostDisclosure, bucket: CanonicalCostBucketName, year: number): boolean {
+  return periodAppliesToYear(disclosure.period, year) && coverageBucket(disclosure) === bucket;
+}
+
+function projectCostCoverage(args: {
+  projects: readonly ProducerProject[];
+  corporateCosts: readonly CostDisclosure[];
+  year: number;
+  buckets: readonly CanonicalCostBucketName[];
+}): { complete: boolean; diagnostics: string[] } {
+  const diagnostics: string[] = [];
+  for (const bucket of args.buckets) {
+    const companyLevelCoverage = args.corporateCosts.some((disclosure) => disclosureCoversBucket(disclosure, bucket, args.year));
+    if (companyLevelCoverage) continue;
+
+    for (const project of args.projects) {
+      if (!projectHasAnySelectedYearProductionDisclosure(project, args.year)) continue;
+      const projectCoverage = (project.costs ?? []).some((disclosure) => disclosureCoversBucket(disclosure, bucket, args.year));
+      if (!projectCoverage) {
+        diagnostics.push(`PROJECT_COST_COVERAGE_MISSING: ${project.id}/${bucket}; another project's cost must not stand in for this project`);
+      }
+    }
+  }
+  return { complete: diagnostics.length === 0, diagnostics };
 }
 
 function normalizeProjectRevenue(
@@ -317,18 +385,38 @@ export async function normalizeProducerCompanyYear(
   const costBuckets = aggregateCanonicalCostBuckets(allCostDisclosures, costEvaluations);
   diagnostics.push(...costBuckets.diagnostics);
 
+  const operatingCoverage = projectCostCoverage({
+    projects: includedProjects,
+    corporateCosts,
+    year: context.selectedYear,
+    buckets: PROJECT_EBITDA_BUCKETS,
+  });
+  const preGrowthCoverage = projectCostCoverage({
+    projects: includedProjects,
+    corporateCosts,
+    year: context.selectedYear,
+    buckets: PRE_GROWTH_BUCKETS,
+  });
+  const growthCoverage = projectCostCoverage({
+    projects: includedProjects,
+    corporateCosts,
+    year: context.selectedYear,
+    buckets: GROWTH_BUCKETS,
+  });
+  diagnostics.push(...operatingCoverage.diagnostics, ...preGrowthCoverage.diagnostics, ...growthCoverage.diagnostics);
+
   const revenueByMetalUSD = revenueQuality === 'not_computable'
     ? Object.fromEntries(metals.map((metal) => [metal, null]))
     : revenue.revenueByMetalUSD;
   const revenueMap = revenueQuality === 'not_computable' ? null : numericRevenueMap(revenueByMetalUSD);
 
-  const ebitdaCostsAvailable = bucketsAvailable(costBuckets, EBITDA_BUCKETS);
-  const preGrowthCostsAvailable = ebitdaCostsAvailable && bucketsAvailable(costBuckets, PRE_GROWTH_BUCKETS);
-  const afterGrowthCostsAvailable = preGrowthCostsAvailable && bucketsAvailable(costBuckets, GROWTH_BUCKETS);
+  const ebitdaCostsAvailable = bucketsAvailable(costBuckets, EBITDA_BUCKETS) && operatingCoverage.complete;
+  const preGrowthCostsAvailable = ebitdaCostsAvailable && bucketsAvailable(costBuckets, PRE_GROWTH_BUCKETS) && preGrowthCoverage.complete;
+  const afterGrowthCostsAvailable = preGrowthCostsAvailable && bucketsAvailable(costBuckets, GROWTH_BUCKETS) && growthCoverage.complete;
 
-  if (!ebitdaCostsAvailable) diagnostics.push(...missingBucketDiagnostics(costBuckets, EBITDA_BUCKETS, 'EBITDA'));
-  if (!preGrowthCostsAvailable) diagnostics.push(...missingBucketDiagnostics(costBuckets, PRE_GROWTH_BUCKETS, 'FCFF before growth'));
-  if (!afterGrowthCostsAvailable) diagnostics.push(...missingBucketDiagnostics(costBuckets, GROWTH_BUCKETS, 'FCFF after growth'));
+  if (!bucketsAvailable(costBuckets, EBITDA_BUCKETS)) diagnostics.push(...missingBucketDiagnostics(costBuckets, EBITDA_BUCKETS, 'EBITDA'));
+  if (!bucketsAvailable(costBuckets, PRE_GROWTH_BUCKETS)) diagnostics.push(...missingBucketDiagnostics(costBuckets, PRE_GROWTH_BUCKETS, 'FCFF before growth'));
+  if (!bucketsAvailable(costBuckets, GROWTH_BUCKETS)) diagnostics.push(...missingBucketDiagnostics(costBuckets, GROWTH_BUCKETS, 'FCFF after growth'));
 
   const hasReportedAisc = args.producer.reportedMetrics?.some((metric) => metric.metric === 'aisc')
     || includedProjects.some((project) => project.reportedMetrics?.some((metric) => metric.metric === 'aisc'));
@@ -353,14 +441,15 @@ export async function normalizeProducerCompanyYear(
       siteGnaUSD: bucketValue(costBuckets, 'siteGnaUSD'),
       corporateGnaUSD: bucketValue(costBuckets, 'corporateGnaUSD'),
       otherRecurringOperatingCashExpensesUSD: bucketValue(costBuckets, 'otherRecurringOperatingCashExpensesUSD'),
-      sustainingCapexUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'sustainingCapexUSD') : 0,
-      sustainingExplorationDevelopmentUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'sustainingExplorationDevelopmentUSD') : 0,
+      sustainingCapexUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'sustainingCapexUSD') : null,
+      sustainingExplorationDevelopmentUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'sustainingExplorationDevelopmentUSD') : null,
       cashTaxesUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'cashTaxesUSD') : null,
-      workingCapitalDeltaUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'workingCapitalDeltaUSD') : 0,
-      otherRecurringNonEbitdaCashSpendUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'otherRecurringNonEbitdaCashSpendUSD') : 0,
-      growthCapexUSD: afterGrowthCostsAvailable ? bucketValue(costBuckets, 'growthCapexUSD') : 0,
-      growthExplorationDevelopmentUSD: afterGrowthCostsAvailable ? bucketValue(costBuckets, 'growthExplorationDevelopmentUSD') : 0,
+      workingCapitalDeltaUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'workingCapitalDeltaUSD') : null,
+      otherRecurringNonEbitdaCashSpendUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'otherRecurringNonEbitdaCashSpendUSD') : null,
+      growthCapexUSD: afterGrowthCostsAvailable ? bucketValue(costBuckets, 'growthCapexUSD') : null,
+      growthExplorationDevelopmentUSD: afterGrowthCostsAvailable ? bucketValue(costBuckets, 'growthExplorationDevelopmentUSD') : null,
     });
+    diagnostics.push(...calculated.diagnostics);
     metrics = {
       revenueUSD: calculated.revenueUSD,
       ebitdaUSD: calculated.ebitdaUSD,
