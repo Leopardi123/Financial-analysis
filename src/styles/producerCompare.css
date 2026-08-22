@@ -1,0 +1,181 @@
+.producer-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.producer-compare__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.producer-compare__controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 130px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.producer-compare__controls input,
+.producer-compare__controls select {
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  background: rgba(255, 255, 255, 0.55);
+  color: inherit;
+  font: inherit;
+}
+
+.producer-compare__state,
+.producer-compare__error,
+.producer-compare__basis,
+.producer-compare__deck,
+.producer-compare__footnote {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.35);
+  padding: 10px 12px;
+}
+
+.producer-compare__error {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.producer-compare__basis {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 18px;
+  font-size: 13px;
+}
+
+.producer-compare__decks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.producer-compare__deck {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.producer-compare__table-wrap {
+  overflow-x: auto;
+  width: 100%;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.producer-compare__table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.producer-compare__table th,
+.producer-compare__table td {
+  padding: 8px 9px;
+  border-right: 1px solid rgba(0, 0, 0, 0.14);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.14);
+  vertical-align: top;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.producer-compare__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(245, 245, 245, 0.96);
+  font-weight: 700;
+}
+
+.producer-compare__table th:first-child,
+.producer-compare__table td:first-child,
+.producer-compare__table th:nth-child(4),
+.producer-compare__table td:nth-child(4),
+.producer-compare__table th:last-child,
+.producer-compare__table td:last-child {
+  text-align: left;
+}
+
+.producer-compare__company {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 160px;
+  background: rgba(255, 255, 255, 0.94);
+  font-weight: 700;
+}
+
+.producer-compare__table thead .producer-compare__company,
+.producer-compare__table th:first-child {
+  z-index: 2;
+}
+
+.producer-compare__quality {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 5px;
+  border: 1px solid currentColor;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.producer-compare__quality--not_computable {
+  opacity: 0.65;
+}
+
+.producer-compare__table small {
+  display: block;
+  margin-top: 3px;
+  opacity: 0.65;
+}
+
+.producer-compare__table details {
+  max-width: 330px;
+  white-space: normal;
+}
+
+.producer-compare__table summary {
+  cursor: pointer;
+  text-align: left;
+}
+
+.producer-compare__table ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  min-width: 280px;
+}
+
+.producer-compare__table li {
+  margin-bottom: 5px;
+}
+
+.producer-compare__footnote {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .producer-compare__controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .producer-compare__controls label:first-child {
+    grid-column: 1 / -1;
+  }
+}
