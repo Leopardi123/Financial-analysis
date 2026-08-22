@@ -64,16 +64,37 @@ export type OwnershipPeriod = {
   provenance: Provenance;
 };
 
+export type ProductionMeasure = 'produced' | 'sold' | 'payable';
+export type ProductionUnit = 'toz' | 'koz' | 'Moz' | 'tonne' | 'kt' | 'lb';
+
 export type ProductionDisclosure = {
   id: string;
   metal: string;
-  measure: 'produced' | 'sold' | 'payable';
+  measure: ProductionMeasure;
   period: PeriodClaim;
   quantity: NumericClaim;
-  unit: 'toz' | 'koz' | 'Moz' | 'tonne' | 'kt' | 'lb';
+  unit: ProductionUnit;
   basis: 'attributable' | 'project_100pct';
   provenance: Provenance;
 };
+
+export type CostDenominator = {
+  metal: string;
+  unit: 'toz' | 'tonne' | 'lb';
+  measure: ProductionMeasure;
+};
+
+export type PriceLinkedCostOutput =
+  | {
+      kind: 'fixed_amount';
+      currency: string;
+    }
+  | {
+      kind: 'per_unit';
+      currency: string;
+      denominator: CostDenominator;
+      netOfByproductCredits?: boolean;
+    };
 
 export type CostModel =
   | { type: 'fixed_amount'; amount: NumericClaim; currency: string }
@@ -81,11 +102,7 @@ export type CostModel =
       type: 'per_unit';
       amount: NumericClaim;
       currency: string;
-      denominator: {
-        metal: string;
-        unit: 'toz' | 'tonne' | 'lb';
-        measure: 'produced' | 'sold' | 'payable';
-      };
+      denominator: CostDenominator;
       netOfByproductCredits?: boolean;
       sourcePriceDeckRef?: string;
     }
@@ -97,7 +114,7 @@ export type CostModel =
   | {
       type: 'price_linked';
       referenceValue: NumericClaim;
-      outputUnit: string;
+      output: PriceLinkedCostOutput;
       sensitivities: Array<{
         driverMetal: string;
         referencePrice: number;
@@ -111,7 +128,7 @@ export type CostModel =
       amount: NumericClaim;
       currency: string;
       sourcePriceDeckRef?: string;
-      priceSensitivity: 'none_explicit' | 'unknown';
+      priceSensitivity: 'not_price_sensitive' | 'unknown';
     }
   | { type: 'derived'; method: string; inputIds: string[] };
 
@@ -130,6 +147,8 @@ export type CostDisclosure = {
     | 'underground_development'
     | 'growth_capex'
     | 'growth_exploration'
+    | 'cash_income_tax'
+    | 'working_capital_delta'
     | 'reclamation_cash'
     | 'reclamation_accretion'
     | 'other_recurring_operating'
@@ -161,7 +180,7 @@ export type ReportedMetric = {
     includes?: string[];
     excludes?: string[];
     netOfByproductCredits?: boolean;
-    denominatorMeasure?: 'produced' | 'sold' | 'payable';
+    denominatorMeasure?: ProductionMeasure;
   };
   provenance: Provenance;
 };
