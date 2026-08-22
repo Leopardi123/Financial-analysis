@@ -215,6 +215,7 @@ export type ReportedMetric = {
   unit: string;
   sourcePriceDeckRef?: string;
   definition?: {
+    definitionSourceId?: string;
     includes?: string[];
     excludes?: string[];
     netOfByproductCredits?: boolean;
