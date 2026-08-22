@@ -5,7 +5,8 @@ import {
   type CostCalculationQuality,
   type EvaluatedCostDisclosure,
 } from './costs.ts';
-import { computeCanonicalProducerMetrics, type CanonicalProducerMetrics } from './metrics.ts';
+import { resolveProducerMarketValue, type ProducerMarketValueResult } from './marketValue.ts';
+import { computeCanonicalProducerMetrics } from './metrics.ts';
 import {
   resolveProducerPriceDeck,
   type ExplicitLongTermPriceDeck,
@@ -24,12 +25,21 @@ import {
   type ScalarQuantity,
 } from './production.ts';
 import { validateProducerJsonV1, validateProducerRunContext } from './schema.ts';
+import { computeProducerValuationMultiples } from './valuation.ts';
 import type { CostDisclosure, ProducerJsonV1, ProducerProject, ProducerRunContext } from './types.ts';
 
 export type ProducerMetricQuality = 'exact' | 'approximation' | 'reported_only' | 'not_computable';
 
+export type ProducerNormalizedMetrics = {
+  revenueUSD: number | null;
+  ebitdaUSD: number | null;
+  fcffBeforeGrowthUSD: number | null;
+  fcffAfterGrowthUSD: number | null;
+};
+
 export type ProducerCompanyYearNormalization = {
   companyId: string;
+  companyName: string;
   selectedYear: number;
   context: ProducerRunContext;
   priceDeck: ResolvedProducerPriceDeck;
@@ -41,13 +51,19 @@ export type ProducerCompanyYearNormalization = {
   physicalAuEqOz: number | null;
   costEvaluations: EvaluatedCostDisclosure[];
   costBucketsUSD: Record<CanonicalCostBucketName, number | null>;
-  metrics: CanonicalProducerMetrics;
+  metrics: ProducerNormalizedMetrics;
   quality: {
     revenue: ProducerMetricQuality;
     physicalAuEq: ProducerMetricQuality;
     ebitda: ProducerMetricQuality;
     fcffBeforeGrowth: ProducerMetricQuality;
     fcffAfterGrowth: ProducerMetricQuality;
+  };
+  marketValue: ProducerMarketValueResult;
+  multiples: {
+    evToEbitda: number | null;
+    evToFcffBeforeGrowth: number | null;
+    evToFcffAfterGrowth: number | null;
   };
   diagnostics: string[];
 };
@@ -116,6 +132,32 @@ function bucketQuality(
   return combineMetricQuality(names.map((name) => costQualityToMetricQuality(buckets.qualityByBucket[name])));
 }
 
+function bucketsAvailable(
+  buckets: ReturnType<typeof aggregateCanonicalCostBuckets>,
+  names: readonly CanonicalCostBucketName[],
+): boolean {
+  return names.every((name) => buckets.values[name] !== null);
+}
+
+function bucketValue(
+  buckets: ReturnType<typeof aggregateCanonicalCostBuckets>,
+  name: CanonicalCostBucketName,
+): number {
+  const value = buckets.values[name];
+  if (value === null) throw new Error(`${name} unexpectedly missing after availability check`);
+  return value;
+}
+
+function missingBucketDiagnostics(
+  buckets: ReturnType<typeof aggregateCanonicalCostBuckets>,
+  names: readonly CanonicalCostBucketName[],
+  metric: string,
+): string[] {
+  return names
+    .filter((name) => buckets.values[name] === null)
+    .map((name) => `${metric}: ${name} is ${buckets.qualityByBucket[name]}; explicit zero is required when the economic amount is zero`);
+}
+
 function projectHasAnySelectedYearProductionDisclosure(project: ProducerProject, year: number): boolean {
   return project.production.some((item) => periodAppliesToYear(item.period, year));
 }
@@ -159,6 +201,36 @@ function evaluateProjectCosts(args: {
   return { disclosures, evaluations };
 }
 
+function collectRequiredMetals(projects: readonly ProducerProject[], corporateCosts: readonly CostDisclosure[]): string[] {
+  const metals = new Set<string>();
+  const inspectCost = (cost: CostDisclosure) => {
+    if (cost.model.type === 'per_unit') metals.add(cost.model.denominator.metal);
+    if (cost.model.type === 'price_linked') {
+      if (cost.model.output.kind === 'per_unit') metals.add(cost.model.output.denominator.metal);
+      for (const sensitivity of cost.model.sensitivities) metals.add(sensitivity.driverMetal);
+    }
+    if (cost.model.type === 'percent_revenue' && cost.model.revenueScope.type === 'metal') {
+      metals.add(cost.model.revenueScope.metal);
+    }
+  };
+  for (const project of projects) {
+    for (const item of project.production) metals.add(item.metal);
+    for (const cost of project.costs ?? []) inspectCost(cost);
+  }
+  for (const cost of corporateCosts) inspectCost(cost);
+  if (metals.size > 0) metals.add('Au');
+  return [...metals].sort();
+}
+
+function numericRevenueMap(values: Record<string, number | null>): Record<string, number> | null {
+  const output: Record<string, number> = {};
+  for (const [metal, value] of Object.entries(values)) {
+    if (value === null || !Number.isFinite(value)) return null;
+    output[metal] = value;
+  }
+  return Object.keys(output).length > 0 ? output : null;
+}
+
 export async function normalizeProducerCompanyYear(
   args: NormalizeProducerCompanyYearArgs,
   deps: { resolvePriceSeriesFn?: Parameters<typeof resolveProducerPriceDeck>[1]['resolvePriceSeriesFn'] } = {},
@@ -172,7 +244,8 @@ export async function normalizeProducerCompanyYear(
   }
 
   const includedProjects = args.producer.projects.filter((project) => isProjectIncludedInCase(project.statusAsOfValuationDate, context.caseMode));
-  const metals = unique(includedProjects.flatMap((project) => project.production.map((item) => item.metal))).sort();
+  const corporateCosts = args.producer.corporateCosts ?? [];
+  const metals = collectRequiredMetals(includedProjects, corporateCosts);
   const priceDeck = await resolveProducerPriceDeck({
     producer: args.producer,
     context,
@@ -228,7 +301,6 @@ export async function normalizeProducerCompanyYear(
     costEvaluations.push(...evaluated.evaluations);
   }
 
-  const corporateCosts = args.producer.corporateCosts ?? [];
   allCostDisclosures.push(...corporateCosts);
   for (const disclosure of corporateCosts) {
     const evaluation = evaluateCostDisclosureForYear(disclosure, {
@@ -248,46 +320,82 @@ export async function normalizeProducerCompanyYear(
   const revenueByMetalUSD = revenueQuality === 'not_computable'
     ? Object.fromEntries(metals.map((metal) => [metal, null]))
     : revenue.revenueByMetalUSD;
+  const revenueMap = revenueQuality === 'not_computable' ? null : numericRevenueMap(revenueByMetalUSD);
 
-  const metrics = metals.length === 0
-    ? {
-        revenueUSD: null,
-        ebitdaUSD: null,
-        fcffBeforeGrowthUSD: null,
-        fcffAfterGrowthUSD: null,
-        diagnostics: ['NO_SELECTED_YEAR_PRODUCTION'],
-      }
-    : computeCanonicalProducerMetrics({
-        revenueByMetalUSD,
-        cashOperatingCostsUSD: costBuckets.values.cashOperatingCostsUSD,
-        royaltiesUSD: costBuckets.values.royaltiesUSD,
-        productionTaxesUSD: costBuckets.values.productionTaxesUSD,
-        tcRcUSD: costBuckets.values.tcRcUSD,
-        siteGnaUSD: costBuckets.values.siteGnaUSD,
-        corporateGnaUSD: costBuckets.values.corporateGnaUSD,
-        otherRecurringOperatingCashExpensesUSD: costBuckets.values.otherRecurringOperatingCashExpensesUSD,
-        sustainingCapexUSD: costBuckets.values.sustainingCapexUSD,
-        sustainingExplorationDevelopmentUSD: costBuckets.values.sustainingExplorationDevelopmentUSD,
-        cashTaxesUSD: costBuckets.values.cashTaxesUSD,
-        workingCapitalDeltaUSD: costBuckets.values.workingCapitalDeltaUSD,
-        otherRecurringNonEbitdaCashSpendUSD: costBuckets.values.otherRecurringNonEbitdaCashSpendUSD,
-        growthCapexUSD: costBuckets.values.growthCapexUSD,
-        growthExplorationDevelopmentUSD: costBuckets.values.growthExplorationDevelopmentUSD,
-      });
-  diagnostics.push(...metrics.diagnostics);
+  const ebitdaCostsAvailable = bucketsAvailable(costBuckets, EBITDA_BUCKETS);
+  const preGrowthCostsAvailable = ebitdaCostsAvailable && bucketsAvailable(costBuckets, PRE_GROWTH_BUCKETS);
+  const afterGrowthCostsAvailable = preGrowthCostsAvailable && bucketsAvailable(costBuckets, GROWTH_BUCKETS);
 
-  const ebitdaQuality = metrics.ebitdaUSD === null
+  if (!ebitdaCostsAvailable) diagnostics.push(...missingBucketDiagnostics(costBuckets, EBITDA_BUCKETS, 'EBITDA'));
+  if (!preGrowthCostsAvailable) diagnostics.push(...missingBucketDiagnostics(costBuckets, PRE_GROWTH_BUCKETS, 'FCFF before growth'));
+  if (!afterGrowthCostsAvailable) diagnostics.push(...missingBucketDiagnostics(costBuckets, GROWTH_BUCKETS, 'FCFF after growth'));
+
+  const hasReportedAisc = args.producer.reportedMetrics?.some((metric) => metric.metric === 'aisc')
+    || includedProjects.some((project) => project.reportedMetrics?.some((metric) => metric.metric === 'aisc'));
+  if (hasReportedAisc && !ebitdaCostsAvailable) {
+    diagnostics.push('AISC_ONLY_NOT_CANONICAL: reported AISC is retained as reported data but is not converted into canonical EBITDA/FCFF');
+  }
+
+  let metrics: ProducerNormalizedMetrics = {
+    revenueUSD: revenueQuality === 'not_computable' ? null : revenue.totalRevenueUSD,
+    ebitdaUSD: null,
+    fcffBeforeGrowthUSD: null,
+    fcffAfterGrowthUSD: null,
+  };
+
+  if (revenueMap && ebitdaCostsAvailable) {
+    const calculated = computeCanonicalProducerMetrics({
+      revenueByMetalUSD: revenueMap,
+      cashOperatingCostsUSD: bucketValue(costBuckets, 'cashOperatingCostsUSD'),
+      royaltiesUSD: bucketValue(costBuckets, 'royaltiesUSD'),
+      productionTaxesUSD: bucketValue(costBuckets, 'productionTaxesUSD'),
+      tcRcUSD: bucketValue(costBuckets, 'tcRcUSD'),
+      siteGnaUSD: bucketValue(costBuckets, 'siteGnaUSD'),
+      corporateGnaUSD: bucketValue(costBuckets, 'corporateGnaUSD'),
+      otherRecurringOperatingCashExpensesUSD: bucketValue(costBuckets, 'otherRecurringOperatingCashExpensesUSD'),
+      sustainingCapexUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'sustainingCapexUSD') : 0,
+      sustainingExplorationDevelopmentUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'sustainingExplorationDevelopmentUSD') : 0,
+      cashTaxesUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'cashTaxesUSD') : null,
+      workingCapitalDeltaUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'workingCapitalDeltaUSD') : 0,
+      otherRecurringNonEbitdaCashSpendUSD: preGrowthCostsAvailable ? bucketValue(costBuckets, 'otherRecurringNonEbitdaCashSpendUSD') : 0,
+      growthCapexUSD: afterGrowthCostsAvailable ? bucketValue(costBuckets, 'growthCapexUSD') : 0,
+      growthExplorationDevelopmentUSD: afterGrowthCostsAvailable ? bucketValue(costBuckets, 'growthExplorationDevelopmentUSD') : 0,
+    });
+    metrics = {
+      revenueUSD: calculated.revenueUSD,
+      ebitdaUSD: calculated.ebitdaUSD,
+      fcffBeforeGrowthUSD: preGrowthCostsAvailable ? calculated.fcffBeforeGrowthUSD : null,
+      fcffAfterGrowthUSD: afterGrowthCostsAvailable ? calculated.fcffAfterGrowthUSD : null,
+    };
+  }
+
+  const ebitdaQuality: ProducerMetricQuality = metrics.ebitdaUSD === null
     ? 'not_computable'
     : combineMetricQuality([revenueQuality, bucketQuality(costBuckets, EBITDA_BUCKETS)]);
-  const fcffBeforeGrowthQuality = metrics.fcffBeforeGrowthUSD === null
+  const fcffBeforeGrowthQuality: ProducerMetricQuality = metrics.fcffBeforeGrowthUSD === null
     ? 'not_computable'
     : combineMetricQuality([ebitdaQuality, bucketQuality(costBuckets, PRE_GROWTH_BUCKETS)]);
-  const fcffAfterGrowthQuality = metrics.fcffAfterGrowthUSD === null
+  const fcffAfterGrowthQuality: ProducerMetricQuality = metrics.fcffAfterGrowthUSD === null
     ? 'not_computable'
     : combineMetricQuality([fcffBeforeGrowthQuality, bucketQuality(costBuckets, GROWTH_BUCKETS)]);
 
+  const marketValue = resolveProducerMarketValue({
+    producer: args.producer,
+    usdPerCurrencyUnitByCurrency,
+  });
+  diagnostics.push(...marketValue.diagnostics);
+  const multiples = marketValue.enterpriseValueUSD === null
+    ? { evToEbitda: null, evToFcffBeforeGrowth: null, evToFcffAfterGrowth: null }
+    : computeProducerValuationMultiples({
+        enterpriseValueUSD: marketValue.enterpriseValueUSD,
+        ebitdaUSD: metrics.ebitdaUSD,
+        fcffBeforeGrowthUSD: metrics.fcffBeforeGrowthUSD,
+        fcffAfterGrowthUSD: metrics.fcffAfterGrowthUSD,
+      });
+
   return {
     companyId: args.producer.company.id,
+    companyName: args.producer.company.name,
     selectedYear: context.selectedYear,
     context,
     priceDeck,
@@ -307,6 +415,8 @@ export async function normalizeProducerCompanyYear(
       fcffBeforeGrowth: fcffBeforeGrowthQuality,
       fcffAfterGrowth: fcffAfterGrowthQuality,
     },
+    marketValue,
+    multiples,
     diagnostics: unique(diagnostics),
   };
 }
