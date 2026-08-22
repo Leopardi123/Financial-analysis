@@ -1,6 +1,6 @@
 import { normalizeProducerCompanyYear, type ProducerCompanyYearNormalization, type ProducerMetricQuality } from './normalize.ts';
 import { resolvePriceSeries } from '../prices/resolve.ts';
-import type { ExplicitLongTermPriceDeck } from './priceDeck.ts';
+import type { ExplicitLongTermPriceDeck, ResolvedProducerPriceDeck } from './priceDeck.ts';
 import type { ProducerJsonV1, ProducerRunContext, ReportedMetric } from './types.ts';
 
 export type ProducerPeerRow = {
@@ -43,6 +43,7 @@ export type ProducerPeerTable = {
   priceMode: ProducerRunContext['priceMode'];
   caseMode: ProducerRunContext['caseMode'];
   comparisonBasis: 'canonical_shared_deck' | 'reported_source_decks';
+  priceDecksByCompanyId: Record<string, ResolvedProducerPriceDeck>;
   rows: ProducerPeerRow[];
   diagnostics: string[];
 };
@@ -233,6 +234,7 @@ export async function buildProducerPeerTable(
     priceMode: args.context.priceMode,
     caseMode: args.context.caseMode,
     comparisonBasis: args.context.priceMode === 'REPORTED' ? 'reported_source_decks' : 'canonical_shared_deck',
+    priceDecksByCompanyId: Object.fromEntries(normalized.map((item) => [item.companyId, item.priceDeck])),
     rows: args.producers.map((producer, index) => rowFromNormalization(producer, normalized[index])),
     diagnostics,
   };
