@@ -82,6 +82,10 @@ function uniqueMetals(metals: readonly string[]): string[] {
   return [...new Set(metals)].sort();
 }
 
+function commercialTermMetals(producer: ProducerJsonV1): string[] {
+  return producer.projects.flatMap((project) => (project.metalStreams ?? []).map((stream) => stream.metal));
+}
+
 function normalizeExplicitPrice(
   metal: string,
   input: { value: number; unit: string } | undefined,
@@ -141,7 +145,7 @@ export async function resolveProducerPriceDeck(
     );
   }
 
-  const metals = uniqueMetals(args.metals);
+  const metals = uniqueMetals([...args.metals, ...commercialTermMetals(args.producer)]);
   const warnings: string[] = [];
   const pricesByMetal: Record<string, ProducerMetalPrice> = {};
   const resolvePriceSeriesFn = deps.resolvePriceSeriesFn ?? resolvePriceSeries;
