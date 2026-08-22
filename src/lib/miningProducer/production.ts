@@ -65,6 +65,13 @@ function scaleClaim(claim: NumericClaim, factor: number): NumericClaim {
 }
 
 function periodResolution(disclosure: ProductionDisclosure, year: number): { applies: boolean; exactYear: boolean; reason?: string } {
+  if (disclosure.period.kind === 'not_periodized') {
+    return {
+      applies: false,
+      exactYear: false,
+      reason: `not_periodized disclosure (${disclosure.period.label}) is evidence only and cannot be assigned to ${year}`,
+    };
+  }
   if (disclosure.period.kind === 'year') {
     return { applies: disclosure.period.year === year, exactYear: disclosure.period.year === year };
   }
