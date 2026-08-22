@@ -11,7 +11,8 @@ export type NumericClaim =
 export type PeriodClaim =
   | { kind: 'year'; year: number }
   | { kind: 'year_range_average'; startYear: number; endYear: number }
-  | { kind: 'year_range_total'; startYear: number; endYear: number };
+  | { kind: 'year_range_total'; startYear: number; endYear: number }
+  | { kind: 'not_periodized'; label: string };
 
 export type EstimateClass =
   | 'actual'
@@ -252,6 +253,8 @@ export type ProducerJsonV1 = {
     };
     balanceSheet?: {
       asOfDate: string;
+      usability?: 'current_as_of_date' | 'stale_after_material_event';
+      usabilityReason?: string;
       cashAndEquivalents?: MoneyPoint;
       totalDebt?: MoneyPoint;
       leaseLiabilities?: MoneyPoint;
