@@ -141,7 +141,7 @@ async function run(): Promise<void> {
   assertClose(missingOperating.metrics.revenueUSD, 220_000, 'missing operating component does not block revenue');
   assertEqual(missingOperating.metrics.ebitdaUSD, null, 'missing TC/RC is not silently assumed zero');
   assertEqual(missingOperating.quality.ebitda, 'not_computable', 'missing TC/RC blocks EBITDA quality');
-  assert(missingOperating.metrics.diagnostics.includes('TC_RC_UNKNOWN'), 'missing TC/RC diagnostic');
+  assert(missingOperating.diagnostics.some((item) => item.includes('tcRcUSD') && item.includes('explicit zero')), 'missing TC/RC diagnostic');
 
   const withoutGrowth = fullProjectCosts().filter((item) => item.canonicalClassification !== 'growth');
   const missingGrowth = await normalizeProducerCompanyYear(
