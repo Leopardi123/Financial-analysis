@@ -28,5 +28,9 @@ jobs:
         run: node --experimental-strip-types src/lib/miningProducer/__tests__/normalize.test.ts
       - name: Run Producer end-to-end tests
         run: node --experimental-strip-types src/lib/miningProducer/__tests__/endToEnd.test.ts
+      - name: Run Producer project-coverage tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/projectCoverage.test.ts
+      - name: Run Producer company-pattern tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/companyPatterns.test.ts
       - name: Build
         run: npm run build
