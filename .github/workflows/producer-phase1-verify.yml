@@ -1,0 +1,38 @@
+name: Producer Phase 1 Verify
+
+on:
+  push:
+    branches:
+      - codex/mining-producer-phase1-core
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install
+      - name: Run Producer core tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/phase1Core.test.ts
+      - name: Run Producer normalization tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/normalization.test.ts
+      - name: Run Producer cost tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/costs.test.ts
+      - name: Run Producer company-year tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/normalize.test.ts
+      - name: Run Producer end-to-end tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/endToEnd.test.ts
+      - name: Run Producer project-coverage tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/projectCoverage.test.ts
+      - name: Run Producer company-pattern tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/companyPatterns.test.ts
+      - name: Run Producer peer-table tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/peerTable.test.ts
+      - name: Build
+        run: npm run build
