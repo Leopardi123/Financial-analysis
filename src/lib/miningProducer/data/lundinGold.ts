@@ -4,7 +4,6 @@ const OUTLOOK_SOURCE = 'lug-2026-guidance-three-year-outlook';
 const Q2_SOURCE = 'lug-q2-2026-results';
 const AISC_DEFINITION_SOURCE = 'lug-q1-2026-mda';
 const STREAM_SOURCE = 'lug-lunr-silver-stream-2026';
-const SHARE_SOURCE = 'lug-share-capital-2026-05-29';
 
 function provenance(
   sourceId: string,
@@ -47,11 +46,6 @@ function reportedCostMetric(args: {
 export function buildLundinGoldProducerJsonV1(valuationDateUtc: string): ProducerJsonV1 {
   const guidance = provenance(OUTLOOK_SOURCE, 'company_guidance');
   const q2Actual = provenance(Q2_SOURCE, 'actual');
-  const aiscDefinition = provenance(
-    AISC_DEFINITION_SOURCE,
-    'actual',
-    'AISC is cash operating costs + corporate social responsibility + treatment/refining charges + restoration accretion + sustaining capital expenditures - silver revenues, divided by gold ounces sold.',
-  );
   const stream = provenance(
     STREAM_SOURCE,
     'actual',
@@ -59,6 +53,7 @@ export function buildLundinGoldProducerJsonV1(valuationDateUtc: string): Produce
   );
 
   const aiscDefinitionFields: ReportedMetric['definition'] = {
+    definitionSourceId: AISC_DEFINITION_SOURCE,
     includes: [
       'cash operating costs',
       'corporate social responsibility costs',
@@ -86,8 +81,7 @@ export function buildLundinGoldProducerJsonV1(valuationDateUtc: string): Produce
     },
     valuation: {
       valuationDateUtc,
-      // Deliberately no sharesOutstanding fallback here. The May 29 issued-share count is retained as source evidence,
-      // but live Market Cap should come from the current provider snapshot rather than current price × a potentially stale count.
+      // Live Market Cap is preferred. No current-share fallback is embedded from an older share-capital date.
       balanceSheet: {
         asOfDate: '2026-06-30',
         cashAndEquivalents: {
@@ -96,8 +90,8 @@ export function buildLundinGoldProducerJsonV1(valuationDateUtc: string): Produce
           asOfDate: '2026-06-30',
           provenance: q2Actual,
         },
-        // Q2 public results used here disclose current cash but do not state a June 30 debt amount in the cited table.
-        // Do not carry forward Q1's "no debt" statement as a silent June 30 exact balance.
+        // Q2 public results used here disclose current cash but not a June 30 debt amount in the cited financial-position table.
+        // Q1's "no debt" statement is not silently carried forward as a June 30 exact balance.
       },
     },
     reportedPriceDecks: [
@@ -230,7 +224,7 @@ export function buildLundinGoldProducerJsonV1(valuationDateUtc: string): Produce
           reportedCostMetric({ id: 'fdn-aisc-2027-outlook', year: 2027, metric: 'aisc', low: 1_110, high: 1_180, definition: aiscDefinitionFields }),
           reportedCostMetric({ id: 'fdn-cash-cost-2028-outlook', year: 2028, metric: 'cash_cost', low: 905, high: 965, definition: { denominatorMeasure: 'sold' } }),
           reportedCostMetric({ id: 'fdn-aisc-2028-outlook', year: 2028, metric: 'aisc', low: 1_060, high: 1_170, definition: aiscDefinitionFields }),
-        ].map((metric) => metric.metric === 'aisc' ? { ...metric, provenance: aiscDefinition } : metric),
+        ],
       },
     ],
     sources: [
@@ -265,14 +259,6 @@ export function buildLundinGoldProducerJsonV1(valuationDateUtc: string): Produce
         title: 'Lundin Gold Announces $670 Million Silver Stream-for-Equity Transaction with LunR Royalties',
         publishedDate: '2026-02-22',
         url: 'https://lundingold.com/news/lundin-gold-announces-670-million-silver-stream-f-122835/',
-      },
-      {
-        id: SHARE_SOURCE,
-        sourceType: 'company_release',
-        publisher: 'Lundin Gold Inc.',
-        title: 'Lundin Gold Share Capital and Voting Rights Update',
-        publishedDate: '2026-05-29',
-        url: 'https://lundingold.com/news/lundin-gold-share-capital-and-voting-rights-update-122849/',
       },
     ],
   };
