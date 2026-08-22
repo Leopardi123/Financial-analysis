@@ -114,6 +114,7 @@ function unique<T>(values: readonly T[]): T[] {
 }
 
 function periodAppliesToYear(period: CostDisclosure['period'] | ProducerProject['production'][number]['period'], year: number): boolean {
+  if (period.kind === 'not_periodized') return false;
   if (period.kind === 'year') return period.year === year;
   return year >= period.startYear && year <= period.endYear;
 }
