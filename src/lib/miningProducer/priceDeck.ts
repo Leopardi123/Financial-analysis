@@ -1,5 +1,6 @@
 import { resolvePriceSeries } from '../prices/resolve.ts';
 import { convertPriceToCanonical } from '../prices/units/convert.ts';
+import { validateProducerRunContext } from './schema.ts';
 import type { ProducerJsonV1, ProducerRunContext, ReportedPriceDeck } from './types.ts';
 
 export type ProducerCanonicalPriceUnit = 'USD_per_toz' | 'USD_per_tonne';
@@ -133,6 +134,13 @@ export async function resolveProducerPriceDeck(
   },
   deps: { resolvePriceSeriesFn?: typeof resolvePriceSeries } = {},
 ): Promise<ResolvedProducerPriceDeck> {
+  validateProducerRunContext(args.context);
+  if (args.producer.valuation.valuationDateUtc !== args.context.valuationDateUtc) {
+    throw new Error(
+      `Producer valuationDateUtc ${args.producer.valuation.valuationDateUtc} does not match run context ${args.context.valuationDateUtc}`,
+    );
+  }
+
   const metals = uniqueMetals(args.metals);
   const warnings: string[] = [];
   const pricesByMetal: Record<string, ProducerMetalPrice> = {};
