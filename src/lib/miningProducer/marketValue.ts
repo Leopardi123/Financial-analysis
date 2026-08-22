@@ -80,7 +80,10 @@ export function resolveProducerMarketValue(args: {
 
   if (marketCapUSD === null && producer.valuation.marketPrice && producer.valuation.sharesOutstanding) {
     const shares = producer.valuation.sharesOutstanding;
-    if (shares.basis !== 'basic_actual') {
+    const security = producer.company.primarySecurity;
+    if (security?.securityType === 'adr') {
+      diagnostics.push('ADR price-times-shares fallback is disabled: ADR ratio/share-class basis must be explicitly normalized or reportedMarketCap supplied');
+    } else if (shares.basis !== 'basic_actual') {
       diagnostics.push(`sharesOutstanding basis ${shares.basis} cannot be used as current basic shares`);
     } else if (!Number.isFinite(shares.value) || shares.value <= 0) {
       diagnostics.push('sharesOutstanding: basic actual shares must be finite and positive');
