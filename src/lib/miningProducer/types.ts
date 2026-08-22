@@ -49,6 +49,22 @@ export type SourceRef = {
   url?: string;
 };
 
+export type MoneyPoint = {
+  value: number;
+  currency: string;
+  asOfDate?: string;
+  provenance: Provenance;
+};
+
+export type EnterpriseAdjustment = {
+  id: string;
+  amount: number;
+  currency: string;
+  treatment: 'add' | 'subtract';
+  description: string;
+  provenance: Provenance;
+};
+
 export type ReportedPriceDeck = {
   id: string;
   label: string;
@@ -132,27 +148,29 @@ export type CostModel =
     }
   | { type: 'derived'; method: string; inputIds: string[] };
 
+export type CostComponent =
+  | 'cash_operating_cost'
+  | 'royalty'
+  | 'production_tax'
+  | 'tc_rc'
+  | 'site_gna'
+  | 'corporate_gna'
+  | 'sustaining_capex'
+  | 'sustaining_exploration'
+  | 'deferred_stripping'
+  | 'underground_development'
+  | 'growth_capex'
+  | 'growth_exploration'
+  | 'cash_income_tax'
+  | 'working_capital_delta'
+  | 'reclamation_cash'
+  | 'reclamation_accretion'
+  | 'other_recurring_operating'
+  | 'other_cash';
+
 export type CostDisclosure = {
   id: string;
-  component:
-    | 'cash_operating_cost'
-    | 'royalty'
-    | 'production_tax'
-    | 'tc_rc'
-    | 'site_gna'
-    | 'corporate_gna'
-    | 'sustaining_capex'
-    | 'sustaining_exploration'
-    | 'deferred_stripping'
-    | 'underground_development'
-    | 'growth_capex'
-    | 'growth_exploration'
-    | 'cash_income_tax'
-    | 'working_capital_delta'
-    | 'reclamation_cash'
-    | 'reclamation_accretion'
-    | 'other_recurring_operating'
-    | 'other_cash';
+  component: CostComponent;
   period: PeriodClaim;
   economicBasis: 'project_100pct' | 'attributable' | 'company';
   canonicalClassification:
@@ -165,6 +183,10 @@ export type CostDisclosure = {
     | 'excluded'
     | 'unknown';
   model: CostModel;
+  definition?: {
+    includesComponents?: CostComponent[];
+    excludesComponents?: CostComponent[];
+  };
   provenance: Provenance;
 };
 
@@ -220,6 +242,24 @@ export type ProducerJsonV1 = {
   };
   valuation: {
     valuationDateUtc: string;
+    marketPrice?: MoneyPoint;
+    reportedMarketCap?: MoneyPoint;
+    sharesOutstanding?: {
+      value: number;
+      basis: 'basic_actual' | 'fully_diluted' | 'weighted_average_basic' | 'weighted_average_diluted';
+      asOfDate: string;
+      provenance: Provenance;
+    };
+    balanceSheet?: {
+      asOfDate: string;
+      cashAndEquivalents?: MoneyPoint;
+      totalDebt?: MoneyPoint;
+      leaseLiabilities?: MoneyPoint;
+      preferredEquity?: MoneyPoint;
+      nonControllingInterest?: MoneyPoint;
+      nonOperatingInvestments?: MoneyPoint;
+      otherEnterpriseAdjustments?: EnterpriseAdjustment[];
+    };
   };
   reportedPriceDecks?: ReportedPriceDeck[];
   projects: ProducerProject[];
