@@ -95,6 +95,21 @@ export type ProductionDisclosure = {
   provenance: Provenance;
 };
 
+export type MetalStreamTier = {
+  cumulativeDeliveryThresholdToz: number | null;
+  streamedPayablePct: number;
+  ongoingPaymentPctSpot: number;
+};
+
+export type MetalStreamDisclosure = {
+  id: string;
+  metal: string;
+  effectiveFrom: string;
+  deliveryMeasure: 'payable';
+  tiers: MetalStreamTier[];
+  provenance: Provenance;
+};
+
 export type CostDenominator = {
   metal: string;
   unit: 'toz' | 'tonne' | 'lb';
@@ -223,6 +238,7 @@ export type ProducerProject = {
     | 'closed';
   ownership: OwnershipPeriod[];
   production: ProductionDisclosure[];
+  metalStreams?: MetalStreamDisclosure[];
   costs?: CostDisclosure[];
   reportedMetrics?: ReportedMetric[];
 };
