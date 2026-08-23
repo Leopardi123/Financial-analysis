@@ -96,7 +96,7 @@ function summarizeForecastDiagnostics(values: readonly string[], year: number): 
   const other = values.filter((value) => !value.startsWith(appliedPrefix));
   if (applied.length === 0) return [...other];
   return [
-    `FORECAST_RULES_APPLIED: ${applied.length} forecast rules materialized for ${year}; inspect Corporate JSON for rule-level provenance.`,
+    `FORECAST_RULE_APPLIED_SUMMARY: ${applied.length} forecast rules materialized for ${year}; inspect Corporate JSON for rule-level provenance.`,
     ...other,
   ];
 }
