@@ -84,6 +84,15 @@ function producer(id: string, marketCapUSD: number, reportedAuPrice = 1_800): Pr
       }],
     }],
     corporateCosts: [fixedCost(`${id}-corp-gna`, 'corporate_gna', 'operating')],
+    reportedMetrics: [{
+      id: `${id}-company-production`,
+      scope: { type: 'company' },
+      period: { kind: 'year', year: 2030 },
+      metric: 'production',
+      value: { kind: 'range', low: 90, high: 110 },
+      unit: 'toz',
+      provenance,
+    }],
     sources: [
       { id: 'company', sourceType: 'company_release', publisher: 'Issuer', title: 'Synthetic peer fixture' },
       { id: 'market', sourceType: 'other', publisher: 'Market', title: 'Synthetic market data' },
@@ -116,6 +125,8 @@ async function run(): Promise<void> {
   assertClose(spot.rows[0].evToEbitda, 5, 'canonical EV/EBITDA');
   assertClose(spot.rows[1].evToFcffBeforeGrowth, 10, 'canonical EV/FCFF');
   assertEqual(spot.rows[0].reportedAisc?.metric, 'aisc', 'single-project reported AISC is surfaced as reported data');
+  assertEqual(spot.rows[0].reportedProduction?.value.kind, 'range', 'company-level reported production range is surfaced without midpointing');
+  assertEqual(spot.rows[0].productionEvidence[0]?.relevance, 'exact_year', 'source production evidence is retained for peer display');
   assertEqual(spot.rows[0].productionEstimateClasses[0], 'company_guidance', 'production estimate class surfaced');
   assert(/non-standard/.test(spot.rows[0].nonStandardMultiples.warning), 'P/EBITDA and P/FCFF are explicitly labelled non-standard');
 
