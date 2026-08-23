@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ProducerPeerTable } from '../lib/miningProducer/peerTable.ts';
-import type { ReportedMetric } from '../lib/miningProducer/types.ts';
+import type { ProducerPeerTable, ProducerProductionEvidence } from '../lib/miningProducer/peerTable.ts';
+import type { NumericClaim, ReportedMetric } from '../lib/miningProducer/types.ts';
 import '../styles/producerCompare.css';
 
 type ProducerPeerApiResponse =
@@ -38,17 +38,54 @@ function formatMultiple(value: number | null): string {
   return value === null || !Number.isFinite(value) ? 'Ej beräkningsbart' : `${value.toFixed(2)}×`;
 }
 
+function displayUnit(unit: string): string {
+  if (unit === 'USD_per_toz_sold') return '$/oz sold';
+  if (unit === 'USD_per_toz_produced') return '$/oz produced';
+  if (unit === 'USD_per_toz') return '$/oz';
+  if (unit === 'USD') return 'USD';
+  return unit;
+}
+
+function formatNumericClaim(claim: NumericClaim, unit: string): string {
+  const suffix = unit ? ` ${displayUnit(unit)}` : '';
+  switch (claim.kind) {
+    case 'point': return `${claim.value.toLocaleString('sv-SE')}${suffix}`;
+    case 'approximate': return `~${claim.value.toLocaleString('sv-SE')}${suffix}`;
+    case 'range': return `${claim.low.toLocaleString('sv-SE')}–${claim.high.toLocaleString('sv-SE')}${suffix}`;
+    case 'upper_bound': return `<${claim.value.toLocaleString('sv-SE')}${suffix}`;
+    case 'lower_bound': return `>${claim.value.toLocaleString('sv-SE')}${suffix}`;
+  }
+}
+
 function formatClaim(metric: ReportedMetric | null): string {
   if (!metric) return 'Ej redovisat';
-  const claim = metric.value;
-  const unit = metric.unit === 'USD_per_toz_sold' ? '$/oz sold' : metric.unit;
-  switch (claim.kind) {
-    case 'point': return `${claim.value.toLocaleString('sv-SE')} ${unit}`;
-    case 'approximate': return `~${claim.value.toLocaleString('sv-SE')} ${unit}`;
-    case 'range': return `${claim.low.toLocaleString('sv-SE')}–${claim.high.toLocaleString('sv-SE')} ${unit}`;
-    case 'upper_bound': return `<${claim.value.toLocaleString('sv-SE')} ${unit}`;
-    case 'lower_bound': return `>${claim.value.toLocaleString('sv-SE')} ${unit}`;
-  }
+  return formatNumericClaim(metric.value, metric.unit);
+}
+
+function formatEvidencePeriod(item: ProducerProductionEvidence): string {
+  const period = item.period;
+  if (period.kind === 'year') return String(period.year);
+  if (period.kind === 'year_range_average') return `snitt ${period.startYear}–${period.endYear}`;
+  if (period.kind === 'year_range_total') return `summa ${period.startYear}–${period.endYear}`;
+  return `ej periodiserat: ${period.label}`;
+}
+
+function evidenceBasisLabel(item: ProducerProductionEvidence): string {
+  return item.basis === 'project_100pct' ? '100% projekt' : 'attributable';
+}
+
+function ProductionEvidenceList({ items }: { items: ProducerProductionEvidence[] }) {
+  if (items.length === 0) return <span>Ej beräkningsbart</span>;
+  return (
+    <div className="producer-compare__evidence-list">
+      {items.map((item) => (
+        <div className="producer-compare__evidence-item" key={`${item.projectId}-${item.sourceId}-${JSON.stringify(item.period)}`}>
+          <strong>{item.projectName}: {formatNumericClaim(item.quantity, item.unit)}</strong>
+          <small>{formatEvidencePeriod(item)} · {evidenceBasisLabel(item)} · {item.estimateClass}</small>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function priceUnitLabel(unit: string): string {
@@ -62,7 +99,7 @@ function qualityLabel(value: string): string {
   switch (value) {
     case 'exact': return 'Exakt';
     case 'approximation': return 'Approx.';
-    case 'reported_only': return 'Rapporterad';
+    case 'reported_only': return 'Rapporterad / evidens';
     default: return 'Ej beräkningsbart';
   }
 }
@@ -127,7 +164,7 @@ export default function ProducerCompareDashboard() {
         </div>
         <input
           value={editorSymbol}
-          placeholder="Ticker, t.ex. BTO"
+          placeholder="Ticker, t.ex. BTO.TO"
           onChange={(event) => setEditorSymbol(event.target.value.toUpperCase())}
           onKeyDown={(event) => {
             if (event.key === 'Enter') openCorporateEditor(editorSymbol);
@@ -237,28 +274,64 @@ export default function ProducerCompareDashboard() {
                 <tbody>
                   {data.table.rows.map((row) => {
                     const symbol = symbolByCompanyId.get(row.companyId) ?? '';
+                    const auEvidence = row.productionEvidence.filter((item) => item.metal === 'Au' && item.measure === 'produced');
                     return (
                       <tr key={row.companyId}>
                         <td className="producer-compare__company">
                           <div>{row.companyName}</div>
                           {symbol && <button type="button" onClick={() => openCorporateEditor(symbol)}>Redigera JSON</button>}
                         </td>
-                        <td>{formatCompact(row.auOz, ' oz')}</td>
-                        <td>{formatCompact(row.auEqOz, ' oz')}</td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.auOz !== null ? formatCompact(row.auOz, ' oz') : row.reportedProduction ? (
+                            <div className="producer-compare__evidence-item">
+                              <strong>{formatClaim(row.reportedProduction)}</strong>
+                              <small>Rapporterad bolagsproduktion · ej omräknad till kanonisk attributable Au</small>
+                            </div>
+                          ) : <ProductionEvidenceList items={auEvidence} />}
+                        </td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.auEqOz !== null ? formatCompact(row.auEqOz, ' oz') : row.reportedAuEq ? (
+                            <div className="producer-compare__evidence-item">
+                              <strong>{formatClaim(row.reportedAuEq)}</strong>
+                              <small>Rapporterad AuEq · ej kanonisk fysisk AuEq</small>
+                            </div>
+                          ) : 'Ej beräkningsbart'}
+                        </td>
                         <td>
                           <div>{row.productionEstimateClasses.length > 0 ? row.productionEstimateClasses.join(', ') : 'Saknas'}</div>
                           <span className={`producer-compare__quality producer-compare__quality--${row.productionQuality}`}>
                             {qualityLabel(row.productionQuality)}
                           </span>
                         </td>
-                        <td>{formatUsd(row.revenueUSD)}</td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.revenueUSD !== null ? formatUsd(row.revenueUSD) : row.reportedRevenue ? (
+                            <div className="producer-compare__evidence-item">
+                              <strong>{formatClaim(row.reportedRevenue)}</strong>
+                              <small>Rapporterad revenue · ej reprissatt SPOT</small>
+                            </div>
+                          ) : 'Ej beräkningsbart'}
+                        </td>
                         <td>
                           <div>{formatClaim(row.reportedCashCost)}</div>
                           <small>Kanonisk/AuEq: {formatUsd(row.canonicalCashOperatingCostPerAuEqUSD)}</small>
                         </td>
                         <td>{formatClaim(row.reportedAisc)}</td>
-                        <td>{formatUsd(row.ebitdaUSD)}</td>
-                        <td>{formatUsd(row.fcffBeforeGrowthUSD)}</td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.ebitdaUSD !== null ? formatUsd(row.ebitdaUSD) : row.reportedEbitda ? (
+                            <div className="producer-compare__evidence-item">
+                              <strong>{formatClaim(row.reportedEbitda)}</strong>
+                              <small>Rapporterad EBITDA · ej kanonisk Producer-EBITDA</small>
+                            </div>
+                          ) : 'Ej beräkningsbart'}
+                        </td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.fcffBeforeGrowthUSD !== null ? formatUsd(row.fcffBeforeGrowthUSD) : row.reportedFcf ? (
+                            <div className="producer-compare__evidence-item">
+                              <strong>{formatClaim(row.reportedFcf)}</strong>
+                              <small>Rapporterad FCF · visas som evidens, ersätter inte FCFF</small>
+                            </div>
+                          ) : 'Ej beräkningsbart'}
+                        </td>
                         <td>{formatUsd(row.fcffAfterGrowthUSD)}</td>
                         <td>{formatUsd(row.growthCapexUSD)}</td>
                         <td>{formatUsd(row.marketCapUSD)}</td>
@@ -285,7 +358,7 @@ export default function ProducerCompareDashboard() {
           )}
 
           <div className="producer-compare__footnote">
-            EBITDA och FCFF är kanoniska Producer-mått. EV/EBITDA och EV/FCFF är huvudmultiplar. Market Cap/EBITDA och Market Cap/FCFF beräknas i motorn men visas inte som standard eftersom de blandar equity value med enterprise/unlevered resultatmått.
+            Stora numeriska värden är kanoniska Producer-mått. När kanonisk aggregering inte är möjlig visas rapporterad range/target som evidens i stället för att midpointas eller annualiseras. EBITDA och FCFF är kanoniska Producer-mått; rapporterad EBITDA/FCF visas endast som separat evidens och används inte i EV-multiplar utan en explicit bridge.
           </div>
         </>
       )}
