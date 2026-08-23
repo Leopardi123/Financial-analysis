@@ -1,4 +1,5 @@
 import { buildProducerJsonV1Template } from './template.ts';
+import { stripGeneratedProducerEditorMetadata } from './editorMetadata.ts';
 import type { ProducerJsonV1 } from './types.ts';
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -328,7 +329,7 @@ export function decorateProducerJsonForEditor(
     symbol,
     producer.valuation?.valuationDateUtc ?? new Date().toISOString().slice(0, 10),
   ) as unknown as Record<string, unknown>;
-  const current = producer as unknown as Record<string, unknown>;
+  const current = stripGeneratedProducerEditorMetadata(producer) as unknown as Record<string, unknown>;
 
   const baseCompany = asRecord(base.company);
   const currentCompany = asRecord(current.company);
