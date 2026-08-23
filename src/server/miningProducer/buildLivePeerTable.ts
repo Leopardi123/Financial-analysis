@@ -2,7 +2,7 @@ import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import { resolvePriceSeries } from '../../lib/prices/resolve.ts';
 import { buildProducerPeerTable, type ProducerPeerTable } from '../../lib/miningProducer/peerTable.ts';
 import type { ExplicitLongTermPriceDeck } from '../../lib/miningProducer/priceDeck.ts';
-import type { ProducerJsonV1, ProducerRunContext } from '../../lib/miningProducer/types.ts';
+import type { ProducerJsonV1, ProducerProject, ProducerRunContext } from '../../lib/miningProducer/types.ts';
 import {
   fetchProducerQuoteFromCanonicalFmpPath,
   resolveLiveProducerMarketInputs,
@@ -60,6 +60,21 @@ function cachedFxResolver(base: typeof resolveFxUSDToTarget): typeof resolveFxUS
   };
 }
 
+function projectInsideExplicitProductionWindow(project: ProducerProject, year: number): boolean {
+  const window = project.productionWindow;
+  if (!window) return true;
+  if (year < window.startYear) return false;
+  if (window.endYear !== undefined && year > window.endYear) return false;
+  return true;
+}
+
+function applyProductionWindowForRun(producer: ProducerJsonV1, year: number): ProducerJsonV1 {
+  return {
+    ...producer,
+    projects: producer.projects.filter((project) => projectInsideExplicitProductionWindow(project, year)),
+  };
+}
+
 export async function buildLiveProducerPeerTable(
   args: {
     producers: readonly ProducerJsonV1[];
@@ -107,8 +122,9 @@ export async function buildLiveProducerPeerTable(
   }
 
   const hydratedProducers = live.map((item) => item.producer);
+  const runProducers = hydratedProducers.map((producer) => applyProductionWindowForRun(producer, args.context.selectedYear));
   const table = await buildProducerPeerTable({
-    producers: hydratedProducers,
+    producers: runProducers,
     context: args.context,
     ltDeck: args.ltDeck,
     reportedPriceDeckIdByCompanyId: args.reportedPriceDeckIdByCompanyId,
