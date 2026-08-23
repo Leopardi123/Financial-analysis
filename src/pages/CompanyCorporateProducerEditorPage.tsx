@@ -5,7 +5,7 @@ import {
   upsertCompanyCorporateProducer,
 } from '../lib/client/companyCorporateProducerClient.ts';
 import { copyText } from '../lib/client/clipboard.ts';
-import { assessProducerFiveYearCoverage } from '../lib/miningProducer/calculability.ts';
+import { assessProducerFiveYearCoverageWithForecast } from '../lib/miningProducer/forecastCalculability.ts';
 import {
   buildDocumentedProducerJsonTemplate,
   decorateProducerJsonForEditor,
@@ -77,7 +77,7 @@ export default function CompanyCorporateProducerEditorPage() {
   const dirty = savedRaw !== null ? raw !== savedRaw : raw.trim().length > 0;
   const currentYear = new Date().getUTCFullYear();
   const fiveYearCoverage = useMemo(
-    () => validation.parsed ? assessProducerFiveYearCoverage(validation.parsed, currentYear, 'BASE') : [],
+    () => validation.parsed ? assessProducerFiveYearCoverageWithForecast(validation.parsed, currentYear, 'BASE') : [],
     [validation.parsed, currentYear],
   );
 
@@ -193,7 +193,7 @@ export default function CompanyCorporateProducerEditorPage() {
         </p>
         <p>
           Mallen är självdokumenterande. Fält som börjar med <code>_description_</code>, <code>_choices_</code>, <code>_example_</code>, <code>_calculability_</code> eller <code>_reference</code> är instruktioner/exempel och ignoreras av beräkningsmotorn.
-          Kopiera ett relevant exempel till det riktiga fältet och fyll endast sådant som källan faktiskt stödjer. Saknad data ska utelämnas, inte sättas till 0.
+          Källfakta ska ligga i de vanliga evidence-fälten. Femårsprognoser kan kompletteras med explicita <code>forecastAssumptions</code>; dessa materialiseras endast som scenario/derived inputs och får aldrig skrivas över en explicit års-disclosure.
         </p>
 
         {validation.ok && fiveYearCoverage.length > 0 && (
@@ -210,6 +210,9 @@ export default function CompanyCorporateProducerEditorPage() {
                       <strong>{metric.metric}: {coverageLabel(metric.state)}</strong>
                       {metric.missing.length > 0 && (
                         <ul>{metric.missing.map((item) => <li key={item}>{item}</li>)}</ul>
+                      )}
+                      {metric.notes.length > 0 && (
+                        <ul>{metric.notes.map((item) => <li key={item}>{item}</li>)}</ul>
                       )}
                     </li>
                   ))}
