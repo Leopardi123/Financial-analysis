@@ -1,3 +1,4 @@
+import { buildLiveProducerPeerTable } from '../../../server/miningProducer/buildLivePeerTable.ts';
 import { assessProducerYearCalculability } from '../calculability.ts';
 import { assessProducerIntervalCompleteness } from '../intervalCompleteness.ts';
 import { normalizeProducerCompanyYear } from '../normalize.ts';
@@ -8,12 +9,22 @@ function assert(condition: unknown, message: string): void {
   if (!condition) throw new Error(message);
 }
 
+function assertClose(actual: number | null | undefined, expected: number, message: string): void {
+  if (actual === null || actual === undefined || Math.abs(actual - expected) > 1e-6) {
+    throw new Error(`${message}. Expected ${expected}, received ${String(actual)}`);
+  }
+}
+
 const source: Provenance = { sourceId: 'src', estimateClass: 'company_guidance' };
 const actual: Provenance = { sourceId: 'src', estimateClass: 'actual' };
 
 const producer = {
   version: 'producer_json_v1',
-  company: { id: 'b2', name: 'B2 pattern' },
+  company: {
+    id: 'b2',
+    name: 'B2 pattern',
+    primarySecurity: { ticker: 'B2', exchange: 'TEST', quoteCurrency: 'USD', securityType: 'common' },
+  },
   valuation: { valuationDateUtc: '2026-08-23' },
   projects: [
     {
@@ -22,6 +33,7 @@ const producer = {
       primaryMetal: 'Au',
       statusAsOfValuationDate: 'operating',
       calculationRole: 'evidence_only_unallocated',
+      financialConsolidation: { method: 'full', provenance: actual },
       ownership: [],
       production: [{
         id: 'combined-2026',
@@ -40,6 +52,7 @@ const producer = {
       primaryMetal: 'Au',
       statusAsOfValuationDate: 'operating',
       ownership: [{ effectiveFrom: '2026-01-01', ownershipPct: 1, provenance: actual }],
+      financialConsolidation: { method: 'full', provenance: actual },
       production: [
         {
           id: 'mine-2026',
@@ -85,7 +98,7 @@ async function run(): Promise<void> {
   assert(au2026?.missing.some((item) => item.includes('evidence_only_unallocated')), '2026 calculability names the unallocated grouping as the blocker');
 
   const complete2026 = assessProducerIntervalCompleteness({ producer, year: 2026, caseMode: 'BASE', basis: 'attributable' });
-  assert(!complete2026.productionComplete && !complete2026.revenueComplete, '2026 interval completeness blocks partial company interval');
+  assert(!complete2026.productionComplete && !complete2026.revenueComplete, '2026 attributable interval completeness blocks partial company interval');
 
   const normalized2026 = await normalizeProducerCompanyYear({
     producer,
@@ -94,9 +107,25 @@ async function run(): Promise<void> {
   }, {
     resolvePriceSeriesFn: (async () => ({ values: [2_000], warnings: [] })) as typeof import('../../prices/resolve.ts').resolvePriceSeries,
   });
-  assert(normalized2026.producedByMetal.Au?.value === 100_000, 'unallocated group ounces are never added to canonical production');
-  assert(normalized2026.physicalAuEqOz === null, 'partial canonical company AuEq is suppressed for exact-year unallocated group evidence');
-  assert(normalized2026.metrics.revenueUSD === null, 'partial canonical company revenue is suppressed for exact-year unallocated group evidence');
+  assert(normalized2026.producedByMetal.Au?.value === 100_000, 'unallocated group ounces are never added to attributable canonical production');
+  assert(normalized2026.physicalAuEqOz === null, 'partial attributable company AuEq is suppressed for exact-year unallocated group evidence');
+  assert(normalized2026.metrics.revenueUSD === null, 'direct attributable normalization suppresses partial company revenue');
+
+  const live2026 = await buildLiveProducerPeerTable({
+    producers: [producer],
+    context: { valuationDateUtc: '2026-08-23', selectedYear: 2026, priceMode: 'SPOT', caseMode: 'BASE' },
+    allowNonProductionReadySpotKeys: true,
+  }, {
+    todayUtcFn: () => '2026-08-23',
+    resolveProviderSymbolFn: async () => ({ symbol: 'B2' }),
+    fetchQuoteFn: async () => ({ price: 1, marketCap: 1_000_000, sharesOutstanding: 1_000_000 }),
+    resolveFxFn: async () => ({ fx: 1, warnings: [] }),
+    resolvePriceSeriesFn: (async () => ({ values: [2_000], warnings: [] })) as typeof import('../../prices/resolve.ts').resolvePriceSeries,
+  });
+  const intervals2026 = live2026.intervalEconomicsByCompanyId.b2;
+  assert(intervals2026.attributable.revenueUSD.range === null, 'attributable interval remains blocked by the unallocated ownership split');
+  assertClose(intervals2026.financial.revenueUSD.range?.low, 980_000_000, 'financial interval can use verified fully consolidated combined-group low revenue');
+  assertClose(intervals2026.financial.revenueUSD.range?.high, 1_040_000_000, 'financial interval can use verified fully consolidated combined-group high revenue');
 
   const calc2030 = assessProducerYearCalculability(producer, 2030, 'BASE');
   const au2030 = calc2030.metrics.find((item) => item.metric === 'Au/AuEq');
