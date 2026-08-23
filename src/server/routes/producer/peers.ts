@@ -228,6 +228,7 @@ export default async function handler(req: any, res: any) {
         sourceContract: 'producer_json_v1_db_only',
       },
       table: result.table,
+      intervalEconomicsByCompanyId: result.intervalEconomicsByCompanyId,
       liveDiagnosticsByCompanyId: result.liveDiagnosticsByCompanyId,
     });
   } catch (error) {
