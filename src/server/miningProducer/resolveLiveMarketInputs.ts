@@ -1,5 +1,3 @@
-import { query } from '../../../api/_db.ts';
-import { fetchApiV3Json } from '../../../api/_fmp.ts';
 import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import type { ProducerJsonV1, Provenance, SourceRef } from '../../lib/miningProducer/types.ts';
 
@@ -42,6 +40,14 @@ function exchangeMatches(actual: string | null, expected: string | undefined): b
   return normalized(actual) === normalized(expected);
 }
 
+async function queryCompanyMaster(sql: string, args: Array<string | number>): Promise<Array<Record<string, unknown>>> {
+  // Keep the root /api runtime module on the same .js import convention used by the
+  // rest of Instrumentbrädan. This import is lazy so raw TypeScript unit tests can
+  // inject dependencies without Node trying to resolve a non-built .js file.
+  const { query } = await import('../../../api/_db.js');
+  return await query(sql, args) as Array<Record<string, unknown>>;
+}
+
 export async function resolveProducerProviderSymbolFromCompanyMaster(
   producer: ProducerJsonV1,
 ): Promise<ProducerProviderSymbolResolution> {
@@ -54,7 +60,7 @@ export async function resolveProducerProviderSymbolFromCompanyMaster(
   }
 
   const ticker = normalized(security.ticker);
-  const rawCandidates = await query(
+  const rawCandidates = await queryCompanyMaster(
     `SELECT symbol, name, exchange
      FROM companies
      WHERE UPPER(symbol) = ?
@@ -62,7 +68,7 @@ export async function resolveProducerProviderSymbolFromCompanyMaster(
     [ticker, `${ticker}.%`],
   );
   const candidates: CompanyMasterCandidate[] = rawCandidates
-    .map((row: any) => ({
+    .map((row) => ({
       symbol: normalized(row?.symbol == null ? '' : String(row.symbol)),
       name: row?.name == null ? '' : String(row.name),
       exchange: row?.exchange == null ? null : String(row.exchange),
@@ -92,6 +98,9 @@ export async function resolveProducerProviderSymbolFromCompanyMaster(
 }
 
 export async function fetchProducerQuoteFromCanonicalFmpPath(symbol: string): Promise<ProducerQuoteSnapshot> {
+  // Same canonical FMP v3 helper/path as the rest of Instrumentbrädan, loaded lazily
+  // for compatibility with both Vercel's compiled runtime and raw-TS unit tests.
+  const { fetchApiV3Json } = await import('../../../api/_fmp.js');
   const quote = await fetchApiV3Json<Array<Record<string, unknown>>>(`quote/${encodeURIComponent(symbol)}`);
   const first = Array.isArray(quote) ? quote[0] : null;
   return {
