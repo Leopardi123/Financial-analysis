@@ -1,7 +1,5 @@
-import { query } from '../../../api/_db.js';
-import { fetchApiV3Json } from '../../../api/_fmp.js';
-import { normalizeName } from '../../../api/_company_master.js';
-import { ensureSchema, tables } from '../../../api/_migrate.js';
+import { query } from '../../../api/_db.ts';
+import { fetchApiV3Json } from '../../../api/_fmp.ts';
 import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import type { ProducerJsonV1, Provenance, SourceRef } from '../../lib/miningProducer/types.ts';
 
@@ -9,7 +7,6 @@ type CompanyMasterCandidate = {
   symbol: string;
   name: string;
   exchange: string | null;
-  normalized_name: string;
 };
 
 export type ProducerProviderSymbolResolution = {
@@ -56,26 +53,20 @@ export async function resolveProducerProviderSymbolFromCompanyMaster(
     };
   }
 
-  await ensureSchema();
   const ticker = normalized(security.ticker);
-  const normalizedCompanyName = normalizeName(producer.company.name);
   const candidates = await query(
-    `SELECT symbol, name, exchange, normalized_name
-     FROM ${tables.companies}
+    `SELECT symbol, name, exchange
+     FROM companies
      WHERE UPPER(symbol) = ?
-        OR UPPER(symbol) LIKE ?
-        OR normalized_name = ?`,
-    [ticker, `${ticker}.%`, normalizedCompanyName],
+        OR UPPER(symbol) LIKE ?`,
+    [ticker, `${ticker}.%`],
   ) as CompanyMasterCandidate[];
 
   const exchangeCandidates = candidates.filter((candidate) => exchangeMatches(candidate.exchange, security.exchange));
   const exactTicker = exchangeCandidates.filter((candidate) => normalized(candidate.symbol) === ticker);
   const resolved = exactTicker.length === 1
     ? exactTicker
-    : exchangeCandidates.filter((candidate) => {
-        const symbol = normalized(candidate.symbol);
-        return symbol.startsWith(`${ticker}.`) || candidate.normalized_name === normalizedCompanyName;
-      });
+    : exchangeCandidates.filter((candidate) => normalized(candidate.symbol).startsWith(`${ticker}.`));
 
   if (resolved.length === 1) {
     return { symbol: normalized(resolved[0].symbol) };
@@ -163,7 +154,7 @@ export async function resolveLiveProducerMarketInputs(
       });
       diagnostics.push(...resolved.warnings.map((warning) => `FX ${quoteCurrency}: ${warning}`));
       if (resolved.fx !== null && Number.isFinite(resolved.fx) && resolved.fx > 0) {
-        // Canonical FX resolver returns TARGET currency units per USD. Producer cost/market normalization
+        // Canonical FX resolver returns TARGET currency units per USD. Producer normalization
         // consumes USD per target-currency unit, so invert exactly once here.
         usdPerCurrencyUnitByCurrency[quoteCurrency] = 1 / resolved.fx;
       } else {
