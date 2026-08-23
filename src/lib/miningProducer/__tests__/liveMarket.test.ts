@@ -10,8 +10,9 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   if (actual !== expected) throw new Error(`${message}. Expected ${String(expected)}, received ${String(actual)}`);
 }
 
-function assertClose(actual: number | null | undefined, expected: number, message: string, tolerance = 1e-9): void {
-  if (actual === null || actual === undefined || Math.abs(actual - expected) > tolerance) {
+function assertClose(actual: number | null | undefined, expected: number, message: string, relativeTolerance = 1e-12): void {
+  const scale = Math.max(1, Math.abs(expected));
+  if (actual === null || actual === undefined || Math.abs(actual - expected) > relativeTolerance * scale) {
     throw new Error(`${message}. Expected ${expected}, received ${String(actual)}`);
   }
 }
