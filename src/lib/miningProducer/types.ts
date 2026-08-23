@@ -237,6 +237,16 @@ export type ProducerProject = {
     | 'study'
     | 'care_maintenance'
     | 'closed';
+  productionWindow?: {
+    startYear: number;
+    endYear?: number;
+    provenance: Provenance;
+  };
+  financialConsolidation?: {
+    method: 'full' | 'proportionate' | 'equity_method';
+    consolidationPct?: number;
+    provenance: Provenance;
+  };
   ownership: OwnershipPeriod[];
   production: ProductionDisclosure[];
   metalStreams?: MetalStreamDisclosure[];
