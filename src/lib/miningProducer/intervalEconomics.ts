@@ -1,5 +1,6 @@
 import { resolveOwnershipForYear } from './ownership.ts';
 import { isProjectIncludedInCase } from './production.ts';
+import { isProducerEconomicProject } from './projectRole.ts';
 import type { ResolvedProducerPriceDeck } from './priceDeck.ts';
 import type {
   CostComponent,
@@ -113,6 +114,7 @@ function periodIsExactYear(disclosure: { period: CostDisclosure['period'] }, yea
 }
 
 function projectActive(project: ProducerProject, year: number, caseMode: ProducerCaseMode): boolean {
+  if (!isProducerEconomicProject(project)) return false;
   if (!isProjectIncludedInCase(project.statusAsOfValuationDate, caseMode)) return false;
   const window = project.productionWindow;
   if (!window) return true;
