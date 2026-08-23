@@ -12,12 +12,12 @@ type CompanyMasterCandidate = {
   normalized_name: string;
 };
 
-type ProviderSymbolResolution = {
+export type ProducerProviderSymbolResolution = {
   symbol: string | null;
   diagnostic?: string;
 };
 
-type QuoteSnapshot = {
+export type ProducerQuoteSnapshot = {
   price: number | null;
   marketCap: number | null;
   sharesOutstanding: number | null;
@@ -47,7 +47,7 @@ function exchangeMatches(actual: string | null, expected: string | undefined): b
 
 export async function resolveProducerProviderSymbolFromCompanyMaster(
   producer: ProducerJsonV1,
-): Promise<ProviderSymbolResolution> {
+): Promise<ProducerProviderSymbolResolution> {
   const security = producer.company.primarySecurity;
   if (!security) {
     return {
@@ -93,7 +93,7 @@ export async function resolveProducerProviderSymbolFromCompanyMaster(
   };
 }
 
-export async function fetchProducerQuoteFromCanonicalFmpPath(symbol: string): Promise<QuoteSnapshot> {
+export async function fetchProducerQuoteFromCanonicalFmpPath(symbol: string): Promise<ProducerQuoteSnapshot> {
   const quote = await fetchApiV3Json<Array<Record<string, unknown>>>(`quote/${encodeURIComponent(symbol)}`);
   const first = Array.isArray(quote) ? quote[0] : null;
   return {
@@ -113,8 +113,8 @@ function appendSource(producer: ProducerJsonV1, source: SourceRef): ProducerJson
 export async function resolveLiveProducerMarketInputs(
   producer: ProducerJsonV1,
   deps: {
-    resolveProviderSymbolFn?: (producer: ProducerJsonV1) => Promise<ProviderSymbolResolution>;
-    fetchQuoteFn?: (symbol: string) => Promise<QuoteSnapshot>;
+    resolveProviderSymbolFn?: (producer: ProducerJsonV1) => Promise<ProducerProviderSymbolResolution>;
+    fetchQuoteFn?: (symbol: string) => Promise<ProducerQuoteSnapshot>;
     resolveFxFn?: ResolveFx;
     todayUtcFn?: () => string;
   } = {},
@@ -194,7 +194,7 @@ export async function resolveLiveProducerMarketInputs(
   };
 
   const fetchQuoteFn = deps.fetchQuoteFn ?? fetchProducerQuoteFromCanonicalFmpPath;
-  let quote: QuoteSnapshot | null = null;
+  let quote: ProducerQuoteSnapshot | null = null;
   try {
     quote = await fetchQuoteFn(providerSymbol);
   } catch (error) {
