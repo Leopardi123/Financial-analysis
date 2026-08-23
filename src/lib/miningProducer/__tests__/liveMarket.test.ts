@@ -23,7 +23,7 @@ function baseProducer(): ProducerJsonV1 {
     version: 'producer_json_v1',
     company: {
       id: 'gmin-test',
-      name: 'GMIN Test',
+      name: 'G Mining Ventures Corp.',
       primarySecurity: {
         ticker: 'GMIN',
         exchange: 'TSX',
@@ -32,7 +32,7 @@ function baseProducer(): ProducerJsonV1 {
       },
     },
     valuation: {
-      valuationDateUtc: '2026-08-22',
+      valuationDateUtc: '2026-08-23',
       balanceSheet: {
         asOfDate: '2026-06-30',
         usability: 'stale_after_material_event',
@@ -49,60 +49,43 @@ function baseProducer(): ProducerJsonV1 {
 async function run(): Promise<void> {
   const calls: string[] = [];
   const result = await resolveLiveProducerMarketInputs(baseProducer(), {
-    todayUtcFn: () => '2026-08-22',
-    fetchStable: async (path, query) => {
-      calls.push(`${path}:${String(query?.query ?? query?.symbol ?? '')}`);
-      if (path === 'search-symbol') {
-        return [
-          { symbol: 'GMIN.TO', currency: 'CAD', exchangeShortName: 'TSX' },
-          { symbol: 'GMINF', currency: 'USD', exchangeShortName: 'OTCQX' },
-        ];
-      }
-      if (path === 'forex-list') return [{ symbol: 'CADUSD' }, { symbol: 'USDBRL' }];
-      if (path === 'market-capitalization') return [{ symbol: 'GMIN.TO', marketCap: 7_000_000_000 }];
-      if (path === 'quote' && query?.symbol === 'CADUSD') return [{ symbol: 'CADUSD', price: 0.73 }];
-      if (path === 'quote' && query?.symbol === 'GMIN.TO') return [{ symbol: 'GMIN.TO', price: 35 }];
-      throw new Error(`Unexpected fake FMP call ${path}`);
+    todayUtcFn: () => '2026-08-23',
+    resolveProviderSymbolFn: async (producer) => {
+      calls.push(`company-master:${producer.company.id}`);
+      return { symbol: 'GMIN.TO' };
+    },
+    fetchQuoteFn: async (symbol) => {
+      calls.push(`v3-quote:${symbol}`);
+      return { price: 35, marketCap: 7_000_000_000, sharesOutstanding: 200_000_000 };
+    },
+    resolveFxFn: async (args) => {
+      calls.push(`canonical-fx:${args.targetCurrency}`);
+      return { fx: 1 / 0.73, warnings: [] };
     },
   });
 
-  assertEqual(result.providerSymbol, 'GMIN.TO', 'security resolution uses declared ticker/exchange/currency');
-  assertClose(result.usdPerCurrencyUnitByCurrency.CAD, 0.73, 'CAD->USD uses verified direct forex-list pair');
-  assertEqual(result.producer.valuation.reportedMarketCap?.currency, 'CAD', 'provider market cap preserves quote currency');
-  assertClose(result.producer.valuation.reportedMarketCap?.value, 7_000_000_000, 'provider market cap hydrated');
-  assertClose(result.producer.valuation.marketPrice?.value, 35, 'provider price hydrated');
-  assert(calls.includes('forex-list:'), 'forex-list is queried before using FX symbol');
-  assert(calls.includes('quote:CADUSD'), 'only verified forex-list pair is quoted');
+  assertEqual(result.providerSymbol, 'GMIN.TO', 'security resolution uses existing company master result');
+  assertClose(result.usdPerCurrencyUnitByCurrency.CAD, 0.73, 'CAD->USD is exact inverse of canonical USD->CAD resolver');
+  assertEqual(result.producer.valuation.reportedMarketCap?.currency, 'CAD', 'v3 quote market cap preserves quote currency');
+  assertClose(result.producer.valuation.reportedMarketCap?.value, 7_000_000_000, 'v3 quote market cap hydrated');
+  assertClose(result.producer.valuation.marketPrice?.value, 35, 'v3 quote price hydrated');
+  assertClose(result.producer.valuation.sharesOutstanding?.value, 200_000_000, 'v3 quote shares hydrated');
+  assertEqual(result.producer.valuation.sharesOutstanding?.basis, 'basic_actual', 'v3 quote shares use current basic basis');
+  assert(calls.includes('company-master:gmin-test'), 'company master is used instead of FMP symbol-search endpoint');
+  assert(calls.includes('v3-quote:GMIN.TO'), 'existing FMP v3 quote path supplies market fields');
+  assert(calls.includes('canonical-fx:CAD'), 'existing canonical FX resolver is reused');
+  assertEqual(calls.length, 3, 'live market resolution requires no parallel Stable/FMP discovery calls');
 
   const marketValue = resolveProducerMarketValue({
     producer: result.producer,
     usdPerCurrencyUnitByCurrency: result.usdPerCurrencyUnitByCurrency,
   });
-  assertClose(marketValue.marketCapUSD, 5_110_000_000, 'market cap converts with explicit provider FX');
+  assertClose(marketValue.marketCapUSD, 5_110_000_000, 'market cap converts with canonical FX');
   assertEqual(marketValue.enterpriseValueUSD, null, 'stale post-event balance blocks EV despite live market cap');
   assert(
     marketValue.diagnostics.some((item) => item.includes('stale after material event')),
     'stale balance produces explicit EV diagnostic',
   );
-
-  const inverse = await resolveLiveProducerMarketInputs({
-    ...baseProducer(),
-    company: {
-      ...baseProducer().company,
-      primarySecurity: { ticker: 'TEST', exchange: 'B3', quoteCurrency: 'BRL', securityType: 'common' },
-    },
-  }, {
-    todayUtcFn: () => '2026-08-22',
-    fetchStable: async (path, query) => {
-      if (path === 'search-symbol') return [{ symbol: 'TEST.SA', currency: 'BRL', exchangeShortName: 'B3' }];
-      if (path === 'forex-list') return [{ symbol: 'USDBRL' }];
-      if (path === 'quote' && query?.symbol === 'USDBRL') return [{ price: 5 }];
-      if (path === 'market-capitalization') return [{ marketCap: 100 }];
-      if (path === 'quote' && query?.symbol === 'TEST.SA') return [{ price: 10 }];
-      throw new Error(`Unexpected fake FMP call ${path}`);
-    },
-  });
-  assertClose(inverse.usdPerCurrencyUnitByCurrency.BRL, 0.2, 'verified inverse USD/BRL pair is inverted');
 
   const unverifiedFx = await resolveLiveProducerMarketInputs({
     ...baseProducer(),
@@ -111,25 +94,57 @@ async function run(): Promise<void> {
       primarySecurity: { ticker: 'TEST', exchange: 'X', quoteCurrency: 'XYZ', securityType: 'common' },
     },
   }, {
-    todayUtcFn: () => '2026-08-22',
-    fetchStable: async (path) => {
-      if (path === 'search-symbol') return [{ symbol: 'TEST.X', currency: 'XYZ', exchangeShortName: 'X' }];
-      if (path === 'forex-list') return [{ symbol: 'EURUSD' }];
-      if (path === 'market-capitalization') return [{ marketCap: 100 }];
-      if (path === 'quote') return [{ price: 10 }];
-      throw new Error(`Unexpected fake FMP call ${path}`);
+    todayUtcFn: () => '2026-08-23',
+    resolveProviderSymbolFn: async () => ({ symbol: 'TEST.X' }),
+    fetchQuoteFn: async () => ({ price: 10, marketCap: 100, sharesOutstanding: 10 }),
+    resolveFxFn: async () => ({ fx: null, warnings: ['Unknown legacy priceKey mapping: USD_XYZ'] }),
+  });
+  assertEqual(unverifiedFx.usdPerCurrencyUnitByCurrency.XYZ, undefined, 'missing canonical FX mapping remains unresolved');
+  assert(
+    unverifiedFx.diagnostics.some((item) => item.includes('not guessed')),
+    'missing FX states explicit no-guess diagnostic',
+  );
+
+  const quoteFailure = await resolveLiveProducerMarketInputs(baseProducer(), {
+    todayUtcFn: () => '2026-08-23',
+    resolveProviderSymbolFn: async () => ({ symbol: 'GMIN.TO' }),
+    resolveFxFn: async () => ({ fx: 1 / 0.73, warnings: [] }),
+    fetchQuoteFn: async () => {
+      throw new Error('provider unavailable');
     },
   });
-  assertEqual(unverifiedFx.usdPerCurrencyUnitByCurrency.XYZ, undefined, 'missing FX pair remains unresolved');
+  assertEqual(quoteFailure.providerSymbol, 'GMIN.TO', 'resolved provider symbol survives quote failure');
+  assertEqual(quoteFailure.producer.valuation.reportedMarketCap, undefined, 'quote failure does not synthesize market cap');
   assert(
-    unverifiedFx.diagnostics.some((item) => item.includes('must not be guessed')),
-    'missing FX pair states no-guess diagnostic',
+    quoteFailure.diagnostics.some((item) => item.includes('without failing the peer table')),
+    'quote provider failure is fail-soft',
+  );
+
+  const fxFailure = await resolveLiveProducerMarketInputs(baseProducer(), {
+    todayUtcFn: () => '2026-08-23',
+    resolveProviderSymbolFn: async () => ({ symbol: 'GMIN.TO' }),
+    fetchQuoteFn: async () => ({ price: 35, marketCap: 7_000_000_000, sharesOutstanding: 200_000_000 }),
+    resolveFxFn: async () => {
+      throw new Error('FX endpoint unavailable');
+    },
+  });
+  assertEqual(fxFailure.producer.valuation.reportedMarketCap?.value, 7_000_000_000, 'FX failure does not discard valid local-currency market cap');
+  assertEqual(fxFailure.usdPerCurrencyUnitByCurrency.CAD, undefined, 'FX failure leaves USD conversion unresolved');
+  assert(
+    fxFailure.diagnostics.some((item) => item.includes('dependent USD metrics remain unresolved')),
+    'FX provider failure is fail-soft',
   );
 
   const historicalRefusal = await resolveLiveProducerMarketInputs(baseProducer(), {
-    todayUtcFn: () => '2026-08-23',
-    fetchStable: async () => {
-      throw new Error('Historical-date refusal must happen before any provider call');
+    todayUtcFn: () => '2026-08-24',
+    resolveProviderSymbolFn: async () => {
+      throw new Error('Historical-date refusal must happen before company-master resolution');
+    },
+    fetchQuoteFn: async () => {
+      throw new Error('Historical-date refusal must happen before quote');
+    },
+    resolveFxFn: async () => {
+      throw new Error('Historical-date refusal must happen before FX');
     },
   });
   assertEqual(historicalRefusal.providerSymbol, null, 'current snapshot is not used for historical valuation date');
