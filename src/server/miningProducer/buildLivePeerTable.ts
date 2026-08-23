@@ -1,5 +1,6 @@
 import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import { resolvePriceSeries } from '../../lib/prices/resolve.ts';
+import { assessProducerIntervalCompleteness } from '../../lib/miningProducer/intervalCompleteness.ts';
 import {
   computeProducerIntervalEconomics,
   type ProducerIntervalEconomics,
@@ -152,6 +153,35 @@ function mergeFinancialEconomics(
   return attributable;
 }
 
+function enforceIntervalCompleteness(
+  interval: ProducerIntervalEconomics,
+  completeness: ReturnType<typeof assessProducerIntervalCompleteness>,
+): ProducerIntervalEconomics {
+  const diagnostics = [...new Set([...interval.diagnostics, ...completeness.diagnostics])];
+  if (!completeness.productionComplete) {
+    interval.auOz = {
+      range: null,
+      quality: 'not_computable',
+      diagnostics: [...interval.auOz.diagnostics, ...completeness.diagnostics],
+    };
+    interval.auEqOz = {
+      range: null,
+      quality: 'not_computable',
+      diagnostics: [...interval.auEqOz.diagnostics, ...completeness.diagnostics],
+    };
+  }
+  if (!completeness.revenueComplete) {
+    const reason = 'PARTIAL_INTERVAL_FORBIDDEN: company interval suppressed because at least one active project/revenue quantity is unresolved.';
+    interval.revenueUSD = { range: null, quality: 'not_computable', diagnostics: [...interval.revenueUSD.diagnostics, reason, ...completeness.diagnostics] };
+    interval.ebitdaUSD = { range: null, quality: 'not_computable', diagnostics: [...interval.ebitdaUSD.diagnostics, reason, ...completeness.diagnostics] };
+    interval.fcffBeforeGrowthUSD = { range: null, quality: 'not_computable', diagnostics: [...interval.fcffBeforeGrowthUSD.diagnostics, reason, ...completeness.diagnostics] };
+    interval.fcffAfterGrowthUSD = { range: null, quality: 'not_computable', diagnostics: [...interval.fcffAfterGrowthUSD.diagnostics, reason, ...completeness.diagnostics] };
+    diagnostics.push(reason);
+  }
+  interval.diagnostics = diagnostics;
+  return interval;
+}
+
 export async function buildLiveProducerPeerTable(
   args: {
     producers: readonly ProducerJsonV1[];
@@ -235,23 +265,35 @@ export async function buildLiveProducerPeerTable(
   for (const producer of attributableProducers) {
     const deck = table.priceDecksByCompanyId[producer.company.id];
     if (!deck) continue;
+    const attributableCompleteness = assessProducerIntervalCompleteness({
+      producer,
+      year: args.context.selectedYear,
+      caseMode: args.context.caseMode,
+      basis: 'attributable',
+    });
+    const financialCompleteness = assessProducerIntervalCompleteness({
+      producer,
+      year: args.context.selectedYear,
+      caseMode: args.context.caseMode,
+      basis: 'financial',
+    });
     intervalEconomicsByCompanyId[producer.company.id] = {
-      attributable: computeProducerIntervalEconomics({
+      attributable: enforceIntervalCompleteness(computeProducerIntervalEconomics({
         producer,
         year: args.context.selectedYear,
         caseMode: args.context.caseMode,
         deck,
         basis: 'attributable',
         usdPerCurrencyUnitByCurrency,
-      }),
-      financial: computeProducerIntervalEconomics({
+      }), attributableCompleteness),
+      financial: enforceIntervalCompleteness(computeProducerIntervalEconomics({
         producer,
         year: args.context.selectedYear,
         caseMode: args.context.caseMode,
         deck,
         basis: 'financial',
         usdPerCurrencyUnitByCurrency,
-      }),
+      }), financialCompleteness),
     };
   }
 
