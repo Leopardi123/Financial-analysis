@@ -16,6 +16,8 @@ type ProducerPeerApiResponse =
       diagnostics?: string[];
     };
 
+type NumericRange = { low: number; high: number };
+
 function formatCompact(value: number | null, suffix = ''): string {
   if (value === null || !Number.isFinite(value)) return 'Ej beräkningsbart';
   const abs = Math.abs(value);
@@ -32,6 +34,16 @@ function formatUsd(value: number | null): string {
   if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)} M`;
   if (abs >= 1_000) return `$${(value / 1_000).toFixed(1)} k`;
   return `$${value.toLocaleString('sv-SE', { maximumFractionDigits: 0 })}`;
+}
+
+function formatUsdRange(range: NumericRange): string {
+  return range.low === range.high ? formatUsd(range.low) : `${formatUsd(range.low)}–${formatUsd(range.high)}`;
+}
+
+function formatUsdPerOzRange(range: NumericRange): string {
+  const low = `$${range.low.toLocaleString('sv-SE', { maximumFractionDigits: 0 })}`;
+  const high = `$${range.high.toLocaleString('sv-SE', { maximumFractionDigits: 0 })}`;
+  return range.low === range.high ? `${low}/oz` : `${low}–${high}/oz`;
 }
 
 function formatMultiple(value: number | null): string {
@@ -60,6 +72,36 @@ function formatNumericClaim(claim: NumericClaim, unit: string): string {
 function formatClaim(metric: ReportedMetric | null): string {
   if (!metric) return 'Ej redovisat';
   return formatNumericClaim(metric.value, metric.unit);
+}
+
+function claimToClosedRange(claim: NumericClaim): NumericRange | null {
+  if (claim.kind === 'point' || claim.kind === 'approximate') return { low: claim.value, high: claim.value };
+  if (claim.kind === 'range') return { low: claim.low, high: claim.high };
+  return null;
+}
+
+function reportedProductionToAuOzRange(metric: ReportedMetric | null): NumericRange | null {
+  if (!metric || metric.metric !== 'production') return null;
+  const raw = claimToClosedRange(metric.value);
+  if (!raw) return null;
+  let factor: number;
+  if (metric.unit === 'toz' || metric.unit === 'oz') factor = 1;
+  else if (metric.unit === 'koz') factor = 1_000;
+  else if (metric.unit === 'Moz') factor = 1_000_000;
+  else return null;
+  return { low: raw.low * factor, high: raw.high * factor };
+}
+
+function multiplyPositiveRanges(a: NumericRange, b: NumericRange): NumericRange {
+  return { low: a.low * b.low, high: a.high * b.high };
+}
+
+function marketCapPerProductionRange(marketCapUSD: number, productionOz: NumericRange): NumericRange | null {
+  if (!Number.isFinite(marketCapUSD) || marketCapUSD < 0 || productionOz.low <= 0 || productionOz.high <= 0) return null;
+  return {
+    low: marketCapUSD / productionOz.high,
+    high: marketCapUSD / productionOz.low,
+  };
 }
 
 function formatEvidencePeriod(item: ProducerProductionEvidence): string {
@@ -275,6 +317,15 @@ export default function ProducerCompareDashboard() {
                   {data.table.rows.map((row) => {
                     const symbol = symbolByCompanyId.get(row.companyId) ?? '';
                     const auEvidence = row.productionEvidence.filter((item) => item.metal === 'Au' && item.measure === 'produced');
+                    const deck = data.table.priceDecksByCompanyId[row.companyId];
+                    const reportedAuRange = reportedProductionToAuOzRange(row.reportedProduction);
+                    const selectedAuPrice = deck?.pricesByMetal.Au;
+                    const reportedRevenueProxy = reportedAuRange && selectedAuPrice?.valueUSD !== null && selectedAuPrice?.valueUSD !== undefined && selectedAuPrice.unit === 'USD_per_toz'
+                      ? multiplyPositiveRanges(reportedAuRange, { low: selectedAuPrice.valueUSD, high: selectedAuPrice.valueUSD })
+                      : null;
+                    const marketCapPerReportedAu = row.marketCapUSD !== null && reportedAuRange
+                      ? marketCapPerProductionRange(row.marketCapUSD, reportedAuRange)
+                      : null;
                     return (
                       <tr key={row.companyId}>
                         <td className="producer-compare__company">
@@ -295,6 +346,11 @@ export default function ProducerCompareDashboard() {
                               <strong>{formatClaim(row.reportedAuEq)}</strong>
                               <small>Rapporterad AuEq · ej kanonisk fysisk AuEq</small>
                             </div>
+                          ) : reportedAuRange ? (
+                            <div className="producer-compare__evidence-item">
+                              <strong>{formatClaim(row.reportedProduction)}</strong>
+                              <small>Au-only reported production proxy; not physical canonical AuEq</small>
+                            </div>
                           ) : 'Ej beräkningsbart'}
                         </td>
                         <td>
@@ -308,6 +364,11 @@ export default function ProducerCompareDashboard() {
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedRevenue)}</strong>
                               <small>Rapporterad revenue · ej reprissatt SPOT</small>
+                            </div>
+                          ) : reportedRevenueProxy ? (
+                            <div className="producer-compare__evidence-item">
+                              <strong>{formatUsdRange(reportedRevenueProxy)}</strong>
+                              <small>Rapporterad Au-produktion × valt {data.table.priceMode}-pris · proxy, ej canonical attributable revenue</small>
                             </div>
                           ) : 'Ej beräkningsbart'}
                         </td>
@@ -336,7 +397,14 @@ export default function ProducerCompareDashboard() {
                         <td>{formatUsd(row.growthCapexUSD)}</td>
                         <td>{formatUsd(row.marketCapUSD)}</td>
                         <td>{formatUsd(row.enterpriseValueUSD)}</td>
-                        <td>{row.marketCapPerAuOzUSD === null ? 'Ej beräkningsbart' : `${formatUsd(row.marketCapPerAuOzUSD)}/oz`}</td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.marketCapPerAuOzUSD !== null ? `${formatUsd(row.marketCapPerAuOzUSD)}/oz` : marketCapPerReportedAu ? (
+                            <div className="producer-compare__evidence-item">
+                              <strong>{formatUsdPerOzRange(marketCapPerReportedAu)}</strong>
+                              <small>MCap / rapporterad Au-range · ej canonical attributable multiple</small>
+                            </div>
+                          ) : 'Ej beräkningsbart'}
+                        </td>
                         <td>{row.marketCapPerAuEqOzUSD === null ? 'Ej beräkningsbart' : `${formatUsd(row.marketCapPerAuEqOzUSD)}/oz`}</td>
                         <td>{formatMultiple(row.evToEbitda)}</td>
                         <td>{formatMultiple(row.evToFcffBeforeGrowth)}</td>
@@ -358,7 +426,7 @@ export default function ProducerCompareDashboard() {
           )}
 
           <div className="producer-compare__footnote">
-            Stora numeriska värden är kanoniska Producer-mått. När kanonisk aggregering inte är möjlig visas rapporterad range/target som evidens i stället för att midpointas eller annualiseras. EBITDA och FCFF är kanoniska Producer-mått; rapporterad EBITDA/FCF visas endast som separat evidens och används inte i EV-multiplar utan en explicit bridge.
+            Stora numeriska värden är kanoniska Producer-mått. När kanonisk aggregering inte är möjlig visas rapporterad range/target som evidens i stället för att midpointas eller annualiseras. Revenue-proxy från rapporterad Au-range × valt pris märks uttryckligen som proxy och används inte i kanoniska EV-multiplar. EBITDA och FCFF är kanoniska Producer-mått; rapporterad EBITDA/FCF visas endast som separat evidens och används inte i EV-multiplar utan en explicit bridge.
           </div>
         </>
       )}
