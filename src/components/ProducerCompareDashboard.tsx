@@ -6,7 +6,7 @@ import '../styles/producerCompare.css';
 type ProducerPeerApiResponse =
   | {
       ok: true;
-      dataset: { companies: string[]; sourceContract: string };
+      dataset: { companies: string[]; symbols?: string[]; sourceContract: string };
       table: ProducerPeerTable;
       liveDiagnosticsByCompanyId: Record<string, string[]>;
     }
@@ -71,6 +71,7 @@ export default function ProducerCompareDashboard() {
   const [year, setYear] = useState(2030);
   const [priceMode, setPriceMode] = useState<'SPOT' | 'LT' | 'REPORTED'>('SPOT');
   const [caseMode, setCaseMode] = useState<'BASE' | 'GROWTH'>('BASE');
+  const [editorSymbol, setEditorSymbol] = useState('');
   const [data, setData] = useState<ProducerPeerApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -105,8 +106,38 @@ export default function ProducerCompareDashboard() {
     return Object.entries(data.table.priceDecksByCompanyId).map(([companyId, deck]) => ({ companyId, deck }));
   }, [data]);
 
+  const symbolByCompanyId = useMemo(() => {
+    if (!data?.ok) return new Map<string, string>();
+    const symbols = data.dataset.symbols ?? [];
+    return new Map(data.dataset.companies.map((companyId, index) => [companyId, symbols[index] ?? '']));
+  }, [data]);
+
+  function openCorporateEditor(symbol: string): void {
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) return;
+    window.location.href = `/company/${encodeURIComponent(normalized)}/corporate`;
+  }
+
   return (
     <div className="producer-compare">
+      <div className="producer-compare__editor-launcher">
+        <div>
+          <strong>CORPORATE JSON</strong>
+          <div>Endast bolag med sparad producer_json_v1 visas i jämförelsen.</div>
+        </div>
+        <input
+          value={editorSymbol}
+          placeholder="Ticker, t.ex. BTO"
+          onChange={(event) => setEditorSymbol(event.target.value.toUpperCase())}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') openCorporateEditor(editorSymbol);
+          }}
+        />
+        <button type="button" disabled={!editorSymbol.trim()} onClick={() => openCorporateEditor(editorSymbol)}>
+          Öppna / skapa JSON
+        </button>
+      </div>
+
       <div className="producer-compare__controls">
         <label>
           <span>ÅR</span>
@@ -157,6 +188,12 @@ export default function ProducerCompareDashboard() {
             </div>
           </div>
 
+          {data.table.rows.length === 0 && (
+            <div className="producer-compare__state">
+              Inga Corporate Producer JSON är sparade. Ange ett ticker ovan och skapa producer_json_v1.
+            </div>
+          )}
+
           <div className="producer-compare__decks">
             {priceDeckRows.map(({ companyId, deck }) => (
               <div className="producer-compare__deck" key={companyId}>
@@ -171,73 +208,81 @@ export default function ProducerCompareDashboard() {
             ))}
           </div>
 
-          <div className="producer-compare__table-wrap">
-            <table className="producer-compare__table">
-              <thead>
-                <tr>
-                  <th>Bolag</th>
-                  <th>Au</th>
-                  <th>AuEq</th>
-                  <th>Källa / kvalitet</th>
-                  <th>Revenue</th>
-                  <th>Cash cost</th>
-                  <th>AISC</th>
-                  <th>EBITDA</th>
-                  <th>FCFF före growth</th>
-                  <th>FCFF efter growth</th>
-                  <th>Growth CAPEX</th>
-                  <th>Market Cap</th>
-                  <th>EV</th>
-                  <th>MCap / Au</th>
-                  <th>MCap / AuEq</th>
-                  <th>EV / EBITDA</th>
-                  <th>EV / FCFF före growth</th>
-                  <th>EV / FCFF efter growth</th>
-                  <th>Diagnostik</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.table.rows.map((row) => (
-                  <tr key={row.companyId}>
-                    <td className="producer-compare__company">{row.companyName}</td>
-                    <td>{formatCompact(row.auOz, ' oz')}</td>
-                    <td>{formatCompact(row.auEqOz, ' oz')}</td>
-                    <td>
-                      <div>{row.productionEstimateClasses.length > 0 ? row.productionEstimateClasses.join(', ') : 'Saknas'}</div>
-                      <span className={`producer-compare__quality producer-compare__quality--${row.productionQuality}`}>
-                        {qualityLabel(row.productionQuality)}
-                      </span>
-                    </td>
-                    <td>{formatUsd(row.revenueUSD)}</td>
-                    <td>
-                      <div>{formatClaim(row.reportedCashCost)}</div>
-                      <small>Kanonisk/AuEq: {formatUsd(row.canonicalCashOperatingCostPerAuEqUSD)}</small>
-                    </td>
-                    <td>{formatClaim(row.reportedAisc)}</td>
-                    <td>{formatUsd(row.ebitdaUSD)}</td>
-                    <td>{formatUsd(row.fcffBeforeGrowthUSD)}</td>
-                    <td>{formatUsd(row.fcffAfterGrowthUSD)}</td>
-                    <td>{formatUsd(row.growthCapexUSD)}</td>
-                    <td>{formatUsd(row.marketCapUSD)}</td>
-                    <td>{formatUsd(row.enterpriseValueUSD)}</td>
-                    <td>{row.marketCapPerAuOzUSD === null ? 'Ej beräkningsbart' : `${formatUsd(row.marketCapPerAuOzUSD)}/oz`}</td>
-                    <td>{row.marketCapPerAuEqOzUSD === null ? 'Ej beräkningsbart' : `${formatUsd(row.marketCapPerAuEqOzUSD)}/oz`}</td>
-                    <td>{formatMultiple(row.evToEbitda)}</td>
-                    <td>{formatMultiple(row.evToFcffBeforeGrowth)}</td>
-                    <td>{formatMultiple(row.evToFcffAfterGrowth)}</td>
-                    <td>
-                      <details>
-                        <summary>{row.diagnostics.length} poster</summary>
-                        <ul>
-                          {row.diagnostics.map((item) => <li key={item}>{item}</li>)}
-                        </ul>
-                      </details>
-                    </td>
+          {data.table.rows.length > 0 && (
+            <div className="producer-compare__table-wrap">
+              <table className="producer-compare__table">
+                <thead>
+                  <tr>
+                    <th>Bolag</th>
+                    <th>Au</th>
+                    <th>AuEq</th>
+                    <th>Källa / kvalitet</th>
+                    <th>Revenue</th>
+                    <th>Cash cost</th>
+                    <th>AISC</th>
+                    <th>EBITDA</th>
+                    <th>FCFF före growth</th>
+                    <th>FCFF efter growth</th>
+                    <th>Growth CAPEX</th>
+                    <th>Market Cap</th>
+                    <th>EV</th>
+                    <th>MCap / Au</th>
+                    <th>MCap / AuEq</th>
+                    <th>EV / EBITDA</th>
+                    <th>EV / FCFF före growth</th>
+                    <th>EV / FCFF efter growth</th>
+                    <th>Diagnostik</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {data.table.rows.map((row) => {
+                    const symbol = symbolByCompanyId.get(row.companyId) ?? '';
+                    return (
+                      <tr key={row.companyId}>
+                        <td className="producer-compare__company">
+                          <div>{row.companyName}</div>
+                          {symbol && <button type="button" onClick={() => openCorporateEditor(symbol)}>Redigera JSON</button>}
+                        </td>
+                        <td>{formatCompact(row.auOz, ' oz')}</td>
+                        <td>{formatCompact(row.auEqOz, ' oz')}</td>
+                        <td>
+                          <div>{row.productionEstimateClasses.length > 0 ? row.productionEstimateClasses.join(', ') : 'Saknas'}</div>
+                          <span className={`producer-compare__quality producer-compare__quality--${row.productionQuality}`}>
+                            {qualityLabel(row.productionQuality)}
+                          </span>
+                        </td>
+                        <td>{formatUsd(row.revenueUSD)}</td>
+                        <td>
+                          <div>{formatClaim(row.reportedCashCost)}</div>
+                          <small>Kanonisk/AuEq: {formatUsd(row.canonicalCashOperatingCostPerAuEqUSD)}</small>
+                        </td>
+                        <td>{formatClaim(row.reportedAisc)}</td>
+                        <td>{formatUsd(row.ebitdaUSD)}</td>
+                        <td>{formatUsd(row.fcffBeforeGrowthUSD)}</td>
+                        <td>{formatUsd(row.fcffAfterGrowthUSD)}</td>
+                        <td>{formatUsd(row.growthCapexUSD)}</td>
+                        <td>{formatUsd(row.marketCapUSD)}</td>
+                        <td>{formatUsd(row.enterpriseValueUSD)}</td>
+                        <td>{row.marketCapPerAuOzUSD === null ? 'Ej beräkningsbart' : `${formatUsd(row.marketCapPerAuOzUSD)}/oz`}</td>
+                        <td>{row.marketCapPerAuEqOzUSD === null ? 'Ej beräkningsbart' : `${formatUsd(row.marketCapPerAuEqOzUSD)}/oz`}</td>
+                        <td>{formatMultiple(row.evToEbitda)}</td>
+                        <td>{formatMultiple(row.evToFcffBeforeGrowth)}</td>
+                        <td>{formatMultiple(row.evToFcffAfterGrowth)}</td>
+                        <td>
+                          <details>
+                            <summary>{row.diagnostics.length} poster</summary>
+                            <ul>
+                              {row.diagnostics.map((item) => <li key={item}>{item}</li>)}
+                            </ul>
+                          </details>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="producer-compare__footnote">
             EBITDA och FCFF är kanoniska Producer-mått. EV/EBITDA och EV/FCFF är huvudmultiplar. Market Cap/EBITDA och Market Cap/FCFF beräknas i motorn men visas inte som standard eftersom de blandar equity value med enterprise/unlevered resultatmått.
