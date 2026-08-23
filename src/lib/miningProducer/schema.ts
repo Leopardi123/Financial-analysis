@@ -82,7 +82,7 @@ function validateForecastProductionRules(project: ProducerJsonV1['projects'][num
 
 function validateForecastCostRules(
   scopeLabel: string,
-  sourceCosts: readonly NonNullable<ProducerJsonV1['corporateCosts']>,
+  sourceCosts: Readonly<NonNullable<ProducerJsonV1['corporateCosts']>>,
   rules: readonly ForecastCostRule[],
   requireCompanyBasis: boolean,
 ): void {
