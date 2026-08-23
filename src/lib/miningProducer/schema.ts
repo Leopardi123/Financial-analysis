@@ -8,6 +8,7 @@ import type {
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const FORECAST_ESTIMATE_CLASSES = new Set(['scenario', 'analyst_consensus', 'derived', 'mine_plan_derived']);
+const PROJECT_CALCULATION_ROLES = new Set(['economic_project', 'evidence_only_unallocated']);
 
 export function assertValuationDateUtc(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) {
@@ -127,6 +128,14 @@ export function validateProducerJsonV1(input: ProducerJsonV1): ProducerJsonV1 {
   }
 
   for (const project of input.projects) {
+    const calculationRole = (project as unknown as Record<string, unknown>).calculationRole;
+    if (calculationRole !== undefined && (typeof calculationRole !== 'string' || !PROJECT_CALCULATION_ROLES.has(calculationRole))) {
+      throw new Error(`Unsupported calculationRole for project ${project.id}; use economic_project or evidence_only_unallocated`);
+    }
+    if (calculationRole === 'evidence_only_unallocated' && (project.forecastAssumptions?.production?.length ?? 0) > 0) {
+      throw new Error(`evidence_only_unallocated project ${project.id} must not contain production forecastAssumptions; decompose the source grouping into economic projects before forecasting it`);
+    }
+
     if (project.productionWindow) {
       const { startYear, endYear } = project.productionWindow;
       if (!Number.isInteger(startYear)) {
