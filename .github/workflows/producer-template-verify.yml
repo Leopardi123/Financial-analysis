@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/mining-producer-phase1-core
+  pull_request:
+    branches:
+      - main
 
 jobs:
   verify:
