@@ -8,6 +8,7 @@ import {
 } from '../../lib/miningProducer/intervalEconomics.ts';
 import { buildProducerPeerTable, type ProducerPeerTable } from '../../lib/miningProducer/peerTable.ts';
 import type { ExplicitLongTermPriceDeck } from '../../lib/miningProducer/priceDeck.ts';
+import { isUnallocatedProducerEvidenceGroup, projectHasExactYearProduction } from '../../lib/miningProducer/projectRole.ts';
 import type { ProducerJsonV1, ProducerProject, ProducerRunContext } from '../../lib/miningProducer/types.ts';
 import {
   fetchProducerQuoteFromCanonicalFmpPath,
@@ -99,8 +100,11 @@ function financialConsolidationFactor(project: ProducerProject): number | null {
  * correct basis: a fully consolidated 80%-owned mine contributes 100% of revenue
  * and EBITDA, while NCI belongs in EV. This runtime copy substitutes the verified
  * financial-consolidation factor only for the financial normalization pass.
- * The attributable pass remains untouched and continues to drive Au/AuEq and
- * Market Cap / attributable-production metrics.
+ *
+ * An evidence_only_unallocated reporting group remains excluded from attributable
+ * Au/AuEq. For an exact year it may be promoted only in this financial copy when
+ * a positive financialConsolidation factor is explicitly present. This preserves
+ * valid consolidated Revenue/EBITDA without inventing an equity-ownership split.
  */
 function applyFinancialConsolidationForRun(producer: ProducerJsonV1, year: number): ProducerJsonV1 {
   return {
@@ -108,8 +112,12 @@ function applyFinancialConsolidationForRun(producer: ProducerJsonV1, year: numbe
     projects: producer.projects.map((project) => {
       const factor = financialConsolidationFactor(project);
       if (factor === null) return project;
+      const promoteUnallocatedFinancialEvidence = isUnallocatedProducerEvidenceGroup(project)
+        && factor > 0
+        && projectHasExactYearProduction(project, year);
       return {
         ...project,
+        ...(promoteUnallocatedFinancialEvidence ? { calculationRole: 'economic_project' as const } : {}),
         ownership: [{
           effectiveFrom: `${year}-01-01`,
           effectiveTo: `${year}-12-31`,
@@ -257,8 +265,9 @@ export async function buildLiveProducerPeerTable(
   );
 
   let table = attributableTable;
+  let financialProducers = attributableProducers;
   if (hasExplicitConsolidation) {
-    const financialProducers = attributableProducers.map((producer) => applyFinancialConsolidationForRun(producer, args.context.selectedYear));
+    financialProducers = attributableProducers.map((producer) => applyFinancialConsolidationForRun(producer, args.context.selectedYear));
     const financialTable = await buildProducerPeerTable({
       producers: financialProducers,
       ...commonBuildArgs,
@@ -268,10 +277,12 @@ export async function buildLiveProducerPeerTable(
     table = mergeFinancialEconomics(attributableTable, financialTable);
   }
 
+  const financialByCompanyId = new Map(financialProducers.map((producer) => [producer.company.id, producer]));
   const intervalEconomicsByCompanyId: LiveProducerPeerTableResult['intervalEconomicsByCompanyId'] = {};
   for (const producer of attributableProducers) {
     const deck = table.priceDecksByCompanyId[producer.company.id];
     if (!deck) continue;
+    const financialProducer = financialByCompanyId.get(producer.company.id) ?? producer;
     const attributableCompleteness = assessProducerIntervalCompleteness({
       producer,
       year: args.context.selectedYear,
@@ -279,7 +290,7 @@ export async function buildLiveProducerPeerTable(
       basis: 'attributable',
     });
     const financialCompleteness = assessProducerIntervalCompleteness({
-      producer,
+      producer: financialProducer,
       year: args.context.selectedYear,
       caseMode: args.context.caseMode,
       basis: 'financial',
@@ -294,7 +305,7 @@ export async function buildLiveProducerPeerTable(
         usdPerCurrencyUnitByCurrency,
       }), attributableCompleteness),
       financial: enforceIntervalCompleteness(computeProducerIntervalEconomics({
-        producer,
+        producer: financialProducer,
         year: args.context.selectedYear,
         caseMode: args.context.caseMode,
         deck,
