@@ -166,6 +166,29 @@
   opacity: 0.65;
 }
 
+.producer-compare__evidence-cell {
+  min-width: 190px;
+  max-width: 310px;
+  white-space: normal !important;
+  text-align: left !important;
+}
+
+.producer-compare__evidence-list {
+  display: grid;
+  gap: 7px;
+}
+
+.producer-compare__evidence-item {
+  display: grid;
+  gap: 2px;
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.producer-compare__evidence-item strong {
+  font-weight: 650;
+}
+
 .producer-compare__table small {
   display: block;
   margin-top: 3px;
