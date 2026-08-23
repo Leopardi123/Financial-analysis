@@ -33,6 +33,24 @@ function normalizeSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
 
+function mapSummary(row: Record<string, unknown>): CompanyCorporateProducerSummary {
+  return {
+    symbol: String(row.symbol ?? '').toUpperCase(),
+    json_version: String(row.json_version ?? ''),
+    company_id: String(row.company_id ?? ''),
+    company_name: String(row.company_name ?? ''),
+    updated_at_utc: String(row.updated_at_utc ?? ''),
+  };
+}
+
+function mapRow(row: Record<string, unknown>): CompanyCorporateProducerRow {
+  return {
+    ...mapSummary(row),
+    raw_json: String(row.raw_json ?? ''),
+    created_at_utc: String(row.created_at_utc ?? ''),
+  };
+}
+
 export async function listCompanyCorporateProducerJson(): Promise<CompanyCorporateProducerSummary[]> {
   await ensureTable();
   const rows = await query(
@@ -40,14 +58,17 @@ export async function listCompanyCorporateProducerJson(): Promise<CompanyCorpora
      FROM ${TABLE}
      ORDER BY company_name ASC, symbol ASC`,
   ) as unknown as Array<Record<string, unknown>>;
+  return rows.map(mapSummary);
+}
 
-  return rows.map((row) => ({
-    symbol: String(row.symbol ?? '').toUpperCase(),
-    json_version: String(row.json_version ?? ''),
-    company_id: String(row.company_id ?? ''),
-    company_name: String(row.company_name ?? ''),
-    updated_at_utc: String(row.updated_at_utc ?? ''),
-  }));
+export async function listCompanyCorporateProducerJsonRows(): Promise<CompanyCorporateProducerRow[]> {
+  await ensureTable();
+  const rows = await query(
+    `SELECT symbol, json_version, company_id, company_name, raw_json, created_at_utc, updated_at_utc
+     FROM ${TABLE}
+     ORDER BY company_name ASC, symbol ASC`,
+  ) as unknown as Array<Record<string, unknown>>;
+  return rows.map(mapRow);
 }
 
 export async function getCompanyCorporateProducerJson(symbol: string): Promise<CompanyCorporateProducerRow | null> {
@@ -62,16 +83,7 @@ export async function getCompanyCorporateProducerJson(symbol: string): Promise<C
   ) as unknown as Array<Record<string, unknown>>;
 
   const row = rows[0];
-  if (!row) return null;
-  return {
-    symbol: String(row.symbol ?? '').toUpperCase(),
-    json_version: String(row.json_version ?? ''),
-    company_id: String(row.company_id ?? ''),
-    company_name: String(row.company_name ?? ''),
-    raw_json: String(row.raw_json ?? ''),
-    created_at_utc: String(row.created_at_utc ?? ''),
-    updated_at_utc: String(row.updated_at_utc ?? ''),
-  };
+  return row ? mapRow(row) : null;
 }
 
 export async function upsertCompanyCorporateProducerJson(input: {
