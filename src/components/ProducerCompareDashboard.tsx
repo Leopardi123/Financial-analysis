@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ProducerCanonicalCashCostInterval } from '../lib/miningProducer/cashCostInterval.ts';
 import type { ProducerIntervalEconomics } from '../lib/miningProducer/intervalEconomics.ts';
 import type { ProducerPeerTable, ProducerProductionEvidence } from '../lib/miningProducer/peerTable.ts';
 import type { NumericClaim, ReportedMetric } from '../lib/miningProducer/types.ts';
@@ -13,6 +14,7 @@ type ProducerPeerApiResponse =
         attributable: ProducerIntervalEconomics;
         financial: ProducerIntervalEconomics;
       }>;
+      canonicalCashCostByCompanyId: Record<string, ProducerCanonicalCashCostInterval>;
       liveDiagnosticsByCompanyId: Record<string, string[]>;
     }
   | {
@@ -358,6 +360,7 @@ export default function ProducerCompareDashboard() {
                     const auEvidence = row.productionEvidence.filter((item) => item.metal === 'Au' && item.measure === 'produced');
                     const deck = data.table.priceDecksByCompanyId[row.companyId];
                     const intervals = data.intervalEconomicsByCompanyId[row.companyId];
+                    const canonicalCashCost = data.canonicalCashCostByCompanyId[row.companyId];
                     const attributableInterval = intervals?.attributable;
                     const financialInterval = intervals?.financial;
                     const reportedAuRange = reportedProductionToAuOzRange(row.reportedProduction);
@@ -382,6 +385,7 @@ export default function ProducerCompareDashboard() {
 
                     const canonicalAuRange = attributableInterval?.auOz.range ?? null;
                     const canonicalAuEqRange = attributableInterval?.auEqOz.range ?? null;
+                    const canonicalCashCostPerAuEqRange = canonicalCashCost?.cashOperatingCostPerAuEqUSD ?? null;
                     const canonicalRevenueRange = financialInterval?.revenueUSD.range ?? null;
                     const canonicalEbitdaRange = financialInterval?.ebitdaUSD.range ?? null;
                     const canonicalFcffBeforeRange = financialInterval?.fcffBeforeGrowthUSD.range ?? null;
@@ -447,9 +451,15 @@ export default function ProducerCompareDashboard() {
                             <IntervalValue range={reportedRevenueProxy} label={`Rapporterad Au-range × valt ${data.table.priceMode}-pris · proxy, ej canonical financial revenue`} />
                           ) : 'Ej beräkningsbart'}
                         </td>
-                        <td>
+                        <td className="producer-compare__evidence-cell">
                           <div>{formatClaim(row.reportedCashCost)}</div>
-                          <small>Kanonisk/AuEq: {formatUsd(row.canonicalCashOperatingCostPerAuEqUSD)}</small>
+                          {row.canonicalCashOperatingCostPerAuEqUSD !== null ? (
+                            <small>Kanonisk/AuEq: {formatUsd(row.canonicalCashOperatingCostPerAuEqUSD)}/oz</small>
+                          ) : canonicalCashCostPerAuEqRange ? (
+                            <IntervalValue range={canonicalCashCostPerAuEqRange} format={formatUsdPerOzRange} label="Kanoniskt cash operating cost / financial AuEq-intervall" />
+                          ) : (
+                            <small>Kanonisk/AuEq: Ej beräkningsbart</small>
+                          )}
                         </td>
                         <td>{formatClaim(row.reportedAisc)}</td>
                         <td className="producer-compare__evidence-cell">
@@ -532,7 +542,7 @@ export default function ProducerCompareDashboard() {
           )}
 
           <div className="producer-compare__footnote">
-            Punktvärden och slutna intervall kan båda vara kanoniska. Intervall midpointas aldrig. Au/AuEq och MCap/Au använder attributable basis; Revenue/EBITDA/FCFF använder financial-consolidation basis när den är verifierad i JSON. Revenue-/cash-margin-/AISC-margin-proxyer visas endast när en kanonisk bridge saknas och används aldrig i kanoniska EV-multiplar.
+            Punktvärden och slutna intervall kan båda vara kanoniska. Intervall midpointas aldrig. Au/AuEq och MCap/Au använder attributable basis; Revenue/EBITDA/FCFF samt kanonisk Cash cost/AuEq använder financial-consolidation basis när den är verifierad i JSON. Revenue-/cash-margin-/AISC-margin-proxyer visas endast när en kanonisk bridge saknas och används aldrig i kanoniska EV-multiplar.
           </div>
         </>
       )}
