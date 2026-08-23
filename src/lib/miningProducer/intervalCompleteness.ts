@@ -1,5 +1,6 @@
 import { resolveOwnershipForYear } from './ownership.ts';
 import { isProjectIncludedInCase } from './production.ts';
+import { isProducerEconomicProject, unresolvedUnallocatedEvidenceGroups } from './projectRole.ts';
 import type { ProducerCaseMode, ProducerJsonV1, ProducerProject, ProductionDisclosure } from './types.ts';
 
 export type ProducerIntervalCompleteness = {
@@ -9,6 +10,7 @@ export type ProducerIntervalCompleteness = {
 };
 
 function projectActive(project: ProducerProject, year: number, caseMode: ProducerCaseMode): boolean {
+  if (!isProducerEconomicProject(project)) return false;
   if (!isProjectIncludedInCase(project.statusAsOfValuationDate, caseMode)) return false;
   const window = project.productionWindow;
   if (!window) return true;
@@ -55,6 +57,15 @@ export function assessProducerIntervalCompleteness(args: {
   const diagnostics: string[] = [];
   let productionComplete = true;
   let revenueComplete = true;
+
+  const unallocatedGroups = unresolvedUnallocatedEvidenceGroups(args.producer.projects, args.year, args.caseMode);
+  if (unallocatedGroups.length > 0) {
+    productionComplete = false;
+    revenueComplete = false;
+    diagnostics.push(...unallocatedGroups.map((project) =>
+      `${project.id}: exact-year production is an evidence_only_unallocated reporting group for ${args.year}; its ounces are excluded from canonical totals, and partial company intervals are forbidden until the source grouping is decomposed.`,
+    ));
+  }
 
   for (const project of args.producer.projects.filter((item) => projectActive(item, args.year, args.caseMode))) {
     const rows = exactYear(project, args.year);
