@@ -47,8 +47,14 @@ const diagnostics = selectPresentedProducerDiagnostics({
     'FINANCIAL_CONSOLIDATION_ROUTE: Au/AuEq remain attributable; Revenue/EBITDA/FCFF use verified project financialConsolidation where supplied.',
   ],
   intervals: {
-    attributable: economics('attributable', true, ['mine/Au: produced used as revenue quantity proxy']),
-    financial: economics('financial', true, ['mine/cash-cost: net-of-byproduct per-unit cost retained']),
+    attributable: economics('attributable', true, [
+      'mine/Au: produced used as revenue quantity proxy',
+      'mine2/Au: produced used as revenue quantity proxy',
+    ]),
+    financial: economics('financial', true, [
+      'forecast:mine-cash:2030: net-of-byproduct per-unit cost retained because no separate byproduct production/revenue is modeled for 2030; byproduct price repricing is therefore not performed.',
+      'forecast:mine2-cash:2030: net-of-byproduct per-unit cost retained because no separate byproduct production/revenue is modeled for 2030; byproduct price repricing is therefore not performed.',
+    ]),
   },
 });
 
@@ -59,8 +65,10 @@ assert(!diagnostics.some((item) => item.startsWith('FORECAST_RULE_APPLIED:')), '
 assert(diagnostics.includes('FORECAST_RULE_WARNING: retained explicit analyst assumption'), 'non-trace forecast warning should remain');
 assert(diagnostics.includes('Enterprise value unresolved: balanceSheet 2026-06-30 is stale after material event'), 'EV blocker should remain');
 assert(diagnostics.some((item) => item.startsWith('FINANCIAL_CONSOLIDATION_ROUTE:')), 'financial consolidation route should remain');
-assert(diagnostics.includes('mine/Au: produced used as revenue quantity proxy'), 'interval production/revenue warning should remain');
-assert(diagnostics.includes('mine/cash-cost: net-of-byproduct per-unit cost retained'), 'interval cost warning should remain');
+assert(diagnostics.includes('REVENUE_QUANTITY_PROXY: produced quantity is used instead of payable/sold for 2 project/metal pairs in 2030.'), 'repeated produced-as-revenue warnings should be summarized');
+assert(diagnostics.includes('BYPRODUCT_COST_REPRICING_LIMITED: 2 net-of-byproduct cash-cost disclosures are retained for 2030; no separate byproduct revenue is modeled, so byproduct credits are not repriced.'), 'repeated byproduct warnings should be summarized');
+assert(!diagnostics.some((item) => item.endsWith(': produced used as revenue quantity proxy')), 'individual revenue-quantity proxy rows should not remain');
+assert(!diagnostics.some((item) => item.includes('net-of-byproduct per-unit cost retained because')), 'individual byproduct warning rows should not remain');
 assert(!diagnostics.some((item) => item.includes('range production claim must not be collapsed')), 'superseded scalar range warning should be removed');
 assert(!diagnostics.some((item) => item.startsWith('PROJECT_COST_COVERAGE_MISSING:')), 'superseded scalar coverage warning should be removed');
 assert(!diagnostics.some((item) => item.startsWith('EBITDA:')), 'superseded scalar EBITDA warning should be removed');
