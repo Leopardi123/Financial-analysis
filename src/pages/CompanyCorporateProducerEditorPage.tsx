@@ -243,7 +243,7 @@ export default function CompanyCorporateProducerEditorPage() {
               <button type="button" onClick={prettify}>Prettify</button>
               <button type="button" onClick={() => void copyTemplate()}>Kopiera template</button>
               <button type="button" disabled={saving || !dirty} onClick={() => void save()}>{saving ? 'Sparar…' : 'Spara'}</button>
-              {savedRaw !== null && <button type="button" className="danger" disabled={saving} onClick={() => void remove())}>Radera JSON</button>}
+              {savedRaw !== null && <button type="button" className="danger" disabled={saving} onClick={() => void remove()}>Radera JSON</button>}
             </div>
 
             <div className="save-meta">
