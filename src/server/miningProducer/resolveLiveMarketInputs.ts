@@ -1,16 +1,29 @@
-import { fetchStableJson } from '../../../api/_fmp.js';
+import { query } from '../../../api/_db.js';
+import { fetchApiV3Json } from '../../../api/_fmp.js';
+import { normalizeName } from '../../../api/_company_master.js';
+import { ensureSchema, tables } from '../../../api/_migrate.js';
+import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import type { ProducerJsonV1, Provenance, SourceRef } from '../../lib/miningProducer/types.ts';
 
-type StableFetch = (
-  path: string,
-  query?: Record<string, string | number | null | undefined>,
-) => Promise<unknown>;
-
-type FmpSecurityCandidate = {
+type CompanyMasterCandidate = {
   symbol: string;
-  currency: string;
+  name: string;
   exchange: string | null;
+  normalized_name: string;
 };
+
+type ProviderSymbolResolution = {
+  symbol: string | null;
+  diagnostic?: string;
+};
+
+type QuoteSnapshot = {
+  price: number | null;
+  marketCap: number | null;
+  sharesOutstanding: number | null;
+};
+
+type ResolveFx = typeof resolveFxUSDToTarget;
 
 export type LiveProducerMarketInputs = {
   producer: ProducerJsonV1;
@@ -19,123 +32,74 @@ export type LiveProducerMarketInputs = {
   diagnostics: string[];
 };
 
-function rows(value: unknown): Array<Record<string, unknown>> {
-  return Array.isArray(value)
-    ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-    : [];
-}
-
 function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function nonEmptyString(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
 }
 
 function normalized(value: string | null | undefined): string {
   return (value ?? '').trim().toUpperCase();
 }
 
-function parseSecurityCandidates(value: unknown): FmpSecurityCandidate[] {
-  return rows(value)
-    .map((row) => {
-      const symbol = nonEmptyString(row.symbol);
-      const currency = nonEmptyString(row.currency);
-      if (!symbol || !currency) return null;
-      return {
-        symbol,
-        currency: normalized(currency),
-        exchange: nonEmptyString(row.exchangeShortName) ?? nonEmptyString(row.exchange),
-      };
-    })
-    .filter((candidate): candidate is FmpSecurityCandidate => candidate !== null);
+function exchangeMatches(actual: string | null, expected: string | undefined): boolean {
+  if (!expected) return true;
+  return normalized(actual) === normalized(expected);
 }
 
-function securitySymbolMatchesTicker(symbol: string, ticker: string): boolean {
-  const symbolUpper = normalized(symbol);
-  const tickerUpper = normalized(ticker);
-  return symbolUpper === tickerUpper || symbolUpper.startsWith(`${tickerUpper}.`);
-}
-
-function resolveSecurityCandidate(
-  candidates: readonly FmpSecurityCandidate[],
-  security: NonNullable<ProducerJsonV1['company']['primarySecurity']>,
-): { candidate: FmpSecurityCandidate | null; diagnostic?: string } {
-  const expectedCurrency = normalized(security.quoteCurrency);
-  const expectedExchange = normalized(security.exchange);
-  const tickerMatches = candidates.filter((candidate) => securitySymbolMatchesTicker(candidate.symbol, security.ticker));
-  const currencyMatches = tickerMatches.filter((candidate) => candidate.currency === expectedCurrency);
-  const exchangeMatches = expectedExchange
-    ? currencyMatches.filter((candidate) => normalized(candidate.exchange) === expectedExchange)
-    : currencyMatches;
-
-  if (exchangeMatches.length === 1) return { candidate: exchangeMatches[0] };
-  if (exchangeMatches.length > 1) {
+export async function resolveProducerProviderSymbolFromCompanyMaster(
+  producer: ProducerJsonV1,
+): Promise<ProviderSymbolResolution> {
+  const security = producer.company.primarySecurity;
+  if (!security) {
     return {
-      candidate: null,
-      diagnostic: `FMP security resolution ambiguous for ${security.ticker}: ${exchangeMatches.map((item) => item.symbol).join(', ')}`,
+      symbol: null,
+      diagnostic: 'Company-master resolution requires company.primarySecurity; ticker/exchange must not be inferred',
+    };
+  }
+
+  await ensureSchema();
+  const ticker = normalized(security.ticker);
+  const normalizedCompanyName = normalizeName(producer.company.name);
+  const candidates = await query(
+    `SELECT symbol, name, exchange, normalized_name
+     FROM ${tables.companies}
+     WHERE UPPER(symbol) = ?
+        OR UPPER(symbol) LIKE ?
+        OR normalized_name = ?`,
+    [ticker, `${ticker}.%`, normalizedCompanyName],
+  ) as CompanyMasterCandidate[];
+
+  const exchangeCandidates = candidates.filter((candidate) => exchangeMatches(candidate.exchange, security.exchange));
+  const exactTicker = exchangeCandidates.filter((candidate) => normalized(candidate.symbol) === ticker);
+  const resolved = exactTicker.length === 1
+    ? exactTicker
+    : exchangeCandidates.filter((candidate) => {
+        const symbol = normalized(candidate.symbol);
+        return symbol.startsWith(`${ticker}.`) || candidate.normalized_name === normalizedCompanyName;
+      });
+
+  if (resolved.length === 1) {
+    return { symbol: normalized(resolved[0].symbol) };
+  }
+  if (resolved.length > 1) {
+    return {
+      symbol: null,
+      diagnostic: `Company-master security resolution ambiguous for ${security.ticker}/${security.exchange ?? 'unspecified'}: ${resolved.map((item) => item.symbol).join(', ')}`,
     };
   }
 
   return {
-    candidate: null,
-    diagnostic: `FMP security resolution failed for ticker=${security.ticker}, exchange=${security.exchange ?? 'unspecified'}, currency=${security.quoteCurrency}; no exact searched candidate matched`,
+    symbol: null,
+    diagnostic: `Company-master security resolution failed for ticker=${security.ticker}, exchange=${security.exchange ?? 'unspecified'}; no provider symbol is guessed`,
   };
 }
 
-async function resolveUsdPerCurrencyUnit(args: {
-  currency: string;
-  fetchStable: StableFetch;
-  forexList?: unknown;
-}): Promise<{ value: number | null; pairSymbol: string | null; diagnostic?: string; forexList?: unknown }> {
-  const currency = normalized(args.currency);
-  if (currency === 'USD') return { value: 1, pairSymbol: null, forexList: args.forexList };
-
-  const forexList = args.forexList ?? await args.fetchStable('forex-list');
-  const availableSymbols = new Set(
-    rows(forexList)
-      .map((row) => nonEmptyString(row.symbol))
-      .filter((symbol): symbol is string => symbol !== null)
-      .map(normalized),
-  );
-
-  const direct = `${currency}USD`;
-  const inverse = `USD${currency}`;
-  let pairSymbol: string | null = null;
-  let invert = false;
-
-  if (availableSymbols.has(direct)) {
-    pairSymbol = direct;
-  } else if (availableSymbols.has(inverse)) {
-    pairSymbol = inverse;
-    invert = true;
-  } else {
-    return {
-      value: null,
-      pairSymbol: null,
-      forexList,
-      diagnostic: `FMP forex-list contains neither ${direct} nor ${inverse}; FX series is unresolved and must not be guessed`,
-    };
-  }
-
-  const quote = rows(await args.fetchStable('quote', { symbol: pairSymbol }))[0];
-  const price = finiteNumber(quote?.price);
-  if (price === null || price <= 0) {
-    return {
-      value: null,
-      pairSymbol,
-      forexList,
-      diagnostic: `FMP quote for verified FX pair ${pairSymbol} has no finite positive price`,
-    };
-  }
-
+export async function fetchProducerQuoteFromCanonicalFmpPath(symbol: string): Promise<QuoteSnapshot> {
+  const quote = await fetchApiV3Json<Array<Record<string, unknown>>>(`quote/${encodeURIComponent(symbol)}`);
+  const first = Array.isArray(quote) ? quote[0] : null;
   return {
-    value: invert ? 1 / price : price,
-    pairSymbol,
-    forexList,
+    price: finiteNumber(first?.price),
+    marketCap: finiteNumber(first?.marketCap),
+    sharesOutstanding: finiteNumber(first?.sharesOutstanding),
   };
 }
 
@@ -149,18 +113,19 @@ function appendSource(producer: ProducerJsonV1, source: SourceRef): ProducerJson
 export async function resolveLiveProducerMarketInputs(
   producer: ProducerJsonV1,
   deps: {
-    fetchStable?: StableFetch;
+    resolveProviderSymbolFn?: (producer: ProducerJsonV1) => Promise<ProviderSymbolResolution>;
+    fetchQuoteFn?: (symbol: string) => Promise<QuoteSnapshot>;
+    resolveFxFn?: ResolveFx;
     todayUtcFn?: () => string;
   } = {},
 ): Promise<LiveProducerMarketInputs> {
   const diagnostics: string[] = [];
-  const fetchStable: StableFetch = deps.fetchStable ?? ((path, query) => fetchStableJson<unknown>(path, query));
   const todayUtc = (deps.todayUtcFn ?? (() => new Date().toISOString().slice(0, 10)))();
   const valuationDateUtc = producer.valuation.valuationDateUtc;
 
   if (valuationDateUtc !== todayUtc) {
     diagnostics.push(
-      `Live market resolver refused: valuationDateUtc=${valuationDateUtc} differs from current UTC date ${todayUtc}; current FMP snapshot must not be used for a historical valuation date`,
+      `Live market resolver refused: valuationDateUtc=${valuationDateUtc} differs from current UTC date ${todayUtc}; current market snapshot must not be used for a historical valuation date`,
     );
     return { producer, providerSymbol: null, usdPerCurrencyUnitByCurrency: {}, diagnostics };
   }
@@ -171,56 +136,88 @@ export async function resolveLiveProducerMarketInputs(
     return { producer, providerSymbol: null, usdPerCurrencyUnitByCurrency: {}, diagnostics };
   }
 
-  const searchResult = await fetchStable('search-symbol', { query: security.ticker });
-  const resolution = resolveSecurityCandidate(parseSecurityCandidates(searchResult), security);
-  if (!resolution.candidate) {
-    diagnostics.push(resolution.diagnostic ?? 'FMP security resolution failed');
-    return { producer, providerSymbol: null, usdPerCurrencyUnitByCurrency: {}, diagnostics };
+  const resolveProviderSymbolFn = deps.resolveProviderSymbolFn ?? resolveProducerProviderSymbolFromCompanyMaster;
+  let providerSymbol: string | null = null;
+  try {
+    const resolution = await resolveProviderSymbolFn(producer);
+    providerSymbol = resolution.symbol;
+    if (!providerSymbol) {
+      diagnostics.push(resolution.diagnostic ?? 'Company-master security resolution failed');
+    }
+  } catch (error) {
+    diagnostics.push(`Company-master security resolution failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const candidate = resolution.candidate;
-  const providerSymbol = candidate.symbol;
-  const quoteCurrency = candidate.currency;
-  const sourceId = `fmp-market:${providerSymbol}:${valuationDateUtc}`;
+  const quoteCurrency = normalized(security.quoteCurrency);
+  const usdPerCurrencyUnitByCurrency: Record<string, number> = {};
+  if (quoteCurrency === 'USD') {
+    usdPerCurrencyUnitByCurrency.USD = 1;
+  } else {
+    const resolveFxFn = deps.resolveFxFn ?? resolveFxUSDToTarget;
+    try {
+      const resolved = await resolveFxFn({
+        targetCurrency: quoteCurrency,
+        anchorDateUtc: valuationDateUtc,
+        scenario: { mode: 'spot' },
+        allowRefresh: true,
+      });
+      diagnostics.push(...resolved.warnings.map((warning) => `FX ${quoteCurrency}: ${warning}`));
+      if (resolved.fx !== null && Number.isFinite(resolved.fx) && resolved.fx > 0) {
+        // Canonical FX resolver returns TARGET currency units per USD. Producer cost/market normalization
+        // consumes USD per target-currency unit, so invert exactly once here.
+        usdPerCurrencyUnitByCurrency[quoteCurrency] = 1 / resolved.fx;
+      } else {
+        diagnostics.push(`FX ${quoteCurrency}->USD unresolved through canonical FX resolver; conversion is not guessed`);
+      }
+    } catch (error) {
+      diagnostics.push(`FX ${quoteCurrency}->USD provider failure: ${error instanceof Error ? error.message : String(error)}; dependent USD metrics remain unresolved`);
+    }
+  }
+
+  if (!providerSymbol) {
+    return { producer, providerSymbol: null, usdPerCurrencyUnitByCurrency, diagnostics };
+  }
+
+  const sourceId = `fmp-v3-quote:${providerSymbol}:${valuationDateUtc}`;
   const provenance: Provenance = {
     sourceId,
     estimateClass: 'actual',
     confidence: 'high',
-    confidenceReason: 'Provider symbol resolved by ticker + declared exchange + declared quote currency; current market fields read directly from FMP stable endpoints.',
+    confidenceReason: 'Provider symbol resolved from the existing company master; current price, market cap and shares use the same FMP v3 quote path already used elsewhere in Instrumentbrädan.',
   };
   const providerSource: SourceRef = {
     id: sourceId,
     sourceType: 'other',
     publisher: 'Financial Modeling Prep',
-    title: `Live market snapshot for ${providerSymbol}`,
+    title: `FMP v3 quote snapshot for ${providerSymbol}`,
     publishedDate: valuationDateUtc,
   };
 
+  const fetchQuoteFn = deps.fetchQuoteFn ?? fetchProducerQuoteFromCanonicalFmpPath;
+  let quote: QuoteSnapshot | null = null;
+  try {
+    quote = await fetchQuoteFn(providerSymbol);
+  } catch (error) {
+    diagnostics.push(
+      `FMP v3 quote failed for ${providerSymbol}: ${error instanceof Error ? error.message : String(error)}; market fields remain unresolved without failing the peer table`,
+    );
+  }
+
+  if (!quote) {
+    return { producer, providerSymbol, usdPerCurrencyUnitByCurrency, diagnostics };
+  }
+
+  const marketCap = quote.marketCap !== null && quote.marketCap >= 0 ? quote.marketCap : null;
+  const marketPrice = quote.price !== null && quote.price >= 0 ? quote.price : null;
+  const sharesOutstanding = quote.sharesOutstanding !== null && quote.sharesOutstanding > 0
+    ? quote.sharesOutstanding
+    : null;
+
+  if (marketCap === null) diagnostics.push(`FMP v3 quote for ${providerSymbol} has no finite non-negative marketCap`);
+  if (marketPrice === null) diagnostics.push(`FMP v3 quote for ${providerSymbol} has no finite non-negative price`);
+  if (sharesOutstanding === null) diagnostics.push(`FMP v3 quote for ${providerSymbol} has no finite positive sharesOutstanding`);
+
   let hydrated = appendSource(producer, providerSource);
-  const usdPerCurrencyUnitByCurrency: Record<string, number> = {};
-  let forexList: unknown | undefined;
-
-  const fx = await resolveUsdPerCurrencyUnit({ currency: quoteCurrency, fetchStable, forexList });
-  forexList = fx.forexList;
-  if (fx.value === null) {
-    diagnostics.push(fx.diagnostic ?? `FX unresolved for ${quoteCurrency}`);
-  } else {
-    usdPerCurrencyUnitByCurrency[quoteCurrency] = fx.value;
-    if (fx.pairSymbol) diagnostics.push(`FX ${quoteCurrency}->USD resolved through verified FMP forex-list pair ${fx.pairSymbol}`);
-  }
-
-  const marketCapRows = rows(await fetchStable('market-capitalization', { symbol: providerSymbol }));
-  const marketCap = finiteNumber(marketCapRows[0]?.marketCap);
-  if (marketCap === null || marketCap < 0) {
-    diagnostics.push(`FMP market-capitalization for ${providerSymbol} has no finite non-negative marketCap`);
-  }
-
-  const quoteRows = rows(await fetchStable('quote', { symbol: providerSymbol }));
-  const marketPrice = finiteNumber(quoteRows[0]?.price);
-  if (marketPrice === null || marketPrice < 0) {
-    diagnostics.push(`FMP quote for ${providerSymbol} has no finite non-negative price`);
-  }
-
   hydrated = {
     ...hydrated,
     valuation: {
@@ -237,6 +234,14 @@ export async function resolveLiveProducerMarketInputs(
         marketPrice: {
           value: marketPrice,
           currency: quoteCurrency,
+          asOfDate: valuationDateUtc,
+          provenance,
+        },
+      }),
+      ...(sharesOutstanding === null ? {} : {
+        sharesOutstanding: {
+          value: sharesOutstanding,
+          basis: 'basic_actual' as const,
           asOfDate: valuationDateUtc,
           provenance,
         },
