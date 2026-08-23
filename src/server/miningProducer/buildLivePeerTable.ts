@@ -1,5 +1,6 @@
 import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import { resolvePriceSeries } from '../../lib/prices/resolve.ts';
+import { selectPresentedProducerDiagnostics } from '../../lib/miningProducer/diagnostics.ts';
 import { materializeProducerForecastForYear } from '../../lib/miningProducer/forecast.ts';
 import { assessProducerIntervalCompleteness } from '../../lib/miningProducer/intervalCompleteness.ts';
 import {
@@ -319,10 +320,16 @@ export async function buildLiveProducerPeerTable(
     const liveDiagnostics = liveDiagnosticsByCompanyId[row.companyId] ?? [];
     const forecastDiagnostics = forecastDiagnosticsByCompanyId[row.companyId] ?? [];
     const intervals = intervalEconomicsByCompanyId[row.companyId];
-    const intervalDiagnostics = intervals
-      ? [...intervals.attributable.diagnostics, ...intervals.financial.diagnostics]
-      : [];
-    row.diagnostics = [...new Set([...liveDiagnostics, ...forecastDiagnostics, ...row.diagnostics, ...intervalDiagnostics])];
+    const priceDeckDiagnostics = table.priceDecksByCompanyId[row.companyId]?.warnings ?? [];
+    const scalarDiagnostics = [...row.diagnostics];
+    row.diagnostics = selectPresentedProducerDiagnostics({
+      year: args.context.selectedYear,
+      liveDiagnostics,
+      forecastDiagnostics,
+      scalarDiagnostics,
+      priceDeckDiagnostics,
+      intervals,
+    });
   }
 
   return {
