@@ -5,6 +5,7 @@ import {
   upsertCompanyCorporateProducer,
 } from '../lib/client/companyCorporateProducerClient.ts';
 import { copyText } from '../lib/client/clipboard.ts';
+import { decorateProducerJsonForEditor } from '../lib/miningProducer/editorTemplate.ts';
 import { validateProducerJsonV1 } from '../lib/miningProducer/schema.ts';
 import { buildProducerJsonV1Template } from '../lib/miningProducer/template.ts';
 import type { ProducerJsonV1 } from '../lib/miningProducer/types.ts';
@@ -71,11 +72,12 @@ export default function CompanyCorporateProducerEditorPage() {
       .then((record) => {
         if (cancelled) return;
         if (record) {
-          const pretty = JSON.stringify(record.raw_json, null, 2);
+          const documented = decorateProducerJsonForEditor(record.raw_json as unknown as ProducerJsonV1, symbol);
+          const pretty = JSON.stringify(documented, null, 2);
           setRaw(pretty);
           setSavedRaw(pretty);
           setUpdatedAt(record.updated_at_utc);
-          setInfo('Loaded saved Corporate Producer JSON.');
+          setInfo('Loaded saved Corporate Producer JSON and applied the current self-documenting template without changing company evidence arrays.');
         } else {
           const template = JSON.stringify(buildProducerJsonV1Template(symbol), null, 2);
           setRaw(template);
