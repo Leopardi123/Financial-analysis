@@ -1,5 +1,6 @@
 import { resolveOwnershipForYear } from './ownership.ts';
 import { isProjectIncludedInCase } from './production.ts';
+import { isProducerEconomicProject, unresolvedUnallocatedEvidenceGroups } from './projectRole.ts';
 import type { CostComponent, CostDisclosure, ProducerCaseMode, ProducerJsonV1, ProducerProject, ProductionDisclosure } from './types.ts';
 
 export type ProducerCalculabilityMetric = 'Au/AuEq' | 'Revenue' | 'EBITDA' | 'FCFF före growth' | 'FCFF efter growth' | 'EV';
@@ -34,6 +35,7 @@ function exactYearPeriod(period: CostDisclosure['period'] | ProducerProject['pro
 }
 
 function projectIsEconomicallyActive(project: ProducerProject, year: number, caseMode: ProducerCaseMode): boolean {
+  if (!isProducerEconomicProject(project)) return false;
   if (!isProjectIncludedInCase(project.statusAsOfValuationDate, caseMode)) return false;
   const window = project.productionWindow;
   if (!window) return true;
@@ -184,9 +186,19 @@ export function assessProducerYearCalculability(
   caseMode: ProducerCaseMode = 'BASE',
 ): ProducerYearCalculability {
   const activeProjects = producer.projects.filter((project) => projectIsEconomicallyActive(project, year, caseMode));
+  const unallocatedGroups = unresolvedUnallocatedEvidenceGroups(producer.projects, year, caseMode);
+  const unallocatedMissing = unallocatedGroups.map((project) =>
+    `projects[${project.id}].calculationRole: evidence_only_unallocated exact-year source grouping covers ${year}; canonical company totals require source-backed decomposition before these ounces can be allocated`,
+  );
   const productionStates = activeProjects.map((project) => ({ project, status: projectAttributableProductionStatus(project, year) }));
-  const productionMissing = productionStates.flatMap((item) => item.status.missing);
-  const productionNotes = productionStates.flatMap((item) => item.status.notes);
+  const productionMissing = [
+    ...productionStates.flatMap((item) => item.status.missing),
+    ...unallocatedMissing,
+  ];
+  const productionNotes = [
+    ...productionStates.flatMap((item) => item.status.notes),
+    ...unallocatedGroups.map((project) => `${project.id}: retained as source evidence only; it is not added to canonical project production.`),
+  ];
   const hasRange = productionStates.some((item) => item.status.state === 'range');
   const reportedProduction = companyReportedMetricExists(producer, 'production', year);
 
@@ -206,7 +218,10 @@ export function assessProducerYearCalculability(
     ],
   };
 
-  const revenueMissing = activeProjects.flatMap((project) => projectFinancialRevenueMissing(project, year));
+  const revenueMissing = [
+    ...activeProjects.flatMap((project) => projectFinancialRevenueMissing(project, year)),
+    ...unallocatedMissing,
+  ];
   const revenueState: ProducerCalculabilityState = revenueMissing.length === 0
     ? (hasRange ? 'range_only' : 'calculable')
     : (companyReportedMetricExists(producer, 'revenue', year) || reportedProduction ? 'reported_only' : 'blocked');
@@ -218,6 +233,7 @@ export function assessProducerYearCalculability(
       'SPOT/LT metal prices are runtime inputs and do not need to be stored in producer_json_v1.',
       'Revenue uses payable > sold > produced by metal. produced is allowed only as an explicitly marked approximation.',
       'Attributable ownership and financial consolidation are separate. A less-than-100%-owned fully consolidated mine should use financialConsolidation.method=full rather than shrinking financial Revenue to equity ownership.',
+      'evidence_only_unallocated reporting groups are display/source evidence only and deliberately block a false partial company Revenue for any exact year they cover.',
     ],
   };
 
