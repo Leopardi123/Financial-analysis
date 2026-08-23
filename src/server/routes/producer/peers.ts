@@ -231,6 +231,7 @@ export default async function handler(req: any, res: any) {
       },
       table: result.table,
       intervalEconomicsByCompanyId: result.intervalEconomicsByCompanyId,
+      canonicalCashCostByCompanyId: result.canonicalCashCostByCompanyId,
       liveDiagnosticsByCompanyId: result.liveDiagnosticsByCompanyId,
     });
   } catch (error) {
