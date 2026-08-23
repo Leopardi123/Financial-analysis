@@ -7,11 +7,96 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function canonicalEditorDocumentation(base: Record<string, unknown>): Record<string, unknown> {
+  const baseReference = asRecord(base._reference);
+  const baseNumericClaim = asRecord(baseReference.numericClaim);
+  const baseProduction = asRecord(baseReference.production);
+  const baseExampleProject = asRecord(base._example_project);
+
+  return {
+    _hard_rules: [
+      'No guessing. No hidden midpointing. No silent annualization of year-range averages/totals.',
+      'Use point only for an actual point estimate. Use approximate/range/upper_bound/lower_bound when that is what the source says.',
+      'Closed range claims may propagate as closed calculation intervals. They are never collapsed to a midpoint. upper_bound/lower_bound remain open bounds and are not promoted to closed intervals.',
+      'A company without a saved producer_json_v1 is not shown in COMPARE STOCKS.',
+      'SPOT price deck, current FX, current quote/market cap and run valuation date come from Instrumentbrädan runtime infrastructure.',
+      'For physical peer production/AuEq, produced quantity is required. sold/payable do not replace produced for that metric.',
+      'For revenue quantity the engine prefers payable, then sold, then produced. Using produced as revenue quantity is explicitly marked approximation.',
+      'If only reported AISC/cash cost exists, keep it as reportedMetrics. Do not manufacture canonical EBITDA or FCFF from AISC alone.',
+      'project_100pct production is ownership-adjusted for attributable Au/AuEq. Revenue/EBITDA/FCFF must use the verified financialConsolidation basis when accounting consolidation differs from equity ownership.',
+      'Do not use legal ownershipPct as a substitute for financial consolidation. A fully consolidated non-100%-owned mine may contribute 100% of revenue/EBITDA while NCI belongs in the EV bridge.',
+    ],
+    _example_project: {
+      ...baseExampleProject,
+      productionWindow: {
+        startYear: 2026,
+        endYear: 2038,
+        _description: 'Optional. Use only when a source supports the producing calendar window. It prevents years before first production or after closure from being treated as unexplained missing production.',
+        provenance: {
+          sourceId: 'src_mine_plan',
+          estimateClass: 'technical_report',
+          confidence: 'high',
+          confidenceReason: 'Explicit production years in source.',
+        },
+      },
+      financialConsolidation: {
+        method: 'full',
+        _choices_method: ['full', 'proportionate', 'equity_method'],
+        _description: 'Accounting consolidation basis, separate from equity ownership. full = 100% operating results consolidated; proportionate requires consolidationPct; equity_method = no line-by-line project revenue/EBITDA consolidation.',
+        provenance: {
+          sourceId: 'src_financials',
+          estimateClass: 'actual',
+          confidence: 'high',
+          confidenceReason: 'Consolidation basis verified from financial statements.',
+        },
+      },
+    },
+    _reference: {
+      ...baseReference,
+      numericClaim: {
+        ...baseNumericClaim,
+        _description: 'Choose exactly one claim shape. point/approximate can become scalar values. A closed range remains a range and may propagate through interval production/revenue/cost/EBITDA/FCFF calculations without midpointing. upper_bound/lower_bound remain open bounds and cannot become a closed interval.',
+      },
+      production: {
+        ...baseProduction,
+        _replacement_rules: [
+          'Physical peer production and physical AuEq: produced is required; sold/payable are not substitutes.',
+          'Revenue quantity: payable > sold > produced. produced fallback is marked approximation.',
+          'Closed annual ranges are valid calculation inputs and remain ranges; do not midpoint them.',
+          'Do not enter the same disclosure twice on both attributable and project_100pct basis.',
+          'project_100pct production uses ownership for attributable Au/AuEq; project economics use financialConsolidation when accounting consolidation differs from ownership.',
+        ],
+      },
+      productionWindow: {
+        _description: 'Optional project-level calendar window. Use only when a source explicitly supports first/last producing years.',
+        example: {
+          startYear: 2028,
+          endYear: 2036,
+          provenance: {
+            sourceId: 'src_mine_plan',
+            estimateClass: 'technical_report',
+            confidence: 'high',
+          },
+        },
+      },
+      financialConsolidation: {
+        _description: 'Project-level accounting consolidation basis. This is separate from ownershipPct and is used for Revenue/EBITDA/FCFF normalization.',
+        _choices_method: ['full', 'proportionate', 'equity_method'],
+        alternatives: [
+          { method: 'full' },
+          { method: 'proportionate', consolidationPct: 0.8 },
+          { method: 'equity_method' },
+        ],
+      },
+    },
+  };
+}
+
 function calculabilityDocumentation(): Record<string, unknown> {
   return {
     _calculability_requirements: {
       _description: 'This section is editor documentation only. It states what must exist for each peer-table metric. Missing source data should remain missing; use the alternative routes explicitly listed here rather than inventing zeroes or midpoint values.',
-      _five_year_target: 'For a useful Producer peer model, aim to cover the current forecast year plus at least the following four calendar years. Exact annual points are not mandatory: source-backed ranges may be stored and displayed/calculated as ranges. Multi-year averages remain evidence unless the source explicitly provides annual values.',
+      _five_year_target: 'For a useful Producer peer model, aim to cover the current forecast year plus at least the following four calendar years. Exact annual points are not mandatory: source-backed closed annual ranges may be stored and calculated as ranges. Multi-year averages remain evidence unless the source explicitly provides annual values.',
       'Au/AuEq': {
         required: [
           'For every economically active included project: projects[].production with measure=produced covering the selected year.',
@@ -20,7 +105,7 @@ function calculabilityDocumentation(): Record<string, unknown> {
         ],
         alternatives: [
           'Company-level reportedMetrics metric=production can be displayed as reported evidence when canonical attributable production is incomplete.',
-          'A range is valid evidence and must remain a range; do not midpoint it.',
+          'A closed annual range is valid evidence and a valid interval input; do not midpoint it.',
         ],
       },
       Revenue: {
@@ -137,8 +222,9 @@ export function decorateProducerJsonForEditor(
 
   return {
     ...base,
-    ...calculabilityDocumentation(),
     ...current,
+    ...canonicalEditorDocumentation(base),
+    ...calculabilityDocumentation(),
     company: {
       ...baseCompany,
       ...currentCompany,
