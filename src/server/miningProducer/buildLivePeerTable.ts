@@ -1,5 +1,9 @@
 import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import { resolvePriceSeries } from '../../lib/prices/resolve.ts';
+import {
+  computeCanonicalCashCostInterval,
+  type ProducerCanonicalCashCostInterval,
+} from '../../lib/miningProducer/cashCostInterval.ts';
 import { selectPresentedProducerDiagnostics } from '../../lib/miningProducer/diagnostics.ts';
 import { materializeProducerForecastForYear } from '../../lib/miningProducer/forecast.ts';
 import { assessProducerIntervalCompleteness } from '../../lib/miningProducer/intervalCompleteness.ts';
@@ -28,6 +32,7 @@ export type LiveProducerPeerTableResult = {
     attributable: ProducerIntervalEconomics;
     financial: ProducerIntervalEconomics;
   }>;
+  canonicalCashCostByCompanyId: Record<string, ProducerCanonicalCashCostInterval>;
 };
 
 function cachedProviderSymbolResolver(
@@ -280,6 +285,7 @@ export async function buildLiveProducerPeerTable(
 
   const financialByCompanyId = new Map(financialProducers.map((producer) => [producer.company.id, producer]));
   const intervalEconomicsByCompanyId: LiveProducerPeerTableResult['intervalEconomicsByCompanyId'] = {};
+  const canonicalCashCostByCompanyId: LiveProducerPeerTableResult['canonicalCashCostByCompanyId'] = {};
   for (const producer of attributableProducers) {
     const deck = table.priceDecksByCompanyId[producer.company.id];
     if (!deck) continue;
@@ -296,30 +302,41 @@ export async function buildLiveProducerPeerTable(
       caseMode: args.context.caseMode,
       basis: 'financial',
     });
+    const attributableInterval = enforceIntervalCompleteness(computeProducerIntervalEconomics({
+      producer,
+      year: args.context.selectedYear,
+      caseMode: args.context.caseMode,
+      deck,
+      basis: 'attributable',
+      usdPerCurrencyUnitByCurrency,
+    }), attributableCompleteness);
+    const financialInterval = enforceIntervalCompleteness(computeProducerIntervalEconomics({
+      producer: financialProducer,
+      year: args.context.selectedYear,
+      caseMode: args.context.caseMode,
+      deck,
+      basis: 'financial',
+      usdPerCurrencyUnitByCurrency,
+    }), financialCompleteness);
     intervalEconomicsByCompanyId[producer.company.id] = {
-      attributable: enforceIntervalCompleteness(computeProducerIntervalEconomics({
-        producer,
-        year: args.context.selectedYear,
-        caseMode: args.context.caseMode,
-        deck,
-        basis: 'attributable',
-        usdPerCurrencyUnitByCurrency,
-      }), attributableCompleteness),
-      financial: enforceIntervalCompleteness(computeProducerIntervalEconomics({
-        producer: financialProducer,
-        year: args.context.selectedYear,
-        caseMode: args.context.caseMode,
-        deck,
-        basis: 'financial',
-        usdPerCurrencyUnitByCurrency,
-      }), financialCompleteness),
+      attributable: attributableInterval,
+      financial: financialInterval,
     };
+    canonicalCashCostByCompanyId[producer.company.id] = computeCanonicalCashCostInterval({
+      producer: financialProducer,
+      year: args.context.selectedYear,
+      caseMode: args.context.caseMode,
+      deck,
+      financialAuEqOz: financialInterval.auEqOz.range,
+      usdPerCurrencyUnitByCurrency,
+    });
   }
 
   for (const row of table.rows) {
     const liveDiagnostics = liveDiagnosticsByCompanyId[row.companyId] ?? [];
     const forecastDiagnostics = forecastDiagnosticsByCompanyId[row.companyId] ?? [];
     const intervals = intervalEconomicsByCompanyId[row.companyId];
+    const cashCost = canonicalCashCostByCompanyId[row.companyId];
     const priceDeckDiagnostics = table.priceDecksByCompanyId[row.companyId]?.warnings ?? [];
     const scalarDiagnostics = [...row.diagnostics];
     row.diagnostics = selectPresentedProducerDiagnostics({
@@ -328,6 +345,7 @@ export async function buildLiveProducerPeerTable(
       forecastDiagnostics,
       scalarDiagnostics,
       priceDeckDiagnostics,
+      cashCostDiagnostics: cashCost?.diagnostics,
       intervals,
     });
   }
@@ -338,5 +356,6 @@ export async function buildLiveProducerPeerTable(
     liveDiagnosticsByCompanyId,
     usdPerCurrencyUnitByCurrency,
     intervalEconomicsByCompanyId,
+    canonicalCashCostByCompanyId,
   };
 }
