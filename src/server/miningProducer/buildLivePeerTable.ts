@@ -1,5 +1,6 @@
 import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import { resolvePriceSeries } from '../../lib/prices/resolve.ts';
+import { materializeProducerForecastForYear } from '../../lib/miningProducer/forecast.ts';
 import { assessProducerIntervalCompleteness } from '../../lib/miningProducer/intervalCompleteness.ts';
 import {
   computeProducerIntervalEconomics,
@@ -229,7 +230,13 @@ export async function buildLiveProducerPeerTable(
   }
 
   const hydratedProducers = live.map((item) => item.producer);
-  const attributableProducers = hydratedProducers.map((producer) => applyProductionWindowForRun(producer, args.context.selectedYear));
+  const forecastDiagnosticsByCompanyId: Record<string, string[]> = {};
+  const forecastedProducers = hydratedProducers.map((producer) => {
+    const materialized = materializeProducerForecastForYear(producer, args.context.selectedYear);
+    forecastDiagnosticsByCompanyId[producer.company.id] = materialized.diagnostics;
+    return materialized.producer;
+  });
+  const attributableProducers = forecastedProducers.map((producer) => applyProductionWindowForRun(producer, args.context.selectedYear));
   const commonBuildArgs = {
     context: args.context,
     ltDeck: args.ltDeck,
@@ -299,11 +306,12 @@ export async function buildLiveProducerPeerTable(
 
   for (const row of table.rows) {
     const liveDiagnostics = liveDiagnosticsByCompanyId[row.companyId] ?? [];
+    const forecastDiagnostics = forecastDiagnosticsByCompanyId[row.companyId] ?? [];
     const intervals = intervalEconomicsByCompanyId[row.companyId];
     const intervalDiagnostics = intervals
       ? [...intervals.attributable.diagnostics, ...intervals.financial.diagnostics]
       : [];
-    row.diagnostics = [...new Set([...liveDiagnostics, ...row.diagnostics, ...intervalDiagnostics])];
+    row.diagnostics = [...new Set([...liveDiagnostics, ...forecastDiagnostics, ...row.diagnostics, ...intervalDiagnostics])];
   }
 
   return {
