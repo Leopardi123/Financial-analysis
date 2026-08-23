@@ -75,6 +75,75 @@ function applyProductionWindowForRun(producer: ProducerJsonV1, year: number): Pr
   };
 }
 
+function financialConsolidationFactor(project: ProducerProject): number | null {
+  const consolidation = project.financialConsolidation;
+  if (!consolidation) return null;
+  if (consolidation.method === 'full') return 1;
+  if (consolidation.method === 'equity_method') return 0;
+  return consolidation.consolidationPct ?? null;
+}
+
+/**
+ * The core normalizer historically uses project ownership to scale project_100pct
+ * production/cost disclosures. For enterprise economics that is not always the
+ * correct basis: a fully consolidated 80%-owned mine contributes 100% of revenue
+ * and EBITDA, while NCI belongs in EV. This runtime copy substitutes the verified
+ * financial-consolidation factor only for the financial normalization pass.
+ * The attributable pass remains untouched and continues to drive Au/AuEq and
+ * Market Cap / attributable-production metrics.
+ */
+function applyFinancialConsolidationForRun(producer: ProducerJsonV1, year: number): ProducerJsonV1 {
+  return {
+    ...producer,
+    projects: producer.projects.map((project) => {
+      const factor = financialConsolidationFactor(project);
+      if (factor === null) return project;
+      return {
+        ...project,
+        ownership: [{
+          effectiveFrom: `${year}-01-01`,
+          effectiveTo: `${year}-12-31`,
+          ownershipPct: factor,
+          provenance: project.financialConsolidation!.provenance,
+        }],
+      };
+    }),
+  };
+}
+
+function mergeFinancialEconomics(
+  attributable: ProducerPeerTable,
+  financial: ProducerPeerTable,
+): ProducerPeerTable {
+  const financialById = new Map(financial.rows.map((row) => [row.companyId, row]));
+  for (const row of attributable.rows) {
+    const financeRow = financialById.get(row.companyId);
+    if (!financeRow) continue;
+    row.revenueUSD = financeRow.revenueUSD;
+    row.ebitdaUSD = financeRow.ebitdaUSD;
+    row.fcffBeforeGrowthUSD = financeRow.fcffBeforeGrowthUSD;
+    row.fcffAfterGrowthUSD = financeRow.fcffAfterGrowthUSD;
+    row.growthCapexUSD = financeRow.growthCapexUSD;
+    row.evToEbitda = financeRow.evToEbitda;
+    row.evToFcffBeforeGrowth = financeRow.evToFcffBeforeGrowth;
+    row.evToFcffAfterGrowth = financeRow.evToFcffAfterGrowth;
+    row.nonStandardMultiples = financeRow.nonStandardMultiples;
+    row.quality = {
+      ...row.quality,
+      revenue: financeRow.quality.revenue,
+      ebitda: financeRow.quality.ebitda,
+      fcffBeforeGrowth: financeRow.quality.fcffBeforeGrowth,
+      fcffAfterGrowth: financeRow.quality.fcffAfterGrowth,
+    };
+    row.diagnostics = [...new Set([
+      ...row.diagnostics,
+      ...financeRow.diagnostics,
+      'FINANCIAL_CONSOLIDATION_ROUTE: Au/AuEq remain attributable; Revenue/EBITDA/FCFF use verified project financialConsolidation where supplied.',
+    ])];
+  }
+  return attributable;
+}
+
 export async function buildLiveProducerPeerTable(
   args: {
     producers: readonly ProducerJsonV1[];
@@ -122,17 +191,37 @@ export async function buildLiveProducerPeerTable(
   }
 
   const hydratedProducers = live.map((item) => item.producer);
-  const runProducers = hydratedProducers.map((producer) => applyProductionWindowForRun(producer, args.context.selectedYear));
-  const table = await buildProducerPeerTable({
-    producers: runProducers,
+  const attributableProducers = hydratedProducers.map((producer) => applyProductionWindowForRun(producer, args.context.selectedYear));
+  const commonBuildArgs = {
     context: args.context,
     ltDeck: args.ltDeck,
     reportedPriceDeckIdByCompanyId: args.reportedPriceDeckIdByCompanyId,
     usdPerCurrencyUnitByCurrency,
     allowNonProductionReadySpotKeys: args.allowNonProductionReadySpotKeys,
+  };
+
+  const attributableTable = await buildProducerPeerTable({
+    producers: attributableProducers,
+    ...commonBuildArgs,
   }, {
     resolvePriceSeriesFn: deps.resolvePriceSeriesFn,
   });
+
+  const hasExplicitConsolidation = attributableProducers.some((producer) =>
+    producer.projects.some((project) => project.financialConsolidation !== undefined),
+  );
+
+  let table = attributableTable;
+  if (hasExplicitConsolidation) {
+    const financialProducers = attributableProducers.map((producer) => applyFinancialConsolidationForRun(producer, args.context.selectedYear));
+    const financialTable = await buildProducerPeerTable({
+      producers: financialProducers,
+      ...commonBuildArgs,
+    }, {
+      resolvePriceSeriesFn: deps.resolvePriceSeriesFn,
+    });
+    table = mergeFinancialEconomics(attributableTable, financialTable);
+  }
 
   for (const row of table.rows) {
     const liveDiagnostics = liveDiagnosticsByCompanyId[row.companyId] ?? [];
