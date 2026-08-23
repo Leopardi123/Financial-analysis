@@ -6,37 +6,13 @@ import {
 } from '../lib/client/companyCorporateProducerClient.ts';
 import { copyText } from '../lib/client/clipboard.ts';
 import { validateProducerJsonV1 } from '../lib/miningProducer/schema.ts';
+import { buildProducerJsonV1Template } from '../lib/miningProducer/template.ts';
 import type { ProducerJsonV1 } from '../lib/miningProducer/types.ts';
 import '../styles/company-project-editor.css';
 
 function parseSymbol(pathname: string): string {
   const match = pathname.match(/^\/company\/([^/]+)\/corporate\/?$/i);
   return match?.[1] ? decodeURIComponent(match[1]).toUpperCase() : '';
-}
-
-function buildTemplate(symbol: string): Record<string, unknown> {
-  return {
-    version: 'producer_json_v1',
-    company: {
-      id: symbol.toLowerCase(),
-      name: '',
-      reportingCurrency: 'USD',
-      primarySecurity: {
-        ticker: symbol,
-        exchange: '',
-        quoteCurrency: 'USD',
-        securityType: 'common',
-      },
-    },
-    valuation: {
-      valuationDateUtc: new Date().toISOString().slice(0, 10),
-    },
-    reportedPriceDecks: [],
-    projects: [],
-    corporateCosts: [],
-    reportedMetrics: [],
-    sources: [],
-  };
 }
 
 type Validation = {
@@ -101,11 +77,11 @@ export default function CompanyCorporateProducerEditorPage() {
           setUpdatedAt(record.updated_at_utc);
           setInfo('Loaded saved Corporate Producer JSON.');
         } else {
-          const template = JSON.stringify(buildTemplate(symbol), null, 2);
+          const template = JSON.stringify(buildProducerJsonV1Template(symbol), null, 2);
           setRaw(template);
           setSavedRaw(null);
           setUpdatedAt(null);
-          setInfo('No Corporate Producer JSON exists for this company. Created a new draft from template.');
+          setInfo('No Corporate Producer JSON exists for this company. Created a self-documenting draft from template.');
         }
       })
       .catch((loadError) => {
@@ -129,8 +105,8 @@ export default function CompanyCorporateProducerEditorPage() {
 
   async function copyTemplate(): Promise<void> {
     try {
-      await copyText(JSON.stringify(buildTemplate(symbol), null, 2));
-      setInfo('Blank producer_json_v1 template copied.');
+      await copyText(JSON.stringify(buildProducerJsonV1Template(symbol), null, 2));
+      setInfo('Self-documenting producer_json_v1 template copied.');
       setError(null);
     } catch (copyError) {
       setError((copyError as Error).message);
@@ -168,7 +144,7 @@ export default function CompanyCorporateProducerEditorPage() {
     setError(null);
     try {
       await deleteCompanyCorporateProducer(symbol);
-      const template = JSON.stringify(buildTemplate(symbol), null, 2);
+      const template = JSON.stringify(buildProducerJsonV1Template(symbol), null, 2);
       setRaw(template);
       setSavedRaw(null);
       setUpdatedAt(null);
@@ -196,8 +172,8 @@ export default function CompanyCorporateProducerEditorPage() {
           Spotpriser, FX, market cap och värderingsdatum hämtas vid körning och ska inte hårdkodas som dagens värden i bolagsdatan.
         </p>
         <p>
-          För REPORTED-läge kan ett prisdeck ange <code>appliesTo: {'{'} startYear, endYear {'}'}</code>.
-          Om flera decks matchar samma år betraktas valet som tvetydigt i stället för att gissas.
+          Mallen är självdokumenterande. Fält som börjar med <code>_description_</code>, <code>_choices_</code>, <code>_example_</code> eller <code>_reference</code> är instruktioner/exempel och ignoreras av beräkningsmotorn.
+          Kopiera ett relevant exempel till det riktiga fältet och fyll endast sådant som källan faktiskt stödjer. Saknad data ska utelämnas, inte sättas till 0.
         </p>
 
         {loading ? <p>Laddar…</p> : (
@@ -205,7 +181,7 @@ export default function CompanyCorporateProducerEditorPage() {
             <label className="json-label">
               <span>Raw JSON</span>
               <textarea
-                rows={34}
+                rows={46}
                 value={raw}
                 onChange={(event) => setRaw(event.target.value)}
                 spellCheck={false}
