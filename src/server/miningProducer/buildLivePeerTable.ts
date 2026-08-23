@@ -1,14 +1,15 @@
-import { fetchStableJson } from '../../../api/_fmp.js';
+import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import { resolvePriceSeries } from '../../lib/prices/resolve.ts';
 import { buildProducerPeerTable, type ProducerPeerTable } from '../../lib/miningProducer/peerTable.ts';
 import type { ExplicitLongTermPriceDeck } from '../../lib/miningProducer/priceDeck.ts';
 import type { ProducerJsonV1, ProducerRunContext } from '../../lib/miningProducer/types.ts';
-import { resolveLiveProducerMarketInputs } from './resolveLiveMarketInputs.ts';
-
-type StableFetch = (
-  path: string,
-  query?: Record<string, string | number | null | undefined>,
-) => Promise<unknown>;
+import {
+  fetchProducerQuoteFromCanonicalFmpPath,
+  resolveLiveProducerMarketInputs,
+  resolveProducerProviderSymbolFromCompanyMaster,
+  type ProducerProviderSymbolResolution,
+  type ProducerQuoteSnapshot,
+} from './resolveLiveMarketInputs.ts';
 
 export type LiveProducerPeerTableResult = {
   table: ProducerPeerTable;
@@ -17,13 +18,42 @@ export type LiveProducerPeerTableResult = {
   usdPerCurrencyUnitByCurrency: Record<string, number>;
 };
 
-function cachedStableFetch(base: StableFetch): StableFetch {
-  const cache = new Map<string, Promise<unknown>>();
-  return async (path, query = {}) => {
-    const key = JSON.stringify({ path, query });
+function cachedProviderSymbolResolver(
+  base: (producer: ProducerJsonV1) => Promise<ProducerProviderSymbolResolution>,
+): (producer: ProducerJsonV1) => Promise<ProducerProviderSymbolResolution> {
+  const cache = new Map<string, Promise<ProducerProviderSymbolResolution>>();
+  return async (producer) => {
+    const key = `${producer.company.id}|${producer.company.primarySecurity?.ticker ?? ''}|${producer.company.primarySecurity?.exchange ?? ''}`;
     let pending = cache.get(key);
     if (!pending) {
-      pending = base(path, query);
+      pending = base(producer);
+      cache.set(key, pending);
+    }
+    return pending;
+  };
+}
+
+function cachedQuoteFetcher(
+  base: (symbol: string) => Promise<ProducerQuoteSnapshot>,
+): (symbol: string) => Promise<ProducerQuoteSnapshot> {
+  const cache = new Map<string, Promise<ProducerQuoteSnapshot>>();
+  return async (symbol) => {
+    let pending = cache.get(symbol);
+    if (!pending) {
+      pending = base(symbol);
+      cache.set(symbol, pending);
+    }
+    return pending;
+  };
+}
+
+function cachedFxResolver(base: typeof resolveFxUSDToTarget): typeof resolveFxUSDToTarget {
+  const cache = new Map<string, Promise<Awaited<ReturnType<typeof resolveFxUSDToTarget>>>>();
+  return async (args, deps) => {
+    const key = JSON.stringify(args);
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = base(args, deps);
       cache.set(key, pending);
     }
     return pending;
@@ -39,16 +69,25 @@ export async function buildLiveProducerPeerTable(
     allowNonProductionReadySpotKeys?: boolean;
   },
   deps: {
-    fetchStable?: StableFetch;
+    resolveProviderSymbolFn?: (producer: ProducerJsonV1) => Promise<ProducerProviderSymbolResolution>;
+    fetchQuoteFn?: (symbol: string) => Promise<ProducerQuoteSnapshot>;
+    resolveFxFn?: typeof resolveFxUSDToTarget;
     resolvePriceSeriesFn?: typeof resolvePriceSeries;
     todayUtcFn?: () => string;
   } = {},
 ): Promise<LiveProducerPeerTableResult> {
-  const baseStableFetch: StableFetch = deps.fetchStable ?? ((path, query) => fetchStableJson<unknown>(path, query));
-  const fetchStable = cachedStableFetch(baseStableFetch);
+  const resolveProviderSymbolFn = cachedProviderSymbolResolver(
+    deps.resolveProviderSymbolFn ?? resolveProducerProviderSymbolFromCompanyMaster,
+  );
+  const fetchQuoteFn = cachedQuoteFetcher(
+    deps.fetchQuoteFn ?? fetchProducerQuoteFromCanonicalFmpPath,
+  );
+  const resolveFxFn = cachedFxResolver(deps.resolveFxFn ?? resolveFxUSDToTarget);
 
   const live = await Promise.all(args.producers.map((producer) => resolveLiveProducerMarketInputs(producer, {
-    fetchStable,
+    resolveProviderSymbolFn,
+    fetchQuoteFn,
+    resolveFxFn,
     todayUtcFn: deps.todayUtcFn,
   })));
 
@@ -60,7 +99,7 @@ export async function buildLiveProducerPeerTable(
     liveDiagnosticsByCompanyId[companyId] = live[index].diagnostics;
     for (const [currency, value] of Object.entries(live[index].usdPerCurrencyUnitByCurrency)) {
       const existing = usdPerCurrencyUnitByCurrency[currency];
-      if (existing !== undefined && existing !== value) {
+      if (existing !== undefined && Math.abs(existing - value) > 1e-12) {
         throw new Error(`Live Producer peer run resolved conflicting ${currency}->USD FX values: ${existing} vs ${value}`);
       }
       usdPerCurrencyUnitByCurrency[currency] = value;
