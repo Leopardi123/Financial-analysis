@@ -54,13 +54,20 @@ export async function resolveProducerProviderSymbolFromCompanyMaster(
   }
 
   const ticker = normalized(security.ticker);
-  const candidates = await query(
+  const rawCandidates = await query(
     `SELECT symbol, name, exchange
      FROM companies
      WHERE UPPER(symbol) = ?
         OR UPPER(symbol) LIKE ?`,
     [ticker, `${ticker}.%`],
-  ) as CompanyMasterCandidate[];
+  );
+  const candidates: CompanyMasterCandidate[] = rawCandidates
+    .map((row: any) => ({
+      symbol: normalized(row?.symbol == null ? '' : String(row.symbol)),
+      name: row?.name == null ? '' : String(row.name),
+      exchange: row?.exchange == null ? null : String(row.exchange),
+    }))
+    .filter((candidate) => candidate.symbol.length > 0);
 
   const exchangeCandidates = candidates.filter((candidate) => exchangeMatches(candidate.exchange, security.exchange));
   const exactTicker = exchangeCandidates.filter((candidate) => normalized(candidate.symbol) === ticker);
@@ -154,8 +161,6 @@ export async function resolveLiveProducerMarketInputs(
       });
       diagnostics.push(...resolved.warnings.map((warning) => `FX ${quoteCurrency}: ${warning}`));
       if (resolved.fx !== null && Number.isFinite(resolved.fx) && resolved.fx > 0) {
-        // Canonical FX resolver returns TARGET currency units per USD. Producer normalization
-        // consumes USD per target-currency unit, so invert exactly once here.
         usdPerCurrencyUnitByCurrency[quoteCurrency] = 1 / resolved.fx;
       } else {
         diagnostics.push(`FX ${quoteCurrency}->USD unresolved through canonical FX resolver; conversion is not guessed`);
