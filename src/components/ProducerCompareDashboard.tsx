@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ProducerIntervalEconomics } from '../lib/miningProducer/intervalEconomics.ts';
 import type { ProducerPeerTable, ProducerProductionEvidence } from '../lib/miningProducer/peerTable.ts';
 import type { NumericClaim, ReportedMetric } from '../lib/miningProducer/types.ts';
 import '../styles/producerCompare.css';
@@ -8,6 +9,10 @@ type ProducerPeerApiResponse =
       ok: true;
       dataset: { companies: string[]; symbols?: string[]; sourceContract: string };
       table: ProducerPeerTable;
+      intervalEconomicsByCompanyId: Record<string, {
+        attributable: ProducerIntervalEconomics;
+        financial: ProducerIntervalEconomics;
+      }>;
       liveDiagnosticsByCompanyId: Record<string, string[]>;
     }
   | {
@@ -27,6 +32,11 @@ function formatCompact(value: number | null, suffix = ''): string {
   return `${value.toLocaleString('sv-SE', { maximumFractionDigits: 1 })}${suffix}`;
 }
 
+function formatCompactRange(value: NumericRange, suffix = ''): string {
+  if (value.low === value.high) return formatCompact(value.low, suffix);
+  return `${formatCompact(value.low, suffix)}–${formatCompact(value.high, suffix)}`;
+}
+
 function formatUsd(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return 'Ej beräkningsbart';
   const abs = Math.abs(value);
@@ -36,18 +46,22 @@ function formatUsd(value: number | null): string {
   return `$${value.toLocaleString('sv-SE', { maximumFractionDigits: 0 })}`;
 }
 
-function formatUsdRange(range: NumericRange): string {
-  return range.low === range.high ? formatUsd(range.low) : `${formatUsd(range.low)}–${formatUsd(range.high)}`;
+function formatUsdRange(value: NumericRange): string {
+  return value.low === value.high ? formatUsd(value.low) : `${formatUsd(value.low)}–${formatUsd(value.high)}`;
 }
 
-function formatUsdPerOzRange(range: NumericRange): string {
-  const low = `$${range.low.toLocaleString('sv-SE', { maximumFractionDigits: 0 })}`;
-  const high = `$${range.high.toLocaleString('sv-SE', { maximumFractionDigits: 0 })}`;
-  return range.low === range.high ? `${low}/oz` : `${low}–${high}/oz`;
+function formatUsdPerOzRange(value: NumericRange): string {
+  const low = `$${value.low.toLocaleString('sv-SE', { maximumFractionDigits: 0 })}`;
+  const high = `$${value.high.toLocaleString('sv-SE', { maximumFractionDigits: 0 })}`;
+  return value.low === value.high ? `${low}/oz` : `${low}–${high}/oz`;
 }
 
 function formatMultiple(value: number | null): string {
   return value === null || !Number.isFinite(value) ? 'Ej beräkningsbart' : `${value.toFixed(2)}×`;
+}
+
+function formatMultipleRange(value: NumericRange): string {
+  return value.low === value.high ? `${value.low.toFixed(2)}×` : `${value.low.toFixed(2)}–${value.high.toFixed(2)}×`;
 }
 
 function displayUnit(unit: string): string {
@@ -106,12 +120,14 @@ function subtractRanges(a: NumericRange, b: NumericRange): NumericRange {
   return { low: a.low - b.high, high: a.high - b.low };
 }
 
-function marketCapPerProductionRange(marketCapUSD: number, productionOz: NumericRange): NumericRange | null {
-  if (!Number.isFinite(marketCapUSD) || marketCapUSD < 0 || productionOz.low <= 0 || productionOz.high <= 0) return null;
-  return {
-    low: marketCapUSD / productionOz.high,
-    high: marketCapUSD / productionOz.low,
-  };
+function valuePerPositiveRange(value: number, denominator: NumericRange): NumericRange | null {
+  if (!Number.isFinite(value) || denominator.low <= 0 || denominator.high <= 0) return null;
+  return { low: value / denominator.high, high: value / denominator.low };
+}
+
+function ratioToPositiveRange(numerator: number, denominator: NumericRange | null): NumericRange | null {
+  if (!denominator || !Number.isFinite(numerator) || denominator.low <= 0 || denominator.high <= 0) return null;
+  return { low: numerator / denominator.high, high: numerator / denominator.low };
 }
 
 function formatEvidencePeriod(item: ProducerProductionEvidence): string {
@@ -154,6 +170,19 @@ function qualityLabel(value: string): string {
     case 'reported_only': return 'Rapporterad / evidens';
     default: return 'Ej beräkningsbart';
   }
+}
+
+function IntervalValue({ range, label, format = formatUsdRange }: {
+  range: NumericRange;
+  label: string;
+  format?: (value: NumericRange) => string;
+}) {
+  return (
+    <div className="producer-compare__evidence-item producer-compare__evidence-item--interval">
+      <strong>{format(range)}</strong>
+      <small>{label}</small>
+    </div>
+  );
 }
 
 export default function ProducerCompareDashboard() {
@@ -328,6 +357,9 @@ export default function ProducerCompareDashboard() {
                     const symbol = symbolByCompanyId.get(row.companyId) ?? '';
                     const auEvidence = row.productionEvidence.filter((item) => item.metal === 'Au' && item.measure === 'produced');
                     const deck = data.table.priceDecksByCompanyId[row.companyId];
+                    const intervals = data.intervalEconomicsByCompanyId[row.companyId];
+                    const attributableInterval = intervals?.attributable;
+                    const financialInterval = intervals?.financial;
                     const reportedAuRange = reportedProductionToAuOzRange(row.reportedProduction);
                     const selectedAuPrice = deck?.pricesByMetal.Au;
                     const reportedRevenueProxy = reportedAuRange && selectedAuPrice?.valueUSD !== null && selectedAuPrice?.valueUSD !== undefined && selectedAuPrice.unit === 'USD_per_toz'
@@ -347,9 +379,25 @@ export default function ProducerCompareDashboard() {
                     const aiscMarginProxy = reportedRevenueProxy && reportedAiscSpend
                       ? subtractRanges(reportedRevenueProxy, reportedAiscSpend)
                       : null;
-                    const marketCapPerReportedAu = row.marketCapUSD !== null && reportedAuRange
-                      ? marketCapPerProductionRange(row.marketCapUSD, reportedAuRange)
+
+                    const canonicalAuRange = attributableInterval?.auOz.range ?? null;
+                    const canonicalAuEqRange = attributableInterval?.auEqOz.range ?? null;
+                    const canonicalRevenueRange = financialInterval?.revenueUSD.range ?? null;
+                    const canonicalEbitdaRange = financialInterval?.ebitdaUSD.range ?? null;
+                    const canonicalFcffBeforeRange = financialInterval?.fcffBeforeGrowthUSD.range ?? null;
+                    const canonicalFcffAfterRange = financialInterval?.fcffAfterGrowthUSD.range ?? null;
+                    const canonicalGrowthCapexRange = financialInterval?.growthCapexUSD.range ?? null;
+
+                    const mcapAuRange = row.marketCapUSD !== null
+                      ? valuePerPositiveRange(row.marketCapUSD, canonicalAuRange ?? reportedAuRange ?? { low: 0, high: 0 })
                       : null;
+                    const mcapAuEqRange = row.marketCapUSD !== null && canonicalAuEqRange
+                      ? valuePerPositiveRange(row.marketCapUSD, canonicalAuEqRange)
+                      : null;
+                    const evEbitdaRange = row.enterpriseValueUSD !== null ? ratioToPositiveRange(row.enterpriseValueUSD, canonicalEbitdaRange) : null;
+                    const evFcffBeforeRange = row.enterpriseValueUSD !== null ? ratioToPositiveRange(row.enterpriseValueUSD, canonicalFcffBeforeRange) : null;
+                    const evFcffAfterRange = row.enterpriseValueUSD !== null ? ratioToPositiveRange(row.enterpriseValueUSD, canonicalFcffAfterRange) : null;
+
                     return (
                       <tr key={row.companyId}>
                         <td className="producer-compare__company">
@@ -357,7 +405,9 @@ export default function ProducerCompareDashboard() {
                           {symbol && <button type="button" onClick={() => openCorporateEditor(symbol)}>Redigera JSON</button>}
                         </td>
                         <td className="producer-compare__evidence-cell">
-                          {row.auOz !== null ? formatCompact(row.auOz, ' oz') : row.reportedProduction ? (
+                          {row.auOz !== null ? formatCompact(row.auOz, ' oz') : canonicalAuRange ? (
+                            <IntervalValue range={canonicalAuRange} format={(value) => formatCompactRange(value, ' oz')} label="Kanoniskt attributable intervall · ingen midpoint" />
+                          ) : row.reportedProduction ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedProduction)}</strong>
                               <small>Rapporterad bolagsproduktion · ej omräknad till kanonisk attributable Au</small>
@@ -365,7 +415,9 @@ export default function ProducerCompareDashboard() {
                           ) : <ProductionEvidenceList items={auEvidence} />}
                         </td>
                         <td className="producer-compare__evidence-cell">
-                          {row.auEqOz !== null ? formatCompact(row.auEqOz, ' oz') : row.reportedAuEq ? (
+                          {row.auEqOz !== null ? formatCompact(row.auEqOz, ' oz') : canonicalAuEqRange ? (
+                            <IntervalValue range={canonicalAuEqRange} format={(value) => formatCompactRange(value, ' oz')} label="Kanoniskt fysisk AuEq-intervall vid valt deck" />
+                          ) : row.reportedAuEq ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedAuEq)}</strong>
                               <small>Rapporterad AuEq · ej kanonisk fysisk AuEq</small>
@@ -384,16 +436,15 @@ export default function ProducerCompareDashboard() {
                           </span>
                         </td>
                         <td className="producer-compare__evidence-cell">
-                          {row.revenueUSD !== null ? formatUsd(row.revenueUSD) : row.reportedRevenue ? (
+                          {row.revenueUSD !== null ? formatUsd(row.revenueUSD) : canonicalRevenueRange ? (
+                            <IntervalValue range={canonicalRevenueRange} label="Kanoniskt financial-consolidation-intervall vid valt price deck" />
+                          ) : row.reportedRevenue ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedRevenue)}</strong>
                               <small>Rapporterad revenue · ej reprissatt SPOT</small>
                             </div>
                           ) : reportedRevenueProxy ? (
-                            <div className="producer-compare__evidence-item">
-                              <strong>{formatUsdRange(reportedRevenueProxy)}</strong>
-                              <small>Rapporterad Au-range × valt {data.table.priceMode}-pris · proxy, ej canonical attributable revenue</small>
-                            </div>
+                            <IntervalValue range={reportedRevenueProxy} label={`Rapporterad Au-range × valt ${data.table.priceMode}-pris · proxy, ej canonical financial revenue`} />
                           ) : 'Ej beräkningsbart'}
                         </td>
                         <td>
@@ -402,54 +453,68 @@ export default function ProducerCompareDashboard() {
                         </td>
                         <td>{formatClaim(row.reportedAisc)}</td>
                         <td className="producer-compare__evidence-cell">
-                          {row.ebitdaUSD !== null ? formatUsd(row.ebitdaUSD) : row.reportedEbitda ? (
+                          {row.ebitdaUSD !== null ? formatUsd(row.ebitdaUSD) : canonicalEbitdaRange ? (
+                            <IntervalValue range={canonicalEbitdaRange} label="Kanoniskt EBITDA-intervall; alla obligatoriska operating-cost buckets täckta" />
+                          ) : row.reportedEbitda ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedEbitda)}</strong>
                               <small>Rapporterad EBITDA · ej kanonisk Producer-EBITDA</small>
                             </div>
                           ) : operatingCashMarginProxy ? (
-                            <div className="producer-compare__evidence-item">
-                              <strong>{formatUsdRange(operatingCashMarginProxy)}</strong>
-                              <small>Cash-margin proxy = selected-price revenue − reported cash cost × reported production. Före royalty/G&A m.m.; <strong>inte EBITDA</strong>.</small>
-                            </div>
+                            <IntervalValue range={operatingCashMarginProxy} label="Cash-margin proxy: selected-price revenue − reported cash cost × reported production. Före royalty/G&A m.m.; INTE EBITDA." />
                           ) : 'Ej beräkningsbart'}
                         </td>
                         <td className="producer-compare__evidence-cell">
-                          {row.fcffBeforeGrowthUSD !== null ? formatUsd(row.fcffBeforeGrowthUSD) : row.reportedFcf ? (
+                          {row.fcffBeforeGrowthUSD !== null ? formatUsd(row.fcffBeforeGrowthUSD) : canonicalFcffBeforeRange ? (
+                            <IntervalValue range={canonicalFcffBeforeRange} label="Kanoniskt FCFF före growth-intervall" />
+                          ) : row.reportedFcf ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedFcf)}</strong>
                               <small>Rapporterad FCF · visas som evidens, ersätter inte FCFF</small>
                             </div>
                           ) : aiscMarginProxy ? (
-                            <div className="producer-compare__evidence-item">
-                              <strong>{formatUsdRange(aiscMarginProxy)}</strong>
-                              <small>AISC-margin proxy = selected-price revenue − reported AISC × reported production. Före cash tax/WC och med denominator-risk; <strong>inte FCFF</strong>.</small>
-                            </div>
+                            <IntervalValue range={aiscMarginProxy} label="AISC-margin proxy: selected-price revenue − reported AISC × reported production. Före cash tax/WC och med denominator-risk; INTE FCFF." />
                           ) : 'Ej beräkningsbart'}
                         </td>
-                        <td>{formatUsd(row.fcffAfterGrowthUSD)}</td>
-                        <td>{formatUsd(row.growthCapexUSD)}</td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.fcffAfterGrowthUSD !== null ? formatUsd(row.fcffAfterGrowthUSD) : canonicalFcffAfterRange ? (
+                            <IntervalValue range={canonicalFcffAfterRange} label="Kanoniskt FCFF efter growth-intervall" />
+                          ) : 'Ej beräkningsbart'}
+                        </td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.growthCapexUSD !== null ? formatUsd(row.growthCapexUSD) : canonicalGrowthCapexRange ? (
+                            <IntervalValue range={canonicalGrowthCapexRange} label="Kanoniskt growth-CAPEX-intervall" />
+                          ) : 'Ej beräkningsbart'}
+                        </td>
                         <td>{formatUsd(row.marketCapUSD)}</td>
                         <td>{formatUsd(row.enterpriseValueUSD)}</td>
                         <td className="producer-compare__evidence-cell">
-                          {row.marketCapPerAuOzUSD !== null ? `${formatUsd(row.marketCapPerAuOzUSD)}/oz` : marketCapPerReportedAu ? (
-                            <div className="producer-compare__evidence-item">
-                              <strong>{formatUsdPerOzRange(marketCapPerReportedAu)}</strong>
-                              <small>MCap / rapporterad Au-range · ej canonical attributable multiple</small>
-                            </div>
+                          {row.marketCapPerAuOzUSD !== null ? `${formatUsd(row.marketCapPerAuOzUSD)}/oz` : mcapAuRange ? (
+                            <IntervalValue range={mcapAuRange} format={formatUsdPerOzRange} label={canonicalAuRange ? 'MCap / kanoniskt attributable Au-intervall' : 'MCap / rapporterad Au-range · ej canonical attributable multiple'} />
                           ) : 'Ej beräkningsbart'}
                         </td>
                         <td className="producer-compare__evidence-cell">
-                          {row.marketCapPerAuEqOzUSD !== null ? `${formatUsd(row.marketCapPerAuEqOzUSD)}/oz` : marketCapPerReportedAu ? (
-                            <div className="producer-compare__evidence-item">
-                              <strong>{formatUsdPerOzRange(marketCapPerReportedAu)}</strong>
-                              <small>Au-only proxy för MCap/AuEq · ej kanonisk fysisk AuEq</small>
-                            </div>
+                          {row.marketCapPerAuEqOzUSD !== null ? `${formatUsd(row.marketCapPerAuEqOzUSD)}/oz` : mcapAuEqRange ? (
+                            <IntervalValue range={mcapAuEqRange} format={formatUsdPerOzRange} label="MCap / kanoniskt fysisk AuEq-intervall" />
+                          ) : mcapAuRange && !canonicalAuEqRange ? (
+                            <IntervalValue range={mcapAuRange} format={formatUsdPerOzRange} label="Au-only proxy för MCap/AuEq · ej kanonisk fysisk AuEq" />
                           ) : 'Ej beräkningsbart'}
                         </td>
-                        <td>{formatMultiple(row.evToEbitda)}</td>
-                        <td>{formatMultiple(row.evToFcffBeforeGrowth)}</td>
-                        <td>{formatMultiple(row.evToFcffAfterGrowth)}</td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.evToEbitda !== null ? formatMultiple(row.evToEbitda) : evEbitdaRange ? (
+                            <IntervalValue range={evEbitdaRange} format={formatMultipleRange} label="EV / kanoniskt EBITDA-intervall" />
+                          ) : 'Ej beräkningsbart'}
+                        </td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.evToFcffBeforeGrowth !== null ? formatMultiple(row.evToFcffBeforeGrowth) : evFcffBeforeRange ? (
+                            <IntervalValue range={evFcffBeforeRange} format={formatMultipleRange} label="EV / kanoniskt FCFF före growth-intervall" />
+                          ) : 'Ej beräkningsbart'}
+                        </td>
+                        <td className="producer-compare__evidence-cell">
+                          {row.evToFcffAfterGrowth !== null ? formatMultiple(row.evToFcffAfterGrowth) : evFcffAfterRange ? (
+                            <IntervalValue range={evFcffAfterRange} format={formatMultipleRange} label="EV / kanoniskt FCFF efter growth-intervall" />
+                          ) : 'Ej beräkningsbart'}
+                        </td>
                         <td>
                           <details>
                             <summary>{row.diagnostics.length} poster</summary>
@@ -467,7 +532,7 @@ export default function ProducerCompareDashboard() {
           )}
 
           <div className="producer-compare__footnote">
-            Stora numeriska värden är kanoniska Producer-mått. När kanonisk aggregering inte är möjlig visas rapporterad range/target som evidens i stället för att midpointas eller annualiseras. Revenue-proxy, cash-margin-proxy och AISC-margin-proxy märks uttryckligen som proxy och används aldrig i kanoniska EV-multiplar. EBITDA och FCFF blir först kanoniska när JSON uppfyller den dokumenterade input-bron.
+            Punktvärden och slutna intervall kan båda vara kanoniska. Intervall midpointas aldrig. Au/AuEq och MCap/Au använder attributable basis; Revenue/EBITDA/FCFF använder financial-consolidation basis när den är verifierad i JSON. Revenue-/cash-margin-/AISC-margin-proxyer visas endast när en kanonisk bridge saknas och används aldrig i kanoniska EV-multiplar.
           </div>
         </>
       )}
