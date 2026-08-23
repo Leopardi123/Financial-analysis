@@ -22,6 +22,8 @@ jobs:
         run: node --experimental-strip-types src/lib/miningProducer/__tests__/calculability.test.ts
       - name: Run Producer financial-consolidation tests
         run: node --experimental-strip-types src/lib/miningProducer/__tests__/financialConsolidation.test.ts
+      - name: Run Producer interval-economics tests
+        run: node --experimental-strip-types src/lib/miningProducer/__tests__/intervalEconomics.test.ts
       - name: Run Producer peer-table tests
         run: node --experimental-strip-types src/lib/miningProducer/__tests__/peerTable.test.ts
       - name: Run Producer core tests
