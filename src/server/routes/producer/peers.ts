@@ -4,6 +4,7 @@ import {
   listCompanyCorporateProducerJsonRows,
   upsertCompanyCorporateProducerJson,
 } from '../../../lib/db/companyCorporateProducer.ts';
+import { stripGeneratedProducerEditorMetadata } from '../../../lib/miningProducer/editorMetadata.ts';
 import {
   assertStoredProducerMatchesSymbol,
   parseStoredProducerJson,
@@ -88,7 +89,8 @@ async function handleCorporateUpsert(req: any, res: any): Promise<void> {
     res.status(400).json({ ok: false, error: 'raw_json must be an object' });
     return;
   }
-  const producer = validateProducerJsonV1(raw as ProducerJsonV1);
+  const cleaned = stripGeneratedProducerEditorMetadata(raw);
+  const producer = validateProducerJsonV1(cleaned as ProducerJsonV1);
   assertStoredProducerMatchesSymbol(producer, symbol);
 
   const saved = await upsertCompanyCorporateProducerJson({
