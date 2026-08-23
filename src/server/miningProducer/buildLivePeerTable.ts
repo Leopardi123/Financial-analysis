@@ -1,5 +1,9 @@
 import { resolveFxUSDToTarget } from '../../lib/prices/fx/resolveFx.ts';
 import { resolvePriceSeries } from '../../lib/prices/resolve.ts';
+import {
+  computeProducerIntervalEconomics,
+  type ProducerIntervalEconomics,
+} from '../../lib/miningProducer/intervalEconomics.ts';
 import { buildProducerPeerTable, type ProducerPeerTable } from '../../lib/miningProducer/peerTable.ts';
 import type { ExplicitLongTermPriceDeck } from '../../lib/miningProducer/priceDeck.ts';
 import type { ProducerJsonV1, ProducerProject, ProducerRunContext } from '../../lib/miningProducer/types.ts';
@@ -16,6 +20,10 @@ export type LiveProducerPeerTableResult = {
   hydratedProducers: ProducerJsonV1[];
   liveDiagnosticsByCompanyId: Record<string, string[]>;
   usdPerCurrencyUnitByCurrency: Record<string, number>;
+  intervalEconomicsByCompanyId: Record<string, {
+    attributable: ProducerIntervalEconomics;
+    financial: ProducerIntervalEconomics;
+  }>;
 };
 
 function cachedProviderSymbolResolver(
@@ -223,9 +231,37 @@ export async function buildLiveProducerPeerTable(
     table = mergeFinancialEconomics(attributableTable, financialTable);
   }
 
+  const intervalEconomicsByCompanyId: LiveProducerPeerTableResult['intervalEconomicsByCompanyId'] = {};
+  for (const producer of attributableProducers) {
+    const deck = table.priceDecksByCompanyId[producer.company.id];
+    if (!deck) continue;
+    intervalEconomicsByCompanyId[producer.company.id] = {
+      attributable: computeProducerIntervalEconomics({
+        producer,
+        year: args.context.selectedYear,
+        caseMode: args.context.caseMode,
+        deck,
+        basis: 'attributable',
+        usdPerCurrencyUnitByCurrency,
+      }),
+      financial: computeProducerIntervalEconomics({
+        producer,
+        year: args.context.selectedYear,
+        caseMode: args.context.caseMode,
+        deck,
+        basis: 'financial',
+        usdPerCurrencyUnitByCurrency,
+      }),
+    };
+  }
+
   for (const row of table.rows) {
     const liveDiagnostics = liveDiagnosticsByCompanyId[row.companyId] ?? [];
-    row.diagnostics = [...new Set([...liveDiagnostics, ...row.diagnostics])];
+    const intervals = intervalEconomicsByCompanyId[row.companyId];
+    const intervalDiagnostics = intervals
+      ? [...intervals.attributable.diagnostics, ...intervals.financial.diagnostics]
+      : [];
+    row.diagnostics = [...new Set([...liveDiagnostics, ...row.diagnostics, ...intervalDiagnostics])];
   }
 
   return {
@@ -233,5 +269,6 @@ export async function buildLiveProducerPeerTable(
     hydratedProducers,
     liveDiagnosticsByCompanyId,
     usdPerCurrencyUnitByCurrency,
+    intervalEconomicsByCompanyId,
   };
 }
