@@ -24,6 +24,7 @@ import {
   type NormalizedProductionDisclosure,
   type ScalarQuantity,
 } from './production.ts';
+import { isProducerEconomicProject, unresolvedUnallocatedEvidenceGroups } from './projectRole.ts';
 import { validateProducerJsonV1, validateProducerRunContext } from './schema.ts';
 import { computeProducerValuationMultiples } from './valuation.ts';
 import type { CostDisclosure, ProducerJsonV1, ProducerProject, ProducerRunContext } from './types.ts';
@@ -312,7 +313,15 @@ export async function normalizeProducerCompanyYear(
     );
   }
 
-  const includedProjects = args.producer.projects.filter((project) => isProjectIncludedInCase(project.statusAsOfValuationDate, context.caseMode));
+  const includedProjects = args.producer.projects.filter((project) =>
+    isProducerEconomicProject(project)
+    && isProjectIncludedInCase(project.statusAsOfValuationDate, context.caseMode),
+  );
+  const unallocatedGroups = unresolvedUnallocatedEvidenceGroups(
+    args.producer.projects,
+    context.selectedYear,
+    context.caseMode,
+  );
   const corporateCosts = args.producer.corporateCosts ?? [];
   const metals = collectRequiredMetals(includedProjects, corporateCosts);
   const priceDeck = await resolveProducerPriceDeck({
@@ -329,9 +338,12 @@ export async function normalizeProducerCompanyYear(
     .filter((project) => !projectHasAnySelectedYearProductionDisclosure(project, context.selectedYear))
     .map((project) => project.id);
   diagnostics.push(...missingProductionProjects.map((projectId) => `${projectId}: no production disclosure covers ${context.selectedYear}; zero production is not assumed`));
+  diagnostics.push(...unallocatedGroups.map((project) =>
+    `UNALLOCATED_REPORTING_GROUP: ${project.id} has exact-year production evidence for ${context.selectedYear} that is intentionally excluded from canonical totals because it cannot be safely decomposed; partial company production/revenue is forbidden.`,
+  ));
 
   const productionItems = buildNormalizedCompanyProduction({
-    projects: args.producer.projects,
+    projects: includedProjects,
     year: context.selectedYear,
     caseMode: context.caseMode,
   });
@@ -342,13 +354,17 @@ export async function normalizeProducerCompanyYear(
 
   let revenueQuality: ProducerMetricQuality = calculationQualityToMetricQuality(revenue.quality);
   let physicalAuEq = computePhysicalAuEqOz(producedByMetal, priceDeck);
-  if (missingProductionProjects.length > 0 || metals.length === 0) {
+  if (missingProductionProjects.length > 0 || unallocatedGroups.length > 0 || metals.length === 0) {
     revenueQuality = 'not_computable';
+    const completenessReasons = [
+      ...missingProductionProjects.map((projectId) => `${projectId}: production completeness is unresolved`),
+      ...unallocatedGroups.map((project) => `${project.id}: unallocated reporting-group production prevents a complete canonical company total`),
+    ];
     physicalAuEq = {
       value: null,
       quality: 'not_computable',
-      reasons: missingProductionProjects.length > 0
-        ? missingProductionProjects.map((projectId) => `${projectId}: production completeness is unresolved`)
+      reasons: completenessReasons.length > 0
+        ? completenessReasons
         : ['No production metals are available for the selected year/case'],
     };
   }
