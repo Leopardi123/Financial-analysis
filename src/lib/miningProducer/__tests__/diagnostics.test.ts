@@ -54,7 +54,7 @@ const diagnostics = selectPresentedProducerDiagnostics({
 
 assert(diagnostics.includes('LIVE_MARKET_OK'), 'live diagnostic should remain');
 assert(diagnostics.includes('Au: commodity history resolved via historical-price-full'), 'price-deck diagnostic should remain');
-assert(diagnostics.some((item) => item.startsWith('FORECAST_RULES_APPLIED: 2 forecast rules materialized for 2030')), 'forecast application should be summarized');
+assert(diagnostics.some((item) => item.startsWith('FORECAST_RULE_APPLIED_SUMMARY: 2 forecast rules materialized for 2030')), 'forecast application should be summarized');
 assert(!diagnostics.some((item) => item.startsWith('FORECAST_RULE_APPLIED:')), 'individual forecast trace rows should not remain');
 assert(diagnostics.includes('FORECAST_RULE_WARNING: retained explicit analyst assumption'), 'non-trace forecast warning should remain');
 assert(diagnostics.includes('Enterprise value unresolved: balanceSheet 2026-06-30 is stale after material event'), 'EV blocker should remain');
