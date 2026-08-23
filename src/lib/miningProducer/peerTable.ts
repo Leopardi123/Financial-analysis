@@ -1,7 +1,28 @@
 import { normalizeProducerCompanyYear, type ProducerCompanyYearNormalization, type ProducerMetricQuality } from './normalize.ts';
 import { resolvePriceSeries } from '../prices/resolve.ts';
 import type { ExplicitLongTermPriceDeck, ResolvedProducerPriceDeck } from './priceDeck.ts';
-import type { ProducerJsonV1, ProducerRunContext, ReportedMetric } from './types.ts';
+import type {
+  NumericClaim,
+  PeriodClaim,
+  ProducerJsonV1,
+  ProducerRunContext,
+  ProductionDisclosure,
+  ReportedMetric,
+} from './types.ts';
+
+export type ProducerProductionEvidence = {
+  projectId: string;
+  projectName: string;
+  metal: string;
+  measure: ProductionDisclosure['measure'];
+  period: PeriodClaim;
+  quantity: NumericClaim;
+  unit: ProductionDisclosure['unit'];
+  basis: ProductionDisclosure['basis'];
+  estimateClass: string;
+  sourceId: string;
+  relevance: 'exact_year' | 'covers_selected_year' | 'not_periodized';
+};
 
 export type ProducerPeerRow = {
   companyId: string;
@@ -10,6 +31,12 @@ export type ProducerPeerRow = {
   priceDeckId: string;
   auOz: number | null;
   auEqOz: number | null;
+  reportedProduction: ReportedMetric | null;
+  reportedAuEq: ReportedMetric | null;
+  reportedRevenue: ReportedMetric | null;
+  reportedEbitda: ReportedMetric | null;
+  reportedFcf: ReportedMetric | null;
+  productionEvidence: ProducerProductionEvidence[];
   productionEstimateClasses: string[];
   productionQuality: ProducerMetricQuality;
   revenueUSD: number | null;
@@ -79,7 +106,7 @@ function createRunScopedPriceResolver(base: typeof resolvePriceSeries): typeof r
 function applicableReportedMetric(
   producer: ProducerJsonV1,
   normalized: ProducerCompanyYearNormalization,
-  metric: 'cash_cost' | 'aisc',
+  metric: ReportedMetric['metric'],
 ): { value: ReportedMetric | null; diagnostic?: string } {
   const companyMetrics = (producer.reportedMetrics ?? []).filter((item) =>
     item.metric === metric
@@ -112,16 +139,50 @@ function applicableReportedMetric(
   return { value: null };
 }
 
-function productionEstimateClasses(
+function productionEvidenceRelevance(period: PeriodClaim, year: number): ProducerProductionEvidence['relevance'] | null {
+  if (period.kind === 'year') return period.year === year ? 'exact_year' : null;
+  if (period.kind === 'year_range_average' || period.kind === 'year_range_total') {
+    return year >= period.startYear && year <= period.endYear ? 'covers_selected_year' : null;
+  }
+  return 'not_periodized';
+}
+
+function productionEvidenceForYear(
   producer: ProducerJsonV1,
   normalized: ProducerCompanyYearNormalization,
-): string[] {
-  const classes = normalized.productionItems.flatMap((item) => {
-    const project = producer.projects.find((candidate) => candidate.id === item.projectId);
-    const source = project?.production.find((candidate) => candidate.id === item.disclosureId);
-    return source ? [source.provenance.estimateClass] : [];
-  });
-  return [...new Set(classes)].sort();
+): ProducerProductionEvidence[] {
+  const output: ProducerProductionEvidence[] = [];
+  for (const projectId of normalized.includedProjectIds) {
+    const project = producer.projects.find((candidate) => candidate.id === projectId);
+    if (!project) continue;
+    for (const disclosure of project.production) {
+      const relevance = productionEvidenceRelevance(disclosure.period, normalized.selectedYear);
+      if (!relevance) continue;
+      output.push({
+        projectId,
+        projectName: project.name,
+        metal: disclosure.metal,
+        measure: disclosure.measure,
+        period: disclosure.period,
+        quantity: disclosure.quantity,
+        unit: disclosure.unit,
+        basis: disclosure.basis,
+        estimateClass: disclosure.provenance.estimateClass,
+        sourceId: disclosure.provenance.sourceId,
+        relevance,
+      });
+    }
+  }
+  const rank: Record<ProducerProductionEvidence['relevance'], number> = {
+    exact_year: 0,
+    covers_selected_year: 1,
+    not_periodized: 2,
+  };
+  return output.sort((a, b) => rank[a.relevance] - rank[b.relevance] || a.projectName.localeCompare(b.projectName));
+}
+
+function productionEstimateClasses(evidence: readonly ProducerProductionEvidence[]): string[] {
+  return [...new Set(evidence.map((item) => item.estimateClass))].sort();
 }
 
 function rowFromNormalization(
@@ -131,17 +192,32 @@ function rowFromNormalization(
   const au = normalized.producedByMetal.Au;
   const auOz = au?.value ?? null;
   const auEqOz = normalized.physicalAuEqOz;
+  const reportedProduction = applicableReportedMetric(producer, normalized, 'production');
+  const reportedAuEq = applicableReportedMetric(producer, normalized, 'aueq');
+  const reportedRevenue = applicableReportedMetric(producer, normalized, 'revenue');
+  const reportedEbitda = applicableReportedMetric(producer, normalized, 'ebitda');
+  const reportedFcf = applicableReportedMetric(producer, normalized, 'fcf');
   const cashCost = applicableReportedMetric(producer, normalized, 'cash_cost');
   const aisc = applicableReportedMetric(producer, normalized, 'aisc');
+  const evidence = productionEvidenceForYear(producer, normalized);
   const diagnostics = [...normalized.diagnostics];
-  if (cashCost.diagnostic) diagnostics.push(cashCost.diagnostic);
-  if (aisc.diagnostic) diagnostics.push(aisc.diagnostic);
+  for (const candidate of [reportedProduction, reportedAuEq, reportedRevenue, reportedEbitda, reportedFcf, cashCost, aisc]) {
+    if (candidate.diagnostic) diagnostics.push(candidate.diagnostic);
+  }
 
   const marketCapUSD = normalized.marketValue.marketCapUSD;
   const enterpriseValueUSD = normalized.marketValue.enterpriseValueUSD;
   const ebitdaUSD = normalized.metrics.ebitdaUSD;
   const fcffBeforeGrowthUSD = normalized.metrics.fcffBeforeGrowthUSD;
   const fcffAfterGrowthUSD = normalized.metrics.fcffAfterGrowthUSD;
+  const hasVisibleProductionEvidence = reportedProduction.value !== null || evidence.some((item) => item.metal === 'Au');
+  const productionQuality: ProducerMetricQuality = normalized.quality.physicalAuEq === 'not_computable' && hasVisibleProductionEvidence
+    ? 'reported_only'
+    : normalized.quality.physicalAuEq;
+
+  if (auOz === null && hasVisibleProductionEvidence) {
+    diagnostics.push('PRODUCTION_EVIDENCE_NOT_AGGREGATED: source production evidence is shown in the peer table, but is not collapsed into a false canonical point value.');
+  }
 
   return {
     companyId: normalized.companyId,
@@ -150,8 +226,14 @@ function rowFromNormalization(
     priceDeckId: normalized.priceDeck.id,
     auOz,
     auEqOz,
-    productionEstimateClasses: productionEstimateClasses(producer, normalized),
-    productionQuality: normalized.quality.physicalAuEq,
+    reportedProduction: reportedProduction.value,
+    reportedAuEq: reportedAuEq.value,
+    reportedRevenue: reportedRevenue.value,
+    reportedEbitda: reportedEbitda.value,
+    reportedFcf: reportedFcf.value,
+    productionEvidence: evidence,
+    productionEstimateClasses: productionEstimateClasses(evidence),
+    productionQuality,
     revenueUSD: normalized.metrics.revenueUSD,
     canonicalCashOperatingCostPerAuEqUSD: safeRatio(normalized.costBucketsUSD.cashOperatingCostsUSD, auEqOz),
     reportedCashCost: cashCost.value,
