@@ -5,9 +5,12 @@ import {
   upsertCompanyCorporateProducer,
 } from '../lib/client/companyCorporateProducerClient.ts';
 import { copyText } from '../lib/client/clipboard.ts';
-import { decorateProducerJsonForEditor } from '../lib/miningProducer/editorTemplate.ts';
+import { assessProducerFiveYearCoverage } from '../lib/miningProducer/calculability.ts';
+import {
+  buildDocumentedProducerJsonTemplate,
+  decorateProducerJsonForEditor,
+} from '../lib/miningProducer/editorTemplate.ts';
 import { validateProducerJsonV1 } from '../lib/miningProducer/schema.ts';
-import { buildProducerJsonV1Template } from '../lib/miningProducer/template.ts';
 import type { ProducerJsonV1 } from '../lib/miningProducer/types.ts';
 import '../styles/company-project-editor.css';
 
@@ -51,6 +54,15 @@ function validateRaw(raw: string, symbol: string): Validation {
   }
 }
 
+function coverageLabel(state: string): string {
+  switch (state) {
+    case 'calculable': return 'Beräkningsbar';
+    case 'range_only': return 'Intervall';
+    case 'reported_only': return 'Endast rapporterad';
+    default: return 'Blockerad';
+  }
+}
+
 export default function CompanyCorporateProducerEditorPage() {
   const symbol = useMemo(() => parseSymbol(window.location.pathname), []);
   const [raw, setRaw] = useState('');
@@ -63,6 +75,11 @@ export default function CompanyCorporateProducerEditorPage() {
 
   const validation = useMemo(() => validateRaw(raw, symbol), [raw, symbol]);
   const dirty = savedRaw !== null ? raw !== savedRaw : raw.trim().length > 0;
+  const currentYear = new Date().getUTCFullYear();
+  const fiveYearCoverage = useMemo(
+    () => validation.parsed ? assessProducerFiveYearCoverage(validation.parsed, currentYear, 'BASE') : [],
+    [validation.parsed, currentYear],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +96,7 @@ export default function CompanyCorporateProducerEditorPage() {
           setUpdatedAt(record.updated_at_utc);
           setInfo('Loaded saved Corporate Producer JSON and applied the current self-documenting template without changing company evidence arrays.');
         } else {
-          const template = JSON.stringify(buildProducerJsonV1Template(symbol), null, 2);
+          const template = JSON.stringify(buildDocumentedProducerJsonTemplate(symbol), null, 2);
           setRaw(template);
           setSavedRaw(null);
           setUpdatedAt(null);
@@ -100,14 +117,15 @@ export default function CompanyCorporateProducerEditorPage() {
       setError(validation.error);
       return;
     }
-    setRaw(JSON.stringify(validation.parsed, null, 2));
+    const documented = decorateProducerJsonForEditor(validation.parsed, symbol);
+    setRaw(JSON.stringify(documented, null, 2));
     setError(null);
-    setInfo('JSON prettified.');
+    setInfo('JSON prettified and current calculability documentation applied.');
   }
 
   async function copyTemplate(): Promise<void> {
     try {
-      await copyText(JSON.stringify(buildProducerJsonV1Template(symbol), null, 2));
+      await copyText(JSON.stringify(buildDocumentedProducerJsonTemplate(symbol), null, 2));
       setInfo('Self-documenting producer_json_v1 template copied.');
       setError(null);
     } catch (copyError) {
@@ -146,7 +164,7 @@ export default function CompanyCorporateProducerEditorPage() {
     setError(null);
     try {
       await deleteCompanyCorporateProducer(symbol);
-      const template = JSON.stringify(buildProducerJsonV1Template(symbol), null, 2);
+      const template = JSON.stringify(buildDocumentedProducerJsonTemplate(symbol), null, 2);
       setRaw(template);
       setSavedRaw(null);
       setUpdatedAt(null);
@@ -174,9 +192,32 @@ export default function CompanyCorporateProducerEditorPage() {
           Spotpriser, FX, market cap och värderingsdatum hämtas vid körning och ska inte hårdkodas som dagens värden i bolagsdatan.
         </p>
         <p>
-          Mallen är självdokumenterande. Fält som börjar med <code>_description_</code>, <code>_choices_</code>, <code>_example_</code> eller <code>_reference</code> är instruktioner/exempel och ignoreras av beräkningsmotorn.
+          Mallen är självdokumenterande. Fält som börjar med <code>_description_</code>, <code>_choices_</code>, <code>_example_</code>, <code>_calculability_</code> eller <code>_reference</code> är instruktioner/exempel och ignoreras av beräkningsmotorn.
           Kopiera ett relevant exempel till det riktiga fältet och fyll endast sådant som källan faktiskt stödjer. Saknad data ska utelämnas, inte sättas till 0.
         </p>
+
+        {validation.ok && fiveYearCoverage.length > 0 && (
+          <div className="save-meta">
+            <strong>BASE — fem års beräkningsbarhet</strong>
+            {fiveYearCoverage.map((yearRow) => (
+              <details key={yearRow.year}>
+                <summary>
+                  {yearRow.year}: {yearRow.metrics.map((metric) => `${metric.metric}=${coverageLabel(metric.state)}`).join(' · ')}
+                </summary>
+                <ul>
+                  {yearRow.metrics.map((metric) => (
+                    <li key={metric.metric}>
+                      <strong>{metric.metric}: {coverageLabel(metric.state)}</strong>
+                      {metric.missing.length > 0 && (
+                        <ul>{metric.missing.map((item) => <li key={item}>{item}</li>)}</ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ))}
+          </div>
+        )}
 
         {loading ? <p>Laddar…</p> : (
           <>
@@ -202,7 +243,7 @@ export default function CompanyCorporateProducerEditorPage() {
               <button type="button" onClick={prettify}>Prettify</button>
               <button type="button" onClick={() => void copyTemplate()}>Kopiera template</button>
               <button type="button" disabled={saving || !dirty} onClick={() => void save()}>{saving ? 'Sparar…' : 'Spara'}</button>
-              {savedRaw !== null && <button type="button" className="danger" disabled={saving} onClick={() => void remove()}>Radera JSON</button>}
+              {savedRaw !== null && <button type="button" className="danger" disabled={saving} onClick={() => void remove())}>Radera JSON</button>}
             </div>
 
             <div className="save-meta">
