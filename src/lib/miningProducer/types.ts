@@ -95,6 +95,40 @@ export type ProductionDisclosure = {
   provenance: Provenance;
 };
 
+export type ForecastYearRange = {
+  startYear: number;
+  endYear: number;
+};
+
+export type ForecastProductionRule =
+  | {
+      id: string;
+      method: 'carry_forward';
+      sourceDisclosureId: string;
+      appliesTo: ForecastYearRange;
+      annualChangePct: number;
+      provenance: Provenance;
+    }
+  | {
+      id: string;
+      method: 'periodize_source';
+      sourceDisclosureId: string;
+      appliesTo: ForecastYearRange;
+      quantity?: NumericClaim;
+      provenance: Provenance;
+    }
+  | {
+      id: string;
+      method: 'explicit';
+      appliesTo: ForecastYearRange;
+      metal: string;
+      measure: ProductionMeasure;
+      quantity: NumericClaim;
+      unit: ProductionUnit;
+      basis: 'attributable' | 'project_100pct';
+      provenance: Provenance;
+    };
+
 export type MetalStreamTier = {
   cumulativeDeliveryThresholdToz: number | null;
   streamedPayablePct: number;
@@ -206,6 +240,27 @@ export type CostDisclosure = {
   provenance: Provenance;
 };
 
+export type ForecastCostRule =
+  | {
+      id: string;
+      method: 'carry_forward';
+      sourceCostId: string;
+      appliesTo: ForecastYearRange;
+      annualEscalationPct: number;
+      provenance: Provenance;
+    }
+  | {
+      id: string;
+      method: 'explicit';
+      appliesTo: ForecastYearRange;
+      component: CostComponent;
+      economicBasis: CostDisclosure['economicBasis'];
+      canonicalClassification: CostDisclosure['canonicalClassification'];
+      model: CostModel;
+      definition?: CostDisclosure['definition'];
+      provenance: Provenance;
+    };
+
 export type ReportedMetric = {
   id: string;
   scope: { type: 'company' } | { type: 'project'; projectId: string };
@@ -251,6 +306,10 @@ export type ProducerProject = {
   production: ProductionDisclosure[];
   metalStreams?: MetalStreamDisclosure[];
   costs?: CostDisclosure[];
+  forecastAssumptions?: {
+    production?: ForecastProductionRule[];
+    costs?: ForecastCostRule[];
+  };
   reportedMetrics?: ReportedMetric[];
 };
 
@@ -294,6 +353,9 @@ export type ProducerJsonV1 = {
   reportedPriceDecks?: ReportedPriceDeck[];
   projects: ProducerProject[];
   corporateCosts?: CostDisclosure[];
+  forecastAssumptions?: {
+    corporateCosts?: ForecastCostRule[];
+  };
   reportedMetrics?: ReportedMetric[];
   sources: SourceRef[];
 };
