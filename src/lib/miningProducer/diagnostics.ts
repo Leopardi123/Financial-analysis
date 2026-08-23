@@ -11,6 +11,7 @@ export type SelectPresentedProducerDiagnosticsArgs = {
   forecastDiagnostics: readonly string[];
   scalarDiagnostics: readonly string[];
   priceDeckDiagnostics?: readonly string[];
+  cashCostDiagnostics?: readonly string[];
   intervals?: ProducerPresentedIntervalPair;
 };
 
@@ -101,6 +102,23 @@ function summarizeForecastDiagnostics(values: readonly string[], year: number): 
   ];
 }
 
+function summarizeRepeatedIntervalDiagnostics(values: readonly string[], year: number): string[] {
+  const distinct = unique(values);
+  const revenueProxy = distinct.filter((value) => value.endsWith(': produced used as revenue quantity proxy'));
+  const byproduct = distinct.filter((value) => value.includes('net-of-byproduct per-unit cost retained because no separate byproduct production/revenue is modeled'));
+  const other = distinct.filter((value) => !revenueProxy.includes(value) && !byproduct.includes(value));
+
+  return [
+    ...(revenueProxy.length > 0
+      ? [`REVENUE_QUANTITY_PROXY: produced quantity is used instead of payable/sold for ${revenueProxy.length} project/metal pairs in ${year}.`]
+      : []),
+    ...(byproduct.length > 0
+      ? [`BYPRODUCT_COST_REPRICING_LIMITED: ${byproduct.length} net-of-byproduct cash-cost disclosures are retained for ${year}; no separate byproduct revenue is modeled, so byproduct credits are not repriced.`]
+      : []),
+    ...other,
+  ];
+}
+
 /**
  * The live Producer run evaluates both the legacy scalar route and the range-native
  * interval route. The peer table may display interval economics even when the
@@ -109,7 +127,7 @@ function summarizeForecastDiagnostics(values: readonly string[], year: number): 
  *
  * Market-value/EV diagnostics remain relevant regardless of the operating route.
  * Forecast application is summarized rather than emitting one trace row per rule;
- * the rule-level provenance remains in the saved Corporate JSON.
+ * repeated interval warnings are also summarized once per company/year.
  */
 export function selectPresentedProducerDiagnostics(
   args: SelectPresentedProducerDiagnosticsArgs,
@@ -121,9 +139,10 @@ export function selectPresentedProducerDiagnostics(
     productionComplete,
     financialComplete,
   });
-  const intervalDiagnostics = args.intervals
-    ? [...args.intervals.attributable.diagnostics, ...args.intervals.financial.diagnostics]
-    : [];
+  const intervalDiagnostics = summarizeRepeatedIntervalDiagnostics([
+    ...(args.cashCostDiagnostics ?? []),
+    ...(args.intervals ? [...args.intervals.attributable.diagnostics, ...args.intervals.financial.diagnostics] : []),
+  ], args.year);
 
   return unique([
     ...args.liveDiagnostics,
