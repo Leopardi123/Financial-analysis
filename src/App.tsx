@@ -3,6 +3,7 @@ import EngineSandboxPage from './pages/dev/EngineSandboxPage';
 import SelfTestPage from './pages/dev/SelfTestPage';
 import PlaygroundSnapshot from './pages/PlaygroundSnapshot';
 import CompanyProjectsEditorPage from './pages/CompanyProjectsEditorPage';
+import CompanyCorporateProducerEditorPage from './pages/CompanyCorporateProducerEditorPage';
 import ProjectsPage from './pages/ProjectsPage';
 import PortfolioDashboardPage from './pages/PortfolioDashboardPage';
 
@@ -23,6 +24,10 @@ export default function App() {
 
   if (/^\/company\/[^/]+\/projects\/?$/i.test(pathname)) {
     return <CompanyProjectsEditorPage />;
+  }
+
+  if (/^\/company\/[^/]+\/corporate\/?$/i.test(pathname)) {
+    return <CompanyCorporateProducerEditorPage />;
   }
 
   if (pathname === '/projects' || /^\/projects\/[^/]+\/?$/i.test(pathname)) {
