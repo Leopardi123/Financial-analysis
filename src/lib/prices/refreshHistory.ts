@@ -37,6 +37,10 @@ function monthFromDate(date: string): string {
   return date.slice(0, 7).replace("-", "");
 }
 
+function monthStart(date: string): string {
+  return `${date.slice(0, 7)}-01`;
+}
+
 function toPayload(rows: HistoryInputRow[]): MonthlyPricePayload {
   return {
     dates: rows.map((row) => row.date),
@@ -116,7 +120,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
       }
       providerSymbol = fredMapping.fredSeriesId;
       const definition = getPriceKeyDefinition(args.priceKey);
-      const fredRows = await fetchFredFn(fredMapping, { fromUtc: args.from, toUtc: args.to });
+      const fredRows = await fetchFredFn(fredMapping, { fromUtc: monthStart(args.from), toUtc: args.to });
       filtered = fredRows
         .filter((row) => row.dateUtc >= args.from && row.dateUtc <= args.to)
         .map((row) => ({
