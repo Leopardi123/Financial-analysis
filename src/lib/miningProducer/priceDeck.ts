@@ -32,6 +32,7 @@ type SpotMetalSpec = {
   sourceUnit: string;
   canonicalUnit: ProducerCanonicalPriceUnit;
   productionReady: boolean;
+  priceType: 'market' | 'monthly-benchmark';
   readinessReason?: string;
 };
 
@@ -41,40 +42,63 @@ const SPOT_METAL_SPECS: Record<string, SpotMetalSpec> = {
     sourceUnit: 'USD_per_toz',
     canonicalUnit: 'USD_per_toz',
     productionReady: true,
+    priceType: 'market',
   },
   Ag: {
     priceKey: 'XAG_USD_TOZ',
     sourceUnit: 'USD_per_toz',
     canonicalUnit: 'USD_per_toz',
     productionReady: true,
+    priceType: 'market',
+  },
+  Pt: {
+    priceKey: 'XPT_USD_TOZ',
+    sourceUnit: 'USD_per_toz',
+    canonicalUnit: 'USD_per_toz',
+    productionReady: true,
+    priceType: 'market',
+  },
+  Pd: {
+    priceKey: 'XPD_USD_TOZ',
+    sourceUnit: 'USD_per_toz',
+    canonicalUnit: 'USD_per_toz',
+    productionReady: true,
+    priceType: 'market',
   },
   Cu: {
     priceKey: 'CU_USD_LB',
     sourceUnit: 'USD_per_lb',
     canonicalUnit: 'USD_per_tonne',
-    productionReady: false,
-    readinessReason: 'CU_USD_LB is explicitly marked TEMP COMEX HG proxy in the provider registry',
+    productionReady: true,
+    priceType: 'market',
+  },
+  Al: {
+    priceKey: 'AL_USD_TONNE',
+    sourceUnit: 'USD_per_tonne',
+    canonicalUnit: 'USD_per_tonne',
+    productionReady: true,
+    priceType: 'market',
   },
   Zn: {
     priceKey: 'ZN_USD_LB',
     sourceUnit: 'USD_per_lb',
     canonicalUnit: 'USD_per_tonne',
-    productionReady: false,
-    readinessReason: 'ZN_USD_LB provider symbol is explicitly marked TODO verify in production',
+    productionReady: true,
+    priceType: 'monthly-benchmark',
   },
   Pb: {
     priceKey: 'PB_USD_LB',
     sourceUnit: 'USD_per_lb',
     canonicalUnit: 'USD_per_tonne',
-    productionReady: false,
-    readinessReason: 'PB_USD_LB provider symbol is explicitly marked TODO verify in production',
+    productionReady: true,
+    priceType: 'monthly-benchmark',
   },
   Ni: {
     priceKey: 'NI_USD_LB',
     sourceUnit: 'USD_per_lb',
     canonicalUnit: 'USD_per_tonne',
-    productionReady: false,
-    readinessReason: 'NI_USD_LB provider symbol is explicitly marked TODO verify in production',
+    productionReady: true,
+    priceType: 'monthly-benchmark',
   },
 };
 
@@ -182,6 +206,9 @@ export async function resolveProducerPriceDeck(
         allowRefresh: true,
       });
       warnings.push(...resolved.warnings.map((warning) => `${metal}: ${warning}`));
+      if (spec.priceType === 'monthly-benchmark') {
+        warnings.push(`${metal}: Producer SPOT mode uses the latest available FRED/IMF monthly period-average benchmark; this value is not a spot quote.`);
+      }
       const raw = resolved.values[0];
       let valueUSD: number | null = null;
       if (raw !== null && Number.isFinite(raw)) {
@@ -195,7 +222,7 @@ export async function resolveProducerPriceDeck(
           warnings.push(error instanceof Error ? `${metal}: ${error.message}` : `${metal}: price conversion failed`);
         }
       } else {
-        warnings.push(`${metal}: no SPOT price resolved for ${args.context.valuationDateUtc}`);
+        warnings.push(`${metal}: no ${spec.priceType === 'monthly-benchmark' ? 'monthly benchmark' : 'SPOT price'} resolved for ${args.context.valuationDateUtc}`);
       }
       pricesByMetal[metal] = {
         metal,
