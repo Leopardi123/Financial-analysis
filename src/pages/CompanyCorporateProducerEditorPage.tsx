@@ -76,10 +76,21 @@ export default function CompanyCorporateProducerEditorPage() {
   const validation = useMemo(() => validateRaw(raw, symbol), [raw, symbol]);
   const dirty = savedRaw !== null ? raw !== savedRaw : raw.trim().length > 0;
   const currentYear = new Date().getUTCFullYear();
-  const fiveYearCoverage = useMemo(
-    () => validation.parsed ? assessProducerFiveYearCoverageWithForecast(validation.parsed, currentYear, 'BASE') : [],
-    [validation.parsed, currentYear],
-  );
+  const coverageEvaluation = useMemo(() => {
+    if (!validation.parsed) return { rows: [], error: null as string | null };
+    try {
+      return {
+        rows: assessProducerFiveYearCoverageWithForecast(validation.parsed, currentYear, 'BASE'),
+        error: null as string | null,
+      };
+    } catch (coverageError) {
+      return {
+        rows: [],
+        error: `Femårsberäkningsbarhet kunde inte utvärderas: ${coverageError instanceof Error ? coverageError.message : String(coverageError)}`,
+      };
+    }
+  }, [validation.parsed, currentYear]);
+  const fiveYearCoverage = coverageEvaluation.rows;
 
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +206,10 @@ export default function CompanyCorporateProducerEditorPage() {
           Mallen är självdokumenterande. Fält som börjar med <code>_description_</code>, <code>_choices_</code>, <code>_example_</code>, <code>_calculability_</code> eller <code>_reference</code> är instruktioner/exempel och ignoreras av beräkningsmotorn.
           Källfakta ska ligga i de vanliga evidence-fälten. Femårsprognoser kan kompletteras med explicita <code>forecastAssumptions</code>; dessa materialiseras endast som scenario/derived inputs och får aldrig skrivas över en explicit års-disclosure.
         </p>
+
+        {coverageEvaluation.error && (
+          <p className="danger">{coverageEvaluation.error}</p>
+        )}
 
         {validation.ok && fiveYearCoverage.length > 0 && (
           <div className="save-meta">
