@@ -138,6 +138,7 @@ const steppeShape: ProducerJsonV1 = {
     companyMetric('company-aueq-2028', 'aueq', { kind: 'year', year: 2028 }, { kind: 'approximate', value: 167 }, 'koz'),
     companyMetric('company-aueq-2029', 'aueq', { kind: 'year', year: 2029 }, { kind: 'approximate', value: 146 }, 'koz'),
     companyMetric('company-aueq-2030', 'aueq', { kind: 'year', year: 2030 }, { kind: 'approximate', value: 152 }, 'koz'),
+    companyMetric('company-revenue-2030', 'revenue', { kind: 'year', year: 2030 }, { kind: 'approximate', value: 350_000_000 }, 'USD'),
     companyMetric('company-h1-2026', 'ebitda', { kind: 'not_periodized', label: 'Six months ended June 30, 2026' }, { kind: 'point', value: 85_171_000 }, 'USD'),
     companyMetric('company-aisc-average', 'aisc', { kind: 'year_range_average', startYear: 2026, endYear: 2038 }, { kind: 'approximate', value: 1528 }, 'USD_per_toz'),
   ],
@@ -154,7 +155,7 @@ const ebitda2030 = coverage2030!.metrics.find((item) => item.metric === 'EBITDA'
 const ev2030 = coverage2030!.metrics.find((item) => item.metric === 'EV');
 assertEqual(au2030?.state, 'reported_only', 'Company-level 152 koz AuEq should be reported-only when ATO lacks canonical physical production');
 assert(au2030?.missing.some((item) => item.includes('projects[ato].production')), 'Steppe 2030 must retain the missing ATO canonical-production diagnostic');
-assertEqual(revenue2030?.state, 'blocked', 'AuEq evidence must not fabricate shared-deck canonical Revenue');
+assertEqual(revenue2030?.state, 'reported_only', 'Exact-year company revenue should remain visible as reported evidence without becoming canonical shared-deck Revenue');
 assertEqual(ebitda2030?.state, 'blocked', 'Reported multi-year AISC must not fabricate canonical EBITDA');
 assertEqual(ev2030?.state, 'calculable', 'Steppe EV checklist remains calculable from current debt/cash evidence');
 
@@ -167,6 +168,8 @@ assertEqual(reportedAisc2030.value?.id, 'company-aisc-average', 'Company-level y
 assert(reportedAisc2030.diagnostic?.includes('not materialized into a precise annual canonical input'), 'Year-range-average AISC must explicitly retain non-canonical semantics');
 const reportedAuEq2030 = applicableReportedMetric(steppeShape, reportedMetricNormalizationStub, 'aueq');
 assertEqual(reportedAuEq2030.value?.id, 'company-aueq-2030', 'Exact-year reported AuEq should take precedence over broader evidence');
+const reportedRevenueEvidence2030 = applicableReportedMetric(steppeShape, reportedMetricNormalizationStub, 'revenue');
+assertEqual(reportedRevenueEvidence2030.value?.id, 'company-revenue-2030', 'Exact-year source-deck revenue should remain available alongside the selected-deck AuEq proxy');
 
 function nullMetric(): ProducerIntervalEconomics['auOz'] {
   return { range: null, quality: 'not_computable', diagnostics: ['missing project coverage'] };
