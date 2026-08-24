@@ -1,4 +1,5 @@
 import { getPriceKeyDefinition } from '../../prices/keys.ts';
+import { isFredCommodityPriceKey } from '../../prices/providers/fred.ts';
 
 export type ManualMetalPriceEntry = {
   metalKey: string;
@@ -11,7 +12,7 @@ export type ManualMetalPriceEntry = {
 
 export type ResolvedMetalPrice = {
   value: number | null;
-  source: 'fmp' | 'manual' | 'missing' | 'expired';
+  source: 'fmp' | 'fred' | 'manual' | 'missing' | 'expired';
   metal: string;
   unit: string | null;
   enteredAtUtc: string | null;
@@ -36,6 +37,10 @@ function toUnitLabel(priceKey: string): string | null {
   }
 }
 
+function providerLabel(priceKey: string): string {
+  return isFredCommodityPriceKey(priceKey) ? 'FRED/IMF monthly benchmark' : 'FMP Legacy price';
+}
+
 export function isManualMetalPriceValid(entry: ManualMetalPriceEntry | null | undefined, nowUtcIso: string = new Date().toISOString()): boolean {
   if (!entry || !isFinitePositive(entry.value)) return false;
   const expiresMs = Date.parse(entry.expiresAtUtc);
@@ -52,16 +57,18 @@ export function resolveMetalPrice(args: {
 }): ResolvedMetalPrice {
   const nowUtcIso = args.nowUtcIso ?? new Date().toISOString();
   const unit = args.manualEntry?.unit ?? toUnitLabel(args.metalKey);
+  const isFred = isFredCommodityPriceKey(args.metalKey);
+  const provider = providerLabel(args.metalKey);
 
   if (isFinitePositive(args.fmpSpotValue)) {
     return {
       value: args.fmpSpotValue,
-      source: 'fmp',
+      source: isFred ? 'fred' : 'fmp',
       metal: args.metal,
       unit,
       enteredAtUtc: null,
       expiresAtUtc: null,
-      reason: null,
+      reason: isFred ? `${provider} available.` : null,
       actionRequired: false,
     };
   }
@@ -74,7 +81,7 @@ export function resolveMetalPrice(args: {
       unit,
       enteredAtUtc: args.manualEntry?.enteredAtUtc ?? null,
       expiresAtUtc: args.manualEntry?.expiresAtUtc ?? null,
-      reason: 'FMP spot unavailable. Using valid manual fallback price.',
+      reason: `${provider} unavailable. Using valid manual fallback price.`,
       actionRequired: false,
     };
   }
@@ -88,8 +95,8 @@ export function resolveMetalPrice(args: {
     enteredAtUtc: args.manualEntry?.enteredAtUtc ?? null,
     expiresAtUtc: args.manualEntry?.expiresAtUtc ?? null,
     reason: expired
-      ? 'FMP spot unavailable and manual fallback price has expired.'
-      : 'FMP spot unavailable and no valid manual fallback price exists.',
+      ? `${provider} unavailable and manual fallback price has expired.`
+      : `${provider} unavailable and no valid manual fallback price exists.`,
     actionRequired: true,
   };
 }

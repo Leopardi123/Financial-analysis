@@ -1,32 +1,52 @@
 import { batch } from "../../../../api/_db.js";
 import { PRICE_KEY_DEFINITIONS, type PriceKind } from "../keys.js";
+import { FRED_COMMODITY_PRICE_MAPPINGS } from "../providers/fred.js";
 import { PRICE_TABLES } from "./schema.js";
 
 interface ProviderMapping {
   priceKey: string;
-  provider: "FMP";
+  provider: "FMP" | "FRED";
   providerSymbol: string;
   providerKind: PriceKind;
   notes: string;
 }
 
-export const DEFAULT_PROVIDER_MAPPINGS: readonly ProviderMapping[] = [
-  { priceKey: "XAU_USD_TOZ", provider: "FMP", providerSymbol: "GCUSD", providerKind: "commodity", notes: "Gold CFD mapping" },
-  { priceKey: "XAG_USD_TOZ", provider: "FMP", providerSymbol: "SIUSD", providerKind: "commodity", notes: "Silver CFD mapping" },
+const FMP_PROVIDER_MAPPINGS: readonly ProviderMapping[] = [
+  { priceKey: "XAU_USD_TOZ", provider: "FMP", providerSymbol: "GCUSD", providerKind: "commodity", notes: "unit=USD_PER_TOZ; verified FMP Legacy commodity symbol" },
+  { priceKey: "XAG_USD_TOZ", provider: "FMP", providerSymbol: "SIUSD", providerKind: "commodity", notes: "unit=USD_PER_TOZ; verified FMP Legacy commodity symbol" },
+  { priceKey: "XPT_USD_TOZ", provider: "FMP", providerSymbol: "PLUSD", providerKind: "commodity", notes: "unit=USD_PER_TOZ; verified FMP Legacy commodity symbol" },
+  { priceKey: "XPD_USD_TOZ", provider: "FMP", providerSymbol: "PAUSD", providerKind: "commodity", notes: "unit=USD_PER_TOZ; verified FMP Legacy commodity symbol" },
   {
     priceKey: "CU_USD_LB",
     provider: "FMP",
     providerSymbol: "HGUSD",
     providerKind: "commodity",
-    notes: "TEMP: COMEX HG proxy for copper until dedicated FMP spot symbol is validated",
+    notes: "unit=USD_PER_LB; COMEX HG basis; verified FMP Legacy commodity symbol",
   },
-  { priceKey: "ZN_USD_LB", provider: "FMP", providerSymbol: "ZNUSD", providerKind: "commodity", notes: "TODO: verify FMP zinc symbol in production" },
-  { priceKey: "PB_USD_LB", provider: "FMP", providerSymbol: "PBUSD", providerKind: "commodity", notes: "TODO: verify FMP lead symbol in production" },
-  { priceKey: "NI_USD_LB", provider: "FMP", providerSymbol: "NIUSD", providerKind: "commodity", notes: "TODO: verify FMP nickel symbol in production" },
+  {
+    priceKey: "AL_USD_TONNE",
+    provider: "FMP",
+    providerSymbol: "ALIUSD",
+    providerKind: "commodity",
+    notes: "unit=USD_PER_TONNE; verified FMP Legacy commodity symbol",
+  },
   { priceKey: "USD_SEK", provider: "FMP", providerSymbol: "USDSEK", providerKind: "forex", notes: "Major FX pair" },
   { priceKey: "EUR_USD", provider: "FMP", providerSymbol: "EURUSD", providerKind: "forex", notes: "Major FX pair" },
   { priceKey: "USD_CAD", provider: "FMP", providerSymbol: "USDCAD", providerKind: "forex", notes: "Major FX pair" },
 ] as const;
+
+const FRED_PROVIDER_MAPPINGS: readonly ProviderMapping[] = FRED_COMMODITY_PRICE_MAPPINGS.map((mapping) => ({
+  priceKey: mapping.priceKey,
+  provider: "FRED" as const,
+  providerSymbol: mapping.fredSeriesId,
+  providerKind: "commodity" as const,
+  notes: `unit=${mapping.providerUnit}; ${mapping.description}; frequency=${mapping.frequency}; not spot`,
+}));
+
+export const DEFAULT_PROVIDER_MAPPINGS: readonly ProviderMapping[] = [
+  ...FMP_PROVIDER_MAPPINGS,
+  ...FRED_PROVIDER_MAPPINGS,
+];
 
 export async function seedPriceRegistry(): Promise<void> {
   await batch([

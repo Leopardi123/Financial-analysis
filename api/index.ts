@@ -1,9 +1,7 @@
-import { query } from "./_db.js";
-import { getLatestPriceCached } from "../src/lib/prices/latestCache.js";
 import { readHistoryRowsInRange } from "../src/lib/prices/db/readHistory.js";
 import { refreshHistoryRangeToMonthlyBlobs } from "../src/lib/prices/refreshHistory.js";
-import { PRICE_TABLES } from "../src/lib/prices/db/schema.js";
 import { PRICE_KEY_SET, type PriceKey } from "../src/lib/prices/keys.js";
+import { getLatestCanonicalPrice, getPriceProviderDescriptor } from "../src/lib/prices/providerService.js";
 import {
   deleteCompanyProject,
   getCompanyProject,
@@ -233,31 +231,42 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      const mapRows = await query(
-        `SELECT price_key, provider_symbol
-         FROM ${PRICE_TABLES.providerMap}
-         WHERE provider = 'FMP' AND price_key IN (${keys.map(() => "?").join(", ")})`,
-        keys,
-      ) as Array<{ price_key: string; provider_symbol: string }>;
-      const symbolByKey = new Map(mapRows.map((row) => [String(row.price_key), String(row.provider_symbol)]));
+      type LatestApiEntry = {
+        price: number | null;
+        asof_utc: string | null;
+        asof_period: string | null;
+        provider: "FMP" | "FRED" | null;
+        source_symbol: string | null;
+        price_type: "market_quote" | "monthly_period_average" | null;
+      };
 
-      const data: Record<string, { price: number | null; asof_utc: string | null; provider: "FMP"; source_symbol: string | null }> = {};
+      const data: Record<string, LatestApiEntry> = {};
       for (const key of keys) {
         if (!PRICE_KEY_SET.has(key)) {
-          data[key] = { price: null, asof_utc: null, provider: "FMP", source_symbol: null };
-          continue;
-        }
-        const symbol = symbolByKey.get(key);
-        if (!symbol) {
-          data[key] = { price: null, asof_utc: null, provider: "FMP", source_symbol: null };
+          data[key] = {
+            price: null,
+            asof_utc: null,
+            asof_period: null,
+            provider: null,
+            source_symbol: null,
+            price_type: null,
+          };
           continue;
         }
 
         try {
-          const latest = await getLatestPriceCached(key as PriceKey, symbol);
-          data[key] = { price: latest.price, asof_utc: latest.asof_utc, provider: "FMP", source_symbol: symbol };
+          const latest = await getLatestCanonicalPrice(key as PriceKey);
+          data[key] = latest;
         } catch {
-          data[key] = { price: null, asof_utc: null, provider: "FMP", source_symbol: symbol };
+          const descriptor = await getPriceProviderDescriptor(key as PriceKey).catch(() => null);
+          data[key] = {
+            price: null,
+            asof_utc: null,
+            asof_period: null,
+            provider: descriptor?.provider ?? null,
+            source_symbol: descriptor?.source_symbol ?? null,
+            price_type: descriptor?.price_type ?? null,
+          };
         }
       }
 
@@ -272,7 +281,6 @@ export default async function handler(req: any, res: any) {
       const from = String(req.query?.from ?? "").trim();
       const to = String(req.query?.to ?? "").trim();
       const refresh = String(req.query?.refresh ?? "") === "1";
-  const debug = String(req.query?.debug ?? "") === "1";
 
       if (!PRICE_KEY_SET.has(key)) {
         res.status(400).json({ ok: false, error: "invalid key" });
@@ -283,14 +291,7 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      const mapRows = await query(
-        `SELECT provider_symbol
-         FROM ${PRICE_TABLES.providerMap}
-         WHERE provider = 'FMP' AND price_key = ?
-         LIMIT 1`,
-        [key],
-      ) as Array<{ provider_symbol: string }>;
-      const sourceSymbol = mapRows[0]?.provider_symbol ? String(mapRows[0].provider_symbol) : null;
+      const descriptor = await getPriceProviderDescriptor(key as PriceKey).catch(() => null);
 
       if (refresh) {
         await refreshHistoryRangeToMonthlyBlobs({ priceKey: key as PriceKey, from, to });
@@ -302,8 +303,9 @@ export default async function handler(req: any, res: any) {
         from,
         to,
         rows: history.rows,
-        provider: "FMP",
-        source_symbol: sourceSymbol,
+        provider: descriptor?.provider ?? null,
+        source_symbol: descriptor?.source_symbol ?? null,
+        price_type: descriptor?.price_type ?? null,
         meta: { missing: history.missing },
       });
       return;
