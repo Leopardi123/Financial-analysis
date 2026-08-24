@@ -5,6 +5,7 @@ import type { QtyUnit } from './schema.ts';
 import type { ParsedProjectJsonV1 } from './parse.ts';
 import { resolvePriceSeries, type PriceScenario as CorePriceScenario } from '../../prices/resolve.ts';
 import { getCommodityPriceKeyForLegacySymbol, getLegacySymbolForPriceKey } from '../../prices/providers/legacyCommoditySymbolMap.ts';
+import { getFredCommodityPriceMapping, isFredCommodityPriceKey } from '../../prices/providers/fred.ts';
 import { resolveMetalPrice, type ManualMetalPriceEntry } from '../../engine/pricing/resolveMetalPrice.ts';
 
 export type PriceScenario =
@@ -27,7 +28,7 @@ export type MetalPriceDiagnostic = {
   manualFallbackAvailable: boolean;
   manualFallbackValue: number | null;
   fallbackUsed: boolean;
-  priceSourceUsed: 'fmp' | 'manual' | 'missing' | 'expired' | 'scenario-series';
+  priceSourceUsed: 'fmp' | 'fred' | 'manual' | 'missing' | 'expired' | 'scenario-series';
   manualEnteredAtUtc?: string | null;
   manualExpiresAtUtc?: string | null;
   reason: string;
@@ -337,8 +338,8 @@ export async function resolveProjectPricesToEngineInput(
       metal,
     });
 
-    if (getLegacySymbolForPriceKey(priceKey) === null) {
-      pushWarning(`Unknown legacy commodity symbol for metal=${metal} priceKey=${priceKey}`);
+    if (getLegacySymbolForPriceKey(priceKey) === null && !isFredCommodityPriceKey(priceKey)) {
+      pushWarning(`Unknown commodity provider mapping for metal=${metal} priceKey=${priceKey}`);
     }
 
     const resolvedPrice = await resolveSeriesWithCuFallback({ metal, requestedPriceKey: priceKey });
@@ -362,7 +363,11 @@ export async function resolveProjectPricesToEngineInput(
       const resolved = resolveMetalPrice({ metal, metalKey: priceKey, fmpSpotValue, manualEntry });
       selectedSeries = new Array<number | null>(len).fill(resolved.value);
       priceSourceUsed = resolved.source;
-      sourceReason = resolved.reason ?? (resolved.source === 'fmp' ? `FMP spot available for ${priceKey}.` : `Missing spot for ${priceKey}.`);
+      sourceReason = resolved.reason ?? (resolved.source === 'fmp'
+        ? `FMP Legacy market price available for ${priceKey}.`
+        : resolved.source === 'fred'
+          ? `FRED/IMF monthly benchmark available for ${priceKey}.`
+          : `Missing provider price for ${priceKey}.`);
       manualFallbackValue = manualEntry?.value ?? null;
       manualFallbackAvailable = typeof manualEntry?.value === 'number' && Number.isFinite(manualEntry.value);
       manualEnteredAtUtc = manualEntry?.enteredAtUtc ?? null;
@@ -375,15 +380,25 @@ export async function resolveProjectPricesToEngineInput(
       priceSeriesByKey[resolvedPrice.derivedFrom] = await resolveSeriesForPriceKey(resolvedPrice.derivedFrom);
     }
 
-    const liveSymbol = getLegacySymbolForPriceKey(priceKey);
+    const legacySymbol = getLegacySymbolForPriceKey(priceKey);
+    const fredMapping = getFredCommodityPriceMapping(priceKey);
+    const liveSymbol = legacySymbol ?? fredMapping?.fredSeriesId ?? null;
     const fallbackUsed = priceSourceUsed === 'manual';
     const normalizedOutputValue = selectedSeries.find((value: number | null) => typeof value === 'number' && Number.isFinite(value)) ?? null;
 
     metalPriceDiagnostics[metal] = {
       priceKeyRequested: priceKey,
       liveSymbol,
-      liveFeedIdentifier: liveSymbol ? `FMP legacy commodity symbol ${liveSymbol}` : null,
-      liveEndpoint: liveSymbol ? `/api/v3/historical-price-full/${liveSymbol}` : null,
+      liveFeedIdentifier: fredMapping
+        ? `FRED/IMF monthly period-average benchmark ${fredMapping.fredSeriesId}`
+        : legacySymbol
+          ? `FMP legacy commodity symbol ${legacySymbol}`
+          : null,
+      liveEndpoint: fredMapping
+        ? 'FRED series/observations'
+        : legacySymbol
+          ? `/api/v3/historical-price-full/${legacySymbol}`
+          : null,
       livePriceAvailable,
       livePriceValue,
       interpretedUnit: inferInterpretedUnitFromPriceKey(priceKey),
@@ -401,7 +416,7 @@ export async function resolveProjectPricesToEngineInput(
     };
 
     pushWarning(
-      `price source metal=${metal} -> ${priceSourceUsed}${livePriceAvailable ? ` live=${String(livePriceValue)}` : ''}${sanity.pass === false ? ` sanity=failed band=${sanity.band ? `${sanity.band.min}-${sanity.band.max} ${sanity.band.unit}` : 'n/a'}` : ''}${priceSourceUsed === 'manual' ? ` manualFallback=${String(manualFallbackValue)}` : ''}${!livePriceAvailable ? ` (live price unavailable for ${priceKey})` : ''}`,
+      `price source metal=${metal} -> ${priceSourceUsed}${livePriceAvailable ? ` value=${String(livePriceValue)}` : ''}${sanity.pass === false ? ` sanity=failed band=${sanity.band ? `${sanity.band.min}-${sanity.band.max} ${sanity.band.unit}` : 'n/a'}` : ''}${priceSourceUsed === 'manual' ? ` manualFallback=${String(manualFallbackValue)}` : ''}${!livePriceAvailable ? ` (provider price unavailable for ${priceKey})` : ''}`,
     );
 
     const needsCuBasisWarning = metal === 'Cu' && resolvedPrice.derived === true;
@@ -430,7 +445,7 @@ export async function resolveProjectPricesToEngineInput(
   }
 
   const metalsUsingLivePrices = Object.entries(metalPriceDiagnostics)
-    .filter(([, item]) => item.priceSourceUsed === 'fmp')
+    .filter(([, item]) => item.priceSourceUsed === 'fmp' || item.priceSourceUsed === 'fred')
     .map(([metal]) => metal)
     .sort((a, b) => a.localeCompare(b));
   const metalsUsingManualFallback = Object.entries(metalPriceDiagnostics)
