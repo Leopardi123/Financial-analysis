@@ -58,6 +58,8 @@ const producer: ProducerJsonV1 = {
           denominator: { metal: 'Au', unit: 'toz', measure: 'produced' },
           netOfByproductCredits: false,
         },
+        // The 1,000/oz composite is subtracted once. includesComponents is coverage metadata;
+        // it must not create synthetic zero rows or double-count any included component.
         definition: { includesComponents: mineSiteIncluded },
         provenance: scenarioProvenance,
       }],
