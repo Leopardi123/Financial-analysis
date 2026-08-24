@@ -100,7 +100,8 @@ export async function getLatestCanonicalPrice(
     fredMapping,
     { fromUtc: subtractUtcMonths(anchorDateUtc, 18), toUtc: anchorDateUtc },
   );
-  const latest = rows.filter((row) => row.dateUtc <= anchorDateUtc).at(-1) ?? null;
+  const eligible = rows.filter((row) => row.dateUtc <= anchorDateUtc);
+  const latest = eligible.length > 0 ? eligible[eligible.length - 1] : null;
   if (!latest) {
     return {
       ...descriptor,
