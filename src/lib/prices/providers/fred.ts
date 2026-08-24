@@ -42,7 +42,7 @@ export const FRED_COMMODITY_PRICE_MAPPINGS: readonly FredCommodityPriceMapping[]
     description: 'IMF/FRED global tin benchmark, monthly period average',
   },
   {
-    priceKey: 'FE_USD_TONNE',
+    priceKey: 'IRON_ORE_USD_TONNE',
     fredSeriesId: 'PIORECRUSDM',
     providerUnit: 'USD_PER_TONNE',
     frequency: 'monthly',
