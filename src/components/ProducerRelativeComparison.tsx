@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ProducerIntervalEconomics } from '../lib/miningProducer/intervalEconomics.ts';
 import type { ProducerPeerRow, ProducerPeerTable } from '../lib/miningProducer/peerTable.ts';
+import '../styles/producerCompareReadability.css';
 
 type NumericRange = { low: number; high: number };
 
