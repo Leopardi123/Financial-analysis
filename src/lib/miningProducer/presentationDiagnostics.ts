@@ -1,4 +1,4 @@
-const FORECAST_SUMMARY_RE = /FORECAST_RULE_APPLIED_SUMMARY:\s*(\d+)\s+forecast rules materialized/i;
+const FORECAST_SUMMARY_RE = /FORECAST_RULE_APPLIED_SUMMARY:\s*(\d+)\s+forecast rules materialized(?:\s+for\s+(\d{4}))?/i;
 
 export function producerForecastRuleCount(diagnostics: readonly string[]): number {
   for (const item of diagnostics) {
@@ -84,12 +84,20 @@ function coverageSummary(prefix: string, coverage: ReturnType<typeof projectCove
   return `${prefix}${projectText}: ${fields}.`;
 }
 
+function forecastSummary(item: string): string {
+  const match = item.match(FORECAST_SUMMARY_RE);
+  if (!match) return item.replace('FORECAST_RULE_APPLIED_SUMMARY:', 'Analystmodell:');
+  const count = Number(match[1]);
+  const year = match[2];
+  return `Analystmodell: ${count} forecastregel${count === 1 ? '' : 'er'} materialiserade${year ? ` för ${year}` : ''}.`;
+}
+
 export function summarizeProducerDiagnostics(diagnostics: readonly string[]): DiagnosticSummary {
   const details = [...new Set(diagnostics)];
   const summaries: string[] = [];
 
   const forecast = details.find((item) => item.startsWith('FORECAST_RULE_APPLIED_SUMMARY:'));
-  if (forecast) summaries.push(forecast.replace('FORECAST_RULE_APPLIED_SUMMARY:', 'Analystmodell:'));
+  if (forecast) summaries.push(forecastSummary(forecast));
 
   const ev = details.find((item) => item.startsWith('Enterprise value unresolved:'));
   if (ev) summaries.push(ev);
