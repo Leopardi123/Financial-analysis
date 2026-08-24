@@ -1,10 +1,16 @@
-import { encodeMonthlyPayload } from "../historyBlob.ts";
+import { decodeMonthlyPayload, encodeMonthlyPayload } from "../historyBlob.ts";
 import { refreshHistoryRangeToMonthlyBlobs } from "../refreshHistory.ts";
 import { readHistoryRowsInRange } from "../db/readHistory.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
     throw new Error(message);
+  }
+}
+
+function assertApprox(actual: number, expected: number, tolerance: number, message: string): void {
+  if (Math.abs(actual - expected) > tolerance) {
+    throw new Error(`${message}: expected ${expected}, got ${actual}`);
   }
 }
 
@@ -16,7 +22,7 @@ function assert(condition: boolean, message: string): void {
     {
       queryFn: async (sql: string, _params: Array<string | number | null> = []) => {
         if (sql.includes("FROM price_provider_map")) {
-          return [{ provider_symbol: "GCUSD", provider_kind: "commodity" }];
+          return [{ provider: "FMP", provider_symbol: "GCUSD", provider_kind: "commodity" }];
         }
         if (sql.includes("FROM price_eod_monthly")) {
           return [];
@@ -35,7 +41,40 @@ function assert(condition: boolean, message: string): void {
     },
   );
 
-  assert(upsertCalls.length === 2, `Expected 2 upserts, got ${upsertCalls.length}`);
+  assert(upsertCalls.length === 2, `Expected 2 FMP upserts, got ${upsertCalls.length}`);
+  assert(upsertCalls.every((call) => call.args[3] === "FMP"), "FMP history rows must retain FMP provider provenance");
+  assert(upsertCalls.every((call) => call.args[4] === "GCUSD"), "FMP history rows must retain GCUSD source symbol");
+
+  const fredUpserts: Array<{ sql: string; args: Array<string | number | null> }> = [];
+  await refreshHistoryRangeToMonthlyBlobs(
+    { priceKey: "ZN_USD_LB", from: "2026-07-01", to: "2026-07-31" },
+    {
+      queryFn: async (sql: string) => {
+        if (sql.includes("FROM price_provider_map")) {
+          return [{ provider: "FRED", provider_symbol: "PZINCUSDM", provider_kind: "commodity" }];
+        }
+        if (sql.includes("FROM price_eod_monthly")) {
+          return [];
+        }
+        return [];
+      },
+      executeFn: async (sql: string, args: Array<string | number | null> = []) => {
+        fredUpserts.push({ sql, args });
+        return {} as never;
+      },
+      fetchFredCommodityPriceSeriesFn: async (mapping) => {
+        assert(mapping.fredSeriesId === "PZINCUSDM", `Expected PZINCUSDM, got ${mapping.fredSeriesId}`);
+        return [{ dateUtc: "2026-07-31", close: 2204.6226218487757, sourcePeriod: "2026-07" }];
+      },
+    },
+  );
+
+  assert(fredUpserts.length === 1, `Expected 1 FRED upsert, got ${fredUpserts.length}`);
+  assert(fredUpserts[0].args[3] === "FRED", "FRED history row must be labelled FRED");
+  assert(fredUpserts[0].args[4] === "PZINCUSDM", "FRED history row must retain exact series id");
+  const fredPayload = decodeMonthlyPayload(String(fredUpserts[0].args[2]));
+  assert(fredPayload.dates[0] === "2026-07-31", "FRED monthly observation should be stored at month end");
+  assertApprox(fredPayload.close[0], 1, 1e-12, "FRED zinc USD/tonne should normalize to canonical USD/lb");
 
   const payloadJan = encodeMonthlyPayload({
     dates: ["2026-01-05", "2026-01-20"],
