@@ -89,7 +89,7 @@ export const PRICE_KEY_DEFINITIONS: readonly PriceKeyDefinition[] = [
     description: "Tin benchmark price in USD per pound",
   },
   {
-    priceKey: "FE_USD_TONNE",
+    priceKey: "IRON_ORE_USD_TONNE",
     kind: "commodity",
     canonicalUnit: "USD_per_tonne",
     decimals: 6,
