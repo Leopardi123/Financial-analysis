@@ -3,6 +3,7 @@ import { UNIT_CONSTANTS } from '../units/types.ts';
 import { downsampleDailyToMonthlyEom } from '../store/monthly.ts';
 import { resolvePriceSeries } from '../resolve.ts';
 import { buildHistoricalWindowUtc, fetchLegacyCommodityQuotes, getLegacyQuote } from '../providers/fmp.ts';
+import { getLegacySymbolForPriceKey } from '../providers/legacyCommoditySymbolMap.ts';
 import { getProviderMapping } from '../registry/getPriceKeyMeta.ts';
 
 function assert(condition: unknown, message: string): void {
@@ -80,6 +81,32 @@ function assertApprox(actual: number, expected: number, tolerance: number, label
   );
   assert(percentile.values[0] === 2, `Expected floor quantile=2, got ${String(percentile.values[0])}`);
 
+  const fredZinc = await resolvePriceSeries(
+    {
+      price_key: 'ZN_USD_LB',
+      anchorDatesUtc: ['2026-08-24'],
+      scenario: { mode: 'spot' },
+      allowRefresh: false,
+    },
+    {
+      fetchFredCommodityPriceSeriesFn: async (mapping) => {
+        assert(mapping.fredSeriesId === 'PZINCUSDM', `Expected PZINCUSDM, got ${mapping.fredSeriesId}`);
+        return [
+          { dateUtc: '2026-06-30', close: 3300, sourcePeriod: '2026-06' },
+          { dateUtc: '2026-07-31', close: 3600, sourcePeriod: '2026-07' },
+        ];
+      },
+    },
+  );
+  assertApprox(fredZinc.values[0] ?? Number.NaN, 3600 / UNIT_CONSTANTS.LB_PER_TONNE, 1e-9, 'FRED zinc tonne->lb');
+  assert(fredZinc.warnings.some((warning) => warning.includes('PZINCUSDM')), 'FRED zinc warning should identify exact series');
+  assert(fredZinc.warnings.some((warning) => warning.includes('as-of 2026-07')), 'FRED zinc warning should identify source month');
+  assert(fredZinc.warnings.some((warning) => warning.includes('not a spot quote')), 'FRED zinc must not be labelled as spot');
+
+  assert(getLegacySymbolForPriceKey('XPT_USD_TOZ') === 'PLUSD', 'platinum should use verified FMP Legacy PLUSD');
+  assert(getLegacySymbolForPriceKey('XPD_USD_TOZ') === 'PAUSD', 'palladium should use verified FMP Legacy PAUSD');
+  assert(getLegacySymbolForPriceKey('AL_USD_TONNE') === 'ALIUSD', 'aluminium should use verified FMP Legacy ALIUSD');
+  assert(getLegacySymbolForPriceKey('ZN_USD_LB') === null, 'ZNUSD must never be treated as zinc');
 
   const legacyCommodityQuotes = await fetchLegacyCommodityQuotes({
     fetchApiV3JsonFn: (async (path) => {
@@ -96,8 +123,6 @@ function assertApprox(actual: number, expected: number, tolerance: number, label
     fetchLegacyCommodityQuotesFn: async () => legacyCommodityQuotes,
   });
   assert(legacyGc?.symbol === 'GCUSD', 'getLegacyQuote should match exact legacy symbol');
-
-
 
   const commoditySpotFromHistory = await resolvePriceSeries(
     {
