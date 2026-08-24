@@ -201,7 +201,7 @@ const partialRow = {
   diagnostics: [],
 } as ProducerPeerRow;
 
-const incompleteIntervals = {
+const incompleteIntervals: { attributable: ProducerIntervalEconomics; financial: ProducerIntervalEconomics } = {
   attributable: {
     year: 2030,
     basis: 'attributable',
@@ -226,7 +226,7 @@ const incompleteIntervals = {
     growthCapexUSD: nullMetric(),
     diagnostics: [],
   },
-} as const;
+};
 
 applyAuthoritativeIntervalCompletenessToPeerRow(partialRow, incompleteIntervals);
 assertEqual(partialRow.auOz, null, 'Partial Boroo-only 49 koz Au must be suppressed at company level');
