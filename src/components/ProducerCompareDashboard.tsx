@@ -595,11 +595,13 @@ export default function ProducerCompareDashboard() {
                           ) : 'Ej beräkningsbart'}
                         </td>
                         <td>
-                          <div className="producer-compare__diagnostic-summary">
-                            {diagnosticView.summaries.map((item) => <div key={item}>{item}</div>)}
-                          </div>
                           <details>
                             <summary>{diagnosticView.summaries.length} huvudposter · {diagnosticView.details.length} detaljer</summary>
+                            {diagnosticView.summaries.length > 0 && (
+                              <div className="producer-compare__diagnostic-summary">
+                                {diagnosticView.summaries.map((item) => <div key={item}>{item}</div>)}
+                              </div>
+                            )}
                             <ul>
                               {diagnosticView.details.map((item) => <li key={item}>{item}</li>)}
                             </ul>
