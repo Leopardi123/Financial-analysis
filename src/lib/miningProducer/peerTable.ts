@@ -103,37 +103,86 @@ function createRunScopedPriceResolver(base: typeof resolvePriceSeries): typeof r
   };
 }
 
-function applicableReportedMetric(
+function metricScopeMatchesCompany(item: ReportedMetric): boolean {
+  return item.scope?.type === 'company';
+}
+
+function metricScopeMatchesProject(item: ReportedMetric, projectId: string): boolean {
+  return item.scope?.type === 'project' && item.scope.projectId === projectId;
+}
+
+function exactYearMetric(items: readonly ReportedMetric[], year: number): ReportedMetric[] {
+  return items.filter((item) => item.period.kind === 'year' && item.period.year === year);
+}
+
+function coveringAverageMetric(items: readonly ReportedMetric[], year: number): ReportedMetric[] {
+  return items.filter((item) =>
+    item.period.kind === 'year_range_average'
+    && item.period.startYear <= year
+    && year <= item.period.endYear,
+  );
+}
+
+function reportedAverageDiagnostic(metric: ReportedMetric['metric'], item: ReportedMetric, year: number): string {
+  if (item.period.kind !== 'year_range_average') return '';
+  return `${metric}: reported ${item.period.startYear}-${item.period.endYear} average is shown as source evidence for ${year}; it is not materialized into a precise annual canonical input`;
+}
+
+export function applicableReportedMetric(
   producer: ProducerJsonV1,
   normalized: ProducerCompanyYearNormalization,
   metric: ReportedMetric['metric'],
 ): { value: ReportedMetric | null; diagnostic?: string } {
-  const companyMetrics = (producer.reportedMetrics ?? []).filter((item) =>
-    item.metric === metric
-    && item.scope.type === 'company'
-    && item.period.kind === 'year'
-    && item.period.year === normalized.selectedYear,
+  const companyPool = (producer.reportedMetrics ?? []).filter((item) =>
+    item.metric === metric && metricScopeMatchesCompany(item),
   );
-  if (companyMetrics.length === 1) return { value: companyMetrics[0] };
-  if (companyMetrics.length > 1) {
-    return { value: null, diagnostic: `${metric}: multiple company-level reported metrics exist for ${normalized.selectedYear}` };
+  const companyExact = exactYearMetric(companyPool, normalized.selectedYear);
+  if (companyExact.length === 1) return { value: companyExact[0] };
+  if (companyExact.length > 1) {
+    return { value: null, diagnostic: `${metric}: multiple company-level exact-year reported metrics exist for ${normalized.selectedYear}` };
   }
 
-  const projectMetrics = normalized.includedProjectIds.flatMap((projectId) => {
+  const companyAverages = coveringAverageMetric(companyPool, normalized.selectedYear);
+  if (companyAverages.length === 1) {
+    return {
+      value: companyAverages[0],
+      diagnostic: reportedAverageDiagnostic(metric, companyAverages[0], normalized.selectedYear),
+    };
+  }
+  if (companyAverages.length > 1) {
+    return { value: null, diagnostic: `${metric}: multiple company-level year-range averages cover ${normalized.selectedYear}` };
+  }
+
+  const projectPools = normalized.includedProjectIds.map((projectId) => {
     const project = producer.projects.find((candidate) => candidate.id === projectId);
-    return (project?.reportedMetrics ?? []).filter((item) =>
-      item.metric === metric
-      && item.scope.type === 'project'
-      && item.scope.projectId === projectId
-      && item.period.kind === 'year'
-      && item.period.year === normalized.selectedYear,
-    );
+    return {
+      projectId,
+      metrics: (project?.reportedMetrics ?? []).filter((item) =>
+        item.metric === metric && metricScopeMatchesProject(item, projectId),
+      ),
+    };
   });
-  if (normalized.includedProjectIds.length === 1 && projectMetrics.length === 1) return { value: projectMetrics[0] };
-  if (projectMetrics.length > 0) {
+
+  const projectExact = projectPools.flatMap(({ metrics }) => exactYearMetric(metrics, normalized.selectedYear));
+  if (normalized.includedProjectIds.length === 1 && projectExact.length === 1) return { value: projectExact[0] };
+  if (projectExact.length > 0) {
     return {
       value: null,
-      diagnostic: `${metric}: multiple/project-level values are not silently aggregated into a company metric`,
+      diagnostic: `${metric}: multiple/project-level exact-year values are not silently aggregated into a company metric`,
+    };
+  }
+
+  const projectAverages = projectPools.flatMap(({ metrics }) => coveringAverageMetric(metrics, normalized.selectedYear));
+  if (normalized.includedProjectIds.length === 1 && projectAverages.length === 1) {
+    return {
+      value: projectAverages[0],
+      diagnostic: reportedAverageDiagnostic(metric, projectAverages[0], normalized.selectedYear),
+    };
+  }
+  if (projectAverages.length > 0) {
+    return {
+      value: null,
+      diagnostic: `${metric}: multiple/project-level year-range averages are not silently aggregated into a company metric`,
     };
   }
   return { value: null };
@@ -155,7 +204,7 @@ function productionEvidenceForYear(
   for (const projectId of normalized.includedProjectIds) {
     const project = producer.projects.find((candidate) => candidate.id === projectId);
     if (!project) continue;
-    for (const disclosure of project.production) {
+    for (const disclosure of project.production ?? []) {
       const relevance = productionEvidenceRelevance(disclosure.period, normalized.selectedYear);
       if (!relevance) continue;
       output.push({

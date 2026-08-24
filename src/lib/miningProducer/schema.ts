@@ -2,7 +2,9 @@ import type {
   ForecastCostRule,
   ForecastProductionRule,
   ProducerJsonV1,
+  ProducerProject,
   ProducerRunContext,
+  ProductionDisclosure,
   Provenance,
 } from './types.ts';
 
@@ -55,8 +57,18 @@ function validateForecastProvenance(ruleId: string, provenance: Provenance): voi
   }
 }
 
+function projectProduction(project: ProducerProject): readonly ProductionDisclosure[] {
+  const production = (project as unknown as { production?: unknown }).production;
+  if (production === undefined) return [];
+  if (!Array.isArray(production)) {
+    throw new Error(`project ${project.id} production must be an array when provided`);
+  }
+  return production as ProductionDisclosure[];
+}
+
 function validateForecastProductionRules(project: ProducerJsonV1['projects'][number], rules: readonly ForecastProductionRule[]): void {
   const ids = new Set<string>();
+  const production = projectProduction(project);
   for (const rule of rules) {
     if (!rule.id || ids.has(rule.id)) throw new Error(`forecast production rule ids must be unique within project ${project.id}: ${rule.id}`);
     ids.add(rule.id);
@@ -67,12 +79,12 @@ function validateForecastProductionRules(project: ProducerJsonV1['projects'][num
       if (!Number.isFinite(rule.annualChangePct) || rule.annualChangePct <= -1) {
         throw new Error(`forecast production rule ${rule.id} annualChangePct must be finite and greater than -1`);
       }
-      const source = project.production.find((item) => item.id === rule.sourceDisclosureId);
+      const source = production.find((item) => item.id === rule.sourceDisclosureId);
       if (!source) throw new Error(`forecast production rule ${rule.id} sourceDisclosureId ${rule.sourceDisclosureId} not found in project ${project.id}`);
       if (source.period.kind !== 'year') throw new Error(`forecast production rule ${rule.id} carry_forward source must be an exact-year disclosure`);
       if (rule.appliesTo.startYear < source.period.year) throw new Error(`forecast production rule ${rule.id} cannot carry ${source.period.year} backwards into ${rule.appliesTo.startYear}`);
     } else if (rule.method === 'periodize_source') {
-      const source = project.production.find((item) => item.id === rule.sourceDisclosureId);
+      const source = production.find((item) => item.id === rule.sourceDisclosureId);
       if (!source) throw new Error(`forecast production rule ${rule.id} sourceDisclosureId ${rule.sourceDisclosureId} not found in project ${project.id}`);
       if (source.period.kind === 'year_range_total' && rule.quantity === undefined) {
         throw new Error(`forecast production rule ${rule.id} must provide an explicit quantity when periodizing a year_range_total`);
@@ -128,6 +140,7 @@ export function validateProducerJsonV1(input: ProducerJsonV1): ProducerJsonV1 {
   }
 
   for (const project of input.projects) {
+    projectProduction(project);
     const calculationRole = (project as unknown as Record<string, unknown>).calculationRole;
     if (calculationRole !== undefined && (typeof calculationRole !== 'string' || !PROJECT_CALCULATION_ROLES.has(calculationRole))) {
       throw new Error(`Unsupported calculationRole for project ${project.id}; use economic_project or evidence_only_unallocated`);

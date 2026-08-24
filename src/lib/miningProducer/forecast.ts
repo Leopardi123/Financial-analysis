@@ -51,8 +51,13 @@ function annualFactor(rate: number, elapsedYears: number): number | null {
   return Number.isFinite(factor) && factor >= 0 ? factor : null;
 }
 
+function projectProduction(project: ProducerProject): readonly ProductionDisclosure[] {
+  const production = (project as unknown as { production?: unknown }).production;
+  return Array.isArray(production) ? production as ProductionDisclosure[] : [];
+}
+
 function exactYearProductionExists(project: ProducerProject, year: number, metal: string, measure: ProductionDisclosure['measure']): boolean {
-  return project.production.some((item) =>
+  return projectProduction(project).some((item) =>
     item.period.kind === 'year'
     && item.period.year === year
     && item.metal === metal
@@ -88,7 +93,7 @@ function productionCandidate(
     };
   }
 
-  const source = project.production.find((item) => item.id === rule.sourceDisclosureId);
+  const source = projectProduction(project).find((item) => item.id === rule.sourceDisclosureId);
   if (!source) {
     diagnostics.push(`FORECAST_RULE_INVALID: ${project.id}/${rule.id} source production ${rule.sourceDisclosureId} not found`);
     return { candidate: null, diagnostics };
@@ -255,7 +260,7 @@ function materializeProjectProduction(project: ProducerProject, year: number): {
     applied.push(rows[0].ruleId);
     diagnostics.push(`FORECAST_RULE_APPLIED: ${project.id}/${rows[0].ruleId} materialized ${year} ${metal}/${measure}`);
   }
-  return { production: [...project.production, ...additions], diagnostics, applied };
+  return { production: [...projectProduction(project), ...additions], diagnostics, applied };
 }
 
 function materializeCosts(

@@ -12,6 +12,7 @@ import {
   type ProducerIntervalEconomics,
 } from '../../lib/miningProducer/intervalEconomics.ts';
 import { buildProducerPeerTable, type ProducerPeerTable } from '../../lib/miningProducer/peerTable.ts';
+import { applyAuthoritativeIntervalCompletenessToPeerRow } from '../../lib/miningProducer/peerRowCompleteness.ts';
 import type { ExplicitLongTermPriceDeck } from '../../lib/miningProducer/priceDeck.ts';
 import { isUnallocatedProducerEvidenceGroup, projectHasExactYearProduction } from '../../lib/miningProducer/projectRole.ts';
 import type { ProducerJsonV1, ProducerProject, ProducerRunContext } from '../../lib/miningProducer/types.ts';
@@ -336,6 +337,7 @@ export async function buildLiveProducerPeerTable(
     const liveDiagnostics = liveDiagnosticsByCompanyId[row.companyId] ?? [];
     const forecastDiagnostics = forecastDiagnosticsByCompanyId[row.companyId] ?? [];
     const intervals = intervalEconomicsByCompanyId[row.companyId];
+    if (intervals) applyAuthoritativeIntervalCompletenessToPeerRow(row, intervals);
     const cashCost = canonicalCashCostByCompanyId[row.companyId];
     const priceDeckDiagnostics = table.priceDecksByCompanyId[row.companyId]?.warnings ?? [];
     const scalarDiagnostics = [...row.diagnostics];

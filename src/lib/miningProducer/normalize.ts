@@ -27,7 +27,7 @@ import {
 import { isProducerEconomicProject, unresolvedUnallocatedEvidenceGroups } from './projectRole.ts';
 import { validateProducerJsonV1, validateProducerRunContext } from './schema.ts';
 import { computeProducerValuationMultiples } from './valuation.ts';
-import type { CostDisclosure, ProducerJsonV1, ProducerProject, ProducerRunContext } from './types.ts';
+import type { CostComponent, CostDisclosure, ProducerJsonV1, ProducerProject, ProducerRunContext } from './types.ts';
 
 export type ProducerMetricQuality = 'exact' | 'approximation' | 'reported_only' | 'not_computable';
 
@@ -169,10 +169,13 @@ function missingBucketDiagnostics(
     .map((name) => `${metric}: ${name} is ${buckets.qualityByBucket[name]}; explicit zero is required when the economic amount is zero`);
 }
 
-function coverageBucket(disclosure: CostDisclosure): CanonicalCostBucketName | null {
-  switch (disclosure.canonicalClassification) {
+function componentBucket(
+  classification: CostDisclosure['canonicalClassification'],
+  component: CostComponent,
+): CanonicalCostBucketName | null {
+  switch (classification) {
     case 'operating':
-      switch (disclosure.component) {
+      switch (component) {
         case 'cash_operating_cost': return 'cashOperatingCostsUSD';
         case 'royalty': return 'royaltiesUSD';
         case 'production_tax': return 'productionTaxesUSD';
@@ -182,19 +185,19 @@ function coverageBucket(disclosure: CostDisclosure): CanonicalCostBucketName | n
         default: return 'otherRecurringOperatingCashExpensesUSD';
       }
     case 'sustaining':
-      if (disclosure.component === 'sustaining_capex') return 'sustainingCapexUSD';
+      if (component === 'sustaining_capex') return 'sustainingCapexUSD';
       if (
-        disclosure.component === 'sustaining_exploration'
-        || disclosure.component === 'deferred_stripping'
-        || disclosure.component === 'underground_development'
+        component === 'sustaining_exploration'
+        || component === 'deferred_stripping'
+        || component === 'underground_development'
       ) return 'sustainingExplorationDevelopmentUSD';
       return 'otherRecurringNonEbitdaCashSpendUSD';
     case 'growth':
-      return disclosure.component === 'growth_capex' ? 'growthCapexUSD' : 'growthExplorationDevelopmentUSD';
+      return component === 'growth_capex' ? 'growthCapexUSD' : 'growthExplorationDevelopmentUSD';
     case 'tax':
-      return disclosure.component === 'cash_income_tax' ? 'cashTaxesUSD' : null;
+      return component === 'cash_income_tax' ? 'cashTaxesUSD' : null;
     case 'working_capital':
-      return disclosure.component === 'working_capital_delta' ? 'workingCapitalDeltaUSD' : null;
+      return component === 'working_capital_delta' ? 'workingCapitalDeltaUSD' : null;
     case 'noncash':
     case 'excluded':
     case 'unknown':
@@ -202,12 +205,27 @@ function coverageBucket(disclosure: CostDisclosure): CanonicalCostBucketName | n
   }
 }
 
+function coverageBucket(disclosure: CostDisclosure): CanonicalCostBucketName | null {
+  return componentBucket(disclosure.canonicalClassification, disclosure.component);
+}
+
+function coveredBuckets(disclosure: CostDisclosure): Set<CanonicalCostBucketName> {
+  const buckets = new Set<CanonicalCostBucketName>();
+  const primary = coverageBucket(disclosure);
+  if (primary) buckets.add(primary);
+  for (const component of disclosure.definition?.includesComponents ?? []) {
+    const bucket = componentBucket(disclosure.canonicalClassification, component);
+    if (bucket) buckets.add(bucket);
+  }
+  return buckets;
+}
+
 function projectHasAnySelectedYearProductionDisclosure(project: ProducerProject, year: number): boolean {
   return project.production.some((item) => periodAppliesToYear(item.period, year));
 }
 
 function disclosureCoversBucket(disclosure: CostDisclosure, bucket: CanonicalCostBucketName, year: number): boolean {
-  return periodAppliesToYear(disclosure.period, year) && coverageBucket(disclosure) === bucket;
+  return periodAppliesToYear(disclosure.period, year) && coveredBuckets(disclosure).has(bucket);
 }
 
 function projectCostCoverage(args: {

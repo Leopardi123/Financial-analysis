@@ -166,6 +166,17 @@
   opacity: 0.65;
 }
 
+.producer-compare__model-layer {
+  display: block;
+  margin-top: 5px;
+  max-width: 180px;
+  white-space: normal;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+  opacity: 0.72;
+}
+
 .producer-compare__evidence-cell {
   min-width: 190px;
   max-width: 310px;
@@ -196,7 +207,7 @@
 }
 
 .producer-compare__table details {
-  max-width: 330px;
+  max-width: 360px;
   white-space: normal;
 }
 
@@ -215,9 +226,183 @@
   margin-bottom: 5px;
 }
 
+.producer-compare__diagnostic-summary {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 6px;
+  min-width: 300px;
+  max-width: 360px;
+  white-space: normal;
+  line-height: 1.3;
+}
+
+.producer-compare__diagnostic-summary div {
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
 .producer-compare__footnote {
   font-size: 12px;
   line-height: 1.45;
+}
+
+.producer-relative {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  background: rgba(255, 255, 255, 0.35);
+  padding: 14px;
+}
+
+.producer-relative__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px 20px;
+  align-items: end;
+}
+
+.producer-relative__header > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.producer-relative__header small {
+  opacity: 0.62;
+  font-size: 11px;
+}
+
+.producer-relative__selectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.producer-relative__selectors label {
+  display: grid;
+  gap: 4px;
+  min-width: 190px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.producer-relative__selectors select {
+  min-height: 34px;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  background: rgba(255, 255, 255, 0.56);
+  color: inherit;
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.producer-relative__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.producer-relative__metric {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid rgba(0, 0, 0, 0.24);
+  padding-top: 8px;
+}
+
+.producer-relative__metric-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.producer-relative__bar-row {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.9fr) minmax(90px, 2fr) 62px;
+  gap: 7px;
+  align-items: center;
+  font-size: 10px;
+}
+
+.producer-relative__bar-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.producer-relative__bar-row > b {
+  text-align: right;
+  font-weight: 650;
+}
+
+.producer-relative__track {
+  position: relative;
+  height: 9px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.producer-relative__bar,
+.producer-relative__range-floor {
+  position: absolute;
+  inset: 0 auto 0 0;
+}
+
+.producer-relative__bar--compared {
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.producer-relative__bar--benchmark {
+  background: currentColor;
+  opacity: 0.18;
+}
+
+.producer-relative__range-floor {
+  border-right: 2px solid currentColor;
+  opacity: 0.88;
+}
+
+.producer-relative__absolute {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.producer-relative__absolute > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  padding-top: 7px;
+  font-size: 11px;
+}
+
+.producer-relative__absolute b {
+  text-align: right;
+}
+
+.producer-relative__absolute small {
+  grid-column: 1 / -1;
+  opacity: 0.62;
+}
+
+.producer-relative__text {
+  display: grid;
+  gap: 6px;
+  max-width: 980px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.producer-relative__text p {
+  margin: 0;
+}
+
+@media (max-width: 960px) {
+  .producer-relative__grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -232,5 +417,16 @@
 
   .producer-compare__controls label:first-child {
     grid-column: 1 / -1;
+  }
+
+  .producer-relative__selectors,
+  .producer-relative__absolute {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .producer-relative__selectors label {
+    min-width: 0;
   }
 }
