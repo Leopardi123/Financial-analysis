@@ -108,6 +108,38 @@ function RelativeBar({
   );
 }
 
+function AbsoluteComparison({
+  label,
+  comparedName,
+  benchmarkName,
+  comparedValue,
+  benchmarkValue,
+  format,
+}: {
+  label: string;
+  comparedName: string;
+  benchmarkName: string;
+  comparedValue: NumericRange | null;
+  benchmarkValue: NumericRange | null;
+  format: (value: NumericRange | null) => string;
+}) {
+  return (
+    <div className="producer-relative__absolute-card">
+      <strong className="producer-relative__absolute-title">{label}</strong>
+      <div className="producer-relative__absolute-company producer-relative__absolute-company--compared">
+        <small>JÄMFÖRD</small>
+        <span>{comparedName}</span>
+        <b>{format(comparedValue)}</b>
+      </div>
+      <div className="producer-relative__absolute-company producer-relative__absolute-company--benchmark">
+        <small>BENCHMARK</small>
+        <span>{benchmarkName}</span>
+        <b>{format(benchmarkValue)}</b>
+      </div>
+    </div>
+  );
+}
+
 export default function ProducerRelativeComparison(props: Props) {
   const rows = props.table.rows;
   const [comparedId, setComparedId] = useState(rows[0]?.companyId ?? '');
@@ -202,8 +234,22 @@ export default function ProducerRelativeComparison(props: Props) {
           </div>
 
           <div className="producer-relative__absolute">
-            <div><span>Revenue {props.table.selectedYear}</span><b>{formatUsdRange(metrics.comparedRevenue)}</b><small>{benchmark.companyName}: {formatUsdRange(metrics.benchmarkRevenue)}</small></div>
-            <div><span>MCap / Au</span><b>{formatUsdPerOzRange(metrics.comparedMcapPerAu)}</b><small>{benchmark.companyName}: {formatUsdPerOzRange(metrics.benchmarkMcapPerAu)}</small></div>
+            <AbsoluteComparison
+              label={`Revenue ${props.table.selectedYear}`}
+              comparedName={compared.companyName}
+              benchmarkName={benchmark.companyName}
+              comparedValue={metrics.comparedRevenue}
+              benchmarkValue={metrics.benchmarkRevenue}
+              format={formatUsdRange}
+            />
+            <AbsoluteComparison
+              label="MCap / attributable Au"
+              comparedName={compared.companyName}
+              benchmarkName={benchmark.companyName}
+              comparedValue={metrics.comparedMcapPerAu}
+              benchmarkValue={metrics.benchmarkMcapPerAu}
+              format={formatUsdPerOzRange}
+            />
           </div>
 
           <div className="producer-relative__text">
