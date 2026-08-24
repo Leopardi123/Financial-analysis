@@ -1,6 +1,8 @@
+import { getPriceKeyDefinition } from './keys.ts';
 import { convertPriceToCanonical } from './units/convert.ts';
 import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.ts';
 import { buildHistoricalWindowUtc, fetchHistorical, getLegacyQuote, resolveLegacyCommodityCloseOnOrBefore, type ProviderPriceRow } from './providers/fmp.ts';
+import { fetchFredCommodityPriceSeries, getFredCommodityPriceMapping } from './providers/fred.ts';
 import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.ts';
 import { getLegacySymbolForPriceKey } from './providers/legacyCommoditySymbolMap.ts';
 
@@ -15,6 +17,7 @@ type ResolveDeps = {
   getPriceKeyMetaFn: typeof getPriceKeyMeta;
   getProviderMappingFn: typeof getProviderMapping;
   fetchHistoricalFn: typeof fetchHistorical;
+  fetchFredCommodityPriceSeriesFn: typeof fetchFredCommodityPriceSeries;
   upsertMonthlySeriesFn: typeof upsertMonthlySeries;
   getMonthlySeriesFn: typeof getMonthlySeries;
   getLegacyQuoteFn: typeof getLegacyQuote;
@@ -27,6 +30,7 @@ function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
     getPriceKeyMetaFn: deps.getPriceKeyMetaFn ?? getPriceKeyMeta,
     getProviderMappingFn: deps.getProviderMappingFn ?? getProviderMapping,
     fetchHistoricalFn: deps.fetchHistoricalFn ?? fetchHistorical,
+    fetchFredCommodityPriceSeriesFn: deps.fetchFredCommodityPriceSeriesFn ?? fetchFredCommodityPriceSeries,
     upsertMonthlySeriesFn: deps.upsertMonthlySeriesFn ?? upsertMonthlySeries,
     getMonthlySeriesFn: deps.getMonthlySeriesFn ?? getMonthlySeries,
     getLegacyQuoteFn: deps.getLegacyQuoteFn ?? getLegacyQuote,
@@ -38,6 +42,16 @@ function subtractUtcYears(dateStr: string, years: number): string {
   const date = new Date(`${dateStr}T00:00:00Z`);
   date.setUTCFullYear(date.getUTCFullYear() - years);
   return date.toISOString().slice(0, 10);
+}
+
+function subtractUtcMonths(dateStr: string, months: number): string {
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() - months);
+  return date.toISOString().slice(0, 10);
+}
+
+function todayUtcDateString(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function dayAfter(dateStr: string): string {
@@ -56,7 +70,7 @@ async function maybeRefreshHistory(price_key: string, fromUtc: string, toUtc: st
   const meta = await deps.getPriceKeyMetaFn(price_key);
   const mapping = await deps.getProviderMappingFn(price_key);
   if (mapping.provider.toUpperCase() !== 'FMP') {
-    throw new Error(`Unsupported provider: ${mapping.provider}`);
+    throw new Error(`Unsupported stored-history refresh provider: ${mapping.provider}`);
   }
 
   const dailyRows: ProviderPriceRow[] = await deps.fetchHistoricalFn(mapping.provider_symbol, mapping.provider_kind, fetchFrom, toUtc, price_key);
@@ -72,6 +86,76 @@ async function maybeRefreshHistory(price_key: string, fromUtc: string, toUtc: st
   );
 
   await deps.upsertMonthlySeriesFn(price_key, monthlyCanonicalRows);
+}
+
+async function resolveFredCommoditySeries(
+  priceKey: string,
+  anchorDatesUtc: string[],
+  scenario: Exclude<PriceScenario, { mode: 'fixed' }>,
+  deps: ResolveDeps,
+): Promise<{ values: (number | null)[]; warnings: string[] }> {
+  const mapping = getFredCommodityPriceMapping(priceKey);
+  if (!mapping) {
+    throw new Error(`No FRED commodity mapping for ${priceKey}`);
+  }
+
+  const sortedAnchors = [...anchorDatesUtc].sort();
+  const minAnchor = sortedAnchors[0];
+  const maxAnchor = sortedAnchors[sortedAnchors.length - 1];
+  const today = todayUtcDateString();
+  const providerTo = maxAnchor > today ? today : maxAnchor;
+  const providerFrom = scenario.mode === 'percentile'
+    ? subtractUtcYears(minAnchor > today ? today : minAnchor, scenario.lookbackYears)
+    : subtractUtcMonths(providerTo, 18);
+  const definition = getPriceKeyDefinition(priceKey);
+  const providerRows = await deps.fetchFredCommodityPriceSeriesFn(mapping, { fromUtc: providerFrom, toUtc: providerTo });
+  const rows = providerRows.map((row) => ({
+    ...row,
+    value: convertPriceToCanonical({
+      value: row.close,
+      fromUnit: mapping.providerUnit,
+      canonicalUnit: definition.canonicalUnit,
+    }),
+  }));
+  const warnings: string[] = [];
+
+  if (scenario.mode === 'spot') {
+    let latestSourcePeriod: string | null = null;
+    const values = anchorDatesUtc.map((anchorDateUtc) => {
+      const effectiveAnchor = anchorDateUtc > today ? today : anchorDateUtc;
+      const eligible = rows.filter((row) => row.dateUtc <= effectiveAnchor);
+      const latest = eligible[eligible.length - 1];
+      if (!latest) return null;
+      latestSourcePeriod = latest.sourcePeriod;
+      return latest.value;
+    });
+
+    if (latestSourcePeriod) {
+      warnings.push(`FRED/IMF monthly benchmark ${mapping.fredSeriesId}: period-average as-of ${latestSourcePeriod}; scenario=spot uses the latest available monthly benchmark, not a spot quote.`);
+    } else {
+      warnings.push(`No FRED/IMF monthly benchmark available for ${mapping.fredSeriesId} on or before ${providerTo}`);
+    }
+    return { values, warnings };
+  }
+
+  const values = anchorDatesUtc.map((anchorDateUtc) => {
+    const effectiveAnchor = anchorDateUtc > today ? today : anchorDateUtc;
+    const windowStart = subtractUtcYears(effectiveAnchor, scenario.lookbackYears);
+    const windowValues = rows
+      .filter((row) => row.dateUtc >= windowStart && row.dateUtc <= effectiveAnchor)
+      .map((row) => row.value)
+      .sort((a, b) => a - b);
+
+    if (windowValues.length === 0) {
+      warnings.push(`No FRED/IMF monthly observations in trailing ${scenario.lookbackYears}y window for ${mapping.fredSeriesId} <= ${effectiveAnchor}`);
+      return null;
+    }
+
+    const idx = Math.floor((scenario.percentile / 100) * (windowValues.length - 1));
+    return windowValues[idx];
+  });
+
+  return { values, warnings: [...new Set(warnings)] };
 }
 
 export async function resolvePriceSeries(
@@ -98,6 +182,10 @@ export async function resolvePriceSeries(
       };
     }
     return { values: args.anchorDatesUtc.map(() => fixedValue), warnings: [] };
+  }
+
+  if (getFredCommodityPriceMapping(args.price_key)) {
+    return resolveFredCommoditySeries(args.price_key, args.anchorDatesUtc, args.scenario, resolvedDeps);
   }
 
   const warnings: string[] = [];
