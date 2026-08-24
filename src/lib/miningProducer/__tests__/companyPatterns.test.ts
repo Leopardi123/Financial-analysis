@@ -1,4 +1,5 @@
 import './steppeCompatibility.test.ts';
+import './analystBase.test.ts';
 import { normalizeProducerCompanyYear } from '../normalize.ts';
 import { resolveProducerMarketValue } from '../marketValue.ts';
 import type { CostDisclosure, ProducerJsonV1, ProducerProject, Provenance } from '../types.ts';
