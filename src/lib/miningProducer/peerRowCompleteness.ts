@@ -27,9 +27,13 @@ export function applyAuthoritativeIntervalCompletenessToPeerRow(
   }
 
   if (attributable.auEqOz.range === null) {
-    if (row.auEqOz !== null || row.marketCapPerAuEqOzUSD !== null || row.canonicalCashOperatingCostPerAuEqUSD !== null) suppressed = true;
+    if (row.auEqOz !== null || row.marketCapPerAuEqOzUSD !== null) suppressed = true;
     row.auEqOz = null;
     row.marketCapPerAuEqOzUSD = null;
+  }
+
+  if (financial.auEqOz.range === null) {
+    if (row.canonicalCashOperatingCostPerAuEqUSD !== null) suppressed = true;
     row.canonicalCashOperatingCostPerAuEqUSD = null;
   }
 
