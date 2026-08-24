@@ -47,7 +47,7 @@ function assertApprox(actual: number, expected: number, tolerance: number, messa
 
   const fredUpserts: Array<{ sql: string; args: Array<string | number | null> }> = [];
   await refreshHistoryRangeToMonthlyBlobs(
-    { priceKey: "ZN_USD_LB", from: "2026-07-01", to: "2026-07-31" },
+    { priceKey: "ZN_USD_LB", from: "2026-07-15", to: "2026-07-31" },
     {
       queryFn: async (sql: string) => {
         if (sql.includes("FROM price_provider_map")) {
@@ -62,8 +62,10 @@ function assertApprox(actual: number, expected: number, tolerance: number, messa
         fredUpserts.push({ sql, args });
         return {} as never;
       },
-      fetchFredCommodityPriceSeriesFn: async (mapping) => {
+      fetchFredCommodityPriceSeriesFn: async (mapping, range) => {
         assert(mapping.fredSeriesId === "PZINCUSDM", `Expected PZINCUSDM, got ${mapping.fredSeriesId}`);
+        assert(range.fromUtc === "2026-07-01", `FRED fetch should expand mid-month from-date to source month start, got ${range.fromUtc}`);
+        assert(range.toUtc === "2026-07-31", `FRED fetch should preserve to-date, got ${range.toUtc}`);
         return [{ dateUtc: "2026-07-31", close: 2204.6226218487757, sourcePeriod: "2026-07" }];
       },
     },
