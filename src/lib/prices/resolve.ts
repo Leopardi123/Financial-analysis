@@ -131,7 +131,8 @@ async function resolveFredCommoditySeries(
     }),
   }));
   const warnings: string[] = [];
-  const latestSource = rows.filter((row) => row.dateUtc <= providerTo).at(-1) ?? null;
+  const latestEligible = rows.filter((row) => row.dateUtc <= providerTo);
+  const latestSource = latestEligible.length > 0 ? latestEligible[latestEligible.length - 1] : null;
   const meta: ResolvedPriceSeriesMeta = {
     provider: 'FRED_IMF',
     sourceIdentifier: mapping.fredSeriesId,
@@ -144,7 +145,7 @@ async function resolveFredCommoditySeries(
     const values = anchorDatesUtc.map((anchorDateUtc) => {
       const effectiveAnchor = anchorDateUtc > today ? today : anchorDateUtc;
       const eligible = rows.filter((row) => row.dateUtc <= effectiveAnchor);
-      return eligible[eligible.length - 1]?.value ?? null;
+      return eligible.length > 0 ? eligible[eligible.length - 1].value : null;
     });
 
     if (latestSource) {
@@ -297,7 +298,7 @@ export async function resolvePriceSeries(
   if (rows.length === 0 && legacySymbol) {
     pushWarning(`No price data returned from FMP legacy v3 for symbol ${legacySymbol}`);
   }
-  const latestStored = rows.at(-1) ?? null;
+  const latestStored = rows.length > 0 ? rows[rows.length - 1] : null;
   const storedMeta: ResolvedPriceSeriesMeta = {
     provider: 'STORED_MONTHLY',
     sourceIdentifier: legacySymbol ?? args.price_key,
