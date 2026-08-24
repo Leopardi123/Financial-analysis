@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ProducerCanonicalCashCostInterval } from '../lib/miningProducer/cashCostInterval.ts';
 import type { ProducerIntervalEconomics } from '../lib/miningProducer/intervalEconomics.ts';
 import type { ProducerPeerTable, ProducerProductionEvidence } from '../lib/miningProducer/peerTable.ts';
+import { producerModelLayerLabel, summarizeProducerDiagnostics } from '../lib/miningProducer/presentationDiagnostics.ts';
 import type { NumericClaim, ReportedMetric } from '../lib/miningProducer/types.ts';
+import ProducerRelativeComparison from './ProducerRelativeComparison.tsx';
 import '../styles/producerCompare.css';
 
 type ProducerPeerApiResponse =
@@ -37,6 +39,18 @@ function formatCompact(value: number | null, suffix = ''): string {
 function formatCompactRange(value: NumericRange, suffix = ''): string {
   if (value.low === value.high) return formatCompact(value.low, suffix);
   return `${formatCompact(value.low, suffix)}–${formatCompact(value.high, suffix)}`;
+}
+
+function formatAnalystProductionRange(value: NumericRange, analystModel: boolean): string {
+  if (!analystModel || value.low !== value.high) return formatCompactRange(value, ' oz');
+  const roundedToKoz = Math.round(value.low / 1_000) * 1_000;
+  return `~${formatCompact(roundedToKoz, ' oz')}`;
+}
+
+function formatAnalystProductionScalar(value: number, analystModel: boolean): string {
+  if (!analystModel) return formatCompact(value, ' oz');
+  const roundedToKoz = Math.round(value / 1_000) * 1_000;
+  return `~${formatCompact(roundedToKoz, ' oz')}`;
 }
 
 function formatUsd(value: number | null): string {
@@ -319,7 +333,7 @@ export default function ProducerCompareDashboard() {
             </div>
             <div>
               {data.table.comparisonBasis === 'canonical_shared_deck'
-                ? 'Gemensamt kanoniskt prisdeck — apples-to-apples för kanoniska värden. Rapporterade AuEq-proxyer märks separat.'
+                ? 'Gemensamt kanoniskt prisdeck — apples-to-apples för kanoniska värden. Analyst BASE och rapporterade proxyer märks separat.'
                 : 'Rapporterade prisdeck — inte apples-to-apples.'}
             </div>
           </div>
@@ -410,6 +424,9 @@ export default function ProducerCompareDashboard() {
                     const canonicalFcffBeforeRange = financialInterval?.fcffBeforeGrowthUSD.range ?? null;
                     const canonicalFcffAfterRange = financialInterval?.fcffAfterGrowthUSD.range ?? null;
                     const canonicalGrowthCapexRange = financialInterval?.growthCapexUSD.range ?? null;
+                    const modelLayer = producerModelLayerLabel(row.diagnostics, data.table.caseMode);
+                    const analystModel = modelLayer !== null;
+                    const diagnosticView = summarizeProducerDiagnostics(row.diagnostics);
 
                     const mcapAuRange = row.marketCapUSD !== null
                       ? valuePerPositiveRange(row.marketCapUSD, canonicalAuRange ?? reportedAuRange ?? { low: 0, high: 0 })
@@ -430,18 +447,34 @@ export default function ProducerCompareDashboard() {
                           {symbol && <button type="button" onClick={() => openCorporateEditor(symbol)}>Redigera JSON</button>}
                         </td>
                         <td className="producer-compare__evidence-cell">
-                          {row.auOz !== null ? formatCompact(row.auOz, ' oz') : canonicalAuRange ? (
-                            <IntervalValue range={canonicalAuRange} format={(value) => formatCompactRange(value, ' oz')} label="Kanoniskt attributable intervall · ingen midpoint" />
+                          {row.auOz !== null ? formatAnalystProductionScalar(row.auOz, analystModel) : canonicalAuRange ? (
+                            <IntervalValue
+                              range={canonicalAuRange}
+                              format={(value) => formatAnalystProductionRange(value, analystModel)}
+                              label={analystModel ? `Kanoniskt attributable · Analyst ${data.table.caseMode}-scenario` : 'Kanoniskt attributable intervall · ingen midpoint'}
+                            />
                           ) : row.reportedProduction ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedProduction)}</strong>
                               <small>Rapporterad bolagsproduktion · ej omräknad till kanonisk attributable Au</small>
                             </div>
-                          ) : <ProductionEvidenceList items={auEvidence} />}
+                          ) : auEvidence.length > 0 ? (
+                            <div className="producer-compare__evidence-list">
+                              <div className="producer-compare__evidence-item">
+                                <strong>Ej komplett company Au</strong>
+                                <small>Delprojekt visas nedan och summeras inte till en falsk company-total.</small>
+                              </div>
+                              <ProductionEvidenceList items={auEvidence} />
+                            </div>
+                          ) : 'Ej beräkningsbart'}
                         </td>
                         <td className="producer-compare__evidence-cell">
-                          {row.auEqOz !== null ? formatCompact(row.auEqOz, ' oz') : canonicalAuEqRange ? (
-                            <IntervalValue range={canonicalAuEqRange} format={(value) => formatCompactRange(value, ' oz')} label="Kanoniskt fysisk AuEq-intervall vid valt deck" />
+                          {row.auEqOz !== null ? formatAnalystProductionScalar(row.auEqOz, analystModel) : canonicalAuEqRange ? (
+                            <IntervalValue
+                              range={canonicalAuEqRange}
+                              format={(value) => formatAnalystProductionRange(value, analystModel)}
+                              label={analystModel ? `Kanoniskt fysisk AuEq · Analyst ${data.table.caseMode}-scenario` : 'Kanoniskt fysisk AuEq-intervall vid valt deck'}
+                            />
                           ) : row.reportedAuEq ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedAuEq)}</strong>
@@ -459,10 +492,11 @@ export default function ProducerCompareDashboard() {
                           <span className={`producer-compare__quality producer-compare__quality--${row.productionQuality}`}>
                             {qualityLabel(row.productionQuality)}
                           </span>
+                          {modelLayer && <span className="producer-compare__model-layer">{modelLayer}</span>}
                         </td>
                         <td className="producer-compare__evidence-cell">
                           {row.revenueUSD !== null ? formatUsd(row.revenueUSD) : canonicalRevenueRange ? (
-                            <IntervalValue range={canonicalRevenueRange} label="Kanoniskt financial-consolidation-intervall vid valt price deck" />
+                            <IntervalValue range={canonicalRevenueRange} label={analystModel ? `Kanoniskt financial-consolidation-intervall · Analyst ${data.table.caseMode} inputs · valt price deck` : 'Kanoniskt financial-consolidation-intervall vid valt price deck'} />
                           ) : preferSelectedDeckRevenueProxy && reportedRevenueProxy ? (
                             <div className="producer-compare__evidence-list">
                               <IntervalValue range={reportedRevenueProxy} label={`${reportedProxyQuantityLabel} × valt ${data.table.priceMode}-Au-pris · jämförelseproxy, ej canonical financial revenue`} />
@@ -484,18 +518,18 @@ export default function ProducerCompareDashboard() {
                           {row.canonicalCashOperatingCostPerAuEqUSD !== null ? (
                             <small>Kanonisk/AuEq: {formatUsd(row.canonicalCashOperatingCostPerAuEqUSD)}/oz</small>
                           ) : canonicalCashCostPerAuEqRange ? (
-                            <IntervalValue range={canonicalCashCostPerAuEqRange} format={formatUsdPerOzRange} label="Kanoniskt cash operating cost / financial AuEq-intervall" />
+                            <IntervalValue range={canonicalCashCostPerAuEqRange} format={formatUsdPerOzRange} label={analystModel ? `Kanoniskt cash operating cost / financial AuEq · Analyst ${data.table.caseMode}` : 'Kanoniskt cash operating cost / financial AuEq-intervall'} />
                           ) : (
                             <small>Kanonisk/AuEq: Ej beräkningsbart</small>
                           )}
                         </td>
                         <td className="producer-compare__evidence-cell">
                           <div>{formatClaim(row.reportedAisc)}</div>
-                          {row.reportedAisc && <small>{formatReportedMetricPeriod(row.reportedAisc)} · rapporterad evidens, inte annualiserad canonical cost bucket</small>}
+                          {row.reportedAisc && <small>{formatReportedMetricPeriod(row.reportedAisc)} · rapporterad/scenario-evidens, inte annualiserad canonical cost bucket</small>}
                         </td>
                         <td className="producer-compare__evidence-cell">
                           {row.ebitdaUSD !== null ? formatUsd(row.ebitdaUSD) : canonicalEbitdaRange ? (
-                            <IntervalValue range={canonicalEbitdaRange} label="Kanoniskt EBITDA-intervall; alla obligatoriska operating-cost buckets täckta" />
+                            <IntervalValue range={canonicalEbitdaRange} label={analystModel ? `Kanoniskt EBITDA-intervall · Analyst ${data.table.caseMode} cost bridge` : 'Kanoniskt EBITDA-intervall; alla obligatoriska operating-cost buckets täckta'} />
                           ) : row.reportedEbitda ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedEbitda)}</strong>
@@ -507,7 +541,7 @@ export default function ProducerCompareDashboard() {
                         </td>
                         <td className="producer-compare__evidence-cell">
                           {row.fcffBeforeGrowthUSD !== null ? formatUsd(row.fcffBeforeGrowthUSD) : canonicalFcffBeforeRange ? (
-                            <IntervalValue range={canonicalFcffBeforeRange} label="Kanoniskt FCFF före growth-intervall" />
+                            <IntervalValue range={canonicalFcffBeforeRange} label={analystModel ? `Kanoniskt FCFF före growth · Analyst ${data.table.caseMode}` : 'Kanoniskt FCFF före growth-intervall'} />
                           ) : row.reportedFcf ? (
                             <div className="producer-compare__evidence-item">
                               <strong>{formatClaim(row.reportedFcf)}</strong>
@@ -519,12 +553,12 @@ export default function ProducerCompareDashboard() {
                         </td>
                         <td className="producer-compare__evidence-cell">
                           {row.fcffAfterGrowthUSD !== null ? formatUsd(row.fcffAfterGrowthUSD) : canonicalFcffAfterRange ? (
-                            <IntervalValue range={canonicalFcffAfterRange} label="Kanoniskt FCFF efter growth-intervall" />
+                            <IntervalValue range={canonicalFcffAfterRange} label={analystModel ? `Kanoniskt FCFF efter growth · Analyst ${data.table.caseMode}` : 'Kanoniskt FCFF efter growth-intervall'} />
                           ) : 'Ej beräkningsbart'}
                         </td>
                         <td className="producer-compare__evidence-cell">
                           {row.growthCapexUSD !== null ? formatUsd(row.growthCapexUSD) : canonicalGrowthCapexRange ? (
-                            <IntervalValue range={canonicalGrowthCapexRange} label="Kanoniskt growth-CAPEX-intervall" />
+                            <IntervalValue range={canonicalGrowthCapexRange} label={analystModel ? `Kanoniskt growth CAPEX · Analyst ${data.table.caseMode}` : 'Kanoniskt growth-CAPEX-intervall'} />
                           ) : 'Ej beräkningsbart'}
                         </td>
                         <td>{formatUsd(row.marketCapUSD)}</td>
@@ -561,10 +595,13 @@ export default function ProducerCompareDashboard() {
                           ) : 'Ej beräkningsbart'}
                         </td>
                         <td>
+                          <div className="producer-compare__diagnostic-summary">
+                            {diagnosticView.summaries.map((item) => <div key={item}>{item}</div>)}
+                          </div>
                           <details>
-                            <summary>{row.diagnostics.length} poster</summary>
+                            <summary>{diagnosticView.summaries.length} huvudposter · {diagnosticView.details.length} detaljer</summary>
                             <ul>
-                              {row.diagnostics.map((item) => <li key={item}>{item}</li>)}
+                              {diagnosticView.details.map((item) => <li key={item}>{item}</li>)}
                             </ul>
                           </details>
                         </td>
@@ -576,8 +613,15 @@ export default function ProducerCompareDashboard() {
             </div>
           )}
 
+          {data.table.rows.length >= 2 && (
+            <ProducerRelativeComparison
+              table={data.table}
+              intervalEconomicsByCompanyId={data.intervalEconomicsByCompanyId}
+            />
+          )}
+
           <div className="producer-compare__footnote">
-            Punktvärden och slutna intervall kan båda vara kanoniska. Intervall midpointas aldrig. Au/AuEq och MCap/Au använder attributable basis; Revenue/EBITDA/FCFF samt kanonisk Cash cost/AuEq använder financial-consolidation basis när den är verifierad i JSON. När fysisk metallmix eller kostnadsbuckets saknas får exakt-årig rapporterad AuEq och rapporterade flerårsgenomsnitt användas endast som tydligt märkta jämförelseproxyer; de uppgraderar aldrig ett värde till canonical och används aldrig i kanoniska EV-multiplar.
+            Punktvärden och slutna intervall kan båda vara kanoniska. Intervall midpointas aldrig. Au/AuEq och MCap/Au använder attributable basis; Revenue/EBITDA/FCFF samt kanonisk Cash cost/AuEq använder financial-consolidation basis när den är verifierad i JSON. Analyst BASE/GROWTH är ett separat, explicit scenario-lager: forecastregler får materialiseras till kanoniska beräkningsinputs men är aldrig bolagsfakta och märks därför i tabellen. När fysisk metallmix eller kostnadsbuckets saknas får exakt-årig rapporterad AuEq och rapporterade flerårsgenomsnitt användas endast som tydligt märkta jämförelseproxyer; de uppgraderar aldrig ett värde till canonical och används aldrig i kanoniska EV-multiplar.
           </div>
         </>
       )}
