@@ -161,7 +161,7 @@ assertEqual(ev2030?.state, 'calculable', 'Steppe EV checklist remains calculable
 const reportedMetricNormalizationStub = {
   selectedYear: 2030,
   includedProjectIds: ['boroo_project', 'ato'],
-} as ProducerCompanyYearNormalization;
+} as unknown as ProducerCompanyYearNormalization;
 const reportedAisc2030 = applicableReportedMetric(steppeShape, reportedMetricNormalizationStub, 'aisc');
 assertEqual(reportedAisc2030.value?.id, 'company-aisc-average', 'Company-level year-range-average AISC should remain visible as reported evidence in 2030');
 assert(reportedAisc2030.diagnostic?.includes('not materialized into a precise annual canonical input'), 'Year-range-average AISC must explicitly retain non-canonical semantics');
