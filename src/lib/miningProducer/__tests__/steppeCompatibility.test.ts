@@ -1,8 +1,9 @@
 import { assessProducerFiveYearCoverageWithForecast } from '../forecastCalculability.ts';
+import type { ProducerCompanyYearNormalization } from '../normalize.ts';
+import { applicableReportedMetric, type ProducerPeerRow } from '../peerTable.ts';
 import { applyAuthoritativeIntervalCompletenessToPeerRow } from '../peerRowCompleteness.ts';
 import { validateProducerJsonV1 } from '../schema.ts';
 import type { ProducerIntervalEconomics } from '../intervalEconomics.ts';
-import type { ProducerPeerRow } from '../peerTable.ts';
 import type { ProducerJsonV1, Provenance, ReportedMetric } from '../types.ts';
 
 function assert(condition: unknown, message: string): void {
@@ -157,6 +158,16 @@ assertEqual(revenue2030?.state, 'blocked', 'AuEq evidence must not fabricate sha
 assertEqual(ebitda2030?.state, 'blocked', 'Reported multi-year AISC must not fabricate canonical EBITDA');
 assertEqual(ev2030?.state, 'calculable', 'Steppe EV checklist remains calculable from current debt/cash evidence');
 
+const reportedMetricNormalizationStub = {
+  selectedYear: 2030,
+  includedProjectIds: ['boroo_project', 'ato'],
+} as ProducerCompanyYearNormalization;
+const reportedAisc2030 = applicableReportedMetric(steppeShape, reportedMetricNormalizationStub, 'aisc');
+assertEqual(reportedAisc2030.value?.id, 'company-aisc-average', 'Company-level year-range-average AISC should remain visible as reported evidence in 2030');
+assert(reportedAisc2030.diagnostic?.includes('not materialized into a precise annual canonical input'), 'Year-range-average AISC must explicitly retain non-canonical semantics');
+const reportedAuEq2030 = applicableReportedMetric(steppeShape, reportedMetricNormalizationStub, 'aueq');
+assertEqual(reportedAuEq2030.value?.id, 'company-aueq-2030', 'Exact-year reported AuEq should take precedence over broader evidence');
+
 function nullMetric(): ProducerIntervalEconomics['auOz'] {
   return { range: null, quality: 'not_computable', diagnostics: ['missing project coverage'] };
 }
@@ -257,5 +268,11 @@ validateProducerJsonV1(malformedButSchemaAccepted);
 const failClosedCoverage = assessProducerFiveYearCoverageWithForecast(malformedButSchemaAccepted, 2026, 'BASE');
 assert(failClosedCoverage[0].metrics.every((metric) => metric.state === 'blocked'), 'Editor calculability must fail closed rather than throw on an unexpected evidence shape');
 assert(failClosedCoverage[0].metrics[0].missing[0].startsWith('CALCULABILITY_EVALUATION_FAILED'), 'Fail-closed editor coverage must expose the caught evaluation error');
+const malformedReportedMetric = applicableReportedMetric(
+  malformedButSchemaAccepted,
+  { ...reportedMetricNormalizationStub, selectedYear: 2026 } as ProducerCompanyYearNormalization,
+  'production',
+);
+assertEqual(malformedReportedMetric.value, null, 'Malformed reported metric scope must fail closed instead of crashing peer-table rendering');
 
 console.log('Mining Producer Steppe compatibility tests passed');
