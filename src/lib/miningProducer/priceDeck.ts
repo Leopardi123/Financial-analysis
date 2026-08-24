@@ -1,4 +1,4 @@
-import { resolvePriceSeries } from '../prices/resolve.ts';
+import { resolvePriceSeries, type ResolvedPriceSeriesMeta } from '../prices/resolve.ts';
 import { convertPriceToCanonical } from '../prices/units/convert.ts';
 import { validateProducerRunContext } from './schema.ts';
 import type { ProducerJsonV1, ProducerRunContext, ReportedPriceDeck } from './types.ts';
@@ -11,6 +11,11 @@ export type ProducerMetalPrice = {
   unit: ProducerCanonicalPriceUnit;
   priceKey?: string;
   readiness: 'production_ready' | 'proxy_or_unverified' | 'explicit_input';
+  sourceProvider?: ResolvedPriceSeriesMeta['provider'];
+  sourceIdentifier?: string | null;
+  sourcePriceType?: ResolvedPriceSeriesMeta['priceType'];
+  sourceAsOfDateUtc?: string | null;
+  sourceAsOfPeriod?: string | null;
 };
 
 export type ResolvedProducerPriceDeck = {
@@ -230,6 +235,11 @@ export async function resolveProducerPriceDeck(
         unit: spec.canonicalUnit,
         priceKey: spec.priceKey,
         readiness: spec.productionReady ? 'production_ready' : 'proxy_or_unverified',
+        sourceProvider: resolved.meta?.provider,
+        sourceIdentifier: resolved.meta?.sourceIdentifier ?? null,
+        sourcePriceType: resolved.meta?.priceType,
+        sourceAsOfDateUtc: resolved.meta?.asOfDateUtc ?? null,
+        sourceAsOfPeriod: resolved.meta?.asOfPeriod ?? null,
       };
     }
 
