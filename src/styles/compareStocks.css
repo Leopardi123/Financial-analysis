@@ -1,0 +1,118 @@
+.compare-stocks__tabs {
+  display: flex;
+  gap: 0;
+  margin: 0 0 18px;
+  border-bottom: 1px solid rgba(20, 35, 32, 0.28);
+}
+
+.compare-stocks__tabs button {
+  appearance: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  padding: 10px 18px 9px;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.compare-stocks__tabs button.is-active {
+  border-bottom-color: currentColor;
+  opacity: 1;
+}
+
+.pre-revenue-compare__intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr);
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.pre-revenue-compare__intro p {
+  margin: 5px 0 0;
+}
+
+.pre-revenue-compare__basis,
+.pre-revenue-compare__note {
+  border: 1px solid rgba(20, 35, 32, 0.2);
+  background: rgba(255, 255, 255, 0.28);
+  padding: 10px 12px;
+}
+
+.pre-revenue-compare__note {
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+}
+
+.pre-revenue-compare__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(20, 35, 32, 0.22);
+}
+
+.pre-revenue-compare__table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 0.82rem;
+}
+
+.pre-revenue-compare__table th,
+.pre-revenue-compare__table td {
+  padding: 8px 10px;
+  border-right: 1px solid rgba(20, 35, 32, 0.12);
+  border-bottom: 1px solid rgba(20, 35, 32, 0.12);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.pre-revenue-compare__table th:first-child,
+.pre-revenue-compare__table td:first-child,
+.pre-revenue-compare__table th:nth-child(3),
+.pre-revenue-compare__table td:nth-child(3) {
+  text-align: left;
+}
+
+.pre-revenue-compare__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #d8e1df;
+  font-weight: 700;
+}
+
+.pre-revenue-compare__table .pre-revenue-compare__group-row th {
+  background: #c7d3d0;
+  text-align: center;
+  letter-spacing: 0.055em;
+  font-size: 0.72rem;
+}
+
+.pre-revenue-compare__projects {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 260px;
+  white-space: normal;
+}
+
+.pre-revenue-compare__projects small {
+  opacity: 0.68;
+}
+
+.pre-revenue-compare__pending {
+  opacity: 0.38;
+}
+
+@media (max-width: 760px) {
+  .pre-revenue-compare__intro {
+    grid-template-columns: 1fr;
+  }
+
+  .compare-stocks__tabs button {
+    flex: 1;
+  }
+}
