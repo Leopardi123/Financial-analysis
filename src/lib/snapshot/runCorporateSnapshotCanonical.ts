@@ -1,7 +1,9 @@
 import { loadProjectsForSymbol } from '../api/loadProjectsForSymbol.ts';
 import { validateSnapshotRequest } from '../api/validateSnapshotRequest.ts';
+import type { CashWaterfallResult } from '../corporate/financing/cashWaterfall.ts';
 import { resolveProjectMilestonesV2 } from '../time/resolveProjectMilestones.ts';
 import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
+import { buildCorporateMilestoneBalances } from '../valuation/corporateMilestoneBalance.ts';
 import {
   buildValuationTimeline,
   selectCanonicalValuationMetrics,
@@ -26,22 +28,6 @@ type ResolvedProjectMilestone = {
   commercialProductionYear: number;
   valuationMilestoneYear: number;
   fdExtraShares: number;
-};
-
-type WaterfallRowLike = {
-  period: number;
-  year: number | null;
-  closingCash: number | null;
-  debtAdded: number | null;
-  newShares: number | null;
-};
-
-type FutureBalanceState = {
-  year: number;
-  cashTarget: number | null;
-  debtTarget: number | null;
-  sharesPf: number | null;
-  cumulativeNewShares: number | null;
 };
 
 function projectName(rawJson: Record<string, unknown>, fallback: string): string | null {
@@ -82,79 +68,6 @@ function resolveMilestone(project: RawProject): ResolvedProjectMilestone {
 async function loadRawProjects(input: ReturnType<typeof validateSnapshotRequest> extends { ok: true; value: infer T } ? T : never): Promise<RawProject[]> {
   const value = input as unknown as { symbol?: string; projects: RawProject[] };
   return typeof value.symbol === 'string' ? loadProjectsForSymbol(value.symbol) : value.projects;
-}
-
-function waterfallRows(snapshot: Record<string, unknown>): WaterfallRowLike[] {
-  const financing = record(snapshot.financing);
-  const waterfall = record(financing?.corporate_cash_waterfall);
-  const rows = Array.isArray(waterfall?.rows) ? waterfall?.rows : [];
-  return rows.flatMap((raw, index) => {
-    const row = record(raw);
-    if (!row) return [];
-    return [{
-      period: finite(row.period) ? row.period : index,
-      year: finite(row.year) ? row.year : null,
-      closingCash: finite(row.closingCash) ? row.closingCash : null,
-      debtAdded: finite(row.debtAdded) ? row.debtAdded : null,
-      newShares: finite(row.newShares) ? row.newShares : null,
-    }];
-  }).sort((left, right) => left.period - right.period);
-}
-
-function buildFutureBalanceStates(args: {
-  rows: WaterfallRowLike[];
-  valuationYear: number;
-  fx: number | null;
-  currentDebtTarget: number | null;
-  currentShares: number | null;
-  fdExtraShares: number;
-}): FutureBalanceState[] {
-  let cumulativeDebtUSD = 0;
-  let cumulativeNewShares = 0;
-  let debtComputable = args.currentDebtTarget !== null && args.fx !== null;
-  let sharesComputable = args.currentShares !== null;
-  let latestCashTarget: number | null = null;
-  const states: FutureBalanceState[] = [];
-
-  for (const row of args.rows) {
-    if (row.year === null || row.year < args.valuationYear) continue;
-
-    if (row.debtAdded === null) debtComputable = false;
-    else cumulativeDebtUSD += row.debtAdded;
-
-    if (row.newShares === null) sharesComputable = false;
-    else cumulativeNewShares += row.newShares;
-
-    latestCashTarget = row.closingCash !== null && args.fx !== null
-      ? row.closingCash * args.fx
-      : null;
-
-    const debtTarget = debtComputable && args.currentDebtTarget !== null && args.fx !== null
-      ? args.currentDebtTarget + cumulativeDebtUSD * args.fx
-      : null;
-    const sharesPf = sharesComputable && args.currentShares !== null
-      ? args.currentShares + cumulativeNewShares + args.fdExtraShares
-      : null;
-
-    states.push({
-      year: row.year,
-      cashTarget: latestCashTarget,
-      debtTarget,
-      sharesPf,
-      cumulativeNewShares: sharesComputable ? cumulativeNewShares : null,
-    });
-  }
-
-  return states;
-}
-
-function stateAtOrBefore(states: FutureBalanceState[], year: number): FutureBalanceState | null {
-  let latest: FutureBalanceState | null = null;
-  for (const state of states) {
-    if (state.year > year) break;
-    latest = state;
-  }
-  return latest;
 }
 
 function rewriteCorporateTimeSeries(snapshot: Record<string, unknown>, timeline: ValuationTimeline): void {
@@ -292,42 +205,44 @@ export async function runCorporateSnapshotPipeline(args: {
     return base;
   }
 
-  const oldByYear = new Map(oldTimeline.periods.map((period) => [period.calendarYear, period]));
   const oldToday = oldTimeline.periods[oldTimeline.todayPeriod] ?? null;
   const fx = finite(snapshot.fx_USD_to_TargetCurrency) ? snapshot.fx_USD_to_TargetCurrency : null;
-  const currentDebtTarget = finite(input.balanceSheet?.debt_t0_TargetCurrency) ? input.balanceSheet?.debt_t0_TargetCurrency as number : null;
-  const currentShares = finite(input.market?.shares_current) ? input.market?.shares_current as number : null;
-  const totalFdExtraShares = milestones.reduce((sum, project) => sum + project.fdExtraShares, 0);
-  const futureStates = buildFutureBalanceStates({
-    rows: waterfallRows(snapshot),
+  const financing = record(snapshot.financing);
+  const market = record(snapshot.market);
+  const rawWaterfall = record(financing?.corporate_cash_waterfall);
+  const cashWaterfall = rawWaterfall as unknown as CashWaterfallResult | null;
+  const reportedCashTarget = finite(financing?.latest_quarterly_cash_TargetCurrency)
+    ? financing?.latest_quarterly_cash_TargetCurrency as number
+    : (finite(input.balanceSheet?.cash_t0_TargetCurrency) ? input.balanceSheet?.cash_t0_TargetCurrency as number : null);
+  const currentDebtTarget = finite(input.balanceSheet?.debt_t0_TargetCurrency)
+    ? input.balanceSheet?.debt_t0_TargetCurrency as number
+    : null;
+  const currentShares = finite(market?.shares_current)
+    ? market?.shares_current as number
+    : (finite(input.market?.shares_current) ? input.market?.shares_current as number : null);
+
+  const balanceBridge = buildCorporateMilestoneBalances({
+    years,
     valuationYear: input.valuationYear,
-    fx,
+    cashWaterfall,
+    fxUSDToTarget: fx,
+    reportedCashTarget,
     currentDebtTarget,
     currentShares,
-    fdExtraShares: totalFdExtraShares,
+    todaySharesPf: oldToday?.sharesPf ?? null,
+    todayNewSharesCumulative: oldToday?.newSharesCumulative ?? null,
   });
-
-  const currentCashTarget = finite(input.balanceSheet?.cash_t0_TargetCurrency) ? input.balanceSheet?.cash_t0_TargetCurrency as number : null;
-  const futureFallbackShares = currentShares !== null ? currentShares + totalFdExtraShares : null;
-  const balanceForYear = (year: number) => {
-    if (year <= input.valuationYear) {
-      const old = oldByYear.get(year) ?? oldToday;
-      return {
-        cashTarget: old?.cashTarget ?? currentCashTarget,
-        debtTarget: old?.debtTarget ?? currentDebtTarget,
-        sharesPf: old?.sharesPf ?? futureFallbackShares,
-        cumulativeNewShares: old?.newSharesCumulative ?? 0,
-      };
-    }
-    const state = stateAtOrBefore(futureStates, year);
+  const balances = balanceBridge.balances.map((balance, index) => {
+    if (balance.year > input.valuationYear) return balance;
+    const old = oldTimeline.periods[index] ?? oldToday;
     return {
-      cashTarget: state?.cashTarget ?? currentCashTarget,
-      debtTarget: state?.debtTarget ?? currentDebtTarget,
-      sharesPf: state?.sharesPf ?? futureFallbackShares,
-      cumulativeNewShares: state?.cumulativeNewShares ?? 0,
+      year: balance.year,
+      cashTarget: old?.cashTarget ?? balance.cashTarget,
+      debtTarget: old?.debtTarget ?? balance.debtTarget,
+      sharesPf: old?.sharesPf ?? balance.sharesPf,
+      cumulativeNewShares: old?.newSharesCumulative ?? balance.cumulativeNewShares,
     };
-  };
-  const balances = years.map(balanceForYear);
+  });
 
   const timeline = buildValuationTimeline({
     scope: oldTimeline.scope,
@@ -340,10 +255,10 @@ export async function runCorporateSnapshotPipeline(args: {
     productionStartPeriod: physicalPeriod,
     commercialProductionPeriod: commercialPeriod,
     valuationMilestonePeriod: valuationPeriod,
-    cashTarget: oldToday?.cashTarget ?? currentCashTarget,
+    cashTarget: oldToday?.cashTarget ?? reportedCashTarget,
     debtTarget: oldToday?.debtTarget ?? currentDebtTarget,
     sharesCurrent: currentShares,
-    sharesPf: oldToday?.sharesPf ?? futureFallbackShares,
+    sharesPf: oldToday?.sharesPf ?? currentShares,
     cashTargetByPeriod: balances.map((balance) => balance.cashTarget),
     debtTargetByPeriod: balances.map((balance) => balance.debtTarget),
     sharesPfByPeriod: balances.map((balance) => balance.sharesPf),
@@ -398,11 +313,13 @@ export async function runCorporateSnapshotPipeline(args: {
   rewriteProjectChartFlows(snapshot, timeline);
   rewriteLegacyModeledTimeline(snapshot, timeline, milestones, delay);
 
+  base.diagnostics.warnings.push(...balanceBridge.diagnostics.warnings);
   base.diagnostics.warnings.push(
     `Canonical valuation milestone: firstProduction=${physicalYear === null ? 'null' : physicalYear + delay}, commercialProduction=${commercialYear === null ? 'null' : commercialYear + delay}, valuation=${valuationYear === null ? 'null' : valuationYear + delay}.`,
   );
   base.diagnostics.warnings.push('Future valuation semantics: DCF/NPV use remaining FCFF only; pre-milestone CAPEX is sunk and is not subtracted again.');
-  base.diagnostics.warnings.push('Future NAV semantics: periodized waterfall closing cash, cumulative new debt and cumulative new shares are used after the valuation year.');
+  base.diagnostics.warnings.push('Future NAV semantics: periodized waterfall closing cash plus retained non-waterfall cash, cumulative new debt and cumulative canonical shares are used after the valuation year.');
+  base.diagnostics.warnings.push('Future debt bridge does not invent amortization: current debt plus modeled waterfall debt additions is used until a debt-service schedule exists.');
 
   return base;
 }
