@@ -4,6 +4,8 @@ import { listCompanyProjects, type CompanyProjectSummary } from '../lib/client/c
 import '../styles/compareStocks.css';
 
 type CompareTab = 'producer' | 'pre-revenue';
+type MetricColumn = readonly [label: string, help: string];
+type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 
 type CompanyListResponse = {
   ok: boolean;
@@ -16,7 +18,7 @@ type PreRevenueCompany = {
   projects: CompanyProjectSummary[];
 };
 
-const METRIC_GROUPS = [
+const METRIC_GROUPS: readonly MetricGroup[] = [
   {
     label: 'VÄRDERING IDAG',
     columns: [
@@ -61,7 +63,7 @@ const METRIC_GROUPS = [
       ['EV / LOM AuEq', 'Enterprise value per LOM recoverable/payable AuEq'],
     ],
   },
-] as const;
+];
 
 function PreRevenueCompareDashboard() {
   const [rows, setRows] = useState<PreRevenueCompany[]>([]);
@@ -104,7 +106,7 @@ function PreRevenueCompareDashboard() {
     return () => controller.abort();
   }, []);
 
-  const metricColumns = useMemo(() => METRIC_GROUPS.flatMap((group) => group.columns), []);
+  const metricColumns = useMemo<MetricColumn[]>(() => METRIC_GROUPS.flatMap((group) => [...group.columns]), []);
 
   return (
     <div className="pre-revenue-compare">
