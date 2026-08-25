@@ -15,6 +15,7 @@ export function withCanonicalViewMetrics(
   timeline: ValuationTimeline,
 ): ProjectViewMetrics {
   const values = selectCanonicalValuationMetrics(timeline);
+  const corporateMilestoneNav = timeline.scope === 'corporate';
   return {
     ...view,
     valuationTimeline: timeline,
@@ -30,8 +31,16 @@ export function withCanonicalViewMetrics(
       NAV_perShare: metric(values.navPerShareToday, 'Missing canonical NAV/share today'),
       NPV_prodStart: metric(values.npvStart, 'Missing canonical NPV at production start'),
       NPV_prodStart_perShare: metric(values.npvPerShareStart, 'Missing canonical NPV/share at production start'),
-      NAV_prodStart: metric(values.navStart, 'Missing canonical NAV at production start'),
-      NAV_prodStart_perShare: metric(values.navPerShareStart, 'Missing canonical NAV/share at production start'),
+      // A multi-project Corporate has no single economically privileged project-start NAV.
+      // Leave the Corporate view scalar empty so the existing milestone renderer publishes
+      // every canonical project-start year, matching the established Corporate DCF rows.
+      // The canonical timeline/API values remain intact; Project View keeps its scalar.
+      NAV_prodStart: corporateMilestoneNav
+        ? metric(null, 'Corporate NAV is presented by project milestone year')
+        : metric(values.navStart, 'Missing canonical NAV at production start'),
+      NAV_prodStart_perShare: corporateMilestoneNav
+        ? metric(null, 'Corporate NAV/share is presented by project milestone year')
+        : metric(values.navPerShareStart, 'Missing canonical NAV/share at production start'),
       DCF_Target: metric(values.dcfStart, 'Missing canonical DCF at production start'),
       DCF_perShare: metric(values.dcfPerShareStart, 'Missing canonical DCF/share at production start'),
       DCF_Target_discounted: metric(values.dcfStartPresentToday, 'Missing canonical DCF present value today'),

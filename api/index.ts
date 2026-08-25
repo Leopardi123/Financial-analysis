@@ -39,7 +39,7 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
 
   try {
     const [{ runCorporateSnapshotPipeline }] = await Promise.all([
-      import("../src/lib/snapshot/runCorporateSnapshot.js"),
+      import("../src/lib/snapshot/runCorporateSnapshotCanonical.js"),
     ]);
 
     const body = parseRequestBody(req);

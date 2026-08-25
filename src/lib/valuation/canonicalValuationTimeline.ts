@@ -18,6 +18,8 @@ export type ValuationPeriodState = {
   isProjectStartPeriod: boolean;
   isConstructionPeriod: boolean;
   isProductionStartPeriod: boolean;
+  isCommercialProductionPeriod: boolean;
+  isValuationMilestonePeriod: boolean;
   isOperatingPeriod: boolean;
   isClosurePeriod: boolean;
   discountExponentFromToday: number;
@@ -56,6 +58,8 @@ export type ValuationTimeline = {
   todayPeriod: number;
   projectStartPeriod: number;
   productionStartPeriod: number | null;
+  commercialProductionPeriod: number | null;
+  valuationMilestonePeriod: number | null;
   periods: ValuationPeriodState[];
 };
 
@@ -73,6 +77,8 @@ export type TimelineNodes = {
   today: ValuationPeriodState;
   projectStart: ValuationPeriodState;
   productionStart: ValuationPeriodState | null;
+  commercialProduction: ValuationPeriodState | null;
+  valuationMilestone: ValuationPeriodState | null;
 };
 
 export type CanonicalValuationMetrics = {
@@ -126,9 +132,27 @@ function sumFinite(values: Array<number | null>): NullableNumber {
   return (values as number[]).reduce((sum, value) => sum + value, 0);
 }
 
+function prependPeriodSeries(args: {
+  series: Array<number | null> | undefined;
+  inputLength: number;
+  prefixCount: number;
+  prefixValue: NullableNumber;
+  label: string;
+}): Array<number | null> | null {
+  if (!args.series) return null;
+  if (args.series.length !== args.inputLength) {
+    throw new Error(`${args.label} length must match FCFF length`);
+  }
+  return [
+    ...new Array<number | null>(args.prefixCount).fill(args.prefixValue),
+    ...args.series,
+  ];
+}
+
 export function buildValuationTimeline(args: {
   scope: 'project' | 'corporate';
   fcfUSD: Array<number | null>;
+  /** Retained for traceability/shape validation. CAPEX is already embedded in FCFF and is never subtracted again by the valuation timeline. */
   capexUSD?: Array<number | null>;
   yearsByPeriod: number[];
   discountRate: NullableNumber;
@@ -138,11 +162,21 @@ export function buildValuationTimeline(args: {
   /** Verified as-of year. The full model axis may start before this year. */
   valuationYear?: number;
   projectStartPeriod?: number;
+  /** First physical production / commissioning output. */
   productionStartPeriod: number | null;
+  /** Declared commercial production. Defaults to productionStartPeriod. */
+  commercialProductionPeriod?: number | null;
+  /** Future Target Price / valuation anchor. Defaults to commercialProductionPeriod, then productionStartPeriod. */
+  valuationMilestonePeriod?: number | null;
   cashTarget: NullableNumber;
   debtTarget: NullableNumber;
   sharesCurrent: NullableNumber;
   sharesPf: NullableNumber;
+  /** Optional periodized balance-sheet inputs. When supplied they replace the static value for that period. */
+  cashTargetByPeriod?: Array<number | null>;
+  debtTargetByPeriod?: Array<number | null>;
+  sharesPfByPeriod?: Array<number | null>;
+  newSharesCumulativeByPeriod?: Array<number | null>;
   newSharesCumulative?: NullableNumber;
   manualExtraShares?: number;
   periodEndDates?: string[];
@@ -151,6 +185,7 @@ export function buildValuationTimeline(args: {
 }): ValuationTimeline {
   const inputLength = args.fcfUSD.length;
   if (args.yearsByPeriod.length !== inputLength) throw new Error('Canonical timeline requires one calendar year per FCFF period');
+  if (args.capexUSD && args.capexUSD.length !== inputLength) throw new Error('Canonical timeline CAPEX length must match FCFF length');
   const firstModelYear = args.yearsByPeriod[0];
   const prefixYears = args.valuationYear !== undefined && finite(firstModelYear) && args.valuationYear < firstModelYear
     ? Array.from({ length: firstModelYear - args.valuationYear }, (_, index) => (args.valuationYear as number) + index)
@@ -158,7 +193,6 @@ export function buildValuationTimeline(args: {
   const prefixCount = prefixYears.length;
   const yearsByPeriod = [...prefixYears, ...args.yearsByPeriod];
   const fcfUSD = [...new Array<number>(prefixCount).fill(0), ...args.fcfUSD];
-  const capexUSD = args.capexUSD ? [...new Array<number>(prefixCount).fill(0), ...args.capexUSD] : undefined;
   const periodEndDates = args.periodEndDates
     ? [...prefixYears.map((year) => `${year}-12-31`), ...args.periodEndDates]
     : undefined;
@@ -168,6 +202,34 @@ export function buildValuationTimeline(args: {
   const corporateAdjustmentsUSD = args.corporateAdjustmentsUSD
     ? [...new Array<number>(prefixCount).fill(0), ...args.corporateAdjustmentsUSD]
     : undefined;
+  const cashTargetByPeriod = prependPeriodSeries({
+    series: args.cashTargetByPeriod,
+    inputLength,
+    prefixCount,
+    prefixValue: args.cashTarget,
+    label: 'cashTargetByPeriod',
+  });
+  const debtTargetByPeriod = prependPeriodSeries({
+    series: args.debtTargetByPeriod,
+    inputLength,
+    prefixCount,
+    prefixValue: args.debtTarget,
+    label: 'debtTargetByPeriod',
+  });
+  const sharesPfByPeriod = prependPeriodSeries({
+    series: args.sharesPfByPeriod,
+    inputLength,
+    prefixCount,
+    prefixValue: args.sharesPf,
+    label: 'sharesPfByPeriod',
+  });
+  const newSharesCumulativeByPeriod = prependPeriodSeries({
+    series: args.newSharesCumulativeByPeriod,
+    inputLength,
+    prefixCount,
+    prefixValue: args.newSharesCumulative ?? null,
+    label: 'newSharesCumulativeByPeriod',
+  });
   const length = fcfUSD.length;
   const resolvedTodayPeriod = args.todayPeriod ?? (args.valuationYear === undefined
     ? 0
@@ -178,22 +240,24 @@ export function buildValuationTimeline(args: {
   const todayPeriod = resolvedTodayPeriod;
   const projectStartPeriod = (args.projectStartPeriod ?? 0) + prefixCount;
   const productionStartPeriod = args.productionStartPeriod === null ? null : args.productionStartPeriod + prefixCount;
+  const commercialBase = args.commercialProductionPeriod ?? args.productionStartPeriod;
+  const commercialProductionPeriod = commercialBase === null ? null : commercialBase + prefixCount;
+  const valuationBase = args.valuationMilestonePeriod ?? commercialBase;
+  const valuationMilestonePeriod = valuationBase === null ? null : valuationBase + prefixCount;
+  for (const [label, period] of [
+    ['productionStartPeriod', productionStartPeriod],
+    ['commercialProductionPeriod', commercialProductionPeriod],
+    ['valuationMilestonePeriod', valuationMilestonePeriod],
+  ] as const) {
+    if (period !== null && (!Number.isInteger(period) || period < 0 || period >= length)) {
+      throw new Error(`Canonical ${label} is outside the model calendar axis`);
+    }
+  }
   const offset = args.todayPeriod === undefined && args.valuationYear === undefined && Number.isInteger(args.valuationPeriodOffset)
     ? args.valuationPeriodOffset as number
     : 0;
   const rate = finite(args.discountRate) && args.discountRate > 0 ? args.discountRate : null;
   const fx = finite(args.fxUSDToTarget) ? args.fxUSDToTarget : null;
-  const netCash = finite(args.cashTarget) && finite(args.debtTarget) ? args.cashTarget - args.debtTarget : null;
-
-  const initialCapexBefore = (period: number): NullableNumber => {
-    if (!capexUSD || period <= projectStartPeriod) return period <= projectStartPeriod ? 0 : null;
-    const window = capexUSD.slice(projectStartPeriod, period);
-    if (window.length !== period - projectStartPeriod || window.some((value) => !finite(value))) return null;
-    const values = window as number[];
-    return values.some((value) => value < 0)
-      ? values.reduce((sum, value) => sum + Math.max(0, -value), 0)
-      : values.reduce((sum, value) => sum + Math.max(0, value), 0);
-  };
 
   const periods = fcfUSD.map((fcff, periodIndex): ValuationPeriodState => {
     const exponent = periodIndex - todayPeriod + offset;
@@ -202,15 +266,26 @@ export function buildValuationTimeline(args: {
     const remainingUndiscounted = sumFinite(remaining);
     const dcfUSD = rate === null || remaining.some((value) => !finite(value)) ? null :
       (remaining as number[]).reduce((sum, value, tailIndex) => sum + value / ((1 + rate) ** tailIndex), 0);
-    const initialCapex = initialCapexBefore(periodIndex);
-    const npvUSD = periodIndex === todayPeriod
-      ? multiply(dcfUSD, discountFactor)
-      : dcfUSD !== null && initialCapex !== null ? dcfUSD - initialCapex : null;
+
+    // FCFF is the canonical enterprise cash-flow series and already contains all
+    // construction/sustaining/closure CAPEX in the period where it occurs. A
+    // future valuation therefore starts with the remaining FCFF tail. Historical
+    // CAPEX is sunk at that future date and must never be deducted a second time.
+    const npvUSD = dcfUSD;
     const dcfTarget = multiply(dcfUSD, fx);
     const npvTarget = multiply(npvUSD, fx);
-    const navTarget = npvTarget !== null && netCash !== null ? npvTarget + netCash : null;
+    const cashAtPeriod = cashTargetByPeriod ? cashTargetByPeriod[periodIndex] ?? null : args.cashTarget;
+    const debtAtPeriod = debtTargetByPeriod ? debtTargetByPeriod[periodIndex] ?? null : args.debtTarget;
+    const netCashAtPeriod = finite(cashAtPeriod) && finite(debtAtPeriod) ? cashAtPeriod - debtAtPeriod : null;
+    const sharesAtPeriod = sharesPfByPeriod ? sharesPfByPeriod[periodIndex] ?? null : args.sharesPf;
+    const newSharesAtPeriod = newSharesCumulativeByPeriod
+      ? newSharesCumulativeByPeriod[periodIndex] ?? null
+      : args.newSharesCumulative ?? null;
+    const navTarget = npvTarget !== null && netCashAtPeriod !== null ? npvTarget + netCashAtPeriod : null;
     const isLast = periodIndex === length - 1;
     const isProductionStart = periodIndex === productionStartPeriod;
+    const isCommercialProduction = periodIndex === commercialProductionPeriod;
+    const isValuationMilestone = periodIndex === valuationMilestonePeriod;
     const isConstruction = productionStartPeriod !== null && periodIndex < productionStartPeriod;
     const isHistorical = periodIndex < todayPeriod;
     const phase: ValuationPhase = isHistorical ? 'historical' : periodIndex === todayPeriod ? 'today' : isProductionStart ? 'production-start' : isLast ? 'closure' : isConstruction ? 'construction' : 'operating';
@@ -219,6 +294,7 @@ export function buildValuationTimeline(args: {
       periodIndex, calendarYear: yearsByPeriod[periodIndex], periodStartDate: null, periodEndDate: endDate,
       phase, isTodayPeriod: periodIndex === todayPeriod, isHistoricalPeriod: isHistorical, isProjectStartPeriod: periodIndex === projectStartPeriod,
       isConstructionPeriod: isConstruction, isProductionStartPeriod: isProductionStart,
+      isCommercialProductionPeriod: isCommercialProduction, isValuationMilestonePeriod: isValuationMilestone,
       isOperatingPeriod: !isConstruction && !isLast, isClosurePeriod: isLast,
       discountExponentFromToday: exponent, discountFactorFromToday: discountFactor,
       fcffUSD: finite(fcff) ? fcff : null, discountedFcffFromTodayUSD: multiply(finite(fcff) ? fcff : null, discountFactor),
@@ -226,19 +302,29 @@ export function buildValuationTimeline(args: {
       dcfPresentValueTodayUSD: multiply(dcfUSD, discountFactor), npvAtPeriodUSD: npvUSD,
       dcfAtPeriodTarget: dcfTarget, dcfPresentValueTodayTarget: multiply(dcfTarget, discountFactor),
       npvAtPeriodTarget: npvTarget, navAtPeriodTarget: navTarget,
-      cashTarget: args.cashTarget, debtTarget: args.debtTarget, netCashTarget: netCash,
-      sharesCurrent: args.sharesCurrent, newSharesCumulative: args.newSharesCumulative ?? null,
+      cashTarget: cashAtPeriod, debtTarget: debtAtPeriod, netCashTarget: netCashAtPeriod,
+      sharesCurrent: args.sharesCurrent, newSharesCumulative: newSharesAtPeriod,
       manualExtraShares: args.manualExtraShares ?? 0,
-      sharesPfBeforeManualExtra: finite(args.sharesPf) ? args.sharesPf - (args.manualExtraShares ?? 0) : null,
-      sharesPf: args.sharesPf, canonicalSharesForPerShare: args.sharesPf,
-      dcfPerShareTarget: divide(dcfTarget, args.sharesPf),
-      dcfPresentValueTodayPerShareTarget: divide(multiply(dcfTarget, discountFactor), args.sharesPf),
-      npvPerShareTarget: divide(npvTarget, args.sharesPf), navPerShareTarget: divide(navTarget, args.sharesPf),
+      sharesPfBeforeManualExtra: finite(sharesAtPeriod) ? sharesAtPeriod - (args.manualExtraShares ?? 0) : null,
+      sharesPf: sharesAtPeriod, canonicalSharesForPerShare: sharesAtPeriod,
+      dcfPerShareTarget: divide(dcfTarget, sharesAtPeriod),
+      dcfPresentValueTodayPerShareTarget: divide(multiply(dcfTarget, discountFactor), sharesAtPeriod),
+      npvPerShareTarget: divide(npvTarget, sharesAtPeriod), navPerShareTarget: divide(navTarget, sharesAtPeriod),
       projectContributions: projectContributionsByPeriod?.[periodIndex],
       corporateAdjustmentsUSD: corporateAdjustmentsUSD?.[periodIndex] ?? null,
     };
   });
-  return { scope: args.scope, timelineStart: periods[0]?.calendarYear ?? 0, timelineEnd: periods[periods.length - 1]?.calendarYear ?? 0, todayPeriod, projectStartPeriod, productionStartPeriod, periods };
+  return {
+    scope: args.scope,
+    timelineStart: periods[0]?.calendarYear ?? 0,
+    timelineEnd: periods[periods.length - 1]?.calendarYear ?? 0,
+    todayPeriod,
+    projectStartPeriod,
+    productionStartPeriod,
+    commercialProductionPeriod,
+    valuationMilestonePeriod,
+    periods,
+  };
 }
 
 export function selectTimelineNodes(timeline: ValuationTimeline): TimelineNodes {
@@ -246,25 +332,27 @@ export function selectTimelineNodes(timeline: ValuationTimeline): TimelineNodes 
   const projectStart = timeline.periods[timeline.projectStartPeriod];
   if (!today || !projectStart) throw new Error('Canonical timeline node is outside the period axis');
   const productionStart = timeline.productionStartPeriod === null ? null : timeline.periods[timeline.productionStartPeriod] ?? null;
-  return { today, projectStart, productionStart };
+  const commercialProduction = timeline.commercialProductionPeriod === null ? null : timeline.periods[timeline.commercialProductionPeriod] ?? null;
+  const valuationMilestone = timeline.valuationMilestonePeriod === null ? null : timeline.periods[timeline.valuationMilestonePeriod] ?? null;
+  return { today, projectStart, productionStart, commercialProduction, valuationMilestone };
 }
 
 /** Sole table/chart scalar adapter for canonical valuation values. */
 export function selectCanonicalValuationMetrics(timeline: ValuationTimeline): CanonicalValuationMetrics {
-  const { today, productionStart } = selectTimelineNodes(timeline);
+  const { today, valuationMilestone } = selectTimelineNodes(timeline);
   return {
     npvToday: today.npvAtPeriodTarget,
     npvPerShareToday: today.npvPerShareTarget,
     navToday: today.navAtPeriodTarget,
     navPerShareToday: today.navPerShareTarget,
-    dcfStart: productionStart?.dcfAtPeriodTarget ?? null,
-    dcfPerShareStart: productionStart?.dcfPerShareTarget ?? null,
-    dcfStartPresentToday: productionStart?.dcfPresentValueTodayTarget ?? null,
-    dcfPerShareStartPresentToday: productionStart?.dcfPresentValueTodayPerShareTarget ?? null,
-    npvStart: productionStart?.npvAtPeriodTarget ?? null,
-    npvPerShareStart: productionStart?.npvPerShareTarget ?? null,
-    navStart: productionStart?.navAtPeriodTarget ?? null,
-    navPerShareStart: productionStart?.navPerShareTarget ?? null,
+    dcfStart: valuationMilestone?.dcfAtPeriodTarget ?? null,
+    dcfPerShareStart: valuationMilestone?.dcfPerShareTarget ?? null,
+    dcfStartPresentToday: valuationMilestone?.dcfPresentValueTodayTarget ?? null,
+    dcfPerShareStartPresentToday: valuationMilestone?.dcfPresentValueTodayPerShareTarget ?? null,
+    npvStart: valuationMilestone?.npvAtPeriodTarget ?? null,
+    npvPerShareStart: valuationMilestone?.npvPerShareTarget ?? null,
+    navStart: valuationMilestone?.navAtPeriodTarget ?? null,
+    navPerShareStart: valuationMilestone?.navPerShareTarget ?? null,
   };
 }
 
@@ -295,15 +383,21 @@ export function withManualExtraShares(
   };
 }
 
-/** Resolve project-local start years once; tables, charts and debug consume these objects. */
+/** Resolve project-local valuation milestone years once; tables, charts and debug consume these objects. */
 export function selectCorporateProjectStartMilestones(
   timeline: ValuationTimeline,
-  projects: Array<{ projectId: string; projectName?: string | null; productionStartYear: number | null }>,
+  projects: Array<{
+    projectId: string;
+    projectName?: string | null;
+    productionStartYear: number | null;
+    valuationMilestoneYear?: number | null;
+  }>,
 ): CorporateProjectStartMilestone[] {
   if (timeline.scope !== 'corporate') throw new Error('Corporate project milestones require a corporate timeline');
   return projects.flatMap((project) => {
-    if (!finite(project.productionStartYear)) return [];
-    const state = timeline.periods.find((period) => period.calendarYear === project.productionStartYear);
+    const milestoneYear = finite(project.valuationMilestoneYear) ? project.valuationMilestoneYear : project.productionStartYear;
+    if (!finite(milestoneYear)) return [];
+    const state = timeline.periods.find((period) => period.calendarYear === milestoneYear);
     if (!state) return [];
     return [{
       projectId: project.projectId,
@@ -326,13 +420,14 @@ export function selectTimelineChartSeries(timeline: ValuationTimeline) {
 }
 
 /**
- * Canonical chart semantics. Today High is the start DCF brought back to today;
- * subsequent High values are each period's rolling DCF. Low is NAV throughout.
- * Peak selection preserves series identity and never orders Low/High with min/max.
+ * Canonical chart semantics. Today High is the selected valuation-milestone DCF
+ * brought back to today; subsequent High values are each period's rolling DCF.
+ * Low is NAV throughout. Peak selection preserves series identity and never
+ * orders Low/High with min/max.
  */
 export function selectValuationChart(
   timeline: ValuationTimeline,
-  startPeriods: number[] = timeline.productionStartPeriod === null ? [] : [timeline.productionStartPeriod],
+  startPeriods: number[] = timeline.valuationMilestonePeriod === null ? [] : [timeline.valuationMilestonePeriod],
 ): ValuationChartSelection {
   const selectedStartPeriod = selectValuationStartPeriod(timeline, startPeriods);
   const validStartPeriods = new Set(startPeriods.filter((period) => Number.isInteger(period) && timeline.periods[period]));
@@ -385,7 +480,7 @@ function rollStartDcfToPeriod(
   return start.dcfPerShareTarget * (start.discountFactorFromToday / period.discountFactorFromToday);
 }
 
-/** Corporate and Project tables/charts share this exact milestone rule. */
+/** Corporate and Project tables/charts share this exact valuation-milestone rule. */
 export function selectValuationStartPeriod(timeline: ValuationTimeline, startPeriods: number[] = []): number | null {
   const valid = startPeriods
     .filter((period) => Number.isInteger(period) && timeline.periods[period])
@@ -394,8 +489,8 @@ export function selectValuationStartPeriod(timeline: ValuationTimeline, startPer
       return yearDelta !== 0 ? yearDelta : a - b;
     });
   if (valid.length > 0) return valid[0];
-  return timeline.productionStartPeriod !== null && timeline.periods[timeline.productionStartPeriod]
-    ? timeline.productionStartPeriod
+  return timeline.valuationMilestonePeriod !== null && timeline.periods[timeline.valuationMilestonePeriod]
+    ? timeline.valuationMilestonePeriod
     : null;
 }
 
