@@ -22,6 +22,8 @@ export function buildValueRangeChartOptions(args: {
     vAxis: { title: args.currencyCode ?? '', textPosition: 'none', titleTextStyle: { color: '#1f2937', italic: false }, gridlines: { color: 'transparent', count: 0 }, minorGridlines: { color: 'transparent', count: 0 }, baselineColor: 'transparent', viewWindowMode: 'explicit', viewWindow: args.valueWindow },
     tooltip: { trigger: 'focus' }, interpolateNulls: false,
     annotations: { alwaysOutside: true, textStyle: { color: '#111827', fontSize: 9 }, stem: { color: 'transparent', length: 10 } },
+    // Explicit series colors below are the source of truth. Keep this palette aligned
+    // so Google Charts also gets the correct defaults before per-series overrides.
     colors: ['transparent', VALUE_RANGE_CHART_COLORS.nav, VALUE_RANGE_CHART_COLORS.nav, VALUE_RANGE_CHART_COLORS.dcf, VALUE_RANGE_CHART_COLORS.combinedTarget, '#111111', '#111111', '#111111', '#111111'],
     seriesType: 'line',
     series: {
