@@ -30,12 +30,14 @@ export type Lista2CfDcfMetrics = {
 type Input = {
   fcfUSD_total: Array<number | null>;
   masterN: number;
+  /** Future valuation anchor. Legacy name retained for API compatibility. */
   productionStartPeriod: number | null;
   discountRate: number;
   shares_post_financing: number | null;
   fx_USD_to_TargetCurrency: number | null;
   npvToday_USD: number | null;
   netCash_t0_post_TargetCurrency?: number | null;
+  /** Audit-only CAPEX schedule. FCFF already contains CAPEX. */
   capexUSD_total?: Array<number | null>;
   initialCapexStartPeriod?: number;
 };
@@ -133,14 +135,14 @@ export function computeLista2CfDcfMetrics(input: Input): {
   }
 
   if (!Number.isInteger(input.productionStartPeriod)) {
-    warnings.push('Lista2 CF+DCF skipped: productionStartPeriod is missing');
+    warnings.push('Lista2 CF+DCF skipped: valuation anchor period is missing');
     return { metrics: nullMetrics, warnings, errors };
   }
 
   const tp = input.productionStartPeriod as number;
 
   if (tp < 0 || tp > input.masterN) {
-    errors.push(`Lista2 CF+DCF failed: productionStartPeriod ${tp} is outside [0, ${input.masterN}]`);
+    errors.push(`Lista2 CF+DCF failed: valuation anchor period ${tp} is outside [0, ${input.masterN}]`);
     return { metrics: nullMetrics, warnings, errors };
   }
 
@@ -192,18 +194,21 @@ export function computeLista2CfDcfMetrics(input: Input): {
   const DCF_prodStart_exCapex_perShare_TargetCurrency = toTarget(DCF_prodStart_exCapex_perShare_USD, fx);
   const DCF_prodStart_present_TargetCurrency = toTarget(dcfProdStart_present, fx);
   const DCF_prodStart_present_perShare_TargetCurrency = toTarget(DCF_prodStart_present_perShare_USD, fx);
+
+  // Initial/build CAPEX is retained strictly as an audit quantity. The canonical
+  // FCFF series already deducts CAPEX in the periods where it is spent. At a
+  // future valuation date, any CAPEX before that date is sunk and must not be
+  // deducted again from the remaining-enterprise-value DCF.
   const initialCapexStartPeriod = Number.isInteger(input.initialCapexStartPeriod)
     ? input.initialCapexStartPeriod as number
     : 0;
   const initialCapexUSD = deriveInitialCapexUSD(input.capexUSD_total, initialCapexStartPeriod, tp);
-  if (initialCapexUSD === null) {
-    warnings.push('Lista2 CF+DCF NAV prod-start metrics set to null: missing capexUSD_total before tp');
+  if (initialCapexUSD === null && Array.isArray(input.capexUSD_total)) {
+    warnings.push('Lista2 CF+DCF incremental CAPEX audit unavailable: missing/non-finite capexUSD_total before valuation anchor');
   }
-  const NPV_prodStart_USD =
-    dcfProdStart_exCapex !== null && initialCapexUSD !== null
-      ? dcfProdStart_exCapex - initialCapexUSD
-      : null;
-  const NPV_prodStart_TargetCurrency = toTarget(NPV_prodStart_USD, fx);
+
+  const NPV_prodStart_USD = dcfProdStart_exCapex;
+  const NPV_prodStart_TargetCurrency = DCF_prodStart_exCapex_TargetCurrency;
   const netCash_t0_post_TargetCurrency =
     input.netCash_t0_post_TargetCurrency !== null
     && input.netCash_t0_post_TargetCurrency !== undefined
