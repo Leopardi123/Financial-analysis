@@ -8,7 +8,7 @@ import ScreeningDashboard from "../components/ScreeningDashboard";
 import MacroRegimeValidationLab from "../components/MacroRegimeValidationLab";
 import ErrorBoundary from "../components/ErrorBoundary";
 import PortfolioDashboardModule from "../components/PortfolioDashboardModule";
-import ProducerCompareDashboard from "../components/ProducerCompareDashboard";
+import CompareStocksDashboard from "../components/CompareStocksDashboard";
 import "../styles/dashboard.css";
 
 export default function Dashboard() {
@@ -100,10 +100,10 @@ export default function Dashboard() {
         <Section
           id="compare"
           title="COMPARE STOCKS"
-          description="Producer Model: jämför framtida produktion, normaliserad kassagenerering och marknadsvärdering på samma prisdeck."
+          description="Jämför Producer och Pre revenue med samma kanoniska bolags- och projektmotorer."
           background="#bfcdcf"
         >
-          <ProducerCompareDashboard />
+          <CompareStocksDashboard />
         </Section>
       </main>
     </div>
