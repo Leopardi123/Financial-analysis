@@ -77,7 +77,6 @@ function normalizeStringMap(value: unknown): Record<string, string> {
   return out;
 }
 
-
 function normalizeQtyUnitMap(value: unknown): Record<string, QtyUnit> {
   const raw = asRecord(value);
   const out: Record<string, QtyUnit> = {};
@@ -147,6 +146,12 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
     : DEFAULT_MASTER_N;
   const seriesLength = masterN + 1;
   const productionStartPeriod = Number.isInteger(rootTime.productionStartPeriod) ? rootTime.productionStartPeriod as number : 0;
+  const commercialProductionPeriod = Number.isInteger(rootTime.commercialProductionPeriod)
+    ? rootTime.commercialProductionPeriod as number
+    : productionStartPeriod;
+  const valuationMilestonePeriod = Number.isInteger(rootTime.valuationMilestonePeriod)
+    ? rootTime.valuationMilestonePeriod as number
+    : commercialProductionPeriod;
   const productionStartYear = Number.isInteger(rootTime.productionStartYear)
     ? rootTime.productionStartYear as number
     : (new Date().getUTCFullYear() + productionStartPeriod);
@@ -182,20 +187,28 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
       _description_masterN: 'Total number of modeled periods minus 1. All aligned arrays are indexed t=0..masterN and must have length masterN+1.',
       _example_masterN: 15,
       productionStartPeriod,
-      _description_productionStartPeriod: '0-based index of the first production period. t=0 is the first model period. The array element at index productionStartPeriod is the first production year.',
+      _description_productionStartPeriod: '0-based index of first physical production. Commissioning output counts as production. This field remains the production-driver alignment anchor.',
       _example_productionStartPeriod: 2,
-      _description_productionStartPeriod_example: 'Example: if productionStartPeriod = 2, then t=0 is the first model period, t=1 is the second model period, and t=2 is the first production period. In an aligned array like capexUSD, capexUSD[2] belongs to the first production year.',
-      _description_timeseries_alignment: 'All time-series arrays use the same 0-based period index t=0..masterN. The value at index productionStartPeriod is the first production period in all aligned arrays.',
+      _description_productionStartPeriod_example: 'Example: if productionStartPeriod = 2, then t=2 is the first period with physical production, even if commercial production is declared later.',
+      commercialProductionPeriod,
+      _description_commercialProductionPeriod: '0-based index of declared commercial production. Defaults to productionStartPeriod for backward compatibility when no separate commissioning/ramp period is modeled.',
+      _example_commercialProductionPeriod: 2,
+      valuationMilestonePeriod,
+      _description_valuationMilestonePeriod: '0-based future valuation/target-price anchor. Defaults to commercialProductionPeriod, then productionStartPeriod. This milestone does not change the physical production alignment.',
+      _example_valuationMilestonePeriod: 2,
+      _description_timeseries_alignment: 'All time-series arrays use the same 0-based period index t=0..masterN. productionStartPeriod is the first physical production period; commercialProductionPeriod and valuationMilestonePeriod are separate milestones on that same axis.',
       _example_timeseries_alignment: {
         productionStartPeriod: 2,
+        commercialProductionPeriod: 3,
+        valuationMilestonePeriod: 3,
         capexUSD: [61.54, 159.11, 0, 5.75, 32.05, 0, 23.05, 5.38, 0, 35.72, 40.25, 0, 0, 0, 0.58, 0],
         interpretation: [
           'capexUSD[0] = pre-production / construction period',
           'capexUSD[1] = pre-production / construction period',
-          'capexUSD[2] = first production period',
-          'capexUSD[3] = second production period',
+          'capexUSD[2] = first physical production / commissioning period',
+          'capexUSD[3] = commercial-production and valuation milestone in this example',
         ],
-        note: 'Production starts at capexUSD[2] (index 2), not capexUSD[1].',
+        note: 'Do not move first physical production to the commercial-production period. Keep the report cash-flow periods intact and place the milestones on the same axis.',
       },
       productionStartYear,
       _description_productionStartYear: 'Calendar year at index productionStartPeriod. Derived calendar year per period is year(t) = productionStartYear + (t - productionStartPeriod).',
@@ -389,6 +402,8 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     time: {
       masterN,
       productionStartPeriod: 2,
+      commercialProductionPeriod: 2,
+      valuationMilestonePeriod: 2,
       productionStartYear: new Date().getUTCFullYear() + 2,
     },
     economics: { taxRate: 0 },
