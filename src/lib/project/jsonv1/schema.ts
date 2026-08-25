@@ -18,6 +18,10 @@ export type ProjectJsonV1 = {
     masterN: number;
     productionStartPeriod: number;
     productionStartYear: number;
+    /** Optional 0-based period for declared commercial production. Defaults to productionStartPeriod when omitted. */
+    commercialProductionPeriod?: number | null;
+    /** Optional 0-based period used as the future valuation/target-price milestone. Defaults to commercialProductionPeriod, then productionStartPeriod. */
+    valuationMilestonePeriod?: number | null;
   };
 
   economics: {
