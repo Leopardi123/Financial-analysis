@@ -23,7 +23,7 @@ test('stacked range geometry stays positive when NAV is above DCF', () => {
   assert.equal(row[4], 8, 'economic High boundary remains DCF');
 });
 
-test('NAV and DCF remain visually identifiable when their values overlap', () => {
+test('DCF and NAV are peer boundary lines while the spread band owns the green color', () => {
   const options = buildValueRangeChartOptions({
     ticks: [],
     yearMin: 2026,
@@ -32,25 +32,40 @@ test('NAV and DCF remain visually identifiable when their values overlap', () =>
   });
   const series = options.series as Record<number, Record<string, unknown>>;
 
-  assert.equal(series[2].color, VALUE_RANGE_CHART_COLORS.nav);
-  assert.equal(series[3].color, VALUE_RANGE_CHART_COLORS.dcf);
-  assert.ok((series[2].lineWidth as number) > (series[3].lineWidth as number), 'NAV underlay is wider than DCF');
+  assert.equal(series[1].color, VALUE_RANGE_CHART_COLORS.rangeBand);
+  assert.equal(series[2].color, VALUE_RANGE_CHART_COLORS.boundary);
+  assert.equal(series[3].color, VALUE_RANGE_CHART_COLORS.boundary);
+  assert.equal(series[2].lineWidth, series[3].lineWidth);
 });
 
-test('peak markers are distinct stars and remain visible if peaks coincide', () => {
-  const options = buildValueRangeChartOptions({
-    ticks: [],
-    yearMin: 2026,
-    yearMax: 2040,
-    valueWindow: { min: 0, max: 30 },
-  });
-  const series = options.series as Record<number, Record<string, unknown>>;
+test('legend focus emphasizes only the selected DCF or NAV boundary without changing economics', () => {
+  const navFocus = buildValueRangeChartOptions({
+    ticks: [], yearMin: 2026, yearMax: 2040, valueWindow: { min: 0, max: 30 }, focusSeries: 'nav',
+  }).series as Record<number, Record<string, unknown>>;
+  const dcfFocus = buildValueRangeChartOptions({
+    ticks: [], yearMin: 2026, yearMax: 2040, valueWindow: { min: 0, max: 30 }, focusSeries: 'dcf',
+  }).series as Record<number, Record<string, unknown>>;
 
-  assert.equal(series[9].pointShape, 'star');
-  assert.equal(series[10].pointShape, 'star');
-  assert.equal(series[9].color, VALUE_RANGE_CHART_COLORS.nav);
-  assert.equal(series[10].color, VALUE_RANGE_CHART_COLORS.dcf);
-  assert.ok((series[9].pointSize as number) > (series[10].pointSize as number), 'NAV star underlays the DCF star');
+  assert.ok((navFocus[2].lineWidth as number) > (navFocus[3].lineWidth as number));
+  assert.ok((dcfFocus[3].lineWidth as number) > (dcfFocus[2].lineWidth as number));
+  assert.equal(navFocus[2].color, navFocus[3].color);
+  assert.equal(dcfFocus[2].color, dcfFocus[3].color);
+});
+
+test('peak markers remain peer stars and follow legend focus emphasis', () => {
+  const neutral = buildValueRangeChartOptions({
+    ticks: [], yearMin: 2026, yearMax: 2040, valueWindow: { min: 0, max: 30 },
+  }).series as Record<number, Record<string, unknown>>;
+  const navFocus = buildValueRangeChartOptions({
+    ticks: [], yearMin: 2026, yearMax: 2040, valueWindow: { min: 0, max: 30 }, focusSeries: 'nav',
+  }).series as Record<number, Record<string, unknown>>;
+
+  assert.equal(neutral[9].pointShape, 'star');
+  assert.equal(neutral[10].pointShape, 'star');
+  assert.equal(neutral[9].color, VALUE_RANGE_CHART_COLORS.boundary);
+  assert.equal(neutral[10].color, VALUE_RANGE_CHART_COLORS.boundary);
+  assert.equal(neutral[9].pointSize, neutral[10].pointSize);
+  assert.ok((navFocus[9].pointSize as number) > (navFocus[10].pointSize as number));
 });
 
 function minimalView(): ProjectViewMetrics {
