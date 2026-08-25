@@ -34,8 +34,10 @@ export function buildValueRangeChartOptions(args: {
       6: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       7: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
       8: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
-      9: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
-      10: { type: 'scatter', pointShape: 'circle', pointSize: 7, lineWidth: 0, visibleInLegend: false },
+      // Peak markers are intentionally visually distinct from current/start markers.
+      // The vertical reference line remains tied to the DCF peak in ValueRangeChart.
+      9: { type: 'scatter', pointShape: 'star', pointSize: 9, color: VALUE_RANGE_CHART_COLORS.nav, lineWidth: 0, visibleInLegend: false },
+      10: { type: 'scatter', pointShape: 'star', pointSize: 9, color: VALUE_RANGE_CHART_COLORS.dcf, lineWidth: 0, visibleInLegend: false },
       // Google Charts rejects CSS rgba() colors. This is #dc2626 blended at 25%
       // over the chart's fixed #e0e9ce background, preserving the requested look.
       11: { type: 'line', color: VALUE_RANGE_CHART_COLORS.staticMultiple, lineWidth: 0.62, pointSize: 0, visibleInLegend: false },
