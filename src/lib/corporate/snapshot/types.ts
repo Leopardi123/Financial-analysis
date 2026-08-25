@@ -225,6 +225,17 @@ export type CorporateSnapshot = {
       value_low: number | null;
       value_mid_if_any: number | null;
       nullReasonIfAny: string | null;
+      lista2Metrics?: {
+        DCF_prodStart_exCapex_TargetCurrency: number | null;
+        DCF_prodStart_exCapex_perShare_TargetCurrency: number | null;
+        DCF_prodStart_present_TargetCurrency: number | null;
+        DCF_prodStart_present_perShare_TargetCurrency: number | null;
+        NPV_prodStart_TargetCurrency: number | null;
+        NPV_prodStart_perShare_TargetCurrency: number | null;
+        NAV_prodStart_TargetCurrency: number | null;
+        NAV_prodStart_perShare_TargetCurrency: number | null;
+        InitialCAPEX_incremental_TargetCurrency: number | null;
+      };
     }>;
   };
 
