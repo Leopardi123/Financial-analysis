@@ -75,7 +75,7 @@ test('Corporate NAV start scalar yields to the existing per-milestone NAV render
     debtTarget: 0,
     sharesCurrent: 100,
     sharesPf: 100,
-  } as const;
+  };
 
   const corporate = withCanonicalViewMetrics(minimalView(), buildValuationTimeline({ scope: 'corporate', ...common }));
   const project = withCanonicalViewMetrics(minimalView(), buildValuationTimeline({ scope: 'project', ...common }));
