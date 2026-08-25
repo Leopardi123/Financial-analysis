@@ -114,6 +114,50 @@ function rewriteCorporateTimeSeries(snapshot: Record<string, unknown>, timeline:
   };
 }
 
+function rewriteQualityMultipleTimeSeries(snapshot: Record<string, unknown>, timeline: ValuationTimeline): void {
+  const quality = record(snapshot.corporateQualityMultipleTimeSeries);
+  if (!quality || !Array.isArray(quality.rows)) return;
+  const timelineByYear = new Map(timeline.periods.map((period) => [period.calendarYear, period]));
+
+  const rewriteBasis = (rawBasis: unknown, year: number): Record<string, unknown> | null => {
+    const basis = record(rawBasis);
+    if (!basis) return null;
+    const period = timelineByYear.get(year) ?? null;
+    const bridge = (suffix: 'Low' | 'Mid' | 'High') => {
+      const enterprise = basis[`enterpriseValue${suffix}Target`];
+      const equity = finite(enterprise) && period?.netCashTarget !== null && period?.netCashTarget !== undefined
+        ? enterprise + period.netCashTarget
+        : null;
+      const perShare = equity !== null && period?.sharesPf !== null && period?.sharesPf !== undefined && period.sharesPf > 0
+        ? equity / period.sharesPf
+        : null;
+      return { equity, perShare };
+    };
+    const low = bridge('Low');
+    const mid = bridge('Mid');
+    const high = bridge('High');
+    return {
+      ...basis,
+      equityValueLowTarget: low.equity,
+      equityValueMidTarget: mid.equity,
+      equityValueHighTarget: high.equity,
+      valuePerShareLow: low.perShare,
+      valuePerShareMid: mid.perShare,
+      valuePerShareHigh: high.perShare,
+    };
+  };
+
+  quality.rows = quality.rows.map((rawRow) => {
+    const row = record(rawRow);
+    if (!row || !finite(row.calendarYear)) return rawRow;
+    return {
+      ...row,
+      annualBasis: rewriteBasis(row.annualBasis, row.calendarYear),
+      forwardAverageBasis: rewriteBasis(row.forwardAverageBasis, row.calendarYear),
+    };
+  });
+}
+
 function rewriteProjectChartFlows(snapshot: Record<string, unknown>, timeline: ValuationTimeline): void {
   const project = record(snapshot.project);
   if (!project) return;
@@ -300,6 +344,7 @@ export async function runCorporateSnapshotPipeline(args: {
   );
 
   rewriteCorporateTimeSeries(snapshot, timeline);
+  rewriteQualityMultipleTimeSeries(snapshot, timeline);
   const corporateSeries = record(snapshot.corporateValuationTimeSeries);
   if (corporateSeries) {
     corporateSeries.projectMarkers = milestones.map((project) => ({
@@ -312,6 +357,25 @@ export async function runCorporateSnapshotPipeline(args: {
   }
   rewriteProjectChartFlows(snapshot, timeline);
   rewriteLegacyModeledTimeline(snapshot, timeline, milestones, delay);
+
+  // The base snapshot still contains legacy diagnostic identities from the old
+  // future-NPV definition (DCF-NPV = incremental CAPEX). Those are invalid once
+  // future valuation is defined as the remaining FCFF tail, so replace them with
+  // the canonical identities used by this finalizer.
+  base.diagnostics.warnings = base.diagnostics.warnings.filter(
+    (warning) => !warning.startsWith('Corporate prod-start identity fail year='),
+  );
+  if (start) {
+    const tolerance = 1e-8 * Math.max(1, Math.abs(start.dcfAtPeriodTarget ?? 0), Math.abs(start.navAtPeriodTarget ?? 0));
+    if (start.dcfAtPeriodTarget !== null && start.npvAtPeriodTarget !== null
+      && Math.abs(start.dcfAtPeriodTarget - start.npvAtPeriodTarget) > tolerance) {
+      base.diagnostics.warnings.push(`Canonical milestone identity fail year=${start.calendarYear}: DCF != NPV.`);
+    }
+    if (start.navAtPeriodTarget !== null && start.npvAtPeriodTarget !== null && start.netCashTarget !== null
+      && Math.abs(start.navAtPeriodTarget - (start.npvAtPeriodTarget + start.netCashTarget)) > tolerance) {
+      base.diagnostics.warnings.push(`Canonical milestone identity fail year=${start.calendarYear}: NAV != NPV + net cash.`);
+    }
+  }
 
   base.diagnostics.warnings.push(...balanceBridge.diagnostics.warnings);
   base.diagnostics.warnings.push(
