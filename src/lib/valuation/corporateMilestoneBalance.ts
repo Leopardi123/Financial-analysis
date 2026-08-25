@@ -22,12 +22,18 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
  *
  * Important contracts:
  * - Project FCFF and the waterfall remain the economic/financing source of truth.
- * - Cash that was deliberately excluded from the waterfall by cash-use settings
- *   remains on the balance sheet and is added back to each future closing-cash row.
- * - Debt is current debt plus cumulative modeled debt additions. Debt amortization
- *   is not invented because the current waterfall does not model it.
- * - Shares use the waterfall's cumulative canonical share count directly.
- * - Once a waterfall row is NOT_COMPUTABLE, future balance points fail closed.
+ * - A valuation for year t is a beginning-of-period value because canonical
+ *   DCF[t] includes FCFF[t]. The balance paired with it must therefore be the
+ *   opening balance before the current year's FCFF/financing, never closingCash[t].
+ * - Operating cash generated in prior years may still reduce later funding needs
+ *   inside the waterfall, but accumulated retained earnings are not capitalized
+ *   into future NAV. Future NAV cash is normalized to the applicable minimum cash
+ *   reserve plus cash deliberately excluded from the financing waterfall.
+ * - Debt is current debt plus modeled debt additions from completed prior periods.
+ *   Debt amortization is not invented because the current waterfall does not model it.
+ * - Shares use the cumulative canonical share count from completed prior periods.
+ * - A NOT_COMPUTABLE row does not invalidate the known opening balance for that
+ *   row, but future balances fail closed after the row.
  */
 export function buildCorporateMilestoneBalances(args: {
   years: number[];
@@ -60,97 +66,117 @@ export function buildCorporateMilestoneBalances(args: {
     && initialWaterfallCashUSD !== null
     && initialWaterfallCashUSD > reportedCashUSD + 1e-8 * Math.max(1, reportedCashUSD)
   ) {
-    warnings.push('Waterfall initial cash exceeds reported cash; future NAV uses the waterfall closing-cash path without inventing additional retained cash.');
+    warnings.push('Waterfall initial cash exceeds reported cash; normalized future NAV cash does not invent additional retained cash.');
   }
 
-  const rows = args.cashWaterfall?.rows ?? [];
-  const firstWaterfallYear = rows
-    .map((row) => row.year)
-    .filter((year): year is number => Number.isInteger(year))
-    .sort((a, b) => a - b)[0] ?? null;
+  const rows = [...(args.cashWaterfall?.rows ?? [])]
+    .filter((row) => Number.isInteger(row.year))
+    .sort((left, right) => (left.year as number) - (right.year as number) || left.period - right.period);
+  const firstWaterfallYear = rows.length > 0 ? rows[0].year as number : null;
+
+  const initialShares = finite(args.todaySharesPf) && args.todaySharesPf > 0
+    ? args.todaySharesPf
+    : (finite(args.currentShares) && args.currentShares > 0 ? args.currentShares : null);
+  const initialCumulativeNewShares = finite(args.todayNewSharesCumulative)
+    ? args.todayNewSharesCumulative
+    : 0;
 
   let cumulativeDebtAddedUSD = 0;
-  let balanceComputable = fx !== null && finite(args.currentDebtTarget);
-  const stateByYear = new Map<number, CorporateMilestoneBalance>();
+  let openingShares = initialShares;
+  let openingCumulativeNewShares: number | null = initialCumulativeNewShares;
+  let futureComputable = fx !== null && finite(args.currentDebtTarget) && retainedCashOutsideWaterfallUSD !== null;
+  let invalidAfterYear: number | null = null;
+
+  const openingStateByYear = new Map<number, CorporateMilestoneBalance>();
+  const postStateByYear = new Map<number, CorporateMilestoneBalance>();
+
+  const normalizedCashTarget = (reserveUSD: unknown): number | null =>
+    futureComputable && fx !== null && retainedCashOutsideWaterfallUSD !== null && finite(reserveUSD)
+      ? (retainedCashOutsideWaterfallUSD + Math.max(0, reserveUSD)) * fx
+      : null;
 
   for (const row of rows) {
-    if (!Number.isInteger(row.year) || (row.year as number) < args.valuationYear) continue;
     const year = row.year as number;
+    if (year < args.valuationYear) continue;
 
-    if (row.status !== 'COMPUTABLE' || !finite(row.closingCash) || !finite(row.debtAdded)) {
-      balanceComputable = false;
-    }
-    if (balanceComputable) cumulativeDebtAddedUSD += row.debtAdded as number;
-
-    const cashTarget = balanceComputable && fx !== null && retainedCashOutsideWaterfallUSD !== null
-      ? ((row.closingCash as number) + retainedCashOutsideWaterfallUSD) * fx
-      : null;
-    const debtTarget = balanceComputable && fx !== null && finite(args.currentDebtTarget)
-      ? args.currentDebtTarget + cumulativeDebtAddedUSD * fx
-      : null;
-    const sharesPf = balanceComputable && finite(row.cumulativeCanonicalShares) && row.cumulativeCanonicalShares > 0
-      ? row.cumulativeCanonicalShares
-      : null;
-    const cumulativeNewShares = balanceComputable && finite(row.cumulativeNewShares)
-      ? row.cumulativeNewShares
-      : null;
-
-    if (!finite(row.cumulativeCanonicalShares) && balanceComputable) {
-      warnings.push(`Future shares are not computable for ${year}; future per-share valuation fails closed from that row.`);
-    }
-
-    stateByYear.set(year, {
+    const openingState: CorporateMilestoneBalance = {
       year,
-      cashTarget,
-      debtTarget,
-      sharesPf,
-      cumulativeNewShares,
+      cashTarget: normalizedCashTarget(row.minimumCashReserve),
+      debtTarget: futureComputable && fx !== null && finite(args.currentDebtTarget)
+        ? args.currentDebtTarget + cumulativeDebtAddedUSD * fx
+        : null,
+      sharesPf: futureComputable && finite(openingShares) && openingShares > 0 ? openingShares : null,
+      cumulativeNewShares: futureComputable && finite(openingCumulativeNewShares) ? openingCumulativeNewShares : null,
+    };
+    openingStateByYear.set(year, openingState);
+
+    const rowComputable = futureComputable
+      && row.status === 'COMPUTABLE'
+      && finite(row.debtAdded)
+      && finite(row.cumulativeCanonicalShares)
+      && row.cumulativeCanonicalShares > 0
+      && finite(row.cumulativeNewShares)
+      && finite(row.minimumCashReserve);
+
+    if (!rowComputable) {
+      if (invalidAfterYear === null) invalidAfterYear = year;
+      futureComputable = false;
+      if (!finite(row.cumulativeCanonicalShares) || row.cumulativeCanonicalShares <= 0) {
+        warnings.push(`Future shares are not computable after ${year}; future per-share valuation fails closed after that row.`);
+      }
+      continue;
+    }
+
+    cumulativeDebtAddedUSD += row.debtAdded as number;
+    openingShares = row.cumulativeCanonicalShares;
+    openingCumulativeNewShares = row.cumulativeNewShares;
+
+    postStateByYear.set(year, {
+      year,
+      cashTarget: normalizedCashTarget(row.minimumCashReserve),
+      debtTarget: fx !== null && finite(args.currentDebtTarget)
+        ? args.currentDebtTarget + cumulativeDebtAddedUSD * fx
+        : null,
+      sharesPf: openingShares,
+      cumulativeNewShares: openingCumulativeNewShares,
     });
   }
 
-  let lastState: CorporateMilestoneBalance | null = null;
+  const currentBalance = (year: number): CorporateMilestoneBalance => ({
+    year,
+    cashTarget: finite(args.reportedCashTarget) ? args.reportedCashTarget : null,
+    debtTarget: finite(args.currentDebtTarget) ? args.currentDebtTarget : null,
+    sharesPf: initialShares,
+    cumulativeNewShares: initialCumulativeNewShares,
+  });
+
+  const latestPostBefore = (year: number): CorporateMilestoneBalance | null => {
+    let latest: CorporateMilestoneBalance | null = null;
+    for (const [sourceYear, state] of postStateByYear.entries()) {
+      if (sourceYear >= year) continue;
+      if (latest === null || sourceYear > latest.year) latest = state;
+    }
+    return latest === null ? null : { ...latest, year };
+  };
+
   const balances = args.years.map((year): CorporateMilestoneBalance => {
-    if (year <= args.valuationYear) {
-      return {
-        year,
-        cashTarget: finite(args.reportedCashTarget) ? args.reportedCashTarget : null,
-        debtTarget: finite(args.currentDebtTarget) ? args.currentDebtTarget : null,
-        sharesPf: finite(args.todaySharesPf) && args.todaySharesPf > 0
-          ? args.todaySharesPf
-          : (finite(args.currentShares) && args.currentShares > 0 ? args.currentShares : null),
-        cumulativeNewShares: finite(args.todayNewSharesCumulative) ? args.todayNewSharesCumulative : 0,
-      };
+    if (year <= args.valuationYear) return currentBalance(year);
+
+    if (firstWaterfallYear === null || year < firstWaterfallYear) {
+      return currentBalance(year);
     }
 
-    const exact = stateByYear.get(year) ?? null;
-    if (exact) lastState = exact;
+    const exactOpening = openingStateByYear.get(year) ?? null;
+    if (exactOpening) return exactOpening;
 
-    // A future year before the first modeled waterfall row has no intervening
-    // project cash-flow activity in the current model, so today's balance carries.
-    if (firstWaterfallYear !== null && year < firstWaterfallYear) {
-      return {
-        year,
-        cashTarget: finite(args.reportedCashTarget) ? args.reportedCashTarget : null,
-        debtTarget: finite(args.currentDebtTarget) ? args.currentDebtTarget : null,
-        sharesPf: finite(args.todaySharesPf) && args.todaySharesPf > 0
-          ? args.todaySharesPf
-          : (finite(args.currentShares) && args.currentShares > 0 ? args.currentShares : null),
-        cumulativeNewShares: finite(args.todayNewSharesCumulative) ? args.todayNewSharesCumulative : 0,
-      };
+    if (invalidAfterYear !== null && year > invalidAfterYear) {
+      return { year, cashTarget: null, debtTarget: null, sharesPf: null, cumulativeNewShares: null };
     }
 
-    if (exact) return exact;
-    if (lastState && lastState.year < year) return { ...lastState, year };
+    const carried = latestPostBefore(year);
+    if (carried) return carried;
 
-    // Once the model should have entered the waterfall horizon, missing data is
-    // not silently replaced with today's balance sheet.
-    return {
-      year,
-      cashTarget: null,
-      debtTarget: null,
-      sharesPf: null,
-      cumulativeNewShares: null,
-    };
+    return { year, cashTarget: null, debtTarget: null, sharesPf: null, cumulativeNewShares: null };
   });
 
   return {
