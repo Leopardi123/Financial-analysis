@@ -48,19 +48,28 @@ export function buildValueRangeChartRow(input: {
   productionStartLowValue?: number | null;
   productionStartHighValue?: number | null;
 }) {
-  const orderedLow = input.low;
-  const orderedHigh = input.high;
+  // `low` and `high` are economic identities (NAV and DCF), not guaranteed
+  // geometric ordering. The stacked area must therefore use min/max geometry
+  // while the boundary columns preserve the original NAV/DCF identities.
+  const economicLow = input.low;
+  const economicHigh = input.high;
+  const geometricBase = finite(economicLow) && finite(economicHigh)
+    ? Math.min(economicLow, economicHigh)
+    : null;
+  const geometricBand = finite(economicLow) && finite(economicHigh)
+    ? Math.abs(economicHigh - economicLow)
+    : null;
   const annotation = (value: number | null) => value === null ? null : `      ${input.format(value)}`;
   const current = input.annotateCurrent ? input.currentPrice : null;
   return [
-    input.year, orderedLow, orderedLow !== null && orderedHigh !== null ? orderedHigh - orderedLow : null, orderedLow, orderedHigh,
+    input.year, geometricBase, geometricBand, economicLow, economicHigh,
     current, current === null ? null : input.currentPriceAnnotation === undefined ? annotation(current) : input.currentPriceAnnotation,
-    input.annotateCurrent ? input.currentLowValue ?? orderedLow : null, input.annotateCurrent ? annotation(input.currentLowValue ?? orderedLow) : null,
-    input.annotateCurrent ? input.currentHighValue ?? orderedHigh : null, input.annotateCurrent ? annotation(input.currentHighValue ?? orderedHigh) : null,
+    input.annotateCurrent ? input.currentLowValue ?? economicLow : null, input.annotateCurrent ? annotation(input.currentLowValue ?? economicLow) : null,
+    input.annotateCurrent ? input.currentHighValue ?? economicHigh : null, input.annotateCurrent ? annotation(input.currentHighValue ?? economicHigh) : null,
     input.annotateProductionStart ? input.productionStartLowValue ?? input.low : null, input.annotateProductionStart ? input.productionStartLowAnnotation === undefined ? annotation(input.productionStartLowValue ?? input.low) : input.productionStartLowAnnotation : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null,
     input.annotateProductionStart ? input.productionStartHighValue ?? input.high : null, input.annotateProductionStart ? input.productionStartHighAnnotation === undefined ? annotation(input.productionStartHighValue ?? input.high) : input.productionStartHighAnnotation : null, input.annotateProductionStart ? input.productionStartTooltip ?? null : null,
-    (input.highlightPeakLow ?? input.highlightPeak) ? orderedLow : null, (input.highlightPeakLow ?? input.highlightPeak) ? annotation(orderedLow) : null, (input.highlightPeakLow ?? input.highlightPeak) ? input.peakTooltip ?? null : null,
-    (input.highlightPeakHigh ?? input.highlightPeak) ? orderedHigh : null, (input.highlightPeakHigh ?? input.highlightPeak) ? annotation(orderedHigh) : null, (input.highlightPeakHigh ?? input.highlightPeak) ? input.peakTooltip ?? null : null,
+    (input.highlightPeakLow ?? input.highlightPeak) ? economicLow : null, (input.highlightPeakLow ?? input.highlightPeak) ? annotation(economicLow) : null, (input.highlightPeakLow ?? input.highlightPeak) ? input.peakTooltip ?? null : null,
+    (input.highlightPeakHigh ?? input.highlightPeak) ? economicHigh : null, (input.highlightPeakHigh ?? input.highlightPeak) ? annotation(economicHigh) : null, (input.highlightPeakHigh ?? input.highlightPeak) ? input.peakTooltip ?? null : null,
   ];
 }
 
