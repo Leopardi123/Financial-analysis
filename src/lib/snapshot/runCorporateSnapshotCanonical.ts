@@ -17,7 +17,7 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
- type RawProject = { projectId: string; rawJson: Record<string, unknown> };
+type RawProject = { projectId: string; rawJson: Record<string, unknown> };
 
 type ResolvedProjectMilestone = {
   projectId: string;
@@ -349,7 +349,7 @@ export async function runCorporateSnapshotPipeline(args: {
     sharesPfByPeriod: balances.map((balance) => balance.sharesPf),
     newSharesCumulativeByPeriod: balances.map((balance) => balance.cumulativeNewShares),
     projectContributionsByPeriod: oldTimeline.periods.map((period) => period.projectContributions ?? []),
-    corporateAdjustmentsUSD: oldTimeline.periods.map((period) => period.corporateAdjustmentsUSD),
+    corporateAdjustmentsUSD: oldTimeline.periods.map((period) => period.corporateAdjustmentsUSD ?? null),
   });
 
   snapshot.canonicalValuationTimeline = timeline;
