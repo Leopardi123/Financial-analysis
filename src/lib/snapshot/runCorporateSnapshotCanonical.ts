@@ -1,0 +1,408 @@
+import { loadProjectsForSymbol } from '../api/loadProjectsForSymbol.ts';
+import { validateSnapshotRequest } from '../api/validateSnapshotRequest.ts';
+import { resolveProjectMilestonesV2 } from '../time/resolveProjectMilestones.ts';
+import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
+import {
+  buildValuationTimeline,
+  selectCanonicalValuationMetrics,
+  selectCorporateProjectStartMilestones,
+  type ValuationTimeline,
+} from '../valuation/canonicalValuationTimeline.ts';
+import {
+  runCorporateSnapshotPipeline as runBaseCorporateSnapshotPipeline,
+  type CorporateSnapshotRunResult,
+} from './runCorporateSnapshot.ts';
+
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const record = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+ type RawProject = { projectId: string; rawJson: Record<string, unknown> };
+
+type ResolvedProjectMilestone = {
+  projectId: string;
+  projectName: string | null;
+  firstProductionYear: number;
+  commercialProductionYear: number;
+  valuationMilestoneYear: number;
+  fdExtraShares: number;
+};
+
+type WaterfallRowLike = {
+  period: number;
+  year: number | null;
+  closingCash: number | null;
+  debtAdded: number | null;
+  newShares: number | null;
+};
+
+type FutureBalanceState = {
+  year: number;
+  cashTarget: number | null;
+  debtTarget: number | null;
+  sharesPf: number | null;
+  cumulativeNewShares: number | null;
+};
+
+function projectName(rawJson: Record<string, unknown>, fallback: string): string | null {
+  const meta = record(rawJson.meta);
+  return typeof meta?.projectName === 'string' && meta.projectName.trim().length > 0
+    ? meta.projectName
+    : fallback;
+}
+
+function resolveMilestone(project: RawProject): ResolvedProjectMilestone {
+  const time = record(project.rawJson.time);
+  if (!time) throw new Error(`[${project.projectId}] time is required for valuation milestones.`);
+  const axis = resolveV2TimeAxis({
+    masterN: time.masterN as number,
+    productionStartPeriod: time.productionStartPeriod as number,
+    productionStartYear: time.productionStartYear as number,
+  });
+  const milestones = resolveProjectMilestonesV2({
+    masterN: axis.masterN,
+    productionStartPeriod: axis.productionStartPeriod,
+    commercialProductionPeriod: time.commercialProductionPeriod as number | null | undefined,
+    valuationMilestonePeriod: time.valuationMilestonePeriod as number | null | undefined,
+  });
+  const equity = record(project.rawJson.equity);
+  const fdExtraShares = finite(equity?.fdExtraShares) && (equity?.fdExtraShares as number) > 0
+    ? equity?.fdExtraShares as number
+    : 0;
+  return {
+    projectId: project.projectId,
+    projectName: projectName(project.rawJson, project.projectId),
+    firstProductionYear: axis.yearsByPeriod[milestones.firstProductionPeriod],
+    commercialProductionYear: axis.yearsByPeriod[milestones.commercialProductionPeriod],
+    valuationMilestoneYear: axis.yearsByPeriod[milestones.valuationMilestonePeriod],
+    fdExtraShares,
+  };
+}
+
+async function loadRawProjects(input: ReturnType<typeof validateSnapshotRequest> extends { ok: true; value: infer T } ? T : never): Promise<RawProject[]> {
+  const value = input as unknown as { symbol?: string; projects: RawProject[] };
+  return typeof value.symbol === 'string' ? loadProjectsForSymbol(value.symbol) : value.projects;
+}
+
+function waterfallRows(snapshot: Record<string, unknown>): WaterfallRowLike[] {
+  const financing = record(snapshot.financing);
+  const waterfall = record(financing?.corporate_cash_waterfall);
+  const rows = Array.isArray(waterfall?.rows) ? waterfall?.rows : [];
+  return rows.flatMap((raw, index) => {
+    const row = record(raw);
+    if (!row) return [];
+    return [{
+      period: finite(row.period) ? row.period : index,
+      year: finite(row.year) ? row.year : null,
+      closingCash: finite(row.closingCash) ? row.closingCash : null,
+      debtAdded: finite(row.debtAdded) ? row.debtAdded : null,
+      newShares: finite(row.newShares) ? row.newShares : null,
+    }];
+  }).sort((left, right) => left.period - right.period);
+}
+
+function buildFutureBalanceStates(args: {
+  rows: WaterfallRowLike[];
+  valuationYear: number;
+  fx: number | null;
+  currentDebtTarget: number | null;
+  currentShares: number | null;
+  fdExtraShares: number;
+}): FutureBalanceState[] {
+  let cumulativeDebtUSD = 0;
+  let cumulativeNewShares = 0;
+  let debtComputable = args.currentDebtTarget !== null && args.fx !== null;
+  let sharesComputable = args.currentShares !== null;
+  let latestCashTarget: number | null = null;
+  const states: FutureBalanceState[] = [];
+
+  for (const row of args.rows) {
+    if (row.year === null || row.year < args.valuationYear) continue;
+
+    if (row.debtAdded === null) debtComputable = false;
+    else cumulativeDebtUSD += row.debtAdded;
+
+    if (row.newShares === null) sharesComputable = false;
+    else cumulativeNewShares += row.newShares;
+
+    latestCashTarget = row.closingCash !== null && args.fx !== null
+      ? row.closingCash * args.fx
+      : null;
+
+    const debtTarget = debtComputable && args.currentDebtTarget !== null && args.fx !== null
+      ? args.currentDebtTarget + cumulativeDebtUSD * args.fx
+      : null;
+    const sharesPf = sharesComputable && args.currentShares !== null
+      ? args.currentShares + cumulativeNewShares + args.fdExtraShares
+      : null;
+
+    states.push({
+      year: row.year,
+      cashTarget: latestCashTarget,
+      debtTarget,
+      sharesPf,
+      cumulativeNewShares: sharesComputable ? cumulativeNewShares : null,
+    });
+  }
+
+  return states;
+}
+
+function stateAtOrBefore(states: FutureBalanceState[], year: number): FutureBalanceState | null {
+  let latest: FutureBalanceState | null = null;
+  for (const state of states) {
+    if (state.year > year) break;
+    latest = state;
+  }
+  return latest;
+}
+
+function rewriteCorporateTimeSeries(snapshot: Record<string, unknown>, timeline: ValuationTimeline): void {
+  const current = record(snapshot.corporateValuationTimeSeries);
+  const currentRows = Array.isArray(current?.rows) ? current?.rows : [];
+  const currentByYear = new Map<number, Record<string, unknown>>(
+    currentRows.flatMap((raw) => {
+      const row = record(raw);
+      return row && finite(row.year) ? [[row.year, row] as const] : [];
+    }),
+  );
+
+  const rows = timeline.periods.map((period) => {
+    const old = currentByYear.get(period.calendarYear) ?? {};
+    const ev5x = finite(old.ev5xTarget) ? old.ev5xTarget : null;
+    const ev6x = finite(old.ev6xTarget) ? old.ev6xTarget : null;
+    const ev7x = finite(old.ev7xTarget) ? old.ev7xTarget : null;
+    const equityValuePerShare = (ev: number | null): number | null =>
+      ev !== null && period.netCashTarget !== null && period.sharesPf !== null && period.sharesPf > 0
+        ? (ev + period.netCashTarget) / period.sharesPf
+        : null;
+    return {
+      ...old,
+      period: period.periodIndex,
+      year: period.calendarYear,
+      dcfAbsolute: period.dcfPresentValueTodayTarget,
+      navAbsolute: period.navAtPeriodTarget,
+      npvAbsolute: period.npvAtPeriodTarget,
+      dcfPerShare: period.dcfPresentValueTodayPerShareTarget,
+      dcfExCapexAbsolute: period.dcfAtPeriodTarget,
+      dcfExCapexPerShare: period.dcfPerShareTarget,
+      navPerShare: period.navPerShareTarget,
+      npvPerShare: period.npvPerShareTarget,
+      sharesPf: period.sharesPf,
+      evEbitda5xPerShare: equityValuePerShare(ev5x),
+      evEbitda6xPerShare: equityValuePerShare(ev6x),
+      evEbitda7xPerShare: equityValuePerShare(ev7x),
+    };
+  });
+
+  snapshot.corporateValuationTimeSeries = {
+    ...(current ?? {}),
+    rows,
+  };
+}
+
+function rewriteProjectChartFlows(snapshot: Record<string, unknown>, timeline: ValuationTimeline): void {
+  const project = record(snapshot.project);
+  if (!project) return;
+  const existing = record(project.chartFlows);
+  project.chartFlows = {
+    ...(existing ?? {}),
+    dcfProdstartPresentPerShareSeries: timeline.periods.map((row) => row.dcfPresentValueTodayPerShareTarget),
+    navProdstartPerShareSeries: timeline.periods.map((row) => row.navPerShareTarget),
+    dcfProdstartExCapexPerShareSeries: timeline.periods.map((row) => row.dcfPerShareTarget),
+    navByPeriodPerShareSeries: timeline.periods.map((row) => row.navPerShareTarget),
+    yearsByPeriod: timeline.periods.map((row) => row.calendarYear),
+    productionStartPeriod: timeline.productionStartPeriod,
+    commercialProductionPeriod: timeline.commercialProductionPeriod,
+    valuationMilestonePeriod: timeline.valuationMilestonePeriod,
+  };
+}
+
+function rewriteLegacyModeledTimeline(snapshot: Record<string, unknown>, timeline: ValuationTimeline, projects: ResolvedProjectMilestone[], delay: number): void {
+  const markers = projects.flatMap((project) => {
+    const year = project.valuationMilestoneYear + delay;
+    const state = timeline.periods.find((period) => period.calendarYear === year);
+    if (!state) return [];
+    return [{
+      tp: state.periodIndex,
+      yearLabelUsed: String(year),
+      corporateTpIndexUsed: state.periodIndex,
+      fcfTailSumUSD: state.remainingUndiscountedFcffUSD,
+      value_high: state.dcfPerShareTarget,
+      value_low: state.navPerShareTarget,
+      value_mid_if_any: null,
+      nullReasonIfAny: state.dcfPerShareTarget === null || state.navPerShareTarget === null ? 'canonical valuation milestone not computable' : null,
+    }];
+  }).sort((left, right) => left.tp - right.tp);
+  snapshot.modeledValuationTimeline = {
+    tps: markers.map((marker) => marker.tp),
+    lastTp: markers.length ? markers[markers.length - 1].tp : null,
+    rangeEndTp: timeline.periods.length ? timeline.periods.length - 1 : null,
+    markers,
+  };
+}
+
+/**
+ * Canonical public snapshot entry point.
+ *
+ * The underlying project/corporate economics and financing waterfall are left
+ * untouched. This finalization layer only resolves distinct project milestones
+ * and rebuilds future valuation rows from remaining FCFF plus the periodized
+ * balance sheet produced by the existing waterfall.
+ */
+export async function runCorporateSnapshotPipeline(args: {
+  body: unknown;
+  refresh?: boolean;
+  debug?: boolean;
+}): Promise<CorporateSnapshotRunResult> {
+  const base = await runBaseCorporateSnapshotPipeline(args);
+  if (!base.ok) return base;
+
+  const validation = validateSnapshotRequest(args.body);
+  if (!validation.ok) return base;
+  const input = validation.value;
+  const rawProjects = await loadRawProjects(input as never);
+  const milestones = rawProjects.map(resolveMilestone);
+  if (milestones.length === 0) return base;
+
+  const snapshot = base.snapshot as unknown as Record<string, unknown>;
+  const oldTimeline = snapshot.canonicalValuationTimeline as ValuationTimeline | undefined;
+  if (!oldTimeline?.periods?.length) {
+    base.diagnostics.warnings.push('Canonical milestone finalization skipped: base canonical valuation timeline missing.');
+    return base;
+  }
+
+  const delay = (input.scenario.delayPeriods ?? 0)
+    + (typeof input.symbol !== 'string' && input.stressOptions?.tpPlus2 ? 2 : 0);
+  const years = oldTimeline.periods.map((period) => period.calendarYear);
+  const periodForYear = (year: number): number | null => {
+    const period = years.indexOf(year + delay);
+    return period >= 0 ? period : null;
+  };
+  const earliest = (values: number[]) => values.length ? Math.min(...values) : null;
+  const physicalYear = earliest(milestones.map((project) => project.firstProductionYear));
+  const commercialYear = earliest(milestones.map((project) => project.commercialProductionYear));
+  const valuationYear = earliest(milestones.map((project) => project.valuationMilestoneYear));
+  const physicalPeriod = physicalYear === null ? null : periodForYear(physicalYear);
+  const commercialPeriod = commercialYear === null ? null : periodForYear(commercialYear);
+  const valuationPeriod = valuationYear === null ? null : periodForYear(valuationYear);
+
+  if (valuationPeriod === null) {
+    base.diagnostics.warnings.push('Canonical milestone finalization skipped: valuation milestone falls outside the modeled calendar axis.');
+    return base;
+  }
+
+  const oldByYear = new Map(oldTimeline.periods.map((period) => [period.calendarYear, period]));
+  const oldToday = oldTimeline.periods[oldTimeline.todayPeriod] ?? null;
+  const fx = finite(snapshot.fx_USD_to_TargetCurrency) ? snapshot.fx_USD_to_TargetCurrency : null;
+  const currentDebtTarget = finite(input.balanceSheet?.debt_t0_TargetCurrency) ? input.balanceSheet?.debt_t0_TargetCurrency as number : null;
+  const currentShares = finite(input.market?.shares_current) ? input.market?.shares_current as number : null;
+  const totalFdExtraShares = milestones.reduce((sum, project) => sum + project.fdExtraShares, 0);
+  const futureStates = buildFutureBalanceStates({
+    rows: waterfallRows(snapshot),
+    valuationYear: input.valuationYear,
+    fx,
+    currentDebtTarget,
+    currentShares,
+    fdExtraShares: totalFdExtraShares,
+  });
+
+  const currentCashTarget = finite(input.balanceSheet?.cash_t0_TargetCurrency) ? input.balanceSheet?.cash_t0_TargetCurrency as number : null;
+  const futureFallbackShares = currentShares !== null ? currentShares + totalFdExtraShares : null;
+  const balanceForYear = (year: number) => {
+    if (year <= input.valuationYear) {
+      const old = oldByYear.get(year) ?? oldToday;
+      return {
+        cashTarget: old?.cashTarget ?? currentCashTarget,
+        debtTarget: old?.debtTarget ?? currentDebtTarget,
+        sharesPf: old?.sharesPf ?? futureFallbackShares,
+        cumulativeNewShares: old?.newSharesCumulative ?? 0,
+      };
+    }
+    const state = stateAtOrBefore(futureStates, year);
+    return {
+      cashTarget: state?.cashTarget ?? currentCashTarget,
+      debtTarget: state?.debtTarget ?? currentDebtTarget,
+      sharesPf: state?.sharesPf ?? futureFallbackShares,
+      cumulativeNewShares: state?.cumulativeNewShares ?? 0,
+    };
+  };
+  const balances = years.map(balanceForYear);
+
+  const timeline = buildValuationTimeline({
+    scope: oldTimeline.scope,
+    fcfUSD: oldTimeline.periods.map((period) => period.fcffUSD),
+    yearsByPeriod: years,
+    discountRate: finite(snapshot.discountRate) ? snapshot.discountRate : input.discountRate,
+    fxUSDToTarget: fx,
+    todayPeriod: oldTimeline.todayPeriod,
+    projectStartPeriod: oldTimeline.projectStartPeriod,
+    productionStartPeriod: physicalPeriod,
+    commercialProductionPeriod: commercialPeriod,
+    valuationMilestonePeriod: valuationPeriod,
+    cashTarget: oldToday?.cashTarget ?? currentCashTarget,
+    debtTarget: oldToday?.debtTarget ?? currentDebtTarget,
+    sharesCurrent: currentShares,
+    sharesPf: oldToday?.sharesPf ?? futureFallbackShares,
+    cashTargetByPeriod: balances.map((balance) => balance.cashTarget),
+    debtTargetByPeriod: balances.map((balance) => balance.debtTarget),
+    sharesPfByPeriod: balances.map((balance) => balance.sharesPf),
+    newSharesCumulativeByPeriod: balances.map((balance) => balance.cumulativeNewShares),
+    projectContributionsByPeriod: oldTimeline.periods.map((period) => period.projectContributions ?? []),
+    corporateAdjustmentsUSD: oldTimeline.periods.map((period) => period.corporateAdjustmentsUSD),
+  });
+
+  snapshot.canonicalValuationTimeline = timeline;
+  const canonical = selectCanonicalValuationMetrics(timeline);
+  const start = timeline.valuationMilestonePeriod === null ? null : timeline.periods[timeline.valuationMilestonePeriod] ?? null;
+
+  snapshot.DCF_prodStart_exCapex_USD = start?.dcfAtPeriodUSD ?? null;
+  snapshot.DCF_prodStart_exCapex_perShare_USD = start?.dcfAtPeriodUSD !== null && start?.sharesPf !== null && start?.sharesPf !== undefined && start.sharesPf > 0
+    ? (start.dcfAtPeriodUSD as number) / start.sharesPf
+    : null;
+  snapshot.DCF_prodStart_present_USD = start?.dcfPresentValueTodayUSD ?? null;
+  snapshot.DCF_prodStart_present_perShare_USD = start?.dcfPresentValueTodayUSD !== null && start?.sharesPf !== null && start?.sharesPf !== undefined && start.sharesPf > 0
+    ? (start.dcfPresentValueTodayUSD as number) / start.sharesPf
+    : null;
+  snapshot.DCF_prodStart_exCapex_TargetCurrency = canonical.dcfStart;
+  snapshot.DCF_prodStart_exCapex_perShare_TargetCurrency = canonical.dcfPerShareStart;
+  snapshot.DCF_prodStart_present_TargetCurrency = canonical.dcfStartPresentToday;
+  snapshot.DCF_prodStart_present_perShare_TargetCurrency = canonical.dcfPerShareStartPresentToday;
+  snapshot.NPV_prodStart_USD = start?.npvAtPeriodUSD ?? null;
+  snapshot.NPV_prodStart_TargetCurrency = canonical.npvStart;
+  snapshot.NPV_prodStart_perShare_TargetCurrency = canonical.npvPerShareStart;
+  snapshot.NAV_prodStart_TargetCurrency = canonical.navStart;
+  snapshot.NAV_prodStart_perShare_TargetCurrency = canonical.navPerShareStart;
+
+  snapshot.projectStartMilestones = selectCorporateProjectStartMilestones(
+    timeline,
+    milestones.map((project) => ({
+      projectId: project.projectId,
+      projectName: project.projectName,
+      productionStartYear: project.firstProductionYear + delay,
+      valuationMilestoneYear: project.valuationMilestoneYear + delay,
+    })),
+  );
+
+  rewriteCorporateTimeSeries(snapshot, timeline);
+  const corporateSeries = record(snapshot.corporateValuationTimeSeries);
+  if (corporateSeries) {
+    corporateSeries.projectMarkers = milestones.map((project) => ({
+      projectId: project.projectId,
+      projectName: project.projectName,
+      productionStartYear: project.firstProductionYear + delay,
+      commercialProductionYear: project.commercialProductionYear + delay,
+      valuationMilestoneYear: project.valuationMilestoneYear + delay,
+    }));
+  }
+  rewriteProjectChartFlows(snapshot, timeline);
+  rewriteLegacyModeledTimeline(snapshot, timeline, milestones, delay);
+
+  base.diagnostics.warnings.push(
+    `Canonical valuation milestone: firstProduction=${physicalYear === null ? 'null' : physicalYear + delay}, commercialProduction=${commercialYear === null ? 'null' : commercialYear + delay}, valuation=${valuationYear === null ? 'null' : valuationYear + delay}.`,
+  );
+  base.diagnostics.warnings.push('Future valuation semantics: DCF/NPV use remaining FCFF only; pre-milestone CAPEX is sunk and is not subtracted again.');
+  base.diagnostics.warnings.push('Future NAV semantics: periodized waterfall closing cash, cumulative new debt and cumulative new shares are used after the valuation year.');
+
+  return base;
+}
