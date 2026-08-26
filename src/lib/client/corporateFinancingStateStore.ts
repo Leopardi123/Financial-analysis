@@ -51,10 +51,11 @@ function loadSession(symbol: string): CorporateFinancingState | null {
 async function persistRemote(symbol: string, state: CorporateFinancingState): Promise<void> {
   if (typeof fetch === 'undefined') return;
   try {
-    await fetch('/api/corporate-financing-preferences', {
+    await fetch('/api/company/profile', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        action: 'saveCorporateFinancingPreferences',
         symbol,
         financingPlan: state.financingPlan,
         financingPlanByProject: state.financingPlanByProject,
@@ -102,15 +103,24 @@ export async function loadLiveCorporateFinancingState(symbolRaw: string): Promis
 
   if (typeof fetch !== 'undefined') {
     try {
-      const response = await fetch(`/api/corporate-financing-preferences?symbol=${encodeURIComponent(symbol)}`);
+      const response = await fetch(`/api/company/profile?ticker=${encodeURIComponent(symbol)}`);
       if (response.ok) {
-        const body = await response.json() as { ok?: boolean; state?: CorporateFinancingState | null };
-        if (body.ok && body.state) {
+        const body = await response.json() as {
+          ok?: boolean;
+          corporateFinancingPreferences?: {
+            financingPlan?: SnapshotRequest['financingPlan'];
+            financingPlanByProject?: SnapshotRequest['financingPlanByProject'];
+            extraShares?: number;
+            updatedAtUtc?: string | null;
+          } | null;
+        };
+        const remote = body.corporateFinancingPreferences;
+        if (body.ok && remote) {
           const state: CorporateFinancingState = {
-            financingPlan: body.state.financingPlan,
-            financingPlanByProject: body.state.financingPlanByProject,
-            extraShares: Number.isSafeInteger(body.state.extraShares) && body.state.extraShares >= 0 ? body.state.extraShares : 0,
-            updatedAtUtc: body.state.updatedAtUtc ?? null,
+            financingPlan: remote.financingPlan,
+            financingPlanByProject: remote.financingPlanByProject,
+            extraShares: Number.isSafeInteger(remote.extraShares) && (remote.extraShares as number) >= 0 ? remote.extraShares as number : 0,
+            updatedAtUtc: remote.updatedAtUtc ?? null,
           };
           saveSession(symbol, state);
           return state;
