@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import ProducerCompareDashboard from './ProducerCompareDashboard.tsx';
 import { listCompanyProjects, type CompanyProjectSummary } from '../lib/client/companyProjectsClient.ts';
+import { loadLiveCorporateFinancingState } from '../lib/client/corporateFinancingStateStore.ts';
 import type { CorporateSnapshot } from '../lib/corporate/snapshot/types.ts';
+import { extraSharesStorageKey, parseExtraShares } from '../lib/market/extraShares.ts';
 import '../styles/compareStocks.css';
 
 type CompareTab = 'producer' | 'pre-revenue';
@@ -31,6 +33,7 @@ type PreRevenueCompany = {
   sharesCurrent: number | null;
   targetCurrency: string | null;
   productionStartYear: number | null;
+  manualExtraShares: number;
   metricError: string | null;
 };
 
@@ -44,11 +47,11 @@ type AuEqProductionStats = {
 const METRIC_GROUPS: readonly MetricGroup[] = [
   { label: 'VÄRDERING IDAG', columns: [
     ['pNav', 'P/NAV', 'Corporate P/NAV'],
-    ['evNav', 'EV/NAV', 'Corporate EV/NAV'],
+    ['evNav', 'EV/NAV', 'Corporate EV/NAV inklusive samma cash/debt- och finansieringsbrygga som Corporate-vyn'],
     ['evEbitdaPeak', 'Peak 6x / pris', 'Högsta 6x EV/EBITDA-värde per aktie från Corporate-grafen relativt dagens pris'],
   ] },
   { label: 'TARGET / RE-RATING', columns: [
-    ['targetPrice', 'Target / pris', 'Corporate target price relativt dagens pris'],
+    ['targetPrice', 'Target / pris', 'Corporate target price relativt dagens pris, justerat för manuellt tillagda extra aktier'],
     ['annualReturn', 'Årlig avk. → prod.', 'Annualiserad utveckling från dagens pris till Corporate target vid produktion'],
   ] },
   { label: 'PROJEKTKVALITET', columns: [
@@ -69,12 +72,13 @@ const METRIC_GROUPS: readonly MetricGroup[] = [
   { label: 'RELATIV VÄRDERING', columns: [
     ['mcap10yAueq', 'MCap / 10y AuEq', 'Market cap per canonical 10y payable AuEq'],
     ['mcapLomAueq', 'MCap / LOM AuEq', 'Market cap per canonical LOM payable AuEq'],
-    ['evLomAueq', 'EV / LOM AuEq', 'Enterprise value per canonical LOM payable AuEq'],
+    ['evLomAueq', 'EV / LOM AuEq', 'Enterprise value inklusive Corporate cash/debt/financing bridge per canonical LOM payable AuEq'],
   ] },
 ];
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const readFinite = (value: unknown): number | null => finite(value) ? value : null;
+const clamp01 = (value: unknown, fallback: number): number => finite(value) ? Math.max(0, Math.min(1, value)) : fallback;
 const lastFinite = (values: Array<number | null> | undefined): number | null => {
   if (!Array.isArray(values)) return null;
   for (let i = values.length - 1; i >= 0; i -= 1) if (finite(values[i])) return values[i] as number;
@@ -93,6 +97,26 @@ function resolveShares(statements: CompanyResponse): number | null {
     if (value !== null && value > 0) return value;
   }
   return null;
+}
+
+function resolveLatestCash(statements: CompanyResponse): number | null {
+  const direct = lastFinite(statements.balance?.cashAndCashEquivalents);
+  if (direct !== null) return direct;
+  return lastFinite(statements.balance?.cashAndShortTermInvestments);
+}
+
+function resolveLatestDebt(statements: CompanyResponse): number | null {
+  const direct = lastFinite(statements.balance?.totalDebt);
+  if (direct !== null) return direct;
+  const shortTerm = lastFinite(statements.balance?.shortTermDebt);
+  const longTerm = lastFinite(statements.balance?.longTermDebt);
+  if (shortTerm === null && longTerm === null) return null;
+  return (shortTerm ?? 0) + (longTerm ?? 0);
+}
+
+function readManualExtraShares(ticker: string): number {
+  if (typeof window === 'undefined') return 0;
+  return parseExtraShares(window.localStorage.getItem(extraSharesStorageKey('corporate', ticker)) ?? '0');
 }
 
 function formatNumber(value: number | null, digits = 2): string {
@@ -149,13 +173,23 @@ function firstProductionYear(snapshot: CorporateSnapshot): number | null {
   return null;
 }
 
-function peakSixTimesValuePerShare(snapshot: SnapshotWithValuationSeries): number | null {
+function extraShareScale(snapshot: SnapshotWithValuationSeries, extraShares: number): number {
+  if (!(extraShares > 0)) return 1;
+  const sharesPostFinancing = snapshot.financing?.shares_post_financing;
+  if (!finite(sharesPostFinancing) || sharesPostFinancing <= 0) return 1;
+  return sharesPostFinancing / (sharesPostFinancing + extraShares);
+}
+
+function peakSixTimesValuePerShare(snapshot: SnapshotWithValuationSeries, scale = 1): number | null {
   const rows = snapshot.corporateValuationTimeSeries?.rows;
   if (!Array.isArray(rows)) return null;
   let peak: number | null = null;
   for (const valuationRow of rows) {
     const value = valuationRow.evEbitda6xPerShare;
-    if (finite(value)) peak = peak === null ? value : Math.max(peak, value);
+    if (finite(value)) {
+      const adjusted = value * scale;
+      peak = peak === null ? adjusted : Math.max(peak, adjusted);
+    }
   }
   return peak;
 }
@@ -165,11 +199,13 @@ function getMetric(row: PreRevenueCompany, key: MetricKey): string {
   if (!s) return '—';
   const lista3 = s.corporate?.lista3Metrics;
   const aueq = computeAuEqProductionStats(s.aggregation?.payableAuEqOz_total);
+  const scale = extraShareScale(s, row.manualExtraShares);
   const marker = s.modeledValuationTimeline?.markers?.find((item) => finite(item.value_high) && finite(item.value_low)) ?? null;
-  const target = marker && finite(marker.value_high) && finite(marker.value_low) ? (marker.value_high + marker.value_low) / 2 : null;
+  const unadjustedTarget = marker && finite(marker.value_high) && finite(marker.value_low) ? (marker.value_high + marker.value_low) / 2 : null;
+  const target = finite(unadjustedTarget) ? unadjustedTarget * scale : null;
   const yearsToProduction = row.productionStartYear && row.productionStartYear > new Date().getUTCFullYear() ? row.productionStartYear - new Date().getUTCFullYear() : null;
   const annualReturn = finite(target) && finite(row.price) && row.price > 0 && finite(yearsToProduction) && yearsToProduction > 0 ? (target / row.price) ** (1 / yearsToProduction) - 1 : null;
-  const peak6xPerShare = peakSixTimesValuePerShare(s);
+  const peak6xPerShare = peakSixTimesValuePerShare(s, scale);
   const peak6xVsPrice = finite(peak6xPerShare) && finite(row.price) && row.price > 0 ? peak6xPerShare / row.price : null;
   const initialCapex = marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null;
 
@@ -199,6 +235,7 @@ function getMetric(row: PreRevenueCompany, key: MetricKey): string {
 async function loadCanonicalCompany(company: { ticker: string; name: string }): Promise<PreRevenueCompany | null> {
   const projects = await listCompanyProjects(company.ticker);
   if (projects.length === 0) return null;
+  const manualExtraShares = readManualExtraShares(company.ticker);
   try {
     const [profileRes, statementsRes] = await Promise.all([
       fetch(`/api/company/profile?ticker=${encodeURIComponent(company.ticker)}`),
@@ -209,10 +246,36 @@ async function loadCanonicalCompany(company: { ticker: string; name: string }): 
     const profile = profileBody.profile ?? null;
     const price = readFinite(profile?.price);
     const sharesCurrent = resolveShares(statements);
+    const latestCash = resolveLatestCash(statements);
+    const latestDebt = resolveLatestDebt(statements);
     const targetCurrency = typeof profile?.currency === 'string' && profile.currency.trim() ? profile.currency.trim().toUpperCase() : 'USD';
     if (!finite(price) || price <= 0 || !finite(sharesCurrent) || sharesCurrent <= 0) {
-      return { ...company, projects, snapshot: null, price, sharesCurrent, targetCurrency, productionStartYear: null, metricError: 'Saknar kanoniskt marknadspris eller aktieantal.' };
+      return { ...company, projects, snapshot: null, price, sharesCurrent, targetCurrency, productionStartYear: null, manualExtraShares, metricError: 'Saknar kanoniskt marknadspris eller aktieantal.' };
     }
+
+    const liveFinancing = loadLiveCorporateFinancingState(company.ticker);
+    const financingPlanByProject = Object.fromEntries(projects.map((project) => {
+      const saved = liveFinancing?.financingPlanByProject?.[project.project_id];
+      const equityFraction = clamp01(saved?.equity_fraction, 1);
+      return [project.project_id, {
+        equity_fraction: equityFraction,
+        debt_fraction: 1 - equityFraction,
+        equity_raise_price_TargetCurrency: price,
+      }];
+    }));
+    const firstProjectId = projects[0]?.project_id ?? null;
+    const firstProjectPlan = firstProjectId ? financingPlanByProject[firstProjectId] : null;
+    const livePlan = liveFinancing?.financingPlan;
+    const equityFraction = firstProjectPlan?.equity_fraction ?? clamp01(livePlan?.equity_fraction, 1);
+    const financingPlan = {
+      equity_fraction: equityFraction,
+      debt_fraction: 1 - equityFraction,
+      use_cash_first: livePlan?.use_cash_first === true,
+      cash_use_percent: clamp01(livePlan?.cash_use_percent, 1),
+      minimum_cash_reserve_TargetCurrency: 0,
+      equity_raise_price_TargetCurrency: price,
+    };
+
     const response = await fetch('/api/snapshot/corporate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -221,15 +284,21 @@ async function loadCanonicalCompany(company: { ticker: string; name: string }): 
         targetCurrency,
         discountRate: 0.1,
         market: { shares_current: sharesCurrent, price_current_TargetCurrency: price },
+        balanceSheet: {
+          cash_t0_TargetCurrency: latestCash,
+          debt_t0_TargetCurrency: latestDebt,
+        },
+        financingPlan,
+        financingPlanByProject,
         scenario: { mode: 'spot' },
         fx: { source: targetCurrency === 'USD' ? 'manual' : 'auto', anchor: 'today', scenario: { mode: 'spot' }, manual_fx_USD_to_TargetCurrency: targetCurrency === 'USD' ? 1 : undefined },
       }),
     });
     const body = await response.json() as SnapshotResponse;
     const snapshot = response.ok && body.ok && body.snapshot ? body.snapshot : null;
-    return { ...company, projects, snapshot, price, sharesCurrent, targetCurrency, productionStartYear: snapshot ? firstProductionYear(snapshot) : null, metricError: snapshot ? null : (body.diagnostics?.errors?.join(' · ') || 'Corporate snapshot kunde inte beräknas.') };
+    return { ...company, projects, snapshot, price, sharesCurrent, targetCurrency, productionStartYear: snapshot ? firstProductionYear(snapshot) : null, manualExtraShares, metricError: snapshot ? null : (body.diagnostics?.errors?.join(' · ') || 'Corporate snapshot kunde inte beräknas.') };
   } catch (error) {
-    return { ...company, projects, snapshot: null, price: null, sharesCurrent: null, targetCurrency: null, productionStartYear: null, metricError: (error as Error).message };
+    return { ...company, projects, snapshot: null, price: null, sharesCurrent: null, targetCurrency: null, productionStartYear: null, manualExtraShares, metricError: (error as Error).message };
   }
 }
 
@@ -260,7 +329,7 @@ function PreRevenueCompareDashboard() {
   const metricColumns = useMemo<MetricColumn[]>(() => METRIC_GROUPS.flatMap((group) => [...group.columns]), []);
 
   return <div className="pre-revenue-compare">
-    <div className="pre-revenue-compare__intro"><div><strong>PRE REVENUE · CORPORATE CANONICAL</strong><p>Jämför projektkvalitet, skala och priset marknaden betalar för den ekonomiskt relevanta metallbasen.</p></div><div className="pre-revenue-compare__basis"><strong>Kanonisk källa:</strong> samma Corporate snapshot som Corporate-vyn. Saknade mått visas som —; ingen separat ekonomisk motor används här.</div></div>
+    <div className="pre-revenue-compare__intro"><div><strong>PRE REVENUE · CORPORATE CANONICAL</strong><p>Jämför projektkvalitet, skala och priset marknaden betalar för den ekonomiskt relevanta metallbasen.</p></div><div className="pre-revenue-compare__basis"><strong>Kanonisk källa:</strong> samma Corporate snapshot, EV bridge och live-finansieringsplan som Corporate-vyn. Manuellt extra aktieantal används endast post-financing i per-share-värden.</div></div>
     {loading && <div className="producer-compare__state">Laddar Corporate snapshots…</div>}
     {error && <div className="producer-compare__error">{error}</div>}
     {!loading && !error && <div className="pre-revenue-compare__table-wrap"><table className="pre-revenue-compare__table"><thead><tr className="pre-revenue-compare__group-row"><th colSpan={4}>BOLAG</th>{METRIC_GROUPS.map((group) => <th key={group.label} colSpan={group.columns.length}>{group.label}</th>)}</tr><tr><th>Bolag</th><th>Ticker</th><th>Projekt</th><th>Corporate</th>{metricColumns.map(([, label, help]) => <th key={label} title={help}>{label}</th>)}</tr></thead><tbody>
