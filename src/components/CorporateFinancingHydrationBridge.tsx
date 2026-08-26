@@ -37,9 +37,6 @@ function setCheckbox(input: HTMLInputElement, checked: boolean): void {
 }
 
 function findCorporateExtraSharesInput(): HTMLInputElement | null {
-  // In Corporate modeled view this is the only visible Extra aktier input next to
-  // the Corporate market/financing boxes. Scope the lookup to the presence of the
-  // Corporate financing card so Project View cannot be hydrated accidentally.
   if (!financingDetails()) return null;
   return Array.from(document.querySelectorAll<HTMLInputElement>('input[aria-label="Extra aktier"]'))
     .find((input) => input.offsetParent !== null) ?? null;
@@ -51,6 +48,12 @@ function applyHydratedState(state: CorporateFinancingState): boolean {
 
   const plan = state.financingPlan;
   const byProject = state.financingPlanByProject ?? {};
+  const equitySliders = Array.from(details.querySelectorAll<HTMLInputElement>(`input[id^="${EQUITY_ID_PREFIX}"]`));
+  const savedProjectIds = Object.keys(byProject);
+  if (savedProjectIds.length > 0) {
+    const renderedProjectIds = new Set(equitySliders.map((slider) => slider.id.slice(EQUITY_ID_PREFIX.length)));
+    if (savedProjectIds.some((projectId) => !renderedProjectIds.has(projectId))) return false;
+  }
 
   if (plan) {
     const checkbox = details.querySelector<HTMLInputElement>('input[type="checkbox"]');
@@ -63,7 +66,6 @@ function applyHydratedState(state: CorporateFinancingState): boolean {
     }
   }
 
-  const equitySliders = Array.from(details.querySelectorAll<HTMLInputElement>(`input[id^="${EQUITY_ID_PREFIX}"]`));
   for (const slider of equitySliders) {
     const projectId = slider.id.slice(EQUITY_ID_PREFIX.length);
     const projectPlan = byProject?.[projectId];
@@ -196,7 +198,7 @@ export default function CorporateFinancingHydrationBridge({ ticker }: Props) {
 
       const details = financingDetails();
       const isFinancingControl = !!details?.contains(target);
-      const isCorporateExtraShares = target.getAttribute('aria-label') === 'Extra aktier' && !!details;
+      const isCorporateExtraShares = findCorporateExtraSharesInput() === target;
       if (!isFinancingControl && !isCorporateExtraShares) return;
 
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
