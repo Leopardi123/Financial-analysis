@@ -25,6 +25,10 @@ function financingDetails(): HTMLDetailsElement | null {
 }
 
 function nativeSetValue(input: HTMLInputElement, value: string): void {
+  // SingleStockDashboard currently owns these controls as local React state and does
+  // not expose a financing-state prop. Applying the persisted state through the native
+  // input setter intentionally goes through its existing onChange handlers, so the UI,
+  // snapshot request and canonical Corporate calculation remain one state path.
   const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
   descriptor?.set?.call(input, value);
   input.dispatchEvent(new Event('input', { bubbles: true }));
