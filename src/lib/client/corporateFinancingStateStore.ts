@@ -21,6 +21,15 @@ function readLocalExtraShares(symbol: string): number {
   }
 }
 
+function writeLocalExtraShares(symbol: string, extraShares: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(extraSharesStorageKey('corporate', symbol), String(extraShares));
+  } catch {
+    // Legacy fallback is optional; Turso remains the cross-device source.
+  }
+}
+
 function saveSession(symbol: string, state: CorporateFinancingState): void {
   if (typeof window === 'undefined') return;
   try {
@@ -81,6 +90,7 @@ export async function saveCorporateFinancingPreferences(args: {
     extraShares: Number.isSafeInteger(args.extraShares) && args.extraShares >= 0 ? args.extraShares : 0,
     updatedAtUtc: new Date().toISOString(),
   };
+  writeLocalExtraShares(symbol, state.extraShares);
   saveSession(symbol, state);
   await persistRemote(symbol, state);
 }
@@ -103,7 +113,10 @@ export async function saveCorporateExtraShares(symbolRaw: string, extraShares: n
     financingPlanByProject: undefined,
     extraShares: 0,
   };
-  if (!current.financingPlan) return;
+  if (!current.financingPlan) {
+    writeLocalExtraShares(symbol, extraShares);
+    return;
+  }
   await saveCorporateFinancingPreferences({
     symbol,
     financingPlan: current.financingPlan,
@@ -137,6 +150,7 @@ export async function loadLiveCorporateFinancingState(symbolRaw: string): Promis
             extraShares: Number.isSafeInteger(remote.extraShares) && (remote.extraShares as number) >= 0 ? remote.extraShares as number : 0,
             updatedAtUtc: remote.updatedAtUtc ?? null,
           };
+          writeLocalExtraShares(symbol, state.extraShares);
           saveSession(symbol, state);
           return state;
         }
@@ -147,7 +161,10 @@ export async function loadLiveCorporateFinancingState(symbolRaw: string): Promis
   }
 
   const session = loadSession(symbol);
-  if (session) return session;
+  if (session) {
+    writeLocalExtraShares(symbol, session.extraShares);
+    return session;
+  }
 
   const localExtraShares = readLocalExtraShares(symbol);
   if (localExtraShares > 0) {
