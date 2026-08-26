@@ -67,17 +67,32 @@ async function persistRemote(symbol: string, state: CorporateFinancingState): Pr
   }
 }
 
-export function saveLiveCorporateFinancingState(payload: SnapshotRequest): void {
-  if (typeof window === 'undefined' || !payload.symbol || !payload.financingPlan) return;
-  const symbol = payload.symbol.trim().toUpperCase();
+export async function saveCorporateFinancingPreferences(args: {
+  symbol: string;
+  financingPlan: SnapshotRequest['financingPlan'];
+  financingPlanByProject: SnapshotRequest['financingPlanByProject'];
+  extraShares: number;
+}): Promise<void> {
+  const symbol = args.symbol.trim().toUpperCase();
+  if (!symbol || !args.financingPlan) return;
   const state: CorporateFinancingState = {
-    financingPlan: payload.financingPlan,
-    financingPlanByProject: payload.financingPlanByProject,
-    extraShares: readLocalExtraShares(symbol),
+    financingPlan: args.financingPlan,
+    financingPlanByProject: args.financingPlanByProject,
+    extraShares: Number.isSafeInteger(args.extraShares) && args.extraShares >= 0 ? args.extraShares : 0,
     updatedAtUtc: new Date().toISOString(),
   };
   saveSession(symbol, state);
-  void persistRemote(symbol, state);
+  await persistRemote(symbol, state);
+}
+
+export function saveLiveCorporateFinancingState(payload: SnapshotRequest): void {
+  if (typeof window === 'undefined' || !payload.symbol || !payload.financingPlan) return;
+  void saveCorporateFinancingPreferences({
+    symbol: payload.symbol,
+    financingPlan: payload.financingPlan,
+    financingPlanByProject: payload.financingPlanByProject,
+    extraShares: readLocalExtraShares(payload.symbol),
+  });
 }
 
 export async function saveCorporateExtraShares(symbolRaw: string, extraShares: number): Promise<void> {
@@ -88,13 +103,13 @@ export async function saveCorporateExtraShares(symbolRaw: string, extraShares: n
     financingPlanByProject: undefined,
     extraShares: 0,
   };
-  const state: CorporateFinancingState = {
-    ...current,
-    extraShares: Number.isSafeInteger(extraShares) && extraShares >= 0 ? extraShares : 0,
-    updatedAtUtc: new Date().toISOString(),
-  };
-  saveSession(symbol, state);
-  await persistRemote(symbol, state);
+  if (!current.financingPlan) return;
+  await saveCorporateFinancingPreferences({
+    symbol,
+    financingPlan: current.financingPlan,
+    financingPlanByProject: current.financingPlanByProject,
+    extraShares,
+  });
 }
 
 export async function loadLiveCorporateFinancingState(symbolRaw: string): Promise<CorporateFinancingState | null> {
@@ -143,7 +158,6 @@ export async function loadLiveCorporateFinancingState(symbolRaw: string): Promis
       updatedAtUtc: new Date().toISOString(),
     };
     saveSession(symbol, migrated);
-    void persistRemote(symbol, migrated);
     return migrated;
   }
 
