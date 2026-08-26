@@ -70,9 +70,7 @@
 }
 
 .pre-revenue-compare__table th:first-child,
-.pre-revenue-compare__table td:first-child,
-.pre-revenue-compare__table th:nth-child(3),
-.pre-revenue-compare__table td:nth-child(3) {
+.pre-revenue-compare__table td:first-child {
   text-align: left;
 }
 
@@ -91,16 +89,37 @@
   font-size: 0.72rem;
 }
 
-.pre-revenue-compare__projects {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-width: 260px;
-  white-space: normal;
+.pre-revenue-compare__company-cell {
+  min-width: 230px;
+  max-width: 320px;
+  white-space: normal !important;
+  vertical-align: middle;
 }
 
-.pre-revenue-compare__projects small {
-  opacity: 0.68;
+.pre-revenue-compare__company-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.pre-revenue-compare__company-link:hover {
+  text-decoration: underline;
+}
+
+.pre-revenue-compare__company-error {
+  color: rgba(20, 35, 32, 0.52);
+  font-size: 0.72rem;
+  font-weight: 400;
+}
+
+.pre-revenue-compare__company-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 1px;
+  color: rgba(20, 35, 32, 0.48);
+  font-size: 0.7rem;
+  line-height: 1.18;
+  font-weight: 400;
 }
 
 .pre-revenue-compare__pending {
