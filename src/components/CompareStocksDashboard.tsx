@@ -7,7 +7,7 @@ import { extraSharesStorageKey, parseExtraShares } from '../lib/market/extraShar
 import '../styles/compareStocks.css';
 
 type CompareTab = 'producer' | 'pre-revenue';
-type MetricKey = 'pNav' | 'evNav' | 'evEbitdaPeak' | 'targetPrice' | 'annualReturn' | 'tier' | 'irr' | 'payback' | 'lom' | 'initialCapex' | 'capexAnnualAueq' | 'annualAueq' | 'aueq10y' | 'aueqLom' | 'inSituAueq' | 'aueqPerShare' | 'mcap10yAueq' | 'mcapLomAueq' | 'evLomAueq';
+type MetricKey = 'pNav' | 'evEbitdaPeak' | 'targetPrice' | 'annualReturn' | 'tier' | 'irr' | 'payback' | 'lom' | 'initialCapex' | 'capexAnnualAueq' | 'annualAueq' | 'aueq10y' | 'aueqLom' | 'inSituAueq' | 'aueqPerShare' | 'mcap10yAueq' | 'mcapLomAueq' | 'evLomAueq';
 type MetricColumn = readonly [key: MetricKey, label: string, help: string];
 type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 
@@ -37,7 +37,6 @@ type AuEqProductionStats = { lomAuEq: number; tenYearAuEq: number; annualAuEq: n
 const METRIC_GROUPS: readonly MetricGroup[] = [
   { label: 'VÄRDERING IDAG', columns: [
     ['pNav', 'P/NAV PF', 'Dagens aktiekurs dividerad med NAV per aktie efter modellerad finansiering och manuellt tillagda extra aktier'],
-    ['evNav', 'EV/NAV', 'Corporate EV/NAV inklusive samma cash/debt- och finansieringsbrygga som Corporate-vyn'],
     ['evEbitdaPeak', 'Peak 6x / pris', 'Högsta 6x EV/EBITDA-värde per aktie från Corporate-grafen relativt dagens pris'],
   ] },
   { label: 'TARGET / RE-RATING', columns: [
@@ -202,7 +201,6 @@ function getMetric(row: PreRevenueCompany, key: MetricKey): string {
 
   switch (key) {
     case 'pNav': return formatMultiple(pNavPostFinancing(s, row.price, row.manualExtraShares));
-    case 'evNav': return formatMultiple(s.EV_over_NAV);
     case 'evEbitdaPeak': return finite(peak6xPerShare) && finite(peak6xVsPrice) ? `${formatMoney(peak6xPerShare, row.targetCurrency)} · ${formatMultiple(peak6xVsPrice)}` : '—';
     case 'targetPrice': return finite(target) && finite(row.price) && row.price > 0 ? `${formatMoney(target, row.targetCurrency)} · ${formatMultiple(target / row.price)}` : '—';
     case 'annualReturn': return formatPct(annualReturn);
@@ -341,9 +339,9 @@ function PreRevenueCompareDashboard() {
     <div className="pre-revenue-compare__intro"><div><strong>PRE REVENUE · CORPORATE CANONICAL</strong><p>Jämför projektkvalitet, skala och priset marknaden betalar för den ekonomiskt relevanta metallbasen.</p></div><div className="pre-revenue-compare__basis"><strong>Kanonisk källa:</strong> samma Corporate snapshot, EV bridge och sparade finansieringsplan som Corporate-vyn. Finansieringsmix och extra aktier kan återanvändas mellan enheter.</div></div>
     {loading && <div className="producer-compare__state">Laddar Corporate snapshots…</div>}
     {error && <div className="producer-compare__error">{error}</div>}
-    {!loading && !error && <div className="pre-revenue-compare__table-wrap"><table className="pre-revenue-compare__table"><thead><tr className="pre-revenue-compare__group-row"><th colSpan={4}>BOLAG</th>{METRIC_GROUPS.map((group) => <th key={group.label} colSpan={group.columns.length}>{group.label}</th>)}</tr><tr><th>Bolag</th><th>Ticker</th><th>Projekt</th><th>Corporate</th>{metricColumns.map(([, label, help]) => <th key={label} title={help}>{label}</th>)}</tr></thead><tbody>
-      {rows.map((row) => <tr key={row.ticker}><td><strong>{row.name}</strong>{row.metricError && <small title={row.metricError}> · Ej beräkningsbar</small>}</td><td>{row.ticker}</td><td><div className="pre-revenue-compare__projects"><strong>{row.projects.length}</strong><small>{row.projects.map((project) => project.project_name || project.project_id).join(' · ')}</small></div></td><td><a href={`/company/${encodeURIComponent(row.ticker)}/corporate`}>Öppna</a></td>{metricColumns.map(([key]) => <td className={getMetric(row, key) === '—' ? 'pre-revenue-compare__pending' : undefined} key={`${row.ticker}-${key}`}>{getMetric(row, key)}</td>)}</tr>)}
-      {rows.length === 0 && <tr><td colSpan={4 + metricColumns.length}>Inga bolag med sparade modellerade projekt hittades.</td></tr>}
+    {!loading && !error && <div className="pre-revenue-compare__table-wrap"><table className="pre-revenue-compare__table"><thead><tr className="pre-revenue-compare__group-row"><th>BOLAG</th>{METRIC_GROUPS.map((group) => <th key={group.label} colSpan={group.columns.length}>{group.label}</th>)}</tr><tr><th>Bolag</th>{metricColumns.map(([, label, help]) => <th key={label} title={help}>{label}</th>)}</tr></thead><tbody>
+      {rows.map((row) => <tr key={row.ticker}><td className="pre-revenue-compare__company-cell"><a className="pre-revenue-compare__company-link" href={`/company/${encodeURIComponent(row.ticker)}/corporate`}><strong>{row.name}</strong></a>{row.metricError && <small className="pre-revenue-compare__company-error" title={row.metricError}> · Ej beräkningsbar</small>}<div className="pre-revenue-compare__company-meta"><span>{row.ticker}</span><span>{row.projects.length} {row.projects.length === 1 ? 'projekt' : 'projekt'} · {row.projects.map((project) => project.project_name || project.project_id).join(' · ')}</span></div></td>{metricColumns.map(([key]) => <td className={getMetric(row, key) === '—' ? 'pre-revenue-compare__pending' : undefined} key={`${row.ticker}-${key}`}>{getMetric(row, key)}</td>)}</tr>)}
+      {rows.length === 0 && <tr><td colSpan={1 + metricColumns.length}>Inga bolag med sparade modellerade projekt hittades.</td></tr>}
     </tbody></table></div>}
   </div>;
 }
