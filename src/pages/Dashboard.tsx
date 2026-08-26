@@ -17,6 +17,7 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
+      {/* Keeps Corporate financing controls synchronized with the persisted per-ticker state. */}
       <CorporateFinancingHydrationBridge ticker={selectedTicker} />
       <Header />
       <main className="dashboard-content">
