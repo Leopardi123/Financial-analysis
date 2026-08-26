@@ -19,10 +19,6 @@ function clamp01(value: unknown, fallback = 1): number {
     : fallback;
 }
 
-function clampPct(value: number): number {
-  return Math.max(0, Math.min(100, value));
-}
-
 function financingDetails(): HTMLDetailsElement | null {
   const details = Array.from(document.querySelectorAll<HTMLDetailsElement>('details'));
   return details.find((item) => item.querySelector('summary')?.textContent?.includes('C CORPORATE FINANCING')) ?? null;
