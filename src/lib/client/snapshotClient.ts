@@ -1,5 +1,6 @@
 import type { SnapshotRequest } from '../api/validateSnapshotRequest.ts';
 import type { CorporateSnapshot } from '../corporate/snapshot/types.ts';
+import { saveLiveCorporateFinancingState } from './corporateFinancingStateStore.ts';
 
 type SnapshotDiagnostics = {
   errors?: string[];
@@ -14,6 +15,10 @@ export type SnapshotApiResponse = {
 };
 
 export async function postCorporateSnapshot(payload: SnapshotRequest, opts: { refresh?: boolean } = {}): Promise<SnapshotApiResponse> {
+  // SingleStock Corporate owns the financing controls. Capture the exact plan it sends
+  // so peer comparison can reuse the same live session state instead of inventing defaults.
+  saveLiveCorporateFinancingState(payload);
+
   const query = new URLSearchParams();
   if (opts.refresh) query.set('refresh', '1');
   if (typeof window !== 'undefined') {
