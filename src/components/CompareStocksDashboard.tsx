@@ -36,7 +36,7 @@ type AuEqProductionStats = { lomAuEq: number; tenYearAuEq: number; annualAuEq: n
 
 const METRIC_GROUPS: readonly MetricGroup[] = [
   { label: 'VÄRDERING IDAG', columns: [
-    ['pNav', 'P/NAV', 'Corporate P/NAV'],
+    ['pNav', 'P/NAV PF', 'Dagens aktiekurs dividerad med NAV per aktie efter modellerad finansiering och manuellt tillagda extra aktier'],
     ['evNav', 'EV/NAV', 'Corporate EV/NAV inklusive samma cash/debt- och finansieringsbrygga som Corporate-vyn'],
     ['evEbitdaPeak', 'Peak 6x / pris', 'Högsta 6x EV/EBITDA-värde per aktie från Corporate-grafen relativt dagens pris'],
   ] },
@@ -158,6 +158,20 @@ function extraShareScale(snapshot: SnapshotWithValuationSeries, extraShares: num
   return sharesPostFinancing / (sharesPostFinancing + extraShares);
 }
 
+function postFinancingShares(snapshot: SnapshotWithValuationSeries, extraShares: number): number | null {
+  const modeledShares = snapshot.financing?.shares_post_financing;
+  if (!finite(modeledShares) || modeledShares <= 0) return null;
+  const manualShares = Number.isSafeInteger(extraShares) && extraShares >= 0 ? extraShares : 0;
+  return modeledShares + manualShares;
+}
+
+function pNavPostFinancing(snapshot: SnapshotWithValuationSeries, price: number | null, extraShares: number): number | null {
+  const sharesPf = postFinancingShares(snapshot, extraShares);
+  const nav = snapshot.NAV_today_TargetCurrency;
+  if (!finite(price) || price < 0 || !finite(sharesPf) || sharesPf <= 0 || !finite(nav) || nav <= 0) return null;
+  return (price * sharesPf) / nav;
+}
+
 function peakSixTimesValuePerShare(snapshot: SnapshotWithValuationSeries, scale = 1): number | null {
   const rows = snapshot.corporateValuationTimeSeries?.rows;
   if (!Array.isArray(rows)) return null;
@@ -187,7 +201,7 @@ function getMetric(row: PreRevenueCompany, key: MetricKey): string {
   const initialCapex = marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null;
 
   switch (key) {
-    case 'pNav': return formatMultiple(s.P_over_NAV);
+    case 'pNav': return formatMultiple(pNavPostFinancing(s, row.price, row.manualExtraShares));
     case 'evNav': return formatMultiple(s.EV_over_NAV);
     case 'evEbitdaPeak': return finite(peak6xPerShare) && finite(peak6xVsPrice) ? `${formatMoney(peak6xPerShare, row.targetCurrency)} · ${formatMultiple(peak6xVsPrice)}` : '—';
     case 'targetPrice': return finite(target) && finite(row.price) && row.price > 0 ? `${formatMoney(target, row.targetCurrency)} · ${formatMultiple(target / row.price)}` : '—';
