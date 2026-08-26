@@ -1,6 +1,5 @@
 import type { SnapshotRequest } from '../api/validateSnapshotRequest.ts';
 import type { CorporateSnapshot } from '../corporate/snapshot/types.ts';
-import { saveLiveCorporateFinancingState } from './corporateFinancingStateStore.ts';
 
 type SnapshotDiagnostics = {
   errors?: string[];
@@ -15,11 +14,6 @@ export type SnapshotApiResponse = {
 };
 
 export async function postCorporateSnapshot(payload: SnapshotRequest, opts: { refresh?: boolean } = {}): Promise<SnapshotApiResponse> {
-  // Corporate owns the financing controls. Persist the exact plan it sends so
-  // Compare and other devices can reuse the same debt/equity and cash-first setup.
-  // Persistence is fire-and-forget and must never block the canonical snapshot.
-  saveLiveCorporateFinancingState(payload);
-
   const query = new URLSearchParams();
   if (opts.refresh) query.set('refresh', '1');
   if (typeof window !== 'undefined') {
