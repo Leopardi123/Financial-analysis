@@ -2,6 +2,7 @@ import { useState } from "react";
 import Header from "../components/Header";
 import Section from "../components/Section";
 import SingleStockDashboard from "../components/SingleStockDashboard";
+import CorporateFinancingHydrationBridge from "../components/CorporateFinancingHydrationBridge";
 import SectorDashboard from "../components/SectorDashboard";
 import GlobalMacroDashboard from "../components/GlobalMacroDashboard";
 import ScreeningDashboard from "../components/ScreeningDashboard";
@@ -16,6 +17,7 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
+      <CorporateFinancingHydrationBridge ticker={selectedTicker} />
       <Header />
       <main className="dashboard-content">
         <Section
