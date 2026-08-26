@@ -12,13 +12,21 @@ type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 type CompanyListResponse = { ok: boolean; companies?: Array<{ ticker: string; name: string }> };
 type ProfileResponse = { ok?: boolean; profile?: Record<string, unknown> | null };
 type CompanyResponse = { balance?: Record<string, Array<number | null>>; income?: Record<string, Array<number | null>> };
-type SnapshotResponse = { ok: boolean; snapshot?: CorporateSnapshot & Record<string, unknown>; diagnostics?: { errors?: string[]; warnings?: string[] } };
+type SnapshotWithValuationSeries = CorporateSnapshot & Record<string, unknown> & {
+  corporateValuationTimeSeries?: {
+    rows?: Array<{
+      year?: number;
+      evEbitda6xPerShare?: number | null;
+    }>;
+  };
+};
+type SnapshotResponse = { ok: boolean; snapshot?: SnapshotWithValuationSeries; diagnostics?: { errors?: string[]; warnings?: string[] } };
 
 type PreRevenueCompany = {
   ticker: string;
   name: string;
   projects: CompanyProjectSummary[];
-  snapshot: (CorporateSnapshot & Record<string, unknown>) | null;
+  snapshot: SnapshotWithValuationSeries | null;
   price: number | null;
   sharesCurrent: number | null;
   targetCurrency: string | null;
@@ -26,11 +34,18 @@ type PreRevenueCompany = {
   metricError: string | null;
 };
 
+type AuEqProductionStats = {
+  lomAuEq: number;
+  tenYearAuEq: number;
+  annualAuEq: number;
+  productionYears: number;
+};
+
 const METRIC_GROUPS: readonly MetricGroup[] = [
   { label: 'VÄRDERING IDAG', columns: [
     ['pNav', 'P/NAV', 'Corporate P/NAV'],
     ['evNav', 'EV/NAV', 'Corporate EV/NAV'],
-    ['evEbitdaPeak', 'EV/EBITDA peak', 'Högsta/base EV/EBITDA från Corporate-värderingen'],
+    ['evEbitdaPeak', 'Peak 6x / pris', 'Högsta 6x EV/EBITDA-värde per aktie från Corporate-grafen relativt dagens pris'],
   ] },
   { label: 'TARGET / RE-RATING', columns: [
     ['targetPrice', 'Target / pris', 'Corporate target price relativt dagens pris'],
@@ -40,21 +55,21 @@ const METRIC_GROUPS: readonly MetricGroup[] = [
     ['tier', 'Tier', 'Project tier'],
     ['irr', 'IRR', 'Kanonisk Corporate IRR'],
     ['payback', 'Payback', 'Kanonisk Corporate payback'],
-    ['lom', 'LOM', 'Life of mine från Corporate produktionsserie'],
+    ['lom', 'LOM', 'Antal år med positiv canonical payable AuEq-produktion'],
     ['initialCapex', 'Initial CAPEX', 'Initial construction CAPEX från Corporate canonical timeline'],
-    ['capexAnnualAueq', 'CAPEX / annual AuEq', 'Kanonisk Corporate Lista 3-metrik'],
+    ['capexAnnualAueq', 'CAPEX / annual AuEq', 'Kanonisk Corporate Lista 3-metrik i USD per AuEq oz'],
   ] },
   { label: 'SKALA', columns: [
-    ['annualAueq', 'Annual AuEq', 'Genomsnittlig årlig payable AuEq-produktion'],
-    ['aueq10y', '10y AuEq', 'Corporate AuEq under de första tio produktionsåren'],
-    ['aueqLom', 'LOM AuEq', 'Corporate payable AuEq över LOM'],
+    ['annualAueq', 'Annual AuEq', 'LOM payable AuEq dividerat med antal år med positiv canonical payable AuEq-produktion'],
+    ['aueq10y', '10y AuEq', 'Canonical payable AuEq under de första upp till tio produktionsåren'],
+    ['aueqLom', 'LOM AuEq', 'Canonical payable AuEq över hela produktionsperioden'],
     ['inSituAueq', 'In-situ AuEq', 'Geologisk in-situ AuEq; visas endast när Corporate exponerar måttet kanoniskt'],
     ['aueqPerShare', 'AuEq / aktie', 'In-situ AuEq per aktie; visas endast när Corporate exponerar måttet kanoniskt'],
   ] },
   { label: 'RELATIV VÄRDERING', columns: [
-    ['mcap10yAueq', 'MCap / 10y AuEq', 'Market cap per Corporate 10y payable AuEq'],
-    ['mcapLomAueq', 'MCap / LOM AuEq', 'Market cap per Corporate LOM payable AuEq'],
-    ['evLomAueq', 'EV / LOM AuEq', 'Enterprise value per Corporate LOM payable AuEq'],
+    ['mcap10yAueq', 'MCap / 10y AuEq', 'Market cap per canonical 10y payable AuEq'],
+    ['mcapLomAueq', 'MCap / LOM AuEq', 'Market cap per canonical LOM payable AuEq'],
+    ['evLomAueq', 'EV / LOM AuEq', 'Enterprise value per canonical LOM payable AuEq'],
   ] },
 ];
 
@@ -92,11 +107,39 @@ const formatPct = (value: number | null) => finite(value) ? `${(value * 100).toL
 const formatMultiple = (value: number | null) => finite(value) ? `${value.toLocaleString('sv-SE', { maximumFractionDigits: 2 })}x` : '—';
 const formatMoney = (value: number | null, currency: string | null) => finite(value) ? `${formatNumber(value)}${currency ? ` ${currency}` : ''}` : '—';
 
-function sumPositive(values: Array<number | null> | undefined): { sum: number; count: number } | null {
-  if (!Array.isArray(values)) return null;
-  let sum = 0; let count = 0;
-  for (const value of values) if (finite(value) && value > 0) { sum += value; count += 1; }
-  return count > 0 ? { sum, count } : null;
+function computeAuEqProductionStats(values: Array<number | null> | undefined): AuEqProductionStats | null {
+  if (!Array.isArray(values) || values.length === 0) return null;
+
+  const firstPositive = values.findIndex((value) => finite(value) && value > 0);
+  let lastPositive = -1;
+  for (let i = values.length - 1; i >= 0; i -= 1) {
+    const value = values[i];
+    if (finite(value) && value > 0) {
+      lastPositive = i;
+      break;
+    }
+  }
+
+  if (firstPositive < 0 || lastPositive < firstPositive) return null;
+
+  const productionValues: number[] = [];
+  for (let i = firstPositive; i <= lastPositive; i += 1) {
+    const value = values[i];
+    if (!finite(value)) return null;
+    if (value < 0) return null;
+    if (value > 0) productionValues.push(value);
+  }
+
+  if (productionValues.length === 0) return null;
+  const lomAuEq = productionValues.reduce((sum, value) => sum + value, 0);
+  const tenYearAuEq = productionValues.slice(0, 10).reduce((sum, value) => sum + value, 0);
+
+  return {
+    lomAuEq,
+    tenYearAuEq,
+    annualAuEq: lomAuEq / productionValues.length,
+    productionYears: productionValues.length,
+  };
 }
 
 function firstProductionYear(snapshot: CorporateSnapshot): number | null {
@@ -106,42 +149,50 @@ function firstProductionYear(snapshot: CorporateSnapshot): number | null {
   return null;
 }
 
+function peakSixTimesValuePerShare(snapshot: SnapshotWithValuationSeries): number | null {
+  const rows = snapshot.corporateValuationTimeSeries?.rows;
+  if (!Array.isArray(rows)) return null;
+  let peak: number | null = null;
+  for (const valuationRow of rows) {
+    const value = valuationRow.evEbitda6xPerShare;
+    if (finite(value)) peak = peak === null ? value : Math.max(peak, value);
+  }
+  return peak;
+}
+
 function getMetric(row: PreRevenueCompany, key: MetricKey): string {
   const s = row.snapshot;
   if (!s) return '—';
   const lista3 = s.corporate?.lista3Metrics;
-  const aueq = sumPositive(s.aggregation?.payableAuEqOz_total);
-  const lomAueq = aueq?.sum ?? null;
-  const annualAueq = aueq ? aueq.sum / aueq.count : null;
+  const aueq = computeAuEqProductionStats(s.aggregation?.payableAuEqOz_total);
   const marker = s.modeledValuationTimeline?.markers?.find((item) => finite(item.value_high) && finite(item.value_low)) ?? null;
   const target = marker && finite(marker.value_high) && finite(marker.value_low) ? (marker.value_high + marker.value_low) / 2 : null;
   const yearsToProduction = row.productionStartYear && row.productionStartYear > new Date().getUTCFullYear() ? row.productionStartYear - new Date().getUTCFullYear() : null;
   const annualReturn = finite(target) && finite(row.price) && row.price > 0 && finite(yearsToProduction) && yearsToProduction > 0 ? (target / row.price) ** (1 / yearsToProduction) - 1 : null;
-  const ebitda = s.series?.ebitdaUSD ?? [];
-  const evUsd = finite(s.EV_TargetCurrency) && finite(s.fx_USD_to_TargetCurrency) && (s.fx_USD_to_TargetCurrency as number) > 0 ? (s.EV_TargetCurrency as number) / (s.fx_USD_to_TargetCurrency as number) : null;
-  const evEbitdaPeak = finite(evUsd) ? ebitda.reduce<number | null>((peak, value) => finite(value) && value > 0 ? Math.max(peak ?? -Infinity, evUsd / value) : peak, null) : null;
+  const peak6xPerShare = peakSixTimesValuePerShare(s);
+  const peak6xVsPrice = finite(peak6xPerShare) && finite(row.price) && row.price > 0 ? peak6xPerShare / row.price : null;
   const initialCapex = marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null;
 
   switch (key) {
     case 'pNav': return formatMultiple(s.P_over_NAV);
     case 'evNav': return formatMultiple(s.EV_over_NAV);
-    case 'evEbitdaPeak': return formatMultiple(evEbitdaPeak);
+    case 'evEbitdaPeak': return finite(peak6xPerShare) && finite(peak6xVsPrice) ? `${formatMoney(peak6xPerShare, row.targetCurrency)} · ${formatMultiple(peak6xVsPrice)}` : '—';
     case 'targetPrice': return finite(target) && finite(row.price) && row.price > 0 ? `${formatMoney(target, row.targetCurrency)} · ${formatMultiple(target / row.price)}` : '—';
     case 'annualReturn': return formatPct(annualReturn);
     case 'tier': return '—';
     case 'irr': return formatPct(lista3?.IRR ?? s.project?.modeled?.npvSpotRange?.base?.irr ?? null);
     case 'payback': return finite(s.Payback_real_years) ? `${formatNumber(s.Payback_real_years, 1)} år` : finite(s.Payback_approx_years) ? `${formatNumber(s.Payback_approx_years, 1)} år` : '—';
-    case 'lom': return aueq ? `${aueq.count} år` : '—';
+    case 'lom': return aueq ? `${aueq.productionYears} år` : '—';
     case 'initialCapex': return formatMoney(initialCapex, row.targetCurrency);
-    case 'capexAnnualAueq': return formatNumber(lista3?.CAPEX_per_Annual_AuEq ?? null);
-    case 'annualAueq': return finite(annualAueq) ? `${formatNumber(annualAueq)} oz` : '—';
-    case 'aueq10y': return finite(s.AuEq_Oz_10Y) ? `${formatNumber(s.AuEq_Oz_10Y)} oz` : '—';
-    case 'aueqLom': return finite(lomAueq) ? `${formatNumber(lomAueq)} oz` : '—';
+    case 'capexAnnualAueq': return finite(lista3?.CAPEX_per_Annual_AuEq) ? `${formatNumber(lista3.CAPEX_per_Annual_AuEq)} USD/oz` : '—';
+    case 'annualAueq': return aueq ? `${formatNumber(aueq.annualAuEq)} oz` : '—';
+    case 'aueq10y': return aueq ? `${formatNumber(aueq.tenYearAuEq)} oz` : '—';
+    case 'aueqLom': return aueq ? `${formatNumber(aueq.lomAuEq)} oz` : '—';
     case 'inSituAueq': return '—';
     case 'aueqPerShare': return '—';
-    case 'mcap10yAueq': return finite(s.MarketCap_TargetCurrency) && finite(s.AuEq_Oz_10Y) && s.AuEq_Oz_10Y > 0 ? formatMoney(s.MarketCap_TargetCurrency / s.AuEq_Oz_10Y, row.targetCurrency) : '—';
-    case 'mcapLomAueq': return finite(s.MarketCap_TargetCurrency) && finite(lomAueq) && lomAueq > 0 ? formatMoney(s.MarketCap_TargetCurrency / lomAueq, row.targetCurrency) : '—';
-    case 'evLomAueq': return finite(s.EV_TargetCurrency) && finite(lomAueq) && lomAueq > 0 ? formatMoney(s.EV_TargetCurrency / lomAueq, row.targetCurrency) : '—';
+    case 'mcap10yAueq': return aueq && finite(s.MarketCap_TargetCurrency) && aueq.tenYearAuEq > 0 ? formatMoney(s.MarketCap_TargetCurrency / aueq.tenYearAuEq, row.targetCurrency) : '—';
+    case 'mcapLomAueq': return aueq && finite(s.MarketCap_TargetCurrency) && aueq.lomAuEq > 0 ? formatMoney(s.MarketCap_TargetCurrency / aueq.lomAuEq, row.targetCurrency) : '—';
+    case 'evLomAueq': return aueq && finite(s.EV_TargetCurrency) && aueq.lomAuEq > 0 ? formatMoney(s.EV_TargetCurrency / aueq.lomAuEq, row.targetCurrency) : '—';
   }
 }
 
