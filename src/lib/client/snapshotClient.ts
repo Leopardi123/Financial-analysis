@@ -15,8 +15,9 @@ export type SnapshotApiResponse = {
 };
 
 export async function postCorporateSnapshot(payload: SnapshotRequest, opts: { refresh?: boolean } = {}): Promise<SnapshotApiResponse> {
-  // SingleStock Corporate owns the financing controls. Capture the exact plan it sends
-  // so peer comparison can reuse the same live session state instead of inventing defaults.
+  // Corporate owns the financing controls. Persist the exact plan it sends so
+  // Compare and other devices can reuse the same debt/equity and cash-first setup.
+  // Persistence is fire-and-forget and must never block the canonical snapshot.
   saveLiveCorporateFinancingState(payload);
 
   const query = new URLSearchParams();
