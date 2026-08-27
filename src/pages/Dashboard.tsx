@@ -10,10 +10,12 @@ import MacroRegimeValidationLab from "../components/MacroRegimeValidationLab";
 import ErrorBoundary from "../components/ErrorBoundary";
 import PortfolioDashboardModule from "../components/PortfolioDashboardModule";
 import CompareStocksDashboard from "../components/CompareStocksDashboard";
+import { getTier1CostBenchmarkTodos } from "../lib/tier1/config";
 import "../styles/dashboard.css";
 
 export default function Dashboard() {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  const tier1BenchmarkTodos = getTier1CostBenchmarkTodos();
 
   return (
     <div className="dashboard">
@@ -29,7 +31,9 @@ export default function Dashboard() {
         >
           <div className="breadcontainersinglecolumn">
             <h2 className="subrub small">Göromål</h2>
-            <p className="bread">Inga göromål just nu.</p>
+            {tier1BenchmarkTodos.length === 0
+              ? <p className="bread">Inga göromål just nu.</p>
+              : <ul className="bread">{tier1BenchmarkTodos.map((todo) => <li key={todo}>{todo}</li>)}</ul>}
           </div>
           <div className="breadcontainerdoublecolumn">
             <div className="subrub">Översiktligheter</div>
