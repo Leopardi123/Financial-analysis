@@ -1,5 +1,5 @@
 import { mergeMonthlyPayload, encodeMonthlyPayload, decodeMonthlyPayload, type MonthlyPricePayload } from "./historyBlob.js";
-import { fetchHistoricalEodFull } from "./providers/fmp.js";
+import { fetchHistoricalEodFull, fetchLegacyCommodityHistoricalFull } from "./providers/fmp.js";
 import { fetchFredCommodityPriceSeries, getFredCommodityPriceMapping } from "./providers/fred.js";
 import { getPriceKeyDefinition, type PriceKey } from "./keys.js";
 import { convertPriceToCanonical } from "./units/convert.js";
@@ -52,6 +52,23 @@ function toPayload(rows: HistoryInputRow[]): MonthlyPricePayload {
   };
 }
 
+function mergeHistoryRows(primary: HistoryInputRow[], fallback: HistoryInputRow[]): HistoryInputRow[] {
+  const byDate = new Map<string, HistoryInputRow>();
+  for (const row of fallback) byDate.set(row.date, row);
+  for (const row of primary) byDate.set(row.date, row);
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function hasMaterialLeadingGap(rows: HistoryInputRow[], requestedFrom: string): boolean {
+  if (rows.length === 0) return true;
+  const earliest = rows[0]?.date;
+  if (!earliest) return true;
+  const requested = Date.parse(`${requestedFrom}T00:00:00Z`);
+  const observed = Date.parse(`${earliest}T00:00:00Z`);
+  if (!Number.isFinite(requested) || !Number.isFinite(observed)) return false;
+  return observed - requested > 45 * 86_400_000;
+}
+
 async function defaultQuery(sql: string, params: Array<string | number | null> = []): Promise<any[]> {
   const db = await import("../../../api/_db.js");
   return db.query(sql, params);
@@ -72,6 +89,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
   queryFn?: QueryFn;
   executeFn?: ExecuteFn;
   fetchHistoricalFn?: typeof fetchHistoricalEodFull;
+  fetchLegacyHistoricalFn?: typeof fetchLegacyCommodityHistoricalFull;
   fetchFredCommodityPriceSeriesFn?: typeof fetchFredCommodityPriceSeries;
 } = {}): Promise<{ monthsTouched: number }> {
   const lockKey = `${args.priceKey}:${args.from}:${args.to}`;
@@ -84,6 +102,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
     const queryFn = deps.queryFn ?? defaultQuery;
     const executeFn = deps.executeFn ?? defaultExecute;
     const fetchHistoricalFn = deps.fetchHistoricalFn ?? fetchHistoricalEodFull;
+    const fetchLegacyHistoricalFn = deps.fetchLegacyHistoricalFn ?? fetchLegacyCommodityHistoricalFull;
     const fetchFredFn = deps.fetchFredCommodityPriceSeriesFn ?? fetchFredCommodityPriceSeries;
 
     const mappingRows = await queryFn(
@@ -107,6 +126,25 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
       }
       const allRows = await fetchHistoricalFn(providerSymbol);
       filtered = allRows.filter((row) => row.date >= args.from && row.date <= args.to);
+
+      // The stable FMP full-history endpoint can return only the recent portion of a
+      // requested commodity history. The repository already has the legacy v3
+      // historical-price-full/{symbol}?from=&to= resolver, so use it as a verified
+      // range backfill only when the stable result clearly starts materially after
+      // the requested start date. Stable rows win on overlapping dates.
+      if (hasMaterialLeadingGap(filtered, args.from)) {
+        try {
+          const legacyRows = await fetchLegacyHistoricalFn(providerSymbol, {
+            fromUtc: args.from,
+            toUtc: args.to,
+          });
+          const legacyFiltered = legacyRows.filter((row) => row.date >= args.from && row.date <= args.to);
+          filtered = mergeHistoryRows(filtered, legacyFiltered);
+        } catch {
+          // Keep the valid stable history. Callers that require longer coverage
+          // (e.g. Tier-1 cycle resilience) will remain NOT_VERIFIED rather than guess.
+        }
+      }
       providerLabel = "FMP";
     } else if (provider === "FRED") {
       const fredMapping = getFredCommodityPriceMapping(args.priceKey);
