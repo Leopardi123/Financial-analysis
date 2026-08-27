@@ -69,7 +69,7 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
     updatedAtUtc: '2026-08-27',
     dataPeriod: '2025E',
     sourceLabel: 'S&P Capital IQ / G2 Goldfields global gold AISC curve',
-    sourceUrl: 'https://g2goldfields.com/wp-content/uploads/2026/01/G2-Goldfields-Investor-Presentation-Janaury-2026-Public.pdf',
+    sourceUrl: 'https://g2goldfields.com/wp-content/uploads/2026/03/G2-Goldfields-Investor-Presentation-March-2026-Public.pdf',
     notes: 'Explicit 2025E boundary: first quartile < US$1,228/oz Au. Global gold mines >25 koz; co-product AISC.',
   },
   Ag: {
