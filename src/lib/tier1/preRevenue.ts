@@ -37,6 +37,9 @@ export type Tier1PreRevenueAssessment = {
     cycleDurationProductionPeriods: number;
     cycleMultipliersByMetal: Record<string, number>;
     cycleMethod: string | null;
+    averageAnnualPayableByMetal?: Partial<Record<Tier1Metal, number>>;
+    scaleEquivalentByMetal?: Partial<Record<Tier1Metal, number>>;
+    combinedScaleEquivalent?: number | null;
   };
   diagnostics: string[];
 };
@@ -94,6 +97,55 @@ export function assessScale(args: { primaryMetal: Tier1Metal | null; averageAnnu
   };
 }
 
+/**
+ * Price-independent polymetallic scale fallback. Each payable metal earns a
+ * fraction of its own physical Tier-1 threshold. A project passes if one metal
+ * independently reaches 1.0x OR the supported fractions sum to >=1.0x.
+ */
+export function assessCombinedScale(
+  averageAnnualPayableByMetal: Partial<Record<Tier1Metal, number>>,
+): { gate: Tier1Gate; equivalentByMetal: Partial<Record<Tier1Metal, number>>; combinedEquivalent: number | null } {
+  const equivalentByMetal: Partial<Record<Tier1Metal, number>> = {};
+  let combined = 0;
+  let observed = 0;
+  let singleMetalPass = false;
+
+  for (const [metal, value] of Object.entries(averageAnnualPayableByMetal) as Array<[Tier1Metal, number | undefined]>) {
+    if (!finite(value) || value < 0 || !isTier1Metal(metal)) continue;
+    const threshold = TIER1_PRODUCTION_THRESHOLDS[metal].minimumAnnualPayable;
+    if (!(threshold > 0)) continue;
+    const equivalent = value / threshold;
+    equivalentByMetal[metal] = equivalent;
+    combined += equivalent;
+    observed += 1;
+    if (equivalent >= 1) singleMetalPass = true;
+  }
+
+  if (observed === 0) {
+    return {
+      gate: { status: 'NOT_VERIFIED', value: null, threshold: TIER1_POLICY.minimumCombinedScaleEquivalent, unit: 'Tier-1 scale-equivalent', reason: 'Payable produktion per metall kunde inte verifieras.' },
+      equivalentByMetal,
+      combinedEquivalent: null,
+    };
+  }
+
+  const parts = (Object.entries(equivalentByMetal) as Array<[Tier1Metal, number]>)
+    .sort((a, b) => b[1] - a[1])
+    .map(([metal, equivalent]) => `${metal} ${equivalent.toFixed(2)}x`);
+  const pass = singleMetalPass || combined >= TIER1_POLICY.minimumCombinedScaleEquivalent;
+  return {
+    gate: {
+      status: pass ? 'PASS' : 'FAIL',
+      value: combined,
+      threshold: TIER1_POLICY.minimumCombinedScaleEquivalent,
+      unit: 'Tier-1 scale-equivalent',
+      reason: `${parts.join(' + ')} = ${combined.toFixed(2)}x; krav >= ${TIER1_POLICY.minimumCombinedScaleEquivalent.toFixed(2)}x sammanlagt eller >=1.00x i en enskild metall.`,
+    },
+    equivalentByMetal,
+    combinedEquivalent: combined,
+  };
+}
+
 export function assessCapitalReturns(reportBaseIrr: number | null): Tier1Gate {
   if (!finite(reportBaseIrr)) {
     return { status: 'NOT_VERIFIED', value: null, threshold: TIER1_POLICY.minimumAfterTaxIrr, unit: 'IRR', reason: 'Rapport-/base-IRR kunde inte kontrollräknas från rapportens prisdeck.' };
@@ -130,14 +182,17 @@ export function assessCost(args: {
     return { status: 'NOT_VERIFIED', value: null, threshold: null, unit: null, reason: 'Primär metall saknas.' };
   }
   const benchmark = TIER1_COST_BENCHMARKS[args.primaryMetal];
-  if (benchmark.q1Max === null || benchmark.metric === 'UNAVAILABLE') {
-    return { status: 'NOT_VERIFIED', value: null, threshold: null, unit: null, reason: `Statisk verifierad Q1-kostnadsgräns saknas för ${args.primaryMetal}.` };
-  }
   if (tier1CostBenchmarkNeedsUpdate(benchmark, args.nowUtc)) {
-    return { status: 'NOT_VERIFIED', value: args.aiscAuEqUsdPerOz, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Q1-benchmark för ${args.primaryMetal} är äldre än ${TIER1_POLICY.costBenchmarkMaxAgeDays} dagar och måste uppdateras.` };
+    return { status: 'NOT_VERIFIED', value: args.aiscAuEqUsdPerOz, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Q1-kostnadsreferensen för ${args.primaryMetal} är äldre än ${TIER1_POLICY.costBenchmarkMaxAgeDays} dagar och måste uppdateras.` };
   }
   if (args.primaryMetal !== 'Au') {
-    return { status: 'NOT_VERIFIED', value: null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Nuvarande canonical engine har ingen verifierad ${args.primaryMetal}-specifik kostnadsdefinition som matchar benchmark.` };
+    return {
+      status: 'NOT_VERIFIED',
+      value: null,
+      threshold: benchmark.q1Max,
+      unit: benchmark.unit,
+      reason: `Statisk ${benchmark.benchmarkKind === 'EXACT_Q1_BOUNDARY' ? 'Q1-gräns' : 'Q1-referens'} finns för ${args.primaryMetal} (${benchmark.q1Max} ${benchmark.unit}; ${benchmark.metric}), men nuvarande canonical engine exponerar ännu ingen definitionskompatibel ${args.primaryMetal}-kostnad för hard-gate-jämförelse.`,
+    };
   }
   if (!finite(args.primaryMetalRevenueShare) || args.primaryMetalRevenueShare < TIER1_POLICY.goldCostDominanceMinimumRevenueShare) {
     return { status: 'NOT_VERIFIED', value: args.aiscAuEqUsdPerOz, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Au måste stå för minst ${Math.round(TIER1_POLICY.goldCostDominanceMinimumRevenueShare * 100)}% av LOM metal revenue för jämförelse mellan AuEq AISC och Au Q1.` };
@@ -145,11 +200,23 @@ export function assessCost(args: {
   if (!finite(args.aiscAuEqUsdPerOz)) {
     return { status: 'NOT_VERIFIED', value: null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: 'Canonical AuEq AISC kunde inte beräknas.' };
   }
+
+  const below = args.aiscAuEqUsdPerOz < benchmark.q1Max;
+  if (benchmark.benchmarkKind === 'Q1_REFERENCE_CEILING' && !below) {
+    return {
+      status: 'NOT_VERIFIED',
+      value: args.aiscAuEqUsdPerOz,
+      threshold: benchmark.q1Max,
+      unit: benchmark.unit,
+      reason: `AuEq AISC ${args.aiscAuEqUsdPerOz.toFixed(0)} ${benchmark.unit} ligger över den konservativa Q1-referensen ${benchmark.q1Max}; exakt Q25-gräns saknas, därför inte FAIL.`,
+    };
+  }
+
   return {
-    status: args.aiscAuEqUsdPerOz < benchmark.q1Max ? 'PASS' : 'FAIL',
+    status: below ? 'PASS' : 'FAIL',
     value: args.aiscAuEqUsdPerOz,
     threshold: benchmark.q1Max,
     unit: benchmark.unit,
-    reason: `AuEq AISC ${args.aiscAuEqUsdPerOz.toFixed(0)} USD/oz mot statisk Q1-gräns < ${benchmark.q1Max} USD/oz. ${benchmark.sourceLabel ?? ''}`.trim(),
+    reason: `AuEq AISC ${args.aiscAuEqUsdPerOz.toFixed(0)} USD/oz mot statisk Q1-gräns < ${benchmark.q1Max} USD/oz. ${benchmark.sourceLabel}`,
   };
 }
