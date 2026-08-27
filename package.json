@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "npm run test:tier",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test:tier": "node --experimental-strip-types src/lib/tier1/__tests__/tier1.test.ts",
