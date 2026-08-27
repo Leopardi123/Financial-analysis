@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import ProducerCompareDashboard from './ProducerCompareDashboard.tsx';
+import Tier1StatusCell from './Tier1StatusCell.tsx';
 import { listCompanyProjects, type CompanyProjectSummary } from '../lib/client/companyProjectsClient.ts';
 import { loadLiveCorporateFinancingState } from '../lib/client/corporateFinancingStateStore.ts';
 import type { CorporateSnapshot } from '../lib/corporate/snapshot/types.ts';
@@ -44,7 +45,7 @@ const METRIC_GROUPS: readonly MetricGroup[] = [
     ['annualReturn', 'Årlig avk. → prod.', 'Annualiserad utveckling från dagens pris till Corporate target vid produktion'],
   ] },
   { label: 'PROJEKTKVALITET', columns: [
-    ['tier', 'Tier', 'Project tier'],
+    ['tier', 'Tier', 'Tier-1 hard gates: LOM, metallspecifik produktionsskala, statisk Q1-kostnadsposition, 3-årig relativ lågcykel och report/base after-tax IRR ≥25%. Ej verifierad om evidens saknas.'],
     ['irr', 'IRR', 'Kanonisk Corporate IRR'],
     ['payback', 'Payback', 'Kanonisk Corporate payback'],
     ['lom', 'LOM', 'Antal år med positiv canonical payable AuEq-produktion'],
@@ -340,7 +341,10 @@ function PreRevenueCompareDashboard() {
     {loading && <div className="producer-compare__state">Laddar Corporate snapshots…</div>}
     {error && <div className="producer-compare__error">{error}</div>}
     {!loading && !error && <div className="pre-revenue-compare__table-wrap"><table className="pre-revenue-compare__table"><thead><tr className="pre-revenue-compare__group-row"><th>BOLAG</th>{METRIC_GROUPS.map((group) => <th key={group.label} colSpan={group.columns.length}>{group.label}</th>)}</tr><tr><th>Bolag</th>{metricColumns.map(([, label, help]) => <th key={label} title={help}>{label}</th>)}</tr></thead><tbody>
-      {rows.map((row) => <tr key={row.ticker}><td className="pre-revenue-compare__company-cell"><a className="pre-revenue-compare__company-link" href={`/company/${encodeURIComponent(row.ticker)}/corporate`}><strong>{row.name}</strong></a>{row.metricError && <small className="pre-revenue-compare__company-error" title={row.metricError}> · Ej beräkningsbar</small>}<div className="pre-revenue-compare__company-meta"><span>{row.ticker}</span><span>{row.projects.length} {row.projects.length === 1 ? 'projekt' : 'projekt'} · {row.projects.map((project) => project.project_name || project.project_id).join(' · ')}</span></div></td>{metricColumns.map(([key]) => <td className={getMetric(row, key) === '—' ? 'pre-revenue-compare__pending' : undefined} key={`${row.ticker}-${key}`}>{getMetric(row, key)}</td>)}</tr>)}
+      {rows.map((row) => <tr key={row.ticker}><td className="pre-revenue-compare__company-cell"><a className="pre-revenue-compare__company-link" href={`/company/${encodeURIComponent(row.ticker)}/corporate`}><strong>{row.name}</strong></a>{row.metricError && <small className="pre-revenue-compare__company-error" title={row.metricError}> · Ej beräkningsbar</small>}<div className="pre-revenue-compare__company-meta"><span>{row.ticker}</span><span>{row.projects.length} {row.projects.length === 1 ? 'projekt' : 'projekt'} · {row.projects.map((project) => project.project_name || project.project_id).join(' · ')}</span></div></td>{metricColumns.map(([key]) => {
+        const value = getMetric(row, key);
+        return <td className={key !== 'tier' && value === '—' ? 'pre-revenue-compare__pending' : undefined} key={`${row.ticker}-${key}`}>{key === 'tier' ? <Tier1StatusCell symbol={row.ticker} /> : value}</td>;
+      })}</tr>)}
       {rows.length === 0 && <tr><td colSpan={1 + metricColumns.length}>Inga bolag med sparade modellerade projekt hittades.</td></tr>}
     </tbody></table></div>}
   </div>;
