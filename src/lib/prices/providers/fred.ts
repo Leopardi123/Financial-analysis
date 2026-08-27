@@ -14,13 +14,6 @@ export type FredCommodityPriceMapping = {
  */
 export const FRED_COMMODITY_PRICE_MAPPINGS: readonly FredCommodityPriceMapping[] = [
   {
-    priceKey: 'CU_USD_TONNE',
-    fredSeriesId: 'PCOPPUSDM',
-    providerUnit: 'USD_PER_TONNE',
-    frequency: 'monthly',
-    description: 'IMF/FRED global copper benchmark, monthly period average',
-  },
-  {
     priceKey: 'ZN_USD_LB',
     fredSeriesId: 'PZINCUSDM',
     providerUnit: 'USD_PER_TONNE',
