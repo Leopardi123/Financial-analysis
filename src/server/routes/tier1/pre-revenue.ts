@@ -39,6 +39,10 @@ function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function scalarPrice(series: Array<number | null> | undefined): number | null {
   if (!Array.isArray(series)) return null;
   const finiteValues = series.filter((value): value is number => finite(value) && value > 0);
@@ -49,7 +53,37 @@ function scalarPrice(series: Array<number | null> | undefined): number | null {
   return first;
 }
 
-function reportFixedDeck(parsed: ReturnType<typeof parseProjectJsonV1>): Record<string, number> | null {
+function reportFixedDeck(
+  rawJson: Record<string, unknown>,
+  parsed: ReturnType<typeof parseProjectJsonV1>,
+): Record<string, number> | null {
+  const economics = isRecord(rawJson.economics) ? rawJson.economics : null;
+  const explicitDeck = economics && isRecord(economics.fixedPriceDeckUSD)
+    ? economics.fixedPriceDeckUSD
+    : null;
+
+  if (explicitDeck) {
+    const fixed: Record<string, number> = {};
+    for (const metal of Object.keys(parsed.engineInputWithoutPrices.payableQtyByMetal)) {
+      const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
+      if (!priceKey) return null;
+
+      const canonicalField = `${metal}_${getPriceKeyDefinition(priceKey).canonicalUnit}`;
+      const byCanonicalPriceKey = explicitDeck[priceKey];
+      const byMetalAndUnit = explicitDeck[canonicalField];
+      const candidates = [byCanonicalPriceKey, byMetalAndUnit].filter(
+        (value): value is number => finite(value) && value > 0,
+      );
+      if (candidates.length === 0) return null;
+
+      const first = candidates[0];
+      const tolerance = Math.max(1e-9, Math.abs(first) * 1e-9);
+      if (candidates.some((value) => Math.abs(value - first) > tolerance)) return null;
+      fixed[priceKey] = first;
+    }
+    return fixed;
+  }
+
   const overrides = parsed.priceOverrides.spotPriceUSDByMetal;
   if (!overrides) return null;
   const fixed: Record<string, number> = {};
@@ -224,10 +258,10 @@ export default async function handler(req: any, res: any): Promise<void> {
 
     for (const project of loaded) {
       const parsed = parseProjectJsonV1(project.rawJson);
-      const fixedPriceByKey = reportFixedDeck(parsed);
+      const fixedPriceByKey = reportFixedDeck(project.rawJson, parsed);
       if (!fixedPriceByKey) {
         reportDeckComplete = false;
-        diagnostics.push(`${project.projectId}: rapportens prisdeck saknas eller är inte ett entydigt konstant priceOverrides-deck; kapital/cykel kan inte verifieras.`);
+        diagnostics.push(`${project.projectId}: rapportens prisdeck saknas eller är inte ett entydigt konstant economics.fixedPriceDeckUSD/priceOverrides-deck; kapital/cykel kan inte verifieras.`);
         continue;
       }
       const yearsByPeriod = parsed.engineInputWithoutPrices.yearsByPeriod;
