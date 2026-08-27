@@ -76,15 +76,6 @@ function standardPayableQuantity(priceKey: string, value: number): { value: numb
   return null;
 }
 
-function sumFinite(series: Array<number | null>): number | null {
-  let total = 0;
-  for (const value of series) {
-    if (!finite(value)) return null;
-    total += value;
-  }
-  return total;
-}
-
 function aggregateFcffByYear(projects: Array<{ yearsByPeriod: number[]; fcff: Array<number | null> }>): {
   years: number[];
   fcff: Array<number | null>;
@@ -269,7 +260,7 @@ export default async function handler(req: any, res: any): Promise<void> {
       }
 
       for (const [metal, revenueSeries] of Object.entries(baseOutput.revenue.byMetalRevenueUSD)) {
-        const revenue = revenueSeries.reduce((sum, value) => sum + (finite(value) ? value : 0), 0);
+        const revenue = revenueSeries.reduce<number>((sum, value) => sum + (finite(value) ? value : 0), 0);
         revenueByMetalTotal[metal] = (revenueByMetalTotal[metal] ?? 0) + revenue;
       }
 
@@ -310,7 +301,7 @@ export default async function handler(req: any, res: any): Promise<void> {
       return;
     }
 
-    const totalRevenue = Object.values(revenueByMetalTotal).reduce((sum, value) => sum + value, 0);
+    const totalRevenue = Object.values(revenueByMetalTotal).reduce<number>((sum, value) => sum + value, 0);
     const sortedRevenue = Object.entries(revenueByMetalTotal).filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
     const primaryRaw = sortedRevenue[0]?.[0] ?? null;
     const primaryMetal: Tier1Metal | null = primaryRaw && isTier1Metal(primaryRaw) ? primaryRaw : null;
