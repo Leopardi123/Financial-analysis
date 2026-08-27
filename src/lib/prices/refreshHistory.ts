@@ -114,8 +114,12 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
     ) as ProviderMapRow[];
 
     const mapping = mappingRows[0] ?? null;
-    const provider = String(mapping?.provider ?? (fxProviderSymbolFromKey(args.priceKey) ? "FMP" : "")).toUpperCase();
-    let providerSymbol = mapping?.provider_symbol ?? null;
+    const fredRegistryMapping = getFredCommodityPriceMapping(args.priceKey);
+    const provider = String(
+      mapping?.provider
+      ?? (fredRegistryMapping ? "FRED" : fxProviderSymbolFromKey(args.priceKey) ? "FMP" : ""),
+    ).toUpperCase();
+    let providerSymbol = mapping?.provider_symbol ?? fredRegistryMapping?.fredSeriesId ?? null;
     let providerLabel: "FMP" | "FRED";
     let filtered: HistoryInputRow[];
 
@@ -142,7 +146,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
           filtered = mergeHistoryRows(filtered, legacyFiltered);
         } catch {
           // Keep the valid stable history. Callers that require longer coverage
-          // (e.g. Tier-1 cycle resilience) will remain NOT_VERIFIED rather than guess.
+          // (e.g. Tier cycle resilience) will remain NOT_VERIFIED rather than guess.
         }
       }
       providerLabel = "FMP";
