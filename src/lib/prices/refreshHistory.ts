@@ -1,11 +1,25 @@
 import { mergeMonthlyPayload, encodeMonthlyPayload, decodeMonthlyPayload, type MonthlyPricePayload } from "./historyBlob.js";
 import { fetchHistoricalEodFull, fetchLegacyCommodityHistoricalFull } from "./providers/fmp.js";
-import { fetchFredCommodityPriceSeries, getFredCommodityPriceMapping } from "./providers/fred.js";
+import { fetchFredCommodityPriceSeries, getFredCommodityPriceMapping, type FredCommodityPriceMapping } from "./providers/fred.js";
 import { getPriceKeyDefinition, type PriceKey } from "./keys.js";
 import { convertPriceToCanonical } from "./units/convert.js";
 
 const PRICE_PROVIDER_MAP_TABLE = "price_provider_map";
 const PRICE_EOD_MONTHLY_TABLE = "price_eod_monthly";
+
+// History-only mapping: Tier cycle calibration needs a long verified Cu series for
+// CU_USD_TONNE, while current Tier-base pricing must remain on the existing FMP
+// spot path (CU_USD_LB -> unit conversion). Keeping this out of the global FRED
+// spot registry prevents a monthly period-average series from being mislabeled spot.
+const HISTORY_ONLY_FRED_MAPPINGS: Partial<Record<PriceKey, FredCommodityPriceMapping>> = {
+  CU_USD_TONNE: {
+    priceKey: "CU_USD_TONNE",
+    fredSeriesId: "PCOPPUSDM",
+    providerUnit: "USD_PER_TONNE",
+    frequency: "monthly",
+    description: "IMF/FRED global copper benchmark, monthly period average; history-only for Tier cycle calibration",
+  },
+};
 
 type ProviderMapRow = {
   provider: string;
@@ -114,7 +128,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
     ) as ProviderMapRow[];
 
     const mapping = mappingRows[0] ?? null;
-    const fredRegistryMapping = getFredCommodityPriceMapping(args.priceKey);
+    const fredRegistryMapping = getFredCommodityPriceMapping(args.priceKey) ?? HISTORY_ONLY_FRED_MAPPINGS[args.priceKey] ?? null;
     const provider = String(
       mapping?.provider
       ?? (fredRegistryMapping ? "FRED" : fxProviderSymbolFromKey(args.priceKey) ? "FMP" : ""),
@@ -151,7 +165,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
       }
       providerLabel = "FMP";
     } else if (provider === "FRED") {
-      const fredMapping = getFredCommodityPriceMapping(args.priceKey);
+      const fredMapping = fredRegistryMapping;
       if (!fredMapping) {
         throw new Error(`No verified FRED commodity mapping found for price key: ${args.priceKey}`);
       }
