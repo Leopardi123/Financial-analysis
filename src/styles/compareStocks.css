@@ -209,9 +209,18 @@
   cursor: pointer;
 }
 
+.tier1-modal__classification {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(20, 35, 32, 0.55);
+  background: rgba(255, 255, 255, 0.32);
+  line-height: 1.42;
+  font-weight: 650;
+}
+
 .tier1-modal__summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   margin: 16px 0;
   background: rgba(20, 35, 32, 0.17);
@@ -257,15 +266,19 @@
   letter-spacing: 0.06em;
 }
 
-.tier1-modal__gate--pass .tier1-modal__gate-head span {
-  opacity: 0.82;
+.tier1-modal__gate--tier-1 .tier1-modal__gate-head span,
+.tier1-modal__gate--tier-2 .tier1-modal__gate-head span,
+.tier1-modal__gate--tier-3 .tier1-modal__gate-head span {
+  opacity: 0.86;
 }
 
+.tier1-modal__gate--tier-2,
+.tier1-modal__gate--tier-3,
 .tier1-modal__gate--fail {
   border-width: 2px;
 }
 
-.tier1-modal__gate--not_verified {
+.tier1-modal__gate--not-verified {
   opacity: 0.72;
 }
 
@@ -327,8 +340,13 @@
   font-weight: 700;
 }
 
+.tier1-modal__diagnostics summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .tier1-modal__diagnostics ul {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   padding-left: 20px;
 }
 
