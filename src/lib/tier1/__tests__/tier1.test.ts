@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { computeTier1CycleMultiplier } from '../cycle.ts';
 import { getTier1CostBenchmarkTodos } from '../config.ts';
 import { assessCapitalReturns, assessCombinedScale, assessLom, classifyTier, type Tier1Gate } from '../preRevenue.ts';
-import { getFredCommodityPriceMapping, getFredHistoryCommodityPriceMapping } from '../../prices/providers/fred.ts';
+import { getFredCommodityPriceMapping, getFredHistoryCommodityPriceMapping, isFredHistoryOnlyCommodityPriceKey } from '../../prices/providers/fred.ts';
 
 function monthDate(index: number): string {
   const date = new Date(Date.UTC(2000 + Math.floor(index / 12), index % 12, 28));
@@ -54,14 +54,18 @@ assert.equal(classifyTier({ lom: gate(1), scale: gate(3), cost: gate(null), cycl
 assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(1), cycle: gate(null), capitalReturns: gate(1) }).status, 'NOT_VERIFIED');
 assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(1), cycle: gate(1), capitalReturns: gate(null, 'FAIL') }).status, 'NOT_QUALIFIED');
 
-// CU_USD_TONNE must not become a FRED current-price key: current copper stays on
-// the existing FMP spot path. Long cycle history explicitly uses verified PCOPPUSDM.
-assert.equal(getFredCommodityPriceMapping('CU_USD_TONNE'), null);
-const copperHistoryMapping = getFredHistoryCommodityPriceMapping('CU_USD_TONNE');
-assert.ok(copperHistoryMapping);
-assert.equal(copperHistoryMapping.fredSeriesId, 'PCOPPUSDM');
-assert.equal(copperHistoryMapping.providerUnit, 'USD_PER_TONNE');
-assert.equal(copperHistoryMapping.frequency, 'monthly');
+// Copper current pricing must stay on the existing FMP/COMEX path. Long Tier
+// cycle calibration uses the verified IMF/FRED PCOPPUSDM global benchmark as a
+// history-only relative-cycle proxy for both canonical Cu units.
+for (const copperPriceKey of ['CU_USD_LB', 'CU_USD_TONNE']) {
+  assert.equal(getFredCommodityPriceMapping(copperPriceKey), null);
+  assert.equal(isFredHistoryOnlyCommodityPriceKey(copperPriceKey), true);
+  const copperHistoryMapping = getFredHistoryCommodityPriceMapping(copperPriceKey);
+  assert.ok(copperHistoryMapping);
+  assert.equal(copperHistoryMapping.fredSeriesId, 'PCOPPUSDM');
+  assert.equal(copperHistoryMapping.providerUnit, 'USD_PER_TONNE');
+  assert.equal(copperHistoryMapping.frequency, 'monthly');
+}
 
 assert.equal(getTier1CostBenchmarkTodos('2027-08-26T00:00:00Z').length, 0);
 const staleTodos = getTier1CostBenchmarkTodos('2027-08-27T00:00:00Z');
