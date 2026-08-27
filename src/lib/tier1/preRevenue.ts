@@ -99,10 +99,24 @@ export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
   }
 
   if (baseTier === 2) {
-    return { status: 'TIER_2', reason: 'Minst en strukturell kategori sätter ett Tier-2-tak; projektet klarar samtidigt miniminivån för ekonomi och cykelresistens.' };
+    const limiters: string[] = [];
+    if (gates.lom.tier === 2) limiters.push('LOM');
+    if (gates.scale.tier === 2) limiters.push('produktionsskala');
+    if (gates.capitalReturns.tier === 2) limiters.push('kapitalavkastning');
+    return {
+      status: 'TIER_2',
+      reason: `${limiters.length > 0 ? limiters.join(', ') : 'Minst en strukturell kategori'} sätter Tier-2-taket; projektet klarar samtidigt miniminivån för ekonomi och cykelresistens.`,
+    };
   }
 
-  return { status: 'TIER_3', reason: 'Minst en strukturell kategori sätter ett Tier-3-tak; mycket liten produktionsskala ger alltid högst Tier 3.' };
+  const limiters: string[] = [];
+  if (gates.lom.tier === 3) limiters.push('LOM');
+  if (gates.scale.tier === 3) limiters.push('produktionsskala');
+  if (gates.capitalReturns.tier === 3) limiters.push('kapitalavkastning');
+  return {
+    status: 'TIER_3',
+    reason: `${limiters.length > 0 ? limiters.join(', ') : 'Minst en strukturell kategori'} sätter Tier-3-taket.`,
+  };
 }
 
 export function determinePrimaryMetal(revenueByMetalUsd: Record<string, number>): {
